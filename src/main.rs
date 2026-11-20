@@ -47,15 +47,12 @@ mod service;
 mod set_password;
 mod shutdown;
 
+// Every description `--help` gives, of the program, a command or an
+// argument, is the catalog's (`cli-help-*`), set by `described` when help is
+// said: none is written here.
 #[derive(Parser)]
-#[command(
-    name = build_info::PROGRAM,
-    version = build_info::SHOWN.as_str(),
-    about = "Self-hosted backup manager for rustic"
-)]
+#[command(name = build_info::PROGRAM, version = build_info::SHOWN.as_str())]
 struct Cli {
-    /// Print plain text: no colour, and nothing drawn over what is already
-    /// printed.
     #[arg(long, global = true)]
     plain: bool,
     #[command(subcommand)]
@@ -64,146 +61,87 @@ struct Cli {
 
 #[derive(Subcommand)]
 enum Command {
-    /// Run Ladderback on this machine and serve its web UI.
     Serve {
-        /// Address to listen on. Beyond loopback only with an
-        /// `--allowed-host`; with sign-in off it then warns that anyone who
-        /// can reach the address can use it. Port 0 picks a free port; the
-        /// address in use is printed on startup.
         #[arg(long, default_value = "127.0.0.1:9898")]
         listen: SocketAddr,
-        /// A host name or address, without a port, that the web UI answers to
-        /// besides loopback addresses, such as the name a reverse proxy
-        /// forwards with the browser's Host (repeatable).
         #[arg(long = "allowed-host", value_name = "NAME")]
         allowed_hosts: Vec<String>,
-        /// Set by the service files `install-service` writes: a service
-        /// manager runs Ladderback and starts it again when it exits with
-        /// the restart status, so Settings offers a restart.
         #[arg(long)]
         service_managed: bool,
-        /// Serve the hub's routes for paired machines under `/sync/` as well, so that
-        /// other machines can pair with this one.
         #[cfg(feature = "hub")]
         #[arg(long)]
         hub: bool,
     },
-    /// Add the repository and the plans of a rustic profile to the
-    /// configuration.
     ImportProfile {
-        /// The rustic profile, a TOML file.
         file: std::path::PathBuf,
-        /// The name the repository gets in the configuration; the profile's
-        /// file name, as a slug, when it is left out.
         #[arg(long = "repo-name", value_name = "NAME")]
         repo_name: Option<String>,
-        /// Print one JSON document on standard output, for a script to read,
-        /// instead of sentences: the repository and the plans that were
-        /// added, or the code of the refusal.
         #[arg(long)]
         json: bool,
-        /// Import the commands the profile runs (its hooks, the password's
-        /// command, an option rustic runs as a command) without asking.
-        /// Without it they are listed and confirmed at a terminal, and
-        /// anywhere else nothing is imported.
         #[arg(long)]
         yes: bool,
     },
-    /// Write a plan as a rustic profile on stdout.
     ExportProfile {
-        /// The ID of the plan to export.
         #[arg(long, value_name = "ID")]
         plan: String,
     },
-    /// Set the admin password, which turns sign-in on, and end every
-    /// session. It is typed twice at a terminal, without being shown, or
-    /// read as one line of standard input; never given as an argument.
     SetPassword,
-    /// Make a one-time pairing token for a machine, list the unused ones, or
-    /// revoke one. Run it while the daemon is stopped.
     #[cfg(feature = "hub")]
     PairingToken {
-        /// The hub's address as machines reach it, such as
-        /// `https://hub.example`.
         #[arg(long, required_unless_present_any = ["list", "revoke"])]
         address: Option<String>,
-        /// How long the token lives, in minutes: 5 to 1440, 15 by default.
         #[arg(long, value_name = "MINUTES")]
         ttl: Option<i64>,
-        /// List the unused tokens by token ID, with when each lapses.
         #[arg(long, conflicts_with_all = ["address", "ttl", "revoke"])]
         list: bool,
-        /// Revoke the unused token with this token ID.
         #[arg(long, value_name = "TOKEN_ID", conflicts_with_all = ["address", "ttl"])]
         revoke: Option<String>,
     },
-    /// Pair this machine with a hub. The token is pasted at the prompt,
-    /// without being shown, or read as standard input; never given as an
-    /// argument.
     #[cfg(feature = "hub")]
     Pair {
-        /// The hub's address, when this machine reaches it another way than
-        /// the token's.
         address: Option<String>,
-        /// Pair under this hostname instead of the machine's.
         #[arg(long)]
         hostname: Option<String>,
-        /// Pair without asking, when standard input is the token.
         #[arg(long)]
         yes: bool,
     },
-    /// Check this machine's link to the hub it paired with: connect, prove
-    /// who it is, and say whether the hub holds it waiting for approval or
-    /// has approved it.
     #[cfg(feature = "hub")]
     HubStatus {
-        /// Connect under this hostname instead of the machine's, as `pair`
-        /// takes it.
         #[arg(long)]
         hostname: Option<String>,
     },
-    // Their descriptions are the catalog's (`cli-help-*`), set in `parse`.
     InstallService,
     RemoveService,
     CheckKeyring,
-    // Its description is the catalog's (`cli-help-mcp`), set in `parse`.
     #[command(
         group(clap::ArgGroup::new("mode").required(true).args(["connect", "headless", "scratch"])),
         subcommand_negates_reqs = true,
         args_conflicts_with_subcommands = true
     )]
     Mcp {
-        /// Drive the running daemon at this address through its API;
-        /// `http://127.0.0.1:9898` when no address follows.
         #[arg(long, value_name = "URL", num_args = 0..=1, default_missing_value = mcp::DEFAULT_DAEMON_URL)]
         connect: Option<String>,
-        /// Send the API token this file holds, which only its owner may
-        /// read; `mcp-token` in the configuration folder, if it is there,
-        /// when no file is named. Only to an https address or this computer.
         #[arg(long, value_name = "PATH", requires = "connect")]
         token_file: Option<std::path::PathBuf>,
-        /// Run a session of its own on Ladderback's folders, without a
-        /// daemon: refused while a daemon or another session uses them.
         #[arg(long)]
         headless: bool,
-        /// Run a session of its own in a new private folder, seeded with a
-        /// plan over a few generated files, and delete the folder at the end.
         #[arg(long)]
         scratch: bool,
         #[command(subcommand)]
         call: Option<McpCommand>,
     },
-    /// Run one operation, read from stdin, and report events on stdout.
-    /// Started by the agent; not for direct use.
+    // Runs one operation, read from stdin, and reports events on stdout.
+    // Started by the daemon; not for direct use, so `--help` hides it and the
+    // catalog doesn't describe it.
     #[command(hide = true)]
     Worker,
 }
 
-/// What `ladderback mcp` does instead of serving.
+// What `ladderback mcp` does instead of serving. Not a doc comment: `clap`
+// would take it for the description of `mcp`.
 #[derive(Subcommand)]
 enum McpCommand {
-    /// Call tools once, without a client, printing each call's result or
-    /// refusal as one JSON line on standard output.
+    // Calls tools once, without a client.
     Call(mcp_call::CallArgs),
 }
 
@@ -219,7 +157,8 @@ fn parse(args: Vec<OsString>) -> Result<Cli, ExitCode> {
         // Help is said again with the catalog's descriptions: the catalog is
         // read only to say help, never on the start of the daemon or a worker.
         Err(error) if says_help(&error) => {
-            let error = with_catalog_help(command)
+            let localizer = Localizer::new(&PosixEnv::from_process().preferences());
+            let error = described(command, &localizer)
                 .try_get_matches_from_mut(&args)
                 .err()
                 .unwrap_or(error);
@@ -240,21 +179,89 @@ fn says_help(error: &clap::Error) -> bool {
     )
 }
 
-/// `command` with the descriptions the catalog has (`cli-help-*`), in the
-/// reader's language: those of the service commands, `check-keyring` and `mcp`
-/// (#299 moves the rest).
-fn with_catalog_help(command: clap::Command) -> clap::Command {
-    let localizer = Localizer::new(&PosixEnv::from_process().preferences());
+/// `command` with the description of itself, each command below it and each
+/// argument of every one of them, from the catalog in `localizer`'s
+/// language.
+fn described(command: clap::Command, localizer: &Localizer) -> clap::Command {
+    described_at(command, "", localizer)
+}
+
+/// [`described`] for the command at `path`, its names below the program
+/// (`mcp call`; empty for the program).
+fn described_at(command: clap::Command, path: &str, localizer: &Localizer) -> clap::Command {
+    let said = |id| localizer.message(id, &[]).into_text();
+    let command = match description(path, None) {
+        Some(id) => command.about(said(id)),
+        None => command,
+    };
+    let command = command.mut_args(|argument| {
+        // `clap` copies a global argument, as `--plain`, into each command
+        // below the program when it builds the tree: it is the program's.
+        let at = if argument.is_global_set() { "" } else { path };
+        match description(at, Some(argument.get_id().as_str())) {
+            Some(id) => argument.help(said(id)),
+            None => argument,
+        }
+    });
     command.mut_subcommands(|subcommand| {
-        let id = match subcommand.get_name() {
-            "install-service" => msg::CLI_HELP_INSTALL_SERVICE,
-            "remove-service" => msg::CLI_HELP_REMOVE_SERVICE,
-            "check-keyring" => msg::CLI_HELP_CHECK_KEYRING,
-            "mcp" => msg::CLI_HELP_MCP,
-            _ => return subcommand,
+        let path = match path {
+            "" => subcommand.get_name().to_owned(),
+            path => format!("{path} {}", subcommand.get_name()),
         };
-        let about = localizer.message(id, &[]).text().to_owned();
-        subcommand.about(about)
+        described_at(subcommand, &path, localizer)
+    })
+}
+
+/// The message that describes the command at `path` (as in
+/// [`described_at`]), or its `argument`, by the argument's ID. None for one
+/// `--help` hides.
+fn description(path: &str, argument: Option<&str>) -> Option<MessageId> {
+    Some(match (path, argument) {
+        ("", None) => msg::CLI_HELP,
+        ("", Some("plain")) => msg::CLI_HELP_PLAIN,
+        ("serve", None) => msg::CLI_HELP_SERVE,
+        ("serve", Some("listen")) => msg::CLI_HELP_SERVE_LISTEN,
+        ("serve", Some("allowed_hosts")) => msg::CLI_HELP_SERVE_ALLOWED_HOST,
+        ("serve", Some("service_managed")) => msg::CLI_HELP_SERVE_SERVICE_MANAGED,
+        ("serve", Some("hub")) => msg::CLI_HELP_SERVE_HUB,
+        ("import-profile", None) => msg::CLI_HELP_IMPORT_PROFILE,
+        ("import-profile", Some("file")) => msg::CLI_HELP_IMPORT_PROFILE_FILE,
+        ("import-profile", Some("repo_name")) => msg::CLI_HELP_IMPORT_PROFILE_REPO_NAME,
+        ("import-profile", Some("json")) => msg::CLI_HELP_IMPORT_PROFILE_JSON,
+        ("import-profile", Some("yes")) => msg::CLI_HELP_IMPORT_PROFILE_YES,
+        ("export-profile", None) => msg::CLI_HELP_EXPORT_PROFILE,
+        ("export-profile", Some("plan")) => msg::CLI_HELP_EXPORT_PROFILE_PLAN,
+        ("set-password", None) => msg::CLI_HELP_SET_PASSWORD,
+        ("pairing-token", None) => msg::CLI_HELP_PAIRING_TOKEN,
+        ("pairing-token", Some("address")) => msg::CLI_HELP_PAIRING_TOKEN_ADDRESS,
+        ("pairing-token", Some("ttl")) => msg::CLI_HELP_PAIRING_TOKEN_TTL,
+        ("pairing-token", Some("list")) => msg::CLI_HELP_PAIRING_TOKEN_LIST,
+        ("pairing-token", Some("revoke")) => msg::CLI_HELP_PAIRING_TOKEN_REVOKE,
+        ("pair", None) => msg::CLI_HELP_PAIR,
+        ("pair", Some("address")) => msg::CLI_HELP_PAIR_ADDRESS,
+        ("pair", Some("hostname")) => msg::CLI_HELP_PAIR_HOSTNAME,
+        ("pair", Some("yes")) => msg::CLI_HELP_PAIR_YES,
+        ("hub-status", None) => msg::CLI_HELP_HUB_STATUS,
+        ("hub-status", Some("hostname")) => msg::CLI_HELP_HUB_STATUS_HOSTNAME,
+        ("install-service", None) => msg::CLI_HELP_INSTALL_SERVICE,
+        ("remove-service", None) => msg::CLI_HELP_REMOVE_SERVICE,
+        ("check-keyring", None) => msg::CLI_HELP_CHECK_KEYRING,
+        ("mcp", None) => msg::CLI_HELP_MCP,
+        ("mcp", Some("connect")) => msg::CLI_HELP_MCP_CONNECT,
+        ("mcp", Some("token_file")) => msg::CLI_HELP_MCP_TOKEN_FILE,
+        ("mcp", Some("headless")) => msg::CLI_HELP_MCP_HEADLESS,
+        ("mcp", Some("scratch")) => msg::CLI_HELP_MCP_SCRATCH,
+        ("mcp call", None) => msg::CLI_HELP_MCP_CALL,
+        ("mcp call", Some("tool")) => msg::CLI_HELP_MCP_CALL_TOOL,
+        ("mcp call", Some("words")) => msg::CLI_HELP_MCP_CALL_WORDS,
+        ("mcp call", Some("arguments")) => msg::CLI_HELP_MCP_CALL_ARGS,
+        ("mcp call", Some("script")) => msg::CLI_HELP_MCP_CALL_SCRIPT,
+        ("mcp call", Some("keep_going")) => msg::CLI_HELP_MCP_CALL_KEEP_GOING,
+        ("mcp call", Some("connect")) => msg::CLI_HELP_MCP_CALL_CONNECT,
+        ("mcp call", Some("token_file")) => msg::CLI_HELP_MCP_CALL_TOKEN_FILE,
+        ("mcp call", Some("headless")) => msg::CLI_HELP_MCP_CALL_HEADLESS,
+        ("mcp call", Some("scratch")) => msg::CLI_HELP_MCP_CALL_SCRATCH,
+        _ => return None,
     })
 }
 
@@ -359,8 +366,16 @@ impl McpMode {
 }
 
 fn serve_mcp(mode: McpMode, plain: bool) -> ExitCode {
-    let localizer = start_protected(plain, None);
-    finish(&localizer, run_mcp(&localizer, mode))
+    let recent = recent_log();
+    let localizer = start_protected(plain, Some(Arc::clone(&recent)));
+    finish(&localizer, run_mcp(&localizer, mode, recent))
+}
+
+/// The log an MCP server keeps of its own, from its start, as the daemon
+/// keeps its recent log (#618): what `read_log` reads in a session of its
+/// own. Connect mode reads the daemon's instead.
+pub(crate) fn recent_log() -> Arc<dyn app::ports::RecentLogStore> {
+    Arc::new(app::recent_log::RecentLogRing::new())
 }
 
 /// The start of a process that will hold secrets, the daemon, the MCP
@@ -385,8 +400,12 @@ pub(crate) fn start_protected(
 /// Serves MCP on stdin and stdout until the client closes stdin (§4.6).
 /// Standard output carries protocol messages only: a refusal is said on
 /// stderr, and the session logs there.
-fn run_mcp(localizer: &Localizer, mode: McpMode) -> io::Result<ExitCode> {
-    let session = match Session::start(localizer, &mode)? {
+fn run_mcp(
+    localizer: &Localizer,
+    mode: McpMode,
+    recent: Arc<dyn app::ports::RecentLogStore>,
+) -> io::Result<ExitCode> {
+    let session = match Session::start(localizer, &mode, recent)? {
         Ok(session) => session,
         Err(status) => return Ok(status),
     };
@@ -410,8 +429,13 @@ struct Session {
 impl Session {
     /// Starts the server `mode` names, or says why it can't and gives the
     /// status to end with: 2 for an address that isn't one, as the parser
-    /// gives for a value it rejects, and 1 otherwise.
-    fn start(localizer: &Localizer, mode: &McpMode) -> io::Result<Result<Self, ExitCode>> {
+    /// gives for a value it rejects, and 1 otherwise. A session of its own
+    /// keeps its log in `recent`.
+    fn start(
+        localizer: &Localizer,
+        mode: &McpMode,
+        recent: Arc<dyn app::ports::RecentLogStore>,
+    ) -> io::Result<Result<Self, ExitCode>> {
         // Checked here, in the catalog's words, like `--allowed-host`; exit
         // status 2 is the parser's own for a value it rejects. The address
         // isn't repeated: it may hold a password.
@@ -447,10 +471,10 @@ impl Session {
             )
             .map(|server| (server, None)),
             (None, McpMode::Scratch) => runtime
-                .block_on(composition::mcp_server::scratch(&OsRandom))
+                .block_on(composition::mcp_server::scratch(&OsRandom, recent))
                 .map(|(server, held)| (server, Some(held))),
             (None, _) => runtime
-                .block_on(composition::mcp_server::headless())
+                .block_on(composition::mcp_server::headless(recent))
                 .map(|(server, held)| (server, Some(held))),
         };
         match started {
@@ -919,6 +943,110 @@ mod tests {
     fn parsed(args: &[&str]) -> Result<Cli, clap::error::ErrorKind> {
         Cli::try_parse_from(std::iter::once("ladderback").chain(args.iter().copied()))
             .map_err(|error| error.kind())
+    }
+
+    /// What `--help` could say a command or an argument does, named by its
+    /// path from the program: its short and long description, and whether
+    /// `--help` hides it.
+    struct Description {
+        name: String,
+        hidden: bool,
+        short: Option<String>,
+        long: Option<String>,
+    }
+
+    /// Adds to `found` each command and argument at or below `command`,
+    /// named `path`, but for `clap`'s own: its `--help` and `--version`
+    /// options and its `help` command, whose words stay English (§8.4).
+    fn descriptions(command: &clap::Command, path: &str, found: &mut Vec<Description>) {
+        let text = |styled: Option<&clap::builder::StyledStr>| styled.map(ToString::to_string);
+        found.push(Description {
+            name: path.to_owned(),
+            hidden: command.is_hide_set(),
+            short: text(command.get_about()),
+            long: text(command.get_long_about()),
+        });
+        let arguments = command.get_arguments().filter(|argument| {
+            !matches!(
+                argument.get_action(),
+                clap::ArgAction::Help
+                    | clap::ArgAction::HelpShort
+                    | clap::ArgAction::HelpLong
+                    | clap::ArgAction::Version
+            )
+        });
+        for argument in arguments {
+            found.push(Description {
+                name: format!("{path} {}", argument.get_id()),
+                hidden: argument.is_hide_set(),
+                short: text(argument.get_help()),
+                long: text(argument.get_long_help()),
+            });
+        }
+        let subcommands = command
+            .get_subcommands()
+            .filter(|subcommand| subcommand.get_name() != "help");
+        for subcommand in subcommands {
+            let path = format!("{path} {}", subcommand.get_name());
+            descriptions(subcommand, &path, found);
+        }
+    }
+
+    /// The command tree built, as `clap` builds it to parse and so as
+    /// `parse` describes it: a global argument, as `--plain`, is in every
+    /// command.
+    fn built() -> clap::Command {
+        let mut command = Cli::command();
+        command.build();
+        command
+    }
+
+    /// No description is written in the code, not even as a doc comment
+    /// `clap` would take for one (technical design §8.4): each is the
+    /// catalog's, set only when help is said.
+    #[test]
+    fn no_description_is_written_in_the_code() {
+        let mut found = Vec::new();
+        descriptions(&built(), "ladderback", &mut found);
+        let written: Vec<String> = found
+            .into_iter()
+            .filter_map(|description| {
+                let shown = if description.hidden {
+                    "hidden"
+                } else {
+                    "shown"
+                };
+                let text = description.short.or(description.long)?;
+                Some(format!("{} ({shown}): {text}", description.name))
+            })
+            .collect();
+        assert_eq!(written, Vec::<String>::new());
+    }
+
+    /// Every command and argument `--help` shows is described from the
+    /// catalog (technical design §8.4): under `en-XA` none is left without a
+    /// description or in English.
+    #[cfg(feature = "pseudo")]
+    #[test]
+    fn every_command_and_argument_is_described_from_the_catalog() {
+        let en_xa = PosixEnv {
+            language: Some("en-XA".to_owned()),
+            ..PosixEnv::default()
+        };
+        let localizer = Localizer::new(&en_xa.preferences());
+        let mut found = Vec::new();
+        descriptions(&described(built(), &localizer), "ladderback", &mut found);
+        let transformed = |text: &String| !text.is_ascii();
+        let english: Vec<String> = found
+            .into_iter()
+            .filter(|description| {
+                !description.hidden
+                    && !(description.short.as_ref().is_some_and(transformed)
+                        && description.long.as_ref().is_none_or(transformed))
+            })
+            .map(|description| format!("{}: {:?}", description.name, description.short))
+            .collect();
+        assert_eq!(english, Vec::<String>::new());
     }
 
     #[test]

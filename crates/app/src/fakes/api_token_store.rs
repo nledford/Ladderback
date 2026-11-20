@@ -5,7 +5,7 @@ use domain::Timestamp;
 use domain::access::PasswordFingerprint;
 use domain::access::api_token::{ApiToken, ApiTokenId, TokenPermissions, admits_api_token};
 
-use crate::ports::{Added, ApiTokenStore, StoreError};
+use crate::ports::{Added, ApiTokenStore, PermissionsSet, StoreError};
 
 /// The API tokens, kept in memory, oldest first, for use-case tests and
 /// acceptance scenarios. It keeps times to the millisecond, as the real
@@ -70,14 +70,16 @@ impl ApiTokenStore for InMemoryApiTokenStore {
         &self,
         id: &ApiTokenId,
         permissions: TokenPermissions,
-    ) -> Result<bool, StoreError> {
+    ) -> Result<PermissionsSet, StoreError> {
         let mut kept = self.kept();
-        let found = kept.iter_mut().find(|token| &token.id == id);
-        let was_kept = found.is_some();
-        if let Some(token) = found {
-            token.permissions = permissions;
+        let Some(token) = kept.iter_mut().find(|token| &token.id == id) else {
+            return Ok(PermissionsSet::NotKept);
+        };
+        if token.permissions == permissions {
+            return Ok(PermissionsSet::Unchanged);
         }
-        Ok(was_kept)
+        token.permissions = permissions;
+        Ok(PermissionsSet::Changed)
     }
 
     async fn revoke_all_but(&self, password: PasswordFingerprint) -> Result<(), StoreError> {

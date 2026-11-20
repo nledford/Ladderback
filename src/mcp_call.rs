@@ -6,6 +6,7 @@ use std::fs::File;
 use std::io::{self, BufRead, BufReader, Read as _, Write};
 use std::path::PathBuf;
 use std::process::ExitCode;
+use std::sync::Arc;
 
 use api::MsgArg;
 use l10n::{Localizer, MessageId, msg};
@@ -16,18 +17,15 @@ use crate::{McpMode, Session, output, say, text};
 /// server reads from a client.
 const MAX_LINE: usize = ::mcp::MAX_MESSAGE_BYTES;
 
-/// The command line of `ladderback mcp call`.
+// The command line of `ladderback mcp call`. Its description, and each of its
+// arguments', is the catalog's (`cli-help-mcp-call-*`), set when help is said.
 #[derive(clap::Args)]
 #[command(group(clap::ArgGroup::new("calls").required(true).args(["tool", "script"])))]
 #[command(group(clap::ArgGroup::new("call-mode").args(["connect", "headless", "scratch"])))]
 pub(crate) struct CallArgs {
-    /// The tool to call, such as `status` or `list_plans`.
     tool: Option<String>,
-    /// The tool's arguments, each NAME=VALUE: a value is a number or `true`
-    /// or `false` where the tool's argument is one, and text otherwise.
     #[arg(value_name = "NAME=VALUE", requires = "tool")]
     words: Vec<String>,
-    /// The tool's arguments as one JSON object, instead of NAME=VALUE.
     #[arg(
         long = "args",
         value_name = "JSON",
@@ -35,31 +33,16 @@ pub(crate) struct CallArgs {
         conflicts_with = "words"
     )]
     arguments: Option<String>,
-    /// Run the calls a file holds, one JSON object to a line, each
-    /// `{"tool": …, "arguments": {…}}`, in one session; `-` reads them from
-    /// standard input, each answered before the next is read.
     #[arg(long, value_name = "FILE")]
     script: Option<PathBuf>,
-    /// Run the rest of the script after a call fails.
     #[arg(long, requires = "script")]
     keep_going: bool,
-    /// Drive the running daemon at this address through its API; without a
-    /// mode, the one at `http://127.0.0.1:9898`.
     #[arg(long, value_name = "URL")]
     connect: Option<String>,
-    /// Send the API token this file holds, which only its owner may read;
-    /// `mcp-token` in the configuration folder, if it is there, when no file
-    /// is named. Only to an https address or this computer.
     #[arg(long, value_name = "PATH", conflicts_with_all = ["headless", "scratch"])]
     token_file: Option<PathBuf>,
-    /// Run a session of its own on Ladderback's folders, without a daemon:
-    /// refused while a daemon or another session uses them. The session ends
-    /// with the last call, and a backup still running ends with it.
     #[arg(long)]
     headless: bool,
-    /// Run a session of its own in a new private folder, seeded with a plan
-    /// over a few generated files, and delete the folder at the end, when a
-    /// backup still running ends too.
     #[arg(long)]
     scratch: bool,
 }
@@ -77,16 +60,21 @@ enum Calls {
 
 /// Runs `ladderback mcp call`. Its session resolves secrets or reads a
 /// token as the server's does, so it starts protected the same way, before
-/// it reads the script or its calls.
+/// it reads the script or its calls, and keeps its log as the server does.
 pub(crate) fn call(args: CallArgs, plain: bool) -> ExitCode {
-    let localizer = crate::start_protected(plain, None);
-    crate::finish(&localizer, run(&localizer, args))
+    let recent = crate::recent_log();
+    let localizer = crate::start_protected(plain, Some(Arc::clone(&recent)));
+    crate::finish(&localizer, run(&localizer, args, recent))
 }
 
 /// Reads the calls, starts the session the mode names, makes the calls,
 /// and ends the session: 0 when every call worked, 1 when one failed or the
 /// session couldn't start, 2 when the command line can't be read.
-fn run(localizer: &Localizer, args: CallArgs) -> io::Result<ExitCode> {
+fn run(
+    localizer: &Localizer,
+    args: CallArgs,
+    recent: Arc<dyn app::ports::RecentLogStore>,
+) -> io::Result<ExitCode> {
     let mode = if args.headless {
         McpMode::Headless
     } else if args.scratch {
@@ -148,7 +136,7 @@ fn run(localizer: &Localizer, args: CallArgs) -> io::Result<ExitCode> {
         // The parser lets neither through without one or the other.
         (None, None) => return Ok(ExitCode::from(2)),
     };
-    let session = match Session::start(localizer, &mode)? {
+    let session = match Session::start(localizer, &mode, recent)? {
         Ok(session) => session,
         Err(status) => return Ok(status),
     };

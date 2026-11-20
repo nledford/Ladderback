@@ -41,7 +41,7 @@ Feature: AI agents propose configuration changes through MCP
     And an MCP server connected to it with that API token in a file
     And the MCP client has proposed adding the plan "nightly" over "/home/demo"
     When the MCP client lists the tools
-    Then the tools listed are "status, list_plans, list_repositories, list_snapshots, list_operations, get_operation, run_plan, wait_operation, cancel_operation, test_repository, preview_forget, preview_import, export_profile, propose_setup, get_proposal, withdraw_proposal, dry_run_plan"
+    Then the tools listed are "status, list_plans, list_repositories, list_snapshots, list_snapshot_folder, find_in_snapshots, list_operations, get_operation, read_log, run_plan, wait_operation, cancel_operation, test_repository, preview_forget, preview_import, export_profile, propose_setup, get_proposal, withdraw_proposal, dry_run_plan"
     When the MCP client calls the tool "approve_proposal" with that proposal
     Then the server answers that it has no such tool
     And the daemon's config file still holds only the repository "demo"

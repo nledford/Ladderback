@@ -13,7 +13,7 @@ use std::ffi::OsString;
 use std::io::{self, Write};
 use std::process::ExitCode;
 
-use api::{ErrorCode, ErrorDto, MsgArg};
+use api::{ErrorCode, ErrorDto, MsgArg, WarningCode};
 use clap::ColorChoice;
 use l10n::Localizer;
 use serde::Serialize;
@@ -164,6 +164,21 @@ pub(crate) fn refusal_line(
         "ladderback: {}\n",
         refusal_said(localizer, code, args, detail)
     )
+}
+
+/// The line a command prints a warning in on standard error: the program's
+/// name, then the catalog's words with each text of `args` [`escaped`],
+/// since they can come from outside (a profile's globs, keys and tags).
+pub(crate) fn warning_line(
+    localizer: &Localizer,
+    code: WarningCode,
+    args: &[(&str, MsgArg)],
+) -> String {
+    let args: Vec<(&str, MsgArg)> = args
+        .iter()
+        .map(|(name, arg)| (*name, escaped_arg(arg)))
+        .collect();
+    format!("ladderback: {}\n", localizer.warning(code, &args, None))
 }
 
 /// `error` as the command line may have another localizer say it, as

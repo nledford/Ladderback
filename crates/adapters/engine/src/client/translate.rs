@@ -7,15 +7,16 @@ use app::ports::{
     ForgetSummary, ProbeAnswer, ProgressEvent, ProgressKind as AppProgressKind, PrunePlanSummary,
     PruneSummary, RestorePlanSummary, RestoreSummary, RewriteSummary,
 };
-use domain::browse::{DisplayName, Entry, EntryName, FolderPage, PAGE_ENTRIES};
+use domain::browse::{DisplayName, Entry, EntryName, FolderPage, FolderPath, PAGE_ENTRIES};
 use domain::execution::{FailureReason, RepositoryHalf, Warning, WarningKind};
+use domain::find::{MAX_MATCHES, MAX_SNAPSHOTS, Match, SearchAnswer, Searched, Seen};
 use domain::maintenance::RepositoryStats;
 use domain::restore::download::{ArchiveFormat, DownloadShape};
 use domain::secrets::Redactor;
 
 use crate::job::{
-    ArchiveSpec, DumpFound, DumpResult, FolderResult, Level, OpResult, ProbeResult, ProgressKind,
-    TRUNCATED, WorkerEvent,
+    ArchiveSpec, DumpFound, DumpResult, FindResult, FolderResult, Level, OpResult, ProbeResult,
+    ProgressKind, TRUNCATED, WorkerEvent,
 };
 use crate::step::step_of;
 
@@ -150,6 +151,12 @@ pub(super) fn translate(event: WorkerEvent, redactor: &Redactor) -> Option<Engin
             // it can't read does.
             OpResult::Folder(found) => match folder_answer(found) {
                 Ok(answer) => EngineResult::Folder(answer),
+                Err(detail) => {
+                    return Some(EngineEvent::Failed(FailureReason::EngineFailed { detail }));
+                }
+            },
+            OpResult::Found(found) => match search_answer(found) {
+                Ok(answer) => EngineResult::Found(answer),
                 Err(detail) => {
                     return Some(EngineEvent::Failed(FailureReason::EngineFailed { detail }));
                 }
@@ -488,6 +495,68 @@ fn folder_answer(found: FolderResult) -> Result<FolderAnswer, String> {
     }))
 }
 
+/// A search's answer as the daemon takes it: no more snapshots or matches
+/// than a search returns, and each match at a path a browse can open.
+fn search_answer(found: FindResult) -> Result<SearchAnswer, String> {
+    let most_snapshots = usize::try_from(MAX_SNAPSHOTS).unwrap_or(usize::MAX);
+    if found.searched.len() > most_snapshots {
+        return Err(format!(
+            "the worker searched {} snapshots, more than {MAX_SNAPSHOTS}",
+            found.searched.len()
+        ));
+    }
+    // A match is one however many snapshots hold it.
+    if found.matches.len() > usize::try_from(MAX_MATCHES).unwrap_or(usize::MAX) {
+        return Err(format!(
+            "the worker sent {} matches, more than {MAX_MATCHES}",
+            found.matches.len()
+        ));
+    }
+    let matches = found
+        .matches
+        .into_iter()
+        .map(|found| {
+            let path = found
+                .path
+                .iter()
+                .try_fold(FolderPath::top(), |path, name| {
+                    path.join(EntryName::parse(name)?)
+                })
+                .map_err(|error| format!("the worker sent a match whose {error}"))?;
+            if path.names().is_empty() || found.seen.is_empty() {
+                return Err("the worker sent a match at no path, or in no snapshot".to_owned());
+            }
+            Ok(Match {
+                path,
+                display: found.display,
+                kind: found.kind,
+                seen: found
+                    .seen
+                    .into_iter()
+                    .map(|seen| Seen {
+                        snapshot: seen.snapshot,
+                        size: seen.size,
+                        modified: seen.modified,
+                    })
+                    .collect(),
+            })
+        })
+        .collect::<Result<_, String>>()?;
+    Ok(SearchAnswer {
+        searched: found
+            .searched
+            .into_iter()
+            .map(|searched| Searched {
+                snapshot: searched.snapshot,
+                time: searched.time,
+            })
+            .collect(),
+        left_out: found.left_out,
+        matches,
+        stopped: found.stopped,
+    })
+}
+
 #[cfg(test)]
 mod tests {
     use std::assert_matches;
@@ -567,6 +636,43 @@ mod tests {
             next: None,
         });
         assert!(over.is_err());
+    }
+
+    /// A match at the path `f<at>`, held by `snapshots` snapshots.
+    fn matched(at: usize, snapshots: u8) -> crate::job::MatchResult {
+        crate::job::MatchResult {
+            path: vec![format!("f{at}")],
+            display: domain::browse::DisplayName::new(&format!("f{at}")),
+            kind: domain::browse::EntryKind::File,
+            seen: (0..snapshots)
+                .map(|n| crate::job::SeenResult {
+                    snapshot: domain::SnapshotId::parse(&format!("{n:02x}").repeat(32))
+                        .unwrap_or_else(|e| panic!("a snapshot ID: {e:?}")),
+                    size: Some(1),
+                    modified: None,
+                })
+                .collect(),
+        }
+    }
+
+    #[test]
+    fn a_search_answer_is_capped_by_its_matches_however_many_snapshots_hold_each() {
+        let most = usize::try_from(MAX_MATCHES).unwrap_or(usize::MAX);
+        let answer = |matches: Vec<crate::job::MatchResult>| {
+            search_answer(FindResult {
+                searched: Vec::new(),
+                left_out: 0,
+                matches,
+                stopped: None,
+            })
+        };
+        let fits = answer((0..most).map(|at| matched(at, 3)).collect());
+        assert!(
+            fits.is_ok(),
+            "as many matches as a search returns, each in three snapshots: {fits:?}"
+        );
+        let over = answer((0..=most).map(|at| matched(at, 1)).collect());
+        assert!(over.is_err(), "one match more than a search returns");
     }
 
     fn failed(code: ErrorCode) -> WorkerEvent {

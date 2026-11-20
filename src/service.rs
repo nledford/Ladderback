@@ -221,7 +221,8 @@ fn runtime(localizer: &Localizer) -> io::Result<Option<tokio::runtime::Runtime>>
     }
 }
 
-/// The line, for stderr, that says why an install or a removal stopped.
+/// The line, for stderr, that says why an install or a removal stopped: its
+/// texts, the service manager's own words among them, escaped.
 fn error_said(localizer: &Localizer, error: &ServiceError) -> String {
     match &error.problem {
         ServiceProblem::File { detail } => said(
@@ -229,13 +230,13 @@ fn error_said(localizer: &Localizer, error: &ServiceError) -> String {
             msg::CLI_SERVICE_FILE_ERROR,
             &[
                 ("file", MsgArg::Text(shown(&error.file))),
-                ("detail", text(detail)),
+                ("detail", outside(detail)),
             ],
         ),
         ServiceProblem::ManagerMissing { command, detail } => said(
             localizer,
             msg::CLI_SERVICE_MANAGER_MISSING,
-            &[("command", text(command)), ("detail", text(detail))],
+            &[("command", outside(command)), ("detail", outside(detail))],
         ),
         ServiceProblem::ManagerRefused {
             command,
@@ -243,13 +244,13 @@ fn error_said(localizer: &Localizer, error: &ServiceError) -> String {
         } => said(
             localizer,
             msg::CLI_SERVICE_MANAGER_REFUSED,
-            &[("command", text(command)), ("said", text(words))],
+            &[("command", outside(command)), ("said", outside(words))],
         ),
         ServiceProblem::ManagerSilent { command, seconds } => said(
             localizer,
             msg::CLI_SERVICE_MANAGER_SILENT,
             &[
-                ("command", text(command)),
+                ("command", outside(command)),
                 ("limit", MsgArg::DurationMs(seconds.saturating_mul(1000))),
             ],
         ),
@@ -257,7 +258,7 @@ fn error_said(localizer: &Localizer, error: &ServiceError) -> String {
             localizer,
             msg::CLI_SERVICE_STILL_STOPPING,
             &[
-                ("command", text(command)),
+                ("command", outside(command)),
                 ("limit", MsgArg::DurationMs(seconds.saturating_mul(1000))),
             ],
         ),
@@ -267,6 +268,12 @@ fn error_said(localizer: &Localizer, error: &ServiceError) -> String {
             &[("file", MsgArg::Text(shown(&error.file)))],
         ),
     }
+}
+
+/// Text from outside (the service manager's, the operating system's) as a
+/// message's argument, escaped.
+fn outside(text: &str) -> MsgArg {
+    MsgArg::Text(crate::output::escaped(text))
 }
 
 /// One of the catalog's messages, as a line of its own.
@@ -338,5 +345,38 @@ mod tests {
             shown(Path::new("/srv/a\nb\u{1b}[31m\u{85}/ladderback.service")),
             r"/srv/a\nb\u{1b}[31m\u{85}/ladderback.service"
         );
+    }
+
+    #[test]
+    fn the_service_managers_words_are_said_with_each_control_and_bidi_character_escaped() {
+        let unsafe_words = "\u{1b}[2J\r\u{7}\u{202e}";
+        let escaped = r"\u{1b}[2J\r\u{7}\u{202e}";
+        for problem in [
+            ServiceProblem::ManagerRefused {
+                command: "systemctl --user enable ladderback".to_owned(),
+                said: format!("Failed {unsafe_words}"),
+            },
+            ServiceProblem::ManagerMissing {
+                command: "systemctl".to_owned(),
+                detail: format!("not found {unsafe_words}"),
+            },
+            ServiceProblem::File {
+                detail: format!("denied {unsafe_words}"),
+            },
+            ServiceProblem::ManagerSilent {
+                command: format!("systemctl --user enable /home/demo/a{unsafe_words}"),
+                seconds: 30,
+            },
+        ] {
+            let error = ServiceError {
+                file: PathBuf::from("/home/demo/.config/systemd/user/ladderback.service"),
+                problem,
+            };
+            let said = error_said(&Localizer::new(&[]), &error);
+            let body = said.strip_suffix('\n').expect("a line ends with a break");
+            assert!(!body.chars().any(char::is_control), "{said:?}");
+            assert!(!said.contains('\u{202e}'), "{said:?}");
+            assert!(said.contains(escaped), "{said:?}");
+        }
     }
 }

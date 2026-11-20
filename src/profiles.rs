@@ -82,10 +82,13 @@ fn refusal_said(localizer: &Localizer, refusal: &Refusal) -> String {
 
 /// Prints a notice on stderr, as the catalog says it.
 fn warn(localizer: &Localizer, notice: &Notice) -> io::Result<()> {
-    to_stderr(&format!(
-        "ladderback: {}\n",
-        localizer.warning(notice.code, &notice.args, None)
-    ))
+    to_stderr(&notice_said(localizer, notice))
+}
+
+/// The line [`warn`] prints, its arguments escaped
+/// ([`output::warning_line`]).
+fn notice_said(localizer: &Localizer, notice: &Notice) -> String {
+    output::warning_line(localizer, notice.code, &notice.args)
 }
 
 /// What `import-profile --json` prints when the import saved the profile,
@@ -694,6 +697,24 @@ mod tests {
             let line = refusal_said(&Localizer::new(&[]), &refusal);
             one_line_without_control_characters(&line);
             assert!(line.contains(&shown), "{line:?}");
+        }
+    }
+
+    #[test]
+    fn an_import_notice_is_said_with_each_control_and_bidi_character_of_its_arguments_escaped() {
+        let localizer = Localizer::new(&[]);
+        for notice in [
+            ProfileNotice::KeyIgnored {
+                key: format!("backup.{UNSAFE}\u{202e}"),
+            },
+            ProfileNotice::TagDropped {
+                tag: format!("{UNSAFE}\u{202e}"),
+            },
+        ] {
+            let line = notice_said(&localizer, &profile_notice(notice));
+            one_line_without_control_characters(&line);
+            assert!(!line.contains('\u{202e}'), "{line:?}");
+            assert!(line.contains(&format!("{ESCAPED}\\u{{202e}}")), "{line:?}");
         }
     }
 }

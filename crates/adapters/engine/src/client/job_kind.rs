@@ -12,7 +12,7 @@ use domain::restore::download::ArchiveFormat;
 
 use crate::job::{
     ArchiveSpec, BackupJobSpec, BrowseJobSpec, CheckJobSpec, DumpJobSpec, FakeEndSpec, FakeJobSpec,
-    FakeWarning, ForgetJobSpec, JobKind, PruneJobSpec, RepositorySpec, RestoreJobSpec,
+    FakeWarning, FindJobSpec, ForgetJobSpec, JobKind, PruneJobSpec, RepositorySpec, RestoreJobSpec,
     RestoreTargetSpec, RewriteJobSpec, SourceFilterSpec,
 };
 
@@ -173,6 +173,14 @@ pub(super) fn job_kind(job: Job) -> Result<JobKind, EngineError> {
                 .map(|name| name.as_str().to_owned())
                 .collect(),
             from: job.from,
+            most: job.most,
+        }),
+        Job::Find(job) => JobKind::Find(FindJobSpec {
+            repo: repository_spec(job.repository),
+            pattern: job.pattern.as_str().to_owned(),
+            plan: job.plan,
+            snapshots: job.caps.snapshots(),
+            matches: job.caps.matches(),
         }),
         Job::Stats(access) => JobKind::Stats(repository_spec(access)),
         Job::Restore(job) => JobKind::Restore(restore_spec(job)),

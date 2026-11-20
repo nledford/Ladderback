@@ -46,6 +46,27 @@ impl Backend for Told {
         Err(untold())
     }
 
+    async fn folder(
+        &self,
+        _repository: String,
+        _snapshot: domain::SnapshotId,
+        _folder: domain::browse::FolderPath,
+        _from: u64,
+        _most: u64,
+    ) -> Result<FolderDto, ErrorDto> {
+        Err(untold())
+    }
+
+    async fn find(
+        &self,
+        _repository: String,
+        _pattern: domain::find::NamePattern,
+        _plan: Option<domain::PlanId>,
+        _caps: domain::find::SearchCaps,
+    ) -> Result<FindDto, ErrorDto> {
+        Err(untold())
+    }
+
     async fn history(
         &self,
         _plan: Option<String>,
@@ -60,6 +81,10 @@ impl Backend for Told {
     }
 
     async fn summary(&self, _id: String) -> Result<OperationSummaryDto, ErrorDto> {
+        Err(untold())
+    }
+
+    async fn recent_log(&self) -> Result<api::RecentLogDto, ErrorDto> {
         Err(untold())
     }
 
@@ -371,8 +396,11 @@ async fn the_tools_listed_are_the_golden_files() {
             "list_plans",
             "list_repositories",
             "list_snapshots",
+            "list_snapshot_folder",
+            "find_in_snapshots",
             "list_operations",
             "get_operation",
+            "read_log",
             "run_plan",
             "wait_operation",
             "cancel_operation",
@@ -445,8 +473,11 @@ async fn each_field_at_every_level_has_one_type_and_only_the_arguments_needed_ar
         ("list_plans", vec![]),
         ("list_repositories", vec![]),
         ("list_snapshots", vec!["repository"]),
+        ("list_snapshot_folder", vec!["repository", "snapshot"]),
+        ("find_in_snapshots", vec!["repository", "pattern"]),
         ("list_operations", vec![]),
         ("get_operation", vec!["operation"]),
+        ("read_log", vec![]),
         ("run_plan", vec!["plan"]),
         ("wait_operation", vec!["operation"]),
         ("cancel_operation", vec!["operation"]),
@@ -988,6 +1019,44 @@ impl Backend for Lists {
         })
     }
 
+    async fn folder(
+        &self,
+        repository: String,
+        snapshot: domain::SnapshotId,
+        folder: domain::browse::FolderPath,
+        from: u64,
+        most: u64,
+    ) -> Result<FolderDto, ErrorDto> {
+        self.ask(format!(
+            "folder {folder} of {} of {repository} from {from}, {most}",
+            snapshot.as_str()
+        ));
+        self.told(&FolderDto {
+            path: folder.to_string(),
+            ..FolderDto::default()
+        })
+    }
+
+    async fn find(
+        &self,
+        repository: String,
+        pattern: domain::find::NamePattern,
+        plan: Option<domain::PlanId>,
+        caps: domain::find::SearchCaps,
+    ) -> Result<FindDto, ErrorDto> {
+        self.ask(format!(
+            "find {} in {repository} of {:?}, {} snapshots, {} matches",
+            pattern.as_str(),
+            plan.as_ref().map(domain::PlanId::as_str),
+            caps.snapshots(),
+            caps.matches()
+        ));
+        self.told(&FindDto {
+            pattern: pattern.as_str().to_owned(),
+            ..FindDto::default()
+        })
+    }
+
     async fn history(
         &self,
         plan: Option<String>,
@@ -1009,6 +1078,10 @@ impl Backend for Lists {
     async fn summary(&self, id: String) -> Result<OperationSummaryDto, ErrorDto> {
         self.ask(format!("summary of {id}"));
         self.told(&self.detail.as_ref().expect("a detail to tell").operation)
+    }
+
+    async fn recent_log(&self) -> Result<api::RecentLogDto, ErrorDto> {
+        self.told(&api::RecentLogDto { lines: Vec::new() })
     }
 
     async fn run(&self, plan: String) -> Result<String, ErrorDto> {
@@ -1244,6 +1317,113 @@ async fn list_snapshots_reads_the_repository_named_and_pages_by_snapshot_id() {
     assert_eq!(
         *asked.lock().unwrap(),
         ["snapshots of nas", "snapshots of nas"]
+    );
+}
+
+/// The snapshot ID every folder test names.
+fn snapshot_id() -> String {
+    "3f".repeat(32)
+}
+
+#[tokio::test(start_paused = true)]
+async fn list_snapshot_folder_reads_the_folder_named_from_where_it_was_asked() {
+    let lists = Lists::default();
+    let asked = Arc::clone(&lists.asked);
+    let mut client = connect(lists);
+    let top = client
+        .listed(
+            "list_snapshot_folder",
+            json!({"repository": "nas", "snapshot": snapshot_id()}),
+        )
+        .await;
+    assert_eq!(top["path"], "", "no path is the snapshot's top folder");
+    let docs = client
+        .listed(
+            "list_snapshot_folder",
+            json!({
+                "repository": "nas",
+                "snapshot": snapshot_id(),
+                "path": "home/demo/docs",
+                "from": 50,
+                "limit": 10_000,
+            }),
+        )
+        .await;
+    assert_eq!(docs["path"], "home/demo/docs");
+    assert_eq!(
+        *asked.lock().unwrap(),
+        [
+            format!("folder  of {} of nas from 0, 50", snapshot_id()),
+            format!(
+                "folder home/demo/docs of {} of nas from 50, 200",
+                snapshot_id()
+            ),
+        ],
+        "a page holds 50 entries unless asked for more, and never more than 200"
+    );
+}
+
+/// A snapshot ID no snapshot could have, or a path no folder could have, is
+/// refused as the API refuses it, naming it, and nothing is read.
+#[tokio::test(start_paused = true)]
+async fn list_snapshot_folder_refuses_a_snapshot_or_folder_no_repository_could_hold() {
+    let lists = Lists::default();
+    let asked = Arc::clone(&lists.asked);
+    let mut client = connect(lists);
+    let snapshot = client
+        .call(
+            "list_snapshot_folder",
+            json!({"repository": "nas", "snapshot": "latest"}),
+        )
+        .await;
+    assert_eq!(
+        refusal(&snapshot),
+        json!({"code": "snapshot-unknown", "args": {"snapshot": {"type": "text", "value": "latest"}}})
+    );
+    let folder = client
+        .call(
+            "list_snapshot_folder",
+            json!({"repository": "nas", "snapshot": snapshot_id(), "path": "/etc"}),
+        )
+        .await;
+    assert_eq!(
+        refusal(&folder),
+        json!({"code": "folder-unknown", "args": {"path": {"type": "text", "value": "/etc"}}})
+    );
+    assert!(asked.lock().unwrap().is_empty(), "{:?}", asked.lock());
+}
+
+#[tokio::test(start_paused = true)]
+async fn find_in_snapshots_searches_with_the_pattern_plan_and_caps_given_each_capped() {
+    let lists = Lists::default();
+    let asked = Arc::clone(&lists.asked);
+    let mut client = connect(lists);
+    let found = client
+        .listed(
+            "find_in_snapshots",
+            json!({"repository": "nas", "pattern": "Tax*.pdf"}),
+        )
+        .await;
+    assert_eq!(found["pattern"], "Tax*.pdf");
+    client
+        .listed(
+            "find_in_snapshots",
+            json!({
+                "repository": "nas",
+                "pattern": "?eport",
+                "plan": "home",
+                "snapshots": 1_000,
+                "matches": 0,
+            }),
+        )
+        .await;
+    assert_eq!(
+        *asked.lock().unwrap(),
+        [
+            "find Tax*.pdf in nas of None, 20 snapshots, 100 matches",
+            "find ?eport in nas of Some(\"home\"), 100 snapshots, 1 matches",
+        ],
+        "20 snapshots and 100 matches unless asked; never more than 100 and 500, never none"
     );
 }
 
@@ -1496,6 +1676,54 @@ async fn an_argument_a_tool_cant_take_is_refused_naming_it() {
             "unknown-key",
         ),
         ("export_profile", json!({"plan": 7}), "plan", "invalid"),
+        (
+            "list_snapshot_folder",
+            json!({"repository": "nas"}),
+            "snapshot",
+            "missing",
+        ),
+        (
+            "list_snapshot_folder",
+            json!({"repository": "nas", "snapshot": "canary", "from": -1}),
+            "from",
+            "invalid",
+        ),
+        (
+            "find_in_snapshots",
+            json!({"repository": "nas"}),
+            "pattern",
+            "missing",
+        ),
+        (
+            "find_in_snapshots",
+            json!({"repository": "nas", "pattern": ""}),
+            "pattern",
+            "invalid",
+        ),
+        (
+            "find_in_snapshots",
+            json!({"repository": "nas", "pattern": "canary/tax.pdf"}),
+            "pattern",
+            "invalid",
+        ),
+        (
+            "find_in_snapshots",
+            json!({"repository": "nas", "pattern": "x".repeat(256)}),
+            "pattern",
+            "invalid",
+        ),
+        (
+            "find_in_snapshots",
+            json!({"repository": "nas", "pattern": "tax", "plan": "Canary Plan"}),
+            "plan",
+            "invalid",
+        ),
+        (
+            "find_in_snapshots",
+            json!({"repository": "nas", "pattern": "tax", "snapshots": "all"}),
+            "snapshots",
+            "invalid",
+        ),
     ] {
         let answer = client.call(tool, arguments).await;
         assert_eq!(refusal(&answer), invalid(field, problem), "{tool}");
@@ -1524,8 +1752,17 @@ async fn every_tool_but_status_hands_on_a_refusal_from_the_backend_as_an_error()
         ("list_plans", json!({})),
         ("list_repositories", json!({})),
         ("list_snapshots", json!({"repository": "nas"})),
+        (
+            "list_snapshot_folder",
+            json!({"repository": "nas", "snapshot": snapshot_id()}),
+        ),
+        (
+            "find_in_snapshots",
+            json!({"repository": "nas", "pattern": "tax"}),
+        ),
         ("list_operations", json!({})),
         ("get_operation", json!({"operation": summary(1).id})),
+        ("read_log", json!({})),
         ("run_plan", json!({"plan": "home"})),
         ("wait_operation", json!({"operation": summary(1).id})),
         ("cancel_operation", json!({"operation": summary(1).id})),
@@ -1637,14 +1874,23 @@ async fn no_refusal_of_any_tool_carries_structured_content() {
 }
 
 /// Each tool, with arguments it takes.
-fn every_tool_called() -> [(&'static str, Value); 17] {
+fn every_tool_called() -> [(&'static str, Value); 20] {
     [
         ("status", json!({})),
         ("list_plans", json!({})),
         ("list_repositories", json!({})),
         ("list_snapshots", json!({"repository": "nas"})),
+        (
+            "list_snapshot_folder",
+            json!({"repository": "nas", "snapshot": snapshot_id()}),
+        ),
+        (
+            "find_in_snapshots",
+            json!({"repository": "nas", "pattern": "tax"}),
+        ),
         ("list_operations", json!({})),
         ("get_operation", json!({"operation": summary(1).id})),
+        ("read_log", json!({})),
         ("run_plan", json!({"plan": "home"})),
         ("wait_operation", json!({"operation": summary(1).id})),
         ("cancel_operation", json!({"operation": summary(1).id})),
@@ -1929,6 +2175,27 @@ impl Backend for Running {
         Err(untold())
     }
 
+    async fn folder(
+        &self,
+        _repository: String,
+        _snapshot: domain::SnapshotId,
+        _folder: domain::browse::FolderPath,
+        _from: u64,
+        _most: u64,
+    ) -> Result<FolderDto, ErrorDto> {
+        Err(untold())
+    }
+
+    async fn find(
+        &self,
+        _repository: String,
+        _pattern: domain::find::NamePattern,
+        _plan: Option<domain::PlanId>,
+        _caps: domain::find::SearchCaps,
+    ) -> Result<FindDto, ErrorDto> {
+        Err(untold())
+    }
+
     async fn history(
         &self,
         _plan: Option<String>,
@@ -1958,6 +2225,10 @@ impl Backend for Running {
         let running = *reads < self.running;
         *reads += 1;
         Ok(Running::state(running))
+    }
+
+    async fn recent_log(&self) -> Result<api::RecentLogDto, ErrorDto> {
+        Err(untold())
     }
 
     async fn run(&self, _plan: String) -> Result<String, ErrorDto> {
@@ -2415,6 +2686,14 @@ async fn a_one_shot_call_answers_as_a_tools_call_does() {
         ("list_plans", json!({"cursor": "nowhere"})),
         ("list_repositories", json!({})),
         ("list_snapshots", json!({"repository": "nas"})),
+        (
+            "list_snapshot_folder",
+            json!({"repository": "nas", "snapshot": snapshot_id(), "path": "docs"}),
+        ),
+        (
+            "find_in_snapshots",
+            json!({"repository": "nas", "pattern": "tax*", "plan": "home"}),
+        ),
         ("list_operations", json!({"plan": "home"})),
         ("get_operation", json!({"operation": id})),
         ("run_plan", json!({"plan": "home"})),
@@ -2516,7 +2795,7 @@ async fn a_server_of_its_own_offers_no_proposal_tool() {
         .iter()
         .collect();
     assert_eq!(listed, expected);
-    assert_eq!(listed.len(), 13);
+    assert_eq!(listed.len(), 16);
     for tool in proposal_tools {
         let answer = client.call(tool, json!({"proposal": "p"})).await;
         assert_eq!(answer["error"]["code"], -32602, "{tool}: {answer}");

@@ -7,10 +7,12 @@ use domain::execution::deadline::KeepDelete;
 use domain::execution::logged_entry::LoggedEntry;
 use domain::execution::plan_tags::{PlanTags, UserTag};
 use domain::execution::{FailureReason, OperationKind, Target, Warning};
+use domain::find::{NamePattern, SearchAnswer, SearchCaps};
 use domain::planning::{AgentConfig, Hostname, RepositoryConfig, SourceFilter, masked_options};
 use domain::secrets::{REDACTED, Redactor, RepositorySecrets, SecretValue};
 use domain::{
-    Offset, OperationId, RepositoryAlias, RepositoryId, SignedDuration, SnapshotId, Timestamp,
+    Offset, OperationId, PlanId, RepositoryAlias, RepositoryId, SignedDuration, SnapshotId,
+    Timestamp,
 };
 use futures::stream::BoxStream;
 
@@ -151,6 +153,9 @@ pub enum Job {
     /// Reads one page of one folder of a snapshot (§16, decision 102). A
     /// read, like [`Ls`](Self::Ls): no I7 slot, no operation log row.
     Browse(BrowseJob),
+    /// Finds entries by name across the repository's snapshots (§16,
+    /// decision 132). A read, like [`Browse`](Self::Browse).
+    Find(FindJob),
     /// Reads the repository's stats: its snapshots, then every index file
     /// (§16, decision 104). A read, not an operation: it takes no I7 slot and
     /// is never written to the operation log.
@@ -190,6 +195,7 @@ impl Job {
             | Self::Check(_)
             | Self::Ls(_)
             | Self::Browse(_)
+            | Self::Find(_)
             | Self::Stats(_)
             | Self::RestorePlan(_) => None,
         }
@@ -208,9 +214,9 @@ impl Job {
             // A plan is never recorded; it names the kind it plans.
             Self::Prune(_) | Self::PrunePlan(_) => OperationKind::Prune,
             Self::Check(_) => OperationKind::Check,
-            // A browse is an `ls` of one folder (§4.1); a stats read is never
-            // recorded either: it reads as a listing.
-            Self::Ls(_) | Self::Browse(_) | Self::Stats(_) => OperationKind::Ls,
+            // A browse and a search are an `ls` of trees (§4.1); a stats
+            // read is never recorded either: it reads as a listing.
+            Self::Ls(_) | Self::Browse(_) | Self::Find(_) | Self::Stats(_) => OperationKind::Ls,
             // A dry run is never recorded; it names the kind it plans.
             Self::Restore(_) | Self::RestorePlan(_) => OperationKind::Restore,
             Self::Dump(_) => OperationKind::Download,
@@ -232,6 +238,7 @@ impl Job {
             Self::Prune(job) | Self::PrunePlan(job) => Some(&job.repository),
             Self::Check(job) => Some(&job.repository),
             Self::Browse(job) => Some(&job.repository),
+            Self::Find(job) => Some(&job.repository),
             Self::Dump(job) => Some(&job.repository),
             Self::Restore(job) | Self::RestorePlan(job) => Some(&job.repository),
         }
@@ -252,6 +259,7 @@ impl Job {
             Self::Prune(job) | Self::PrunePlan(job) => Some(&mut job.repository),
             Self::Check(job) => Some(&mut job.repository),
             Self::Browse(job) => Some(&mut job.repository),
+            Self::Find(job) => Some(&mut job.repository),
             Self::Dump(job) => Some(&mut job.repository),
             Self::Restore(job) | Self::RestorePlan(job) => Some(&mut job.repository),
         }
@@ -477,13 +485,26 @@ pub struct RewriteJob {
 }
 
 /// One page of one folder of a snapshot, from position `from` of the
-/// folder's entries.
+/// folder's entries, at most `most` of them.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct BrowseJob {
     pub repository: RepositoryAccess,
     pub snapshot: SnapshotId,
     pub folder: FolderPath,
     pub from: u64,
+    /// From 1 to [`domain::browse::PAGE_ENTRIES`].
+    pub most: u64,
+}
+
+/// A search of the repository's snapshots for entries whose names match
+/// `pattern`: the newest snapshots, of `plan` when it names one, within
+/// `caps`, and for at most [`domain::find::SEARCH_SECONDS`].
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct FindJob {
+    pub repository: RepositoryAccess,
+    pub pattern: NamePattern,
+    pub plan: Option<PlanId>,
+    pub caps: SearchCaps,
 }
 
 /// One entry of a snapshot to restore, and where.
@@ -700,6 +721,8 @@ pub enum EngineResult {
     Probed(ProbeAnswer),
     /// What a [`Job::Browse`] found.
     Folder(FolderAnswer),
+    /// What a [`Job::Find`] found.
+    Found(SearchAnswer),
     /// What a [`Job::Stats`] read.
     Stats(domain::maintenance::RepositoryStats),
     /// What a [`Job::Restore`] wrote.

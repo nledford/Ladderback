@@ -334,9 +334,11 @@ pub enum ErrorCode {
     InvalidCursor,
     /// A call of an MCP tool gives an argument the tool doesn't take, leaves
     /// out one it needs, or gives one a value it doesn't take (§4.6), so the
-    /// tool didn't run. The argument `field` names the argument, and
-    /// `problem` what is wrong with it, an [`ArgumentProblem`]'s wire name.
-    /// Neither holds the value given.
+    /// tool didn't run; or a query parameter of a route such a tool calls
+    /// through (a folder's page `limit`, a search's) is, alike. The argument
+    /// `field` names the argument or parameter, and `problem` what is wrong
+    /// with it, an [`ArgumentProblem`]'s wire name. Neither holds the value
+    /// given.
     InvalidArguments,
     /// A request's body is not the JSON the route takes.
     InvalidBody,

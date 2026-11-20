@@ -238,6 +238,7 @@ pub const MAX_FOLDER_ENTRIES: usize = 1_000;
 /// One page of one folder of a snapshot, in the order the snapshot records
 /// its entries.
 #[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "schemars", derive(schemars::JsonSchema))]
 #[serde(rename_all = "kebab-case")]
 pub struct FolderDto {
     /// The folder's path in the snapshot, its names joined by `/`; empty
@@ -255,6 +256,7 @@ pub struct FolderDto {
 
 /// One entry of a folder.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "schemars", derive(schemars::JsonSchema))]
 #[serde(rename_all = "kebab-case")]
 pub struct EntryDto {
     /// The name as rustic records it: the key a request opens the entry by,
@@ -278,6 +280,7 @@ pub struct EntryDto {
 
 /// What an entry is.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "schemars", derive(schemars::JsonSchema))]
 #[serde(rename_all = "kebab-case")]
 pub enum EntryKindDto {
     Folder,
@@ -286,6 +289,82 @@ pub enum EntryKindDto {
     Link,
     /// A device, a pipe or a socket.
     Other,
+}
+
+/// What a search of a repository's snapshots found: the entries whose names
+/// match the pattern, each at its path with the snapshots that hold it.
+#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "schemars", derive(schemars::JsonSchema))]
+#[serde(rename_all = "kebab-case")]
+pub struct FindDto {
+    /// The pattern searched for, as given.
+    pub pattern: String,
+    /// The snapshots read to the end, newest first.
+    pub searched: Vec<SearchedDto>,
+    /// How many snapshots it chose from weren't read to the end: older
+    /// ones past the cap, and any a cap stopped it before.
+    pub left_out: u64,
+    /// In the order the newest snapshot holding each records them.
+    pub matches: Vec<MatchDto>,
+    /// The cap that cut the search short; absent when it read every
+    /// snapshot it could.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub stopped: Option<SearchStopDto>,
+}
+
+/// A snapshot a search read.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "schemars", derive(schemars::JsonSchema))]
+#[serde(rename_all = "kebab-case")]
+pub struct SearchedDto {
+    pub snapshot: String,
+    /// RFC 3339 in UTC.
+    pub time: String,
+}
+
+/// An entry whose name matched, at one path, and the snapshots it is in.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "schemars", derive(schemars::JsonSchema))]
+#[serde(rename_all = "kebab-case")]
+pub struct MatchDto {
+    /// The entry's path from the snapshot's top, by the names rustic
+    /// records (each an [`EntryDto::name`]), joined by `/`: the folder that
+    /// holds it is the path without its last name.
+    pub path: String,
+    /// The path as a person reads it, its names made visible as
+    /// [`EntryDto::display`] is.
+    pub display: String,
+    pub kind: EntryKindDto,
+    /// Newest snapshot first.
+    pub seen: Vec<SeenDto>,
+}
+
+/// One snapshot that holds a match, and the entry as it holds it there.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "schemars", derive(schemars::JsonSchema))]
+#[serde(rename_all = "kebab-case")]
+pub struct SeenDto {
+    pub snapshot: String,
+    /// A file's size in bytes; absent for anything else.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub size: Option<u64>,
+    /// RFC 3339 in UTC, when the snapshot recorded it.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub modified: Option<String>,
+}
+
+/// Which cap cut a search short.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "schemars", derive(schemars::JsonSchema))]
+#[serde(rename_all = "kebab-case")]
+pub enum SearchStopDto {
+    /// The repository has more snapshots than it was told to read.
+    Snapshots,
+    /// It found as many matches as it was told to return, and there were
+    /// more; or the matches reached the most one answer carries.
+    Matches,
+    /// Its time ran out.
+    Time,
 }
 
 #[cfg(test)]

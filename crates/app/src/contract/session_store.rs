@@ -32,6 +32,7 @@ pub async fn run(harness: &dyn SessionHarness) {
     times_are_kept_to_the_millisecond(harness).await;
     sessions_outlive_the_daemon(harness).await;
     a_new_store_keeps_no_session_length(harness).await;
+    setting_the_length_says_whether_it_changed(harness).await;
     the_session_length_kept_last_is_kept_apart_from_the_sessions(harness).await;
     the_session_length_outlives_the_daemon(harness).await;
 }
@@ -108,9 +109,11 @@ async fn removed_sessions_are_gone(harness: &dyn SessionHarness) {
         add(store.as_ref(), &session(seed, 0), &[]).await;
     }
     let removed = store.remove(&[digest(1), digest(3), digest(9)]).await;
-    assert!(removed.is_ok(), "{removed:?}");
+    assert_eq!(removed, Ok(true), "two of them were kept");
+    let none_kept = store.remove(&[digest(1), digest(9)]).await;
+    assert_eq!(none_kept, Ok(false), "none of them is kept");
     let none = store.remove(&[]).await;
-    assert!(none.is_ok(), "{none:?}");
+    assert_eq!(none, Ok(false));
     assert_eq!(all(store.as_ref()).await, vec![session(2, 0)]);
 }
 
@@ -120,8 +123,10 @@ async fn removing_all_forgets_every_session(harness: &dyn SessionHarness) {
         add(store.as_ref(), &session(seed, 0), &[]).await;
     }
     let removed = store.remove_all().await;
-    assert!(removed.is_ok(), "{removed:?}");
+    assert_eq!(removed, Ok(true));
     assert_eq!(all(store.as_ref()).await, Vec::new());
+    let none_kept = store.remove_all().await;
+    assert_eq!(none_kept, Ok(false), "none is kept");
 }
 
 async fn a_use_is_kept_and_never_brings_a_session_back(harness: &dyn SessionHarness) {
@@ -191,6 +196,20 @@ async fn set_length(store: &dyn SessionStore, length: SessionLength) {
 
 async fn a_new_store_keeps_no_session_length(harness: &dyn SessionHarness) {
     assert_eq!(length(harness.empty().await.as_ref()).await, None);
+}
+
+async fn setting_the_length_says_whether_it_changed(harness: &dyn SessionHarness) {
+    let store = harness.empty().await;
+    let first = store.set_length(SessionLength::SevenDays).await;
+    assert_eq!(first, Ok(true), "none was kept");
+    let same = store.set_length(SessionLength::SevenDays).await;
+    assert_eq!(same, Ok(false), "the same one is kept already");
+    let other = store.set_length(SessionLength::NinetyDays).await;
+    assert_eq!(other, Ok(true));
+    assert_eq!(
+        length(store.as_ref()).await,
+        Some(SessionLength::NinetyDays)
+    );
 }
 
 async fn the_session_length_kept_last_is_kept_apart_from_the_sessions(

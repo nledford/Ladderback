@@ -35,7 +35,7 @@ mod walk;
 
 pub use admin_password::{AdminPassword, AdminPasswordError};
 pub use agent_registry::AgentRegistry;
-pub use api_token_store::{Added, ApiTokenStore};
+pub use api_token_store::{Added, ApiTokenStore, PermissionsSet};
 pub use change_codec::{ChangeCodec, CodecError};
 pub use clock::Clock;
 pub use config_drafts::{ConfigDraft, ConfigDrafts, SavedOver};
@@ -45,11 +45,11 @@ pub use config_store::{
 };
 pub use engine::{
     BackupJob, BackupSummary, BrowseJob, CheckJob, CheckSummary, DumpAnswer, DumpHeader, DumpJob,
-    Engine, EngineError, EngineEvent, EngineResult, FakeEnd, FakeJob, FolderAnswer, ForgetJob,
-    ForgetSummary, Job, JobControl, MAX_JOB_IDS, OperationStep, ProbeAnswer, ProgressEvent,
-    ProgressKind, PruneJob, PrunePlanSummary, PruneSummary, RepositoryAccess, RestoreJob,
-    RestorePlanSummary, RestoreSummary, RestoreTarget, RewriteJob, RewriteSummary, RunningJob,
-    SavedEntry, SnapshotSummary,
+    Engine, EngineError, EngineEvent, EngineResult, FakeEnd, FakeJob, FindJob, FolderAnswer,
+    ForgetJob, ForgetSummary, Job, JobControl, MAX_JOB_IDS, OperationStep, ProbeAnswer,
+    ProgressEvent, ProgressKind, PruneJob, PrunePlanSummary, PruneSummary, RepositoryAccess,
+    RestoreJob, RestorePlanSummary, RestoreSummary, RestoreTarget, RewriteJob, RewriteSummary,
+    RunningJob, SavedEntry, SnapshotSummary,
 };
 pub use event_bus::{EVENT_BUFFER, EventBus};
 pub use full_disk_access::FullDiskAccessProbe;

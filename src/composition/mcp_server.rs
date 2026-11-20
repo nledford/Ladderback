@@ -176,14 +176,19 @@ fn api_token(
 
 /// The server for a headless session on Ladderback's folders, which it
 /// holds as `serve` does: one a daemon or another session holds is refused.
-/// It starts with `serve`'s recovery, and plans and runs nothing.
-pub(crate) async fn headless() -> Result<(::mcp::Server, Held), Refused> {
-    let daemon = daemon_at(
+/// It starts with `serve`'s recovery, and plans and runs nothing. Its
+/// `read_log` reads `recent`, the session's own log, as the daemon's Log
+/// page reads the daemon's.
+pub(crate) async fn headless(
+    recent: Arc<dyn app::ports::RecentLogStore>,
+) -> Result<(::mcp::Server, Held), Refused> {
+    let mut daemon = daemon_at(
         platform::dirs::config_dir(),
         platform::dirs::data_dir(),
         platform::dirs::cache_dir(),
     )
     .await?;
+    daemon.state.recent_log = recent;
     Ok(in_process(daemon, None))
 }
 
@@ -197,8 +202,12 @@ const SCRATCH_FILES: usize = 3;
 /// The server for a session in a new scratch folder in the temporary
 /// folder: a plan over a few generated files, backing up to a repository of
 /// its own whose password is a file in the folder. The scratch folders
-/// crashed sessions left are swept first.
-pub(crate) async fn scratch(random: &dyn Random) -> Result<(::mcp::Server, Held), Refused> {
+/// crashed sessions left are swept first. Its `read_log` reads `recent`, as
+/// a headless session's does.
+pub(crate) async fn scratch(
+    random: &dyn Random,
+    recent: Arc<dyn app::ports::RecentLogStore>,
+) -> Result<(::mcp::Server, Held), Refused> {
     let parent = std::env::temp_dir();
     let swept = scratch::sweep(&parent);
     for path in &swept.removed {
@@ -218,7 +227,10 @@ pub(crate) async fn scratch(random: &dyn Random) -> Result<(::mcp::Server, Held)
     let name = hex(name.get(..8).unwrap_or_default());
     let folder = Scratch::create(&parent, &name).map_err(|error| unavailable(error.to_string()))?;
     match seeded(&folder, random).await {
-        Ok(daemon) => Ok(in_process(daemon, Some(folder))),
+        Ok(mut daemon) => {
+            daemon.state.recent_log = recent;
+            Ok(in_process(daemon, Some(folder)))
+        }
         Err(unseeded) => {
             // Nothing of a session that never started is left.
             let _ = folder.remove();
@@ -397,6 +409,7 @@ pub(crate) struct InProcess {
     repositories: Arc<dyn http_adapter::Repositories>,
     profiles: Arc<dyn http_adapter::Profiles>,
     full_disk_access: http_adapter::FullDiskAccessRoute,
+    recent_log: Arc<dyn app::ports::RecentLogStore>,
 }
 
 impl InProcess {
@@ -408,6 +421,7 @@ impl InProcess {
             repositories: Arc::clone(&state.repositories),
             profiles: Arc::clone(&state.profiles),
             full_disk_access: state.full_disk_access.clone(),
+            recent_log: Arc::clone(&state.recent_log),
         }
     }
 }
@@ -436,32 +450,52 @@ impl ::mcp::Backend for InProcess {
     }
 
     async fn snapshots(&self, repository: String) -> Result<api::SnapshotsDto, api::ErrorDto> {
-        use http_adapter::SnapshotsError;
         self.catalog
             .snapshots(repository.clone())
             .await
+            .map_err(|error| snapshots_refusal(repository, error))
+    }
+
+    async fn folder(
+        &self,
+        repository: String,
+        snapshot: domain::SnapshotId,
+        folder: domain::browse::FolderPath,
+        from: u64,
+        most: u64,
+    ) -> Result<api::FolderDto, api::ErrorDto> {
+        use http_adapter::FolderError;
+        let named = snapshot.as_str().to_owned();
+        let path = folder.to_string();
+        self.catalog
+            .folder(repository.clone(), snapshot, folder, from, most)
+            .await
             .map_err(|error| match error {
-                SnapshotsError::Unknown => api::ErrorDto::new(
-                    api::ErrorCode::RepositoryUnknown,
-                    [("alias", MsgArg::Text(repository))],
+                FolderError::SnapshotUnknown => api::ErrorDto::new(
+                    api::ErrorCode::SnapshotUnknown,
+                    [("snapshot", MsgArg::Text(named))],
                     None,
                 ),
-                SnapshotsError::SecretRefused(secret) => {
-                    api::ErrorDto::new(secret.code, secret.args, secret.detail)
-                }
-                SnapshotsError::RepositoryNotFound => {
-                    api::ErrorDto::new(api::ErrorCode::RepositoryNotFound, [], None)
-                }
-                SnapshotsError::RepositoryConfigNotFound { detail } => {
-                    api::ErrorDto::new(api::ErrorCode::RepositoryConfigNotFound, [], Some(detail))
-                }
-                SnapshotsError::Unavailable { code, args, detail } => {
-                    api::ErrorDto::new(code, args, detail)
-                }
-                SnapshotsError::TimedOut => {
-                    api::ErrorDto::new(api::ErrorCode::RepositoryReadTimedOut, [], None)
-                }
+                FolderError::FolderUnknown => api::ErrorDto::new(
+                    api::ErrorCode::FolderUnknown,
+                    [("path", MsgArg::Text(path))],
+                    None,
+                ),
+                FolderError::Repository(error) => snapshots_refusal(repository, error),
             })
+    }
+
+    async fn find(
+        &self,
+        repository: String,
+        pattern: domain::find::NamePattern,
+        plan: Option<domain::PlanId>,
+        caps: domain::find::SearchCaps,
+    ) -> Result<api::FindDto, api::ErrorDto> {
+        self.catalog
+            .find(repository.clone(), pattern, plan, caps)
+            .await
+            .map_err(|error| snapshots_refusal(repository, error))
     }
 
     async fn history(
@@ -499,6 +533,10 @@ impl ::mcp::Backend for InProcess {
     /// on what it reads.
     async fn summary(&self, id: String) -> Result<api::OperationSummaryDto, api::ErrorDto> {
         Ok(self.operation(id).await?.operation)
+    }
+
+    async fn recent_log(&self) -> Result<api::RecentLogDto, api::ErrorDto> {
+        Ok(app::recent_log::answer(self.recent_log.as_ref()))
     }
 
     async fn run(&self, plan: String) -> Result<String, api::ErrorDto> {
@@ -598,6 +636,34 @@ impl ::mcp::Backend for InProcess {
 fn catalog_refusal(error: http_adapter::CatalogError) -> api::ErrorDto {
     let http_adapter::CatalogError::Unavailable { code, args, detail } = error;
     api::ErrorDto::new(code, args, detail)
+}
+
+/// A refusal of a read of the repository `alias`, its listing, a folder's
+/// page or a search, as the API answers it.
+fn snapshots_refusal(alias: String, error: http_adapter::SnapshotsError) -> api::ErrorDto {
+    use http_adapter::SnapshotsError;
+    match error {
+        SnapshotsError::Unknown => api::ErrorDto::new(
+            api::ErrorCode::RepositoryUnknown,
+            [("alias", MsgArg::Text(alias))],
+            None,
+        ),
+        SnapshotsError::SecretRefused(secret) => {
+            api::ErrorDto::new(secret.code, secret.args, secret.detail)
+        }
+        SnapshotsError::RepositoryNotFound => {
+            api::ErrorDto::new(api::ErrorCode::RepositoryNotFound, [], None)
+        }
+        SnapshotsError::RepositoryConfigNotFound { detail } => {
+            api::ErrorDto::new(api::ErrorCode::RepositoryConfigNotFound, [], Some(detail))
+        }
+        SnapshotsError::Unavailable { code, args, detail } => {
+            api::ErrorDto::new(code, args, detail)
+        }
+        SnapshotsError::TimedOut => {
+            api::ErrorDto::new(api::ErrorCode::RepositoryReadTimedOut, [], None)
+        }
+    }
 }
 
 #[cfg(test)]
