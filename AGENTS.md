@@ -35,6 +35,7 @@ The other recipes:
 | `just test-wasm` | `wasm-bindgen` tests under Node |
 | `just test-contrast` | The WCAG 2.2 AA token gate |
 | `just docs-site` | Builds the user docs site from `docs/guide/` with the pinned mdBook and checks its links (`scripts/check-site-links.ts`) |
+| `just docs-site-a11y` | `docs-site`, then axe-core over every page in Chromium, as the `Docs site` workflow runs it on each change to the site (`ui-tests/scripts/docs-site-a11y.ts`) |
 | `just check-pr-title "<title>"` | Checks a pull request title as CI does |
 | `just translations [tags]` | Each translation's missing, unreviewed and stale messages |
 | `just accept-translations <tag> <ids>` | Records the English of messages accepted after review (`scripts/translations.ts`) |
