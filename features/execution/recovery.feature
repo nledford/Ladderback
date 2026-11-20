@@ -57,6 +57,15 @@ Feature: Crash recovery
     And the agent said the queued backup of the plan "home" ended because its plan's repository changed
     And nothing runs again
 
+  Scenario: A plan's oldest queued backup that can't run again leaves the next one to run
+    Given the log shows a backup of the plan "home" on the repository "nas" as queued
+    And the log shows a later backup of the plan "home" on the repository "offsite" as queued
+    And the plan "home" now backs up to the repository "offsite"
+    When the daemon starts again
+    Then the log shows the backup of the plan "home" as failed because the daemon stopped
+    And the agent said the queued backup of the plan "home" ended because its plan's repository changed
+    And the later backup of the plan "home" runs again under its own ID
+
   Scenario: A queued backup on the repository its plan still backs up to runs again
     Given the log shows a backup of the plan "home" on the repository "nas" as queued
     When the daemon starts again

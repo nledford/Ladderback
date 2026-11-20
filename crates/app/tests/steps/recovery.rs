@@ -545,6 +545,17 @@ fn ran_again(agent: &Agent) -> Vec<Operation> {
 #[then(expr = "the backup of the plan {string} runs again under its own ID")]
 async fn backup_runs_again(agent: &mut Agent, plan: String) {
     let id = agent.recovery.backup(&plan).id;
+    assert_runs_again(agent, id).await;
+}
+
+#[then(expr = "the later backup of the plan {string} runs again under its own ID")]
+async fn later_backup_runs_again(agent: &mut Agent, plan: String) {
+    let id = agent.recovery.later_backup(&plan).id;
+    assert_runs_again(agent, id).await;
+}
+
+/// The queued operation `id` ran again, once, as it was queued.
+async fn assert_runs_again(agent: &Agent, id: OperationId) {
     let queued = detail(agent, id).await.record;
     assert_eq!(
         queued.status,
