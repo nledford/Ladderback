@@ -539,6 +539,10 @@ async fn connect_to_hub(
                 say(localizer, msg::CLI_KEY_FILE_EXPOSED, &args)?;
                 return Ok(ExitCode::FAILURE);
             }
+            if let Some(message) = connect_message(&failure) {
+                say(localizer, message, &[("address", text(&address))])?;
+                return Ok(ExitCode::FAILURE);
+            }
             let (code, args, detail) = connect_failed(&failure, &address);
             to_stderr(&refusal_line(localizer, code, &args, detail.as_deref()))?;
             Ok(ExitCode::FAILURE)
@@ -579,9 +583,16 @@ fn connect_failed(failure: &ConnectFailure, address: &str) -> Said {
         ConnectFailure::Welcome(WelcomeRefused::GenerationLower) => {
             (ErrorCode::GenerationLower, vec![], None)
         }
-        ConnectFailure::Refused(refusal) => {
-            (api::sync::refusal_code(refusal.code.as_str()), vec![], None)
-        }
+        // A hub refuses a proof only as `proof-refused`; any other code,
+        // pairing's among them, would show advice for something else.
+        ConnectFailure::Refused(refusal) => match api::sync::refusal_code(refusal.code.as_str()) {
+            ErrorCode::ProofRefused => (ErrorCode::ProofRefused, vec![], None),
+            _ => (
+                ErrorCode::HubLinkLost,
+                vec![],
+                Some(refusal.code.as_str().to_owned()),
+            ),
+        },
         ConnectFailure::NotPaired
         | ConnectFailure::Identity(_)
         | ConnectFailure::Signing(_)
@@ -593,8 +604,12 @@ fn connect_failed(failure: &ConnectFailure, address: &str) -> Said {
 /// the code's advice is pairing's and can't be followed: a hub that didn't
 /// prove the key this machine pinned is no reason to pair again.
 fn connect_message(failure: &ConnectFailure) -> Option<MessageId> {
-    let _ = failure;
-    todo!()
+    match failure {
+        ConnectFailure::Challenge(
+            ChallengeRefused::HubKeyMismatch | ChallengeRefused::HubProofInvalid,
+        ) => Some(msg::CLI_HUB_STATUS_HUB_UNPROVED),
+        _ => None,
+    }
 }
 
 /// An error code, its arguments, and the detail the system gave.
