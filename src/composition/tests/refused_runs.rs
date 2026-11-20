@@ -581,7 +581,7 @@ async fn a_resumed_run_waits_for_the_keyring_to_be_unlocked() {
 /// A queued backup of a plan whose planner kept no next run — the plan
 /// left the schedule while it sat queued — is refused at once when its
 /// keyring is locked: there is no run to wait within (#1221, decision
-/// 132).
+/// 134).
 #[tokio::test]
 async fn a_resumed_run_of_a_plan_with_no_next_run_is_refused_at_once() {
     capture();
@@ -655,9 +655,17 @@ async fn a_waiting_run_gives_way_to_a_newer_run_of_its_plan() {
     );
     PlanRuns::start(&runner, &home, Trigger::Schedule, waiting, Some(unlock)).await;
 
-    // The keyring unlocks, and a newer run of the plan starts and reaches
-    // the engine; its job never answers, so it is going.
-    clock.advance(domain::SignedDuration::from_secs(56));
+    // The run waits, asking every 10 s while the keyring is locked, until
+    // it sleeps from 50 s to 60 s.
+    for _ in 0..5 {
+        until_it_waits(&clock).await;
+        clock.advance(domain::SignedDuration::from_secs(10));
+    }
+    until_it_waits(&clock).await;
+
+    // The keyring unlocks at 55 s, and a newer run of the plan starts and
+    // reaches the engine; its job never answers, so it is going.
+    clock.advance(domain::SignedDuration::from_secs(5));
     *scripted
         .hangs
         .lock()
@@ -667,15 +675,55 @@ async fn a_waiting_run_gives_way_to_a_newer_run_of_its_plan() {
         .push(&home, domain::planning::Concurrency::default());
     PlanRuns::start(&runner, &home, Trigger::Schedule, newer, None).await;
 
-    // The parked run asks at its next tick, finds the keyring unlocked,
+    // The waiting run asks at its next tick, finds the keyring unlocked,
     // and gives way to the newer run.
-    clock.advance(domain::SignedDuration::from_secs(4));
+    clock.advance(domain::SignedDuration::from_secs(5));
+    until_logged(&[
+        "the scheduled run of plan home didn't start",
+        "plan-run-waiting",
+    ])
+    .await;
+    assert_eq!(jobs(&scripted), 1, "only the newer run reached the engine");
+}
+
+/// A queued backup recorded on a repository its plan no longer backs up to
+/// isn't parked to wait for the keyring of the one it backs up to now: it
+/// ends at once, as it would with the keyring unlocked (#1221).
+#[tokio::test]
+async fn a_resumed_run_whose_plan_moved_is_not_parked_for_the_keyring() {
+    capture();
+    let started = domain::Timestamp::from_second(1_800_000_000).expect("a timestamp");
+    let clock = Arc::new(FakeClock::new(started));
+    let secrets = Arc::new(FakeSecrets::new());
+    keyring_locked_until(
+        &secrets,
+        &clock,
+        started + domain::SignedDuration::from_secs(3600),
+    );
+    let store = Arc::new(app::fakes::InMemoryOperationStore::new());
+    let (runner, _heard, scripted, _home) =
+        keyring_parked_runner(secrets, clock.clone(), store.clone()).await;
+    let queued = queued_home_backup(0x1225, Some(repository_id()));
+    store
+        .save(&queued, None)
+        .await
+        .expect("the queued backup is saved");
+    let unlock = app::secrets::UnlockWait::new(
+        clock.clone(),
+        started + domain::SignedDuration::from_secs(600),
+    );
+    PlanRuns::resume(&runner, queued, Some(unlock)).await;
+
     tokio::time::timeout(std::time::Duration::from_secs(5), async {
         loop {
-            let said = captured_log::lines();
-            if said
+            let history = store
+                .list(&app::ports::HistoryQuery::default())
+                .await
+                .expect("the log reads");
+            if history
+                .operations
                 .iter()
-                .any(|(_, line)| line.contains("didn't start") && line.contains("home"))
+                .all(|record| record.status.is_finished())
             {
                 break;
             }
@@ -683,8 +731,9 @@ async fn a_waiting_run_gives_way_to_a_newer_run_of_its_plan() {
         }
     })
     .await
-    .expect("the parked run says it gave way");
-    assert_eq!(jobs(&scripted), 1, "only the newer run reached the engine");
+    .expect("the queued backup ends at once, never waiting for the keyring");
+    assert_eq!(clock.sleepers(), 0, "nothing waits for the keyring");
+    assert_eq!(jobs(&scripted), 0, "the engine was never asked");
 }
 
 /// Waits until a run parked on `clock` sleeps there: time moved before it
