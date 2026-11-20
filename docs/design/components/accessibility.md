@@ -86,6 +86,7 @@ The gallery's "Shared vocabulary" demo shows every value named in words, each st
 - **Progress** is never written to a region. The start and the finish are announced.
 - **Focus survives an update (2.4.3).** An update to a row changes text, values and the presence of what it is about; it never rebuilds a control the reader may be on. A control goes only when it stops being one, as a Cancel button does when its run ends. A row's Cancel button or progress bar that goes while it holds focus, its row staying, hands focus to the row's header, which names the run (`components::hand_focus_when_gone`; #438, and for the bar the Progress row above), and the run's end is announced as any other. A row that leaves the page, or a table built again (a change of what the page shows), takes the header with it, and focus then falls to the page.
 - **Pause:** the Operations page, the one page that follows the daemon live, has a "Pause live updates" control (2.2.2). While paused, the page stops changing and a banner counts pending changes; the announcer holds what happens by itself and still answers what the reader does. Resuming shows every change at once and says once how many runs ended (decision 65).
+- **The change cue:** a row of a live table whose status a live update changed is lit once in Ledger Gray (`--surface`), its cells settling back to their own fill over 600 ms (`Table`'s `cue_on`, decided on the host by `table::rules::cues`; decision 127). Never as the page first shows its rows, for an update that leaves the status as it was (a progress report, a re-sort), or while the page is paused: its rows hold still then, and the resume lights each changed row once. It never loops, has no shadow and no second color, and says nothing to a screen reader, which the announcer already tells. Under forced colors the system's colors replace the fill, and there is no cue. The Operations page is the one live table.
 
 **Settled in the first build** (`crates/web/src/announcer.rs` for the timing, `live.rs` for the regions):
 
@@ -160,7 +161,7 @@ The gallery's "Shared vocabulary" demo shows every value named in words, each st
 
 - Light and dark themes follow `prefers-color-scheme`, with a manual override.
 - `prefers-contrast: more` strengthens borders and focus rings, and `forced-colors: active` falls back to system colors without losing state.
-- `prefers-reduced-motion` stops every animation and transition: the progress bar's fill then jumps to each value rather than moving to it. Nothing flashes.
+- `prefers-reduced-motion` stops anything that moves, resizes, rotates, scales or loops: every animation (the spinner's turn) and every transition of anything but a color or the opacity, so the progress bar's fill jumps to each value rather than growing to it. A fade of a color or the opacity short enough to be feedback, 600 ms at most, stays: the tooltip's and the change cue's (decision 127). Nothing flashes.
 - Text resizes to 200 % without loss, and pages reflow at 320 × 256 CSS px (A4).
 - Color tokens live in one CSS file, and a test checks every foreground and background pair against A4's ratios. Once the visual `DESIGN.md` exists, `design.md lint` runs the same check on its tokens.
 
