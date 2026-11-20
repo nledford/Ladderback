@@ -55,7 +55,8 @@ pub enum KeyringLock {
     Unlocked,
     /// The collection is locked: nobody has unlocked it yet.
     Locked,
-    /// The question got no answer: there is no keyring service to ask.
+    /// The question got no answer: there is no keyring service to ask, the
+    /// answer came too late, or a question asked before is still out.
     Unknown,
 }
 
