@@ -5,7 +5,7 @@ use app::ports::{Added, ApiTokenStore, StoreError};
 use async_trait::async_trait;
 use domain::Timestamp;
 use domain::access::PasswordFingerprint;
-use domain::access::api_token::{ApiToken, ApiTokenId, TokenPermissions};
+use domain::access::api_token::{ApiToken, ApiTokenId, TokenPermissions, admits_api_token};
 use sqlx::Connection;
 
 use crate::{SqliteStore, row, sql, unavailable};
@@ -37,7 +37,7 @@ impl ApiTokenStore for SqliteStore {
             .fetch_one(&mut *tx)
             .await
             .map_err(unavailable)?;
-        if usize::try_from(kept).unwrap_or(usize::MAX) >= at_most {
+        if admits_api_token(usize::try_from(kept).unwrap_or(usize::MAX), at_most).is_err() {
             tx.rollback().await.map_err(unavailable)?;
             return Ok(Added::Full);
         }

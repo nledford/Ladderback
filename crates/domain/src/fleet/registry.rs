@@ -21,6 +21,28 @@ pub const PENDING_LIMIT: usize = 20;
 /// The most tokens that may be unused at once.
 pub const UNUSED_TOKEN_LIMIT: usize = 20;
 
+/// A new token refused: `limit` tokens are unused already.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct UnusedTokensFull;
+
+/// Whether one more token may be kept while `unused` are unused: fewer
+/// than `limit`. The registry counts and asks this in the step that keeps
+/// the token, so of adds racing for the last place one is kept.
+pub fn admits_unused_token(unused: usize, limit: usize) -> Result<(), UnusedTokensFull> {
+    if unused < limit {
+        Ok(())
+    } else {
+        Err(UnusedTokensFull)
+    }
+}
+
+/// Whether a new hub key voids the unused tokens, given the `agents`
+/// registered: only while there are none, since a registered agent pins
+/// the old key and the hub keeps it.
+pub fn voids_tokens_for_new_key(agents: usize) -> bool {
+    agents == 0
+}
+
 /// A token's life when none is asked for.
 pub const TOKEN_LIFE: SignedDuration = SignedDuration::from_mins(15);
 

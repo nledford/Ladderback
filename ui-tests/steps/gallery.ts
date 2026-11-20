@@ -354,7 +354,7 @@ const SNAPSHOTS: Record<string, string> = {
 - tabpanel "Demo overview":
   - paragraph: The demo repository holds 12 snapshots of two demo plans.
 - paragraph: These demo tabs are chosen with Enter or Space. The arrow keys only move between them.
-- tablist "Demo agent":
+- tablist "Demo machine":
   - tab "Demo log" [selected]
   - tab "Demo stats"
   - tab "Demo plans"
@@ -589,7 +589,7 @@ const SNAPSHOTS: Record<string, string> = {
   - listitem: Check Done
   - listitem: Copy Done
   - listitem: Commit the demo move once every demo snapshot has reached the new hub Current
-  - listitem: Switch the agents To do
+  - listitem: Switch the machines To do
   - listitem: Clean up To do
 - paragraph:
   - button "Advance the demo hub move"

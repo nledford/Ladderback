@@ -146,7 +146,7 @@ ui-gallery-missing-link = Open a page that does not exist
 ui-gallery-polite-button = Say politely: backup finished
 
 # The button that queues a second, different polite message.
-ui-gallery-polite-other-button = Say politely: { -agent } back online
+ui-gallery-polite-other-button = Say politely: { -machine } back online
 
 # The button that sends an assertive message: one a screen reader says at once.
 ui-gallery-assertive-button = Say urgently: restore failed
@@ -164,8 +164,8 @@ ui-gallery-modal-heading = Modal stand-in
 # What the polite button announces.
 ui-gallery-backup-finished = Backup finished.
 
-# What the second polite button announces. The same word as the term -agent, written out because the sentence starts with a capital letter.
-ui-gallery-agent-online = Agent back online.
+# What the second polite button announces. The same word as the term -machine, written out because the sentence starts with a capital letter.
+ui-gallery-agent-online = Machine back online.
 
 # What the assertive button announces.
 ui-gallery-restore-failed = Restore failed.
@@ -819,14 +819,14 @@ ui-gallery-steps-move = Demo { -hub } move
 ui-gallery-steps-check = Check
 ui-gallery-steps-copy = Copy
 ui-gallery-steps-commit = Commit the demo move once every demo snapshot has reached the new { -hub }
-ui-gallery-steps-switch = Switch the { -agent(form: "other") }
+ui-gallery-steps-switch = Switch the { -machine(form: "other") }
 ui-gallery-steps-clean-up = Clean up
 
 # The button that moves the demo hub move on to its next step, and from its
 # end back to its first.
 ui-gallery-steps-advance = Advance the demo { -hub } move
 
-# The name of the demo's second list of steps: a demo of pairing an agent,
+# The name of the demo's second list of steps: a demo of pairing a machine,
 # which failed at its second step.
 ui-gallery-steps-pairing = Demo pairing
 ui-gallery-steps-token = Token
@@ -1040,7 +1040,7 @@ ui-gallery-tabs-history-text = The last demo check found nothing wrong.
 # line after the set names the tab it says is chosen, as a page that reads that
 # tab's panel from the daemon would follow it; $tab is one of the tabs' names.
 ui-gallery-tabs-manual-hint = These demo tabs are chosen with Enter or Space. The arrow keys only move between them.
-ui-gallery-tabs-agent = Demo { -agent }
+ui-gallery-tabs-agent = Demo { -machine }
 ui-gallery-tabs-log = Demo log
 ui-gallery-tabs-log-text = A demo panel that a page would read from the daemon once its tab is chosen.
 ui-gallery-tabs-stats = Demo stats
@@ -1100,7 +1100,7 @@ ui-gallery-tabs-address = Demo address
 ui-gallery-tabs-address-field = Demo address text
 ui-gallery-tabs-address-hint = What you type here stays while the tabs change layout.
 ui-gallery-tabs-about = Demo about
-ui-gallery-tabs-about-text = The demo { -agent } runs on this computer.
+ui-gallery-tabs-about-text = The demo { -machine } runs on this computer.
 
 # The same kind of tabs in a narrow column of the page that runs right to
 # left: a row, as the column has no room for the list beside the panel.
@@ -1257,7 +1257,7 @@ ui-cancel-plan = Cancel { $plan }
 ui-cancel = Cancel
 
 # The row header of a maintenance run, a restore or a download: what ran and
-# the repository it ran on or read, by the alias this agent gave the repository
+# the repository it ran on or read, by the alias this machine gave the repository
 # when the run was first logged.
 # $kind is the wire text of what ran: forget, prune, check, adopt, restore or
 # download; any other kind is an operation.
@@ -1517,7 +1517,7 @@ ui-plan-progress = Backup progress of { $plan }
 
 # The name of a running maintenance run's, restore's or download's progress
 # bar: what it measures and the repository it runs on or reads, by the alias
-# this agent gave the repository when the run was first logged, as its row is
+# this machine gave the repository when the run was first logged, as its row is
 # named.
 # $kind is the wire text of what runs: forget, prune, check, adopt, restore or
 # download; any other kind is an operation.
@@ -1592,7 +1592,7 @@ ui-step-backing-up = Backing up…
 # Listing the packs the repository holds.
 ui-step-listing-packs = Listing the { -pack(form: "other") }…
 
-# Comparing the agent's cache of the repository with the repository.
+# Comparing the machine's cache of the repository with the repository.
 ui-step-checking-cache = Checking the cache of the { -repository }…
 
 # Comparing a repository's hot copy with the repository itself.
@@ -1696,8 +1696,8 @@ ui-maintenance-heading = Maintenance of { $alias }
 # What the maintenance section says before its buttons.
 ui-maintenance-body = Each of these shows what it would do first. Nothing changes until you confirm.
 
-# What the maintenance section says instead, with no buttons but the one that turns maintenance from this agent on, of a repository this agent does not maintain: its entry asks for maintenance by the hub or by nothing.
-ui-maintenance-elsewhere = This { -agent } does not maintain this repository, so it cannot forget, prune or check it, or adopt history into its plans.
+# What the maintenance section says instead, with no buttons but the one that turns maintenance from this machine on, of a repository this machine does not maintain: its entry asks for maintenance by the hub or by nothing.
+ui-maintenance-elsewhere = This { -machine } does not maintain this repository, so it cannot forget, prune or check it, or adopt history into its plans.
 
 # The button that reviews a forget: the snapshots the plans' retention no longer keeps.
 ui-maintenance-forget = Forget snapshots
@@ -1708,44 +1708,44 @@ ui-maintenance-prune = Prune unused data
 # The button that reviews a check of the repository.
 ui-maintenance-check = Check the repository
 
-# The button after a repository's maintenance that asks this agent to maintain it, which first opens a dialog that says what that means.
-ui-maintainer-on = Maintain from this { -agent }
+# The button after a repository's maintenance that asks this machine to maintain it, which first opens a dialog that says what that means.
+ui-maintainer-on = Maintain from this { -machine }
 
-# The button after a repository's maintenance that asks this agent to stop maintaining it, which first opens a dialog that says what stops.
-ui-maintainer-off = Stop maintaining from this { -agent }
+# The button after a repository's maintenance that asks this machine to stop maintaining it, which first opens a dialog that says what stops.
+ui-maintainer-off = Stop maintaining from this { -machine }
 
-# The title of the dialog that asks before this agent maintains a repository.
+# The title of the dialog that asks before this machine maintains a repository.
 # $alias (text): the repository's alias, such as demo.
-ui-maintainer-on-title = Maintain { $alias } from this { -agent }
+ui-maintainer-on-title = Maintain { $alias } from this { -machine }
 
-# What that dialog says: what maintaining means, and why to leave it off. Nothing can tell whether another agent maintains the repository, so the person is told that only one place may.
+# What that dialog says: what maintaining means, and why to leave it off. Nothing can tell whether another machine maintains the repository, so the person is told that only one place may.
 # $alias (text): the repository's alias, such as demo.
-ui-maintainer-on-body = This { -agent } will forget, prune and check { $alias }, and adopt history into its plans. Only one place may maintain a repository, so leave this off when another { -agent } or the { -hub } already does.
+ui-maintainer-on-body = This { -machine } will forget, prune and check { $alias }, and adopt history into its plans. Only one place may maintain a repository, so leave this off when another { -machine } or the { -hub } already does.
 
-# The button in that dialog that turns maintenance from this agent on.
+# The button in that dialog that turns maintenance from this machine on.
 ui-maintainer-on-confirm = Turn on maintenance
 
-# The title of the dialog that asks before this agent stops maintaining a repository.
+# The title of the dialog that asks before this machine stops maintaining a repository.
 # $alias (text): the repository's alias, such as demo.
-ui-maintainer-off-title = Stop maintaining { $alias } from this { -agent }
+ui-maintainer-off-title = Stop maintaining { $alias } from this { -machine }
 
 # What that dialog says: what stops, and that backups go on while nothing removes old snapshots.
 # $alias (text): the repository's alias, such as demo.
-ui-maintainer-off-body = This { -agent } will stop forgetting, pruning and checking { $alias }, and adopting history into its plans. Backups go on, but nothing removes old snapshots until another place maintains it.
+ui-maintainer-off-body = This { -machine } will stop forgetting, pruning and checking { $alias }, and adopting history into its plans. Backups go on, but nothing removes old snapshots until another place maintains it.
 
-# The button in that dialog that turns maintenance from this agent off.
+# The button in that dialog that turns maintenance from this machine off.
 ui-maintainer-off-confirm = Turn off maintenance
 
 # Said in either dialog while the daemon saves the change.
 ui-maintainer-saving = Saving the change…
 
-# Announced once this agent maintains the repository.
+# Announced once this machine maintains the repository.
 # $alias (text): the repository's alias, such as demo.
-ui-maintainer-on-done = This { -agent } now maintains { $alias }.
+ui-maintainer-on-done = This { -machine } now maintains { $alias }.
 
-# Announced once this agent no longer maintains the repository.
+# Announced once this machine no longer maintains the repository.
 # $alias (text): the repository's alias, such as demo.
-ui-maintainer-off-done = This { -agent } no longer maintains { $alias }.
+ui-maintainer-off-done = This { -machine } no longer maintains { $alias }.
 
 # What the maintenance section shows while a review is being prepared.
 ui-maintenance-preparing = Preparing the review…
@@ -1787,7 +1787,7 @@ ui-maintenance-check-untidy =
        *[other] Check finished. It found { $warnings } things to tidy, listed below, and no errors.
     }
 
-# Said assertively, and shown, when a check ran to its end and found errors, which it lists below this line with what else it found. An error is damage in the repository, or a part of the repository, or of this agent's copy of it, that could not be read or did not match. $errors (count): how many errors it found.
+# Said assertively, and shown, when a check ran to its end and found errors, which it lists below this line with what else it found. An error is damage in the repository, or a part of the repository, or of this machine's copy of it, that could not be read or did not match. $errors (count): how many errors it found.
 ui-maintenance-check-errors =
     { $errors ->
         [one] Check finished. It found an error, listed below.
@@ -1902,44 +1902,44 @@ ui-tree-entry-modified =
 # $total (count): how many it holds.
 ui-tree-more = Show more: { $shown } of { $total } shown
 
-# The heading of the section of history that no plan of this agent owns.
+# The heading of the section of history that no plan of this machine owns.
 ui-orphaned-heading = Orphaned history
 
 # What the orphaned section says about its groups.
-ui-orphaned-body = No plan of this { -agent } owns these snapshots now. A forget leaves them alone, and adopting a group rewrites it into a plan.
+ui-orphaned-body = No plan of this { -machine } owns these snapshots now. A forget leaves them alone, and adopting a group rewrites it into a plan.
 
-# The heading of an orphaned group. $owner is both when the group carries the tags of an agent and a plan, plan or agent when it carries one of them, and neither when it carries none; $plan and $agent are the tags.
+# The heading of an orphaned group. $owner is both when the group carries the tags of a machine and a plan, plan or agent when it carries one of them, and neither when it carries none; $plan and $agent are the tags, $agent the machine's.
 ui-orphaned-group =
     { $owner ->
-        [both] Plan { $plan } of { -agent } { $agent }
-        [plan] Plan { $plan } of an unknown { -agent }
-        [agent] An unknown plan of { -agent } { $agent }
-       *[neither] History of an unknown { -agent } and plan
+        [both] Plan { $plan } of { -machine } { $agent }
+        [plan] Plan { $plan } of an unknown { -machine }
+        [agent] An unknown plan of { -machine } { $agent }
+       *[neither] History of an unknown { -machine } and plan
     }
 
 # The caption of the table of an orphaned group's snapshots; $owner, $plan and $agent are as in the group's heading.
 ui-orphaned-caption =
     { $owner ->
-        [both] Snapshots of plan { $plan } of { -agent } { $agent }
-        [plan] Snapshots of plan { $plan } of an unknown { -agent }
-        [agent] Snapshots of an unknown plan of { -agent } { $agent }
-       *[neither] Snapshots of an unknown { -agent } and plan
+        [both] Snapshots of plan { $plan } of { -machine } { $agent }
+        [plan] Snapshots of plan { $plan } of an unknown { -machine }
+        [agent] Snapshots of an unknown plan of { -machine } { $agent }
+       *[neither] Snapshots of an unknown { -machine } and plan
     }
 
-# The button that adopts an orphaned group, named by its agent and plan, into a plan of this agent.
-ui-adopt-orphaned = Adopt history of plan { $plan } from { -agent } { $agent } into plan { $into }
+# The button that adopts an orphaned group, named by its machine and plan, into a plan of this machine.
+ui-adopt-orphaned = Adopt history of plan { $plan } from { -machine } { $agent } into plan { $into }
 
-# What an orphaned group says when it lacks the tag of an agent or of a plan, which an adoption names.
-ui-orphaned-untagged = This history lacks the tag of an { -agent } or a plan, so it cannot be adopted.
+# What an orphaned group says when it lacks the tag of a machine or of a plan, which an adoption names.
+ui-orphaned-untagged = This history lacks the tag of a { -machine } or a plan, so it cannot be adopted.
 
-# What an orphaned group says when no plan of this agent could take it.
-ui-orphaned-no-plan = No plan of this { -agent } could take this history, so it cannot be adopted.
+# What an orphaned group says when no plan of this machine could take it.
+ui-orphaned-no-plan = No plan of this { -machine } could take this history, so it cannot be adopted.
 
-# The heading of the section of history that no agent tagged.
+# The heading of the section of history that no machine tagged.
 ui-unmanaged-heading = Unmanaged history
 
 # What the unmanaged section says about its groups.
-ui-unmanaged-body = No { -agent } tagged these snapshots. A forget leaves them alone, and a plan that backs up the same host, label and paths can adopt them.
+ui-unmanaged-body = No { -machine } tagged these snapshots. A forget leaves them alone, and a plan that backs up the same host, label and paths can adopt them.
 
 # The heading of an unmanaged group. $labeled is yes when the group has a label and no when it has none; $hostname is its host and $label its label.
 ui-unmanaged-group =
@@ -1965,8 +1965,8 @@ ui-adopt-unmanaged =
        *[no] Adopt history of host { $hostname }, no label into plan { $into }
     }
 
-# What an unmanaged group says when no plan of this agent could adopt it.
-ui-unmanaged-no-plan = No plan of this { -agent } backs up this host, label and paths, so this history cannot be adopted.
+# What an unmanaged group says when no plan of this machine could adopt it.
+ui-unmanaged-no-plan = No plan of this { -machine } backs up this host, label and paths, so this history cannot be adopted.
 
 # The title of the review of a forget, named with the repository.
 ui-review-title-forget = Forget snapshots of { $alias }
@@ -2018,17 +2018,17 @@ ui-review-removes-none =
        *[other] Plan { $plan }: nothing is forgotten among its { $total } snapshots.
     }
 
-# What a forget says when no plan of this agent backs up to the repository.
-ui-review-no-plans = No plan of this { -agent } backs up to this repository, so a forget has nothing to keep or remove.
+# What a forget says when no plan of this machine backs up to the repository.
+ui-review-no-plans = No plan of this { -machine } backs up to this repository, so a forget has nothing to keep or remove.
 
 # What a forget leaves alone when it finds only orphaned history; $snapshots counts the snapshots.
-ui-review-leaves-orphaned = Left alone: orphaned snapshots ({ $snapshots }), which no plan of this { -agent } owns.
+ui-review-leaves-orphaned = Left alone: orphaned snapshots ({ $snapshots }), which no plan of this { -machine } owns.
 
 # What a forget leaves alone when it finds only unmanaged history; $snapshots counts the snapshots.
-ui-review-leaves-unmanaged = Left alone: unmanaged snapshots ({ $snapshots }), which no { -agent } tagged.
+ui-review-leaves-unmanaged = Left alone: unmanaged snapshots ({ $snapshots }), which no { -machine } tagged.
 
 # What a forget leaves alone when it finds both kinds of history, counted by $orphaned and $unmanaged.
-ui-review-leaves-both = Left alone: orphaned snapshots ({ $orphaned }), which no plan of this { -agent } owns, and unmanaged snapshots ({ $unmanaged }), which no { -agent } tagged.
+ui-review-leaves-both = Left alone: orphaned snapshots ({ $orphaned }), which no plan of this { -machine } owns, and unmanaged snapshots ({ $unmanaged }), which no { -machine } tagged.
 
 # What an adoption does; $snapshots is how many snapshots become part of the plan $into.
 ui-review-adopts =
@@ -2216,7 +2216,7 @@ ui-restore-new-folder = Into a new folder
 ui-restore-in-place = Over the original files
 
 # What the choice of where to restore says under its name.
-ui-restore-where-hint = A new folder is made for it in the { -agent }'s restore folder. Over the original files, it first reads what it would change.
+ui-restore-where-hint = A new folder is made for it in the { -machine }'s restore folder. Over the original files, it first reads what it would change.
 
 # Said in the restore dialog while the dry run of a restore over the original files reads what it would change.
 ui-restore-previewing = Reading what a restore over the original files would change…
@@ -2272,7 +2272,7 @@ ui-restore-finished = Restore of { $name } finished.
 
 # Said politely when a restore into a new folder finished, naming that folder.
 # $name (text): the entry restored, as the tree shows it.
-# $folder (text): the folder made for the restore, its full path on the agent's computer.
+# $folder (text): the folder made for the restore, its full path on this machine.
 ui-restore-finished-into = Restore of { $name } finished. Its files are in { $folder }.
 
 # Said politely when a restore was cancelled. What it wrote before stays.
@@ -2282,7 +2282,7 @@ ui-restore-cancelled = Restore of { $name } was cancelled. What it wrote before 
 # Said politely when a restore into a new folder was cancelled, naming that
 # folder. What it wrote before stays there.
 # $name (text): the entry restored, as the tree shows it.
-# $folder (text): the folder made for the restore, its full path on the agent's computer.
+# $folder (text): the folder made for the restore, its full path on this machine.
 ui-restore-cancelled-into = Restore of { $name } was cancelled. What it wrote before stays in { $folder }.
 
 # Said urgently when a restore failed. The Operations page says why.
@@ -2560,11 +2560,11 @@ ui-repositories-keep-password-configuration = In the configuration file
 # The choice that keeps the typed password in the system keyring: the macOS keychain, or the Secret Service on Linux.
 ui-repositories-keep-password-keyring = In the system keyring
 
-# The label of the checkbox that asks this agent to maintain a repository it connects: run its forget, prune and check. Off unless the person turns it on.
-ui-repositories-maintain-label = Maintain this repository from this { -agent }
+# The label of the checkbox that asks this machine to maintain a repository it connects: run its forget, prune and check. Off unless the person turns it on.
+ui-repositories-maintain-label = Maintain this repository from this { -machine }
 
-# The hint under that checkbox. It says what maintaining means, that a repository created here is always maintained from here, and why to leave it off: only one place may maintain a repository, and another agent or the hub may already do it.
-ui-repositories-maintain-hint = When this is on, this { -agent } forgets, prunes and checks the repository you connect, and adopts history into its plans. Only one place may maintain a repository, so leave this off when another { -agent } or the { -hub } already does. A repository you create here under a name is always maintained from here.
+# The hint under that checkbox. It says what maintaining means, that a repository created here is always maintained from here, and why to leave it off: only one place may maintain a repository, and another machine or the hub may already do it.
+ui-repositories-maintain-hint = When this is on, this { -machine } forgets, prunes and checks the repository you connect, and adopts history into its plans. Only one place may maintain a repository, so leave this off when another { -machine } or the { -hub } already does. A repository you create here under a name is always maintained from here.
 
 # The button that opens the repository and saves nothing.
 ui-repositories-test = Test the repository
@@ -3403,13 +3403,13 @@ ui-proposal-forget-heading = What it would forget
 # $repository (text): the repository's alias, such as demo.
 ui-proposal-forget-repository = Repository { $repository }
 
-# Said of a repository this agent maintains neither before nor after the proposal.
+# Said of a repository this machine maintains neither before nor after the proposal.
 ui-proposal-forget-not-maintained = { -brand-name } doesn't maintain this { -repository }, before or after the proposal, so its retention forgets nothing there.
 
-# Said of a repository this agent doesn't maintain now.
+# Said of a repository this machine doesn't maintain now.
 ui-proposal-forget-before-not-maintained = Now, { -brand-name } doesn't maintain this { -repository }, so its retention forgets nothing there.
 
-# Said of a repository this agent wouldn't maintain after the proposal.
+# Said of a repository this machine wouldn't maintain after the proposal.
 ui-proposal-forget-after-not-maintained = After the proposal, { -brand-name } wouldn't maintain this { -repository }, so its retention would forget nothing there.
 
 # Said of a repository where no plan owns any snapshots now.

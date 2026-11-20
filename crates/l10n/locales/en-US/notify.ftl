@@ -22,7 +22,7 @@ notify-backup-warning = The backup of { $plan } succeeded with warnings. Its his
 # $code (text): the failure's code, such as operation-failed, or none when it is unknown.
 notify-backup-failed = The backup of { $plan } failed ({ $code }).
 
-# A backup failed, and the agent planned one of its retries.
+# A backup failed, and the machine planned one of its retries.
 # $plan (text): the plan's ID, such as home, or the operation's ID when the backup has no plan.
 # $code (text): the failure's code, such as operation-failed, or none when it is unknown.
 # $attempt (number): which retry this is, such as 1.
@@ -31,22 +31,22 @@ notify-backup-failed = The backup of { $plan } failed ({ $code }).
 notify-backup-retrying = The backup of { $plan } failed ({ $code }). Retry { $attempt } of { $attempts } runs at { DATETIME($at) } { DATETIME($at, timeZoneName: "short") }.
 
 # A forget of old snapshots failed.
-# $repository (text): the repository's alias, such as nas, or the operation's ID when the agent has none for it.
+# $repository (text): the repository's alias, such as nas, or the operation's ID when the machine has none for it.
 # $code (text): the failure's code, such as operation-failed, or none when it is unknown.
 notify-forget-failed = Forgetting old snapshots in { $repository } failed ({ $code }).
 
 # A prune of a repository failed.
-# $repository (text): the repository's alias, such as nas, or the operation's ID when the agent has none for it.
+# $repository (text): the repository's alias, such as nas, or the operation's ID when the machine has none for it.
 # $code (text): the failure's code, such as operation-failed, or none when it is unknown.
 notify-prune-failed = The prune of { $repository } failed ({ $code }).
 
 # A check of a repository failed.
-# $repository (text): the repository's alias, such as nas, or the operation's ID when the agent has none for it.
+# $repository (text): the repository's alias, such as nas, or the operation's ID when the machine has none for it.
 # $code (text): the failure's code, such as operation-failed, or none when it is unknown.
 notify-check-failed = The check of { $repository } failed ({ $code }).
 
 # A restore of files from one of a repository's snapshots failed.
-# $repository (text): the repository's alias, such as nas, or the operation's ID when the agent has none for it.
+# $repository (text): the repository's alias, such as nas, or the operation's ID when the machine has none for it.
 # $code (text): the failure's code, such as restore-target-unwritable, or none when it is unknown.
 notify-restore-failed = Restoring files from { $repository } failed ({ $code }).
 
@@ -67,7 +67,7 @@ notify-title-backup-warning = Backup finished with warnings
 # The title of a notification that a backup failed.
 notify-title-backup-failed = Backup failed
 
-# The title of a notification that a backup failed and the agent will run it again.
+# The title of a notification that a backup failed and the machine will run it again.
 notify-title-backup-retrying = Backup will be retried
 
 # The title of a notification that a forget of old snapshots failed.

@@ -380,10 +380,10 @@ async function readAgain(world: BrowserWorld): Promise<void> {
   await keys.press("Enter");
 }
 
-// An adoption button names the agent too, which a journey cannot know.
+// An adoption button names the machine too, which a journey cannot know.
 function adoptionButton(world: BrowserWorld, plan: string): Locator {
   return journey(world.page).byRole("button", {
-    name: new RegExp(`^Adopt history of plan .+ from agent .+ into plan ${ISOLATION}${escapeRegExp(plan)}${ISOLATION}$`),
+    name: new RegExp(`^Adopt history of plan .+ from machine .+ into plan ${ISOLATION}${escapeRegExp(plan)}${ISOLATION}$`),
   });
 }
 

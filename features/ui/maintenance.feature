@@ -32,7 +32,7 @@ Feature: Maintenance of a repository on the Snapshots page
     And I press Enter
     Then the page shows the section heading "Orphaned history"
     And the page lists 2 snapshots
-    And the main content shows the line "This agent does not maintain this repository, so it cannot forget, prune or check it, or adopt history into its plans."
+    And the main content shows the line "This machine does not maintain this repository, so it cannot forget, prune or check it, or adopt history into its plans."
     And the page offers no button "Forget snapshots"
     And the page offers no button "Prune unused data"
     And the page offers no button "Check the repository"
@@ -46,22 +46,22 @@ Feature: Maintenance of a repository on the Snapshots page
     And I skip to the content
     And I press Tab until focus is on the button "Snapshots of demo"
     And I press Enter
-    And I press Tab until focus is on the button "Maintain from this agent"
+    And I press Tab until focus is on the button "Maintain from this machine"
     And I press Enter
-    Then the dialog "Maintain demo from this agent" opens with focus inside it
+    Then the dialog "Maintain demo from this machine" opens with focus inside it
     And focus is on the button "Cancel"
-    And the dialog "Maintain demo from this agent" says "Only one place may maintain a repository"
+    And the dialog "Maintain demo from this machine" says "Only one place may maintain a repository"
     When I press Escape
-    Then the dialog "Maintain demo from this agent" is closed
-    And focus is on the button "Maintain from this agent"
+    Then the dialog "Maintain demo from this machine" is closed
+    And focus is on the button "Maintain from this machine"
     And the page offers no button "Forget snapshots"
     When I press Enter
     And I press Tab until focus is on the button "Turn on maintenance"
     And I press Enter
-    Then the dialog "Maintain demo from this agent" is closed
-    And the polite region comes to contain "This agent now maintains demo."
+    Then the dialog "Maintain demo from this machine" is closed
+    And the polite region comes to contain "This machine now maintains demo."
     And the page offers the button "Forget snapshots"
-    And the page offers the button "Stop maintaining from this agent"
+    And the page offers the button "Stop maintaining from this machine"
 
   Scenario: Maintenance from this agent is turned off after saying what stops
     Given a demo plan "home" with a tiny scratch repository
@@ -70,18 +70,18 @@ Feature: Maintenance of a repository on the Snapshots page
     And I skip to the content
     And I press Tab until focus is on the button "Snapshots of demo"
     And I press Enter
-    And I press Tab until focus is on the button "Stop maintaining from this agent"
+    And I press Tab until focus is on the button "Stop maintaining from this machine"
     And I press Enter
-    Then the dialog "Stop maintaining demo from this agent" opens with focus inside it
+    Then the dialog "Stop maintaining demo from this machine" opens with focus inside it
     And focus is on the button "Cancel"
-    And the dialog "Stop maintaining demo from this agent" says "nothing removes old snapshots until another place maintains it"
+    And the dialog "Stop maintaining demo from this machine" says "nothing removes old snapshots until another place maintains it"
     When I press Tab until focus is on the button "Turn off maintenance"
     And I press Enter
-    Then the dialog "Stop maintaining demo from this agent" is closed
-    And the polite region comes to contain "This agent no longer maintains demo."
-    And the main content shows the line "This agent does not maintain this repository, so it cannot forget, prune or check it, or adopt history into its plans."
+    Then the dialog "Stop maintaining demo from this machine" is closed
+    And the polite region comes to contain "This machine no longer maintains demo."
+    And the main content shows the line "This machine does not maintain this repository, so it cannot forget, prune or check it, or adopt history into its plans."
     And the page offers no button "Forget snapshots"
-    And the page offers the button "Maintain from this agent"
+    And the page offers the button "Maintain from this machine"
 
   Scenario: A change of who maintains a repository the daemon refuses is said in an error alert of the dialog's own, which stays open
     Given a demo plan "home" with a tiny scratch repository
@@ -91,15 +91,15 @@ Feature: Maintenance of a repository on the Snapshots page
     And I skip to the content
     And I press Tab until focus is on the button "Snapshots of demo"
     And I press Enter
-    And I press Tab until focus is on the button "Stop maintaining from this agent"
+    And I press Tab until focus is on the button "Stop maintaining from this machine"
     And I press Enter
     And I press Tab until focus is on the button "Turn off maintenance"
     And I press Enter
-    Then the dialog "Stop maintaining demo from this agent" alerts "could not read or write its configuration file /etc/ladderback/config.toml"
+    Then the dialog "Stop maintaining demo from this machine" alerts "could not read or write its configuration file /etc/ladderback/config.toml"
     And the page shows an error alert containing "could not read or write its configuration file /etc/ladderback/config.toml"
     And the page has no accessibility violations
     When I press Escape
-    Then focus is on the button "Stop maintaining from this agent"
+    Then focus is on the button "Stop maintaining from this machine"
     And the assertive region stays empty
 
   Scenario: The dialog that turns maintenance on has no accessibility violations
@@ -110,9 +110,9 @@ Feature: Maintenance of a repository on the Snapshots page
     And I skip to the content
     And I press Tab until focus is on the button "Snapshots of demo"
     And I press Enter
-    And I press Tab until focus is on the button "Maintain from this agent"
+    And I press Tab until focus is on the button "Maintain from this machine"
     And I press Enter
-    Then the dialog "Maintain demo from this agent" opens with focus inside it
+    Then the dialog "Maintain demo from this machine" opens with focus inside it
     And the page has no accessibility violations
 
   Scenario: A forget is reviewed before it runs and changes nothing until it is confirmed
@@ -459,7 +459,7 @@ Feature: Maintenance of a repository on the Snapshots page
     When I press Tab until focus is on the button "Forget snapshots"
     And I press Enter
     Then the dialog "Forget snapshots of demo" opens with focus inside it
-    And the dialog "Forget snapshots of demo" says "No plan of this agent backs up to this repository"
+    And the dialog "Forget snapshots of demo" says "No plan of this machine backs up to this repository"
     And the dialog "Forget snapshots of demo" offers only the button "Close"
 
   Scenario: Orphaned history that no plan of this agent could take says why it cannot be adopted
@@ -471,7 +471,7 @@ Feature: Maintenance of a repository on the Snapshots page
     And I press Tab until focus is on the button "Snapshots of demo"
     And I press Enter
     Then the page shows the section heading "Orphaned history"
-    And the main content shows the line "No plan of this agent could take this history, so it cannot be adopted."
+    And the main content shows the line "No plan of this machine could take this history, so it cannot be adopted."
 
   Scenario Outline: The Snapshots page is in the language of the page, history of both kinds showing
     Given a demo plan "home" with a tiny scratch repository

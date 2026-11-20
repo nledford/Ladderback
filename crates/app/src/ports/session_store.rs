@@ -18,14 +18,16 @@ use crate::ports::StoreError;
 /// - [`forget_unreadable`](Self::forget_unreadable) forgets the sessions
 ///   kept that can't be read back, and only those, and says how many; once
 ///   it has, [`all`](Self::all) reads every one left.
-/// - [`remove`](Self::remove) forgets the sessions named; one not kept is no
-///   error.
-/// - [`remove_all`](Self::remove_all) forgets every session.
+/// - [`remove`](Self::remove) forgets the sessions named, and says whether
+///   it kept any of them; one not kept is no error.
+/// - [`remove_all`](Self::remove_all) forgets every session, and says
+///   whether it kept any.
 /// - [`record_use`](Self::record_use) keeps a session's last use; a session
 ///   not kept is no error and is not brought back.
 /// - [`length`](Self::length) is `None` until
 ///   [`set_length`](Self::set_length) has kept one, then the one kept last;
-///   forgetting sessions never touches it.
+///   forgetting sessions never touches it. `set_length` says whether the
+///   length kept changed.
 /// - What is kept outlives the handle: a store opened again on the same
 ///   place returns it.
 #[async_trait]
@@ -40,11 +42,11 @@ pub trait SessionStore: Send + Sync {
     /// another build could leave them, and says how many there were.
     async fn forget_unreadable(&self) -> Result<usize, StoreError>;
 
-    /// Forgets the sessions of `digests`.
-    async fn remove(&self, digests: &[SessionDigest]) -> Result<(), StoreError>;
+    /// Forgets the sessions of `digests`; whether any of them was kept.
+    async fn remove(&self, digests: &[SessionDigest]) -> Result<bool, StoreError>;
 
-    /// Forgets every session.
-    async fn remove_all(&self) -> Result<(), StoreError>;
+    /// Forgets every session; whether any was kept.
+    async fn remove_all(&self) -> Result<bool, StoreError>;
 
     /// Keeps `at` as the session's last use.
     async fn record_use(&self, digest: &SessionDigest, at: Timestamp) -> Result<(), StoreError>;
@@ -52,6 +54,7 @@ pub trait SessionStore: Send + Sync {
     /// The session length kept, or `None` while none has been set.
     async fn length(&self) -> Result<Option<SessionLength>, StoreError>;
 
-    /// Keeps `length` as the session length.
-    async fn set_length(&self, length: SessionLength) -> Result<(), StoreError>;
+    /// Keeps `length` as the session length; whether it differs from the
+    /// one kept before.
+    async fn set_length(&self, length: SessionLength) -> Result<bool, StoreError>;
 }
