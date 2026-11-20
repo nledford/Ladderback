@@ -392,30 +392,59 @@ impl PlanRunner {
     /// a newer run of its plan that is going, as the schedule's parked run
     /// does. Whatever else it answers, or a keyring that never unlocks by
     /// the plan's next kept run, ends it as the queued run it is (#1221).
+    /// `cancel` is its cancel switch, parked before it waits: a cancel
+    /// while it waits ends it cancelled at once, as a queued backup
+    /// waiting for its turn is (§4.2).
     async fn resume_parked(
         &self,
         operation: domain::execution::Operation,
         plan: PlanId,
         trigger: Trigger,
         unlock: UnlockWait,
+        cancel: impl Future<Output = ()> + Send + 'static,
     ) {
-        match self
-            .resumed_after_wait(&operation, &plan, &trigger, unlock)
-            .await
-        {
+        let id = operation.id();
+        let mut cancel = Box::pin(cancel);
+        let waited = tokio::select! {
+            biased;
+            () = &mut cancel => None,
+            waited = self.resumed_after_wait(&operation, &plan, &trigger, unlock) => Some(waited),
+        };
+        let Some(waited) = waited else {
+            self.registry.finish(&id);
+            let finished = RunOperation::new(
+                Arc::clone(&self.engine),
+                Arc::new(SystemClock),
+                Arc::clone(&self.store),
+            )
+            .with_events(Arc::clone(&self.events))
+            .cancel_resumed(operation)
+            .await;
+            log_ended(&finished);
+            say_how_it_ended(&self.ends, &finished);
+            return;
+        };
+        match waited {
             Waited::Runs(built, limit) => {
                 // A newer run of the plan may be going — running, or
                 // waiting for its turn — since this run waited with no
                 // place: it gives way to it.
                 if self.queue.is_going(&plan) {
+                    self.registry.finish(&id);
                     self.end_unrunnable(operation, "a newer run of its plan is going")
                         .await;
                     return;
                 }
-                self.spawn_resumed(operation, built, plan, limit);
+                self.spawn_resumed(operation, built, plan, limit, cancel);
             }
-            Waited::Refused(secret) => self.refuse_resumed(operation, secret).await,
-            Waited::Unrunnable(why) => self.end_unrunnable(operation, &why).await,
+            Waited::Refused(secret) => {
+                self.registry.finish(&id);
+                self.refuse_resumed(operation, secret).await;
+            }
+            Waited::Unrunnable(why) => {
+                self.registry.finish(&id);
+                self.end_unrunnable(operation, &why).await;
+            }
         }
     }
 
@@ -472,13 +501,15 @@ impl PlanRunner {
 
     /// Runs a queued backup in a place of the queue, on a task of its own
     /// under the freeze: oldest first, as the queue hands them on, each
-    /// waits for its turn like any other backup (§5).
+    /// waits for its turn like any other backup (§5). `cancel` is its
+    /// cancel switch, parked already ([`Self::cancel_switch`]).
     fn spawn_resumed(
         &self,
         operation: domain::execution::Operation,
         built: BuiltBackup,
         plan: PlanId,
         limit: domain::planning::Concurrency,
+        cancel: impl Future<Output = ()> + Send + 'static,
     ) {
         let id = operation.id();
         let BuiltBackup {
@@ -487,7 +518,6 @@ impl PlanRunner {
             warnings,
         } = built;
         let place = self.queue.push(&plan, limit);
-        let cancel = self.cancel_switch(id);
         let use_case = self.backup_use_case(setup);
         let registry = Arc::clone(&self.registry);
         let ends = self.ends.clone();
@@ -788,16 +818,21 @@ impl PlanRuns for PlanRunner {
         // repository password is in a locked keyring with the plan's next
         // kept run to wait within, parks on a task of its own — its
         // operation shows as queued while it waits — so the queue's other
-        // leftovers go on (#1221). A retry is answered at once, as ever:
-        // its next try is planned when it ends.
+        // leftovers go on (#1221). Its cancel switch is parked first, so a
+        // cancel of what shows as queued finds it while it waits (§4.2). A
+        // retry is answered at once, as ever: its next try is planned when
+        // it ends.
         if let (Some(plan), Some(unlock)) = (operation.target().plan.clone(), unlock)
             && matches!(trigger, Trigger::Schedule | Trigger::CatchUp)
             && matches!(&built, Err(Unbuilt::Secret(secret)) if secret.refused_as_locked())
         {
+            let cancel = self.cancel_switch(operation.id());
             let runner = self.clone();
             let frozen = self.runs.clone();
             tokio::spawn(frozen.until_frozen(async move {
-                runner.resume_parked(operation, plan, trigger, unlock).await;
+                runner
+                    .resume_parked(operation, plan, trigger, unlock, cancel)
+                    .await;
             }));
             return;
         }
@@ -830,7 +865,8 @@ impl PlanRuns for PlanRunner {
         });
         match built {
             Ok((built, plan, limit)) => {
-                self.spawn_resumed(operation, built, plan, limit);
+                let cancel = self.cancel_switch(operation.id());
+                self.spawn_resumed(operation, built, plan, limit, cancel);
             }
             // The queue can't run it again, as decision 40 ended every
             // queued operation: its plan or repository is gone or changed, its
