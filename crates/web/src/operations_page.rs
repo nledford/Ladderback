@@ -20,7 +20,6 @@ use serde::Serialize;
 use crate::announcer::Politeness;
 use crate::backend::{OperationRow, OperationsState, ended};
 use crate::components::button::Content;
-use crate::components::first_load;
 use crate::components::skeleton::rules::Awaited;
 use crate::components::status_badge::rules::BadgeState;
 use crate::components::{
@@ -28,6 +27,7 @@ use crate::components::{
     StatusBadge, Table, Toast, ToastTone, Toasts, cell_sentence_view, hand_focus_when_gone,
     refusal_alert, runs_view, say_refusals,
 };
+use crate::components::{first_load, paced};
 use crate::live::{reply, say};
 use crate::operations::{self, Name, Said};
 use crate::pause::{self, Ends, Pausable};
@@ -206,6 +206,7 @@ pub(crate) fn Operations(localizer: Arc<Localizer>) -> impl IntoView {
         let refused = history_refused.with(Option::is_some);
         page.with(|state| shown(phase, refused, &state.rows))
     });
+    let (showing, pace) = paced(move || showing.get(), |showing| *showing == Shown::Loading);
     let table_localizer = Arc::clone(&localizer);
     let error_alert_localizer = Arc::clone(&localizer);
     let plans_alert_localizer = Arc::clone(&localizer);
@@ -347,7 +348,7 @@ pub(crate) fn Operations(localizer: Arc<Localizer>) -> impl IntoView {
         // render is a change of what the page shows, never an update to a row.
         {move || {
             match showing.get() {
-                Shown::Loading => first_load(loading.clone(), Awaited::table(5)).into_any(),
+                Shown::Loading => first_load(loading.clone(), Awaited::table(5), pace).into_any(),
                 Shown::Unreachable => view! { <p>{unreachable_body.clone()}</p> }.into_any(),
                 Shown::Refused => {
                     history_refused

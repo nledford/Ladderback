@@ -92,6 +92,7 @@ where
         let frame = AgentFrame::from_text(text.as_str()).unwrap();
         match pairing.step(&mut session, &frame).await {
             HubStep::Reply(answer) => socket.send(Message::text(answer.to_text())).await.unwrap(),
+            HubStep::Wait => {}
             HubStep::Last(answer) => {
                 socket.send(Message::text(answer.to_text())).await.unwrap();
                 return;
@@ -169,6 +170,7 @@ fn hub() -> Arc<HubPairing> {
         Arc::new(FakeSigning),
         Arc::new(SeededRandom::new(3)),
         Arc::new(FakeClock::new(now())),
+        "0.0.0-test".to_owned(),
     ))
 }
 

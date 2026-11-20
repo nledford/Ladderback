@@ -1,21 +1,25 @@
-//! Steps for the untagged scenarios of `features/fleet/pairing.feature`: an
-//! agent pairing with its hub, both sides run in process on fakes (§7.1;
-//! §16, decision 120, "The handshake", "Pairing" and "Pending approval").
+//! Steps for the untagged scenarios of `features/fleet/pairing.feature` and
+//! `features/fleet/connecting.feature`: an agent pairing with its hub, then
+//! connecting to it, both sides run in process on fakes (§7.1, §7.2; §16,
+//! decision 120, "The handshake", "Pairing" and "Pending approval").
 
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
 
+use api::sync::AgentFrame;
 use app::fakes::{
     FakeClock, FakeSigning, InMemoryAgentRegistry, InMemoryIdentity, LoopbackHubConnector,
     SeededRandom,
 };
 use app::pairing::{
-    AgentPairing, AgentPairingError, HubKeys, HubPairing, PairFailure, PairWithHub, PairedHub,
+    AgentPairing, AgentPairingError, ChallengeRefused, ConnectFailure, ConnectToHub, Connected,
+    HubKeys, HubPairing, PairFailure, PairWithHub, PairedHub,
 };
 use app::ports::{AgentRegistry, Clock, Identity, LinkError, Signing};
 use cucumber::{given, then, when};
 use domain::fleet::{
-    AgentStatus, Fingerprint, Hostname, HubAddress, PairingToken, RouteRefused, TokenId, TokenTls,
+    AgentStatus, Approval, Fingerprint, Hostname, HubAddress, PairingToken, RouteRefused, SeedFile,
+    SigningSeed, TokenId, TokenTls,
 };
 use domain::{AgentId, SignedDuration, Timestamp, Uuid};
 
@@ -43,6 +47,7 @@ impl Hub {
             Arc::new(FakeSigning),
             Arc::new(SeededRandom::new(seed)),
             clock.clone(),
+            "0.5.0-hub".to_owned(),
         ));
         let keys = pairing.keys().await.expect("the hub's keys");
         Self {
@@ -71,6 +76,7 @@ impl Hub {
             Arc::new(FakeSigning),
             Arc::new(SeededRandom::new(2)),
             self.clock.clone(),
+            "0.5.0-hub".to_owned(),
         ));
         let keys = pairing.keys().await.expect("the hub's new keys");
         assert_ne!(keys.key(), self.keys.key());
@@ -109,6 +115,32 @@ impl Machine {
             Arc::new(SeededRandom::new(self.seed)),
         )
     }
+
+    /// This machine's connection to its hub through `connector`.
+    fn connecting(&self, connector: Arc<LoopbackHubConnector>) -> ConnectToHub {
+        ConnectToHub::new(
+            self.identity.clone(),
+            Arc::new(FakeSigning),
+            Arc::new(SeededRandom::new(self.seed + 1)),
+            Arc::new(FakeClock::new(
+                Timestamp::from_second(1_800_000_000).unwrap(),
+            )),
+            connector,
+            "0.5.0-agent".to_owned(),
+        )
+    }
+
+    /// This machine holding `like`'s pin and an agent key of its own, as a
+    /// copy of the pin alone would leave it: it never paired.
+    async fn with_pin_of(self, like: &Self) -> Self {
+        let pin = like.identity.pin().await.unwrap().expect("a pin");
+        self.identity.write_pin(&pin).await.unwrap();
+        self.identity
+            .keep_seed(SeedFile::AgentKey, SigningSeed::from_bytes([0x5a; 32]))
+            .await
+            .unwrap();
+        self
+    }
 }
 
 #[derive(Default)]
@@ -126,6 +158,10 @@ pub struct PairingWorld {
     /// Why the last pairing over a connection stopped short of the
     /// handshake, when it did.
     failure: Option<PairFailure>,
+    /// How each connection to the hub ended, in order.
+    connections: Vec<Result<Connected, ConnectFailure>>,
+    /// The hub's counter for the first agent after each connection.
+    counters: Vec<u64>,
 }
 
 impl std::fmt::Debug for PairingWorld {
@@ -237,6 +273,54 @@ impl PairingWorld {
 
     fn hub_link(&self) -> LoopbackHubConnector {
         LoopbackHubConnector::to(self.hub().pairing.clone())
+    }
+
+    fn first(&self) -> &Machine {
+        self.first.as_ref().expect("the first agent")
+    }
+
+    /// `machine` connects to its hub; `answering` is the hub that answers
+    /// at the pinned address, the world's by default.
+    async fn connect(&mut self, machine: &Machine, answering: Option<&Hub>) {
+        let hub = answering.unwrap_or_else(|| self.hub());
+        let connector = Arc::new(LoopbackHubConnector::to(hub.pairing.clone()));
+        let outcome = machine
+            .connecting(connector.clone())
+            .connect(machine.agent_id, machine.hostname.clone())
+            .await;
+        let first = self.first().agent_id;
+        let record = self.hub().registry.agent(first).await.unwrap();
+        self.counters
+            .push(record.map_or(0, |record| record.counter));
+        self.connections.push(outcome);
+        self.connector = Some(connector);
+    }
+
+    fn connected(&self) -> &Connected {
+        match self.connections.last() {
+            Some(Ok(connected)) => connected,
+            other => panic!("the agent didn't connect: {other:?}"),
+        }
+    }
+
+    fn connect_failure(&self) -> &ConnectFailure {
+        match self.connections.last() {
+            Some(Err(failure)) => failure,
+            other => panic!("the connection didn't fail: {other:?}"),
+        }
+    }
+
+    /// The counters of the proofs the agent sent on the last connection.
+    fn proved_counters(&self) -> Vec<u64> {
+        let connector = self.connector.as_ref().expect("a connector");
+        connector
+            .sent()
+            .iter()
+            .filter_map(|text| match AgentFrame::from_text(text) {
+                Ok(AgentFrame::Proof { counter, .. }) => Some(counter),
+                _ => None,
+            })
+            .collect()
     }
 }
 
@@ -544,4 +628,150 @@ fn stops_unreached(agent: &mut Agent) {
 fn connected_nowhere(agent: &mut Agent) {
     let connector = agent.pairing.connector.as_ref().expect("a connector");
     assert_eq!(connector.routes(), Vec::new());
+}
+
+#[given("an agent paired with a hub")]
+async fn an_agent_paired(agent: &mut Agent) {
+    paired_under(agent, "laptop".to_owned(), String::new()).await;
+}
+
+#[given("a person approved the agent on the hub")]
+async fn approved(agent: &mut Agent) {
+    let world = &agent.pairing;
+    let hub = world.hub();
+    hub.registry
+        .approve(world.first().agent_id, hub.clock.now());
+}
+
+#[when(regex = r"^the agent connects to its hub( twice)?$")]
+async fn connects(agent: &mut Agent, twice: String) {
+    let world = &mut agent.pairing;
+    let machine = world.first().clone();
+    let times = if twice.is_empty() { 1 } else { 2 };
+    for _ in 0..times {
+        world.connect(&machine, None).await;
+    }
+}
+
+#[when("another hub that has another key answers its connection")]
+async fn another_hub_connected(agent: &mut Agent) {
+    let world = &mut agent.pairing;
+    let other = Hub::new(500).await;
+    let machine = world.first().clone();
+    world.connect(&machine, Some(&other)).await;
+}
+
+#[when("a machine that holds the same pin but never paired connects to the hub")]
+async fn stranger_connects(agent: &mut Agent) {
+    let world = &mut agent.pairing;
+    let machine = Machine::new(9, "stranger").with_pin_of(world.first()).await;
+    world.connect(&machine, None).await;
+}
+
+#[when("a machine with another key connects under the agent's ID")]
+async fn impostor_connects(agent: &mut Agent) {
+    let world = &mut agent.pairing;
+    let first = world.first().clone();
+    let machine = Machine {
+        agent_id: first.agent_id,
+        ..Machine::new(99, "desktop")
+    }
+    .with_pin_of(&first)
+    .await;
+    world.connect(&machine, None).await;
+}
+
+#[then("the hub accepts the agent's proof")]
+async fn proof_accepted(agent: &mut Agent) {
+    let world = &agent.pairing;
+    world.connected();
+    let hub = world.hub();
+    let record = hub
+        .registry
+        .agent(world.first().agent_id)
+        .await
+        .unwrap()
+        .expect("the agent's record");
+    assert_eq!(record.last_seen, hub.clock.now());
+    assert_eq!(world.proved_counters(), [record.counter]);
+}
+
+#[then("the agent is told it waits for approval")]
+fn told_pending(agent: &mut Agent) {
+    assert_eq!(agent.pairing.connected().approval, Approval::Pending);
+}
+
+#[then("the agent is told the hub approved it")]
+fn told_approved(agent: &mut Agent) {
+    assert_eq!(agent.pairing.connected().approval, Approval::Approved);
+}
+
+#[then("the hub holds the counter of the agent's second connection")]
+fn holds_second_counter(agent: &mut Agent) {
+    let world = &agent.pairing;
+    assert!(
+        world.connections.iter().all(Result::is_ok),
+        "{:?}",
+        world.connections
+    );
+    let [first, second] = world.counters.as_slice() else {
+        panic!("two connections: {:?}", world.counters);
+    };
+    assert!(second > first, "{first} then {second}");
+    assert_eq!(world.proved_counters(), [*second]);
+}
+
+#[then("the agent stops because the hub's key isn't the one it trusts")]
+fn stops_on_untrusted_key(agent: &mut Agent) {
+    assert_eq!(
+        agent.pairing.connect_failure(),
+        &ConnectFailure::Challenge(ChallengeRefused::HubKeyMismatch)
+    );
+}
+
+#[then("the agent sent no proof")]
+fn sent_no_proof(agent: &mut Agent) {
+    let world = &agent.pairing;
+    assert_eq!(world.proved_counters(), Vec::<u64>::new());
+    let connector = world.connector.as_ref().expect("a connector");
+    assert_eq!(connector.sent().len(), 1);
+}
+
+#[then("the hub refuses the machine's proof")]
+fn proof_refused(agent: &mut Agent) {
+    let failure = agent.pairing.connect_failure();
+    let ConnectFailure::Refused(refused) = failure else {
+        panic!("the proof wasn't refused: {failure:?}");
+    };
+    assert_eq!(refused.code.as_str(), "proof-refused");
+}
+
+#[then("the hub lists only the paired agent")]
+async fn lists_only_paired(agent: &mut Agent) {
+    let world = &agent.pairing;
+    let ids: Vec<_> = world
+        .agents()
+        .await
+        .iter()
+        .map(|record| record.agent_id)
+        .collect();
+    assert_eq!(ids, [world.first().agent_id]);
+}
+
+#[then("the hub still holds the agent's key")]
+async fn still_holds_key(agent: &mut Agent) {
+    let world = &agent.pairing;
+    let first = world.first();
+    let seed = first
+        .identity
+        .seed(SeedFile::AgentKey)
+        .await
+        .unwrap()
+        .expect("the agent's key");
+    let agents = world.agents().await;
+    let [held] = agents.as_slice() else {
+        panic!("one agent: {agents:?}");
+    };
+    assert_eq!(held.key, FakeSigning.public_key(&seed).unwrap());
+    assert!(held.is_pending(), "{held:?}");
 }

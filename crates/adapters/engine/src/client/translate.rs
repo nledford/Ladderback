@@ -430,6 +430,9 @@ pub(super) fn translate(event: WorkerEvent, redactor: &Redactor) -> Option<Engin
                 | ErrorCode::HubTlsRefused
                 | ErrorCode::PlainAddress
                 | ErrorCode::HubConnectionLost
+                | ErrorCode::HubLinkLost
+                | ErrorCode::GenerationLower
+                | ErrorCode::ProtocolOutOfDate
                 | ErrorCode::Unknown => FailureReason::EngineFailed { detail },
             })
         }

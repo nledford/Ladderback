@@ -45,6 +45,7 @@ fn pairing() -> Arc<HubPairing> {
         Arc::new(FakeSigning),
         Arc::new(SeededRandom::new(7)),
         Arc::new(clock),
+        "0.0.0-test".to_owned(),
     ))
 }
 

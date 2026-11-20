@@ -332,7 +332,7 @@ Every shared component takes the same choices, defined once in `crates/web/src/v
 
 ### Progress Bar
 
-A Ledger Gray pill track, half its size on the shared scale thick (Small, the default, 0.5em; up to 1.5em at Extra large), filling the room it is given up to 16rem, with a fill in its tone (Ladder Blue, Primary, by default) that eases to each report (0.4 s) and jumps under reduced motion. The tone colors the fill only; the track stays Ledger Gray and the words keep the text's color. The fill is the tone's own color, never a status pair: a pair is for words on a tinted fill, and the fill carries none, so each tone's fill keeps 3:1 against the track and the page instead. The current step sits on its own line above it.
+A Ledger Gray pill track, half its size on the shared scale thick (Small, the default, 0.5em; up to 1.5em at Extra large), filling the room it is given up to 16rem, with a pill fill in its tone (Ladder Blue, Primary, by default) that eases to each report (0.4 s, sliding in from the track's start, its round end leading, never resizing) and jumps under reduced motion. The tone colors the fill only; the track stays Ledger Gray and the words keep the text's color. The fill is the tone's own color, never a status pair: a pair is for words on a tinted fill, and the fill carries none, so each tone's fill keeps 3:1 against the track and the page instead. The current step sits on its own line above it.
 
 ### Banners
 
@@ -356,7 +356,7 @@ A Ledger Gray pill track, half its size on the shared scale thick (Small, the de
 
 ### Skeleton
 
-- **Use:** the still shape of content on its way, standing where the content will, beside the words that say the wait ("Loading…"). Never a stand-in for those words, and hidden from a screen reader; the region it stands for is busy until the content comes.
+- **Use:** the still shape of content on its way, standing where the content will, beside the words that say the wait ("Loading…"). Never a stand-in for those words, and hidden from a screen reader; the region it stands for is busy until the content comes. Shape and words show only once the wait has lasted 200 ms, and then stay at least 300 ms, so a quick answer never flashes them.
 - **Shape:** lines of text, each 1em tall on a line of the text's height, the full width of their room but the last, which is shorter; or a block in `rem`, such as a field, never wider than its room. No circles, avatars or image shapes.
 - **Look:** flat Pencil Gray with the small corner, on the page and on Ledger Gray alike. Under forced colors, no fill and a 1px `GrayText` edge.
 - **Still:** no shimmer, no pulse, in any motion setting: it starts by itself and nothing could pause it (2.2.2).
@@ -396,7 +396,7 @@ A Ledger Gray pill track, half its size on the shared scale thick (Small, the de
 - **Look:** the page's colors swapped: the fill is Graphite Ink (`--fg`), the words Paper (`--bg`), in light and dark. The small corner (`--radius-small`), flat, no shadow, no arrow. Under forced colors it is the system's page colors, edged in a 1px line of its text color, so it stands apart from what it lies over.
 - **Size:** its words a step smaller than its control's (0.875em), so it grows with the reader's text; it wraps at about 20 of its em, or the window's width less a margin, no word cut. Its height has no limit, so its text stays short enough to fit a small window at 200 % text.
 - **Side:** the shared sides, Above (the default), Below, Start and End, which follow the page's direction. Without room on its side it flips to the opposite one, then to the other axis, and stays inside the window, never over its control.
-- **Showing:** keyboard focus shows it at once; a resting pointer after 300 ms, and it stays while the pointer is on the control or on it. Escape hides it, focus and pointer staying put. It fades in and out over 100 ms, at once under reduced motion. A mouse press's focus on a button doesn't show it (the resting pointer already did) and a finger shows nothing there: no tap opens one. A text field's note shows on a press, as any focus on a field is the keyboard's kind.
+- **Showing:** keyboard focus shows it at once; a resting pointer after 300 ms, and it stays while the pointer is on the control or on it. Escape hides it, focus and pointer staying put. It fades in over 100 ms and out over 60 ms, at once under reduced motion. A mouse press's focus on a button doesn't show it (the resting pointer already did) and a finger shows nothing there: no tap opens one. A text field's note shows on a press, as any focus on a field is the keyboard's kind.
 - **No tone and no size:** it is a note, not a status, and its size follows its control's text.
 
 ### Tabs

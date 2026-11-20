@@ -323,6 +323,18 @@ Then("the tooltip of the button {string} fades in over 100 ms", async function (
   assert.equal(durationOf(now.style, "opacity"), 0.1, `${now.style.properties}: ${now.style.durations}`);
 });
 
+// Exit faster than entrance (DESIGN.md's motion): once Escape hides it, the
+// tooltip fades out over 60 ms, the transition its hidden state gives.
+Then("the tooltip of the button {string} fades out over 60 ms", async function (this: BrowserWorld, name: string) {
+  const found = await button(this.page, name);
+  const now = await untilStepLimit(
+    `the tooltip of the button "${name}" hides`,
+    () => drawn(found),
+    (now) => !now.open,
+  );
+  assert.equal(durationOf(now.style, "opacity"), 0.06, `${now.style.properties}: ${now.style.durations}`);
+});
+
 Then("the tooltip of the button {string} appears without fading", async function (this: BrowserWorld, name: string) {
   const now = await shown(this.page, name);
   const fade = durationOf(now.style, "opacity") ?? 0;

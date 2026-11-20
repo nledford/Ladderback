@@ -804,7 +804,9 @@ Then("the buttons {string} and {string} stand apart", async function (this: Brow
 // A table whose columns have fixed shares lets a cell's content run past the
 // cell when it can't fit: it draws over the next column, which neither the
 // page's width nor a clipped box shows. Every box and every line of text in a
-// cell stays inside the cell, within half a pixel of rounding.
+// cell stays inside the cell, within half a pixel of rounding. A box that a
+// box inside the cell clips (any `overflow` but `visible`) counts for what of
+// it shows, as a progress bar's fill does, slid back past its track's start.
 Then("nothing in the table {string} runs outside its cell", async function (this: BrowserWorld, name: string) {
   assert.deepEqual(await outsideItsCells(table(this, name)), [], `something in the table ${name} runs outside its cell`);
 });
@@ -830,9 +832,21 @@ async function outsideItsCells(grid: Locator): Promise<string[]> {
           found.push(`${what} at ${describe(rect)}px runs outside its cell at ${describe(box)}px`);
         }
       };
+      // What of an element's box shows inside the boxes in the cell that clip it.
+      const shown = (inner: Element) => {
+        const rect = inner.getBoundingClientRect();
+        let [left, right, top, bottom] = [rect.left, rect.right, rect.top, rect.bottom];
+        for (let up = inner.parentElement; up !== null && up !== cell; up = up.parentElement) {
+          const style = getComputedStyle(up);
+          const clip = up.getBoundingClientRect();
+          if (style.overflowX !== "visible") [left, right] = [Math.max(left, clip.left), Math.min(right, clip.right)];
+          if (style.overflowY !== "visible") [top, bottom] = [Math.max(top, clip.top), Math.min(bottom, clip.bottom)];
+        }
+        return new DOMRect(left, top, Math.max(0, right - left), Math.max(0, bottom - top));
+      };
       for (const inner of cell.querySelectorAll("*")) {
         if (getComputedStyle(inner).display === "none") continue;
-        check(inner.getBoundingClientRect(), `<${inner.localName}> "${(inner.textContent ?? "").trim().slice(0, 30)}"`);
+        check(shown(inner), `<${inner.localName}> "${(inner.textContent ?? "").trim().slice(0, 30)}"`);
       }
       const walker = document.createTreeWalker(cell, NodeFilter.SHOW_TEXT);
       for (let node = walker.nextNode(); node; node = walker.nextNode()) {

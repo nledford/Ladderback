@@ -26,13 +26,13 @@ use leptos::wasm_bindgen::JsValue;
 
 use crate::announcer::Politeness;
 use crate::components::button::Content;
-use crate::components::first_load;
 use crate::components::skeleton::rules::Awaited;
 use crate::components::tree::rules::snapshot_link;
 use crate::components::{
     Button, Column, Confirmation, Link, Name as TableName, ReviewDialog, Sentences, State, Table,
     Working, dialog_refusal_alert, recover_focus, refusal_alert, say_refusals, sentence_view,
 };
+use crate::components::{first_load, paced};
 use crate::live::{reply, say};
 use crate::maintenance::{
     self, Kind, Owner, Panel, Refusal, Review, Rows, Shown, Step, Told, shown, unreachable_after,
@@ -571,17 +571,33 @@ pub(crate) fn Snapshots(localizer: Arc<Localizer>) -> impl IntoView {
         });
     });
     let picker = Arc::clone(&localizer);
+    // Whether the reading reached no daemon counts only until the list has
+    // come: a later reading that fails says so in the heading, and leaves
+    // the buttons, and the focus on one, as they were.
+    let (listed, pace) = paced(
+        move || {
+            let repositories = repositories.get();
+            let gone = repositories.is_none() && unreachable.get();
+            (repositories, gone)
+        },
+        |(repositories, gone)| repositories.is_none() && !gone,
+    );
+    // The page says it can't reach Ladderback once its list has come, or
+    // once the wait it holds is over, never above a wait still shown.
+    let cut_off = move || {
+        unreachable.get() && listed.with(|(repositories, gone)| repositories.is_some() || *gone)
+    };
     view! {
         <PageHeading>
-            {move || if unreachable.get() { unreachable_heading.clone() } else { heading.clone() }}
+            {move || if cut_off() { unreachable_heading.clone() } else { heading.clone() }}
         </PageHeading>
         <p>{body}</p>
-        {move || { unreachable.get().then(|| view! { <p>{unreachable_body.clone()}</p> }) }}
+        {move || { cut_off().then(|| view! { <p>{unreachable_body.clone()}</p> }) }}
         {move || refused.get().map(|sentence| refusal_alert(&alert_localizer, sentence))}
-        {move || match repositories.get() {
-            None if unreachable.get() => ().into_any(),
-            None => first_load(loading.clone(), Awaited::Text).into_any(),
-            Some(aliases) => {
+        {move || match listed.get() {
+            (None, true) => ().into_any(),
+            (None, false) => first_load(loading.clone(), Awaited::Text, pace).into_any(),
+            (Some(aliases), _) => {
                 aliases
                     .into_iter()
                     .map(|(alias, maintained)| {
@@ -727,6 +743,7 @@ fn Repository(
         let reading = page.reading.get();
         page.groups.with(|groups| shown(groups.as_ref(), reading))
     });
+    let (area, pace) = paced(move || area.get(), |area| *area == Shown::Loading);
     // What the history warns of, such as snapshots from other hosts in a
     // repository maintained here (§7.3): said before the buttons that act on it.
     let warned = Memo::new(move |_| {
@@ -809,7 +826,7 @@ fn Repository(
             }}
         </section>
         {move || match area.get() {
-            Shown::Loading => first_load(loading.clone(), Awaited::table(2)).into_any(),
+            Shown::Loading => first_load(loading.clone(), Awaited::table(2), pace).into_any(),
             Shown::Empty => view! { <p>{empty.clone()}</p> }.into_any(),
             Shown::Nothing => ().into_any(),
             Shown::Lists => {
@@ -833,6 +850,7 @@ fn stats_view(page: Page, heading: String) -> impl IntoView {
     // A memo for each part, so a change of one does not draw the others
     // again, and a refusal read again in the same words is not said again.
     let shown = Memo::new(move |_| page.stats.with(StatsPanel::shown));
+    let (shown, pace) = paced(move || shown.get(), |shown| *shown == stats::Shown::Loading);
     let latest = Memo::new(move |_| page.stats.with(|panel| panel.latest.clone()));
     let reading = Memo::new(move |_| page.stats.with(|panel| panel.reading));
     let refused = Memo::new(move |_| page.stats.with(|panel| panel.refusal.clone()));
@@ -843,7 +861,9 @@ fn stats_view(page: Page, heading: String) -> impl IntoView {
         <section aria-labelledby=STATS_HEADING>
             <h2 id=STATS_HEADING>{heading}</h2>
             {move || match shown.get() {
-                stats::Shown::Loading => first_load(loading.clone(), Awaited::table(2)).into_any(),
+                stats::Shown::Loading => {
+                    first_load(loading.clone(), Awaited::table(2), pace).into_any()
+                }
                 stats::Shown::Never => view! { <p>{never.clone()}</p> }.into_any(),
                 stats::Shown::Table => {
                     (move || latest.get().map(|reading| stats_table(page, reading))).into_any()

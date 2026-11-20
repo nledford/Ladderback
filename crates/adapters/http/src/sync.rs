@@ -309,13 +309,14 @@ mod served {
                             return End::Dropped;
                         }
                     }
+                    HubStep::Wait => {}
                     HubStep::Last(answer) => {
                         let _ = socket.send(Message::text(answer.to_text())).await;
                         return End::Answered;
                     }
                     HubStep::Close(reason) => return End::Refused(reason),
                     HubStep::Fail(error) => {
-                        log::warn!("/sync/v1: the hub couldn't take a pairing step: {error:?}");
+                        log::warn!("/sync/v1: the hub couldn't take a handshake step: {error:?}");
                         return End::Dropped;
                     }
                 }

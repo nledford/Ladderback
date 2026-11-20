@@ -19,13 +19,13 @@ use crate::announcer::Politeness;
 use crate::components::alert::rules::AlertTone;
 use crate::components::banner::rules::BannerTone;
 use crate::components::button::{Content, Kind};
-use crate::components::first_load;
 use crate::components::skeleton::rules::Awaited;
 use crate::components::{
     Alert, Banner, Button, Checkbox, Column, ErrorSummary, Name as TableName, RadioGroup,
     Sentences, State, SummaryItem, Table, TextField, address_view, refusal_alert, runs_view,
     say_refusals, text_field,
 };
+use crate::components::{first_load, paced};
 use crate::live::reply;
 use crate::repositories::{
     Action, Field, Form, Outcome, RowCreated, Sentence, advises_retry, create_label,
@@ -319,6 +319,7 @@ pub(crate) fn Repositories(localizer: Arc<Localizer>) -> impl IntoView {
             rows.with(|rows| rows.as_ref().is_some_and(|rows| !rows.is_empty())),
         )
     });
+    let (shape, pace) = paced(move || shape.get(), |shape| shape.0 == Phase::Loading);
     let summary_localizer = Arc::clone(&localizer);
     let note_localizer = Arc::clone(&localizer);
     let field_text = |id| text(&localizer, id);
@@ -347,7 +348,9 @@ pub(crate) fn Repositories(localizer: Arc<Localizer>) -> impl IntoView {
                 .collect_view()
         }}
         {move || match shape.get() {
-            (Phase::Loading, _, _) => first_load(loading.clone(), Awaited::table(4)).into_any(),
+            (Phase::Loading, _, _) => {
+                first_load(loading.clone(), Awaited::table(4), pace).into_any()
+            }
             (Phase::Unreachable, _, _) => view! { <p>{unreachable_body.clone()}</p> }.into_any(),
             (Phase::Ready, Some(sentence), _) => {
                 refusal_alert(&table_localizer, sentence).into_any()

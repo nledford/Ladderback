@@ -592,6 +592,22 @@ error-plain-address = This address starts with { "http://" }, which shows the to
 # the hub sent what isn't the next message of the handshake.
 error-hub-connection-lost = The connection to the { -hub } ended before the pairing was answered. Check that the { -hub } is running, then pair again with the same token: a token is used only once the { -hub } answers.
 
+# The connection to the hub ended after this machine paired, or the hub
+# sent what isn't the next message, or one it didn't sign on this
+# connection. Nothing in it was acted on.
+# $detail (text): the code of the hub's signed refusal, such as
+# hostname-taken, shown as it came so it can be reported.
+error-hub-link-lost = The connection to the { -hub } ended, or the { -hub } sent something this machine can't trust, so nothing it sent was acted on. This machine keeps backing up. Check that the { -hub } is running, then try again.
+    .with-detail = The connection to the { -hub } ended, or the { -hub } sent something this machine can't trust, so nothing it sent was acted on. This machine keeps backing up. Check that the { -hub } is running, then try again. The { -hub } said: { $detail }
+
+# The hub offered a lower generation than this machine has already seen.
+# `ladderback hub-recover` is a command: keep it a string literal.
+error-generation-lower = The { -hub } offered an older state than this machine has already seen, so it ignored it. It keeps backing up. If you restored the { -hub } from a backup, or moved it, ask whoever runs it. If you didn't, the { -hub }'s key may be leaked: on the { -hub }'s machine run { "ladderback hub-recover" } with the recovery kit. A leaked key always needs a recovery or a reset of the { -hub } key.
+
+# The hub and this machine share no protocol: one is on an older release
+# than the other can use.
+error-protocol-out-of-date = The { -hub } is on an older release than this machine can use, or a newer one. This machine keeps backing up. Update whichever side is older.
+
 # This agent doesn't maintain the repository: its entry doesn't ask this
 # agent to maintain it, so a forget, a prune, a check or an adoption, or the
 # preview of one, was refused and nothing in the repository was changed. The

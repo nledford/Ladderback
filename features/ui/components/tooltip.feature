@@ -111,6 +111,13 @@ Feature: The tooltip
     When the reader asks for less motion
     Then the tooltip of the button "Prune the demo repository" appears without fading
 
+  Scenario: A tooltip fades out faster than it fades in
+    When I open the component gallery
+    And I press Shift+Tab until focus is on the button "Prune the demo repository"
+    Then the tooltip of the button "Prune the demo repository" fades in over 100 ms
+    When I press Escape
+    Then the tooltip of the button "Prune the demo repository" fades out over 60 ms
+
   Scenario: A tooltip follows its control as the page scrolls
     When I open the component gallery
     And I press Shift+Tab until focus is on the button "Demo note above"
