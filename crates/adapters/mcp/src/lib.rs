@@ -629,8 +629,11 @@ impl Server {
     /// snapshots: the one place such a call passes through, where a setting
     /// that lets a person withhold those names from agents would refuse it.
     async fn snapshot_contents(&self, tool: ToolName, given: Option<JsonObject>) -> Answer {
-        let _ = (tool, given);
-        todo!()
+        match tool {
+            ToolName::ListSnapshotFolder => answered(self.list_snapshot_folder(given).await),
+            ToolName::FindInSnapshots => answered(self.find_in_snapshots(given).await),
+            other => Answer::Unwritten(format!("no tool is named {:?}", other.name())),
+        }
     }
 
     async fn list_snapshot_folder(&self, given: Option<JsonObject>) -> Result<FolderDto, ErrorDto> {

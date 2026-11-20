@@ -478,8 +478,10 @@ impl ::mcp::Backend for InProcess {
         plan: Option<domain::PlanId>,
         caps: domain::find::SearchCaps,
     ) -> Result<api::FindDto, api::ErrorDto> {
-        let _ = (repository, pattern, plan, caps);
-        todo!()
+        self.catalog
+            .find(repository.clone(), pattern, plan, caps)
+            .await
+            .map_err(|error| snapshots_refusal(repository, error))
     }
 
     async fn history(
