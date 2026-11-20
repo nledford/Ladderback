@@ -89,6 +89,7 @@ pub(super) fn translate(event: WorkerEvent, redactor: &Redactor) -> Option<Engin
                 | WarningCode::InlineSecret
                 | WarningCode::ConfigInlineSecret
                 | WarningCode::LocationSecret
+                | WarningCode::RcloneCommandSecret
                 | WarningCode::GlobNeverMatches
                 | WarningCode::ProfileTagDropped
                 | WarningCode::FullDiskAccessMissing

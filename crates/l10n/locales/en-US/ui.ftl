@@ -3513,10 +3513,10 @@ ui-plan-field-hint = { $field ->
     [keep-weekly] For how many of the latest weeks forget keeps the newest { -snapshot } of each.
     [keep-monthly] For how many of the latest months forget keeps the newest { -snapshot } of each.
     [keep-yearly] For how many of the latest years forget keeps the newest { -snapshot } of each.
-    [run-before] One command line a line, run in order before the backup starts.
-    [run-after] One command line a line, run in order once the backup has succeeded.
-    [run-failed] One command line a line, run in order once the backup has failed.
-    [run-finally] One command line a line, run in order once the backup has ended, however it ended.
+    [run-before] One command line a line, run in order before the backup starts. Other users of this computer may see a command line while it runs, so keep passwords and tokens out of it.
+    [run-after] One command line a line, run in order once the backup has succeeded. Other users of this computer may see a command line while it runs, so keep passwords and tokens out of it.
+    [run-failed] One command line a line, run in order once the backup has failed. Other users of this computer may see a command line while it runs, so keep passwords and tokens out of it.
+    [run-finally] One command line a line, run in order once the backup has ended, however it ended. Other users of this computer may see a command line while it runs, so keep passwords and tokens out of it.
    *[name] Up to 64 lower-case letters, digits and hyphens, starting with a letter or a digit. It is the plan's ID, which tags its { -snapshot(form: "other") }, and can't be changed once the plan is saved.
   }
 

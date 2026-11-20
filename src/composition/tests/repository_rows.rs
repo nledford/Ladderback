@@ -649,3 +649,54 @@ fn an_operations_summary_carries_the_locations_its_choice_saw() {
         ])
     );
 }
+
+/// A credential typed after a flag of `rclone-command` is pointed out by
+/// the setting and the flag, in the first location and a further one,
+/// never by its value (I4, #1136).
+#[test]
+fn a_listed_repository_points_out_a_credential_after_a_flag_of_its_rclone_command() {
+    let alias = RepositoryAlias::parse("nas").expect("an alias");
+    let mut entry = two_locations();
+    entry.settings.options.insert(
+        "rclone-command".to_owned(),
+        "rclone serve restic --pass=CANARY-rclone-pass".to_owned(),
+    );
+    entry.locations.further[0].options_hot.insert(
+        "rclone-command".to_owned(),
+        "rclone --s3-secret-access-key 'CANARY-rclone-key' serve restic".to_owned(),
+    );
+    let first = repository_row(&alias, &entry.settings, Maintenance::Local, false);
+    let row = listed_repository(&alias, &entry, &[], true, false);
+    let warning = |args: &[(&str, &str)]| api::WarningDto {
+        code: WarningCode::RcloneCommandSecret,
+        args: args
+            .iter()
+            .map(|(name, value)| ((*name).to_owned(), MsgArg::Text((*value).to_owned())))
+            .collect(),
+    };
+    let at_first = warning(&[("field", "options.rclone-command"), ("flag", "--pass")]);
+    assert!(
+        first.warnings.contains(&at_first),
+        "{at_first:?} in {:?}",
+        first.warnings
+    );
+    for expected in [
+        at_first,
+        warning(&[
+            ("field", "options-hot.rclone-command"),
+            ("flag", "--s3-secret-access-key"),
+            ("position", "2"),
+        ]),
+    ] {
+        assert!(
+            row.warnings.contains(&expected),
+            "{expected:?} in {:?}",
+            row.warnings
+        );
+    }
+    let wire = serde_json::to_string(&row).expect("a row is JSON");
+    let shown = format!("{row:?} {first:?} {wire}");
+    for secret in ["CANARY-rclone-pass", "CANARY-rclone-key"] {
+        assert!(!shown.contains(secret), "{shown}");
+    }
+}

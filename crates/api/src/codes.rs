@@ -687,6 +687,16 @@ pub enum WarningCode {
     /// in, absent for the first. Never the credential, nor the location it
     /// is in (I4).
     LocationSecret,
+    /// A repository's `rclone-command` gives one of rclone's flags a
+    /// credential written as text, as in `--pass=…`: the configuration file
+    /// keeps it, and rclone is started with it in its arguments, where other
+    /// users of the computer can read it. Said when the configuration loads
+    /// and on the repository's row of the list. The argument `field` names
+    /// the setting (`options.rclone-command`, `options-hot.rclone-command`,
+    /// `options-cold.rclone-command`), `flag` the flag as `--NAME`; the
+    /// optional `position`, from 2, is the further location that holds it,
+    /// absent for the first. Never the credential itself (I4).
+    RcloneCommandSecret,
     /// A glob of a plan can never match (#510): it has a slash in the middle,
     /// so rustic reads it from the root of the file system, and written from
     /// a source it reaches none. Said by the import, when the configuration
@@ -1715,6 +1725,23 @@ impl WarningCode {
                 },
                 ArgSpec {
                     name: "kind",
+                    kind: ArgKind::Text,
+                    optional: false,
+                },
+                ArgSpec {
+                    name: "position",
+                    kind: ArgKind::Text,
+                    optional: true,
+                },
+            ],
+            Self::RcloneCommandSecret => &[
+                ArgSpec {
+                    name: "field",
+                    kind: ArgKind::Text,
+                    optional: false,
+                },
+                ArgSpec {
+                    name: "flag",
                     kind: ArgKind::Text,
                     optional: false,
                 },

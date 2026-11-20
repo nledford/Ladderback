@@ -26,6 +26,7 @@ pub use inline::{
     InlineSecret, MAX_RCLONE_CREDENTIALS, location_secret_written, rclone_location,
     too_many_rclone_credentials, url_password_written,
 };
+pub(crate) use options::is_rclone_secret_flag;
 use options::is_rclone_secret_option;
 pub use options::{is_command_option, is_secret_option};
 pub use outcome::{

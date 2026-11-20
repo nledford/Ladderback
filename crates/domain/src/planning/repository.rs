@@ -6,6 +6,7 @@
 use std::collections::BTreeMap;
 use std::fmt;
 
+use super::local_paths::rclone_secret_flags;
 use super::{Hooks, InvalidValue, Locations, ValueKind};
 use crate::RepositoryId;
 use crate::secrets::{
@@ -94,12 +95,14 @@ impl RepositorySettings {
 
     /// Every secret these settings hold as text: a credential written in
     /// `repository` or `repo-hot` ([`location_secret_written`]), the password
-    /// when it is inline, and each option whose name says it is a credential
+    /// when it is inline, each option whose name says it is a credential
     /// ([`is_secret_option`]) and whose value has no `${…}` reference in it,
     /// or whose value is a URL with a password written in it
-    /// ([`url_password_written`]). In the order `repository`, `repo-hot`,
-    /// password, `options`, `options-hot`, `options-cold`, each set by name.
-    /// A secret that is empty is nothing to move.
+    /// ([`url_password_written`]), and each flag of an `rclone-command`
+    /// given a credential as text, after the option's own. In the order
+    /// `repository`, `repo-hot`, password, `options`, `options-hot`,
+    /// `options-cold`, each set by name. A secret that is empty is nothing
+    /// to move.
     pub fn inline_secrets(&self) -> Vec<InlineSecret> {
         let mut found = Vec::new();
         if location_secret_written(&self.repository) {
@@ -116,18 +119,35 @@ impl RepositorySettings {
             found.push(InlineSecret::Password);
         }
         let mut credentials = |set: &BTreeMap<String, String>,
-                               secret: fn(String) -> InlineSecret| {
+                               secret: fn(String) -> InlineSecret,
+                               flag: fn(String) -> InlineSecret| {
             for (name, value) in set {
                 let credential =
                     is_secret_option(name) && !value.is_empty() && !has_reference(value);
                 if credential || url_password_written(value) {
                     found.push(secret(name.clone()));
                 }
+                // rustic reads the option only by this name.
+                if name == "rclone-command" {
+                    found.extend(rclone_secret_flags(value).into_iter().map(flag));
+                }
             }
         };
-        credentials(&self.options, InlineSecret::Option);
-        credentials(&self.options_hot, InlineSecret::OptionHot);
-        credentials(&self.options_cold, InlineSecret::OptionCold);
+        credentials(
+            &self.options,
+            InlineSecret::Option,
+            InlineSecret::RcloneFlag,
+        );
+        credentials(
+            &self.options_hot,
+            InlineSecret::OptionHot,
+            InlineSecret::RcloneFlagHot,
+        );
+        credentials(
+            &self.options_cold,
+            InlineSecret::OptionCold,
+            InlineSecret::RcloneFlagCold,
+        );
         found
     }
 
@@ -168,7 +188,10 @@ impl RepositorySettings {
             InlineSecret::Password
             | InlineSecret::Option(_)
             | InlineSecret::OptionHot(_)
-            | InlineSecret::OptionCold(_) => None,
+            | InlineSecret::OptionCold(_)
+            | InlineSecret::RcloneFlag(_)
+            | InlineSecret::RcloneFlagHot(_)
+            | InlineSecret::RcloneFlagCold(_) => None,
         }
     }
 

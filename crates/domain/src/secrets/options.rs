@@ -74,6 +74,47 @@ pub(super) fn is_rclone_secret_option(name: &str) -> bool {
     is_secret_option(name) || RCLONE_SECRET_NAMES.contains(&normalised(name).as_str())
 }
 
+/// The words that end the name of an rclone flag that says where a
+/// credential is, never the credential: `--password-command` and
+/// `--webdav-bearer-token-command` run a program that prints one, and
+/// `--sftp-key-file` and `--oos-sse-customer-key-file` name a file that
+/// holds one.
+const WHERE_A_CREDENTIAL_IS: [&str; 2] = ["_command", "_file"];
+
+/// rclone flags whose name, or what follows its first `-`, reads like a
+/// credential and whose value is none: `--ask-password` and its backends'
+/// (`--sftp-ask-password`), `--dump-headers`, `--sftp-pin-host-key`,
+/// `--seafile-2fa` (on mega and protondrive, `2fa` takes a code) and
+/// `--drive-client-credentials` are switches, and `--drive-token-url` is an
+/// address. A switch read as taking a value would take the next word for
+/// it, and miss a flag there.
+const NOT_SECRET_FLAGS: [&str; 6] = [
+    "ask_password",
+    "client_credentials",
+    "dump_headers",
+    "pin_host_key",
+    "seafile_2fa",
+    "token_url",
+];
+
+/// Whether an rclone flag of this name, without its `--`, is given a
+/// credential: the name, or what follows its first `-` (a backend's prefix,
+/// as in `--sftp-pass`, or `rc`, as in `--rc-pass`), is a credential's in a
+/// connection string ([`is_rclone_secret_option`]), unless it ends in
+/// [`WHERE_A_CREDENTIAL_IS`] or is one of the [`NOT_SECRET_FLAGS`]. `-` and
+/// `_` are the same, and case doesn't matter. Whether the flag names a file
+/// on this machine whatever its name says (`--key`, the TLS key of `rclone
+/// serve`) is the caller's to know.
+pub(crate) fn is_rclone_secret_flag(name: &str) -> bool {
+    let name = normalised(name);
+    if WHERE_A_CREDENTIAL_IS.iter().any(|end| name.ends_with(end)) {
+        return false;
+    }
+    let unprefixed = name.split_once('_').map(|(_, rest)| rest);
+    let names = || std::iter::once(name.as_str()).chain(unprefixed);
+    !names().any(|name| NOT_SECRET_FLAGS.contains(&name)) && names().any(is_rclone_secret_option)
+}
+
 /// The options of the pinned `rustic_backend` that are run as commands:
 /// `rclone-command` starts rclone (`rclone.rs`), and the local backend runs
 /// `post-create-command` and `post-delete-command` (`local.rs`).

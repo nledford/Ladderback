@@ -141,16 +141,17 @@ fn exposed_args(
 
 /// The warning for a secret the configuration holds as text, with its
 /// arguments: one in a location is moved differently from a setting of its
-/// own, and one in an rclone location differently again (§10.2). `settings`
-/// open the location at `position`, from 1; a further one is named by it.
+/// own, one in an rclone location differently again, and one after a flag
+/// of an `rclone-command` is named by its flag too (§10.2). `settings` open
+/// the location at `position`, from 1; a further one is named by it.
 fn inline_secret_warning(
     settings: &RepositorySettings,
     secret: &domain::secrets::InlineSecret,
     position: u8,
 ) -> (WarningCode, Vec<(&'static str, MsgArg)>) {
     let field = ("field", MsgArg::Text(secret.field()));
-    let (code, mut args) = match settings.location_of(secret) {
-        Some(location) => (
+    let (code, mut args) = match (settings.location_of(secret), secret.flag()) {
+        (Some(location), _) => (
             WarningCode::LocationSecret,
             vec![
                 field,
@@ -160,7 +161,11 @@ fn inline_secret_warning(
                 ),
             ],
         ),
-        None => (WarningCode::ConfigInlineSecret, vec![field]),
+        (None, Some(flag)) => (
+            WarningCode::RcloneCommandSecret,
+            vec![field, ("flag", MsgArg::Text(flag))],
+        ),
+        (None, None) => (WarningCode::ConfigInlineSecret, vec![field]),
     };
     if position > 1 {
         args.push(("position", text(position)));

@@ -44,4 +44,8 @@ The redactor and the export's refusal of an rclone credential read the same list
 
 **A URL in an option.** An option whose value is a URL with a password in it counts as a credential option (`config-inline-secret`, `options.NAME`).
 
+**A credential after a flag of an rclone-command** (#1136). rclone is started with the words of an `rclone-command` as its arguments, which other users of the computer can read (security.md §10.2), so a credential typed after one of its flags is said as `rclone-command-secret`, with `field` (`options.rclone-command`), `flag` (`--pass`) and the location's `position`, never the value. A flag counts when its name, or what follows its backend's prefix (`--sftp-pass`, `--rc-pass`), is a credential's in a connection string (`is_rclone_secret_option`), unless it ends in `-command` or `-file`, names a file on this machine (`--key`, `--rc-htpasswd`) or is a switch or an address (`--ask-password`, `--drive-token-url`). The command is split as rustic splits it; one with a `${…}` is not read.
+
+It names a flag by its name alone, so a credential in a flag's value under another name is not said: `--header "Authorization: Bearer …"`, and a flag whose name is no credential's (`--protondrive-client-salted-key-pass`). It is said for a repository that doesn't start rclone too, whose `rclone-command` nothing runs but the file still keeps, and an import doesn't say it: the daemon does once the profile is saved.
+
 **What gets no warning.** A `@` in a URL's path, query or fragment is not a userinfo, so a location rustic can't parse (a raw `/`, `?` or `#` in the password) gets no warning; its password is still masked wherever it shows, as before.

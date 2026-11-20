@@ -616,6 +616,14 @@ fn profile_codes_declare_the_arguments_their_producers_send() {
             text("position", true)
         ]
     );
+    assert_eq!(
+        WarningCode::RcloneCommandSecret.args(),
+        &[
+            text("field", false),
+            text("flag", false),
+            text("position", true)
+        ]
+    );
     // A repository of one location is told about itself, never about
     // "location 1" (#473).
     assert_eq!(

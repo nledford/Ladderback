@@ -224,22 +224,34 @@ fn is_opendal_file(service: &str, name: &str) -> bool {
 
 /// Whether the command line `value` starts its program by a relative path,
 /// or, for rclone, has a flag that names a file, a folder or a program by
-/// one ([`rclone::flags_relative`]). A command with a reference in it is
-/// split only once the job resolves it, and one that can't be split is
-/// rustic's to refuse.
+/// one ([`rclone::flags_relative`]).
 fn runs_relative(value: &str, starts_rclone: bool) -> bool {
-    let Ok(template) = Template::parse(value) else {
-        return false;
-    };
+    plain_command(value).is_some_and(|command| {
+        is_relative_program(command.program())
+            || (starts_rclone && rclone::flags_relative(command.args()))
+    })
+}
+
+/// The flags of the command line `value`, an `rclone-command`, that are
+/// given a credential written as text ([`rclone::secret_flags`]), by name
+/// without the `--`.
+pub(super) fn rclone_secret_flags(value: &str) -> Vec<String> {
+    plain_command(value)
+        .map(|command| rclone::secret_flags(command.args()))
+        .unwrap_or_default()
+}
+
+/// The command line `value` split into words as rustic splits it, when it
+/// holds no reference. A command with a reference in it is split only once
+/// the job resolves it (and an option rustic runs as a command refuses one,
+/// §10.2), and one that can't be split is rustic's to refuse.
+fn plain_command(value: &str) -> Option<CommandLine> {
+    let template = Template::parse(value).ok()?;
     // An empty command has no program to split.
     let [Part::Text(text)] = template.parts() else {
-        return false;
+        return None;
     };
-    let Ok(command) = CommandLine::parse(text) else {
-        return false;
-    };
-    is_relative_program(command.program())
-        || (starts_rclone && rclone::flags_relative(command.args()))
+    CommandLine::parse(text).ok()
 }
 
 #[cfg(test)]
