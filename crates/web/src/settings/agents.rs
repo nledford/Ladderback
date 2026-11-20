@@ -29,9 +29,10 @@ use crate::live::PageClock;
 use crate::pairing::{AddressWarning, Countdown, life, minutes};
 use crate::repositories::Sentence;
 use crate::routes::{instant, refused_sentence, text_with};
+use crate::session::Standing;
 use crate::snapshots::viewer_offset;
 use crate::text;
-use crate::ws::{self, Got, Posted};
+use crate::ws::{self, Posted};
 
 /// The section's heading, where focus goes when the dialog's way back is gone.
 const HEADING_ID: &str = "agents-heading";
@@ -55,27 +56,40 @@ const MAKE_NEW_ID: &str = "pairing-make-new";
 const TICK: Duration = Duration::from_millis(250);
 /// The life a token is made with unless another is typed (decision 121).
 const DEFAULT_LIFE: &str = "15";
+/// How long the page waits for the hub's key: Settings is drawn without its
+/// Machines tab once it has waited this long.
+const READ_PATIENCE: Duration = Duration::from_secs(5);
 
-/// The hub's key as the page read it, which `App` provides: `Some` on a
-/// daemon serving as a hub, read with sign-in off or in a session.
+/// The hub's key as the page read it, which `App` provides, with the
+/// standing it was read in: a key on a daemon serving as a hub, read with
+/// sign-in off or in a session; `None` until the first read answers.
 #[derive(Clone, Copy)]
-pub(crate) struct HubKey(pub(crate) RwSignal<Option<HubDto>>);
+pub(crate) struct HubKey(pub(crate) RwSignal<Option<(Standing, Option<HubDto>)>>);
 
-/// Whether the page has read a hub's key, for Settings to show its Agents
-/// tab; it changes when the key is read or a session ends.
-pub(crate) fn hub_known() -> impl Fn() -> bool + Copy + 'static {
+/// Whether the daemon is a hub, once the page has read its key in the
+/// standing it is in, for Settings to show its Machines tab; `None` until
+/// then.
+pub(crate) fn hub_known() -> impl Fn() -> Option<bool> + Copy + 'static {
     let key = use_context::<HubKey>().map(|HubKey(key)| key);
-    let known = Memo::new(move |_| key.is_some_and(|key| key.with(Option::is_some)));
+    let standing = use_context::<RwSignal<Standing>>();
+    let known = Memo::new(move |_| {
+        let Some(key) = key else {
+            return Some(false);
+        };
+        let now = standing.map(|standing| standing.get());
+        key.with(|read| match read {
+            Some((when, key)) if now.is_none_or(|now| now == *when) => Some(key.is_some()),
+            _ => None,
+        })
+    });
     move || known.get()
 }
 
-/// The hub's key, or `None` on a daemon that isn't a hub (it answers
-/// `route-unknown`), and for any answer but the key.
+/// The hub's key, the page's own read of it, or `None` on a daemon that
+/// isn't a hub (it answers `route-unknown`), for any answer but the key,
+/// and for none within `READ_PATIENCE`.
 pub(crate) async fn read_hub() -> Option<HubDto> {
-    match ws::get::<HubDto>(&format!("{}{HUB_PATH}", ws::origin())).await? {
-        Got::Read(hub) => Some(hub),
-        Got::Refused(..) => None,
-    }
+    ws::poll::<HubDto>(&format!("{}{HUB_PATH}", ws::origin()), READ_PATIENCE).await
 }
 
 /// What the dialog shows of a token made, its text apart.
@@ -243,6 +257,7 @@ pub(crate) fn Agents(localizer: Arc<Localizer>, on: bool) -> impl IntoView {
     };
     let key_id = use_context::<HubKey>()
         .and_then(|HubKey(key)| key.get_untracked())
+        .and_then(|(_, key)| key)
         .map(|key| key.key_id)
         .unwrap_or_default();
     let step_up = if on {

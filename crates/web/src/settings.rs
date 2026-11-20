@@ -100,15 +100,23 @@ const SECRET_ID: &str = "api-token-secret";
 /// sign-in off and in a session; with the daemon unread, the page can't say
 /// which form they would be.
 ///
-/// On a hub, its Agents tab shows once the page has read the hub's key, so
-/// the tabs are drawn again when that read lands (decision 121).
+/// On a hub, its Machines tab shows when the page has read the hub's key,
+/// so the tabs are drawn once that read has answered or waited its while,
+/// and only once: a later read never draws them again, which would lose
+/// what their panels hold, as an API token's one-time secret (decision
+/// 121).
 #[component]
 pub(crate) fn Settings(localizer: Arc<Localizer>) -> impl IntoView {
     #[cfg(feature = "hub")]
     let hub = agents::hub_known();
     #[cfg(not(feature = "hub"))]
-    let hub = || false;
-    move || view! { <SettingsTabs localizer=Arc::clone(&localizer) hub=hub() /> }
+    let hub = || Some(false);
+    let drawn = Memo::new(move |was: Option<&Option<bool>>| was.copied().flatten().or_else(hub));
+    move || {
+        drawn
+            .get()
+            .map(|hub| view! { <SettingsTabs localizer=Arc::clone(&localizer) hub=hub /> })
+    }
 }
 
 /// Settings' heading and tabs, the Agents tab among them when `hub`.
