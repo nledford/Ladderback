@@ -10,7 +10,8 @@ use std::sync::Arc;
 
 use app::fakes::{FakeProfileReader, FakeProfileWriter, FakeSources, InMemoryConfigStore};
 use app::interop::{
-    ExportError, ExportProfile, ExportedProfile, ImportError, ImportProfile, Imported,
+    Consent, ExportError, ExportProfile, ExportedProfile, ImportError, ImportProfile, Imported,
+    ImportedCommand, Runs,
 };
 use app::ports::{
     ConfigStore, ExportCommands, ExportRefusal, ImportedProfile, ProfileError, ProfileNotice,
@@ -22,7 +23,7 @@ use domain::planning::{
     AgentConfig, AgentSettings, HookEntry, Hooks, Hostname, Maintenance, Plan, RepositoryConfig,
     RepositorySettings, Source,
 };
-use domain::secrets::{FileRead, SecretRef};
+use domain::secrets::{CommandLine, FileRead, SecretRef};
 use domain::{AgentId, PlanId, RepositoryAlias, Uuid};
 
 use super::Agent;
@@ -42,6 +43,9 @@ pub struct InteropWorld {
     profile_repository: Option<RepositoryConfig>,
     profile_plans: Vec<Plan>,
     profile_hooks: Hooks,
+    /// The global hooks the profile is changed to run once its commands
+    /// have been listed, before the owner's confirmation reaches the import.
+    changed_hooks: Option<Hooks>,
     profile_notices: Vec<ProfileNotice>,
     unreadable: bool,
     /// The configuration as the owner's command found it.
@@ -65,6 +69,7 @@ impl Default for InteropWorld {
             profile_repository: None,
             profile_plans: Vec::new(),
             profile_hooks: Hooks::default(),
+            changed_hooks: None,
             profile_notices: Vec::new(),
             unreadable: false,
             before: None,
@@ -201,6 +206,21 @@ fn profile_hooks(agent: &mut Agent, program: String) {
     agent.interop.profile_hooks = hooks_before(&[&program]);
 }
 
+#[given(expr = "the profile reads the repository's password with the command {string}")]
+fn profile_password_command(agent: &mut Agent, command: String) {
+    let mut repository = demo_repository();
+    repository.settings.password =
+        SecretRef::Command(CommandLine::parse(&command).expect("a command line"));
+    agent.interop.profile_repository = Some(repository);
+}
+
+#[given(
+    expr = "the profile changes to run {string} before everything once its commands are listed"
+)]
+fn profile_changes(agent: &mut Agent, program: String) {
+    agent.interop.changed_hooks = Some(hooks_before(&[&program]));
+}
+
 /// A repository the configuration holds, at a location of its own: not the
 /// profile's, which is another repository.
 fn configured_repository(name: &str) -> RepositoryConfig {
@@ -330,35 +350,115 @@ fn writer_leaves_out(agent: &mut Agent, option: String, variable: String) {
 async fn imports(agent: &mut Agent, name: String) {
     let world = &mut agent.interop;
     world.saved().await;
-    let repository = alias(&name);
-    // What the real reader does: every plan backs up into the alias.
-    let plans = world
-        .profile_plans
-        .iter()
-        .cloned()
-        .map(|mut plan| {
-            plan.repository = repository.clone();
-            plan
-        })
-        .collect();
-    world.reader.script(if world.unreadable {
-        Err(ProfileError::Unreadable {
-            file: "nas.toml".to_owned(),
-        })
-    } else {
-        Ok(ImportedProfile {
-            repository: world
-                .profile_repository
-                .clone()
-                .unwrap_or_else(demo_repository),
-            plans,
-            hooks: world.profile_hooks.clone(),
-            notices: world.profile_notices.clone(),
-        })
-    });
-    let reader: Arc<dyn ProfileReader> = world.reader.clone();
-    let use_case = ImportProfile::new(reader, world.store.clone(), Arc::new(FakeSources));
-    world.imported = Some(use_case.import(Path::new("nas.toml"), repository).await);
+    world.imported = Some(world.import(&name, Consent::Only(&[])).await);
+}
+
+/// The owner is shown the commands the import would make runnable, and
+/// agrees to them: the import is run again with them.
+#[when(expr = "the owner imports the profile as the repository {string}, confirming its commands")]
+async fn imports_confirming(agent: &mut Agent, name: String) {
+    imports(agent, name.clone()).await;
+    let world = &mut agent.interop;
+    if let Some(Err(ImportError::CommandsUnconfirmed(listed))) = world.imported.clone() {
+        if let Some(hooks) = world.changed_hooks.take() {
+            world.profile_hooks = hooks;
+        }
+        world.imported = Some(world.import(&name, Consent::Only(&listed)).await);
+    }
+}
+
+impl InteropWorld {
+    /// Imports the scripted profile as the repository `name`.
+    #[expect(clippy::result_large_err, reason = "the use case's own error")]
+    async fn import(&self, name: &str, consent: Consent<'_>) -> Result<Imported, ImportError> {
+        let repository = alias(name);
+        // What the real reader does: every plan backs up into the alias.
+        let plans = self
+            .profile_plans
+            .iter()
+            .cloned()
+            .map(|mut plan| {
+                plan.repository = repository.clone();
+                plan
+            })
+            .collect();
+        self.reader.script(if self.unreadable {
+            Err(ProfileError::Unreadable {
+                file: "nas.toml".to_owned(),
+            })
+        } else {
+            Ok(ImportedProfile {
+                repository: self
+                    .profile_repository
+                    .clone()
+                    .unwrap_or_else(demo_repository),
+                plans,
+                hooks: self.profile_hooks.clone(),
+                notices: self.profile_notices.clone(),
+            })
+        });
+        let reader: Arc<dyn ProfileReader> = self.reader.clone();
+        ImportProfile::new(reader, self.store.clone(), Arc::new(FakeSources))
+            .import(Path::new("nas.toml"), repository, consent)
+            .await
+    }
+}
+
+#[then("the import is refused until its commands are confirmed")]
+fn refused_unconfirmed(agent: &mut Agent) {
+    let imported = agent.interop.imported();
+    assert!(
+        matches!(imported, Err(ImportError::CommandsUnconfirmed(_))),
+        "not refused for its commands: {imported:?}"
+    );
+}
+
+#[then(expr = "the import lists the command {string} at {string}")]
+fn lists_command(agent: &mut Agent, command: String, key: String) {
+    let listed = match agent.interop.imported() {
+        Ok(imported) => &imported.commands,
+        Err(ImportError::CommandsUnconfirmed(listed)) => listed,
+        Err(error) => panic!("the import was refused: {error:?}"),
+    };
+    let expected = ImportedCommand {
+        key,
+        runs: Runs::Command(CommandLine::parse(&command).expect("a command line")),
+    };
+    assert!(
+        listed.contains(&expected),
+        "{expected:?} is not in {listed:?}"
+    );
+}
+
+#[then(expr = "the import notes that it made {string} runnable at {string}")]
+fn notes_command(agent: &mut Agent, program: String, key: String) {
+    let notices = match agent.interop.imported() {
+        Ok(imported) => &imported.notices,
+        Err(error) => panic!("the import was refused: {error:?}"),
+    };
+    let expected = ProfileNotice::CommandImported { key, program };
+    assert!(
+        notices.contains(&expected),
+        "{expected:?} is not in {notices:?}"
+    );
+}
+
+#[then("the import notes that the profile's global hooks were left out")]
+fn notes_global_hooks_left_out(agent: &mut Agent) {
+    let notices = match agent.interop.imported() {
+        Ok(imported) => &imported.notices,
+        Err(error) => panic!("the import was refused: {error:?}"),
+    };
+    assert!(
+        notices.contains(&ProfileNotice::GlobalHooksLeftOut),
+        "no notice in {notices:?}"
+    );
+}
+
+#[then("the agent's hooks run nothing before everything")]
+async fn agent_hooks_empty(agent: &mut Agent) {
+    let config = agent.interop.now().await;
+    assert!(programs_before(config.hooks()).is_empty());
 }
 
 #[when(expr = "the owner exports the plan {string}")]

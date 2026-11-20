@@ -99,6 +99,8 @@ pub(super) fn translate(event: WorkerEvent, redactor: &Redactor) -> Option<Engin
                 | WarningCode::ProfileKeyringCommandMissing
                 | WarningCode::ProfileLocationsNotExported
                 | WarningCode::ProfileCommandLeftOut
+                | WarningCode::ProfileCommandImported
+                | WarningCode::ProfileGlobalHooksLeftOut
                 | WarningCode::LocationPlainHttpCredentials
                 | WarningCode::LocationEveryRuled
                 | WarningCode::LocationLastRuledNoRetry
@@ -387,6 +389,7 @@ pub(super) fn translate(event: WorkerEvent, redactor: &Redactor) -> Option<Engin
                 | ErrorCode::ProfileInvalid
                 | ErrorCode::ProfileUnsupported
                 | ErrorCode::PlanIdTaken
+                | ErrorCode::ProfileCommandsUnconfirmed
                 | ErrorCode::InlineSecret
                 | ErrorCode::ProfileExportReference
                 | ErrorCode::ProfileExportUrlPassword

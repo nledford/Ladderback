@@ -29,6 +29,7 @@ use std::sync::Arc;
 
 use domain::execution::plan_tags::PlanTags;
 use domain::planning::{AgentConfig, Hostname, Plan, RepositoryConfig, Violation};
+use domain::secrets::CommandLine;
 use domain::{AgentId, PlanId, RepositoryAlias};
 
 use crate::globs::never_matching_globs;
@@ -55,8 +56,41 @@ pub struct Imported {
     pub repository: RepositoryAlias,
     /// The IDs of the plans added, in the order of the profile.
     pub plans: Vec<PlanId>,
+    /// The commands the import made runnable, in the order the configuration
+    /// keeps them: the agent's hooks, the repository's, then each plan's.
+    pub commands: Vec<ImportedCommand>,
     /// What the profile could not carry over, and what changed on the way.
     pub notices: Vec<ProfileNotice>,
+}
+
+/// A command an import makes runnable, and where the configuration keeps it.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct ImportedCommand {
+    /// Its key in the configuration: `hooks.run-before`,
+    /// `repositories.nas.password-command`,
+    /// `repositories.nas.options.rclone-command`, `plans.home.hooks.run-after`.
+    pub key: String,
+    pub runs: Runs,
+}
+
+/// What a command an import makes runnable runs.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum Runs {
+    /// A hook or the password's command: a program and its arguments.
+    Command(CommandLine),
+    /// An option rustic runs as a command (`rclone-command`), its value as
+    /// the configuration keeps it: rustic splits it when it runs it.
+    Option(String),
+}
+
+/// Which commands the person agreed an import may make runnable (§6.2).
+#[derive(Clone, Copy, Debug)]
+pub enum Consent<'a> {
+    /// Whichever the profile holds: the import was told not to ask.
+    Any,
+    /// Exactly these, the ones the person was shown and agreed to; none
+    /// when nobody has been asked yet.
+    Only(&'a [ImportedCommand]),
 }
 
 /// Why an import saved nothing. A typed code, never a sentence (§8.4).
@@ -76,6 +110,9 @@ pub enum ImportError {
     /// The configuration could not be read or written, or the result is not
     /// a configuration it accepts.
     Config(ConfigError),
+    /// The import would make these commands runnable, which are not the
+    /// ones agreed to ([`Consent`]).
+    CommandsUnconfirmed(Vec<ImportedCommand>),
 }
 
 /// Exports one plan as a profile: finds the plan and its repository in the
@@ -122,12 +159,16 @@ impl ImportProfile {
         }
     }
 
-    /// Imports the profile in `file` under the repository alias `repository`.
+    /// Imports the profile in `file` under the repository alias
+    /// `repository`, provided the commands it would make runnable are the
+    /// ones `consent` agrees to.
     pub async fn import(
         &self,
         file: &Path,
         repository: RepositoryAlias,
+        consent: Consent<'_>,
     ) -> Result<Imported, ImportError> {
+        let _ = consent;
         let loaded = self.config.load().await.map_err(ImportError::Config)?;
         let profile = self
             .reader
@@ -256,6 +297,7 @@ impl ImportProfile {
             Imported {
                 repository,
                 plans: ids,
+                commands: Vec::new(),
                 notices,
             },
         ))
@@ -436,7 +478,7 @@ mod tests {
             config.clone(),
             Arc::new(FakeSources),
         )
-        .import(Path::new("nas.toml"), alias("nas"))
+        .import(Path::new("nas.toml"), alias("nas"), Consent::Any)
         .await
     }
 
@@ -496,7 +538,7 @@ mod tests {
             config.clone(),
             Arc::new(HomeUnderVar),
         )
-        .import(Path::new("nas.toml"), alias("nas"))
+        .import(Path::new("nas.toml"), alias("nas"), Consent::Any)
         .await
         .expect("the import");
         assert_eq!(
@@ -705,7 +747,7 @@ mod tests {
             Hooks::default(),
         ))));
         let imported = ImportProfile::new(reader, config.clone(), Arc::new(FakeSources))
-            .import(Path::new("nas.toml"), alias("nas"))
+            .import(Path::new("nas.toml"), alias("nas"), Consent::Any)
             .await
             .expect("the plans are added");
         assert_eq!(imported.plans, vec![PlanId::parse("docs").unwrap()]);
@@ -759,7 +801,7 @@ mod tests {
             config.clone(),
             Arc::new(FakeSources),
         )
-        .import(Path::new("nas.toml"), alias(name))
+        .import(Path::new("nas.toml"), alias(name), Consent::Any)
         .await
     }
 
@@ -844,7 +886,7 @@ mod tests {
             config.clone(),
             Arc::new(FakeSources),
         )
-        .import(Path::new("nas.toml"), alias("nas"))
+        .import(Path::new("nas.toml"), alias("nas"), Consent::Any)
         .await
         .expect("the plans are added");
         (imported, saved(&config).await)
@@ -1082,7 +1124,7 @@ mod tests {
             Hooks::default(),
         ))));
         ImportProfile::new(reader.clone(), config.clone(), Arc::new(FakeSources))
-            .import(Path::new("nas.toml"), alias("nas"))
+            .import(Path::new("nas.toml"), alias("nas"), Consent::Any)
             .await
             .expect("imported");
         assert_eq!(
@@ -1119,5 +1161,241 @@ mod tests {
             reader.asked(),
             vec![(Path::new("content").to_path_buf(), alias("nas"))]
         );
+    }
+
+    fn line(text: &str) -> CommandLine {
+        CommandLine::parse(text).expect("a command line")
+    }
+
+    fn command(key: &str, text: &str) -> ImportedCommand {
+        ImportedCommand {
+            key: key.to_owned(),
+            runs: Runs::Command(line(text)),
+        }
+    }
+
+    /// An `rclone-command` with a program in one of its flags.
+    const RCLONE: &str = "rclone serve restic --stdio --password-command 'pass show rclone'";
+
+    /// A profile that runs a command in every place one can be: its global
+    /// hooks, the repository's password, an option of each of two tables and
+    /// the repository's hooks, and its plan's hooks.
+    fn running_commands() -> ImportedProfile {
+        let mut repository = repository();
+        repository.settings.password = SecretRef::Command(line("pass show demo/nas"));
+        let options = &mut repository.settings.options;
+        options.insert("rclone-command".to_owned(), RCLONE.to_owned());
+        options.insert("connections".to_owned(), "4".to_owned());
+        repository.settings.options_hot.insert(
+            "post-create-command".to_owned(),
+            "/usr/local/bin/notify created".to_owned(),
+        );
+        repository.hooks.run_after = vec![hook("curl -fsS https://hc.example/ping")];
+        let mut home = plan("home", None);
+        home.hooks.run_failed = vec![hook("notify-send failed")];
+        home.hooks.run_finally = vec![hook("logger done"), hook("sync")];
+        ImportedProfile {
+            repository,
+            plans: vec![home],
+            hooks: Hooks {
+                run_before: vec![hook("echo start")],
+                ..Hooks::default()
+            },
+            notices: vec![ProfileNotice::EnvIgnored],
+        }
+    }
+
+    /// What [`running_commands`] makes runnable in an empty configuration.
+    fn commands_listed() -> Vec<ImportedCommand> {
+        vec![
+            command("hooks.run-before", "echo start"),
+            command("repositories.nas.password-command", "pass show demo/nas"),
+            ImportedCommand {
+                key: "repositories.nas.options.rclone-command".to_owned(),
+                runs: Runs::Option(RCLONE.to_owned()),
+            },
+            ImportedCommand {
+                key: "repositories.nas.options-hot.post-create-command".to_owned(),
+                runs: Runs::Option("/usr/local/bin/notify created".to_owned()),
+            },
+            command(
+                "repositories.nas.hooks.run-after",
+                "curl -fsS https://hc.example/ping",
+            ),
+            command("plans.home.hooks.run-failed", "notify-send failed"),
+            command("plans.home.hooks.run-finally", "logger done"),
+            command("plans.home.hooks.run-finally", "sync"),
+        ]
+    }
+
+    fn imported_notice(key: &str, program: &str) -> ProfileNotice {
+        ProfileNotice::CommandImported {
+            key: key.to_owned(),
+            program: program.to_owned(),
+        }
+    }
+
+    #[expect(clippy::result_large_err, reason = "the use case's own error")]
+    async fn import_with(
+        config: &Arc<InMemoryConfigStore>,
+        profile: ImportedProfile,
+        consent: Consent<'_>,
+    ) -> Result<Imported, ImportError> {
+        ImportProfile::new(
+            Arc::new(FakeProfileReader::new(Ok(profile))),
+            config.clone(),
+            Arc::new(FakeSources),
+        )
+        .import(Path::new("nas.toml"), alias("nas"), consent)
+        .await
+    }
+
+    /// Each command is listed in full where the configuration keeps it,
+    /// in the order the configuration keeps them, and named by a notice
+    /// after the profile's own, with the program it starts: for an
+    /// option, the first word of its value. An option that runs nothing is
+    /// not a command.
+    #[tokio::test]
+    async fn every_command_an_import_makes_runnable_is_listed_where_the_configuration_keeps_it() {
+        let config = Arc::new(InMemoryConfigStore::new());
+        let imported = import_with(&config, running_commands(), Consent::Any)
+            .await
+            .expect("imported");
+        assert_eq!(imported.commands, commands_listed());
+        assert_eq!(
+            imported.notices,
+            [
+                ProfileNotice::EnvIgnored,
+                imported_notice("hooks.run-before", "echo"),
+                imported_notice("repositories.nas.password-command", "pass"),
+                imported_notice("repositories.nas.options.rclone-command", "rclone"),
+                imported_notice(
+                    "repositories.nas.options-hot.post-create-command",
+                    "/usr/local/bin/notify"
+                ),
+                imported_notice("repositories.nas.hooks.run-after", "curl"),
+                imported_notice("plans.home.hooks.run-failed", "notify-send"),
+                imported_notice("plans.home.hooks.run-finally", "logger"),
+                imported_notice("plans.home.hooks.run-finally", "sync"),
+            ]
+        );
+    }
+
+    #[tokio::test]
+    async fn an_import_whose_commands_nobody_agreed_to_names_them_and_saves_nothing() {
+        let config = Arc::new(InMemoryConfigStore::new());
+        let before = saved(&config).await;
+        let refused = import_with(&config, running_commands(), Consent::Only(&[])).await;
+        assert_eq!(
+            refused,
+            Err(ImportError::CommandsUnconfirmed(commands_listed()))
+        );
+        assert_eq!(saved(&config).await, before);
+    }
+
+    #[tokio::test]
+    async fn the_commands_agreed_to_are_imported() {
+        let config = Arc::new(InMemoryConfigStore::new());
+        let listed = commands_listed();
+        let imported = import_with(&config, running_commands(), Consent::Only(&listed))
+            .await
+            .expect("imported");
+        assert_eq!(imported.commands, listed);
+        let saved = saved(&config).await;
+        assert_eq!(saved.hooks().run_before, vec![hook("echo start")]);
+        assert_eq!(saved.plans().len(), 1);
+    }
+
+    /// The profile changed after its commands were listed: what the person
+    /// agreed to is not what would run.
+    #[tokio::test]
+    async fn commands_other_than_the_ones_agreed_to_save_nothing() {
+        let config = Arc::new(InMemoryConfigStore::new());
+        let before = saved(&config).await;
+        let mut agreed = commands_listed();
+        agreed.pop();
+        let refused = import_with(&config, running_commands(), Consent::Only(&agreed)).await;
+        assert_eq!(
+            refused,
+            Err(ImportError::CommandsUnconfirmed(commands_listed()))
+        );
+        assert_eq!(saved(&config).await, before);
+    }
+
+    /// A configuration holding the repository `cloud`, at a location of
+    /// its own, and the plans `plans` for it.
+    async fn holding_cloud(plans: &[&str]) -> Arc<InMemoryConfigStore> {
+        let config = Arc::new(InMemoryConfigStore::new());
+        let mut cloud = repository();
+        cloud.settings.repository = "/srv/cloud".to_owned();
+        let plans = plans
+            .iter()
+            .map(|id| {
+                let mut plan = plan(id, None);
+                plan.repository = alias("cloud");
+                plan
+            })
+            .collect();
+        let own = AgentConfig::new(
+            AgentSettings::default(),
+            Hooks::default(),
+            BTreeMap::from([(alias("cloud"), cloud)]),
+            plans,
+        )
+        .expect("a configuration");
+        config.save(&own).await.expect("saved");
+        config
+    }
+
+    /// The global hooks would run around jobs that were there before the
+    /// import: the plans' backups, and the checks, forgets and prunes of
+    /// the repositories, whether or not a plan backs up into one.
+    #[tokio::test]
+    async fn global_hooks_are_left_out_of_a_configuration_that_has_plans_or_repositories() {
+        for plans in [&["work"][..], &[]] {
+            let config = holding_cloud(plans).await;
+            let imported = import_with(&config, running_commands(), Consent::Any)
+                .await
+                .expect("imported");
+            assert_eq!(saved(&config).await.hooks(), &Hooks::default(), "{plans:?}");
+            assert_eq!(
+                imported.commands.first(),
+                commands_listed().get(1),
+                "{plans:?}"
+            );
+            assert_eq!(
+                imported.notices.get(..2),
+                Some(&[ProfileNotice::EnvIgnored, ProfileNotice::GlobalHooksLeftOut][..]),
+                "{plans:?}"
+            );
+        }
+    }
+
+    /// An entry the configuration already holds keeps its own password,
+    /// options and hooks: the profile's make nothing runnable.
+    #[tokio::test]
+    async fn the_commands_of_a_repository_entry_kept_are_not_listed() {
+        let config = holding(vec![("nas", repository())]).await;
+        let imported = import_with(&config, running_commands(), Consent::Any)
+            .await
+            .expect("imported");
+        assert_eq!(imported.commands, commands_listed().split_off(5));
+    }
+
+    /// A preview asks nobody: it lists what an import would make runnable.
+    #[tokio::test]
+    async fn a_preview_lists_the_commands_an_import_would_make_runnable() {
+        let config = Arc::new(InMemoryConfigStore::new());
+        let before = saved(&config).await;
+        let imported = ImportProfile::new(
+            Arc::new(FakeProfileReader::new(Ok(running_commands()))),
+            config.clone(),
+            Arc::new(FakeSources),
+        )
+        .preview("content", "[repository]", alias("nas"))
+        .await
+        .expect("previewed");
+        assert_eq!(imported.commands, commands_listed());
+        assert_eq!(saved(&config).await, before);
     }
 }

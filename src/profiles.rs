@@ -20,7 +20,7 @@ use std::path::{Path, PathBuf};
 use std::process::ExitCode;
 use std::sync::Arc;
 
-use app::interop::{ExportProfile, ImportProfile, Imported};
+use app::interop::{Consent, ExportProfile, ImportProfile, Imported};
 use app::ports::{ConfigStore, ExportCommands};
 use config_adapter::FileConfigStore;
 use domain::{PlanId, RepositoryAlias};
@@ -196,7 +196,7 @@ fn import(file: &Path, repo_name: Option<&str>) -> Result<Imported, NotImported>
     );
     let use_case = ImportProfile::new(Arc::new(reader), config, Arc::new(engine::RusticSources));
     runtime
-        .block_on(use_case.import(file, alias))
+        .block_on(use_case.import(file, alias, Consent::Any))
         .map_err(|error| NotImported::Refused(import_refusal(error, &config_file)))
 }
 
@@ -411,6 +411,7 @@ mod tests {
                 PlanId::parse("docs").unwrap(),
                 PlanId::parse("home").unwrap(),
             ],
+            commands: Vec::new(),
             notices: vec![
                 ProfileNotice::KeyIgnored {
                     key: "copy".to_owned(),
