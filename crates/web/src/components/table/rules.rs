@@ -168,15 +168,14 @@ pub fn shown(state: State, rows: usize) -> Shown {
     }
 }
 
-/// Whether a row takes the change cue (decision NN): the part of it the
+/// Whether a row takes the change cue (decision 127): the part of it the
 /// table watches (`Table`'s `cue_on`, a status) was `shown` as the row last
 /// showed it and is `now`. Only a change of a value the row already showed
 /// lights it: a row's first sight (the page's first rows, a row that
 /// arrives, the table built again) only seeds it, and an update that leaves
 /// the value as it was (a progress report, a re-sort) lights nothing.
 pub fn cues<T: PartialEq>(shown: Option<&T>, now: &T) -> bool {
-    let _ = (shown, now);
-    todo!()
+    shown.is_some_and(|shown| shown != now)
 }
 
 /// How a column's cells are aligned: at the start of the line, or, for

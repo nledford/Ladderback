@@ -1116,6 +1116,25 @@ table.data-table :is(th[scope="row"], thead th:first-child) {
   }
 }
 
+/* The change cue (decision 127; `Table`'s `cue_on`): a row whose status a
+   live update changed is lit in Ledger Gray at once, then settles back to
+   its cells' own fill over 600 ms, easing out, once. Only a settling row's
+   cells have the transition, so a change of the theme's colors reaches a
+   settled row at once. On the cells, not the row: a pinned row header's own
+   fill would cover the row's. Custom CSS rather than utilities, since it
+   must beat that fill, which is custom CSS in no layer. A change of color,
+   so the reduced-motion rule keeps it. Under forced colors the system's
+   colors are the cells' and nothing is lit. */
+@media (forced-colors: none) {
+  table.data-table tr[data-cue="lit"] > :is(th, td) {
+    background-color: var(--surface);
+  }
+
+  table.data-table tr[data-cue="settling"] > :is(th, td) {
+    transition: background-color 600ms ease-out;
+  }
+}
+
 /* The gallery's narrow frame (`gallery.rs`), which shows a table scrolling
    sideways on a screen of any width. */
 .gallery-narrow {

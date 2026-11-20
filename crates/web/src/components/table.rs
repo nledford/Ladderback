@@ -165,6 +165,15 @@ pub struct Footer {
 /// script focus it (`tabindex="-1"`, no stop for Tab), so a control that
 /// leaves the row can hand focus to the header that names it.
 ///
+/// `cue_on`, where given, is what a live update can change in a row, such as
+/// its status. A row whose `cue_on` changes while it shows takes the change
+/// cue (decision 127): its cells are lit in Ledger Gray and settle back to
+/// their own fill over 600 ms (`style.css`), once. Its first sight, and an
+/// update that leaves it as it was, light nothing ([`rules::cues`]); a page
+/// whose rows a pause holds still lights nothing meanwhile, and its resume
+/// lights each changed row once. A screen reader hears the page's announcer
+/// instead, so the cue says nothing to it.
+///
 /// It sits in a frame that scrolls sideways where its columns are wider than
 /// the page (a small screen, larger text): a region named as the table is,
 /// which a keyboard focuses and scrolls, each row's header pinned at its
@@ -208,6 +217,7 @@ pub fn Table<R, K, KF>(
     sentences: Sentences,
     #[prop(optional)] footer: Option<Footer>,
     #[prop(optional)] row_header_id: Option<fn(&R) -> String>,
+    #[prop(optional)] cue_on: Option<fn(&R) -> String>,
 ) -> impl IntoView
 where
     R: Clone + PartialEq + Send + Sync + 'static,
@@ -339,7 +349,7 @@ where
                                             each=move || placed.get()
                                             key=|key| key.clone()
                                             children=move |key| {
-                                                row_view(&columns, rows, index, key, row_header_id)
+                                                row_view(&columns, rows, index, key, row_header_id, cue_on)
                                             }
                                         />
                                     </tbody>
@@ -457,6 +467,7 @@ fn row_view<R, K>(
     index: Memo<HashMap<K, usize>>,
     key: K,
     header_id: Option<fn(&R) -> String>,
+    cue_on: Option<fn(&R) -> String>,
 ) -> AnyView
 where
     R: Clone + PartialEq + Send + Sync + 'static,
@@ -500,7 +511,82 @@ where
             }
         })
         .collect_view();
-    view! { <tr>{cells}</tr> }.into_any()
+    let cue = RwSignal::new(Cue::Settled);
+    if let Some(cue_on) = cue_on {
+        let watched = Memo::new(move |_| row.with(cue_on));
+        Effect::new(move |shown: Option<String>| {
+            let now = watched.get();
+            if rules::cues(shown.as_ref(), &now) {
+                light(cue);
+            }
+            now
+        });
+    }
+    let state = move || cue_on.map(|_| cue.get().name());
+    // The cells' fade ends, or a move of the row or a second change cuts it
+    // short; a transition inside a cell (a progress bar's) isn't the cue's.
+    let settle = move |event: web_sys::TransitionEvent| {
+        if cue.get_untracked() == Cue::Settling && ends_the_cue(&event) {
+            cue.set(Cue::Settled);
+        }
+    };
+    view! {
+        <tr data-cue=state on:transitionend=settle on:transitioncancel=settle>
+            {cells}
+        </tr>
+    }
+    .into_any()
+}
+
+/// Where a row's change cue is (`data-cue`, which `style.css` draws): lit in
+/// Ledger Gray, settling back to its own fill, or settled. Only a settling
+/// row's cells have a transition, so a change of the theme's colors reaches
+/// a settled row at once, as it does the rest of the page.
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum Cue {
+    Lit,
+    Settling,
+    Settled,
+}
+
+impl Cue {
+    fn name(self) -> &'static str {
+        match self {
+            Self::Lit => "lit",
+            Self::Settling => "settling",
+            Self::Settled => "settled",
+        }
+    }
+}
+
+/// Lights a row for the change cue, and lets it settle two frames on: the
+/// first frame draws it lit, so at the second its cells' fill has a lit
+/// color to settle back from over the transition `style.css` gives them. In
+/// a tab the reader isn't looking at, the frames wait, and the row stays
+/// lit until the tab shows again.
+fn light(cue: RwSignal<Cue>) {
+    cue.set(Cue::Lit);
+    request_animation_frame(move || {
+        request_animation_frame(move || {
+            if cue.try_get_untracked() == Some(Cue::Lit) {
+                cue.set(Cue::Settling);
+            }
+        });
+    });
+}
+
+/// Whether a transition's event is the change cue's: a cell's fill, the
+/// cell one of the row's own.
+fn ends_the_cue(event: &web_sys::TransitionEvent) -> bool {
+    let row = event
+        .current_target()
+        .and_then(|row| row.dyn_into::<web_sys::Node>().ok());
+    event.property_name() == "background-color"
+        && event
+            .target()
+            .and_then(|cell| cell.dyn_into::<web_sys::Node>().ok())
+            .and_then(|cell| cell.parent_node())
+            .is_some_and(|parent| parent.is_same_node(row.as_ref()))
 }
 
 /// The element in the table's body that has focus, if any.

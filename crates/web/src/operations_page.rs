@@ -492,6 +492,7 @@ fn operations_table(
             state=State::Ready
             sentences=sentences
             row_header_id=header_id
+            cue_on=status_of
         />
     }
     .into_any()
@@ -501,6 +502,12 @@ fn operations_table(
 /// row hands focus to.
 fn header_id(row: &OperationRow) -> String {
     format!("operation-{}", row.summary.id)
+}
+
+/// What a live update changes that lights an operation's row: its status
+/// (a start, an end), never a progress report (decision 127).
+fn status_of(row: &OperationRow) -> String {
+    row.summary.status.clone()
 }
 
 /// An operation's status: its badge, and a running backup's progress bar once
