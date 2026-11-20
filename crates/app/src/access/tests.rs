@@ -537,8 +537,9 @@ thread_local! {
 }
 
 /// Keeps each line `access` logs on the thread that logged it: each test
-/// runs its use cases on its own thread (`now_or_never`), so tests running
-/// at once in one process never see each other's lines.
+/// runs its use cases on its own thread (`now_or_never`, or a
+/// `#[tokio::test]`'s runtime on the test's thread), so tests running at
+/// once in one process never see each other's lines.
 struct CapturingLogger;
 
 impl log::Log for CapturingLogger {
@@ -559,7 +560,7 @@ impl log::Log for CapturingLogger {
 
 /// Captures the log from here on, and forgets what this thread logged
 /// before.
-fn capture_the_log() {
+pub(super) fn capture_the_log() {
     static ONCE: std::sync::Once = std::sync::Once::new();
     ONCE.call_once(|| {
         log::set_logger(&CapturingLogger).expect("no other logger in app's tests");
@@ -569,7 +570,7 @@ fn capture_the_log() {
 }
 
 /// What this thread has logged since this was last asked.
-fn logged() -> Vec<(log::Level, String)> {
+pub(super) fn logged() -> Vec<(log::Level, String)> {
     LOGGED.with_borrow_mut(std::mem::take)
 }
 

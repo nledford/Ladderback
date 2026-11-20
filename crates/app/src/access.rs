@@ -62,6 +62,9 @@ struct State {
     /// last write that succeeded: it was logged, and the next such failure
     /// is logged only once a write has succeeded again.
     store_failing: bool,
+    /// The same as `store_failing`, for the API-token store: a token's
+    /// last use is the one write to it whose failure no caller sees.
+    token_store_failing: bool,
 }
 
 impl State {
