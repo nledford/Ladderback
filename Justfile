@@ -102,6 +102,19 @@ docs-site: _mdbook-pinned
     mdbook build docs/guide
     node scripts/check-site-links.ts
 
+# Build the user docs site, check its links (`docs-site`), then run axe-core
+# over every page in Chromium: WCAG 2.2 A and AA, the rules the @ui scenarios
+# scan with, in each of mdBook's five themes at a wide and a narrow window, on
+# the landing page with its theme list open and with search results showing,
+# and on a result's page with its matches marked
+# (ui-tests/scripts/docs-site-a11y.ts; §16, decision 128). The docs site
+# workflow (.github/workflows/docs-site.yml) runs it on every change to the
+# site, before it publishes one. `lint` doesn't: it starts no browser.
+[doc('Build the user docs site, check its links, and run axe-core over every page in Chromium.')]
+[group('quality')]
+docs-site-a11y: docs-site _ui-deps
+    node ui-tests/scripts/docs-site-a11y.ts
+
 # Fails unless the shellcheck on the PATH is the release
 # scripts/install-shellcheck.sh pins (its `version=` line, the one place the
 # version lives, beside the hashes that go with it): another release finds
