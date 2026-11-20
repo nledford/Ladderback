@@ -94,6 +94,42 @@ async fn a_connect_is_answered_with_the_hubs_challenge() {
     ));
 }
 
+/// An agent sends its `Hello` right after its `Proof`, unanswered, so a
+/// refused proof leaves that `Hello` unread on the hub's side. The hub still
+/// ends the connection so that its refusal reaches the agent: closing a
+/// socket with unread data resets it, and a reset can discard what the
+/// agent hasn't read yet.
+#[tokio::test]
+async fn a_refused_proof_reaches_an_agent_that_sent_its_hello_after_it() {
+    let address = serve(&SyncHub::serving(pairing())).await;
+    let mut socket = open(&address).await;
+    socket.send(connect(0)).await.unwrap();
+    let Some(Message::Text(_)) = next(&mut socket).await else {
+        panic!("no challenge");
+    };
+    let proof = AgentFrame::Proof {
+        counter: 1,
+        agent_proof: "A".repeat(86),
+    };
+    let hello = AgentFrame::Signed {
+        kind: "hello".to_owned(),
+        seq: 1,
+        payload: "A".repeat(1_000),
+        signature: "A".repeat(86),
+    };
+    socket.send(Message::text(proof.to_text())).await.unwrap();
+    socket.send(Message::text(hello.to_text())).await.unwrap();
+    // The hub has answered and closed before the agent reads.
+    tokio::time::sleep(Duration::from_millis(300)).await;
+    let Some(Message::Text(text)) = next(&mut socket).await else {
+        panic!("the refusal was lost");
+    };
+    assert!(matches!(
+        HubFrame::from_text(text.as_str()),
+        Ok(HubFrame::Refused { .. })
+    ));
+}
+
 /// This listener has no TLS of the hub's own, so a `Connect` that binds to
 /// one is closed `binding-unavailable` (decision 121).
 #[tokio::test]
