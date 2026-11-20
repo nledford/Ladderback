@@ -1,7 +1,9 @@
 ### Ladderback's own command-line messages. The program prints each after its
-### name and a colon (`ladderback: listening on …`); `clap`'s help and usage
-### errors are not here and stay in English, but for the descriptions of some
-### commands (`cli-help-*`).
+### name and a colon (`ladderback: listening on …`). `clap`'s usage errors,
+### and its own words in the help (headings, the usage line, its `--help` and
+### `--version` options and `help` command), are not here and stay in English;
+### the descriptions the help gives of the program, its commands and their
+### options are (`cli-help-*`).
 
 # The daemon is up. Scripts and the UI tests read the address after "listening on".
 # $url (text): where the web UI answers, such as http://127.0.0.1:9898.
@@ -536,3 +538,131 @@ cli-hub-status-approved = Connected. The { -hub } approved this machine.
 # pair again, which `ladderback pair` refuses while the machine holds a pin.
 # $address (text): the hub address this machine pinned.
 cli-hub-status-hub-unproved = The { -hub } at { $address } didn't prove the key this machine pinned when it paired, so this machine sent it nothing and keeps backing up on its own. Don't pair again. Check the address with whoever runs the { -hub }. If they reset or reinstalled it on purpose, ask them how to move this machine to its new key; if they didn't, someone may be posing as the { -hub }.
+
+## The help (`--help`): what the program, each command and each option does.
+## `clap` prints each description after the names a person types, and its
+## placeholders for a value (`<MINUTES>`, `<NAME>`) stay English. A command's
+## ID is `cli-help-` and its name (`cli-help-mcp-call` for `mcp call`), and an
+## option's adds the option's name (`cli-help-serve-listen`). The
+## descriptions of `install-service`, `remove-service`, `check-keyring` and
+## `mcp` are with their commands' messages.
+
+# What `ladderback` is, at the top of `ladderback --help`. "rustic" is the backup program's name, written in lowercase.
+cli-help = Self-hosted backup manager for rustic
+
+# What `--plain`, an option of every command, does.
+cli-help-plain = Print plain text: no colour, and nothing drawn over what is already printed
+
+# What `serve` does.
+cli-help-serve = Run { -brand-name } on this { -machine } and serve its web UI
+
+# What `serve --listen` does. `--allowed-host` is an option, typed as it is: keep it a string literal.
+cli-help-serve-listen = Address to listen on. Beyond loopback only with an { "--allowed-host" }; with sign-in off it then warns that anyone who can reach the address can use it. Port 0 picks a free port; the address in use is printed on startup
+
+# What `serve --allowed-host` takes. "Host" is the name of the header a browser sends: keep it a string literal.
+cli-help-serve-allowed-host = A host name or address, without a port, that the web UI answers to besides loopback addresses, such as the name a reverse proxy forwards with the browser's { "Host" } (repeatable)
+
+# What `serve --service-managed` is for. `install-service` is the command, typed as it is: keep it a string literal. "Settings" is the web UI's page of that name.
+cli-help-serve-service-managed = Set by the service files { "install-service" } writes: a service manager runs { -brand-name } and starts it again when it exits with the restart status, so Settings offers a restart
+
+# What `serve --hub` does. `/sync/` is the start of the routes' paths: keep it a string literal.
+cli-help-serve-hub = Serve the { -hub }'s routes for paired { -machine(form: "other") } under { "/sync/" } as well, so that other { -machine(form: "other") } can pair with this one
+
+# What `import-profile` does.
+cli-help-import-profile = Add the { -repository } and the plans of a rustic profile to the configuration
+
+# The file `import-profile` reads. "TOML" is the file format's name.
+cli-help-import-profile-file = The rustic profile, a { "TOML" } file
+
+# What `import-profile --repo-name` names.
+cli-help-import-profile-repo-name = The name the { -repository } gets in the configuration; the profile's file name, as a slug, when it is left out
+
+# What `import-profile --json` prints instead of sentences.
+cli-help-import-profile-json = Print one { "JSON" } document on standard output, for a script to read, instead of sentences: the { -repository } and the plans that were added, or the code of the refusal
+
+# What `import-profile --yes` does.
+cli-help-import-profile-yes = Import the commands the profile runs (its hooks, the password's command, an option rustic runs as a command) without asking. Without it they are listed and confirmed at a terminal, and anywhere else nothing is imported
+
+# What `export-profile` does.
+cli-help-export-profile = Write a plan as a rustic profile on stdout
+
+# What `export-profile --plan` takes.
+cli-help-export-profile-plan = The ID of the plan to export
+
+# What `set-password` does.
+cli-help-set-password = Set the admin password, which turns sign-in on, and end every session. It is typed twice at a terminal, without being shown, or read as one line of standard input; never given as an argument
+
+# What `pairing-token` does.
+cli-help-pairing-token = Make a one-time pairing token for a { -machine }, list the unused ones, or revoke one. Run it while the daemon is stopped
+
+# What `pairing-token --address` takes. The address is an example, typed as it is: keep it a string literal.
+cli-help-pairing-token-address = The { -hub }'s address as { -machine(form: "other") } reach it, such as { "https://hub.example" }
+
+# What `pairing-token --ttl` takes.
+cli-help-pairing-token-ttl = How long the token lives, in minutes: 5 to 1440, 15 by default
+
+# What `pairing-token --list` does.
+cli-help-pairing-token-list = List the unused tokens by token ID, with when each lapses
+
+# What `pairing-token --revoke` does.
+cli-help-pairing-token-revoke = Revoke the unused token with this token ID
+
+# What `pair` does.
+cli-help-pair = Pair this { -machine } with a { -hub }. The token is pasted at the prompt, without being shown, or read as standard input; never given as an argument
+
+# The address `pair` takes.
+cli-help-pair-address = The { -hub }'s address, when this { -machine } reaches it another way than the token's
+
+# What `pair --hostname` does.
+cli-help-pair-hostname = Pair under this hostname instead of the { -machine }'s
+
+# What `pair --yes` does.
+cli-help-pair-yes = Pair without asking, when standard input is the token
+
+# What `hub-status` does.
+cli-help-hub-status = Check this { -machine }'s link to the { -hub } it paired with: connect, prove who it is, and say whether the { -hub } holds it waiting for approval or has approved it
+
+# What `hub-status --hostname` does. `pair` is the command, typed as it is: keep it a string literal.
+cli-help-hub-status-hostname = Connect under this hostname instead of the { -machine }'s, as { "pair" } takes it
+
+# What `mcp --connect` does. The address is the one used when none follows: keep it a string literal.
+cli-help-mcp-connect = Drive the running daemon at this address through its API; { "http://127.0.0.1:9898" } when no address follows
+
+# What `mcp --token-file` does. `mcp-token` is a file's name: keep it a string literal.
+cli-help-mcp-token-file = Send the { -api-token } this file holds, which only its owner may read; { "mcp-token" } in the configuration folder, if it is there, when no file is named. Only to an { "https" } address or this computer
+
+# What `mcp --headless` does.
+cli-help-mcp-headless = Run a session of its own on { -brand-name }'s folders, without a daemon: refused while a daemon or another session uses them
+
+# What `mcp --scratch` does.
+cli-help-mcp-scratch = Run a session of its own in a new private folder, seeded with a plan over a few generated files, and delete the folder at the end
+
+# What `mcp call` does.
+cli-help-mcp-call = Call tools once, without a client, printing each call's result or refusal as one { "JSON" } line on standard output
+
+# The tool `mcp call` calls. `status` and `list_plans` are tools' names: keep them string literals.
+cli-help-mcp-call-tool = The tool to call, such as { "status" } or { "list_plans" }
+
+# The arguments `mcp call` gives the tool. `NAME=VALUE`, `true` and `false` are typed as they are: keep them string literals.
+cli-help-mcp-call-words = The tool's arguments, each { "NAME=VALUE" }: a value is a number or { "true" } or { "false" } where the tool's argument is one, and text otherwise
+
+# What `mcp call --args` takes. `NAME=VALUE` is typed as it is: keep it a string literal.
+cli-help-mcp-call-args = The tool's arguments as one { "JSON" } object, instead of { "NAME=VALUE" }
+
+# What `mcp call --script` does. The JSON object and `-` are typed as they are: keep them string literals.
+cli-help-mcp-call-script = Run the calls a file holds, one { "JSON" } object to a line, each { "{\"tool\": …, \"arguments\": {…}}" }, in one session; { "-" } reads them from standard input, each answered before the next is read
+
+# What `mcp call --keep-going` does.
+cli-help-mcp-call-keep-going = Run the rest of the script after a call fails
+
+# What `mcp call --connect` does. The address is the one used without a mode: keep it a string literal.
+cli-help-mcp-call-connect = Drive the running daemon at this address through its API; without a mode, the one at { "http://127.0.0.1:9898" }
+
+# What `mcp call --token-file` does. `mcp-token` is a file's name: keep it a string literal.
+cli-help-mcp-call-token-file = Send the { -api-token } this file holds, which only its owner may read; { "mcp-token" } in the configuration folder, if it is there, when no file is named. Only to an { "https" } address or this computer
+
+# What `mcp call --headless` does.
+cli-help-mcp-call-headless = Run a session of its own on { -brand-name }'s folders, without a daemon: refused while a daemon or another session uses them. The session ends with the last call, and a backup still running ends with it
+
+# What `mcp call --scratch` does.
+cli-help-mcp-call-scratch = Run a session of its own in a new private folder, seeded with a plan over a few generated files, and delete the folder at the end, when a backup still running ends too
