@@ -96,6 +96,37 @@ Feature: A row whose status changes stays marked until it is seen
     And the row "demo-home" of the table "Operations" doesn't say "Changed, not yet seen" in its "Status" column to a screen reader
     And the page doesn't offer the button "Mark all as seen"
 
+  # Mark all as seen hides itself when its last mark goes without its press:
+  # a refusal or the page's unreachable state takes the table's place, and
+  # the rows take their marks with them. Focus on it goes where a press
+  # sends it, the page's heading, and nothing is said for it (2.4.3).
+  Scenario: Mark all as seen hands its focus to the page's heading when a refusal takes the table's place
+    Given the daemon reports running backups of "demo-home" and "demo-docs"
+    When I open the address "/operations"
+    And the table "Operations" has a row "demo-docs" that shows "Running"
+    And the daemon reports that the backup of "demo-docs" has succeeded with 5 files
+    And the row "demo-docs" of the table "Operations" is marked as changed, its "Status" in bold and an edge at its start
+    And I skip to the content
+    And I press Tab until focus is on the button "Mark all as seen"
+    And the daemon can't read its store, and its events stream drops
+    Then the page doesn't offer the button "Mark all as seen"
+    And focus is on the heading "Operations"
+    And the polite region never says "marked as seen"
+
+  Scenario: Mark all as seen hands its focus to the page's heading when the daemon goes away
+    Given the daemon reports running backups of "demo-home" and "demo-docs"
+    When I open the address "/operations"
+    And the table "Operations" has a row "demo-docs" that shows "Running"
+    And the daemon reports that the backup of "demo-docs" has succeeded with 5 files
+    And the row "demo-docs" of the table "Operations" is marked as changed, its "Status" in bold and an edge at its start
+    And I skip to the content
+    And I press Tab until focus is on the button "Mark all as seen"
+    And the daemon goes away
+    Then the page shows the heading "Cannot reach Ladderback"
+    And the page doesn't offer the button "Mark all as seen"
+    And focus is on the heading "Cannot reach Ladderback"
+    And the polite region never says "marked as seen"
+
   # Mark all as seen stands in the page's row of actions, after the plans'
   # start buttons, in a place kept for it while it is hidden, so it comes
   # and goes without moving the table, however the row wraps (1.4.10).

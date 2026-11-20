@@ -476,6 +476,19 @@ When("the daemon's events stream drops", async function (this: BrowserWorld) {
   await scripted(this).dropTheStream();
 });
 
+// The page reads the history again as its stream drops, and so meets what
+// the daemon has become: a refusal takes the table's place, or the page's
+// unreachable state does.
+When("the daemon can't read its store, and its events stream drops", async function (this: BrowserWorld) {
+  scripted(this).refuseReads();
+  await scripted(this).dropTheStream();
+});
+
+When("the daemon goes away", async function (this: BrowserWorld) {
+  scripted(this).goAway();
+  await scripted(this).dropTheStream();
+});
+
 // A page that read again beside the reading held back would have asked as it
 // heard the end, before this step began; the moment it waits is for that
 // request to reach the scripted daemon, not for the page.
