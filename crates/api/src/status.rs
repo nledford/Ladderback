@@ -146,6 +146,9 @@ pub struct LogLineDto {
     /// (`ladderback::scheduler`).
     pub source: String,
     pub message: String,
+    /// The line's number since the daemon started, from 1: a newer line has
+    /// a larger one, and `read_log`'s `before` takes it.
+    pub number: u64,
 }
 
 /// How much a line of the daemon log matters, most severe first, so that

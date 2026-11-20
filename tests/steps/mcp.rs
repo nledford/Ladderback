@@ -62,6 +62,10 @@ pub struct McpE2e {
     pages: Vec<Value>,
     /// What the last run returned: its `structuredContent`.
     started: Option<Value>,
+    /// The pages of the recent log `read_log` answered, in order.
+    pub(super) log_pages: Vec<Value>,
+    /// The time a `read_log` was bounded by.
+    pub(super) log_bound: Option<String>,
 }
 
 /// One `ladderback mcp`, ended with the scenario.

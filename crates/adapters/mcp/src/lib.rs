@@ -54,6 +54,7 @@ mod arguments;
 mod checks;
 mod connect;
 mod contents;
+mod log;
 mod one_shot;
 mod pages;
 mod proposals;

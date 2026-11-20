@@ -29,6 +29,7 @@ fn line_dto(line: &LogLine) -> LogLineDto {
         },
         source: line.source().to_owned(),
         message: line.message().to_owned(),
+        number: line.number(),
     }
 }
 
@@ -106,5 +107,11 @@ mod tests {
         let first = answer.lines.first().unwrap();
         assert_eq!(first.source, "ladderback::demo");
         assert_eq!(first.message, "said");
+        let numbers: Vec<u64> = answer.lines.iter().map(|line| line.number).collect();
+        assert_eq!(
+            numbers,
+            [5, 4, 3, 2, 1],
+            "each line numbered from the first kept"
+        );
     }
 }
