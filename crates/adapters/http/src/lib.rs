@@ -1138,8 +1138,10 @@ async fn read_folder(
             }
         },
     };
-    let _ = params.limit;
-    let most = u64::MAX;
+    let Ok(most) = number(params.limit) else {
+        return invalid_argument("limit", api::ArgumentProblem::Invalid);
+    };
+    let most = most.unwrap_or(u64::MAX);
     let Ok(id) = domain::SnapshotId::parse(&snapshot) else {
         return snapshot_unknown(snapshot);
     };
@@ -1178,19 +1180,34 @@ async fn find_in_snapshots(
     axum::extract::Path(alias): axum::extract::Path<String>,
     axum::extract::Query(params): axum::extract::Query<FindParams>,
 ) -> Response {
-    let _ = (state, alias, params);
-    todo!()
+    let Some(pattern) = params.pattern else {
+        return invalid_argument("pattern", api::ArgumentProblem::Missing);
+    };
+    let Ok(pattern) = domain::find::NamePattern::parse(&pattern) else {
+        return invalid_argument("pattern", api::ArgumentProblem::Invalid);
+    };
+    let plan = match params.plan.as_deref().map(domain::PlanId::parse) {
+        None => None,
+        Some(Ok(plan)) => Some(plan),
+        Some(Err(_)) => return invalid_argument("plan", api::ArgumentProblem::Invalid),
+    };
+    let Ok(snapshots) = number(params.snapshots) else {
+        return invalid_argument("snapshots", api::ArgumentProblem::Invalid);
+    };
+    let Ok(matches) = number(params.matches) else {
+        return invalid_argument("matches", api::ArgumentProblem::Invalid);
+    };
+    let caps = domain::find::SearchCaps::clamped(snapshots, matches);
+    match state.catalog.find(alias.clone(), pattern, plan, caps).await {
+        Ok(found) => (StatusCode::OK, axum::Json(found)).into_response(),
+        Err(error) => snapshots_refused(alias, error),
+    }
 }
 
-/// The query parameter `field`, a whole number when it is given: anything
-/// else is refused as `invalid-arguments`.
-fn number(field: &'static str, given: Option<String>) -> Result<Option<u64>, Response> {
-    given
-        .map(|text| {
-            text.parse::<u64>()
-                .map_err(|_| invalid_argument(field, api::ArgumentProblem::Invalid))
-        })
-        .transpose()
+/// A query parameter's value, a whole number when it is given; anything
+/// else is an error, which the caller refuses as `invalid-arguments`.
+fn number(given: Option<String>) -> Result<Option<u64>, std::num::ParseIntError> {
+    given.map(|text| text.parse::<u64>()).transpose()
 }
 
 /// The refusal of a query parameter: 400 `invalid-arguments`, naming the

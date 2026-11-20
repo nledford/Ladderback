@@ -18,8 +18,7 @@ use crate::job::{EntryResult, FolderResult, LISTING_BATCH_BYTES};
 pub(crate) fn page(nodes: &[Node], from: u64, most: usize) -> FolderResult {
     let total = u64::try_from(nodes.len()).unwrap_or(u64::MAX);
     let start = usize::try_from(from).unwrap_or(usize::MAX);
-    let _ = most;
-    let most = PAGE_ENTRIES;
+    let most = most.clamp(1, PAGE_ENTRIES);
     let mut entries = Vec::new();
     let mut bytes = 0_usize;
     let mut consumed = 0_u64;

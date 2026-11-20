@@ -51,8 +51,21 @@ pub enum InvalidPattern {
 impl NamePattern {
     /// The pattern `text` is.
     pub fn parse(text: &str) -> Result<Self, InvalidPattern> {
-        let _ = text;
-        todo!()
+        if text.is_empty() {
+            return Err(InvalidPattern::Empty);
+        }
+        // Counted before anything is copied, so a hostile text costs no more
+        // than the longest pattern.
+        if text.chars().nth(MAX_PATTERN_CHARS).is_some() {
+            return Err(InvalidPattern::TooLong);
+        }
+        if text.contains(['/', '\0']) {
+            return Err(InvalidPattern::NotAName);
+        }
+        Ok(Self {
+            written: text.to_owned(),
+            folded: text.to_lowercase().chars().collect(),
+        })
     }
 
     /// The pattern as written.
@@ -64,8 +77,37 @@ impl NamePattern {
     /// pattern, whatever its case. Linear in the name for a pattern of one
     /// `*`, and never worse than the name's length times the pattern's.
     pub fn matches(&self, name: &str) -> bool {
-        let _ = name;
-        todo!()
+        let name: Vec<char> = name.to_lowercase().chars().collect();
+        let pattern = self.folded.as_slice();
+        let (mut at_pattern, mut at_name) = (0_usize, 0_usize);
+        // The last `*` seen, and where in the name it was last made to end.
+        let mut star: Option<(usize, usize)> = None;
+        while let Some(character) = name.get(at_name) {
+            match pattern.get(at_pattern) {
+                Some('*') => {
+                    star = Some((at_pattern, at_name));
+                    at_pattern = at_pattern.saturating_add(1);
+                }
+                Some(wanted) if *wanted == '?' || wanted == character => {
+                    at_pattern = at_pattern.saturating_add(1);
+                    at_name = at_name.saturating_add(1);
+                }
+                _ => {
+                    let Some((star_at, ended)) = star else {
+                        return false;
+                    };
+                    // The `*` takes one more character, and the rest of the
+                    // pattern is tried after it.
+                    let ended = ended.saturating_add(1);
+                    star = Some((star_at, ended));
+                    at_pattern = star_at.saturating_add(1);
+                    at_name = ended;
+                }
+            }
+        }
+        pattern
+            .get(at_pattern..)
+            .is_some_and(|rest| rest.iter().all(|wanted| *wanted == '*'))
     }
 }
 
@@ -82,8 +124,15 @@ impl SearchCaps {
     /// The caps `snapshots` and `matches` make, each its default when not
     /// given.
     pub fn clamped(snapshots: Option<u64>, matches: Option<u64>) -> Self {
-        let _ = (snapshots, matches);
-        todo!()
+        let clamp = |given: Option<u64>, default: u32, most: u32| {
+            given.map_or(default, |given| {
+                u32::try_from(given.clamp(1, u64::from(most))).unwrap_or(most)
+            })
+        };
+        Self {
+            snapshots: clamp(snapshots, DEFAULT_SNAPSHOTS, MAX_SNAPSHOTS),
+            matches: clamp(matches, DEFAULT_MATCHES, MAX_MATCHES),
+        }
     }
 
     /// The most snapshots the search reads.
@@ -124,8 +173,31 @@ pub struct Chosen {
 /// one (the first `ladderback-plan:` tag, as the snapshot list reads it),
 /// newest first, at most `most`; and how many more there were.
 pub fn choose(mut listed: Vec<Listed>, plan: Option<&PlanId>, most: u32) -> Chosen {
-    let _ = (&mut listed, plan, most);
-    todo!()
+    listed.retain(|snapshot| {
+        plan.is_none_or(|plan| {
+            snapshot
+                .tags
+                .iter()
+                .find_map(|tag| tag.strip_prefix(PLAN_TAG_PREFIX))
+                == Some(plan.as_str())
+        })
+    });
+    // Newest first; two of the same time in the order of their IDs, so a
+    // search reads the same ones each time.
+    listed.sort_by(|a, b| b.time.cmp(&a.time).then_with(|| a.id.cmp(&b.id)));
+    let most = usize::try_from(most).unwrap_or(usize::MAX);
+    let left_out = u64::try_from(listed.len().saturating_sub(most)).unwrap_or(u64::MAX);
+    listed.truncate(most);
+    Chosen {
+        searched: listed
+            .into_iter()
+            .map(|snapshot| Searched {
+                snapshot: snapshot.id,
+                time: snapshot.time,
+            })
+            .collect(),
+        left_out,
+    }
 }
 
 /// Which cap ended a search before it had read every snapshot it chose.

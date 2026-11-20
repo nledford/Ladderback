@@ -91,8 +91,7 @@ impl BrowseSnapshot {
         most: u64,
     ) -> Result<FolderPage, BrowseError> {
         let repository = self.access(alias, entry).await?;
-        let _ = most;
-        let most = u64::try_from(PAGE_ENTRIES).unwrap_or(u64::MAX);
+        let most = most.clamp(1, u64::try_from(PAGE_ENTRIES).unwrap_or(u64::MAX));
         let job = Job::Browse(BrowseJob {
             repository,
             snapshot,
@@ -127,8 +126,20 @@ impl BrowseSnapshot {
         plan: Option<PlanId>,
         caps: SearchCaps,
     ) -> Result<SearchAnswer, BrowseError> {
-        let _ = (op, alias, entry, pattern, plan, caps);
-        todo!()
+        let repository = self.access(alias, entry).await?;
+        let job = Job::Find(FindJob {
+            repository,
+            pattern,
+            plan,
+            caps,
+        });
+        match within(self.clock.as_ref(), SEARCH_TIMEOUT, self.run(op, job))
+            .await
+            .map_err(BrowseError::Read)?
+        {
+            EngineResult::Found(answer) => Ok(answer),
+            _ => Err(engine_exited()),
+        }
     }
 
     /// The access to the repository the configuration's `entry`, saved

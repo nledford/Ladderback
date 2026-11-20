@@ -64,8 +64,43 @@ pub(crate) fn search<T: Trees>(
     most: u32,
     out_of_time: impl FnMut() -> bool,
 ) -> Result<FindResult, JobError> {
-    let _ = (trees, roots, left_out, pattern, most, out_of_time);
-    todo!()
+    let mut search = Search {
+        trees,
+        pattern,
+        out_of_time,
+        read: HashMap::new(),
+        found: Found {
+            most,
+            ..Found::default()
+        },
+    };
+    let count = u64::try_from(roots.len()).unwrap_or(u64::MAX);
+    let mut searched = Vec::new();
+    let mut stopped = None;
+    for root in roots {
+        let mut path = Vec::new();
+        match search.walk(&root.tree, &mut path, &root.snapshot) {
+            Ok(_) => searched.push(SearchedResult {
+                snapshot: root.snapshot,
+                time: root.time,
+            }),
+            Err(Halt::Stop(stop)) => {
+                stopped = Some(stop);
+                break;
+            }
+            Err(Halt::Failed(error)) => return Err(error),
+        }
+    }
+    let unread = count.saturating_sub(u64::try_from(searched.len()).unwrap_or(u64::MAX));
+    if stopped.is_none() && left_out > 0 {
+        stopped = Some(SearchStop::Snapshots);
+    }
+    Ok(FindResult {
+        searched,
+        left_out: left_out.saturating_add(unread),
+        matches: search.found.matches,
+        stopped,
+    })
 }
 
 /// Why a walk ended before its tree's end.
