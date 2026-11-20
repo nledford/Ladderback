@@ -306,6 +306,19 @@ fn says_not_paired(agent: &mut Agent) {
     assert!(said.stderr.contains("isn't paired with a hub"), "{said:?}");
 }
 
+/// A command that only checks writes nothing, not even the agent ID a
+/// machine gets when it first pairs or serves.
+#[then("the machine's data folder holds nothing")]
+fn data_folder_empty(agent: &mut Agent) {
+    let data = testkit::daemon::data_dir(&machine_root(agent));
+    let held: Vec<_> = match std::fs::read_dir(&data) {
+        Ok(entries) => entries.map(|entry| entry.unwrap().file_name()).collect(),
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => vec![],
+        Err(error) => panic!("{}: {error}", data.display()),
+    };
+    assert!(held.is_empty(), "{held:?}");
+}
+
 #[then("the terminal shows no token")]
 fn no_token_shown(agent: &mut Agent) {
     let said = said(agent);

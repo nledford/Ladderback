@@ -18,6 +18,15 @@ pub const AGENT_ID_FILE: &str = "agent-id";
 /// and is never read whole (technical design §13.5).
 const MAX_ID_FILE_BYTES: u64 = 256;
 
+/// The agent ID stored in `data_dir`, or `None` when there is none yet.
+/// Writes nothing: a command that only reads, such as `hub-status`, uses it
+/// rather than [`load_or_create`]. A file that exists but doesn't hold an ID
+/// is an error.
+pub fn load(data_dir: &Path) -> io::Result<Option<AgentId>> {
+    let _ = data_dir;
+    todo!()
+}
+
 /// The agent ID stored in `data_dir`, generating and storing one first if
 /// there is none. A file that exists but doesn't hold an ID is an error,
 /// never silently replaced.
@@ -94,6 +103,29 @@ mod tests {
     use std::fs;
 
     use super::*;
+
+    #[test]
+    fn a_data_dir_with_no_id_has_none_and_is_left_empty() {
+        let root = tempfile::tempdir().unwrap();
+        let data = root.path().join("data");
+        assert_eq!(load(&data).unwrap(), None);
+        assert!(!data.exists());
+    }
+
+    #[test]
+    fn a_kept_id_is_loaded_as_it_is() {
+        let data = tempfile::tempdir().unwrap();
+        let id = load_or_create(data.path()).unwrap();
+        assert_eq!(load(data.path()).unwrap(), Some(id));
+    }
+
+    #[test]
+    fn a_damaged_id_file_is_an_error_when_only_loaded() {
+        let data = tempfile::tempdir().unwrap();
+        fs::write(data.path().join(AGENT_ID_FILE), "not an id").unwrap();
+        let error = load(data.path()).unwrap_err();
+        assert_eq!(error.kind(), io::ErrorKind::InvalidData);
+    }
 
     #[test]
     fn an_agent_keeps_the_id_it_was_first_given() {

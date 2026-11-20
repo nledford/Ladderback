@@ -17,3 +17,4 @@ Feature: Checking a machine's link to its hub from a terminal
   Scenario: A machine that never paired has no hub to check
     When the machine checks its link to the hub from its terminal
     Then the machine says it isn't paired with a hub
+    And the machine's data folder holds nothing
