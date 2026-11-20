@@ -987,6 +987,10 @@ error-profile-unsupported = The profile { $file } says something { -brand-name }
 # $plan (text): the plan's ID, such as home.
 error-plan-id-taken = { -brand-name } already has a plan with the ID { $plan }, or the profile makes two of them, so nothing was imported. Give the profile's snapshot entries different names, or remove the plan from the configuration.
 
+# The profile runs commands (hooks, a password command, an option rustic runs as a command), and nobody confirmed them, so nothing was imported.
+# `--yes` is typed as it is: keep it a string literal.
+error-profile-commands-unconfirmed = Nothing was imported: the profile runs commands that nobody confirmed, or that changed after they were listed. Run the import at a terminal to see them and answer, or run it again with { "--yes" } once you have read them.
+
 # The plan can't be exported, because the repository's password is written in the configuration.
 # `password` is a setting of the configuration, typed as it is: keep it a string literal.
 error-inline-secret = { -brand-name } did not export the plan, because the repository's { "password" } is written in its configuration, and a profile would have to repeat it as text. Move the password to a keyring, a file, a command or an environment variable, then export again.
@@ -1220,6 +1224,14 @@ warning-profile-keyring-command-missing = { $program ->
 # An export for an AI agent or an API token left a command out of the profile: the password's command or a list of hooks, which a person wrote and which may hold a token.
 # $key (text): the command's place in the profile, such as repository.password-command or global.hooks.run-before. Keep it as it is.
 warning-profile-command-left-out = The command at { $key } was left out of the profile, because this export may be read by an AI agent or another program. To have it, export the plan from the web UI or the command line.
+
+# An import made a command runnable: a hook, the password's command, or an option rustic runs as a command.
+# $key (text): where the configuration keeps it, such as hooks.run-before or repositories.nas.password-command. Keep it as it is.
+# $program (text): the program the command starts, such as curl.
+warning-profile-command-imported = The import added a command at { $key } that runs { $program }.
+
+# An import left the profile's global hooks out, because the configuration already had plans or repositories.
+warning-profile-global-hooks-left-out = The profile's global hooks were left out, because they would also run around the plans and repositories the configuration already has. To have them, add them to the { -agent }'s hooks yourself.
 
 # A notification of an event was not delivered to its channel, and is not tried again.
 # $event (text): the event's name, such as backup.failed. Keep it as it is.

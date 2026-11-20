@@ -50,6 +50,11 @@ pub(crate) fn import_refusal(error: ImportError, config_file: &std::path::Path) 
             detail: None,
         },
         ImportError::Config(error) => profile_config_refusal(error, config_file),
+        ImportError::CommandsUnconfirmed(_) => Refusal {
+            code: ErrorCode::ProfileCommandsUnconfirmed,
+            args: Vec::new(),
+            detail: None,
+        },
     }
 }
 
@@ -296,6 +301,11 @@ pub(crate) fn profile_notice(notice: ProfileNotice) -> Notice {
         ProfileNotice::CommandLeftOut { key } => {
             (WarningCode::ProfileCommandLeftOut, vec![("key", text(key))])
         }
+        ProfileNotice::CommandImported { key, program } => (
+            WarningCode::ProfileCommandImported,
+            vec![("key", text(key)), ("program", text(program))],
+        ),
+        ProfileNotice::GlobalHooksLeftOut => (WarningCode::ProfileGlobalHooksLeftOut, Vec::new()),
     };
     Notice { code, args }
 }

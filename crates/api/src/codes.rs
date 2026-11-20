@@ -383,6 +383,11 @@ pub enum ErrorCode {
     /// The configuration, or the profile itself, already has a plan with this
     /// ID, so nothing was imported. The argument `plan` names it.
     PlanIdTaken,
+    /// The profile runs commands nobody agreed the import may make
+    /// runnable, so nothing was imported: `import-profile` was not told
+    /// `--yes`, and had nobody to ask, or the profile's commands changed
+    /// after they were listed (§6.2).
+    ProfileCommandsUnconfirmed,
     /// A plan can't be exported as a profile because its repository's
     /// password is written in the configuration: a profile would have to
     /// repeat it as text. Nothing was written.
@@ -759,6 +764,17 @@ pub enum WarningCode {
     /// option rustic runs as a command, as `repository.options.rclone-command`,
     /// or a hook's list, as `global.hooks.run-before`.
     ProfileCommandLeftOut,
+    /// An import made a command runnable (§6.2), one notice for each. The
+    /// argument `key` is where the configuration keeps it: `hooks.run-before`,
+    /// `repositories.<alias>.password-command`, an option rustic runs as a
+    /// command, as `repositories.<alias>.options.rclone-command`, or a
+    /// hook's list, as `plans.<id>.hooks.run-after`; `program` is the program
+    /// it starts.
+    ProfileCommandImported,
+    /// An import left the profile's `[global.hooks]` out, because the
+    /// configuration already had plans or repositories whose jobs they would
+    /// have run around (§6.2).
+    ProfileGlobalHooksLeftOut,
     /// A notification of an event wasn't delivered to its channel (§11). It
     /// is not tried again. The arguments: `event`, the event's name
     /// (`backup.failed`); `rule` and `channel`, their names in the
@@ -1425,7 +1441,9 @@ impl ErrorCode {
                 optional: false,
             }],
             Self::AdoptionNoMatch => &[],
-            Self::MaintenanceSelectionChanged | Self::RepositoryReadTimedOut => &[],
+            Self::MaintenanceSelectionChanged
+            | Self::RepositoryReadTimedOut
+            | Self::ProfileCommandsUnconfirmed => &[],
             Self::AdoptionAmbiguous => &[ArgSpec {
                 name: "plans",
                 kind: ArgKind::Text,
@@ -1838,6 +1856,18 @@ impl WarningCode {
                 kind: ArgKind::Text,
                 optional: false,
             }],
+            Self::ProfileCommandImported => &[
+                ArgSpec {
+                    name: "key",
+                    kind: ArgKind::Text,
+                    optional: false,
+                },
+                ArgSpec {
+                    name: "program",
+                    kind: ArgKind::Text,
+                    optional: false,
+                },
+            ],
             Self::NotificationUndelivered => &[
                 ArgSpec {
                     name: "event",
@@ -1866,6 +1896,7 @@ impl WarningCode {
             | Self::ProfilePrune
             | Self::ProfileEnvIgnored
             | Self::ProfileHooksPerPlan
+            | Self::ProfileGlobalHooksLeftOut
             | Self::ProfileRetentionEmpty
             | Self::CoreDumpsOn
             | Self::DebuggerAttachAllowed

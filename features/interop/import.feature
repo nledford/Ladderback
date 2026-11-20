@@ -165,15 +165,76 @@ Feature: Import a rustic profile
       And the agent has no hostname of its own
       And the plan "home" has the host "demo-laptop"
 
-  Rule: The profile's global hooks run after the agent's own
+  Rule: An import makes no command runnable that nobody confirmed
+
+    Scenario: A profile that runs commands is refused until they are confirmed, and each is listed in full
+      Given a profile holding the plan "home"
+      And the profile's global hooks run "profile-hook --ping" before everything
+      And the profile reads the repository's password with the command "pass show nas"
+      When the owner imports the profile as the repository "nas"
+      Then the import is refused until its commands are confirmed
+      And the import lists the command "profile-hook --ping" at "hooks.run-before"
+      And the import lists the command "pass show nas" at "repositories.nas.password-command"
+      And the configuration is unchanged
+
+    Scenario: Confirmed commands are imported, and each is noted with the program it starts
+      Given a profile holding the plan "home"
+      And the profile reads the repository's password with the command "pass show nas"
+      When the owner imports the profile as the repository "nas", confirming its commands
+      Then the import succeeds
+      And the import notes that it made "pass" runnable at "repositories.nas.password-command"
+
+    Scenario: Commands that changed after they were listed are refused
+      Given a profile holding the plan "home"
+      And the profile's global hooks run "profile-hook" before everything
+      And the profile changes to run "other-hook" before everything once its commands are listed
+      When the owner imports the profile as the repository "nas", confirming its commands
+      Then the import is refused until its commands are confirmed
+      And the import lists the command "other-hook" at "hooks.run-before"
+      And the configuration is unchanged
+
+    Scenario: A program the repository's rclone location runs is a command to confirm too
+      Given a profile holding the plan "home"
+      And the profile's repository is at "rclone::sftp,host=nas,ssh='ssh -i /home/demo/.ssh/nas demo@nas':/srv/repo" with the option "connections" set to "4"
+      When the owner imports the profile as the repository "nas"
+      Then the import is refused until its commands are confirmed
+      And the configuration is unchanged
+
+    Scenario: A confirmed program of an rclone location is noted with the location
+      Given a profile holding the plan "home"
+      And the profile's repository is at "rclone::sftp,host=nas,ssh='ssh -i /home/demo/.ssh/nas demo@nas':/srv/repo" with the option "connections" set to "4"
+      When the owner imports the profile as the repository "nas", confirming its commands
+      Then the import succeeds
+      And the import notes that it made "ssh" runnable at "repositories.nas.repository"
+
+  Rule: The profile's global hooks join the agent's own only while the configuration has no plan or repository
 
     Scenario: Imported global hooks are appended
       Given the agent's hooks run "agent-hook" before everything
       And a profile holding the plan "home"
       And the profile's global hooks run "profile-hook" before everything
-      When the owner imports the profile as the repository "nas"
+      When the owner imports the profile as the repository "nas", confirming its commands
       Then the import succeeds
       And the agent's hooks run "agent-hook" and then "profile-hook" before everything
+
+    Scenario: Global hooks are left out of a configuration that has plans
+      Given the configuration holds the repository "cloud"
+      And the configuration holds the plan "work" for the repository "cloud"
+      And a profile holding the plan "home"
+      And the profile's global hooks run "profile-hook" before everything
+      When the owner imports the profile as the repository "nas", confirming its commands
+      Then the import succeeds
+      And the agent's hooks run nothing before everything
+      And the import notes that the profile's global hooks were left out
+
+    Scenario: Global hooks are left out of a configuration that has a repository, as they would run around its maintenance
+      Given the configuration holds the repository "cloud"
+      And a profile holding the plan "home"
+      And the profile's global hooks run "profile-hook" before everything
+      When the owner imports the profile as the repository "nas", confirming its commands
+      Then the import succeeds
+      And the agent's hooks run nothing before everything
+      And the import notes that the profile's global hooks were left out
 
   @e2e
   Rule: A plan gets what rustic would back up with
@@ -832,7 +893,7 @@ Feature: Import a rustic profile
         run-before = ["echo entry-before"]
         run-after = ["echo entry-after"]
         """
-      When the owner imports the profile "nas.toml"
+      When the owner imports the profile "nas.toml" without being asked about its commands
       Then the import succeeds
       And the import warns that backup hooks now run once per plan
       And the saved config has:
@@ -841,6 +902,118 @@ Feature: Import a rustic profile
         | repositories.nas.hooks.run-before    | ["echo repository"]                  |
         | plans.home.hooks.run-before          | ["echo backup-before", "echo entry-before"] |
         | plans.home.hooks.run-after           | ["echo entry-after", "echo backup-after"]   |
+
+  @e2e
+  Rule: The command line lists every command an import would make runnable, and writes the config only once they are confirmed
+
+    Scenario: Away from a terminal, a profile that runs commands is refused, each command listed in full, and nothing is written
+      Given a rustic profile "nas.toml" holding:
+        """
+        [global.hooks]
+        run-before = ["curl -fsS https://hc.example/start"]
+
+        [repository]
+        repository = "{scratch}/repo"
+        password-command = "pass show demo/nas"
+
+        [[backup.snapshots]]
+        name = "home"
+        sources = ["/home/demo"]
+
+        [backup.snapshots.hooks]
+        run-failed = ["notify-send 'backup failed'"]
+        """
+      When the owner imports the profile "nas.toml"
+      Then the import is refused until its commands are confirmed
+      And the import lists the command "curl -fsS https://hc.example/start" at "hooks.run-before"
+      And the import lists the command "pass show demo/nas" at "repositories.nas.password-command"
+      And the import lists the command "notify-send 'backup failed'" at "plans.home.hooks.run-failed"
+      And no config file was written
+
+    Scenario: A command's control characters are listed as escapes, so the terminal shows them rather than acts on them
+      Given a rustic profile "nas.toml" holding:
+        """
+        [global.hooks]
+        run-before = ["echo \"start\r\u001b[2Kdone\u202e\""]
+
+        [repository]
+        repository = "{scratch}/repo"
+        password-file = "{scratch}/password"
+
+        [[backup.snapshots]]
+        name = "home"
+        sources = ["/home/demo"]
+        """
+      When the owner imports the profile "nas.toml"
+      Then the import is refused until its commands are confirmed
+      And the import lists the command "echo 'start\r\u{1b}[2Kdone\u{202e}'" at "hooks.run-before"
+      And standard error holds no control or bidirectional format character
+
+    Scenario: Told not to ask, the import lists the commands it made runnable
+      Given a rustic profile "nas.toml" holding:
+        """
+        [repository]
+        repository = "{scratch}/repo"
+        password-file = "{scratch}/password"
+
+        [repository.hooks]
+        run-after = ["curl -fsS https://hc.example/done"]
+
+        [[backup.snapshots]]
+        name = "home"
+        sources = ["/home/demo"]
+        """
+      When the owner imports the profile "nas.toml" without being asked about its commands
+      Then the import succeeds
+      And the import lists the command "curl -fsS https://hc.example/done" at "repositories.nas.hooks.run-after"
+      And the saved config has:
+        | key                              | value                                 |
+        | repositories.nas.hooks.run-after | ["curl -fsS https://hc.example/done"] |
+
+    Scenario: A script that wants JSON is never asked: without --yes, the refusal is the document
+      Given a rustic profile "nas.toml" holding:
+        """
+        [repository]
+        repository = "{scratch}/repo"
+        password-file = "{scratch}/password"
+
+        [repository.hooks]
+        run-after = ["curl -fsS https://hc.example/done"]
+
+        [[backup.snapshots]]
+        name = "home"
+        sources = ["/home/demo"]
+        """
+      When the owner runs "import-profile nas.toml --json"
+      Then the command exits with status 1
+      And standard output is one line holding one JSON document
+      And the document has:
+        | key        | value                          |
+        | error.code | "profile-commands-unconfirmed" |
+      And no config file was written
+
+    Scenario: With --yes, the document notes each command the import made runnable, with the program it starts
+      Given a rustic profile "nas.toml" holding:
+        """
+        [repository]
+        repository = "{scratch}/repo"
+        password-file = "{scratch}/password"
+
+        [repository.hooks]
+        run-after = ["curl -fsS https://hc.example/done"]
+
+        [[backup.snapshots]]
+        name = "home"
+        sources = ["/home/demo"]
+        """
+      When the owner runs "import-profile nas.toml --json --yes"
+      Then the command exits with status 0
+      And the document has:
+        | key                    | value                                                      |
+        | notices.0.code         | "profile-command-imported"                                 |
+        | notices.0.args.key     | {"type":"text","value":"repositories.nas.hooks.run-after"} |
+        | notices.0.args.program | {"type":"text","value":"curl"}                             |
+      And the import never shows "hc.example"
 
   @e2e
   Rule: What Ladderback does not carry over is said, and what it cannot honour is refused

@@ -16,11 +16,11 @@
 use std::borrow::Cow;
 use std::collections::BTreeSet;
 
-use super::{is_relative_program, starts_relative};
+use super::{LocationProgram, is_relative_program, starts_relative};
 use crate::secrets::{MAX_RCLONE_DEPTH, is_rclone_secret_flag};
 
 /// What the value of a flag or a setting names on this machine.
-#[derive(Clone, Copy)]
+#[derive(Clone, Copy, PartialEq, Eq)]
 enum Names {
     /// A file or a folder.
     File,
@@ -241,31 +241,37 @@ fn written_as(written: &str, name: &str, separator: char) -> bool {
         })
 }
 
-/// Whether the setting `name` of a connection string names something on
-/// this machine by a relative path when it is `value`. `override.NAME` and
-/// `global.NAME` set a global flag. Any other is an option of `backend`,
-/// the backend an on-the-fly location names or a remote's `type` setting
-/// says; a remote of rclone's configuration file without one may be of
-/// any, so its setting is read as each backend with an option of that name
-/// reads it.
-fn setting_relative(backend: Option<&str>, name: &str, value: &str, depth: usize) -> bool {
-    if let Some(global) = name
+/// What the setting `name` of a connection string names on this machine.
+/// `override.NAME` and `global.NAME` set a global flag. Any other is an
+/// option of `backend`, the backend an on-the-fly location names or a
+/// remote's `type` setting says; a remote of rclone's configuration file
+/// without one may be of any, so its setting is read as each backend with
+/// an option of that name reads it.
+fn setting_names<'a>(backend: Option<&'a str>, name: &'a str) -> impl Iterator<Item = Names> + 'a {
+    let global = name
         .strip_prefix("override.")
-        .or_else(|| name.strip_prefix("global."))
-    {
-        return GLOBAL_FLAGS.iter().any(|(flag, names)| {
-            written_as(global, flag, '_') && names_relative(*names, value, depth)
-        });
-    }
-    let options = || {
+        .or_else(|| name.strip_prefix("global."));
+    let globals = GLOBAL_FLAGS
+        .iter()
+        .filter(move |(flag, _)| global.is_some_and(|global| written_as(global, flag, '_')))
+        .map(|(_, names)| *names);
+    let options = move || {
         BACKEND_OPTIONS
             .iter()
-            .filter(|(_, option, _)| *option == name)
+            .filter(move |(_, option, _)| global.is_none() && *option == name)
     };
     let own = options().any(|(prefix, _, _)| Some(*prefix) == backend);
-    options()
-        .filter(|(prefix, _, _)| !own || Some(*prefix) == backend)
-        .any(|(_, _, names)| names_relative(*names, value, depth))
+    let backends = options()
+        .filter(move |(prefix, _, _)| !own || Some(*prefix) == backend)
+        .map(|(_, _, names)| *names);
+    globals.chain(backends)
+}
+
+/// Whether the setting `name` of a connection string names something on
+/// this machine by a relative path when it is `value`, read as
+/// [`setting_names`] says.
+fn setting_relative(backend: Option<&str>, name: &str, value: &str, depth: usize) -> bool {
+    setting_names(backend, name).any(|names| names_relative(names, value, depth))
 }
 
 /// Whether `value`, what a flag or a setting is set to, names something on
@@ -280,13 +286,10 @@ fn names_relative(names: Names, value: &str, depth: usize) -> bool {
             .and_then(|words| words.into_iter().next())
             .is_some_and(|program| is_relative_program(&program)),
         Names::Location => reads_relative(value, true, depth),
-        Names::UnionUpstreams => words(value).unwrap_or_default().iter().any(|upstream| {
-            let location = [":ro", ":nc", ":writeback"]
-                .iter()
-                .find_map(|mode| upstream.strip_suffix(mode))
-                .unwrap_or(upstream);
-            reads_relative(location, true, depth)
-        }),
+        Names::UnionUpstreams => words(value)
+            .unwrap_or_default()
+            .iter()
+            .any(|upstream| reads_relative(upstream_location(upstream), true, depth)),
         Names::CombineUpstreams => words(value).unwrap_or_default().iter().any(|upstream| {
             upstream
                 .split_once('=')
@@ -299,6 +302,104 @@ fn names_relative(names: Names, value: &str, depth: usize) -> bool {
                 .unwrap_or(value),
         ),
         Names::Address => value.strip_prefix("unix://").is_some_and(file_relative),
+    }
+}
+
+/// The location of an upstream of a union, without the `:ro`, `:nc` or
+/// `:writeback` after it.
+fn upstream_location(upstream: &str) -> &str {
+    [":ro", ":nc", ":writeback"]
+        .iter()
+        .find_map(|mode| upstream.strip_suffix(mode))
+        .unwrap_or(upstream)
+}
+
+/// The programs rclone runs for `path`, the location of a repository: the
+/// value of each setting of its connection string that names one, and of
+/// each location written in a setting, read as deep as
+/// [`location_relative`] reads one, in the order written. A location
+/// deeper than that names none here: [`location_relative`] finds it
+/// relative, so a profile that writes one is refused.
+pub(super) fn location_programs(path: &str) -> Vec<LocationProgram> {
+    let mut found = Vec::new();
+    programs(path, MAX_RCLONE_DEPTH, &mut found);
+    found
+}
+
+/// [`location_programs`], `depth` levels deep at most, added to `found`.
+fn programs(path: &str, depth: usize, found: &mut Vec<LocationProgram>) {
+    let Some(depth) = depth.checked_sub(1) else {
+        return;
+    };
+    let Some((backend, settings)) = connection(path) else {
+        return;
+    };
+    for (name, value) in &settings {
+        // Each backend with an option of this name reads it the same way:
+        // once per way is enough.
+        let names = |kind: Names| setting_names(backend.as_deref(), name).any(|n| n == kind);
+        if names(Names::Program) {
+            found.push(LocationProgram {
+                command: value.clone().into_owned(),
+                program: program_of(value),
+            });
+        }
+        if names(Names::Location) {
+            programs(value, depth, found);
+        }
+        if names(Names::UnionUpstreams) {
+            for upstream in words(value).unwrap_or_default() {
+                programs(upstream_location(&upstream), depth, found);
+            }
+        }
+        if names(Names::CombineUpstreams) {
+            for upstream in words(value).unwrap_or_default() {
+                if let Some((_, location)) = upstream.split_once('=') {
+                    programs(location, depth, found);
+                }
+            }
+        }
+    }
+}
+
+/// The program a setting that names one starts: the first of the words
+/// rclone splits its value into, or, for a value rclone refuses to split,
+/// its first word at a space.
+fn program_of(value: &str) -> String {
+    words(value)
+        .and_then(|words| words.into_iter().next())
+        .unwrap_or_else(|| value.split(' ').next().unwrap_or_default().to_owned())
+}
+
+/// The backend and the settings of the connection string `path` starts
+/// with, as [`reads_relative`] reads them: an on-the-fly backend's
+/// (`:sftp,host=nas:`), whose name is the backend, or a remote's
+/// (`nas,type=sftp:`), whose last `type` setting says the backend, if one
+/// does. Nothing for a path with no settings, or one rclone refuses.
+fn connection(path: &str) -> Option<(Option<Cow<'_, str>>, Vec<Setting<'_>>)> {
+    let ends = |c: &(usize, char)| matches!(c.1, '/' | '\\' | ':' | ',');
+    let (at, found) = path.char_indices().find(ends)?;
+    match (at, found) {
+        (0, ':') => {
+            let text = path.get(1..)?;
+            let (at, found) = text.char_indices().find(ends)?;
+            let backend = text.get(..at).filter(|backend| !backend.is_empty())?;
+            if found != ',' {
+                return None;
+            }
+            let (settings, _) = settings(text.get(at.saturating_add(1)..)?)?;
+            Some((Some(Cow::Borrowed(backend)), settings))
+        }
+        (_, ',') if at > 0 => {
+            let (settings, _) = settings(path.get(at.saturating_add(1)..)?)?;
+            let backend = settings
+                .iter()
+                .rev()
+                .find(|(name, _)| *name == "type")
+                .map(|(_, backend)| backend.clone());
+            Some((backend, settings))
+        }
+        _ => None,
     }
 }
 

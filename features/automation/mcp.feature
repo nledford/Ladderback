@@ -432,6 +432,31 @@ Feature: AI agents and scripts use Ladderback through MCP
     Then the preview adds the repository "nas" and the plan "laptop"
     And the preview carries the notice "profile-used-not-read"
 
+  # An import asks the person before it makes a command runnable: the preview
+  # names each, by where it would land and the program it starts.
+  Scenario: A profile's preview names each command an import would make runnable, and the global hooks it would leave out
+    Given Ladderback is serving on loopback with the plan "home"
+    And an MCP server connected to it
+    When the MCP client previews importing as "nas" the profile:
+      """
+      [global.hooks]
+      run-before = ["curl -fsS https://hc.example/start"]
+
+      [repository]
+      repository = "/srv/restic-repo"
+      password-file = "/home/demo/.restic-password"
+
+      [repository.hooks]
+      run-after = ["notify-send done"]
+
+      [[backup.snapshots]]
+      name = "laptop"
+      sources = ["/home/demo"]
+      """
+    Then the preview adds the repository "nas" and the plan "laptop"
+    And the preview carries the notice "profile-command-imported"
+    And the preview carries the notice "profile-global-hooks-left-out"
+
   Scenario: A profile that isn't TOML is refused without its text
     Given an MCP server running in a scratch folder
     When the MCP client previews importing as "nas" the profile:

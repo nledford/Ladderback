@@ -133,6 +133,16 @@ pub enum ProfileNotice {
     /// `global.hooks.run-before`), because it was asked to leave every
     /// command out ([`ExportCommands::LeftOut`]).
     CommandLeftOut { key: String },
+    /// An import made a command runnable: `key` is where the configuration
+    /// keeps it (`hooks.run-before`, `repositories.nas.password-command`,
+    /// `repositories.nas.options.rclone-command`, `plans.home.hooks.run-after`)
+    /// and `program` the program it starts. One for each command, in the
+    /// order of [`Imported::commands`](crate::interop::Imported::commands).
+    CommandImported { key: String, program: String },
+    /// An import left the profile's `[global.hooks]` out: the configuration
+    /// already had plans or repositories, around whose jobs they would have
+    /// run too.
+    GlobalHooksLeftOut,
 }
 
 /// Why a profile couldn't be read. `file` is the path as the user gave it, or

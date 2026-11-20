@@ -27,6 +27,7 @@ use signing_adapter::AwsLcSigning;
 use store::SqliteStore;
 use tls_adapter::WebSocketHubConnector;
 
+use crate::confirm::{Question, confirmed};
 use crate::output::{refusal_line, to_stderr, to_stdout};
 use crate::{finish, say, text};
 
@@ -379,7 +380,7 @@ fn run_pair(localizer: &Localizer, ask: PairAsk) -> io::Result<ExitCode> {
             ("fingerprint", text(Fingerprint::of_key(token.hub_key()))),
         ],
     )?;
-    if !confirmed(localizer, at_terminal, ask.yes)? {
+    if !confirmed(localizer, &PAIR, at_terminal, ask.yes)? {
         return Ok(ExitCode::FAILURE);
     }
     let runtime = match runtime(localizer)? {
@@ -389,28 +390,12 @@ fn run_pair(localizer: &Localizer, ask: PairAsk) -> io::Result<ExitCode> {
     runtime.block_on(on_the_agent(localizer, &data_dir, token, hostname))
 }
 
-/// Whether the person said `y`: at a terminal they are asked; piped, only
-/// `--yes` goes ahead.
-fn confirmed(localizer: &Localizer, at_terminal: bool, yes: bool) -> io::Result<bool> {
-    if yes {
-        return Ok(true);
-    }
-    if !at_terminal {
-        say(localizer, msg::CLI_PAIR_NO_TERMINAL, &[])?;
-        return Ok(false);
-    }
-    to_stderr(&format!(
-        "{} ",
-        localizer.message(msg::CLI_PAIR_CONFIRM, &[])
-    ))?;
-    let mut answer = String::new();
-    io::stdin().read_line(&mut answer)?;
-    let yes = matches!(answer.trim(), "y" | "Y");
-    if !yes {
-        say(localizer, msg::CLI_PAIR_NOT_CONFIRMED, &[])?;
-    }
-    Ok(yes)
-}
+/// What `pair` asks before it sends anything.
+const PAIR: Question = Question {
+    ask: msg::CLI_PAIR_CONFIRM,
+    declined: msg::CLI_PAIR_NOT_CONFIRMED,
+    no_terminal: msg::CLI_PAIR_NO_TERMINAL,
+};
 
 async fn on_the_agent(
     localizer: &Localizer,

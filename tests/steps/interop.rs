@@ -344,6 +344,13 @@ async fn imports(agent: &mut Agent, name: String) {
     run(agent, &["import-profile", &file]).await;
 }
 
+#[when(expr = "the owner imports the profile {string} without being asked about its commands")]
+async fn imports_without_asking(agent: &mut Agent, name: String) {
+    let file = work_dir(agent).join(name);
+    let file = file.to_str().expect("a UTF-8 path").to_owned();
+    run(agent, &["import-profile", &file, "--yes"]).await;
+}
+
 #[when(expr = "the owner imports the profile {string} as the repository {string}")]
 async fn imports_as(agent: &mut Agent, name: String, alias: String) {
     let file = work_dir(agent).join(name);
@@ -452,6 +459,45 @@ fn import_succeeds(agent: &mut Agent) {
 #[then(expr = "the import is refused naming {string}")]
 fn import_refused(agent: &mut Agent, text: String) {
     assert_refused_naming(agent, &text);
+}
+
+/// Away from a terminal, nobody can be asked: the refusal says how to agree.
+#[then("the import is refused until its commands are confirmed")]
+fn refused_unconfirmed(agent: &mut Agent) {
+    assert_refused_naming(agent, "--yes");
+    assert!(
+        ran(agent).stdout.is_empty(),
+        "a refused import reports nothing: {}",
+        ran(agent).stdout
+    );
+}
+
+/// A line of standard error names the key and holds the whole command.
+#[then(expr = "the import lists the command {string} at {string}")]
+fn lists_command(agent: &mut Agent, command: String, key: String) {
+    let stderr = &ran(agent).stderr;
+    assert!(
+        stderr
+            .lines()
+            .any(|line| line.contains(&key) && line.contains(&command)),
+        "no line names {key:?} with {command:?}: {stderr}"
+    );
+}
+
+/// Nothing on standard error but its line breaks acts on a terminal: no
+/// control character moves the cursor or erases a line, and no
+/// bidirectional format character reorders what follows it.
+#[then("standard error holds no control or bidirectional format character")]
+fn stderr_inert(agent: &mut Agent) {
+    let stderr = &ran(agent).stderr;
+    let acts = |c: char| {
+        (c.is_control() && c != '\n')
+            || matches!(
+                c,
+                '\u{61c}' | '\u{200e}' | '\u{200f}' | '\u{202a}'..='\u{202e}' | '\u{2066}'..='\u{2069}'
+            )
+    };
+    assert!(!stderr.chars().any(acts), "{stderr:?}");
 }
 
 #[then(expr = "the refusal points at line {int} of the profile")]
