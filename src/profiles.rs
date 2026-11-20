@@ -85,12 +85,10 @@ fn warn(localizer: &Localizer, notice: &Notice) -> io::Result<()> {
     to_stderr(&notice_said(localizer, notice))
 }
 
-/// The line [`warn`] prints.
+/// The line [`warn`] prints, its arguments escaped
+/// ([`output::warning_line`]).
 fn notice_said(localizer: &Localizer, notice: &Notice) -> String {
-    format!(
-        "ladderback: {}\n",
-        localizer.warning(notice.code, &notice.args, None)
-    )
+    output::warning_line(localizer, notice.code, &notice.args)
 }
 
 /// What `import-profile --json` prints when the import saved the profile,

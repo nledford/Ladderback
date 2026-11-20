@@ -221,7 +221,8 @@ fn runtime(localizer: &Localizer) -> io::Result<Option<tokio::runtime::Runtime>>
     }
 }
 
-/// The line, for stderr, that says why an install or a removal stopped.
+/// The line, for stderr, that says why an install or a removal stopped: its
+/// texts, the service manager's own words among them, escaped.
 fn error_said(localizer: &Localizer, error: &ServiceError) -> String {
     match &error.problem {
         ServiceProblem::File { detail } => said(
@@ -229,13 +230,13 @@ fn error_said(localizer: &Localizer, error: &ServiceError) -> String {
             msg::CLI_SERVICE_FILE_ERROR,
             &[
                 ("file", MsgArg::Text(shown(&error.file))),
-                ("detail", text(detail)),
+                ("detail", outside(detail)),
             ],
         ),
         ServiceProblem::ManagerMissing { command, detail } => said(
             localizer,
             msg::CLI_SERVICE_MANAGER_MISSING,
-            &[("command", text(command)), ("detail", text(detail))],
+            &[("command", outside(command)), ("detail", outside(detail))],
         ),
         ServiceProblem::ManagerRefused {
             command,
@@ -243,13 +244,13 @@ fn error_said(localizer: &Localizer, error: &ServiceError) -> String {
         } => said(
             localizer,
             msg::CLI_SERVICE_MANAGER_REFUSED,
-            &[("command", text(command)), ("said", text(words))],
+            &[("command", outside(command)), ("said", outside(words))],
         ),
         ServiceProblem::ManagerSilent { command, seconds } => said(
             localizer,
             msg::CLI_SERVICE_MANAGER_SILENT,
             &[
-                ("command", text(command)),
+                ("command", outside(command)),
                 ("limit", MsgArg::DurationMs(seconds.saturating_mul(1000))),
             ],
         ),
@@ -257,7 +258,7 @@ fn error_said(localizer: &Localizer, error: &ServiceError) -> String {
             localizer,
             msg::CLI_SERVICE_STILL_STOPPING,
             &[
-                ("command", text(command)),
+                ("command", outside(command)),
                 ("limit", MsgArg::DurationMs(seconds.saturating_mul(1000))),
             ],
         ),
@@ -267,6 +268,12 @@ fn error_said(localizer: &Localizer, error: &ServiceError) -> String {
             &[("file", MsgArg::Text(shown(&error.file)))],
         ),
     }
+}
+
+/// Text from outside (the service manager's, the operating system's) as a
+/// message's argument, escaped.
+fn outside(text: &str) -> MsgArg {
+    MsgArg::Text(crate::output::escaped(text))
 }
 
 /// One of the catalog's messages, as a line of its own.
