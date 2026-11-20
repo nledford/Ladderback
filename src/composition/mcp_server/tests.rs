@@ -403,8 +403,24 @@ impl http_adapter::Catalog for WithSnapshots {
         snapshot: domain::SnapshotId,
         folder: domain::browse::FolderPath,
         from: u64,
+        most: u64,
     ) -> Result<api::FolderDto, http_adapter::FolderError> {
-        self.catalog.folder(alias, snapshot, folder, from).await
+        self.catalog
+            .folder(alias, snapshot, folder, from, most)
+            .await
+    }
+
+    async fn find(
+        &self,
+        alias: String,
+        pattern: domain::find::NamePattern,
+        plan: Option<domain::PlanId>,
+        caps: domain::find::SearchCaps,
+    ) -> Result<api::FindDto, http_adapter::SnapshotsError> {
+        if alias == "slow" {
+            return Err(http_adapter::SnapshotsError::TimedOut);
+        }
+        self.catalog.find(alias, pattern, plan, caps).await
     }
 }
 
@@ -492,6 +508,29 @@ async fn both_backends_refuse_a_listing_that_ran_out_of_time_alike() {
     assert_eq!(
         Err(refused.clone()),
         connect.snapshots("slow".to_owned()).await
+    );
+    assert_eq!(wire_name(refused.code), "repository-read-timed-out");
+}
+
+#[tokio::test]
+async fn both_backends_refuse_a_search_that_ran_out_of_time_alike() {
+    let scratch = tempfile::tempdir().expect("a scratch dir");
+    let daemon = a_daemon(scratch.path()).await;
+    let mut state = daemon.state.clone();
+    state.catalog = Arc::new(WithSnapshots {
+        catalog: Arc::clone(&daemon.state.catalog),
+        snapshots: Vec::new(),
+    });
+    let connect = connected_over(state.clone()).await;
+    let pattern = || domain::find::NamePattern::parse("tax*").expect("a pattern");
+    let caps = domain::find::SearchCaps::clamped(None, None);
+    let refused = InProcess::over(&state)
+        .find("slow".to_owned(), pattern(), None, caps)
+        .await
+        .expect_err("a search that ran out of time is refused");
+    assert_eq!(
+        Err(refused.clone()),
+        connect.find("slow".to_owned(), pattern(), None, caps).await
     );
     assert_eq!(wire_name(refused.code), "repository-read-timed-out");
 }
@@ -1097,6 +1136,26 @@ async fn every_tool(session: &mut Session) -> serde_json::Value {
         ("list_snapshots", json!({"repository": "vault"})),
         ("list_snapshots", json!({"repository": "nowhere"})),
         ("list_snapshots", json!({})),
+        (
+            "list_snapshot_folder",
+            json!({"repository": "vault", "snapshot": "3f".repeat(32)}),
+        ),
+        (
+            "list_snapshot_folder",
+            json!({"repository": "vault", "snapshot": "latest"}),
+        ),
+        (
+            "find_in_snapshots",
+            json!({"repository": "vault", "pattern": "tax*"}),
+        ),
+        (
+            "find_in_snapshots",
+            json!({"repository": "nowhere", "pattern": "tax*"}),
+        ),
+        (
+            "find_in_snapshots",
+            json!({"repository": "vault", "pattern": "a/b"}),
+        ),
         ("list_operations", json!({})),
         ("list_operations", json!({"cursor": "not-a-cursor"})),
         ("get_operation", json!({"operation": failed})),

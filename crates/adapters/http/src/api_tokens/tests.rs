@@ -354,6 +354,12 @@ fn the_permission_table_names_each_route_a_token_may_use_and_no_other() {
             Some(BackupRuns),
         ),
         (
+            Method::GET,
+            "/api/v1/repositories/home/find",
+            Some(Backups),
+        ),
+        (Method::POST, "/api/v1/repositories/home/find", None),
+        (
             Method::POST,
             "/api/v1/repositories/home/maintenance/preview",
             Some(Previews),
@@ -502,6 +508,21 @@ async fn a_read_token_reads_a_snapshot_s_folder() {
     let token = daemon.token(&[Permission::SnapshotContents]).await;
     let response = daemon
         .send(get(&folder_of_a_snapshot(), &[("authorization", &token)]))
+        .await;
+    assert_eq!(response.status(), StatusCode::OK);
+}
+
+/// An agent searches a repository's snapshots with Backups, as it reads
+/// the list of snapshots (#953): no Backup runs is needed.
+#[tokio::test]
+async fn a_read_token_searches_a_repository_s_snapshots() {
+    let daemon = Daemon::new();
+    let token = daemon.token(&[Permission::Backups]).await;
+    let response = daemon
+        .send(get(
+            "/api/v1/repositories/home/find?pattern=tax",
+            &[("authorization", &token)],
+        ))
         .await;
     assert_eq!(response.status(), StatusCode::OK);
 }
@@ -2148,8 +2169,19 @@ impl crate::Catalog for FailedOnAFile {
         _snapshot: domain::SnapshotId,
         _folder: domain::browse::FolderPath,
         _from: u64,
+        _most: u64,
     ) -> Result<api::FolderDto, crate::FolderError> {
         Ok(api::FolderDto::default())
+    }
+
+    async fn find(
+        &self,
+        _alias: String,
+        _pattern: domain::find::NamePattern,
+        _plan: Option<domain::PlanId>,
+        _caps: domain::find::SearchCaps,
+    ) -> Result<api::FindDto, crate::SnapshotsError> {
+        Ok(api::FindDto::default())
     }
 }
 

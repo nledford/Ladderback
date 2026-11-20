@@ -309,15 +309,27 @@ pub trait Catalog: Send + Sync {
     async fn snapshots(&self, alias: String) -> Result<api::SnapshotsDto, SnapshotsError>;
 
     /// The page of the folder `folder` of the snapshot `snapshot`, in the
-    /// repository `alias`, that starts at position `from` (§16, decision
-    /// 102), read live.
+    /// repository `alias`, that starts at position `from` and holds at most
+    /// `most` entries (§16, decision 102), read live.
     async fn folder(
         &self,
         alias: String,
         snapshot: domain::SnapshotId,
         folder: domain::browse::FolderPath,
         from: u64,
+        most: u64,
     ) -> Result<api::FolderDto, FolderError>;
+
+    /// The entries whose names match `pattern` in the newest snapshots of
+    /// the repository `alias`, of `plan` alone when it names one, within
+    /// `caps` (§16, decision 127), read live.
+    async fn find(
+        &self,
+        alias: String,
+        pattern: domain::find::NamePattern,
+        plan: Option<domain::PlanId>,
+        caps: domain::find::SearchCaps,
+    ) -> Result<api::FindDto, SnapshotsError>;
 
     /// The status summary (§4.6), read now, with `full_disk_access`, what
     /// the Full Disk Access probe found, as its own.
@@ -669,6 +681,10 @@ pub fn router(assets: Arc<dyn AssetSource>, checks: RequestChecks, state: AppSta
         .route(
             "/api/v1/repositories/{alias}/snapshots/{snapshot}/folder",
             axum::routing::get(read_folder),
+        )
+        .route(
+            "/api/v1/repositories/{alias}/find",
+            axum::routing::get(find_in_snapshots),
         )
         // For a session only: no API token scope opens either (§10.5).
         .route(
@@ -1068,26 +1084,36 @@ async fn list_snapshots(
 ) -> Response {
     match state.catalog.snapshots(alias.clone()).await {
         Ok(snapshots) => (StatusCode::OK, axum::Json(snapshots)).into_response(),
-        Err(SnapshotsError::Unknown) => refused_with(
+        Err(error) => snapshots_refused(alias, error),
+    }
+}
+
+/// The refusal of a read of the repository `alias` the listing, a folder's
+/// page and a search all tell alike.
+fn snapshots_refused(alias: String, error: SnapshotsError) -> Response {
+    match error {
+        SnapshotsError::Unknown => refused_with(
             StatusCode::NOT_FOUND,
             api::ErrorCode::RepositoryUnknown,
             vec![("alias", api::MsgArg::Text(alias))],
         ),
-        Err(SnapshotsError::SecretRefused(secret)) => repositories::secret_refusal(&secret),
-        Err(SnapshotsError::RepositoryNotFound) => no_repository(None),
-        Err(SnapshotsError::RepositoryConfigNotFound { detail }) => no_repository(Some(detail)),
-        Err(SnapshotsError::Unavailable { code, args, detail }) => unavailable(code, args, detail),
-        Err(SnapshotsError::TimedOut) => read_timed_out(),
+        SnapshotsError::SecretRefused(secret) => repositories::secret_refusal(&secret),
+        SnapshotsError::RepositoryNotFound => no_repository(None),
+        SnapshotsError::RepositoryConfigNotFound { detail } => no_repository(Some(detail)),
+        SnapshotsError::Unavailable { code, args, detail } => unavailable(code, args, detail),
+        SnapshotsError::TimedOut => read_timed_out(),
     }
 }
 
 /// The query the folder route takes: the folder's path in the snapshot, its
-/// names joined by `/` (none for the top), and the position the page starts
-/// at (none for the first). Both optional.
+/// names joined by `/` (none for the top), the position the page starts at
+/// (none for the first) and the most entries the page holds (none for a
+/// full page). All optional.
 #[derive(Deserialize, Default)]
 struct FolderParams {
     path: Option<String>,
     from: Option<String>,
+    limit: Option<String>,
 }
 
 /// One page of one folder of a snapshot, read live like the listing (§9).
@@ -1112,6 +1138,8 @@ async fn read_folder(
             }
         },
     };
+    let _ = params.limit;
+    let most = u64::MAX;
     let Ok(id) = domain::SnapshotId::parse(&snapshot) else {
         return snapshot_unknown(snapshot);
     };
@@ -1119,27 +1147,63 @@ async fn read_folder(
     let Ok(folder) = domain::browse::FolderPath::parse(&path) else {
         return folder_unknown(path);
     };
-    match state.catalog.folder(alias.clone(), id, folder, from).await {
+    match state
+        .catalog
+        .folder(alias.clone(), id, folder, from, most)
+        .await
+    {
         Ok(page) => (StatusCode::OK, axum::Json(page)).into_response(),
         Err(FolderError::SnapshotUnknown) => snapshot_unknown(snapshot),
         Err(FolderError::FolderUnknown) => folder_unknown(path),
-        Err(FolderError::Repository(SnapshotsError::Unknown)) => refused_with(
-            StatusCode::NOT_FOUND,
-            api::ErrorCode::RepositoryUnknown,
-            vec![("alias", api::MsgArg::Text(alias))],
-        ),
-        Err(FolderError::Repository(SnapshotsError::SecretRefused(secret))) => {
-            repositories::secret_refusal(&secret)
-        }
-        Err(FolderError::Repository(SnapshotsError::RepositoryNotFound)) => no_repository(None),
-        Err(FolderError::Repository(SnapshotsError::RepositoryConfigNotFound { detail })) => {
-            no_repository(Some(detail))
-        }
-        Err(FolderError::Repository(SnapshotsError::Unavailable { code, args, detail })) => {
-            unavailable(code, args, detail)
-        }
-        Err(FolderError::Repository(SnapshotsError::TimedOut)) => read_timed_out(),
+        Err(FolderError::Repository(error)) => snapshots_refused(alias, error),
     }
+}
+
+/// The query the search route takes: the pattern a name must match, and
+/// optionally the plan whose snapshots alone are searched and the caps on
+/// the snapshots read and the matches returned.
+#[derive(Deserialize, Default)]
+struct FindParams {
+    pattern: Option<String>,
+    plan: Option<String>,
+    snapshots: Option<String>,
+    matches: Option<String>,
+}
+
+/// A search of a repository's snapshots for entries by name (§16, decision
+/// 127), read live like the listing (§9). The pattern, the plan and the caps
+/// are parsed here, where they enter; a cap past its most is lowered to it.
+async fn find_in_snapshots(
+    State(state): State<AppState>,
+    axum::extract::Path(alias): axum::extract::Path<String>,
+    axum::extract::Query(params): axum::extract::Query<FindParams>,
+) -> Response {
+    let _ = (state, alias, params);
+    todo!()
+}
+
+/// The query parameter `field`, a whole number when it is given: anything
+/// else is refused as `invalid-arguments`.
+fn number(field: &'static str, given: Option<String>) -> Result<Option<u64>, Response> {
+    given
+        .map(|text| {
+            text.parse::<u64>()
+                .map_err(|_| invalid_argument(field, api::ArgumentProblem::Invalid))
+        })
+        .transpose()
+}
+
+/// The refusal of a query parameter: 400 `invalid-arguments`, naming the
+/// parameter and what is wrong with it, never the value given.
+fn invalid_argument(field: &'static str, problem: api::ArgumentProblem) -> Response {
+    refused_with(
+        StatusCode::BAD_REQUEST,
+        api::ErrorCode::InvalidArguments,
+        vec![
+            ("field", api::MsgArg::Text(field.to_owned())),
+            ("problem", api::MsgArg::Text(problem.as_str().to_owned())),
+        ],
+    )
 }
 
 /// No repository at the repository's location, a configuration to correct

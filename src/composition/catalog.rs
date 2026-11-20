@@ -22,6 +22,7 @@ use async_trait::async_trait;
 use domain::RepositoryAlias;
 use domain::browse::FolderPath;
 use domain::execution::FailureReason;
+use domain::find::{NamePattern, SearchAnswer, SearchCaps, SearchStop};
 use domain::planning::{
     InterfaceKind, Link, Location, LocationRule, MixedLinkNote, NameFilter, Plan, RepositoryConfig,
     RepositorySettings, RuleNote,
@@ -263,6 +264,7 @@ impl Catalog for ConfigCatalog {
         snapshot: SnapshotId,
         folder: FolderPath,
         from: u64,
+        most: u64,
     ) -> Result<api::FolderDto, FolderError> {
         // The repository is refused as its listing is (`snapshots`).
         let unknown = || FolderError::Repository(SnapshotsError::Unknown);
@@ -288,6 +290,7 @@ impl Catalog for ConfigCatalog {
             snapshot,
             folder,
             from,
+            most,
         )
         .await;
         let page = match read {
@@ -300,6 +303,102 @@ impl Catalog for ConfigCatalog {
             total: page.total,
             next: page.next,
         })
+    }
+
+    async fn find(
+        &self,
+        alias: String,
+        pattern: NamePattern,
+        plan: Option<PlanId>,
+        caps: SearchCaps,
+    ) -> Result<api::FindDto, SnapshotsError> {
+        // The repository is refused as its listing is (`snapshots`).
+        let alias = RepositoryAlias::parse(&alias).map_err(|_| SnapshotsError::Unknown)?;
+        let config = self.config.load().await.map_err(|error| {
+            config_unusable(error, |code, args, detail| SnapshotsError::Unavailable {
+                code,
+                args,
+                detail,
+            })
+        })?;
+        let repository = config.repository(&alias).ok_or(SnapshotsError::Unknown)?;
+        let found = BrowseSnapshot::new(
+            Arc::clone(&self.engine),
+            Arc::new(SystemClock),
+            ResolveRepository::new(Arc::new(SystemSecrets::default()))
+                .telling(Arc::new(log_secret_warning)),
+            Arc::clone(&self.reads),
+        )
+        .find(
+            OperationId::from_uuid(Uuid::now_v7()),
+            &alias,
+            repository,
+            pattern.clone(),
+            plan,
+            caps,
+        )
+        .await;
+        match found {
+            Ok(answer) => Ok(find_dto(&pattern, answer)),
+            Err(error) => Err(search_refusal(&alias, &repository.settings, error).await),
+        }
+    }
+}
+
+/// The refusal of a search of `alias`'s snapshots: as a folder's read is
+/// refused, which it reads as.
+pub(super) async fn search_refusal(
+    alias: &RepositoryAlias,
+    settings: &RepositorySettings,
+    error: BrowseError,
+) -> SnapshotsError {
+    match folder_refusal(alias, settings, error).await {
+        FolderError::Repository(error) => error,
+        // A search names no snapshot or folder, so it is never told either.
+        FolderError::SnapshotUnknown | FolderError::FolderUnknown => SnapshotsError::Unavailable {
+            code: ErrorCode::EngineUnavailable,
+            args: Vec::new(),
+            detail: None,
+        },
+    }
+}
+
+/// What a search found, as the wire carries it.
+pub(super) fn find_dto(pattern: &NamePattern, answer: SearchAnswer) -> api::FindDto {
+    api::FindDto {
+        pattern: pattern.as_str().to_owned(),
+        searched: answer
+            .searched
+            .into_iter()
+            .map(|searched| api::SearchedDto {
+                snapshot: searched.snapshot.as_str().to_owned(),
+                time: searched.time.to_string(),
+            })
+            .collect(),
+        left_out: answer.left_out,
+        matches: answer
+            .matches
+            .into_iter()
+            .map(|found| api::MatchDto {
+                path: found.path.to_string(),
+                display: found.display.into(),
+                kind: kind_dto(found.kind),
+                seen: found
+                    .seen
+                    .into_iter()
+                    .map(|seen| api::SeenDto {
+                        snapshot: seen.snapshot.as_str().to_owned(),
+                        size: seen.size,
+                        modified: seen.modified.map(|at| at.to_string()),
+                    })
+                    .collect(),
+            })
+            .collect(),
+        stopped: answer.stopped.map(|stop| match stop {
+            SearchStop::Snapshots => api::SearchStopDto::Snapshots,
+            SearchStop::Matches => api::SearchStopDto::Matches,
+            SearchStop::Time => api::SearchStopDto::Time,
+        }),
     }
 }
 
@@ -343,18 +442,22 @@ fn told_failure(reason: &FailureReason) -> Option<SnapshotsError> {
 
 /// An entry of a snapshot's folder as the page is told of it.
 fn entry_dto(entry: domain::browse::Entry) -> api::EntryDto {
-    use domain::browse::EntryKind;
     api::EntryDto {
         name: entry.name.into(),
         display: entry.display.into(),
-        kind: match entry.kind {
-            EntryKind::Folder => api::EntryKindDto::Folder,
-            EntryKind::File => api::EntryKindDto::File,
-            EntryKind::Link => api::EntryKindDto::Link,
-            EntryKind::Other => api::EntryKindDto::Other,
-        },
+        kind: kind_dto(entry.kind),
         size: entry.size,
         modified: entry.modified.map(|at| at.to_string()),
+    }
+}
+
+fn kind_dto(kind: domain::browse::EntryKind) -> api::EntryKindDto {
+    use domain::browse::EntryKind;
+    match kind {
+        EntryKind::Folder => api::EntryKindDto::Folder,
+        EntryKind::File => api::EntryKindDto::File,
+        EntryKind::Link => api::EntryKindDto::Link,
+        EntryKind::Other => api::EntryKindDto::Other,
     }
 }
 

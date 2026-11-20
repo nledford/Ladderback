@@ -1628,7 +1628,17 @@ pub(crate) async fn within_read_timeout<T>(
     clock: &dyn Clock,
     read: impl Future<Output = Result<T, MaintenanceError>>,
 ) -> Result<T, MaintenanceError> {
-    let give_up = clock.sleep_until(clock.now() + READ_TIMEOUT);
+    within(clock, READ_TIMEOUT, read).await
+}
+
+/// Awaits a read of the repository, giving it up when `limit` has passed on
+/// `clock`, as [`within_read_timeout`] does.
+pub(crate) async fn within<T>(
+    clock: &dyn Clock,
+    limit: SignedDuration,
+    read: impl Future<Output = Result<T, MaintenanceError>>,
+) -> Result<T, MaintenanceError> {
+    let give_up = clock.sleep_until(clock.now() + limit);
     // The read first: one that is ready is never lost to a timer.
     select_biased! {
         result = pin!(read.fuse()) => result,

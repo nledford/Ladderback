@@ -3,12 +3,15 @@
 //! `rustic_core` reported, converted by `convert`.
 
 use domain::execution::plan_tags::PlanTags;
+use domain::find::{Listed, NamePattern, SEARCH_SECONDS, SearchCaps, choose};
+use std::collections::HashMap;
 use std::path::PathBuf;
+use std::time::{Duration, Instant};
 
 use rustic_core::repofile::{SnapshotFile, SnapshotId as RusticSnapshotId};
 use rustic_core::{
     CheckOptions, ConfigOptions, Credentials, KeyOptions, LocalSource, ParentOptions, PathList,
-    SnapshotOptions, StringList,
+    SnapshotOptions, StringList, TreeId,
 };
 
 use super::browse;
@@ -17,12 +20,13 @@ use super::convert::{
     JobError, backup_options, backup_result, check_result, errors_first, prune_options,
     prune_plan_result, prune_result, snapshot_host, snapshot_id, snapshot_ref, snapshot_tags,
 };
+use super::find::{self, Child, Root, Trees};
 use super::listing;
 use super::repository::{self as location, new_repository, open, repository_id};
 use super::{Context, Done};
 use crate::job::{
-    BackupJobSpec, BrowseJobSpec, CheckJobSpec, FolderResult, ForgetJobSpec, ForgetResult,
-    OpResult, ProbeResult, PruneJobSpec, RepositorySpec, StatsResult, WorkerEvent,
+    BackupJobSpec, BrowseJobSpec, CheckJobSpec, FindJobSpec, FolderResult, ForgetJobSpec,
+    ForgetResult, OpResult, ProbeResult, PruneJobSpec, RepositorySpec, StatsResult, WorkerEvent,
 };
 use crate::job::{RewriteJobSpec, RewriteResult};
 
@@ -109,7 +113,76 @@ pub(crate) fn browse(ctx: &Context, job: &BrowseJobSpec) -> Result<Done, JobErro
     Ok(Done::Result(OpResult::Folder(browse::page(
         &tree.nodes,
         job.from,
+        usize::try_from(job.most).unwrap_or(usize::MAX),
     ))))
+}
+
+/// Finds entries by name across the repository's snapshots (§16, decision
+/// 127). A read: it emits `Started` after the open, as `ls` does, chooses the
+/// newest snapshots (of the plan, when the job names one), then walks their
+/// trees for at most [`SEARCH_SECONDS`], and sends one final result.
+pub(crate) fn find(ctx: &Context, job: &FindJobSpec) -> Result<Done, JobError> {
+    let pattern = NamePattern::parse(&job.pattern)
+        .map_err(|_| JobError::failed("the search's pattern is no name pattern"))?;
+    let caps = SearchCaps::clamped(Some(job.snapshots.into()), Some(job.matches.into()));
+    let repository = open(ctx, &job.repo)?;
+    ctx.start(None, Some(&repository_id(&repository)?))?;
+    let out_of_time = Instant::now() + Duration::from_secs(SEARCH_SECONDS);
+    let mut tops = HashMap::new();
+    let mut listed = Vec::new();
+    for snapshot in repository.get_all_snapshots()? {
+        let id = snapshot_id(&snapshot.id)?;
+        tops.insert(id.clone(), snapshot.tree);
+        listed.push(Listed {
+            id,
+            time: snapshot.time.timestamp(),
+            tags: snapshot.tags.iter().cloned().collect(),
+        });
+    }
+    let chosen = choose(listed, job.plan.as_ref(), caps.snapshots());
+    let roots = chosen
+        .searched
+        .into_iter()
+        .filter_map(|searched| {
+            Some(Root {
+                tree: *tops.get(&searched.snapshot)?,
+                snapshot: searched.snapshot,
+                time: searched.time,
+            })
+        })
+        .collect();
+    let repository = repository.to_indexed_ids()?;
+    let trees = RusticTrees(|id: &TreeId| Ok(repository.get_tree(id)?.nodes));
+    let found = find::search(
+        &trees,
+        roots,
+        chosen.left_out,
+        &pattern,
+        caps.matches(),
+        || Instant::now() >= out_of_time,
+    )?;
+    Ok(Done::Result(OpResult::Found(found)))
+}
+
+/// A repository's trees, read by `0`.
+struct RusticTrees<F>(F);
+
+impl<F> Trees for RusticTrees<F>
+where
+    F: Fn(&TreeId) -> Result<Vec<rustic_core::repofile::Node>, JobError>,
+{
+    type Id = TreeId;
+
+    fn children(&self, id: &TreeId) -> Result<Vec<Child<TreeId>>, JobError> {
+        Ok((self.0)(id)?
+            .iter()
+            .map(|node| Child {
+                entry: browse::entry(node),
+                name: node.name().to_string_lossy().into_owned(),
+                subtree: node.subtree.filter(|_| node.is_dir()),
+            })
+            .collect())
+    }
 }
 
 /// Reads the repository's stats (§16, decision 104). A read: it emits

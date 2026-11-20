@@ -7,15 +7,16 @@ use app::ports::{
     ForgetSummary, ProbeAnswer, ProgressEvent, ProgressKind as AppProgressKind, PrunePlanSummary,
     PruneSummary, RestorePlanSummary, RestoreSummary, RewriteSummary,
 };
-use domain::browse::{DisplayName, Entry, EntryName, FolderPage, PAGE_ENTRIES};
+use domain::browse::{DisplayName, Entry, EntryName, FolderPage, FolderPath, PAGE_ENTRIES};
 use domain::execution::{FailureReason, RepositoryHalf, Warning, WarningKind};
+use domain::find::{MAX_MATCHES, MAX_SNAPSHOTS, Match, SearchAnswer, Searched, Seen};
 use domain::maintenance::RepositoryStats;
 use domain::restore::download::{ArchiveFormat, DownloadShape};
 use domain::secrets::Redactor;
 
 use crate::job::{
-    ArchiveSpec, DumpFound, DumpResult, FolderResult, Level, OpResult, ProbeResult, ProgressKind,
-    TRUNCATED, WorkerEvent,
+    ArchiveSpec, DumpFound, DumpResult, FindResult, FolderResult, Level, OpResult, ProbeResult,
+    ProgressKind, TRUNCATED, WorkerEvent,
 };
 use crate::step::step_of;
 
@@ -150,6 +151,12 @@ pub(super) fn translate(event: WorkerEvent, redactor: &Redactor) -> Option<Engin
             // it can't read does.
             OpResult::Folder(found) => match folder_answer(found) {
                 Ok(answer) => EngineResult::Folder(answer),
+                Err(detail) => {
+                    return Some(EngineEvent::Failed(FailureReason::EngineFailed { detail }));
+                }
+            },
+            OpResult::Found(found) => match search_answer(found) {
+                Ok(answer) => EngineResult::Found(answer),
                 Err(detail) => {
                     return Some(EngineEvent::Failed(FailureReason::EngineFailed { detail }));
                 }
@@ -480,6 +487,70 @@ fn folder_answer(found: FolderResult) -> Result<FolderAnswer, String> {
         total,
         next,
     }))
+}
+
+/// A search's answer as the daemon takes it: no more snapshots or matches
+/// than a search returns, and each match at a path a browse can open.
+fn search_answer(found: FindResult) -> Result<SearchAnswer, String> {
+    let most_snapshots = usize::try_from(MAX_SNAPSHOTS).unwrap_or(usize::MAX);
+    if found.searched.len() > most_snapshots {
+        return Err(format!(
+            "the worker searched {} snapshots, more than {MAX_SNAPSHOTS}",
+            found.searched.len()
+        ));
+    }
+    let seen: usize = found
+        .matches
+        .iter()
+        .fold(0, |seen, found| seen.saturating_add(found.seen.len()));
+    if seen > usize::try_from(MAX_MATCHES).unwrap_or(usize::MAX) {
+        return Err(format!(
+            "the worker sent {seen} matches, more than {MAX_MATCHES}"
+        ));
+    }
+    let matches = found
+        .matches
+        .into_iter()
+        .map(|found| {
+            let path = found
+                .path
+                .iter()
+                .try_fold(FolderPath::top(), |path, name| {
+                    path.join(EntryName::parse(name)?)
+                })
+                .map_err(|error| format!("the worker sent a match whose {error}"))?;
+            if path.names().is_empty() || found.seen.is_empty() {
+                return Err("the worker sent a match at no path, or in no snapshot".to_owned());
+            }
+            Ok(Match {
+                path,
+                display: found.display,
+                kind: found.kind,
+                seen: found
+                    .seen
+                    .into_iter()
+                    .map(|seen| Seen {
+                        snapshot: seen.snapshot,
+                        size: seen.size,
+                        modified: seen.modified,
+                    })
+                    .collect(),
+            })
+        })
+        .collect::<Result<_, String>>()?;
+    Ok(SearchAnswer {
+        searched: found
+            .searched
+            .into_iter()
+            .map(|searched| Searched {
+                snapshot: searched.snapshot,
+                time: searched.time,
+            })
+            .collect(),
+        left_out: found.left_out,
+        matches,
+        stopped: found.stopped,
+    })
 }
 
 #[cfg(test)]

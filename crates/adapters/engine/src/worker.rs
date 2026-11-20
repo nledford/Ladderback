@@ -17,6 +17,7 @@ mod convert;
 mod dump;
 mod events;
 mod fake;
+mod find;
 mod jobs;
 mod listing;
 mod logging;
@@ -366,6 +367,7 @@ fn run_events(input: impl Read, events: Events, pid: u32, process: Process) -> i
         JobKind::Check(job) => jobs::check(&ctx, job),
         JobKind::Ls(repository) => jobs::ls(&ctx, repository),
         JobKind::Browse(job) => jobs::browse(&ctx, job),
+        JobKind::Find(job) => jobs::find(&ctx, job),
         JobKind::Stats(repository) => jobs::stats(&ctx, repository),
         JobKind::Restore(job) => restore::restore(&ctx, job),
         JobKind::RestorePlan(job) => restore::plan(&ctx, job),
@@ -432,6 +434,7 @@ fn repository_of(job: &JobKind) -> Option<&RepositorySpec> {
         JobKind::PrunePlan(job) => Some(&job.repo),
         JobKind::Check(job) => Some(&job.repo),
         JobKind::Browse(job) => Some(&job.repo),
+        JobKind::Find(job) => Some(&job.repo),
         JobKind::Restore(job) | JobKind::RestorePlan(job) => Some(&job.repo),
         JobKind::Dump(job) => Some(&job.repo),
     }

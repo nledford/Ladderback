@@ -436,32 +436,50 @@ impl ::mcp::Backend for InProcess {
     }
 
     async fn snapshots(&self, repository: String) -> Result<api::SnapshotsDto, api::ErrorDto> {
-        use http_adapter::SnapshotsError;
         self.catalog
             .snapshots(repository.clone())
             .await
+            .map_err(|error| snapshots_refusal(repository, error))
+    }
+
+    async fn folder(
+        &self,
+        repository: String,
+        snapshot: domain::SnapshotId,
+        folder: domain::browse::FolderPath,
+        from: u64,
+        most: u64,
+    ) -> Result<api::FolderDto, api::ErrorDto> {
+        use http_adapter::FolderError;
+        let named = snapshot.as_str().to_owned();
+        let path = folder.to_string();
+        self.catalog
+            .folder(repository.clone(), snapshot, folder, from, most)
+            .await
             .map_err(|error| match error {
-                SnapshotsError::Unknown => api::ErrorDto::new(
-                    api::ErrorCode::RepositoryUnknown,
-                    [("alias", MsgArg::Text(repository))],
+                FolderError::SnapshotUnknown => api::ErrorDto::new(
+                    api::ErrorCode::SnapshotUnknown,
+                    [("snapshot", MsgArg::Text(named))],
                     None,
                 ),
-                SnapshotsError::SecretRefused(secret) => {
-                    api::ErrorDto::new(secret.code, secret.args, secret.detail)
-                }
-                SnapshotsError::RepositoryNotFound => {
-                    api::ErrorDto::new(api::ErrorCode::RepositoryNotFound, [], None)
-                }
-                SnapshotsError::RepositoryConfigNotFound { detail } => {
-                    api::ErrorDto::new(api::ErrorCode::RepositoryConfigNotFound, [], Some(detail))
-                }
-                SnapshotsError::Unavailable { code, args, detail } => {
-                    api::ErrorDto::new(code, args, detail)
-                }
-                SnapshotsError::TimedOut => {
-                    api::ErrorDto::new(api::ErrorCode::RepositoryReadTimedOut, [], None)
-                }
+                FolderError::FolderUnknown => api::ErrorDto::new(
+                    api::ErrorCode::FolderUnknown,
+                    [("path", MsgArg::Text(path))],
+                    None,
+                ),
+                FolderError::Repository(error) => snapshots_refusal(repository, error),
             })
+    }
+
+    async fn find(
+        &self,
+        repository: String,
+        pattern: domain::find::NamePattern,
+        plan: Option<domain::PlanId>,
+        caps: domain::find::SearchCaps,
+    ) -> Result<api::FindDto, api::ErrorDto> {
+        let _ = (repository, pattern, plan, caps);
+        todo!()
     }
 
     async fn history(
@@ -598,6 +616,34 @@ impl ::mcp::Backend for InProcess {
 fn catalog_refusal(error: http_adapter::CatalogError) -> api::ErrorDto {
     let http_adapter::CatalogError::Unavailable { code, args, detail } = error;
     api::ErrorDto::new(code, args, detail)
+}
+
+/// A refusal of a read of the repository `alias`, its listing, a folder's
+/// page or a search, as the API answers it.
+fn snapshots_refusal(alias: String, error: http_adapter::SnapshotsError) -> api::ErrorDto {
+    use http_adapter::SnapshotsError;
+    match error {
+        SnapshotsError::Unknown => api::ErrorDto::new(
+            api::ErrorCode::RepositoryUnknown,
+            [("alias", MsgArg::Text(alias))],
+            None,
+        ),
+        SnapshotsError::SecretRefused(secret) => {
+            api::ErrorDto::new(secret.code, secret.args, secret.detail)
+        }
+        SnapshotsError::RepositoryNotFound => {
+            api::ErrorDto::new(api::ErrorCode::RepositoryNotFound, [], None)
+        }
+        SnapshotsError::RepositoryConfigNotFound { detail } => {
+            api::ErrorDto::new(api::ErrorCode::RepositoryConfigNotFound, [], Some(detail))
+        }
+        SnapshotsError::Unavailable { code, args, detail } => {
+            api::ErrorDto::new(code, args, detail)
+        }
+        SnapshotsError::TimedOut => {
+            api::ErrorDto::new(api::ErrorCode::RepositoryReadTimedOut, [], None)
+        }
+    }
 }
 
 #[cfg(test)]

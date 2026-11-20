@@ -231,7 +231,7 @@ pub(crate) fn required_permission(method: &Method, path: &str) -> Needs {
         ["repositories", _, "snapshots", _, "folder"] if reads => Permission::SnapshotContents,
         ["events" | "operations" | "plans" | "repositories" | "session" | "status"]
         | ["operations", _]
-        | ["repositories", _, "snapshots" | "groups" | "stats"]
+        | ["repositories", _, "snapshots" | "groups" | "stats" | "find"]
         | ["plans", _, "profile"]
             if reads =>
         {

@@ -483,7 +483,7 @@ async fn open(agent: &mut Agent, folder: FolderPath, from: u64) {
     let alias = domain::RepositoryAlias::parse("demo").expect("an alias");
     let op = agent.next_snapshot_op();
     let page = use_case
-        .folder(op, &alias, &entry, snapshot, folder.clone(), from)
+        .folder(op, &alias, &entry, snapshot, folder.clone(), from, 1_000)
         .await;
     agent.snapshots.opened = Some((folder, page));
 }

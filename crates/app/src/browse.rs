@@ -1,23 +1,36 @@
-//! The snapshot-browsing use case (§16, decision 102): one page of one folder
-//! of a snapshot, read live by one worker. The job names the ID the
-//! configuration's entry records, as a run's does, so the engine opens only
-//! that repository (refusing another at the location, §7.3) and gives the
-//! job the repository's cache. A read (§9): it takes no I7 slot and writes
-//! nothing to the operation log.
+//! The snapshot-browsing use cases (§16, decision 102): one page of one
+//! folder of a snapshot, and a search of a repository's snapshots for
+//! entries by name (decision 127), each read live by one worker. The job
+//! names the ID the configuration's entry records, as a run's does, so the
+//! engine opens only that repository (refusing another at the location,
+//! §7.3) and gives the job the repository's cache. A read (§9): it takes no
+//! I7 slot and writes nothing to the operation log.
 
 use std::sync::Arc;
 
-use domain::browse::{FolderPage, FolderPath};
+use domain::browse::{FolderPage, FolderPath, PAGE_ENTRIES};
 use domain::execution::FailureReason;
+use domain::find::{NamePattern, SEARCH_SECONDS, SearchAnswer, SearchCaps};
 use domain::planning::RepositoryConfig;
-use domain::{OperationId, RepositoryAlias, SnapshotId};
+use domain::{OperationId, PlanId, RepositoryAlias, SignedDuration, SnapshotId};
 
-use crate::maintenance::{MaintenanceError, run_read, within_read_timeout};
-use crate::ports::{BrowseJob, Clock, Engine, EngineResult, FolderAnswer, Job};
+use crate::maintenance::{MaintenanceError, run_read, within, within_read_timeout};
+use crate::ports::{
+    BrowseJob, Clock, Engine, EngineResult, FindJob, FolderAnswer, Job, RepositoryAccess,
+};
 use crate::reads::ReadTurns;
 use crate::secrets::{ResolveError, ResolveRepository};
 
-/// Reads a page of a snapshot's folder.
+/// How long a search may take in all, its wait for a turn and the
+/// repository's open included: its walk's [`SEARCH_SECONDS`] and ten more,
+/// within the 30 s a client of a running daemon waits for an answer (§4.6).
+pub const SEARCH_TIMEOUT: SignedDuration = SignedDuration::from_secs(25);
+
+// The walk fits in the search's time, with time left to open the repository.
+const _: () = assert!(SEARCH_SECONDS + 10 <= 25);
+
+/// Reads a page of a snapshot's folder, or searches a repository's
+/// snapshots.
 pub struct BrowseSnapshot {
     engine: Arc<dyn Engine>,
     clock: Arc<dyn Clock>,
@@ -25,18 +38,19 @@ pub struct BrowseSnapshot {
     reads: Arc<ReadTurns>,
 }
 
-/// Why a folder couldn't be read. A typed code, never a sentence (§8.4).
+/// Why a folder couldn't be read, or a search couldn't be made. A typed
+/// code, never a sentence (§8.4).
 #[derive(Debug, PartialEq)]
 pub enum BrowseError {
     /// The repository's secrets couldn't be resolved.
     Resolve(ResolveError),
-    /// Identifying the repository or reading the folder failed, or wasn't
-    /// answered within the read timeout: as a maintenance read's would
-    /// (`Engine`, `Failed`, `TimedOut`).
+    /// Identifying the repository or reading it failed, or wasn't answered
+    /// within the read's timeout: as a maintenance read's would (`Engine`,
+    /// `Failed`, `TimedOut`).
     Read(MaintenanceError),
-    /// The repository holds no snapshot by that ID.
+    /// The repository holds no snapshot by that ID. Never a search's.
     SnapshotUnknown,
-    /// The snapshot holds no folder at that path.
+    /// The snapshot holds no folder at that path. Never a search's.
     FolderUnknown,
 }
 
@@ -59,8 +73,13 @@ impl BrowseSnapshot {
     }
 
     /// The page of `folder` of the snapshot `snapshot` that starts at
-    /// position `from`, in the repository the configuration's `entry`,
+    /// position `from` and holds at most `most` entries (clamped from 1 to
+    /// [`PAGE_ENTRIES`]), in the repository the configuration's `entry`,
     /// saved under `alias`, names.
+    #[expect(
+        clippy::too_many_arguments,
+        reason = "each names one part of the page; a struct of them would be built only to be taken apart here"
+    )]
     pub async fn folder(
         &self,
         op: OperationId,
@@ -69,28 +88,19 @@ impl BrowseSnapshot {
         snapshot: SnapshotId,
         folder: FolderPath,
         from: u64,
+        most: u64,
     ) -> Result<FolderPage, BrowseError> {
-        // `resolve_saved` gives the access the ID the entry records, so the
-        // engine refuses another repository at the location (§7.3).
-        let repository = self
-            .resolve
-            .resolve_saved(alias, entry)
-            .await
-            .map_err(BrowseError::Resolve)?
-            .access;
+        let repository = self.access(alias, entry).await?;
+        let _ = most;
+        let most = u64::try_from(PAGE_ENTRIES).unwrap_or(u64::MAX);
         let job = Job::Browse(BrowseJob {
             repository,
             snapshot,
             folder,
             from,
+            most,
         });
-        // The wait for a turn counts against the read timeout, so a read
-        // waits no longer in all than one that started at once.
-        let read = async {
-            let _turn = self.reads.turn().await;
-            run_read(self.engine.as_ref(), self.clock.as_ref(), op, job).await
-        };
-        match within_read_timeout(self.clock.as_ref(), read)
+        match within_read_timeout(self.clock.as_ref(), self.run(op, job))
             .await
             .map_err(BrowseError::Read)?
         {
@@ -100,11 +110,58 @@ impl BrowseSnapshot {
             }
             EngineResult::Folder(FolderAnswer::FolderUnknown) => Err(BrowseError::FolderUnknown),
             // Any other answer is the engine stopping without its own.
-            _ => Err(BrowseError::Read(MaintenanceError::Failed(
-                FailureReason::EngineExited { exit_code: None },
-            ))),
+            _ => Err(engine_exited()),
         }
     }
+
+    /// The entries whose names match `pattern` in the newest snapshots, of
+    /// `plan` when it names one, within `caps`, in the repository the
+    /// configuration's `entry`, saved under `alias`, names. Given up once
+    /// [`SEARCH_TIMEOUT`] has passed, its wait for a turn included.
+    pub async fn find(
+        &self,
+        op: OperationId,
+        alias: &RepositoryAlias,
+        entry: &RepositoryConfig,
+        pattern: NamePattern,
+        plan: Option<PlanId>,
+        caps: SearchCaps,
+    ) -> Result<SearchAnswer, BrowseError> {
+        let _ = (op, alias, entry, pattern, plan, caps);
+        todo!()
+    }
+
+    /// The access to the repository the configuration's `entry`, saved
+    /// under `alias`, names. `resolve_saved` gives it the ID the entry
+    /// records, so the engine refuses another repository at the location
+    /// (§7.3).
+    async fn access(
+        &self,
+        alias: &RepositoryAlias,
+        entry: &RepositoryConfig,
+    ) -> Result<RepositoryAccess, BrowseError> {
+        Ok(self
+            .resolve
+            .resolve_saved(alias, entry)
+            .await
+            .map_err(BrowseError::Resolve)?
+            .access)
+    }
+
+    /// Runs `job` once a turn is free. The wait for a turn counts against
+    /// the caller's timeout, so a read waits no longer in all than one that
+    /// started at once.
+    async fn run(&self, op: OperationId, job: Job) -> Result<EngineResult, MaintenanceError> {
+        let _turn = self.reads.turn().await;
+        run_read(self.engine.as_ref(), self.clock.as_ref(), op, job).await
+    }
+}
+
+/// The engine stopping without an answer of the job's own.
+fn engine_exited() -> BrowseError {
+    BrowseError::Read(MaintenanceError::Failed(FailureReason::EngineExited {
+        exit_code: None,
+    }))
 }
 
 #[cfg(test)]
@@ -115,16 +172,19 @@ mod tests {
     use std::time::Duration;
 
     use async_trait::async_trait;
-    use domain::browse::{DisplayName, Entry, EntryKind, EntryName, FolderPage, FolderPath};
+    use domain::browse::{
+        DisplayName, Entry, EntryKind, EntryName, FolderPage, FolderPath, PAGE_ENTRIES,
+    };
     use domain::execution::FailureReason;
+    use domain::find::{NamePattern, SearchAnswer, SearchCaps, SearchStop, Searched};
     use domain::planning::{Maintenance, RepositoryConfig};
     use domain::secrets::{SecretRef, SecretValue};
-    use domain::{OperationId, RepositoryAlias, RepositoryId, SnapshotId, Timestamp, Uuid};
+    use domain::{OperationId, PlanId, RepositoryAlias, RepositoryId, SnapshotId, Timestamp, Uuid};
     use futures::stream;
     use tokio::sync::watch;
     use tokio::task::JoinHandle;
 
-    use super::{BrowseError, BrowseSnapshot};
+    use super::{BrowseError, BrowseSnapshot, SEARCH_TIMEOUT};
     use crate::fakes::{FakeClock, FakeSecrets};
     use crate::maintenance::{MaintenanceError, READ_TIMEOUT};
     use crate::ports::{
@@ -154,6 +214,7 @@ mod tests {
                     Ok(answer) => EngineEvent::Succeeded(EngineResult::Folder(answer)),
                     Err(reason) => EngineEvent::Failed(reason),
                 },
+                Job::Find(_) => EngineEvent::Succeeded(EngineResult::Found(found())),
                 other => EngineEvent::Failed(FailureReason::EngineFailed {
                     detail: format!("unexpected job {other:?}"),
                 }),
@@ -219,6 +280,24 @@ mod tests {
         }
     }
 
+    /// A search's answer: one snapshot searched, nothing found, the
+    /// snapshot cap reached.
+    fn found() -> SearchAnswer {
+        SearchAnswer {
+            searched: vec![Searched {
+                snapshot: snapshot(),
+                time: Timestamp::UNIX_EPOCH,
+            }],
+            left_out: 3,
+            matches: Vec::new(),
+            stopped: Some(SearchStop::Snapshots),
+        }
+    }
+
+    fn pattern() -> NamePattern {
+        NamePattern::parse("*.pdf").unwrap_or_else(|e| panic!("a pattern: {e:?}"))
+    }
+
     fn use_case(engine: Arc<dyn Engine>, clock: Arc<FakeClock>) -> BrowseSnapshot {
         BrowseSnapshot::new(
             engine,
@@ -273,7 +352,15 @@ mod tests {
         let browse = Arc::clone(browse);
         tokio::spawn(async move {
             browse
-                .folder(op(), &alias(), &entry(), snapshot(), FolderPath::top(), 0)
+                .folder(
+                    op(),
+                    &alias(),
+                    &entry(),
+                    snapshot(),
+                    FolderPath::top(),
+                    0,
+                    50,
+                )
                 .await
         })
     }
@@ -298,7 +385,15 @@ mod tests {
     async fn browsing_reads_the_folder_in_one_job_naming_the_recorded_id() {
         let engine = scripted(Ok(FolderAnswer::Page(page())));
         let read = use_case(engine.clone(), at_epoch())
-            .folder(op(), &alias(), &entry(), snapshot(), path("source/docs"), 0)
+            .folder(
+                op(),
+                &alias(),
+                &entry(),
+                snapshot(),
+                path("source/docs"),
+                0,
+                50,
+            )
             .await;
         assert_eq!(read, Ok(page()));
         let seen = engine.seen.lock().unwrap_or_else(PoisonError::into_inner);
@@ -314,6 +409,7 @@ mod tests {
         assert_eq!(browse.snapshot, snapshot());
         assert_eq!(browse.folder, path("source/docs"));
         assert_eq!(browse.from, 0);
+        assert_eq!(browse.most, 50, "the page holds as many entries as asked");
     }
 
     #[tokio::test]
@@ -327,6 +423,7 @@ mod tests {
                 snapshot(),
                 FolderPath::top(),
                 1_000,
+                50,
             )
             .await;
         let seen = engine.seen.lock().unwrap_or_else(PoisonError::into_inner);
@@ -337,10 +434,126 @@ mod tests {
         assert_eq!(browse.folder, FolderPath::top());
     }
 
+    /// The `most` of the browse job a read asking for `asked` entries sends.
+    async fn most_sent(asked: u64) -> u64 {
+        let engine = scripted(Ok(FolderAnswer::Page(page())));
+        let _ = use_case(engine.clone(), at_epoch())
+            .folder(
+                op(),
+                &alias(),
+                &entry(),
+                snapshot(),
+                FolderPath::top(),
+                0,
+                asked,
+            )
+            .await;
+        let seen = engine.seen.lock().unwrap_or_else(PoisonError::into_inner);
+        let Some(Job::Browse(browse)) = seen.last() else {
+            panic!("a browse: {seen:?}");
+        };
+        browse.most
+    }
+
+    #[tokio::test]
+    async fn a_page_holds_at_least_one_entry_and_at_most_a_full_page() {
+        let full = u64::try_from(PAGE_ENTRIES).unwrap_or(u64::MAX);
+        assert_eq!(most_sent(0).await, 1, "an empty page is never asked for");
+        assert_eq!(most_sent(1).await, 1);
+        assert_eq!(most_sent(full).await, full);
+        assert_eq!(
+            most_sent(full + 1).await,
+            full,
+            "no page holds more than the page a folder listing shows"
+        );
+        assert_eq!(most_sent(u64::MAX).await, full);
+    }
+
+    #[tokio::test]
+    async fn a_search_runs_one_find_job_naming_the_recorded_id_the_plan_and_the_caps() {
+        let engine = scripted(Ok(FolderAnswer::Page(page())));
+        let plan = PlanId::parse("documents").unwrap_or_else(|e| panic!("a plan: {e:?}"));
+        let caps = SearchCaps::clamped(Some(5), Some(7));
+        let found_now = use_case(engine.clone(), at_epoch())
+            .find(
+                op(),
+                &alias(),
+                &entry(),
+                pattern(),
+                Some(plan.clone()),
+                caps,
+            )
+            .await;
+        assert_eq!(found_now, Ok(found()));
+        let seen = engine.seen.lock().unwrap_or_else(PoisonError::into_inner);
+        let [Job::Find(find)] = seen.as_slice() else {
+            panic!("one search: {seen:?}");
+        };
+        assert_eq!(
+            find.repository.id,
+            Some(repository()),
+            "the search names the recorded ID, so another repository is refused"
+        );
+        assert_eq!(find.pattern, pattern());
+        assert_eq!(find.plan, Some(plan));
+        assert_eq!(find.caps, caps);
+    }
+
+    #[tokio::test]
+    async fn a_search_nobody_answers_is_given_up_when_the_search_timeout_ends() {
+        let (_gate, open) = watch::channel(false);
+        let engine = Arc::new(Gated {
+            open,
+            seen: Mutex::new(Vec::new()),
+        });
+        let clock = at_epoch();
+        let browse = Arc::new(use_case(engine.clone(), Arc::clone(&clock)));
+        let searching = {
+            let browse = Arc::clone(&browse);
+            tokio::spawn(async move {
+                browse
+                    .find(
+                        op(),
+                        &alias(),
+                        &entry(),
+                        pattern(),
+                        None,
+                        SearchCaps::clamped(None, None),
+                    )
+                    .await
+            })
+        };
+        settle().await;
+        assert_eq!(engine.started(), 1, "the search started its worker");
+        clock.advance(SEARCH_TIMEOUT - domain::SignedDuration::from_secs(1));
+        settle().await;
+        assert!(
+            !searching.is_finished(),
+            "a second before the search's timeout"
+        );
+        clock.advance(domain::SignedDuration::from_secs(1));
+        let found_now = tokio::time::timeout(Duration::from_secs(5), searching)
+            .await
+            .expect("the search ends when its timeout does")
+            .expect("the search task ran");
+        assert_eq!(
+            found_now,
+            Err(BrowseError::Read(MaintenanceError::TimedOut))
+        );
+    }
+
     #[tokio::test]
     async fn a_snapshot_that_is_gone_is_said_to_be_unknown() {
         let read = use_case(scripted(Ok(FolderAnswer::SnapshotUnknown)), at_epoch())
-            .folder(op(), &alias(), &entry(), snapshot(), FolderPath::top(), 0)
+            .folder(
+                op(),
+                &alias(),
+                &entry(),
+                snapshot(),
+                FolderPath::top(),
+                0,
+                50,
+            )
             .await;
         assert_eq!(read, Err(BrowseError::SnapshotUnknown));
     }
@@ -348,7 +561,15 @@ mod tests {
     #[tokio::test]
     async fn a_folder_the_snapshot_does_not_hold_is_said_to_be_unknown() {
         let read = use_case(scripted(Ok(FolderAnswer::FolderUnknown)), at_epoch())
-            .folder(op(), &alias(), &entry(), snapshot(), path("source/gone"), 0)
+            .folder(
+                op(),
+                &alias(),
+                &entry(),
+                snapshot(),
+                path("source/gone"),
+                0,
+                50,
+            )
             .await;
         assert_eq!(read, Err(BrowseError::FolderUnknown));
     }
@@ -359,7 +580,15 @@ mod tests {
             detail: "the pack is damaged".to_owned(),
         };
         let read = use_case(scripted(Err(reason.clone())), at_epoch())
-            .folder(op(), &alias(), &entry(), snapshot(), FolderPath::top(), 0)
+            .folder(
+                op(),
+                &alias(),
+                &entry(),
+                snapshot(),
+                FolderPath::top(),
+                0,
+                50,
+            )
             .await;
         assert_eq!(
             read,

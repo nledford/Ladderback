@@ -1,26 +1,30 @@
 //! One page of a snapshot's folder on its way to the daemon (§16, decision
 //! 102): the folder's entries in the order its tree records them, from the
-//! position asked for, at most [`PAGE_ENTRIES`] of them and at most
-//! [`LISTING_BATCH_BYTES`] serialized, so the page is one message under the
-//! protocol's cap whatever the folder holds (§4.1).
+//! position asked for, at most the number asked for and never more than
+//! [`PAGE_ENTRIES`], and at most [`LISTING_BATCH_BYTES`] serialized, so the
+//! page is one message under the protocol's cap whatever the folder holds
+//! (§4.1).
 
 use domain::browse::{DisplayName, EntryKind, FolderPage, MAX_ENTRY_NAME_BYTES, PAGE_ENTRIES};
 use rustic_core::repofile::{Node, NodeType};
 
 use crate::job::{EntryResult, FolderResult, LISTING_BATCH_BYTES};
 
-/// The page of `nodes`, a folder's tree, that starts at position `from`.
-/// An entry whose name is longer than [`MAX_ENTRY_NAME_BYTES`] (no file
-/// system writes one) is left out of the page but keeps its position, so the
-/// total still counts it and the next page starts after it.
-pub(crate) fn page(nodes: &[Node], from: u64) -> FolderResult {
+/// The page of `nodes`, a folder's tree, that starts at position `from` and
+/// holds at most `most` entries. An entry whose name is longer than
+/// [`MAX_ENTRY_NAME_BYTES`] (no file system writes one) is left out of the
+/// page but keeps its position, so the total still counts it and the next
+/// page starts after it.
+pub(crate) fn page(nodes: &[Node], from: u64, most: usize) -> FolderResult {
     let total = u64::try_from(nodes.len()).unwrap_or(u64::MAX);
     let start = usize::try_from(from).unwrap_or(usize::MAX);
+    let _ = most;
+    let most = PAGE_ENTRIES;
     let mut entries = Vec::new();
     let mut bytes = 0_usize;
     let mut consumed = 0_u64;
     for node in nodes.iter().skip(start) {
-        if entries.len() == PAGE_ENTRIES {
+        if entries.len() == most {
             break;
         }
         if node.name.len() <= MAX_ENTRY_NAME_BYTES {
@@ -48,7 +52,7 @@ pub(crate) fn page(nodes: &[Node], from: u64) -> FolderResult {
 }
 
 /// What `node` is, as a page says it.
-fn kind(node: &Node) -> EntryKind {
+pub(crate) fn kind(node: &Node) -> EntryKind {
     match node.node_type {
         NodeType::Dir => EntryKind::Folder,
         NodeType::File => EntryKind::File,
@@ -61,7 +65,7 @@ fn kind(node: &Node) -> EntryKind {
 
 /// `node` as a page carries it: its name as rustic records it, the key, and
 /// as `rustic ls` prints it, to show.
-fn entry(node: &Node) -> EntryResult {
+pub(crate) fn entry(node: &Node) -> EntryResult {
     let kind = kind(node);
     EntryResult {
         name: node.name.clone(),
@@ -115,6 +119,27 @@ mod tests {
             FolderResult::Page { total, next, .. } => (*total, *next),
             other => panic!("a page, not {other:?}"),
         }
+    }
+
+    /// The page of `nodes` from `from` of the most entries a page holds.
+    fn page(nodes: &[Node], from: u64) -> FolderResult {
+        super::page(nodes, from, PAGE_ENTRIES)
+    }
+
+    #[test]
+    fn a_page_holds_no_more_entries_than_asked_for_and_says_where_the_next_starts() {
+        let nodes = files(5);
+        let first = super::page(&nodes, 1, 2);
+        assert_eq!(names(&first), ["file-0001.txt", "file-0002.txt"]);
+        assert_eq!(paging(&first), (5, Some(3)));
+        let none_asked = super::page(&nodes, 0, 0);
+        assert_eq!(
+            names(&none_asked),
+            ["file-0000.txt"],
+            "a page holds one at least"
+        );
+        let too_many = super::page(&files(PAGE_ENTRIES + 1), 0, usize::MAX);
+        assert_eq!(names(&too_many).len(), PAGE_ENTRIES);
     }
 
     #[test]

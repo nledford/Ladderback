@@ -12,6 +12,7 @@ use app::ports::{
     RewriteSummary, SnapshotSummary,
 };
 use domain::browse::FolderPage;
+use domain::find::SearchAnswer;
 use domain::maintenance::RepositoryStats;
 use domain::{RepositoryId, SnapshotId, Timestamp};
 use serde::{Deserialize, Serialize};
@@ -85,6 +86,10 @@ pub(crate) enum Summary {
     Folder {
         total: u64,
     },
+    /// A read's result: a search of the snapshots is never logged as an
+    /// operation (§9), so no row holds this variant either, and it keeps
+    /// nothing of what the search found.
+    Found,
     /// A read's result: a stats read is never logged as an operation; its
     /// readings are kept in `repo_stats` (decision 104), so no row holds this
     /// variant either.
@@ -220,6 +225,7 @@ impl From<&EngineResult> for Summary {
                     FolderAnswer::SnapshotUnknown | FolderAnswer::FolderUnknown => 0,
                 },
             },
+            EngineResult::Found(_) => Self::Found,
             EngineResult::Stats(stats) => Self::Stats {
                 snapshots: stats.snapshots,
                 total_size: stats.total_size,
@@ -368,6 +374,14 @@ impl From<Summary> for EngineResult {
                 total,
                 next: None,
             })),
+            // No row holds a search (above): it reads back as one that found
+            // nothing.
+            Summary::Found => Self::Found(SearchAnswer {
+                searched: Vec::new(),
+                left_out: 0,
+                matches: Vec::new(),
+                stopped: None,
+            }),
             Summary::Restore {
                 files_restored,
                 files_unchanged,

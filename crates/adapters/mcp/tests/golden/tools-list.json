@@ -1425,6 +1425,322 @@
       "openWorldHint": false,
       "readOnlyHint": true
     },
+    "description": "One folder of a snapshot, a page at a time, read from the repository: each entry's name, whether it is a folder, a file, a link or something else, a file's size and when it was last modified, with how many entries the folder holds. Restoring and downloading are done by the person, in the web UI.",
+    "inputSchema": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "additionalProperties": false,
+      "properties": {
+        "from": {
+          "description": "The `next` of the page before, to list the page after it.",
+          "type": "integer"
+        },
+        "limit": {
+          "description": "How many entries to list, a whole number from 1 to 200; 50 when not\ngiven. A larger number lists 200, and 0 lists 1.",
+          "type": "integer"
+        },
+        "path": {
+          "description": "The folder, by the names of the folders that lead to it from the\nsnapshot's top, joined by `/` (each a `name` a listing gave); the\nsnapshot's top when not given.",
+          "type": "string"
+        },
+        "repository": {
+          "description": "The repository, by its alias, as `list_repositories` names it.",
+          "type": "string"
+        },
+        "snapshot": {
+          "description": "The snapshot, by its full ID, as `list_snapshots` gives it.",
+          "type": "string"
+        }
+      },
+      "required": [
+        "repository",
+        "snapshot"
+      ],
+      "type": "object"
+    },
+    "name": "list_snapshot_folder",
+    "outputSchema": {
+      "$defs": {
+        "EntryDto": {
+          "properties": {
+            "display": {
+              "type": "string"
+            },
+            "kind": {
+              "$ref": "#/$defs/EntryKindDto"
+            },
+            "modified": {
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "name": {
+              "type": "string"
+            },
+            "size": {
+              "format": "uint64",
+              "minimum": 0,
+              "type": [
+                "integer",
+                "null"
+              ]
+            }
+          },
+          "required": [
+            "name",
+            "display",
+            "kind"
+          ],
+          "type": "object"
+        },
+        "EntryKindDto": {
+          "oneOf": [
+            {
+              "enum": [
+                "folder",
+                "file"
+              ],
+              "type": "string"
+            },
+            {
+              "const": "link",
+              "type": "string"
+            },
+            {
+              "const": "other",
+              "type": "string"
+            }
+          ]
+        }
+      },
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "properties": {
+        "entries": {
+          "items": {
+            "$ref": "#/$defs/EntryDto"
+          },
+          "type": "array"
+        },
+        "next": {
+          "format": "uint64",
+          "minimum": 0,
+          "type": [
+            "integer",
+            "null"
+          ]
+        },
+        "path": {
+          "type": "string"
+        },
+        "total": {
+          "format": "uint64",
+          "minimum": 0,
+          "type": "integer"
+        }
+      },
+      "required": [
+        "path",
+        "entries",
+        "total"
+      ],
+      "type": "object"
+    },
+    "title": "List snapshot folder"
+  },
+  {
+    "annotations": {
+      "destructiveHint": false,
+      "idempotentHint": true,
+      "openWorldHint": false,
+      "readOnlyHint": true
+    },
+    "description": "Finds files and folders by name across a repository's newest snapshots, or one plan's: each match's path, and the snapshots that hold it with its size and when it was last modified there. Searches at most 100 snapshots for at most 15 seconds, returns at most 500 matches, and says which cap cut it short. Restoring and downloading are done by the person, in the web UI.",
+    "inputSchema": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "additionalProperties": false,
+      "properties": {
+        "matches": {
+          "description": "How many matches to return, a whole number from 1 to 500; 100 when\nnot given. A larger number returns 500, and 0 one.",
+          "type": "integer"
+        },
+        "pattern": {
+          "description": "The name to look for: a file's or a folder's name, never a path with\n`/`. `*` stands for any run of characters and `?` for any one;\nletters match in either case. At most 255 characters.",
+          "type": "string"
+        },
+        "plan": {
+          "description": "Only the snapshots of this plan, by its ID: those whose\n`ladderback-plan:` tag names it.",
+          "type": "string"
+        },
+        "repository": {
+          "description": "The repository, by its alias, as `list_repositories` names it.",
+          "type": "string"
+        },
+        "snapshots": {
+          "description": "How many of the newest snapshots to search, a whole number from 1 to\n100; 20 when not given. A larger number searches 100, and 0 one.",
+          "type": "integer"
+        }
+      },
+      "required": [
+        "repository",
+        "pattern"
+      ],
+      "type": "object"
+    },
+    "name": "find_in_snapshots",
+    "outputSchema": {
+      "$defs": {
+        "EntryKindDto": {
+          "oneOf": [
+            {
+              "enum": [
+                "folder",
+                "file"
+              ],
+              "type": "string"
+            },
+            {
+              "const": "link",
+              "type": "string"
+            },
+            {
+              "const": "other",
+              "type": "string"
+            }
+          ]
+        },
+        "MatchDto": {
+          "properties": {
+            "display": {
+              "type": "string"
+            },
+            "kind": {
+              "$ref": "#/$defs/EntryKindDto"
+            },
+            "path": {
+              "type": "string"
+            },
+            "seen": {
+              "items": {
+                "$ref": "#/$defs/SeenDto"
+              },
+              "type": "array"
+            }
+          },
+          "required": [
+            "path",
+            "display",
+            "kind",
+            "seen"
+          ],
+          "type": "object"
+        },
+        "SearchStopDto": {
+          "oneOf": [
+            {
+              "const": "snapshots",
+              "type": "string"
+            },
+            {
+              "const": "matches",
+              "type": "string"
+            },
+            {
+              "const": "time",
+              "type": "string"
+            }
+          ]
+        },
+        "SearchedDto": {
+          "properties": {
+            "snapshot": {
+              "type": "string"
+            },
+            "time": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "snapshot",
+            "time"
+          ],
+          "type": "object"
+        },
+        "SeenDto": {
+          "properties": {
+            "modified": {
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "size": {
+              "format": "uint64",
+              "minimum": 0,
+              "type": [
+                "integer",
+                "null"
+              ]
+            },
+            "snapshot": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "snapshot"
+          ],
+          "type": "object"
+        }
+      },
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "properties": {
+        "left-out": {
+          "format": "uint64",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "matches": {
+          "items": {
+            "$ref": "#/$defs/MatchDto"
+          },
+          "type": "array"
+        },
+        "pattern": {
+          "type": "string"
+        },
+        "searched": {
+          "items": {
+            "$ref": "#/$defs/SearchedDto"
+          },
+          "type": "array"
+        },
+        "stopped": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/SearchStopDto"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      },
+      "required": [
+        "pattern",
+        "searched",
+        "left-out",
+        "matches"
+      ],
+      "type": "object"
+    },
+    "title": "Find in snapshots"
+  },
+  {
+    "annotations": {
+      "destructiveHint": false,
+      "idempotentHint": true,
+      "openWorldHint": false,
+      "readOnlyHint": true
+    },
     "description": "The history of operations, newest first, a page at a time, running ones included: each with its status, times, warning codes and, when it failed, why.",
     "inputSchema": {
       "$schema": "https://json-schema.org/draft/2020-12/schema",
