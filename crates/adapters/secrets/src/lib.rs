@@ -295,6 +295,17 @@ enum Unfinished {
     Lost(String),
 }
 
+/// The flag of a lock question that is out, cleared when the question
+/// ends, however it ends: answered, panicked, or dropped unrun as the
+/// runtime shuts down.
+struct Asked(Arc<AtomicBool>);
+
+impl Drop for Asked {
+    fn drop(&mut self) {
+        self.0.store(false, Ordering::Release);
+    }
+}
+
 #[async_trait]
 impl SecretResolver for SystemSecrets {
     async fn resolve(&self, secret: &SecretRef) -> Result<Resolved, SecretError> {
@@ -320,11 +331,11 @@ impl SecretResolver for SystemSecrets {
             return KeyringLock::Unknown;
         }
         let probe = Arc::clone(&self.lock_probe);
-        let asking = Arc::clone(&self.lock_asking);
+        let asked = Asked(Arc::clone(&self.lock_asking));
         let asking = tokio::task::spawn_blocking(move || {
-            let answer = probe();
-            asking.store(false, Ordering::Release);
-            answer
+            // Cleared however the question ends, answered or lost.
+            let _asked = asked;
+            probe()
         });
         match tokio::time::timeout(ACTIVATION_LIMIT, asking).await {
             Ok(Ok(keyring_store::Lock::Unlocked)) => KeyringLock::Unlocked,
