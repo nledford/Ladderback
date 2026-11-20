@@ -31,7 +31,6 @@ impl ProgressShown {
     /// the daemon heard `at`.
     #[must_use]
     pub fn ui(self, operation: String, at: Timestamp) -> UiEvent {
-        let _ = at;
         UiEvent::OperationProgress {
             operation,
             step: self.step.map(wire_step),
@@ -41,7 +40,7 @@ impl ProgressShown {
             },
             current: self.current,
             total: self.total,
-            at: None,
+            at: Some(at.to_string()),
         }
     }
 }
