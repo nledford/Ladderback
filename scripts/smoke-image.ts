@@ -29,7 +29,9 @@
 //     names;
 //   - `docker stop` ends the daemon cleanly, with exit status 0;
 //   - a new container on the same volumes still has sign-in on, the snapshot
-//     and the backup in its operation history.
+//     and the backup in its operation history;
+//   - the install guide's example Compose file still parses
+//     (`docker compose config`).
 // The results go to standard output as Markdown, and are appended to the file
 // `--summary` names, or to $GITHUB_STEP_SUMMARY in a GitHub Actions job.
 //
@@ -46,6 +48,8 @@ import { checkoutBuild, shown, workspaceVersion } from "./build-identity.ts";
 import { details, type Output, Report, run } from "./smoke-report.ts";
 
 const ROOT = path.resolve(import.meta.dirname, "..");
+// The install guide's Compose file, the agent of its `docker run` (§12).
+const COMPOSE = "docs/guide/examples/compose.yaml";
 
 // What the image promises (Containerfile).
 const USER = "10001:10001";
@@ -378,6 +382,14 @@ async function checkImage(image: string, version: string, scratch: Scratch, repo
   );
 }
 
+// The install guide's Compose file still parses, as `docker compose` reads
+// it. Parsing only: it runs nothing and needs none of the files it names.
+async function checkCompose(report: Report): Promise<void> {
+  const file = path.join(ROOT, COMPOSE);
+  const parsed = await docker(["compose", "--file", file, "config", "--quiet"]);
+  report.add("the example Compose file parses", parsed.status === 0, parsed.status === 0 ? COMPOSE : said(parsed));
+}
+
 async function checkAgent(image: string, scratch: Scratch, report: Report): Promise<void> {
   const volumes: Volumes = {
     config: await scratch.volume("config"),
@@ -580,6 +592,7 @@ async function main(argv: string[]): Promise<number> {
   try {
     await checkImage(image, expected, scratch, report);
     await checkAgent(image, scratch, report);
+    await checkCompose(report);
   } catch (error) {
     report.add("the run finishes", false, (error as Error).message);
   } finally {

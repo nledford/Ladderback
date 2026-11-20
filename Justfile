@@ -714,9 +714,10 @@ image version +args:
 # version and labels, its user, no hub, the refusal to listen beyond loopback
 # without `--allowed-host`, then an agent in a container with sign-in on,
 # backing up a read-only mounted folder into a repository on a volume, and a
-# new container on the same volumes keeping the data. It creates its own
+# new container on the same volumes keeping the data; last, that the install
+# guide's Compose file parses (`docker compose config`). It creates its own
 # containers and volumes and removes them. `--help` lists the options.
-[doc('Smoke-test a Docker image: version, user, no hub, sign-in, one backup, data kept.')]
+[doc('Smoke-test a Docker image: version, user, no hub, sign-in, one backup, data kept, the Compose file.')]
 [group('release')]
 [positional-arguments]
 smoke-image image *args:

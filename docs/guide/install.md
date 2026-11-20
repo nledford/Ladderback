@@ -200,6 +200,8 @@ docker run --detach --name ladderback \
   serve --listen 0.0.0.0:9898 --allowed-host nas.example.com --service-managed
 ```
 
+The same agent as a Compose file, with its port on loopback for a reverse proxy on the same machine, is [`examples/compose.yaml`](examples/compose.yaml): turn sign-in on with `docker compose run --rm ladderback set-password`, then start it with `docker compose up --detach`.
+
 What each part is for:
 
 - **`--allowed-host`** names the host name browsers reach Ladderback by. Listening beyond the container's loopback, Ladderback refuses to start without one, so the image's own command, `serve --listen 0.0.0.0:9898`, doesn't start until you give it ([Remote access](remote-access.md#listening-beyond-loopback)). Over plain HTTP the password crosses the network unencrypted, so put a reverse proxy that adds TLS in front. With the proxy on the same machine, publish the port on loopback only, `--publish 127.0.0.1:9898:9898`: Docker's own firewall rules pass by ufw and firewalld.
