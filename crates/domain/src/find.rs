@@ -155,8 +155,8 @@ impl SearchCaps {
         self.snapshots
     }
 
-    /// The most matches the search returns: an entry at one path is one,
-    /// however many snapshots hold it.
+    /// The most matches the search returns: an entry at one path, of one
+    /// kind, is one, however many snapshots hold it.
     pub fn matches(self) -> u32 {
         self.matches
     }

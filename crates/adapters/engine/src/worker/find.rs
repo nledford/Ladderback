@@ -53,9 +53,9 @@ pub(crate) struct Root<K> {
 
 /// Searches the tree of each of `roots`, newest first, for entries whose
 /// names match `pattern`, returning at most `most` of them (an entry at one
-/// path is one, however many snapshots hold it). `left_out` snapshots were
-/// chosen not to be searched; `out_of_time` says when the search's time is
-/// up, asked before each tree is read.
+/// path, of one kind, is one, however many snapshots hold it). `left_out`
+/// snapshots were chosen not to be searched; `out_of_time` says when the
+/// search's time is up, asked before each tree is read.
 pub(crate) fn search<T: Trees>(
     trees: &T,
     roots: Vec<Root<T::Id>>,
