@@ -513,7 +513,7 @@ fn keyring_locked_until(
 /// in a locked keyring waits for the keyring to be unlocked — its
 /// operation shows as queued while it waits — and runs once it is, never
 /// past the next run its plan's planner kept, which is its bound
-/// (#1221, decision 134).
+/// (#1221, decision 135).
 #[tokio::test]
 async fn a_resumed_run_waits_for_the_keyring_to_be_unlocked() {
     capture();
@@ -581,7 +581,7 @@ async fn a_resumed_run_waits_for_the_keyring_to_be_unlocked() {
 /// A queued backup of a plan whose planner kept no next run — the plan
 /// left the schedule while it sat queued — is refused at once when its
 /// keyring is locked: there is no run to wait within (#1221, decision
-/// 134).
+/// 135).
 #[tokio::test]
 async fn a_resumed_run_of_a_plan_with_no_next_run_is_refused_at_once() {
     capture();
@@ -630,7 +630,7 @@ async fn a_resumed_run_of_a_plan_with_no_next_run_is_refused_at_once() {
 
 /// A run parked waiting for its keyring gives way to a newer run of its
 /// plan that is going when the keyring is unlocked: one backup runs, not
-/// two behind each other (#1221, decision 134).
+/// two behind each other (#1221, decision 135).
 #[tokio::test]
 async fn a_waiting_run_gives_way_to_a_newer_run_of_its_plan() {
     capture();
@@ -782,7 +782,7 @@ async fn change_home(runner: &PlanRunner, change: impl FnOnce(&mut domain::plann
 /// A run that waited for its keyring backs up its plan as the
 /// configuration stands once the keyring is unlocked, not as it stood
 /// when the run began to wait: the wait can last hours (#1221, decision
-/// 134).
+/// 135).
 #[tokio::test]
 async fn a_run_that_waited_backs_up_its_plan_as_it_stands_once_the_keyring_is_unlocked() {
     capture();

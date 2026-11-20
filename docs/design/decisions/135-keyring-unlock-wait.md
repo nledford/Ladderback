@@ -1,4 +1,4 @@
-# Decision 134: A run whose keyring is locked waits for it to be unlocked
+# Decision 135: A run whose keyring is locked waits for it to be unlocked
 
 **A run nobody waits on whose repository password is in a keyring the service answers is locked isn't refused at once: it waits for the keyring to be unlocked — asking only whether it is locked, never reading the entry, so waiting can raise no unlock prompt — and reads the entry again the moment it is. It gives up when the plan's next run is due, never waiting past its successor, and is then refused once as `secret-keyring-locked`. While it waits the run holds no place in the queue, so the scheduler goes on: it waits on a task of its own under the freeze of the daemon's stop, and takes a place only once the keyring is unlocked, giving way to a newer run of its plan. A retry and a run with no next run are refused at once** (recorded 2026-11-20, §5, §10.2; #1221).
 
