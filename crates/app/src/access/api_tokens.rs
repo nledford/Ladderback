@@ -245,8 +245,7 @@ impl Access {
             .set_permissions(id, permissions)
             .await
             .map_err(|error| ApiTokenChangeRefused::Unavailable(error.to_string()))?;
-        let kept = set != PermissionsSet::NotKept;
-        if kept {
+        if set == PermissionsSet::Changed {
             self.tokens_written();
             log::info!(
                 "API token {} now has {}",
@@ -254,7 +253,7 @@ impl Access {
                 logged(permissions.get())
             );
         }
-        Ok(kept)
+        Ok(set != PermissionsSet::NotKept)
     }
 
     /// Checks the token a request from `address` presents: `None` when the
@@ -349,11 +348,13 @@ impl Access {
         }
     }
 
-    /// A write to the API-token store changed it: the store writes again,
-    /// so the next last use it fails to write is logged. A write that
-    /// changes nothing, such as the cleanup of an earlier password's
-    /// tokens that the list and a new token start with, may succeed on a
-    /// store that can't keep a change, so it doesn't count.
+    /// A write to the API-token store changed it (a token created, revoked
+    /// or given other permissions, or a last use kept): the store writes
+    /// again, so the next last use it fails to write is logged. A write
+    /// that changes nothing, such as the cleanup of an earlier password's
+    /// tokens that the list and a new token start with, or the permissions
+    /// a token holds already set again, may succeed on a store that can't
+    /// keep a change, so it doesn't count.
     fn tokens_written(&self) {
         self.lock().token_store_failing = false;
     }

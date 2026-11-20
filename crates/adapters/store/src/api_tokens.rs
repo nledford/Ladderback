@@ -85,23 +85,40 @@ impl ApiTokenStore for SqliteStore {
         Ok(done.rows_affected() > 0)
     }
 
+    /// One transaction, so a token found unchanged was kept, unchanged, at
+    /// the update.
     async fn set_permissions(
         &self,
         id: &ApiTokenId,
         permissions: TokenPermissions,
     ) -> Result<PermissionsSet, StoreError> {
         let _call = self.call().await;
+        let text = permissions_text(permissions);
+        let mut conn = self.pool.acquire().await.map_err(unavailable)?;
+        let mut tx = conn.begin().await.map_err(unavailable)?;
         let done = sqlx::query(sql::SET_API_TOKEN_PERMISSIONS)
-            .bind(permissions_text(permissions))
+            .bind(&text)
             .bind(id.as_str())
-            .execute(&self.pool)
+            .bind(&text)
+            .execute(&mut *tx)
             .await
             .map_err(unavailable)?;
-        Ok(if done.rows_affected() > 0 {
+        let set = if done.rows_affected() > 0 {
             PermissionsSet::Changed
         } else {
-            PermissionsSet::NotKept
-        })
+            let kept: bool = sqlx::query_scalar(sql::API_TOKEN_KEPT)
+                .bind(id.as_str())
+                .fetch_one(&mut *tx)
+                .await
+                .map_err(unavailable)?;
+            if kept {
+                PermissionsSet::Unchanged
+            } else {
+                PermissionsSet::NotKept
+            }
+        };
+        tx.commit().await.map_err(unavailable)?;
+        Ok(set)
     }
 
     async fn revoke_all_but(&self, password: PasswordFingerprint) -> Result<(), StoreError> {

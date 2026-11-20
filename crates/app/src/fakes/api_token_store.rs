@@ -75,6 +75,9 @@ impl ApiTokenStore for InMemoryApiTokenStore {
         let Some(token) = kept.iter_mut().find(|token| &token.id == id) else {
             return Ok(PermissionsSet::NotKept);
         };
+        if token.permissions == permissions {
+            return Ok(PermissionsSet::Unchanged);
+        }
         token.permissions = permissions;
         Ok(PermissionsSet::Changed)
     }
