@@ -104,6 +104,7 @@ code_messages!(ERRORS, error_message, ErrorCode {
     KeyringUnwritable => msg::ERROR_KEYRING_UNWRITABLE,
     KeyringEntryTaken => msg::ERROR_KEYRING_ENTRY_TAKEN,
     PlanUnknown => msg::ERROR_PLAN_UNKNOWN,
+    PlanRunWaiting => msg::ERROR_PLAN_RUN_WAITING,
     PlanInvalid => msg::ERROR_PLAN_INVALID,
     PlanInUse => msg::ERROR_PLAN_IN_USE,
     KeyFilesNotLeftOut => msg::ERROR_KEY_FILES_NOT_LEFT_OUT,

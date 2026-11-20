@@ -848,7 +848,11 @@ async fn run_plan(
             api::ErrorCode::KeyFilesNotLeftOut,
             Vec::new(),
         ),
-        Err(StartError::RunWaiting) => todo!(),
+        Err(StartError::RunWaiting) => refused_with(
+            StatusCode::CONFLICT,
+            api::ErrorCode::PlanRunWaiting,
+            vec![("plan", api::MsgArg::Text(plan))],
+        ),
     }
 }
 

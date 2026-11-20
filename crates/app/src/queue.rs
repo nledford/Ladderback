@@ -72,8 +72,10 @@ impl RunQueue {
     /// concurrency, as the configuration says now, and applies from then
     /// on, refused or not.
     pub fn by_hand(&self, plan: &PlanId, limit: Concurrency) -> Result<Place, RunWaiting> {
-        let _ = (plan, limit);
-        todo!()
+        self.admit(|queue| {
+            queue.set_limit(limit);
+            queue.by_hand(plan)
+        })
     }
 
     /// A place for a run of `plan` the queue held from before the start

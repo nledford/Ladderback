@@ -212,6 +212,11 @@ pub enum ErrorCode {
     /// The configuration holds no plan by that name. The argument `plan`
     /// names it.
     PlanUnknown,
+    /// A backup of the plan started by hand was refused: a run of the plan
+    /// is waiting for its turn already, and backs up the sources as they
+    /// are when it starts, so nothing was queued (decision 75, point 4).
+    /// The argument `plan` names the plan.
+    PlanRunWaiting,
     /// A plan sent to be created or changed is not one the configuration
     /// file would load, so nothing was saved (decision 96). The argument
     /// `field` is the plan's setting at fault, as its key in the plan's
@@ -1221,6 +1226,11 @@ impl ErrorCode {
                 },
             ],
             Self::PlanUnknown => &[ArgSpec {
+                name: "plan",
+                kind: ArgKind::Text,
+                optional: false,
+            }],
+            Self::PlanRunWaiting => &[ArgSpec {
                 name: "plan",
                 kind: ArgKind::Text,
                 optional: false,

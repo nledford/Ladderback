@@ -71,7 +71,7 @@ impl BackupQueue {
     /// has a run waiting already skips it ([`Overlapping::Waiting`]); under
     /// `skip`, so does a plan whose last run is running.
     pub fn due(&mut self, plan: &PlanId, overlap: Overlap) -> Result<Ticket, Overlapping> {
-        if self.waiting.values().any(|waiting| waiting == plan) {
+        if self.has_waiting(plan) {
             return Err(Overlapping::Waiting);
         }
         if overlap == Overlap::Skip && self.running.values().any(|running| running == plan) {
@@ -85,8 +85,15 @@ impl BackupQueue {
     /// ([`RunWaiting`]), whichever way that one came: a schedule, a person,
     /// or the queue held from before the start.
     pub fn by_hand(&mut self, plan: &PlanId) -> Result<Ticket, RunWaiting> {
-        let _ = plan;
-        todo!()
+        if self.has_waiting(plan) {
+            return Err(RunWaiting);
+        }
+        Ok(self.push(plan))
+    }
+
+    /// Whether a run of `plan` waits for its turn.
+    fn has_waiting(&self, plan: &PlanId) -> bool {
+        self.waiting.values().any(|waiting| waiting == plan)
     }
 
     /// A run of `plan` the queue held from before the daemon started: it
