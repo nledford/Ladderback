@@ -238,12 +238,16 @@ Then(
       }
       if (drawn.track === null || drawn.fill === null) continue;
       fills += 1;
-      assert.ok(drawn.fill.width < drawn.track.width, `the fill of "${drawn.name}" is the whole track`);
-      const start = direction === "ltr" ? "left" : "right";
+      // The fill reaches back to the track's start or past it, where the
+      // track clips it, and its leading end lies short of the track's end.
+      const [start, end, lean] = direction === "ltr" ? (["left", "right", 1] as const) : (["right", "left", -1] as const);
       assert.ok(
-        Math.abs(drawn.fill[start] - drawn.track[start]) < ROUNDING_PX,
+        lean * (drawn.track[start] - drawn.fill[start]) >= -ROUNDING_PX,
         `the fill of "${drawn.name}" doesn't start at the track's ${start}: ${JSON.stringify(drawn)}`,
       );
+      const shown = lean * (drawn.fill[end] - drawn.track[start]);
+      assert.ok(shown >= -ROUNDING_PX, `the fill of "${drawn.name}" lies wholly before the track: ${JSON.stringify(drawn)}`);
+      assert.ok(shown < drawn.track.width, `the fill of "${drawn.name}" is the whole track`);
     }
     assert.equal(fills, BARS - 2, "the progress bars of the gallery that draw a fill");
   },
@@ -327,9 +331,14 @@ Then("the progress bar {string} reads {string}", async function (this: BrowserWo
 });
 
 // The fill a sighted reader sees, drawn to the percentage at every report,
-// whatever the bar has told a screen reader so far.
+// whatever the bar has told a screen reader so far: the share of its track
+// left once its slide (`translateX(calc(var(--progress-lean) * N%))`) takes
+// back the N percent it doesn't fill.
 const filled = (bar: Locator) =>
-  bar.evaluate((element) => (element.querySelector(".progress-fill") as HTMLElement | null)?.style.inlineSize ?? "");
+  bar.evaluate((element) => {
+    const back = (element.querySelector(".progress-fill") as HTMLElement | null)?.style.transform.match(/\*\s*([\d.]+)%\)\)$/);
+    return back ? `${100 - Number(back[1])}%` : "";
+  });
 
 Then("the progress bar {string} is filled to {int} percent", async function (this: BrowserWorld, name: string, percent: number) {
   await expect.poll(() => filled(this.page.getByRole("progressbar", { name: namePattern(name) }))).toBe(`${percent}%`);

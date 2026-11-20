@@ -43,30 +43,41 @@ pub(crate) const STEP: &str = "progress-step block";
 /// Ledger Gray pill half the shared scale's length thick (`--size`, in `em`,
 /// so it grows with the reader's text), filling the room it is given up to
 /// 16rem, so in a table's cell it never widens its column and fits a small
-/// screen. Under forced colors the mode would paint it the page's own
-/// background, so it opts out and takes the color of unavailable text, as a
-/// spinner's track does.
+/// screen. It clips what of its fill lies past its start (`overflow: clip`,
+/// which follows its round ends). Under forced colors the mode would paint
+/// it the page's own background, so it opts out and takes the color of
+/// unavailable text, as a spinner's track does.
 pub(crate) const TRACK: &str = "progress-track block-[calc(var(--size)/2)] inline-full \
-    max-inline-[16rem] rounded-full bg-surface \
+    max-inline-[16rem] overflow-clip rounded-full bg-surface \
     forced-colors:forced-color-adjust-none forced-colors:bg-[color:GrayText]";
 
-/// The fill, in its tone (`--tone`, set by the tone's class on the bar),
-/// which eases to each report over 0.4 s; `style.css`'s reduced-motion rule
-/// takes every transition away, so the fill then jumps to the value. Under
-/// forced colors the mode would paint it the page's own background and
-/// leave the bar empty, so it opts out and takes `CanvasText`, as the
-/// alert's border does: the text's color wherever a bar sits on Canvas.
-pub(crate) const FILL: &str = "progress-fill block-full rounded-[inherit] bg-(--tone) \
-    transition-[inline-size] duration-400 ease-out \
+/// The fill, in its tone (`--tone`, set by the tone's class on the bar): a
+/// pill as long as its track, slid back past the track's start by the share
+/// it doesn't fill ([`fill_shift`]), so its own round end leads and each
+/// report eases it over 0.4 s without laying the page out. The start is the
+/// left edge, or the right one where the fill runs right to left: the lean
+/// (`--progress-lean`, -1 or 1) follows the fill's own direction through
+/// `:dir(rtl)`, not Tailwind's `rtl:` variant, which also matches inside a
+/// `dir="ltr"` that a `dir="rtl"` holds. `style.css`'s reduced-motion rule takes
+/// every transition away, so the fill then jumps to the value. Under forced
+/// colors the mode would paint it the page's own background and leave the
+/// bar empty, so it opts out and takes `CanvasText`, as the alert's border
+/// does: the text's color wherever a bar sits on Canvas.
+pub(crate) const FILL: &str = "progress-fill block-full rounded-full bg-(--tone) \
+    [--progress-lean:-1] [&:dir(rtl)]:[--progress-lean:1] \
+    transition-[transform] duration-400 ease-out \
     forced-colors:forced-color-adjust-none forced-colors:bg-[color:CanvasText]";
 
 /// The transform that draws the fill at `percent` of its track: the fill,
 /// a pill as long as its track, slid back past the track's start by the
 /// share it doesn't fill, so its own round end leads and a report moves it
-/// without laying the page out again.
+/// without laying the page out again. A percentage of a translation is one
+/// of the fill's own length, the track's; the lean says which way is back.
 pub(crate) fn fill_shift(percent: u8) -> String {
-    let _ = percent;
-    todo!()
+    format!(
+        "translateX(calc(var(--progress-lean) * {}%))",
+        100u8.saturating_sub(percent)
+    )
 }
 
 /// The bar's words below the track: its percentage, or the step or that it
