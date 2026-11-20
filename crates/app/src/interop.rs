@@ -343,13 +343,21 @@ impl ImportProfile {
 
 impl Runs {
     /// The program the command starts: for an option, the first word of
-    /// its value as rustic splits it, or the whole value when it can't be
-    /// split.
+    /// its value as rustic splits it, or, when it can't be split, its first
+    /// word at white space, never the rest (#856).
     pub fn program(&self) -> String {
         match self {
             Self::Command(line) => line.program().to_owned(),
-            Self::Option(value) => CommandLine::parse(value)
-                .map_or_else(|_| value.clone(), |line| line.program().to_owned()),
+            Self::Option(value) => CommandLine::parse(value).map_or_else(
+                |_| {
+                    value
+                        .split_whitespace()
+                        .next()
+                        .unwrap_or_default()
+                        .to_owned()
+                },
+                |line| line.program().to_owned(),
+            ),
             Self::Location(found) => found.program.clone(),
         }
     }
