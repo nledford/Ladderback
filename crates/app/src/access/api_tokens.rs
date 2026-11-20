@@ -96,10 +96,13 @@ impl Access {
             .await
             .map_err(store_refused)?
         {
-            Added::Kept => Ok(CreatedApiToken {
-                text: ApiTokenText::new(&token.id, &secret),
-                token,
-            }),
+            Added::Kept => {
+                self.tokens_written();
+                Ok(CreatedApiToken {
+                    text: ApiTokenText::new(&token.id, &secret),
+                    token,
+                })
+            }
             Added::Full => Err(ApiTokensRefused::Full),
         }
     }
@@ -120,7 +123,11 @@ impl Access {
 
     /// Revokes the token `id`; whether there was one.
     pub async fn revoke_api_token(&self, id: &ApiTokenId) -> Result<bool, ApiTokensRefused> {
-        self.tokens.revoke(id).await.map_err(store_refused)
+        let revoked = self.tokens.revoke(id).await.map_err(store_refused)?;
+        if revoked {
+            self.tokens_written();
+        }
+        Ok(revoked)
     }
 
     /// Checks the token a request from `address` presents: `None` when the
@@ -169,8 +176,12 @@ impl Access {
         };
         if token.use_to_record(now) {
             // The last use only informs the admin: a write that fails
-            // leaves the earlier one shown and refuses nothing.
-            let _ = self.tokens.record_use(&token.id, now).await;
+            // leaves the earlier one shown and refuses nothing, and is
+            // tried again at the token's next use.
+            match self.tokens.record_use(&token.id, now).await {
+                Ok(()) => self.tokens_written(),
+                Err(error) => self.token_use_unkept(&error),
+            }
         }
         Ok(ApiTokenGrant {
             id: token.id,
@@ -205,6 +216,28 @@ impl Access {
             Err(left) => ApiTokenRefused::Wait {
                 seconds: seconds_left(left),
             },
+        }
+    }
+
+    /// A write to the API-token store changed it: the store writes again,
+    /// so the next last use it fails to write is logged. A write that
+    /// changes nothing, such as the cleanup of an earlier password's
+    /// tokens that the list and a new token start with, may succeed on a
+    /// store that can't keep a change, so it doesn't count.
+    fn tokens_written(&self) {
+        self.lock().token_store_failing = false;
+    }
+
+    /// A token's last use the store failed to write with `error`: logged
+    /// at its first failure since a write succeeded, by the error's code
+    /// alone (I4), as a failed session write is.
+    fn token_use_unkept(&self, error: &StoreError) {
+        let first = !std::mem::replace(&mut self.lock().token_store_failing, true);
+        if first {
+            log::warn!(
+                "the database could not keep an API token's last use ({}); it is tried again at the token's next use, and further failures of this kind are not logged until a write succeeds",
+                error.code()
+            );
         }
     }
 }
