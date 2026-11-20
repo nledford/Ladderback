@@ -10,8 +10,8 @@ use crate::routes::text_with;
 use crate::text;
 use crate::variants::{Size, Tone};
 use rules::{
-    Clear, FILL, Next, STEP, TRACK, Teller, Told, WORDS, Wake, bar_class, default_size, percent,
-    progress_text, value_text, wait_for,
+    Clear, FILL, Next, STEP, TRACK, Teller, Told, WORDS, Wake, bar_class, default_size, fill_shift,
+    percent, progress_text, value_text, wait_for,
 };
 
 // What a progress bar tells a screen reader, and when, decided on the host;
@@ -124,8 +124,8 @@ pub fn Progress(
                                 // allows (§10.1), not a `style` attribute, which it refuses.
                                 <div
                                     class=FILL
-                                    style:inline-size=move || {
-                                        format!("{}%", percent.get().unwrap_or_default())
+                                    style:transform=move || {
+                                        fill_shift(percent.get().unwrap_or_default())
                                     }
                                 ></div>
                             </div>

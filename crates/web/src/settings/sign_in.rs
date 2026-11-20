@@ -16,12 +16,12 @@ use leptos::task::spawn_local;
 use crate::announcer::Politeness;
 use crate::components::alert::rules::AlertTone;
 use crate::components::button::{Appearance, Content, Kind};
-use crate::components::first_load;
 use crate::components::skeleton::rules::Awaited;
 use crate::components::{
     Alert, Button, Confirmation, RadioGroup, ReviewDialog, Working, dialog_refusal_alert,
     refusal_alert, say_refusals,
 };
+use crate::components::{first_load, paced};
 use crate::live::reply;
 use crate::repositories::Sentence;
 use crate::routes::refused_sentence;
@@ -187,8 +187,9 @@ fn Choices(localizer: Arc<Localizer>) -> impl IntoView {
     let saved_localizer = Arc::clone(&localizer);
     let save_error_localizer = Arc::clone(&localizer);
     let everywhere_error_localizer = Arc::clone(&localizer);
+    let (phase, pace) = paced(move || phase.get(), |phase| *phase == Phase::Loading);
     let form = move || match phase.get() {
-        Phase::Loading => first_load(loading.clone(), Awaited::form(1)).into_any(),
+        Phase::Loading => first_load(loading.clone(), Awaited::form(1), pace).into_any(),
         Phase::Unreachable => view! { <p>{unreachable.clone()}</p> }.into_any(),
         Phase::Ready => match refused.get() {
             // A read refused, shown in the form's place.
