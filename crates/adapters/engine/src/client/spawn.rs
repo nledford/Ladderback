@@ -202,6 +202,7 @@ fn repository_id(job: &Job) -> Option<&RepositoryId> {
             access.id.as_ref()
         }
         Job::Browse(job) => job.repository.id.as_ref(),
+        Job::Find(job) => job.repository.id.as_ref(),
         // A probe names no repository, so it takes no cache slot: it opens
         // with no cache (decision 80).
         Job::Probe(_) => None,
@@ -271,6 +272,7 @@ fn access_of(job: &Job) -> Option<&RepositoryAccess> {
         Job::Prune(job) | Job::PrunePlan(job) => Some(&job.repository),
         Job::Check(job) => Some(&job.repository),
         Job::Browse(job) => Some(&job.repository),
+        Job::Find(job) => Some(&job.repository),
         Job::Restore(job) | Job::RestorePlan(job) => Some(&job.repository),
         Job::Dump(job) => Some(&job.repository),
     }

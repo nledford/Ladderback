@@ -1286,3 +1286,131 @@ fn exported_reads_a_password_file(agent: &mut Agent) {
         "{content}"
     );
 }
+
+/// Runs a snapshot search with `arguments`, keeping what it found as the
+/// page the steps after it read.
+async fn search(agent: &mut Agent, arguments: Value) {
+    call(agent, "find_in_snapshots".to_owned(), arguments).await;
+    if result(agent)["isError"] == false {
+        let found = content(agent).clone();
+        agent.mcp.pages.push(found);
+    }
+}
+
+#[when(expr = "the MCP client looks for {string} in the repository {string}")]
+async fn looks_for(agent: &mut Agent, pattern: String, repository: String) {
+    search(agent, json!({"repository": repository, "pattern": pattern})).await;
+}
+
+#[when(expr = "the MCP client looks for {string} in the repository {string}, in {int} snapshot(s)")]
+async fn looks_for_in(agent: &mut Agent, pattern: String, repository: String, snapshots: u64) {
+    let arguments = json!({"repository": repository, "pattern": pattern, "snapshots": snapshots});
+    search(agent, arguments).await;
+}
+
+#[when(
+    expr = "the MCP client looks for {string} in the repository {string}, returning {int} matches"
+)]
+async fn looks_for_returning(agent: &mut Agent, pattern: String, repository: String, matches: u64) {
+    let arguments = json!({"repository": repository, "pattern": pattern, "matches": matches});
+    search(agent, arguments).await;
+}
+
+/// What the last search found.
+fn found(agent: &Agent) -> &Value {
+    let found = content(agent);
+    assert!(found["searched"].is_array(), "not a search: {found}");
+    found
+}
+
+/// How many of `key` the search `found` holds.
+fn count_of(found: &Value, key: &str) -> usize {
+    found[key]
+        .as_array()
+        .unwrap_or_else(|| panic!("no {key}: {found}"))
+        .len()
+}
+
+#[then(expr = "the search read {int} snapshot(s) and found {int} match(es)")]
+fn search_read_and_found(agent: &mut Agent, snapshots: usize, matches: usize) {
+    let found = found(agent);
+    assert_eq!(count_of(found, "searched"), snapshots, "{found}");
+    assert_eq!(count_of(found, "matches"), matches, "{found}");
+    assert_eq!(found["left-out"], 0, "{found}");
+    assert!(
+        found.get("stopped").is_none(),
+        "nothing cut it short: {found}"
+    );
+}
+
+#[then("that match is in the newest snapshot only")]
+fn match_in_newest_only(agent: &mut Agent) {
+    let found = found(agent);
+    let newest = &found["searched"][0]["snapshot"];
+    let seen: Vec<&Value> = found["matches"][0]["seen"]
+        .as_array()
+        .unwrap_or_else(|| panic!("no snapshots hold it: {found}"))
+        .iter()
+        .map(|seen| &seen["snapshot"])
+        .collect();
+    assert_eq!(seen, [newest], "{found}");
+}
+
+#[then(
+    expr = "the search read {int} snapshot(s), left {int} out and was cut short by its {string} cap"
+)]
+fn search_cut_short_by_snapshots(agent: &mut Agent, snapshots: usize, left: u64, cap: String) {
+    let found = found(agent);
+    assert_eq!(count_of(found, "searched"), snapshots, "{found}");
+    assert_eq!(found["left-out"], left, "{found}");
+    assert_eq!(found["stopped"], cap.as_str(), "{found}");
+}
+
+#[then(expr = "the search found {int} matches and was cut short by its {string} cap")]
+fn search_cut_short_by_matches(agent: &mut Agent, matches: usize, cap: String) {
+    let found = found(agent);
+    assert_eq!(count_of(found, "matches"), matches, "{found}");
+    assert_eq!(found["stopped"], cap.as_str(), "{found}");
+}
+
+#[when("the MCP client lists the folder that holds that match in the newest snapshot")]
+async fn lists_folder_of_match(agent: &mut Agent) {
+    let found = agent.mcp.pages.last().expect("a search found something");
+    let matched = &found["matches"][0];
+    let path = matched["path"].as_str().expect("the match's path");
+    let folder = path.rsplit_once('/').map_or("", |(folder, _)| folder);
+    let arguments = json!({
+        "repository": "demo",
+        "snapshot": matched["seen"][0]["snapshot"],
+        "path": folder,
+    });
+    call(agent, "list_snapshot_folder".to_owned(), arguments).await;
+}
+
+#[when("the MCP client lists the top folder of the snapshot it searched")]
+async fn lists_top_folder_searched(agent: &mut Agent) {
+    let found = agent.mcp.pages.last().expect("a search read a snapshot");
+    let arguments = json!({"repository": "demo", "snapshot": found["searched"][0]["snapshot"]});
+    call(agent, "list_snapshot_folder".to_owned(), arguments).await;
+}
+
+#[when(
+    expr = "the MCP client lists the top folder of the snapshot {string} in the repository {string}"
+)]
+async fn lists_top_folder_of(agent: &mut Agent, snapshot: String, repository: String) {
+    let arguments = json!({"repository": repository, "snapshot": snapshot});
+    call(agent, "list_snapshot_folder".to_owned(), arguments).await;
+}
+
+#[then(expr = "the folder lists {string} as a file of {int} bytes")]
+fn folder_lists_file(agent: &mut Agent, name: String, size: u64) {
+    let folder = content(agent);
+    let entry = folder["entries"]
+        .as_array()
+        .unwrap_or_else(|| panic!("no entries: {folder}"))
+        .iter()
+        .find(|entry| entry["name"] == name.as_str())
+        .unwrap_or_else(|| panic!("no {name:?}: {folder}"));
+    assert_eq!(entry["kind"], "file", "{entry}");
+    assert_eq!(entry["size"], size, "{entry}");
+}

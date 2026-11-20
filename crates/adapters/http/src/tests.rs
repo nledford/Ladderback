@@ -377,13 +377,15 @@ impl Catalog for DemoCatalog {
 
     /// The folder `source/docs` of the snapshot `ab…` holds one file of
     /// a folder of 1,001 entries; the top holds `source`. The page
-    /// echoes the path and continues from where it started.
+    /// echoes the path and continues from where it started, after as many
+    /// entries as it was let hold.
     async fn folder(
         &self,
         alias: String,
         snapshot: domain::SnapshotId,
         folder: domain::browse::FolderPath,
         from: u64,
+        most: u64,
     ) -> Result<api::FolderDto, FolderError> {
         match alias.as_str() {
             "missing" => return Err(FolderError::Repository(SnapshotsError::Unknown)),
@@ -430,13 +432,41 @@ impl Catalog for DemoCatalog {
             ),
             _ => return Err(FolderError::FolderUnknown),
         };
-        let next = from.checked_add(1_000).filter(|next| *next < total);
+        let next = from
+            .checked_add(most.min(1_000))
+            .filter(|next| *next < total);
         Ok(api::FolderDto {
             path: folder.to_string(),
             entries,
             total,
             next,
         })
+    }
+
+    /// Refuses the repositories the listing refuses; otherwise finds
+    /// nothing, and echoes what it was asked for as the pattern, so a test
+    /// sees what the route handed on.
+    async fn find(
+        &self,
+        alias: String,
+        pattern: domain::find::NamePattern,
+        plan: Option<domain::PlanId>,
+        caps: domain::find::SearchCaps,
+    ) -> Result<api::FindDto, SnapshotsError> {
+        match alias.as_str() {
+            "missing" => Err(SnapshotsError::Unknown),
+            "slow" => Err(SnapshotsError::TimedOut),
+            _ => Ok(api::FindDto {
+                pattern: format!(
+                    "{} plan {} snapshots {} matches {}",
+                    pattern.as_str(),
+                    plan.as_ref().map_or("-", domain::PlanId::as_str),
+                    caps.snapshots(),
+                    caps.matches()
+                ),
+                ..api::FindDto::default()
+            }),
+        }
     }
 }
 
@@ -1610,6 +1640,7 @@ impl Catalog for MistakenCatalog {
         _snapshot: domain::SnapshotId,
         _folder: domain::browse::FolderPath,
         _from: u64,
+        _most: u64,
     ) -> Result<api::FolderDto, FolderError> {
         let (code, args, detail) = mistake();
         Err(FolderError::Repository(SnapshotsError::Unavailable {
@@ -1617,6 +1648,17 @@ impl Catalog for MistakenCatalog {
             args,
             detail,
         }))
+    }
+
+    async fn find(
+        &self,
+        _alias: String,
+        _pattern: domain::find::NamePattern,
+        _plan: Option<domain::PlanId>,
+        _caps: domain::find::SearchCaps,
+    ) -> Result<api::FindDto, SnapshotsError> {
+        let (code, args, detail) = mistake();
+        Err(SnapshotsError::Unavailable { code, args, detail })
     }
 }
 
@@ -1864,6 +1906,98 @@ async fn a_folder_of_a_repository_that_cannot_be_read_is_refused_as_its_listing_
     assert_eq!(down.status(), StatusCode::SERVICE_UNAVAILABLE);
     assert_eq!(body(down).await, r#"{"code":"engine-unavailable"}"#);
     let slow = get(&folder_route("slow", "")).await;
+    assert_eq!(slow.status(), StatusCode::GATEWAY_TIMEOUT);
+    assert_eq!(body(slow).await, r#"{"code":"repository-read-timed-out"}"#);
+}
+
+/// A page holds no more entries than the request's `limit`, and the next
+/// page starts after them.
+#[tokio::test]
+async fn a_folder_page_holds_no_more_than_the_limit_asked_for() {
+    let response = get(&folder_route("demo", "?path=source/docs&from=0&limit=10")).await;
+    assert_eq!(response.status(), StatusCode::OK);
+    let wire: serde_json::Value = serde_json::from_str(&body(response).await).unwrap();
+    assert_eq!(wire["next"], 10, "the next page starts after ten entries");
+}
+
+/// A limit that is no count of entries is refused as an invalid argument,
+/// naming the parameter and never the value given.
+#[tokio::test]
+async fn a_folder_limit_that_is_no_count_is_an_invalid_argument() {
+    for limit in ["abc", "-1", "18446744073709551616"] {
+        let response = get(&folder_route("demo", &format!("?limit={limit}"))).await;
+        assert_eq!(response.status(), StatusCode::BAD_REQUEST, "{limit}");
+        assert_eq!(
+            serde_json::from_str::<serde_json::Value>(&body(response).await).unwrap(),
+            invalid_argument("limit", "invalid"),
+            "{limit}"
+        );
+    }
+}
+
+/// The refusal of the query parameter `field` for `problem`.
+fn invalid_argument(field: &str, problem: &str) -> serde_json::Value {
+    serde_json::json!({
+        "code": "invalid-arguments",
+        "args": {
+            "field": {"type": "text", "value": field},
+            "problem": {"type": "text", "value": problem},
+        },
+    })
+}
+
+/// A search hands the catalog the pattern, the plan and the caps as the
+/// request names them, a cap past its most lowered to it, and answers
+/// what the catalog found.
+#[tokio::test]
+async fn a_search_hands_on_its_pattern_plan_and_caps() {
+    let response = get(
+        "/api/v1/repositories/demo/find?pattern=*.PDF&plan=documents&snapshots=5&matches=100000",
+    )
+    .await;
+    assert_eq!(response.status(), StatusCode::OK);
+    let wire: serde_json::Value = serde_json::from_str(&body(response).await).unwrap();
+    assert_eq!(
+        wire["pattern"],
+        "*.PDF plan documents snapshots 5 matches 500"
+    );
+    let defaults = get("/api/v1/repositories/demo/find?pattern=tax").await;
+    let wire: serde_json::Value = serde_json::from_str(&body(defaults).await).unwrap();
+    assert_eq!(wire["pattern"], "tax plan - snapshots 20 matches 100");
+}
+
+/// A pattern left out or one no name could match, a plan ID that can't be
+/// one and a cap that is no count are each refused, naming the parameter.
+#[tokio::test]
+async fn a_search_s_parameters_are_checked_where_they_enter() {
+    for (query, field, problem) in [
+        ("", "pattern", "missing"),
+        ("?pattern=", "pattern", "invalid"),
+        ("?pattern=tax/2025", "pattern", "invalid"),
+        ("?pattern=tax&plan=Not%20A%20Plan", "plan", "invalid"),
+        ("?pattern=tax&snapshots=many", "snapshots", "invalid"),
+        ("?pattern=tax&matches=-1", "matches", "invalid"),
+    ] {
+        let response = get(&format!("/api/v1/repositories/demo/find{query}")).await;
+        assert_eq!(response.status(), StatusCode::BAD_REQUEST, "{query}");
+        assert_eq!(
+            serde_json::from_str::<serde_json::Value>(&body(response).await).unwrap(),
+            invalid_argument(field, problem),
+            "{query}"
+        );
+    }
+}
+
+/// The repository is refused as its listing would be.
+#[tokio::test]
+async fn a_search_of_a_repository_that_cannot_be_read_is_refused_as_its_listing_is() {
+    let missing = get("/api/v1/repositories/missing/find?pattern=tax").await;
+    assert_eq!(missing.status(), StatusCode::NOT_FOUND);
+    assert_eq!(
+        body(missing).await,
+        r#"{"code":"repository-unknown","args":{"alias":{"type":"text","value":"missing"}}}"#
+    );
+    let slow = get("/api/v1/repositories/slow/find?pattern=tax").await;
     assert_eq!(slow.status(), StatusCode::GATEWAY_TIMEOUT);
     assert_eq!(body(slow).await, r#"{"code":"repository-read-timed-out"}"#);
 }

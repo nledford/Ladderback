@@ -348,8 +348,19 @@ impl crate::Catalog for EmptyCatalog {
         _snapshot: domain::SnapshotId,
         _folder: domain::browse::FolderPath,
         _from: u64,
+        _most: u64,
     ) -> Result<api::FolderDto, crate::FolderError> {
         Ok(api::FolderDto::default())
+    }
+
+    async fn find(
+        &self,
+        _alias: String,
+        _pattern: domain::find::NamePattern,
+        _plan: Option<domain::PlanId>,
+        _caps: domain::find::SearchCaps,
+    ) -> Result<api::FindDto, crate::SnapshotsError> {
+        Ok(api::FindDto::default())
     }
 }
 

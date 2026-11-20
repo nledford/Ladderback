@@ -311,7 +311,7 @@ async fn a_listing_or_folder_read_that_failed_is_told_by_the_code_of_its_failure
         );
         assert_eq!(
             catalog
-                .folder("failing".to_owned(), a_snapshot(), docs(), 0)
+                .folder("failing".to_owned(), a_snapshot(), docs(), 0, 1_000)
                 .await,
             Err(FolderError::Repository(expected)),
             "{reason:?}"
@@ -396,7 +396,7 @@ async fn a_page_of_a_snapshot_s_folder_is_told_entry_by_entry() {
     let (catalog, _scratch) =
         catalog_with_a_password_command("demo", "echo not-a-real-password", engine.clone()).await;
     let page = catalog
-        .folder("demo".to_owned(), a_snapshot(), docs(), 1_000)
+        .folder("demo".to_owned(), a_snapshot(), docs(), 1_000, 1_000)
         .await
         .expect("the page");
     let entry = |name: &str, kind, size, modified: Option<&str>| api::EntryDto {
@@ -447,7 +447,7 @@ async fn a_snapshot_or_folder_that_is_not_there_is_told_as_unknown() {
             catalog_with_a_password_command("demo", "echo not-a-real-password", browsing(answer))
                 .await;
         let read = catalog
-            .folder("demo".to_owned(), a_snapshot(), docs(), 0)
+            .folder("demo".to_owned(), a_snapshot(), docs(), 0, 1_000)
             .await;
         assert_eq!(read, Err(refused));
     }
@@ -462,7 +462,7 @@ async fn a_folder_of_a_repository_the_configuration_does_not_hold_is_unknown() {
         catalog_with_a_password_command("demo", "echo not-a-real-password", engine.clone()).await;
     for alias in ["other", "not an alias!"] {
         let read = catalog
-            .folder(alias.to_owned(), a_snapshot(), docs(), 0)
+            .folder(alias.to_owned(), a_snapshot(), docs(), 0, 1_000)
             .await;
         assert_eq!(
             read,
@@ -508,6 +508,7 @@ async fn a_listing_that_ran_out_of_time_is_refused_as_a_read_that_timed_out() {
 async fn a_folder_read_that_ran_out_of_time_is_refused_as_a_read_that_timed_out() {
     let alias = RepositoryAlias::parse("slow").expect("an alias");
     let refused = folder_refusal(
+        "a folder of a snapshot",
         &alias,
         &timed_out_settings(),
         BrowseError::Read(app::maintenance::MaintenanceError::TimedOut),
@@ -529,7 +530,7 @@ async fn a_browse_whose_password_command_fails_is_refused_with_its_code_and_mask
     )
     .await;
     let refused = catalog
-        .folder("failing-browse".to_owned(), a_snapshot(), docs(), 0)
+        .folder("failing-browse".to_owned(), a_snapshot(), docs(), 0, 1_000)
         .await
         .expect_err("the browse is refused");
     let FolderError::Repository(SnapshotsError::SecretRefused(refusal)) = refused else {
@@ -561,7 +562,7 @@ async fn the_log_of_a_browse_the_engine_refused_masks_the_secrets_of_the_reposit
     let (catalog, _scratch) =
         catalog_with_a_password_command("browse-down", "echo not-a-real-password", engine).await;
     let refused = catalog
-        .folder("browse-down".to_owned(), a_snapshot(), docs(), 0)
+        .folder("browse-down".to_owned(), a_snapshot(), docs(), 0, 1_000)
         .await;
     assert_eq!(refused, Err(FolderError::Repository(engine_unavailable())));
     let logged = logged_about_browsing("browse-down").join("\n");
@@ -585,7 +586,7 @@ async fn a_browse_the_engine_refused_for_too_much_to_mask_is_refused_with_its_co
     let (catalog, _scratch) =
         catalog_with_a_password_command("too-much", "echo not-a-real-password", engine).await;
     let refused = catalog
-        .folder("too-much".to_owned(), a_snapshot(), docs(), 0)
+        .folder("too-much".to_owned(), a_snapshot(), docs(), 0, 1_000)
         .await;
     assert_eq!(
         refused,

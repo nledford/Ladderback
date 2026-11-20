@@ -20,3 +20,5 @@ A scope opened too much at once: `read` gave the names inside every snapshot and
 - **An open events stream follows its permissions.** The stream asks every 5 s, as a session's does, whether what opened it still has Backups: a token revoked or changed to lack it, or a `[without-token]` table that no longer allows it or can't be read, ends the stream; otherwise it shows from then on what the permissions held now allow.
 
 Left out of this step: the MCP server sending the header and listing only the tools its permissions open, and the web UI's form of permission rows with the password prompt, which come next under #962. The token form keeps its four checkboxes meanwhile, each giving the rows its scope was migrated to.
+
+**Amended by decision 132** (2026-11-20, #953): Snapshot contents also opens the snapshot search (`GET /api/v1/repositories/{alias}/find`), which names what a folder's page names; Backups alone doesn't.
