@@ -23,6 +23,24 @@ updates:
     commit-message:
       prefix: ci
 
+  # The Containerfile's base image, pinned by digest: one pull request when
+  # the digest of its tag moves, so the image picks up Debian's security
+  # fixes. Dependabot reads files named Containerfile as well as Dockerfile.
+  # A new Debian release is a choice someone makes, not a weekly proposal.
+  # The prefix is `build`, as for npm: the PR title check accepts it, and
+  # release-plz leaves it out of the changelog.
+  - package-ecosystem: docker
+    directory: /
+    schedule:
+      interval: weekly
+    cooldown:
+      default-days: 7
+    ignore:
+      - dependency-name: debian
+        update-types: ["version-update:semver-major"]
+    commit-message:
+      prefix: build
+
   # Cargo: security updates only. `open-pull-requests-limit: 0` turns off
   # version updates, which stay a choice someone makes, but Dependabot still
   # opens a pull request for a RustSec advisory that affects the lockfile,
