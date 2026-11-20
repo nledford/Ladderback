@@ -869,38 +869,16 @@ async fn a_run_whose_plan_was_deleted_while_it_waited_does_not_start() {
     assert_eq!(jobs(&scripted), 0, "the engine was never asked");
 }
 
-/// A queued backup whose run waited for its keyring, and whose plan moved
-/// to another repository while it waited, isn't run there under a record
-/// of the old: it ends once the keyring is unlocked, and the engine is
-/// never asked (#1221).
-#[tokio::test]
-async fn a_resumed_run_whose_plan_moved_while_it_waited_ends_unrun() {
-    capture();
-    let started = domain::Timestamp::from_second(1_800_000_000).expect("a timestamp");
-    let clock = Arc::new(FakeClock::new(started));
-    let secrets = Arc::new(FakeSecrets::new());
-    keyring_locked_until(
-        &secrets,
-        &clock,
-        started + domain::SignedDuration::from_secs(60),
-    );
-    let store = Arc::new(app::fakes::InMemoryOperationStore::new());
-    let (runner, _heard, scripted, home) =
-        keyring_parked_runner(secrets, clock.clone(), store.clone()).await;
-    let queued = queued_home_backup(0x1223, None);
-    store
-        .save(&queued, None)
-        .await
-        .expect("the queued backup is saved");
-    let unlock = app::secrets::UnlockWait::new(
-        clock.clone(),
-        started + domain::SignedDuration::from_secs(600),
-    );
-    PlanRuns::resume(&runner, queued.clone(), Some(unlock)).await;
-    until_it_waits(&clock).await;
+/// The keyring entry of the repository `other`, where [`move_home_to_other`]
+/// moves the plan `home`.
+fn other_entry() -> domain::secrets::KeyringEntry {
+    domain::secrets::KeyringEntry::parse("ladderback/other").expect("an entry")
+}
 
-    // The person adds the repository `other`, whose password is written in
-    // its settings, and moves the plan there.
+/// The person adds the repository `other`, whose password is in the
+/// keyring under [`other_entry`], and moves the plan `home` there.
+async fn move_home_to_other(runner: &PlanRunner, secrets: &FakeSecrets) {
+    secrets.set_keyring_entry(&other_entry(), "canary-other");
     let config = runner.config.load().await.expect("the configuration reads");
     let other = domain::RepositoryAlias::parse("other").expect("an alias");
     let mut repositories = config.repositories().clone();
@@ -912,7 +890,7 @@ async fn a_resumed_run_whose_plan_moved_while_it_waited_ends_unrun() {
             settings: domain::planning::RepositorySettings {
                 repository: "/srv/other".to_owned(),
                 repo_hot: None,
-                password: SecretRef::Inline(domain::secrets::SecretValue::new("canary-other")),
+                password: SecretRef::Keyring(other_entry()),
                 options: Default::default(),
                 options_hot: Default::default(),
                 options_cold: Default::default(),
@@ -922,6 +900,7 @@ async fn a_resumed_run_whose_plan_moved_while_it_waited_ends_unrun() {
             hooks: Default::default(),
         },
     );
+    let home = PlanId::parse("home").expect("a plan id");
     let mut plan = config.plan(&home).expect("the plan").clone();
     plan.repository = other;
     let moved = config
@@ -935,9 +914,86 @@ async fn a_resumed_run_whose_plan_moved_while_it_waited_ends_unrun() {
     app::ports::ConfigStore::save(&*runner.config, &moved)
         .await
         .expect("the configuration saves");
+}
+
+/// A scheduled run that waited for its keyring, and whose plan moved to
+/// another repository while it waited, doesn't start: the engine is never
+/// asked, and the new repository's password isn't read for a run that
+/// won't run there (#1221).
+#[tokio::test]
+async fn a_run_whose_plan_moved_while_it_waited_does_not_start() {
+    capture();
+    let started = domain::Timestamp::from_second(1_800_000_000).expect("a timestamp");
+    let clock = Arc::new(FakeClock::new(started));
+    let secrets = Arc::new(FakeSecrets::new());
+    keyring_locked_until(
+        &secrets,
+        &clock,
+        started + domain::SignedDuration::from_secs(60),
+    );
+    let store = Arc::new(app::fakes::InMemoryOperationStore::new());
+    let (runner, _heard, scripted, home) =
+        keyring_parked_runner(secrets.clone(), clock.clone(), store).await;
+    let place = runner
+        .queue
+        .push(&home, domain::planning::Concurrency::default());
+    let unlock = app::secrets::UnlockWait::new(
+        clock.clone(),
+        started + domain::SignedDuration::from_secs(600),
+    );
+    PlanRuns::start(&runner, &home, Trigger::Schedule, place, Some(unlock)).await;
+    until_it_waits(&clock).await;
+
+    move_home_to_other(&runner, &secrets).await;
+    clock.advance(domain::SignedDuration::from_secs(60));
+    until_logged(&["home", "didn't start", "another repository"]).await;
+    assert_eq!(jobs(&scripted), 0, "the engine was never asked");
+    assert_eq!(
+        secrets.read_count(&SecretRef::Keyring(other_entry())),
+        0,
+        "the new repository's password isn't read"
+    );
+}
+
+/// A queued backup whose run waited for its keyring, and whose plan moved
+/// to another repository while it waited, isn't run there under a record
+/// of the old: it ends once the keyring is unlocked, the engine is never
+/// asked, and the new repository's password isn't read (#1221).
+#[tokio::test]
+async fn a_resumed_run_whose_plan_moved_while_it_waited_ends_unrun() {
+    capture();
+    let started = domain::Timestamp::from_second(1_800_000_000).expect("a timestamp");
+    let clock = Arc::new(FakeClock::new(started));
+    let secrets = Arc::new(FakeSecrets::new());
+    keyring_locked_until(
+        &secrets,
+        &clock,
+        started + domain::SignedDuration::from_secs(60),
+    );
+    let store = Arc::new(app::fakes::InMemoryOperationStore::new());
+    let (runner, _heard, scripted, _home) =
+        keyring_parked_runner(secrets.clone(), clock.clone(), store.clone()).await;
+    let queued = queued_home_backup(0x1223, None);
+    store
+        .save(&queued, None)
+        .await
+        .expect("the queued backup is saved");
+    let unlock = app::secrets::UnlockWait::new(
+        clock.clone(),
+        started + domain::SignedDuration::from_secs(600),
+    );
+    PlanRuns::resume(&runner, queued.clone(), Some(unlock)).await;
+    until_it_waits(&clock).await;
+
+    move_home_to_other(&runner, &secrets).await;
     clock.advance(domain::SignedDuration::from_secs(60));
     until_logged(&["can't run again", "another repository"]).await;
     assert_eq!(jobs(&scripted), 0, "the engine was never asked");
+    assert_eq!(
+        secrets.read_count(&SecretRef::Keyring(other_entry())),
+        0,
+        "the new repository's password isn't read"
+    );
 }
 
 /// A queued backup whose run waits for its keyring can be cancelled while
@@ -994,6 +1050,7 @@ async fn a_resumed_run_waiting_for_its_keyring_can_be_cancelled() {
     })
     .await
     .expect("the queued backup ends cancelled");
+    assert_eq!(clock.sleepers(), 0, "the wait for the keyring stopped");
     assert_eq!(jobs(&scripted), 0, "the engine was never asked");
 }
 

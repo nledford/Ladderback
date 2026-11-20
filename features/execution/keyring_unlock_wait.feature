@@ -39,6 +39,13 @@ Feature: A run whose keyring is locked waits for it to be unlocked
     Then the run fails 120 seconds after the daemon started because the keyring is locked
     And the keyring entry "ladderback/demo" was read 10 times
 
+  Scenario: A run that starts once its plan's next run is due is refused without asking whether the keyring is locked
+    Given the keyring is locked
+    And the plan's next run is due 20 seconds after the daemon started
+    When the schedule starts a backup 30 seconds after the daemon started
+    Then the run fails 30 seconds after the daemon started because the keyring is locked
+    And the daemon asked whether the keyring is locked 0 times
+
   Scenario: The daemon logs the unlock wait once, naming the keyring entry and no secret
     Given the keyring unlocks 45 seconds after the daemon started
     When the schedule starts a backup 30 seconds after the daemon started
