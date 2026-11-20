@@ -108,6 +108,35 @@ pub fn toast_class(tone: ToastTone) -> String {
     format!("toast {} {} {LOOK}", tone.tone().class(), tone.fill())
 }
 
+/// The words a page's toast slot keeps room for while the page is open: one
+/// empty line from its first paint, so a toast of one line moves nothing
+/// after it as it comes, then the words of each toast shown, once each, so a
+/// toast going, or a shorter one taking its place, gives back none of the
+/// room. The slot draws each as an unseen copy of a toast, which lays out as
+/// the toast does at any width and text size.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct Room {
+    words: Vec<String>,
+}
+
+impl Default for Room {
+    fn default() -> Self {
+        todo!()
+    }
+}
+
+impl Room {
+    /// Keeps room for a toast of `words`; `false` if it already had.
+    pub fn keep(&mut self, words: &str) -> bool {
+        todo!("{words}{:?}", self.words)
+    }
+
+    /// The words it keeps room for, the empty line first.
+    pub fn words(&self) -> &[String] {
+        todo!("{:?}", self.words)
+    }
+}
+
 /// What holds a toast on screen while the reader is on it (2.2.1).
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Hold {
@@ -269,6 +298,23 @@ mod tests {
                 assert!(classes.contains(&utility), "{class} lacks {utility}");
             }
         }
+    }
+
+    #[test]
+    fn a_page_keeps_room_for_one_empty_line_before_any_toast() {
+        assert_eq!(Room::default().words(), [String::new()]);
+    }
+
+    #[test]
+    fn a_page_keeps_room_for_each_toasts_words_once_and_never_gives_it_back() {
+        let mut room = Room::default();
+        assert!(room.keep("Settings saved."));
+        assert!(room.keep("Demo check queued."));
+        assert!(!room.keep("Settings saved."));
+        assert_eq!(
+            room.words(),
+            ["", "Settings saved.", "Demo check queued."].map(String::from)
+        );
     }
 
     #[test]
