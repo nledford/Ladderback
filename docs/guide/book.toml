@@ -1,0 +1,27 @@
+# The user docs site, built by mdBook from the pages in this folder (§16,
+# decision 128): `just docs-site` builds it into book/ and checks its links.
+[book]
+title = "Ladderback"
+description = "Guides for running Ladderback, a self-hosted backup manager for rustic."
+language = "en"
+src = "."
+
+[build]
+# A page SUMMARY.md lists but the folder lacks fails the build, rather than
+# being made as an empty page.
+create-missing = false
+
+[output.html]
+site-url = "/Ladderback/"
+git-repository-url = "https://github.com/nledford/Ladderback"
+edit-url-template = "https://github.com/nledford/Ladderback/edit/main/docs/guide/{path}"
+default-theme = "light"
+preferred-dark-theme = "navy"
+# The accessibility fixes to mdBook's themes (theme/ladderback.css says what
+# each fixes and why).
+additional-css = ["theme/ladderback.css"]
+additional-js = ["theme/ladderback.js"]
+
+[output.html.search]
+# Search the guides, not the build's own pages.
+enable = true

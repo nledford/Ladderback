@@ -1,6 +1,8 @@
-//! Steps for `features/fleet/pairing_from_a_terminal.feature`: the hub's
+//! Steps for `features/fleet/pairing_from_a_terminal.feature` and
+//! `features/fleet/hub_status_from_a_terminal.feature`: the hub's
 //! `ladderback pairing-token` and `ladderback serve --hub`, and a machine's
-//! `ladderback pair`, each a real process on folders of its own.
+//! `ladderback pair` and `ladderback hub-status`, each a real process on
+//! folders of its own.
 
 use std::io::Write as _;
 use std::net::SocketAddr;
@@ -153,6 +155,19 @@ async fn machine_pairs(agent: &mut Agent, hostname: String) {
     pair(agent, &hostname, &format!("http://{address}")).await;
 }
 
+#[given(expr = "a machine named {string} paired with the token from its terminal")]
+async fn machine_paired_before(agent: &mut Agent, hostname: String) {
+    machine_pairs(agent, hostname).await;
+    let said = said(agent);
+    assert!(said.success, "{said:?}");
+}
+
+#[when("the machine checks its link to the hub from its terminal")]
+async fn machine_checks(agent: &mut Agent) {
+    let said = ladderback(machine_root(agent), &["hub-status"], None).await;
+    agent.pairing_terminal.said = Some(said);
+}
+
 #[when(expr = "a machine pairs with the token at the address {string} from its terminal")]
 async fn machine_pairs_at(agent: &mut Agent, address: String) {
     pair(agent, "e2e-laptop", &address).await;
@@ -271,6 +286,37 @@ fn refused_life(agent: &mut Agent) {
         said.stderr.contains("a token lives 5 to 1440 minutes"),
         "{said:?}"
     );
+}
+
+#[then("the machine says the hub holds it waiting for approval")]
+fn says_pending(agent: &mut Agent) {
+    let said = said(agent);
+    assert!(said.success, "{said:?}");
+    assert!(
+        said.stderr
+            .contains("The hub holds this machine waiting for approval"),
+        "{said:?}"
+    );
+}
+
+#[then("the machine says it isn't paired with a hub")]
+fn says_not_paired(agent: &mut Agent) {
+    let said = said(agent);
+    assert!(!said.success, "{said:?}");
+    assert!(said.stderr.contains("isn't paired with a hub"), "{said:?}");
+}
+
+/// A command that only checks writes nothing, not even the agent ID a
+/// machine gets when it first pairs or serves.
+#[then("the machine's data folder holds nothing")]
+fn data_folder_empty(agent: &mut Agent) {
+    let data = testkit::daemon::data_dir(&machine_root(agent));
+    let held: Vec<_> = match std::fs::read_dir(&data) {
+        Ok(entries) => entries.map(|entry| entry.unwrap().file_name()).collect(),
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => vec![],
+        Err(error) => panic!("{}: {error}", data.display()),
+    };
+    assert!(held.is_empty(), "{held:?}");
 }
 
 #[then("the terminal shows no token")]

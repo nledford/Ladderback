@@ -152,6 +152,7 @@ fn the_hub_commands_are_unknown() {
         &["serve", "--hub"][..],
         &["pairing-token"],
         &["pair"],
+        &["hub-status"],
         &["recovery-kit"],
         &["hub-recover"],
     ] {

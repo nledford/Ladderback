@@ -1,6 +1,6 @@
 # Install Ladderback
 
-Ladderback runs on each machine it backs up, and each system has one recommended way to install it ([decision 126](../design/decisions/126-primary-install-channels.md)):
+Ladderback runs on each machine it backs up, and each system has one recommended way to install it ([decision 126](https://github.com/nledford/Ladderback/blob/main/docs/design/decisions/126-primary-install-channels.md)):
 
 - **Debian 12 or newer, Ubuntu 22.04 or newer, 64-bit Raspberry Pi OS and Fedora:** the release's [`.deb` or `.rpm` package](#install-a-package-debian-ubuntu-fedora), from 0.5.0.
 - **Any other 64-bit Linux:** the [install script](#the-install-script), which downloads the release's archive and checks it.
@@ -28,7 +28,7 @@ sha256sum -c --ignore-missing SHA256SUMS
 sudo dnf install "./$rpm"
 ```
 
-`sha256sum` must print `…: OK`. The packages are not signed: `apt` and `dnf` install a file from disk without a repository's key, and `dnf` warns that it skipped the OpenPGP checks. The checksum is the check ([decision 123](../design/decisions/123-deb-and-rpm-packages.md)). The `./` matters to `apt`, which otherwise looks for a package of that name in its repositories. The packages are for 64-bit systems: on 32-bit Raspberry Pi OS `dpkg --print-architecture` says `armhf`, the download fails with a 404, and there is no package for it.
+`sha256sum` must print `…: OK`. The packages are not signed: `apt` and `dnf` install a file from disk without a repository's key, and `dnf` warns that it skipped the OpenPGP checks. The checksum is the check ([decision 123](https://github.com/nledford/Ladderback/blob/main/docs/design/decisions/123-deb-and-rpm-packages.md)). The `./` matters to `apt`, which otherwise looks for a package of that name in its repositories. The packages are for 64-bit systems: on 32-bit Raspberry Pi OS `dpkg --print-architecture` says `armhf`, the download fails with a 404, and there is no package for it.
 
 Then run `ladderback --version` and `ladderback install-service` as yourself, not under `sudo`. There is no apt or dnf repository yet, so to update, install the next release's package the same way, then run `ladderback install-service` again. `sudo apt remove ladderback` or `sudo dnf remove ladderback` removes the program and leaves your configuration, data and service unit as they are, so run `ladderback remove-service` first if you want the service gone too. On Atomic Fedora (Bazzite) a package needs `rpm-ostree` layering: use the [install script](#the-install-script) there.
 
@@ -48,7 +48,7 @@ A download that stalls, finding no connection within 30 s or averaging under 1 K
 
 Those that need them, a C compiler, git and Node.js 26 or newer, it never installs: it names the missing ones with the command that installs them and stops, and it never runs `sudo`.
 
-It keeps Ladderback's source in `~/.local/share/ladderback/source`, checks out the newest release, and installs it with `just install` into `~/.cargo/bin`. The command runs the script on `main`, and the script installs the newest release, not `main` ([decision 79](../design/decisions/79-a-from-source-install-script.md)).
+It keeps Ladderback's source in `~/.local/share/ladderback/source`, checks out the newest release, and installs it with `just install` into `~/.cargo/bin`. The command runs the script on `main`, and the script installs the newest release, not `main` ([decision 79](https://github.com/nledford/Ladderback/blob/main/docs/design/decisions/79-a-from-source-install-script.md)).
 
 Options go after `bash -s --`:
 
@@ -73,7 +73,7 @@ These are for contributors, for installing the release's archive by hand, and fo
 
 ### Download a release (Linux)
 
-Each release from 0.3.1 on has an archive for `x86_64` and one for `aarch64` Linux, each holding the `ladderback` binary with the web UI built in, and a `SHA256SUMS` file with their checksums. macOS has no archive until it can be signed and notarized ([decision 71](../design/decisions/71-signing-macos-builds-without-a-developer-id.md)). Download the archive for your machine and the checksums, check the archive, and install the binary into `~/.local/bin`:
+Each release from 0.3.1 on has an archive for `x86_64` and one for `aarch64` Linux, each holding the `ladderback` binary with the web UI built in, and a `SHA256SUMS` file with their checksums. macOS has no archive until it can be signed and notarized ([decision 71](https://github.com/nledford/Ladderback/blob/main/docs/design/decisions/71-signing-macos-builds-without-a-developer-id.md)). Download the archive for your machine and the checksums, check the archive, and install the binary into `~/.local/bin`:
 
 ```sh
 target="$(uname -m)-unknown-linux-gnu"
@@ -86,7 +86,7 @@ mkdir -p ~/.local/bin && install -m 755 "ladderback-$target/ladderback" ~/.local
 
 `sha256sum` must print `ladderback-…tar.xz: OK`; anything else means the download is damaged or isn't the release's, so don't install it. On a Raspberry Pi, `uname -m` says `aarch64` under 32-bit Raspberry Pi OS too, whose 64-bit kernel runs 32-bit programs, and the binary then doesn't start: `getconf LONG_BIT` must print `64`. `~/.local/bin` must be on your `PATH`; if you built Ladderback from source before, `cargo uninstall ladderback` removes that one, so the shell doesn't find the old binary first. To update, run the same commands again, which replace the binary, then `ladderback install-service` again if it runs as a [service](#running-as-a-service).
 
-Releases after 0.3.1 list inside the binary the crates the daemon was built from, so [cargo-audit](https://crates.io/crates/cargo-audit) can check an installed one against the security advisories published since, without its source: `cargo audit bin "$(command -v ladderback)"`. The list leaves out the crates of the web UI built into it, and a binary you built from source has none; `cargo audit` in a checkout of the release's tag checks both. An advisory the project has found doesn't affect Ladderback is in the `ignore` list of [`deny.toml`](../../deny.toml), with the reason.
+Releases after 0.3.1 list inside the binary the crates the daemon was built from, so [cargo-audit](https://crates.io/crates/cargo-audit) can check an installed one against the security advisories published since, without its source: `cargo audit bin "$(command -v ladderback)"`. The list leaves out the crates of the web UI built into it, and a binary you built from source has none; `cargo audit` in a checkout of the release's tag checks both. An advisory the project has found doesn't affect Ladderback is in the `ignore` list of [`deny.toml`](https://github.com/nledford/Ladderback/blob/main/deny.toml), with the reason.
 
 ### cargo-binstall
 
@@ -102,7 +102,7 @@ It reads the version in `main`'s `Cargo.toml`, downloads that release's archive 
 
 You need:
 
-- **Rust**, through [rustup](https://rustup.rs). In the checkout, rustup installs the exact Rust version `rust-toolchain.toml` pins, with the `wasm32-unknown-unknown` target, on the first build, so you build with the compiler CI tested ([decision 78](../design/decisions/78-the-rust-toolchain-is-pinned.md)). Without rustup, use Rust 1.100.0 or newer, the [MSRV](../../Cargo.toml), with that target, and take trunk and just from their prebuilt releases.
+- **Rust**, through [rustup](https://rustup.rs). In the checkout, rustup installs the exact Rust version `rust-toolchain.toml` pins, with the `wasm32-unknown-unknown` target, on the first build, so you build with the compiler CI tested ([decision 78](https://github.com/nledford/Ladderback/blob/main/docs/design/decisions/78-the-rust-toolchain-is-pinned.md)). Without rustup, use Rust 1.100.0 or newer, the [MSRV](https://github.com/nledford/Ladderback/blob/main/Cargo.toml), with that target, and take trunk and just from their prebuilt releases.
 - **git and a C compiler**: Xcode's Command Line Tools on macOS, `git` and `build-essential` or your distribution's equivalents on Linux.
 - **Node.js** 26 or newer, with npm, ideally the newest 26 release: the web UI's build runs Tailwind's CLI, and `just install-restart` is TypeScript, which Node runs as it is. Debian's and Ubuntu's own packages are older: take it from [nodejs.org](https://nodejs.org) or [NodeSource's signed apt repository](https://github.com/nodesource/distributions).
 - **[trunk](https://trunkrs.dev)**, which builds the web UI, and **[just](https://just.systems)** 1.40 or newer: `cargo +stable install --locked trunk just`, or your package manager's. trunk's newest release can need a newer Rust than the one the checkout pins, hence `+stable`. Building trunk from source takes more memory than a small machine has (with cargo's default jobs it ran a 4 GB Raspberry Pi out of memory), so prefer trunk's [prebuilt release](https://github.com/trunk-rs/trunk/releases), on Linux the `musl` archive, which runs whatever the system's glibc; where there is none for your system, bound the build to about one job per 2 GB of free memory with `-j`. trunk downloads the `wasm-bindgen` and `wasm-opt` the build needs.
@@ -126,7 +126,7 @@ git checkout "$(git tag --list 'v*' --sort=-v:refname | grep -v -- - | head -n 1
 
 ## After installing
 
-Start it with `ladderback serve` and open the address it prints, `listening on http://127.0.0.1:9898`; `--listen` picks another address or port (beyond loopback only with `--allowed-host`; [Remote access](remote-access.md) has the details). Its configuration and data live in your platform's config and data folders ([technical design §4.2](../design/components/daemon.md#42-daemon-agent), "Config").
+Start it with `ladderback serve` and open the address it prints, `listening on http://127.0.0.1:9898`; `--listen` picks another address or port (beyond loopback only with `--allowed-host`; [Remote access](remote-access.md) has the details). Its configuration and data live in your platform's config and data folders ([technical design §4.2](https://github.com/nledford/Ladderback/blob/main/docs/design/components/daemon.md#42-daemon-agent), "Config").
 
 ## Updating
 
@@ -142,17 +142,17 @@ If the service stops without its service manager asking it to, after a crash or 
 
 After an update, run `ladderback install-service` again: it replaces the service and starts it on the new binary. From a checkout, `just install-restart` does both without interrupting a backup: it builds with `just install` (its other arguments go there) into a staging folder beside the installed `ladderback`, waits until the service's operation log shows no operation running or queued (up to 2 hours; `--wait <minutes>` changes that, `--now` skips the wait), then moves the new binary into place, restarts the service at once, and checks that it runs a new process of that build. Until the restart the service's binary stays in place, so a backup that starts during the wait can still read a keyring password. It doesn't restart a service when it can't tell whether it is busy, as when the service isn't running, unless `--now`.
 
-`INSTALL_RESTART_ADDRESS=<host:port>` names the address of a service whose file you edited to listen elsewhere than `127.0.0.1:9898`. A hidden `.ladderback-install-` folder beside `ladderback` is one a run that was killed left behind: delete it. `ladderback remove-service` stops the service and removes its file. [Decision 64](../design/decisions/64-installing-the-agent-as-a-user-service.md) says what the service file holds.
+`INSTALL_RESTART_ADDRESS=<host:port>` names the address of a service whose file you edited to listen elsewhere than `127.0.0.1:9898`. A hidden `.ladderback-install-` folder beside `ladderback` is one a run that was killed left behind: delete it. `ladderback remove-service` stops the service and removes its file. [Decision 64](https://github.com/nledford/Ladderback/blob/main/docs/design/decisions/64-installing-the-agent-as-a-user-service.md) says what the service file holds.
 
 ## macOS: Full Disk Access
 
-On macOS, grant the installed `ladderback` Full Disk Access by hand, in System Settings → Privacy & Security. A build from source signed ad hoc loses the grant when it is rebuilt, so then grant it again after each update ([technical design §12](../design/operations.md#12-packaging-and-deployment), [decision 71](../design/decisions/71-signing-macos-builds-without-a-developer-id.md)); [signing your build](#signing-your-build) keeps it. A reinstall of an unsigned build can also make macOS ask again for access to the keychain, to Photos and to Full Disk Access; [technical design §12](../design/operations.md#12-packaging-and-deployment) says why, and what a prompt you decline or leave unanswered costs.
+On macOS, grant the installed `ladderback` Full Disk Access by hand, in System Settings → Privacy & Security. A build from source signed ad hoc loses the grant when it is rebuilt, so then grant it again after each update ([technical design §12](https://github.com/nledford/Ladderback/blob/main/docs/design/operations.md#12-packaging-and-deployment), [decision 71](https://github.com/nledford/Ladderback/blob/main/docs/design/decisions/71-signing-macos-builds-without-a-developer-id.md)); [signing your build](#signing-your-build) keeps it. A reinstall of an unsigned build can also make macOS ask again for access to the keychain, to Photos and to Full Disk Access; [technical design §12](https://github.com/nledford/Ladderback/blob/main/docs/design/operations.md#12-packaging-and-deployment) says why, and what a prompt you decline or leave unanswered costs.
 
 ### Signing your build
 
 A build from source carries the linker's ad-hoc signature, which changes with every build, so macOS sees each update as a new program: it drops the Full Disk Access grant and asks again for Photos and the keychain. Signed with a certificate from your own keychain under one fixed identifier, every build has the same signature to macOS, so its Full Disk Access and Photos grants carry over to the next update (tested on macOS 27.3, [#281](https://github.com/nledford/Ladderback/issues/281)). No Apple Developer account is needed.
 
-The keychain still asks once for each new build, signed or not, before it lets the build read a keyring entry: a self-signed certificate has no Apple Team ID, so "Always Allow" lets in only the build that was answered ([#892](https://github.com/nledford/Ladderback/issues/892), [technical design §12](../design/operations.md#12-packaging-and-deployment)). Left unanswered, the prompt fails the first scheduled backup, or notification, after an update. Any of these avoids that:
+The keychain still asks once for each new build, signed or not, before it lets the build read a keyring entry: a self-signed certificate has no Apple Team ID, so "Always Allow" lets in only the build that was answered ([#892](https://github.com/nledford/Ladderback/issues/892), [technical design §12](https://github.com/nledford/Ladderback/blob/main/docs/design/operations.md#12-packaging-and-deployment)). Left unanswered, the prompt fails the first scheduled backup, or notification, after an update. Any of these avoids that:
 
 - `just install-restart` reads each keyring entry once with the new program, a repository's password and a notification channel's address, token or password, in your terminal, before it restarts the service, so the keychain asks while you are there. Answer "Always Allow": a single "Allow" is for that one read, and the service is asked again. It stops before the restart when an entry can't be read; `--ignore-keyring-failure` restarts all the same. After any other update, run `ladderback check-keyring` yourself.
 - Read the entry with Apple's `security` program, which a new build of Ladderback doesn't change: `password-command = "security find-generic-password -s ladderback -a nas -w"` for the entry `ladderback/nas`. The keychain may ask once for `security` itself, so run that command once in a terminal and answer "Always Allow".
@@ -180,7 +180,7 @@ The first signing asks whether `codesign` may use the key: choose Always Allow, 
 
 Each release after 0.5.0 publishes a Docker image for x86_64 and aarch64 Linux, as `ghcr.io/nledford/ladderback` and `docker.io/nledford/ladderback`: the same image, tagged with the release's version. Only GitHub's latest release also gets `latest`, so a pre-release never moves it; to try a pre-release, pull it by its version. For 0.5.0, or a build of your own, `just image <version> <archive>... --tag ghcr.io/nledford/ladderback --load`, in a checkout, builds it from a release archive, as a release does. Docker Hub limits how often you may pull without an account; GitHub's registry doesn't.
 
-The image is there to try: it isn't yet a supported way to install and run Ladderback, and the package or the install script above is. It runs a machine's agent, which backs up the folders mounted into it. From M8's release it runs the hub too, and becomes the recommended way to run one ([decision 126](../design/decisions/126-primary-install-channels.md)); until then it has no hub, and refuses `serve --hub`.
+The image is there to try: it isn't yet a supported way to install and run Ladderback, and the package or the install script above is. It runs a machine's agent, which backs up the folders mounted into it. From M8's release it runs the hub too, and becomes the recommended way to run one ([decision 126](https://github.com/nledford/Ladderback/blob/main/docs/design/decisions/126-primary-install-channels.md)); until then it has no hub, and refuses `serve --hub`.
 
 The image runs `ladderback` as user and group 10001 and listens on port 9898. It keeps its configuration in the volume at `/var/lib/ladderback/config`, its data (the operation history and the admin password among them) in the volume at `/var/lib/ladderback/data`, and its cache in `/var/cache/ladderback`. Turn sign-in on first: `set-password` asks twice for an admin password of at least 8 characters, without showing it, and keeps it in the data volume. With `-i` alone in place of `-it`, it reads one line from a pipe instead.
 

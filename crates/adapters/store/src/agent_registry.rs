@@ -5,11 +5,12 @@
 
 use app::ports::{Added, AgentRegistry, StoreError};
 use async_trait::async_trait;
-use domain::Timestamp;
 use domain::fleet::{
-    AgentRecord, AgentStatus, HostnameKey, PairRefusal, PairRequest, Pairing, PairingView,
-    PublicKey, TokenId, TokenRecord, TokenUse, decide_pairing,
+    AgentRecord, AgentStatus, BindingKind, HostnameKey, PairRefusal, PairRequest, Pairing,
+    PairingView, ProofRefusal, ProofRequest, ProofView, PublicKey, TokenId, TokenRecord, TokenUse,
+    decide_pairing, decide_proof,
 };
+use domain::{AgentId, Timestamp};
 use sqlx::{Connection, SqliteConnection};
 
 use crate::sql::hub as sql;
@@ -278,5 +279,57 @@ impl AgentRegistry for SqliteStore {
             .await
             .map_err(unavailable)?;
         rows.iter().map(row::agent).collect()
+    }
+
+    async fn agent(&self, agent_id: AgentId) -> Result<Option<AgentRecord>, StoreError> {
+        let _call = self.call().await;
+        let found = sqlx::query(sql::AGENT)
+            .bind(row::agent_id_text(agent_id))
+            .fetch_optional(&self.pool)
+            .await
+            .map_err(unavailable)?;
+        found.as_ref().map(row::agent).transpose()
+    }
+
+    /// One transaction, the write lock taken up front, so the record the
+    /// decision reads is the one its change is written over: of two proofs
+    /// at once, the second sees the first's counter.
+    async fn take_proof(
+        &self,
+        request: &ProofRequest,
+        now: Timestamp,
+    ) -> Result<Result<AgentRecord, ProofRefusal>, StoreError> {
+        let now = to_the_millisecond(now);
+        let id = row::agent_id_text(request.agent_id);
+        let _call = self.call().await;
+        let mut conn = self.pool.acquire().await.map_err(unavailable)?;
+        let mut tx = conn
+            .begin_with("BEGIN IMMEDIATE")
+            .await
+            .map_err(unavailable)?;
+        let record = agent(&mut tx, sql::AGENT, id.clone()).await?;
+        let spent = sqlx::query(sql::SPENT_TOKENS)
+            .bind(id)
+            .bind(request.agent_key.as_bytes().as_slice())
+            .fetch_all(&mut *tx)
+            .await
+            .map_err(unavailable)?;
+        let kinds = spent
+            .iter()
+            .map(|found| row::pairing_token(found).map(|token| token.kind))
+            .collect::<Result<Vec<BindingKind>, StoreError>>()?;
+        let view = ProofView {
+            record: record.as_ref(),
+            kinds: &kinds,
+        };
+        let decided = decide_proof(&view, request, now);
+        match &decided {
+            Ok(agent) => {
+                write_agent(&mut tx, agent, false).await?;
+                tx.commit().await.map_err(unavailable)?;
+            }
+            Err(_) => tx.rollback().await.map_err(unavailable)?,
+        }
+        Ok(decided)
     }
 }

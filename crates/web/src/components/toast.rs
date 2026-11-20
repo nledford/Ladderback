@@ -17,7 +17,7 @@ use crate::live::reply;
 use crate::text;
 use crate::variants::{Size, Tone};
 pub use rules::ToastTone;
-use rules::{Hold, Lifetime, Timer};
+use rules::{Hold, Lifetime, Room, Timer};
 
 // What a toast shows, how it is said and drawn and how long it stays,
 // decided on the host; `Toast` is its glue.
@@ -38,6 +38,7 @@ struct Shown {
 pub struct Toasts {
     shown: RwSignal<Option<Shown>>,
     life: StoredValue<Lifetime>,
+    room: RwSignal<Room>,
 }
 
 impl Toasts {
@@ -45,14 +46,16 @@ impl Toasts {
         Self {
             shown: RwSignal::new(None),
             life: StoredValue::new(Lifetime::default()),
+            room: RwSignal::new(Room::default()),
         }
     }
 
     /// Shows `words` as a toast in `tone`, said once through the announcer,
     /// politely, or assertively for a failure; its going is not said. It
-    /// never takes focus.
+    /// never takes focus. Its slot keeps room for it while the page is open.
     pub fn show(self, tone: ToastTone, words: String) {
         reply(tone.politeness(), &words);
+        self.room.maybe_update(|room| room.keep(&words));
         self.shown.set(Some(Shown { tone, words }));
         let timer = self.life.try_update_value(|life| life.arrive(tone));
         self.wait(timer.flatten());
@@ -112,6 +115,13 @@ impl Default for Toasts {
 /// whose ID `then_focus` holds then, which the page keeps on the page
 /// (2.4.3), and nothing is said.
 ///
+/// It lies in a slot that keeps room for it from the page's first paint,
+/// one line of a toast tall, and grows to fit each toast shown without
+/// shrinking back while the page is open, so a toast coming or going moves
+/// nothing after it; only a toast taller than any before it, such as one
+/// whose words wrap on a small screen with larger text, moves what follows,
+/// once, by the lines it adds.
+///
 /// What the caller owes WCAG 2.2 AA, since the toast does none of it:
 ///
 /// - **Keeping a failure on the page.** A failure stays where it happened,
@@ -139,7 +149,8 @@ pub fn Toast(
             .shown
             .with(|shown| shown.as_ref().map(|shown| shown.tone).unwrap_or_default())
     };
-    move || {
+    let room_name = name.clone();
+    let toast = move || {
         showing.get().then(|| {
             let localizer = Arc::clone(&localizer);
             let name = name.clone();
@@ -153,28 +164,21 @@ pub fn Toast(
                     on:focusin=move |_| toasts.hold(Hold::Focus)
                     on:focusout=move |_| toasts.release(Hold::Focus)
                 >
-                    // The icon, centered on the first line of the words (one
-                    // line tall: `1lh`, which no utility names), in the
-                    // words' color, so the pair's contrast covers it.
-                    <span class="toast-icon flex flex-none items-center [min-block-size:1lh]">
+                    <span class=ICON>
                         {move || {
                             let tone = tone();
                             let label = text(&localizer, tone.label());
                             view! { <Icon glyph=tone.glyph() meaning=Meaning::Labelled(label) /> }
                         }}
                     </span>
-                    // The words take the room left and wrap (The 320 Rule);
-                    // `min-inline-size` lets them shrink below their longest
-                    // word, which no logical utility names.
-                    <p class="toast-words flex-auto m-0 [min-inline-size:0] wrap-anywhere">
+                    <p class=WORDS>
                         {move || {
                             toasts
                                 .shown
                                 .with(|shown| shown.as_ref().map(|shown| shown.words.clone()))
                         }}
                     </p>
-                    // At the line's end, never squeezed by the words.
-                    <span class="toast-dismiss flex-none">
+                    <span class=DISMISS>
                         <Tooltip tip=Tip::Names(name.clone())>
                             <Button
                                 content=Content::IconOnly {
@@ -192,5 +196,64 @@ pub fn Toast(
                 </div>
             }
         })
+    };
+    view! {
+        // The room comes first, so the toast, drawn after it in the one
+        // cell, lies above it.
+        <div class=rules::SLOT>
+            <For
+                each=move || toasts.room.with(|room| room.words().to_vec())
+                key=|words: &String| words.clone()
+                let:words
+            >
+                {room(room_name.clone(), words)}
+            </For>
+            {toast}
+        </div>
+    }
+}
+
+// The parts of a toast, and of the room kept for one, so both lay out alike.
+// The icon, centered on the first line of the words (one line tall: `1lh`,
+// which no utility names), in the words' color, so the pair's contrast
+// covers it.
+const ICON: &str = "toast-icon flex flex-none items-center [min-block-size:1lh]";
+// The words take the room left and wrap (The 320 Rule); `min-inline-size`
+// lets them shrink below their longest word, which no logical utility names.
+const WORDS: &str = "toast-words flex-auto m-0 [min-inline-size:0] wrap-anywhere";
+// At the line's end, never squeezed by the words.
+const DISMISS: &str = "toast-dismiss flex-none";
+
+/// Room kept for a toast of `words` (or one empty line): an unseen copy of
+/// one, laid out as it is at any width and text size. Hidden (`invisible`),
+/// it is out of the accessibility tree, and `inert` keeps its button out of
+/// reach. Its words are drawn by CSS from an attribute, so no search of the
+/// page's text finds them twice. Its Dismiss button sits in the span a
+/// [`Tooltip`] wraps a control in, with no tooltip: a closed one takes no
+/// room, and a real one per copy would keep its listeners on the window for
+/// the page's life.
+fn room(name: String, words: String) -> impl IntoView {
+    view! {
+        <div class=rules::ROOM inert=true>
+            <span class=ICON>
+                <Icon glyph=ToastTone::default().glyph() />
+            </span>
+            <p class=format!("{WORDS} before:content-[attr(data-words)]") data-words=words></p>
+            <span class=DISMISS>
+                <span class="tooltip-anchor">
+                    // Never pressed: it is unseen and inert.
+                    <Button
+                        content=Content::IconOnly {
+                            glyph: LucideGlyph::X.into(),
+                            label: name.into(),
+                        }
+                        appearance=Appearance::Ghost
+                        tone=Tone::Inherit
+                        size=Size::Small
+                        on_press=Callback::new(|()| {})
+                    />
+                </span>
+            </span>
+        </div>
     }
 }

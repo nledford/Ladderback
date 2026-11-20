@@ -5,14 +5,18 @@
 
 mod agent;
 mod client;
+mod connection;
 mod hub;
 mod session;
 mod wire;
 
-pub use agent::{AgentHandshake, AgentPairing, AgentPairingError, AwaitingPaired, PairedHub};
+pub use agent::{
+    AgentHandshake, AgentPairing, AgentPairingError, AwaitingPaired, ChallengeRefused, PairedHub,
+};
 pub use client::{PairFailure, PairWithHub};
-pub use hub::{HubHandshake, HubKeys, HubPairing, HubPairingError};
-pub use session::{BINDING_UNAVAILABLE, HubSession, HubStep, PROTOCOL_ERROR};
+pub use connection::{ConnectFailure, ConnectToHub, Connected};
+pub use hub::{HubHandshake, HubKeys, HubPairing, HubPairingError, MessageRefused, ProofAnswer};
+pub use session::{BINDING_UNAVAILABLE, HubSession, HubStep, PROTOCOL_ERROR, SEQUENCE_ERROR};
 
 #[cfg(test)]
 mod tests;

@@ -587,6 +587,17 @@ pub enum ErrorCode {
     /// The connection to the hub ended before the pairing was answered, or
     /// the hub sent what isn't the handshake's next message.
     HubConnectionLost,
+    /// The connection to the hub ended after the agent paired, or the hub
+    /// sent what isn't the next message, or one it didn't sign on this
+    /// connection: nothing in it was acted on.
+    HubLinkLost,
+    /// The hub's `Welcome` carries a lower generation than the agent's pin
+    /// holds: the agent ignored it (decision 120, "Generation and
+    /// addresses").
+    GenerationLower,
+    /// The hub and the agent share no protocol: one of them is on an older
+    /// release than the other can use.
+    ProtocolOutOfDate,
     #[serde(other)]
     Unknown,
 }
@@ -1538,6 +1549,9 @@ impl ErrorCode {
             | Self::BindingUnavailable
             | Self::PlainAddress
             | Self::HubConnectionLost
+            | Self::HubLinkLost
+            | Self::GenerationLower
+            | Self::ProtocolOutOfDate
             | Self::Unknown => &[],
         }
     }

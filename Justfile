@@ -25,6 +25,12 @@ release_flags := "--no-default-features"
 # (`just --evaluate leptosfmt_version`), and `fmt-check` refuses another.
 leptosfmt_version := "0.1.34"
 
+# The mdBook release that builds the user docs site (§16, decision 128).
+# Another release renders the pages and their anchors differently, so `setup`
+# installs this one, CI too (it reads this line), and `docs-site` refuses
+# another.
+mdbook_version := "0.5.4"
+
 # List available workflows.
 [group('help')]
 default:
@@ -42,6 +48,7 @@ setup:
     cargo binstall --no-confirm trunk cargo-deny cargo-mutants cargo-nextest release-plz zizmor cargo-auditable
     cargo binstall --no-confirm --version "$(just _wasm-bindgen-version)" wasm-bindgen-cli
     cargo binstall --no-confirm --version '{{ leptosfmt_version }}' leptosfmt
+    cargo binstall --no-confirm --version '{{ mdbook_version }}' mdbook
     scripts/install-rustic.sh
     scripts/install-actionlint.sh
     scripts/install-shellcheck.sh
@@ -79,6 +86,22 @@ fmt-check: _leptosfmt-pinned
 _leptosfmt-pinned:
     @[ "$(leptosfmt --version)" = 'leptosfmt {{ leptosfmt_version }}' ] || { echo "needs leptosfmt {{ leptosfmt_version }}, found $(leptosfmt --version 2>&1 || true); run just setup" >&2; exit 1; }
 
+# Fails unless the installed mdBook is the pinned release.
+[private]
+_mdbook-pinned:
+    @[ "$(mdbook --version)" = 'mdbook v{{ mdbook_version }}' ] || { echo "needs mdbook {{ mdbook_version }}, found $(mdbook --version 2>&1 || true); run just setup" >&2; exit 1; }
+
+# Build the user docs site (docs/guide/, §16 decision 128) into
+# docs/guide/book/, then check that every link in its pages resolves:
+# mdBook copies a broken link into the page as it is, so the check is what
+# fails the build on one (scripts/check-site-links.ts). `lint` runs it, so CI
+# does, docs-only pull requests included.
+[doc('Build the user docs site into docs/guide/book/ and check its links.')]
+[group('quality')]
+docs-site: _mdbook-pinned
+    mdbook build docs/guide
+    node scripts/check-site-links.ts
+
 # Fails unless the shellcheck on the PATH is the release
 # scripts/install-shellcheck.sh pins (its `version=` line, the one place the
 # version lives, beside the hashes that go with it): another release finds
@@ -109,16 +132,17 @@ clippy:
 # its warnings and errors fail and its style notes don't), the tooling's own
 # tests (`scripts/*.test.ts`, under Node's built-in runner), the journey lint,
 # the check that every path AGENTS.md and CLAUDE.md name exists, the check that
-# no paragraph in docs/ runs over 150 words, the check that the §16 decision
+# no paragraph in docs/ runs over 150 words, the user docs site's build and
+# link check (`docs-site`), the check that the §16 decision
 # index matches the decision files, and rustdoc on every crate, private items
 # included, with warnings as errors, so a doc comment's broken link or
 # malformed markup fails. Rustdoc sees only the items built for the host and,
 # for `web`, not its wasm32-only ones. CI runs `lint` on Linux alone, so a doc
 # comment on macOS-only code is checked only by a local run on a Mac; macOS CI
 # runs `clippy` (see `clippy`).
-[doc('Clippy on the host and the web UI, each also as a release is built, and on the web UI with its component gallery, the TypeScript type check, the Biome format and lint check, shellcheck on the shell scripts, the tooling tests, the journey lint, the AGENTS.md path check, the docs paragraph-length check, the decision-index and component-index checks, and rustdoc with warnings as errors.')]
+[doc('Clippy on the host and the web UI, each also as a release is built, and on the web UI with its component gallery, the TypeScript type check, the Biome format and lint check, shellcheck on the shell scripts, the tooling tests, the journey lint, the AGENTS.md path check, the docs paragraph-length check, the user docs site build and link check, the decision-index and component-index checks, and rustdoc with warnings as errors.')]
 [group('quality')]
-lint: _ui-deps _shellcheck-pinned clippy
+lint: _ui-deps _shellcheck-pinned clippy docs-site
     cargo clippy --package web --all-targets --target wasm32-unknown-unknown -- -D warnings
     cargo clippy --package web --all-targets --features gallery --target wasm32-unknown-unknown -- -D warnings
     cargo clippy --workspace --all-targets {{ release_flags }} -- -D warnings
