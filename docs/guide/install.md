@@ -146,3 +146,49 @@ The install script passes the variable on to the `just install` it runs, `curl -
 `just install` checks the name before it builds, and installs nothing when `security` lists no valid certificate of exactly that name, or lists more than one: then name one by the SHA-1 hash it shows, or, when it is one certificate kept in two keychains, delete a copy. After installing, it signs the binary with the certificate under the identifier `io.github.nledford.ladderback` and checks the signature. Only the name passes through; the key stays in your keychain.
 
 The first signing asks whether `codesign` may use the key: choose Always Allow, and later installs don't ask. Over SSH, or with the keychain locked, nobody can answer, so the signing fails. After `just install`, the new binary is installed by then, still with its ad-hoc signature (or, when the signature fails its check, with that signature), and the command says which. To sign the installed binary without building again, run `node scripts/install-signing.ts sign` in the checkout with the variable and the arguments you gave `just install`. `just install-restart` signs in its staging folder, so there a failed signing installs nothing and the service keeps running as it was: run it again once the keychain can answer. The first signed build is still new to macOS, so grant it Full Disk Access once more.
+
+## Docker image (not supported yet)
+
+From 0.5.x each release also publishes a Docker image for x86_64 and aarch64 Linux, as `ghcr.io/nledford/ladderback` and `docker.io/nledford/ladderback`: the same image, tagged with the release's version and `latest`. Docker Hub limits how often you may pull without an account; GitHub's registry doesn't. The image is there to try: it isn't yet a supported way to install and run Ladderback, and the package or the install script above is. It runs a machine's agent, which backs up the folders mounted into it. From M8's release it runs the hub too, and becomes the recommended way to run one ([decision 126](../design/decisions/126-primary-install-channels.md)); until then it has no hub, and refuses `serve --hub`.
+
+The image runs `ladderback` as user and group 10001 and listens on port 9898. It keeps its configuration in the volume at `/var/lib/ladderback/config`, its data (the operation history and the admin password among them) in the volume at `/var/lib/ladderback/data`, and its cache in `/var/cache/ladderback`. Turn sign-in on first: `set-password` reads an admin password of at least 8 characters from standard input and keeps it in the data volume.
+
+```sh
+docker run --rm -i -v ladderback-data:/var/lib/ladderback/data ghcr.io/nledford/ladderback set-password
+```
+
+Then start the agent, here on a machine that browsers reach as `nas.example.com`, backing up `/srv/photos`:
+
+```sh
+docker run --detach --name ladderback \
+  --hostname nas --init --restart unless-stopped --stop-timeout 75 \
+  --env TZ=Europe/Berlin --publish 9898:9898 \
+  -v ladderback-config:/var/lib/ladderback/config \
+  -v ladderback-data:/var/lib/ladderback/data \
+  -v ladderback-cache:/var/cache/ladderback \
+  -v /srv/photos:/srv/photos:ro \
+  ghcr.io/nledford/ladderback \
+  serve --listen 0.0.0.0:9898 --allowed-host nas.example.com --service-managed
+```
+
+What each part is for:
+
+- **`--allowed-host`** names the host name browsers reach Ladderback by. Listening beyond the container's loopback, Ladderback refuses to start without one, so the image's own command, `serve --listen 0.0.0.0:9898`, doesn't start until you give it ([Remote access](remote-access.md#listening-beyond-loopback)). Over plain HTTP the password crosses the network unencrypted, so put a reverse proxy that adds TLS in front.
+- **`--hostname`** stays the same from one container to the next. Ladderback names the machine, and its snapshots' host, by the container's hostname, which Docker makes up anew for each container unless you give one.
+- **Each folder to back up is mounted read-only, at the path it has on the host.** The snapshots record the paths inside the container, so the same path keeps them meaningful to a restore and to `rustic`. A restore into a mounted folder needs it mounted without `:ro`, and writes files as the container's user.
+- **`--init`** runs a small init as process 1, which hands on `docker stop`'s signal and reaps the processes hooks leave behind. **`--stop-timeout 75`** gives Ladderback the 65 seconds it may take to stop cleanly, where Docker kills it after 10; in Compose, `stop_grace_period: 75s`.
+- **`--restart unless-stopped`** stands in for `install-service`, which a container can't use, and `--service-managed` lets **Restart Ladderback** in Settings restart it: Ladderback exits, and Docker starts it again.
+- **`TZ`** sets the time zone the schedules run in; without it, a container's is UTC.
+- **The cache volume** is optional: it keeps the repositories' cache from one container to the next.
+
+The container's user reads only what user 10001 or everyone may read. To back up a whole machine, run as root with `--user 0`: root reads every file mounted into the container, and the volumes need no change. To run as one of the host's users instead, with `--user <uid>:<gid>`, keep the configuration, data and cache in folders on the host that this user owns, made as that user:
+
+```sh
+install -d -m 0700 ~/ladderback/config ~/ladderback/data ~/ladderback/cache
+```
+
+Mount them in place of the volumes, as in `-v ~/ladderback/data:/var/lib/ladderback/data`, in every `docker run`, `set-password`'s included. A named volume won't do: while it is empty, each mount gives it back to user 10001, so a `chown` of one doesn't last. Keep to one user, since the files root writes stay root's.
+
+A container has no keyring, so keep a repository's password in a file, such as a Docker secret under `/run/secrets`, in an environment variable or behind a command ([Secrets](secrets.md)). To update, pull the image, remove the container and run the same `docker run` again: the volumes keep the configuration, the history and the password.
+
+On macOS, Docker runs Linux in a virtual machine, so an agent there sees only the folders shared with it and gets no Full Disk Access, Photos library or keychain: use the install script. From M8's release, the same image runs the hub with `serve --hub --listen 0.0.0.0:9898 --allowed-host <name>` in place of the agent's command; this guide will say how to pair machines with it then.
