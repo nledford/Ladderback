@@ -1442,6 +1442,20 @@ ui-no-operations = No operations yet.
 # walked its whole source, or a step that counts without a total.
 ui-progress-working = Working…
 
+# Shown below the words of a progress bar that has no total to measure
+# against, so a reader can tell a run that is still reporting from one that
+# has gone quiet. It is an exact instant, never "a minute ago", so it
+# changes only when a new report arrives.
+# $when (instant): when the daemon last heard the run report, in the daemon's clock.
+ui-progress-reported = Last report at { DATETIME($when, dateStyle: "short", timeStyle: "medium") }
+
+# What a screen reader hears of a progress bar that has no total to measure
+# against and knows when its run last reported. It changes at most every 30
+# seconds.
+# $step (text): the step's own message, such as "Backing up…", or "Working…" when the operation names no step.
+# $when (instant): when the daemon last heard the run report, in the daemon's clock.
+ui-progress-unknown-value = { $step } Last report at { DATETIME($when, dateStyle: "short", timeStyle: "medium") }
+
 # The name of a running backup's progress bar, named as its row is, by its
 # plan, so two running backups' bars are told apart and a check's bar is
 # never announced as a backup's.

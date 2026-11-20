@@ -48,10 +48,15 @@ pub(super) fn ProgressDemo(localizer: Arc<Localizer>) -> impl IntoView {
                     })
                 />
             </p>
+            // A run that has reported but not its total, which the daemon
+            // heard at a fixed instant, so the demo never changes.
             <Progress
                 localizer=Arc::clone(&localizer)
                 label=t(msg::UI_GALLERY_DEMO_UNKNOWN_PROGRESS)
-                reading=Signal::stored(Reading::default())
+                reading=Signal::stored(Reading {
+                    reported_at: "2026-11-09T10:01:00Z".parse().ok(),
+                    ..Reading::default()
+                })
             />
             <Progress
                 localizer=Arc::clone(&localizer)

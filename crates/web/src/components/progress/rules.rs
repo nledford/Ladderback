@@ -84,6 +84,10 @@ pub(crate) fn fill_shift(percent: u8) -> String {
 /// is working while it has none.
 pub(crate) const WORDS: &str = "progress-words";
 
+/// When the run last reported, below the bar's words while it has no
+/// percentage: a line of its own, so it never runs on from the step.
+pub(crate) const REPORTED: &str = "progress-reported block";
+
 /// The least time between two values told to a screen reader, while the
 /// step stays the same.
 pub(crate) const HOLD: Duration = Duration::from_secs(30);
@@ -275,8 +279,8 @@ fn told_of(progress: &Progress, left: Option<Left>) -> Told {
         });
     Told {
         step: progress.step,
+        reported: progress.reported_at.filter(|_| measure.is_none()),
         measure,
-        reported: None,
     }
 }
 
@@ -302,10 +306,25 @@ pub(crate) fn value_text(
     zone: Option<&api::IanaZone>,
     word: impl Fn(MessageId, &[(&str, MsgArg)]) -> String,
 ) -> String {
-    let _ = zone;
     let step = told.step.and_then(step_message);
     let Some(measure) = told.measure else {
-        return word(step.unwrap_or(msg::UI_PROGRESS_WORKING), &[]);
+        let words = step.unwrap_or(msg::UI_PROGRESS_WORKING);
+        return match told.reported {
+            None => word(words, &[]),
+            Some(at) => word(
+                msg::UI_PROGRESS_UNKNOWN_VALUE,
+                &[
+                    ("step", MsgArg::Text(word(words, &[]))),
+                    (
+                        "when",
+                        MsgArg::Timestamp {
+                            utc_ms: at.as_millisecond(),
+                            zone: zone.cloned(),
+                        },
+                    ),
+                ],
+            ),
+        };
     };
     let amount = |amount| match measure.unit {
         ProgressUnit::Bytes => MsgArg::Bytes(amount),
@@ -404,7 +423,7 @@ pub(crate) fn progress_text(progress: &Progress) -> ProgressText {
     ProgressText {
         above: step.filter(|_| with_percent),
         unknown: step.unwrap_or(msg::UI_PROGRESS_WORKING),
-        reported: None,
+        reported: progress.reported_at.filter(|_| !with_percent),
     }
 }
 

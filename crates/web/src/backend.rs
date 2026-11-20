@@ -92,7 +92,7 @@ impl OperationsState {
                 unit,
                 current,
                 total,
-                ..
+                at,
             } => {
                 if let Some(row) = self.live_row_mut(operation) {
                     row.progress = Some(Progress {
@@ -100,7 +100,9 @@ impl OperationsState {
                         unit: *unit,
                         current: *current,
                         total: *total,
-                        reported_at: None,
+                        // An instant that isn't RFC 3339 says nothing,
+                        // never a guess.
+                        reported_at: at.as_deref().and_then(|at| at.parse().ok()),
                     });
                 }
             }
@@ -732,13 +734,17 @@ mod tests {
         };
         state.apply(&report(Some("2026-11-09T10:01:00Z")));
         assert_eq!(
-            state.rows[0].progress.and_then(|progress| progress.reported_at),
+            state.rows[0]
+                .progress
+                .and_then(|progress| progress.reported_at),
             Some("2026-11-09T10:01:00Z".parse::<jiff::Timestamp>().unwrap())
         );
         for unread in [None, Some("a minute ago")] {
             state.apply(&report(unread));
             assert_eq!(
-                state.rows[0].progress.and_then(|progress| progress.reported_at),
+                state.rows[0]
+                    .progress
+                    .and_then(|progress| progress.reported_at),
                 None,
                 "{unread:?}"
             );

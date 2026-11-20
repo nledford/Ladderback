@@ -419,10 +419,11 @@ fn operations_table(
         },
     );
     let status_localizer = Arc::clone(localizer);
+    let status_zone = zone.clone();
     let status = Column::new(
         text(localizer, msg::UI_COLUMN_STATUS),
         Rem::tenths(95),
-        move |row: Signal<OperationRow>| status_view(&status_localizer, row),
+        move |row: Signal<OperationRow>| status_view(&status_localizer, status_zone.clone(), row),
     );
     let started_localizer = Arc::clone(localizer);
     let started = Column::new(
@@ -504,8 +505,13 @@ fn header_id(row: &OperationRow) -> String {
 }
 
 /// An operation's status: its badge, and a running backup's progress bar once
-/// it has reported, whose name is worded once.
-fn status_view(localizer: &Arc<Localizer>, row: Signal<OperationRow>) -> AnyView {
+/// it has reported, whose name is worded once and whose last report is read
+/// in `zone`, as the Started column is.
+fn status_view(
+    localizer: &Arc<Localizer>,
+    zone: Option<api::IanaZone>,
+    row: Signal<OperationRow>,
+) -> AnyView {
     let (progress_label, header) = row.with_untracked(|row| {
         let bar = operations::progress_label(&row.summary);
         (text_with(localizer, bar.id, &bar.args), header_id(row))
@@ -535,6 +541,7 @@ fn status_view(localizer: &Arc<Localizer>, row: Signal<OperationRow>) -> AnyView
                             label=progress_label.clone()
                             then_focus=header.clone()
                             reading=Signal::derive(move || { reading.get().unwrap_or_default() })
+                            zone=zone.clone()
                         />
                     }
                 })

@@ -1,7 +1,8 @@
 use std::sync::Arc;
 
 use crate::announcer::Clock;
-use l10n::Localizer;
+use api::MsgArg;
+use l10n::{Localizer, msg};
 use leptos::prelude::*;
 
 use super::hand_focus_when_gone;
@@ -10,8 +11,8 @@ use crate::routes::text_with;
 use crate::text;
 use crate::variants::{Size, Tone};
 use rules::{
-    Clear, FILL, Next, STEP, TRACK, Teller, Told, WORDS, Wake, bar_class, default_size, fill_shift,
-    percent, progress_text, value_text, wait_for,
+    Clear, FILL, Next, REPORTED, STEP, TRACK, Teller, Told, WORDS, Wake, bar_class, default_size,
+    fill_shift, percent, progress_text, value_text, wait_for,
 };
 
 // What a progress bar tells a screen reader, and when, decided on the host;
@@ -35,8 +36,12 @@ mod rules;
 /// hears the value text alone. A reading without a total is indeterminate
 /// (WAI-ARIA `progressbar`): no `aria-valuenow` and no track, and the step,
 /// or that the operation is working, where the percentage stands; never 0%,
-/// which would say that nothing has been done (#422). The one timer that
-/// tells a held value is cleared when the bar goes.
+/// which would say that nothing has been done (#422). Below those words it
+/// says when the run last reported, as the daemon heard it, read in `zone`
+/// (UTC without one): an exact instant, which changes only when a report
+/// arrives and is told like the rest of the value, so a stalled run is told
+/// from a busy one without anything that ticks (WCAG 2.2.2). The one timer
+/// that tells a held value is cleared when the bar goes.
 ///
 /// A bar that goes while it holds focus, as one does when its run ends,
 /// hands focus to the element with the ID `then_focus` (a row's header), so
@@ -55,6 +60,7 @@ pub fn Progress(
     #[prop(optional, into)] then_focus: Option<String>,
     #[prop(optional)] tone: Tone,
     #[prop(optional)] size: Option<Size>,
+    #[prop(default = None)] zone: Option<api::IanaZone>,
 ) -> impl IntoView {
     let teller = StoredValue::new(Teller::default());
     let wake = StoredValue::new(Wake::<TimeoutHandle>::default());
@@ -90,6 +96,8 @@ pub fn Progress(
     let said = Memo::new(move |_| reading.with(progress_text));
     let value_localizer = Arc::clone(&localizer);
     let step_localizer = Arc::clone(&localizer);
+    let reported_localizer = Arc::clone(&localizer);
+    let value_zone = zone.clone();
     view! {
         <div
             node_ref=bar
@@ -105,7 +113,11 @@ pub fn Progress(
             aria-valuetext=move || {
                 told.get()
                     .map(|told| {
-                        value_text(&told, None, |id, args| text_with(&value_localizer, id, args))
+                        value_text(
+                            &told,
+                            value_zone.as_ref(),
+                            |id, args| text_with(&value_localizer, id, args),
+                        )
                     })
             }
         >
@@ -140,6 +152,30 @@ pub fn Progress(
                     None => text(&localizer, said.get().unknown),
                 }}
             </span>
+            {move || {
+                said.get()
+                    .reported
+                    .map(|at| {
+                        let shown = text_with(
+                            &reported_localizer,
+                            msg::UI_PROGRESS_REPORTED,
+                            &[
+                                (
+                                    "when",
+                                    MsgArg::Timestamp {
+                                        utc_ms: at.as_millisecond(),
+                                        zone: zone.clone(),
+                                    },
+                                ),
+                            ],
+                        );
+                        view! {
+                            <span class=REPORTED>
+                                <time datetime=at.to_string()>{shown}</time>
+                            </span>
+                        }
+                    })
+            }}
         </div>
     }
 }
