@@ -1,23 +1,13 @@
 # Install Ladderback
 
-On Linux, from 0.3.1 on, you can [download a release](#download-a-release-linux), and from 0.5.0 [install its `.deb` or `.rpm` package](#install-a-package-debian-ubuntu-fedora); on macOS, and on Linux too if you prefer, you build one from source. Linux means 64-bit (x86_64 or aarch64) with glibc 2.35 or newer: 32-bit ARM and musl distributions such as Alpine aren't supported. The [README](../../README.md#install) has the one command that installs it: the release's archive on Linux, a build from source on macOS. This guide says how to download a release or a package, what that command does, how to build by hand, how to update, and how to keep Ladderback running in the background.
+Ladderback runs on each machine it backs up, and each system has one recommended way to install it ([decision 126](../design/decisions/126-primary-install-channels.md)):
 
-## Download a release (Linux)
+- **Debian 12 or newer, Ubuntu 22.04 or newer, 64-bit Raspberry Pi OS and Fedora:** the release's [`.deb` or `.rpm` package](#install-a-package-debian-ubuntu-fedora), from 0.5.0.
+- **Any other 64-bit Linux:** the [install script](#the-install-script), which downloads the release's archive and checks it.
+- **macOS:** the [install script](#the-install-script), which builds the release from source, [signed with your own certificate](#signing-your-build) so that Full Disk Access carries over to the next update. macOS has no download until a build can be signed and notarized ([#344](https://github.com/nledford/Ladderback/issues/344)).
+- **A hub:** not in a release yet; it arrives with M8.
 
-Each release from 0.3.1 on has an archive for `x86_64` and one for `aarch64` Linux, each holding the `ladderback` binary with the web UI built in, and a `SHA256SUMS` file with their checksums. macOS has no archive until it can be signed and notarized ([decision 71](../design/decisions/71-signing-macos-builds-without-a-developer-id.md)). Download the archive for your machine and the checksums, check the archive, and install the binary into `~/.local/bin`:
-
-```sh
-target="$(uname -m)-unknown-linux-gnu"
-base=https://github.com/nledford/Ladderback/releases/latest/download
-curl -fL -O "$base/ladderback-$target.tar.xz" -O "$base/SHA256SUMS"
-sha256sum -c --ignore-missing SHA256SUMS
-tar -xJf "ladderback-$target.tar.xz"
-mkdir -p ~/.local/bin && install -m 755 "ladderback-$target/ladderback" ~/.local/bin/
-```
-
-`sha256sum` must print `ladderback-…tar.xz: OK`; anything else means the download is damaged or isn't the release's, so don't install it. On a Raspberry Pi, `uname -m` says `aarch64` under 32-bit Raspberry Pi OS too, whose 64-bit kernel runs 32-bit programs, and the binary then doesn't start: `getconf LONG_BIT` must print `64`. `~/.local/bin` must be on your `PATH`; if you built Ladderback from source before, `cargo uninstall ladderback` removes that one, so the shell doesn't find the old binary first. To update, run the same commands again, which replace the binary, then `ladderback install-service` again if it runs as a [service](#running-as-a-service).
-
-Releases after 0.3.1 list inside the binary the crates the daemon was built from, so [cargo-audit](https://crates.io/crates/cargo-audit) can check an installed one against the security advisories published since, without its source: `cargo audit bin "$(command -v ladderback)"`. The list leaves out the crates of the web UI built into it, and a binary you built from source has none; `cargo audit` in a checkout of the release's tag checks both. An advisory the project has found doesn't affect Ladderback is in the `ignore` list of [`deny.toml`](../../deny.toml), with the reason.
+Linux means 64-bit (x86_64 or aarch64) with glibc 2.35 or newer: 32-bit ARM and musl distributions such as Alpine aren't supported. [Other ways](#other-ways), for contributors and for people who already use cargo-binstall, follow: the release's archive by hand, cargo-binstall, and a build by hand. Then the guide says how to update, how to keep Ladderback running in the background, and what macOS asks for.
 
 ## Install a package (Debian, Ubuntu, Fedora)
 
@@ -40,7 +30,7 @@ sudo dnf install "./$rpm"
 
 `sha256sum` must print `…: OK`. The packages are not signed: `apt` and `dnf` install a file from disk without a repository's key, and `dnf` warns that it skipped the OpenPGP checks. The checksum is the check ([decision 123](../design/decisions/123-deb-and-rpm-packages.md)). The `./` matters to `apt`, which otherwise looks for a package of that name in its repositories. The packages are for 64-bit systems: on 32-bit Raspberry Pi OS `dpkg --print-architecture` says `armhf`, the download fails with a 404, and there is no package for it.
 
-Then run `ladderback --version` and `ladderback install-service` as yourself, not under `sudo`. There is no apt or dnf repository yet, so to update, install the next release's package the same way, then run `ladderback install-service` again. `sudo apt remove ladderback` or `sudo dnf remove ladderback` removes the program and leaves your configuration, data and service unit as they are, so run `ladderback remove-service` first if you want the service gone too. On Atomic Fedora (Bazzite) a package needs `rpm-ostree` layering: use the [archive](#download-a-release-linux) there.
+Then run `ladderback --version` and `ladderback install-service` as yourself, not under `sudo`. There is no apt or dnf repository yet, so to update, install the next release's package the same way, then run `ladderback install-service` again. `sudo apt remove ladderback` or `sudo dnf remove ladderback` removes the program and leaves your configuration, data and service unit as they are, so run `ladderback remove-service` first if you want the service gone too. On Atomic Fedora (Bazzite) a package needs `rpm-ostree` layering: use the [install script](#the-install-script) there.
 
 **Moving an existing install to the package.** If `ladderback` came from the archive, the install script or a build from source, it is in `~/.local/bin` or `~/.cargo/bin`, and the service names that path:
 
@@ -69,7 +59,46 @@ Options go after `bash -s --`:
 
 `--help` lists them.
 
-## By hand
+**On macOS, sign the build.** Make the certificate that [Signing your build](#signing-your-build) describes once, then name it each time you run the script, so that the build's Full Disk Access and Photos grants carry over to the next update:
+
+```sh
+curl -fsSL https://raw.githubusercontent.com/nledford/Ladderback/main/scripts/install.sh | LADDERBACK_SIGN_IDENTITY="Ladderback Code Signing" bash
+```
+
+Without it the build is signed ad hoc, and macOS asks again for both after every update: until you grant Full Disk Access again, backups can't read the folders it protects.
+
+## Other ways
+
+These are for contributors, for installing the release's archive by hand, and for people who already use cargo-binstall. Ladderback isn't published to crates.io, and has no Homebrew tap until a macOS build can be signed and notarized ([#344](https://github.com/nledford/Ladderback/issues/344)).
+
+### Download a release (Linux)
+
+Each release from 0.3.1 on has an archive for `x86_64` and one for `aarch64` Linux, each holding the `ladderback` binary with the web UI built in, and a `SHA256SUMS` file with their checksums. macOS has no archive until it can be signed and notarized ([decision 71](../design/decisions/71-signing-macos-builds-without-a-developer-id.md)). Download the archive for your machine and the checksums, check the archive, and install the binary into `~/.local/bin`:
+
+```sh
+target="$(uname -m)-unknown-linux-gnu"
+base=https://github.com/nledford/Ladderback/releases/latest/download
+curl -fL -O "$base/ladderback-$target.tar.xz" -O "$base/SHA256SUMS"
+sha256sum -c --ignore-missing SHA256SUMS
+tar -xJf "ladderback-$target.tar.xz"
+mkdir -p ~/.local/bin && install -m 755 "ladderback-$target/ladderback" ~/.local/bin/
+```
+
+`sha256sum` must print `ladderback-…tar.xz: OK`; anything else means the download is damaged or isn't the release's, so don't install it. On a Raspberry Pi, `uname -m` says `aarch64` under 32-bit Raspberry Pi OS too, whose 64-bit kernel runs 32-bit programs, and the binary then doesn't start: `getconf LONG_BIT` must print `64`. `~/.local/bin` must be on your `PATH`; if you built Ladderback from source before, `cargo uninstall ladderback` removes that one, so the shell doesn't find the old binary first. To update, run the same commands again, which replace the binary, then `ladderback install-service` again if it runs as a [service](#running-as-a-service).
+
+Releases after 0.3.1 list inside the binary the crates the daemon was built from, so [cargo-audit](https://crates.io/crates/cargo-audit) can check an installed one against the security advisories published since, without its source: `cargo audit bin "$(command -v ladderback)"`. The list leaves out the crates of the web UI built into it, and a binary you built from source has none; `cargo audit` in a checkout of the release's tag checks both. An advisory the project has found doesn't affect Ladderback is in the `ignore` list of [`deny.toml`](../../deny.toml), with the reason.
+
+### cargo-binstall
+
+For people who already use [cargo-binstall](https://github.com/cargo-bins/cargo-binstall), on 64-bit Linux:
+
+```sh
+cargo binstall --strategies crate-meta-data --git https://github.com/nledford/Ladderback ladderback
+```
+
+It reads the version in `main`'s `Cargo.toml`, downloads that release's archive for your machine and installs `ladderback` into `~/.cargo/bin`, as the install script does. It doesn't check the archive against `SHA256SUMS` ([#357](https://github.com/nledford/Ladderback/issues/357)); the install script and [Download a release](#download-a-release-linux) do. `--strategies crate-meta-data` keeps it to the release's archive: where there is none (macOS, or a release whose archives aren't attached yet), it would otherwise build with `cargo install`, which doesn't build the web UI, so the binary it installs has none. To update, run the same command again.
+
+### By hand
 
 You need:
 
@@ -101,7 +130,7 @@ Start it with `ladderback serve` and open the address it prints, `listening on h
 
 ## Updating
 
-To update a package, install the next release's, then run `ladderback install-service` again (see [Install a package](#install-a-package-debian-ubuntu-fedora)). To update, run the install command again, or by hand `git fetch --tags`, the same `git checkout` line, and `just install`; either replaces the installed binary. By hand after the script installed the archive, run `just install --force`: cargo won't overwrite a binary it didn't install. Releases up to 0.2.0 track the web UI's stylesheet, which their build can rewrite: coming from one of them by hand, first put it back with `git checkout -- crates/web/tw-out.css`, or git refuses to check out the new release.
+To update a package, install the next release's, then run `ladderback install-service` again (see [Install a package](#install-a-package-debian-ubuntu-fedora)). To update, run the install script again (on macOS with `LADDERBACK_SIGN_IDENTITY` again), or by hand `git fetch --tags`, the same `git checkout` line, and `just install`; either replaces the installed binary. By hand after the script installed the archive, run `just install --force`: cargo won't overwrite a binary it didn't install. Releases up to 0.2.0 track the web UI's stylesheet, which their build can rewrite: coming from one of them by hand, first put it back with `git checkout -- crates/web/tw-out.css`, or git refuses to check out the new release.
 
 ## Running as a service
 
@@ -135,13 +164,13 @@ Make the certificate once:
 2. Open the new certificate, expand Trust, and set Code Signing to Always Trust.
 3. Check that macOS lists it as valid: `security find-identity -v -p codesigning` names it.
 
-Then name it in `LADDERBACK_SIGN_IDENTITY` for every install, by `just install` or `just install-restart` in a checkout:
+Then name it in `LADDERBACK_SIGN_IDENTITY` for every install: when you run the install script, as [The install script](#the-install-script) shows, or with `just install` or `just install-restart` in a checkout:
 
 ```sh
 LADDERBACK_SIGN_IDENTITY="Ladderback Code Signing" just install-restart
 ```
 
-The install script passes the variable on to the `just install` it runs, `curl -fsSL … | LADDERBACK_SIGN_IDENTITY="Ladderback Code Signing" bash`, but it builds the newest release, and releases up to 0.3.1 sign nothing: there the variable takes effect from the first release that has this.
+The install script passes the variable on to the `just install` it runs. It builds the newest release, and every release from 0.4.0 on signs its build; releases up to 0.3.1 sign nothing.
 
 `just install` checks the name before it builds, and installs nothing when `security` lists no valid certificate of exactly that name, or lists more than one: then name one by the SHA-1 hash it shows, or, when it is one certificate kept in two keychains, delete a copy. After installing, it signs the binary with the certificate under the identifier `io.github.nledford.ladderback` and checks the signature. Only the name passes through; the key stays in your keychain.
 
