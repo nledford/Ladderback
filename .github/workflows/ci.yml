@@ -336,9 +336,9 @@ jobs:
     timeout-minutes: 45
     steps:
       # Every pull request is checked out: a docs-only one still runs the
-      # agent-guidance path check, the paragraph-length check and the
-      # decision-index and component-index checks below, which `just lint`
-      # runs for the rest.
+      # agent-guidance path check, the paragraph-length check, the user docs
+      # site's build and link check, and the decision-index and
+      # component-index checks below, which `just lint` runs for the rest.
       - if: matrix.skip != 'true'
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -356,14 +356,32 @@ jobs:
       # paragraph-length lints, the architecture checks and the contrast gate
       # give one answer anywhere, so they run on Linux alone; macOS needs no
       # Node then. A docs-only pull request sets Node up as well, for the
-      # paragraph-length, decision-index and component-index checks. Every
-      # setup-node reads Node's major version from ui-tests/.nvmrc, which a
-      # pull request of its own bumps (development.md §13.8).
+      # paragraph-length, site link, decision-index and component-index
+      # checks. Every setup-node reads Node's major version from
+      # ui-tests/.nvmrc, which a pull request of its own bumps (development.md
+      # §13.8).
       - if: matrix.skip != 'true' && runner.os == 'Linux'
         uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         with:
           node-version-file: ui-tests/.nvmrc
           package-manager-cache: false
+      # mdBook at the version the Justfile pins (its `mdbook_version` line,
+      # read without `just`, which a docs-only pull request doesn't install),
+      # for the user docs site's build and link check (`just docs-site`). An
+      # empty read fails here rather than install whatever mdBook is newest.
+      - id: mdbook
+        if: matrix.skip != 'true' && runner.os == 'Linux'
+        run: |
+          version=$(sed -n 's/^mdbook_version := "\(.*\)"$/\1/p' Justfile)
+          test -n "$version"
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+      - if: matrix.skip != 'true' && runner.os == 'Linux'
+        uses: taiki-e/install-action@cfdb7ed4ccc7c7dce37759eae89dc5674b469b39 # v2.90.3
+        with:
+          tool: mdbook@${{ steps.mdbook.outputs.version }}
+      # `just docs-site`'s two lines, for a docs-only pull request.
+      - if: matrix.skip != 'true' && needs.changes.outputs.docs-only == 'true' && runner.os == 'Linux'
+        run: mdbook build docs/guide && node scripts/check-site-links.ts
       - if: matrix.skip != 'true' && needs.changes.outputs.docs-only == 'true' && runner.os == 'Linux'
         run: node scripts/check-paragraph-length.ts
       - if: matrix.skip != 'true' && needs.changes.outputs.docs-only == 'true' && runner.os == 'Linux'

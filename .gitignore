@@ -7,3 +7,4 @@ node_modules/
 /.worktrees/
 /target-clippy
 /crates/*/target
+/docs/guide/book

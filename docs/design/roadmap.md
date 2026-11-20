@@ -208,6 +208,7 @@ Decisions 1–6 recorded 2026-11-08. Decisions 7–12 recorded 2026-11-08 after 
 | [124](decisions/124-mvp-ci-mode.md) | How CI runs on pull requests until the MVP |
 | [125](decisions/125-coderabbit-reviews-on-request.md) | CodeRabbit reviews pull requests on request, as an advisory second reviewer |
 | [126](decisions/126-primary-install-channels.md) | Which ways to install Ladderback the project recommends |
+| [128](decisions/128-the-user-docs-site.md) | What builds the user docs site, and from where |
 
 ## 17. Open questions
 

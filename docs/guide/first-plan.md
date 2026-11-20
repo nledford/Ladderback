@@ -43,4 +43,4 @@ keep-within-weekly = "1 month"
 keep-within-monthly = "1 year"
 ```
 
-A run the machine slept through runs when it wakes. Ladderback doesn't forget on a schedule yet: the keep policy takes effect when you press "Forget snapshots" on the Snapshots page, on a repository this machine maintains. Every key a plan takes, among them tags, a time zone, retries and hooks, is in [technical design §6.1](../design/scheduling-and-config.md#61-source-of-truth); the filter and `keep-*` keys are rustic's own.
+A run the machine slept through runs when it wakes. Ladderback doesn't forget on a schedule yet: the keep policy takes effect when you press "Forget snapshots" on the Snapshots page, on a repository this machine maintains. Every key a plan takes, among them tags, a time zone, retries and hooks, is in [technical design §6.1](https://github.com/nledford/Ladderback/blob/main/docs/design/scheduling-and-config.md#61-source-of-truth); the filter and `keep-*` keys are rustic's own.
