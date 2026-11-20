@@ -98,8 +98,14 @@ impl RunQueue {
     /// queue's lock, so two runs of a plan whose waits end at once can't
     /// both take one. `limit` applies from then on, refused or not.
     pub fn unless_going(&self, plan: &PlanId, limit: Concurrency) -> Result<Place, RunWaiting> {
-        let _ = (plan, limit);
-        todo!()
+        self.admit(|queue| {
+            queue.set_limit(limit);
+            if queue.is_going(plan) {
+                Err(RunWaiting)
+            } else {
+                Ok(queue.push(plan))
+            }
+        })
     }
 
     /// Whether a run of `plan` is going: it holds a place, running or

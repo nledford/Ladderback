@@ -329,16 +329,10 @@ impl PlanRunner {
                 // A newer run of the plan may be going — running, or
                 // waiting for its turn — since this run waited with no
                 // place: it gives way to it.
-                if self.queue.is_going(&plan) {
-                    log_not_started(&plan, &trigger, &StartError::RunWaiting);
-                    return;
-                }
-                match self.queue.by_hand(&plan, limit) {
+                match self.queue.unless_going(&plan, limit) {
                     Ok(place) => {
                         self.run_built(built, trigger, place).await;
                     }
-                    // A newer run of the plan holds its turn: this run
-                    // gives way to it.
                     Err(RunWaiting) => log_not_started(&plan, &trigger, &StartError::RunWaiting),
                 }
             }
@@ -429,13 +423,13 @@ impl PlanRunner {
                 // A newer run of the plan may be going — running, or
                 // waiting for its turn — since this run waited with no
                 // place: it gives way to it.
-                if self.queue.is_going(&plan) {
+                let Ok(place) = self.queue.unless_going(&plan, limit) else {
                     self.registry.finish(&id);
                     self.end_unrunnable(operation, "a newer run of its plan is going")
                         .await;
                     return;
-                }
-                self.spawn_resumed(operation, built, plan, limit, cancel);
+                };
+                self.spawn_resumed(operation, built, place, cancel);
             }
             Waited::Refused(secret) => {
                 self.registry.finish(&id);
@@ -499,16 +493,15 @@ impl PlanRunner {
         }
     }
 
-    /// Runs a queued backup in a place of the queue, on a task of its own
-    /// under the freeze: oldest first, as the queue hands them on, each
-    /// waits for its turn like any other backup (§5). `cancel` is its
-    /// cancel switch, parked already ([`Self::cancel_switch`]).
+    /// Runs a queued backup in `place`, on a task of its own under the
+    /// freeze: oldest first, as the queue hands them on, each waits for its
+    /// turn like any other backup (§5). `cancel` is its cancel switch,
+    /// parked already ([`Self::cancel_switch`]).
     fn spawn_resumed(
         &self,
         operation: domain::execution::Operation,
         built: BuiltBackup,
-        plan: PlanId,
-        limit: domain::planning::Concurrency,
+        place: Place,
         cancel: impl Future<Output = ()> + Send + 'static,
     ) {
         let id = operation.id();
@@ -517,7 +510,6 @@ impl PlanRunner {
             setup,
             warnings,
         } = built;
-        let place = self.queue.push(&plan, limit);
         let use_case = self.backup_use_case(setup);
         let registry = Arc::clone(&self.registry);
         let ends = self.ends.clone();
@@ -865,8 +857,9 @@ impl PlanRuns for PlanRunner {
         });
         match built {
             Ok((built, plan, limit)) => {
+                let place = self.queue.push(&plan, limit);
                 let cancel = self.cancel_switch(operation.id());
-                self.spawn_resumed(operation, built, plan, limit, cancel);
+                self.spawn_resumed(operation, built, place, cancel);
             }
             // The queue can't run it again, as decision 40 ended every
             // queued operation: its plan or repository is gone or changed, its
