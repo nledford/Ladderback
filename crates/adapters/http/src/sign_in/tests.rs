@@ -744,12 +744,12 @@ impl app::ports::SessionStore for Breakable {
     async fn remove(
         &self,
         digests: &[domain::access::SessionDigest],
-    ) -> Result<(), app::ports::StoreError> {
+    ) -> Result<bool, app::ports::StoreError> {
         self.check()?;
         self.kept.remove(digests).await
     }
 
-    async fn remove_all(&self) -> Result<(), app::ports::StoreError> {
+    async fn remove_all(&self) -> Result<bool, app::ports::StoreError> {
         self.check()?;
         self.kept.remove_all().await
     }
@@ -773,7 +773,7 @@ impl app::ports::SessionStore for Breakable {
     async fn set_length(
         &self,
         length: domain::access::SessionLength,
-    ) -> Result<(), app::ports::StoreError> {
+    ) -> Result<bool, app::ports::StoreError> {
         self.check()?;
         self.kept.set_length(length).await
     }

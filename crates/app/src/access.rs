@@ -62,8 +62,8 @@ struct State {
     /// next write to tell again.
     unkept: Vec<SessionDigest>,
     /// Whether a write whose failure no caller sees has failed since the
-    /// last write that succeeded: it was logged, and the next such failure
-    /// is logged only once a write has succeeded again.
+    /// last write that changed the sessions: it was logged, and the next
+    /// such failure is logged only once a write has changed them again.
     store_failing: bool,
     /// The same as `store_failing`, for the API-token store: a token's
     /// last use is the one write to it whose failure no caller sees.
@@ -336,7 +336,9 @@ impl Access {
         if digests.is_empty() {
             return Ok(());
         }
-        self.wrote(self.sessions.remove(&digests).await)?;
+        if self.sessions.remove(&digests).await? {
+            self.sessions_written();
+        }
         self.lock().forgotten_by_store(&digests);
         Ok(())
     }
@@ -345,26 +347,27 @@ impl Access {
         self.state.lock().unwrap_or_else(PoisonError::into_inner)
     }
 
-    /// Passes on how a write to the store went; one that succeeded means
-    /// the store writes again, so the next failure no caller sees is logged.
-    fn wrote(&self, written: Result<(), StoreError>) -> Result<(), StoreError> {
-        if written.is_ok() {
-            self.lock().store_failing = false;
-        }
-        written
+    /// A write to the session store changed it (a session kept, used or
+    /// forgotten, or another session length kept): the store writes
+    /// again, so the next failure no caller sees is logged. A write that
+    /// changes nothing, such as forgetting a session the store never kept,
+    /// may succeed on a store that can't keep a change, so it doesn't
+    /// count, as with the API-token store.
+    fn sessions_written(&self) {
+        self.lock().store_failing = false;
     }
 
     /// A write that failed with `error` where no caller sees it: it is
     /// tried again at the next write. Logged at its first failure since a
-    /// write succeeded, so a store that keeps failing (a full disk, say) is
-    /// said once rather than at every write. The line holds the error's
-    /// code alone: its message is the store's own words, which nobody has
-    /// checked for a value (I4).
+    /// write changed the sessions, so a store that keeps failing (a full
+    /// disk, say) is said once rather than at every write. The line holds
+    /// the error's code alone: its message is the store's own words, which
+    /// nobody has checked for a value (I4).
     fn tried_again_later(&self, error: &StoreError) {
         let first = !std::mem::replace(&mut self.lock().store_failing, true);
         if first {
             log::warn!(
-                "the database could not keep a change to the sessions ({}); it is tried again at the next write, and further failures of this kind are not logged until a write succeeds",
+                "the database could not keep a change to the sessions ({}); it is tried again at the next write, and further failures of this kind are not logged until a write changes the sessions",
                 error.code()
             );
         }
@@ -446,12 +449,13 @@ impl Access {
                 session.cookie_at(now, length),
             )
         };
-        if let Err(error) = self.wrote(self.sessions.add(&kept, &forget).await) {
+        if let Err(error) = self.sessions.add(&kept, &forget).await {
             // Ended here, and forgotten by the store at its next write, in
             // case the write was kept after all.
             self.lock().sessions.end(&token);
             return Err(SignInRefused::Store(error));
         }
+        self.sessions_written();
         self.lock().forgotten_by_store(&forget);
         Ok(SignedIn {
             token,
@@ -506,8 +510,9 @@ impl Access {
         if let Some((digest, at)) = used {
             // A last use the store misses can only end the session sooner
             // after a restart, never keep it longer.
-            if let Err(error) = self.wrote(self.sessions.record_use(&digest, at).await) {
-                self.tried_again_later(&error);
+            match self.sessions.record_use(&digest, at).await {
+                Ok(()) => self.sessions_written(),
+                Err(error) => self.tried_again_later(&error),
             }
         }
         live
@@ -552,7 +557,9 @@ impl Access {
             state.sessions.end_all();
             state.still_to_forget()
         };
-        self.wrote(self.sessions.remove_all().await)?;
+        if self.sessions.remove_all().await? {
+            self.sessions_written();
+        }
         self.lock().forgotten_by_store(&forget);
         Ok(())
     }
@@ -577,7 +584,9 @@ impl Access {
     /// included, and a session it ends is forgotten at once.
     pub async fn set_session_length(&self, length: SessionLength) -> Result<(), StoreError> {
         let _setting = self.setting_length.lock().await;
-        self.wrote(self.sessions.set_length(length).await)?;
+        if self.sessions.set_length(length).await? {
+            self.sessions_written();
+        }
         let now = self.clock.now();
         let forget = {
             let mut state = self.lock();

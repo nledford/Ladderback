@@ -500,12 +500,12 @@ impl SessionStore for Flaky {
         Ok(self.unreadable.swap(0, std::sync::atomic::Ordering::SeqCst))
     }
 
-    async fn remove(&self, digests: &[domain::access::SessionDigest]) -> Result<(), StoreError> {
+    async fn remove(&self, digests: &[domain::access::SessionDigest]) -> Result<bool, StoreError> {
         self.answer()?;
         self.kept.remove(digests).await
     }
 
-    async fn remove_all(&self) -> Result<(), StoreError> {
+    async fn remove_all(&self) -> Result<bool, StoreError> {
         self.answer()?;
         self.kept.remove_all().await
     }
@@ -524,7 +524,7 @@ impl SessionStore for Flaky {
         self.kept.length().await
     }
 
-    async fn set_length(&self, length: SessionLength) -> Result<(), StoreError> {
+    async fn set_length(&self, length: SessionLength) -> Result<bool, StoreError> {
         self.answer()?;
         self.kept.set_length(length).await
     }
@@ -674,6 +674,129 @@ fn a_session_the_store_keeps_is_a_write_that_succeeded() {
     store.failing(true);
     assert!(sign_out(&access, &other.token).is_err());
     assert!(live(&access, &session.token).is_some());
+    let logged = logged();
+    assert_eq!(logged.len(), 1, "{logged:?}");
+}
+
+/// Signs in while the store fails: refused, and the session the sign-in
+/// started, which the store never kept, is left for the next write to
+/// forget.
+fn refused_sign_in(access: &Access) {
+    assert_matches!(
+        access
+            .sign_in(HOME, &password("demo-admin-pass"), false, false)
+            .now_or_never()
+            .unwrap(),
+        Err(SignInRefused::Store(StoreError::Unavailable { .. }))
+    );
+}
+
+#[test]
+fn only_a_forgetting_that_forgets_a_session_kept_has_the_next_failure_logged() {
+    let clock = clock();
+    let kept = Arc::new(InMemoryAdminPassword::with("demo-admin-pass"));
+    let store = Arc::new(Flaky::default());
+    let access = over(&clock, kept, store.clone());
+    let session = signed_in(&access);
+    let other = signed_in(&access);
+    capture_the_log();
+    store.failing(true);
+    refused_sign_in(&access);
+    // No last use is due yet, so each use writes only the forgetting left
+    // for later.
+    assert!(live(&access, &session.token).is_some());
+    assert_eq!(logged().len(), 1);
+    store.failing(false);
+    // The refused sign-in's session was never kept: forgetting it changes
+    // nothing, as a full disk can let it.
+    assert!(live(&access, &session.token).is_some());
+    store.failing(true);
+    refused_sign_in(&access);
+    assert!(live(&access, &session.token).is_some());
+    assert_eq!(
+        logged(),
+        Vec::new(),
+        "a write that changed nothing doesn't show the store writes again"
+    );
+    store.failing(false);
+    sign_out(&access, &other.token).unwrap();
+    store.failing(true);
+    refused_sign_in(&access);
+    assert!(live(&access, &session.token).is_some());
+    let logged = logged();
+    assert_eq!(logged.len(), 1, "{logged:?}");
+}
+
+#[test]
+fn only_a_sign_out_everywhere_that_forgets_a_session_kept_has_the_next_failure_logged() {
+    let clock = clock();
+    let kept = Arc::new(InMemoryAdminPassword::with("demo-admin-pass"));
+    let store = Arc::new(Flaky::default());
+    let access = over(&clock, kept, store.clone());
+    let ended = signed_in(&access);
+    sign_out(&access, &ended.token).unwrap();
+    capture_the_log();
+    store.failing(true);
+    refused_sign_in(&access);
+    assert!(live(&access, &ended.token).is_none());
+    assert_eq!(logged().len(), 1);
+    store.failing(false);
+    // The store keeps no session: forgetting every one changes nothing.
+    sign_out_everywhere(&access).unwrap();
+    store.failing(true);
+    refused_sign_in(&access);
+    assert!(live(&access, &ended.token).is_none());
+    assert_eq!(
+        logged(),
+        Vec::new(),
+        "a write that changed nothing doesn't show the store writes again"
+    );
+    store.failing(false);
+    let session = signed_in(&access);
+    store.failing(true);
+    assert!(sign_out(&access, &session.token).is_err());
+    assert!(live(&access, &ended.token).is_none());
+    assert_eq!(logged().len(), 1);
+    store.failing(false);
+    sign_out_everywhere(&access).unwrap();
+    store.failing(true);
+    refused_sign_in(&access);
+    assert!(live(&access, &ended.token).is_none());
+    let logged = logged();
+    assert_eq!(logged.len(), 1, "{logged:?}");
+}
+
+#[test]
+fn only_a_session_length_that_changes_has_the_next_failure_logged() {
+    let clock = clock();
+    let kept = Arc::new(InMemoryAdminPassword::with("demo-admin-pass"));
+    let store = Arc::new(Flaky::default());
+    let access = over(&clock, kept, store.clone());
+    set_length(&access, SessionLength::SevenDays).unwrap();
+    let ended = signed_in(&access);
+    sign_out(&access, &ended.token).unwrap();
+    capture_the_log();
+    store.failing(true);
+    refused_sign_in(&access);
+    assert!(live(&access, &ended.token).is_none());
+    assert_eq!(logged().len(), 1);
+    store.failing(false);
+    // The store keeps this length already: keeping it again changes
+    // nothing.
+    set_length(&access, SessionLength::SevenDays).unwrap();
+    store.failing(true);
+    refused_sign_in(&access);
+    assert!(live(&access, &ended.token).is_none());
+    assert_eq!(
+        logged(),
+        Vec::new(),
+        "a write that changed nothing doesn't show the store writes again"
+    );
+    store.failing(false);
+    set_length(&access, SessionLength::NinetyDays).unwrap();
+    store.failing(true);
+    refused_sign_in(&access);
+    assert!(live(&access, &ended.token).is_none());
     let logged = logged();
     assert_eq!(logged.len(), 1, "{logged:?}");
 }
@@ -1230,12 +1353,12 @@ impl SessionStore for Scripted {
         self.kept.forget_unreadable().await
     }
 
-    async fn remove(&self, digests: &[domain::access::SessionDigest]) -> Result<(), StoreError> {
+    async fn remove(&self, digests: &[domain::access::SessionDigest]) -> Result<bool, StoreError> {
         self.answer("remove").await?;
         self.kept.remove(digests).await
     }
 
-    async fn remove_all(&self) -> Result<(), StoreError> {
+    async fn remove_all(&self) -> Result<bool, StoreError> {
         self.answer("remove_all").await?;
         self.kept.remove_all().await
     }
@@ -1254,7 +1377,7 @@ impl SessionStore for Scripted {
         self.kept.length().await
     }
 
-    async fn set_length(&self, length: SessionLength) -> Result<(), StoreError> {
+    async fn set_length(&self, length: SessionLength) -> Result<bool, StoreError> {
         self.answer("set_length").await?;
         self.kept.set_length(length).await
     }

@@ -65,7 +65,7 @@ pub async fn set_admin_password(
     // old password has ended by its fingerprint anyway, and one signed in
     // with the new password in that moment lives until the next restart.
     Ok(match sessions.remove_all().await {
-        Ok(()) => PasswordSet::SessionsForgotten,
+        Ok(_) => PasswordSet::SessionsForgotten,
         Err(error) => PasswordSet::SessionsLeft(error),
     })
 }
