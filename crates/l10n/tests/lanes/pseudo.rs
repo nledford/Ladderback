@@ -248,6 +248,34 @@ fn what_a_person_types_stays_as_it_is_in_a_transformed_message() {
 }
 
 #[test]
+fn an_ftp_locations_scheme_stays_as_it_is_in_a_transformed_message() {
+    // What the plain-FTP warning advises typing: `ftps://`, and the option
+    // an FTP location ignores (#831).
+    for asked in ["en-XA", "ar-XB"] {
+        let localizer = speaking(asked);
+        for rule in ["network", "none"] {
+            let shown = localizer.message(
+                msg::WARNING_LOCATION_PLAIN_HTTP_CREDENTIALS,
+                &[
+                    ("position", text("2")),
+                    ("cause", text("plain-ftp")),
+                    ("rule", text(rule)),
+                    ("locations", text("several")),
+                ],
+            );
+            assert!(shown.problems().is_empty(), "{asked} {rule}: {shown}");
+            assert!(!shown.text().is_ascii(), "{asked} {rule}: {shown}");
+            for literal in ["ftps://", "http-cacert"] {
+                assert!(
+                    shown.text().contains(literal),
+                    "{asked} {rule} changes `{literal}`: {shown}"
+                );
+            }
+        }
+    }
+}
+
+#[test]
 fn a_cli_message_in_a_pseudolocale_shows_each_argument_exactly_as_given() {
     let source = source_locale();
     let plain = english();

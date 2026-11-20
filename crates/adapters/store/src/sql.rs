@@ -239,10 +239,13 @@ pub(crate) const RECORD_SESSION_USE: &str = "UPDATE sessions SET last_used_at = 
 /// The session length the admin set; no row while none has been set.
 pub(crate) const SESSION_LENGTH: &str = "SELECT session_length FROM sign_in_settings WHERE id = 1";
 
-/// Keeps the session length, in place of the one kept. Parameter: its name.
+/// Keeps the session length, in place of the one kept; it touches no row
+/// when that one is the same, so the count of rows changed says whether it
+/// changed. Parameter: its name.
 pub(crate) const SET_SESSION_LENGTH: &str = concat!(
     "INSERT INTO sign_in_settings (id, session_length) VALUES (1, ?) ",
-    "ON CONFLICT(id) DO UPDATE SET session_length = excluded.session_length"
+    "ON CONFLICT(id) DO UPDATE SET session_length = excluded.session_length ",
+    "WHERE session_length IS NOT excluded.session_length"
 );
 
 /// Keeps a reading of a repository's stats. Parameters: `repo_alias`,

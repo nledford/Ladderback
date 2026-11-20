@@ -336,6 +336,40 @@ fn an_rclone_location_is_pointed_to_rclone_s_own_certificate_setting() {
     }
 }
 
+/// opendal's FTP service encrypts an endpoint written `ftps://`, and builds
+/// that connection's trust from the operating system's certificates alone,
+/// reading no `http-cacert` (`opendal-service-ftp` 0.59.5), so the warning
+/// names `ftps://` first and says where the certificate must be trusted
+/// (#831).
+#[test]
+fn an_ftp_location_is_pointed_to_ftps_and_the_operating_systems_trust() {
+    let localizer = english();
+    for locations in ["one", "several"] {
+        for rule in ["network", "none"] {
+            let shown = localizer.message(
+                msg::WARNING_LOCATION_PLAIN_HTTP_CREDENTIALS,
+                &[
+                    ("position", MsgArg::Text("2".to_owned())),
+                    ("cause", MsgArg::Text("plain-ftp".to_owned())),
+                    ("rule", MsgArg::Text(rule.to_owned())),
+                    ("locations", MsgArg::Text(locations.to_owned())),
+                ],
+            );
+            assert!(shown.problems().is_empty(), "{locations} {rule}: {shown}");
+            let text = shown.text();
+            let https = text.find("HTTPS").unwrap_or(text.len());
+            assert!(
+                text.find("ftps://").is_some_and(|ftps| ftps < https),
+                "{locations} {rule}: {text}"
+            );
+            assert!(
+                text.contains("the operating system must trust the server's certificate"),
+                "{locations} {rule}: {text}"
+            );
+        }
+    }
+}
+
 /// A secret written as text is pointed out by its setting, said to be one,
 /// never as if the setting were a place, and by the position of the
 /// location that holds it when that is a further one (#505).
