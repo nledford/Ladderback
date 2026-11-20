@@ -284,5 +284,71 @@ pub fn decide_pairing(
     }))
 }
 
+/// What the hub asks of its registry once a proof's signature holds under
+/// `agent_key`, the key the registry held for `agent_id` when the hub read
+/// it.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct ProofRequest {
+    pub agent_id: AgentId,
+    pub agent_key: PublicKey,
+    /// The binding kind the agent named in `Connect`.
+    pub kind: BindingKind,
+    pub counter: u64,
+}
+
+/// Why the hub refuses an agent's proof (decision 120, "The handshake").
+/// The hub signs one code for every cause, so a refused machine learns
+/// nothing of what the hub holds.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum ProofRefusal {
+    /// No agent under the ID, a signature that doesn't hold under the
+    /// registered key, or a binding kind the agent never paired with.
+    ProofRefused,
+}
+
+impl ProofRefusal {
+    /// The code on the wire, which the hub signs.
+    pub fn code(self) -> WireName {
+        match self {
+            Self::ProofRefused => WireName::known("proof-refused"),
+        }
+    }
+}
+
+/// What the registry holds that bears on one proof, read in the step that
+/// applies the decision.
+#[derive(Clone, Copy, Debug)]
+pub struct ProofView<'a> {
+    /// The agent registered under the request's agent ID.
+    pub record: Option<&'a AgentRecord>,
+    /// The binding kinds of the tokens the agent paired with under the
+    /// request's agent key: the kinds it may connect with.
+    pub kinds: &'a [BindingKind],
+}
+
+/// The decision a proof gets at `now` (decision 120, "The handshake"): the
+/// agent's record as it now is, seen now and keeping the greater counter.
+/// Telling a copy of the agent by its counter is #296's.
+pub fn decide_proof(
+    view: &ProofView<'_>,
+    request: &ProofRequest,
+    now: Timestamp,
+) -> Result<AgentRecord, ProofRefusal> {
+    let Some(record) = view.record else {
+        return Err(ProofRefusal::ProofRefused);
+    };
+    if record.agent_id != request.agent_id
+        || record.key != request.agent_key
+        || !view.kinds.contains(&request.kind)
+    {
+        return Err(ProofRefusal::ProofRefused);
+    }
+    Ok(AgentRecord {
+        counter: record.counter.max(request.counter),
+        last_seen: now,
+        ..record.clone()
+    })
+}
+
 #[cfg(test)]
 mod tests;

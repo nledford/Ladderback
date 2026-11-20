@@ -32,6 +32,7 @@ impl Hub {
             Arc::new(FakeSigning),
             Arc::new(SeededRandom::new(seed)),
             clock.clone(),
+            "0.0.0-test".to_owned(),
         );
         Self {
             registry,
@@ -142,6 +143,7 @@ async fn no_key_is_made_again_while_agents_are_registered() {
         Arc::new(FakeSigning),
         Arc::new(SeededRandom::new(2)),
         hub.clock.clone(),
+        "0.0.0-test".to_owned(),
     );
     assert_eq!(
         without_keys.keys().await.unwrap_err(),
@@ -166,6 +168,7 @@ async fn no_key_is_made_again_while_agents_are_registered() {
         Arc::new(FakeSigning),
         Arc::new(SeededRandom::new(2)),
         hub.clock.clone(),
+        "0.0.0-test".to_owned(),
     );
     assert_eq!(
         without_recovery.keys().await.unwrap_err(),
@@ -213,6 +216,7 @@ async fn a_new_hub_key_voids_the_unused_tokens() {
             Arc::new(FakeSigning),
             Arc::new(SeededRandom::new(2)),
             hub.clock.clone(),
+            "0.0.0-test".to_owned(),
         ),
     };
     let new = renewed.pairing.keys().await.unwrap();

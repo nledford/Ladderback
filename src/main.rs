@@ -145,6 +145,16 @@ enum Command {
         #[arg(long)]
         yes: bool,
     },
+    /// Check this machine's link to the hub it paired with: connect, prove
+    /// who it is, and say whether the hub holds it waiting for approval or
+    /// has approved it.
+    #[cfg(feature = "hub")]
+    HubStatus {
+        /// Connect under this hostname instead of the machine's, as `pair`
+        /// takes it.
+        #[arg(long)]
+        hostname: Option<String>,
+    },
     // Their descriptions are the catalog's (`cli-help-*`), set in `parse`.
     InstallService,
     RemoveService,
@@ -285,6 +295,8 @@ fn main() -> ExitCode {
             hostname,
             yes,
         }),
+        #[cfg(feature = "hub")]
+        Command::HubStatus { hostname } => hub::hub_status(hostname),
         Command::ImportProfile {
             file,
             repo_name,

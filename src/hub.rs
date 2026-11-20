@@ -1,6 +1,6 @@
 //! The hub's terminal commands (§16, decision 121, "From a terminal"):
-//! `pairing-token` on the hub, and `pair` on the agent. Only a build with
-//! the `hub` feature has them.
+//! `pairing-token` on the hub, and `pair` and `hub-status` on the agent.
+//! Only a build with the `hub` feature has them.
 
 use std::io;
 use std::path::Path;
@@ -9,15 +9,16 @@ use std::sync::Arc;
 
 use api::{ErrorCode, MsgArg};
 use app::pairing::{
-    AgentPairing, AgentPairingError, HubPairing, HubPairingError, PairFailure, PairWithHub,
+    AgentPairing, AgentPairingError, ChallengeRefused, ConnectFailure, ConnectToHub, HubPairing,
+    HubPairingError, PairFailure, PairWithHub,
 };
-use app::ports::{AgentRegistry as _, IdentityError, LinkError, Signing as _};
+use app::ports::{AgentRegistry as _, Identity as _, IdentityError, LinkError, Signing as _};
 use domain::fleet::{
-    Fingerprint, Hostname, HubAddress, HubRoute, PairingToken, RouteRefused, TokenId, TokenTls,
-    is_loopback,
+    Approval, Fingerprint, Hostname, HubAddress, HubRoute, PairingToken, RouteRefused, TokenId,
+    TokenTls, WelcomeRefused, is_loopback,
 };
 use domain::{SignedDuration, Timestamp};
-use l10n::{Localizer, PosixEnv, msg};
+use l10n::{Localizer, MessageId, PosixEnv, msg};
 use platform::data_dir_lock::{DataDirLock, LockError};
 use platform::identity::FileIdentity;
 use platform::random::OsRandom;
@@ -54,6 +55,7 @@ pub(crate) fn hub_pairing(data_dir: &Path, store: Arc<SqliteStore>) -> HubPairin
         Arc::new(AwsLcSigning),
         Arc::new(OsRandom),
         Arc::new(SystemClock),
+        crate::build_info::SHOWN.as_str().to_owned(),
     )
 }
 
@@ -453,6 +455,163 @@ async fn on_the_agent(
     }
 }
 
+/// `ladderback hub-status`: connects to the hub this machine pinned at
+/// pairing, proves who it is, and says whether the hub holds it waiting for
+/// approval or has approved it.
+pub(crate) fn hub_status(hostname: Option<String>) -> ExitCode {
+    let localizer = Localizer::new(&PosixEnv::from_process().preferences());
+    finish(&localizer, run_hub_status(&localizer, hostname))
+}
+
+fn run_hub_status(localizer: &Localizer, hostname: Option<String>) -> io::Result<ExitCode> {
+    let Some(data_dir) = dirs::data_dir() else {
+        say(localizer, msg::CLI_NO_DATA_DIR, &[])?;
+        return Ok(ExitCode::FAILURE);
+    };
+    let hostname = hostname.unwrap_or_else(platform::hostname);
+    let Ok(hostname) = Hostname::parse(&hostname) else {
+        say(
+            localizer,
+            msg::CLI_PAIR_BAD_HOSTNAME,
+            &[("name", text(hostname))],
+        )?;
+        return Ok(ExitCode::from(2));
+    };
+    let runtime = match runtime(localizer)? {
+        Ok(runtime) => runtime,
+        Err(code) => return Ok(code),
+    };
+    runtime.block_on(connect_to_hub(localizer, &data_dir, hostname))
+}
+
+async fn connect_to_hub(
+    localizer: &Localizer,
+    data_dir: &Path,
+    hostname: Hostname,
+) -> io::Result<ExitCode> {
+    // A status check writes nothing: a machine with no agent ID never paired,
+    // and gets none from asking.
+    let agent_id = match platform::agent_id::load(data_dir) {
+        Ok(Some(id)) => id,
+        Ok(None) => {
+            say(localizer, msg::CLI_HUB_STATUS_NOT_PAIRED, &[])?;
+            return Ok(ExitCode::FAILURE);
+        }
+        Err(error) => return refused(localizer, &error.to_string()),
+    };
+    let identity = Arc::new(FileIdentity::in_data_dir(data_dir));
+    // The address a failure names; the use case reads the pin it trusts.
+    let address = match identity.pin().await {
+        Ok(Some(pin)) => pin.address.as_str().to_owned(),
+        Ok(None) | Err(_) => String::new(),
+    };
+    let connecting = ConnectToHub::new(
+        identity,
+        Arc::new(AwsLcSigning),
+        Arc::new(OsRandom),
+        Arc::new(SystemClock),
+        Arc::new(WebSocketHubConnector::new()),
+        crate::build_info::SHOWN.as_str().to_owned(),
+    );
+    match connecting.connect(agent_id, hostname).await {
+        Ok(connected) => {
+            match connected.approval {
+                Approval::Pending => say(
+                    localizer,
+                    msg::CLI_HUB_STATUS_PENDING,
+                    &[(
+                        "fingerprint",
+                        text(Fingerprint::of_key(&connected.agent_key)),
+                    )],
+                )?,
+                Approval::Approved => say(localizer, msg::CLI_HUB_STATUS_APPROVED, &[])?,
+            }
+            Ok(ExitCode::SUCCESS)
+        }
+        Err(ConnectFailure::NotPaired) => {
+            say(localizer, msg::CLI_HUB_STATUS_NOT_PAIRED, &[])?;
+            Ok(ExitCode::FAILURE)
+        }
+        Err(failure) => {
+            if let ConnectFailure::Identity(identity) = &failure
+                && let Some(args) = exposed(identity)
+            {
+                say(localizer, msg::CLI_KEY_FILE_EXPOSED, &args)?;
+                return Ok(ExitCode::FAILURE);
+            }
+            if let Some(message) = connect_message(&failure) {
+                say(localizer, message, &[("address", text(&address))])?;
+                return Ok(ExitCode::FAILURE);
+            }
+            let (code, args, detail) = connect_failed(&failure, &address);
+            to_stderr(&refusal_line(localizer, code, &args, detail.as_deref()))?;
+            Ok(ExitCode::FAILURE)
+        }
+    }
+}
+
+/// What `hub-status` says a failure with. Nothing names anything of the pin
+/// but its address.
+fn connect_failed(failure: &ConnectFailure, address: &str) -> Said {
+    match failure {
+        ConnectFailure::Route(route) => failed(&PairFailure::Route(*route), address),
+        ConnectFailure::Link(LinkError::Closed {
+            reason: Some(reason),
+        }) if wire_code(reason) == Some(ErrorCode::BindingUnavailable) => {
+            (ErrorCode::BindingUnavailable, vec![], None)
+        }
+        ConnectFailure::Link(LinkError::Closed { .. } | LinkError::Unreadable)
+        | ConnectFailure::OutOfTurn
+        | ConnectFailure::Unsigned
+        | ConnectFailure::Welcome(WelcomeRefused::Expiry | WelcomeRefused::Protocols) => {
+            (ErrorCode::HubLinkLost, vec![], None)
+        }
+        ConnectFailure::Link(link) => failed(&PairFailure::Link(link.clone()), address),
+        ConnectFailure::Challenge(ChallengeRefused::HubKeyMismatch) => {
+            (ErrorCode::HubKeyMismatch, vec![], None)
+        }
+        ConnectFailure::Challenge(ChallengeRefused::HubProofInvalid) => {
+            (ErrorCode::HubProofInvalid, vec![], None)
+        }
+        ConnectFailure::Challenge(ChallengeRefused::BindingUnavailable) => {
+            (ErrorCode::BindingUnavailable, vec![], None)
+        }
+        ConnectFailure::Challenge(ChallengeRefused::NoCommonHandshake)
+        | ConnectFailure::Welcome(WelcomeRefused::NoCommonProtocol) => {
+            (ErrorCode::ProtocolOutOfDate, vec![], None)
+        }
+        ConnectFailure::Welcome(WelcomeRefused::GenerationLower) => {
+            (ErrorCode::GenerationLower, vec![], None)
+        }
+        // A hub refuses a proof only as `proof-refused`; any other code,
+        // pairing's among them, would show advice for something else.
+        ConnectFailure::Refused(refusal) => match api::sync::refusal_code(refusal.code.as_str()) {
+            ErrorCode::ProofRefused => (ErrorCode::ProofRefused, vec![], None),
+            _ => (
+                ErrorCode::HubLinkLost,
+                vec![],
+                Some(refusal.code.as_str().to_owned()),
+            ),
+        },
+        ConnectFailure::NotPaired
+        | ConnectFailure::Identity(_)
+        | ConnectFailure::Signing(_)
+        | ConnectFailure::Random(_) => (ErrorCode::Unknown, vec![], Some(format!("{failure:?}"))),
+    }
+}
+
+/// The message `hub-status` says `failure` with in place of its code's, when
+/// the code's advice is pairing's and can't be followed: a hub that didn't
+/// prove the key this machine pinned is no reason to pair again.
+fn connect_message(failure: &ConnectFailure) -> Option<MessageId> {
+    match failure {
+        ConnectFailure::Challenge(
+            ChallengeRefused::HubKeyMismatch | ChallengeRefused::HubProofInvalid,
+        ) => Some(msg::CLI_HUB_STATUS_HUB_UNPROVED),
+        _ => None,
+    }
+}
+
 /// An error code, its arguments, and the detail the system gave.
 type Said = (ErrorCode, Vec<(&'static str, MsgArg)>, Option<String>);
 
@@ -556,6 +715,121 @@ mod tests {
     #[test]
     fn a_moment_shows_as_its_date_and_minute_in_utc() {
         assert_eq!(when(1_795_000_000), "2026-11-18 11:06 UTC");
+    }
+
+    /// Each way `hub-status` can fail is said with the code that names it;
+    /// a link that broke for no reason the agent can act on is lost.
+    #[test]
+    fn each_connect_failure_is_said_with_its_code() {
+        let code = |failure: ConnectFailure| connect_failed(&failure, "https://hub.example").0;
+        let closed = |reason: Option<&str>| {
+            ConnectFailure::Link(LinkError::Closed {
+                reason: reason.map(str::to_owned),
+            })
+        };
+        let refused = |name: &str| {
+            ConnectFailure::Refused(domain::fleet::Refused {
+                code: domain::fleet::WireName::parse(name).unwrap(),
+                holder: None,
+                signature: domain::fleet::Signature::from_bytes([0; 64]).unwrap(),
+            })
+        };
+        let lost = [
+            ConnectFailure::Unsigned,
+            ConnectFailure::OutOfTurn,
+            closed(None),
+            closed(Some("token-used")),
+            ConnectFailure::Link(LinkError::Unreadable),
+            ConnectFailure::Welcome(WelcomeRefused::Expiry),
+            ConnectFailure::Welcome(WelcomeRefused::Protocols),
+        ];
+        for failure in lost {
+            let said = format!("{failure:?}");
+            assert_eq!(code(failure), ErrorCode::HubLinkLost, "{said}");
+        }
+        let cases = [
+            (
+                closed(Some("binding-unavailable")),
+                ErrorCode::BindingUnavailable,
+            ),
+            (
+                ConnectFailure::Challenge(ChallengeRefused::BindingUnavailable),
+                ErrorCode::BindingUnavailable,
+            ),
+            (
+                ConnectFailure::Challenge(ChallengeRefused::NoCommonHandshake),
+                ErrorCode::ProtocolOutOfDate,
+            ),
+            (
+                ConnectFailure::Welcome(WelcomeRefused::NoCommonProtocol),
+                ErrorCode::ProtocolOutOfDate,
+            ),
+            (
+                ConnectFailure::Welcome(WelcomeRefused::GenerationLower),
+                ErrorCode::GenerationLower,
+            ),
+            (
+                ConnectFailure::Link(LinkError::PinMismatch),
+                ErrorCode::HubPinMismatch,
+            ),
+            (
+                ConnectFailure::Route(RouteRefused::PlainOffLoopback),
+                ErrorCode::PlainAddress,
+            ),
+            (refused("proof-refused"), ErrorCode::ProofRefused),
+            (refused("generation-lower"), ErrorCode::HubLinkLost),
+            (refused("hostname-taken"), ErrorCode::HubLinkLost),
+            (refused("token-used"), ErrorCode::HubLinkLost),
+        ];
+        for (failure, expected) in cases {
+            let said = format!("{failure:?}");
+            assert_eq!(code(failure), expected, "{said}");
+        }
+        let (code, args, _) = connect_failed(
+            &ConnectFailure::Link(LinkError::Unreachable {
+                detail: "refused".to_owned(),
+            }),
+            "https://hub.example",
+        );
+        assert_eq!(code, ErrorCode::HubUnreachable);
+        assert_eq!(
+            args,
+            vec![("address", MsgArg::Text("https://hub.example".to_owned()))]
+        );
+        // A hub's signed refusal other than `proof-refused` is a lost link
+        // whose text still names the hub's code, so the person can report it.
+        for name in ["hostname-taken", "generation-lower", "token-used"] {
+            let (code, args, detail) = connect_failed(&refused(name), "https://hub.example");
+            let text = l10n::Localizer::new(&[]).error(code, &args, detail.as_deref());
+            assert!(text.text().contains(name), "{name}: {text}");
+        }
+    }
+
+    /// A hub that didn't prove the key this machine pinned gets hub-status's
+    /// own message, never pairing's advice to pair again, which `pair` can't
+    /// follow while the machine holds that pin; every other failure is said
+    /// by its code.
+    #[test]
+    fn a_hub_that_proves_another_key_is_no_reason_to_pair_again() {
+        for refused in [
+            ChallengeRefused::HubKeyMismatch,
+            ChallengeRefused::HubProofInvalid,
+        ] {
+            assert_eq!(
+                connect_message(&ConnectFailure::Challenge(refused)),
+                Some(msg::CLI_HUB_STATUS_HUB_UNPROVED),
+                "{refused:?}"
+            );
+        }
+        for other in [
+            ConnectFailure::Challenge(ChallengeRefused::BindingUnavailable),
+            ConnectFailure::Challenge(ChallengeRefused::NoCommonHandshake),
+            ConnectFailure::Link(LinkError::PinMismatch),
+            ConnectFailure::Unsigned,
+        ] {
+            let said = format!("{other:?}");
+            assert_eq!(connect_message(&other), None, "{said}");
+        }
     }
 
     /// A key file refused for its mode is named by its file and its mode as

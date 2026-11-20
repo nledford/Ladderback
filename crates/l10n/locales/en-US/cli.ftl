@@ -494,3 +494,22 @@ cli-pair-no-terminal = No terminal to ask on. Compare the { -hub } key above wit
 # The hub took the pairing and holds the agent pending until a person approves it there.
 # $fingerprint (text): this machine's own key's fingerprint, to compare on the hub.
 cli-pair-pending = Paired. The { -hub } holds this machine pending until someone approves it there. This machine's key: { $fingerprint }. Compare it with the { -hub }'s screen.
+
+# `ladderback hub-status` on a machine with no hub pin or no agent key.
+# `ladderback pair` is a command: keep it a string literal.
+cli-hub-status-not-paired = This machine isn't paired with a { -hub }. Pair it with { "ladderback pair" } and a token made on the { -hub }.
+
+# `ladderback hub-status`: the hub proved itself and holds this machine
+# waiting until a person approves it there.
+# $fingerprint (text): this machine's own key's fingerprint, to compare on the hub.
+cli-hub-status-pending = Connected. The { -hub } holds this machine waiting for approval: someone has to approve it there. This machine's key: { $fingerprint }. Compare it with the { -hub }'s screen.
+
+# `ladderback hub-status`: the hub proved itself and a person approved this
+# machine there.
+cli-hub-status-approved = Connected. The { -hub } approved this machine.
+
+# `ladderback hub-status`: the hub didn't prove the key this machine pinned
+# at pairing, so the machine sent it no proof. Pairing's own messages say to
+# pair again, which `ladderback pair` refuses while the machine holds a pin.
+# $address (text): the hub address this machine pinned.
+cli-hub-status-hub-unproved = The { -hub } at { $address } didn't prove the key this machine pinned when it paired, so this machine sent it nothing and keeps backing up on its own. Don't pair again. Check the address with whoever runs the { -hub }. If they reset or reinstalled it on purpose, ask them how to move this machine to its new key; if they didn't, someone may be posing as the { -hub }.

@@ -1,6 +1,9 @@
 use async_trait::async_trait;
-use domain::Timestamp;
-use domain::fleet::{AgentRecord, PairRefusal, PairRequest, Pairing, TokenId, TokenRecord};
+use domain::fleet::{
+    AgentRecord, PairRefusal, PairRequest, Pairing, ProofRefusal, ProofRequest, TokenId,
+    TokenRecord,
+};
+use domain::{AgentId, Timestamp};
 
 use super::{Added, StoreError};
 
@@ -49,4 +52,17 @@ pub trait AgentRegistry: Send + Sync {
 
     /// Every registered agent, pending or approved, oldest first.
     async fn agents(&self) -> Result<Vec<AgentRecord>, StoreError>;
+
+    /// The agent registered under `agent_id`, pending or approved.
+    async fn agent(&self, agent_id: AgentId) -> Result<Option<AgentRecord>, StoreError>;
+
+    /// Decides `request` with [`domain::fleet::decide_proof`] on the
+    /// records it holds at `now`, the binding kinds being those of the
+    /// tokens spent on the request's agent ID and key, and keeps the record
+    /// it answers, in one step. A refusal changes nothing.
+    async fn take_proof(
+        &self,
+        request: &ProofRequest,
+        now: Timestamp,
+    ) -> Result<Result<AgentRecord, ProofRefusal>, StoreError>;
 }

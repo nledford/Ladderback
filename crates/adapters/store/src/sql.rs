@@ -430,6 +430,11 @@ pub(crate) mod hub {
         "WHERE pairing_key = ?"
     );
 
+    /// The tokens spent on an agent ID and key. Parameters: the agent ID,
+    /// the agent key.
+    pub(crate) const SPENT_TOKENS: &str =
+        select_tokens!(" WHERE state = 'used' AND used_agent_id = ? AND used_agent_key = ?");
+
     /// The agent with an ID. Parameter: the ID.
     pub(crate) const AGENT: &str = select_agents!(" WHERE id = ?");
 

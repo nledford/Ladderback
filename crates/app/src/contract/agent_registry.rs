@@ -1,6 +1,7 @@
-//! The `AgentRegistry` contract (§7.1; §16, decision 120, "Pairing" and
-//! "Pending approval"): the hub's agents and pairing tokens, kept between
-//! its starts, and a pairing decided and applied in one step.
+//! The `AgentRegistry` contract (§7.1; §16, decision 120, "Pairing",
+//! "Pending approval" and "The handshake"): the hub's agents and pairing
+//! tokens, kept between its starts, and a pairing or a proof decided and
+//! applied in one step.
 
 use std::fmt;
 use std::sync::Arc;
@@ -8,7 +9,7 @@ use std::sync::Arc;
 use async_trait::async_trait;
 use domain::fleet::{
     AgentRecord, AgentStatus, BindingKind, Hostname, KEY_BYTES, PENDING_LIMIT, PairRefusal,
-    PairRequest, Pairing, PublicKey, TokenRecord, TokenUse,
+    PairRequest, Pairing, ProofRefusal, ProofRequest, PublicKey, TokenRecord, TokenUse,
 };
 use domain::{AgentId, Timestamp, Uuid};
 
@@ -41,6 +42,8 @@ pub async fn run(harness: &dyn AgentRegistryHarness) {
     another_key_under_a_registered_id_is_refused(harness).await;
     records_outlive_the_hub(harness).await;
     racing_pairings_on_one_token_pair_one(harness).await;
+    a_proof_keeps_the_greater_counter_and_when_it_was_seen(harness).await;
+    a_proof_of_another_id_key_or_kind_changes_nothing(harness).await;
 }
 
 /// The value of `result`, after a failed assertion if it is an error.
@@ -413,6 +416,100 @@ async fn another_key_under_a_registered_id_is_refused(harness: &dyn AgentRegistr
     );
     assert_eq!(agents(registry.as_ref()).await, before);
     assert_eq!(unused(registry.as_ref(), at(21)).await, vec![second_token]);
+}
+
+/// Agent `n`'s proof with `counter`, under the key `request(n, ..)` pairs
+/// with and the binding kind of every test token.
+fn proof(n: u8, counter: u64) -> Option<ProofRequest> {
+    Some(ProofRequest {
+        agent_id: agent_id(u128::from(n)),
+        agent_key: key(n.wrapping_add(100))?,
+        kind: BindingKind::TlsExporter,
+        counter,
+    })
+}
+
+async fn a_proof_keeps_the_greater_counter_and_when_it_was_seen(
+    harness: &dyn AgentRegistryHarness,
+) {
+    let (Some(spent), Some(request), Some(lower), Some(highest)) = (
+        token(1, 0),
+        request(1, 1, "laptop"),
+        proof(1, 0),
+        proof(1, u64::MAX),
+    ) else {
+        return;
+    };
+    let registry = harness.empty().await;
+    add(registry.as_ref(), &spent).await;
+    let paired = pair(registry.as_ref(), &request, at(10)).await;
+    let Some(Ok(Pairing::New(record))) = paired else {
+        assert!(paired.is_none(), "paired: {paired:?}");
+        return;
+    };
+    assert_eq!(
+        ok(registry.agent(request.agent_id).await, "reading the agent"),
+        Some(Some(record.clone()))
+    );
+    assert_eq!(
+        ok(registry.agent(agent_id(9)).await, "reading no agent"),
+        Some(None)
+    );
+    let seen = AgentRecord {
+        last_seen: at(20),
+        ..record
+    };
+    assert_eq!(
+        ok(registry.take_proof(&lower, at(20)).await, "proving"),
+        Some(Ok(seen.clone())),
+        "a lower counter is never kept"
+    );
+    let reopened = harness.reopened().await;
+    assert_eq!(agents(reopened.as_ref()).await, vec![seen.clone()]);
+    let raised = AgentRecord {
+        counter: u64::MAX,
+        last_seen: at(30),
+        ..seen
+    };
+    assert_eq!(
+        ok(reopened.take_proof(&highest, at(30)).await, "proving"),
+        Some(Ok(raised.clone()))
+    );
+    assert_eq!(agents(reopened.as_ref()).await, vec![raised]);
+}
+
+async fn a_proof_of_another_id_key_or_kind_changes_nothing(harness: &dyn AgentRegistryHarness) {
+    let (Some(spent), Some(request), Some(proof), Some(other_key)) =
+        (token(1, 0), request(1, 1, "laptop"), proof(1, 5), key(50))
+    else {
+        return;
+    };
+    let registry = harness.empty().await;
+    add(registry.as_ref(), &spent).await;
+    let paired = pair(registry.as_ref(), &request, at(10)).await;
+    assert!(matches!(paired, Some(Ok(Pairing::New(_)))), "{paired:?}");
+    let before = agents(registry.as_ref()).await;
+    for refused in [
+        ProofRequest {
+            agent_id: agent_id(9),
+            ..proof
+        },
+        ProofRequest {
+            agent_key: other_key,
+            ..proof
+        },
+        ProofRequest {
+            kind: BindingKind::None,
+            ..proof
+        },
+    ] {
+        assert_eq!(
+            ok(registry.take_proof(&refused, at(20)).await, "proving"),
+            Some(Err(ProofRefusal::ProofRefused)),
+            "{refused:?}"
+        );
+    }
+    assert_eq!(agents(registry.as_ref()).await, before);
 }
 
 async fn records_outlive_the_hub(harness: &dyn AgentRegistryHarness) {

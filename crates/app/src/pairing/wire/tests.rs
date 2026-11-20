@@ -222,3 +222,143 @@ fn a_refusal_with_a_field_out_of_shape_is_refused() {
         assert_eq!(hub_message(&frame), Err(WireRefused), "{frame:?}");
     }
 }
+
+fn welcome() -> Welcome {
+    Welcome {
+        protocol: Some(1),
+        hub_protocols: domain::fleet::PROTOCOLS,
+        agent_protocols: domain::fleet::Protocols::new(1, 3).unwrap(),
+        generation: 2,
+        hub_handshakes: Handshakes::from_bits(1),
+        hub_version: "0.5.0+def5678".to_owned(),
+        signed_at: EpochSeconds::from_seconds(1_800_000_000),
+        approval: domain::fleet::Approval::Approved,
+    }
+}
+
+fn hello() -> Hello {
+    Hello {
+        agent_version: "0.5.0+abc1234".to_owned(),
+        hostname: Hostname::parse("Nick's NAS").unwrap(),
+        protocols: domain::fleet::PROTOCOLS,
+        clock: EpochSeconds::from_seconds(1_800_000_001),
+    }
+}
+
+#[test]
+fn the_proof_and_the_envelopes_read_back_from_their_frames() {
+    let proof = Proof {
+        counter: u64::MAX,
+        agent_proof: signature(0x55),
+    };
+    assert_eq!(
+        agent_message(&proof_frame(&proof)),
+        Ok(AgentMessage::Proof(proof))
+    );
+    let sent = AgentEnvelope {
+        kind: domain::fleet::hello_kind(),
+        seq: 1,
+        payload: b"{\"a\":1}".to_vec(),
+        signature: signature(0x66),
+    };
+    let frame = agent_envelope_frame(&sent);
+    assert_eq!(
+        frame,
+        AgentFrame::Signed {
+            kind: "Hello".to_owned(),
+            seq: 1,
+            payload: "eyJhIjoxfQ".to_owned(),
+            signature: encoded(signature(0x66).as_bytes()),
+        }
+    );
+    assert_eq!(agent_message(&frame), Ok(AgentMessage::Signed(sent)));
+    let answered = HubEnvelope {
+        kind: domain::fleet::welcome_kind(),
+        seq: 1,
+        expires_at: EpochSeconds::from_seconds(1_800_000_600),
+        payload: Vec::new(),
+        signature: signature(0x77),
+    };
+    assert_eq!(
+        hub_message(&hub_envelope_frame(&answered)),
+        Ok(HubMessage::Signed(answered))
+    );
+}
+
+#[test]
+fn the_payloads_read_back_from_their_bytes() {
+    assert_eq!(read_hello(&hello_payload(&hello())), Ok(hello()));
+    assert_eq!(read_welcome(&welcome_payload(&welcome())), Ok(welcome()));
+    let mut apart = welcome();
+    apart.protocol = None;
+    apart.approval = domain::fleet::Approval::Pending;
+    assert_eq!(read_welcome(&welcome_payload(&apart)), Ok(apart));
+    assert_eq!(
+        String::from_utf8(welcome_payload(&welcome())).unwrap(),
+        concat!(
+            r#"{"protocol":1,"hub_protocols":[1,1],"agent_protocols":[1,3],"generation":2,"#,
+            r#""hub_handshakes":1,"hub_version":"0.5.0+def5678","signed_at":1800000000,"#,
+            r#""status":"approved"}"#
+        )
+    );
+}
+
+#[test]
+fn a_payload_out_of_shape_is_refused() {
+    for bytes in [
+        &b"not json"[..],
+        br#"{"agent_version":"x","hostname":"","protocols":[1,1],"clock":1}"#,
+        br#"{"agent_version":"x","hostname":"nas","protocols":[0,1],"clock":1}"#,
+        br#"{"agent_version":"x","hostname":"nas","protocols":[2,1],"clock":1}"#,
+    ] {
+        assert_eq!(read_hello(bytes), Err(WireRefused), "{bytes:?}");
+    }
+    let mut welcome = String::from_utf8(welcome_payload(&welcome())).unwrap();
+    welcome = welcome.replace("[1,3]", "[3,1]");
+    assert_eq!(read_welcome(welcome.as_bytes()), Err(WireRefused));
+}
+
+#[test]
+fn an_envelope_or_proof_out_of_shape_is_refused() {
+    let signature = encoded(signature(0x66).as_bytes());
+    for frame in [
+        AgentFrame::Proof {
+            counter: 1,
+            agent_proof: "short".to_owned(),
+        },
+        AgentFrame::Signed {
+            kind: "Hello".to_owned(),
+            seq: 1,
+            payload: "eyJhIjoxfQ==".to_owned(),
+            signature: signature.clone(),
+        },
+        AgentFrame::Signed {
+            kind: "Hello".to_owned(),
+            seq: 1,
+            payload: "eyJhIjoxfR".to_owned(),
+            signature: signature.clone(),
+        },
+        AgentFrame::Signed {
+            kind: "Hel lo".to_owned(),
+            seq: 1,
+            payload: "eyJhIjoxfQ".to_owned(),
+            signature: signature.clone(),
+        },
+        AgentFrame::Signed {
+            kind: "Hello".to_owned(),
+            seq: 1,
+            payload: "eyJhIjoxfQ+".to_owned(),
+            signature: signature.clone(),
+        },
+    ] {
+        assert_eq!(agent_message(&frame), Err(WireRefused), "{frame:?}");
+    }
+    let frame = HubFrame::Signed {
+        kind: "Welcome".to_owned(),
+        seq: 1,
+        expires_at: 1,
+        payload: "A".repeat(MAX_FRAME_BYTES + 1),
+        signature,
+    };
+    assert_eq!(hub_message(&frame), Err(WireRefused));
+}
