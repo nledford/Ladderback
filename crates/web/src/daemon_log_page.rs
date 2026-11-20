@@ -11,12 +11,12 @@ use leptos::prelude::*;
 use leptos::task::spawn_local;
 
 use crate::components::button::Content;
-use crate::components::first_load;
 use crate::components::skeleton::rules::Awaited;
 use crate::components::{
     Button, Column, Name, RadioGroup, Sentences, State, Table, Toast, ToastTone, Toasts,
     refusal_alert, say_refusals, write_clipboard,
 };
+use crate::components::{first_load, paced};
 use crate::daemon_log::{LOG_PATH, Levels, bug_report, level_name, shown};
 use crate::repositories::Sentence;
 use crate::routes::{PAGE_HEADING_ID, PageHeading, refused_sentence};
@@ -73,6 +73,7 @@ pub(crate) fn DaemonLog(localizer: Arc<Localizer>) -> impl IntoView {
     let unreachable = text(&localizer, msg::UI_UNREACHABLE_BODY);
     let none = text(&localizer, msg::UI_LOG_NONE);
     let lines_localizer = Arc::clone(&localizer);
+    let (phase, pace) = paced(move || phase.get(), |phase| *phase == Phase::Loading);
     view! {
         <PageHeading>
             {move || {
@@ -85,7 +86,7 @@ pub(crate) fn DaemonLog(localizer: Arc<Localizer>) -> impl IntoView {
         </PageHeading>
         <p>{body}</p>
         {move || match phase.get() {
-            Phase::Loading => first_load(loading.clone(), Awaited::table(4)).into_any(),
+            Phase::Loading => first_load(loading.clone(), Awaited::table(4), pace).into_any(),
             Phase::Unreachable => view! { <p>{unreachable.clone()}</p> }.into_any(),
             Phase::Ready => {
                 match refused.get() {

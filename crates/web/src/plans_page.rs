@@ -17,13 +17,13 @@ use leptos::task::spawn_local;
 
 use crate::announcer::Politeness;
 use crate::components::button::{self, Appearance, Content};
-use crate::components::first_load;
 use crate::components::skeleton::rules::Awaited;
 use crate::components::{
     Button, Checkbox, Column, Confirmation, ErrorSummary, Name, ReviewDialog, Sentences, State,
     SummaryItem, Table, TextField, Toast, ToastTone, Toasts, Working, dialog_refusal_alert,
     focus_element, hand_focus_when_gone, recover_focus, refusal_alert, say_refusals, text_field,
 };
+use crate::components::{first_load, paced};
 use crate::live::reply;
 use crate::plans::{
     ADD_ID, DELETE_BODY_ID, FORM_HEADING_ID, Field, Kind, NEXT_RUN_EVERY, NEXT_RUN_TRIES,
@@ -269,6 +269,7 @@ pub(crate) fn Plans(localizer: Arc<Localizer>) -> impl IntoView {
                 .with(|plans| plans.as_ref().is_some_and(|plans| !plans.is_empty())),
         )
     });
+    let (shape, pace) = paced(move || shape.get(), |shape| shape.0 == Phase::Loading);
     let table_localizer = Arc::clone(&localizer);
     let form_localizer = Arc::clone(&localizer);
     let dialog_localizer = Arc::clone(&localizer);
@@ -288,7 +289,9 @@ pub(crate) fn Plans(localizer: Arc<Localizer>) -> impl IntoView {
         // Dismissed, a toast hands focus to the heading just before it.
         <Toast localizer=Arc::clone(&localizer) toasts=toasts then_focus=PAGE_HEADING_ID />
         {move || match shape.get() {
-            (Phase::Loading, _, _) => first_load(loading.clone(), Awaited::table(4)).into_any(),
+            (Phase::Loading, _, _) => {
+                first_load(loading.clone(), Awaited::table(4), pace).into_any()
+            }
             (Phase::Unreachable, _, _) => view! { <p>{unreachable.clone()}</p> }.into_any(),
             (Phase::Ready, Some(sentence), _) => {
                 refusal_alert(&refusal_localizer, sentence).into_any()

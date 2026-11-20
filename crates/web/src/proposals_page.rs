@@ -21,12 +21,12 @@ use leptos::task::{spawn_local, tick};
 use crate::announcer::Politeness;
 use crate::components::banner::rules::BannerTone;
 use crate::components::button::{Appearance, Content, Kind};
-use crate::components::first_load;
 use crate::components::skeleton::rules::Awaited;
 use crate::components::{
     Banner, Button, StepUp, StepUpField, TextField, Toast, ToastTone, Toasts, focus_element,
     hand_focus_when_gone, refusal_alert, say_refusals, text_field,
 };
+use crate::components::{first_load, paced};
 use crate::live::reply;
 use crate::plans::Said;
 use crate::proposals::{
@@ -206,6 +206,7 @@ pub(crate) fn Proposals(localizer: Arc<Localizer>) -> impl IntoView {
             }),
         )
     });
+    let (shape, pace) = paced(move || shape.get(), |shape| shape.0 == Phase::Loading);
     let list_localizer = Arc::clone(&localizer);
     let refusal_localizer = Arc::clone(&localizer);
     let not_opened_localizer = Arc::clone(&localizer);
@@ -225,7 +226,7 @@ pub(crate) fn Proposals(localizer: Arc<Localizer>) -> impl IntoView {
         <Toast localizer=Arc::clone(&localizer) toasts=toasts then_focus=PAGE_HEADING_ID />
         {off}
         {move || match shape.get() {
-            (Phase::Loading, _, _) => first_load(loading.clone(), Awaited::Text).into_any(),
+            (Phase::Loading, _, _) => first_load(loading.clone(), Awaited::Text, pace).into_any(),
             (Phase::Unreachable, _, _) => view! { <p>{unreachable.clone()}</p> }.into_any(),
             (Phase::Ready, Some(sentence), _) => {
                 refusal_alert(&refusal_localizer, sentence).into_any()

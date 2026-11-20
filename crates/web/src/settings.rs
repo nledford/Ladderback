@@ -51,7 +51,6 @@ use crate::api_tokens::{
     revoke_id, revoke_label, revoke_path, revoke_title, revoked, scope_hint, scope_id, scope_name,
 };
 use crate::components::button::{Appearance, Content, Kind};
-use crate::components::first_load;
 use crate::components::skeleton::rules::Awaited;
 use crate::components::tabs::{Orientation, TabSet, TabsName};
 use crate::components::{
@@ -59,6 +58,7 @@ use crate::components::{
     State, SummaryItem, Tab, Table, Tabs, TextField, Toast, ToastTone, Toasts, Working, copy_text,
     dialog_refusal_alert, hand_focus_when_gone, refusal_alert, say_refusals, text_field,
 };
+use crate::components::{first_load, paced};
 use crate::live::reply;
 use crate::page_width::PageWidth;
 use crate::repositories::Sentence;
@@ -445,6 +445,7 @@ fn ApiTokens(localizer: Arc<Localizer>) -> impl IntoView {
     let form_localizer = Arc::clone(&localizer);
     let revoke_dialog_localizer = Arc::clone(&localizer);
     let viewer = l10n::viewer_zone();
+    let (phase, pace) = paced(move || phase.get(), |phase| *phase == Phase::Loading);
     view! {
         <section aria-labelledby=HEADING_ID>
             <h2 id=HEADING_ID tabindex="-1">
@@ -454,7 +455,7 @@ fn ApiTokens(localizer: Arc<Localizer>) -> impl IntoView {
             // Dismissed, a toast hands focus to the heading just before it.
             <Toast localizer=Arc::clone(&localizer) toasts=toasts then_focus=HEADING_ID />
             {move || match phase.get() {
-                Phase::Loading => first_load(loading.clone(), Awaited::table(5)).into_any(),
+                Phase::Loading => first_load(loading.clone(), Awaited::table(5), pace).into_any(),
                 Phase::Unreachable => view! { <p>{unreachable.clone()}</p> }.into_any(),
                 Phase::Ready => {
                     match (refused.get(), tokens.get()) {
@@ -1042,6 +1043,10 @@ fn RestartSection(localizer: Arc<Localizer>) -> impl IntoView {
             .flatten()
     });
     say_refusals(pending_refused);
+    let (stage, pace) = paced(
+        move || section.stage.get(),
+        |stage| *stage == Stage::Loading,
+    );
     view! {
         <section aria-labelledby=restart::HEADING_ID>
             <h2 id=restart::HEADING_ID tabindex="-1">
@@ -1049,9 +1054,9 @@ fn RestartSection(localizer: Arc<Localizer>) -> impl IntoView {
             </h2>
             {move || {
                 let localizer = &stage_localizer;
-                match section.stage.get() {
+                match stage.get() {
                     Stage::Loading => {
-                        first_load(text(localizer, msg::UI_LOADING), Awaited::Text).into_any()
+                        first_load(text(localizer, msg::UI_LOADING), Awaited::Text, pace).into_any()
                     }
                     Stage::Unreachable => {
                         view! { <p>{text(localizer, msg::UI_UNREACHABLE_BODY)}</p> }.into_any()

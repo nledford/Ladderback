@@ -11,12 +11,12 @@ use l10n::{Localizer, msg};
 use leptos::prelude::*;
 use leptos::task::spawn_local;
 
-use crate::components::first_load;
 use crate::components::link::rules::{Destination, Matching};
 use crate::components::skeleton::rules::Awaited;
 use crate::components::{
     Column, Link, Name as TableName, Sentences, State, Table, refusal_alert, say_refusals,
 };
+use crate::components::{first_load, paced};
 use crate::full_disk_access_warning::FullDiskAccessSteps;
 use crate::repositories::{Sentence, repository_notes};
 use crate::routes::{PageHeading, next_run_cell, refused_sentence, time_view};
@@ -93,6 +93,7 @@ pub(crate) fn Start(localizer: Arc<Localizer>) -> impl IntoView {
     let full_disk_access = Arc::clone(&localizer);
     let links = Arc::clone(&localizer);
     let operations_localizer = Arc::clone(&localizer);
+    let (phase, pace) = paced(move || phase.get(), |phase| *phase == Phase::Loading);
     view! {
         <PageHeading>
             {move || {
@@ -107,7 +108,7 @@ pub(crate) fn Start(localizer: Arc<Localizer>) -> impl IntoView {
         <FullDiskAccessSteps localizer=full_disk_access />
         <p>{body}</p>
         {move || match phase.get() {
-            Phase::Loading => first_load(loading.clone(), Awaited::table(2)).into_any(),
+            Phase::Loading => first_load(loading.clone(), Awaited::table(2), pace).into_any(),
             Phase::Unreachable => view! { <p>{unreachable_body.clone()}</p> }.into_any(),
             Phase::Ready => {
                 match (refused.get(), plans.get()) {

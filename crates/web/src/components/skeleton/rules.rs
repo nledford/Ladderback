@@ -239,19 +239,38 @@ pub enum Reveal {
 impl Reveal {
     /// Takes in `load` and says what the timer does.
     pub fn on(&mut self, load: Load) -> Timer {
-        let _ = load;
-        todo!()
+        let (next, timer) = match (*self, load) {
+            (Self::Idle, Load::Began) => (Self::Waiting, Timer::Start(SHOW_AFTER)),
+            (Self::Waiting, Load::Ended) => (Self::Idle, Timer::CallOff),
+            (Self::Waiting, Load::WaitOver) => {
+                (Self::Fresh { ended: false }, Timer::Start(KEEP_AT_LEAST))
+            }
+            (Self::Fresh { .. }, Load::Began) => (Self::Fresh { ended: false }, Timer::Keep),
+            (Self::Fresh { .. }, Load::Ended) => (Self::Fresh { ended: true }, Timer::Keep),
+            (Self::Fresh { ended: true }, Load::WaitOver) | (Self::Shown, Load::Ended) => {
+                (Self::Idle, Timer::Keep)
+            }
+            (Self::Fresh { ended: false }, Load::WaitOver) => (Self::Shown, Timer::Keep),
+            // Nothing to do: a reading that begins while one is read, an
+            // answer or a late timer with nothing read, a timer over once
+            // the wait has had its least time.
+            (Self::Idle, Load::Ended | Load::WaitOver)
+            | (Self::Waiting, Load::Began)
+            | (Self::Shown, Load::Began | Load::WaitOver) => (*self, Timer::Keep),
+        };
+        *self = next;
+        timer
     }
 
     /// Whether the words and skeleton show.
     pub fn visible(self) -> bool {
-        todo!()
+        matches!(self, Self::Fresh { .. } | Self::Shown)
     }
 
     /// Whether the region keeps showing its wait though the answer may
     /// have come: the wait shows and hasn't stayed its least time yet.
     pub fn holds(self) -> bool {
-        todo!()
+        matches!(self, Self::Fresh { .. })
     }
 }
 

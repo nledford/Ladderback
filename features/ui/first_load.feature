@@ -46,6 +46,19 @@ Feature: A page's first load
     And no region of the page is busy
     And the page doesn't show "Loading…"
 
+  # Once its first answer came, a page's wait is over for good: the daemon
+  # going away later says so in the heading, and leaves what the answer drew,
+  # and the reader's place in it, as they were.
+  Scenario: Picking a repository once the daemon has stopped keeps focus on the repository's button
+    Given a demo plan "demo-home" with a scratch repository
+    When I open the address "/snapshots"
+    And I skip to the content
+    And I press Tab until focus is on the button "Snapshots of demo"
+    And the daemon has stopped
+    And I press Enter
+    Then the page shows the heading "Cannot reach Ladderback"
+    And focus is on the button "Snapshots of demo"
+
   Scenario: A page whose answer comes within a fifth of a second never shows its wait
     Given a demo plan "demo-home" with a scratch repository
     And the page's clock stands still from the start until a step moves it on

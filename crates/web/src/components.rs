@@ -21,7 +21,7 @@ use crate::focus::{FocusWrap, focus_wrap};
 use crate::live::reply;
 use crate::repositories::{Run, Sentence, address_parts, runs};
 use alert::rules::AlertTone;
-use skeleton::rules::Awaited;
+use skeleton::rules::{Awaited, Load, NOT_YET, Reveal, Timer};
 
 pub(crate) mod alert;
 pub(crate) mod badge;
@@ -225,9 +225,13 @@ pub(crate) fn dialog_refusal_alert(
 /// its content will stand and drops it whole when the content comes, so
 /// nothing busy or saying the wait stays, focus stays where it was, and
 /// nothing is announced: the announcer stays the page's.
-pub(crate) fn first_load(words: String, awaited: Awaited) -> impl IntoView + use<> {
+///
+/// The region is busy from the start, but its words and shape show only as
+/// `pace` says ([`paced`]): until then they keep their room unseen, and a
+/// screen reader skips them as a sighted reader does.
+pub(crate) fn first_load(words: String, awaited: Awaited, pace: Pace) -> impl IntoView + use<> {
     view! {
-        <div>
+        <div class=move || if pace.visible() { "" } else { NOT_YET }>
             <p>{words}</p>
             <div aria-busy="true">
                 {awaited
@@ -253,6 +257,98 @@ pub(crate) fn first_load(words: String, awaited: Awaited) -> impl IntoView + use
             </div>
         </div>
     }
+}
+
+/// When a region's first load shows its wait ([`Reveal`], decided on the
+/// host), and the one timer it waits on.
+#[derive(Clone, Copy)]
+pub(crate) struct Pace {
+    reveal: RwSignal<Reveal>,
+    timer: StoredValue<Option<TimeoutHandle>>,
+}
+
+impl Pace {
+    /// Takes in `load` and does what [`Reveal::on`] says of the timer.
+    /// Nothing, once the page has gone.
+    fn send(self, load: Load) {
+        let Some(timer) = self.reveal.try_update(|reveal| reveal.on(load)) else {
+            return;
+        };
+        match timer {
+            Timer::Keep => {}
+            Timer::CallOff => self.call_off(),
+            Timer::Start(after) => {
+                self.call_off();
+                let over = move || {
+                    self.timer.try_set_value(None);
+                    self.send(Load::WaitOver);
+                };
+                if let Ok(handle) = set_timeout_with_handle(over, after) {
+                    self.timer.try_set_value(Some(handle));
+                }
+            }
+        }
+    }
+
+    /// Calls off the timer, if one is running.
+    fn call_off(self) {
+        if let Some(Some(handle)) = self.timer.try_update_value(Option::take) {
+            handle.clear();
+        }
+    }
+
+    /// Whether the wait's words and shape show now.
+    fn visible(self) -> bool {
+        self.reveal
+            .try_with(|reveal| reveal.visible())
+            .unwrap_or(false)
+    }
+}
+
+/// What a page shows, `shown`, paced for its first load (§4.5): the value
+/// to match on, which keeps a `loading` value while its wait, once shown,
+/// hasn't stayed its least time, though the answer has come; and the
+/// [`Pace`] its [`first_load`] shows its wait by. Called once, where the
+/// page makes its signals; the timer stops with the page.
+pub(crate) fn paced<T>(
+    shown: impl Fn() -> T + Send + Sync + 'static,
+    loading: fn(&T) -> bool,
+) -> (Memo<T>, Pace)
+where
+    T: Clone + PartialEq + Send + Sync + 'static,
+{
+    let pace = Pace {
+        reveal: RwSignal::new(Reveal::default()),
+        timer: StoredValue::new(None),
+    };
+    let current = Memo::new(move |_| shown());
+    Effect::new(move |was: Option<bool>| {
+        let is = current.with(loading);
+        if was != Some(is) {
+            pace.send(if is { Load::Began } else { Load::Ended });
+        }
+        is
+    });
+    on_cleanup(move || pace.call_off());
+    // The value before is the last one shown: while the wait holds, the
+    // loading one it shows stays, whatever has come since.
+    let held = Memo::new(move |before: Option<&T>| {
+        let now = current.get();
+        match before {
+            Some(before)
+                if !loading(&now)
+                    && loading(before)
+                    && pace
+                        .reveal
+                        .try_with(|reveal| reveal.holds())
+                        .unwrap_or(false) =>
+            {
+                before.clone()
+            }
+            _ => now,
+        }
+    });
+    (held, pace)
 }
 
 /// Says each refusal `refused` comes to hold through the announcer's
