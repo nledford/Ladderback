@@ -40,6 +40,10 @@ pub const CUT: &str = "…";
 /// adds each line's time, level and number (§16, decision 134).
 pub const READ_MAX_BYTES: usize = 32 * 1024;
 
+// A line is never more than a read's bytes on its own, so a read always
+// holds the first line it keeps.
+const _: () = assert!(MAX_SOURCE_BYTES + MAX_MESSAGE_BYTES <= READ_MAX_BYTES);
+
 /// How much a line of the daemon log matters, most severe first: the levels
 /// of the `log` facade the daemon writes through.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
@@ -57,7 +61,7 @@ impl LogLevel {
     /// at [`Trace`](Self::Trace) or worse, and only an error at
     /// [`Error`](Self::Error).
     pub fn is_at_least(self, level: Self) -> bool {
-        todo!("{level:?}")
+        self <= level
     }
 }
 
@@ -69,6 +73,8 @@ pub struct LogLine {
     level: LogLevel,
     source: String,
     message: String,
+    /// 0 until the recent log keeps it.
+    number: u64,
 }
 
 impl LogLine {
@@ -86,6 +92,7 @@ impl LogLine {
             level,
             source: capped_source.text,
             message: capped_message.text,
+            number: 0,
         }
     }
 
@@ -110,14 +117,14 @@ impl LogLine {
     /// not kept yet. A read's `before` takes it, so a page after another
     /// starts where that one ended however many lines came since.
     pub fn number(&self) -> u64 {
-        todo!()
+        self.number
     }
 
     /// The line as numbered `number`: one the recent log kept, read back
     /// from its answer.
     #[must_use]
     pub fn numbered(self, number: u64) -> Self {
-        todo!("{number}")
+        Self { number, ..self }
     }
 
     /// The bytes the line counts for against [`MAX_BYTES`].
@@ -174,6 +181,8 @@ pub struct RecentLog {
     lines: VecDeque<LogLine>,
     /// The sum of the lines' weights.
     bytes: usize,
+    /// How many lines it has kept, the number of the newest.
+    kept: u64,
 }
 
 impl RecentLog {
@@ -184,7 +193,9 @@ impl RecentLog {
     /// Keeps `line` as the newest, then lets go of the oldest lines until
     /// the rest are within both caps. A line is never over [`MAX_BYTES`] on
     /// its own, so the newest is always kept.
-    pub fn push(&mut self, line: LogLine) {
+    pub fn push(&mut self, mut line: LogLine) {
+        self.kept = self.kept.saturating_add(1);
+        line.number = self.kept;
         self.bytes = self.bytes.saturating_add(line.weight());
         self.lines.push_back(line);
         while self.lines.len() > MAX_LINES || self.bytes > MAX_BYTES {
@@ -246,8 +257,35 @@ impl Default for LogFilter {
 impl LogFilter {
     /// Whether `line` is one the filter keeps.
     pub fn keeps(&self, line: &LogLine) -> bool {
-        todo!("{line:?}")
+        line.level.is_at_least(self.level)
+            && self.since.is_none_or(|since| line.at >= since)
+            && self.until.is_none_or(|until| line.at <= until)
+            && self.operation.is_none_or(|operation| {
+                let mut text = uuid::Uuid::encode_buffer();
+                let id = operation.as_uuid().hyphenated().encode_lower(&mut text);
+                line.message.contains(&*id)
+            })
+            && self
+                .plan
+                .as_ref()
+                .is_none_or(|plan| names_plan(&line.message, plan))
     }
+}
+
+/// Whether `message` says `plan <id>` of `plan`, its ID ending there: the
+/// message ends, or goes on with a character no plan's ID holds.
+fn names_plan(message: &str, plan: &PlanId) -> bool {
+    const NAMED: &str = "plan ";
+    message.match_indices(NAMED).any(|(start, _)| {
+        message
+            .get(start.saturating_add(NAMED.len())..)
+            .and_then(|rest| rest.strip_prefix(plan.as_str()))
+            .is_some_and(|rest| {
+                rest.chars().next().is_none_or(|next| {
+                    !(next.is_ascii_lowercase() || next.is_ascii_digit() || next == '-')
+                })
+            })
+    })
 }
 
 /// The cap that cut a read of the recent log short, with more lines to
@@ -278,8 +316,29 @@ pub fn read<'a>(
     before: Option<u64>,
     limit: usize,
 ) -> LogRead<'a> {
-    let _ = (newest_first.into_iter(), filter, before, limit);
-    todo!()
+    let mut lines: Vec<&LogLine> = Vec::new();
+    let mut bytes = 0_usize;
+    let kept = newest_first
+        .into_iter()
+        .filter(|line| before.is_none_or(|before| line.number < before))
+        .filter(|line| filter.keeps(line));
+    for line in kept {
+        if lines.len() >= limit {
+            return LogRead {
+                lines,
+                cut: Some(ReadCut::Lines),
+            };
+        }
+        bytes = bytes.saturating_add(line.weight());
+        if bytes > READ_MAX_BYTES {
+            return LogRead {
+                lines,
+                cut: Some(ReadCut::Bytes),
+            };
+        }
+        lines.push(line);
+    }
+    LogRead { lines, cut: None }
 }
 
 #[cfg(test)]
