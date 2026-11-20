@@ -64,6 +64,15 @@ fn a_pattern_matches_a_name_of_any_script() {
 }
 
 #[test]
+fn a_question_mark_stands_for_one_character_of_the_name_as_written() {
+    // `İ` lowercases to two characters, `i` and a combining dot above.
+    assert!(pattern("?.txt").matches("İ.txt"));
+    assert!(pattern("??").matches("İx"));
+    assert!(!pattern("???").matches("İx"));
+    assert!(pattern("İ*").matches("İSTANBUL.txt"));
+}
+
+#[test]
 fn a_pattern_of_many_stars_against_a_long_name_is_answered() {
     let stars = pattern(&"*a".repeat(100));
     let name = "a".repeat(99) + &"b".repeat(4_000);
