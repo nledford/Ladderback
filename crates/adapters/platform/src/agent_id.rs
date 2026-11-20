@@ -23,20 +23,21 @@ const MAX_ID_FILE_BYTES: u64 = 256;
 /// rather than [`load_or_create`]. A file that exists but doesn't hold an ID
 /// is an error.
 pub fn load(data_dir: &Path) -> io::Result<Option<AgentId>> {
-    let _ = data_dir;
-    todo!()
+    match read_id_file(&data_dir.join(AGENT_ID_FILE)) {
+        Ok(text) => parse(&text).map(Some),
+        Err(error) if error.kind() == io::ErrorKind::NotFound => Ok(None),
+        Err(error) => Err(error),
+    }
 }
 
 /// The agent ID stored in `data_dir`, generating and storing one first if
 /// there is none. A file that exists but doesn't hold an ID is an error,
 /// never silently replaced.
 pub fn load_or_create(data_dir: &Path) -> io::Result<AgentId> {
-    let path = data_dir.join(AGENT_ID_FILE);
-    match read_id_file(&path) {
-        Ok(text) => return parse(&text),
-        Err(error) if error.kind() == io::ErrorKind::NotFound => {}
-        Err(error) => return Err(error),
+    if let Some(id) = load(data_dir)? {
+        return Ok(id);
     }
+    let path = data_dir.join(AGENT_ID_FILE);
     fs::create_dir_all(data_dir)?;
     // Write the whole file under a private name, then link it into place:
     // the link fails if another process got there first, so concurrent first

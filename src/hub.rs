@@ -489,8 +489,14 @@ async fn connect_to_hub(
     data_dir: &Path,
     hostname: Hostname,
 ) -> io::Result<ExitCode> {
-    let agent_id = match platform::agent_id::load_or_create(data_dir) {
-        Ok(id) => id,
+    // A status check writes nothing: a machine with no agent ID never paired,
+    // and gets none from asking.
+    let agent_id = match platform::agent_id::load(data_dir) {
+        Ok(Some(id)) => id,
+        Ok(None) => {
+            say(localizer, msg::CLI_HUB_STATUS_NOT_PAIRED, &[])?;
+            return Ok(ExitCode::FAILURE);
+        }
         Err(error) => return refused(localizer, &error.to_string()),
     };
     let identity = Arc::new(FileIdentity::in_data_dir(data_dir));
