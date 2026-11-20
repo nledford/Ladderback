@@ -668,6 +668,60 @@ package target binary version:
 smoke-release binary *args:
     node scripts/smoke-release.ts "$@"
 
+# Builds the Docker image (Containerfile; §12, §16 decision 126) from Linux
+# release archives, `ladderback-<x86_64|aarch64>-unknown-linux-gnu.tar.xz` as
+# `just release-build` makes them and a release carries, never from source,
+# so the image runs the archive's own binary. Each archive is unpacked into
+# target/image under Docker's name for its architecture (amd64, arm64), the
+# build context, and the image is built for the platforms of the archives
+# given. `version` is what the binary says, for the image's version label.
+# The other arguments go to `docker buildx build`: `--tag ladderback:dev
+# --load` keeps an image of one platform locally. Needs Docker with buildx.
+[doc('Build the Docker image from Linux release archives, never from source.')]
+[group('release')]
+[positional-arguments]
+image version +args:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    version=$1
+    shift
+    context=target/image
+    rm -rf "$context"
+    mkdir -p "$context"
+    platforms=()
+    build=()
+    for arg in "$@"; do
+      case $arg in
+        *.tar.xz)
+          case $(basename "$arg" .tar.xz) in
+            ladderback-x86_64-unknown-linux-gnu) arch=amd64 ;;
+            ladderback-aarch64-unknown-linux-gnu) arch=arm64 ;;
+            *) echo "error: $arg is no Linux release archive: ladderback-<x86_64|aarch64>-unknown-linux-gnu.tar.xz" >&2; exit 1 ;;
+          esac
+          [[ ! -e $context/$arch ]] || { echo "error: a second archive for linux/$arch: $arg" >&2; exit 1; }
+          mkdir "$context/$arch"
+          tar -xJf "$arg" -C "$context/$arch" --strip-components=1
+          platforms+=("linux/$arch")
+          ;;
+        *) build+=("$arg") ;;
+      esac
+    done
+    (( ${#platforms[@]} > 0 )) || { echo "error: no release archive given" >&2; exit 1; }
+    list=$(IFS=,; echo "${platforms[*]}")
+    docker buildx build --file Containerfile --platform "$list" --build-arg "VERSION=$version" ${build[@]+"${build[@]}"} "$context"
+
+# Runs scripts/smoke-image.ts on a Docker image `just image` built: its
+# version and labels, its user, no hub, the refusal to listen beyond loopback
+# without `--allowed-host`, then an agent in a container with sign-in on,
+# backing up a read-only mounted folder into a repository on a volume, and a
+# new container on the same volumes keeping the data. It creates its own
+# containers and volumes and removes them. `--help` lists the options.
+[doc('Smoke-test a Docker image: version, user, no hub, sign-in, one backup, data kept.')]
+[group('release')]
+[positional-arguments]
+smoke-image image *args:
+    node scripts/smoke-image.ts "$@"
+
 # Runs the Release workflow, which opens or updates the draft release PR, and
 # waits for it (§12.1). Then, on that PR's branch: with a `version` (a version
 # the commits can't imply: the first release, a release candidate, 1.0.0) it

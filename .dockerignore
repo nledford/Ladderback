@@ -1,6 +1,8 @@
-# Keeps a `docker build` context to the sources: no history, build output,
-# agent worktrees or installed test tooling. Whether an image build makes the
-# web UI itself or copies crates/web/dist is decided with the image (M10).
+# Keeps a `docker build` whose context is this checkout to the sources: no
+# history, build output, agent worktrees or installed test tooling. The
+# image (Containerfile) isn't built from here: `just image` builds it from a
+# folder of unpacked release archives, so it holds the release's binary and
+# nothing of this checkout.
 .git
 **/target
 .worktrees
