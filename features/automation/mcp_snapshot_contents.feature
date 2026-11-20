@@ -3,11 +3,12 @@ Feature: AI agents look inside snapshots through MCP
   An agent helping a person get a file back first has to find it:
   `list_snapshot_folder` lists one folder of a snapshot a page at a time, and
   `find_in_snapshots` runs a snapshot search, looking a name up across a
-  repository's newest snapshots (§4.6). Both only read, so the `read` scope
-  is enough, and neither costs an unbounded walk: a search reads at most 100
-  snapshots for at most 15 seconds and returns at most 500 matches, and says
-  which cap cut it short. Restoring and downloading stay the person's, in
-  the web UI.
+  repository's newest snapshots (§4.6). Both show the names inside
+  snapshots, so a token needs the permission Snapshot contents for each, as
+  for a folder of the snapshot page, and neither costs an unbounded walk: a
+  search reads at most 100 snapshots for at most 15 seconds and returns at
+  most 500 matches, and says which cap cut it short. Restoring and
+  downloading stay the person's, in the web UI.
 
   Scenario: A file is found in the snapshots that hold it and its folder listed
     Given Ladderback is serving on loopback with the plan "home"
@@ -30,13 +31,27 @@ Feature: AI agents look inside snapshots through MCP
     When the MCP client looks for "file-*.txt" in the repository "demo", returning 2 matches
     Then the search found 2 matches and was cut short by its "matches" cap
 
-  Scenario: A read token is enough to look inside snapshots
+  Scenario: A token with Snapshot contents may look inside snapshots
     Given Ladderback is serving on loopback with sign-in on and the admin password "demo-admin-pass"
     And the admin has signed in over HTTP with "demo-admin-pass"
-    And the admin has created an API token over HTTP with the permissions "backups: read, snapshot-contents: read, daemon-log: read" and the label "agent"
+    And the admin has created an API token over HTTP with the permissions "snapshot-contents: read" and the label "agent"
     And an MCP server connected to it with that API token in a file
     When the MCP client looks for "*.txt" in the repository "demo"
     Then the result is the error "repository-unknown"
+    When the MCP client lists the top folder of the snapshot "0123abcd0123abcd0123abcd0123abcd0123abcd0123abcd0123abcd0123abcd" in the repository "demo"
+    Then the result is the error "repository-unknown"
+
+  Scenario: A token without Snapshot contents can't look inside snapshots
+    Given Ladderback is serving on loopback with sign-in on and the admin password "demo-admin-pass"
+    And the admin has signed in over HTTP with "demo-admin-pass"
+    And the admin has created an API token over HTTP with the permissions "backups: read, backup-runs: start-and-cancel" and the label "agent"
+    And an MCP server connected to it with that API token in a file
+    When the MCP client looks for "*.txt" in the repository "demo"
+    Then the result is the error "api-token-permission"
+    And the error names the permission "snapshot-contents"
+    When the MCP client lists the top folder of the snapshot "0123abcd0123abcd0123abcd0123abcd0123abcd0123abcd0123abcd0123abcd" in the repository "demo"
+    Then the result is the error "api-token-permission"
+    And the error names the permission "snapshot-contents"
 
   # I4 where a worker opens the repository (§0): the password its file holds
   # opens it, a wrong one fails, and neither is ever shown or logged.

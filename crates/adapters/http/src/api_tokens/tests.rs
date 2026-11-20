@@ -353,10 +353,16 @@ fn the_permission_table_names_each_route_a_token_may_use_and_no_other() {
             "/api/v1/repositories/home/test",
             Some(BackupRuns),
         ),
+        // A search of the snapshots names what a folder's page names.
         (
             Method::GET,
             "/api/v1/repositories/home/find",
-            Some(Backups),
+            Some(SnapshotContents),
+        ),
+        (
+            Method::HEAD,
+            "/api/v1/repositories/home/find",
+            Some(SnapshotContents),
         ),
         (Method::POST, "/api/v1/repositories/home/find", None),
         (
@@ -512,12 +518,13 @@ async fn a_read_token_reads_a_snapshot_s_folder() {
     assert_eq!(response.status(), StatusCode::OK);
 }
 
-/// An agent searches a repository's snapshots with Backups, as it reads
-/// the list of snapshots (#953): no Backup runs is needed.
+/// An agent searches a repository's snapshots with Snapshot contents, as it
+/// reads a snapshot's folder (#953): neither Backups nor Backup runs is
+/// needed.
 #[tokio::test]
-async fn a_read_token_searches_a_repository_s_snapshots() {
+async fn a_token_with_snapshot_contents_searches_a_repository_s_snapshots() {
     let daemon = Daemon::new();
-    let token = daemon.token(&[Permission::Backups]).await;
+    let token = daemon.token(&[Permission::SnapshotContents]).await;
     let response = daemon
         .send(get(
             "/api/v1/repositories/home/find?pattern=tax",
@@ -576,6 +583,7 @@ async fn a_token_without_the_routes_permission_is_refused_naming_the_permission(
         "snapshot-contents",
     )
     .await;
+    assert_needs(&daemon, get(SEARCH, &auth), "snapshot-contents").await;
     // Backups alone names nothing inside a snapshot.
     let token = daemon.token(&[Permission::Backups]).await;
     let auth = [("authorization", token.as_str())];
@@ -585,8 +593,20 @@ async fn a_token_without_the_routes_permission_is_refused_naming_the_permission(
         "snapshot-contents",
     )
     .await;
+    assert_needs(&daemon, get(SEARCH, &auth), "snapshot-contents").await;
+    // Refused before the repository is looked up: one the daemon doesn't
+    // hold is refused alike, so the refusal tells nothing of either.
+    assert_needs(
+        &daemon,
+        get("/api/v1/repositories/missing/find?pattern=tax", &auth),
+        "snapshot-contents",
+    )
+    .await;
     assert_needs(&daemon, get("/api/v1/log", &auth), "daemon-log").await;
 }
+
+/// A search of the repository `home` for `tax`.
+const SEARCH: &str = "/api/v1/repositories/home/find?pattern=tax";
 
 #[tokio::test]
 async fn a_token_never_opens_a_route_for_a_session_only() {
@@ -1607,6 +1627,29 @@ async fn with_sign_in_off_an_ai_agents_request_is_held_to_what_agents_may_do_wit
     );
     let permissions = json(signed_off(get("/api/v1/permissions", &[])).await).await;
     assert_eq!(permissions["daemon-log"], "read", "{permissions}");
+}
+
+/// With sign-in off, an AI agent's search is held to the `[without-token]`
+/// table, which by default lists the snapshots but names nothing inside
+/// them: Backups doesn't open the search (decision 132).
+#[tokio::test]
+async fn with_sign_in_off_an_ai_agent_searches_only_with_snapshot_contents() {
+    let agent = [(api::AI_AGENT_HEADER, "1")];
+    let (status, code, args) = refusal(signed_off(get(SEARCH, &agent)).await).await;
+    assert_eq!(
+        (status, code.as_deref()),
+        (StatusCode::FORBIDDEN, Some("without-token-permission"))
+    );
+    assert_eq!(
+        args,
+        serde_json::json!({ "permission": { "type": "text", "value": "snapshot-contents" } })
+    );
+    assert_eq!(
+        signed_off(get("/api/v1/repositories/home/snapshots", &agent))
+            .await
+            .status(),
+        StatusCode::OK
+    );
 }
 
 /// A warning that names a file, twice: as its item and in the engine's own

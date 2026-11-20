@@ -1394,6 +1394,14 @@ async fn lists_top_folder_searched(agent: &mut Agent) {
     call(agent, "list_snapshot_folder".to_owned(), arguments).await;
 }
 
+#[when(
+    expr = "the MCP client lists the top folder of the snapshot {string} in the repository {string}"
+)]
+async fn lists_top_folder_of(agent: &mut Agent, snapshot: String, repository: String) {
+    let arguments = json!({"repository": repository, "snapshot": snapshot});
+    call(agent, "list_snapshot_folder".to_owned(), arguments).await;
+}
+
 #[then(expr = "the folder lists {string} as a file of {int} bytes")]
 fn folder_lists_file(agent: &mut Agent, name: String, size: u64) {
     let folder = content(agent);
