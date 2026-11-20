@@ -339,4 +339,37 @@ mod tests {
             r"/srv/a\nb\u{1b}[31m\u{85}/ladderback.service"
         );
     }
+
+    #[test]
+    fn the_service_managers_words_are_said_with_each_control_and_bidi_character_escaped() {
+        let unsafe_words = "\u{1b}[2J\r\u{7}\u{202e}";
+        let escaped = r"\u{1b}[2J\r\u{7}\u{202e}";
+        for problem in [
+            ServiceProblem::ManagerRefused {
+                command: "systemctl --user enable ladderback".to_owned(),
+                said: format!("Failed {unsafe_words}"),
+            },
+            ServiceProblem::ManagerMissing {
+                command: "systemctl".to_owned(),
+                detail: format!("not found {unsafe_words}"),
+            },
+            ServiceProblem::File {
+                detail: format!("denied {unsafe_words}"),
+            },
+            ServiceProblem::ManagerSilent {
+                command: format!("systemctl --user enable /home/demo/a{unsafe_words}"),
+                seconds: 30,
+            },
+        ] {
+            let error = ServiceError {
+                file: PathBuf::from("/home/demo/.config/systemd/user/ladderback.service"),
+                problem,
+            };
+            let said = error_said(&Localizer::new(&[]), &error);
+            let body = said.strip_suffix('\n').expect("a line ends with a break");
+            assert!(!body.chars().any(char::is_control), "{said:?}");
+            assert!(!said.contains('\u{202e}'), "{said:?}");
+            assert!(said.contains(escaped), "{said:?}");
+        }
+    }
 }
