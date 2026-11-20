@@ -660,6 +660,22 @@ fn a_flag_that_names_a_command_a_file_or_a_switch_holds_no_credential() {
     }
 }
 
+/// rclone's flags that take a value aren't all known here, so a credential
+/// flag after one, as in `--user --pass`, may be that one's value or a flag.
+/// A word that starts `--` after a credential flag is read as both: its
+/// value, and a flag of its own, so the flag a credential follows is named
+/// whichever rclone takes it for.
+#[test]
+fn a_credential_flag_after_a_flag_is_still_read_as_a_flag() {
+    assert_eq!(
+        rclone_command("rclone serve restic --user --pass --rc-pass=canary-pass"),
+        [
+            InlineSecret::RcloneFlag("pass".to_owned()),
+            InlineSecret::RcloneFlag("rc-pass".to_owned()),
+        ]
+    );
+}
+
 #[test]
 fn a_flag_with_no_credential_after_it_holds_none() {
     for command in [
