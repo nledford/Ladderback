@@ -9,3 +9,5 @@
 **Amended by decision 127** (2026-11-20, #962): with sign-in off, a request `ladderback mcp` marks as an AI agent's is held to the `[without-token]` table of `config.toml`, the permissions a new API token gets unless set otherwise, and a token's permissions replace its scopes.
 
 **Amended by decision 132** (2026-11-20, #953): agents look inside snapshots through two read tools, `list_snapshot_folder` (one folder of a snapshot, a page at a time) and `find_in_snapshots` (a name looked up across a repository's newest snapshots, capped in snapshots, matches and time). The permission Snapshot contents opens both (decision 127). They show where a file is and in which snapshots; restoring and downloading it stay with the person, in the web UI, as before.
+
+**Amended by [decision 134](134-an-agent-reads-the-log-a-page-at-a-time.md)** (2026-11-20, #957): the tools also read the daemon's recent log, through `read_log`, a page at a time and narrowed as the Log page narrows it; in connect mode at the permission Daemon log.

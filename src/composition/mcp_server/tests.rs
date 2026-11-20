@@ -1349,6 +1349,12 @@ async fn every_tool(session: &mut Session) -> serde_json::Value {
         ("export_profile", json!({"plan": "work"})),
         ("export_profile", json!({"plan": "cold"})),
         ("export_profile", json!({"plan": "hooked"})),
+        ("read_log", json!({})),
+        ("read_log", json!({"level": "warn", "plan": "work"})),
+        ("read_log", json!({"since": format!("{CANARY}-since")})),
+        ("read_log", json!({"until": format!("{CANARY}-until")})),
+        ("read_log", json!({"operation": CANARY})),
+        ("read_log", json!({"plan": format!("{CANARY}-PLAN")})),
     ] {
         session.call(tool, arguments).await;
     }
@@ -1446,7 +1452,50 @@ async fn no_tool_of_either_backend_tells_or_logs_a_secret() {
         ),
     ];
     let mut started = Vec::new();
-    for (_, session) in &mut sessions {
+    // The unknown token's refusals make the address wait before its next
+    // sign-in, so the sessions that sign in read the log before it calls.
+    let (known, unknown_session) = sessions.split_at_mut(2);
+    for (_, session) in known.iter_mut() {
+        started.push(every_tool(session).await);
+    }
+    // What the log wrote while each tool ran, the refused run of `vault`
+    // whose password command printed a canary among it, kept in the ring and
+    // read back through `read_log`: the tool adds no secret to the lines it
+    // answers. That the ring is fed inside the masking is the logger's own
+    // test (`logging::tests::in_process_open`).
+    use domain::daemon_log::{LogLevel, LogLine};
+    let now = domain::Timestamp::now();
+    let warned = crate::composition::captured_log::lines()
+        .into_iter()
+        .map(|(level, text)| {
+            let level = match level {
+                log::Level::Error => LogLevel::Error,
+                _ => LogLevel::Warn,
+            };
+            (level, text)
+        });
+    let said = crate::composition::captured_log::infos()
+        .into_iter()
+        .map(|text| (LogLevel::Info, text));
+    for (level, text) in warned.chain(said) {
+        state.recent_log.record(LogLine::new(
+            now,
+            level,
+            "ladderback",
+            format_args!("{text}"),
+        ));
+    }
+    for (backend, session) in known.iter_mut() {
+        let read = session
+            .call("read_log", serde_json::json!({"limit": 200}))
+            .await;
+        let lines = read["result"]["structuredContent"]["lines"].as_array();
+        assert!(
+            lines.is_some_and(|lines| !lines.is_empty()),
+            "{backend}: {read}"
+        );
+    }
+    for (_, session) in unknown_session.iter_mut() {
         started.push(every_tool(session).await);
     }
 
