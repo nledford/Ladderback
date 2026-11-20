@@ -29,7 +29,8 @@ use std::sync::Arc;
 
 use domain::execution::plan_tags::PlanTags;
 use domain::planning::{
-    AgentConfig, Hooks, Hostname, LocationProgram, Plan, RepositoryConfig, Violation,
+    AgentConfig, Hooks, Hostname, LocationProgram, Plan, RepositoryConfig, RepositoryField,
+    Violation,
 };
 use domain::secrets::{CommandLine, SecretRef, is_command_option};
 use domain::{AgentId, PlanId, RepositoryAlias};
@@ -379,8 +380,9 @@ fn push_hooks(commands: &mut Vec<ImportedCommand>, at: &str, hooks: &Hooks) {
     }
 }
 
-/// Adds the commands a new repository entry runs to `commands`: its
-/// password's command, the options rustic runs as commands, and its hooks.
+/// Adds the commands a new repository entry runs to `commands`: the
+/// programs its locations name, its password's command, the options rustic
+/// runs as commands, and its hooks.
 fn push_repository(
     commands: &mut Vec<ImportedCommand>,
     alias: &RepositoryAlias,
@@ -388,6 +390,21 @@ fn push_repository(
 ) {
     let at = format!("repositories.{}", alias.as_str());
     let settings = &entry.settings;
+    for (field, found) in settings.location_programs() {
+        let field = match field {
+            RepositoryField::Repository => "repository",
+            RepositoryField::RepoHot => "repo-hot",
+            // Only a location names a program rclone runs.
+            RepositoryField::PasswordCommand
+            | RepositoryField::Option(_)
+            | RepositoryField::OptionHot(_)
+            | RepositoryField::OptionCold(_) => continue,
+        };
+        commands.push(ImportedCommand {
+            key: format!("{at}.{field}"),
+            runs: Runs::Location(found),
+        });
+    }
     if let SecretRef::Command(line) = &settings.password {
         commands.push(ImportedCommand {
             key: format!("{at}.password-command"),

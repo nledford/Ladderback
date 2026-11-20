@@ -94,7 +94,20 @@ impl RepositorySettings {
     /// written. Only what is known before a job resolves a reference is
     /// read.
     pub fn location_programs(&self) -> Vec<(RepositoryField, LocationProgram)> {
-        todo!()
+        [
+            (RepositoryField::Repository, Some(&self.repository)),
+            (RepositoryField::RepoHot, self.repo_hot.as_ref()),
+        ]
+        .into_iter()
+        .filter_map(|(field, value)| Some((field, Known::of(value?)?.head)))
+        .flat_map(|(field, head)| {
+            head.strip_prefix("rclone:")
+                .map(rclone::location_programs)
+                .unwrap_or_default()
+                .into_iter()
+                .map(move |found| (field.clone(), found))
+        })
+        .collect()
     }
 }
 
