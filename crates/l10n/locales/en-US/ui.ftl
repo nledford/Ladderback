@@ -3103,7 +3103,7 @@ ui-api-token-scope-hint = { $scope ->
     [read] See the plans, the repositories and their snapshots, the operations and their live progress.
     [run] Start a plan's backup, cancel a backup, and test a saved repository.
     [preview] Ask what a forget, a prune or a check would do, without running it.
-   *[propose] Propose changes to the configuration for you to review here. Nothing uses this scope yet.
+   *[propose] Propose changes to the configuration for you to review here, and count what a draft plan would back up within the { -dry-run-allowlist }.
   }
 
 # The Last used column of a token no program has used yet.
