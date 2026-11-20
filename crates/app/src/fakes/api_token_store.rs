@@ -3,7 +3,7 @@ use std::sync::{Mutex, MutexGuard, PoisonError};
 use async_trait::async_trait;
 use domain::Timestamp;
 use domain::access::PasswordFingerprint;
-use domain::access::api_token::{ApiToken, ApiTokenId};
+use domain::access::api_token::{ApiToken, ApiTokenId, TokenPermissions};
 
 use crate::ports::{Added, ApiTokenStore, StoreError};
 
@@ -64,6 +64,20 @@ impl ApiTokenStore for InMemoryApiTokenStore {
         let before = kept.len();
         kept.retain(|token| &token.id != id);
         Ok(kept.len() < before)
+    }
+
+    async fn set_permissions(
+        &self,
+        id: &ApiTokenId,
+        permissions: TokenPermissions,
+    ) -> Result<bool, StoreError> {
+        let mut kept = self.kept();
+        let found = kept.iter_mut().find(|token| &token.id == id);
+        let was_kept = found.is_some();
+        if let Some(token) = found {
+            token.permissions = permissions;
+        }
+        Ok(was_kept)
     }
 
     async fn revoke_all_but(&self, password: PasswordFingerprint) -> Result<(), StoreError> {

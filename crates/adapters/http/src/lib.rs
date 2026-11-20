@@ -73,6 +73,7 @@ pub use sync::SyncHub;
 use api::UiEvent;
 use app::ports::EventBus;
 use async_trait::async_trait;
+use domain::access::permissions::{Permission, Permissions};
 use domain::execution::Trigger;
 use futures::StreamExt;
 use futures::stream::BoxStream;
@@ -122,6 +123,9 @@ pub struct AppState {
     /// The newest lines of the daemon's own log, which the Log page reads
     /// (#618).
     pub recent_log: Arc<dyn app::ports::RecentLogStore>,
+    /// What AI agents may do without a token, which holds a request
+    /// `ladderback mcp` marks when sign-in is off (§10.5).
+    pub without_token: Arc<app::without_token::WithoutToken>,
     /// What the Full Disk Access probe found, and what opens System
     /// Settings' pane for it: neither off macOS (§16, decision 115).
     pub full_disk_access: FullDiskAccessRoute,
@@ -133,6 +137,12 @@ pub struct AppState {
 impl axum::extract::FromRef<AppState> for SignIn {
     fn from_ref(state: &AppState) -> Self {
         state.sign_in.clone()
+    }
+}
+
+impl axum::extract::FromRef<AppState> for Arc<app::without_token::WithoutToken> {
+    fn from_ref(state: &AppState) -> Self {
+        Arc::clone(&state.without_token)
     }
 }
 
@@ -497,7 +507,10 @@ fn read_ui_file(folder: &Path, path: &str) -> Option<Asset> {
 /// through a [`GatedListener`]: with sign-in on, a sign-in without its
 /// connection's address is refused.
 pub fn router(assets: Arc<dyn AssetSource>, checks: RequestChecks, state: AppState) -> Router {
-    let sign_in = state.sign_in.clone();
+    let gate = sign_in::Gate {
+        sign_in: state.sign_in.clone(),
+        without_token: Arc::clone(&state.without_token),
+    };
     #[cfg(feature = "hub")]
     let hub = state.sync.clone();
     let routes = Router::new()
@@ -522,6 +535,14 @@ pub fn router(assets: Arc<dyn AssetSource>, checks: RequestChecks, state: AppSta
         .route(
             "/api/v1/tokens/{id}",
             axum::routing::delete(api_tokens::revoke),
+        )
+        .route(
+            "/api/v1/tokens/{id}/permissions",
+            axum::routing::put(api_tokens::change_permissions),
+        )
+        .route(
+            api_tokens::PERMISSIONS_PATH,
+            axum::routing::get(api_tokens::permissions),
         )
         .route(
             sign_in::settings::SETTINGS_PATH,
@@ -699,7 +720,7 @@ pub fn router(assets: Arc<dyn AssetSource>, checks: RequestChecks, state: AppSta
             async move { serve(assets.as_ref(), &method, &uri) }
         })
         .layer(from_fn(body_limit::enforce))
-        .layer(from_fn_with_state(sign_in, sign_in::enforce))
+        .layer(from_fn_with_state(gate, sign_in::enforce))
         .layer(from_fn_with_state(checks, request_checks::enforce));
     // With it, they are the agents', behind a check of their own.
     #[cfg(feature = "hub")]
@@ -712,70 +733,81 @@ pub fn router(assets: Arc<dyn AssetSource>, checks: RequestChecks, state: AppSta
 /// 64 MiB would let a client make the daemon buffer that much.
 const EVENTS_CLIENT_MAX_MESSAGE: usize = 1024;
 
-/// How often an events stream opened with a session or an API token asks
-/// whether it is still live: a session that has ended (signed out, unused
-/// too long, or the admin password set anew) or a token revoked stops its
-/// stream within this long.
+/// How often an events stream opened with a session, an API token or, with
+/// sign-in off, as an AI agent's asks whether it may go on: a session that
+/// has ended (signed out, unused too long, or the admin password set anew),
+/// a token revoked or one that no longer has Backups, or AI agents without a
+/// token no longer allowed Backups, stops its stream within this long.
 const SESSION_RECHECK: std::time::Duration = std::time::Duration::from_secs(5);
 
 /// The live-updates WebSocket (technical design §4.4): one per tab, carrying
 /// [`UiEvent`]s. It sends nothing until an event arrives — the first state
 /// comes over REST — and the client is dropped when a send fails. The
 /// request checks have already allowed this handshake: a foreign `Origin`
-/// never reaches here. With sign-in on, the stream ends when the session or
-/// the API token that opened it does.
+/// never reaches here. The stream ends when the session that opened it
+/// does, or when the program that opened it may no longer see backups, and
+/// shows a program only what its permissions allow, read again as often.
 async fn events(
     upgrade: WebSocketUpgrade,
     State(state): State<AppState>,
     session: Option<axum::Extension<sign_in::SessionOf>>,
     token: Option<axum::Extension<api_tokens::TokenOf>>,
+    granted: Option<axum::Extension<api_tokens::Granted>>,
 ) -> Response {
     let stream = state.events.subscribe().await;
-    let opener = match (session, token) {
-        (Some(axum::Extension(session)), _) => Some(Opener::Session(session)),
-        (None, Some(axum::Extension(token))) => Some(Opener::Token(token)),
-        (None, None) => None,
+    let shown = granted
+        .as_ref()
+        .map_or_else(api_tokens::every, |axum::Extension(granted)| granted.0);
+    let opener = match (session, token, granted) {
+        (Some(axum::Extension(session)), _, _) => Some(Opener::Session(session)),
+        (None, Some(axum::Extension(token)), _) => Some(Opener::Token(token)),
+        (None, None, Some(_)) => Some(Opener::AiAgent(Arc::clone(&state.without_token))),
+        (None, None, None) => None,
     };
     upgrade
         .max_message_size(EVENTS_CLIENT_MAX_MESSAGE)
         .max_frame_size(EVENTS_CLIENT_MAX_MESSAGE)
-        .on_upgrade(move |socket| forward(socket, stream, opener))
+        .on_upgrade(move |socket| forward(socket, stream, opener, shown))
 }
 
-/// What opened an events stream with sign-in on: a session, or an API token.
+/// What opened an events stream: a session, an API token, or, with sign-in
+/// off, a request marked as an AI agent's.
 enum Opener {
     Session(sign_in::SessionOf),
     Token(api_tokens::TokenOf),
+    AiAgent(Arc<app::without_token::WithoutToken>),
 }
 
 impl Opener {
-    /// Whether the session is live still, or the token kept still (not
-    /// revoked, and of the admin password kept now).
-    async fn live(&self) -> bool {
-        match self {
-            Self::Session(session) => session.access.peek(&session.token).is_some(),
-            Self::Token(token) => token.access.api_token_live(&token.grant.id).await,
-        }
+    /// What the stream may show now: everything while the session is
+    /// live; the permissions the token holds now, while it is kept (not
+    /// revoked, and of the admin password kept now); what AI agents may do
+    /// without a token now. `None` once there is none of these.
+    async fn permissions(&self) -> Option<Permissions> {
+        todo!()
     }
 }
 
-/// Reads the bus and writes each event to the client, until the client goes,
-/// the daemon does, or the session or token that opened the stream ends. A
-/// client's `Ping` is answered with a `Pong`: the events stream never waits
-/// on the client, so the reply races fairly with the next event.
+/// Reads the bus and writes each event to the client, as `shown` lets it
+/// see it, until the client goes, the daemon does, or what opened the
+/// stream no longer has Backups, which the events route needs. A client's
+/// `Ping` is answered with a `Pong`: the events stream never waits on the
+/// client, so the reply races fairly with the next event.
 async fn forward(
     mut socket: WebSocket,
     mut stream: BoxStream<'static, UiEvent>,
     opener: Option<Opener>,
+    mut shown: Permissions,
 ) {
     let mut recheck = tokio::time::interval(SESSION_RECHECK);
     loop {
         tokio::select! {
             _ = recheck.tick(), if opener.is_some() => {
-                if let Some(opener) = &opener
-                    && !opener.live().await
-                {
-                    break;
+                if let Some(opener) = &opener {
+                    match opener.permissions().await {
+                        Some(now) if now.grants(Permission::Backups) => shown = now,
+                        _ => break,
+                    }
                 }
             }
             event = stream.next() => {
@@ -783,7 +815,7 @@ async fn forward(
                 // An event that cannot be written is not retryable here: the
                 // client is gone, so the connection ends rather than falling
                 // behind.
-                let Ok(text) = serde_json::to_string(&event) else {
+                let Ok(text) = serde_json::to_string(&api_tokens::event_shown(shown, event)) else {
                     break;
                 };
                 if socket.send(Message::Text(text.into())).await.is_err() {
@@ -861,6 +893,7 @@ struct HistoryParams {
 /// closes the gap a late subscriber has (§4.2).
 async fn list_operations(
     State(state): State<AppState>,
+    granted: Option<axum::Extension<api_tokens::Granted>>,
     axum::extract::Query(params): axum::extract::Query<HistoryParams>,
 ) -> Response {
     match state
@@ -868,7 +901,20 @@ async fn list_operations(
         .history(params.plan, params.after.clone(), params.limit)
         .await
     {
-        Ok(page) => (StatusCode::OK, axum::Json(page)).into_response(),
+        Ok(page) => {
+            let page = match granted {
+                Some(axum::Extension(api_tokens::Granted(held))) => api::OperationsPageDto {
+                    operations: page
+                        .operations
+                        .into_iter()
+                        .map(|summary| api_tokens::summary_shown(held, summary))
+                        .collect(),
+                    ..page
+                },
+                None => page,
+            };
+            (StatusCode::OK, axum::Json(page)).into_response()
+        }
         Err(HistoryError::BadCursor) => refused_with(
             StatusCode::BAD_REQUEST,
             api::ErrorCode::InvalidCursor,
@@ -885,13 +931,29 @@ async fn recent_log(State(state): State<AppState>) -> Response {
     (StatusCode::OK, axum::Json(answer)).into_response()
 }
 
-/// One operation's detail: what happened, with its warnings.
+/// One operation's detail: what happened, with its warnings, each as the
+/// program asking may see it: its path, and the engine's words of a failure,
+/// only with Snapshot contents.
 async fn get_operation(
     State(state): State<AppState>,
+    granted: Option<axum::Extension<api_tokens::Granted>>,
     axum::extract::Path(id): axum::extract::Path<String>,
 ) -> Response {
     match state.operations.operation(id.clone()).await {
-        Ok(detail) => (StatusCode::OK, axum::Json(detail)).into_response(),
+        Ok(detail) => {
+            let detail = match granted {
+                Some(axum::Extension(api_tokens::Granted(held))) => api::OperationDetailDto {
+                    operation: api_tokens::summary_shown(held, detail.operation),
+                    warnings: detail
+                        .warnings
+                        .into_iter()
+                        .map(|warning| api_tokens::warning_shown(held, warning))
+                        .collect(),
+                },
+                None => detail,
+            };
+            (StatusCode::OK, axum::Json(detail)).into_response()
+        }
         Err(LookupError::Unknown) => refused_with(
             StatusCode::NOT_FOUND,
             api::ErrorCode::OperationUnknown,
@@ -918,7 +980,7 @@ async fn cancel_operation(
         None => Canceller::Session,
     };
     match state.operations.cancel(id.clone(), by).await {
-        Err(CancelError::SessionOnly) => api_tokens::scope_refused(api_tokens::SESSION_SCOPE),
+        Err(CancelError::SessionOnly) => api_tokens::permission_refused(api_tokens::SESSION_ONLY),
         Ok(()) => (StatusCode::OK, axum::Json(serde_json::json!({}))).into_response(),
         Err(CancelError::Unknown) => refused_with(
             StatusCode::NOT_FOUND,
@@ -942,10 +1004,22 @@ async fn list_plans(State(state): State<AppState>) -> Response {
 }
 
 /// `GET /api/v1/status`: the status summary (§4.6), with what the Full
-/// Disk Access probe found last.
-async fn read_status(State(state): State<AppState>) -> Response {
+/// Disk Access probe found last, each operation in it as the program asking
+/// may see it.
+async fn read_status(
+    State(state): State<AppState>,
+    granted: Option<axum::Extension<api_tokens::Granted>>,
+) -> Response {
     match state.catalog.status(state.full_disk_access.state()).await {
-        Ok(status) => (StatusCode::OK, axum::Json(status)).into_response(),
+        Ok(status) => {
+            let status = match granted {
+                Some(axum::Extension(api_tokens::Granted(held))) => {
+                    api_tokens::status_shown(held, status)
+                }
+                None => status,
+            };
+            (StatusCode::OK, axum::Json(status)).into_response()
+        }
         Err(CatalogError::Unavailable { code, args, detail }) => unavailable(code, args, detail),
     }
 }

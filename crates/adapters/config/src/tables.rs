@@ -42,6 +42,7 @@ table! {
         repositories: Repositories,
         plans: Vec<PlanTable>,
         notifications: NotificationsTable,
+        without_token: WithoutTokenTable,
     }
 }
 
@@ -55,6 +56,21 @@ table! {
         check_for_updates: bool,
         restore_folder: String,
         dry_run_allowlist: Vec<String>,
+    }
+}
+
+table! {
+    /// `[without-token]`: what AI agents may do without a token, each key a
+    /// permission set to its level or to `"none"` (§16, decision 127). A key
+    /// left out keeps its default.
+    WithoutTokenTable {
+        backups: String,
+        backup_runs: String,
+        previews: String,
+        configuration: String,
+        snapshot_contents: String,
+        daemon_log: String,
+        repository_check: String,
     }
 }
 

@@ -323,12 +323,13 @@ pub(super) fn translate(event: WorkerEvent, redactor: &Redactor) -> Option<Engin
                 | ErrorCode::CsrfTokenInvalid
                 | ErrorCode::SignInUnavailable
                 | ErrorCode::ApiTokenInvalid
-                | ErrorCode::ApiTokenScope
+                | ErrorCode::ApiTokenPermission
+                | ErrorCode::WithoutTokenPermission
                 | ErrorCode::SignInOff
                 | ErrorCode::RestartUnavailable
                 | ErrorCode::RestartPending
                 | ErrorCode::ApiTokenLabel
-                | ErrorCode::ApiTokenNoScope
+                | ErrorCode::ApiTokenNoPermission
                 | ErrorCode::ApiTokenLimit
                 | ErrorCode::ApiTokenUnknown
                 | ErrorCode::ApiTokensUnavailable

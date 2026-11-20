@@ -50,6 +50,7 @@ pub mod snapshots;
 pub mod stats;
 pub mod status;
 pub mod updates;
+pub mod without_token;
 
 #[cfg(feature = "fakes")]
 pub mod contract;

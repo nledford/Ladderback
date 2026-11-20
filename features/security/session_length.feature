@@ -173,13 +173,13 @@ Feature: How long signing in lasts
     Scenario: Sign out everywhere ends another browser's session and this one's, and an API token still works
       Given the admin has signed in from 192.0.2.10
       And the admin has signed in again from 192.0.2.20
-      And the admin has created an API token "nightly-mcp" with the scopes "read"
+      And the admin has created an API token "nightly-mcp" with the permissions "backups: read"
       When the admin signs out everywhere
       Then the session is not live
       And the second session is not live
       And Ladderback keeps no session for after a restart
       When a program presents the token from 192.0.2.30
-      Then the program is let in with the scopes "read"
+      Then the program is let in with the permissions "backups: read"
 
   Rule: Sessions and Stay signed in for outlive a restart of Ladderback, and a session that ended stays ended
 
@@ -295,13 +295,13 @@ Feature: How long signing in lasts
 
     Scenario: An API token can't change Stay signed in for
       Given the admin has signed in over HTTP with "demo-admin-pass"
-      And the admin has created an API token over HTTP with the scopes "read, run, preview, propose" and the label "demo-token"
+      And the admin has created an API token over HTTP with the permissions "backups: read, backup-runs: start-and-cancel, previews: preview, configuration: propose, snapshot-contents: read, daemon-log: read, repository-check: run" and the label "demo-token"
       And a "PUT" request for "/api/v1/settings/sign-in" with the API token
       And the request has the header "Content-Type: application/json"
       And the request has the body "{\"session-length\":\"7-days\"}"
       When the request is sent
-      Then the route answers with status 403 and the error code "api-token-scope"
-      And the refusal names the scope "session"
+      Then the route answers with status 403 and the error code "api-token-permission"
+      And the refusal names the permission "session"
       Given a "GET" request for "/api/v1/settings/sign-in" with the session cookie
       When the request is sent
       Then the request is answered with status 200

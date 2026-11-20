@@ -616,14 +616,14 @@ async fn save(
     // other rules are about plans, which don't change, so this refusal is not
     // one the caller can reach; it is handled all the same, for nothing here
     // panics.
-    let saved = AgentConfig::new(
-        loaded.agent().clone(),
-        loaded.hooks().clone(),
-        repositories,
-        loaded.plans().to_vec(),
-    )
-    .and_then(|config| config.with_notifications(loaded.notifications().clone()))
-    .map_err(unwritable)?;
+    let saved = loaded
+        .replacing(
+            loaded.agent().clone(),
+            loaded.hooks().clone(),
+            repositories,
+            loaded.plans().to_vec(),
+        )
+        .map_err(unwritable)?;
     config.save(&saved).await.map_err(RepositoryError::Config)
 }
 
@@ -646,14 +646,14 @@ async fn record(
         Some(entry) if entry.settings.same_location(settings) => entry.id = Some(id.clone()),
         _ => return Ok(()),
     }
-    let recorded = AgentConfig::new(
-        loaded.agent().clone(),
-        loaded.hooks().clone(),
-        repositories,
-        loaded.plans().to_vec(),
-    )
-    .and_then(|config| config.with_notifications(loaded.notifications().clone()))
-    .map_err(unwritable)?;
+    let recorded = loaded
+        .replacing(
+            loaded.agent().clone(),
+            loaded.hooks().clone(),
+            repositories,
+            loaded.plans().to_vec(),
+        )
+        .map_err(unwritable)?;
     config
         .save(&recorded)
         .await
@@ -661,7 +661,7 @@ async fn record(
 }
 
 /// A configuration that can't be, as a configuration error: only reachable
-/// through a violation that [`AgentConfig::new`] reports.
+/// through a violation that [`AgentConfig::replacing`] reports.
 fn unwritable(violation: domain::planning::Violation) -> RepositoryError {
     RepositoryError::Config(ConfigError::Invalid {
         file: String::new(),
@@ -1348,8 +1348,16 @@ mod tests {
         .unwrap_or_else(|e| panic!("rules that name their channel: {e:?}"))
     }
 
+    /// What a person set AI agents may do without a token: Backup runs off.
+    fn no_backup_runs() -> domain::access::permissions::Permissions {
+        domain::access::permissions::Permissions::default()
+            .with(domain::access::permissions::Permission::BackupRuns, None)
+            .unwrap_or_else(|e| panic!("a level the row has: {e:?}"))
+    }
+
     /// Gives the configuration in `config` the rules and channels of
-    /// [`notifications`].
+    /// [`notifications`], and [`no_backup_runs`] for AI agents without a
+    /// token.
     async fn with_notifications(config: &InMemoryConfigStore) {
         let loaded = config
             .load()
@@ -1357,7 +1365,8 @@ mod tests {
             .unwrap_or_else(|e| panic!("the configuration loads: {e:?}"));
         let with = loaded
             .with_notifications(notifications())
-            .unwrap_or_else(|e| panic!("rules for no plan in particular: {e:?}"));
+            .unwrap_or_else(|e| panic!("rules for no plan in particular: {e:?}"))
+            .with_without_token(no_backup_runs());
         config
             .save(&with)
             .await
@@ -1365,7 +1374,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn connecting_keeps_the_notification_rules_and_channels() {
+    async fn connecting_keeps_the_notifications_and_what_ai_agents_may_do_without_a_token() {
         let engine = Arc::new(Scripted {
             outcome: Mutex::new(Ok(id())),
             seen: Mutex::new(Vec::new()),
@@ -1390,6 +1399,7 @@ mod tests {
             .unwrap_or_else(|e| panic!("the configuration loads: {e:?}"));
         assert_eq!(saved.repositories().len(), 1);
         assert_eq!(saved.notifications(), &notifications());
+        assert_eq!(saved.without_token(), no_backup_runs());
     }
 
     #[tokio::test]
@@ -1771,7 +1781,8 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn recording_a_created_repositorys_id_keeps_the_notification_rules_and_channels() {
+    async fn recording_a_created_repositorys_id_keeps_the_notifications_and_what_ai_agents_may_do_without_a_token()
+     {
         let (_, config, use_case) =
             saved_entry(&settings(), None, FakeSecrets::new(), Ok(id())).await;
         with_notifications(&config).await;
@@ -1791,6 +1802,7 @@ mod tests {
             "the ID is recorded"
         );
         assert_eq!(after.notifications(), &notifications());
+        assert_eq!(after.without_token(), no_backup_runs());
     }
 
     /// An entry that records a repository ID names a repository Ladderback

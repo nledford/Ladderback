@@ -434,10 +434,17 @@ pub enum ErrorCode {
     /// a wrong secret, all alike (§10.1, decision 93). It counted as a failed
     /// sign-in.
     ApiTokenInvalid,
-    /// The request's API token is good but doesn't open this route. The
-    /// argument `scope` is what the route needs: `read`, `run`, `preview`,
-    /// `propose`, or `session` for a route only a signed-in browser may use.
-    ApiTokenScope,
+    /// The request's API token is good but doesn't open this route (§10.1,
+    /// decision 127). The argument `permission` is what the route needs:
+    /// `backups`, `backup-runs`, `previews`, `configuration`,
+    /// `snapshot-contents`, `daemon-log`, `repository-check`, or `session`
+    /// for a route only a signed-in browser may use.
+    ApiTokenPermission,
+    /// An AI agent without an API token asked for something the
+    /// configuration's `[without-token]` table doesn't allow (§10.5), or for
+    /// something only a signed-in browser may do. The argument `permission`
+    /// names what it needs, as for `api-token-permission`.
+    WithoutTokenPermission,
     /// Sign-in is off, so there are no API tokens to create, list or revoke.
     SignInOff,
     /// A restart was asked for, but no service manager runs the daemon to
@@ -450,8 +457,8 @@ pub enum ErrorCode {
     /// An API token's label is empty, blank, holds a control character, or is
     /// longer than `max` characters.
     ApiTokenLabel,
-    /// An API token was asked for with no scope.
-    ApiTokenNoScope,
+    /// An API token was asked for with no permission.
+    ApiTokenNoPermission,
     /// `limit` API tokens are kept already, so no other was created.
     ApiTokenLimit,
     /// No API token with the ID `token` is kept: it was revoked already.
@@ -993,8 +1000,8 @@ impl ErrorCode {
                 kind: ArgKind::Count,
                 optional: false,
             }],
-            Self::ApiTokenScope => &[ArgSpec {
-                name: "scope",
+            Self::ApiTokenPermission | Self::WithoutTokenPermission => &[ArgSpec {
+                name: "permission",
                 kind: ArgKind::Text,
                 optional: false,
             }],
@@ -1496,7 +1503,7 @@ impl ErrorCode {
             | Self::SignInOff
             | Self::RestartUnavailable
             | Self::RestartPending
-            | Self::ApiTokenNoScope
+            | Self::ApiTokenNoPermission
             | Self::ApiTokensUnavailable
             | Self::ProposalsUnavailable
             | Self::DryRunBusy

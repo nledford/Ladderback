@@ -559,6 +559,12 @@ async fn state_over(
     // connection, a creation, the record of an opened repository's ID and a
     // plan's change (§6.1, decisions 57 and 96).
     let writes = Arc::new(ConfigWrites::default());
+    // What AI agents may do without a token: the configuration's
+    // `[without-token]` table, changed under the same lock (§10.5).
+    let without_token = Arc::new(app::without_token::WithoutToken::new(
+        Arc::clone(&config),
+        Arc::clone(&writes),
+    ));
     let resolve = Arc::new(daemon_resolve(
         Arc::new(SystemSecrets::default()),
         Arc::new(SystemClock),
@@ -755,6 +761,7 @@ async fn state_over(
             updates: notice,
             // An empty one: the daemon's own puts the one its log feeds here.
             recent_log: Arc::new(app::recent_log::RecentLogRing::new()),
+            without_token,
             full_disk_access: full_disk_access_route,
             sync: http_adapter::SyncHub::default(),
         },

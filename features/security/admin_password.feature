@@ -36,7 +36,7 @@ Feature: Setting and changing the admin password in Settings
       Then the admin is signed in
 
     Scenario: A changed admin password ends every session and every API token
-      Given the admin has created an API token "nightly-mcp" with the scopes "read"
+      Given the admin has created an API token "nightly-mcp" with the permissions "backups: read"
       When the admin changes the admin password from "demo-admin-pass" to "another-admin-pass" from 192.0.2.10
       Then the session is not live
       When a program presents the token from 192.0.2.20
@@ -111,10 +111,10 @@ Feature: Setting and changing the admin password in Settings
     Scenario: An API token can't change the admin password, though the session that made it can
       Given Ladderback is serving on loopback with sign-in on and the admin password "demo-admin-pass"
       And the admin has signed in over HTTP with "demo-admin-pass"
-      And the admin has created an API token over HTTP with the scopes "read, run, preview, propose" and the label "every-scope"
+      And the admin has created an API token over HTTP with the permissions "backups: read, backup-runs: start-and-cancel, previews: preview, configuration: propose, snapshot-contents: read, daemon-log: read, repository-check: run" and the label "every-permission"
       When the admin changes the admin password over HTTP from "demo-admin-pass" to "another-admin-pass" with the API token
-      Then the route answers with status 403 and the error code "api-token-scope"
-      And the refusal names the scope "session"
+      Then the route answers with status 403 and the error code "api-token-permission"
+      And the refusal names the permission "session"
       When the admin changes the admin password over HTTP from "demo-admin-pass" to "another-admin-pass"
       Then the request is answered with status 204
 

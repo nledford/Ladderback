@@ -313,3 +313,21 @@ fn the_file_is_laid_out_as_a_person_would_write_it() {
          sources = [\"/home/demo\"]\n"
     );
 }
+
+#[test]
+fn the_without_token_table_holds_only_the_permissions_that_differ_from_their_defaults() {
+    use domain::access::permissions::{Level, Permission, Permissions};
+    let config = AgentConfig::default().with_without_token(
+        Permissions::default()
+            .with(Permission::BackupRuns, None)
+            .and_then(|p| p.with(Permission::DaemonLog, Some(Level::Read)))
+            .unwrap(),
+    );
+    let text = render(file(), &config).expect("written");
+    assert_eq!(
+        table_of(&text),
+        table_of("schema = 1\n\n[without-token]\nbackup-runs = \"none\"\ndaemon-log = \"read\"\n")
+    );
+    let back = parse(file(), &text, &Schemas::production()).expect("read back");
+    assert_eq!(back.config, config);
+}

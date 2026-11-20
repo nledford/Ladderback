@@ -390,18 +390,20 @@ fn refused_naming_the_argument(
     );
 }
 
-#[then(expr = "line {int} says the tool {string} refused with {string}, naming the scope {string}")]
-fn refused_naming_the_scope(
+#[then(
+    expr = "line {int} says the tool {string} refused with {string}, naming the permission {string}"
+)]
+fn refused_naming_the_permission(
     agent: &mut Agent,
     number: usize,
     tool: String,
     code: String,
-    scope: String,
+    permission: String,
 ) {
     let error = refused(agent, number, &tool, &code);
     assert_eq!(
-        error["args"]["scope"],
-        json!({"type": "text", "value": scope}),
+        error["args"]["permission"],
+        json!({"type": "text", "value": permission}),
         "{error}"
     );
 }

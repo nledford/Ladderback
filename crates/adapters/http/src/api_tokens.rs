@@ -1,7 +1,8 @@
-//! API tokens over HTTP (technical design §10.1, decision 93): a program
-//! other than a browser presents one as `Authorization: Bearer <token>`, and
-//! is let through to the routes its scopes open; the admin creates, lists
-//! and revokes them in a session.
+//! API tokens over HTTP (technical design §10.1, decisions 93 and 127): a
+//! program other than a browser presents one as `Authorization: Bearer
+//! <token>`, and is let through to the routes its permissions open; the
+//! admin creates, lists, changes the permissions of and revokes them in a
+//! session.
 //!
 //! A token request is judged by its token alone: its cookie is ignored, and
 //! it carries no CSRF token, which guards only what a browser sends on its
@@ -11,20 +12,26 @@
 use std::sync::Arc;
 
 use api::{
-    ApiTokenDto, ApiTokenScopeDto, ApiTokensDto, CreateApiTokenDto, CreatedApiTokenDto, ErrorCode,
-    MsgArg,
+    ApiTokenDto, ApiTokensDto, ChangeApiTokenPermissionsDto, CreateApiTokenDto, CreatedApiTokenDto,
+    ErrorCode, MsgArg,
 };
-use app::access::{Access, ApiTokenGrant, ApiTokenRefused, ApiTokensRefused};
+use app::access::{
+    Access, ApiTokenChangeRefused, ApiTokenGrant, ApiTokenRefused, ApiTokensRefused,
+    PasswordRefused, permissions_dto, permissions_of,
+};
+use app::without_token::{WithoutToken, WithoutTokenRefused};
 use axum::extract::rejection::JsonRejection;
 use axum::extract::{ConnectInfo, Path, Request, State};
 use axum::http::header::{AUTHORIZATION, RETRY_AFTER};
 use axum::http::{HeaderMap, HeaderValue, Method, StatusCode};
 use axum::middleware::Next;
 use axum::response::{IntoResponse, Response};
+use domain::access::Password;
 use domain::access::api_token::{
-    ApiToken, ApiTokenId, ApiTokenLabel, LABEL_MAX_CHARS, MAX_API_TOKENS, PresentedApiToken, Scope,
-    Scopes,
+    ApiToken, ApiTokenId, ApiTokenLabel, LABEL_MAX_CHARS, MAX_API_TOKENS, PresentedApiToken,
+    TokenPermissions,
 };
+use domain::access::permissions::{Permission, Permissions};
 
 use crate::sign_in::SignIn;
 use crate::{refused, refused_with};
@@ -32,8 +39,12 @@ use crate::{refused, refused_with};
 /// The token routes' own path.
 pub(crate) const TOKENS_PATH: &str = "/api/v1/tokens";
 
-/// The scope a refusal names for a route only a session may use.
-pub(crate) const SESSION_SCOPE: &str = "session";
+/// What a program may do: any good token reads it, and `ladderback mcp`
+/// lists only the tools it may call.
+pub(crate) const PERMISSIONS_PATH: &str = "/api/v1/permissions";
+
+/// What a refusal names for a route only a session may use.
+pub(crate) const SESSION_ONLY: &str = "session";
 
 /// A request that reached its route with a good API token: who it is and
 /// what it may do. The events stream keeps it, to end once the token does.
@@ -41,6 +52,60 @@ pub(crate) const SESSION_SCOPE: &str = "session";
 pub(crate) struct TokenOf {
     pub(crate) access: Arc<Access>,
     pub(crate) grant: ApiTokenGrant,
+}
+
+/// What the program asking may do, for a request that reached its route
+/// with a good API token, or, with sign-in off, marked as an AI agent's: the
+/// token's permissions, or what AI agents may do without a token. A request
+/// without it is a person's, a session's or an unmarked one with sign-in
+/// off, and may see everything. A route that shows more to some programs
+/// than to others reads it, as a warning's path needs Snapshot contents.
+#[derive(Clone, Copy, Debug)]
+pub(crate) struct Granted(pub(crate) Permissions);
+
+/// Every permission: what a person may do.
+pub(crate) fn every() -> Permissions {
+    Permission::ALL
+        .into_iter()
+        .fold(Permissions::NONE, |all, permission| {
+            all.with(permission, Some(permission.level()))
+                .unwrap_or(all)
+        })
+}
+
+/// What `permissions` may see of `warning`: a program without Snapshot
+/// contents sees neither its item nor the engine's own words, either of
+/// which can name a file (decision 127).
+pub(crate) fn warning_shown(
+    permissions: Permissions,
+    warning: api::OperationWarningDto,
+) -> api::OperationWarningDto {
+    todo!()
+}
+
+/// What `permissions` may see of an operation's `summary`: a program
+/// without Snapshot contents gets its failure's code only, neither the
+/// failure's arguments nor the engine's own words, and not the snapshot
+/// entry a restore read, any of which can name a file (decision 127).
+pub(crate) fn summary_shown(
+    permissions: Permissions,
+    summary: api::OperationSummaryDto,
+) -> api::OperationSummaryDto {
+    todo!()
+}
+
+/// What `permissions` may see of the status summary: each operation in it
+/// as [`summary_shown`].
+pub(crate) fn status_shown(permissions: Permissions, status: api::StatusDto) -> api::StatusDto {
+    todo!()
+}
+
+/// What `permissions` may see of `event`: a warning's arguments, its item
+/// and the engine's own words, as [`warning_shown`], and a failure's
+/// arguments and the engine's own words, as [`summary_shown`], only with
+/// Snapshot contents.
+pub(crate) fn event_shown(permissions: Permissions, event: api::UiEvent) -> api::UiEvent {
+    todo!()
 }
 
 /// The token a request presents, when it has an `Authorization` header with
@@ -75,54 +140,52 @@ fn bearer_credentials(value: &[u8]) -> Option<&[u8]> {
     Some(rest.trim_ascii())
 }
 
-/// The scope table (decision 93): the scope a token needs for `method` on
-/// `path`, or `None` for a route only a session may use, which is every
-/// route the table doesn't name.
-pub(crate) fn required_scope(method: &Method, path: &str) -> Option<Scope> {
-    let rest = path.strip_prefix("/api/v1/")?;
-    let segments: Vec<&str> = rest.split('/').collect();
-    if segments.iter().any(|segment| segment.is_empty()) {
-        return None;
-    }
-    let reads = method == Method::GET || method == Method::HEAD;
-    match segments.as_slice() {
-        ["events" | "log" | "operations" | "plans" | "repositories" | "session" | "status"]
-        | ["operations", _]
-        | ["repositories", _, "snapshots" | "groups" | "stats"]
-        | ["plans", _, "profile"]
-        | ["repositories", _, "snapshots", _, "folder"]
-            if reads =>
-        {
-            Some(Scope::Read)
-        }
-        // Reading a repository's stats now opens the repository, as a test
-        // does, and keeps the reading (§16, decision 104).
-        ["operations"] | ["operations", _, "cancel"] | ["repositories", _, "test" | "stats"]
-            if method == Method::POST =>
-        {
-            Some(Scope::Run)
-        }
-        ["repositories", _, "maintenance", "preview"] | ["profiles", "preview"]
-            if method == Method::POST =>
-        {
-            Some(Scope::Preview)
-        }
-        // A token sees and withdraws only the proposals it made (§16,
-        // decision 89).
-        ["proposals"] | ["proposals", _] if reads => Some(Scope::Propose),
-        ["proposals"] | ["proposals", _, "withdraw"] | ["dry-runs"] if method == Method::POST => {
-            Some(Scope::Propose)
-        }
-        _ => None,
-    }
+/// What a program needs for a route.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum Needs {
+    /// One permission.
+    Permission(Permission),
+    /// Only a good token, whatever its permissions: what it may do.
+    AnyToken,
+    /// A signed-in browser's session: no token opens the route.
+    Session,
 }
 
-/// `403 api-token-scope`, naming the scope the route needs.
-pub(crate) fn scope_refused(scope: &str) -> Response {
+/// The permission table (decision 127): what a program needs for `method`
+/// on `path`. Every route the table doesn't name is a session's only.
+pub(crate) fn required_permission(method: &Method, path: &str) -> Needs {
+    todo!()
+}
+
+/// `403 api-token-permission`, naming what the route needs.
+pub(crate) fn permission_refused(needs: &str) -> Response {
     refused_with(
         StatusCode::FORBIDDEN,
-        ErrorCode::ApiTokenScope,
-        vec![("scope", MsgArg::Text(scope.to_owned()))],
+        ErrorCode::ApiTokenPermission,
+        vec![("permission", MsgArg::Text(needs.to_owned()))],
+    )
+}
+
+/// With sign-in off, holds a request `ladderback mcp` marked as an AI
+/// agent's to what AI agents may do without a token (§10.5): a route that
+/// needs a permission the configuration's `[without-token]` table doesn't
+/// grant is refused `403 without-token-permission`, naming it, and a route
+/// no token may use is refused naming `session`. What it may do goes with
+/// the request as [`Granted`].
+pub(crate) async fn enforce_without_token(
+    without_token: &WithoutToken,
+    mut request: Request,
+    next: Next,
+) -> Response {
+    todo!()
+}
+
+/// `403 without-token-permission`, naming what the route needs.
+fn without_token_refused(needs: &str) -> Response {
+    refused_with(
+        StatusCode::FORBIDDEN,
+        ErrorCode::WithoutTokenPermission,
+        vec![("permission", MsgArg::Text(needs.to_owned()))],
     )
 }
 
@@ -169,11 +232,14 @@ pub(crate) async fn enforce(
         }
         Err(ApiTokenRefused::Unavailable(detail)) => return unavailable(&detail),
     };
-    match required_scope(request.method(), request.uri().path()) {
-        None => return scope_refused(SESSION_SCOPE),
-        Some(scope) if !grant.scopes.allows(scope) => return scope_refused(scope.as_str()),
-        Some(_) => {}
+    match required_permission(request.method(), request.uri().path()) {
+        Needs::Session => return permission_refused(SESSION_ONLY),
+        Needs::Permission(permission) if !grant.permissions.grants(permission) => {
+            return permission_refused(permission.as_str());
+        }
+        Needs::Permission(_) | Needs::AnyToken => {}
     }
+    request.extensions_mut().insert(Granted(grant.permissions));
     request.extensions_mut().insert(TokenOf { access, grant });
     next.run(request).await
 }
@@ -207,33 +273,32 @@ fn count(value: usize) -> u64 {
     u64::try_from(value).unwrap_or(u64::MAX)
 }
 
-fn scope_dto(scope: Scope) -> ApiTokenScopeDto {
-    match scope {
-        Scope::Read => ApiTokenScopeDto::Read,
-        Scope::Run => ApiTokenScopeDto::Run,
-        Scope::Preview => ApiTokenScopeDto::Preview,
-        Scope::Propose => ApiTokenScopeDto::Propose,
-    }
-}
-
-fn scope_of(dto: ApiTokenScopeDto) -> Scope {
-    match dto {
-        ApiTokenScopeDto::Read => Scope::Read,
-        ApiTokenScopeDto::Run => Scope::Run,
-        ApiTokenScopeDto::Preview => Scope::Preview,
-        ApiTokenScopeDto::Propose => Scope::Propose,
-    }
-}
-
 /// A token as it is listed: never its secret, which the daemon doesn't keep.
 fn listed(token: &ApiToken) -> ApiTokenDto {
     ApiTokenDto {
         id: token.id.as_str().to_owned(),
         label: token.label.as_str().to_owned(),
-        scopes: token.scopes.iter().map(scope_dto).collect(),
+        permissions: permissions_dto(token.permissions.get()),
         created_at: token.created_at.to_string(),
         last_used_at: token.last_used_at.map(|at| at.to_string()),
     }
+}
+
+/// The permissions a body names, at least one: `None` answers its refusal.
+fn token_permissions(dto: api::PermissionsDto) -> Result<TokenPermissions, Response> {
+    let permissions = permissions_of(dto)
+        .map_err(|_| refused(StatusCode::BAD_REQUEST, ErrorCode::InvalidBody))?;
+    TokenPermissions::new(permissions)
+        .map_err(|_| refused(StatusCode::BAD_REQUEST, ErrorCode::ApiTokenNoPermission))
+}
+
+/// `GET /api/v1/permissions`: what the request may do. A token's
+/// permissions; with sign-in off, what AI agents may do without a token for
+/// a request `ladderback mcp` marked; everything for a session, and for an
+/// unmarked request with sign-in off. The mark counts only with sign-in
+/// off: with sign-in on, a session is a person's whatever it carries.
+pub(crate) async fn permissions(granted: Option<axum::Extension<Granted>>) -> Response {
+    todo!()
 }
 
 /// `GET /api/v1/tokens`: the tokens kept, oldest first.
@@ -253,8 +318,8 @@ pub(crate) async fn list(State(sign_in): State<SignIn>) -> Response {
     }
 }
 
-/// `POST /api/v1/tokens`: creates a token with the body's label and scopes,
-/// and answers with its whole text, this once.
+/// `POST /api/v1/tokens`: creates a token with the body's label and
+/// permissions, and answers with its whole text, this once.
 pub(crate) async fn create(
     State(sign_in): State<SignIn>,
     body: Result<axum::Json<CreateApiTokenDto>, JsonRejection>,
@@ -262,7 +327,7 @@ pub(crate) async fn create(
     let SignIn::On(access) = sign_in else {
         return sign_in_off();
     };
-    let Ok(axum::Json(CreateApiTokenDto { label, scopes })) = body else {
+    let Ok(axum::Json(CreateApiTokenDto { label, permissions })) = body else {
         return refused(StatusCode::BAD_REQUEST, ErrorCode::InvalidBody);
     };
     let label = match ApiTokenLabel::new(label) {
@@ -275,13 +340,11 @@ pub(crate) async fn create(
             );
         }
     };
-    let scopes = match Scopes::new(scopes.into_iter().map(scope_of)) {
-        Ok(scopes) => scopes,
-        Err(_) => {
-            return refused(StatusCode::BAD_REQUEST, ErrorCode::ApiTokenNoScope);
-        }
+    let permissions = match token_permissions(permissions) {
+        Ok(permissions) => permissions,
+        Err(refusal) => return refusal,
     };
-    match access.create_api_token(label, scopes).await {
+    match access.create_api_token(label, permissions).await {
         Ok(created) => (
             StatusCode::CREATED,
             axum::Json(CreatedApiTokenDto {
@@ -315,6 +378,18 @@ pub(crate) async fn revoke(State(sign_in): State<SignIn>, Path(id): Path<String>
         Ok(false) => unknown(id),
         Err(refusal) => refused_as(refusal),
     }
+}
+
+/// `PUT /api/v1/tokens/{id}/permissions`: keeps the body's permissions as
+/// the token's from now on, with the current admin password, checked in the
+/// waits of the connection's address as a sign-in is. A session's only: no
+/// token changes its own or another's permissions.
+pub(crate) async fn change_permissions(
+    State(sign_in): State<SignIn>,
+    Path(id): Path<String>,
+    request: Request,
+) -> Response {
+    todo!()
 }
 
 #[cfg(test)]

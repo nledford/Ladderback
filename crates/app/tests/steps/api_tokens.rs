@@ -8,8 +8,9 @@ use app::access::{ApiTokenGrant, ApiTokenRefused, ApiTokensRefused, CreatedApiTo
 use app::ports::Clock;
 use cucumber::{given, then, when};
 use domain::access::api_token::{
-    ApiToken, ApiTokenLabel, ApiTokenProblem, PresentedApiToken, Scope, Scopes,
+    ApiToken, ApiTokenLabel, ApiTokenProblem, PresentedApiToken, TokenPermissions,
 };
+use domain::access::permissions::{Level, Permission, Permissions};
 
 use super::Agent;
 
@@ -39,12 +40,20 @@ impl std::fmt::Debug for ApiTokensWorld {
     }
 }
 
-fn scopes_of(text: &str) -> Vec<Scope> {
+/// Permissions as the scenarios write them: `row: level` pairs joined by
+/// commas, as `backups: read, daemon-log: read`.
+pub fn permissions_of(text: &str) -> Permissions {
     text.split(',')
         .map(str::trim)
-        .filter(|name| !name.is_empty())
-        .map(|name| Scope::parse(name).expect("a scope"))
-        .collect()
+        .filter(|pair| !pair.is_empty())
+        .fold(Permissions::NONE, |permissions, pair| {
+            let (row, level) = pair.split_once(':').expect("a row: level pair");
+            let row = Permission::parse(row.trim()).expect("a permission row");
+            let level = Level::parse(level.trim()).expect("a level");
+            permissions
+                .with(row, Some(level))
+                .expect("a level of its row")
+        })
 }
 
 fn created(agent: &Agent) -> &CreatedApiToken {
@@ -55,7 +64,7 @@ fn created(agent: &Agent) -> &CreatedApiToken {
         .expect("the admin created a token")
 }
 
-async fn create(agent: &mut Agent, label: String, scopes: Vec<Scope>) {
+async fn create(agent: &mut Agent, label: String, permissions: Permissions) {
     agent.api_tokens.refused = None;
     let label = match ApiTokenLabel::new(label) {
         Ok(label) => label,
@@ -64,14 +73,19 @@ async fn create(agent: &mut Agent, label: String, scopes: Vec<Scope>) {
             return;
         }
     };
-    let scopes = match Scopes::new(scopes) {
-        Ok(scopes) => scopes,
+    let permissions = match TokenPermissions::new(permissions) {
+        Ok(permissions) => permissions,
         Err(problem) => {
             agent.api_tokens.refused = Some(Refusal::Problem(problem));
             return;
         }
     };
-    match agent.sign_in.access().create_api_token(label, scopes).await {
+    match agent
+        .sign_in
+        .access()
+        .create_api_token(label, permissions)
+        .await
+    {
         Ok(token) => agent.api_tokens.created = Some(token),
         Err(refused) => agent.api_tokens.refused = Some(Refusal::Store(refused)),
     }
@@ -97,33 +111,33 @@ async fn present(agent: &mut Agent, text: &str, from: &str) {
     agent.api_tokens.checked = Some(checked);
 }
 
-#[when(expr = "the admin creates an API token {string} with the scopes {string}")]
-async fn creates(agent: &mut Agent, label: String, scopes: String) {
-    create(agent, label, scopes_of(&scopes)).await;
+#[when(expr = "the admin creates an API token {string} with the permissions {string}")]
+async fn creates(agent: &mut Agent, label: String, permissions: String) {
+    create(agent, label, permissions_of(&permissions)).await;
 }
 
-#[given(expr = "the admin has created an API token {string} with the scopes {string}")]
-async fn has_created(agent: &mut Agent, label: String, scopes: String) {
-    create(agent, label, scopes_of(&scopes)).await;
+#[given(expr = "the admin has created an API token {string} with the permissions {string}")]
+async fn has_created(agent: &mut Agent, label: String, permissions: String) {
+    create(agent, label, permissions_of(&permissions)).await;
     assert_eq!(agent.api_tokens.refused, None);
 }
 
 #[when(
-    expr = "the admin creates an API token with a label of {int} characters and the scopes {string}"
+    expr = "the admin creates an API token with a label of {int} characters and the permissions {string}"
 )]
-async fn creates_long(agent: &mut Agent, chars: usize, scopes: String) {
-    create(agent, "a".repeat(chars), scopes_of(&scopes)).await;
+async fn creates_long(agent: &mut Agent, chars: usize, permissions: String) {
+    create(agent, "a".repeat(chars), permissions_of(&permissions)).await;
 }
 
-#[when(expr = "the admin creates an API token {string} with no scopes")]
-async fn creates_without_scopes(agent: &mut Agent, label: String) {
-    create(agent, label, Vec::new()).await;
+#[when(expr = "the admin creates an API token {string} with no permission")]
+async fn creates_without_permissions(agent: &mut Agent, label: String) {
+    create(agent, label, Permissions::NONE).await;
 }
 
 #[given(expr = "the admin has created {int} API tokens")]
 async fn has_created_many(agent: &mut Agent, count: usize) {
     for index in 0..count {
-        create(agent, format!("demo-{index}"), vec![Scope::Read]).await;
+        create(agent, format!("demo-{index}"), Permissions::default()).await;
         assert_eq!(agent.api_tokens.refused, None, "token {index}");
     }
 }
@@ -133,14 +147,14 @@ fn secret_starts(agent: &mut Agent, prefix: String) {
     assert!(created(agent).text.expose().starts_with(&prefix));
 }
 
-#[then(expr = "the API tokens are listed as {string} with the scopes {string}, never used")]
-async fn listed_as(agent: &mut Agent, label: String, scopes: String) {
+#[then(expr = "the API tokens are listed as {string} with the permissions {string}, never used")]
+async fn listed_as(agent: &mut Agent, label: String, permissions: String) {
     let tokens = listed(agent).await;
     let [token] = tokens.as_slice() else {
         panic!("one token, not {}", tokens.len());
     };
     assert_eq!(token.label.as_str(), label);
-    assert_eq!(token.scopes.iter().collect::<Vec<_>>(), scopes_of(&scopes));
+    assert_eq!(token.permissions.get(), permissions_of(&permissions));
     assert_eq!(token.last_used_at, None);
     assert_eq!(token.id, created(agent).token.id);
 }
@@ -161,11 +175,11 @@ fn refused_label(agent: &mut Agent) {
     );
 }
 
-#[then("the token is refused as having no scope")]
-fn refused_scope(agent: &mut Agent) {
+#[then("the token is refused as having no permission")]
+fn refused_permission(agent: &mut Agent) {
     assert_eq!(
         agent.api_tokens.refused,
-        Some(Refusal::Problem(ApiTokenProblem::NoScope))
+        Some(Refusal::Problem(ApiTokenProblem::NoPermission))
     );
 }
 
@@ -202,15 +216,15 @@ async fn presents_unknown(agent: &mut Agent, from: String) {
     present(agent, &unknown, &from).await;
 }
 
-#[then(expr = "the program is let in with the scopes {string}")]
-fn let_in(agent: &mut Agent, scopes: String) {
+#[then(expr = "the program is let in with the permissions {string}")]
+fn let_in(agent: &mut Agent, permissions: String) {
     let checked = agent
         .api_tokens
         .checked
         .as_ref()
         .expect("a token was presented");
     let grant = checked.as_ref().expect("the token is accepted");
-    assert_eq!(grant.scopes.iter().collect::<Vec<_>>(), scopes_of(&scopes));
+    assert_eq!(grant.permissions, permissions_of(&permissions));
     assert_eq!(grant.id, created(agent).token.id);
 }
 

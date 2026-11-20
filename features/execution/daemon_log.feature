@@ -40,18 +40,18 @@ Feature: The recent log
       Then the request is answered with status 200
       And the answer lists the recent log newest first, its oldest line saying that Ladderback is starting
 
-    Scenario: A read token reads the recent log, without a session
-      Given the admin has created an API token over HTTP with the scopes "read" and the label "reader"
+    Scenario: A token with Daemon log reads the recent log, without a session
+      Given the admin has created an API token over HTTP with the permissions "daemon-log: read" and the label "reader"
       And a "GET" request for "/api/v1/log" with the API token
       When the request is sent
       Then the request is answered with status 200
 
-    Scenario: A token without the read scope is refused, and the refusal names it
-      Given the admin has created an API token over HTTP with the scopes "run" and the label "runner"
+    Scenario: A token without Daemon log is refused, and the refusal names it
+      Given the admin has created an API token over HTTP with the permissions "backups: read" and the label "reader"
       And a "GET" request for "/api/v1/log" with the API token
       When the request is sent
-      Then the route answers with status 403 and the error code "api-token-scope"
-      And the refusal names the scope "read"
+      Then the route answers with status 403 and the error code "api-token-permission"
+      And the refusal names the permission "daemon-log"
 
   @e2e
   Rule: The recent log holds the lines the log writes, and no secret

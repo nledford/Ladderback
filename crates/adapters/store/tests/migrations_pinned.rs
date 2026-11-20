@@ -94,6 +94,11 @@ const PINNED: &[(i64, &str, &str)] = &[
         "hub registry",
         "d358afcedf70fbedbb51e9016085519b92106907ae3bd4f5361bd1d57101037c7495f6097c867edb6edcd97674ef0cc7",
     ),
+    (
+        17,
+        "api token permissions",
+        "3a9e32929bac3a5fe6397385a801d5f1d5381e2d86c2549b473284d4379e2a7ba6ada382eb705ac6d79ac9c4f00b9797",
+    ),
 ];
 
 /// The migration's file name, as `sqlx::migrate!` reads it: sqlx turns the

@@ -6,8 +6,9 @@ use std::sync::Arc;
 use async_trait::async_trait;
 use domain::Timestamp;
 use domain::access::api_token::{
-    ApiToken, ApiTokenId, ApiTokenLabel, ApiTokenSecret, Scope, Scopes,
+    ApiToken, ApiTokenId, ApiTokenLabel, ApiTokenSecret, TokenPermissions,
 };
+use domain::access::permissions::{Level, Permission, Permissions};
 use domain::access::{PasswordFingerprint, TOKEN_BYTES};
 
 use crate::ports::{Added, ApiTokenStore};
@@ -29,6 +30,7 @@ pub async fn run(harness: &dyn ApiTokenHarness) {
     tokens_are_listed_oldest_first(harness).await;
     no_more_than_the_limit_are_kept(harness).await;
     a_revoked_token_is_gone(harness).await;
+    a_tokens_permissions_are_changed_and_a_revoked_one_is_not_brought_back(harness).await;
     tokens_of_another_password_are_revoked(harness).await;
     a_use_is_kept_and_never_brings_a_token_back(harness).await;
     times_are_kept_to_the_millisecond(harness).await;
@@ -49,15 +51,15 @@ fn bytes(seed: u8) -> [u8; TOKEN_BYTES] {
 /// A token from `seed`, created at `seconds`, under `password`.
 fn token(seed: u8, seconds: i64, password: PasswordFingerprint) -> Option<ApiToken> {
     let label = ApiTokenLabel::new(format!("demo-token-{seed}"));
-    let scopes = Scopes::new([Scope::Read, Scope::Preview]);
+    let permissions = TokenPermissions::new(Permissions::default());
     assert!(
-        label.is_ok() && scopes.is_ok(),
+        label.is_ok() && permissions.is_ok(),
         "the suite's own tokens are valid"
     );
     Some(ApiToken::issue(
         ApiTokenId::from_bytes(&bytes(seed)),
         label.ok()?,
-        scopes.ok()?,
+        permissions.ok()?,
         &ApiTokenSecret::from_bytes(bytes(seed.wrapping_add(128))),
         password,
         at(seconds),
@@ -68,7 +70,7 @@ fn token(seed: u8, seconds: i64, password: PasswordFingerprint) -> Option<ApiTok
 type Kept = (
     String,
     String,
-    Vec<Scope>,
+    Vec<(Permission, Level)>,
     [u8; 32],
     u64,
     Timestamp,
@@ -79,7 +81,7 @@ fn kept(token: &ApiToken) -> Kept {
     (
         token.id.as_str().to_owned(),
         token.label.as_str().to_owned(),
-        token.scopes.iter().collect(),
+        token.permissions.get().rows().collect(),
         *token.digest.as_bytes(),
         token.password.value(),
         token.created_at,
@@ -174,6 +176,35 @@ async fn a_revoked_token_is_gone(harness: &dyn ApiTokenHarness) {
     assert!(matches!(again, Ok(false)), "{again:?}");
     assert_eq!(get(store.as_ref(), &one.id).await, None);
     assert_eq!(all(store.as_ref()).await, vec![kept(&other)]);
+}
+
+async fn a_tokens_permissions_are_changed_and_a_revoked_one_is_not_brought_back(
+    harness: &dyn ApiTokenHarness,
+) {
+    let (Some(one), Some(other)) = (token(1, 0, PASSWORD), token(2, 1, PASSWORD)) else {
+        return;
+    };
+    let log_only = Permissions::NONE
+        .with(Permission::DaemonLog, Some(Level::Read))
+        .ok()
+        .and_then(|permissions| TokenPermissions::new(permissions).ok());
+    let Some(log_only) = log_only else {
+        return;
+    };
+    let store = harness.empty().await;
+    add(store.as_ref(), &one).await;
+    add(store.as_ref(), &other).await;
+    let changed = store.set_permissions(&one.id, log_only).await;
+    assert!(matches!(changed, Ok(true)), "{changed:?}");
+    let mut expected = one.clone();
+    expected.permissions = log_only;
+    assert_eq!(get(store.as_ref(), &one.id).await, Some(kept(&expected)));
+    assert_eq!(get(store.as_ref(), &other.id).await, Some(kept(&other)));
+    let revoked = store.revoke(&one.id).await;
+    assert!(matches!(revoked, Ok(true)), "{revoked:?}");
+    let gone = store.set_permissions(&one.id, log_only).await;
+    assert!(matches!(gone, Ok(false)), "{gone:?}");
+    assert_eq!(get(store.as_ref(), &one.id).await, None);
 }
 
 async fn tokens_of_another_password_are_revoked(harness: &dyn ApiTokenHarness) {

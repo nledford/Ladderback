@@ -1,10 +1,12 @@
-//! The decisions behind the API tokens of Settings (security §10.1, decision
-//! 93): what the form lacks, the request it sends, which field a refusal is
-//! about, how a scope and a token's last use read, and the words of each
-//! button and dialog. Host-tested here; the DOM glue that holds the signals
-//! and sends the requests is `settings.rs`.
+//! The decisions behind the API tokens of Settings (security §10.1,
+//! decisions 93 and 127): what the form lacks, the request it sends, which
+//! field a refusal is about, how a scope and a token's last use read, and
+//! the words of each button and dialog. Host-tested here; the DOM glue that
+//! holds the signals and sends the requests is `settings.rs`.
 
-use api::{ApiTokenScopeDto, CreateApiTokenDto, CreatedApiTokenDto, ErrorCode, MsgArg};
+use api::{
+    CreateApiTokenDto, CreatedApiTokenDto, ErrorCode, MsgArg, PermissionLevelDto, PermissionsDto,
+};
 use l10n::{MessageId, msg};
 
 use crate::components::SummaryItem;
@@ -21,13 +23,78 @@ pub(crate) const TOKENS_PATH: &str = "/api/v1/tokens";
 /// it, and the daemon decides.
 pub(crate) const LABEL_MAX_CHARS: u64 = 64;
 
+/// A scope the form offers: a group of permissions, each one the
+/// permissions a token of the scope of that name was given when scopes
+/// were replaced by permissions (decision 127), so the form reads as it did
+/// until it sets each permission on its own.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum Scope {
+    Read,
+    Run,
+    Preview,
+    Propose,
+}
+
+impl Scope {
+    /// The permissions the scope gives, each at its level, every other at
+    /// `none`.
+    fn permissions(self) -> PermissionsDto {
+        todo!()
+    }
+}
+
 /// Every scope, in the order the form offers them.
-pub(crate) const SCOPES: [ApiTokenScopeDto; 4] = [
-    ApiTokenScopeDto::Read,
-    ApiTokenScopeDto::Run,
-    ApiTokenScopeDto::Preview,
-    ApiTokenScopeDto::Propose,
-];
+pub(crate) const SCOPES: [Scope; 4] = [Scope::Read, Scope::Run, Scope::Preview, Scope::Propose];
+
+/// Each permission's level, in the API's order.
+fn levels(permissions: PermissionsDto) -> [PermissionLevelDto; 7] {
+    let PermissionsDto {
+        backups,
+        backup_runs,
+        previews,
+        configuration,
+        snapshot_contents,
+        daemon_log,
+        repository_check,
+    } = permissions;
+    [
+        backups,
+        backup_runs,
+        previews,
+        configuration,
+        snapshot_contents,
+        daemon_log,
+        repository_check,
+    ]
+}
+
+/// The permissions of `levels`, in the API's order.
+fn permissions_of(levels: [PermissionLevelDto; 7]) -> PermissionsDto {
+    let [
+        backups,
+        backup_runs,
+        previews,
+        configuration,
+        snapshot_contents,
+        daemon_log,
+        repository_check,
+    ] = levels;
+    PermissionsDto {
+        backups,
+        backup_runs,
+        previews,
+        configuration,
+        snapshot_contents,
+        daemon_log,
+        repository_check,
+    }
+}
+
+/// The scopes a token's row lists for its `permissions`: each that gives
+/// at least one of them.
+pub(crate) fn scopes_of(permissions: PermissionsDto) -> Vec<Scope> {
+    todo!()
+}
 
 /// The `id` of the heading of the tokens' section, which names their table
 /// and takes focus when the control that held it goes.
@@ -43,28 +110,28 @@ pub(crate) const CREATED_BODY_ID: &str = "api-token-created-body";
 /// The `id` of what the revoke dialog says, which describes it.
 pub(crate) const REVOKE_BODY_ID: &str = "api-token-revoke-body";
 
-/// A scope as the catalog's selects and the routes name it.
-pub(crate) fn scope_code(scope: ApiTokenScopeDto) -> &'static str {
+/// A scope as the catalog's selects name it.
+pub(crate) fn scope_code(scope: Scope) -> &'static str {
     match scope {
-        ApiTokenScopeDto::Read => "read",
-        ApiTokenScopeDto::Run => "run",
-        ApiTokenScopeDto::Preview => "preview",
-        ApiTokenScopeDto::Propose => "propose",
+        Scope::Read => "read",
+        Scope::Run => "run",
+        Scope::Preview => "preview",
+        Scope::Propose => "propose",
     }
 }
 
 /// The `id` of a scope's checkbox.
-pub(crate) fn scope_id(scope: ApiTokenScopeDto) -> &'static str {
+pub(crate) fn scope_id(scope: Scope) -> &'static str {
     match scope {
-        ApiTokenScopeDto::Read => "api-token-scope-read",
-        ApiTokenScopeDto::Run => "api-token-scope-run",
-        ApiTokenScopeDto::Preview => "api-token-scope-preview",
-        ApiTokenScopeDto::Propose => "api-token-scope-propose",
+        Scope::Read => "api-token-scope-read",
+        Scope::Run => "api-token-scope-run",
+        Scope::Preview => "api-token-scope-preview",
+        Scope::Propose => "api-token-scope-propose",
     }
 }
 
 /// A scope's name, as a row lists it and its checkbox says it.
-pub(crate) fn scope_name(scope: ApiTokenScopeDto) -> Said {
+pub(crate) fn scope_name(scope: Scope) -> Said {
     (
         msg::UI_API_TOKEN_SCOPE,
         vec![("scope", MsgArg::Text(scope_code(scope).to_owned()))],
@@ -72,7 +139,7 @@ pub(crate) fn scope_name(scope: ApiTokenScopeDto) -> Said {
 }
 
 /// What a token of `scope` may do, under its checkbox.
-pub(crate) fn scope_hint(scope: ApiTokenScopeDto) -> Said {
+pub(crate) fn scope_hint(scope: Scope) -> Said {
     (
         msg::UI_API_TOKEN_SCOPE_HINT,
         vec![("scope", MsgArg::Text(scope_code(scope).to_owned()))],
@@ -103,7 +170,7 @@ impl Field {
     pub(crate) fn id(self) -> &'static str {
         match self {
             Self::Label => "api-token-label",
-            Self::Scopes => scope_id(ApiTokenScopeDto::Read),
+            Self::Scopes => scope_id(Scope::Read),
         }
     }
 
@@ -114,7 +181,7 @@ impl Field {
                 msg::ERROR_API_TOKEN_LABEL,
                 vec![("max", MsgArg::Count(LABEL_MAX_CHARS))],
             ),
-            Self::Scopes => (msg::ERROR_API_TOKEN_NO_SCOPE, Vec::new()),
+            Self::Scopes => (msg::ERROR_API_TOKEN_NO_PERMISSION, Vec::new()),
         }
     }
 }
@@ -123,7 +190,7 @@ impl Field {
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub(crate) struct TokenForm {
     pub(crate) label: String,
-    pub(crate) scopes: Vec<ApiTokenScopeDto>,
+    pub(crate) scopes: Vec<Scope>,
 }
 
 impl TokenForm {
@@ -142,14 +209,22 @@ impl TokenForm {
     }
 
     /// The body of the create request: the label without the spaces around
-    /// it, and the scopes chosen, each once, in the form's order.
+    /// it, and the permissions of the scopes chosen.
     pub(crate) fn request(&self) -> CreateApiTokenDto {
+        let mut chosen = levels(PermissionsDto::default());
+        for scope in SCOPES
+            .into_iter()
+            .filter(|scope| self.scopes.contains(scope))
+        {
+            for (slot, gives) in chosen.iter_mut().zip(levels(scope.permissions())) {
+                if gives != PermissionLevelDto::None {
+                    *slot = gives;
+                }
+            }
+        }
         CreateApiTokenDto {
             label: self.label.trim().to_owned(),
-            scopes: SCOPES
-                .into_iter()
-                .filter(|scope| self.scopes.contains(scope))
-                .collect(),
+            permissions: permissions_of(chosen),
         }
     }
 }
@@ -178,7 +253,7 @@ pub(crate) fn problems_of(
 pub(crate) fn field_of(code: ErrorCode) -> Option<Field> {
     match code {
         ErrorCode::ApiTokenLabel => Some(Field::Label),
-        ErrorCode::ApiTokenNoScope => Some(Field::Scopes),
+        ErrorCode::ApiTokenNoPermission => Some(Field::Scopes),
         _ => None,
     }
 }

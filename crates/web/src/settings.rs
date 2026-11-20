@@ -35,9 +35,7 @@ use sign_in::SignInSection;
 use std::rc::Rc;
 use std::sync::Arc;
 
-use api::{
-    ApiTokenDto, ApiTokenScopeDto, ApiTokensDto, IanaZone, MsgArg, RestartDto, RestartWhenDto,
-};
+use api::{ApiTokenDto, ApiTokensDto, IanaZone, MsgArg, RestartDto, RestartWhenDto};
 use l10n::{Localizer, MessageId, msg};
 use lepticons_data::LucideGlyph;
 use leptos::ev;
@@ -47,8 +45,9 @@ use leptos::task::spawn_local;
 use crate::announcer::Politeness;
 use crate::api_tokens::{
     CREATE_ID, CREATED_BODY_ID, Field, HEADING_ID, LABEL_MAX_CHARS, LastUsed, REVOKE_BODY_ID,
-    SCOPES, Said, TOKENS_PATH, TokenForm, created, created_body, error_of, field_of, problems_of,
-    revoke_id, revoke_label, revoke_path, revoke_title, revoked, scope_hint, scope_id, scope_name,
+    SCOPES, Said, Scope, TOKENS_PATH, TokenForm, created, created_body, error_of, field_of,
+    problems_of, revoke_id, revoke_label, revoke_path, revoke_title, revoked, scope_hint, scope_id,
+    scope_name, scopes_of,
 };
 use crate::components::button::{Appearance, Content, Kind};
 use crate::components::first_load;
@@ -531,7 +530,9 @@ fn tokens_table(
         text(localizer, msg::UI_API_TOKENS_COLUMN_SCOPES),
         Rem::tenths(80),
         move |row: Signal<ApiTokenDto>| {
-            row.with_untracked(|token| scopes_view(&scopes_localizer, &token.scopes))
+            row.with_untracked(|token| {
+                scopes_view(&scopes_localizer, &scopes_of(token.permissions))
+            })
         },
     );
     let created_localizer = Arc::clone(localizer);
@@ -605,7 +606,7 @@ fn tokens_table(
 }
 
 /// A token's scopes in its row: one said as it is, several as a list.
-fn scopes_view(localizer: &Localizer, scopes: &[ApiTokenScopeDto]) -> AnyView {
+fn scopes_view(localizer: &Localizer, scopes: &[Scope]) -> AnyView {
     let names: Vec<String> = scopes
         .iter()
         .map(|scope| say(localizer, scope_name(*scope)))

@@ -10,12 +10,13 @@ use axum::extract::{ConnectInfo, Request};
 use axum::http::header::{HOST, SET_COOKIE};
 use axum::http::{Method, StatusCode};
 use domain::Timestamp;
-use domain::access::api_token::{ApiTokenLabel, Scope, Scopes};
+use domain::access::api_token::{ApiTokenLabel, TokenPermissions};
+use domain::access::permissions::{Permission, Permissions};
 use http_body_util::BodyExt;
 use tower::ServiceExt;
 
 use super::*;
-use crate::api_tokens::required_scope;
+use crate::api_tokens::{Needs, required_permission};
 use crate::request_checks::tests::{NoUi, test_state};
 use crate::{RequestChecks, SignIn, router};
 
@@ -262,14 +263,17 @@ impl Daemon {
             .unwrap()
     }
 
-    /// A token with `scopes` labelled `assistant`, as a program sends it,
+    /// A token with `permissions` labelled `assistant`, as a program sends it,
     /// and who it is.
-    async fn token(&self, scopes: &[Scope]) -> (String, Proposer) {
+    async fn token(&self, permissions: &[Permission]) -> (String, Proposer) {
         let created = self
             .access
             .create_api_token(
                 ApiTokenLabel::new("assistant".to_owned()).unwrap(),
-                Scopes::new(scopes.iter().copied()).unwrap(),
+                TokenPermissions::new(permissions.iter().fold(Permissions::NONE, |all, row| {
+                    all.with(*row, Some(row.level())).unwrap()
+                }))
+                .unwrap(),
             )
             .await
             .unwrap();
@@ -332,20 +336,17 @@ async fn json(response: Response) -> serde_json::Value {
 const PROPOSED: &str = r#"{"changes":[{"kind":"remove-plan","plan":"home"}]}"#;
 
 #[test]
-fn the_proposal_routes_need_the_propose_scope_and_no_others_open_to_it() {
-    for (method, path, scope) in [
-        (Method::GET, "/api/v1/proposals", Some(Scope::Propose)),
-        (Method::HEAD, "/api/v1/proposals", Some(Scope::Propose)),
-        (Method::POST, "/api/v1/proposals", Some(Scope::Propose)),
-        (
-            Method::GET,
-            "/api/v1/proposals/abcdefghijkl",
-            Some(Scope::Propose),
-        ),
+fn the_proposal_routes_need_the_configuration_permission_and_no_others_open_to_it() {
+    let configuration = Some(Permission::Configuration);
+    for (method, path, permission) in [
+        (Method::GET, "/api/v1/proposals", configuration),
+        (Method::HEAD, "/api/v1/proposals", configuration),
+        (Method::POST, "/api/v1/proposals", configuration),
+        (Method::GET, "/api/v1/proposals/abcdefghijkl", configuration),
         (
             Method::POST,
             "/api/v1/proposals/abcdefghijkl/withdraw",
-            Some(Scope::Propose),
+            configuration,
         ),
         (Method::DELETE, "/api/v1/proposals/abcdefghijkl", None),
         (Method::POST, "/api/v1/proposals/abcdefghijkl", None),
@@ -366,14 +367,15 @@ fn the_proposal_routes_need_the_propose_scope_and_no_others_open_to_it() {
         (Method::POST, "/api/v1/proposals/abcdefghijkl/reject", None),
         (Method::POST, "/api/v1/proposals//withdraw", None),
     ] {
-        assert_eq!(required_scope(&method, path), scope, "{method} {path}");
+        let needs = permission.map_or(Needs::Session, Needs::Permission);
+        assert_eq!(required_permission(&method, path), needs, "{method} {path}");
     }
 }
 
 #[tokio::test]
 async fn a_token_with_the_propose_scope_asks_as_itself_on_every_proposal_route() {
     let daemon = Daemon::new();
-    let (bearer, itself) = daemon.token(&[Scope::Propose]).await;
+    let (bearer, itself) = daemon.token(&[Permission::Configuration]).await;
     let auth = [("authorization", bearer.as_str())];
     let made = daemon
         .send(post("/api/v1/proposals", &auth, PROPOSED))
@@ -395,9 +397,11 @@ async fn a_token_with_the_propose_scope_asks_as_itself_on_every_proposal_route()
 }
 
 #[tokio::test]
-async fn a_token_without_the_propose_scope_is_refused_naming_it() {
+async fn a_token_without_the_configuration_permission_is_refused_naming_it() {
     let daemon = Daemon::new();
-    let (bearer, _) = daemon.token(&[Scope::Read, Scope::Run]).await;
+    let (bearer, _) = daemon
+        .token(&[Permission::Backups, Permission::BackupRuns])
+        .await;
     let response = daemon
         .send(post(
             "/api/v1/proposals",
@@ -409,8 +413,8 @@ async fn a_token_without_the_propose_scope_is_refused_naming_it() {
     assert_eq!(
         json(response).await,
         serde_json::json!({
-            "code": "api-token-scope",
-            "args": { "scope": { "type": "text", "value": "propose" } }
+            "code": "api-token-permission",
+            "args": { "permission": { "type": "text", "value": "configuration" } }
         })
     );
     assert!(daemon.proposals.askers().is_empty());
@@ -441,7 +445,7 @@ async fn a_session_asks_with_no_token() {
 #[tokio::test]
 async fn a_body_that_is_not_a_proposal_is_refused_unread() {
     let daemon = Daemon::new();
-    let (bearer, _) = daemon.token(&[Scope::Propose]).await;
+    let (bearer, _) = daemon.token(&[Permission::Configuration]).await;
     let auth = [("authorization", bearer.as_str())];
     for body in [
         "not json",
@@ -531,7 +535,7 @@ async fn each_refusal_is_answered_with_the_status_and_code_of_its_kind() {
             .refusal
             .lock()
             .unwrap_or_else(PoisonError::into_inner) = Some(refusal.clone());
-        let (bearer, _) = daemon.token(&[Scope::Propose]).await;
+        let (bearer, _) = daemon.token(&[Permission::Configuration]).await;
         let response = daemon
             .send(post(
                 "/api/v1/proposals/abcdefghijkl/withdraw",
@@ -563,11 +567,9 @@ fn borrowed(headers: &[(String, String)]) -> Vec<(&str, &str)> {
 const APPROVAL: &str = r#"{"revision":"aaaa","diff-hash":"bbbb","forget-digest":"cccc","confirmation":"demo-admin-pass"}"#;
 
 #[tokio::test]
-async fn no_token_reviews_approves_or_rejects_whatever_its_scopes() {
+async fn no_token_reviews_approves_or_rejects_whatever_its_permissions() {
     let daemon = Daemon::new();
-    let (bearer, _) = daemon
-        .token(&[Scope::Read, Scope::Run, Scope::Preview, Scope::Propose])
-        .await;
+    let (bearer, _) = daemon.token(&Permission::ALL).await;
     let auth = [("authorization", bearer.as_str())];
     for request in [
         get("/api/v1/proposals/abcdefghijkl/review", &auth),
@@ -585,8 +587,8 @@ async fn no_token_reviews_approves_or_rejects_whatever_its_scopes() {
         assert_eq!(
             json(response).await,
             serde_json::json!({
-                "code": "api-token-scope",
-                "args": { "scope": { "type": "text", "value": "session" } }
+                "code": "api-token-permission",
+                "args": { "permission": { "type": "text", "value": "session" } }
             }),
             "{what}"
         );

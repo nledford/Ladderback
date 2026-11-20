@@ -5,6 +5,7 @@
 use std::collections::{BTreeMap, BTreeSet};
 use std::error::Error;
 
+use crate::access::permissions::Permissions;
 use crate::notifications::{ChannelName, Notifications, RuleName};
 use crate::secrets::SecretValue;
 use crate::{PlanId, RepositoryAlias, RepositoryId};
@@ -177,6 +178,9 @@ pub struct AgentConfig {
     repositories: BTreeMap<RepositoryAlias, RepositoryConfig>,
     plans: Vec<Plan>,
     notifications: Notifications,
+    /// What AI agents may do without a token: the `[without-token]` table
+    /// (§16, decision 127).
+    without_token: Permissions,
 }
 
 impl AgentConfig {
@@ -232,6 +236,7 @@ impl AgentConfig {
             repositories,
             plans,
             notifications: Notifications::default(),
+            without_token: Permissions::default(),
         })
     }
 
@@ -258,6 +263,23 @@ impl AgentConfig {
         })
     }
 
+    /// The configuration with `agent`, `hooks`, `repositories` and `plans`
+    /// in place of its own, checked whole as [`AgentConfig::new`] and
+    /// [`AgentConfig::with_notifications`] check a loaded one, its
+    /// notification rules and what AI agents may do without a token kept.
+    /// Every change that rebuilds a configuration from its parts goes
+    /// through here, so a change to one part never resets another it doesn't
+    /// touch to its default.
+    pub fn replacing(
+        &self,
+        agent: AgentSettings,
+        hooks: Hooks,
+        repositories: BTreeMap<RepositoryAlias, RepositoryConfig>,
+        plans: Vec<Plan>,
+    ) -> Result<Self, Violation> {
+        todo!()
+    }
+
     /// The notification rules and the channels they send to (§11).
     pub fn notifications(&self) -> &Notifications {
         &self.notifications
@@ -274,6 +296,24 @@ impl AgentConfig {
         let mut changed = self.clone();
         changed.agent.dry_run_allowlist = allowlist;
         changed
+    }
+
+    /// What AI agents may do without a token, through `ladderback mcp` in
+    /// headless and scratch modes, or in connect mode with sign-in off
+    /// (§10.1).
+    pub fn without_token(&self) -> Permissions {
+        self.without_token
+    }
+
+    /// This configuration with `permissions` as what AI agents may do
+    /// without a token, the rest as it is: a person sets them in Settings,
+    /// and no proposal changes them (§16, decision 127).
+    #[must_use]
+    pub fn with_without_token(&self, permissions: Permissions) -> Self {
+        Self {
+            without_token: permissions,
+            ..self.clone()
+        }
     }
 
     /// The hooks that wrap every operation of the agent.
@@ -441,13 +481,12 @@ impl AgentConfig {
     /// The configuration with `plans` as its plans, the rest of it as it is,
     /// checked whole as a loaded one is.
     fn with_plans(&self, plans: Vec<Plan>) -> Result<Self, ChangeRefused> {
-        Self::new(
+        self.replacing(
             self.agent.clone(),
             self.hooks.clone(),
             self.repositories.clone(),
             plans,
         )
-        .and_then(|config| config.with_notifications(self.notifications.clone()))
         .map_err(ChangeRefused::Violation)
     }
 }
@@ -1400,5 +1439,62 @@ mod tests {
         for secret in ["canary-pw-home", "canary-pw-cloud", "canary-option-cloud"] {
             assert!(!masked.contains(secret), "{secret} shows in {masked}");
         }
+    }
+
+    /// A person turned Backup runs off for AI agents without a token.
+    fn no_backup_runs() -> Permissions {
+        Permissions::default()
+            .with(crate::access::permissions::Permission::BackupRuns, None)
+            .unwrap()
+    }
+
+    /// A plan added, changed or removed, as a person's edit or an approved
+    /// proposal does, leaves what AI agents may do without a token as the
+    /// person set it.
+    #[test]
+    fn a_plan_change_keeps_what_ai_agents_may_do_without_a_token() {
+        let before = with_plans(&["home", "docs"], &[]).with_without_token(no_backup_runs());
+        let added = before.add_plan(plan("media", "nas")).unwrap();
+        let mut changed = plan("home", "nas");
+        changed.label = Some("Home".to_owned());
+        let changed = before.change_plan(changed).unwrap();
+        let removed = before.remove_plan(&id("docs")).unwrap();
+        for after in [added, changed, removed] {
+            assert_eq!(after.without_token(), no_backup_runs());
+        }
+    }
+
+    #[test]
+    fn replacing_the_parts_keeps_the_notifications_and_what_ai_agents_may_do_without_a_token() {
+        let before = with_plans(&["home"], &["home"]).with_without_token(no_backup_runs());
+        let after = before
+            .replacing(
+                AgentSettings::default(),
+                Hooks::default(),
+                repositories(&["nas", "cloud"]),
+                vec![plan("home", "cloud")],
+            )
+            .unwrap();
+        assert_eq!(after.without_token(), no_backup_runs());
+        assert_eq!(after.notifications(), &notifications_for(&["home"]));
+        assert_eq!(ids(&after), ["home"]);
+        assert_eq!(after.repositories(), &repositories(&["nas", "cloud"]));
+    }
+
+    #[test]
+    fn replacing_the_parts_checks_them_as_a_loaded_configuration() {
+        let before = with_plans(&["home"], &["home"]);
+        assert_eq!(
+            before.replacing(
+                AgentSettings::default(),
+                Hooks::default(),
+                repositories(&["nas"]),
+                Vec::new(),
+            ),
+            Err(Violation::UnknownRulePlan {
+                rule: RuleName::parse("failures").unwrap(),
+                plan: id("home"),
+            })
+        );
     }
 }

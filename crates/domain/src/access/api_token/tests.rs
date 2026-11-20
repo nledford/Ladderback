@@ -22,8 +22,8 @@ fn issued(seed: u8) -> (ApiToken, ApiTokenText) {
     let id = ApiTokenId::from_bytes(&bytes(seed));
     let secret = ApiTokenSecret::from_bytes(bytes(seed.wrapping_add(100)));
     let text = ApiTokenText::new(&id, &secret);
-    let scopes = Scopes::new([Scope::Read]).unwrap();
-    let token = ApiToken::issue(id, label("nightly-mcp"), scopes, &secret, UNDER, at(0));
+    let permissions = TokenPermissions::new(Permissions::default()).unwrap();
+    let token = ApiToken::issue(id, label("nightly-mcp"), permissions, &secret, UNDER, at(0));
     (token, text)
 }
 
@@ -229,36 +229,21 @@ fn a_label_is_one_to_sixty_four_characters_not_blank_without_control_characters(
 }
 
 #[test]
-fn scopes_need_one_at_least_and_allow_only_their_own() {
-    assert_eq!(Scopes::new([]), Err(ApiTokenProblem::NoScope));
-    let scopes = Scopes::new([Scope::Preview, Scope::Read, Scope::Read]).unwrap();
-    assert!(scopes.allows(Scope::Read));
-    assert!(scopes.allows(Scope::Preview));
-    assert!(!scopes.allows(Scope::Run));
-    assert!(!scopes.allows(Scope::Propose));
+fn a_token_needs_one_permission_at_least() {
     assert_eq!(
-        scopes.iter().collect::<Vec<_>>(),
-        [Scope::Read, Scope::Preview]
+        TokenPermissions::new(Permissions::NONE),
+        Err(ApiTokenProblem::NoPermission)
     );
-    let all = Scopes::new(Scope::ALL).unwrap();
-    assert_eq!(all.iter().collect::<Vec<_>>(), Scope::ALL);
-    for scope in Scope::ALL {
-        assert_eq!(
-            Scopes::new([scope]).unwrap().iter().collect::<Vec<_>>(),
-            [scope]
-        );
-    }
-}
-
-#[test]
-fn scopes_have_their_names() {
-    let names: Vec<_> = Scope::ALL.into_iter().map(Scope::as_str).collect();
-    assert_eq!(names, ["read", "run", "preview", "propose"]);
-    for scope in Scope::ALL {
-        assert_eq!(Scope::parse(scope.as_str()), Some(scope));
-    }
-    assert_eq!(Scope::parse("Read"), None);
-    assert_eq!(Scope::parse("write"), None);
+    let log_only = Permissions::NONE
+        .with(
+            crate::access::permissions::Permission::DaemonLog,
+            Some(crate::access::permissions::Level::Read),
+        )
+        .unwrap();
+    assert_eq!(
+        TokenPermissions::new(log_only).map(TokenPermissions::get),
+        Ok(log_only)
+    );
 }
 
 #[test]

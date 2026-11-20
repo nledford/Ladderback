@@ -1,47 +1,48 @@
 Feature: API tokens
   With sign-in on, a program other than a browser, such as MCP connect mode,
-  uses the API with an API token (§10.1, decision 93). The admin creates one
-  in a session, with a label and its scopes, and sees its secret once. The
-  token opens only the routes its scopes name; a failed one counts as a failed
-  sign-in; it lives until it is revoked or the admin password is set anew.
+  uses the API with an API token (§10.1, decisions 93 and 127). The admin
+  creates one in a session, with a label and its permissions, and sees its
+  secret once. The token opens only the routes its permissions allow; a
+  failed one counts as a failed sign-in; it lives until it is revoked or the
+  admin password is set anew.
 
-  Rule: An API token is created with a label and at least one scope, and its secret is shown only then
+  Rule: An API token is created with a label and at least one permission, and its secret is shown only then
 
     Background:
       Given the admin password is "demo-admin-pass"
 
-    Scenario: A created token is listed by its label and scopes, never with its secret
-      When the admin creates an API token "nightly-mcp" with the scopes "read, run"
+    Scenario: A created token is listed by its label and permissions, never with its secret
+      When the admin creates an API token "nightly-mcp" with the permissions "backup-runs: start-and-cancel, daemon-log: read"
       Then the token's secret starts with "ladderback_"
-      And the API tokens are listed as "nightly-mcp" with the scopes "read, run", never used
+      And the API tokens are listed as "nightly-mcp" with the permissions "backup-runs: start-and-cancel, daemon-log: read", never used
       And no listed API token holds the token's secret
 
     Scenario: A token needs a label
-      When the admin creates an API token "" with the scopes "read"
+      When the admin creates an API token "" with the permissions "backups: read"
       Then the token is refused as having no label of 1 to 64 characters
 
     Scenario: A label longer than 64 characters is refused
-      When the admin creates an API token with a label of 65 characters and the scopes "read"
+      When the admin creates an API token with a label of 65 characters and the permissions "backups: read"
       Then the token is refused as having no label of 1 to 64 characters
 
-    Scenario: A token needs a scope
-      When the admin creates an API token "nightly-mcp" with no scopes
-      Then the token is refused as having no scope
+    Scenario: A token needs a permission
+      When the admin creates an API token "nightly-mcp" with no permission
+      Then the token is refused as having no permission
 
     Scenario: At most 100 tokens are kept
       Given the admin has created 100 API tokens
-      When the admin creates an API token "one-more" with the scopes "read"
+      When the admin creates an API token "one-more" with the permissions "backups: read"
       Then the token is refused as one over the 100 kept
 
   Rule: A token is accepted with its own secret, and a wrong one counts as a failed sign-in
 
     Background:
       Given the admin password is "demo-admin-pass"
-      And the admin has created an API token "nightly-mcp" with the scopes "read"
+      And the admin has created an API token "nightly-mcp" with the permissions "backups: read"
 
-    Scenario: A program presents the token and is let in with its scopes
+    Scenario: A program presents the token and is let in with its permissions
       When a program presents the token from 192.0.2.10
-      Then the program is let in with the scopes "read"
+      Then the program is let in with the permissions "backups: read"
 
     Scenario: A wrong secret and an unknown token are refused alike
       When a program presents the token with a wrong secret from 192.0.2.10
@@ -72,7 +73,7 @@ Feature: API tokens
 
     Background:
       Given the admin password is "demo-admin-pass"
-      And the admin has created an API token "nightly-mcp" with the scopes "read"
+      And the admin has created an API token "nightly-mcp" with the permissions "backups: read"
 
     Scenario: A revoked token is refused and no longer listed
       When the admin revokes the token
@@ -89,13 +90,13 @@ Feature: API tokens
     Scenario: A token is never too old: it is accepted a year later
       When 8760 hours pass
       And a program presents the token from 192.0.2.10
-      Then the program is let in with the scopes "read"
+      Then the program is let in with the permissions "backups: read"
 
   Rule: Settings shows when each token was last used, written at most once a minute
 
     Background:
       Given the admin password is "demo-admin-pass"
-      And the admin has created an API token "nightly-mcp" with the scopes "read"
+      And the admin has created an API token "nightly-mcp" with the permissions "backups: read"
 
     Scenario: A use is recorded, and uses within the minute after it are not
       When a program presents the token from 192.0.2.10
@@ -107,45 +108,67 @@ Feature: API tokens
       Then the token was last used just now
 
   @e2e
-  Rule: Over HTTP, a token opens only the routes of its scopes, and its secret is never shown again
+  Rule: Over HTTP, a token opens only the routes of its permissions, and its secret is never shown again
 
     Background:
       Given Ladderback is serving on loopback with sign-in on and the admin password "demo-admin-pass"
       And the admin has signed in over HTTP with "demo-admin-pass"
 
-    Scenario: A read token reads, without a session or a CSRF token
-      Given the admin has created an API token over HTTP with the scopes "read" and the label "reader"
+    Scenario: A token with Backups reads, without a session or a CSRF token
+      Given the admin has created an API token over HTTP with the permissions "backups: read" and the label "reader"
       And a "GET" request for "/api/v1/operations" with the API token
       When the request is sent
       Then the request is answered with status 200
 
-    Scenario: A read token can't start a plan, and the refusal names the scope it needs
-      Given the admin has created an API token over HTTP with the scopes "read" and the label "reader"
+    Scenario: A token without Backup runs can't start a plan, and the refusal names the permission it needs
+      Given the admin has created an API token over HTTP with the permissions "backups: read" and the label "reader"
       And a "POST" request for "/api/v1/operations" with the API token
       And the request has the header "Content-Type: application/json"
       And the request has the body "{\"plan\":\"home\"}"
       When the request is sent
-      Then the route answers with status 403 and the error code "api-token-scope"
-      And the refusal names the scope "run"
+      Then the route answers with status 403 and the error code "api-token-permission"
+      And the refusal names the permission "backup-runs"
+
+    Scenario: A token with only Backup runs reads nothing
+      Given the admin has created an API token over HTTP with the permissions "backup-runs: start-and-cancel" and the label "scheduler"
+      And a "GET" request for "/api/v1/operations" with the API token
+      When the request is sent
+      Then the route answers with status 403 and the error code "api-token-permission"
+      And the refusal names the permission "backups"
+
+    Scenario: A token without Snapshot contents can't see the names inside a snapshot
+      Given the admin has created an API token over HTTP with the permissions "backups: read" and the label "reader"
+      And a "GET" request for "/api/v1/repositories/nas/snapshots/0123abcd/folder" with the API token
+      When the request is sent
+      Then the route answers with status 403 and the error code "api-token-permission"
+      And the refusal names the permission "snapshot-contents"
+
+    Scenario: A token asks what it may do
+      Given the admin has created an API token over HTTP with the permissions "backups: read, daemon-log: read" and the label "reader"
+      And a "GET" request for "/api/v1/permissions" with the API token
+      When the request is sent
+      Then the request is answered with status 200
+      And the answer lists the permissions "backups: read, daemon-log: read"
 
     Scenario Outline: A token never opens a route for a session only: <method> <path>
-      Given the admin has created an API token over HTTP with the scopes "read, run, preview, propose" and the label "every-scope"
+      Given the admin has created an API token over HTTP with the permissions "backups: read, backup-runs: start-and-cancel, previews: preview, configuration: propose, snapshot-contents: read, daemon-log: read, repository-check: run" and the label "every-permission"
       And a "<method>" request for "<path>" with the API token
       And the request has the header "Content-Type: application/json"
       And the request has the body "{}"
       When the request is sent
-      Then the route answers with status 403 and the error code "api-token-scope"
-      And the refusal names the scope "session"
+      Then the route answers with status 403 and the error code "api-token-permission"
+      And the refusal names the permission "session"
 
       Examples:
-        | method | path                                  |
-        | POST   | /api/v1/session                       |
-        | GET    | /api/v1/tokens                        |
-        | POST   | /api/v1/tokens                        |
-        | POST   | /api/v1/repositories                  |
-        | POST   | /api/v1/repositories/_test            |
-        | POST   | /api/v1/repositories/home/maintenance |
-        | GET    | /api/v1/no-such-route                 |
+        | method | path                                    |
+        | POST   | /api/v1/session                         |
+        | GET    | /api/v1/tokens                          |
+        | POST   | /api/v1/tokens                          |
+        | PUT    | /api/v1/tokens/abcdefghijkl/permissions |
+        | POST   | /api/v1/repositories                    |
+        | POST   | /api/v1/repositories/_test              |
+        | POST   | /api/v1/repositories/home/maintenance   |
+        | GET    | /api/v1/no-such-route                   |
 
     Scenario: A token with a wrong secret is refused, and the cookie beside it doesn't help
       Given a "GET" request for "/api/v1/operations" with a token nobody created
@@ -154,20 +177,54 @@ Feature: API tokens
       Then the route answers with status 401 and the error code "api-token-invalid"
 
     Scenario: A revoked token is refused
-      Given the admin has created an API token over HTTP with the scopes "read" and the label "reader"
+      Given the admin has created an API token over HTTP with the permissions "backups: read" and the label "reader"
       And the admin has revoked that API token over HTTP
       And a "GET" request for "/api/v1/operations" with the API token
       When the request is sent
       Then the route answers with status 401 and the error code "api-token-invalid"
+      And its log says "revoked"
 
     Scenario: The secret is in no file Ladderback keeps, no log line and no answer after the one that created it
-      Given the admin has created an API token over HTTP with the scopes "read" and the label "reader"
+      Given the admin has created an API token over HTTP with the permissions "backups: read" and the label "reader"
       And a "GET" request for "/api/v1/tokens" with the session cookie
       When the request is sent
       Then the request is answered with status 200
       And the answer doesn't hold the API token's secret
       And no file Ladderback keeps holds the API token's secret
       And the daemon's log doesn't hold the API token's secret
+      And its log says "(reader) created, with backups: read"
+
+  @e2e
+  Rule: Only a person signed in with the current admin password changes a token's permissions, and the log says so
+
+    Background:
+      Given Ladderback is serving on loopback with sign-in on and the admin password "demo-admin-pass"
+      And the admin has signed in over HTTP with "demo-admin-pass"
+      And the admin has created an API token over HTTP with the permissions "backups: read" and the label "reader"
+
+    Scenario: With the current admin password, the change is kept, answered and logged
+      Given a request in the admin's session that changes the API token's permissions to "backups: read, daemon-log: read" with the admin password "demo-admin-pass"
+      When the request is sent
+      Then the request is answered with status 200
+      And the answer lists the permissions "backups: read, daemon-log: read"
+      And its log says "now has backups: read, daemon-log: read"
+      And the daemon's log doesn't hold "demo-admin-pass"
+      Given a "GET" request for "/api/v1/log" with the API token
+      When the request is sent
+      Then the request is answered with status 200
+
+    Scenario: A wrong admin password changes nothing
+      Given a request in the admin's session that changes the API token's permissions to "backups: read, daemon-log: read" with the admin password "not-the-password"
+      When the request is sent
+      Then the route answers with status 403 and the error code "current-password-wrong"
+      And the daemon's log doesn't hold "not-the-password"
+      And the admin's session lists the API token with the permissions "backups: read"
+
+    Scenario: A token can't change its own permissions, even with the admin password
+      Given a request with the API token that changes its own permissions to "backups: read, daemon-log: read" with the admin password "demo-admin-pass"
+      When the request is sent
+      Then the route answers with status 403 and the error code "api-token-permission"
+      And the refusal names the permission "session"
 
   @e2e
   Rule: With sign-in off, there are no API tokens
@@ -300,7 +357,7 @@ Feature: API tokens
       Then focus is on the heading "There are 2 problems with the form"
       And the field "Label" shows the error "so you can tell it from the others"
       And the field "Label" is marked invalid
-      And the page shows a message containing "Choose at least one scope for the token"
+      And the page shows a message containing "Choose at least one permission for the token"
       And the page has no accessibility violations
 
     Scenario: A token over the 100 kept is refused, and the error summary says so

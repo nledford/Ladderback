@@ -162,11 +162,32 @@ error-sign-in-unavailable = { -brand-name } could not check the admin password, 
 # A program's API token is unknown, revoked, of an admin password set since, or has a wrong secret. It counted as a failed sign-in.
 error-api-token-invalid = { -brand-name } doesn't know this { -api-token }: it may have been revoked, or the admin password set again. Create a new token in { -brand-name }'s Settings and give it to the program in place of this one; { "ladderback mcp" } reads it from the file { "--token-file" } names.
 
-# A good API token was sent to a route its scopes don't open.
-# $scope (text): what the route needs, one of { "read" }, { "run" }, { "preview" }, { "propose" } or { "session" }.
-error-api-token-scope = { $scope ->
+# A good API token was sent to a route its permissions don't open.
+# $permission (text): what the route needs, one of { "backups" }, { "backup-runs" }, { "previews" }, { "configuration" }, { "snapshot-contents" }, { "daemon-log" }, { "repository-check" } or { "session" }.
+error-api-token-permission = { $permission ->
     [session] This { -api-token } can't do that: only a browser signed in to { -brand-name } can, never a program with a token.
-   *[other] This { -api-token } can't do that: it needs the { $scope } scope. Create a token with that scope in { -brand-name }'s Settings and give it to the program in place of this one.
+    [backups] This { -api-token } can't do that: it needs the permission Backups, to see plans, repositories, snapshots, operations and status. Add it to the token in { -brand-name }'s Settings.
+    [backup-runs] This { -api-token } can't do that: it needs the permission Backup runs, to start and cancel backups. Add it to the token in { -brand-name }'s Settings.
+    [previews] This { -api-token } can't do that: it needs the permission Previews, to see what forget or an import would do. Add it to the token in { -brand-name }'s Settings.
+    [configuration] This { -api-token } can't do that: it needs the permission Configuration, to propose configuration changes. Add it to the token in { -brand-name }'s Settings.
+    [snapshot-contents] This { -api-token } can't do that: it needs the permission Snapshot contents, to see file and folder names inside snapshots. Add it to the token in { -brand-name }'s Settings.
+    [daemon-log] This { -api-token } can't do that: it needs the permission Daemon log, to read { -brand-name }'s log. Add it to the token in { -brand-name }'s Settings.
+    [repository-check] This { -api-token } can't do that: it needs the permission Repository check, to start a repository check. Add it to the token in { -brand-name }'s Settings.
+   *[other] This { -api-token } can't do that: it needs a permission it doesn't have. Add it to the token in { -brand-name }'s Settings.
+  }
+
+# An AI agent without an API token asked for something that what AI agents may do without a token, the configuration's [without-token] table, doesn't allow, or for something only a person's browser may do.
+# $permission (text): the permission it needs, one of { "backups" }, { "backup-runs" }, { "previews" }, { "configuration" }, { "snapshot-contents" }, { "daemon-log" } or { "repository-check" }; or { "session" } for what only a browser may do.
+error-without-token-permission = { $permission ->
+    [session] AI agents can't do that: only a person using { -brand-name } in a browser can.
+    [backups] AI agents without a token may not see plans, repositories, snapshots, operations or status here: that needs the permission Backups. A person can allow it in the table { "[without-token]" } of { -brand-name }'s configuration file, or give the agent an { -api-token } that has it.
+    [backup-runs] AI agents without a token may not start or cancel backups here: that needs the permission Backup runs. A person can allow it in the table { "[without-token]" } of { -brand-name }'s configuration file, or give the agent an { -api-token } that has it.
+    [previews] AI agents without a token may not preview what forget or an import would do here: that needs the permission Previews. A person can allow it in the table { "[without-token]" } of { -brand-name }'s configuration file, or give the agent an { -api-token } that has it.
+    [configuration] AI agents without a token may not propose configuration changes here: that needs the permission Configuration. A person can allow it in the table { "[without-token]" } of { -brand-name }'s configuration file, or give the agent an { -api-token } that has it.
+    [snapshot-contents] AI agents without a token may not see file and folder names inside snapshots here: that needs the permission Snapshot contents. A person can allow it in the table { "[without-token]" } of { -brand-name }'s configuration file, or give the agent an { -api-token } that has it.
+    [daemon-log] AI agents without a token may not read { -brand-name }'s log here: that needs the permission Daemon log. A person can allow it in the table { "[without-token]" } of { -brand-name }'s configuration file, or give the agent an { -api-token } that has it.
+    [repository-check] AI agents without a token may not start a repository check here: that needs the permission Repository check. A person can allow it in the table { "[without-token]" } of { -brand-name }'s configuration file, or give the agent an { -api-token } that has it.
+   *[other] AI agents without a token may not do that here. A person can allow it in the table { "[without-token]" } of { -brand-name }'s configuration file, or give the agent an { -api-token } that has it.
   }
 
 # The token routes were asked for while no admin password is set.
@@ -182,8 +203,8 @@ error-restart-pending = { -brand-name } is waiting to restart once the running o
 # $max (count): the most characters a label may have.
 error-api-token-label = Give the token a label of 1 to { $max } characters, so you can tell it from the others.
 
-# An API token was asked for with no scope.
-error-api-token-no-scope = Choose at least one scope for the token: what the program may do.
+# An API token was asked for with no permission.
+error-api-token-no-permission = Choose at least one permission for the token: what the program may do.
 
 # As many API tokens as are allowed are kept already.
 # $limit (count): the most tokens kept.

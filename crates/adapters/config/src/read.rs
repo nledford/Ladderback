@@ -5,6 +5,7 @@
 use std::collections::{BTreeMap, BTreeSet};
 
 use app::ports::{CadenceProblem, ConfigError, PasswordProblem, Problem};
+use domain::access::permissions::{Permission, Permissions};
 use domain::execution::plan_tags::UserTag;
 use domain::notifications::{
     Auth, Channel, ChannelError, ChannelKind, ChannelName, ChannelSecret, EventKind, Notifications,
@@ -27,7 +28,7 @@ use crate::locate::{Doc, Path, key_span, position, value_span};
 use crate::tables::{
     AgentTable, AlternativeTable, ChannelTable, FileTable, HookEntryTable, HookValue, HooksTable,
     LocationTable, NotificationsTable, PlanTable, RepositoryTable, RetentionTable, RetryTable,
-    RuleTable, ScheduleTable,
+    RuleTable, ScheduleTable, WithoutTokenTable,
 };
 use crate::zone::schedule_zone;
 
@@ -120,9 +121,53 @@ pub(crate) fn config(reader: &Reader<'_, '_>, file: FileTable) -> Read<AgentConf
         &root.key("notifications"),
         file.notifications.unwrap_or_default(),
     )?;
+    let without_token = without_token(
+        reader,
+        &root.key("without-token"),
+        file.without_token.unwrap_or_default(),
+    )?;
     AgentConfig::new(agent, hooks, repositories, plans)
         .and_then(|config| config.with_notifications(Notifications::new(channels, rules)?))
+        .map(|config| config.with_without_token(without_token))
         .map_err(|violation| violated(reader, &root, violation))
+}
+
+/// The `[without-token]` table: what AI agents may do without a token, each
+/// key a permission set to its level or to `"none"`; a permission it leaves
+/// out keeps its default (§16, decision 127).
+fn without_token(
+    reader: &Reader<'_, '_>,
+    path: &Path,
+    table: WithoutTokenTable,
+) -> Read<Permissions> {
+    let WithoutTokenTable {
+        backups,
+        backup_runs,
+        previews,
+        configuration,
+        snapshot_contents,
+        daemon_log,
+        repository_check,
+    } = table;
+    [
+        (Permission::Backups, backups),
+        (Permission::BackupRuns, backup_runs),
+        (Permission::Previews, previews),
+        (Permission::Configuration, configuration),
+        (Permission::SnapshotContents, snapshot_contents),
+        (Permission::DaemonLog, daemon_log),
+        (Permission::RepositoryCheck, repository_check),
+    ]
+    .into_iter()
+    .try_fold(Permissions::default(), |permissions, (permission, set)| {
+        let Some(text) = set else {
+            return Ok(permissions);
+        };
+        reader.value(
+            &path.key(permission.as_str()),
+            permissions.with_named(permission, &text),
+        )
+    })
 }
 
 /// A violation, at the key that the rule is about: a plan's, or the second
