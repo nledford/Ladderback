@@ -1231,7 +1231,7 @@ warning-profile-command-left-out = The command at { $key } was left out of the p
 warning-profile-command-imported = The import added a command at { $key } that runs { $program }.
 
 # An import left the profile's global hooks out, because the configuration already had plans or repositories.
-warning-profile-global-hooks-left-out = The profile's global hooks were left out, because they would also run around the plans and repositories the configuration already has. To have them, add them to the agent's hooks yourself.
+warning-profile-global-hooks-left-out = The profile's global hooks were left out, because they would also run around the plans and repositories the configuration already has. To have them, add them to the { -agent }'s hooks yourself.
 
 # A notification of an event was not delivered to its channel, and is not tried again.
 # $event (text): the event's name, such as backup.failed. Keep it as it is.
