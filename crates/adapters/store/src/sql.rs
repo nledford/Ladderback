@@ -188,10 +188,15 @@ pub(crate) const INSERT_API_TOKEN: &str = concat!(
     "VALUES (?, ?, ?, ?, ?, ?, ?)"
 );
 
-/// Gives a kept API token other permissions. Parameters: the permissions,
-/// the token's ID.
+/// Gives a kept API token other permissions; it touches no row when the
+/// token holds them already, so the count of rows changed says whether
+/// they changed. Parameters: the permissions, the token's ID, the
+/// permissions again.
 pub(crate) const SET_API_TOKEN_PERMISSIONS: &str =
-    "UPDATE api_tokens SET permissions = ? WHERE id = ?";
+    "UPDATE api_tokens SET permissions = ? WHERE id = ? AND permissions IS NOT ?";
+
+/// Whether an API token is kept. Parameter: the token's ID.
+pub(crate) const API_TOKEN_KEPT: &str = "SELECT EXISTS(SELECT 1 FROM api_tokens WHERE id = ?)";
 
 /// Parameter: the token's ID.
 pub(crate) const GET_API_TOKEN: &str = select_api_tokens!(" WHERE id = ?");
