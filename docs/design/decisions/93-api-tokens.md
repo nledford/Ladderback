@@ -20,3 +20,5 @@
 - **Bounds.** At most 100 tokens; a label of 1 to 64 characters, required; at least one scope.
 
 Left out: per-repository or per-plan scopes, tokens on the hub, and creating a token from the command line (creation needs a session).
+
+**Amended by decision 127** (2026-11-20, #962): the four scopes are replaced by seven permissions, each token's own and changed only from a session with the current admin password; `api-token-scope` and its `scope` argument are `api-token-permission` and `permission`, and `api-token-no-scope` is `api-token-no-permission`. Each token keeps the routes it reached.
