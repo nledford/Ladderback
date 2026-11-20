@@ -55,6 +55,19 @@
     color: #d77c7c;
 }
 
+/* The matches a search result's page marks (its link adds `?highlight=`):
+ * dark text on the mark's light fill, code included, whose own colors are
+ * chosen for the code block's fill (`.content` outranks the theme rules
+ * above). Coal's fill is navy's, since dark text reads at under 3:1 on its
+ * own. */
+.coal {
+    --search-mark-bg: #a2cff5;
+}
+
+.content mark [class*="hljs-"] {
+    color: inherit;
+}
+
 /* 1.4.1: a link in a sentence is told apart by more than its color. */
 .content main a:not(.header) {
     text-decoration: underline;
