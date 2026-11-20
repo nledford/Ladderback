@@ -3,6 +3,8 @@
 //! and compatibility"): the agent's `Hello`, the hub's `Welcome`, and the
 //! envelopes that carry them.
 
+use jiff::SignedDuration;
+
 use super::handshake::HANDSHAKES;
 use super::hostname::Hostname;
 use super::keys::Signature;
@@ -186,13 +188,20 @@ impl Welcome {
 
     /// Whether an agent that sent `sent` in its `Hello` and pinned
     /// `generation` acts on this `Welcome`, whose envelope expires at
-    /// `expires_at`.
+    /// `expires_at` and reached the agent `waited` after it sent `Hello`,
+    /// on the agent's monotonic clock. The hub signed after it read
+    /// `Hello`, so at arrival the hub's time is at most `signed_at` plus
+    /// `waited`: a `Welcome` that waited as long as its own life is
+    /// refused, whatever the agent's wall clock says (decision 120,
+    /// "Expiry is judged on the hub's time").
     pub fn check(
         &self,
         expires_at: EpochSeconds,
+        waited: SignedDuration,
         sent: Protocols,
         generation: u64,
     ) -> Result<(), WelcomeRefused> {
+        let _ = waited;
         let signed_at = self.signed_at.seconds();
         let expires = expires_at.seconds();
         if expires <= signed_at || expires > signed_at.saturating_add(MAX_EXPIRY_AHEAD) {

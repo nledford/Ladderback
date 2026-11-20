@@ -494,6 +494,88 @@ async fn a_welcome_is_checked_before_it_is_acted_on() {
     assert_eq!(identity.pin().await.unwrap().unwrap().generation, 3);
 }
 
+/// A connector to `hub` whose link lets `delay` pass on the agent's clock
+/// before it hands over a signed message, as a link that held the
+/// `Welcome` in a buffer would.
+struct Delaying {
+    hub: Arc<HubPairing>,
+    clock: Arc<FakeClock>,
+    delay: SignedDuration,
+}
+
+struct DelayingLink {
+    inner: Box<dyn HubLink>,
+    clock: Arc<FakeClock>,
+    delay: SignedDuration,
+}
+
+#[async_trait]
+impl HubConnector for Delaying {
+    async fn connect(&self, route: &HubRoute) -> Result<Box<dyn HubLink>, LinkError> {
+        let inner = LoopbackHubConnector::to(self.hub.clone())
+            .connect(route)
+            .await?;
+        Ok(Box::new(DelayingLink {
+            inner,
+            clock: self.clock.clone(),
+            delay: self.delay,
+        }))
+    }
+}
+
+#[async_trait]
+impl HubLink for DelayingLink {
+    fn exporter(&self) -> Option<[u8; KEY_BYTES]> {
+        self.inner.exporter()
+    }
+
+    async fn send(&mut self, frame: &AgentFrame) -> Result<(), LinkError> {
+        self.inner.send(frame).await
+    }
+
+    async fn receive(&mut self) -> Result<HubFrame, LinkError> {
+        let frame = self.inner.receive().await?;
+        if let Ok(HubMessage::Signed(_)) = hub_message(&frame) {
+            self.clock.advance(self.delay);
+        }
+        Ok(frame)
+    }
+}
+
+/// A `Welcome` that reaches the agent as long after its `Hello` as the
+/// message lives had expired by then, so the agent acts on none of it,
+/// whatever its own wall clock says; one a little sooner is taken
+/// (decision 120, "Expiry is judged on the hub's time").
+#[tokio::test]
+async fn a_welcome_that_arrives_after_its_life_is_not_acted_on() {
+    let hub = hub(1);
+    let identity = paired(&hub, 1).await;
+    let life = SignedDuration::from_secs(i64::try_from(domain::fleet::MESSAGE_LIFE).unwrap());
+    let connect = |delay: SignedDuration| {
+        let clock = Arc::new(FakeClock::new(
+            Timestamp::from_second(1_800_000_030).unwrap(),
+        ));
+        ConnectToHub::new(
+            identity.clone(),
+            Arc::new(FakeSigning),
+            Arc::new(SeededRandom::new(77)),
+            clock.clone(),
+            Arc::new(Delaying {
+                hub: hub.pairing.clone(),
+                clock,
+                delay,
+            }),
+            "0.5.0-agent".to_owned(),
+        )
+    };
+    let late = connect(life).connect(agent_id(1), hostname(1)).await;
+    assert_eq!(late, Err(ConnectFailure::Welcome(WelcomeRefused::Expiry)));
+    let in_time = connect(life - SignedDuration::from_secs(1))
+        .connect(agent_id(1), hostname(1))
+        .await;
+    assert!(in_time.is_ok(), "{in_time:?}");
+}
+
 /// The hub's side on its own: a proof is checked against the key the hub
 /// registered, and a `Hello` must be the agent's, first in sequence, and
 /// of its kind; the `Welcome` it gets is signed and lives 10 minutes.

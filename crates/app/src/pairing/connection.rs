@@ -1,11 +1,11 @@
 use std::sync::Arc;
 
-use domain::AgentId;
 use domain::fleet::{
     AgentEnvelope, Approval, BindingKind, Connect, EpochSeconds, FIRST_SEQUENCE, Hello, Hostname,
     HubEnvelope, HubPin, HubRoute, Nonce, PROTOCOLS, PairAnswer, PayloadDigest, Proof, PublicKey,
     Refused, RouteRefused, SeedFile, SignedMessage, WelcomeRefused, hello_kind, welcome_kind,
 };
+use domain::{AgentId, SignedDuration};
 
 use super::agent::{ChallengeRefused, check_challenge, refusal_holds};
 use super::wire::{
@@ -189,6 +189,7 @@ impl ConnectToHub {
         let signature = self.signing.sign(&seed, &said.to_bytes())?;
         // A refused proof is answered before `Hello` reaches the hub, which
         // may have closed the connection: its refusal is still read.
+        let hello_sent = self.clock.monotonic();
         let sent = link
             .send(&agent_envelope_frame(&AgentEnvelope {
                 kind,
@@ -242,22 +243,25 @@ impl ConnectToHub {
         {
             return Err(ConnectFailure::Unsigned);
         }
-        self.take_welcome(pin, agent_key, &welcome).await
+        let waited = self.clock.monotonic().saturating_sub(hello_sent);
+        self.take_welcome(pin, agent_key, &welcome, waited).await
     }
 
     /// The agent's pin and approval after the hub's signed `welcome`,
-    /// which it acts on only once the welcome holds.
+    /// which reached it `waited` after it sent `Hello` and which it acts on
+    /// only once the welcome holds.
     async fn take_welcome(
         &self,
         mut pin: HubPin,
         agent_key: PublicKey,
         welcome: &HubEnvelope,
+        waited: SignedDuration,
     ) -> Result<Connected, ConnectFailure> {
         if welcome.kind != welcome_kind() {
             return Err(ConnectFailure::OutOfTurn);
         }
         let read = read_welcome(&welcome.payload).map_err(|_| ConnectFailure::Unsigned)?;
-        read.check(welcome.expires_at, PROTOCOLS, pin.generation)
+        read.check(welcome.expires_at, waited, PROTOCOLS, pin.generation)
             .map_err(ConnectFailure::Welcome)?;
         if read.generation > pin.generation {
             pin.generation = read.generation;

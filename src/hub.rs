@@ -796,6 +796,13 @@ mod tests {
             args,
             vec![("address", MsgArg::Text("https://hub.example".to_owned()))]
         );
+        // A hub's signed refusal other than `proof-refused` is a lost link
+        // whose text still names the hub's code, so the person can report it.
+        for name in ["hostname-taken", "generation-lower", "token-used"] {
+            let (code, args, detail) = connect_failed(&refused(name), "https://hub.example");
+            let text = l10n::Localizer::new(&[]).error(code, &args, detail.as_deref());
+            assert!(text.text().contains(name), "{name}: {text}");
+        }
     }
 
     /// A hub that didn't prove the key this machine pinned gets hub-status's

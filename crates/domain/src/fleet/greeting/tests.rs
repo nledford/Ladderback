@@ -1,3 +1,5 @@
+use jiff::SignedDuration;
+
 use super::*;
 
 fn range(lowest: u64, highest: u64) -> Protocols {
@@ -80,15 +82,62 @@ fn an_agent_acts_on_a_welcome_inside_its_window() {
     let welcome = welcome();
     for ahead in [1, MESSAGE_LIFE, MAX_EXPIRY_AHEAD] {
         let expires = EpochSeconds::from_seconds(1_800_000_000 + ahead);
-        assert_eq!(welcome.check(expires, PROTOCOLS, 1), Ok(()), "{ahead}");
+        assert_eq!(
+            welcome.check(expires, SignedDuration::ZERO, PROTOCOLS, 1),
+            Ok(()),
+            "{ahead}"
+        );
     }
     for expires in [1_800_000_000, 1_799_999_999, 1_800_000_901] {
         assert_eq!(
-            welcome.check(EpochSeconds::from_seconds(expires), PROTOCOLS, 1),
+            welcome.check(
+                EpochSeconds::from_seconds(expires),
+                SignedDuration::ZERO,
+                PROTOCOLS,
+                1
+            ),
             Err(WelcomeRefused::Expiry),
             "{expires}"
         );
     }
+}
+
+/// The agent can't read the hub's clock, but it knows how long it waited
+/// since it sent `Hello`, which the hub signed after: a `Welcome` that took
+/// longer than its own life to arrive had expired by then (decision 120,
+/// "Expiry is judged on the hub's time").
+#[test]
+fn a_welcome_that_took_longer_than_its_life_to_arrive_is_refused() {
+    let welcome = welcome();
+    let expires = welcome.expires_at();
+    let life = i64::try_from(MESSAGE_LIFE).unwrap();
+    for waited in [0, 1, life - 1] {
+        assert_eq!(
+            welcome.check(expires, SignedDuration::from_secs(waited), PROTOCOLS, 1),
+            Ok(()),
+            "{waited}"
+        );
+    }
+    for waited in [life, life + 1, i64::MAX] {
+        assert_eq!(
+            welcome.check(expires, SignedDuration::from_secs(waited), PROTOCOLS, 1),
+            Err(WelcomeRefused::Expiry),
+            "{waited}"
+        );
+    }
+    assert_eq!(
+        welcome.check(
+            expires,
+            SignedDuration::from_millis(life * 1_000 - 1),
+            PROTOCOLS,
+            1
+        ),
+        Ok(())
+    );
+    assert_eq!(
+        welcome.check(expires, SignedDuration::from_secs(-5), PROTOCOLS, 1),
+        Ok(())
+    );
 }
 
 #[test]
@@ -97,7 +146,7 @@ fn an_altered_protocol_echo_or_pick_is_refused() {
     let mut stripped = welcome();
     stripped.agent_protocols = range(1, 2);
     assert_eq!(
-        stripped.check(expires, PROTOCOLS, 1),
+        stripped.check(expires, SignedDuration::ZERO, PROTOCOLS, 1),
         Err(WelcomeRefused::Protocols)
     );
     let mut lowered = welcome();
@@ -105,12 +154,12 @@ fn an_altered_protocol_echo_or_pick_is_refused() {
     lowered.agent_protocols = range(1, 2);
     lowered.protocol = Some(1);
     assert_eq!(
-        lowered.check(expires, range(1, 2), 1),
+        lowered.check(expires, SignedDuration::ZERO, range(1, 2), 1),
         Err(WelcomeRefused::Protocols)
     );
     lowered.protocol = None;
     assert_eq!(
-        lowered.check(expires, range(1, 2), 1),
+        lowered.check(expires, SignedDuration::ZERO, range(1, 2), 1),
         Err(WelcomeRefused::Protocols)
     );
 }
@@ -120,17 +169,20 @@ fn a_lower_generation_or_no_common_protocol_is_refused() {
     let welcome = welcome();
     let expires = welcome.expires_at();
     assert_eq!(
-        welcome.check(expires, PROTOCOLS, 2),
+        welcome.check(expires, SignedDuration::ZERO, PROTOCOLS, 2),
         Err(WelcomeRefused::GenerationLower)
     );
     let mut higher = welcome.clone();
     higher.generation = 3;
-    assert_eq!(higher.check(expires, PROTOCOLS, 2), Ok(()));
+    assert_eq!(
+        higher.check(expires, SignedDuration::ZERO, PROTOCOLS, 2),
+        Ok(())
+    );
     let mut apart = welcome;
     apart.hub_protocols = range(2, 3);
     apart.protocol = None;
     assert_eq!(
-        apart.check(expires, PROTOCOLS, 1),
+        apart.check(expires, SignedDuration::ZERO, PROTOCOLS, 1),
         Err(WelcomeRefused::NoCommonProtocol)
     );
 }
