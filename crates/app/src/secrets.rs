@@ -762,10 +762,15 @@ impl<'a> Run<'a> {
     /// to ask is read again every [`KEYRING_POLL`] while the daemon is in
     /// its first [`KEYRING_WAIT`], and one that answered that it is locked
     /// waits to be unlocked until the plan's next run is due; the hold's
-    /// `waiting` is told once of either wait. Every other answer, and the
-    /// last, is as the resolver gave it.
+    /// `waiting` is told once of either wait. An entry still refused as
+    /// locked after the keyring answered that it is unlocked — it can sit
+    /// in a collection other than the one the keyring is asked about — is
+    /// read again no sooner than a [`KEYRING_POLL`] later, and never past
+    /// that bound. Every other answer, and the last, is as the resolver
+    /// gave it.
     async fn read(&self, secret: &SecretRef) -> Result<Resolved, SecretError> {
         let mut told = false;
+        let mut read_unlocked = false;
         loop {
             let read = self.resolver.resolve(secret).await;
             let Some(hold) = self.hold else {
@@ -797,9 +802,16 @@ impl<'a> Run<'a> {
                         (hold.waiting)(source, KeyringWaitsFor::Unlock);
                         told = true;
                     }
+                    if read_unlocked {
+                        let Some(left) = unlock.left() else {
+                            return read;
+                        };
+                        unlock.clock.sleep(left.min(KEYRING_POLL)).await;
+                    }
                     if !self.waits_to_unlock(unlock).await {
                         return read;
                     }
+                    read_unlocked = true;
                 }
                 // An unlock prompt the person dismissed is a no: the run
                 // fails at once and never asks again.
@@ -810,10 +822,14 @@ impl<'a> Run<'a> {
 
     /// Waits for the keyring to be unlocked until `unlock`'s bound, asking
     /// whether it is locked every [`KEYRING_POLL`] — reading no entry, so
-    /// waiting can raise no unlock prompt (#1221). `true` once it is
-    /// unlocked; `false` at the bound, the refusal standing.
+    /// waiting can raise no unlock prompt (#1221) — and never once the
+    /// bound has come. `true` once it is unlocked; `false` at the bound,
+    /// the refusal standing.
     async fn waits_to_unlock(&self, unlock: &UnlockWait) -> bool {
         loop {
+            if unlock.left().is_none() {
+                return false;
+            }
             match self.resolver.keyring_lock().await {
                 KeyringLock::Unlocked => return true,
                 // Where there is no service to ask it can't be said: the
