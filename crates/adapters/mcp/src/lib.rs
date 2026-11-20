@@ -1204,7 +1204,19 @@ impl Server {
     /// backend's permissions open (decision 127). Permissions that can't be
     /// read hide no tool: the daemon still refuses what isn't allowed.
     async fn offered(&self) -> Vec<Tool> {
-        todo!()
+        let offer = self.offer();
+        let permissions = self.backend.permissions().await.ok();
+        tools()
+            .into_iter()
+            .filter(|tool| {
+                ToolName::named(&tool.name).is_some_and(|named| {
+                    named.offered_in(offer)
+                        && permissions
+                            .as_ref()
+                            .is_none_or(|permissions| named.opened_by(permissions))
+                })
+            })
+            .collect()
     }
 }
 

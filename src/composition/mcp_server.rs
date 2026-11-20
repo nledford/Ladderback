@@ -13,6 +13,7 @@ use api::MsgArg;
 use app::ports::{ConfigStore as _, Random};
 use async_trait::async_trait;
 use config_adapter::FileConfigStore;
+use domain::access::permissions::{Permission, Permissions};
 use domain::planning::{
     AgentConfig, AgentSettings, Hooks, Maintenance, Plan, RepositoryConfig, RepositorySettings,
     Source,
@@ -320,7 +321,10 @@ async fn seeded(folder: &Scratch, random: &dyn Random) -> Result<Daemon, Unseede
 
 /// The configuration of a scratch session: the repository at `repository`,
 /// opened with the password in `password` and maintained here, and a plan
-/// that backs `files` up to it.
+/// that backs `files` up to it. Its files are made up, so nothing in them
+/// is private: its AI agent may look inside its snapshots beside a new
+/// token's defaults (decision 127), and the folder and search tools stay
+/// open to a demo.
 fn scratch_config(files: &Path, repository: &Path, password: &Path) -> Result<AgentConfig, String> {
     let alias = RepositoryAlias::parse(SCRATCH_NAME).map_err(|error| error.to_string())?;
     let plan = PlanId::parse(SCRATCH_NAME).map_err(|error| error.to_string())?;
@@ -343,12 +347,19 @@ fn scratch_config(files: &Path, repository: &Path, password: &Path) -> Result<Ag
         group_by: Default::default(),
         hooks: Hooks::default(),
     };
+    let without_token = Permissions::default()
+        .with(
+            Permission::SnapshotContents,
+            Some(Permission::SnapshotContents.level()),
+        )
+        .map_err(|error| format!("{error:?}"))?;
     AgentConfig::new(
         AgentSettings::default(),
         Hooks::default(),
         BTreeMap::from([(alias.clone(), entry)]),
         vec![Plan::new(plan, alias, vec![source])],
     )
+    .map(|config| config.with_without_token(without_token))
     .map_err(|error| error.to_string())
 }
 
@@ -390,13 +401,18 @@ fn in_process(daemon: Daemon, scratch: Option<Scratch>) -> (::mcp::Server, Held)
 }
 
 /// The in-process [`mcp::Backend`] of headless and scratch modes: the
-/// handles the router of `serve` reads, called directly.
+/// handles the router of `serve` reads, called directly. Its AI agent is
+/// held to what AI agents may do without a token, as connect mode is with
+/// sign-in off (decision 127): each call is refused naming a permission
+/// the `[without-token]` table doesn't grant, and a file's name is shown
+/// only with Snapshot contents.
 pub(crate) struct InProcess {
     catalog: Arc<dyn http_adapter::Catalog>,
     operations: Arc<dyn http_adapter::Operations>,
     repositories: Arc<dyn http_adapter::Repositories>,
     profiles: Arc<dyn http_adapter::Profiles>,
     full_disk_access: http_adapter::FullDiskAccessRoute,
+    without_token: Arc<app::without_token::WithoutToken>,
 }
 
 impl InProcess {
@@ -408,13 +424,33 @@ impl InProcess {
             repositories: Arc::clone(&state.repositories),
             profiles: Arc::clone(&state.profiles),
             full_disk_access: state.full_disk_access.clone(),
+            without_token: Arc::clone(&state.without_token),
         }
+    }
+
+    /// Every permission the `[without-token]` table holds, when it grants
+    /// `permission`; refused as the daemon refuses an AI agent's request
+    /// otherwise.
+    async fn allow(&self, permission: Permission) -> Result<Permissions, api::ErrorDto> {
+        use app::without_token::WithoutTokenRefused;
+        self.without_token
+            .allow(permission)
+            .await
+            .map_err(|refusal| match refusal {
+                WithoutTokenRefused::Lacks(permission) => api::ErrorDto::new(
+                    api::ErrorCode::WithoutTokenPermission,
+                    [("permission", MsgArg::Text(permission.as_str().to_owned()))],
+                    None,
+                ),
+                WithoutTokenRefused::Unavailable(error) => config_refusal(error),
+            })
     }
 }
 
 #[async_trait]
 impl ::mcp::Backend for InProcess {
     async fn status(&self) -> Result<::mcp::BackendStatus, api::ErrorDto> {
+        let held = self.allow(Permission::Backups).await?;
         let summary = self
             .catalog
             .status(self.full_disk_access.state())
@@ -423,19 +459,22 @@ impl ::mcp::Backend for InProcess {
         Ok(::mcp::BackendStatus {
             access: ::mcp::Access::InProcess,
             daemon: None,
-            summary,
+            summary: http_adapter::status_shown(held, summary),
         })
     }
 
     async fn plans(&self) -> Result<api::PlansDto, api::ErrorDto> {
+        self.allow(Permission::Backups).await?;
         self.catalog.plans().await.map_err(catalog_refusal)
     }
 
     async fn repositories(&self) -> Result<api::RepositoriesDto, api::ErrorDto> {
+        self.allow(Permission::Backups).await?;
         self.catalog.repositories().await.map_err(catalog_refusal)
     }
 
     async fn snapshots(&self, repository: String) -> Result<api::SnapshotsDto, api::ErrorDto> {
+        self.allow(Permission::Backups).await?;
         self.catalog
             .snapshots(repository.clone())
             .await
@@ -451,6 +490,7 @@ impl ::mcp::Backend for InProcess {
         most: u64,
     ) -> Result<api::FolderDto, api::ErrorDto> {
         use http_adapter::FolderError;
+        self.allow(Permission::SnapshotContents).await?;
         let named = snapshot.as_str().to_owned();
         let path = folder.to_string();
         self.catalog
@@ -478,6 +518,7 @@ impl ::mcp::Backend for InProcess {
         plan: Option<domain::PlanId>,
         caps: domain::find::SearchCaps,
     ) -> Result<api::FindDto, api::ErrorDto> {
+        self.allow(Permission::SnapshotContents).await?;
         self.catalog
             .find(repository.clone(), pattern, plan, caps)
             .await
@@ -490,7 +531,9 @@ impl ::mcp::Backend for InProcess {
         after: Option<String>,
         limit: u64,
     ) -> Result<api::OperationsPageDto, api::ErrorDto> {
-        self.operations
+        let held = self.allow(Permission::Backups).await?;
+        let page = self
+            .operations
             .history(plan, after.clone(), Some(limit))
             .await
             .map_err(|http_adapter::HistoryError::BadCursor| {
@@ -499,20 +542,36 @@ impl ::mcp::Backend for InProcess {
                     after.map(|cursor| ("cursor", MsgArg::Text(cursor))),
                     None,
                 )
-            })
+            })?;
+        Ok(api::OperationsPageDto {
+            operations: page
+                .operations
+                .into_iter()
+                .map(|summary| http_adapter::summary_shown(held, summary))
+                .collect(),
+            ..page
+        })
     }
 
     async fn operation(&self, id: String) -> Result<api::OperationDetailDto, api::ErrorDto> {
-        self.operations
-            .operation(id.clone())
-            .await
-            .map_err(|http_adapter::LookupError::Unknown| {
+        let held = self.allow(Permission::Backups).await?;
+        let detail = self.operations.operation(id.clone()).await.map_err(
+            |http_adapter::LookupError::Unknown| {
                 api::ErrorDto::new(
                     api::ErrorCode::OperationUnknown,
                     [("operation", MsgArg::Text(id))],
                     None,
                 )
-            })
+            },
+        )?;
+        Ok(api::OperationDetailDto {
+            operation: http_adapter::summary_shown(held, detail.operation),
+            warnings: detail
+                .warnings
+                .into_iter()
+                .map(|warning| http_adapter::warning_shown(held, warning))
+                .collect(),
+        })
     }
 
     /// Read from the detail: this process reads its own store, with no cap
@@ -523,6 +582,7 @@ impl ::mcp::Backend for InProcess {
 
     async fn run(&self, plan: String) -> Result<String, api::ErrorDto> {
         use http_adapter::StartError;
+        self.allow(Permission::BackupRuns).await?;
         self.operations
             .start_backup(plan.clone(), domain::execution::Trigger::Mcp)
             .await
@@ -553,6 +613,10 @@ impl ::mcp::Backend for InProcess {
     /// refusal the domain's rule gives.
     async fn cancel(&self, id: String) -> Result<(), api::ErrorDto> {
         use http_adapter::CancelError;
+        // Connect mode reads the operation before it cancels it, so it
+        // needs Backups too, and names it first.
+        self.allow(Permission::Backups).await?;
+        self.allow(Permission::BackupRuns).await?;
         self.operations
             .cancel(id.clone(), http_adapter::Canceller::ApiToken)
             .await
@@ -575,6 +639,7 @@ impl ::mcp::Backend for InProcess {
         &self,
         repository: String,
     ) -> Result<api::LocationsTestDto, api::ErrorDto> {
+        self.allow(Permission::BackupRuns).await?;
         self.repositories
             .test_saved(repository)
             .await
@@ -585,6 +650,7 @@ impl ::mcp::Backend for InProcess {
         &self,
         repository: String,
     ) -> Result<api::MaintenancePreviewDto, api::ErrorDto> {
+        self.allow(Permission::Previews).await?;
         self.operations
             .preview(repository.clone(), http_adapter::MaintenanceRequest::Forget)
             .await
@@ -596,6 +662,7 @@ impl ::mcp::Backend for InProcess {
         content: String,
         repository: String,
     ) -> Result<api::ProfileImportDto, api::ErrorDto> {
+        self.allow(Permission::Previews).await?;
         self.profiles
             .preview(api::ProfilePreviewDto {
                 content,
@@ -606,6 +673,7 @@ impl ::mcp::Backend for InProcess {
     }
 
     async fn export_profile(&self, plan: String) -> Result<api::ProfileExportDto, api::ErrorDto> {
+        self.allow(Permission::Backups).await?;
         self.profiles
             .export(plan, api::ProfileCommands::LeftOut)
             .await
@@ -613,7 +681,11 @@ impl ::mcp::Backend for InProcess {
     }
 
     async fn permissions(&self) -> Result<api::PermissionsDto, api::ErrorDto> {
-        todo!()
+        self.without_token
+            .permissions()
+            .await
+            .map(app::access::permissions_dto)
+            .map_err(config_refusal)
     }
 }
 
@@ -650,6 +722,14 @@ fn snapshots_refusal(alias: String, error: http_adapter::SnapshotsError) -> api:
             api::ErrorDto::new(api::ErrorCode::RepositoryReadTimedOut, [], None)
         }
     }
+}
+
+/// The configuration's refusal as the API answers it: its `config-*` code,
+/// its arguments and the store's words.
+fn config_refusal(error: app::ports::ConfigError) -> api::ErrorDto {
+    app::ports::config_unusable(error, |code, args, detail| {
+        api::ErrorDto::new(code, args, detail)
+    })
 }
 
 #[cfg(test)]
