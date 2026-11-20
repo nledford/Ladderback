@@ -128,6 +128,10 @@ git checkout "$(git tag --list 'v*' --sort=-v:refname | grep -v -- - | head -n 1
 
 Start it with `ladderback serve` and open the address it prints, `listening on http://127.0.0.1:9898`; `--listen` picks another address or port (beyond loopback only with `--allowed-host`; [Remote access](remote-access.md) has the details). Its configuration and data live in your platform's config and data folders ([technical design §4.2](https://github.com/nledford/Ladderback/blob/main/docs/design/components/daemon.md#42-daemon-agent), "Config").
 
+### Coming from rustic
+
+`ladderback import-profile <profile.toml>` adds a rustic profile's repository and its snapshot entries, as plans, to the configuration. When the profile runs commands (hooks, a `password-command`, an `rclone-command`), the import lists each one in full and asks `Import them? [y/N]` before it writes anything, since Ladderback then runs them on its jobs. Read them, and answer `y` only if you know what each does. In a script there is nobody to ask, so pass `--yes` once you have read them; without it nothing is imported. A profile's global hooks are imported only into an empty configuration: once you have a plan or a repository, add them to `[hooks]` yourself ([technical design §6.2](https://github.com/nledford/Ladderback/blob/main/docs/design/scheduling-and-config.md#62-importing-rustic-profiles)).
+
 ## Updating
 
 To update a package, install the next release's, then run `ladderback install-service` again (see [Install a package](#install-a-package-debian-ubuntu-fedora)). To update, run the install script again (on macOS with `LADDERBACK_SIGN_IDENTITY` again), or by hand `git fetch --tags`, the same `git checkout` line, and `just install`; either replaces the installed binary. By hand after the script installed the archive, run `just install --force`: cargo won't overwrite a binary it didn't install. Releases up to 0.2.0 track the web UI's stylesheet, which their build can rewrite: coming from one of them by hand, first put it back with `git checkout -- crates/web/tw-out.css`, or git refuses to check out the new release.

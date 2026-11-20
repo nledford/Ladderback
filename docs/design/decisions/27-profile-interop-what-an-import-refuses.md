@@ -2,6 +2,8 @@
 
 **An import refuses what it would have to guess at; an export is a profile the stock `rustic` reads, and says or refuses what rustic would do differently** (recorded 2026-11-10, §6.2).
 
+**Amended 2026-11-19 (the maintainer, #1135; [decision 131](131-an-import-confirms-the-commands-it-adds.md)):** an import lists every command it would make runnable (hooks, `password-command`, the options rustic runs as commands) and writes nothing until the person agrees at a terminal or passes `--yes`; `--json` never asks. A profile's `[global.hooks]` become agent hooks only while the configuration has no plan and no repository, and are otherwise left out with a notice.
+
 Settled:
 
 1. **Plan IDs.** A plan's ID is the slug of the entry's `name`, else its label, else the last folder of its first source, else `plan`, and any clash, with the configuration or inside the profile, is refused, never numbered.
