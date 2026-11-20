@@ -513,7 +513,7 @@ fn keyring_locked_until(
 /// in a locked keyring waits for the keyring to be unlocked — its
 /// operation shows as queued while it waits — and runs once it is, never
 /// past the next run its plan's planner kept, which is its bound
-/// (#1221, decision 132).
+/// (#1221, decision 134).
 #[tokio::test]
 async fn a_resumed_run_waits_for_the_keyring_to_be_unlocked() {
     capture();
@@ -526,7 +526,7 @@ async fn a_resumed_run_waits_for_the_keyring_to_be_unlocked() {
         started + domain::SignedDuration::from_secs(60),
     );
     let store = Arc::new(app::fakes::InMemoryOperationStore::new());
-    let (runner, mut heard, scripted, home) =
+    let (runner, heard, scripted, home) =
         keyring_parked_runner(secrets, clock.clone(), store.clone()).await;
     let queued = queued_home_backup(0x1221, None);
     store
@@ -594,7 +594,7 @@ async fn a_resumed_run_of_a_plan_with_no_next_run_is_refused_at_once() {
         started + domain::SignedDuration::from_secs(3600),
     );
     let store = Arc::new(app::fakes::InMemoryOperationStore::new());
-    let (runner, mut heard, scripted, home) =
+    let (runner, heard, scripted, home) =
         keyring_parked_runner(secrets, clock, store.clone()).await;
     let queued = queued_home_backup(0x1222, None);
     store
@@ -630,7 +630,7 @@ async fn a_resumed_run_of_a_plan_with_no_next_run_is_refused_at_once() {
 
 /// A run parked waiting for its keyring gives way to a newer run of its
 /// plan that is going when the keyring is unlocked: one backup runs, not
-/// two behind each other (#1221, decision 132).
+/// two behind each other (#1221, decision 134).
 #[tokio::test]
 async fn a_waiting_run_gives_way_to_a_newer_run_of_its_plan() {
     capture();

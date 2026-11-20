@@ -213,8 +213,8 @@ Decisions 1–6 recorded 2026-11-08. Decisions 7–12 recorded 2026-11-08 after 
 | [129](decisions/129-a-changed-row-stays-marked-until-seen.md) | A changed live row stays marked until it is seen |
 | [130](decisions/130-reduced-motion-keeps-fades.md) | What reduced motion stops, and what it keeps |
 | [131](decisions/131-an-import-confirms-the-commands-it-adds.md) | An import lists the commands it makes runnable, and asks first |
-| [132](decisions/132-keyring-unlock-wait.md) | A run whose keyring is locked waits for it to be unlocked |
 | [133](decisions/133-a-machine-not-an-agent.md) | A machine running Ladderback is a machine, not an agent |
+| [134](decisions/134-keyring-unlock-wait.md) | A run whose keyring is locked waits for it to be unlocked |
 
 ## 17. Open questions
 
