@@ -201,10 +201,13 @@ impl Welcome {
         sent: Protocols,
         generation: u64,
     ) -> Result<(), WelcomeRefused> {
-        let _ = waited;
         let signed_at = self.signed_at.seconds();
         let expires = expires_at.seconds();
         if expires <= signed_at || expires > signed_at.saturating_add(MAX_EXPIRY_AHEAD) {
+            return Err(WelcomeRefused::Expiry);
+        }
+        let life_ms = i128::from(expires.saturating_sub(signed_at)).saturating_mul(1_000);
+        if waited.as_millis() >= life_ms {
             return Err(WelcomeRefused::Expiry);
         }
         if self.agent_protocols != sent || self.protocol != sent.highest_shared(self.hub_protocols)

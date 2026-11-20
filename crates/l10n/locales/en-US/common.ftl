@@ -591,7 +591,10 @@ error-hub-connection-lost = The connection to the { -hub } ended before the pair
 # The connection to the hub ended after this machine paired, or the hub
 # sent what isn't the next message, or one it didn't sign on this
 # connection. Nothing in it was acted on.
+# $detail (text): the code of the hub's signed refusal, such as
+# hostname-taken, shown as it came so it can be reported.
 error-hub-link-lost = The connection to the { -hub } ended, or the { -hub } sent something this machine can't trust, so nothing it sent was acted on. This machine keeps backing up. Check that the { -hub } is running, then try again.
+    .with-detail = The connection to the { -hub } ended, or the { -hub } sent something this machine can't trust, so nothing it sent was acted on. This machine keeps backing up. Check that the { -hub } is running, then try again. The { -hub } said: { $detail }
 
 # The hub offered a lower generation than this machine has already seen.
 # `ladderback hub-recover` is a command: keep it a string literal.
