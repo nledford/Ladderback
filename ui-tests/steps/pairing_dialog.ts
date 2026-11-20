@@ -10,11 +10,11 @@ import { tmpdir } from "node:os";
 import path from "node:path";
 
 import { Given, Then, When } from "@cucumber/cucumber";
-import type { BrowserContext, Locator } from "playwright";
+import type { BrowserContext, Locator, Request } from "playwright";
 
 import { expect } from "../support/expect.ts";
 import { journey, namePattern } from "../support/keyboard.ts";
-import { patienceMs } from "../support/patience.ts";
+import { patienceMs, untilSettled } from "../support/patience.ts";
 import { type BrowserWorld, fixtureRepo, startServer } from "../support/world.ts";
 import { pressUntilFocusIsOn } from "./accessibility.ts";
 import { ownBase } from "./api_tokens.ts";
@@ -216,6 +216,55 @@ Given("the hub fails to cancel pairing tokens", function (this: BrowserWorld) {
         : route.fallback(),
     );
   });
+});
+
+/** The page's first cancel the hub holds, per scenario, and the step's way
+ *  to let the hub answer it. */
+const heldCancels = new WeakMap<BrowserWorld, { request: Promise<Request>; answer: () => void }>();
+
+// The page's first cancel of a token waits for its answer until a step lets
+// the hub give it, so the page is left while it is on its way. Every other
+// cancel goes to the hub at once.
+Given("the hub holds its answer to the page's first cancel of a pairing token", function (this: BrowserWorld) {
+  const answered = Promise.withResolvers<void>();
+  const request = Promise.withResolvers<Request>();
+  heldCancels.set(this, { request: request.promise, answer: answered.resolve });
+  let holding = false;
+  this.contextRoutes.push(async (context) => {
+    await context.route("**/api/v1/hub/pairing-tokens/*", async (route) => {
+      if (route.request().method() !== "DELETE" || holding) {
+        await route.fallback();
+        return;
+      }
+      holding = true;
+      request.resolve(route.request());
+      await answered.promise;
+      await route.fallback();
+    });
+  });
+});
+
+When("the hub answers the cancel it held", async function (this: BrowserWorld) {
+  const held = heldCancels.get(this);
+  assert.ok(held, "the hub holds no cancel");
+  await untilSettled(held.request, "the page sent no cancel for the hub to hold");
+  held.answer();
+});
+
+// Only the held cancel went out for the token, and the hub agreed to it: a
+// second one, sent as the dialog was left, would find no token and answer
+// 404.
+Then("the page sent the hub one cancel of the token the dialog showed, which it agreed to", async function (this: BrowserWorld) {
+  const { id } = madeToken(this);
+  const held = heldCancels.get(this);
+  assert.ok(held, "the hub holds no cancel");
+  const response = await untilSettled((await held.request).response(), "the held cancel was never answered");
+  const answered = `${response?.status() ?? "no answer"} ${id}`;
+  await expect.poll(() => pageCancels.get(this) ?? [], { message: "the page saw the held cancel's answer" }).toContain(answered);
+  assert.deepEqual(
+    (pageCancels.get(this) ?? []).filter((cancel) => cancel.endsWith(` ${id}`)),
+    [`204 ${id}`],
+  );
 });
 
 // I4, and the token is shown once: once the dialog is left, no text, no

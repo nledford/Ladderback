@@ -69,6 +69,19 @@ Feature: Making a pairing token on the hub's page
     Then the dialog "Copy the pairing token" is closed
     And focus is on the textbox "Hub key ID"
 
+  Scenario: Escape while Cancel this token is on its way sends no second cancel, and the page says the first one's answer
+    Given a hub with sign-in off
+    And the hub holds its answer to the page's first cancel of a pairing token
+    When I make a pairing token on the Agents tab
+    And I press Tab until focus is on the button "Cancel this token"
+    And I press Enter
+    And I press Escape
+    Then the dialog "Copy the pairing token" is closed
+    When the hub answers the cancel it held
+    Then the page says "The unused pairing token was canceled."
+    And the page sent the hub one cancel of the token the dialog showed, which it agreed to
+    And nothing on the page holds the pairing token the dialog showed
+
   Scenario: A token that lapses while the dialog is open is replaced by a status, and focus goes to Make a new token
     Given a hub with sign-in off
     And the page's clock can be moved on
