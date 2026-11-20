@@ -277,7 +277,8 @@ fn made(session: &Session, call: ::mcp::Call, out: &mut impl Write) -> io::Resul
     let answer = session.call(call);
     output::write_json(out, &answer.outcome(tool))?;
     if let ::mcp::Answer::Refused(error) = &answer {
-        output::to_stderr(&format!("ladderback: {}\n", session.server.sentence(error)))?;
+        let sentence = session.server.sentence(&output::escaped_error(error));
+        output::to_stderr(&format!("ladderback: {sentence}\n"))?;
     }
     Ok(answer.is_ok())
 }

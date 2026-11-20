@@ -26,7 +26,7 @@ use signing_adapter::AwsLcSigning;
 use store::SqliteStore;
 use tls_adapter::WebSocketHubConnector;
 
-use crate::output::{to_stderr, to_stdout};
+use crate::output::{refusal_line, to_stderr, to_stdout};
 use crate::{finish, say, text};
 
 /// The database's file in the data folder.
@@ -447,10 +447,7 @@ async fn on_the_agent(
                 return Ok(ExitCode::FAILURE);
             }
             let (code, args, detail) = failed(&failure, &address);
-            to_stderr(&format!(
-                "ladderback: {}\n",
-                localizer.error(code, &args, detail.as_deref())
-            ))?;
+            to_stderr(&refusal_line(localizer, code, &args, detail.as_deref()))?;
             Ok(ExitCode::FAILURE)
         }
     }

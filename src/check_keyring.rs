@@ -130,7 +130,8 @@ fn report(
             }
             (KeyringUser::Repository(alias), Some(refusal)) => {
                 let (error, args, detail) = app::announce::refused("password", refusal);
-                let reason = localizer.error(error, &args, detail.as_deref());
+                let reason =
+                    crate::output::refusal_said(localizer, error, &args, detail.as_deref());
                 let args = [
                     ("repository", text(alias.as_str())),
                     entry,
@@ -260,6 +261,29 @@ mod tests {
         assert!(err.contains("the keychain said no"), "{err:?}");
         assert_eq!(err.lines().count(), 1, "{err:?}");
         assert_eq!(status, ExitCode::FAILURE);
+    }
+
+    /// What the platform said can hold control characters: the refusal's
+    /// message writes each as its escape, and stays one line (#809).
+    #[test]
+    fn a_refusal_says_each_control_character_of_what_the_platform_said_as_its_escape() {
+        let checked = KeyringCheck {
+            reads: vec![read(
+                "usb",
+                "ladderback/usb",
+                Some(SettingRefusal::SecretKeyringUnavailable {
+                    source: "ladderback/usb".to_owned(),
+                    detail: Some("the keychain\r\u{1b}[2K said\u{7} no\u{9b}".to_owned()),
+                }),
+            )],
+        };
+        let (_, err, _) = reported(&checked);
+        let line = err.strip_suffix('\n').expect("a line ends with a break");
+        assert!(!line.chars().any(char::is_control), "{err:?}");
+        assert!(
+            err.contains(r"the keychain\r\u{1b}[2K said\u{7} no\u{9b}"),
+            "{err:?}"
+        );
     }
 
     #[test]
