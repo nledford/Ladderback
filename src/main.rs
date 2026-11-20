@@ -64,7 +64,7 @@ struct Cli {
 
 #[derive(Subcommand)]
 enum Command {
-    /// Run the agent and serve its web UI.
+    /// Run Ladderback on this machine and serve its web UI.
     Serve {
         /// Address to listen on. Beyond loopback only with an
         /// `--allowed-host`; with sign-in off it then warns that anyone who
@@ -78,11 +78,11 @@ enum Command {
         #[arg(long = "allowed-host", value_name = "NAME")]
         allowed_hosts: Vec<String>,
         /// Set by the service files `install-service` writes: a service
-        /// manager runs the agent and starts it again when it exits with
+        /// manager runs Ladderback and starts it again when it exits with
         /// the restart status, so Settings offers a restart.
         #[arg(long)]
         service_managed: bool,
-        /// Serve the hub's agent routes under `/sync/` as well, so that
+        /// Serve the hub's routes for paired machines under `/sync/` as well, so that
         /// other machines can pair with this one.
         #[cfg(feature = "hub")]
         #[arg(long)]
@@ -119,11 +119,11 @@ enum Command {
     /// session. It is typed twice at a terminal, without being shown, or
     /// read as one line of standard input; never given as an argument.
     SetPassword,
-    /// Make a one-time pairing token for an agent, list the unused ones, or
+    /// Make a one-time pairing token for a machine, list the unused ones, or
     /// revoke one. Run it while the daemon is stopped.
     #[cfg(feature = "hub")]
     PairingToken {
-        /// The hub's address as agents reach it, such as
+        /// The hub's address as machines reach it, such as
         /// `https://hub.example`.
         #[arg(long, required_unless_present_any = ["list", "revoke"])]
         address: Option<String>,
