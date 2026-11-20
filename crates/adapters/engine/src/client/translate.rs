@@ -634,6 +634,43 @@ mod tests {
         assert!(over.is_err());
     }
 
+    /// A match at the path `f<at>`, held by `snapshots` snapshots.
+    fn matched(at: usize, snapshots: u8) -> crate::job::MatchResult {
+        crate::job::MatchResult {
+            path: vec![format!("f{at}")],
+            display: domain::browse::DisplayName::new(&format!("f{at}")),
+            kind: domain::browse::EntryKind::File,
+            seen: (0..snapshots)
+                .map(|n| crate::job::SeenResult {
+                    snapshot: domain::SnapshotId::parse(&format!("{n:02x}").repeat(32))
+                        .unwrap_or_else(|e| panic!("a snapshot ID: {e:?}")),
+                    size: Some(1),
+                    modified: None,
+                })
+                .collect(),
+        }
+    }
+
+    #[test]
+    fn a_search_answer_is_capped_by_its_matches_however_many_snapshots_hold_each() {
+        let most = usize::try_from(MAX_MATCHES).unwrap_or(usize::MAX);
+        let answer = |matches: Vec<crate::job::MatchResult>| {
+            search_answer(FindResult {
+                searched: Vec::new(),
+                left_out: 0,
+                matches,
+                stopped: None,
+            })
+        };
+        let fits = answer((0..most).map(|at| matched(at, 3)).collect());
+        assert!(
+            fits.is_ok(),
+            "as many matches as a search returns, each in three snapshots: {fits:?}"
+        );
+        let over = answer((0..=most).map(|at| matched(at, 1)).collect());
+        assert!(over.is_err(), "one match more than a search returns");
+    }
+
     fn failed(code: ErrorCode) -> WorkerEvent {
         WorkerEvent::Failed {
             code,
