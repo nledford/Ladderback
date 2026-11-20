@@ -104,7 +104,9 @@ pub fn Progress(
             }
             aria-valuetext=move || {
                 told.get()
-                    .map(|told| value_text(&told, |id, args| text_with(&value_localizer, id, args)))
+                    .map(|told| {
+                        value_text(&told, None, |id, args| text_with(&value_localizer, id, args))
+                    })
             }
         >
             {move || {

@@ -270,6 +270,7 @@ async fn the_engine_tells_the_pages_neither_how_a_job_started_nor_how_it_ended()
         let engine = EventEngine {
             inner: Arc::new(Answers(vec![started(), end.clone()])),
             bus,
+            clock: Arc::new(SystemClock),
         };
         let job = Job::Fake(app::ports::FakeJob {
             steps: 1,
@@ -394,6 +395,7 @@ async fn only_an_operations_job_tells_the_pages_its_progress_and_warnings() {
     let engine = EventEngine {
         inner: Arc::new(TellsThenEmpty(Arc::default())),
         bus,
+        clock: Arc::new(SystemClock),
     };
     let access = app::ports::RepositoryAccess {
         repository: "/srv/demo/repo".to_owned(),
@@ -479,4 +481,36 @@ async fn only_an_operations_job_tells_the_pages_its_progress_and_warnings() {
             assert_eq!(news, [], "{said}");
         }
     }
+}
+
+/// A page hears each progress report with the instant the daemon's clock
+/// read as it heard it, so the page can say when a run without a total last
+/// reported in the clock the run's start is in (§4.5).
+#[tokio::test]
+async fn a_page_hears_each_progress_report_with_the_instant_the_daemon_heard_it() {
+    let bus = Arc::new(BroadcastEventBus::new());
+    let mut heard = bus.subscribe().await;
+    let at = domain::Timestamp::from_second(1_800_000_000).expect("the demo time is valid");
+    let engine = EventEngine {
+        inner: Arc::new(TellsThenEmpty(Arc::default())),
+        bus,
+        clock: Arc::new(app::fakes::FakeClock::new(at)),
+    };
+    let job = Job::Fake(app::ports::FakeJob {
+        steps: 0,
+        step_delay: std::time::Duration::ZERO,
+        warnings: Vec::new(),
+        end: app::ports::FakeEnd::Succeed,
+        deadline_budget: None,
+    });
+    let running = engine
+        .run(new_operation(), job)
+        .await
+        .expect("the job runs");
+    running.events.collect::<Vec<_>>().await;
+    let news = heard_now(&mut heard);
+    let Some(UiEvent::OperationProgress { at: told, .. }) = news.first() else {
+        panic!("the page hears the progress first: {news:?}");
+    };
+    assert_eq!(told.as_deref(), Some("2027-01-15T08:00:00Z"));
 }

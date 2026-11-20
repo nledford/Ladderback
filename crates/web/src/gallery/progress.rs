@@ -24,6 +24,7 @@ pub(super) fn ProgressDemo(localizer: Arc<Localizer>) -> impl IntoView {
         unit: api::ProgressUnit::Bytes,
         current: 4 * GIB,
         total: Some(10 * GIB),
+        reported_at: None,
     });
     // The reading of the progress demo's bars at each size and tone.
     let sixty = Reading {

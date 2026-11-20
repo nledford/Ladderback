@@ -190,6 +190,27 @@ Feature: Each row of the Operations page names its operation and says what it di
     Then the progress bar "Backup progress of demo-home" shows 100 percent
     And the row "demo-home" of the table "Operations" doesn't show "Working…" in its "Status" column
 
+  # A run with no total shows no percentage, so its row says when the run
+  # last reported: an instant that changes only when the run reports again.
+  # A run that has stopped reporting keeps an old time, which a working run
+  # doesn't, and nothing on the page ticks by itself (WCAG 2.2.2).
+  Scenario: A running backup whose size isn't known yet says when it last reported, and only a new report changes it
+    Given the page's clock can be moved on
+    And the daemon reports a running backup of "demo-home"
+    When I open the address "/operations"
+    And the table "Operations" has a row "demo-home" that shows "Running"
+    And the daemon reports 8 bytes processed of the backup of "demo-home" and not yet its total, at "2026-11-09T10:01:00Z"
+    Then the row "demo-home" of the table "Operations" shows "Working…" in its "Status" column
+    And the progress bar "Backup progress of demo-home" shows its last report at "2026-11-09T10:01:00Z"
+    And the progress bar "Backup progress of demo-home" reads "Working…" and its last report at "2026-11-09T10:01:00Z"
+    When the page's clock moves on 60 seconds
+    Then the progress bar "Backup progress of demo-home" shows its last report at "2026-11-09T10:01:00Z"
+    When the daemon reports 16 bytes processed of the backup of "demo-home" and not yet its total, at "2026-11-09T10:02:30Z"
+    Then the progress bar "Backup progress of demo-home" shows its last report at "2026-11-09T10:02:30Z"
+    And the progress bar "Backup progress of demo-home" reads "Working…" and its last report at "2026-11-09T10:02:30Z"
+    And the live regions stay silent
+    And the page has no accessibility violations
+
   # A backup reads the repository's index before it backs up, and its row
   # says which step it is in (#423). The index's count is that step's, shown
   # with it, never as the backup's percentage; the backup shows its own

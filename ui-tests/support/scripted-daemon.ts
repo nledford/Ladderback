@@ -477,9 +477,11 @@ export class ScriptedDaemon {
   }
 
   /** The backup of `plan` reports `bytes` processed and no total, as the
-   *  daemon does while rustic is still walking the source for its size. */
-  async progressesWithoutTotal(plan: string, bytes: number): Promise<void> {
-    await this.#tell({ type: "operation-progress", operation: this.#backupOf(plan).id, current: bytes, total: null });
+   *  daemon does while rustic is still walking the source for its size;
+   *  `at` is when the daemon heard it, left out as a daemon older than the
+   *  field leaves it out. */
+  async progressesWithoutTotal(plan: string, bytes: number, at?: string): Promise<void> {
+    await this.#tell({ type: "operation-progress", operation: this.#backupOf(plan).id, current: bytes, total: null, at });
   }
 
   /** The backup of `plan` reports `current` of `total` (`null`: not known

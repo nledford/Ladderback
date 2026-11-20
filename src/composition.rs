@@ -307,10 +307,13 @@ async fn close_within(
 /// engine reported them. The daemon never coalesces: that is the worker's,
 /// once (§4.1). How an operation started and ended is not announced here:
 /// the run that records it announces each once the log has it (§4.4,
-/// #305). A job that is no operation tells the pages nothing (#308).
+/// #305). A job that is no operation tells the pages nothing (#308). Each
+/// progress report goes with the instant `clock` reads as the daemon hears
+/// it, so a page can say when a run without a total last reported (§4.5).
 struct EventEngine {
     inner: Arc<dyn Engine>,
     bus: Arc<dyn EventBus>,
+    clock: Arc<dyn Clock>,
 }
 
 #[async_trait]
@@ -324,6 +327,7 @@ impl Engine for EventEngine {
         let mut publish = Publish {
             operation,
             progress: LiveProgress::new(),
+            clock: Arc::clone(&self.clock),
         };
         let bus = Arc::clone(&self.bus);
         Ok(RunningJob {
@@ -378,10 +382,12 @@ fn is_operation(job: &Job) -> bool {
 
 /// Turns one run's [`EngineEvent`]s into [`UiEvent`]s, but for how the run
 /// started and ended (§4.4). Of its progress bars, a page is told of the one
-/// [`LiveProgress`] shows: the bar begun last that is still open.
+/// [`LiveProgress`] shows: the bar begun last that is still open, with the
+/// instant `clock` reads as it is heard.
 struct Publish {
     operation: String,
     progress: LiveProgress,
+    clock: Arc<dyn Clock>,
 }
 
 impl Publish {
@@ -391,7 +397,7 @@ impl Publish {
             E::Progress(progress) => self
                 .progress
                 .apply(progress)
-                .map(|shown| shown.ui(self.operation.clone())),
+                .map(|shown| shown.ui(self.operation.clone(), self.clock.now())),
             E::Warning(warning) => Some(UiEvent::OperationWarning {
                 operation: self.operation.clone(),
                 code: warning_code(warning.kind),

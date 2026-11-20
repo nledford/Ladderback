@@ -306,6 +306,7 @@ pub(super) async fn listen(
     runner.engine = Arc::new(EventEngine {
         inner: Arc::new(inner),
         bus: bus.clone(),
+        clock: Arc::new(SystemClock),
     });
     runner.events = bus;
     runner.store = log;

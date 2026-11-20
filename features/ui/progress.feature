@@ -100,6 +100,26 @@ Feature: A running operation's progress bar can be reached by keyboard and never
     Then the progress bar "Backup progress of demo-home" shows 5 percent
     And the progress bar "Backup progress of demo-home" reads "Backing up… 5%, 1 GiB of 20 GiB"
 
+  # A bar with no total says when its run last reported, beside the step or
+  # "Working…", as soon as the report comes; its value text says it too,
+  # held like every other value: at most every 30 seconds while the step
+  # stays the same.
+  Scenario: A bar with no total says when its run last reported, and tells a screen reader at most every 30 seconds
+    Given the page's clock can be moved on
+    And the daemon reports a running backup of "demo-home"
+    When I open the address "/operations"
+    And the table "Operations" has a row "demo-home" that shows "Running"
+    And the daemon reports 8 bytes processed of the backup of "demo-home" and not yet its total, at "2026-11-09T10:01:00Z"
+    Then the progress bar "Backup progress of demo-home" shows its last report at "2026-11-09T10:01:00Z"
+    And the progress bar "Backup progress of demo-home" reads "Working…" and its last report at "2026-11-09T10:01:00Z"
+    When the page's clock moves on 10 seconds
+    And the daemon reports 16 bytes processed of the backup of "demo-home" and not yet its total, at "2026-11-09T10:01:10Z"
+    Then the progress bar "Backup progress of demo-home" shows its last report at "2026-11-09T10:01:10Z"
+    And the progress bar "Backup progress of demo-home" reads "Working…" and its last report at "2026-11-09T10:01:00Z"
+    When the page's clock moves on 20 seconds
+    Then the progress bar "Backup progress of demo-home" reads "Working…" and its last report at "2026-11-09T10:01:10Z"
+    And the live regions stay silent
+
   Scenario Outline: A running backup's progress bar reads in a pseudolocale and fits a small screen with larger text
     Given the daemon reports a running backup of "demo-home"
     And a viewport of 320 by 256 pixels

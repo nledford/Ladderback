@@ -282,6 +282,7 @@ mod tests {
                     unit: api::ProgressUnit::Count,
                     current,
                     total: Some(3),
+                    at: None,
                 });
             });
         }

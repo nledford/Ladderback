@@ -26,6 +26,40 @@ const ROUNDING_PX = 0.5;
 
 const bar = (page: Page, name: string): Locator => page.getByRole("progressbar", { name: namePattern(name) });
 
+// What each bar showed of its run's last report, by the instant: the words
+// a sighted reader saw, which its value text, held at most 30 s, says later.
+const lastReports = new WeakMap<BrowserWorld, Map<string, string>>();
+
+const withoutMarks = (text: string) => text.replace(/[\u2066-\u2069]/g, "").trim();
+
+// A bar with no total shows when its run last reported (§4.5): one `<time>`
+// inside it that gives the instant to a program and words to a reader,
+// which change only when the run reports again.
+Then("the progress bar {string} shows its last report at {string}", async function (this: BrowserWorld, name: string, at: string) {
+  const time = bar(this.page, name).locator("time");
+  await expect(time).toHaveCount(1);
+  await expect(time).toHaveAttribute("datetime", at);
+  await expect(time).toBeVisible();
+  const words = withoutMarks(await time.innerText());
+  assert.match(words, /\d/, `the last report of ${name} shows no time`);
+  const seen = lastReports.get(this) ?? new Map<string, string>();
+  seen.set(at, words);
+  lastReports.set(this, seen);
+});
+
+// The value text of a bar with no total: its step, or "Working…", then the
+// words the bar showed for the report at `at`, so a screen reader hears the
+// same instant a sighted reader saw.
+Then(
+  "the progress bar {string} reads {string} and its last report at {string}",
+  async function (this: BrowserWorld, name: string, step: string, at: string) {
+    const words = lastReports.get(this)?.get(at);
+    assert.ok(words, `no step saw the progress bar ${name} show its last report at ${at}`);
+    const heard = async () => withoutMarks((await bar(this.page, name).getAttribute("aria-valuetext")) ?? "");
+    await expect.poll(heard).toBe(`${step} ${words}`);
+  },
+);
+
 // A bar is a stop for Tab at every size and tone (A1), and its focus ring,
 // an outline around the bar, surrounds everything it draws, so a sighted
 // keyboard user sees which bar a screen reader is reading.

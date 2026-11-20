@@ -17,6 +17,7 @@ fn progress() -> UiEvent {
         unit: ProgressUnit::Count,
         current: 3,
         total: Some(10),
+        at: Some("2026-11-09T10:01:00Z".into()),
     }
 }
 
@@ -107,6 +108,7 @@ fn the_fields_of_each_event_carry_their_own_names() {
             "unit": "count",
             "current": 3,
             "total": 10,
+            "at": "2026-11-09T10:01:00Z",
         })
     );
     let wire = to_value(&UiEvent::OperationProgress {
@@ -115,9 +117,15 @@ fn the_fields_of_each_event_carry_their_own_names() {
         unit: ProgressUnit::Count,
         current: 1,
         total: None,
+        at: None,
     })
     .unwrap();
     assert_eq!(wire.get("total"), Some(&Value::Null));
+    assert_eq!(
+        wire.get("at"),
+        None,
+        "a report with no instant leaves it out"
+    );
     let wire = to_value(retrying()).unwrap();
     assert_eq!(
         wire,
@@ -143,6 +151,7 @@ fn every_event_round_trips_through_its_wire_form() {
             unit: ProgressUnit::Count,
             current: 1,
             total: None,
+            at: None,
         },
         UiEvent::OperationWarning {
             operation: "018f0000-0000-7000-8000-000000000001".into(),
@@ -202,6 +211,7 @@ fn a_progress_event_names_its_step_by_a_code_of_its_own() {
             unit: ProgressUnit::Count,
             current: 3,
             total: Some(10),
+            at: None,
         };
         let wire = to_value(&event).unwrap();
         assert_eq!(
@@ -242,6 +252,7 @@ fn a_progress_event_with_no_step_or_one_the_page_doesnt_know_still_reads() {
         unit: ProgressUnit::Count,
         current: 3,
         total: Some(10),
+        at: None,
     };
     assert_eq!(progress_with(None), read(None));
     assert_eq!(progress_with(Some(Value::Null)), read(None));
@@ -280,6 +291,7 @@ fn a_progress_event_says_what_it_counts_and_reads_without_a_unit_it_knows() {
         unit,
         current: 3,
         total: Some(10),
+        at: None,
     };
     assert_eq!(
         to_value(read(ProgressUnit::Bytes)).unwrap(),

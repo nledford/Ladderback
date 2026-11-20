@@ -167,12 +167,15 @@ impl Pace {
     }
 }
 
-/// What a bar tells a screen reader: its step, and how far it has come
-/// when it knows its total.
+/// What a bar tells a screen reader: its step, how far it has come when it
+/// knows its total, and when its run last reported when it doesn't.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) struct Told {
     pub(crate) step: Option<OperationStep>,
     pub(crate) measure: Option<Measure>,
+    /// When the daemon last heard the run, only while there is no measure:
+    /// with a percentage, the percentage says the run is alive.
+    pub(crate) reported: Option<jiff::Timestamp>,
 }
 
 /// How far a bar with a total has come.
@@ -257,20 +260,23 @@ pub(crate) fn wait_for(due: Duration, now: Duration) -> Duration {
     }
 }
 
-/// What `progress` tells, with the time `left` when it has a total.
+/// What `progress` tells, with the time `left` when it has a total, and
+/// when its run last reported when it has none.
 fn told_of(progress: &Progress, left: Option<Left>) -> Told {
+    let measure = progress
+        .total
+        .zip(percent(progress.current, progress.total))
+        .map(|(total, percent)| Measure {
+            percent,
+            current: progress.current,
+            total,
+            unit: progress.unit,
+            left,
+        });
     Told {
         step: progress.step,
-        measure: progress
-            .total
-            .zip(percent(progress.current, progress.total))
-            .map(|(total, percent)| Measure {
-                percent,
-                current: progress.current,
-                total,
-                unit: progress.unit,
-                left,
-            }),
+        measure,
+        reported: None,
     }
 }
 
@@ -287,13 +293,16 @@ fn at_once(exposed: &Told, value: &Told) -> bool {
 }
 
 /// The value text of `told`, worded by `word`: the step and the working
-/// text when there is no total, otherwise the step, the percentage, the
-/// amounts and the time left once known. The step is its own message, a
-/// whole clause, which the value's message places: the code joins nothing.
+/// text when there is no total, with when its run last reported, read in
+/// `zone`, once known; otherwise the step, the percentage, the amounts and
+/// the time left once known. The step is its own message, a whole clause,
+/// which the value's message places: the code joins nothing.
 pub(crate) fn value_text(
     told: &Told,
+    zone: Option<&api::IanaZone>,
     word: impl Fn(MessageId, &[(&str, MsgArg)]) -> String,
 ) -> String {
+    let _ = zone;
     let step = told.step.and_then(step_message);
     let Some(measure) = told.measure else {
         return word(step.unwrap_or(msg::UI_PROGRESS_WORKING), &[]);
@@ -382,15 +391,20 @@ pub(crate) struct ProgressText {
     /// message, or that the run is working when it names none this build
     /// knows.
     pub(crate) unknown: MessageId,
+    /// When the run last reported, below those words, while the bar shows
+    /// no percentage and the daemon said when it heard the report.
+    pub(crate) reported: Option<jiff::Timestamp>,
 }
 
-/// What `progress` says of the step its run is in (§4.4; §16, decision 82).
+/// What `progress` says of the step its run is in (§4.4; §16, decision 82),
+/// and, while it has no percentage, when it last reported (§4.5).
 pub(crate) fn progress_text(progress: &Progress) -> ProgressText {
     let step = progress.step.and_then(step_message);
     let with_percent = percent(progress.current, progress.total).is_some();
     ProgressText {
         above: step.filter(|_| with_percent),
         unknown: step.unwrap_or(msg::UI_PROGRESS_WORKING),
+        reported: None,
     }
 }
 
@@ -437,6 +451,19 @@ mod tests {
             unit: ProgressUnit::Count,
             current,
             total,
+            reported_at: None,
+        }
+    }
+
+    fn heard(raw: &str) -> jiff::Timestamp {
+        raw.parse().expect("an RFC 3339 instant")
+    }
+
+    /// A report with no total, which the daemon heard at `raw`.
+    fn heard_working(current: u64, raw: &str) -> Progress {
+        Progress {
+            reported_at: Some(heard(raw)),
+            ..report(Some(OperationStep::BackingUp), current, None)
         }
     }
 
@@ -586,6 +613,7 @@ mod tests {
                 unit: progress.unit,
                 left,
             }),
+            reported: None,
         })
     }
 
@@ -678,6 +706,7 @@ mod tests {
             Next::Tell(Told {
                 step: Some(OperationStep::BackingUp),
                 measure: None,
+                reported: None,
             })
         );
         assert_eq!(teller.report(working(4096), at(101)), Next::Keep);
@@ -685,6 +714,45 @@ mod tests {
         let mut same = Teller::default();
         same.report(backing_up(2, 10), at(100));
         assert_eq!(same.report(backing_up(2, 10), at(101)), Next::Keep);
+    }
+
+    /// A run with no total that reports again is told when, like any other
+    /// change: at most every 30 s, and the time never ticks between reports.
+    /// With a percentage, the percentage says the run is alive: when it
+    /// last reported is no news of its own.
+    #[test]
+    fn when_a_run_without_a_total_last_reported_is_told_at_most_every_thirty_seconds() {
+        let mut teller = Teller::default();
+        let told = |raw| {
+            Next::Tell(Told {
+                step: Some(OperationStep::BackingUp),
+                measure: None,
+                reported: Some(heard(raw)),
+            })
+        };
+        assert_eq!(
+            teller.report(heard_working(8, "2026-11-09T10:01:00Z"), at(100)),
+            told("2026-11-09T10:01:00Z")
+        );
+        assert_eq!(
+            teller.report(heard_working(16, "2026-11-09T10:01:10Z"), at(110)),
+            Next::WaitUntil(at(130))
+        );
+        assert_eq!(teller.wake(at(130)), told("2026-11-09T10:01:10Z"));
+        assert_eq!(teller.wake(at(200)), Next::Keep, "no new report");
+        let mut measured_teller = Teller::default();
+        let at_total = |raw| Progress {
+            reported_at: Some(heard(raw)),
+            ..backing_up(2, 10)
+        };
+        assert_eq!(
+            measured_teller.report(at_total("2026-11-09T10:01:00Z"), at(100)),
+            measured(backing_up(2, 10), 20, None)
+        );
+        assert_eq!(
+            measured_teller.report(at_total("2026-11-09T10:01:10Z"), at(110)),
+            Next::Keep
+        );
     }
 
     #[test]
@@ -717,6 +785,7 @@ mod tests {
             Next::Tell(Told {
                 step: Some(OperationStep::BackingUp),
                 measure: None,
+                reported: None,
             })
         );
     }
@@ -747,7 +816,7 @@ mod tests {
     /// never hears.
     fn english(told: &Told) -> String {
         let localizer = Localizer::new(&[]);
-        value_text(told, |id, args| text_with(&localizer, id, args))
+        value_text(told, None, |id, args| text_with(&localizer, id, args))
             .replace(['\u{2068}', '\u{2069}'], "")
     }
 
@@ -766,6 +835,7 @@ mod tests {
                 unit,
                 left,
             }),
+            reported: None,
         }
     }
 
@@ -855,6 +925,7 @@ mod tests {
             english(&Told {
                 step: Some(OperationStep::ReadingIndex),
                 measure: None,
+                reported: None,
             }),
             "Reading the index…"
         );
@@ -862,9 +933,33 @@ mod tests {
             english(&Told {
                 step: None,
                 measure: None,
+                reported: None,
             }),
             "Working…"
         );
+    }
+
+    /// Without a total, once the daemon has said when it heard the run,
+    /// the value text says so after the step or the working text: an exact
+    /// instant in the page's zone, which never ticks.
+    #[test]
+    fn the_value_text_without_a_total_says_when_its_run_last_reported() {
+        let localizer = Localizer::new(&[]);
+        let instant = crate::routes::instant(&localizer, "2026-11-09T10:01:00Z", None)
+            .replace(['\u{2068}', '\u{2069}'], "");
+        for (step, words) in [
+            (Some(OperationStep::BackingUp), "Backing up…"),
+            (None, "Working…"),
+        ] {
+            assert_eq!(
+                english(&Told {
+                    step,
+                    measure: None,
+                    reported: Some(heard("2026-11-09T10:01:00Z")),
+                }),
+                format!("{words} Last report at {instant}")
+            );
+        }
     }
 
     /// A timer the page set, as its handle: what clears it marks it so.
@@ -922,20 +1017,23 @@ mod tests {
                 unit: ProgressUnit::Count,
                 current: 3,
                 total,
+                reported_at: None,
             })
         };
         assert_eq!(
             at(Some(S::BackingUp), None),
             ProgressText {
                 above: None,
-                unknown: msg::UI_STEP_BACKING_UP
+                unknown: msg::UI_STEP_BACKING_UP,
+                reported: None,
             }
         );
         assert_eq!(
             at(Some(S::ReadingIndex), Some(10)),
             ProgressText {
                 above: Some(msg::UI_STEP_READING_INDEX),
-                unknown: msg::UI_STEP_READING_INDEX
+                unknown: msg::UI_STEP_READING_INDEX,
+                reported: None,
             }
         );
         for step in [None, Some(S::Unknown)] {
@@ -944,12 +1042,34 @@ mod tests {
                     at(step, total),
                     ProgressText {
                         above: None,
-                        unknown: msg::UI_PROGRESS_WORKING
+                        unknown: msg::UI_PROGRESS_WORKING,
+                        reported: None,
                     },
                     "{step:?} of {total:?}"
                 );
             }
         }
+    }
+
+    /// A row says when its run last reported only while its bar shows no
+    /// percentage, and only when the daemon said when it heard the report.
+    #[test]
+    fn a_row_says_when_its_run_last_reported_only_beside_a_bar_with_no_percentage() {
+        let reported = |total, reported_at| {
+            progress_text(&Progress {
+                step: None,
+                unit: ProgressUnit::Bytes,
+                current: 3,
+                total,
+                reported_at,
+            })
+            .reported
+        };
+        let at = heard("2026-11-09T10:01:00Z");
+        assert_eq!(reported(None, Some(at)), Some(at));
+        assert_eq!(reported(Some(0), Some(at)), Some(at), "a total of nothing");
+        assert_eq!(reported(Some(10), Some(at)), None);
+        assert_eq!(reported(None, None), None);
     }
 
     #[test]
