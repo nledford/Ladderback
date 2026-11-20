@@ -124,6 +124,84 @@ impl From<RandomUnavailable> for AgentPairingError {
     }
 }
 
+impl From<ChallengeRefused> for AgentPairingError {
+    fn from(refused: ChallengeRefused) -> Self {
+        match refused {
+            ChallengeRefused::HubKeyMismatch => Self::HubKeyMismatch,
+            ChallengeRefused::HubProofInvalid => Self::HubProofInvalid,
+            ChallengeRefused::NoCommonHandshake => Self::NoCommonHandshake,
+            ChallengeRefused::BindingUnavailable => Self::BindingUnavailable,
+        }
+    }
+}
+
+/// The binding of a connection on which `challenge` proves the hub holds
+/// `hub_key`, answering the agent's `connect` on a session whose
+/// `tls-exporter` value is `exporter`; otherwise why the agent sends
+/// nothing more on it.
+pub(super) fn check_challenge(
+    signing: &dyn Signing,
+    hub_key: PublicKey,
+    connect: &Connect,
+    challenge: &Challenge,
+    exporter: Option<[u8; KEY_BYTES]>,
+) -> Result<Binding, ChallengeRefused> {
+    if challenge.hub_key != hub_key {
+        return Err(ChallengeRefused::HubKeyMismatch);
+    }
+    let binding = connect
+        .binding_kind
+        .binding(exporter)
+        .ok_or(ChallengeRefused::BindingUnavailable)?;
+    let proof = SignedMessage::HubProof {
+        hub_key,
+        agent_id: connect.agent_id,
+        agent_nonce: connect.agent_nonce,
+        hub_nonce: challenge.hub_nonce,
+        binding,
+        handshakes: challenge.hub_handshakes,
+    };
+    if !signing.verify(&hub_key, &proof.to_bytes(), &challenge.hub_proof) {
+        return Err(ChallengeRefused::HubProofInvalid);
+    }
+    if challenge.hub_handshakes.bits() & HANDSHAKES.bits() == 0 {
+        return Err(ChallengeRefused::NoCommonHandshake);
+    }
+    Ok(binding)
+}
+
+/// Whether `refused` is signed by `hub_key` over the connection the
+/// agent's `connect` opened, the hub's `hub_nonce` and `binding`.
+pub(super) fn refusal_holds(
+    signing: &dyn Signing,
+    hub_key: PublicKey,
+    connect: &Connect,
+    hub_nonce: Nonce,
+    binding: Binding,
+    refused: &Refused,
+) -> bool {
+    let signed = SignedMessage::Refusal {
+        hub_key,
+        agent_id: connect.agent_id,
+        agent_nonce: connect.agent_nonce,
+        hub_nonce,
+        binding,
+        code: &refused.code,
+    };
+    signing.verify(&hub_key, &signed.to_bytes(), &refused.signature)
+}
+
+impl AgentHandshake {
+    /// The `Connect` this handshake sent.
+    const fn connect(&self) -> Connect {
+        Connect {
+            agent_id: self.agent_id,
+            agent_nonce: self.agent_nonce,
+            binding_kind: self.kind,
+        }
+    }
+}
+
 impl AgentPairing {
     pub fn new(
         identity: Arc<dyn Identity>,
@@ -161,11 +239,7 @@ impl AgentPairing {
             hostname,
             agent_nonce: Nonce::from_bytes(self.random.token()?),
         };
-        let connect = Connect {
-            agent_id,
-            agent_nonce: handshake.agent_nonce,
-            binding_kind: handshake.kind,
-        };
+        let connect = handshake.connect();
         Ok((connect, handshake))
     }
 
@@ -179,30 +253,13 @@ impl AgentPairing {
         exporter: Option<[u8; KEY_BYTES]>,
     ) -> Result<(Pair, AwaitingPaired), AgentPairingError> {
         let hub_key = *handshake.token.hub_key();
-        if challenge.hub_key != hub_key {
-            return Err(AgentPairingError::HubKeyMismatch);
-        }
-        let binding = handshake
-            .kind
-            .binding(exporter)
-            .ok_or(AgentPairingError::BindingUnavailable)?;
-        let proof = SignedMessage::HubProof {
+        let binding = check_challenge(
+            self.signing.as_ref(),
             hub_key,
-            agent_id: handshake.agent_id,
-            agent_nonce: handshake.agent_nonce,
-            hub_nonce: challenge.hub_nonce,
-            binding,
-            handshakes: challenge.hub_handshakes,
-        };
-        if !self
-            .signing
-            .verify(&hub_key, &proof.to_bytes(), &challenge.hub_proof)
-        {
-            return Err(AgentPairingError::HubProofInvalid);
-        }
-        if challenge.hub_handshakes.bits() & HANDSHAKES.bits() == 0 {
-            return Err(AgentPairingError::NoCommonHandshake);
-        }
+            &handshake.connect(),
+            challenge,
+            exporter,
+        )?;
         let agent_seed = self.agent_seed().await?;
         let agent_key = self.signing.public_key(&agent_seed)?;
         let attempt = self.identity.begin_attempt().await?;
@@ -257,19 +314,15 @@ impl AgentPairing {
         let paired = match answer {
             PairAnswer::Paired(paired) => paired,
             PairAnswer::Refused(refused) => {
-                let signed = SignedMessage::Refusal {
-                    hub_key,
-                    agent_id: handshake.agent_id,
-                    agent_nonce: handshake.agent_nonce,
-                    hub_nonce,
-                    binding,
-                    code: &refused.code,
-                };
                 return Err(
-                    if self
-                        .signing
-                        .verify(&hub_key, &signed.to_bytes(), &refused.signature)
-                    {
+                    if refusal_holds(
+                        self.signing.as_ref(),
+                        hub_key,
+                        &handshake.connect(),
+                        hub_nonce,
+                        binding,
+                        refused,
+                    ) {
                         AgentPairingError::Refused(refused.clone())
                     } else {
                         AgentPairingError::Unsigned
