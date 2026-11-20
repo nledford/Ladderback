@@ -1973,21 +1973,31 @@ ui-review-adopts =
 # What an adoption says when no snapshot is left to adopt into the plan $into.
 ui-review-adopts-none = No snapshots are left to adopt into plan { $into }.
 
-# What a prune's dry run found: packs marked as unused now, packs deleted now, packs recovered, and the bytes the deleted ones free.
-ui-review-prunes = Packs marked as unused now: { $marked }. Packs deleted now, which were marked earlier: { $deleted }, freeing { $bytes }. Packs recovered: { $recovered }.
+# What a prune's dry run found. $marked counts the packs marked as unused now, $deleted the packs deleted now (marked earlier), $recovered the packs a snapshot uses again, which the prune marks for recovery or brings back once they have been marked for recovery long enough; $bytes is the size the deleted packs free.
+ui-review-prunes =
+    Marked as unused now: { $marked ->
+        [one] 1 { -pack }
+       *[other] { $marked } { -pack(form: "other") }
+    }. Deleted now, marked earlier: { $deleted ->
+        [one] 1 { -pack }
+       *[other] { $deleted } { -pack(form: "other") }
+    }, freeing { $bytes }. Used by a { -snapshot } again, marked for recovery now or brought back now: { $recovered ->
+        [one] 1 { -pack }
+       *[other] { $recovered } { -pack(form: "other") }
+    }.
 
-# How long a pack that is marked now waits for a later prune to delete it, in whole days.
+# How long the packs that are marked now wait for a later prune to delete them, in whole days; $days counts them.
 ui-review-prune-wait-days =
     { $days ->
-        [one] Packs marked now are deleted by a later prune, after 1 day.
-       *[other] Packs marked now are deleted by a later prune, after { $days } days.
+        [one] A later prune deletes the { -pack(form: "other") } marked now, after 1 day.
+       *[other] A later prune deletes the { -pack(form: "other") } marked now, after { $days } days.
     }
 
-# How long a pack that is marked now waits for a later prune to delete it, in hours.
+# How long the packs that are marked now wait for a later prune to delete them, in hours; $hours counts them.
 ui-review-prune-wait-hours =
     { $hours ->
-        [one] Packs marked now are deleted by a later prune, after 1 hour.
-       *[other] Packs marked now are deleted by a later prune, after { $hours } hours.
+        [one] A later prune deletes the { -pack(form: "other") } marked now, after 1 hour.
+       *[other] A later prune deletes the { -pack(form: "other") } marked now, after { $hours } hours.
     }
 
 # What a check reads when it looks at the repository's structure only.

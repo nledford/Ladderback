@@ -207,9 +207,9 @@ mod tests {
     /// warning on with the option's name and the reason, without the line,
     /// which can carry a credential the redactor doesn't know (I4, #882).
     /// A line that holds rustic's own markers keeps its text out too. The
-    /// warnings are rustic's own at the pinned revision, so a version that
-    /// changes them fails here: one that stops quoting the line fails the
-    /// first assertion, and the rewrite can go.
+    /// warnings are rustic's own in the release the workspace depends on, so
+    /// a version that changes them fails here: one that stops quoting the
+    /// line fails the first assertion, and the rewrite can go.
     #[test]
     fn rustic_s_post_command_warnings_lose_the_command_line_and_keep_the_reason() {
         use rustic_backend::LocalBackend;

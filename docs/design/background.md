@@ -2,7 +2,7 @@
 
 ### 2.1 `rustic_core` (library, Apache-2.0 OR MIT)
 
-Ladderback pins `rustic_core` and `rustic_backend` to **one git revision of `rustic-rs/rustic_core` `main`**, because the per-file error reporting it needs (`Progress::error`, `SnapshotSummary.error_count`) is not in the latest release, 0.13.0. It moves to crates.io as soon as a release (expected 0.14) contains them. The table was checked against `main` at `01fe284` (2026-11-05):
+Ladderback depends on the crates.io releases of `rustic_core` and `rustic_backend`, 0.14.0 and 0.8.0, the first to have the per-file error reporting it needs (`Progress::error`, `SnapshotSummary.error_count`). Until those releases it pinned one git revision of `main` (decision 7). The table was checked against `rustic_core` 0.14.0 (2026-11-17):
 
 | Need | API |
 |---|---|
@@ -16,7 +16,7 @@ Ladderback pins `rustic_core` and `rustic_backend` to **one git revision of `rus
 | Check | `check(CheckOptions) -> CheckResults` |
 | Browse / restore | `node_from_snapshot_path("SNAP[:PATH]", filter)`, `ls(&Node, &LsOptions)`, `prepare_restore` and `restore`, `dump(&Node, &mut impl Write)` |
 | Stats | `get_all_snapshots()` (count, `total_bytes_processed`), `infos_index()` (stored and raw size); `infos_files()` is the probe's (§16, decision 104) |
-| Progress | `trait ProgressBars { fn progress(ProgressType, prefix) -> Progress }`. A progress object has `set_length`/`inc`/`set_title`/`finish`/`error(item, during, message)` (`error` is on `main` only) |
+| Progress | `trait ProgressBars { fn progress(ProgressType, prefix) -> Progress }`. A progress object has `set_length`/`inc`/`set_title`/`finish`/`error(item, during, message)` (`error` since 0.14.0) |
 
 Facts that shape the design:
 
@@ -32,7 +32,13 @@ Facts that shape the design:
 
 ### 2.2 Why lock-free matters
 
-`rustic prune` does not delete unreferenced pack files right away. It records them in a `packs_to_delete` list in a new index file, stamped with the time the prune plan was made, and only deletes them on a **later** prune once that stamp is at least `keep-delete` old (rustic's default is **23 h**; Ladderback defaults to **6 days**, §7.3). If a snapshot written in the meantime uses a marked pack, the next prune recovers it.
+`rustic prune` does not delete unreferenced pack files right away. It records them in a `packs_to_delete` list in a new index file, stamped with the time the prune plan was made, and only deletes them on a **later** prune once that stamp is at least `keep-delete` old (rustic's default is **23 h**; Ladderback defaults to **6 days**, §7.3).
+
+If a snapshot written in the meantime uses a marked pack, the next prune doesn't bring it back: it moves the pack to a `packs_to_recover` list, stamped like the deletion mark, and a prune that finds that stamp at least `keep-delete` old brings it back (since `rustic_core` 0.14.0, rustic-rs/rustic_core#639, which fixed a race between overlapping prunes). Both lists stay out of the index a backup, a restore and a check read, so until then the snapshot can't be restored, a check reports its blobs missing, and the repository's stats leave the pack out. At Ladderback's defaults, a weekly prune and a 6-day `keep-delete`, that is about one prune interval longer than it was: up to roughly 14 days after the snapshot rather than 7. restic and older rustic versions don't read `packs_to_recover`.
+
+One state only the earlier revision writes is a residual risk. It brought a pack back by listing it live, stamped with its own time, in a new index file, and removed the index files holding the deletion mark only at its end; a prune stopped in between leaves the pack listed twice. 0.14.0 keeps the entry with the earliest stamp, the deletion mark. A pack any snapshot uses is still marked for recovery, never deleted; but one that only a still-running backup uses can carry a mark older than `keep-delete`, so 0.14.0's first prune deletes it at once rather than after the wait.
+
+Pruning the repository once with the earlier build, to its end, before the first prune with 0.14.0 clears the state. That prune must be the last one the earlier build runs: an earlier-build prune interrupted after it, on another host or on the same one before it upgrades, lists the pack twice again. So no earlier-build prune of the repository may run after the cleanup prune and before the first prune with 0.14.0, on the host that holds maintenance or on any other host that could prune it.
 
 A backup never uses blobs from packs that are already marked: it loads only the live pack list. The race is a backup that **loaded the index before a prune marked the pack** and is still running when a later prune deletes it. The old index files are only removed at the end of the marking prune, so a backup that loads the index while that prune runs is also exposed. The safe condition is therefore:
 

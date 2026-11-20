@@ -112,6 +112,40 @@ async fn the_packs_a_prune_marked_for_deletion_are_left_out() {
 }
 
 #[tokio::test]
+async fn a_marked_pack_a_snapshot_uses_again_is_only_marked_for_recovery_by_the_next_prune() {
+    let scratch = Scratch::new();
+    let location = scratch.local();
+    location.init();
+    write_file(scratch.source().join("kept.bin"), &Rng(1).bytes(200_000));
+    back_up(&location, &scratch).await;
+    write_file(scratch.source().join("reused.bin"), &Rng(2).bytes(200_000));
+    back_up(&location, &scratch).await;
+    let snapshots = location.snapshots();
+    let newest = snapshots.iter().max_by_key(|s| s.time.clone()).unwrap();
+    location.open().delete_snapshots(&[newest.id]).unwrap();
+    succeeded(&run_to_end(&engine(), prune_job(&location)).await);
+    // The snapshot is back, as when a backup that read the index before
+    // that prune marked the pack saves its snapshot after it (§7.3).
+    location
+        .open()
+        .save_snapshots(vec![newest.clone()])
+        .unwrap();
+
+    let events = run_to_end(&engine(), prune_job(&location)).await;
+
+    let EngineResult::Prune(pruned) = succeeded(&events) else {
+        panic!("not a prune result: {events:?}");
+    };
+    assert!(pruned.packs_recovered >= 1, "{pruned:?}");
+    // This prune marks the pack for recovery; only a prune at least
+    // `keep-delete` later brings it back into the index. Until then the
+    // stats leave its data out, as a restore can't read it.
+    let read = stats(&location).await;
+    assert_eq!(read.snapshots, 2);
+    assert!(read.raw_size < 200_000 + 10_000, "{read:?}");
+}
+
+#[tokio::test]
 async fn an_index_entry_listed_twice_counts_twice_as_rustic_repoinfo_counts_it() {
     let scratch = Scratch::new();
     let location = scratch.local();

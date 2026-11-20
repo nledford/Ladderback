@@ -792,7 +792,8 @@ pub struct PruneSummary {
     pub packs_marked: u64,
     /// Packs marked by an earlier prune, now deleted.
     pub packs_deleted: u64,
-    /// Marked packs that a newer snapshot uses again, now unmarked.
+    /// Marked packs that a newer snapshot uses again, now marked for recovery,
+    /// or brought back once marked for recovery for `keep_delete`.
     pub packs_recovered: u64,
 }
 
@@ -807,7 +808,8 @@ pub struct PrunePlanSummary {
     pub packs_marked: u64,
     /// Packs marked by an earlier prune that this one would delete.
     pub packs_deleted: u64,
-    /// Marked packs a newer snapshot uses again, which this one would unmark.
+    /// Marked packs a newer snapshot uses again, which this one would mark for
+    /// recovery, or bring back once marked for recovery for `keep_delete`.
     pub packs_recovered: u64,
     /// The bytes of the packs this prune would delete.
     pub bytes_deleted: u64,
