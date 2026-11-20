@@ -6,8 +6,10 @@ use api::MsgArg;
 use l10n::{Localizer, msg};
 use leptos::prelude::*;
 
-use super::DemoHeading;
+use super::link::RUSTIC_DOCS;
+use super::{DemoHeading, demo_link};
 use crate::components::button::Content;
+use crate::components::link::rules::Destination;
 use crate::components::{
     Align, Button, ChangeMarks, Column, Cue, Footer, MarkAllSeen, Name, RadioGroup, Sentences,
     Sort, SortKey, State, Table,
@@ -343,7 +345,8 @@ struct DemoJob {
 /// demo job's status on, as a live update would (photos, then music, then
 /// documents, each waiting, running, done and round again), and a table
 /// whose status column carries the change mark (decision 129), each row
-/// with a toggle a keyboard moves focus into the row with.
+/// with a toggle a keyboard moves focus into the row with, and last a link
+/// to another site.
 #[component]
 pub(super) fn LiveTableDemo(localizer: Arc<Localizer>) -> impl IntoView {
     let t = {
@@ -422,6 +425,25 @@ pub(super) fn LiveTableDemo(localizer: Arc<Localizer>) -> impl IntoView {
                 .into_any()
         },
     );
+    // Another site's link in the row's last cell, far past a small screen's
+    // edge: what its name adds after its words is out of sight, as the
+    // mark's word is, and both stay inside the table's frame.
+    let guide_localizer = Arc::clone(&localizer);
+    let guide = Column::new(
+        t(msg::UI_GALLERY_LIVE_TABLE_GUIDE),
+        Rem::tenths(140),
+        move |row: Signal<DemoJob>| {
+            let words = row.with_untracked(|row| {
+                text_with(
+                    &guide_localizer,
+                    msg::UI_GALLERY_LIVE_TABLE_GUIDE_LINK,
+                    &[("job", MsgArg::Text(row.name.clone()))],
+                )
+            });
+            view! { {demo_link(&guide_localizer, Destination::outside(RUSTIC_DOCS), words)} }
+                .into_any()
+        },
+    );
     view! {
         <section id="live-table-demo">
             <DemoHeading text=t(msg::UI_GALLERY_LIVE_TABLE_HEADING) id=LIVE_TABLE_HEADING_ID />
@@ -442,7 +464,7 @@ pub(super) fn LiveTableDemo(localizer: Arc<Localizer>) -> impl IntoView {
             <Table
                 name=Name::Caption(t(msg::UI_GALLERY_LIVE_TABLE_CAPTION))
                 row_header=job
-                columns=vec![status, star]
+                columns=vec![status, star, guide]
                 rows=jobs
                 key=|row: &DemoJob| row.name.clone()
                 state=State::Ready

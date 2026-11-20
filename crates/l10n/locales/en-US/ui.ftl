@@ -386,6 +386,15 @@ ui-gallery-live-table-change = Change a demo status
 # $job (string): the demo job's name, "photos".
 ui-gallery-live-table-star = Star { $job }
 
+# The heading of the live table demo's last column, a link to another site
+# in each row.
+ui-gallery-live-table-guide = Guide
+
+# The link to another site in each row of the live table demo, rustic's
+# documentation.
+# $job (string): the demo job's name, "photos".
+ui-gallery-live-table-guide-link = rustic's guide for { $job }
+
 # The heading of the gallery's link demo (§4.5): a link to a page of the
 # app, to the page it is on, to another site, inside a sentence and inside a
 # status sentence, and right to left.

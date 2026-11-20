@@ -301,26 +301,36 @@ const SNAPSHOTS: Record<string, string> = {
   - table "Demo jobs":
     - caption: Demo jobs
     - rowgroup:
-      - row "Job Status Actions":
+      - row "Job Status Actions Guide":
         - columnheader "Job"
         - columnheader "Status"
         - columnheader "Actions"
+        - columnheader "Guide"
     - rowgroup:
-      - row "photos Waiting Star ⁨photos⁩":
+      - row "photos Waiting Star ⁨photos⁩ rustic's guide for ⁨photos⁩ (goes to another site)":
         - rowheader "photos"
         - cell "Waiting"
         - cell "Star ⁨photos⁩":
           - button "Star ⁨photos⁩"
-      - row "music Waiting Star ⁨music⁩":
+        - cell "rustic's guide for ⁨photos⁩ (goes to another site)":
+          - link "rustic's guide for ⁨photos⁩ (goes to another site)":
+            - /url: https://rustic.cli.rs/
+      - row "music Waiting Star ⁨music⁩ rustic's guide for ⁨music⁩ (goes to another site)":
         - rowheader "music"
         - cell "Waiting"
         - cell "Star ⁨music⁩":
           - button "Star ⁨music⁩"
-      - row "documents Waiting Star ⁨documents⁩":
+        - cell "rustic's guide for ⁨music⁩ (goes to another site)":
+          - link "rustic's guide for ⁨music⁩ (goes to another site)":
+            - /url: https://rustic.cli.rs/
+      - row "documents Waiting Star ⁨documents⁩ rustic's guide for ⁨documents⁩ (goes to another site)":
         - rowheader "documents"
         - cell "Waiting"
         - cell "Star ⁨documents⁩":
-          - button "Star ⁨documents⁩"`,
+          - button "Star ⁨documents⁩"
+        - cell "rustic's guide for ⁨documents⁩ (goes to another site)":
+          - link "rustic's guide for ⁨documents⁩ (goes to another site)":
+            - /url: https://rustic.cli.rs/`,
   Tree: `- heading "Tree" [level=2]
 - tree "Demo snapshot":
   - treeitem "documents" [level=1] [selected]
