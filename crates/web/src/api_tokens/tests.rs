@@ -319,3 +319,191 @@ fn the_buttons_and_dialogs_of_a_token_are_named_for_its_label() {
         (msg::UI_API_TOKEN_CREATED_BODY, label)
     );
 }
+
+/// Decision 127's defaults: a new token sees and starts backups, previews
+/// and proposes, and is given what can show a file's name or a log line
+/// only when chosen.
+#[test]
+fn a_new_token_starts_at_the_defaults_of_a_new_token() {
+    assert_eq!(
+        chosen_of(&new_token()),
+        [
+            "read",
+            "start-and-cancel",
+            "preview",
+            "propose",
+            "none",
+            "none",
+            "none"
+        ]
+    );
+}
+
+/// Each permission's group holds its level or no access, and gives back
+/// what it was set from.
+#[test]
+fn each_group_gives_back_the_permission_it_was_set_from() {
+    for (row, permissions) in ROWS.into_iter().zip([
+        PermissionsDto {
+            backups: PermissionLevelDto::Read,
+            ..PermissionsDto::default()
+        },
+        PermissionsDto {
+            backup_runs: PermissionLevelDto::StartAndCancel,
+            ..PermissionsDto::default()
+        },
+        PermissionsDto {
+            previews: PermissionLevelDto::Preview,
+            ..PermissionsDto::default()
+        },
+        PermissionsDto {
+            configuration: PermissionLevelDto::Propose,
+            ..PermissionsDto::default()
+        },
+        PermissionsDto {
+            snapshot_contents: PermissionLevelDto::Read,
+            ..PermissionsDto::default()
+        },
+        PermissionsDto {
+            daemon_log: PermissionLevelDto::Read,
+            ..PermissionsDto::default()
+        },
+        PermissionsDto {
+            repository_check: PermissionLevelDto::Run,
+            ..PermissionsDto::default()
+        },
+    ]) {
+        let chosen = chosen_of(&permissions);
+        for (other, value) in ROWS.into_iter().zip(chosen) {
+            let expected = if other == row {
+                row.level_code()
+            } else {
+                NO_ACCESS
+            };
+            assert_eq!(value, expected, "{row:?}: {other:?}");
+        }
+        assert_eq!(permissions_from(chosen), permissions, "{row:?}");
+        assert_eq!(granted_of(&permissions), [row], "{row:?}");
+    }
+}
+
+#[test]
+fn each_row_has_its_api_code_and_level() {
+    let codes: Vec<_> = ROWS
+        .into_iter()
+        .map(|row| (row.code(), row.level_code()))
+        .collect();
+    assert_eq!(
+        codes,
+        [
+            ("backups", "read"),
+            ("backup-runs", "start-and-cancel"),
+            ("previews", "preview"),
+            ("configuration", "propose"),
+            ("snapshot-contents", "read"),
+            ("daemon-log", "read"),
+            ("repository-check", "run"),
+        ]
+    );
+}
+
+/// A value that isn't the row's own level, such as another row's, grants
+/// nothing.
+#[test]
+fn a_value_that_isnt_the_rows_level_is_no_access() {
+    let chosen = ["run", "read", "propose", "preview", "none", "none", "none"];
+    assert_eq!(permissions_from(chosen), PermissionsDto::default());
+}
+
+/// 1a's Scopes column said "Read" for a token with only Daemon log, and
+/// nothing for one with only Repository check (#1214): each permission is
+/// listed by its own name.
+#[test]
+fn a_row_lists_each_permission_the_token_holds_by_its_own_name() {
+    let mixed = PermissionsDto {
+        backups: PermissionLevelDto::Read,
+        daemon_log: PermissionLevelDto::Read,
+        repository_check: PermissionLevelDto::Run,
+        ..PermissionsDto::default()
+    };
+    assert_eq!(
+        granted_of(&mixed),
+        [Row::Backups, Row::DaemonLog, Row::RepositoryCheck]
+    );
+    assert!(granted_of(&PermissionsDto::default()).is_empty());
+    let code = |row: Row| vec![("permission", MsgArg::Text(row.code().to_owned()))];
+    assert_eq!(
+        Row::DaemonLog.granted(),
+        (msg::UI_PERMISSION_GRANTED, code(Row::DaemonLog))
+    );
+    assert_eq!(
+        Row::Backups.name(),
+        (msg::UI_PERMISSION, code(Row::Backups))
+    );
+    assert_eq!(
+        Row::Previews.hint(),
+        (msg::UI_PERMISSION_HINT, code(Row::Previews))
+    );
+}
+
+/// A group offers no access first, then the row's level, each in the
+/// catalog's words.
+#[test]
+fn a_group_offers_no_access_then_its_level() {
+    let level = |code: &str| {
+        (
+            msg::UI_PERMISSION_LEVEL,
+            vec![("level", MsgArg::Text(code.to_owned()))],
+        )
+    };
+    assert_eq!(
+        Row::BackupRuns.choices(),
+        [
+            ("none", level("none")),
+            ("start-and-cancel", level("start-and-cancel")),
+        ]
+    );
+}
+
+/// A page can hold two forms of permissions, a token's dialog over the new
+/// token form: no two groups share a name.
+#[test]
+fn every_group_of_every_form_has_a_name_of_its_own() {
+    let mut names: Vec<&str> = [Form::Create, Form::Change, Form::WithoutToken]
+        .into_iter()
+        .flat_map(|form| ROWS.into_iter().map(move |row| row.group(form)))
+        .collect();
+    assert_eq!(Row::Backups.group(Form::Create), "api-token-backups");
+    assert_eq!(
+        Row::DaemonLog.group(Form::Change),
+        "api-token-change-daemon-log"
+    );
+    assert_eq!(
+        Row::RepositoryCheck.group(Form::WithoutToken),
+        "without-token-repository-check"
+    );
+    names.sort_unstable();
+    names.dedup();
+    assert_eq!(names.len(), 21);
+}
+
+#[test]
+fn a_change_goes_to_the_token_s_own_route_with_the_admin_password() {
+    assert_eq!(
+        change_path("abcdefghijkl"),
+        "/api/v1/tokens/abcdefghijkl/permissions"
+    );
+    let change = change_request(new_token(), "demo-admin-pass".to_owned());
+    assert_eq!(change.permissions, new_token());
+    assert_eq!(change.current_password, "demo-admin-pass");
+}
+
+/// With sign-in off there is no admin password to give, so none is sent.
+#[test]
+fn what_ai_agents_may_do_is_sent_with_the_password_only_with_sign_in_on() {
+    let on = without_token_request(new_token(), "demo-admin-pass".to_owned(), true);
+    assert_eq!(on.permissions, new_token());
+    assert_eq!(on.current_password.as_deref(), Some("demo-admin-pass"));
+    let off = without_token_request(new_token(), "typed anyway".to_owned(), false);
+    assert_eq!(off.current_password, None);
+}

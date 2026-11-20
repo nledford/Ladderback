@@ -27,6 +27,46 @@ async fn status_of(daemon: DaemonUrl) -> Result<BackendStatus, ErrorDto> {
     Connect::new(daemon).unwrap().status().await
 }
 
+/// A daemon that answers only a request that says it is an AI agent's, with
+/// `x-ladderback-ai-agent: 1`: its permissions, reading and the daemon's
+/// log, or a run queued as the operation `…01`.
+fn a_daemon_for_ai_agents_only() -> Router {
+    Router::new().fallback(
+        |method: axum::http::Method, uri: axum::http::Uri, headers: axum::http::HeaderMap| async move {
+            let marked = headers
+                .get(api::AI_AGENT_HEADER)
+                .is_some_and(|value| value == "1");
+            match (marked, method.as_str(), uri.path()) {
+                (false, _, _) => StatusCode::FORBIDDEN.into_response(),
+                (true, "GET", "/api/v1/permissions") => {
+                    axum::Json(json!({"backups": "read", "daemon-log": "read"})).into_response()
+                }
+                (true, "POST", "/api/v1/operations") => {
+                    axum::Json(json!({"operation": "00000000-0000-7000-8000-000000000001"}))
+                        .into_response()
+                }
+                _ => StatusCode::NOT_FOUND.into_response(),
+            }
+        },
+    )
+}
+
+/// With sign-in off the daemon holds a request `ladderback mcp` sends to
+/// what AI agents may do without a token (decision 127): every request says
+/// it is an AI agent's, a read and a change alike.
+#[tokio::test]
+async fn every_request_says_it_is_an_ai_agents() {
+    let connect = Connect::new(daemon(a_daemon_for_ai_agents_only()).await).unwrap();
+    let permissions = connect.permissions().await.unwrap();
+    assert_eq!(permissions.backups, api::PermissionLevelDto::Read);
+    assert_eq!(permissions.daemon_log, api::PermissionLevelDto::Read);
+    assert_eq!(permissions.backup_runs, api::PermissionLevelDto::None);
+    assert_eq!(
+        connect.run("home".to_owned()).await.unwrap(),
+        "00000000-0000-7000-8000-000000000001"
+    );
+}
+
 fn operation(id: u8, plan: &str, status: &str) -> Value {
     json!({
         "id": format!("00000000-0000-7000-8000-0000000000{id:02}"),

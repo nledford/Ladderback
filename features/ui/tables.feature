@@ -60,7 +60,7 @@ Feature: The app's tables
   Scenario: The API tokens table sits in a frame of its own, each instant in its words
     Given a daemon with sign-in on and the admin password "demo-admin-pass"
     And the admin is signed in with "demo-admin-pass"
-    And the admin has created the API token "nightly-mcp" with the scopes "read"
+    And the admin has created the API token "nightly-mcp" with the permissions "backups: read"
     When I open the address "/settings#api-tokens"
     Then the table "API tokens" has the row "nightly-mcp"
     And the table "API tokens" sits in a frame of its own that Tab stops on, named as the table is

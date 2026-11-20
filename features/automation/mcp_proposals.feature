@@ -34,6 +34,14 @@ Feature: AI agents propose configuration changes through MCP
     And the error names the permission "configuration"
     And the daemon's config file still holds only the repository "demo"
 
+  # The server lists only what the token's permissions open (decision 127):
+  # an AI agent that sees no tool for a job doesn't try it.
+  Scenario: A token's server lists only the tools its permissions open
+    Given the admin has created an API token over HTTP with the permissions "backups: read" and the label "reader"
+    And an MCP server connected to it with that API token in a file
+    When the MCP client lists the tools
+    Then the tools listed are "status, list_plans, list_repositories, list_snapshots, list_operations, get_operation, wait_operation, export_profile"
+
   # Approval needs a person's browser session with step-up (decision 89,
   # point 7): the server lists no tool that approves, and has none to call.
   Scenario: No tool approves a proposal
@@ -41,7 +49,7 @@ Feature: AI agents propose configuration changes through MCP
     And an MCP server connected to it with that API token in a file
     And the MCP client has proposed adding the plan "nightly" over "/home/demo"
     When the MCP client lists the tools
-    Then the tools listed are "status, list_plans, list_repositories, list_snapshots, list_snapshot_folder, find_in_snapshots, list_operations, get_operation, run_plan, wait_operation, cancel_operation, test_repository, preview_forget, preview_import, export_profile, propose_setup, get_proposal, withdraw_proposal, dry_run_plan"
+    Then the tools listed are "propose_setup, get_proposal, withdraw_proposal, dry_run_plan"
     When the MCP client calls the tool "approve_proposal" with that proposal
     Then the server answers that it has no such tool
     And the daemon's config file still holds only the repository "demo"

@@ -587,5 +587,21 @@ pub(crate) async fn change_permissions(
     }
 }
 
+/// The route of what AI agents may do without a token (decision 127).
+pub(crate) const WITHOUT_TOKEN_PATH: &str = "/api/v1/settings/without-token";
+
+/// `GET /api/v1/settings/without-token`: what AI agents may do without a
+/// token, every permission at its level or `none`.
+pub(crate) async fn without_token() -> Response {
+    todo!()
+}
+
+/// `PUT /api/v1/settings/without-token`: keeps what AI agents may do
+/// without a token and answers it. With sign-in on it takes the current
+/// admin password, as a token's change does.
+pub(crate) async fn change_without_token() -> Response {
+    todo!()
+}
+
 #[cfg(test)]
 mod tests;

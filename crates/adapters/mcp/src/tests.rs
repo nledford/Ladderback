@@ -7,7 +7,8 @@ use std::time::Duration;
 
 use api::{
     BuildDto, ErrorCode, ErrorDto, ExposureDto, NewProposalDto, OperationWarningDto,
-    PlanSummaryDto, PlansDto, ProposalDto, RepositoriesDto, SnapshotsDto, WarningCode,
+    PermissionLevelDto, PermissionsDto, PlanSummaryDto, PlansDto, ProposalDto, RepositoriesDto,
+    SnapshotsDto, WarningCode,
 };
 use serde_json::{Value, json};
 use tokio::io::{
@@ -26,6 +27,20 @@ struct Told(Result<BackendStatus, ErrorDto>);
 /// The refusal of a stand-in that has nothing to tell.
 fn untold() -> ErrorDto {
     ErrorDto::new(ErrorCode::Unknown, [], None)
+}
+
+/// Every permission at its level: what a stand-in backend grants unless a
+/// test says otherwise.
+fn every() -> PermissionsDto {
+    PermissionsDto {
+        backups: PermissionLevelDto::Read,
+        backup_runs: PermissionLevelDto::StartAndCancel,
+        previews: PermissionLevelDto::Preview,
+        configuration: PermissionLevelDto::Propose,
+        snapshot_contents: PermissionLevelDto::Read,
+        daemon_log: PermissionLevelDto::Read,
+        repository_check: PermissionLevelDto::Run,
+    }
 }
 
 #[async_trait]
@@ -110,6 +125,10 @@ impl Backend for Told {
 
     async fn export_profile(&self, _plan: String) -> Result<ProfileExportDto, ErrorDto> {
         Err(untold())
+    }
+
+    async fn permissions(&self) -> Result<PermissionsDto, ErrorDto> {
+        Ok(every())
     }
 }
 
@@ -881,6 +900,8 @@ struct Lists {
     detail: Option<OperationDetailDto>,
     preview: Option<MaintenancePreviewDto>,
     refusal: Option<ErrorDto>,
+    /// What `permissions` answers; every permission when `None`.
+    permissions: Option<Result<PermissionsDto, ErrorDto>>,
     asked: Arc<Mutex<Vec<String>>>,
 }
 
@@ -1120,6 +1141,10 @@ impl Backend for Lists {
             text: "[repository]\n".to_owned(),
             notices: Vec::new(),
         })
+    }
+
+    async fn permissions(&self) -> Result<PermissionsDto, ErrorDto> {
+        self.permissions.clone().unwrap_or_else(|| Ok(every()))
     }
 }
 
@@ -2243,6 +2268,10 @@ impl Backend for Running {
     async fn export_profile(&self, _plan: String) -> Result<ProfileExportDto, ErrorDto> {
         Err(untold())
     }
+
+    async fn permissions(&self) -> Result<PermissionsDto, ErrorDto> {
+        Ok(every())
+    }
 }
 
 impl Client {
@@ -2839,6 +2868,122 @@ fn only_connect_mode_offers_the_proposal_tools_to_a_one_shot_call() {
             tool.name
         );
     }
+}
+
+/// The names `tools/list` gives `client`, in order.
+async fn listed(client: &mut Client) -> Vec<String> {
+    let answer = client.ask_current("tools/list", json!({})).await;
+    answer["result"]["tools"]
+        .as_array()
+        .unwrap_or_else(|| panic!("no tools: {answer}"))
+        .iter()
+        .map(|tool| tool["name"].as_str().expect("a name").to_owned())
+        .collect()
+}
+
+/// A stand-in that grants `permissions` and lists nothing.
+fn granting(permissions: PermissionsDto) -> Lists {
+    Lists {
+        permissions: Some(Ok(permissions)),
+        ..Lists::default()
+    }
+}
+
+/// Decision 127: an AI agent sees only the tools its permissions open, so
+/// it doesn't try one it would be refused.
+#[tokio::test(start_paused = true)]
+async fn a_token_that_only_reads_is_listed_only_the_tools_that_read() {
+    let mut client = proposing(granting(PermissionsDto {
+        backups: PermissionLevelDto::Read,
+        ..PermissionsDto::default()
+    }));
+    assert_eq!(
+        listed(&mut client).await,
+        [
+            "status",
+            "list_plans",
+            "list_repositories",
+            "list_snapshots",
+            "list_operations",
+            "get_operation",
+            "wait_operation",
+            "export_profile"
+        ]
+    );
+}
+
+/// Cancelling reads the operation first, so it needs Backups beside Backup
+/// runs; a scheduler that only starts backups is offered no cancel.
+#[tokio::test(start_paused = true)]
+async fn backup_runs_alone_open_starting_and_testing_but_not_cancelling() {
+    let mut client = proposing(granting(PermissionsDto {
+        backup_runs: PermissionLevelDto::StartAndCancel,
+        ..PermissionsDto::default()
+    }));
+    assert_eq!(listed(&mut client).await, ["run_plan", "test_repository"]);
+}
+
+#[tokio::test(start_paused = true)]
+async fn configuration_opens_the_proposal_tools_where_they_are_offered() {
+    let configuration = PermissionsDto {
+        configuration: PermissionLevelDto::Propose,
+        previews: PermissionLevelDto::Preview,
+        ..PermissionsDto::default()
+    };
+    assert_eq!(
+        listed(&mut proposing(granting(configuration))).await,
+        [
+            "preview_forget",
+            "preview_import",
+            "propose_setup",
+            "get_proposal",
+            "withdraw_proposal",
+            "dry_run_plan"
+        ]
+    );
+    assert_eq!(
+        listed(&mut connect(granting(configuration))).await,
+        ["preview_forget", "preview_import"]
+    );
+}
+
+/// Snapshot contents opens the two tools that show the names inside
+/// snapshots (decision 132), and nothing else.
+#[tokio::test(start_paused = true)]
+async fn snapshot_contents_alone_opens_the_folder_and_search_tools() {
+    let mut client = proposing(granting(PermissionsDto {
+        snapshot_contents: PermissionLevelDto::Read,
+        ..PermissionsDto::default()
+    }));
+    assert_eq!(
+        listed(&mut client).await,
+        ["list_snapshot_folder", "find_in_snapshots"]
+    );
+}
+
+/// The daemon's log and a repository check open no tool of their own: on
+/// their own they list nothing.
+#[tokio::test(start_paused = true)]
+async fn the_permissions_no_tool_needs_alone_list_no_tool() {
+    let mut client = proposing(granting(PermissionsDto {
+        daemon_log: PermissionLevelDto::Read,
+        repository_check: PermissionLevelDto::Run,
+        ..PermissionsDto::default()
+    }));
+    assert!(listed(&mut client).await.is_empty());
+}
+
+/// Permissions that can't be read hide nothing: the daemon still refuses
+/// what isn't allowed, naming the permission.
+#[tokio::test(start_paused = true)]
+async fn permissions_that_cant_be_read_leave_every_tool_listed() {
+    let mut client = proposing(Lists {
+        permissions: Some(Err(untold())),
+        ..Lists::default()
+    });
+    let names = listed(&mut client).await;
+    assert_eq!(names.len(), 19, "{names:?}");
+    assert_eq!(names[0], "status");
 }
 
 /// A server of its own given a proposal tool's call all the same answers

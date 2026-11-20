@@ -560,6 +560,13 @@ pub fn router(assets: Arc<dyn AssetSource>, checks: RequestChecks, state: AppSta
             api_tokens::PERMISSIONS_PATH,
             axum::routing::get(api_tokens::permissions),
         )
+        // A session's only: the route table names no permission for it, so
+        // neither a token nor an AI agent changes what AI agents may do
+        // without a token (decision 127).
+        .route(
+            api_tokens::WITHOUT_TOKEN_PATH,
+            axum::routing::get(api_tokens::without_token).put(api_tokens::change_without_token),
+        )
         .route(
             sign_in::settings::SETTINGS_PATH,
             axum::routing::get(sign_in::settings::read).put(sign_in::settings::change),

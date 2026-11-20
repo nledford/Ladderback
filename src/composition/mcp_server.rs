@@ -611,6 +611,10 @@ impl ::mcp::Backend for InProcess {
             .await
             .map_err(http_adapter::ProfilesError::error)
     }
+
+    async fn permissions(&self) -> Result<api::PermissionsDto, api::ErrorDto> {
+        todo!()
+    }
 }
 
 /// A catalog's refusal as the API answers it: the configuration's

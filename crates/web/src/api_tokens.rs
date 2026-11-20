@@ -5,7 +5,8 @@
 //! holds the signals and sends the requests is `settings.rs`.
 
 use api::{
-    CreateApiTokenDto, CreatedApiTokenDto, ErrorCode, MsgArg, PermissionLevelDto, PermissionsDto,
+    ChangeApiTokenPermissionsDto, ChangeWithoutTokenDto, CreateApiTokenDto, CreatedApiTokenDto,
+    ErrorCode, MsgArg, PermissionLevelDto, PermissionsDto,
 };
 use l10n::{MessageId, msg};
 
@@ -389,6 +390,134 @@ pub(crate) fn revoked(label: &str) -> Said {
 /// What the dialog that shows the new token `label` says.
 pub(crate) fn created_body(label: &str) -> Said {
     about(msg::UI_API_TOKEN_CREATED_BODY, label)
+}
+
+/// A permission a form offers as a group of its own (decision 127): no
+/// access, or the permission's one level.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum Row {
+    Backups,
+    BackupRuns,
+    Previews,
+    Configuration,
+    SnapshotContents,
+    DaemonLog,
+    RepositoryCheck,
+}
+
+/// Every permission, in the API's order, which the forms and a token's row
+/// keep.
+pub(crate) const ROWS: [Row; 7] = [
+    Row::Backups,
+    Row::BackupRuns,
+    Row::Previews,
+    Row::Configuration,
+    Row::SnapshotContents,
+    Row::DaemonLog,
+    Row::RepositoryCheck,
+];
+
+/// The value of the radio that grants no access.
+pub(crate) const NO_ACCESS: &str = "none";
+
+/// A form of permissions: a new token's, an existing token's change, or
+/// what AI agents may do without a token. Each names its groups apart, as
+/// a page can hold two of them.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum Form {
+    Create,
+    Change,
+    WithoutToken,
+}
+
+impl Row {
+    /// The permission's code, as the API and the catalog's selects name it.
+    pub(crate) const fn code(self) -> &'static str {
+        todo!()
+    }
+
+    /// The code of the row's one level: the value of the radio that grants
+    /// it.
+    pub(crate) const fn level_code(self) -> &'static str {
+        todo!()
+    }
+
+    /// The `name` of the row's group in `form`; its radios' ids are this
+    /// and their values.
+    pub(crate) const fn group(self, form: Form) -> &'static str {
+        todo!()
+    }
+
+    /// The row's name: its group's legend.
+    pub(crate) fn name(self) -> Said {
+        todo!()
+    }
+
+    /// What the row opens, in plain words, under its legend.
+    pub(crate) fn hint(self) -> Said {
+        todo!()
+    }
+
+    /// How a token's row lists the permission: its name and its level.
+    pub(crate) fn granted(self) -> Said {
+        todo!()
+    }
+
+    /// The group's choices, values and words: no access, then the level.
+    pub(crate) fn choices(self) -> [(&'static str, Said); 2] {
+        todo!()
+    }
+}
+
+/// What a new token starts with (decision 127): it sees and starts
+/// backups, previews and proposes; what can show a file's name or a log
+/// line is off until chosen.
+pub(crate) fn new_token() -> PermissionsDto {
+    todo!()
+}
+
+/// The value each group holds for `permissions`, in [`ROWS`]' order.
+pub(crate) fn chosen_of(_permissions: &PermissionsDto) -> [&'static str; 7] {
+    todo!()
+}
+
+/// The permissions the groups' values `chosen` give, in [`ROWS`]' order: a
+/// group at its row's level holds it, and any other value is no access.
+pub(crate) fn permissions_from(_chosen: [&str; 7]) -> PermissionsDto {
+    todo!()
+}
+
+/// The permissions a token's row lists: each it holds, in [`ROWS`]' order.
+pub(crate) fn granted_of(_permissions: &PermissionsDto) -> Vec<Row> {
+    todo!()
+}
+
+/// The route that changes the permissions of the token `id`.
+pub(crate) fn change_path(_id: &str) -> String {
+    todo!()
+}
+
+/// The body of a token's change: its permissions from now on and the
+/// current admin password.
+pub(crate) fn change_request(
+    _permissions: PermissionsDto,
+    _password: String,
+) -> ChangeApiTokenPermissionsDto {
+    todo!()
+}
+
+/// The route of what AI agents may do without a token.
+pub(crate) const WITHOUT_TOKEN_PATH: &str = "/api/v1/settings/without-token";
+
+/// The body of a change of what AI agents may do without a token: the
+/// current admin password only with sign-in on (`signed_in`), as with
+/// sign-in off there is none.
+pub(crate) fn without_token_request(
+    _permissions: PermissionsDto,
+    _password: String,
+    _signed_in: bool,
+) -> ChangeWithoutTokenDto {
+    todo!()
 }
 
 #[cfg(test)]

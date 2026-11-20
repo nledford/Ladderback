@@ -39,11 +39,13 @@ Feature: AI agents and scripts use Ladderback through MCP
       | 2025-06-18 |
       | 2025-11-25 |
 
+  # With sign-in off, the server lists the tools AI agents may use without a
+  # token (decision 127): by default not the two that look inside snapshots.
   Scenario: The server lists its tools
     Given Ladderback is serving on loopback
     And an MCP server connected to it
     When the MCP client lists the tools
-    Then the tools listed are "status, list_plans, list_repositories, list_snapshots, list_snapshot_folder, find_in_snapshots, list_operations, get_operation, run_plan, wait_operation, cancel_operation, test_repository, preview_forget, preview_import, export_profile, propose_setup, get_proposal, withdraw_proposal, dry_run_plan"
+    Then the tools listed are "status, list_plans, list_repositories, list_snapshots, list_operations, get_operation, run_plan, wait_operation, cancel_operation, test_repository, preview_forget, preview_import, export_profile, propose_setup, get_proposal, withdraw_proposal, dry_run_plan"
 
   # A proposal waits for a person on the web UI's "Pending changes" page,
   # which only a running Ladderback serves: a session of its own offers no

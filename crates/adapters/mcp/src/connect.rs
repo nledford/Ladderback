@@ -7,9 +7,9 @@ use std::time::Duration;
 
 use api::{
     ErrorCode, ErrorDto, FindDto, FolderDto, LocationsTestDto, MaintenancePreviewDto, MsgArg,
-    NewProposalDto, OperationDetailDto, OperationSummaryDto, OperationsPageDto, PlanDryRunDto,
-    PlanDto, PlansDto, ProfileExportDto, ProfileImportDto, ProposalDto, RepositoriesDto,
-    SessionDto, SignInStateDto, SnapshotsDto,
+    NewProposalDto, OperationDetailDto, OperationSummaryDto, OperationsPageDto, PermissionsDto,
+    PlanDryRunDto, PlanDto, PlansDto, ProfileExportDto, ProfileImportDto, ProposalDto,
+    RepositoriesDto, SessionDto, SignInStateDto, SnapshotsDto,
 };
 use async_trait::async_trait;
 use domain::browse::FolderPath;
@@ -613,6 +613,10 @@ impl Backend for Connect {
             &[("commands", "left-out")],
         )
         .await
+    }
+
+    async fn permissions(&self) -> Result<PermissionsDto, ErrorDto> {
+        todo!()
     }
 }
 

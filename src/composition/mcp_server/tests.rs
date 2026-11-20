@@ -46,6 +46,14 @@ async fn a_daemon(scratch: &std::path::Path) -> Daemon {
     a_daemon_with(scratch, &[]).await
 }
 
+/// [`a_daemon`], whose AI agents may look inside snapshots without a token,
+/// as a headless or scratch session must to list a folder or search
+/// (decision 127).
+async fn a_daemon_seeing_contents(scratch: &std::path::Path) -> Daemon {
+    let config = format!("{CONFIG}\n[without-token]\nsnapshot-contents = \"read\"\n");
+    a_daemon_over(scratch, &config, &[]).await
+}
+
 /// [`a_daemon`], its log holding `more` too.
 async fn a_daemon_with(scratch: &std::path::Path, more: &[Operation]) -> Daemon {
     a_daemon_over(scratch, CONFIG, more).await
@@ -212,6 +220,383 @@ async fn both_backends_refuse_alike_when_the_configuration_cant_be_read() {
         wire_name(refused.code).starts_with("config-"),
         "a configuration's refusal: {refused:?}"
     );
+}
+
+/// What the `[without-token]` table turns off for the tests of what AI
+/// agents may do without a token (decision 127).
+const WITHOUT_RUNS_OR_PREVIEWS: &str =
+    "\n[without-token]\nbackup-runs = \"none\"\npreviews = \"none\"\n";
+
+/// A headless or scratch session is held to the `[without-token]` setting,
+/// as connect mode is with sign-in off: both lists the same tools.
+#[tokio::test]
+async fn both_backends_tell_alike_what_ai_agents_may_do_without_a_token() {
+    let scratch = tempfile::tempdir().expect("a scratch dir");
+    let config = format!("{CONFIG}{WITHOUT_RUNS_OR_PREVIEWS}");
+    let daemon = a_daemon_over(scratch.path(), &config, &[]).await;
+    let connect = connected_to(&daemon).await.permissions().await;
+    let in_process = InProcess::over(&daemon.state).permissions().await;
+
+    let permissions = in_process.expect("the table is read");
+    assert_eq!(permissions.backups, api::PermissionLevelDto::Read);
+    assert_eq!(permissions.backup_runs, api::PermissionLevelDto::None);
+    assert_eq!(permissions.previews, api::PermissionLevelDto::None);
+    assert_eq!(Ok(permissions), connect);
+}
+
+/// A call the table doesn't allow is refused by both backends alike, naming
+/// the permission, before it reaches what it asks for.
+#[tokio::test]
+async fn both_backends_refuse_alike_what_ai_agents_may_not_do_without_a_token() {
+    let scratch = tempfile::tempdir().expect("a scratch dir");
+    let config = format!("{CONFIG}{WITHOUT_RUNS_OR_PREVIEWS}");
+    let daemon = a_daemon_over(scratch.path(), &config, &[]).await;
+    let connect = connected_to(&daemon).await;
+    let in_process = InProcess::over(&daemon.state);
+    let running = Uuid::from_u128(1).to_string();
+
+    let asked = [
+        (
+            "backup-runs",
+            connect.run("home".to_owned()).await.map(drop),
+            in_process.run("home".to_owned()).await.map(drop),
+        ),
+        (
+            "backup-runs",
+            connect.cancel(running.clone()).await,
+            in_process.cancel(running).await,
+        ),
+        (
+            "backup-runs",
+            connect.test_repository("demo".to_owned()).await.map(drop),
+            in_process
+                .test_repository("demo".to_owned())
+                .await
+                .map(drop),
+        ),
+        (
+            "previews",
+            connect.preview_forget("demo".to_owned()).await.map(drop),
+            in_process.preview_forget("demo".to_owned()).await.map(drop),
+        ),
+        (
+            "previews",
+            connect
+                .preview_import(String::new(), "demo".to_owned())
+                .await
+                .map(drop),
+            in_process
+                .preview_import(String::new(), "demo".to_owned())
+                .await
+                .map(drop),
+        ),
+    ];
+    for (permission, connect, in_process) in asked {
+        let refused = in_process.expect_err("a permission the table turns off");
+        assert_eq!(
+            refused.code,
+            api::ErrorCode::WithoutTokenPermission,
+            "{refused:?}"
+        );
+        assert_eq!(
+            refused.args.get("permission"),
+            Some(&MsgArg::Text(permission.to_owned())),
+            "{refused:?}"
+        );
+        assert_eq!(Err(refused), connect);
+    }
+    assert!(in_process.plans().await.is_ok(), "Backups stays open");
+}
+
+/// Without Backups, each call that reads plans, repositories, snapshots or
+/// operations is refused by both backends alike, naming it; so is a
+/// cancel, which connect mode starts by reading the operation it cancels.
+#[tokio::test]
+async fn both_backends_refuse_alike_what_needs_backups_without_it() {
+    let scratch = tempfile::tempdir().expect("a scratch dir");
+    let config = format!("{CONFIG}\n[without-token]\nbackups = \"none\"\n");
+    let daemon = a_daemon_over(scratch.path(), &config, &[]).await;
+    let connect = connected_to(&daemon).await;
+    let in_process = InProcess::over(&daemon.state);
+    let running = Uuid::from_u128(1).to_string();
+
+    let asked = [
+        (
+            "status",
+            connect.status().await.map(drop),
+            in_process.status().await.map(drop),
+        ),
+        (
+            "plans",
+            connect.plans().await.map(drop),
+            in_process.plans().await.map(drop),
+        ),
+        (
+            "repositories",
+            connect.repositories().await.map(drop),
+            in_process.repositories().await.map(drop),
+        ),
+        (
+            "snapshots",
+            connect.snapshots("demo".to_owned()).await.map(drop),
+            in_process.snapshots("demo".to_owned()).await.map(drop),
+        ),
+        (
+            "history",
+            connect.history(None, None, 10).await.map(drop),
+            in_process.history(None, None, 10).await.map(drop),
+        ),
+        (
+            "operation",
+            connect.operation(running.clone()).await.map(drop),
+            in_process.operation(running.clone()).await.map(drop),
+        ),
+        (
+            "summary",
+            connect.summary(running.clone()).await.map(drop),
+            in_process.summary(running.clone()).await.map(drop),
+        ),
+        (
+            "export_profile",
+            connect.export_profile("home".to_owned()).await.map(drop),
+            in_process.export_profile("home".to_owned()).await.map(drop),
+        ),
+        (
+            "cancel",
+            connect.cancel(running.clone()).await,
+            in_process.cancel(running).await,
+        ),
+    ];
+    for (call, connect, in_process) in asked {
+        let refused = in_process.expect_err(call);
+        assert_eq!(
+            refused.code,
+            api::ErrorCode::WithoutTokenPermission,
+            "{call}: {refused:?}"
+        );
+        assert_eq!(
+            refused.args.get("permission"),
+            Some(&MsgArg::Text("backups".to_owned())),
+            "{call}: {refused:?}"
+        );
+        assert_eq!(Err(refused), connect, "{call}");
+    }
+}
+
+/// The file the operations of [`NamingAFile`] name.
+const A_FILE: &str = "/home/demo/tax-2026.pdf";
+
+/// `summary`, failed on [`A_FILE`]: its failure names the file as an
+/// argument and in the engine's own words, and its entry is that file.
+fn failed_on_a_file(summary: api::OperationSummaryDto) -> api::OperationSummaryDto {
+    api::OperationSummaryDto {
+        failure: Some(api::ErrorDto::new(
+            api::ErrorCode::EntryUnknown,
+            [("path", MsgArg::Text(A_FILE.to_owned()))],
+            Some(format!("no entry {A_FILE}")),
+        )),
+        entry: Some(A_FILE.to_owned()),
+        ..summary
+    }
+}
+
+/// The daemon's catalog and operations, but every operation they tell of
+/// failed on [`A_FILE`], and each detail warns that it couldn't read it.
+struct NamingAFile {
+    catalog: Arc<dyn http_adapter::Catalog>,
+    operations: Arc<dyn http_adapter::Operations>,
+}
+
+#[async_trait]
+impl http_adapter::Catalog for NamingAFile {
+    async fn status(
+        &self,
+        full_disk_access: api::FullDiskAccessStateDto,
+    ) -> Result<api::StatusDto, http_adapter::CatalogError> {
+        let status = self.catalog.status(full_disk_access).await?;
+        Ok(api::StatusDto {
+            plans: status
+                .plans
+                .into_iter()
+                .map(|plan| api::PlanStatusDto {
+                    last: plan.last.map(failed_on_a_file),
+                    ..plan
+                })
+                .collect(),
+            running: status.running.into_iter().map(failed_on_a_file).collect(),
+            ..status
+        })
+    }
+
+    async fn plans(&self) -> Result<api::PlansDto, http_adapter::CatalogError> {
+        self.catalog.plans().await
+    }
+
+    async fn repositories(&self) -> Result<api::RepositoriesDto, http_adapter::CatalogError> {
+        self.catalog.repositories().await
+    }
+
+    async fn snapshots(
+        &self,
+        alias: String,
+    ) -> Result<api::SnapshotsDto, http_adapter::SnapshotsError> {
+        self.catalog.snapshots(alias).await
+    }
+
+    async fn folder(
+        &self,
+        alias: String,
+        snapshot: domain::SnapshotId,
+        folder: domain::browse::FolderPath,
+        from: u64,
+        most: u64,
+    ) -> Result<api::FolderDto, http_adapter::FolderError> {
+        self.catalog
+            .folder(alias, snapshot, folder, from, most)
+            .await
+    }
+
+    async fn find(
+        &self,
+        alias: String,
+        pattern: domain::find::NamePattern,
+        plan: Option<domain::PlanId>,
+        caps: domain::find::SearchCaps,
+    ) -> Result<api::FindDto, http_adapter::SnapshotsError> {
+        self.catalog.find(alias, pattern, plan, caps).await
+    }
+}
+
+#[async_trait]
+impl http_adapter::Operations for NamingAFile {
+    async fn start_backup(
+        &self,
+        plan: String,
+        trigger: Trigger,
+    ) -> Result<String, http_adapter::StartError> {
+        self.operations.start_backup(plan, trigger).await
+    }
+
+    async fn start_maintenance(
+        &self,
+        repository: String,
+        request: http_adapter::MaintenanceRequest,
+        selection: Option<String>,
+    ) -> Result<String, http_adapter::MaintenanceRefusal> {
+        self.operations
+            .start_maintenance(repository, request, selection)
+            .await
+    }
+
+    async fn preview(
+        &self,
+        repository: String,
+        request: http_adapter::MaintenanceRequest,
+    ) -> Result<api::MaintenancePreviewDto, http_adapter::MaintenanceRefusal> {
+        self.operations.preview(repository, request).await
+    }
+
+    async fn groups(
+        &self,
+        repository: String,
+    ) -> Result<api::SnapshotGroupsDto, http_adapter::MaintenanceRefusal> {
+        self.operations.groups(repository).await
+    }
+
+    async fn stats(
+        &self,
+        repository: String,
+    ) -> Result<api::RepositoryStatsDto, http_adapter::MaintenanceRefusal> {
+        self.operations.stats(repository).await
+    }
+
+    async fn read_stats(
+        &self,
+        repository: String,
+    ) -> Result<api::StatsReadingDto, http_adapter::MaintenanceRefusal> {
+        self.operations.read_stats(repository).await
+    }
+
+    async fn history(
+        &self,
+        plan: Option<String>,
+        after: Option<String>,
+        limit: Option<u64>,
+    ) -> Result<api::OperationsPageDto, http_adapter::HistoryError> {
+        let page = self.operations.history(plan, after, limit).await?;
+        Ok(api::OperationsPageDto {
+            operations: page.operations.into_iter().map(failed_on_a_file).collect(),
+            ..page
+        })
+    }
+
+    async fn operation(
+        &self,
+        id: String,
+    ) -> Result<api::OperationDetailDto, http_adapter::LookupError> {
+        let detail = self.operations.operation(id).await?;
+        Ok(api::OperationDetailDto {
+            operation: failed_on_a_file(detail.operation),
+            warnings: vec![api::OperationWarningDto {
+                code: api::WarningCode::SourceUnreadable,
+                item: Some(A_FILE.to_owned()),
+                during: "backup".to_owned(),
+                detail: format!("permission denied: {A_FILE}"),
+            }],
+        })
+    }
+
+    async fn cancel(
+        &self,
+        id: String,
+        by: http_adapter::Canceller,
+    ) -> Result<(), http_adapter::CancelError> {
+        self.operations.cancel(id, by).await
+    }
+}
+
+/// A headless or scratch session is held to the `[without-token]` setting
+/// in what it shows too, as connect mode is with sign-in off: a file's name,
+/// in an operation's warnings, its failure or its entry, in the history or
+/// the status, only with Snapshot contents (decision 127).
+#[tokio::test]
+async fn both_backends_name_a_file_alike_only_once_ai_agents_have_snapshot_contents() {
+    for (table, named) in [
+        ("", false),
+        ("\n[without-token]\nsnapshot-contents = \"read\"\n", true),
+    ] {
+        let scratch = tempfile::tempdir().expect("a scratch dir");
+        let daemon = a_daemon_over(scratch.path(), &format!("{CONFIG}{table}"), &[]).await;
+        let mut state = daemon.state.clone();
+        let naming = Arc::new(NamingAFile {
+            catalog: Arc::clone(&daemon.state.catalog),
+            operations: Arc::clone(&daemon.state.operations),
+        });
+        state.catalog = naming.clone();
+        state.operations = naming;
+        let connect = connected_over(state.clone()).await;
+        let in_process = InProcess::over(&state);
+
+        let id = Uuid::from_u128(1).hyphenated().to_string();
+        let detail = in_process.operation(id.clone()).await;
+        assert_eq!(detail, connect.operation(id.clone()).await, "{table}");
+        let summary = in_process.summary(id.clone()).await;
+        assert_eq!(summary, connect.summary(id).await, "{table}");
+        let page = in_process.history(None, None, 10).await;
+        assert_eq!(page, connect.history(None, None, 10).await, "{table}");
+        let status = in_process.status().await.map(|status| status.summary);
+        let connect_status = connect.status().await.map(|status| status.summary);
+        assert_eq!(status, connect_status, "{table}");
+
+        let told = serde_json::to_string(&(
+            detail.expect("the operation"),
+            summary.expect("its summary"),
+            page.expect("the history"),
+            status.expect("the status"),
+        ))
+        .expect("JSON");
+        assert_eq!(told.contains(A_FILE), named, "{table}: {told}");
+    }
 }
 
 #[tokio::test]
@@ -555,7 +940,7 @@ async fn both_backends_refuse_a_listing_that_ran_out_of_time_alike() {
 #[tokio::test]
 async fn both_backends_refuse_a_search_that_ran_out_of_time_alike() {
     let scratch = tempfile::tempdir().expect("a scratch dir");
-    let daemon = a_daemon(scratch.path()).await;
+    let daemon = a_daemon_seeing_contents(scratch.path()).await;
     let mut state = daemon.state.clone();
     state.catalog = Arc::new(WithSnapshots {
         catalog: Arc::clone(&daemon.state.catalog),
@@ -609,7 +994,7 @@ async fn token_with(
 async fn a_token_without_snapshot_contents_is_refused_both_snapshot_tools() {
     use domain::access::permissions::Permission;
     let scratch = tempfile::tempdir().expect("a scratch dir");
-    let daemon = a_daemon(scratch.path()).await;
+    let daemon = a_daemon_seeing_contents(scratch.path()).await;
     let access = Arc::new(app::access::Access::new(
         Arc::new(app::fakes::InMemoryAdminPassword::with("demo-admin-pass")),
         Arc::new(app::fakes::SeededRandom::new(7)),

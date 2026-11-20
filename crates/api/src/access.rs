@@ -259,6 +259,24 @@ impl std::fmt::Debug for ChangeApiTokenPermissionsDto {
     }
 }
 
+/// `PUT /api/v1/settings/without-token`: what AI agents may do without a
+/// token from now on (decision 127), and, with sign-in on, the current admin
+/// password, which a change then needs; with sign-in off there is none to
+/// give. Its `Debug` hides the password (I4).
+#[derive(Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "kebab-case", deny_unknown_fields)]
+pub struct ChangeWithoutTokenDto {
+    pub permissions: PermissionsDto,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub current_password: Option<String>,
+}
+
+impl std::fmt::Debug for ChangeWithoutTokenDto {
+    fn fmt(&self, _f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        todo!()
+    }
+}
+
 /// What creating a token answers: the token as it is listed, and its whole
 /// text, `ladderback_<id>_<secret>`, shown this once. Its `Debug` hides the
 /// secret (I4).
