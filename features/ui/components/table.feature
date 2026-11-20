@@ -96,34 +96,41 @@ Feature: The table
       | forced colors |
 
   # The change mark (decision 129): a live change to a row's watched column
-  # marks the row "changed, not yet seen" until the reader sees it. The demo's
-  # button stands in for a live update, changing the status of the next row
-  # in turn: photos first, then music.
+  # marks the row "changed, not yet seen" until the reader sees it, in bold,
+  # with an edge, and in a word a screen reader hears with the status. The
+  # demo's button stands in for a live update, changing the status of the
+  # next row in turn: photos first, then music. Mark all as seen stands
+  # beside it, in the demo's row of actions, as it does in a page's.
   Scenario: A row a live change marks stays marked until focus enters it
     When I open the "Live table" demo
     And I press Tab until focus is on the button "Change a demo status"
     And I press Enter
     Then the row "photos" of the table "Demo jobs" shows "Running" in its "Status" column
     And the row "photos" of the table "Demo jobs" is marked as changed, its "Status" in bold and an edge at its start
+    And the row "photos" of the table "Demo jobs" says "Changed, not yet seen" in its "Status" column to a screen reader
     And the row "music" of the table "Demo jobs" is not marked
+    And the row "music" of the table "Demo jobs" doesn't say "Changed, not yet seen" in its "Status" column to a screen reader
     And focus is kept on the button "Change a demo status"
     When I press Tab until focus is on the button "Star photos"
     Then the row "photos" of the table "Demo jobs" is not marked
+    And the row "photos" of the table "Demo jobs" doesn't say "Changed, not yet seen" in its "Status" column to a screen reader
     And the page doesn't offer the button "Mark all as seen"
 
-  Scenario: Mark all as seen clears every mark, says how many, and hands focus to the table as it goes
+  Scenario: Mark all as seen clears every mark, says how many, and hands focus to the demo's heading as it goes
     When I open the "Live table" demo
     And I press Tab until focus is on the button "Change a demo status"
     And I press Enter
     And I press Enter
     Then the row "photos" of the table "Demo jobs" is marked as changed, its "Status" in bold and an edge at its start
     And the row "music" of the table "Demo jobs" is marked as changed, its "Status" in bold and an edge at its start
-    When I press Tab until focus is on the button "Mark all as seen"
-    And I press Enter
+    When I press Tab
+    Then focus is kept on the button "Mark all as seen"
+    When I press Enter
     Then the polite region reads "2 changed rows marked as seen."
-    And focus is on the region "Demo jobs"
+    And focus is on the heading "Live table"
     And the row "photos" of the table "Demo jobs" is not marked
     And the row "music" of the table "Demo jobs" is not marked
+    And the row "photos" of the table "Demo jobs" doesn't say "Changed, not yet seen" in its "Status" column to a screen reader
     And the page doesn't offer the button "Mark all as seen"
 
   Scenario Outline: A marked row keeps its bold status and its edge in <colors>

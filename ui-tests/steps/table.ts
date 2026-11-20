@@ -384,12 +384,18 @@ interface Mark {
   cue: string;
 }
 
-async function markOf(world: BrowserWorld, name: string, row: string, column: string): Promise<Mark> {
-  const found = rowNamed(world, name, row).first();
-  await found.waitFor({ state: "visible", timeout: patienceMs() });
+/** Where `column` stands among the table's columns, its row header's first. */
+async function columnAt(world: BrowserWorld, name: string, column: string): Promise<number> {
   const headers = (await table(world.page, name).locator("thead th").allInnerTexts()).map(headerWords);
   const index = headers.indexOf(column);
   assert.ok(index >= 0, `the table "${name}" has no column "${column}": ${headers.join(", ")}`);
+  return index;
+}
+
+async function markOf(world: BrowserWorld, name: string, row: string, column: string): Promise<Mark> {
+  const found = rowNamed(world, name, row).first();
+  await found.waitFor({ state: "visible", timeout: patienceMs() });
+  const index = await columnAt(world, name, column);
   return found.evaluate((element, at) => {
     const probe = document.createElement("span");
     probe.style.setProperty("forced-color-adjust", "none");
@@ -476,6 +482,66 @@ Then(
 Then("the row {string} of the table {string} is not marked", async function (this: BrowserWorld, row: string, name: string) {
   const mark = await waitForMark(this, name, row, "Status", unmarked);
   assert.ok(unmarked(mark), `the row ${row} is still marked as changed: ${JSON.stringify(mark)}`);
+});
+
+// What a screen reader hears of a marked row (decision 129): the mark's word
+// in the name of its cell, so the mark is not drawn alone (1.3.1). A cell
+// after the row header, found by its column's place among the cells, in a
+// row whose header may be fetched text, isolated as such (`rowNamed`).
+async function cellOfLive(world: BrowserWorld, name: string, row: string, column: string): Promise<Locator> {
+  const found = rowNamed(world, name, row).first();
+  await found.waitFor({ state: "visible", timeout: patienceMs() });
+  const index = await columnAt(world, name, column);
+  assert.ok(index > 0, `the column "${column}" holds the row headers, not cells`);
+  return found.getByRole("cell").nth(index - 1);
+}
+
+/** `words` anywhere in a name, bidi isolation marks and all. */
+const saying = (words: string): RegExp => new RegExp(namePattern(words).source.slice(1, -1));
+
+Then(
+  "the row {string} of the table {string} says {string} in its {string} column to a screen reader",
+  async function (this: BrowserWorld, row: string, name: string, words: string, column: string) {
+    const cell = await cellOfLive(this, name, row, column);
+    await expect(cell).toHaveAccessibleName(saying(words), { timeout: patienceMs() });
+  },
+);
+
+Then(
+  "the row {string} of the table {string} doesn't say {string} in its {string} column to a screen reader",
+  async function (this: BrowserWorld, row: string, name: string, words: string, column: string) {
+    const cell = await cellOfLive(this, name, row, column);
+    await expect(cell).not.toHaveAccessibleName(saying(words), { timeout: patienceMs() });
+  },
+);
+
+// Where a table's frame starts on the page, not in the viewport, so a scroll
+// that brings a control into view isn't counted as a move: a control that
+// comes and goes before it, in a line kept for it, moves nothing (decision
+// 129).
+const starts = new WeakMap<BrowserWorld, { x: number; y: number }>();
+
+async function startOf(world: BrowserWorld, name: string): Promise<{ x: number; y: number }> {
+  const region = world.page.getByRole("region", { name: namePattern(name) });
+  await region.waitFor({ state: "visible", timeout: patienceMs() });
+  return region.evaluate((frame) => {
+    const box = frame.getBoundingClientRect();
+    return { x: box.left + scrollX, y: box.top + scrollY };
+  });
+}
+
+When("I note where the table {string} starts", async function (this: BrowserWorld, name: string) {
+  starts.set(this, await startOf(this, name));
+});
+
+Then("the table {string} starts where it did", async function (this: BrowserWorld, name: string) {
+  const noted = starts.get(this);
+  assert.ok(noted, "no step noted where the table started");
+  const now = await startOf(this, name);
+  assert.ok(
+    Math.abs(now.x - noted.x) < 0.5 && Math.abs(now.y - noted.y) < 0.5,
+    `the table "${name}" started at ${JSON.stringify(noted)} and now starts at ${JSON.stringify(now)}`,
+  );
 });
 
 // The region a table's frame is, named as its table: where focus goes when

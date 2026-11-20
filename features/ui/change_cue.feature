@@ -3,15 +3,16 @@ Feature: A row whose status changes stays marked until it is seen
   A live table changes by itself: on the Operations page a run starts, ends
   or fails while the reader looks elsewhere, and a badge that flips unwatched
   is easy to miss. So a row whose status a live update changed is marked
-  "changed, not yet seen": its status reads in bold, and an edge stands at
-  the row's start. The mark stays until the reader sees it, as focus enters
-  the row or they mark every row as seen, or until they leave the page. It
-  arrives once with a fade, from the cue's fill into the still mark over
-  about 600 ms. Nothing marks a row whose status stayed as it was: not the
-  page's first rows, not a progress report, not a re-sort, not a paused
-  page; a resume marks each changed row once. A mark and its fade move
-  nothing, so both stay for a reader who asks for less motion (decisions
-  127 and 129); a screen reader hears the announcer instead. The journeys
+  "changed, not yet seen": its status reads in bold, an edge stands at the
+  row's start, and a screen reader hears "Changed, not yet seen" with the
+  status. The mark stays until the reader sees it, as focus enters the row
+  or they mark every row as seen with the button in the page's row of
+  actions, or until they leave the page. It arrives once with a fade, from
+  the cue's fill into the still mark over about 600 ms. Nothing marks a row
+  whose status stayed as it was: not the page's first rows, not a progress
+  report, not a re-sort, not a paused page; a resume marks each changed row
+  once. A mark, its fade and its button move nothing, so all stay for a
+  reader who asks for less motion (decisions 127 and 129). The journeys
   play the daemon, so each update reaches the page when a step sends it,
   after the page is listening.
 
@@ -70,7 +71,7 @@ Feature: A row whose status changes stays marked until it is seen
     And the row "demo-home" of the table "Operations" is marked as changed, its "Status" in bold and an edge at its start
     And nothing on the page moves, turns or changes size
 
-  Scenario: Marking every row as seen clears the marks, says how many, and hands focus to the table
+  Scenario: Marking every row as seen clears the marks, says how many, and hands focus to the page's heading
     Given the daemon reports running backups of "demo-home" and "demo-docs"
     When I open the address "/operations"
     And the table "Operations" has a row "demo-docs" that shows "Running"
@@ -79,11 +80,78 @@ Feature: A row whose status changes stays marked until it is seen
     And the daemon reports that the backup of "demo-home" has failed
     Then the row "demo-docs" of the table "Operations" is marked as changed, its "Status" in bold and an edge at its start
     And the row "demo-home" of the table "Operations" is marked as changed, its "Status" in bold and an edge at its start
+    And the row "demo-docs" of the table "Operations" says "Changed, not yet seen" in its "Status" column to a screen reader
+    And the row "demo-home" of the table "Operations" says "Changed, not yet seen" in its "Status" column to a screen reader
+    When I skip to the content
+    And I press Tab until focus is on the button "Mark all as seen"
+    And I press Tab
+    Then focus is on the region "Operations"
+    When I press Shift+Tab until focus is on the button "Mark all as seen"
+    And I press Enter
+    Then the polite region comes to contain "2 changed rows marked as seen."
+    And focus is on the heading "Operations"
+    And the row "demo-docs" of the table "Operations" is not marked
+    And the row "demo-home" of the table "Operations" is not marked
+    And the row "demo-docs" of the table "Operations" doesn't say "Changed, not yet seen" in its "Status" column to a screen reader
+    And the row "demo-home" of the table "Operations" doesn't say "Changed, not yet seen" in its "Status" column to a screen reader
+    And the page doesn't offer the button "Mark all as seen"
+
+  # Mark all as seen stands in the page's row of actions, after the plans'
+  # start buttons, in a place kept for it while it is hidden, so it comes
+  # and goes without moving the table, however the row wraps (1.4.10).
+  Scenario: Mark all as seen comes and goes in the page's row of actions and moves nothing, on a small screen with larger text
+    Given a viewport of 320 by 640 pixels
+    And the reader sets the text size to 200 percent
+    And the daemon reports running backups of "demo-home" and "demo-docs"
+    When I open the address "/operations"
+    And the table "Operations" has a row "demo-docs" that shows "Running"
+    And I note where the table "Operations" starts
+    And the daemon reports that the backup of "demo-docs" has failed
+    Then the row "demo-docs" of the table "Operations" is marked as changed, its "Status" in bold and an edge at its start
+    And the table "Operations" starts where it did
     When I skip to the content
     And I press Tab until focus is on the button "Mark all as seen"
     And I press Enter
-    Then the polite region comes to contain "2 changed rows marked as seen."
-    And focus is on the region "Operations"
-    And the row "demo-docs" of the table "Operations" is not marked
-    And the row "demo-home" of the table "Operations" is not marked
+    Then focus is on the heading "Operations"
     And the page doesn't offer the button "Mark all as seen"
+    And the table "Operations" starts where it did
+    And the page doesn't scroll sideways
+
+  # The row of actions and the toast's slot under it each keep their room,
+  # so Mark all as seen and a toast come and go together without moving a
+  # row's button under the reader's pointer. On a small screen with larger
+  # text the first toast moves the table once, by the lines its words take
+  # past the room kept for one (as the Operations page's own scenarios say),
+  # so the row's place is noted after it.
+  Scenario Outline: Mark all as seen and a toast come and go together and move none of the table's rows, at <width> pixels wide with text at <size> percent
+    Given the page's clock can be moved on
+    And the daemon reports running backups of "demo-home" and "demo-docs"
+    And the daemon queues each backup the page starts
+    And a viewport of <width> by <height> pixels
+    And the reader sets the text size to <size> percent
+    When I open the address "/operations"
+    And I skip to the content
+    And I press Tab until focus is on the button "Start backup of demo-home"
+    And I press Enter
+    And the polite region comes to contain "Backup started."
+    And the table "Operations" has 3 rows
+    And the page's clock stands still until a step moves it on
+    And the page's clock moves on until the page stops waiting for the run's end
+    Then the toast reads "Still waiting for Ladderback to say how the run ended." after its icon "Information"
+    When I note where the first row's button of the table "Operations" lies
+    And the daemon reports that the backup of "demo-docs" has failed
+    Then the row "demo-docs" of the table "Operations" is marked as changed, its "Status" in bold and an edge at its start
+    And the first row's button of the table "Operations" lies where it was
+    When the page's clock moves on 7 seconds
+    Then the page shows no toast
+    And the first row's button of the table "Operations" lies where it was
+    When I press Tab until focus is on the button "Mark all as seen"
+    And I press Enter
+    Then the page doesn't offer the button "Mark all as seen"
+    And the first row's button of the table "Operations" lies where it was
+    And the page doesn't scroll sideways
+
+    Examples:
+      | width | height | size |
+      | 1280  | 800    | 100  |
+      | 320   | 256    | 200  |
