@@ -39,6 +39,10 @@ colors:
   field-edge-dark: "#7b8594"
   pencil-gray: "#c8ccd2"
   pencil-gray-dark: "#353d4a"
+  margin-slate: "#475569"
+  margin-slate-dark: "#94a3b8"
+  margin-wash: "#dae0e7"
+  margin-wash-dark: "#282f38"
 typography:
   body:
     fontFamily: "system-ui, sans-serif"
@@ -178,9 +182,11 @@ A white page (dark: near-black), graphite text, one blue, three status hues, a s
 - **Paper** (`--bg`): the page, and the mark on a chosen checkbox or radio.
 - **Graphite Ink** (`--fg`): all body text and headings.
 - **Slate Note** (`--muted`): secondary text (captions, notes, the running version), the rule under each table row and between a list of tabs and its panel, and the line around the pause banner.
-- **Ledger Gray** (`--surface`): the site header, toasts, alerts, banners, the pause banner, a progress bar's empty track, an unavailable text field and a live row's change cue.
+- **Ledger Gray** (`--surface`): the site header, toasts, alerts, banners, the pause banner, a progress bar's empty track and an unavailable text field.
 - **Field Edge** (`--field-edge`): a text field's, a checkbox's and a radio's 1 px edge, 3:1 or more on the page and on Ledger Gray; Field Edge Dark in dark mode.
 - **Pencil Gray** (`--skeleton`): a skeleton's bars, 1.61:1 on the page and 1.47:1 on Ledger Gray (1.69:1 and 1.46:1 as Pencil Gray Dark), so they show on either. That is a floor for visibility, 1.4:1 in the contrast gate, not a WCAG minimum: a skeleton carries no information.
+- **Margin Slate** (`--cue`): the edge at the start of a live row marked "changed, not yet seen", 3:1 or more on the page and on Margin Wash; Margin Slate Dark in dark mode.
+- **Margin Wash** (`--cue-fill`): the fill a marked row's cells arrive in and settle back from, 1.3:1 or more on the page so it is seen, with the text, links and focus ring at their minimums on it; Margin Wash Dark in dark mode. The mark's own pair, so its arrival shows on a page that already uses Ledger Gray.
 
 ### Status
 
@@ -329,7 +335,7 @@ Every shared component takes the same choices, defined once in `crates/web/src/v
 - **Columns:** each a fixed width in rem; the table is as wide as its frame or its columns added up, whichever is wider, so a column never moves as a cell changes. Numbers stand at the end in figures of one width.
 - **Sorting:** a sortable header puts a Ghost Small sort button after its text, its arrow showing the direction, wrapping below the text when there's no room.
 - **Narrow:** the table's frame takes keyboard focus at every width, and where its columns are wider than the page it scrolls sideways; each row's header stays pinned at the frame's start on the page's background, at most two fifths of the frame.
-- **Change cue:** a row of a live table whose status changed by itself is lit once in Ledger Gray, flat, and settles back to its own fill over 600 ms, easing out. Never as the page first shows its rows, for a progress report, or while live updates are paused; once for each changed row as they resume. It stays under reduced motion (a color, which moves nothing) and goes under forced colors.
+- **Change mark:** a row of a live table whose status changed by itself is marked "changed, not yet seen" until the reader sees it: its status in bold, a flat 3 px Margin Slate edge at the row's start, and "Changed, not yet seen" for a screen reader. It arrives once lit in Margin Wash, settling back to the cells' own fill over 600 ms, easing out. Never as the page first shows its rows, for a progress report, or while live updates are paused; once for each changed row as they resume. Focus entering the row sees it. "Mark all as seen" ends the page's row of actions before the table, hidden with its room kept while nothing is marked, so it moves nothing as it comes and goes. The fade stays under reduced motion (a color, which moves nothing); under forced colors the fill goes and the edge is the system's text color.
 
 ### Progress Bar
 
