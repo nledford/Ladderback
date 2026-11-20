@@ -360,13 +360,13 @@ impl Access {
     }
 
     /// A token's last use the store failed to write with `error`: logged
-    /// at its first failure since a write succeeded, by the error's code
-    /// alone (I4), as a failed session write is.
+    /// at its first failure since a write changed the API tokens, by the
+    /// error's code alone (I4), as a failed session write is.
     fn token_use_unkept(&self, error: &StoreError) {
         let first = !std::mem::replace(&mut self.lock().token_store_failing, true);
         if first {
             log::warn!(
-                "the database could not keep an API token's last use ({}); it is tried again at the token's next use, and further failures of this kind are not logged until a write succeeds",
+                "the database could not keep an API token's last use ({}); it is tried again at the token's next use, and further failures of this kind are not logged until a write changes the API tokens",
                 error.code()
             );
         }
