@@ -1,0 +1,101 @@
+/*
+ * Accessibility fixes to mdBook's themes, so the site meets WCAG 2.2 AA like
+ * the product (§0, A1-A6). Each rule fixes what axe-core reported on mdBook
+ * 0.5.4's own theme; theme/ladderback.js does the parts CSS can't.
+ */
+
+/* 1.4.3: links and the sidebar's current page at 4.5:1 or more on their
+ * backgrounds, and the menu title at 3:1 (large text), in every theme. The
+ * light theme passes as it is. */
+.rust {
+    --links: #1f5f80;
+}
+
+.coal {
+    --links: #5aa7d6;
+    --sidebar-active: #6aaee8;
+    --icons: #8a939b;
+}
+
+.navy {
+    --links: #6cb2e0;
+    --sidebar-active: #6cb2e0;
+}
+
+/* The page before its script runs, in a dark system theme: mdBook styles it
+ * as coal. */
+@media (prefers-color-scheme: dark) {
+    html:not(.js) {
+        --links: #5aa7d6;
+        --sidebar-active: #6aaee8;
+        --icons: #8a939b;
+    }
+}
+
+/* Ayu's code comments. */
+.ayu .hljs-comment,
+.ayu .hljs-quote {
+    color: #8b96a3;
+}
+
+/* The search results' heading ("N search results for …"). */
+.rust {
+    --searchresults-header-fg: #555555;
+}
+
+.coal,
+.navy,
+.ayu {
+    --searchresults-header-fg: #a6a6a6;
+}
+
+/* Tomorrow Night's red, the code colors of coal and navy. */
+.coal :is(.hljs-variable, .hljs-attribute, .hljs-attr, .hljs-tag, .hljs-regexp),
+.navy :is(.hljs-variable, .hljs-attribute, .hljs-attr, .hljs-tag, .hljs-regexp) {
+    color: #d77c7c;
+}
+
+/* 1.4.1: a link in a sentence is told apart by more than its color. */
+.content main a:not(.header) {
+    text-decoration: underline;
+}
+
+/* 2.1.1 and 1.4.10: a code block wraps rather than scrolls sideways, so no
+ * part of it needs a scrollbar that a keyboard can't reach. */
+.content pre > code {
+    white-space: pre-wrap;
+    overflow-wrap: anywhere;
+}
+
+/* 2.5.8: the sidebar's links to the page's headings are 24px tall. */
+.header-in-summary {
+    display: inline-block;
+    min-block-size: 24px;
+}
+
+/* 2.5.8: the menu bar's links (print, the repository) are as tall as its
+ * buttons, not their icon's 22px line. */
+.right-buttons a {
+    display: inline-block;
+}
+
+/* 2.4.1: the skip link (ladderback.js) shows only while it has focus. */
+.ladderback-skip-link {
+    position: absolute;
+    inset-block-start: 0;
+    inset-inline-start: 0;
+    z-index: 1000;
+    padding: 0.5em 1em;
+    background: var(--bg);
+    color: var(--links);
+    transform: translateY(-200%);
+}
+
+.ladderback-skip-link:focus {
+    transform: none;
+}
+
+/* The skip link's target takes focus only so the next Tab starts there. */
+main[tabindex="-1"]:focus {
+    outline: none;
+}
