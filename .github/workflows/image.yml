@@ -1,0 +1,42 @@
+# Proves the release's Docker image on a pull request that could break it,
+# without publishing anything: on each platform's own runner, the image of the
+# latest release's archive, built with this pull request's Containerfile, and
+# its smoke test (release-image.yml, called as release.yml calls it but with
+# no tag and no push). Only when a file it covers changes. The `image` and
+# `smoke-image` recipes live in the Justfile, which most pull requests touch,
+# so a change to them shows only at the next release, after its archives are
+# attached. None of its jobs is a required check, and their names must not
+# match one (development.md §13.8).
+name: Docker image
+
+on:
+  pull_request:
+    paths:
+      - Containerfile
+      - docs/guide/examples/compose.yaml
+      - scripts/smoke-image.ts
+      - scripts/smoke-report.ts
+      - scripts/build-identity.ts
+      - .github/workflows/image.yml
+      - .github/workflows/release-image.yml
+      - .github/workflows/release.yml
+
+# Only what reading the latest release needs: this run pushes nothing.
+permissions:
+  contents: read
+
+# A push to the pull request cancels its older run.
+concurrency:
+  group: image-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+
+jobs:
+  image:
+    name: Docker image (linux/${{ matrix.platform }})
+    strategy:
+      fail-fast: false
+      matrix:
+        platform: [amd64, arm64]
+    uses: $/.github/workflows/release-image.yml
+    with:
+      platform: ${{ matrix.platform }}
