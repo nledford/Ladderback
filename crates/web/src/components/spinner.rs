@@ -95,7 +95,10 @@ pub fn Spinner(
                             transform="rotate(-90 12 12)"
                         />
                     </g>
-                    <g class=rules::STILL fill="currentColor" stroke="none">
+                    // Hidden by its attribute too, so a page without the
+                    // stylesheet draws no dots over the ring; any rule of
+                    // the stylesheet outranks it.
+                    <g class=rules::STILL fill="currentColor" stroke="none" display="none">
                         <circle cx="4" cy="12" r="2" />
                         <circle cx="12" cy="12" r="2" />
                         <circle cx="20" cy="12" r="2" />

@@ -37,6 +37,15 @@ pub(crate) struct Progress {
     pub(crate) since: Option<jiff::Timestamp>,
 }
 
+impl Progress {
+    /// Whether `next` goes on with the measure `self` is of: the same step
+    /// and total, and a count that hasn't gone back, as a bar's pace reads
+    /// it (`components::progress::rules::Pace`).
+    fn goes_on_to(&self, next: &Self) -> bool {
+        self.step == next.step && self.total == next.total && self.current <= next.current
+    }
+}
+
 /// One row of the operations table: what the daemon's history says about an
 /// operation, with the live progress of a run that is still going.
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -100,15 +109,23 @@ impl OperationsState {
                 at,
             } => {
                 if let Some(row) = self.live_row_mut(operation) {
-                    row.progress = Some(Progress {
+                    // An instant that isn't RFC 3339 says nothing, never a
+                    // guess.
+                    let heard = at.as_deref().and_then(|at| at.parse().ok());
+                    let next = Progress {
                         step: *step,
                         unit: *unit,
                         current: *current,
                         total: *total,
-                        // An instant that isn't RFC 3339 says nothing,
-                        // never a guess.
-                        reported_at: at.as_deref().and_then(|at| at.parse().ok()),
-                        since: None,
+                        reported_at: heard,
+                        since: heard,
+                    };
+                    row.progress = Some(match row.progress {
+                        Some(last) if last.goes_on_to(&next) => Progress {
+                            since: last.since.or(heard),
+                            ..next
+                        },
+                        _ => next,
                     });
                 }
             }

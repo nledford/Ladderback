@@ -37,11 +37,13 @@ mod rules;
 /// (WAI-ARIA `progressbar`): no `aria-valuenow` and no track, and the step,
 /// or that the operation is working, where the percentage stands; never 0%,
 /// which would say that nothing has been done (#422). Below those words it
-/// says when the run last reported, as the daemon heard it, read in `zone`
-/// (UTC without one): an exact instant, which changes only when a report
-/// arrives and is told like the rest of the value, so a stalled run is told
-/// from a busy one without anything that ticks (WCAG 2.2.2). The one timer
-/// that tells a held value is cleared when the bar goes.
+/// says when the daemon heard the run (`rules::heard_of`): since when its
+/// step began while the step has counted nothing, else its last report,
+/// read in `zone` (UTC without one): an exact instant, which changes only
+/// when a report arrives and is told like the rest of the value, so a
+/// stalled run is told from a busy one without anything that ticks (WCAG
+/// 2.2.2). The one timer that tells a held value is cleared when the bar
+/// goes.
 ///
 /// A bar that goes while it holds focus, as one does when its run ends,
 /// hands focus to the element with the ID `then_focus` (a row's header), so
@@ -160,7 +162,7 @@ pub fn Progress(
                     .get()
                     .map(|heard| {
                         let (id, at) = match heard {
-                            Heard::Since(_) => todo!(),
+                            Heard::Since(at) => (msg::UI_PROGRESS_SINCE, at),
                             Heard::Last(at) => (msg::UI_PROGRESS_REPORTED, at),
                         };
                         let shown = text_with(

@@ -195,18 +195,25 @@ pub(crate) enum Heard {
 }
 
 /// What `progress` says of when the daemon heard its run, while it has no
-/// percentage and the daemon said when.
+/// percentage and the daemon said when: since when its step began while the
+/// step has counted nothing, and its last report once it counts. The wire
+/// doesn't tell a spinner from a counter, so a count of nothing decides.
 pub(crate) fn heard_of(progress: &Progress) -> Option<Heard> {
-    progress
-        .reported_at
-        .filter(|_| percent(progress.current, progress.total).is_none())
-        .map(Heard::Last)
+    if percent(progress.current, progress.total).is_some() {
+        None
+    } else if progress.current == 0 {
+        progress.since.map(Heard::Since)
+    } else {
+        progress.reported_at.map(Heard::Last)
+    }
 }
 
 /// `at` as a machine reads it in a `<time>`'s `datetime`, which HTML allows
 /// at most three digits of a second.
 pub(crate) fn datetime(at: jiff::Timestamp) -> String {
-    at.to_string()
+    jiff::Timestamp::from_millisecond(at.as_millisecond())
+        .unwrap_or(at)
+        .to_string()
 }
 
 /// How far a bar with a total has come.
@@ -339,7 +346,7 @@ pub(crate) fn value_text(
         let (id, at) = match told.reported {
             None => return word(words, &[]),
             Some(Heard::Last(at)) => (msg::UI_PROGRESS_UNKNOWN_VALUE, at),
-            Some(Heard::Since(_)) => todo!(),
+            Some(Heard::Since(at)) => (msg::UI_PROGRESS_SINCE_VALUE, at),
         };
         return word(
             id,
