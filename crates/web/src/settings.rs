@@ -729,14 +729,15 @@ fn tokens_table(
     let now_ms = ws::now_ms();
     let label = Column::new(
         text(localizer, msg::UI_API_TOKENS_COLUMN_LABEL),
-        Rem::tenths(100),
+        Rem::tenths(80),
         |row: Signal<ApiTokenDto>| (move || row.with(|token| token.label.clone())).into_any(),
     );
     let permissions_localizer = Arc::clone(localizer);
     let permissions = Column::new(
         text(localizer, msg::UI_API_TOKENS_COLUMN_PERMISSIONS),
-        // As wide as the scopes' column was, so the table fits its panel.
-        Rem::tenths(80),
+        // Wide enough for "Configuration" on one line; the label's column gave
+        // up the 2 rem, so the table still fits its panel.
+        Rem::tenths(100),
         move |row: Signal<ApiTokenDto>| {
             row.with_untracked(|token| permissions_view(&permissions_localizer, &token.permissions))
         },
