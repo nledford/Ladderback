@@ -995,6 +995,38 @@ mod tests {
         // the plan's following run (#1221).
         assert_eq!(runs.unlocks(), vec![Some(at("2026-06-11T03:00:00Z"))]);
     }
+
+    /// A start that takes `.1` on the clock, as one waiting for the
+    /// keyring service at startup does.
+    struct SlowStart(Arc<FakeClock>, SignedDuration);
+
+    #[async_trait]
+    impl PlanRuns for SlowStart {
+        async fn start(&self, _: &PlanId, _: Trigger, _: Place, _: Option<UnlockWait>) {
+            self.0.advance(self.1);
+        }
+
+        async fn resume(&self, _: Operation, _: Option<UnlockWait>) {}
+
+        fn report(&self, _: ScheduleReport) {}
+    }
+
+    #[tokio::test]
+    async fn a_start_that_outlasts_the_following_run_plans_it_from_when_it_ended() {
+        let clock = Arc::new(FakeClock::new(at("2026-06-10T03:00:00Z")));
+        let mut scheduler = scheduler("2026-06-10T03:00:00Z", Arc::new(Started::default()));
+        scheduler.clock = clock.clone();
+        scheduler.runs = Arc::new(SlowStart(clock, SignedDuration::from_hours(25)));
+        let mut planned = home_planned_for("2026-06-10T03:00:00Z");
+        scheduler.start_due(&mut planned).await;
+        // The following run, due at 03:00 the next day, passed while the
+        // run started: it isn't kept due at once (#1221).
+        assert_eq!(
+            planned[&home()].next.as_ref().map(|next| next.at),
+            Some(at("2026-06-12T03:00:00Z"))
+        );
+    }
+
     #[tokio::test]
     async fn a_run_a_second_away_waits() {
         let runs = Arc::new(Started::default());
