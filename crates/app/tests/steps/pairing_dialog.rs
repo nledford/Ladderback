@@ -155,11 +155,8 @@ async fn shows_token(agent: &mut Agent) {
     assert_eq!(made.token.address().as_str(), ADDRESS);
     let pairing_key = FakeSigning.public_key(made.token.pairing_seed()).unwrap();
     assert_eq!(made.id, TokenId::of_pairing_key(&pairing_key));
-    assert_eq!(made.made_at, hub.clock.now());
-    assert_eq!(
-        made.made_at.duration_until(made.expires_at),
-        SignedDuration::from_mins(15)
-    );
+    assert_eq!(made.left, SignedDuration::from_mins(15));
+    assert_eq!(hub.clock.now().duration_until(made.expires_at), made.left);
 }
 
 #[given(expr = "the hub's registry takes {int} seconds to keep a token")]

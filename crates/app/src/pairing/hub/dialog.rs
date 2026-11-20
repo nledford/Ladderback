@@ -41,14 +41,13 @@ impl fmt::Debug for TokenAsk {
 }
 
 /// A token made for the page, shown once: its text, its token ID, the hub
-/// key it carries, when it lapses, and how much of its life is left as the
-/// hub answers.
+/// key it carries, when it lapses, and how much of its life is left once
+/// the hub has kept it, which the page counts down from.
 #[derive(Clone, Debug)]
 pub struct MadeToken {
     pub token: PairingToken,
     pub id: TokenId,
     pub hub_key: PublicKey,
-    pub made_at: Timestamp,
     pub expires_at: Timestamp,
     pub left: SignedDuration,
 }
@@ -116,13 +115,19 @@ impl HubPairing {
         let (token, record) = self
             .mint(&keys, ask.address, TokenTls::Ca, ask.life)
             .await?;
+        // Counted once the token is kept, so the time keeping it took is
+        // never shown as life it has left.
+        let left = self
+            .clock
+            .now()
+            .duration_until(record.expires_at)
+            .max(SignedDuration::ZERO);
         Ok(MadeToken {
             token,
             id: TokenId::of_pairing_key(&record.pairing_key),
             hub_key: record.hub_key,
-            made_at: record.made_at,
             expires_at: record.expires_at,
-            left: record.made_at.duration_until(record.expires_at),
+            left,
         })
     }
 }
