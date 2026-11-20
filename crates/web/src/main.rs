@@ -96,6 +96,10 @@ mod repositories;
 mod repositories_page;
 // What a paused live page shows, counts and says, decided on the host.
 mod pause;
+// What the hub's pairing dialog decides, on the host; `settings/agents.rs`
+// is its glue. Only a build with the hub has it (decision 122).
+#[cfg(feature = "hub")]
+mod pairing;
 // What the Plans page shows, sends and says, decided on the host;
 // `plans_page.rs` is its glue.
 mod plans;

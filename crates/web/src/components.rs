@@ -29,6 +29,7 @@ pub(crate) mod banner;
 pub(crate) mod button;
 mod checkbox;
 mod error_summary;
+pub(crate) mod fingerprint;
 pub(crate) mod icon;
 pub(crate) mod link;
 mod modal_dialog;

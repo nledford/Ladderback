@@ -11,10 +11,15 @@ use domain::fleet::{
 use domain::{AgentId, SignedDuration};
 
 use super::wire::{read_hello, welcome_payload};
+use crate::access::Access;
 use crate::ports::{
     Added, AgentRegistry, Clock, Identity, IdentityError, Random, RandomUnavailable, Signing,
     SigningError, StoreError,
 };
+
+mod dialog;
+
+pub use dialog::{MadeToken, TokenAsk, TokenAskRefused};
 
 /// The hub's side of pairing: its keys, its tokens, and its answers to an
 /// agent's `Connect` and `Pair`.
@@ -26,6 +31,9 @@ pub struct HubPairing {
     clock: Arc<dyn Clock>,
     /// The hub's build, as `--version` names it, which `Welcome` carries.
     version: String,
+    /// The sign-in by the admin password, when it is on: a token asked for
+    /// on the web is confirmed by that password, entered again.
+    access: Option<Arc<Access>>,
 }
 
 /// The hub's answer to an agent's proof.
@@ -152,7 +160,16 @@ impl HubPairing {
             random,
             clock,
             version,
+            access: None,
         }
+    }
+
+    /// This pairing with sign-in by the admin password on, which a token
+    /// asked for on the web is then confirmed by ([`Self::make_token_asked`]).
+    #[must_use]
+    pub fn with_access(mut self, access: Arc<Access>) -> Self {
+        self.access = Some(access);
+        self
     }
 
     /// A seed no one can guess.
@@ -231,6 +248,17 @@ impl HubPairing {
         tls: TokenTls,
         life: Option<SignedDuration>,
     ) -> Result<PairingToken, HubPairingError> {
+        Ok(self.mint(keys, address, tls, life).await?.0)
+    }
+
+    /// A pairing token, and the record the hub keeps of it.
+    async fn mint(
+        &self,
+        keys: &HubKeys,
+        address: HubAddress,
+        tls: TokenTls,
+        life: Option<SignedDuration>,
+    ) -> Result<(PairingToken, TokenRecord), HubPairingError> {
         let life = token_life(life).map_err(|_| HubPairingError::TokenLife)?;
         let now = self.clock.now();
         let expires_at = now
@@ -250,7 +278,10 @@ impl HubPairing {
             .add_token(&record, UNUSED_TOKEN_LIMIT, now)
             .await?
         {
-            Added::Kept => Ok(PairingToken::new(keys.key, tls, pairing_seed, address)),
+            Added::Kept => Ok((
+                PairingToken::new(keys.key, tls, pairing_seed, address),
+                record,
+            )),
             Added::Full => Err(HubPairingError::TooManyUnusedTokens),
         }
     }

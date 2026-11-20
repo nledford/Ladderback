@@ -16,6 +16,8 @@ mod body_limit;
 mod downloads;
 mod dry_runs;
 mod full_disk_access;
+#[cfg(feature = "hub")]
+mod hub_pages;
 mod listener;
 mod maintenance;
 mod plans;
@@ -717,6 +719,10 @@ pub fn router(assets: Arc<dyn AssetSource>, checks: RequestChecks, state: AppSta
     // browser's checks, as every other path does (§16, decision 122).
     #[cfg(not(feature = "hub"))]
     let routes = routes.merge(sync::routes(&state.sync));
+    // With it, the hub's own routes under `/api/v1/hub` are the page's,
+    // behind every check the others are.
+    #[cfg(feature = "hub")]
+    let routes = hub_pages::routes(routes);
     let app = routes
         .with_state(state)
         .fallback(move |method: Method, uri: Uri| {

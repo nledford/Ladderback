@@ -4,6 +4,7 @@
 
 use crate::SnapshotId;
 use crate::access::{Password, PasswordProblem};
+use crate::fleet::KeyId;
 use crate::planning::{ProposalId, short_proposal_id};
 
 /// How long a snapshot's short ID is: the first 8 hex digits of its ID, as
@@ -41,6 +42,10 @@ pub enum StepUpFor<'a> {
     Snapshot(&'a SnapshotId),
     /// The approval of the proposal.
     Proposal(&'a ProposalId),
+    /// A pairing token made, or an agent approved, on the hub whose key
+    /// has this key ID (§16, decision 120, "Who may make a token, approve
+    /// or re-key").
+    HubKey(&'a KeyId),
 }
 
 /// A step-up confirmation as the person typed it: the admin password with
@@ -67,11 +72,12 @@ impl StepUpConfirmation {
     /// Whether it names `what`: its short ID or its whole ID, in either
     /// case, with the spaces around it dropped, as a paste brings them.
     pub fn names(&self, what: StepUpFor<'_>) -> bool {
+        let typed = self.0.expose().trim();
         let (short, whole) = match what {
             StepUpFor::Snapshot(snapshot) => (short_id(snapshot), snapshot.as_str()),
             StepUpFor::Proposal(id) => (short_proposal_id(id), id.as_str()),
+            StepUpFor::HubKey(_) => todo!(),
         };
-        let typed = self.0.expose().trim();
         typed.eq_ignore_ascii_case(short) || typed.eq_ignore_ascii_case(whole)
     }
 }
@@ -190,6 +196,24 @@ mod tests {
             id.as_str().get(..5).expect("5 characters"),
         ] {
             assert!(!typed(text).names(StepUpFor::Proposal(&id)), "{text:?}");
+        }
+    }
+
+    #[test]
+    fn a_hub_key_is_confirmed_by_its_key_id_in_either_case_not_another_s() {
+        let key = |byte| {
+            crate::fleet::PublicKey::from_bytes([byte; crate::fleet::KEY_BYTES]).expect("a key")
+        };
+        let id = KeyId::of_key(&key(3));
+        let shown = id.to_string();
+        assert_eq!(shown.len(), 8);
+        for text in [shown.clone(), format!(" {} ", shown.to_lowercase())] {
+            assert!(typed(&text).names(StepUpFor::HubKey(&id)), "{text:?}");
+        }
+        let other = KeyId::of_key(&key(4));
+        let first_seven = shown.get(..7).expect("7 characters");
+        for text in [other.to_string().as_str(), first_seven, "3F9A8B21"] {
+            assert!(!typed(text).names(StepUpFor::HubKey(&id)), "{text:?}");
         }
     }
 

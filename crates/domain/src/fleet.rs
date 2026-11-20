@@ -8,6 +8,7 @@
 mod fingerprint;
 mod greeting;
 mod handshake;
+mod high_impact;
 mod hostname;
 mod key_files;
 mod keys;
@@ -25,6 +26,7 @@ pub use greeting::{
 pub use handshake::{
     BindingKind, Challenge, Connect, HANDSHAKES, Holder, Pair, PairAnswer, Paired, Proof, Refused,
 };
+pub use high_impact::needs_sign_in;
 pub use hostname::{Hostname, InvalidHostname, MAX_HOSTNAME_BYTES};
 pub use key_files::{
     COUNTER_LOCK_FILE, ConnectionCounter, CounterRefused, KeyFile, LEFT_OUT_OF_BACKUPS,
