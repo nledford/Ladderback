@@ -500,12 +500,12 @@ impl SessionStore for Flaky {
         Ok(self.unreadable.swap(0, std::sync::atomic::Ordering::SeqCst))
     }
 
-    async fn remove(&self, digests: &[domain::access::SessionDigest]) -> Result<(), StoreError> {
+    async fn remove(&self, digests: &[domain::access::SessionDigest]) -> Result<bool, StoreError> {
         self.answer()?;
         self.kept.remove(digests).await
     }
 
-    async fn remove_all(&self) -> Result<(), StoreError> {
+    async fn remove_all(&self) -> Result<bool, StoreError> {
         self.answer()?;
         self.kept.remove_all().await
     }
@@ -524,7 +524,7 @@ impl SessionStore for Flaky {
         self.kept.length().await
     }
 
-    async fn set_length(&self, length: SessionLength) -> Result<(), StoreError> {
+    async fn set_length(&self, length: SessionLength) -> Result<bool, StoreError> {
         self.answer()?;
         self.kept.set_length(length).await
     }
@@ -1353,12 +1353,12 @@ impl SessionStore for Scripted {
         self.kept.forget_unreadable().await
     }
 
-    async fn remove(&self, digests: &[domain::access::SessionDigest]) -> Result<(), StoreError> {
+    async fn remove(&self, digests: &[domain::access::SessionDigest]) -> Result<bool, StoreError> {
         self.answer("remove").await?;
         self.kept.remove(digests).await
     }
 
-    async fn remove_all(&self) -> Result<(), StoreError> {
+    async fn remove_all(&self) -> Result<bool, StoreError> {
         self.answer("remove_all").await?;
         self.kept.remove_all().await
     }
@@ -1377,7 +1377,7 @@ impl SessionStore for Scripted {
         self.kept.length().await
     }
 
-    async fn set_length(&self, length: SessionLength) -> Result<(), StoreError> {
+    async fn set_length(&self, length: SessionLength) -> Result<bool, StoreError> {
         self.answer("set_length").await?;
         self.kept.set_length(length).await
     }
