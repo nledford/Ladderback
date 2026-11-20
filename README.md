@@ -122,6 +122,8 @@ For contributors, for installing the release's archive by hand, and for people w
 
 Ladderback isn't published to crates.io, and has no Homebrew tap until a macOS build can be signed and notarized ([#344](https://github.com/nledford/Ladderback/issues/344)).
 
+Releases are to publish a Docker image too, `ghcr.io/nledford/ladderback`, to try Ladderback in a container; none has yet (#358). It isn't yet a supported way to install and run Ladderback: the [install guide](docs/guide/install.md#docker-image-not-supported-yet) says how to build and run it and what an agent in a container can't do.
+
 ## Quick start
 
 ```sh
@@ -150,9 +152,9 @@ The skeleton (M0), the backup engine (M1a), the single-machine MVP (M1b, release
 - [ ] **M5: Scheduled maintenance.** Forget, prune and check on their schedules, one at a time by default, each check's result kept and shown.
 - [ ] **M6: Notification channels.** Gotify, Discord, Slack, email, Telegram, Pushover, Pushbullet, web push and a webhook you template.
 - [ ] **M7: Japanese.** Japanese, with a language choice in the web UI; released once its review is done.
-- [ ] **M8: Hub, visibility.** Pair machines with a hub; one dashboard for all of them; offline alerts.
+- [ ] **M8: Hub, visibility.** Pair machines with a hub; one dashboard for all of them; offline alerts; the Docker image as the way to run the hub.
 - [ ] **M9: Hub, control and maintenance.** Repository ownership; forget, prune and check managed from the hub; remote run and cancel; opt-in restores from the hub.
-- [ ] **M10: Polish.** A run condition for metered networks (running only on AC power, and waiting for the network after a wake, came in 0.2.0), charts, Docker image, database rebuild, user docs (the `.deb` and `.rpm` packages came in 0.5.0).
+- [ ] **M10: Polish.** A run condition for metered networks (running only on AC power, and waiting for the network after a wake, came in 0.2.0), charts, database rebuild, user docs (the `.deb` and `.rpm` packages came in 0.5.0).
 
 Not planned for v1: Windows, multiple users, and rustic's `copy`, `merge`, `rewrite`, `repair`, `webdav` and `mount` commands (use the CLI).
 

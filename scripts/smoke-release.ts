@@ -58,6 +58,7 @@ import { platform, tmpdir } from "node:os";
 import path from "node:path";
 
 import { checkoutBuild, shown, workspaceVersion } from "./build-identity.ts";
+import { COMMAND_LIMIT_MS, details, type Output, Report, run } from "./smoke-report.ts";
 import {
   containerFormat,
   describeScript,
@@ -118,75 +119,12 @@ const GLIBC_CEILING = "2.35";
 const PASSWORD = "smoke-scratch-password";
 const PLAN = "smoke";
 
-const COMMAND_LIMIT_MS = 60_000;
 const LISTEN_LIMIT_MS = 60_000;
 const BACKUP_LIMIT_MS = 180_000;
 const DOCKER_LIMIT_MS = 300_000;
 
 // ---------------------------------------------------------------------------
-// Results
-
-type Result = { check: string; ok: boolean; detail: string };
-
-class Report {
-  results: Result[] = [];
-  notes: string[] = [];
-
-  add(check: string, ok: boolean, detail: string): boolean {
-    this.results.push({ check, ok, detail });
-    return ok;
-  }
-
-  note(markdown: string): void {
-    this.notes.push(markdown);
-  }
-
-  get failed(): boolean {
-    return this.results.some((result) => !result.ok);
-  }
-
-  markdown(title: string): string {
-    const cell = (text: string) => text.replace(/\|/g, "\\|").replace(/\r?\n/g, " ");
-    const rows = this.results.map(
-      (result) => `| ${result.ok ? "pass" : "**FAIL**"} | ${cell(result.check)} | ${cell(result.detail)} |`,
-    );
-    return [`### ${title}`, "", "| Result | Check | Detail |", "|---|---|---|", ...rows, "", ...this.notes, ""].join("\n");
-  }
-}
-
-const details = (summary: string, body: string) =>
-  ["<details>", `<summary>${summary}</summary>`, "", "```", body.trimEnd(), "```", "", "</details>", ""].join("\n");
-
-// ---------------------------------------------------------------------------
 // Processes
-
-type Output = { status: number | null; stdout: Buffer; stderr: string };
-
-/** Runs `command` to the end, or kills it after `limitMs`; never throws. */
-function run(
-  command: string,
-  args: string[],
-  options: { input?: Buffer | string; env?: NodeJS.ProcessEnv; limitMs?: number } = {},
-): Promise<Output> {
-  const { promise, resolve } = Promise.withResolvers<Output>();
-  const child = spawn(command, args, { env: options.env ?? process.env, stdio: ["pipe", "pipe", "pipe"] });
-  const stdout: Buffer[] = [];
-  let stderr = "";
-  const timer = setTimeout(() => child.kill("SIGKILL"), options.limitMs ?? COMMAND_LIMIT_MS);
-  child.stdout.on("data", (chunk: Buffer) => stdout.push(chunk));
-  child.stderr.on("data", (chunk: Buffer) => (stderr += chunk.toString()));
-  child.on("error", (error) => {
-    clearTimeout(timer);
-    resolve({ status: null, stdout: Buffer.alloc(0), stderr: `${stderr}${error.message}` });
-  });
-  child.on("close", (status) => {
-    clearTimeout(timer);
-    resolve({ status, stdout: Buffer.concat(stdout), stderr });
-  });
-  child.stdin.on("error", () => {});
-  child.stdin.end(options.input ?? "");
-  return promise;
-}
 
 /** A long-running program: what it has said on stderr so far, and a way to stop it. */
 type Daemon = { stderr: () => string; exited: () => boolean; stop: () => Promise<void> };
