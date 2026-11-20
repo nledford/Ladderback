@@ -22,18 +22,25 @@ const LOGGED: Duration = Duration::from_secs(10);
 const READ_MAX_BYTES: usize = 32 * 1024;
 
 /// Calls `read_log` with `arguments` and keeps the page it answers, unless
-/// it refused.
+/// it refused; a refusal is remembered, so no step reads an earlier page as
+/// its answer.
 async fn read(agent: &mut Agent, arguments: Value) {
     call(agent, "read_log".to_owned(), arguments).await;
-    if result(agent)["isError"] == true {
+    agent.mcp.log_refused = result(agent)["isError"] == true;
+    if agent.mcp.log_refused {
         return;
     }
     let page = content(agent).clone();
     agent.mcp.log_pages.push(page);
 }
 
-/// The page read last.
+/// The page read last, which the latest read answered.
 fn page(agent: &Agent) -> &Value {
+    assert!(
+        !agent.mcp.log_refused,
+        "the latest read was refused: {}",
+        result(agent)
+    );
     agent.mcp.log_pages.last().expect("the log was read")
 }
 

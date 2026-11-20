@@ -64,6 +64,8 @@ pub struct McpE2e {
     started: Option<Value>,
     /// The pages of the recent log `read_log` answered, in order.
     pub(super) log_pages: Vec<Value>,
+    /// Whether the latest `read_log` was refused, so no page is its answer.
+    pub(super) log_refused: bool,
     /// The time a `read_log` was bounded by.
     pub(super) log_bound: Option<String>,
 }
