@@ -162,6 +162,19 @@ for (const [reading, address] of Object.entries(HELD_READINGS)) {
     await untilSettled(held.arrived, `the page never made ${reading}`);
     held.letThrough();
   });
+
+  // As above, then waits until the answer has reached the page whole, so a
+  // step after it sees what the page does with it, not the wait before it.
+  When(`the daemon gives the answer it held back to ${reading}, and the page has it`, async function (this: BrowserWorld) {
+    const held = heldReadings.get(this);
+    assert.ok(held, `no Given held back ${reading}`);
+    await untilSettled(held.arrived, `the page never made ${reading}`);
+    const answered = this.page.waitForResponse((response) => new URL(response.url()).pathname === address, {
+      timeout: patienceMs(),
+    });
+    held.letThrough();
+    await (await answered).finished();
+  });
 }
 
 // A page that lost its session reads the history again on its own, a back-off

@@ -106,3 +106,12 @@ Feature: The progress bar
       | locale | direction     |
       | en-US  | left to right |
       | ar-XB  | right to left |
+
+  Scenario Outline: A progress bar's fill slides in from the track's start, a pill as long as the track, which clips the rest, in a page that runs <direction>
+    When I open the component gallery asking for the locale "<locale>"
+    Then every progress bar of the gallery slides its fill in from the track's start, the fill a pill as long as the track, which clips the rest, in a page that runs <direction>
+
+    Examples:
+      | locale | direction     |
+      | en-US  | left to right |
+      | ar-XB  | right to left |

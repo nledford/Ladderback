@@ -60,6 +60,15 @@ pub(crate) const FILL: &str = "progress-fill block-full rounded-[inherit] bg-(--
     transition-[inline-size] duration-400 ease-out \
     forced-colors:forced-color-adjust-none forced-colors:bg-[color:CanvasText]";
 
+/// The transform that draws the fill at `percent` of its track: the fill,
+/// a pill as long as its track, slid back past the track's start by the
+/// share it doesn't fill, so its own round end leads and a report moves it
+/// without laying the page out again.
+pub(crate) fn fill_shift(percent: u8) -> String {
+    let _ = percent;
+    todo!()
+}
+
 /// The bar's words below the track: its percentage, or the step or that it
 /// is working while it has none.
 pub(crate) const WORDS: &str = "progress-words";
@@ -1019,6 +1028,51 @@ mod tests {
                     "{tone:?} {size:?}"
                 );
             }
+        }
+    }
+
+    // The fill slides back past the track's start by the share it doesn't
+    // fill: to the left in a page written left to right, to the right in
+    // one written right to left, as the lean its class sets for each
+    // direction says.
+    #[test]
+    fn the_fill_slides_back_past_the_tracks_start_by_the_share_it_does_not_fill() {
+        let lean = |variant: &str| {
+            FILL.split_whitespace()
+                .find_map(|class| {
+                    class
+                        .strip_prefix(variant)?
+                        .strip_prefix("[--progress-lean:")?
+                        .strip_suffix(']')
+                })
+                .unwrap_or_else(|| panic!("FILL sets no {variant}--progress-lean"))
+        };
+        let drawn =
+            |percent, variant| fill_shift(percent).replace("var(--progress-lean)", lean(variant));
+        for (percent, left_to_right, right_to_left) in [
+            (
+                0,
+                "translateX(calc(-1 * 100%))",
+                "translateX(calc(1 * 100%))",
+            ),
+            (7, "translateX(calc(-1 * 93%))", "translateX(calc(1 * 93%))"),
+            (
+                40,
+                "translateX(calc(-1 * 60%))",
+                "translateX(calc(1 * 60%))",
+            ),
+            (100, "translateX(calc(-1 * 0%))", "translateX(calc(1 * 0%))"),
+        ] {
+            assert_eq!(
+                drawn(percent, ""),
+                left_to_right,
+                "{percent}% left to right"
+            );
+            assert_eq!(
+                drawn(percent, "[&:dir(rtl)]:"),
+                right_to_left,
+                "{percent}% right to left"
+            );
         }
     }
 }

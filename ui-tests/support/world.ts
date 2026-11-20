@@ -37,6 +37,7 @@ import {
 } from "playwright";
 
 import { avoidLabelledByCrash } from "./labelledby-crash.ts";
+import { clockStandsStill } from "./keyboard.ts";
 import { patienceMs, STEP_LIMIT_MS, timed } from "./patience.ts";
 import type { ScriptedDaemon } from "./scripted-daemon.ts";
 
@@ -287,6 +288,9 @@ export class BrowserWorld extends World {
   /** Whether the page's timers run on a clock the steps can move on, set by
    *  the Given that asks for one before the page opens. */
   fakeClock = false;
+  /** Whether that clock stands still from before the page loads until a
+   *  step moves it on, set by the Given that asks for it. */
+  clockStillFromStart = false;
   // Set by `open`, which every scenario's first page goes through before a
   // step reads them.
   context!: BrowserContext;
@@ -331,6 +335,12 @@ export class BrowserWorld extends World {
     // Before the page loads, so every timer it sets runs on this clock. It
     // keeps time as a real clock does until a step moves it on.
     if (this.fakeClock) await this.page.clock.install();
+    // Stopped before the page loads, so no timer it sets falls due until a
+    // step moves the clock on, however long the browser takes to open it.
+    if (this.clockStillFromStart) {
+      await this.page.clock.pauseAt(Date.now() + 1);
+      clockStandsStill(this.page);
+    }
     this.#watch(this.page);
     await this.page.goto(new URL(pathname, this.baseUrl ?? baseUrl).href);
     // The page is ready once the app has mounted its heading.
@@ -437,6 +447,7 @@ Before(function (this: BrowserWorld) {
   this.ownServer = null;
   this.baseUrl = null;
   this.fakeClock = false;
+  this.clockStillFromStart = false;
   this.firstTab = null;
   this.tracing = false;
 });

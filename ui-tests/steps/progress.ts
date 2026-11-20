@@ -249,6 +249,68 @@ Then(
   },
 );
 
+// Transform, not layout (§4.5): the fill is a pill as long as its track,
+// and a transform slides it back past the track's start, the left in
+// English and the right in Arabic, by the share it doesn't fill, so a report
+// never lays the page out again, and the fill's move to it is a transition
+// of that transform alone. The track clips what lies past its start, so the
+// fill's own round end leads (DESIGN.md: a pill fill).
+Then(
+  "every progress bar of the gallery slides its fill in from the track's start, the fill a pill as long as the track, which clips the rest, in a page that runs {word} to {word}",
+  async function (this: BrowserWorld, from: string, to: string) {
+    const direction = from === "right" && to === "left" ? "rtl" : "ltr";
+    const bars = await eachOf(this.page.getByRole("progressbar"), BARS);
+    let fills = 0;
+    for (const found of bars) {
+      const drawn = await found.evaluate((element) => {
+        const track = element.querySelector<HTMLElement>(".progress-track");
+        const fill = element.querySelector<HTMLElement>(".progress-fill");
+        if (track === null || fill === null) return null;
+        const trackStyle = getComputedStyle(track);
+        const fillStyle = getComputedStyle(fill);
+        const moved = new DOMMatrixReadOnly(fillStyle.transform === "none" ? undefined : fillStyle.transform);
+        return {
+          name: element.getAttribute("aria-label") ?? "",
+          now: element.getAttribute("aria-valuenow"),
+          direction: getComputedStyle(element).direction,
+          track: { length: track.getBoundingClientRect().width, thick: track.getBoundingClientRect().height },
+          // The fill's own length and thickness, before its transform.
+          length: fill.offsetWidth,
+          thick: fill.offsetHeight,
+          transform: fillStyle.transform,
+          slid: moved.is2D && moved.a === 1 && moved.b === 0 && moved.c === 0 && moved.d === 1 && moved.f === 0,
+          shift: moved.e,
+          transitioned: fillStyle.transitionProperty.split(",").map((property) => property.trim()),
+          clip: trackStyle.overflowX,
+          radius: Number.parseFloat(trackStyle.borderStartStartRadius),
+          fillRadius: Math.min(
+            Number.parseFloat(fillStyle.borderStartStartRadius),
+            Number.parseFloat(fillStyle.borderStartEndRadius),
+            Number.parseFloat(fillStyle.borderEndStartRadius),
+            Number.parseFloat(fillStyle.borderEndEndRadius),
+          ),
+        };
+      });
+      if (drawn === null) continue;
+      fills += 1;
+      const about = `the fill of "${drawn.name}": ${JSON.stringify(drawn)}`;
+      assert.equal(drawn.direction, direction, drawn.name);
+      assert.ok(Math.abs(drawn.length - drawn.track.length) <= 1, `${about} isn't as long as its track`);
+      assert.ok(drawn.slid, `${about} is moved by more than a slide along its track`);
+      // Back toward the track's start by the share the bar doesn't fill.
+      assert.ok(drawn.now !== null, `${about} has no value`);
+      const left = ((100 - Number(drawn.now)) / 100) * drawn.length;
+      const back = direction === "ltr" ? -drawn.shift : drawn.shift;
+      assert.ok(Math.abs(back - left) <= 1, `${about} isn't slid back past the track's start by the share it doesn't fill`);
+      assert.deepEqual(drawn.transitioned, ["transform"], `${about} moves by more than its transform`);
+      assert.equal(drawn.clip, "clip", `${about}: its track doesn't clip it`);
+      assert.ok(drawn.radius >= drawn.track.thick / 2 - ROUNDING_PX, `${about}: its track isn't a pill`);
+      assert.ok(drawn.fillRadius >= drawn.thick / 2 - ROUNDING_PX, `${about} isn't a pill, so its leading edge is square`);
+    }
+    assert.equal(fills, BARS - 2, "the progress bars of the gallery that draw a fill");
+  },
+);
+
 // What a screen reader is told of the bar's value: `aria-valuenow`, which
 // changes at most every 30 s while the step stays the same (§4.5).
 Then("the progress bar {string} shows {int} percent", async function (this: BrowserWorld, name: string, percent: number) {

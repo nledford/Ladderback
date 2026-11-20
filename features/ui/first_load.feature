@@ -8,6 +8,11 @@ Feature: A page's first load
   Once the answer comes, the content takes the region's place, and nothing on
   the page is busy or says the wait any more.
 
+  The words and the still shape show only once the wait has lasted a fifth of
+  a second, so an answer that comes sooner never flashes them, and once shown
+  they stay at least 0.3 seconds, long enough to be seen rather than flicker.
+  The region is busy from the start.
+
   Scenario: The start page says it waits for its plans just before a busy region in the shape of a table, and the table takes its place
     Given a demo plan "demo-home" with a scratch repository
     And the daemon holds back its answer to the start page's reading of the plans list
@@ -39,4 +44,35 @@ Feature: A page's first load
     When I open the address "/snapshots"
     Then the page shows the heading "Cannot reach Ladderback"
     And no region of the page is busy
+    And the page doesn't show "Loading…"
+
+  Scenario: A page whose answer comes within a fifth of a second never shows its wait
+    Given a demo plan "demo-home" with a scratch repository
+    And the page's clock stands still from the start until a step moves it on
+    And the daemon holds back its answer to the start page's reading of the plans list
+    When I open the web UI
+    Then a region of the page is busy but shows nothing yet, neither the still shape of what is coming nor "Loading…"
+    When the page's clock moves on 199 milliseconds
+    Then a region of the page is busy but shows nothing yet, neither the still shape of what is coming nor "Loading…"
+    When the daemon gives the answer it held back to the start page's reading of the plans list
+    Then no region of the page is busy
+    And the table "Plans" has the row "demo-home"
+    And the page doesn't show "Loading…"
+
+  Scenario: A page whose answer is slow shows its wait after a fifth of a second and keeps it at least 0.3 seconds
+    Given a demo plan "demo-home" with a scratch repository
+    And the page's clock stands still from the start until a step moves it on
+    And the daemon holds back its answer to the start page's reading of the plans list
+    When I open the web UI
+    And the page's clock moves on 200 milliseconds
+    Then a region of the page is busy and shows the still shape of a table, its header and 3 rows of 2 columns
+    And the page says "Loading…" just before its busy region, outside it
+    When the page's clock moves on 100 milliseconds
+    And the daemon gives the answer it held back to the start page's reading of the plans list, and the page has it
+    Then the page keeps the still shape of what is coming and says "Loading…" while its clock stands still
+    When the page's clock moves on 199 milliseconds
+    Then the page keeps the still shape of what is coming and says "Loading…" while its clock stands still
+    When the page's clock moves on 1 millisecond
+    Then no region of the page is busy
+    And the table "Plans" has the row "demo-home"
     And the page doesn't show "Loading…"

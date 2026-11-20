@@ -7,6 +7,7 @@
 
 use std::fmt;
 use std::num::NonZeroU8;
+use std::time::Duration;
 
 use crate::variants::Rem;
 
@@ -182,6 +183,78 @@ impl Awaited {
     }
 }
 
+/// How long a first load waits before it shows its wait (§4.5): an answer
+/// that comes sooner takes the region's place with nothing shown before it,
+/// so a fast daemon flashes no skeleton for a frame.
+pub const SHOW_AFTER: Duration = Duration::from_millis(200);
+
+/// How long a first load's wait, once shown, stays at least, so it is seen
+/// rather than flickers: an answer that comes sooner waits out the rest.
+pub const KEEP_AT_LEAST: Duration = Duration::from_millis(300);
+
+/// The class that hides a first load's words and skeleton while it waits
+/// to show them: they keep their room, so the content takes it without a
+/// jump, and a screen reader skips them as a sighted reader does.
+pub const NOT_YET: &str = "invisible";
+
+/// What happens to a first load: its region's reading began or ended, or
+/// the wait a [`Timer`] started is over.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Load {
+    Began,
+    Ended,
+    WaitOver,
+}
+
+/// What a first load's one timer does after an event.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Timer {
+    /// Leaves the timer as it is, running or not.
+    Keep,
+    /// Stops the running timer.
+    CallOff,
+    /// Stops the running timer, if any, and starts one that sends
+    /// [`Load::WaitOver`] after this long.
+    Start(Duration),
+}
+
+/// Whether a first load shows its wait (§4.5): not until the reading has
+/// lasted [`SHOW_AFTER`], then for [`KEEP_AT_LEAST`] at least. Decided on
+/// the host from events alone, with no clock; `components.rs`'s `paced`
+/// holds the one timer.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum Reveal {
+    /// Nothing is read, or the wait came and went.
+    #[default]
+    Idle,
+    /// The reading has begun, and its wait doesn't show yet.
+    Waiting,
+    /// The wait shows and stays its least time; `ended` once the answer
+    /// has come meanwhile, which waits for that time to be over.
+    Fresh { ended: bool },
+    /// The wait has shown its least time and shows until the answer comes.
+    Shown,
+}
+
+impl Reveal {
+    /// Takes in `load` and says what the timer does.
+    pub fn on(&mut self, load: Load) -> Timer {
+        let _ = load;
+        todo!()
+    }
+
+    /// Whether the words and skeleton show.
+    pub fn visible(self) -> bool {
+        todo!()
+    }
+
+    /// Whether the region keeps showing its wait though the answer may
+    /// have come: the wait shows and hasn't stayed its least time yet.
+    pub fn holds(self) -> bool {
+        todo!()
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -352,5 +425,116 @@ mod tests {
         };
         assert!(count.get() > 1, "{rows:?}");
         assert!(last.0 < 100, "{rows:?}");
+    }
+
+    /// Runs `loads` from `Idle`: the state they leave and each timer answer.
+    fn run(loads: &[Load]) -> (Reveal, Vec<Timer>) {
+        let mut reveal = Reveal::default();
+        let timers = loads.iter().map(|&load| reveal.on(load)).collect();
+        (reveal, timers)
+    }
+
+    #[test]
+    fn a_reading_waits_unseen_before_its_wait_shows() {
+        let (reveal, timers) = run(&[Load::Began]);
+        assert_eq!(timers, [Timer::Start(SHOW_AFTER)]);
+        assert!(!reveal.visible());
+        assert!(!reveal.holds());
+    }
+
+    #[test]
+    fn an_answer_before_the_wait_shows_takes_its_place_and_nothing_shows_after() {
+        let (reveal, timers) = run(&[Load::Began, Load::Ended]);
+        assert_eq!(timers, [Timer::Start(SHOW_AFTER), Timer::CallOff]);
+        assert_eq!(reveal, Reveal::Idle);
+        assert!(!reveal.visible());
+        assert!(!reveal.holds());
+    }
+
+    #[test]
+    fn a_wait_that_lasts_shows_and_holds_for_its_least_time() {
+        let (reveal, timers) = run(&[Load::Began, Load::WaitOver]);
+        assert_eq!(
+            timers,
+            [Timer::Start(SHOW_AFTER), Timer::Start(KEEP_AT_LEAST)]
+        );
+        assert!(reveal.visible());
+        assert!(reveal.holds());
+    }
+
+    #[test]
+    fn an_answer_within_the_least_time_waits_it_out_then_takes_the_place() {
+        let (reveal, timers) = run(&[Load::Began, Load::WaitOver, Load::Ended]);
+        assert_eq!(timers[2], Timer::Keep, "the least time runs on");
+        assert!(reveal.visible());
+        assert!(reveal.holds());
+        let (reveal, timers) = run(&[Load::Began, Load::WaitOver, Load::Ended, Load::WaitOver]);
+        assert_eq!(timers[3], Timer::Keep);
+        assert_eq!(reveal, Reveal::Idle);
+        assert!(!reveal.visible());
+        assert!(!reveal.holds());
+    }
+
+    #[test]
+    fn a_wait_past_its_least_time_shows_until_the_answer_then_goes_at_once() {
+        let (reveal, timers) = run(&[Load::Began, Load::WaitOver, Load::WaitOver]);
+        assert_eq!(timers[2], Timer::Keep);
+        assert_eq!(reveal, Reveal::Shown);
+        assert!(reveal.visible());
+        assert!(!reveal.holds());
+        let (reveal, timers) = run(&[Load::Began, Load::WaitOver, Load::WaitOver, Load::Ended]);
+        assert_eq!(timers[3], Timer::Keep);
+        assert_eq!(reveal, Reveal::Idle);
+        assert!(!reveal.visible());
+    }
+
+    #[test]
+    fn a_reading_begun_again_within_the_least_time_keeps_showing_after_it() {
+        let loads = [Load::Began, Load::WaitOver, Load::Ended, Load::Began];
+        let (reveal, timers) = run(&loads);
+        assert_eq!(timers[3], Timer::Keep, "the least time runs on");
+        assert!(reveal.visible());
+        let (reveal, _) = run(&[
+            Load::Began,
+            Load::WaitOver,
+            Load::Ended,
+            Load::Began,
+            Load::WaitOver,
+        ]);
+        assert_eq!(reveal, Reveal::Shown);
+    }
+
+    #[test]
+    fn a_reading_begun_after_the_wait_went_waits_unseen_again() {
+        let loads = [
+            Load::Began,
+            Load::WaitOver,
+            Load::WaitOver,
+            Load::Ended,
+            Load::Began,
+        ];
+        let (reveal, timers) = run(&loads);
+        assert_eq!(timers[4], Timer::Start(SHOW_AFTER));
+        assert_eq!(reveal, Reveal::Waiting);
+        assert!(!reveal.visible());
+    }
+
+    #[test]
+    fn a_reading_that_begins_while_one_waits_keeps_its_timer() {
+        let (reveal, timers) = run(&[Load::Began, Load::Began]);
+        assert_eq!(timers[1], Timer::Keep);
+        assert_eq!(reveal, Reveal::Waiting);
+        let (reveal, timers) = run(&[Load::Began, Load::WaitOver, Load::WaitOver, Load::Began]);
+        assert_eq!(timers[3], Timer::Keep);
+        assert_eq!(reveal, Reveal::Shown);
+    }
+
+    #[test]
+    fn an_answer_or_a_late_timer_with_nothing_read_changes_nothing() {
+        for load in [Load::Ended, Load::WaitOver] {
+            let (reveal, timers) = run(&[load]);
+            assert_eq!(timers, [Timer::Keep], "{load:?}");
+            assert_eq!(reveal, Reveal::Idle, "{load:?}");
+        }
     }
 }
