@@ -366,8 +366,16 @@ impl McpMode {
 }
 
 fn serve_mcp(mode: McpMode, plain: bool) -> ExitCode {
-    let localizer = start_protected(plain, None);
-    finish(&localizer, run_mcp(&localizer, mode))
+    let recent = recent_log();
+    let localizer = start_protected(plain, Some(Arc::clone(&recent)));
+    finish(&localizer, run_mcp(&localizer, mode, recent))
+}
+
+/// The log an MCP server keeps of its own, from its start, as the daemon
+/// keeps its recent log (#618): what `read_log` reads in a session of its
+/// own. Connect mode reads the daemon's instead.
+pub(crate) fn recent_log() -> Arc<dyn app::ports::RecentLogStore> {
+    Arc::new(app::recent_log::RecentLogRing::new())
 }
 
 /// The start of a process that will hold secrets, the daemon, the MCP
@@ -392,8 +400,12 @@ pub(crate) fn start_protected(
 /// Serves MCP on stdin and stdout until the client closes stdin (§4.6).
 /// Standard output carries protocol messages only: a refusal is said on
 /// stderr, and the session logs there.
-fn run_mcp(localizer: &Localizer, mode: McpMode) -> io::Result<ExitCode> {
-    let session = match Session::start(localizer, &mode)? {
+fn run_mcp(
+    localizer: &Localizer,
+    mode: McpMode,
+    recent: Arc<dyn app::ports::RecentLogStore>,
+) -> io::Result<ExitCode> {
+    let session = match Session::start(localizer, &mode, recent)? {
         Ok(session) => session,
         Err(status) => return Ok(status),
     };
@@ -417,8 +429,13 @@ struct Session {
 impl Session {
     /// Starts the server `mode` names, or says why it can't and gives the
     /// status to end with: 2 for an address that isn't one, as the parser
-    /// gives for a value it rejects, and 1 otherwise.
-    fn start(localizer: &Localizer, mode: &McpMode) -> io::Result<Result<Self, ExitCode>> {
+    /// gives for a value it rejects, and 1 otherwise. A session of its own
+    /// keeps its log in `recent`.
+    fn start(
+        localizer: &Localizer,
+        mode: &McpMode,
+        recent: Arc<dyn app::ports::RecentLogStore>,
+    ) -> io::Result<Result<Self, ExitCode>> {
         // Checked here, in the catalog's words, like `--allowed-host`; exit
         // status 2 is the parser's own for a value it rejects. The address
         // isn't repeated: it may hold a password.
@@ -454,10 +471,10 @@ impl Session {
             )
             .map(|server| (server, None)),
             (None, McpMode::Scratch) => runtime
-                .block_on(composition::mcp_server::scratch(&OsRandom))
+                .block_on(composition::mcp_server::scratch(&OsRandom, recent))
                 .map(|(server, held)| (server, Some(held))),
             (None, _) => runtime
-                .block_on(composition::mcp_server::headless())
+                .block_on(composition::mcp_server::headless(recent))
                 .map(|(server, held)| (server, Some(held))),
         };
         match started {

@@ -6,6 +6,7 @@ use std::fs::File;
 use std::io::{self, BufRead, BufReader, Read as _, Write};
 use std::path::PathBuf;
 use std::process::ExitCode;
+use std::sync::Arc;
 
 use api::MsgArg;
 use l10n::{Localizer, MessageId, msg};
@@ -59,16 +60,21 @@ enum Calls {
 
 /// Runs `ladderback mcp call`. Its session resolves secrets or reads a
 /// token as the server's does, so it starts protected the same way, before
-/// it reads the script or its calls.
+/// it reads the script or its calls, and keeps its log as the server does.
 pub(crate) fn call(args: CallArgs, plain: bool) -> ExitCode {
-    let localizer = crate::start_protected(plain, None);
-    crate::finish(&localizer, run(&localizer, args))
+    let recent = crate::recent_log();
+    let localizer = crate::start_protected(plain, Some(Arc::clone(&recent)));
+    crate::finish(&localizer, run(&localizer, args, recent))
 }
 
 /// Reads the calls, starts the session the mode names, makes the calls,
 /// and ends the session: 0 when every call worked, 1 when one failed or the
 /// session couldn't start, 2 when the command line can't be read.
-fn run(localizer: &Localizer, args: CallArgs) -> io::Result<ExitCode> {
+fn run(
+    localizer: &Localizer,
+    args: CallArgs,
+    recent: Arc<dyn app::ports::RecentLogStore>,
+) -> io::Result<ExitCode> {
     let mode = if args.headless {
         McpMode::Headless
     } else if args.scratch {
@@ -130,7 +136,7 @@ fn run(localizer: &Localizer, args: CallArgs) -> io::Result<ExitCode> {
         // The parser lets neither through without one or the other.
         (None, None) => return Ok(ExitCode::from(2)),
     };
-    let session = match Session::start(localizer, &mode)? {
+    let session = match Session::start(localizer, &mode, recent)? {
         Ok(session) => session,
         Err(status) => return Ok(status),
     };

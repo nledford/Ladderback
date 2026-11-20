@@ -77,6 +77,8 @@ mod locations_steps;
 mod maintenance_steps;
 #[path = "steps/mcp_call.rs"]
 mod mcp_call_steps;
+#[path = "steps/mcp_log.rs"]
+mod mcp_log_steps;
 #[path = "steps/mcp_proposals.rs"]
 mod mcp_proposals_steps;
 #[path = "steps/mcp.rs"]

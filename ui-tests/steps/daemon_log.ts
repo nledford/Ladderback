@@ -14,9 +14,13 @@ import { runningBuild } from "./start_page.ts";
 const ISOLATION_MARKS = /[\u2066-\u2069]/g;
 
 // The daemon answers the recent log with these lines, which the Given lists
-// oldest first, as a log file reads; the answer lists them newest first.
+// oldest first, as a log file reads; the answer lists them newest first, each
+// numbered from 1 in the order it was kept, as the daemon numbers them.
 Given("the recent log holds:", function (this: BrowserWorld, lines: DataTable) {
-  const newestFirst = lines.hashes().reverse();
+  const newestFirst = lines
+    .hashes()
+    .map((line, kept) => ({ ...line, number: kept + 1 }))
+    .reverse();
   this.contextRoutes.push(async (context) => {
     await context.route("**/api/v1/log", (route) => route.fulfill({ json: { lines: newestFirst } }));
   });
