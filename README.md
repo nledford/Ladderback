@@ -69,7 +69,24 @@ The [technical design](docs/design/README.md#relationship-to-backrest) has the f
 
 ## Install
 
-One command installs the newest release. On 64-bit Linux (x86_64 or aarch64, glibc 2.35 or newer) it downloads the release's archive and checks it against the release's checksums; on macOS, which has no download yet, and elsewhere, it builds the release from source:
+Ladderback runs on each machine it backs up, and each system has one recommended way to install it ([decision 126](docs/design/decisions/126-primary-install-channels.md)). The [install guide](docs/guide/install.md) has the details: what each way checks and installs, how to update, how to run Ladderback as a service and what macOS asks for.
+
+### Debian, Ubuntu, Raspberry Pi OS and Fedora: the package
+
+From 0.5.0, each release has a `.deb` for Debian 12 or newer, Ubuntu 22.04 or newer and 64-bit Raspberry Pi OS, and an `.rpm` for Fedora, for x86_64 and aarch64. The package puts `ladderback` in `/usr/bin` and starts nothing. Download yours from the [release](https://github.com/nledford/Ladderback/releases/latest) with its `SHA256SUMS`, check it, install it, then install the service as yourself:
+
+```sh
+sha256sum -c --ignore-missing SHA256SUMS
+sudo apt install ./ladderback_<version>_arm64.deb          # amd64 on x86_64
+sudo dnf install ./ladderback-<version>-1.x86_64.rpm       # aarch64 on ARM
+ladderback install-service
+```
+
+The packages are unsigned and have no apt or dnf repository yet, so to update, install the next release's package and run `ladderback install-service` again. To move an earlier install, remove its binary first (`~/.cargo/bin/ladderback` from the script or a build, `~/.local/bin/ladderback` from the archive by hand), install the package, then run `ladderback install-service` again, so the service runs `/usr/bin/ladderback`. The [install guide](docs/guide/install.md#install-a-package-debian-ubuntu-fedora) has the details.
+
+### Other 64-bit Linux: the install script
+
+On any other 64-bit Linux (x86_64 or aarch64) with glibc 2.35 or newer, one command downloads the newest release's archive, checks it against the release's checksums and installs `ladderback` into `~/.cargo/bin`:
 
 ```sh
 curl -fsSL https://raw.githubusercontent.com/nledford/Ladderback/main/scripts/install.sh | bash
@@ -83,20 +100,27 @@ less install.sh
 bash install.sh
 ```
 
-To build from source on Linux too, pass `--from-source`: `curl -fsSL … | bash -s -- --from-source`, or `bash install.sh --from-source`. A build asks before it installs any tool. The [install guide](docs/guide/install.md) says what the script checks and installs, how to download a release or build one by hand, how to update, how to run Ladderback as a service and what macOS asks for.
+Then `ladderback install-service` runs it in the background, from each login on.
 
-On Debian, Ubuntu and Raspberry Pi OS (Debian 12 or newer, Ubuntu 22.04 or newer), or on Fedora, from 0.5.0 each release also has a package, which puts `ladderback` in `/usr/bin` and starts nothing. Download it from the [release](https://github.com/nledford/Ladderback/releases/latest) with its `SHA256SUMS`, check it, and install it:
+### macOS: the install script, signed with your own certificate
+
+macOS has no download yet ([#344](https://github.com/nledford/Ladderback/issues/344)), so on a Mac the same script builds the newest release from source, and asks before it installs any tool the build needs. Make a self-signed code-signing certificate in your keychain once, as the install guide's [Signing your build](docs/guide/install.md#signing-your-build) says, and name it in `LADDERBACK_SIGN_IDENTITY`, so that the build's Full Disk Access and Photos grants carry over to the next update:
 
 ```sh
-sha256sum -c --ignore-missing SHA256SUMS
-sudo apt install ./ladderback_<version>_arm64.deb          # amd64 on x86_64
-sudo dnf install ./ladderback-<version>-1.x86_64.rpm       # aarch64 on ARM
-ladderback install-service
+curl -fsSL https://raw.githubusercontent.com/nledford/Ladderback/main/scripts/install.sh | LADDERBACK_SIGN_IDENTITY="Ladderback Code Signing" bash
 ```
 
-The packages are unsigned and have no apt or dnf repository yet, so to update, install the next release's package and run `ladderback install-service` again. To move an install the script or a build made, remove `~/.cargo/bin/ladderback` first, install the package, then run `ladderback install-service` again, so the service runs `/usr/bin/ladderback`. The [install guide](docs/guide/install.md#install-a-package-debian-ubuntu-fedora) has the details.
+Without the certificate the build is signed ad hoc, and after each update macOS asks again for Full Disk Access and Photos: until you grant them again, backups can't read the folders they protect. Then run `ladderback install-service` and [grant Full Disk Access](docs/guide/install.md#macos-full-disk-access).
 
-On macOS, a build from source is signed ad hoc, so after each update macOS asks again for Full Disk Access and Photos. A build from a checkout can instead be signed with a self-signed code-signing certificate from your own keychain, named in `LADDERBACK_SIGN_IDENTITY`, so that the grants carry over; the install guide says [how to make one](docs/guide/install.md#signing-your-build).
+### Other ways
+
+For contributors, for installing the release's archive by hand, and for people who already use cargo-binstall:
+
+- **From a checkout:** `just install`, or the install guide's steps [by hand](docs/guide/install.md#by-hand), to build a release or a branch yourself. On Linux, `bash install.sh --from-source` has the script build from source too.
+- **The release's archive by hand,** on 64-bit Linux: [download a release](docs/guide/install.md#download-a-release-linux).
+- **cargo-binstall,** on 64-bit Linux: `cargo binstall --strategies crate-meta-data --git https://github.com/nledford/Ladderback ladderback` installs the release's archive, without checking it against `SHA256SUMS` ([details](docs/guide/install.md#cargo-binstall)).
+
+Ladderback isn't published to crates.io, and has no Homebrew tap until a macOS build can be signed and notarized ([#344](https://github.com/nledford/Ladderback/issues/344)).
 
 ## Quick start
 
