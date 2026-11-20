@@ -976,6 +976,11 @@ fn keyring_unlocks(agent: &mut Agent, seconds: i64) {
         .lock_keyring_until(agent.clock.clone(), at);
 }
 
+#[given("the keyring says it is unlocked, but its entries stay locked")]
+fn entries_stay_locked(agent: &mut Agent) {
+    agent.secrets.store.keep_entries_locked();
+}
+
 #[given(expr = "the plan's next run is due {int} seconds after the daemon started")]
 fn next_run_due_at(agent: &mut Agent, seconds: i64) {
     agent.secrets.next_run_due = Some(agent.secrets.after_start(seconds));

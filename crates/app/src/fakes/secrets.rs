@@ -75,6 +75,11 @@ struct State {
     /// The keyring's unlock prompt was dismissed: every keyring read fails,
     /// entry or not.
     unlock_prompt_dismissed: bool,
+    /// The keyring answers that it is unlocked, but its entries are in a
+    /// collection that stays locked, as one the default alias doesn't name:
+    /// every keyring read fails as locked while asking whether the keyring
+    /// is locked says unlocked.
+    entries_stay_locked: bool,
     commands: BTreeMap<(String, Vec<String>), Script>,
     /// The keyring doesn't answer, as a macOS keychain waiting on a prompt
     /// nobody answered: every keyring read outlives the time limit.
@@ -176,6 +181,14 @@ impl FakeSecrets {
     /// entry, there or not, fails as `KeyringUnavailable`, refused.
     pub fn dismiss_unlock_prompt(&self) {
         self.lock().unlock_prompt_dismissed = true;
+    }
+
+    /// A keyring that answers it is unlocked while its entries stay locked,
+    /// as one whose default collection is unlocked while the entry sits in
+    /// another that isn't: every keyring entry fails as `KeyringUnavailable`
+    /// locked, and asking whether the keyring is locked says unlocked.
+    pub fn keep_entries_locked(&self) {
+        self.lock().entries_stay_locked = true;
     }
 
     /// A session whose keyring service starts when `clock` reaches `at`, as
@@ -340,7 +353,11 @@ impl SecretResolver for FakeSecrets {
                         },
                     });
                 }
-                let unavailable = keyring_unavailable(&state);
+                let unavailable = keyring_unavailable(&state).or_else(|| {
+                    state
+                        .entries_stay_locked
+                        .then_some(("the item is locked", KeyringCause::Locked))
+                });
                 if let Some((detail, cause)) = unavailable {
                     // A run that spins on a keyring it can't ask would hang
                     // its test: past the cap, the read fails otherwise, so
