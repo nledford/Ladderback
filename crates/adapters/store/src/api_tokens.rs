@@ -5,18 +5,18 @@ use app::ports::{Added, ApiTokenStore, StoreError};
 use async_trait::async_trait;
 use domain::Timestamp;
 use domain::access::PasswordFingerprint;
-use domain::access::api_token::{ApiToken, ApiTokenId, Scope};
+use domain::access::api_token::{ApiToken, ApiTokenId, TokenPermissions};
 use sqlx::Connection;
 
 use crate::{SqliteStore, row, sql, unavailable};
 
-/// A token's scopes as the `scopes` column keeps them: their names, in order,
-/// joined by commas.
-fn scopes_text(token: &ApiToken) -> String {
-    token
-        .scopes
-        .iter()
-        .map(Scope::as_str)
+/// A token's permissions as the `permissions` column keeps them: its rows
+/// set to a level, as `row:level`, in order, joined by commas.
+fn permissions_text(permissions: TokenPermissions) -> String {
+    permissions
+        .get()
+        .rows()
+        .map(|(row, level)| format!("{}:{}", row.as_str(), level.as_str()))
         .collect::<Vec<_>>()
         .join(",")
 }
@@ -45,7 +45,7 @@ impl ApiTokenStore for SqliteStore {
             .bind(token.id.as_str())
             .bind(token.label.as_str())
             .bind(token.digest.as_bytes().as_slice())
-            .bind(scopes_text(token))
+            .bind(permissions_text(token.permissions))
             .bind(token.password.value().cast_signed())
             .bind(token.created_at.as_millisecond())
             .bind(token.last_used_at.map(Timestamp::as_millisecond))
@@ -78,6 +78,21 @@ impl ApiTokenStore for SqliteStore {
     async fn revoke(&self, id: &ApiTokenId) -> Result<bool, StoreError> {
         let _call = self.call().await;
         let done = sqlx::query(sql::DELETE_API_TOKEN)
+            .bind(id.as_str())
+            .execute(&self.pool)
+            .await
+            .map_err(unavailable)?;
+        Ok(done.rows_affected() > 0)
+    }
+
+    async fn set_permissions(
+        &self,
+        id: &ApiTokenId,
+        permissions: TokenPermissions,
+    ) -> Result<bool, StoreError> {
+        let _call = self.call().await;
+        let done = sqlx::query(sql::SET_API_TOKEN_PERMISSIONS)
+            .bind(permissions_text(permissions))
             .bind(id.as_str())
             .execute(&self.pool)
             .await

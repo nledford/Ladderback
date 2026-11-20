@@ -1,6 +1,6 @@
 //! API tokens (technical design §10.1, decision 93): what lets a program
 //! other than a browser use the API while sign-in is on. A token is
-//! `ladderback_<id>_<secret>`; the daemon keeps its label, its scopes, the
+//! `ladderback_<id>_<secret>`; the daemon keeps its label, its permissions, the
 //! SHA-256 of its secret and the admin password it was created under, never
 //! the secret. Rules only: the time and the random bytes are passed in.
 
@@ -10,6 +10,7 @@ use sha2::{Digest as _, Sha256};
 use subtle::ConstantTimeEq;
 use zeroize::{Zeroize, ZeroizeOnDrop};
 
+use super::permissions::Permissions;
 use super::{PasswordFingerprint, TOKEN_BYTES};
 
 /// What every token's text starts with, so a secret scanner knows one.
@@ -35,67 +36,21 @@ const SECRET_CHARS: usize = 43;
 const BASE32: &[u8; 32] = b"abcdefghijklmnopqrstuvwxyz234567";
 const BASE64URL: &[u8; 64] = b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-_";
 
-/// What a token lets a program do, each opening the routes the daemon's scope
-/// table names for it. Scopes don't imply each other.
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, PartialOrd, Ord)]
-pub enum Scope {
-    Read,
-    Run,
-    Preview,
-    Propose,
-}
-
-impl Scope {
-    /// Every scope, in the order they are listed.
-    pub const ALL: [Self; 4] = [Self::Read, Self::Run, Self::Preview, Self::Propose];
-
-    /// Its name on the wire and in the store.
-    pub fn as_str(self) -> &'static str {
-        match self {
-            Self::Read => "read",
-            Self::Run => "run",
-            Self::Preview => "preview",
-            Self::Propose => "propose",
-        }
-    }
-
-    pub fn parse(text: &str) -> Option<Self> {
-        Self::ALL.into_iter().find(|scope| scope.as_str() == text)
-    }
-
-    fn bit(self) -> u8 {
-        match self {
-            Self::Read => 1,
-            Self::Run => 2,
-            Self::Preview => 4,
-            Self::Propose => 8,
-        }
-    }
-}
-
-/// A token's scopes: one at least.
+/// A token's permissions: one row set to a level at least (decision 127).
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub struct Scopes(u8);
+pub struct TokenPermissions(Permissions);
 
-impl Scopes {
-    pub fn new(scopes: impl IntoIterator<Item = Scope>) -> Result<Self, ApiTokenProblem> {
-        let bits = scopes.into_iter().fold(0, |bits, scope| bits | scope.bit());
-        if bits == 0 {
-            return Err(ApiTokenProblem::NoScope);
+impl TokenPermissions {
+    pub fn new(permissions: Permissions) -> Result<Self, ApiTokenProblem> {
+        if permissions.is_empty() {
+            return Err(ApiTokenProblem::NoPermission);
         }
-        Ok(Self(bits))
+        Ok(Self(permissions))
     }
 
-    /// Whether the token was given `scope`.
-    pub fn allows(self, scope: Scope) -> bool {
-        self.0 & scope.bit() != 0
-    }
-
-    /// The scopes, in [`Scope::ALL`]'s order.
-    pub fn iter(self) -> impl Iterator<Item = Scope> {
-        Scope::ALL
-            .into_iter()
-            .filter(move |scope| self.allows(*scope))
+    /// What the token may do.
+    pub fn get(self) -> Permissions {
+        self.0
     }
 }
 
@@ -105,8 +60,8 @@ pub enum ApiTokenProblem {
     /// The label is empty, blank, longer than [`LABEL_MAX_CHARS`], or holds
     /// a control character.
     Label,
-    /// No scope was given.
-    NoScope,
+    /// Every permission was left at no access.
+    NoPermission,
 }
 
 /// A token's ID: what it is looked up, listed and revoked by. Not a secret.
@@ -307,13 +262,13 @@ impl PresentedApiToken {
 }
 
 /// One kept token: who it is (its ID and label), what it may do (its
-/// scopes), the SHA-256 of its secret, the admin password it was created
+/// permissions), the SHA-256 of its secret, the admin password it was created
 /// under, when it was created and when last used.
 #[derive(Clone, Debug)]
 pub struct ApiToken {
     pub id: ApiTokenId,
     pub label: ApiTokenLabel,
-    pub scopes: Scopes,
+    pub permissions: TokenPermissions,
     pub digest: ApiTokenDigest,
     pub password: PasswordFingerprint,
     pub created_at: Timestamp,
@@ -326,7 +281,7 @@ impl ApiToken {
     pub fn issue(
         id: ApiTokenId,
         label: ApiTokenLabel,
-        scopes: Scopes,
+        permissions: TokenPermissions,
         secret: &ApiTokenSecret,
         password: PasswordFingerprint,
         now: Timestamp,
@@ -334,7 +289,7 @@ impl ApiToken {
         Self {
             id,
             label,
-            scopes,
+            permissions,
             digest: secret.digest(),
             password,
             created_at: now,

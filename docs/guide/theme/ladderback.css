@@ -55,6 +55,19 @@
     color: #d77c7c;
 }
 
+/* The matches a search result's page marks (its link adds `?highlight=`):
+ * dark text on the mark's light fill, code included, whose own colors are
+ * chosen for the code block's fill (`.content` outranks the theme rules
+ * above). Coal's fill is navy's, since dark text reads at under 3:1 on its
+ * own. */
+.coal {
+    --search-mark-bg: #a2cff5;
+}
+
+.content mark [class*="hljs-"] {
+    color: inherit;
+}
+
 /* 1.4.1: a link in a sentence is told apart by more than its color. */
 .content main a:not(.header) {
     text-decoration: underline;
@@ -67,9 +80,14 @@
     overflow-wrap: anywhere;
 }
 
-/* 2.5.8: the sidebar's links to the page's headings are 24px tall. */
-.header-in-summary {
-    display: inline-block;
+/* 2.5.8: the sidebar's links (its pages, the current page's headings and
+ * their fold chevrons) are 24px tall, not their 21px line. The current page's
+ * link sits right on top of its first heading's, so at 21px it passed only
+ * while that link stayed 12px or more from its center, which rests on the
+ * text's width: on Linux, whose font hinting sets "1. Install" about 2px wider
+ * than macOS does, it came within 12px. At 24px it passes in any font. Each
+ * link is a flex item of its `.chapter-link-wrapper`, so the height applies. */
+.chapter-link-wrapper > a {
     min-block-size: 24px;
 }
 

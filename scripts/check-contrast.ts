@@ -56,6 +56,20 @@ const PAIRS = [
   // information, so 1.4.11 doesn't apply, but it must still be seen.
   { name: "skeleton on page", fg: "--skeleton", bg: "--bg", min: 1.4 },
   { name: "skeleton on surface", fg: "--skeleton", bg: "--surface", min: 1.4 },
+  // The change mark (components §4.5, decision 129): a live row's edge
+  // against the page and the cue's fill it fades from (1.4.11), and that
+  // fill's floor against the page: not a WCAG minimum, since the edge and
+  // the bold carry the mark and the fill only its arrival, but it must
+  // still be seen. While lit, the row's text, links and focus ring lie on
+  // the fill. A status tone's words lie on its badge's own fill, never on
+  // the cue's, so no tone is paired with it.
+  { name: "change mark's edge on page", fg: "--cue", bg: "--bg", min: 3 },
+  { name: "change mark's edge on its fill", fg: "--cue", bg: "--cue-fill", min: 3 },
+  { name: "change mark's fill on page", fg: "--cue-fill", bg: "--bg", min: 1.3 },
+  { name: "text on the change mark's fill", fg: "--fg", bg: "--cue-fill", min: 4.5 },
+  { name: "muted text on the change mark's fill", fg: "--muted", bg: "--cue-fill", min: 4.5 },
+  { name: "link on the change mark's fill", fg: "--accent", bg: "--cue-fill", min: 4.5 },
+  { name: "focus ring on the change mark's fill", fg: "--focus", bg: "--cue-fill", min: 3 },
   // The tabs (components §4.5): the selected tab's bar, the shape that
   // tells it with its weight, against the page and a surface (1.4.11). A
   // tab's words are the text on page; the list's rule the table rule.

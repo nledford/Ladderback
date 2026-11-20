@@ -8,7 +8,7 @@
 use std::sync::Arc;
 
 use domain::maintenance::{Ownership, OwnershipChange};
-use domain::planning::{AgentConfig, Maintenance};
+use domain::planning::Maintenance;
 use domain::{OperationId, RepositoryAlias};
 
 use crate::ports::{ConfigError, ConfigStore, OperationStore, Problem, StoreError};
@@ -89,22 +89,22 @@ impl ChangeMaintainer {
         if let Some(entry) = repositories.get_mut(alias) {
             entry.maintenance = request;
         }
-        let changed = AgentConfig::new(
-            loaded.agent().clone(),
-            loaded.hooks().clone(),
-            repositories,
-            loaded.plans().to_vec(),
-        )
-        .and_then(|config| config.with_notifications(loaded.notifications().clone()))
-        .map_err(|violation| {
-            MaintainerError::Config(ConfigError::Invalid {
-                file: String::new(),
-                key: None,
-                at: None,
-                problem: Problem::Violation(violation),
-                detail: String::new(),
-            })
-        })?;
+        let changed = loaded
+            .replacing(
+                loaded.agent().clone(),
+                loaded.hooks().clone(),
+                repositories,
+                loaded.plans().to_vec(),
+            )
+            .map_err(|violation| {
+                MaintainerError::Config(ConfigError::Invalid {
+                    file: String::new(),
+                    key: None,
+                    at: None,
+                    problem: Problem::Violation(violation),
+                    detail: String::new(),
+                })
+            })?;
         self.config
             .save(&changed)
             .await
@@ -202,5 +202,34 @@ mod tests {
             Some(Maintenance::Local),
             "the entry still asks this agent to maintain it"
         );
+    }
+
+    /// Turning maintenance off keeps what a person set AI agents may do
+    /// without a token.
+    #[tokio::test]
+    async fn changing_the_maintainer_keeps_what_ai_agents_may_do_without_a_token() {
+        let no_backup_runs = domain::access::permissions::Permissions::default()
+            .with(domain::access::permissions::Permission::BackupRuns, None)
+            .expect("a level the row has");
+        let config = Arc::new(InMemoryConfigStore::new());
+        config
+            .save(&maintained_here().with_without_token(no_backup_runs))
+            .await
+            .expect("the configuration saves");
+        let use_case = ChangeMaintainer::new(
+            config.clone(),
+            Arc::new(InMemoryOperationStore::new()),
+            Arc::default(),
+        );
+        use_case
+            .change(&alias(), false)
+            .await
+            .expect("nothing runs, so maintenance turns off");
+        let now = config.load().await.expect("the configuration loads");
+        assert_eq!(
+            now.repository(&alias()).map(|entry| entry.maintenance),
+            Some(Maintenance::None)
+        );
+        assert_eq!(now.without_token(), no_backup_runs);
     }
 }

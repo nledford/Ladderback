@@ -9,6 +9,7 @@
 //! table, so the file is laid out here, with `toml` writing each value.
 
 use app::ports::{ConfigError, Problem};
+use domain::access::permissions::{Permission, Permissions};
 use domain::notifications::{Auth, Channel, Notifications, Rule};
 use domain::planning::{
     AgentConfig, AgentSettings, Cadence, GlobFile, GroupBy, HookEntry, Hooks, KeepCount,
@@ -20,7 +21,7 @@ use domain::secrets::{FileRead, SecretRef};
 use crate::tables::{
     AgentTable, AlternativeTable, ChannelTable, FileTable, HookEntryTable, HookValue, HooksTable,
     LocationTable, NotificationsTable, PlanTable, Repositories, RepositoryTable, RetentionTable,
-    RetryTable, RuleTable, ScheduleTable,
+    RetryTable, RuleTable, ScheduleTable, WithoutTokenTable,
 };
 
 /// `value` unless it is empty, which isn't written.
@@ -44,7 +45,7 @@ pub(crate) fn text(tables: &FileTable) -> Result<String, String> {
     let mut out = String::new();
     for (key, value) in &root {
         match (key.as_str(), value) {
-            ("agent" | "hooks", toml::Value::Table(table)) => {
+            ("agent" | "hooks" | "without-token", toml::Value::Table(table)) => {
                 section(&mut out, key, false, table, &[])?;
             }
             ("repositories", toml::Value::Table(all)) => {
@@ -172,6 +173,33 @@ pub(crate) fn file(config: &AgentConfig, schema: i64) -> Result<FileTable, Strin
         repositories: (!repositories.is_empty()).then_some(Repositories(repositories)),
         plans: (!config.plans().is_empty()).then(|| config.plans().iter().map(plan).collect()),
         notifications: notifications(config.notifications())?,
+        without_token: without_token(config.without_token()),
+    })
+}
+
+/// The `[without-token]` table with only the permissions that differ from
+/// their defaults, each at its level or `"none"`, unless none does (§16,
+/// decision 127).
+fn without_token(permissions: Permissions) -> Option<WithoutTokenTable> {
+    let defaults = Permissions::default();
+    let differs = |permission: Permission| {
+        let on = permissions.grants(permission);
+        (on != defaults.grants(permission)).then(|| {
+            if on {
+                permission.level().as_str().to_owned()
+            } else {
+                "none".to_owned()
+            }
+        })
+    };
+    (permissions != defaults).then(|| WithoutTokenTable {
+        backups: differs(Permission::Backups),
+        backup_runs: differs(Permission::BackupRuns),
+        previews: differs(Permission::Previews),
+        configuration: differs(Permission::Configuration),
+        snapshot_contents: differs(Permission::SnapshotContents),
+        daemon_log: differs(Permission::DaemonLog),
+        repository_check: differs(Permission::RepositoryCheck),
     })
 }
 

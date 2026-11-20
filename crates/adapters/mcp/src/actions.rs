@@ -27,12 +27,12 @@ pub const WAIT_STEP: Duration = Duration::from_millis(500);
 pub const CANCELLABLE_KIND: &str = "backup";
 
 /// The refusal of a cancel of anything but a backup: the one the daemon
-/// gives an API token, `api-token-scope` naming the scope `session`, so
-/// both backends refuse alike (decision 93).
+/// gives an API token, `api-token-permission` naming `session`, so both
+/// backends refuse alike (decision 93).
 pub fn not_cancellable() -> ErrorDto {
     ErrorDto::new(
-        ErrorCode::ApiTokenScope,
-        [("scope", MsgArg::Text("session".to_owned()))],
+        ErrorCode::ApiTokenPermission,
+        [("permission", MsgArg::Text("session".to_owned()))],
         None,
     )
 }

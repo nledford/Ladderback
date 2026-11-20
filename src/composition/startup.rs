@@ -48,10 +48,11 @@ use super::key_files::KeyFilesLeftOut;
 use super::plan_runner::PlanRunner;
 use super::repositories::RepositoryService;
 use super::{
-    CancelRegistry, Daemon, EventEngine, OperationLog, Refused, SignInDecided, config_unusable,
-    downloads, dry_runs, exposed_args, inline_secret_warnings, log_secret_warning,
-    never_matching_glob_warnings, plain, plans, profiles, proposals, restores, runs, text,
+    CancelRegistry, Daemon, EventEngine, OperationLog, Refused, SignInDecided, downloads, dry_runs,
+    exposed_args, inline_secret_warnings, log_secret_warning, never_matching_glob_warnings, plain,
+    plans, profiles, proposals, restores, runs, text,
 };
+use app::ports::config_unusable;
 
 /// Says in the log, once at load, each secret the configuration holds as
 /// text (§10.2), in every location, and each location that sends its
@@ -573,6 +574,12 @@ async fn state_over(
     // connection, a creation, the record of an opened repository's ID and a
     // plan's change (§6.1, decisions 57 and 96).
     let writes = Arc::new(ConfigWrites::default());
+    // What AI agents may do without a token: the configuration's
+    // `[without-token]` table, changed under the same lock (§10.5).
+    let without_token = Arc::new(app::without_token::WithoutToken::new(
+        Arc::clone(&config),
+        Arc::clone(&writes),
+    ));
     let resolve = Arc::new(daemon_resolve(
         Arc::new(SystemSecrets::default()),
         Arc::new(SystemClock),
@@ -781,6 +788,7 @@ async fn state_over(
             updates: notice,
             // An empty one: the daemon's own puts the one its log feeds here.
             recent_log: Arc::new(app::recent_log::RecentLogRing::new()),
+            without_token,
             full_disk_access: full_disk_access_route,
             sync: http_adapter::SyncHub::default(),
         },

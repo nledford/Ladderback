@@ -58,8 +58,8 @@ pub(crate) const TRACK: &str = "progress-track block-[calc(var(--size)/2)] inlin
 /// left edge, or the right one where the fill runs right to left: the lean
 /// (`--progress-lean`, -1 or 1) follows the fill's own direction through
 /// `:dir(rtl)`, not Tailwind's `rtl:` variant, which also matches inside a
-/// `dir="ltr"` that a `dir="rtl"` holds. `style.css`'s reduced-motion rule takes
-/// every transition away, so the fill then jumps to the value. Under forced
+/// `dir="ltr"` that a `dir="rtl"` holds. `style.css`'s reduced-motion rule
+/// keeps only fades, so the fill then jumps to the value. Under forced
 /// colors the mode would paint it the page's own background and leave the
 /// bar empty, so it opts out and takes `CanvasText`, as the alert's border
 /// does: the text's color wherever a bar sits on Canvas.

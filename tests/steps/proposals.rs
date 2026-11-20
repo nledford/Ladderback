@@ -80,6 +80,30 @@ fn holds_only_the_repository(agent: &mut Agent, alias: String) {
     agent.proposals.config = Some(text);
 }
 
+/// Adds the step's text, as a person would, after what the file holds.
+#[given("the daemon's config file also holds:")]
+fn also_holds(agent: &mut Agent, step: &cucumber::gherkin::Step) {
+    let added = step.docstring.as_deref().expect("the step has a text");
+    let file = config_file(agent);
+    let mut text = std::fs::read_to_string(&file).expect("the daemon's config file");
+    text.push('\n');
+    text.push_str(added);
+    text.push('\n');
+    std::fs::write(&file, &text).expect("the daemon's config file");
+    agent.proposals.config = Some(text);
+}
+
+#[then("the daemon's config file still holds:")]
+fn still_holds(agent: &mut Agent, step: &cucumber::gherkin::Step) {
+    let kept = step.docstring.as_deref().expect("the step has a text");
+    let kept = kept.trim_start_matches('\n');
+    let text = std::fs::read_to_string(config_file(agent)).expect("the config file");
+    assert!(
+        text.contains(kept),
+        "{kept:?} is gone from the config file:\n{text}"
+    );
+}
+
 /// The I4 canary: the repository's password, and a password in its
 /// address, written in the config file, which no proposal answer may hold.
 #[given(

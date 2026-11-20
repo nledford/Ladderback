@@ -75,7 +75,9 @@ pub struct OperationSummaryDto {
     /// Why the operation failed, set when it did: the failure's code, the
     /// arguments its message takes, and the engine's own words, as the
     /// engine masked them of every secret of the job (I4). Added beside
-    /// `failure-code`, which keeps its place in the published shape.
+    /// `failure-code`, which keeps its place in the published shape. The
+    /// code alone for a program without the permission Snapshot contents:
+    /// the arguments and the words can name a file.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub failure: Option<ErrorDto>,
     /// What the engine reported when the operation succeeded.
@@ -95,8 +97,9 @@ pub struct OperationSummaryDto {
     /// The entry of a snapshot a restore or a download read, as the log
     /// kept it: its path from the snapshot's top, `/` first, with every
     /// secret of the repository masked and a path past 1 KiB cut to its end
-    /// after `…` (#847). Left out for every other operation and for one an
-    /// earlier version logged.
+    /// after `…` (#847). Left out for every other operation, for one an
+    /// earlier version logged, and for a program without the permission
+    /// Snapshot contents.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub entry: Option<String>,
 }
@@ -223,11 +226,13 @@ pub struct OperationsPageDto {
 #[serde(rename_all = "kebab-case")]
 pub struct OperationWarningDto {
     pub code: WarningCode,
-    /// The affected item, usually a path.
+    /// The affected item, usually a path. Left out for a program without
+    /// the permission Snapshot contents.
     pub item: Option<String>,
     /// What the engine was doing.
     pub during: String,
-    /// The engine's own message, verbatim.
+    /// The engine's own message, verbatim, which can name a file: empty for
+    /// a program without the permission Snapshot contents.
     pub detail: String,
 }
 

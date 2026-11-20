@@ -313,6 +313,16 @@ Then("the {word} region stays empty", async function (this: BrowserWorld, polite
   } while (Date.now() < until);
 });
 
+// The same wait, for one message among whatever else the page says.
+Then("the {word} region never says {string}", async function (this: BrowserWorld, politeness: string, unsaid: string) {
+  const found = await region(this, politeness);
+  const until = Date.now() + SILENCE_MS;
+  do {
+    assert.ok(!(await textOf(found)).includes(unsaid), `the ${politeness} region says "${unsaid}"`);
+    await sleep(100);
+  } while (Date.now() < until);
+});
+
 Then("the live regions stay silent", async function (this: BrowserWorld) {
   const regions = [await region(this, "polite"), await region(this, "assertive")];
   const until = Date.now() + SILENCE_MS;

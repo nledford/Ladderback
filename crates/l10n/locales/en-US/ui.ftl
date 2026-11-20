@@ -355,6 +355,46 @@ ui-gallery-table-sorted-files-up = Sorted by files, fewest first.
 # Announced politely when the table demo is sorted by files, the most first.
 ui-gallery-table-sorted-files-down = Sorted by files, most first.
 
+# The heading of the gallery's live table demo (§4.5): a table whose status
+# column a live update changes, so a changed row is marked until it is seen.
+ui-gallery-live-table-heading = Live table
+
+# The caption of the live table demo, and the name of its frame.
+ui-gallery-live-table-caption = Demo jobs
+
+# The header of the live table demo's row header column: each row's job.
+ui-gallery-live-table-job = Job
+
+# The header of the live table demo's status column, the one a change marks.
+ui-gallery-live-table-status = Status
+
+# A demo job's status before it starts.
+ui-gallery-live-table-waiting = Waiting
+
+# A demo job's status while it runs.
+ui-gallery-live-table-running = Running
+
+# A demo job's status once it has finished.
+ui-gallery-live-table-done = Done
+
+# The button that moves the next demo job's status on, as a live update
+# would: waiting, then running, then done.
+ui-gallery-live-table-change = Change a demo status
+
+# The toggle button in each row of the live table demo, a control a keyboard
+# can move focus into the row with.
+# $job (string): the demo job's name, "photos".
+ui-gallery-live-table-star = Star { $job }
+
+# The heading of the live table demo's last column, a link to another site
+# in each row.
+ui-gallery-live-table-guide = Guide
+
+# The link to another site in each row of the live table demo, rustic's
+# documentation.
+# $job (string): the demo job's name, "photos".
+ui-gallery-live-table-guide-link = rustic's guide for { $job }
+
 # The heading of the gallery's link demo (§4.5): a link to a page of the
 # app, to the page it is on, to another site, inside a sentence and inside a
 # status sentence, and right to left.
@@ -2369,6 +2409,23 @@ ui-live-paused-banner =
         [0] Live updates are paused. Nothing has changed since.
         [one] Live updates are paused. One change is waiting.
        *[other] Live updates are paused. { $count } changes are waiting.
+    }
+
+# The button in a page's row of actions that marks every row of its live
+# table that a live update changed as seen, shown while any row is marked.
+ui-mark-all-seen = Mark all as seen
+
+# Read by a screen reader after the status of a row a live update changed
+# and the reader hasn't seen yet, as a mark it carries; never shown. It
+# reads on its own, after the cell's own words ("Failed").
+ui-table-cue-unseen = Changed, not yet seen
+
+# Said politely, once, when "Mark all as seen" is pressed.
+# $count (number): how many rows it marked as seen.
+ui-marked-seen =
+    { $count ->
+        [one] One changed row marked as seen.
+       *[other] { $count } changed rows marked as seen.
     }
 
 # Said politely, once, when live updates resume, in place of one announcement

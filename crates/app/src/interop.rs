@@ -239,8 +239,8 @@ impl ImportProfile {
             repositories.insert(repository.clone(), profile.repository);
         }
 
-        let saved = AgentConfig::new(agent, hooks, repositories, plans)
-            .and_then(|config| config.with_notifications(loaded.notifications().clone()))
+        let saved = loaded
+            .replacing(agent, hooks, repositories, plans)
             .map_err(|violation| match violation {
                 Violation::DuplicatePlan { plan, .. } => ImportError::PlanTaken(plan),
                 violation => ImportError::Config(ConfigError::Invalid {
@@ -595,20 +595,26 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn an_import_keeps_the_notification_rules_and_channels() {
+    async fn an_import_keeps_the_notifications_and_what_ai_agents_may_do_without_a_token() {
+        let no_backup_runs = domain::access::permissions::Permissions::default()
+            .with(domain::access::permissions::Permission::BackupRuns, None)
+            .expect("a level the row has");
         let config = Arc::new(InMemoryConfigStore::new());
         config
             .save(
                 &AgentConfig::default()
                     .with_notifications(notifications())
-                    .expect("rules for no plan in particular"),
+                    .expect("rules for no plan in particular")
+                    .with_without_token(no_backup_runs),
             )
             .await
             .expect("saved");
         import(&config, profile(vec![plan("home", None)], Hooks::default()))
             .await
             .expect("imported");
-        assert_eq!(saved(&config).await.notifications(), &notifications());
+        let saved = saved(&config).await;
+        assert_eq!(saved.notifications(), &notifications());
+        assert_eq!(saved.without_token(), no_backup_runs);
     }
 
     #[tokio::test]

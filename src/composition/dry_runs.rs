@@ -15,7 +15,7 @@ use async_trait::async_trait;
 use domain::planning::{DryRunAllowlist, DryRunFolder, MAX_DRY_RUN_FOLDERS, Proposer};
 use http_adapter::{DryRunsError, PlansError};
 
-use super::config_unusable;
+use app::ports::config_unusable;
 
 /// The daemon's dry runs, and the allowlist they read within.
 pub(super) struct DryRunService {

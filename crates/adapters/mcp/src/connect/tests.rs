@@ -191,15 +191,15 @@ async fn a_refusal_from_the_daemon_is_its_own_code_and_arguments() {
         get(|| async {
             (
                 StatusCode::FORBIDDEN,
-                axum::Json(json!({"code": "api-token-scope", "args": {"scope": {"type": "text", "value": "read"}}})),
+                axum::Json(json!({"code": "api-token-permission", "args": {"permission": {"type": "text", "value": "backups"}}})),
             )
         }),
     );
     let refusal = status_of(daemon(routes).await).await.unwrap_err();
-    assert_eq!(refusal.code, ErrorCode::ApiTokenScope);
+    assert_eq!(refusal.code, ErrorCode::ApiTokenPermission);
     assert_eq!(
         serde_json::to_value(&refusal).unwrap(),
-        json!({"code": "api-token-scope", "args": {"scope": {"type": "text", "value": "read"}}})
+        json!({"code": "api-token-permission", "args": {"permission": {"type": "text", "value": "backups"}}})
     );
 }
 

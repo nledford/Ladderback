@@ -13,8 +13,9 @@ use app::ports::{
     StoredProposal,
 };
 use domain::access::api_token::{
-    ApiToken, ApiTokenDigest, ApiTokenId, ApiTokenLabel, Scope, Scopes,
+    ApiToken, ApiTokenDigest, ApiTokenId, ApiTokenLabel, TokenPermissions,
 };
+use domain::access::permissions::{Level, Permission, Permissions};
 use domain::access::{KeptSession, PasswordFingerprint, SessionDigest, SessionLength};
 use domain::execution::locations::LocationsRecord;
 use domain::execution::logged_entry::LoggedEntry;
@@ -274,7 +275,7 @@ pub(crate) fn release_check(row: &SqliteRow) -> Result<ReleaseCheck, StoreError>
     })
 }
 
-/// A row of `api_tokens`. A token whose label, scopes or digest this
+/// A row of `api_tokens`. A token whose label, permissions or digest this
 /// version couldn't have written is [`StoreError::Corrupt`], never a token
 /// that lets more or less than it was given.
 pub(crate) fn api_token(row: &SqliteRow) -> Result<ApiToken, StoreError> {
@@ -289,15 +290,25 @@ pub(crate) fn api_token(row: &SqliteRow) -> Result<ApiToken, StoreError> {
     reader.scope = format!("API token {}", id.as_str());
     let label = ApiTokenLabel::new(reader.required_text("label")?)
         .map_err(|_| reader.corrupt("label", "is not an API token label"))?;
-    let scopes_text = reader.required_text("scopes")?;
-    let scopes = scopes_text
-        .split(',')
-        .map(|name| {
-            Scope::parse(name)
-                .ok_or_else(|| reader.corrupt("scopes", format!("{} is not a scope", shown(name))))
-        })
-        .collect::<Result<Vec<_>, _>>()?;
-    let scopes = Scopes::new(scopes).map_err(|_| reader.corrupt("scopes", "names no scope"))?;
+    let permissions_text = reader.required_text("permissions")?;
+    let mut permissions = Permissions::NONE;
+    for pair in permissions_text.split(',') {
+        let not_one = || {
+            reader.corrupt(
+                "permissions",
+                format!("{} is not a permission", shown(pair)),
+            )
+        };
+        let (row_name, level_name) = pair.split_once(':').ok_or_else(not_one)?;
+        let row = Permission::parse(row_name).ok_or_else(not_one)?;
+        let level = Level::parse(level_name).ok_or_else(not_one)?;
+        if permissions.grants(row) {
+            return Err(not_one());
+        }
+        permissions = permissions.with(row, Some(level)).map_err(|_| not_one())?;
+    }
+    let permissions = TokenPermissions::new(permissions)
+        .map_err(|_| reader.corrupt("permissions", "names no permission"))?;
     let digest = reader
         .blob("digest")?
         .ok_or_else(|| reader.corrupt("digest", "is NULL"))?;
@@ -309,7 +320,7 @@ pub(crate) fn api_token(row: &SqliteRow) -> Result<ApiToken, StoreError> {
     Ok(ApiToken {
         id,
         label,
-        scopes,
+        permissions,
         digest: ApiTokenDigest::from_bytes(digest),
         password: PasswordFingerprint::new(password.cast_unsigned()),
         created_at: reader.required_time("created_at")?,

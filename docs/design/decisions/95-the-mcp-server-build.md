@@ -71,3 +71,5 @@ It amends decision 20, which planned the protocol and the tool list before revis
 19. **Routes:** `POST /api/v1/profiles/preview` (scope `preview`, a body of at most 2 MiB and 128 KiB) and `GET /api/v1/plans/{id}/profile` (scope `read`). A preview whose merged configuration breaks a rule is `422`; a configuration that can't be loaded is `503`. The export takes `?commands=left-out`, which connect mode always sends; a request with an API token gets the commands left out whatever it asks (#856).
 
 Left out: proposal tools (#518), the hub's `agent` argument (M5), and a per-operation log.
+
+**Amended by decision 127** (2026-11-20, #962): the refusals above named `api-token-scope` are `api-token-permission`, naming `session` or the permission a route needs; the scopes named for the routes are the permissions their tokens were migrated to (`read` Backups, `run` Backup runs, `preview` Previews, `propose` Configuration).

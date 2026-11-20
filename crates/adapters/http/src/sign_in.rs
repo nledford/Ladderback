@@ -116,14 +116,29 @@ fn csrf_token(headers: &HeaderMap) -> Option<Token> {
     }
 }
 
+/// What the sign-in layer judges a request by: sign-in, and what AI agents
+/// may do without a token, for a request `ladderback mcp` marks while
+/// sign-in is off (§10.5).
+#[derive(Clone)]
+pub(crate) struct Gate {
+    pub(crate) sign_in: SignIn,
+    pub(crate) without_token: Arc<app::without_token::WithoutToken>,
+}
+
 /// Refuses an API request that has no live session, or a changed one
-/// without its session's CSRF token, before any route sees it.
+/// without its session's CSRF token, before any route sees it. With sign-in
+/// off, holds a request `ladderback mcp` marks as an AI agent's to what AI
+/// agents may do without a token.
 pub(crate) async fn enforce(
-    State(sign_in): State<SignIn>,
+    State(gate): State<Gate>,
     mut request: Request,
     next: Next,
 ) -> Response {
-    let SignIn::On(access) = sign_in else {
+    let SignIn::On(access) = gate.sign_in else {
+        if is_api(request.uri().path()) && request.headers().contains_key(api::AI_AGENT_HEADER) {
+            return crate::api_tokens::enforce_without_token(&gate.without_token, request, next)
+                .await;
+        }
         return next.run(request).await;
     };
     let path = request.uri().path();

@@ -239,7 +239,8 @@ async fn an_old_database_gains_the_rule_and_keeps_what_it_holds() {
             (13, true),
             (14, true),
             (15, true),
-            (16, true)
+            (16, true),
+            (17, true)
         ]
     );
     let prune = started(queued_on_repository(0x50, OperationKind::Prune));
@@ -306,7 +307,8 @@ async fn an_old_database_with_nothing_to_fix_is_upgraded_without_changing_a_row(
             (13, true),
             (14, true),
             (15, true),
-            (16, true)
+            (16, true),
+            (17, true)
         ]
     );
     let check = started(queued_on_repository(0x20, OperationKind::Check));
@@ -371,7 +373,8 @@ async fn a_log_from_before_the_alias_was_kept_reads_back_without_one() {
             (13, true),
             (14, true),
             (15, true),
-            (16, true)
+            (16, true),
+            (17, true)
         ]
     );
     let check = store
@@ -467,7 +470,8 @@ async fn a_log_at_version_4_gains_the_index_of_successes_and_changes_no_row() {
             (13, true),
             (14, true),
             (15, true),
-            (16, true)
+            (16, true),
+            (17, true)
         ]
     );
     let index: Option<String> = sqlx::query_scalar(
@@ -484,16 +488,18 @@ async fn a_log_at_version_4_gains_the_index_of_successes_and_changes_no_row() {
     );
 }
 
-/// The API tokens' columns, as text, to compare a row before and after.
+/// The API tokens' columns, as text, to compare a row before and after:
+/// all but what it may do, which version 17 moves from `scopes` to
+/// `permissions`.
 async fn api_token_row(conn: &mut SqliteConnection) -> Vec<String> {
     let row = sqlx::query(
-        "SELECT id, label, hex(digest), scopes, password, created_at, \
+        "SELECT id, label, hex(digest), password, created_at, \
          ifnull(last_used_at, 'NULL') FROM api_tokens",
     )
     .fetch_one(conn)
     .await
     .expect("the API token is readable");
-    (0..7)
+    (0..6)
         .map(|column| {
             row.try_get::<String, _>(column)
                 .or_else(|_| row.try_get::<i64, _>(column).map(|n| n.to_string()))
@@ -526,7 +532,7 @@ async fn a_database_at_version_9_gains_no_session_and_no_session_length_and_keep
     assert!(matches!(length, Ok(None)), "{length:?}");
     let mut raw = scratch.raw().await;
     assert_eq!(api_token_row(&mut raw).await, before);
-    assert_eq!(applied_versions(&mut raw).await.last(), Some(&(16, true)));
+    assert_eq!(applied_versions(&mut raw).await.last(), Some(&(17, true)));
 }
 
 #[tokio::test]
@@ -549,7 +555,7 @@ async fn a_database_at_version_10_gains_no_reading_and_keeps_its_sessions_length
         "{length:?}"
     );
     let mut raw = scratch.raw().await;
-    assert_eq!(applied_versions(&mut raw).await.last(), Some(&(16, true)));
+    assert_eq!(applied_versions(&mut raw).await.last(), Some(&(17, true)));
 }
 
 #[tokio::test]
@@ -571,7 +577,7 @@ async fn a_database_at_version_11_gains_no_release_check_and_keeps_its_session_l
         "{length:?}"
     );
     let mut raw = scratch.raw().await;
-    assert_eq!(applied_versions(&mut raw).await.last(), Some(&(16, true)));
+    assert_eq!(applied_versions(&mut raw).await.last(), Some(&(17, true)));
 }
 
 #[tokio::test]
@@ -590,7 +596,7 @@ async fn a_database_at_version_12_gains_no_proposal_and_keeps_its_release_check(
     let check = app::ports::ScheduleStore::release_check(&store).await;
     assert!(matches!(check, Ok(Some(_))), "{check:?}");
     let mut raw = scratch.raw().await;
-    assert_eq!(applied_versions(&mut raw).await.last(), Some(&(16, true)));
+    assert_eq!(applied_versions(&mut raw).await.last(), Some(&(17, true)));
 }
 
 #[tokio::test]
@@ -619,7 +625,7 @@ async fn a_database_at_version_13_keeps_its_proposals_with_nothing_decided() {
     assert_eq!(kept.approved_from, None);
     assert_eq!(kept.applied_as, None);
     let mut raw = scratch.raw().await;
-    assert_eq!(applied_versions(&mut raw).await.last(), Some(&(16, true)));
+    assert_eq!(applied_versions(&mut raw).await.last(), Some(&(17, true)));
 }
 
 /// A restore an earlier build logged names no entry: the column the
@@ -640,7 +646,7 @@ async fn a_database_at_version_14_keeps_its_restores_naming_no_entry() {
     assert_eq!(restore.record.kind, OperationKind::Restore);
     assert_eq!(restore.record.entry, None);
     let mut raw = scratch.raw().await;
-    assert_eq!(applied_versions(&mut raw).await.last(), Some(&(16, true)));
+    assert_eq!(applied_versions(&mut raw).await.last(), Some(&(17, true)));
 }
 
 /// A database an earlier build kept gains the hub's registry, empty, in
@@ -665,5 +671,90 @@ async fn a_database_at_version_15_gains_an_empty_registry_and_keeps_its_log() {
                 .unwrap_or_else(|error| panic!("{table} is there: {error}"));
         assert_eq!(rows, 0, "{table} is empty");
     }
-    assert_eq!(applied_versions(&mut raw).await.last(), Some(&(16, true)));
+    assert_eq!(applied_versions(&mut raw).await.last(), Some(&(17, true)));
+}
+
+/// Version 17 gives every API token permissions in place of its scopes, each
+/// keeping exactly what its scopes opened and no more: `read` backups, the
+/// names in snapshots and the daemon's log; `run` backup runs alone;
+/// `preview` and `propose` their rows (§16, decision 127).
+#[tokio::test]
+async fn a_database_at_version_16_gives_each_api_token_the_permissions_its_scopes_opened() {
+    let scratch = Scratch::new();
+    let mut old = database_at_version(&scratch, 16).await;
+    for (id, scopes) in [
+        ("aaaaaaaaaaaa", "read"),
+        ("bbbbbbbbbbbb", "run"),
+        ("cccccccccccc", "preview,propose"),
+        ("dddddddddddd", "read,run,preview,propose"),
+    ] {
+        sqlx::query(
+            "INSERT INTO api_tokens (id, label, digest, scopes, password, created_at) \
+             VALUES (?, 'demo-token', zeroblob(32), ?, 1, 1800000000000)",
+        )
+        .bind(id)
+        .bind(scopes)
+        .execute(&mut old)
+        .await
+        .expect("an API token of version 16");
+    }
+    old.close().await.expect("the old database is closed");
+
+    let store = scratch.open().await;
+    let tokens = app::ports::ApiTokenStore::all(&store)
+        .await
+        .expect("every migrated token reads back");
+    let rows: Vec<(String, String)> = tokens
+        .iter()
+        .map(|token| {
+            let rows = token
+                .permissions
+                .get()
+                .rows()
+                .map(|(row, level)| format!("{}:{}", row.as_str(), level.as_str()))
+                .collect::<Vec<_>>()
+                .join(",");
+            (token.id.as_str().to_owned(), rows)
+        })
+        .collect();
+    assert_eq!(
+        rows,
+        [
+            (
+                "aaaaaaaaaaaa".to_owned(),
+                "backups:read,snapshot-contents:read,daemon-log:read".to_owned()
+            ),
+            (
+                "bbbbbbbbbbbb".to_owned(),
+                "backup-runs:start-and-cancel".to_owned()
+            ),
+            (
+                "cccccccccccc".to_owned(),
+                "previews:preview,configuration:propose".to_owned()
+            ),
+            (
+                "dddddddddddd".to_owned(),
+                "backups:read,backup-runs:start-and-cancel,previews:preview,\
+                 configuration:propose,snapshot-contents:read,daemon-log:read"
+                    .to_owned()
+            ),
+        ]
+    );
+    let run_only = tokens
+        .iter()
+        .find(|token| token.id.as_str() == "bbbbbbbbbbbb")
+        .expect("the run-only token")
+        .permissions
+        .get();
+    let granted: Vec<_> = domain::access::permissions::Permission::ALL
+        .into_iter()
+        .filter(|permission| run_only.grants(*permission))
+        .collect();
+    assert_eq!(
+        granted,
+        [domain::access::permissions::Permission::BackupRuns],
+        "a token that could only start backups still reads nothing"
+    );
+    let mut raw = scratch.raw().await;
+    assert_eq!(applied_versions(&mut raw).await.last(), Some(&(17, true)));
 }

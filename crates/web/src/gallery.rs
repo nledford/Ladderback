@@ -92,6 +92,11 @@ pub(crate) fn Gallery(localizer: Arc<Localizer>) -> impl IntoView {
         // Shift+Tab from the page's end, so its one stop lengthens none of
         // those walks; its scenarios start at its anchor.
         <steps::StepsDemo localizer=Arc::clone(&localizer) />
+        // After the steps' demo, past every demo a journey walks to from the
+        // page's top, and before the table's, which journeys reach by
+        // Shift+Tab from the page's start, so its stops lengthen none of
+        // those walks; its scenarios start at its anchor.
+        <table::LiveTableDemo localizer=Arc::clone(&localizer) />
         // Before the tooltip's, so a journey reaches its controls by
         // Shift+Tab from the page's start, past the tooltip's few.
         <table::TableDemo localizer=Arc::clone(&localizer) />
@@ -108,9 +113,10 @@ pub(crate) fn Gallery(localizer: Arc<Localizer>) -> impl IntoView {
 /// `/_gallery#<id>` puts focus on the heading as the page loads
 /// ([`page::focus_when_named`]), so a scenario can start at its own demo and
 /// a demo added above it lengthens no walk (technical design §13.7.5). Only
-/// a script focuses it (`tabindex="-1"`), so it is no stop for Tab.
+/// a script focuses it (`tabindex="-1"`), so it is no stop for Tab. An `id`,
+/// where given, lets a control in the demo hand focus to it.
 #[component]
-fn DemoHeading(text: String) -> impl IntoView {
+fn DemoHeading(text: String, #[prop(optional)] id: Option<&'static str>) -> impl IntoView {
     let heading = NodeRef::<leptos::html::H2>::new();
     Effect::new(move |_| {
         if let Some(heading) = heading.get()
@@ -120,7 +126,7 @@ fn DemoHeading(text: String) -> impl IntoView {
         }
     });
     view! {
-        <h2 node_ref=heading tabindex="-1">
+        <h2 node_ref=heading id=id tabindex="-1">
             {text}
         </h2>
     }

@@ -12,6 +12,41 @@ use crate::{AvailableUpdateDto, BuildDto};
 /// It can only shorten a session's life, so the daemon trusts it as sent.
 pub const BACKGROUND_HEADER: &str = "x-ladderback-background";
 
+/// The header `ladderback mcp` sends with every request in connect mode, so
+/// that with sign-in off, when no API token says who is asking, the daemon
+/// holds an AI agent's request to what AI agents may do without a token
+/// (§10.5, decision 127). Its value is ignored. It can only narrow what a
+/// request may do, so the daemon trusts it as sent.
+pub const AI_AGENT_HEADER: &str = "x-ladderback-ai-agent";
+
+/// A permission's level, or `none` for no access (§10.1, decision 127).
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "kebab-case")]
+pub enum PermissionLevelDto {
+    #[default]
+    None,
+    Read,
+    StartAndCancel,
+    Preview,
+    Propose,
+    Run,
+}
+
+/// What an API token, or an AI agent without one, may do: each permission
+/// at its level or `none`. A permission a request leaves out is `none`, and
+/// a level its permission doesn't have (`"backups": "propose"`) is refused.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "kebab-case", deny_unknown_fields, default)]
+pub struct PermissionsDto {
+    pub backups: PermissionLevelDto,
+    pub backup_runs: PermissionLevelDto,
+    pub previews: PermissionLevelDto,
+    pub configuration: PermissionLevelDto,
+    pub snapshot_contents: PermissionLevelDto,
+    pub daemon_log: PermissionLevelDto,
+    pub repository_check: PermissionLevelDto,
+}
+
 /// `GET /api/v1/session` and a sign-in's answer (§10.1): whether sign-in is
 /// on, and whether the request's session is live. A live session's answer
 /// carries the CSRF token its changed requests send as `x-csrf-token`, how
@@ -175,16 +210,6 @@ pub struct SignInSettingsDto {
     pub session_length: SessionLengthDto,
 }
 
-/// A scope of an API token (§10.1, decision 93), as the token routes name it.
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "kebab-case")]
-pub enum ApiTokenScopeDto {
-    Read,
-    Run,
-    Preview,
-    Propose,
-}
-
 /// One API token as the token routes list it: who it is, what it may do,
 /// when it was created and last used. Never its secret (I4).
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
@@ -192,7 +217,7 @@ pub enum ApiTokenScopeDto {
 pub struct ApiTokenDto {
     pub id: String,
     pub label: String,
-    pub scopes: Vec<ApiTokenScopeDto>,
+    pub permissions: PermissionsDto,
     pub created_at: String,
     /// `null` for a token never used.
     #[serde(default)]
@@ -206,12 +231,32 @@ pub struct ApiTokensDto {
     pub tokens: Vec<ApiTokenDto>,
 }
 
-/// `POST /api/v1/tokens`: the label and scopes of the token to create.
+/// `POST /api/v1/tokens`: the label and permissions of the token to create.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "kebab-case", deny_unknown_fields)]
 pub struct CreateApiTokenDto {
     pub label: String,
-    pub scopes: Vec<ApiTokenScopeDto>,
+    pub permissions: PermissionsDto,
+}
+
+/// `PUT /api/v1/tokens/{id}/permissions`: the permissions the token keeps
+/// from now on, and the current admin password, which a change needs, so
+/// that a stolen session alone can't widen a token. Its `Debug` hides the
+/// password (I4).
+#[derive(Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "kebab-case", deny_unknown_fields)]
+pub struct ChangeApiTokenPermissionsDto {
+    pub permissions: PermissionsDto,
+    pub current_password: String,
+}
+
+impl std::fmt::Debug for ChangeApiTokenPermissionsDto {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("ChangeApiTokenPermissionsDto")
+            .field("permissions", &self.permissions)
+            .field("current_password", &format_args!("[hidden]"))
+            .finish()
+    }
 }
 
 /// What creating a token answers: the token as it is listed, and its whole

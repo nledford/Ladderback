@@ -87,6 +87,10 @@ export class ScriptedDaemon {
    *  the page signs in again; and how many readings it refused so. */
   #sessionsEnded = false;
   #readsRefused = 0;
+  /** What this daemon does with each reading of the history from now on:
+   *  answers it; refuses it, as a daemon that can't read its store does
+   *  (`refuseReads`); or gives it no answer, as one that has gone (`goAway`). */
+  #reads: "answered" | "refused" | "unanswered" = "answered";
   /** Tells the steps waiting on what the page did of each thing it does. */
   #changed = new Signal();
 
@@ -189,6 +193,10 @@ export class ScriptedDaemon {
         this.#changed.notify();
         return route.fallback();
       }
+      if (this.#reads === "refused") {
+        return route.fulfill({ status: 503, contentType: "application/json", body: JSON.stringify({ code: "store-unavailable" }) });
+      }
+      if (this.#reads === "unanswered") return route.abort("connectionrefused");
       const json = { operations: structuredClone(this.#operations), next: null };
       if (this.#holdNext) {
         this.#holdNext = false;
@@ -308,6 +316,18 @@ export class ScriptedDaemon {
    *  them, until the page signs in again. */
   endSessions(): void {
     this.#sessionsEnded = true;
+  }
+
+  /** The daemon can't read its store: it refuses each reading of the
+   *  history from now on (503 `store-unavailable`). */
+  refuseReads(): void {
+    this.#reads = "refused";
+  }
+
+  /** The daemon has gone: each reading of the history from now on gets no
+   *  answer. */
+  goAway(): void {
+    this.#reads = "unanswered";
   }
 
   /** Waits until the real daemon has refused a reading of the history

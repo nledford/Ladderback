@@ -485,6 +485,19 @@ When("the daemon's events stream drops", async function (this: BrowserWorld) {
   await scripted(this).dropTheStream();
 });
 
+// The page reads the history again as its stream drops, and so meets what
+// the daemon has become: a refusal takes the table's place, or the page's
+// unreachable state does.
+When("the daemon can't read its store, and its events stream drops", async function (this: BrowserWorld) {
+  scripted(this).refuseReads();
+  await scripted(this).dropTheStream();
+});
+
+When("the daemon goes away", async function (this: BrowserWorld) {
+  scripted(this).goAway();
+  await scripted(this).dropTheStream();
+});
+
 // A page that read again beside the reading held back would have asked as it
 // heard the end, before this step began; the moment it waits is for that
 // request to reach the scripted daemon, not for the page.
@@ -813,9 +826,14 @@ Then("the buttons {string} and {string} stand apart", async function (this: Brow
 // A table whose columns have fixed shares lets a cell's content run past the
 // cell when it can't fit: it draws over the next column, which neither the
 // page's width nor a clipped box shows. Every box and every line of text in a
-// cell stays inside the cell, within half a pixel of rounding. A box that a
-// box inside the cell clips (any `overflow` but `visible`) counts for what of
-// it shows, as a progress bar's fill does, slid back past its track's start.
+// cell stays inside the cell, within half a pixel of rounding. A box or a
+// line that a box inside the cell clips (any `overflow` but `visible`) counts
+// for what of it shows: a progress bar's fill, slid back past its track's
+// start, or the words of an out-of-sight box for a screen reader, 1 px wide.
+// Only a box that really clips it counts: an absolutely placed box escapes
+// every box that isn't positioned, a fixed one every box, and an inline box
+// or one with `display: contents` clips nothing. The clipping box is itself
+// checked, so nothing shown escapes the cell.
 Then("nothing in the table {string} runs outside its cell", async function (this: BrowserWorld, name: string) {
   assert.deepEqual(await outsideItsCells(table(this, name)), [], `something in the table ${name} runs outside its cell`);
 });
@@ -841,28 +859,40 @@ async function outsideItsCells(grid: Locator): Promise<string[]> {
           found.push(`${what} at ${describe(rect)}px runs outside its cell at ${describe(box)}px`);
         }
       };
-      // What of an element's box shows inside the boxes in the cell that clip it.
-      const shown = (inner: Element) => {
-        const rect = inner.getBoundingClientRect();
+      // What of a box or a line shows inside the boxes in the cell that clip
+      // it, from `from` outwards; `place` is the `position` of the box that
+      // `from` holds (a line of text is in its element's flow).
+      const shown = (rect: DOMRect, place: string, from: Element | null) => {
         let [left, right, top, bottom] = [rect.left, rect.right, rect.top, rect.bottom];
-        for (let up = inner.parentElement; up !== null && up !== cell; up = up.parentElement) {
+        let held = place;
+        for (let up = from; up !== null && up !== cell && held !== "fixed"; up = up.parentElement) {
           const style = getComputedStyle(up);
-          const clip = up.getBoundingClientRect();
-          if (style.overflowX !== "visible") [left, right] = [Math.max(left, clip.left), Math.min(right, clip.right)];
-          if (style.overflowY !== "visible") [top, bottom] = [Math.max(top, clip.top), Math.min(bottom, clip.bottom)];
+          if (held === "absolute" && style.position === "static") continue;
+          if (style.display !== "inline" && style.display !== "contents") {
+            const clip = up.getBoundingClientRect();
+            if (style.overflowX !== "visible") [left, right] = [Math.max(left, clip.left), Math.min(right, clip.right)];
+            if (style.overflowY !== "visible") [top, bottom] = [Math.max(top, clip.top), Math.min(bottom, clip.bottom)];
+          }
+          held = style.position;
         }
-        return new DOMRect(left, top, Math.max(0, right - left), Math.max(0, bottom - top));
+        // Nothing of it shows: an empty box, which `check` passes.
+        if (right <= left || bottom <= top) return new DOMRect(left, top, 0, 0);
+        return new DOMRect(left, top, right - left, bottom - top);
       };
       for (const inner of cell.querySelectorAll("*")) {
         if (getComputedStyle(inner).display === "none") continue;
-        check(shown(inner), `<${inner.localName}> "${(inner.textContent ?? "").trim().slice(0, 30)}"`);
+        check(
+          shown(inner.getBoundingClientRect(), getComputedStyle(inner).position, inner.parentElement),
+          `<${inner.localName}> "${(inner.textContent ?? "").trim().slice(0, 30)}"`,
+        );
       }
       const walker = document.createTreeWalker(cell, NodeFilter.SHOW_TEXT);
       for (let node = walker.nextNode(); node; node = walker.nextNode()) {
         if (!(node.textContent ?? "").trim()) continue;
         const range = document.createRange();
         range.selectNodeContents(node);
-        for (const line of range.getClientRects()) check(line, `the text "${(node.textContent ?? "").trim().slice(0, 30)}"`);
+        for (const line of range.getClientRects())
+          check(shown(line, "static", node.parentElement), `the text "${(node.textContent ?? "").trim().slice(0, 30)}"`);
       }
     }
     return found;

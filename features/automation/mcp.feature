@@ -85,10 +85,10 @@ Feature: AI agents and scripts use Ladderback through MCP
   Scenario: A refusal says after its code what to do next
     Given Ladderback is serving on loopback with sign-in on and the admin password "demo-admin-pass"
     And the admin has signed in over HTTP with "demo-admin-pass"
-    And the admin has created an API token over HTTP with the scopes "run" and the label "runner"
+    And the admin has created an API token over HTTP with the permissions "backup-runs: start-and-cancel" and the label "runner"
     And an MCP server connected to it with that API token in a file
     When the MCP client calls the tool "status"
-    Then the result is the error "api-token-scope"
+    Then the result is the error "api-token-permission"
     And after its code the error is said in "en-US" as the catalog says it
 
   # An MCP client asks for no language: the sentence follows the locale of the
@@ -175,10 +175,10 @@ Feature: AI agents and scripts use Ladderback through MCP
     When the MCP client lists the snapshots of the repository "demo" of the host "elsewhere.example"
     Then the result lists 0 snapshots
 
-  Scenario: A read token from a file reaches a daemon with sign-in on
+  Scenario: A token with Backups from a file reaches a daemon with sign-in on
     Given Ladderback is serving on loopback with sign-in on and the admin password "demo-admin-pass"
     And the admin has signed in over HTTP with "demo-admin-pass"
-    And the admin has created an API token over HTTP with the scopes "read" and the label "agent"
+    And the admin has created an API token over HTTP with the permissions "backups: read" and the label "agent"
     And an MCP server connected to it with that API token in a file
     When the MCP client calls the tool "status"
     Then the result says the tools reach the daemon with an API token, and nothing in it says signed out
@@ -196,14 +196,14 @@ Feature: AI agents and scripts use Ladderback through MCP
     When the MCP client calls the tool "status"
     Then the result is the error "api-token-invalid"
 
-  Scenario: A token without the scope to read is refused, naming the scope
+  Scenario: A token without Backups is refused, naming the permission
     Given Ladderback is serving on loopback with sign-in on and the admin password "demo-admin-pass"
     And the admin has signed in over HTTP with "demo-admin-pass"
-    And the admin has created an API token over HTTP with the scopes "run" and the label "runner"
+    And the admin has created an API token over HTTP with the permissions "backup-runs: start-and-cancel" and the label "runner"
     And an MCP server connected to it with that API token in a file
     When the MCP client calls the tool "status"
-    Then the result is the error "api-token-scope"
-    And the error names the scope "read"
+    Then the result is the error "api-token-permission"
+    And the error names the permission "backups"
 
   Scenario: A token file that isn't there is refused at start
     When the owner runs "mcp --connect --token-file missing-token"
@@ -325,8 +325,8 @@ Feature: AI agents and scripts use Ladderback through MCP
     And an MCP server connected to it
     When the owner checks the repository and the check ends
     And the MCP client cancels that check
-    Then the result is the error "api-token-scope"
-    And the error names the scope "session"
+    Then the result is the error "api-token-permission"
+    And the error names the permission "session"
 
   # The 128 GiB file keeps the backup running until the session ends.
   Scenario: A backup still running when a headless session ends is ended by its stop
@@ -558,15 +558,15 @@ Feature: AI agents and scripts use Ladderback through MCP
       | status --json                | '--json'            |
       | status --connect not-a-url   | isn't an http       |
 
-  Scenario: A token without the scope to run is refused for a run, and never shown
+  Scenario: A token without Backup runs is refused for a run, and never shown
     Given Ladderback is serving on loopback with sign-in on and the admin password "demo-admin-pass"
     And the admin has signed in over HTTP with "demo-admin-pass"
-    And the admin has created an API token over HTTP with the scopes "read" and the label "agent"
+    And the admin has created an API token over HTTP with the permissions "backups: read" and the label "agent"
     And that API token in a token file
     When an agent runs "mcp call run_plan plan=home --connect {daemon} --token-file {token file}"
     Then the command exits with status 1
     And standard output has 1 line
-    And line 1 says the tool "run_plan" refused with "api-token-scope", naming the scope "run"
+    And line 1 says the tool "run_plan" refused with "api-token-permission", naming the permission "backup-runs"
     And nothing the command printed holds the token
 
   Scenario: A one-shot call never sends a token over plain HTTP to another machine, nor shows it

@@ -23,9 +23,9 @@ use crate::components::button::Content;
 use crate::components::skeleton::rules::Awaited;
 use crate::components::status_badge::rules::BadgeState;
 use crate::components::{
-    Button, Column, Name as TableName, PauseUpdates, Progress, Sentences, Sort, SortKey, State,
-    StatusBadge, Table, Toast, ToastTone, Toasts, cell_sentence_view, hand_focus_when_gone,
-    refusal_alert, runs_view, say_refusals,
+    Button, ChangeMarks, Column, Cue, MarkAllSeen, Name as TableName, PauseUpdates, Progress,
+    Sentences, Sort, SortKey, State, StatusBadge, Table, Toast, ToastTone, Toasts,
+    cell_sentence_view, hand_focus_when_gone, refusal_alert, runs_view, say_refusals,
 };
 use crate::components::{first_load, paced};
 use crate::live::{reply, say};
@@ -211,6 +211,22 @@ pub(crate) fn Operations(localizer: Arc<Localizer>) -> impl IntoView {
     let error_alert_localizer = Arc::clone(&localizer);
     let plans_alert_localizer = Arc::clone(&localizer);
     let history_alert_localizer = Arc::clone(&localizer);
+    // The rows a live update changed that the reader hasn't seen yet: the
+    // table marks them, and Mark all as seen, in the row of actions, clears
+    // them (decision 129).
+    let marks = ChangeMarks::<String>::new();
+    let mark_all_seen = text(&localizer, msg::UI_MARK_ALL_SEEN);
+    let marked_seen = Callback::new({
+        let localizer = Arc::clone(&localizer);
+        move |count: usize| {
+            let count = u64::try_from(count).unwrap_or(u64::MAX);
+            text_with(
+                &localizer,
+                msg::UI_MARKED_SEEN,
+                &[("count", MsgArg::Count(count))],
+            )
+        }
+    });
     // The zone the browser reads its clock in, asked once: every instant the
     // page shows is written in it (§8.4).
     let viewer = l10n::viewer_zone();
@@ -248,98 +264,105 @@ pub(crate) fn Operations(localizer: Arc<Localizer>) -> impl IntoView {
         // The plans sit outside the connection's phases: a reader can start a
         // backup while the history is still on its way. Their buttons are a
         // row of actions, as a dialog's are, so each stands apart from the
-        // next and they wrap on a small screen (§4.4).
-        {move || {
-            let buttons = plans
-                .get()
-                .map_or_default(|plans| {
-                    plans
-                        .into_iter()
-                        .map(|plan| {
-                            let started = started_text.clone();
-                            let still_waiting = still_waiting.clone();
-                            let url = format!("{}/api/v1/operations", start_base);
-                            let ops = start_ops;
-                            let base = start_base.clone();
-                            let visit = start_visit.clone();
-                            let error_localizer = Arc::clone(&localizer_for_errors);
-                            let label = text_with(
-                                &start_localizer,
-                                msg::UI_START_PLAN,
-                                &[("plan", MsgArg::Text(plan.id.clone()))],
-                            );
-                            let starting = RwSignal::new(false);
-                            // `starting` keeps the button busy while the daemon
-                            // answers the start; what the run then does, the
-                            // table shows.
-                            view! {
-                                // Named with its plan, as a row's Cancel is: a
-                                // reader tabbing through the plans hears which
-                                // one each button runs (2.4.6, 4.1.2). When a
-                                // start gets no answer at all, the page's phase
-                                // says that its own way.
-                                <Button
-                                    content=Content::IconAndText {
-                                        glyph: LucideGlyph::Play.into(),
-                                        label: label.into(),
-                                    }
-                                    tone=Tone::Primary
-                                    busy=starting
-                                    on_press=Callback::new(move |()| {
-                                        let request = StartBackup {
-                                            plan: plan.id.clone(),
-                                        };
-                                        let url = url.clone();
-                                        let base = base.clone();
-                                        let started = started.clone();
-                                        let visit = visit.clone();
-                                        let still_waiting = still_waiting.clone();
-                                        let error_localizer = Arc::clone(&error_localizer);
-                                        let ops = ops;
-                                        error.set(None);
-                                        starting.set(true);
-                                        spawn_local(async move {
-                                            let answer = ws::post(&url, &request).await;
-                                            starting.try_set(false);
-                                            match answer {
-                                                Some(Posted::Done(answer)) => {
-                                                    reply(Politeness::Polite, &started);
-                                                    if let Some(operation) = ws::started_operation(&answer)
-                                                        && visit.during(ws::settle(&base, ops, &operation)).await
-                                                            == Some(false)
-                                                    {
-                                                        toasts.show(ToastTone::Primary, still_waiting);
+        // next and they wrap on a small screen (§4.4). Mark all as seen ends
+        // it, before the table, so a keyboard reaches it before the rows whose
+        // focus would see their marks one by one; the row is there with no
+        // plans too, as its room is (decision 129).
+        <p class="actions">
+            // A press that is refused again in the same words is said again
+            // (§4.5).
+            {move || {
+                plans
+                    .get()
+                    .map_or_default(|plans| {
+                        plans
+                            .into_iter()
+                            .map(|plan| {
+                                let started = started_text.clone();
+                                let still_waiting = still_waiting.clone();
+                                let url = format!("{}/api/v1/operations", start_base);
+                                let ops = start_ops;
+                                let base = start_base.clone();
+                                let visit = start_visit.clone();
+                                let error_localizer = Arc::clone(&localizer_for_errors);
+                                let label = text_with(
+                                    &start_localizer,
+                                    msg::UI_START_PLAN,
+                                    &[("plan", MsgArg::Text(plan.id.clone()))],
+                                );
+                                let starting = RwSignal::new(false);
+                                // `starting` keeps the button busy while the daemon
+                                // answers the start; what the run then does, the
+                                // table shows.
+                                view! {
+                                    // Named with its plan, as a row's Cancel is: a
+                                    // reader tabbing through the plans hears which
+                                    // one each button runs (2.4.6, 4.1.2). When a
+                                    // start gets no answer at all, the page's phase
+                                    // says that its own way.
+                                    <Button
+                                        content=Content::IconAndText {
+                                            glyph: LucideGlyph::Play.into(),
+                                            label: label.into(),
+                                        }
+                                        tone=Tone::Primary
+                                        busy=starting
+                                        on_press=Callback::new(move |()| {
+                                            let request = StartBackup {
+                                                plan: plan.id.clone(),
+                                            };
+                                            let url = url.clone();
+                                            let base = base.clone();
+                                            let started = started.clone();
+                                            let visit = visit.clone();
+                                            let still_waiting = still_waiting.clone();
+                                            let error_localizer = Arc::clone(&error_localizer);
+                                            let ops = ops;
+                                            error.set(None);
+                                            starting.set(true);
+                                            spawn_local(async move {
+                                                let answer = ws::post(&url, &request).await;
+                                                starting.try_set(false);
+                                                match answer {
+                                                    Some(Posted::Done(answer)) => {
+                                                        reply(Politeness::Polite, &started);
+                                                        if let Some(operation) = ws::started_operation(&answer)
+                                                            && visit.during(ws::settle(&base, ops, &operation)).await
+                                                                == Some(false)
+                                                        {
+                                                            toasts.show(ToastTone::Primary, still_waiting);
+                                                        }
                                                     }
-                                                }
-                                                Some(Posted::Refused(code, args, detail)) => {
-                                                    error
-                                                        .set(
-                                                            Some(
-                                                                refused_sentence(
-                                                                    &error_localizer,
-                                                                    code,
-                                                                    &args,
-                                                                    detail.as_deref(),
+                                                    Some(Posted::Refused(code, args, detail)) => {
+                                                        error
+                                                            .set(
+                                                                Some(
+                                                                    refused_sentence(
+                                                                        &error_localizer,
+                                                                        code,
+                                                                        &args,
+                                                                        detail.as_deref(),
+                                                                    ),
                                                                 ),
-                                                            ),
-                                                        );
+                                                            );
+                                                    }
+                                                    None => {}
                                                 }
-                                                None => {}
-                                            }
-                                        });
-                                    })
-                                />
-                            }
-                        })
-                        .collect::<Vec<_>>()
-                });
-            (!buttons.is_empty())
-                .then(|| {
-                    // A press that is refused again in the
-                    // same words is said again (§4.5).
-                    view! { <p class="actions">{buttons}</p> }
-                })
-        }}
+                                            });
+                                        })
+                                    />
+                                }
+                            })
+                            .collect::<Vec<_>>()
+                    })
+            }}
+            <MarkAllSeen
+                marks=marks
+                label=mark_all_seen
+                said=marked_seen
+                then_focus=PAGE_HEADING_ID.to_owned()
+            />
+        </p>
         // After the start buttons, whose press it mostly answers. Dismissed,
         // it hands focus to the page's heading: the button whose press it
         // answers may be a row's Cancel, gone with its run.
@@ -365,6 +388,7 @@ pub(crate) fn Operations(localizer: Arc<Localizer>) -> impl IntoView {
                         cancelled,
                         Answers { refused: error, toasts },
                         viewer.clone(),
+                        marks,
                     )
                 }
             }
@@ -403,6 +427,7 @@ fn operations_table(
     cancelled: StoredValue<HashSet<String>>,
     answers: Answers,
     zone: Option<api::IanaZone>,
+    marks: ChangeMarks<String>,
 ) -> AnyView {
     let name_localizer = Arc::clone(localizer);
     let operation = Column::new(
@@ -424,7 +449,11 @@ fn operations_table(
         text(localizer, msg::UI_COLUMN_STATUS),
         Rem::tenths(95),
         move |row: Signal<OperationRow>| status_view(&status_localizer, status_zone.clone(), row),
-    );
+    )
+    .cued(Cue::new(
+        status_of,
+        text(localizer, msg::UI_TABLE_CUE_UNSEEN),
+    ));
     let started_localizer = Arc::clone(localizer);
     let started = Column::new(
         text(localizer, msg::UI_COLUMN_STARTED),
@@ -493,6 +522,7 @@ fn operations_table(
             state=State::Ready
             sentences=sentences
             row_header_id=header_id
+            marks=marks
         />
     }
     .into_any()
@@ -502,6 +532,12 @@ fn operations_table(
 /// row hands focus to.
 fn header_id(row: &OperationRow) -> String {
     format!("operation-{}", row.summary.id)
+}
+
+/// What a live update changes that marks an operation's row: its status
+/// (a start, an end), never a progress report (decisions 129 and 130).
+fn status_of(row: &OperationRow) -> &str {
+    &row.summary.status
 }
 
 /// An operation's status: its badge, and a running backup's progress bar once

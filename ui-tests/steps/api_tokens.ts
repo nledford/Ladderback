@@ -48,12 +48,26 @@ export async function changeHeaders(context: BrowserContext, base: string): Prom
   return { Origin: base, "X-CSRF-Token": token };
 }
 
-/** Creates a token through the token route, as Settings does, and keeps its
- *  secret by its label. */
+/** The permissions each scope of the token form gives (decision 127). */
+const SCOPE_PERMISSIONS: Record<string, Record<string, string>> = {
+  read: { backups: "read", "snapshot-contents": "read", "daemon-log": "read" },
+  run: { "backup-runs": "start-and-cancel" },
+  preview: { previews: "preview" },
+  propose: { configuration: "propose" },
+};
+
+/** Creates a token through the token route with the permissions of
+ *  `scopes`, as Settings does, and keeps its secret by its label. */
 async function createToken(world: BrowserWorld, context: BrowserContext, label: string, scopes: string[]): Promise<void> {
   const base = ownBase(world);
+  const permissions: Record<string, string> = {};
+  for (const scope of scopes) {
+    const gives = SCOPE_PERMISSIONS[scope];
+    assert.ok(gives, `the token form has no scope ${scope}`);
+    Object.assign(permissions, gives);
+  }
   const answer = await context.request.post(`${base}/api/v1/tokens`, {
-    data: { label, scopes },
+    data: { label, permissions },
     headers: await changeHeaders(context, base),
   });
   assert.equal(answer.status(), 201, `the token ${label} was not created: ${await answer.text()}`);

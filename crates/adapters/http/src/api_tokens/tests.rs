@@ -11,7 +11,8 @@ use axum::http::{HeaderValue, Method, StatusCode};
 use axum::response::Response;
 use domain::Timestamp;
 use domain::access::PasswordFingerprint;
-use domain::access::api_token::{ApiToken, ApiTokenId, ApiTokenLabel, Scope, Scopes};
+use domain::access::api_token::{ApiToken, ApiTokenId, ApiTokenLabel, TokenPermissions};
+use domain::access::permissions::{Permission, Permissions};
 use domain::execution::Trigger;
 use futures::StreamExt;
 use http_body_util::BodyExt;
@@ -68,13 +69,13 @@ impl Daemon {
             .unwrap()
     }
 
-    /// A token with `scopes`, as a program sends it: `Bearer <text>`.
-    async fn token(&self, scopes: &[Scope]) -> String {
+    /// A token with `permissions`, as a program sends it: `Bearer <text>`.
+    async fn token(&self, permissions: &[Permission]) -> String {
         let created = self
             .access
             .create_api_token(
                 ApiTokenLabel::new("nightly-mcp".to_owned()).unwrap(),
-                Scopes::new(scopes.iter().copied()).unwrap(),
+                TokenPermissions::new(granting(permissions)).unwrap(),
             )
             .await
             .unwrap();
@@ -160,11 +161,17 @@ impl crate::Operations for Recorder {
         _after: Option<String>,
         _limit: Option<u64>,
     ) -> Result<api::OperationsPageDto, crate::HistoryError> {
-        Err(crate::HistoryError::BadCursor)
+        Ok(api::OperationsPageDto {
+            operations: vec![failed_on_a_file()],
+            next: None,
+        })
     }
 
     async fn operation(&self, _id: String) -> Result<api::OperationDetailDto, crate::LookupError> {
-        Err(crate::LookupError::Unknown)
+        Ok(api::OperationDetailDto {
+            operation: failed_on_a_file(),
+            warnings: vec![unreadable()],
+        })
     }
 
     async fn cancel(&self, id: String, by: Canceller) -> Result<(), CancelError> {
@@ -194,6 +201,13 @@ impl ApiTokenStore for Broken {
         Err(broken())
     }
     async fn revoke(&self, _id: &ApiTokenId) -> Result<bool, StoreError> {
+        Err(broken())
+    }
+    async fn set_permissions(
+        &self,
+        _id: &ApiTokenId,
+        _permissions: TokenPermissions,
+    ) -> Result<bool, StoreError> {
         Err(broken())
     }
     async fn revoke_all_but(&self, _password: PasswordFingerprint) -> Result<(), StoreError> {
@@ -259,70 +273,108 @@ async fn refusal(response: Response) -> (StatusCode, Option<String>, serde_json:
     (status, code, body["args"].clone())
 }
 
-async fn assert_needs(daemon: &Daemon, request: Request, scope: &str) {
+/// The permissions that grant exactly `rows`.
+fn granting(rows: &[Permission]) -> Permissions {
+    rows.iter().fold(Permissions::NONE, |permissions, row| {
+        permissions.with(*row, Some(row.level())).unwrap()
+    })
+}
+
+async fn assert_needs(daemon: &Daemon, request: Request, permission: &str) {
     let what = format!("{} {}", request.method(), request.uri());
     let (status, code, args) = refusal(daemon.send(request).await).await;
     assert_eq!(
         (status, code.as_deref()),
-        (StatusCode::FORBIDDEN, Some("api-token-scope")),
+        (StatusCode::FORBIDDEN, Some("api-token-permission")),
         "{what}"
     );
     assert_eq!(
         args,
-        serde_json::json!({ "scope": { "type": "text", "value": scope } }),
+        serde_json::json!({ "permission": { "type": "text", "value": permission } }),
         "{what}"
     );
 }
 
 #[test]
-fn the_scope_table_names_each_route_a_token_may_use_and_no_other() {
-    use Scope::{Preview, Read, Run};
-    for (method, path, scope) in [
-        (Method::GET, "/api/v1/events", Some(Read)),
-        // The recent log, read as Operations is read (#618).
-        (Method::GET, "/api/v1/log", Some(Read)),
-        (Method::HEAD, "/api/v1/log", Some(Read)),
+fn the_permission_table_names_each_route_a_token_may_use_and_no_other() {
+    use Permission::{BackupRuns, Backups, Configuration, DaemonLog, Previews, SnapshotContents};
+    for (method, path, permission) in [
+        (Method::GET, "/api/v1/events", Some(Backups)),
+        // The daemon's log and the names in a snapshot each need their own.
+        (Method::GET, "/api/v1/log", Some(DaemonLog)),
+        (Method::HEAD, "/api/v1/log", Some(DaemonLog)),
         (Method::DELETE, "/api/v1/log", None),
-        (Method::GET, "/api/v1/operations", Some(Read)),
-        (Method::HEAD, "/api/v1/operations", Some(Read)),
-        (Method::GET, "/api/v1/operations/018f", Some(Read)),
-        (Method::GET, "/api/v1/plans", Some(Read)),
-        (Method::GET, "/api/v1/repositories", Some(Read)),
+        (Method::GET, "/api/v1/operations", Some(Backups)),
+        (Method::HEAD, "/api/v1/operations", Some(Backups)),
+        (Method::GET, "/api/v1/operations/018f", Some(Backups)),
+        (Method::GET, "/api/v1/plans", Some(Backups)),
+        (Method::GET, "/api/v1/repositories", Some(Backups)),
         // The status summary, read as the plans are (§4.6).
-        (Method::GET, "/api/v1/status", Some(Read)),
+        (Method::GET, "/api/v1/status", Some(Backups)),
         (Method::POST, "/api/v1/status", None),
         (
             Method::GET,
             "/api/v1/repositories/home/snapshots",
-            Some(Read),
+            Some(Backups),
         ),
-        (Method::GET, "/api/v1/repositories/home/groups", Some(Read)),
+        (
+            Method::GET,
+            "/api/v1/repositories/home/groups",
+            Some(Backups),
+        ),
         (
             Method::GET,
             "/api/v1/repositories/home/snapshots/abcd/folder",
-            Some(Read),
+            Some(SnapshotContents),
         ),
         (
             Method::HEAD,
             "/api/v1/repositories/home/snapshots/abcd/folder",
-            Some(Read),
+            Some(SnapshotContents),
         ),
-        (Method::GET, "/api/v1/repositories/home/stats", Some(Read)),
-        (Method::POST, "/api/v1/repositories/home/stats", Some(Run)),
-        (Method::POST, "/api/v1/operations", Some(Run)),
-        (Method::POST, "/api/v1/operations/018f/cancel", Some(Run)),
-        (Method::POST, "/api/v1/repositories/home/test", Some(Run)),
+        (
+            Method::GET,
+            "/api/v1/repositories/home/stats",
+            Some(Backups),
+        ),
+        (
+            Method::POST,
+            "/api/v1/repositories/home/stats",
+            Some(BackupRuns),
+        ),
+        (Method::POST, "/api/v1/operations", Some(BackupRuns)),
+        (
+            Method::POST,
+            "/api/v1/operations/018f/cancel",
+            Some(BackupRuns),
+        ),
+        (
+            Method::POST,
+            "/api/v1/repositories/home/test",
+            Some(BackupRuns),
+        ),
         (
             Method::POST,
             "/api/v1/repositories/home/maintenance/preview",
-            Some(Preview),
+            Some(Previews),
         ),
-        (Method::GET, "/api/v1/plans/home/profile", Some(Read)),
-        (Method::HEAD, "/api/v1/plans/home/profile", Some(Read)),
-        (Method::POST, "/api/v1/profiles/preview", Some(Preview)),
-        // A `read` token reads the session route: the build, never a session.
-        (Method::GET, "/api/v1/session", Some(Read)),
-        (Method::HEAD, "/api/v1/session", Some(Read)),
+        (Method::GET, "/api/v1/plans/home/profile", Some(Backups)),
+        (Method::HEAD, "/api/v1/plans/home/profile", Some(Backups)),
+        (Method::POST, "/api/v1/profiles/preview", Some(Previews)),
+        (Method::GET, "/api/v1/proposals", Some(Configuration)),
+        (Method::GET, "/api/v1/proposals/018f", Some(Configuration)),
+        (Method::POST, "/api/v1/proposals", Some(Configuration)),
+        (
+            Method::POST,
+            "/api/v1/proposals/018f/withdraw",
+            Some(Configuration),
+        ),
+        (Method::POST, "/api/v1/dry-runs", Some(Configuration)),
+        (Method::POST, "/api/v1/proposals/018f/apply", None),
+        (Method::PUT, "/api/v1/tokens/abcdefghijkl/permissions", None),
+        // A token reads the session route: the build, never a session.
+        (Method::GET, "/api/v1/session", Some(Backups)),
+        (Method::HEAD, "/api/v1/session", Some(Backups)),
         // Session-only: signing in and out, the tokens, configuration
         // changes, maintenance, and every route the table doesn't name.
         (Method::POST, "/api/v1/session", None),
@@ -402,14 +454,23 @@ fn the_scope_table_names_each_route_a_token_may_use_and_no_other() {
             None,
         ),
     ] {
-        assert_eq!(required_scope(&method, path), scope, "{method} {path}");
+        let needs = permission.map_or(Needs::Session, Needs::Permission);
+        assert_eq!(required_permission(&method, path), needs, "{method} {path}");
     }
+    assert_eq!(
+        required_permission(&Method::GET, "/api/v1/permissions"),
+        Needs::AnyToken
+    );
+    assert_eq!(
+        required_permission(&Method::POST, "/api/v1/permissions"),
+        Needs::Session
+    );
 }
 
 #[tokio::test]
 async fn a_read_token_reads_without_a_session_or_a_csrf_token() {
     let daemon = Daemon::new();
-    let token = daemon.token(&[Scope::Read]).await;
+    let token = daemon.token(&[Permission::Backups]).await;
     let response = daemon
         .send(get("/api/v1/plans", &[("authorization", &token)]))
         .await;
@@ -421,7 +482,7 @@ async fn a_read_token_reads_without_a_session_or_a_csrf_token() {
 #[tokio::test]
 async fn a_read_token_reads_the_status_summary_with_what_the_probe_found() {
     let daemon = Daemon::new();
-    let token = daemon.token(&[Scope::Read]).await;
+    let token = daemon.token(&[Permission::Backups]).await;
     let response = daemon
         .send(get("/api/v1/status", &[("authorization", &token)]))
         .await;
@@ -438,7 +499,7 @@ async fn a_read_token_reads_the_status_summary_with_what_the_probe_found() {
 #[tokio::test]
 async fn a_read_token_reads_a_snapshot_s_folder() {
     let daemon = Daemon::new();
-    let token = daemon.token(&[Scope::Read]).await;
+    let token = daemon.token(&[Permission::SnapshotContents]).await;
     let response = daemon
         .send(get(&folder_of_a_snapshot(), &[("authorization", &token)]))
         .await;
@@ -456,7 +517,7 @@ fn folder_of_a_snapshot() -> String {
 #[tokio::test]
 async fn the_bearer_scheme_is_read_in_any_case() {
     let daemon = Daemon::new();
-    let token = daemon.token(&[Scope::Read]).await;
+    let token = daemon.token(&[Permission::Backups]).await;
     let lower = token.replacen("Bearer", "bearer", 1);
     let response = daemon
         .send(get("/api/v1/plans", &[("authorization", &lower)]))
@@ -465,35 +526,51 @@ async fn the_bearer_scheme_is_read_in_any_case() {
 }
 
 #[tokio::test]
-async fn a_token_without_the_routes_scope_is_refused_naming_the_scope() {
+async fn a_token_without_the_routes_permission_is_refused_naming_the_permission() {
     let daemon = Daemon::new();
-    let token = daemon.token(&[Scope::Read]).await;
+    let token = daemon.token(&[Permission::Backups]).await;
     let auth = [("authorization", token.as_str())];
     assert_needs(
         &daemon,
         post("/api/v1/operations", &auth, r#"{"plan":"home"}"#),
-        "run",
+        "backup-runs",
     )
     .await;
     assert_needs(
         &daemon,
         post("/api/v1/repositories/home/maintenance/preview", &auth, "{}"),
-        "preview",
+        "previews",
     )
     .await;
     assert!(daemon.operations.started.lock().unwrap().is_empty());
-    let token = daemon.token(&[Scope::Run, Scope::Preview]).await;
+    let token = daemon
+        .token(&[Permission::BackupRuns, Permission::Previews])
+        .await;
     let auth = [("authorization", token.as_str())];
-    assert_needs(&daemon, get("/api/v1/plans", &auth), "read").await;
-    assert_needs(&daemon, get(&folder_of_a_snapshot(), &auth), "read").await;
+    assert_needs(&daemon, get("/api/v1/plans", &auth), "backups").await;
+    assert_needs(&daemon, get("/api/v1/log", &auth), "daemon-log").await;
+    assert_needs(
+        &daemon,
+        get(&folder_of_a_snapshot(), &auth),
+        "snapshot-contents",
+    )
+    .await;
+    // Backups alone names nothing inside a snapshot.
+    let token = daemon.token(&[Permission::Backups]).await;
+    let auth = [("authorization", token.as_str())];
+    assert_needs(
+        &daemon,
+        get(&folder_of_a_snapshot(), &auth),
+        "snapshot-contents",
+    )
+    .await;
+    assert_needs(&daemon, get("/api/v1/log", &auth), "daemon-log").await;
 }
 
 #[tokio::test]
 async fn a_token_never_opens_a_route_for_a_session_only() {
     let daemon = Daemon::new();
-    let token = daemon
-        .token(&[Scope::Read, Scope::Run, Scope::Preview, Scope::Propose])
-        .await;
+    let token = daemon.token(&Permission::ALL).await;
     let auth = [("authorization", token.as_str())];
     for request in [
         post("/api/v1/session", &auth, "{}"),
@@ -501,7 +578,7 @@ async fn a_token_never_opens_a_route_for_a_session_only() {
         post(
             "/api/v1/tokens",
             &auth,
-            r#"{"label":"x","scopes":["read"]}"#,
+            r#"{"label":"x","permissions":{"backups":"read"}}"#,
         ),
         delete("/api/v1/tokens/abcdefghijkl", &auth),
         post("/api/v1/repositories", &auth, "{}"),
@@ -554,7 +631,7 @@ async fn a_token_never_opens_a_route_for_a_session_only() {
 async fn a_read_token_reads_the_build_on_the_session_route_and_never_a_session() {
     let daemon = Daemon::new();
     let (cookie, _) = daemon.signed_in().await;
-    let token = daemon.token(&[Scope::Read]).await;
+    let token = daemon.token(&[Permission::Backups]).await;
     daemon.clock.advance(domain::SignedDuration::from_hours(1));
     let background = (api::BACKGROUND_HEADER, "1");
     for headers in [
@@ -598,11 +675,11 @@ async fn a_read_token_reads_the_build_on_the_session_route_and_never_a_session()
     daemon.clock.advance(domain::SignedDuration::from_hours(11));
     let session = read().await;
     assert_eq!(session["sign-in"], "signed-out", "{session}");
-    let run = daemon.token(&[Scope::Run]).await;
+    let run = daemon.token(&[Permission::BackupRuns]).await;
     assert_needs(
         &daemon,
         get("/api/v1/session", &[("authorization", &run)]),
-        "read",
+        "backups",
     )
     .await;
 }
@@ -613,9 +690,7 @@ async fn a_read_token_reads_the_build_on_the_session_route_and_never_a_session()
 async fn a_good_token_beside_a_live_session_still_cannot_use_a_session_only_route() {
     let daemon = Daemon::new();
     let (cookie, csrf) = daemon.signed_in().await;
-    let token = daemon
-        .token(&[Scope::Read, Scope::Run, Scope::Preview, Scope::Propose])
-        .await;
+    let token = daemon.token(&Permission::ALL).await;
     let both = [
         ("authorization", token.as_str()),
         ("cookie", cookie.as_str()),
@@ -626,7 +701,7 @@ async fn a_good_token_beside_a_live_session_still_cannot_use_a_session_only_rout
         post(
             "/api/v1/tokens",
             &both,
-            r#"{"label":"x","scopes":["read"]}"#,
+            r#"{"label":"x","permissions":{"backups":"read"}}"#,
         ),
         delete("/api/v1/tokens/abcdefghijkl", &both),
         post("/api/v1/repositories/home/maintenance", &both, "{}"),
@@ -689,7 +764,7 @@ async fn the_signed_in_admin_restarts_with_the_csrf_token_and_is_named_as_who_as
 async fn a_wrong_token_is_refused_and_the_session_cookie_beside_it_does_not_help() {
     let daemon = Daemon::new();
     let (cookie, _) = daemon.signed_in().await;
-    let token = daemon.token(&[Scope::Read]).await;
+    let token = daemon.token(&[Permission::Backups]).await;
     let mut wrong = token.clone();
     wrong.pop();
     wrong.push(if token.ends_with('A') { 'B' } else { 'A' });
@@ -729,7 +804,7 @@ async fn text_that_is_no_token_is_refused_as_invalid() {
         );
     }
     // Two tokens in one request are no token.
-    let token = daemon.token(&[Scope::Read]).await;
+    let token = daemon.token(&[Permission::Backups]).await;
     let (status, code, _) = refusal(
         daemon
             .send(get(
@@ -770,7 +845,7 @@ async fn another_authorization_scheme_is_ignored_and_the_request_judged_by_its_s
 #[tokio::test]
 async fn after_a_wrong_token_the_next_waits_unchecked_and_so_does_a_sign_in() {
     let daemon = Daemon::new();
-    let token = daemon.token(&[Scope::Read]).await;
+    let token = daemon.token(&[Permission::Backups]).await;
     let response = daemon
         .send(get(
             "/api/v1/plans",
@@ -804,7 +879,7 @@ async fn after_a_wrong_token_the_next_waits_unchecked_and_so_does_a_sign_in() {
 #[tokio::test]
 async fn a_token_request_without_its_connections_address_is_refused() {
     let daemon = Daemon::new();
-    let token = daemon.token(&[Scope::Read]).await;
+    let token = daemon.token(&[Permission::Backups]).await;
     let request = Request::builder()
         .uri("/api/v1/plans")
         .header(HOST, OWN_HOST)
@@ -821,7 +896,9 @@ async fn a_token_request_without_its_connections_address_is_refused() {
 #[tokio::test]
 async fn the_request_checks_come_before_the_token_and_a_refused_one_starts_no_wait() {
     let daemon = Daemon::new();
-    let token = daemon.token(&[Scope::Read, Scope::Run]).await;
+    let token = daemon
+        .token(&[Permission::Backups, Permission::BackupRuns])
+        .await;
     let wrong = "Bearer ladderback_x_y";
     let foreign = build(
         Method::GET,
@@ -852,7 +929,7 @@ async fn the_request_checks_come_before_the_token_and_a_refused_one_starts_no_wa
 #[tokio::test]
 async fn a_body_over_the_limit_is_refused_to_a_token_too() {
     let daemon = Daemon::new();
-    let token = daemon.token(&[Scope::Run]).await;
+    let token = daemon.token(&[Permission::BackupRuns]).await;
     let body = format!(r#"{{"plan":"{}"}}"#, "x".repeat(2 * 1024 * 1024));
     let (status, code, _) = refusal(
         daemon
@@ -874,7 +951,7 @@ async fn a_body_over_the_limit_is_refused_to_a_token_too() {
 #[tokio::test]
 async fn a_run_a_token_starts_is_recorded_as_the_tokens_and_one_by_hand_as_manual() {
     let daemon = Daemon::new();
-    let token = daemon.token(&[Scope::Run]).await;
+    let token = daemon.token(&[Permission::BackupRuns]).await;
     let response = daemon
         .send(post(
             "/api/v1/operations",
@@ -909,7 +986,7 @@ async fn a_run_a_token_starts_is_recorded_as_the_tokens_and_one_by_hand_as_manua
 #[tokio::test]
 async fn a_token_cancels_as_a_token_and_what_it_may_not_stop_needs_a_session() {
     let daemon = Daemon::new();
-    let token = daemon.token(&[Scope::Run]).await;
+    let token = daemon.token(&[Permission::BackupRuns]).await;
     let auth = [("authorization", token.as_str())];
     let response = daemon
         .send(post("/api/v1/operations/backup-op/cancel", &auth, "{}"))
@@ -952,7 +1029,11 @@ async fn with_sign_in_off_the_token_routes_say_so_and_the_header_is_ignored() {
     };
     for request in [
         get(TOKENS_PATH, &[]),
-        post(TOKENS_PATH, &[], r#"{"label":"x","scopes":["read"]}"#),
+        post(
+            TOKENS_PATH,
+            &[],
+            r#"{"label":"x","permissions":{"backups":"read"}}"#,
+        ),
         delete("/api/v1/tokens/abcdefghijkl", &[]),
     ] {
         let (status, code, _) = refusal(send(request).await).await;
@@ -978,7 +1059,7 @@ async fn a_created_tokens_secret_is_shown_once_and_never_listed() {
         .send(post(
             TOKENS_PATH,
             &session,
-            r#"{"label":"nightly-mcp","scopes":["run","read"]}"#,
+            r#"{"label":"nightly-mcp","permissions":{"backup-runs":"start-and-cancel","backups":"read"}}"#,
         ))
         .await;
     assert_eq!(response.status(), StatusCode::CREATED);
@@ -987,8 +1068,16 @@ async fn a_created_tokens_secret_is_shown_once_and_never_listed() {
     assert!(secret.starts_with("ladderback_"), "{secret}");
     assert_eq!(created["token"]["label"], "nightly-mcp");
     assert_eq!(
-        created["token"]["scopes"],
-        serde_json::json!(["read", "run"])
+        created["token"]["permissions"],
+        serde_json::json!({
+            "backups": "read",
+            "backup-runs": "start-and-cancel",
+            "previews": "none",
+            "configuration": "none",
+            "snapshot-contents": "none",
+            "daemon-log": "none",
+            "repository-check": "none",
+        })
     );
     assert_eq!(created["token"]["created-at"], "2027-01-15T08:00:00Z");
     assert_eq!(created["token"]["last-used-at"], serde_json::Value::Null);
@@ -1014,14 +1103,15 @@ async fn a_created_tokens_secret_is_shown_once_and_never_listed() {
 }
 
 #[tokio::test]
-async fn a_token_is_refused_without_a_label_of_1_to_64_characters_or_a_scope() {
+async fn a_token_is_refused_without_a_label_of_1_to_64_characters_or_a_permission() {
     let daemon = Daemon::new();
     let (cookie, csrf) = daemon.signed_in().await;
     let session = [("cookie", cookie.as_str()), ("x-csrf-token", csrf.as_str())];
-    let long = serde_json::json!({ "label": "x".repeat(65), "scopes": ["read"] }).to_string();
+    let long = serde_json::json!({ "label": "x".repeat(65), "permissions": {"backups": "read"} })
+        .to_string();
     for (body, status, code, args) in [
         (
-            r#"{"label":"","scopes":["read"]}"#.to_owned(),
+            r#"{"label":"","permissions":{"backups":"read"}}"#.to_owned(),
             StatusCode::BAD_REQUEST,
             "api-token-label",
             serde_json::json!({ "max": { "type": "count", "value": 64 } }),
@@ -1033,19 +1123,32 @@ async fn a_token_is_refused_without_a_label_of_1_to_64_characters_or_a_scope() {
             serde_json::json!({ "max": { "type": "count", "value": 64 } }),
         ),
         (
-            r#"{"label":"x","scopes":[]}"#.to_owned(),
+            r#"{"label":"x","permissions":{}}"#.to_owned(),
             StatusCode::BAD_REQUEST,
-            "api-token-no-scope",
+            "api-token-no-permission",
             serde_json::Value::Null,
         ),
         (
-            r#"{"label":"x","scopes":["admin"]}"#.to_owned(),
+            r#"{"label":"x","permissions":{"backups":"none","daemon-log":"none"}}"#.to_owned(),
+            StatusCode::BAD_REQUEST,
+            "api-token-no-permission",
+            serde_json::Value::Null,
+        ),
+        (
+            r#"{"label":"x","permissions":{"admin":"read"}}"#.to_owned(),
+            StatusCode::BAD_REQUEST,
+            "invalid-body",
+            serde_json::Value::Null,
+        ),
+        // A level its permission doesn't have.
+        (
+            r#"{"label":"x","permissions":{"backups":"propose"}}"#.to_owned(),
             StatusCode::BAD_REQUEST,
             "invalid-body",
             serde_json::Value::Null,
         ),
         (
-            r#"{"label":"x","scopes":["read"],"expires":1}"#.to_owned(),
+            r#"{"label":"x","permissions":{"backups":"read"},"expires":1}"#.to_owned(),
             StatusCode::BAD_REQUEST,
             "invalid-body",
             serde_json::Value::Null,
@@ -1065,14 +1168,14 @@ async fn a_token_is_refused_without_a_label_of_1_to_64_characters_or_a_scope() {
 async fn a_token_over_the_100_kept_is_refused() {
     let daemon = Daemon::new();
     for _ in 0..100 {
-        daemon.token(&[Scope::Read]).await;
+        daemon.token(&[Permission::Backups]).await;
     }
     let (cookie, csrf) = daemon.signed_in().await;
     let response = daemon
         .send(post(
             TOKENS_PATH,
             &[("cookie", &cookie), ("x-csrf-token", &csrf)],
-            r#"{"label":"one-more","scopes":["read"]}"#,
+            r#"{"label":"one-more","permissions":{"backups":"read"}}"#,
         ))
         .await;
     assert_eq!(
@@ -1088,7 +1191,7 @@ async fn a_token_over_the_100_kept_is_refused() {
 #[tokio::test]
 async fn a_revoked_token_is_refused_and_revoking_it_again_finds_none() {
     let daemon = Daemon::new();
-    let token = daemon.token(&[Scope::Read]).await;
+    let token = daemon.token(&[Permission::Backups]).await;
     let id = daemon.access.api_tokens().await.unwrap()[0].id.clone();
     let (cookie, csrf) = daemon.signed_in().await;
     let session = [("cookie", cookie.as_str()), ("x-csrf-token", csrf.as_str())];
@@ -1134,7 +1237,11 @@ async fn tokens_that_cant_be_read_are_unavailable_and_their_detail_stays_in_the_
     let session = [("cookie", cookie.as_str()), ("x-csrf-token", csrf.as_str())];
     for request in [
         get(TOKENS_PATH, &session),
-        post(TOKENS_PATH, &session, r#"{"label":"x","scopes":["read"]}"#),
+        post(
+            TOKENS_PATH,
+            &session,
+            r#"{"label":"x","permissions":{"backups":"read"}}"#,
+        ),
         delete("/api/v1/tokens/abcdefghijkl", &session),
         get(
             "/api/v1/plans",
@@ -1160,7 +1267,7 @@ async fn an_events_stream_ends_once_the_token_that_opened_it_is_revoked() {
     use tokio_tungstenite::tungstenite::client::IntoClientRequest;
 
     let daemon = Daemon::new();
-    let token = daemon.token(&[Scope::Read]).await;
+    let token = daemon.token(&[Permission::Backups]).await;
     let listener = crate::GatedListener::bind(SocketAddr::from((Ipv4Addr::LOCALHOST, 0)))
         .await
         .unwrap();
@@ -1277,17 +1384,14 @@ impl Daemon {
     }
 }
 
-/// A token is a program's, perhaps an AI agent's: whatever its scopes and
-/// whatever it asks, its export leaves out the commands a person wrote,
+/// A token is a program's, perhaps an AI agent's: whatever its permissions
+/// and whatever it asks, its export leaves out the commands a person wrote,
 /// which may carry a token of their own (#856).
 #[tokio::test]
 async fn a_token_s_export_leaves_the_commands_out_whatever_it_asks() {
     let daemon = Daemon::new();
-    for scopes in [
-        &[Scope::Read][..],
-        &[Scope::Read, Scope::Run, Scope::Preview, Scope::Propose],
-    ] {
-        let token = daemon.token(scopes).await;
+    for permissions in [&[Permission::Backups][..], &Permission::ALL] {
+        let token = daemon.token(permissions).await;
         for uri in [
             "/api/v1/plans/home/profile",
             "/api/v1/plans/home/profile?commands=written",
@@ -1296,7 +1400,7 @@ async fn a_token_s_export_leaves_the_commands_out_whatever_it_asks() {
             assert_eq!(
                 daemon.export_asked(uri, &[("authorization", &token)]).await,
                 api::ProfileCommands::LeftOut,
-                "{scopes:?} {uri}"
+                "{permissions:?} {uri}"
             );
         }
     }
@@ -1325,4 +1429,862 @@ async fn a_session_s_export_writes_the_commands_unless_it_asks_them_left_out() {
             "{uri}"
         );
     }
+}
+
+fn put(path: &str, headers: &[(&str, &str)], body: &str) -> Request {
+    let mut all = vec![("content-type", "application/json")];
+    all.extend_from_slice(headers);
+    build(Method::PUT, path, &all, body)
+}
+
+/// The path that changes the only token's permissions.
+async fn permissions_path(daemon: &Daemon) -> String {
+    let id = daemon.access.api_tokens().await.unwrap()[0].id.clone();
+    format!("/api/v1/tokens/{}/permissions", id.as_str())
+}
+
+#[tokio::test]
+async fn the_admin_changes_a_tokens_permissions_with_the_current_password() {
+    let daemon = Daemon::new();
+    let token = daemon.token(&[Permission::Backups]).await;
+    let path = permissions_path(&daemon).await;
+    let (cookie, csrf) = daemon.signed_in().await;
+    let session = [("cookie", cookie.as_str()), ("x-csrf-token", csrf.as_str())];
+    let body = |password: &str| {
+        serde_json::json!({
+            "permissions": { "backup-runs": "start-and-cancel", "daemon-log": "read" },
+            "current-password": password,
+        })
+        .to_string()
+    };
+    let (status, code, _) = refusal(
+        daemon
+            .send(put(&path, &session, &body("not-the-password")))
+            .await,
+    )
+    .await;
+    assert_eq!(
+        (status, code.as_deref()),
+        (StatusCode::FORBIDDEN, Some("current-password-wrong"))
+    );
+    // The wrong password made the address wait, as a failed sign-in does;
+    // the token is still as it was once the wait is over.
+    daemon.clock.advance(domain::SignedDuration::from_secs(1));
+    let auth = [("authorization", token.as_str())];
+    assert_eq!(
+        daemon.send(get("/api/v1/plans", &auth)).await.status(),
+        StatusCode::OK
+    );
+    let response = daemon.send(put(&path, &session, &body(PASSWORD))).await;
+    assert_eq!(response.status(), StatusCode::OK);
+    assert_eq!(json(response).await["daemon-log"], "read");
+    assert_needs(&daemon, get("/api/v1/plans", &auth), "backups").await;
+    assert_eq!(
+        daemon.send(get("/api/v1/log", &auth)).await.status(),
+        StatusCode::OK
+    );
+}
+
+#[tokio::test]
+async fn no_token_changes_permissions_even_with_the_password_and_every_permission() {
+    let daemon = Daemon::new();
+    let token = daemon.token(&Permission::ALL).await;
+    let path = permissions_path(&daemon).await;
+    let body = serde_json::json!({
+        "permissions": { "backups": "read" },
+        "current-password": PASSWORD,
+    })
+    .to_string();
+    assert_needs(
+        &daemon,
+        put(&path, &[("authorization", &token)], &body),
+        "session",
+    )
+    .await;
+    let kept = daemon.access.api_tokens().await.unwrap()[0].permissions;
+    assert!(kept.get().grants(Permission::RepositoryCheck));
+}
+
+#[tokio::test]
+async fn a_change_to_no_permission_or_to_an_unknown_token_is_refused() {
+    let daemon = Daemon::new();
+    daemon.token(&[Permission::Backups]).await;
+    let path = permissions_path(&daemon).await;
+    let (cookie, csrf) = daemon.signed_in().await;
+    let session = [("cookie", cookie.as_str()), ("x-csrf-token", csrf.as_str())];
+    let none = serde_json::json!({ "permissions": {}, "current-password": PASSWORD }).to_string();
+    let (status, code, _) = refusal(daemon.send(put(&path, &session, &none)).await).await;
+    assert_eq!(
+        (status, code.as_deref()),
+        (StatusCode::BAD_REQUEST, Some("api-token-no-permission"))
+    );
+    let some = serde_json::json!({
+        "permissions": { "backups": "read" },
+        "current-password": PASSWORD,
+    })
+    .to_string();
+    let (status, code, _) = refusal(
+        daemon
+            .send(put(
+                "/api/v1/tokens/abcdefghijkl/permissions",
+                &session,
+                &some,
+            ))
+            .await,
+    )
+    .await;
+    assert_eq!(
+        (status, code.as_deref()),
+        (StatusCode::NOT_FOUND, Some("api-token-unknown"))
+    );
+}
+
+#[tokio::test]
+async fn a_token_reads_its_own_permissions_whatever_they_are() {
+    let daemon = Daemon::new();
+    let token = daemon.token(&[Permission::DaemonLog]).await;
+    let response = daemon
+        .send(get("/api/v1/permissions", &[("authorization", &token)]))
+        .await;
+    assert_eq!(response.status(), StatusCode::OK);
+    let permissions = json(response).await;
+    assert_eq!(permissions["daemon-log"], "read", "{permissions}");
+    assert_eq!(permissions["backups"], "none", "{permissions}");
+}
+
+/// The router with sign-in off over the default configuration.
+async fn signed_off(request: Request) -> Response {
+    router(Arc::new(NoUi), RequestChecks::default(), test_state())
+        .oneshot(request)
+        .await
+        .unwrap()
+}
+
+#[tokio::test]
+async fn with_sign_in_off_an_ai_agents_request_is_held_to_what_agents_may_do_without_a_token() {
+    let agent = [(api::AI_AGENT_HEADER, "1")];
+    let (status, code, args) = refusal(signed_off(get("/api/v1/log", &agent)).await).await;
+    assert_eq!(
+        (status, code.as_deref()),
+        (StatusCode::FORBIDDEN, Some("without-token-permission"))
+    );
+    assert_eq!(
+        args,
+        serde_json::json!({ "permission": { "type": "text", "value": "daemon-log" } })
+    );
+    assert_eq!(
+        signed_off(get("/api/v1/plans", &agent)).await.status(),
+        StatusCode::OK
+    );
+    let permissions = json(signed_off(get("/api/v1/permissions", &agent)).await).await;
+    assert_eq!(permissions["backups"], "read", "{permissions}");
+    assert_eq!(permissions["daemon-log"], "none", "{permissions}");
+    // Without the mark, the request is a person's, as before.
+    assert_ne!(
+        signed_off(get("/api/v1/log", &[])).await.status(),
+        StatusCode::FORBIDDEN
+    );
+    let permissions = json(signed_off(get("/api/v1/permissions", &[])).await).await;
+    assert_eq!(permissions["daemon-log"], "read", "{permissions}");
+}
+
+/// A warning that names a file, twice: as its item and in the engine's own
+/// words.
+fn unreadable() -> api::OperationWarningDto {
+    api::OperationWarningDto {
+        code: api::WarningCode::SourceUnreadable,
+        item: Some("/home/demo/tax-2026.pdf".to_owned()),
+        during: "backup".to_owned(),
+        detail: "permission denied: /home/demo/tax-2026.pdf".to_owned(),
+    }
+}
+
+/// The one warning of an operation's detail, as `request` is answered it.
+async fn warning_shown_to(daemon: &Daemon, request: Request) -> serde_json::Value {
+    let response = daemon.send(request).await;
+    assert_eq!(response.status(), StatusCode::OK);
+    json(response).await["warnings"][0].clone()
+}
+
+#[tokio::test]
+async fn an_operations_warning_names_its_file_only_to_a_token_with_snapshot_contents() {
+    let daemon = Daemon::new();
+    let path = "/api/v1/operations/018f0000-0000-7000-8000-000000000001";
+    let without = daemon.token(&[Permission::Backups]).await;
+    let hidden = warning_shown_to(&daemon, get(path, &[("authorization", &without)])).await;
+    assert_eq!(
+        hidden,
+        serde_json::json!({
+            "code": "source-unreadable",
+            "item": null,
+            "during": "backup",
+            "detail": "",
+        })
+    );
+    let with = daemon
+        .token(&[Permission::Backups, Permission::SnapshotContents])
+        .await;
+    let shown = warning_shown_to(&daemon, get(path, &[("authorization", &with)])).await;
+    assert_eq!(shown["item"], "/home/demo/tax-2026.pdf");
+    assert_eq!(
+        shown["detail"],
+        "permission denied: /home/demo/tax-2026.pdf"
+    );
+    let (cookie, _) = daemon.signed_in().await;
+    let person = warning_shown_to(&daemon, get(path, &[("cookie", &cookie)])).await;
+    assert_eq!(person["item"], "/home/demo/tax-2026.pdf");
+}
+
+#[tokio::test]
+async fn with_sign_in_off_an_ai_agent_sees_a_warnings_file_only_once_the_table_allows_it() {
+    let path = "/api/v1/operations/018f0000-0000-7000-8000-000000000001";
+    let agent = [(api::AI_AGENT_HEADER, "1")];
+    let config = Arc::new(app::fakes::InMemoryConfigStore::new());
+    let serve = |request: Request| {
+        let mut state = test_state();
+        state.operations = Arc::new(Recorder::default());
+        state.without_token = crate::request_checks::tests::without_token_over(config.clone());
+        router(Arc::new(NoUi), RequestChecks::default(), state).oneshot(request)
+    };
+    let warning = |response: Response| async move {
+        assert_eq!(response.status(), StatusCode::OK);
+        json(response).await["warnings"][0].clone()
+    };
+    let hidden = warning(serve(get(path, &agent)).await.unwrap()).await;
+    assert_eq!(hidden["item"], serde_json::Value::Null, "{hidden}");
+    assert_eq!(hidden["detail"], "", "{hidden}");
+    let person = warning(serve(get(path, &[])).await.unwrap()).await;
+    assert_eq!(person["item"], "/home/demo/tax-2026.pdf", "{person}");
+    let opened = domain::planning::AgentConfig::default().with_without_token(
+        Permissions::default()
+            .with(
+                Permission::SnapshotContents,
+                Some(domain::access::permissions::Level::Read),
+            )
+            .unwrap(),
+    );
+    app::ports::ConfigStore::save(config.as_ref(), &opened)
+        .await
+        .unwrap();
+    let shown = warning(serve(get(path, &agent)).await.unwrap()).await;
+    assert_eq!(shown["item"], "/home/demo/tax-2026.pdf", "{shown}");
+}
+
+#[tokio::test]
+async fn with_sign_in_off_an_ai_agent_is_refused_a_route_only_a_browser_may_use() {
+    let agent = [(api::AI_AGENT_HEADER, "1")];
+    for request in [
+        get(TOKENS_PATH, &agent),
+        post("/api/v1/proposals/018f/approve", &agent, "{}"),
+        get("/api/v1/settings/notifications", &agent),
+    ] {
+        let what = format!("{} {}", request.method(), request.uri());
+        let (status, code, args) = refusal(signed_off(request).await).await;
+        assert_eq!(
+            (status, code.as_deref()),
+            (StatusCode::FORBIDDEN, Some("without-token-permission")),
+            "{what}"
+        );
+        assert_eq!(
+            args,
+            serde_json::json!({ "permission": { "type": "text", "value": "session" } }),
+            "{what}"
+        );
+    }
+    // Without the mark, the request is a person's, as before.
+    let (status, code, _) = refusal(signed_off(get(TOKENS_PATH, &[])).await).await;
+    assert_eq!(
+        (status, code.as_deref()),
+        (StatusCode::CONFLICT, Some("sign-in-off"))
+    );
+}
+
+#[tokio::test]
+async fn with_sign_in_on_a_session_reads_every_permission_whatever_mark_it_carries() {
+    let daemon = Daemon::new();
+    let (cookie, _) = daemon.signed_in().await;
+    let response = daemon
+        .send(get(
+            "/api/v1/permissions",
+            &[("cookie", &cookie), (api::AI_AGENT_HEADER, "1")],
+        ))
+        .await;
+    assert_eq!(response.status(), StatusCode::OK);
+    let permissions = json(response).await;
+    assert_eq!(
+        permissions,
+        serde_json::json!({
+            "backups": "read",
+            "backup-runs": "start-and-cancel",
+            "previews": "preview",
+            "configuration": "propose",
+            "snapshot-contents": "read",
+            "daemon-log": "read",
+            "repository-check": "run",
+        })
+    );
+}
+
+#[tokio::test]
+async fn a_change_without_the_csrf_token_or_with_a_wrong_password_leaves_the_permissions() {
+    let daemon = Daemon::new();
+    let token = daemon.token(&[Permission::Backups]).await;
+    let path = permissions_path(&daemon).await;
+    let (cookie, csrf) = daemon.signed_in().await;
+    let body = |password: &str| {
+        serde_json::json!({
+            "permissions": { "backups": "read", "daemon-log": "read" },
+            "current-password": password,
+        })
+        .to_string()
+    };
+    let (status, code, _) = refusal(
+        daemon
+            .send(put(&path, &[("cookie", cookie.as_str())], &body(PASSWORD)))
+            .await,
+    )
+    .await;
+    assert_eq!(
+        (status, code.as_deref()),
+        (StatusCode::FORBIDDEN, Some("csrf-token-invalid"))
+    );
+    let session = [("cookie", cookie.as_str()), ("x-csrf-token", csrf.as_str())];
+    let (status, code, _) = refusal(
+        daemon
+            .send(put(&path, &session, &body("not-the-password")))
+            .await,
+    )
+    .await;
+    assert_eq!(
+        (status, code.as_deref()),
+        (StatusCode::FORBIDDEN, Some("current-password-wrong"))
+    );
+    let kept = daemon.access.api_tokens().await.unwrap()[0].permissions;
+    assert_eq!(kept.get(), granting(&[Permission::Backups]));
+    daemon.clock.advance(domain::SignedDuration::from_secs(1));
+    assert_needs(
+        &daemon,
+        get("/api/v1/log", &[("authorization", &token)]),
+        "daemon-log",
+    )
+    .await;
+}
+
+/// Serves the router over `state`, with the connection's address; returns
+/// where.
+async fn serving_events(state: AppState) -> SocketAddr {
+    let listener = crate::GatedListener::bind(SocketAddr::from((Ipv4Addr::LOCALHOST, 0)))
+        .await
+        .unwrap();
+    let addr = listener.local_addr().unwrap();
+    let app = router(Arc::new(NoUi), RequestChecks::default(), state);
+    tokio::spawn(async move {
+        let _ = axum::serve(
+            listener,
+            app.into_make_service_with_connect_info::<crate::PeerAddr>(),
+        )
+        .await;
+    });
+    addr
+}
+
+type EventSocket =
+    tokio_tungstenite::WebSocketStream<tokio_tungstenite::MaybeTlsStream<tokio::net::TcpStream>>;
+
+/// An events stream opened at `addr` with the header `(name, value)`.
+async fn events_with(addr: SocketAddr, (name, value): (&'static str, &str)) -> EventSocket {
+    use tokio_tungstenite::tungstenite::client::IntoClientRequest;
+    let mut request = format!("ws://{addr}/api/v1/events")
+        .into_client_request()
+        .unwrap();
+    request
+        .headers_mut()
+        .insert(name, HeaderValue::from_str(value).unwrap());
+    let socket = tokio_tungstenite::connect_async(request).await.unwrap().0;
+    answers_a_ping(socket).await
+}
+
+/// Pings `socket` and waits for its pong: the stream is open and
+/// subscribed.
+async fn answers_a_ping(mut socket: EventSocket) -> EventSocket {
+    use tokio_tungstenite::tungstenite::Message;
+    futures::SinkExt::send(&mut socket, Message::Ping(vec![7].into()))
+        .await
+        .unwrap();
+    match socket.next().await {
+        Some(Ok(Message::Pong(payload))) => assert_eq!(payload.as_ref(), [7]),
+        other => panic!("an open stream answers a ping: {other:?}"),
+    }
+    socket
+}
+
+/// Whether `socket` ends within a recheck and a little more.
+async fn ends(socket: &mut EventSocket) -> bool {
+    tokio::time::timeout(
+        crate::SESSION_RECHECK + std::time::Duration::from_secs(2),
+        async {
+            loop {
+                match socket.next().await {
+                    None | Some(Err(_)) => break,
+                    Some(Ok(message)) if message.is_close() => break,
+                    Some(Ok(_)) => {}
+                }
+            }
+        },
+    )
+    .await
+    .is_ok()
+}
+
+#[tokio::test]
+async fn an_events_stream_ends_once_its_token_no_longer_has_backups() {
+    let daemon = Daemon::new();
+    let token = daemon
+        .token(&[Permission::Backups, Permission::BackupRuns])
+        .await;
+    let addr = serving_events(daemon.state()).await;
+    let mut socket = events_with(addr, ("authorization", &token)).await;
+    let id = daemon.access.api_tokens().await.unwrap()[0].id.clone();
+    let current = domain::access::Password::parse(PASSWORD.to_owned()).unwrap();
+    assert_eq!(
+        daemon
+            .access
+            .change_api_token_permissions(
+                HOME.ip(),
+                &current,
+                &id,
+                TokenPermissions::new(granting(&[Permission::BackupRuns])).unwrap(),
+            )
+            .await,
+        Ok(true)
+    );
+    assert!(ends(&mut socket).await, "the stream outlived its Backups");
+}
+
+#[tokio::test]
+async fn with_sign_in_off_an_ai_agents_stream_ends_once_the_table_takes_backups_away() {
+    let config = Arc::new(app::fakes::InMemoryConfigStore::new());
+    let mut state = test_state();
+    state.without_token = crate::request_checks::tests::without_token_over(config.clone());
+    let addr = serving_events(state).await;
+    let mut socket = events_with(addr, (api::AI_AGENT_HEADER, "1")).await;
+    let closed = domain::planning::AgentConfig::default().with_without_token(
+        Permissions::NONE
+            .with(
+                Permission::DaemonLog,
+                Some(domain::access::permissions::Level::Read),
+            )
+            .unwrap(),
+    );
+    app::ports::ConfigStore::save(config.as_ref(), &closed)
+        .await
+        .unwrap();
+    assert!(ends(&mut socket).await, "the stream outlived its Backups");
+}
+
+#[tokio::test]
+async fn an_events_stream_shows_a_warnings_file_only_to_a_token_with_snapshot_contents() {
+    use tokio_tungstenite::tungstenite::Message;
+
+    let daemon = Daemon::new();
+    let without = daemon.token(&[Permission::Backups]).await;
+    let with = daemon
+        .token(&[Permission::Backups, Permission::SnapshotContents])
+        .await;
+    let events = Arc::new(app::fakes::InMemoryEventBus::new());
+    let mut state = daemon.state();
+    state.events = events.clone();
+    let addr = serving_events(state).await;
+    let mut hidden = events_with(addr, ("authorization", &without)).await;
+    let mut shown = events_with(addr, ("authorization", &with)).await;
+    app::ports::EventBus::publish(
+        events.as_ref(),
+        api::UiEvent::OperationWarning {
+            operation: "018f0000-0000-7000-8000-000000000001".to_owned(),
+            code: api::WarningCode::SourceUnreadable,
+            args: vec![api::MsgArg::Text("/home/demo/tax-2026.pdf".to_owned())],
+        },
+    )
+    .await;
+    for (socket, args) in [
+        (&mut hidden, serde_json::json!([])),
+        (
+            &mut shown,
+            serde_json::json!([{ "type": "text", "value": "/home/demo/tax-2026.pdf" }]),
+        ),
+    ] {
+        let seen = match socket.next().await {
+            Some(Ok(Message::Text(text))) => {
+                serde_json::from_str::<serde_json::Value>(text.as_str()).unwrap()
+            }
+            other => panic!("the warning arrives as text: {other:?}"),
+        };
+        assert_eq!(seen["code"], "source-unreadable", "{seen}");
+        assert_eq!(seen["args"], args, "{seen}");
+    }
+}
+
+/// A restore that failed on a file: its failure names the file as an
+/// argument and in the engine's own words, and its entry is that file.
+fn failed_on_a_file() -> api::OperationSummaryDto {
+    api::OperationSummaryDto {
+        kind: "restore".to_owned(),
+        status: "failed".to_owned(),
+        failure_code: Some(api::ErrorCode::EntryUnknown),
+        failure: Some(api::ErrorDto::new(
+            api::ErrorCode::EntryUnknown,
+            [(
+                "path",
+                api::MsgArg::Text("/home/demo/tax-2026.pdf".to_owned()),
+            )],
+            Some("no entry /home/demo/tax-2026.pdf".to_owned()),
+        )),
+        result: None,
+        entry: Some("/home/demo/tax-2026.pdf".to_owned()),
+        ..crate::tests::canned_summary()
+    }
+}
+
+/// The one operation `path` answers with (its detail's or a page's first),
+/// as `request` is answered it.
+async fn operation_shown_to(daemon: &Daemon, request: Request) -> serde_json::Value {
+    let response = daemon.send(request).await;
+    assert_eq!(response.status(), StatusCode::OK);
+    let body = json(response).await;
+    if body["operation"].is_object() {
+        body["operation"].clone()
+    } else {
+        body["operations"][0].clone()
+    }
+}
+
+#[tokio::test]
+async fn an_operations_failure_is_only_its_code_to_a_token_without_snapshot_contents() {
+    let daemon = Daemon::new();
+    let without = daemon.token(&[Permission::Backups]).await;
+    let with = daemon
+        .token(&[Permission::Backups, Permission::SnapshotContents])
+        .await;
+    let (cookie, _) = daemon.signed_in().await;
+    for path in [
+        "/api/v1/operations/018f0000-0000-7000-8000-000000000001",
+        "/api/v1/operations",
+    ] {
+        let hidden = operation_shown_to(&daemon, get(path, &[("authorization", &without)])).await;
+        assert_eq!(
+            hidden["failure"],
+            serde_json::json!({ "code": "entry-unknown" }),
+            "{path}: {hidden}"
+        );
+        assert_eq!(hidden["failure-code"], "entry-unknown", "{path}: {hidden}");
+        assert_eq!(hidden.get("entry"), None, "{path}: {hidden}");
+        for shown in [
+            operation_shown_to(&daemon, get(path, &[("authorization", &with)])).await,
+            operation_shown_to(&daemon, get(path, &[("cookie", &cookie)])).await,
+        ] {
+            assert_eq!(
+                shown["failure"]["args"]["path"]["value"], "/home/demo/tax-2026.pdf",
+                "{path}: {shown}"
+            );
+            assert_eq!(
+                shown["failure"]["detail"], "no entry /home/demo/tax-2026.pdf",
+                "{path}: {shown}"
+            );
+            assert_eq!(shown["entry"], "/home/demo/tax-2026.pdf", "{path}: {shown}");
+        }
+    }
+}
+
+#[tokio::test]
+async fn with_sign_in_off_an_ai_agent_reads_a_failures_words_only_once_the_table_allows_it() {
+    let path = "/api/v1/operations/018f0000-0000-7000-8000-000000000001";
+    let agent = [(api::AI_AGENT_HEADER, "1")];
+    let config = Arc::new(app::fakes::InMemoryConfigStore::new());
+    let serve = |request: Request| {
+        let mut state = test_state();
+        state.operations = Arc::new(Recorder::default());
+        state.without_token = crate::request_checks::tests::without_token_over(config.clone());
+        router(Arc::new(NoUi), RequestChecks::default(), state).oneshot(request)
+    };
+    let failure = |response: Response| async move {
+        assert_eq!(response.status(), StatusCode::OK);
+        json(response).await["operation"]["failure"].clone()
+    };
+    let hidden = failure(serve(get(path, &agent)).await.unwrap()).await;
+    assert_eq!(hidden, serde_json::json!({ "code": "entry-unknown" }));
+    let person = failure(serve(get(path, &[])).await.unwrap()).await;
+    assert_eq!(
+        person["detail"], "no entry /home/demo/tax-2026.pdf",
+        "{person}"
+    );
+    let opened = domain::planning::AgentConfig::default().with_without_token(
+        Permissions::default()
+            .with(
+                Permission::SnapshotContents,
+                Some(domain::access::permissions::Level::Read),
+            )
+            .unwrap(),
+    );
+    app::ports::ConfigStore::save(config.as_ref(), &opened)
+        .await
+        .unwrap();
+    let shown = failure(serve(get(path, &agent)).await.unwrap()).await;
+    assert_eq!(shown, person);
+}
+
+#[test]
+fn the_status_shows_each_operation_in_it_as_the_operation_itself_is_shown() {
+    let status = api::StatusDto {
+        plans: vec![api::PlanStatusDto {
+            plan: api::PlanSummaryDto {
+                id: "home".to_owned(),
+                repository: "demo".to_owned(),
+                scheduled: false,
+                next_run: None,
+                warnings: Vec::new(),
+            },
+            last: Some(failed_on_a_file()),
+            last_success: None,
+            overdue: false,
+        }],
+        running: vec![failed_on_a_file()],
+        unreadable_repositories: vec![api::UnreadableRepositoryDto {
+            repository: "demo".to_owned(),
+            operation: failed_on_a_file(),
+        }],
+        full_disk_access: api::FullDiskAccessStateDto::NotApplicable,
+    };
+    let code_only = summary_shown(granting(&[Permission::Backups]), failed_on_a_file());
+    assert_eq!(
+        code_only.failure,
+        Some(api::ErrorDto::new(api::ErrorCode::EntryUnknown, [], None))
+    );
+    assert_eq!(code_only.entry, None);
+    let hidden = status_shown(granting(&[Permission::Backups]), status.clone());
+    assert_eq!(hidden.plans[0].last.as_ref(), Some(&code_only));
+    assert_eq!(hidden.running, std::slice::from_ref(&code_only));
+    assert_eq!(hidden.unreadable_repositories[0].operation, code_only);
+    let with = granting(&[Permission::Backups, Permission::SnapshotContents]);
+    assert_eq!(status_shown(with, status.clone()), status);
+}
+
+#[tokio::test]
+async fn an_events_stream_tells_a_failures_words_only_to_a_token_with_snapshot_contents() {
+    use tokio_tungstenite::tungstenite::Message;
+
+    let daemon = Daemon::new();
+    let without = daemon.token(&[Permission::Backups]).await;
+    let with = daemon
+        .token(&[Permission::Backups, Permission::SnapshotContents])
+        .await;
+    let events = Arc::new(app::fakes::InMemoryEventBus::new());
+    let mut state = daemon.state();
+    state.events = events.clone();
+    let addr = serving_events(state).await;
+    let mut hidden = events_with(addr, ("authorization", &without)).await;
+    let mut shown = events_with(addr, ("authorization", &with)).await;
+    let words = [
+        api::MsgArg::Text("/home/demo/tax-2026.pdf".to_owned()),
+        api::MsgArg::Text("no entry /home/demo/tax-2026.pdf".to_owned()),
+    ];
+    app::ports::EventBus::publish(
+        events.as_ref(),
+        api::UiEvent::OperationFailed {
+            operation: "018f0000-0000-7000-8000-000000000001".to_owned(),
+            code: api::ErrorCode::EntryUnknown,
+            args: words.to_vec(),
+            finished_at: "2026-11-09T10:00:02Z".to_owned(),
+        },
+    )
+    .await;
+    for (socket, args) in [
+        (&mut hidden, serde_json::json!([])),
+        (&mut shown, serde_json::to_value(words).unwrap()),
+    ] {
+        let seen = match socket.next().await {
+            Some(Ok(Message::Text(text))) => {
+                serde_json::from_str::<serde_json::Value>(text.as_str()).unwrap()
+            }
+            other => panic!("the failure arrives as text: {other:?}"),
+        };
+        assert_eq!(seen["code"], "entry-unknown", "{seen}");
+        assert_eq!(seen["finished_at"], "2026-11-09T10:00:02Z", "{seen}");
+        assert_eq!(seen["args"], args, "{seen}");
+    }
+}
+
+/// A catalog whose status has a restore running that failed on a file.
+struct FailedOnAFile;
+
+#[async_trait]
+impl crate::Catalog for FailedOnAFile {
+    async fn status(
+        &self,
+        full_disk_access: api::FullDiskAccessStateDto,
+    ) -> Result<api::StatusDto, crate::CatalogError> {
+        Ok(api::StatusDto {
+            plans: Vec::new(),
+            running: vec![failed_on_a_file()],
+            unreadable_repositories: Vec::new(),
+            full_disk_access,
+        })
+    }
+
+    async fn plans(&self) -> Result<api::PlansDto, crate::CatalogError> {
+        Ok(api::PlansDto::default())
+    }
+
+    async fn repositories(&self) -> Result<api::RepositoriesDto, crate::CatalogError> {
+        Ok(api::RepositoriesDto::default())
+    }
+
+    async fn snapshots(&self, _alias: String) -> Result<api::SnapshotsDto, crate::SnapshotsError> {
+        Ok(api::SnapshotsDto::default())
+    }
+
+    async fn folder(
+        &self,
+        _alias: String,
+        _snapshot: domain::SnapshotId,
+        _folder: domain::browse::FolderPath,
+        _from: u64,
+    ) -> Result<api::FolderDto, crate::FolderError> {
+        Ok(api::FolderDto::default())
+    }
+}
+
+#[tokio::test]
+async fn the_status_tells_a_failures_words_only_to_a_token_with_snapshot_contents() {
+    let daemon = Daemon::new();
+    let without = daemon.token(&[Permission::Backups]).await;
+    let with = daemon
+        .token(&[Permission::Backups, Permission::SnapshotContents])
+        .await;
+    let mut state = daemon.state();
+    state.catalog = Arc::new(FailedOnAFile);
+    let app = router(Arc::new(NoUi), RequestChecks::default(), state);
+    for (token, failure, entry) in [
+        (
+            &without,
+            serde_json::json!({ "code": "entry-unknown" }),
+            None,
+        ),
+        (
+            &with,
+            serde_json::to_value(failed_on_a_file().failure).unwrap(),
+            Some(serde_json::json!("/home/demo/tax-2026.pdf")),
+        ),
+    ] {
+        let response = app
+            .clone()
+            .oneshot(get("/api/v1/status", &[("authorization", token)]))
+            .await
+            .unwrap();
+        assert_eq!(response.status(), StatusCode::OK);
+        let running = json(response).await["running"][0].clone();
+        assert_eq!(running["failure"], failure, "{running}");
+        assert_eq!(running.get("entry"), entry.as_ref(), "{running}");
+    }
+}
+
+#[tokio::test]
+async fn an_open_events_stream_stops_telling_a_failures_words_once_its_token_loses_snapshot_contents()
+ {
+    use tokio_tungstenite::tungstenite::Message;
+
+    let daemon = Daemon::new();
+    let token = daemon
+        .token(&[Permission::Backups, Permission::SnapshotContents])
+        .await;
+    let events = Arc::new(app::fakes::InMemoryEventBus::new());
+    let mut state = daemon.state();
+    state.events = events.clone();
+    let addr = serving_events(state).await;
+    let mut socket = events_with(addr, ("authorization", &token)).await;
+    let id = daemon.access.api_tokens().await.unwrap()[0].id.clone();
+    let current = domain::access::Password::parse(PASSWORD.to_owned()).unwrap();
+    assert_eq!(
+        daemon
+            .access
+            .change_api_token_permissions(
+                HOME.ip(),
+                &current,
+                &id,
+                TokenPermissions::new(granting(&[Permission::Backups])).unwrap(),
+            )
+            .await,
+        Ok(true)
+    );
+    // The stream reads its token's permissions again within a recheck.
+    tokio::time::sleep(crate::SESSION_RECHECK + std::time::Duration::from_secs(2)).await;
+    app::ports::EventBus::publish(
+        events.as_ref(),
+        api::UiEvent::OperationFailed {
+            operation: "018f0000-0000-7000-8000-000000000001".to_owned(),
+            code: api::ErrorCode::EntryUnknown,
+            args: vec![api::MsgArg::Text("/home/demo/tax-2026.pdf".to_owned())],
+            finished_at: "2026-11-09T10:00:02Z".to_owned(),
+        },
+    )
+    .await;
+    let seen = match socket.next().await {
+        Some(Ok(Message::Text(text))) => {
+            serde_json::from_str::<serde_json::Value>(text.as_str()).unwrap()
+        }
+        other => panic!("the failure arrives as text: {other:?}"),
+    };
+    assert_eq!(seen["code"], "entry-unknown", "{seen}");
+    assert_eq!(seen["args"], serde_json::json!([]), "{seen}");
+}
+
+/// A configuration that can't be read, as a file the daemon may not open.
+struct Unreadable;
+
+fn denied() -> app::ports::ConfigError {
+    app::ports::ConfigError::Unavailable {
+        file: "config.toml".to_owned(),
+        detail: "permission denied".to_owned(),
+    }
+}
+
+#[async_trait]
+impl app::ports::ConfigStore for Unreadable {
+    async fn load(&self) -> Result<domain::planning::AgentConfig, app::ports::ConfigError> {
+        Err(denied())
+    }
+
+    async fn save(
+        &self,
+        _config: &domain::planning::AgentConfig,
+    ) -> Result<(), app::ports::ConfigError> {
+        Err(denied())
+    }
+
+    async fn record_id(
+        &self,
+        _alias: &domain::RepositoryAlias,
+        _read: &domain::planning::RepositoryConfig,
+        _id: &domain::RepositoryId,
+    ) -> Result<(), app::ports::RecordError> {
+        Err(app::ports::RecordError::Store(denied()))
+    }
+}
+
+#[tokio::test]
+async fn with_sign_in_off_an_ai_agent_is_told_which_file_couldnt_be_read() {
+    let mut state = test_state();
+    state.without_token = crate::request_checks::tests::without_token_over(Arc::new(Unreadable));
+    let response = router(Arc::new(NoUi), RequestChecks::default(), state)
+        .oneshot(get("/api/v1/plans", &[(api::AI_AGENT_HEADER, "1")]))
+        .await
+        .unwrap();
+    let (status, code, args) = refusal(response).await;
+    assert_eq!(
+        (status, code.as_deref()),
+        (StatusCode::SERVICE_UNAVAILABLE, Some("config-unavailable"))
+    );
+    assert_eq!(
+        args,
+        serde_json::json!({ "file": { "type": "text", "value": "config.toml" } })
+    );
 }

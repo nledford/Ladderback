@@ -31,7 +31,7 @@ fn ui() -> Arc<dyn AssetSource> {
 struct Plans;
 
 /// The one operation the fake log holds, as the wire shows it.
-fn canned_summary() -> api::OperationSummaryDto {
+pub(crate) fn canned_summary() -> api::OperationSummaryDto {
     api::OperationSummaryDto::new(
         "018f0000-0000-7000-8000-000000000001".to_owned(),
         "home".to_owned(),
@@ -458,6 +458,9 @@ fn state() -> AppState {
         restart: Restart::default(),
         updates: Arc::default(),
         recent_log: Arc::new(app::recent_log::RecentLogRing::new()),
+        without_token: crate::request_checks::tests::without_token_over(Arc::new(
+            app::fakes::InMemoryConfigStore::new(),
+        )),
         full_disk_access: FullDiskAccessRoute::default(),
         sync: SyncHub::default(),
     }
@@ -502,6 +505,9 @@ async fn serving() -> (std::net::SocketAddr, Arc<app::fakes::InMemoryEventBus>) 
         restart: Restart::default(),
         updates: Arc::default(),
         recent_log: Arc::new(app::recent_log::RecentLogRing::new()),
+        without_token: crate::request_checks::tests::without_token_over(Arc::new(
+            app::fakes::InMemoryConfigStore::new(),
+        )),
         full_disk_access: FullDiskAccessRoute::default(),
         sync: SyncHub::default(),
     };
@@ -2027,8 +2033,8 @@ async fn the_repositories_page_reads_its_notes_as_codes() {
         serde_json::json!({"notes": [{"code": "keyring-not-activatable"}]})
     );
     assert_eq!(
-        crate::api_tokens::required_scope(&Method::GET, repositories::NOTES_PATH),
-        None
+        crate::api_tokens::required_permission(&Method::GET, repositories::NOTES_PATH),
+        crate::api_tokens::Needs::Session
     );
 }
 
@@ -2072,6 +2078,9 @@ async fn send_counted(method: Method, path: &str, body: String) -> (Response, us
         restart: Restart::default(),
         updates: Arc::default(),
         recent_log: Arc::new(app::recent_log::RecentLogRing::new()),
+        without_token: crate::request_checks::tests::without_token_over(Arc::new(
+            app::fakes::InMemoryConfigStore::new(),
+        )),
         full_disk_access: FullDiskAccessRoute::default(),
         sync: SyncHub::default(),
     };

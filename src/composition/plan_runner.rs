@@ -33,9 +33,9 @@ use uuid::Uuid;
 
 use super::key_files::KeyFilesLeftOut;
 use super::{
-    CancelRegistry, config_unusable, maintenance, refusal_redactor, refusal_with, runs, summary,
-    warning_code,
+    CancelRegistry, maintenance, refusal_redactor, refusal_with, runs, summary, warning_code,
 };
+use app::ports::config_unusable;
 
 /// Starts the operations the API asks for: a backup of a named plan, run to
 /// its end on a task of its own. What happens to the run arrives over the

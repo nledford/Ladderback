@@ -972,47 +972,68 @@ async fn a_pending_retry_this_version_did_not_write_is_reported() {
 #[tokio::test]
 async fn an_api_token_this_version_did_not_write_is_reported() {
     let digest = vec![0x5e_u8; 32];
-    for (name, column, label, scopes, digest) in [
+    for (name, column, label, permissions, digest) in [
         (
             "a blank label",
             "label",
             Cell::from(" "),
+            Cell::from("backups:read"),
+            digest.clone(),
+        ),
+        (
+            "an unknown row",
+            "permissions",
+            Cell::from("demo"),
+            Cell::from("admin:read"),
+            digest.clone(),
+        ),
+        (
+            "a level its row doesn't have",
+            "permissions",
+            Cell::from("demo"),
+            Cell::from("daemon-log:start-and-cancel"),
+            digest.clone(),
+        ),
+        (
+            "a row twice",
+            "permissions",
+            Cell::from("demo"),
+            Cell::from("backups:read,backups:read"),
+            digest.clone(),
+        ),
+        (
+            "a scope from before permissions",
+            "permissions",
+            Cell::from("demo"),
             Cell::from("read"),
             digest.clone(),
         ),
         (
-            "an unknown scope",
-            "scopes",
-            Cell::from("demo"),
-            Cell::from("admin"),
-            digest.clone(),
-        ),
-        (
-            "no scope",
-            "scopes",
+            "no permission",
+            "permissions",
             Cell::from("demo"),
             Cell::from(""),
             digest.clone(),
         ),
         (
-            "scopes that are no list",
-            "scopes",
+            "permissions that are no list",
+            "permissions",
             Cell::from("demo"),
-            Cell::from("read;run"),
+            Cell::from("backups:read;previews:preview"),
             digest.clone(),
         ),
         (
             "a short digest",
             "digest",
             Cell::from("demo"),
-            Cell::from("read"),
+            Cell::from("backups:read"),
             vec![0x5e; 31],
         ),
         (
             "a long digest",
             "digest",
             Cell::from("demo"),
-            Cell::from("read,run"),
+            Cell::from("backup-runs:start-and-cancel"),
             vec![0x5e; 33],
         ),
     ] {
@@ -1020,14 +1041,14 @@ async fn an_api_token_this_version_did_not_write_is_reported() {
         let store = scratch.open().await;
         let mut raw = scratch.raw().await;
         let mut query = sqlx::query(
-            "INSERT INTO api_tokens (id, label, digest, scopes, password, created_at) \
+            "INSERT INTO api_tokens (id, label, digest, permissions, password, created_at) \
              VALUES ('abcdefghijkl', ?, ?, ?, 1, 1800000000000)",
         );
         let text = |cell: Cell| match cell {
             Cell::Text(text) => text,
             other => panic!("a text cell: {other:?}"),
         };
-        query = query.bind(text(label)).bind(digest).bind(text(scopes));
+        query = query.bind(text(label)).bind(digest).bind(text(permissions));
         query
             .execute(&mut raw)
             .await
