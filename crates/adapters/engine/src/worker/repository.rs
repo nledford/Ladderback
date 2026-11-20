@@ -1144,6 +1144,57 @@ mod tests {
         );
     }
 
+    /// rustic reads a REST server's `HEAD /config` answered with anything
+    /// but success as no config file (rustic-rs/rustic_core#652), so the
+    /// probe lists the location's files to tell what it is. A listing the
+    /// server fails, as with `500`, says nothing about what the location
+    /// holds: the probe fails with rustic's words, which the daemon reads as
+    /// silent, never `not-a-repository`, which offers to create a repository
+    /// there (#1175).
+    #[test]
+    fn a_probe_of_a_rest_server_that_fails_the_listing_fails_with_the_servers_status() {
+        let failing = server_answering_by(|request| {
+            if request.starts_with("HEAD ") {
+                "404 Not Found"
+            } else {
+                "500 Internal Server Error"
+            }
+        });
+        let spec = RepositorySpec {
+            options: [("retry".to_owned(), "off".to_owned())].into(),
+            ..spec_at(&format!("rest:http://{failing}/"))
+        };
+        let probe = probed(&spec);
+        let Err(JobError::Failed { detail, .. }) = &probe else {
+            panic!("a failed listing must fail the probe, not be {probe:?}");
+        };
+        assert!(detail.contains("500 Internal Server Error"), "{detail}");
+    }
+
+    /// rclone's `serve restic` before 1.66 answers 404 when its remote
+    /// fails, for the `HEAD` of `config` and a listing alike (rclone#7550);
+    /// later ones list a missing folder as empty. A 404 from an `rclone:`
+    /// location's server says nothing about what it holds, so the probe
+    /// fails, and the daemon reads the location as silent (#1175).
+    #[cfg(unix)]
+    #[test]
+    fn a_probe_of_an_rclone_location_whose_server_answers_404_fails() {
+        let server = server_answering("404 Not Found");
+        // rustic appends the repository's path as the last argument.
+        let stand_in = format!(
+            "sh -c 'echo \"NOTICE: Serving restic REST API on [http://{server}/]\" >&2; exec sleep 30' sh"
+        );
+        let spec = RepositorySpec {
+            options: [("rclone-command".to_owned(), stand_in)].into(),
+            ..spec_at("rclone:demo-remote:repo")
+        };
+        let probe = probed(&spec);
+        let Err(JobError::Failed { detail, .. }) = &probe else {
+            panic!("a 404 from rclone must fail the probe, not be {probe:?}");
+        };
+        assert!(detail.contains("404 Not Found"), "{detail}");
+    }
+
     /// A REST refusal is told by the status rustic's client keeps; an
     /// OpenDAL one by OpenDAL's error text at the revision the workspace
     /// pins (`refused`): these two fail when an upgrade changes that text,
