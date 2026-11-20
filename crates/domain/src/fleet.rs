@@ -38,8 +38,8 @@ pub use pin::{HubPin, MAX_PIN_BYTES, PinRefused};
 pub use registry::{
     AgentRecord, AgentStatus, HostnameKey, LONGEST_TOKEN_LIFE, PENDING_LIMIT, PairRefusal,
     PairRequest, Pairing, PairingView, ProofRefusal, ProofRequest, ProofView, SHORTEST_TOKEN_LIFE,
-    TOKEN_LIFE, TokenLifeRefused, TokenRecord, TokenUse, UNUSED_TOKEN_LIMIT, decide_pairing,
-    decide_proof, token_life,
+    TOKEN_LIFE, TokenLifeRefused, TokenRecord, TokenUse, UNUSED_TOKEN_LIMIT, UnusedTokensFull,
+    admits_unused_token, decide_pairing, decide_proof, token_life, voids_tokens_for_new_key,
 };
 pub use route::{HubRoute, RouteRefused, RouteSession, is_loopback};
 pub use signed::{
