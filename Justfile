@@ -23,7 +23,7 @@ release_flags := "--no-default-features"
 # The leptosfmt release `fmt` and `fmt-check` expect (technical design §13.13).
 # Another release formats differently, so `setup` installs this one, CI too
 # (`just --evaluate leptosfmt_version`), and `fmt-check` refuses another.
-leptosfmt_version := "0.1.33"
+leptosfmt_version := "0.1.34"
 
 # The mdBook release that builds the user docs site (§16, decision 128).
 # Another release renders the pages and their anchors differently, so `setup`
