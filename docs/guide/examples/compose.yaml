@@ -1,4 +1,4 @@
-# Ladderback's agent in Docker Compose: the `docker run` of the install guide
+# Ladderback in Docker Compose: the `docker run` of the install guide
 # (docs/guide/install.md, "Docker image (not supported yet)"), written as a
 # Compose file. The image isn't yet a supported way to install and run
 # Ladderback: the package or the install script is.
@@ -15,7 +15,7 @@
 #
 #   docker compose run --rm ladderback set-password
 #
-# Then start the agent with `docker compose up --detach`.
+# Then start it with `docker compose up --detach`.
 
 services:
   ladderback:
