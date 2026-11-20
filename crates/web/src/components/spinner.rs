@@ -24,8 +24,9 @@ pub(crate) mod rules;
 /// placement goes on the spinner's line, an element around it, never on the
 /// spinner itself; on a line of its own (Start, Center, End) a long label
 /// wraps beside the drawing, never under it. The drawing is a faint track
-/// and an arc, which turns once in 0.9 s and stands still when the reader
-/// asks for less motion, the label carrying the meaning.
+/// and an arc, which turns once in 0.9 s; when the reader asks for less
+/// motion it is three still dots in a row instead, which never read as an
+/// amount, the label carrying the meaning.
 ///
 /// What the caller owes WCAG 2.2 AA, since the spinner does none of it:
 ///
@@ -64,8 +65,10 @@ pub fn Spinner(
                 // around), the arc starting at the top, stroked in the
                 // drawing's color, its tone, the track at a quarter of its
                 // strength. The arc turns inside its group, so the drawing's
-                // box never does. The attributes give it the text's height
-                // without the stylesheet, which sets each size's length.
+                // box never does. For a reader who asks for less motion,
+                // three dots stand in for both. The attributes give it the
+                // text's height without the stylesheet, which sets each
+                // size's length.
                 <svg
                     class=rules::GRAPHIC
                     xmlns="http://www.w3.org/2000/svg"
@@ -91,6 +94,11 @@ pub fn Spinner(
                             stroke-dasharray="14.14 42.41"
                             transform="rotate(-90 12 12)"
                         />
+                    </g>
+                    <g class=rules::STILL fill="currentColor" stroke="none">
+                        <circle cx="4" cy="12" r="2" />
+                        <circle cx="12" cy="12" r="2" />
+                        <circle cx="20" cy="12" r="2" />
                     </g>
                 </svg>
                 {shown
