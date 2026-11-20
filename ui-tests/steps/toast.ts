@@ -268,6 +268,30 @@ Then("the toast holds its icon, its words and its Dismiss button inside its edge
   for (const part of drawn.parts) assert.ok(part.inside, `${part.selector} lies outside the toast`);
 });
 
+// A toast lies at the top of its slot, as tall as its own content: its edge
+// ends its padding below the lowest of its parts, while the slot, which
+// keeps the room of a longer toast, is taller.
+Then("the toast's edge closes round its own words, inside a taller room", async function (this: BrowserWorld) {
+  const found = await toast(this.page);
+  const drawn = await found.evaluate((element) => {
+    const outer = element.getBoundingClientRect();
+    const style = getComputedStyle(element);
+    const lowest = Math.max(
+      ...[".toast-icon", ".toast-words", ".toast-dismiss"].map(
+        (selector) => element.querySelector(selector)?.getBoundingClientRect().bottom ?? Number.NaN,
+      ),
+    );
+    return {
+      bottom: outer.bottom,
+      closes: lowest + Number.parseFloat(style.paddingBlockEnd) + Number.parseFloat(style.borderBlockEndWidth),
+      room: element.parentElement?.getBoundingClientRect().height ?? Number.NaN,
+      tall: outer.height,
+    };
+  });
+  assert.ok(near(drawn.bottom, drawn.closes), `the toast's edge ends at ${drawn.bottom}, not round its content at ${drawn.closes}`);
+  assert.ok(drawn.room > drawn.tall + 1, `the toast's room is ${drawn.room} tall, no taller than the toast's ${drawn.tall}`);
+});
+
 // A toast is transient: the step waits until it has gone.
 // Scoped to main: the polite live region carries the same text.
 When("the toast {string} is gone", async function (this: BrowserWorld, text: string) {

@@ -98,14 +98,34 @@ impl ToastTone {
 /// only: edged 1px all round in its tone (`--tone`) with the small corner,
 /// its icon, words and Dismiss button on one line that wraps its words.
 /// Under forced colors the fill is dropped, and the edge, in the system's
-/// text color, keeps its box in view.
-const LOOK: &str = "flex items-start gap-2 my-2 py-2 px-3 rounded-(--radius-small) \
-    border border-solid border-(--tone) forced-colors:border-[color:CanvasText]";
+/// text color, keeps its box in view. A macro, so the room kept for a toast
+/// ([`ROOM`]) is drawn by the same utilities, joined at compile time.
+macro_rules! look {
+    () => {
+        "flex items-start gap-2 py-2 px-3 rounded-(--radius-small) \
+         border border-solid border-(--tone) forced-colors:border-[color:CanvasText]"
+    };
+}
+
+/// The toast's slot, where its page puts it: one grid cell that the toast
+/// and the room kept for it share, so it is as tall as the tallest of them,
+/// spaced from what comes before and after it as a toast is.
+pub const SLOT: &str = "toast-slot grid my-2";
+
+/// Room kept for a toast: a copy of one, laid out as it is but unseen, in
+/// the slot's one cell.
+pub const ROOM: &str = concat!("toast-room invisible col-start-1 row-start-1 ", look!());
 
 /// The classes of the toast: the toast's own, which names it, its tone's,
-/// its fill and words, and its look.
+/// its fill and words, its place in the slot's one cell, at its top, as
+/// tall as its own content, and its look.
 pub fn toast_class(tone: ToastTone) -> String {
-    format!("toast {} {} {LOOK}", tone.tone().class(), tone.fill())
+    format!(
+        "toast {} {} col-start-1 row-start-1 self-start {}",
+        tone.tone().class(),
+        tone.fill(),
+        look!()
+    )
 }
 
 /// The words a page's toast slot keeps room for while the page is open: one
@@ -121,19 +141,25 @@ pub struct Room {
 
 impl Default for Room {
     fn default() -> Self {
-        todo!()
+        Self {
+            words: vec![String::new()],
+        }
     }
 }
 
 impl Room {
     /// Keeps room for a toast of `words`; `false` if it already had.
     pub fn keep(&mut self, words: &str) -> bool {
-        todo!("{words}{:?}", self.words)
+        if self.words.iter().any(|kept| kept == words) {
+            return false;
+        }
+        self.words.push(words.to_owned());
+        true
     }
 
     /// The words it keeps room for, the empty line first.
     pub fn words(&self) -> &[String] {
-        todo!("{:?}", self.words)
+        &self.words
     }
 }
 
