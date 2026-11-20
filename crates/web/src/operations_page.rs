@@ -534,9 +534,9 @@ fn header_id(row: &OperationRow) -> String {
 }
 
 /// What a live update changes that marks an operation's row: its status
-/// (a start, an end), never a progress report (decisions 127 and 129).
-fn status_of(row: &OperationRow) -> String {
-    row.summary.status.clone()
+/// (a start, an end), never a progress report (decisions 129 and 130).
+fn status_of(row: &OperationRow) -> &str {
+    &row.summary.status
 }
 
 /// An operation's status: its badge, and a running backup's progress bar once

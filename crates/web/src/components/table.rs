@@ -149,24 +149,24 @@ impl<R> Sort<R> {
     }
 }
 
-/// The change mark a column carries (decisions 127 and 129): `on`, what
+/// The change mark a column carries (decisions 129 and 130): `on`, what
 /// a live update changes in a row, such as its status, and `changed`, the
 /// words a screen reader hears in the column's cell while its row is
 /// marked, a complete message from the catalog that reads on its own
 /// ("Changed, not yet seen").
 pub struct Cue<R> {
-    on: fn(&R) -> String,
+    on: fn(&R) -> &str,
     changed: String,
 }
 
 /// The column a table watches for the change mark: its place, what of a
 /// row it reads there, and the words its marked cell says. `None` where no
 /// column carries a [`Cue`].
-type Watch<R> = Option<(usize, fn(&R) -> String, Arc<str>)>;
+type Watch<R> = Option<(usize, fn(&R) -> &str, Arc<str>)>;
 
 impl<R> Cue<R> {
     /// A mark on a change of `on`, said `changed` to a screen reader.
-    pub fn new(on: fn(&R) -> String, changed: impl Into<String>) -> Self {
+    pub fn new(on: fn(&R) -> &str, changed: impl Into<String>) -> Self {
         Self {
             on,
             changed: changed.into(),
@@ -280,7 +280,7 @@ pub struct Footer {
 /// `--cue` color (`style.css`), and the cell says the cue's words to a
 /// screen reader after its own, so the mark is never drawn alone (1.3.1).
 /// The mark arrives once with a fade, its cells lit in the cue's fill and
-/// settling back to their own over 600 ms (decision 127), and stays until
+/// settling back to their own over 600 ms (decision 130), and stays until
 /// it is seen: focus enters the row, the reader presses the page's
 /// [`MarkAllSeen`], or the row or the page goes. A change while focus is in
 /// the row is seen as it comes. Its first sight, and an update that leaves
@@ -686,15 +686,26 @@ where
     let line = NodeRef::<leptos::html::Tr>::new();
     let cued = watch.is_some();
     if let Some(on) = watch.map(|(_, on, _)| on) {
-        let watched = Memo::new(move |_| row.with(on));
+        // What the row shows there, owned anew only when it changes: a
+        // progress report updates the row but not its status.
+        let watched = Memo::new_owning(move |shown: Option<String>| {
+            row.with(|row| match shown {
+                Some(shown) if shown == on(row) => (shown, false),
+                _ => (on(row).to_owned(), true),
+            })
+        });
         let changed = key.clone();
         Effect::new(move |shown: Option<String>| {
             let now = watched.get();
             let focused = line
                 .get_untracked()
                 .is_some_and(|line| holds_focus_within(&line));
+            // The marks' watchers hear of it only when a row is marked.
             let lights = marks
-                .try_update(|marks| marks.change(&changed, shown.as_ref(), &now, focused))
+                .try_maybe_update(|marks| {
+                    let lights = marks.change(&changed, shown.as_ref(), &now, focused);
+                    (lights && !focused, lights)
+                })
                 .unwrap_or_default();
             if lights {
                 light(arrival);
@@ -703,7 +714,7 @@ where
         });
         let gone = key.clone();
         on_cleanup(move || {
-            marks.try_update(|marks| marks.gone(&gone));
+            marks.try_maybe_update(|marks| (marks.gone(&gone), ()));
         });
     }
     let state = move || cued.then(|| arrival.get().name());

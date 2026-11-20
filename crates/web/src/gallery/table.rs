@@ -380,7 +380,6 @@ pub(super) fn LiveTableDemo(localizer: Arc<Localizer>) -> impl IntoView {
         t(msg::UI_GALLERY_LIVE_TABLE_RUNNING),
         t(msg::UI_GALLERY_LIVE_TABLE_DONE),
     ]);
-    let status_of = |job: &DemoJob| job.step.to_string();
     let job = Column::new(
         t(msg::UI_GALLERY_LIVE_TABLE_JOB),
         Rem::tenths(100),
@@ -482,3 +481,11 @@ pub(super) fn LiveTableDemo(localizer: Arc<Localizer>) -> impl IntoView {
 /// The `id` of the live table demo's heading, where Mark all as seen hands
 /// focus as it goes.
 const LIVE_TABLE_HEADING_ID: &str = "live-table-demo-heading";
+
+/// What marks a demo job's row: the step its status has reached.
+fn status_of(job: &DemoJob) -> &str {
+    ["waiting", "running", "done"]
+        .get(job.step)
+        .copied()
+        .unwrap_or_default()
+}

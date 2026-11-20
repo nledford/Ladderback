@@ -171,7 +171,7 @@ pub fn shown(state: State, rows: usize) -> Shown {
     }
 }
 
-/// Whether a row takes the change cue (decision 127): the part of it the
+/// Whether a row takes the change cue (decision 130): the part of it the
 /// table watches (the column given a `Cue`, a status) was `shown` as the row last
 /// showed it and is `now`. Only a change of a value the row already showed
 /// lights it: a row's first sight (the page's first rows, a row that
@@ -232,9 +232,10 @@ impl<K: Eq + Hash + Clone> Marks<K> {
         marked
     }
 
-    /// The row `key` left the table, and its mark with it.
-    pub fn gone(&mut self, key: &K) {
-        self.unseen.remove(key);
+    /// The row `key` left the table, and its mark with it. Whether it had
+    /// one.
+    pub fn gone(&mut self, key: &K) -> bool {
+        self.unseen.remove(key)
     }
 
     /// Whether the row `key` is marked, changed and not yet seen.
@@ -727,7 +728,8 @@ mod tests {
         let mut marks = Marks::default();
         marks.change(&"home", Some(&"queued"), &"running", false);
         marks.change(&"docs", Some(&"running"), &"succeeded", false);
-        marks.gone(&"home");
+        assert!(marks.gone(&"home"));
+        assert!(!marks.gone(&"music"));
         assert!(!marks.is_unseen(&"home"));
         assert!(marks.is_unseen(&"docs"));
         assert_eq!(marks.see_all(), 1);
