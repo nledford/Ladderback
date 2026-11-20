@@ -11,7 +11,7 @@ use domain::access::api_token::{
 use domain::access::permissions::{Level, Permission, Permissions};
 use domain::access::{PasswordFingerprint, TOKEN_BYTES};
 
-use crate::ports::{Added, ApiTokenStore};
+use crate::ports::{Added, ApiTokenStore, PermissionsSet};
 
 /// Opens an API token store: a new, empty one, or the one before opened
 /// again on the same place.
@@ -31,6 +31,7 @@ pub async fn run(harness: &dyn ApiTokenHarness) {
     no_more_than_the_limit_are_kept(harness).await;
     a_revoked_token_is_gone(harness).await;
     a_tokens_permissions_are_changed_and_a_revoked_one_is_not_brought_back(harness).await;
+    the_permissions_a_token_holds_already_change_nothing(harness).await;
     tokens_of_another_password_are_revoked(harness).await;
     a_use_is_kept_and_never_brings_a_token_back(harness).await;
     times_are_kept_to_the_millisecond(harness).await;
@@ -195,7 +196,10 @@ async fn a_tokens_permissions_are_changed_and_a_revoked_one_is_not_brought_back(
     add(store.as_ref(), &one).await;
     add(store.as_ref(), &other).await;
     let changed = store.set_permissions(&one.id, log_only).await;
-    assert!(matches!(changed, Ok(true)), "{changed:?}");
+    assert!(
+        matches!(changed, Ok(PermissionsSet::Changed)),
+        "{changed:?}"
+    );
     let mut expected = one.clone();
     expected.permissions = log_only;
     assert_eq!(get(store.as_ref(), &one.id).await, Some(kept(&expected)));
@@ -203,8 +207,36 @@ async fn a_tokens_permissions_are_changed_and_a_revoked_one_is_not_brought_back(
     let revoked = store.revoke(&one.id).await;
     assert!(matches!(revoked, Ok(true)), "{revoked:?}");
     let gone = store.set_permissions(&one.id, log_only).await;
-    assert!(matches!(gone, Ok(false)), "{gone:?}");
+    assert!(matches!(gone, Ok(PermissionsSet::NotKept)), "{gone:?}");
     assert_eq!(get(store.as_ref(), &one.id).await, None);
+}
+
+async fn the_permissions_a_token_holds_already_change_nothing(harness: &dyn ApiTokenHarness) {
+    let Some(one) = token(1, 0, PASSWORD) else {
+        return;
+    };
+    let log_only = Permissions::NONE
+        .with(Permission::DaemonLog, Some(Level::Read))
+        .ok()
+        .and_then(|permissions| TokenPermissions::new(permissions).ok());
+    let Some(log_only) = log_only else {
+        return;
+    };
+    let store = harness.empty().await;
+    add(store.as_ref(), &one).await;
+    let again = store.set_permissions(&one.id, one.permissions).await;
+    assert!(matches!(again, Ok(PermissionsSet::Unchanged)), "{again:?}");
+    assert_eq!(get(store.as_ref(), &one.id).await, Some(kept(&one)));
+    let changed = store.set_permissions(&one.id, log_only).await;
+    assert!(
+        matches!(changed, Ok(PermissionsSet::Changed)),
+        "{changed:?}"
+    );
+    let again = store.set_permissions(&one.id, log_only).await;
+    assert!(matches!(again, Ok(PermissionsSet::Unchanged)), "{again:?}");
+    let mut expected = one.clone();
+    expected.permissions = log_only;
+    assert_eq!(get(store.as_ref(), &one.id).await, Some(kept(&expected)));
 }
 
 async fn tokens_of_another_password_are_revoked(harness: &dyn ApiTokenHarness) {

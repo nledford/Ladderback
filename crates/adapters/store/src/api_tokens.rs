@@ -1,7 +1,7 @@
 //! The API tokens (technical design §10.1, §9 `api_tokens`; decision 93):
 //! the `ApiTokenStore` port on the store's own file.
 
-use app::ports::{Added, ApiTokenStore, StoreError};
+use app::ports::{Added, ApiTokenStore, PermissionsSet, StoreError};
 use async_trait::async_trait;
 use domain::Timestamp;
 use domain::access::PasswordFingerprint;
@@ -89,7 +89,7 @@ impl ApiTokenStore for SqliteStore {
         &self,
         id: &ApiTokenId,
         permissions: TokenPermissions,
-    ) -> Result<bool, StoreError> {
+    ) -> Result<PermissionsSet, StoreError> {
         let _call = self.call().await;
         let done = sqlx::query(sql::SET_API_TOKEN_PERMISSIONS)
             .bind(permissions_text(permissions))
@@ -97,7 +97,11 @@ impl ApiTokenStore for SqliteStore {
             .execute(&self.pool)
             .await
             .map_err(unavailable)?;
-        Ok(done.rows_affected() > 0)
+        Ok(if done.rows_affected() > 0 {
+            PermissionsSet::Changed
+        } else {
+            PermissionsSet::NotKept
+        })
     }
 
     async fn revoke_all_but(&self, password: PasswordFingerprint) -> Result<(), StoreError> {

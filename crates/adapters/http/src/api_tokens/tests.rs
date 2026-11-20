@@ -2,7 +2,7 @@ use std::net::{IpAddr, Ipv4Addr, SocketAddr};
 use std::sync::{Arc, Mutex, PoisonError};
 
 use app::fakes::{FakeClock, InMemoryAdminPassword, InMemoryApiTokenStore, SeededRandom};
-use app::ports::{Added, ApiTokenStore, StoreError};
+use app::ports::{Added, ApiTokenStore, PermissionsSet, StoreError};
 use async_trait::async_trait;
 use axum::body::Body;
 use axum::extract::{ConnectInfo, Request};
@@ -207,7 +207,7 @@ impl ApiTokenStore for Broken {
         &self,
         _id: &ApiTokenId,
         _permissions: TokenPermissions,
-    ) -> Result<bool, StoreError> {
+    ) -> Result<PermissionsSet, StoreError> {
         Err(broken())
     }
     async fn revoke_all_but(&self, _password: PasswordFingerprint) -> Result<(), StoreError> {

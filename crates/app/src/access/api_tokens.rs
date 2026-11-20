@@ -16,7 +16,7 @@ use domain::access::{Client, Password};
 use domain::{SignedDuration, Timestamp};
 
 use super::{Access, PasswordRefused};
-use crate::ports::{Added, StoreError};
+use crate::ports::{Added, PermissionsSet, StoreError};
 
 /// `permissions` as a log line names them: each row that is on, with its
 /// level, as `backups: read`, joined by commas; `no access` for none.
@@ -240,12 +240,13 @@ impl Access {
         self.step_up(address, current)
             .await
             .map_err(ApiTokenChangeRefused::Password)?;
-        let changed = self
+        let set = self
             .tokens
             .set_permissions(id, permissions)
             .await
             .map_err(|error| ApiTokenChangeRefused::Unavailable(error.to_string()))?;
-        if changed {
+        let kept = set != PermissionsSet::NotKept;
+        if kept {
             self.tokens_written();
             log::info!(
                 "API token {} now has {}",
@@ -253,7 +254,7 @@ impl Access {
                 logged(permissions.get())
             );
         }
-        Ok(changed)
+        Ok(kept)
     }
 
     /// Checks the token a request from `address` presents: `None` when the
