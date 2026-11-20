@@ -499,13 +499,11 @@ fn search_answer(found: FindResult) -> Result<SearchAnswer, String> {
             found.searched.len()
         ));
     }
-    let seen: usize = found
-        .matches
-        .iter()
-        .fold(0, |seen, found| seen.saturating_add(found.seen.len()));
-    if seen > usize::try_from(MAX_MATCHES).unwrap_or(usize::MAX) {
+    // A match is one however many snapshots hold it.
+    if found.matches.len() > usize::try_from(MAX_MATCHES).unwrap_or(usize::MAX) {
         return Err(format!(
-            "the worker sent {seen} matches, more than {MAX_MATCHES}"
+            "the worker sent {} matches, more than {MAX_MATCHES}",
+            found.matches.len()
         ));
     }
     let matches = found
