@@ -177,13 +177,16 @@ pub(super) fn flags_relative(args: &[String]) -> bool {
 /// `--`, each once, in the order first given. A flag is read as in
 /// [`flags_relative`], and its next word is its value whatever it is, as
 /// pflag reads a flag that takes one; an empty value is no credential. A
+/// next word that starts `--` is read as a flag too: which of rclone's flags
+/// take a value isn't known here, so in `--user --pass --rc-pass=…` it may
+/// be `--pass` or `--rc-pass` that rclone gives the credential. A
 /// flag that names something on this machine ([`named_by_flag`]: `--key`,
 /// the TLS key of `rclone serve`, `--rc-htpasswd`) is given none, whatever
 /// its name says, and so is a word whose name has a character no flag has.
 pub(super) fn secret_flags(args: &[String]) -> Vec<String> {
     let mut found: Vec<String> = Vec::new();
     let mut seen = BTreeSet::new();
-    let mut args = args.iter();
+    let mut args = args.iter().peekable();
     while let Some(arg) = args.next() {
         let Some(flag) = arg.strip_prefix("--") else {
             continue;
@@ -199,7 +202,10 @@ pub(super) fn secret_flags(args: &[String]) -> Vec<String> {
         if !flag_like || named_by_flag(name).is_some() || !is_rclone_secret_flag(name) {
             continue;
         }
-        let Some(value) = value.or_else(|| args.next().map(String::as_str)) else {
+        let Some(value) = value.or_else(|| match args.next_if(|next| !next.starts_with("--")) {
+            Some(next) => Some(next.as_str()),
+            None => args.peek().copied().map(String::as_str),
+        }) else {
             break;
         };
         if !value.is_empty() && seen.insert(name) {
