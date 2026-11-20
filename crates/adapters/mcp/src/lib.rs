@@ -25,9 +25,10 @@ use std::borrow::Cow;
 use std::sync::Arc;
 
 use api::{
-    BuildDto, ErrorCode, ErrorDto, ExposureDto, LocationsTestDto, MaintenancePreviewDto,
-    OperationDetailDto, OperationSummaryDto, OperationsPageDto, PlanDryRunDto, PlansDto,
-    ProfileExportDto, ProfileImportDto, ProposalDto, RepositoriesDto, SnapshotsDto, StatusDto,
+    BuildDto, ErrorCode, ErrorDto, ExposureDto, FindDto, FolderDto, LocationsTestDto,
+    MaintenancePreviewDto, OperationDetailDto, OperationSummaryDto, OperationsPageDto,
+    PlanDryRunDto, PlansDto, ProfileExportDto, ProfileImportDto, ProposalDto, RepositoriesDto,
+    SnapshotsDto, StatusDto,
 };
 use async_trait::async_trait;
 use l10n::Localizer;
@@ -52,6 +53,7 @@ mod actions;
 mod arguments;
 mod checks;
 mod connect;
+mod contents;
 mod one_shot;
 mod pages;
 mod proposals;
@@ -70,6 +72,7 @@ use actions::{
 };
 use arguments::{NoArguments, read};
 use checks::{ExportArguments, ForgetPreview, ImportArguments, RepositoryArguments};
+use contents::{FindArguments, FolderArguments, Search, folder_of};
 use pages::{
     ListArguments, Operation, OperationArguments, OperationsArguments, PlansPage, RepositoriesPage,
     SnapshotsArguments, SnapshotsPage, page, page_length,
@@ -97,6 +100,8 @@ const STATUS: &str = "status";
 const LIST_PLANS: &str = "list_plans";
 const LIST_REPOSITORIES: &str = "list_repositories";
 const LIST_SNAPSHOTS: &str = "list_snapshots";
+const LIST_SNAPSHOT_FOLDER: &str = "list_snapshot_folder";
+const FIND_IN_SNAPSHOTS: &str = "find_in_snapshots";
 const LIST_OPERATIONS: &str = "list_operations";
 const GET_OPERATION: &str = "get_operation";
 const RUN_PLAN: &str = "run_plan";
@@ -118,6 +123,8 @@ pub(crate) enum ToolName {
     ListPlans,
     ListRepositories,
     ListSnapshots,
+    ListSnapshotFolder,
+    FindInSnapshots,
     ListOperations,
     GetOperation,
     RunPlan,
@@ -135,11 +142,13 @@ pub(crate) enum ToolName {
 
 impl ToolName {
     /// Every tool.
-    const ALL: [Self; 17] = [
+    const ALL: [Self; 19] = [
         Self::Status,
         Self::ListPlans,
         Self::ListRepositories,
         Self::ListSnapshots,
+        Self::ListSnapshotFolder,
+        Self::FindInSnapshots,
         Self::ListOperations,
         Self::GetOperation,
         Self::RunPlan,
@@ -167,6 +176,8 @@ impl ToolName {
             Self::ListPlans => LIST_PLANS,
             Self::ListRepositories => LIST_REPOSITORIES,
             Self::ListSnapshots => LIST_SNAPSHOTS,
+            Self::ListSnapshotFolder => LIST_SNAPSHOT_FOLDER,
+            Self::FindInSnapshots => FIND_IN_SNAPSHOTS,
             Self::ListOperations => LIST_OPERATIONS,
             Self::GetOperation => GET_OPERATION,
             Self::RunPlan => RUN_PLAN,
@@ -239,6 +250,29 @@ pub trait Backend: Send + Sync + 'static {
     /// The snapshots of the repository whose alias is `repository`, newest
     /// first, read live.
     async fn snapshots(&self, repository: String) -> Result<SnapshotsDto, ErrorDto>;
+
+    /// The page of the folder `folder` of the snapshot `snapshot`, in the
+    /// repository whose alias is `repository`, that starts at position
+    /// `from` and holds at most `most` entries, read live.
+    async fn folder(
+        &self,
+        repository: String,
+        snapshot: domain::SnapshotId,
+        folder: domain::browse::FolderPath,
+        from: u64,
+        most: u64,
+    ) -> Result<FolderDto, ErrorDto>;
+
+    /// The entries whose names match `pattern` in the newest snapshots of
+    /// the repository whose alias is `repository`, of `plan` alone when it
+    /// names one, within `caps`, read live.
+    async fn find(
+        &self,
+        repository: String,
+        pattern: domain::find::NamePattern,
+        plan: Option<domain::PlanId>,
+        caps: domain::find::SearchCaps,
+    ) -> Result<FindDto, ErrorDto>;
 
     /// One page of the history, newest first, as the API pages it: of
     /// `plan` alone when it names one, after the operation `after`, at most
@@ -498,6 +532,9 @@ impl Server {
             ToolName::ListPlans => answered(self.list_plans(given).await),
             ToolName::ListRepositories => answered(self.list_repositories(given).await),
             ToolName::ListSnapshots => answered(self.list_snapshots(given).await),
+            tool @ (ToolName::ListSnapshotFolder | ToolName::FindInSnapshots) => {
+                self.snapshot_contents(tool, given).await
+            }
             ToolName::ListOperations => answered(self.list_operations(given).await),
             ToolName::GetOperation => answered(self.get_operation(given).await),
             ToolName::RunPlan => answered(self.run_plan(given).await),
@@ -586,6 +623,39 @@ impl Server {
             arguments.limit,
         )?;
         Ok(SnapshotsPage { snapshots, next })
+    }
+
+    /// Runs one of the tools that show the file and folder names inside
+    /// snapshots: the one place such a call passes through, where a setting
+    /// that lets a person withhold those names from agents would refuse it.
+    async fn snapshot_contents(&self, tool: ToolName, given: Option<JsonObject>) -> Answer {
+        match tool {
+            ToolName::ListSnapshotFolder => answered(self.list_snapshot_folder(given).await),
+            ToolName::FindInSnapshots => answered(self.find_in_snapshots(given).await),
+            other => Answer::Unwritten(format!("no tool is named {:?}", other.name())),
+        }
+    }
+
+    async fn list_snapshot_folder(&self, given: Option<JsonObject>) -> Result<FolderDto, ErrorDto> {
+        let arguments: FolderArguments = read(given)?;
+        let (snapshot, folder) = folder_of(&arguments)?;
+        self.backend
+            .folder(
+                arguments.repository,
+                snapshot,
+                folder,
+                arguments.from.unwrap_or(0),
+                page_length(arguments.limit),
+            )
+            .await
+    }
+
+    async fn find_in_snapshots(&self, given: Option<JsonObject>) -> Result<FindDto, ErrorDto> {
+        let arguments: FindArguments = read(given)?;
+        let search = Search::try_from(arguments)?;
+        self.backend
+            .find(search.repository, search.pattern, search.plan, search.caps)
+            .await
     }
 
     async fn list_operations(
@@ -915,6 +985,29 @@ fn tools() -> Vec<Tool> {
         )
         .with_title("List snapshots")
         .with_raw_output_schema(output_schema::<SnapshotsPage>())
+        .with_annotations(read_only()),
+        Tool::new(
+            LIST_SNAPSHOT_FOLDER,
+            "One folder of a snapshot, a page at a time, read from the repository: each \
+             entry's name, whether it is a folder, a file, a link or something else, a file's \
+             size and when it was last modified, with how many entries the folder holds. \
+             Restoring and downloading are done by the person, in the web UI.",
+            input_schema::<FolderArguments>(),
+        )
+        .with_title("List snapshot folder")
+        .with_raw_output_schema(output_schema::<FolderDto>())
+        .with_annotations(read_only()),
+        Tool::new(
+            FIND_IN_SNAPSHOTS,
+            "Finds files and folders by name across a repository's newest snapshots, or one \
+             plan's: each match's path, and the snapshots that hold it with its size and when \
+             it was last modified there. Searches at most 100 snapshots for at most 15 \
+             seconds, returns at most 500 matches, and says which cap cut it short. \
+             Restoring and downloading are done by the person, in the web UI.",
+            input_schema::<FindArguments>(),
+        )
+        .with_title("Find in snapshots")
+        .with_raw_output_schema(output_schema::<FindDto>())
         .with_annotations(read_only()),
         Tool::new(
             LIST_OPERATIONS,

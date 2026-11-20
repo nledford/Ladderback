@@ -261,6 +261,7 @@ async fn archive_unpacks(agent: &mut Agent, top: String, original: String) {
 }
 
 #[given(expr = "the plan's source holds the file {string} reading {string}")]
+#[when(expr = "the plan's source holds the file {string} reading {string}")]
 fn source_holds_file(agent: &mut Agent, name: String, content: String) {
     let source = agent.backup.source.clone().expect("a plan source");
     fs::write(source.join(name), content).expect("the file is written");

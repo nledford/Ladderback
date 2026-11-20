@@ -17,6 +17,7 @@ pub mod access;
 pub mod browse;
 pub mod daemon_log;
 pub mod execution;
+pub mod find;
 pub mod fleet;
 mod ids;
 pub mod maintenance;

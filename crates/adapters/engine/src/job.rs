@@ -118,6 +118,9 @@ pub enum JobKind {
     /// Reads one page of one folder of a snapshot. A read, never an
     /// operation.
     Browse(BrowseJobSpec),
+    /// Finds entries by name across the repository's snapshots. A read,
+    /// never an operation.
+    Find(FindJobSpec),
     /// Reads the repository's stats: the snapshots, then every index file.
     /// A read, never an operation.
     Stats(RepositorySpec),
@@ -282,6 +285,24 @@ pub struct BrowseJobSpec {
     pub folder: Vec<String>,
     /// The position in the folder the page starts at.
     pub from: u64,
+    /// The most entries the page holds, from 1 to
+    /// [`domain::browse::PAGE_ENTRIES`].
+    pub most: u64,
+}
+
+/// A search of the repository's snapshots for entries by name (§16,
+/// decision 132).
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct FindJobSpec {
+    pub repo: RepositorySpec,
+    /// The name pattern, as written: the worker parses it again.
+    pub pattern: String,
+    /// Only this plan's snapshots, by their first `ladderback-plan:` tag.
+    pub plan: Option<PlanId>,
+    /// The most snapshots it reads, from 1 to [`domain::find::MAX_SNAPSHOTS`].
+    pub snapshots: u32,
+    /// The most matches it returns, from 1 to [`domain::find::MAX_MATCHES`].
+    pub matches: u32,
 }
 
 /// One entry of a snapshot to restore, and where (§10.4).
@@ -490,6 +511,8 @@ pub enum OpResult {
     Probed(ProbeResult),
     /// What a [`JobKind::Browse`] found.
     Folder(FolderResult),
+    /// What a [`JobKind::Find`] found.
+    Found(FindResult),
     /// What a [`JobKind::Stats`] read.
     Stats(StatsResult),
     /// What a [`JobKind::Restore`] wrote.
@@ -551,6 +574,47 @@ pub struct EntryResult {
     /// The name as a person reads it; made visible again as it is read.
     pub display: domain::browse::DisplayName,
     pub kind: domain::browse::EntryKind,
+    pub size: Option<u64>,
+    pub modified: Option<Timestamp>,
+}
+
+/// What a search found: one message, of at most `LISTING_BATCH_BYTES`
+/// serialized, whatever the snapshots hold.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct FindResult {
+    /// The snapshots read to the end, newest first.
+    pub searched: Vec<SearchedResult>,
+    /// How many snapshots it chose from weren't read to the end.
+    pub left_out: u64,
+    pub matches: Vec<MatchResult>,
+    /// The cap that ended the search, if one did.
+    pub stopped: Option<domain::find::SearchStop>,
+}
+
+/// A snapshot a search read.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct SearchedResult {
+    pub snapshot: SnapshotId,
+    pub time: Timestamp,
+}
+
+/// An entry whose name matched, at one path, and each snapshot it is in.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct MatchResult {
+    /// The names that lead from the snapshot's top to the entry, each as
+    /// rustic records it (its escaped form).
+    pub path: Vec<String>,
+    /// The path as a person reads it, its names joined by `/`.
+    pub display: domain::browse::DisplayName,
+    pub kind: domain::browse::EntryKind,
+    /// Newest snapshot first.
+    pub seen: Vec<SeenResult>,
+}
+
+/// One snapshot that holds a match, and the entry as it holds it.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct SeenResult {
+    pub snapshot: SnapshotId,
     pub size: Option<u64>,
     pub modified: Option<Timestamp>,
 }

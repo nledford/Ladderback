@@ -10,7 +10,7 @@ use domain::access::{Password, PasswordFingerprint};
 use super::*;
 use crate::access::tests::{capture_the_log, logged as everything_logged};
 use crate::fakes::{FakeClock, InMemoryAdminPassword, InMemoryApiTokenStore, SeededRandom};
-use crate::ports::{AdminPassword, AdminPasswordError, ApiTokenStore};
+use crate::ports::{AdminPassword, AdminPasswordError, ApiTokenStore, PermissionsSet};
 
 /// The warnings logged since the capture began: what a failed write of a
 /// use says, without the lines that log each token created or revoked.
@@ -105,7 +105,7 @@ impl ApiTokenStore for Meeting {
         &self,
         id: &ApiTokenId,
         permissions: TokenPermissions,
-    ) -> Result<bool, StoreError> {
+    ) -> Result<PermissionsSet, StoreError> {
         self.inner.set_permissions(id, permissions).await
     }
     async fn revoke(&self, id: &ApiTokenId) -> Result<bool, StoreError> {
@@ -247,7 +247,7 @@ impl ApiTokenStore for Broken {
         &self,
         _: &ApiTokenId,
         _: TokenPermissions,
-    ) -> Result<bool, StoreError> {
+    ) -> Result<PermissionsSet, StoreError> {
         Err(broken())
     }
     async fn revoke(&self, _: &ApiTokenId) -> Result<bool, StoreError> {
@@ -339,7 +339,7 @@ impl ApiTokenStore for NoUses {
         &self,
         id: &ApiTokenId,
         permissions: TokenPermissions,
-    ) -> Result<bool, StoreError> {
+    ) -> Result<PermissionsSet, StoreError> {
         self.kept.set_permissions(id, permissions).await
     }
     async fn revoke(&self, id: &ApiTokenId) -> Result<bool, StoreError> {
@@ -472,6 +472,41 @@ async fn listing_the_tokens_changes_nothing_so_is_no_write_that_succeeded() {
     assert_eq!(access.api_tokens().await.unwrap().len(), 1);
     used_a_minute_later(&access, &clock, &token).await;
     assert_eq!(logged(), Vec::new());
+}
+
+#[tokio::test]
+async fn the_permissions_a_token_holds_already_set_again_are_no_write_that_succeeded() {
+    let (clock, _store, access, token) = over_uses_that_cannot_be_written().await;
+    used_a_minute_later(&access, &clock, &token).await;
+    assert_eq!(logged().len(), 1);
+    let current = Password::parse("demo-admin-pass".to_owned()).unwrap();
+    assert_eq!(
+        access
+            .change_api_token_permissions(HOME, &current, &token.token.id, token.token.permissions)
+            .await,
+        Ok(true),
+        "the token is still kept"
+    );
+    assert_eq!(everything_logged(), Vec::new(), "nothing changed");
+    used_a_minute_later(&access, &clock, &token).await;
+    assert_eq!(logged(), Vec::new());
+}
+
+#[tokio::test]
+async fn other_permissions_given_to_a_token_are_a_write_that_succeeded() {
+    let (clock, _store, access, token) = over_uses_that_cannot_be_written().await;
+    used_a_minute_later(&access, &clock, &token).await;
+    assert_eq!(logged().len(), 1);
+    let current = Password::parse("demo-admin-pass".to_owned()).unwrap();
+    assert_eq!(
+        access
+            .change_api_token_permissions(HOME, &current, &token.token.id, with_the_log())
+            .await,
+        Ok(true)
+    );
+    used_a_minute_later(&access, &clock, &token).await;
+    let logged = logged();
+    assert_eq!(logged.len(), 1, "{logged:?}");
 }
 
 #[tokio::test]

@@ -6,12 +6,15 @@ use std::net::{Ipv4Addr, Ipv6Addr};
 use std::time::Duration;
 
 use api::{
-    ErrorCode, ErrorDto, LocationsTestDto, MaintenancePreviewDto, MsgArg, NewProposalDto,
-    OperationDetailDto, OperationSummaryDto, OperationsPageDto, PlanDryRunDto, PlanDto, PlansDto,
-    ProfileExportDto, ProfileImportDto, ProposalDto, RepositoriesDto, SessionDto, SignInStateDto,
-    SnapshotsDto,
+    ErrorCode, ErrorDto, FindDto, FolderDto, LocationsTestDto, MaintenancePreviewDto, MsgArg,
+    NewProposalDto, OperationDetailDto, OperationSummaryDto, OperationsPageDto, PlanDryRunDto,
+    PlanDto, PlansDto, ProfileExportDto, ProfileImportDto, ProposalDto, RepositoriesDto,
+    SessionDto, SignInStateDto, SnapshotsDto,
 };
 use async_trait::async_trait;
+use domain::browse::FolderPath;
+use domain::find::{NamePattern, SearchCaps};
+use domain::{PlanId, SnapshotId};
 use reqwest::header::{AUTHORIZATION, CONTENT_TYPE, HeaderValue};
 use reqwest::{Client, Url, redirect};
 use serde::Deserialize;
@@ -31,8 +34,9 @@ const CONNECT_TIMEOUT: Duration = Duration::from_secs(5);
 
 /// How long one request may take, answer included. Most routes connect
 /// mode calls answer from the daemon's store or memory; a snapshot listing,
-/// a test and a forget preview read the repository, and one that takes
-/// longer is `daemon-unreachable`, which a read can ask again (§4.6).
+/// a folder's page, a search, a test and a forget preview read the
+/// repository, and one that takes longer is `daemon-unreachable`, which a
+/// read can ask again (§4.6). A search gives itself up before this.
 const REQUEST_TIMEOUT: Duration = Duration::from_secs(30);
 
 /// The largest answer read, in bytes: a full history page with every
@@ -425,6 +429,48 @@ impl Backend for Connect {
             return Err(unknown_repository(repository));
         };
         self.get("api/v1/repositories", &[alias, "snapshots"], &[])
+            .await
+    }
+
+    async fn folder(
+        &self,
+        repository: String,
+        snapshot: SnapshotId,
+        folder: FolderPath,
+        from: u64,
+        most: u64,
+    ) -> Result<FolderDto, ErrorDto> {
+        let Some(alias) = segment(&repository) else {
+            return Err(unknown_repository(repository));
+        };
+        let path = folder.to_string();
+        let (from, most) = (from.to_string(), most.to_string());
+        self.get(
+            "api/v1/repositories",
+            &[alias, "snapshots", snapshot.as_str(), "folder"],
+            &[("path", &path), ("from", &from), ("limit", &most)],
+        )
+        .await
+    }
+
+    async fn find(
+        &self,
+        repository: String,
+        pattern: NamePattern,
+        plan: Option<PlanId>,
+        caps: SearchCaps,
+    ) -> Result<FindDto, ErrorDto> {
+        let Some(alias) = segment(&repository) else {
+            return Err(unknown_repository(repository));
+        };
+        let (snapshots, matches) = (caps.snapshots().to_string(), caps.matches().to_string());
+        let mut query = vec![
+            ("pattern", pattern.as_str()),
+            ("snapshots", &snapshots),
+            ("matches", &matches),
+        ];
+        query.extend(plan.as_ref().map(|plan| ("plan", plan.as_str())));
+        self.get("api/v1/repositories", &[alias, "find"], &query)
             .await
     }
 

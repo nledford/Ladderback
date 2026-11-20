@@ -366,6 +366,7 @@ fn is_operation(job: &Job) -> bool {
         | Job::Init(_)
         | Job::Ls(_)
         | Job::Browse(_)
+        | Job::Find(_)
         | Job::Stats(_)
         | Job::PrunePlan(_)
         | Job::RestorePlan(_)
@@ -517,6 +518,7 @@ fn result_dto(result: &EngineResult, record: &OperationRecord) -> Option<api::Op
         | EngineResult::Probed(_)
         | EngineResult::Snapshots(_)
         | EngineResult::Folder(_)
+        | EngineResult::Found(_)
         | EngineResult::Stats(_)
         | EngineResult::Dump(_) => None,
     }

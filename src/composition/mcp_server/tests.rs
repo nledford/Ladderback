@@ -358,8 +358,9 @@ async fn both_backends_refuse_the_snapshots_of_a_repository_alike() {
 }
 
 /// The daemon's catalog, but listing `snapshots` as the repository `demo`'s,
-/// which the parity daemon has no real repository for, and `slow`'s as a
-/// listing that ran out of time.
+/// which the parity daemon has no real repository for, with a folder and a
+/// search of `demo` that name the file `tax-2026.pdf`, and `slow`'s as a
+/// listing or a search that ran out of time.
 struct WithSnapshots {
     catalog: Arc<dyn http_adapter::Catalog>,
     snapshots: Vec<api::SnapshotDto>,
@@ -403,8 +404,63 @@ impl http_adapter::Catalog for WithSnapshots {
         snapshot: domain::SnapshotId,
         folder: domain::browse::FolderPath,
         from: u64,
+        most: u64,
     ) -> Result<api::FolderDto, http_adapter::FolderError> {
-        self.catalog.folder(alias, snapshot, folder, from).await
+        if alias == "demo" {
+            return Ok(names_inside_folder());
+        }
+        self.catalog
+            .folder(alias, snapshot, folder, from, most)
+            .await
+    }
+
+    async fn find(
+        &self,
+        alias: String,
+        pattern: domain::find::NamePattern,
+        plan: Option<domain::PlanId>,
+        caps: domain::find::SearchCaps,
+    ) -> Result<api::FindDto, http_adapter::SnapshotsError> {
+        if alias == "slow" {
+            return Err(http_adapter::SnapshotsError::TimedOut);
+        }
+        if alias == "demo" {
+            return Ok(api::FindDto {
+                pattern: pattern.as_str().to_owned(),
+                searched: vec![api::SearchedDto {
+                    snapshot: format!("{:064x}", 1),
+                    time: "2026-11-19T10:00:00Z".to_owned(),
+                }],
+                matches: names_inside_folder()
+                    .entries
+                    .into_iter()
+                    .map(|entry| api::MatchDto {
+                        path: format!("taxes/{}", entry.name),
+                        display: entry.display,
+                        kind: entry.kind,
+                        seen: Vec::new(),
+                    })
+                    .collect(),
+                ..api::FindDto::default()
+            });
+        }
+        self.catalog.find(alias, pattern, plan, caps).await
+    }
+}
+
+/// The folder `taxes` of `demo`'s snapshot, holding `tax-2026.pdf`.
+fn names_inside_folder() -> api::FolderDto {
+    api::FolderDto {
+        path: "taxes".to_owned(),
+        entries: vec![api::EntryDto {
+            name: "tax-2026.pdf".to_owned(),
+            display: "tax-2026.pdf".to_owned(),
+            kind: api::EntryKindDto::File,
+            size: Some(6),
+            modified: None,
+        }],
+        total: 1,
+        next: None,
     }
 }
 
@@ -494,6 +550,149 @@ async fn both_backends_refuse_a_listing_that_ran_out_of_time_alike() {
         connect.snapshots("slow".to_owned()).await
     );
     assert_eq!(wire_name(refused.code), "repository-read-timed-out");
+}
+
+#[tokio::test]
+async fn both_backends_refuse_a_search_that_ran_out_of_time_alike() {
+    let scratch = tempfile::tempdir().expect("a scratch dir");
+    let daemon = a_daemon(scratch.path()).await;
+    let mut state = daemon.state.clone();
+    state.catalog = Arc::new(WithSnapshots {
+        catalog: Arc::clone(&daemon.state.catalog),
+        snapshots: Vec::new(),
+    });
+    let connect = connected_over(state.clone()).await;
+    let pattern = || domain::find::NamePattern::parse("tax*").expect("a pattern");
+    let caps = domain::find::SearchCaps::clamped(None, None);
+    let refused = InProcess::over(&state)
+        .find("slow".to_owned(), pattern(), None, caps)
+        .await
+        .expect_err("a search that ran out of time is refused");
+    assert_eq!(
+        Err(refused.clone()),
+        connect.find("slow".to_owned(), pattern(), None, caps).await
+    );
+    assert_eq!(wire_name(refused.code), "repository-read-timed-out");
+}
+
+/// An API token with exactly the permissions `rows`, each at its level.
+async fn token_with(
+    access: &app::access::Access,
+    rows: &[domain::access::permissions::Permission],
+) -> String {
+    use domain::access::api_token::{ApiTokenLabel, TokenPermissions};
+    use domain::access::permissions::Permissions;
+    let permissions = rows
+        .iter()
+        .try_fold(Permissions::NONE, |granted, row| {
+            granted.with(*row, Some(row.level()))
+        })
+        .expect("each row at its own level");
+    access
+        .create_api_token(
+            ApiTokenLabel::new("agent".to_owned()).expect("a label"),
+            TokenPermissions::new(permissions).expect("permissions"),
+        )
+        .await
+        .expect("a token")
+        .text
+        .expose()
+        .to_owned()
+}
+
+/// The tools that show the names inside snapshots need the permission
+/// Snapshot contents (§10.5; §16, decisions 127 and 132). In connect mode a
+/// token with Backups alone is refused both, as the daemon refuses their
+/// routes, naming the permission, and gets nothing of the snapshot; with
+/// Snapshot contents it gets what the in-process backend gets.
+#[tokio::test]
+async fn a_token_without_snapshot_contents_is_refused_both_snapshot_tools() {
+    use domain::access::permissions::Permission;
+    let scratch = tempfile::tempdir().expect("a scratch dir");
+    let daemon = a_daemon(scratch.path()).await;
+    let access = Arc::new(app::access::Access::new(
+        Arc::new(app::fakes::InMemoryAdminPassword::with("demo-admin-pass")),
+        Arc::new(app::fakes::SeededRandom::new(7)),
+        Arc::new(platform::SystemClock),
+        Arc::new(app::fakes::InMemoryApiTokenStore::new()),
+        Arc::new(app::fakes::InMemorySessionStore::new()),
+    ));
+    let without = token_with(&access, &[Permission::Backups]).await;
+    let with = token_with(
+        &access,
+        &[Permission::Backups, Permission::SnapshotContents],
+    )
+    .await;
+    let mut state = daemon.state.clone();
+    state.catalog = Arc::new(WithSnapshots {
+        catalog: Arc::clone(&daemon.state.catalog),
+        snapshots: Vec::new(),
+    });
+    let in_process = InProcess::over(&state);
+    state.sign_in = http_adapter::SignIn::On(access);
+    let url = served(state).await;
+    let connect_with = |token: &str| {
+        mcp::Connect::new(url.clone())
+            .expect("a client")
+            .with_token(mcp::ApiToken::parse(token).expect("a token"))
+            .expect("loopback keeps a token private")
+    };
+    let snapshot = || domain::SnapshotId::parse(&format!("{:064x}", 1)).expect("a snapshot ID");
+    let folder = || domain::browse::FolderPath::parse("taxes").expect("a folder");
+    let pattern = || domain::find::NamePattern::parse("tax*").expect("a pattern");
+    let caps = domain::find::SearchCaps::clamped(None, None);
+    let refused = api::ErrorDto::new(
+        api::ErrorCode::ApiTokenPermission,
+        [(
+            "permission",
+            api::MsgArg::Text("snapshot-contents".to_owned()),
+        )],
+        None,
+    );
+
+    let connect = connect_with(&without);
+    assert_eq!(
+        connect
+            .folder("demo".to_owned(), snapshot(), folder(), 0, 100)
+            .await,
+        Err(refused.clone())
+    );
+    assert_eq!(
+        connect.find("demo".to_owned(), pattern(), None, caps).await,
+        Err(refused.clone())
+    );
+    // Nor does a repository the daemon doesn't hold answer otherwise: the
+    // refusal comes before the repository is looked up.
+    assert_eq!(
+        connect
+            .find("nowhere".to_owned(), pattern(), None, caps)
+            .await,
+        Err(refused)
+    );
+
+    let connect = connect_with(&with);
+    let listed = connect
+        .folder("demo".to_owned(), snapshot(), folder(), 0, 100)
+        .await
+        .expect("the folder");
+    assert_eq!(listed, names_inside_folder());
+    assert_eq!(
+        Ok(listed),
+        in_process
+            .folder("demo".to_owned(), snapshot(), folder(), 0, 100)
+            .await
+    );
+    let found = connect
+        .find("demo".to_owned(), pattern(), None, caps)
+        .await
+        .expect("the search");
+    assert_eq!(found.matches.len(), 1, "{found:?}");
+    assert_eq!(
+        Ok(found),
+        in_process
+            .find("demo".to_owned(), pattern(), None, caps)
+            .await
+    );
 }
 
 /// Writes `text` as the file `name` in `folder`, readable by its owner
@@ -1097,6 +1296,26 @@ async fn every_tool(session: &mut Session) -> serde_json::Value {
         ("list_snapshots", json!({"repository": "vault"})),
         ("list_snapshots", json!({"repository": "nowhere"})),
         ("list_snapshots", json!({})),
+        (
+            "list_snapshot_folder",
+            json!({"repository": "vault", "snapshot": "3f".repeat(32)}),
+        ),
+        (
+            "list_snapshot_folder",
+            json!({"repository": "vault", "snapshot": "latest"}),
+        ),
+        (
+            "find_in_snapshots",
+            json!({"repository": "vault", "pattern": "tax*"}),
+        ),
+        (
+            "find_in_snapshots",
+            json!({"repository": "nowhere", "pattern": "tax*"}),
+        ),
+        (
+            "find_in_snapshots",
+            json!({"repository": "vault", "pattern": "a/b"}),
+        ),
         ("list_operations", json!({})),
         ("list_operations", json!({"cursor": "not-a-cursor"})),
         ("get_operation", json!({"operation": failed})),
