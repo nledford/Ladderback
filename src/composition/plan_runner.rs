@@ -356,7 +356,8 @@ impl PlanRunner {
     /// the build the wait ended with, from `waited_config`. The keyring
     /// answers at once now, so nothing waits again. `None` when the plan
     /// now backs up to another repository than the one whose keyring it
-    /// waited for.
+    /// waited for: that is told before the build, so the other
+    /// repository's secrets aren't resolved for a run that won't run.
     async fn rebuilt_after_wait(
         &self,
         waited_config: &domain::planning::AgentConfig,
@@ -369,12 +370,15 @@ impl PlanRunner {
                 StartError::Unavailable { code, args, detail }
             }))
         })?;
-        let built = self.backup_of(&fresh, plan, trigger, None).await?;
         let on = |config: &domain::planning::AgentConfig| {
             config.plan(plan).map(|plan| plan.repository.clone())
         };
-        let same_repository = on(&fresh) == on(waited_config)
-            && built.job.target().repository == waited.job.target().repository;
+        // A deleted plan is left to the build, which refuses it.
+        if on(&fresh).is_some_and(|now| Some(now) != on(waited_config)) {
+            return Ok(None);
+        }
+        let built = self.backup_of(&fresh, plan, trigger, None).await?;
+        let same_repository = built.job.target().repository == waited.job.target().repository;
         Ok(same_repository.then(|| (built, fresh.agent().concurrency)))
     }
 
