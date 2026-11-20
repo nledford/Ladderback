@@ -34,8 +34,7 @@ impl PairingWorld {
                 IpAddr::V4(Ipv4Addr::LOCALHOST)
             },
             beyond_loopback,
-            confirmation: StepUpConfirmation::parse(confirmation.to_owned())
-                .expect("a confirmation"),
+            confirmation: StepUpConfirmation::parse(confirmation.to_owned()).ok(),
         };
         let asked = self.hub().pairing.make_token_asked(ask).await;
         if let Ok(made) = &asked {

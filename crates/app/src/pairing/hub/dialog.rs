@@ -24,9 +24,10 @@ pub struct TokenAsk {
     /// Whether the request came from beyond loopback: its `Host` isn't a
     /// loopback name, or its peer isn't a loopback address.
     pub beyond_loopback: bool,
-    /// The admin password with sign-in on, the hub key's key ID otherwise.
-    /// Never shown (I4).
-    pub confirmation: StepUpConfirmation,
+    /// The admin password with sign-in on, the hub key's key ID otherwise;
+    /// `None` when nothing was typed, or more than any password. Never shown
+    /// (I4).
+    pub confirmation: Option<StepUpConfirmation>,
 }
 
 impl fmt::Debug for TokenAsk {
@@ -82,18 +83,24 @@ impl HubPairing {
 
     /// A token for `ask`, made only once its step-up is confirmed: the
     /// admin password, in the peer's sign-in waits, with sign-in on; with it
-    /// off, the hub key's key ID, and only on loopback. Of the token the hub
-    /// keeps only its pairing key's public half.
+    /// off, the hub key's key ID, and only on loopback. Beyond loopback with
+    /// sign-in off, no confirmation helps, so none is read. Of the token the
+    /// hub keeps only its pairing key's public half.
     pub async fn make_token_asked(&self, ask: TokenAsk) -> Result<MadeToken, TokenAskRefused> {
         if needs_sign_in(self.access.is_some(), ask.beyond_loopback) {
             return Err(TokenAskRefused::NeedsSignIn);
         }
+        // Nothing typed, or more than any password, is no confirmation:
+        // refused as a wrong one, in no sign-in wait.
+        let Some(confirmation) = ask.confirmation else {
+            return Err(TokenAskRefused::StepUpFailed);
+        };
         let keys = self.keys().await?;
         let key_id = KeyId::of_key(keys.key());
         confirm_step_up(
             self.access.as_deref(),
             ask.peer,
-            &ask.confirmation,
+            &confirmation,
             StepUpFor::HubKey(&key_id),
         )
         .await

@@ -94,17 +94,14 @@ async fn make_token(State(state): State<AppState>, request: Request) -> Response
     let Ok(address) = HubAddress::parse(&address) else {
         return crate::refused(StatusCode::BAD_REQUEST, ErrorCode::HubAddressInvalid);
     };
-    // Nothing typed, or more than any password, is no confirmation: refused
-    // as a wrong one, in no sign-in wait.
-    let Ok(confirmation) = StepUpConfirmation::parse(confirmation) else {
-        return crate::refused(StatusCode::FORBIDDEN, ErrorCode::StepUpFailed);
-    };
     let ask = TokenAsk {
         address,
         life: life_minutes.map(|minutes| SignedDuration::from_mins(i64::from(minutes))),
         peer: peer.ip(),
         beyond_loopback: beyond,
-        confirmation,
+        // Checked after the sign-in rule: beyond loopback with sign-in off,
+        // no confirmation helps.
+        confirmation: StepUpConfirmation::parse(confirmation).ok(),
     };
     match pairing.make_token_asked(ask).await {
         Ok(made) => (StatusCode::CREATED, axum::Json(token_dto(&made))).into_response(),
