@@ -507,3 +507,9 @@ cli-hub-status-pending = Connected. The { -hub } holds this machine waiting for 
 # `ladderback hub-status`: the hub proved itself and a person approved this
 # machine there.
 cli-hub-status-approved = Connected. The { -hub } approved this machine.
+
+# `ladderback hub-status`: the hub didn't prove the key this machine pinned
+# at pairing, so the machine sent it no proof. Pairing's own messages say to
+# pair again, which `ladderback pair` refuses while the machine holds a pin.
+# $address (text): the hub address this machine pinned.
+cli-hub-status-hub-unproved = The { -hub } at { $address } didn't prove the key this machine pinned when it paired, so this machine sent it nothing and keeps backing up on its own. Don't pair again. Check the address with whoever runs the { -hub }. If they reset or reinstalled it on purpose, ask them how to move this machine to its new key; if they didn't, someone may be posing as the { -hub }.

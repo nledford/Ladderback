@@ -18,7 +18,7 @@ use domain::fleet::{
     TokenTls, WelcomeRefused, is_loopback,
 };
 use domain::{SignedDuration, Timestamp};
-use l10n::{Localizer, PosixEnv, msg};
+use l10n::{Localizer, MessageId, PosixEnv, msg};
 use platform::data_dir_lock::{DataDirLock, LockError};
 use platform::identity::FileIdentity;
 use platform::random::OsRandom;
@@ -589,6 +589,14 @@ fn connect_failed(failure: &ConnectFailure, address: &str) -> Said {
     }
 }
 
+/// The message `hub-status` says `failure` with in place of its code's, when
+/// the code's advice is pairing's and can't be followed: a hub that didn't
+/// prove the key this machine pinned is no reason to pair again.
+fn connect_message(failure: &ConnectFailure) -> Option<MessageId> {
+    let _ = failure;
+    todo!()
+}
+
 /// An error code, its arguments, and the detail the system gave.
 type Said = (ErrorCode, Vec<(&'static str, MsgArg)>, Option<String>);
 
@@ -746,14 +754,6 @@ mod tests {
                 ErrorCode::GenerationLower,
             ),
             (
-                ConnectFailure::Challenge(ChallengeRefused::HubKeyMismatch),
-                ErrorCode::HubKeyMismatch,
-            ),
-            (
-                ConnectFailure::Challenge(ChallengeRefused::HubProofInvalid),
-                ErrorCode::HubProofInvalid,
-            ),
-            (
                 ConnectFailure::Link(LinkError::PinMismatch),
                 ErrorCode::HubPinMismatch,
             ),
@@ -762,7 +762,9 @@ mod tests {
                 ErrorCode::PlainAddress,
             ),
             (refused("proof-refused"), ErrorCode::ProofRefused),
-            (refused("generation-lower"), ErrorCode::Unknown),
+            (refused("generation-lower"), ErrorCode::HubLinkLost),
+            (refused("hostname-taken"), ErrorCode::HubLinkLost),
+            (refused("token-used"), ErrorCode::HubLinkLost),
         ];
         for (failure, expected) in cases {
             let said = format!("{failure:?}");
@@ -779,6 +781,33 @@ mod tests {
             args,
             vec![("address", MsgArg::Text("https://hub.example".to_owned()))]
         );
+    }
+
+    /// A hub that didn't prove the key this machine pinned gets hub-status's
+    /// own message, never pairing's advice to pair again, which `pair` can't
+    /// follow while the machine holds that pin; every other failure is said
+    /// by its code.
+    #[test]
+    fn a_hub_that_proves_another_key_is_no_reason_to_pair_again() {
+        for refused in [
+            ChallengeRefused::HubKeyMismatch,
+            ChallengeRefused::HubProofInvalid,
+        ] {
+            assert_eq!(
+                connect_message(&ConnectFailure::Challenge(refused)),
+                Some(msg::CLI_HUB_STATUS_HUB_UNPROVED),
+                "{refused:?}"
+            );
+        }
+        for other in [
+            ConnectFailure::Challenge(ChallengeRefused::BindingUnavailable),
+            ConnectFailure::Challenge(ChallengeRefused::NoCommonHandshake),
+            ConnectFailure::Link(LinkError::PinMismatch),
+            ConnectFailure::Unsigned,
+        ] {
+            let said = format!("{other:?}");
+            assert_eq!(connect_message(&other), None, "{said}");
+        }
     }
 
     /// A key file refused for its mode is named by its file and its mode as
