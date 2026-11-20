@@ -22,3 +22,5 @@ A scope opened too much at once: `read` gave the names inside every snapshot and
 Left out of this step: the MCP server sending the header and listing only the tools its permissions open, and the web UI's form of permission rows with the password prompt, which come next under #962. The token form keeps its four checkboxes meanwhile, each giving the rows its scope was migrated to.
 
 **Amended by decision 132** (2026-11-20, #953): Snapshot contents also opens the snapshot search (`GET /api/v1/repositories/{alias}/find`), which names what a folder's page names; Backups alone doesn't.
+
+**Amended by [decision 134](134-an-agent-reads-the-log-a-page-at-a-time.md)** (2026-11-20, #957): the MCP tool `read_log` reads `GET /api/v1/log`, so the row Daemon log opens it too, and an AI agent without a token reads the log only where the `[without-token]` table opens that row.
