@@ -384,7 +384,7 @@ fn in_process(daemon: Daemon, scratch: Option<Scratch>) -> (::mcp::Server, Held)
         lock,
         scratch,
         workers,
-        runs: background.runs(),
+        runs: background.unstarted(),
     };
     (server, held)
 }

@@ -126,14 +126,15 @@ impl RunQueue {
     /// place again, or every one is handed back ([`Self::resumed`]), a run
     /// of the plan started by hand is refused (`BackupQueue::resuming`).
     pub fn resuming(&self, plans: impl IntoIterator<Item = PlanId>) {
-        let _ = plans.into_iter();
-        todo!()
+        let mut state = self.state.lock().unwrap_or_else(PoisonError::into_inner);
+        state.queue.resuming(plans);
     }
 
     /// Every run the queue held from before the start is handed back to it,
     /// or ended (`BackupQueue::resumed`).
     pub fn resumed(&self) {
-        todo!()
+        let mut state = self.state.lock().unwrap_or_else(PoisonError::into_inner);
+        state.queue.resumed();
     }
 
     /// How many backups are running: past their turn, their place kept.

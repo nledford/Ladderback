@@ -3,7 +3,7 @@
 //! plan's overlap policy for a run its schedule starts. Nothing here runs
 //! anything or waits: `app::queue` hands each run its turn as this decides.
 
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 
 use crate::PlanId;
 use crate::planning::{Concurrency, Overlap};
@@ -46,6 +46,9 @@ pub struct BackupQueue {
     waiting: BTreeMap<Ticket, PlanId>,
     /// Held for a restart: no waiting run starts again (decision 94).
     held: bool,
+    /// The plans whose runs from before the start are still to be handed
+    /// back to the queue (decision 73).
+    resuming: BTreeSet<PlanId>,
 }
 
 impl BackupQueue {
@@ -57,6 +60,7 @@ impl BackupQueue {
             running: BTreeMap::new(),
             waiting: BTreeMap::new(),
             held: false,
+            resuming: BTreeSet::new(),
         }
     }
 
@@ -83,9 +87,10 @@ impl BackupQueue {
     /// A run of `plan` started by hand: it waits for its turn behind a run
     /// of the plan that is running, and is refused while one is waiting
     /// ([`RunWaiting`]), whichever way that one came: a schedule, a person,
-    /// or the queue held from before the start.
+    /// or the queue held from before the start, handed back or still to be
+    /// ([`Self::resuming`]).
     pub fn by_hand(&mut self, plan: &PlanId) -> Result<Ticket, RunWaiting> {
-        if self.has_waiting(plan) {
+        if self.has_waiting(plan) || self.resuming.contains(plan) {
             return Err(RunWaiting);
         }
         Ok(self.push(plan))
@@ -98,13 +103,14 @@ impl BackupQueue {
 
     /// A run of `plan` the queue held from before the daemon started: it
     /// waits for its turn whatever else of the plan is running or waiting,
-    /// since the log has it queued already.
+    /// since the log has it queued already. The plan is handed back.
     pub fn push(&mut self, plan: &PlanId) -> Ticket {
         let ticket = Ticket(self.issued);
         // A daemon would have to queue a run every nanosecond for 584 years
         // to wrap it.
         self.issued = self.issued.wrapping_add(1);
         self.waiting.insert(ticket, plan.clone());
+        self.resuming.remove(plan);
         ticket
     }
 
@@ -171,14 +177,13 @@ impl BackupQueue {
     /// handed back every one ([`Self::resumed`]), a run of the plan started
     /// by hand is refused as if that run waited already ([`RunWaiting`]).
     pub fn resuming(&mut self, plans: impl IntoIterator<Item = PlanId>) {
-        let _ = plans.into_iter();
-        todo!()
+        self.resuming.extend(plans);
     }
 
     /// The daemon has handed back, or ended, every run the queue held from
     /// before the start: no plan is refused for one from now on.
     pub fn resumed(&mut self) {
-        todo!()
+        self.resuming.clear();
     }
 
     /// How many backups hold a slot: running, past their turn.

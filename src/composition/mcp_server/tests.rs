@@ -689,6 +689,27 @@ async fn both_backends_refuse_a_run_of_a_plan_whose_backup_from_before_waits_ali
     );
 }
 
+/// A headless or scratch session leaves the backups queued before it in
+/// the log for the next `serve` (decision 73), and never hands them back to
+/// its queue: nothing of `work` waits in it, so a run of `work` isn't
+/// refused for one (decision 75, point 4), and is refused for its password,
+/// which the session can't read, instead.
+#[tokio::test]
+async fn a_session_that_leaves_the_queue_unstarted_refuses_no_run_for_a_backup_queued_before_it() {
+    let scratch = tempfile::tempdir().expect("a scratch dir");
+    let (server, _held) = in_process(a_daemon(scratch.path()).await, None);
+    let mut session = Session::serving(server);
+
+    let answer = session
+        .call("run_plan", serde_json::json!({"plan": "work"}))
+        .await;
+
+    let text = answer.to_string();
+    assert!(refused(&answer), "{text}");
+    assert!(!text.contains("plan-run-waiting"), "{text}");
+    assert!(text.contains("secret-"), "a secret's refusal: {text}");
+}
+
 #[tokio::test]
 async fn both_backends_refuse_to_cancel_what_isnt_a_queued_or_running_backup_alike() {
     let scratch = tempfile::tempdir().expect("a scratch dir");
