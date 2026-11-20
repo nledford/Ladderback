@@ -46,7 +46,12 @@ fn the_lines_are_listed_newest_first_as_recorded(harness: &dyn RecentLogHarness)
     for line in recorded.clone() {
         log.record(line);
     }
-    let mut newest_first = recorded.to_vec();
+    // Numbered as kept, from 1: `read_log` pages by the numbers.
+    let mut newest_first: Vec<LogLine> = recorded
+        .into_iter()
+        .zip(1..)
+        .map(|(line, number)| line.numbered(number))
+        .collect();
     newest_first.reverse();
     assert_eq!(log.newest_first(), newest_first);
 }

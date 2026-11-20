@@ -123,6 +123,7 @@ mod tests {
             level,
             source: "ladderback::config".to_owned(),
             message: message.to_owned(),
+            number: 1,
         }
     }
 
@@ -216,6 +217,7 @@ mod tests {
                 level: LogLevelDto::Error,
                 source: "ladderback::notify".to_owned(),
                 message: "the notification to demo-channel failed".to_owned(),
+                number: 2,
             },
             line(LogLevelDto::Warn, "repository nas: a demo warning"),
             line(LogLevelDto::Info, "i"),
