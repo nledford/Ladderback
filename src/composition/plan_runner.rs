@@ -429,7 +429,7 @@ impl PlanRunner {
                         .await;
                     return;
                 };
-                self.spawn_resumed(operation, built, place, cancel);
+                self.spawn_resumed(operation, *built, place, cancel);
             }
             Waited::Refused(secret) => {
                 self.registry.finish(&id);
@@ -473,7 +473,7 @@ impl PlanRunner {
                     .target()
                     .is_on(built.job.target().repository.as_ref()) =>
             {
-                Waited::Runs(built, limit)
+                Waited::Runs(Box::new(built), limit)
             }
             // The keyring never unlocked within the bound, or another
             // secret of the repository is refused: the queued backup ends
@@ -619,8 +619,9 @@ pub(super) struct BuiltBackup {
 /// recorded of it ([`PlanRunner::resume_parked`]).
 enum Waited {
     /// It runs, built from the configuration as it stands now, under the
-    /// queue's limit it says.
-    Runs(BuiltBackup, domain::planning::Concurrency),
+    /// queue's limit it says. Boxed: a built backup is large beside the
+    /// other answers.
+    Runs(Box<BuiltBackup>, domain::planning::Concurrency),
     /// Refused for a secret of the repository it was queued on: it ends
     /// failed with that refusal.
     Refused(SecretUnbuilt),
