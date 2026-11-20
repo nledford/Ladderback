@@ -195,6 +195,92 @@ fn a_search_that_finds_exactly_its_matches_is_not_cut_short() {
 }
 
 #[test]
+fn a_match_in_many_snapshots_counts_once_against_its_matches() {
+    let trees = Memory::default().with(10, vec![file("taxes.pdf", 7)]);
+    let roots = vec![root(1, 10), root(2, 10), root(3, 10)];
+    let result = find(&trees, roots, "taxes*", 1);
+    assert_eq!(
+        matches(&result),
+        [("taxes.pdf", vec![snapshot(1), snapshot(2), snapshot(3)])]
+    );
+    assert_eq!(result.stopped, None, "one match was all there was");
+    assert_eq!(result.searched.len(), 3);
+}
+
+#[test]
+fn a_file_and_a_folder_at_one_path_are_two_matches() {
+    let trees = Memory::default()
+        .with(10, vec![file("report", 5)])
+        .with(20, vec![folder("report", 21)])
+        .with(21, vec![]);
+    let result = find(&trees, vec![root(1, 10), root(2, 20)], "report", 100);
+    let kinds: Vec<(&str, EntryKind, Vec<SnapshotId>)> = result
+        .matches
+        .iter()
+        .map(|found| {
+            let seen = found.seen.iter().map(|seen| seen.snapshot.clone());
+            (found.display.as_str(), found.kind, seen.collect())
+        })
+        .collect();
+    assert_eq!(
+        kinds,
+        [
+            ("report", EntryKind::File, vec![snapshot(1)]),
+            ("report", EntryKind::Folder, vec![snapshot(2)]),
+        ]
+    );
+}
+
+/// A chain of folders `d` from the tree `from`, `count` deep, whose last
+/// folder holds `deep.txt`.
+fn chain(trees: Memory, from: u32, count: u32) -> Memory {
+    (from..from + count)
+        .fold(trees, |trees, at| trees.with(at, vec![folder("d", at + 1)]))
+        .with(from + count, vec![file("deep.txt", 1)])
+}
+
+#[test]
+fn a_folder_met_again_deeper_is_searched_only_as_deep_as_a_path_reaches() {
+    // The newer snapshot holds `a/d/…/d/deep.txt` with as many names as a
+    // path may hold; the older holds the same `a` one folder deeper, under
+    // `b`, which puts `deep.txt` past the deepest folder a path names.
+    let depth = u32::try_from(MAX_FOLDER_DEPTH).expect("a small depth");
+    let trees = chain(Memory::default(), 1000, depth - 2)
+        .with(100, vec![folder("a", 1000)])
+        .with(200, vec![folder("b", 201)])
+        .with(201, vec![folder("a", 1000)]);
+    let result = find(&trees, vec![root(1, 100), root(2, 200)], "deep.txt", 100);
+    let found: Vec<(usize, Vec<SnapshotId>)> = result
+        .matches
+        .iter()
+        .map(|found| {
+            let seen = found.seen.iter().map(|seen| seen.snapshot.clone());
+            (found.path.len(), seen.collect())
+        })
+        .collect();
+    assert_eq!(found, [(MAX_FOLDER_DEPTH, vec![snapshot(1)])]);
+}
+
+#[test]
+fn a_folder_met_first_too_deep_is_searched_where_it_is_shallower() {
+    let depth = u32::try_from(MAX_FOLDER_DEPTH).expect("a small depth");
+    let trees = chain(Memory::default(), 1000, depth - 2)
+        .with(100, vec![folder("b", 101)])
+        .with(101, vec![folder("a", 1000)])
+        .with(200, vec![folder("a", 1000)]);
+    let result = find(&trees, vec![root(1, 100), root(2, 200)], "deep.txt", 100);
+    let found: Vec<(usize, Vec<SnapshotId>)> = result
+        .matches
+        .iter()
+        .map(|found| {
+            let seen = found.seen.iter().map(|seen| seen.snapshot.clone());
+            (found.path.len(), seen.collect())
+        })
+        .collect();
+    assert_eq!(found, [(MAX_FOLDER_DEPTH, vec![snapshot(2)])]);
+}
+
+#[test]
 fn a_search_of_fewer_snapshots_than_there_are_says_so() {
     let trees = two_snapshots();
     let result = search(&trees, vec![root(1, 10)], 1, &pattern("*.pdf"), 100, || {

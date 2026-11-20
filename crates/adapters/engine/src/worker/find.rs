@@ -12,7 +12,7 @@ use std::rc::Rc;
 
 use domain::SnapshotId;
 use domain::Timestamp;
-use domain::browse::{DisplayName, MAX_ENTRY_NAME_BYTES, MAX_FOLDER_DEPTH};
+use domain::browse::{DisplayName, EntryKind, MAX_ENTRY_NAME_BYTES, MAX_FOLDER_DEPTH};
 use domain::find::{NamePattern, SearchStop};
 
 use super::convert::JobError;
@@ -52,10 +52,10 @@ pub(crate) struct Root<K> {
 }
 
 /// Searches the tree of each of `roots`, newest first, for entries whose
-/// names match `pattern`, returning at most `most` of them (an entry in one
-/// snapshot is one). `left_out` snapshots were chosen not to be searched;
-/// `out_of_time` says when the search's time is up, asked before each tree
-/// is read.
+/// names match `pattern`, returning at most `most` of them (an entry at one
+/// path is one, however many snapshots hold it). `left_out` snapshots were
+/// chosen not to be searched; `out_of_time` says when the search's time is
+/// up, asked before each tree is read.
 pub(crate) fn search<T: Trees>(
     trees: &T,
     roots: Vec<Root<T::Id>>,
@@ -122,12 +122,17 @@ enum Hit<K> {
     Inside { key: String, shown: String, tree: K },
 }
 
+/// Every tree read to its end, by its ID and the depth it was read at (a
+/// walk stops at the deepest folder a path names, so a tree read at one
+/// depth may hold more or less than at another), and what it held that
+/// matched.
+type Read<K> = HashMap<(K, usize), Rc<Vec<Hit<K>>>>;
+
 struct Search<'a, T: Trees, F> {
     trees: &'a T,
     pattern: &'a NamePattern,
     out_of_time: F,
-    /// Every tree read to its end, and what it held that matched.
-    read: HashMap<T::Id, Rc<Vec<Hit<T::Id>>>>,
+    read: Read<T::Id>,
     found: Found,
 }
 
@@ -140,7 +145,8 @@ impl<T: Trees, F: FnMut() -> bool> Search<'_, T, F> {
         path: &mut Vec<(String, String)>,
         snapshot: &SnapshotId,
     ) -> Result<bool, Halt> {
-        if let Some(hits) = self.read.get(tree).map(Rc::clone) {
+        let memo = (tree.clone(), path.len());
+        if let Some(hits) = self.read.get(&memo).map(Rc::clone) {
             self.replay(&hits, path, snapshot)?;
             return Ok(!hits.is_empty());
         }
@@ -177,7 +183,7 @@ impl<T: Trees, F: FnMut() -> bool> Search<'_, T, F> {
             path.pop();
         }
         let held = !hits.is_empty();
-        self.read.insert(tree.clone(), Rc::new(hits));
+        self.read.insert(memo, Rc::new(hits));
         Ok(held)
     }
 
@@ -210,54 +216,50 @@ impl<T: Trees, F: FnMut() -> bool> Search<'_, T, F> {
 #[derive(Default)]
 struct Found {
     matches: Vec<MatchResult>,
-    /// Each match's place in `matches`, by its path's keys.
-    at: HashMap<Vec<String>, usize>,
-    /// How many entries in snapshots the matches hold.
-    count: u32,
+    /// Each match's place in `matches`, by its path's keys and its kind: a
+    /// file in one snapshot and a folder in another are two matches.
+    at: HashMap<(Vec<String>, EntryKind), usize>,
     most: u32,
     bytes: usize,
 }
 
 impl Found {
     /// Adds `entry`, at `path` (its own name last), as the snapshot
-    /// `snapshot` holds it; or stops the search when that is one more than
-    /// it may return.
+    /// `snapshot` holds it; or stops the search when it is a match one more
+    /// than it may return.
     fn add(
         &mut self,
         path: &[(String, String)],
         entry: &EntryResult,
         snapshot: &SnapshotId,
     ) -> Result<(), SearchStop> {
-        if self.count >= self.most {
-            return Err(SearchStop::Matches);
-        }
         let seen = SeenResult {
             snapshot: snapshot.clone(),
             size: entry.size,
             modified: entry.modified,
         };
         let keys: Vec<String> = path.iter().map(|(key, _)| key.clone()).collect();
-        match self.at.get(&keys) {
-            Some(&at) => {
-                self.spend(&seen)?;
-                if let Some(found) = self.matches.get_mut(at) {
-                    found.seen.push(seen);
-                }
+        let key = (keys, entry.kind);
+        if let Some(&at) = self.at.get(&key) {
+            self.spend(&seen)?;
+            if let Some(found) = self.matches.get_mut(at) {
+                found.seen.push(seen);
             }
-            None => {
-                let shown: Vec<&str> = path.iter().map(|(_, shown)| shown.as_str()).collect();
-                let found = MatchResult {
-                    path: keys.clone(),
-                    display: DisplayName::new(&shown.join("/")),
-                    kind: entry.kind,
-                    seen: vec![seen],
-                };
-                self.spend(&found)?;
-                self.at.insert(keys, self.matches.len());
-                self.matches.push(found);
-            }
+            return Ok(());
         }
-        self.count = self.count.saturating_add(1);
+        if self.matches.len() >= usize::try_from(self.most).unwrap_or(usize::MAX) {
+            return Err(SearchStop::Matches);
+        }
+        let shown: Vec<&str> = path.iter().map(|(_, shown)| shown.as_str()).collect();
+        let found = MatchResult {
+            path: key.0.clone(),
+            display: DisplayName::new(&shown.join("/")),
+            kind: entry.kind,
+            seen: vec![seen],
+        };
+        self.spend(&found)?;
+        self.at.insert(key, self.matches.len());
+        self.matches.push(found);
         Ok(())
     }
 

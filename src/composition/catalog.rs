@@ -295,7 +295,15 @@ impl Catalog for ConfigCatalog {
         .await;
         let page = match read {
             Ok(page) => page,
-            Err(error) => return Err(folder_refusal(&alias, &repository.settings, error).await),
+            Err(error) => {
+                return Err(folder_refusal(
+                    "a folder of a snapshot",
+                    &alias,
+                    &repository.settings,
+                    error,
+                )
+                .await);
+            }
         };
         Ok(api::FolderDto {
             path,
@@ -352,7 +360,7 @@ pub(super) async fn search_refusal(
     settings: &RepositorySettings,
     error: BrowseError,
 ) -> SnapshotsError {
-    match folder_refusal(alias, settings, error).await {
+    match folder_refusal("a search of the snapshots", alias, settings, error).await {
         FolderError::Repository(error) => error,
         // A search names no snapshot or folder, so it is never told either.
         FolderError::SnapshotUnknown | FolderError::FolderUnknown => SnapshotsError::Unavailable {
@@ -470,13 +478,14 @@ fn catalog_refusal(error: ConfigError) -> CatalogError {
     })
 }
 
-/// The refusal of a read of a folder of a snapshot of `alias`, configured
-/// with `settings`, that failed with `error`. A secret: its code and the
-/// words a command or the platform gave, masked of every secret of the
-/// repository, in the log as in the answer (I4). A read that ran out of
-/// time by its own code; the rest by its code alone, its masked words in
-/// the log.
+/// The refusal of `what` (a read of a folder of a snapshot, or a search of
+/// the snapshots) of `alias`, configured with `settings`, that failed with
+/// `error`. A secret: its code and the words a command or the platform
+/// gave, masked of every secret of the repository, in the log as in the
+/// answer (I4). A read that ran out of time by its own code; the rest by
+/// its code alone, its masked words in the log.
 pub(super) async fn folder_refusal(
+    what: &str,
     alias: &RepositoryAlias,
     settings: &RepositorySettings,
     error: BrowseError,
@@ -484,7 +493,7 @@ pub(super) async fn folder_refusal(
     use app::maintenance::MaintenanceError;
     let refused = |refusal: SecretRefusal| {
         log::warn!(
-            "a folder of a snapshot of {} could not be read: {:?}{}",
+            "{what} of {} could not be read: {:?}{}",
             alias.as_str(),
             refusal.code,
             refusal
@@ -505,29 +514,20 @@ pub(super) async fn folder_refusal(
             limit,
         })) => refused(too_much_to_mask(field, limit)),
         BrowseError::Read(MaintenanceError::TimedOut) => {
-            log::warn!(
-                "a folder of a snapshot of {} could not be read in time",
-                alias.as_str()
-            );
+            log::warn!("{what} of {} could not be read in time", alias.as_str());
             FolderError::Repository(SnapshotsError::TimedOut)
         }
         error => {
             if let BrowseError::Read(MaintenanceError::Failed(reason)) = &error
                 && let Some(told) = told_failure(reason)
             {
-                log::warn!(
-                    "a folder of a snapshot of {} could not be read: {told:?}",
-                    alias.as_str()
-                );
+                log::warn!("{what} of {} could not be read: {told:?}", alias.as_str());
                 return FolderError::Repository(told);
             }
             let said = failure_redactor(settings, &SystemSecrets::default())
                 .await
                 .redact(&format!("{error:?}"));
-            log::warn!(
-                "a folder of a snapshot of {} could not be read: {said}",
-                alias.as_str()
-            );
+            log::warn!("{what} of {} could not be read: {said}", alias.as_str());
             FolderError::Repository(SnapshotsError::Unavailable {
                 code: ErrorCode::EngineUnavailable,
                 args: Vec::new(),

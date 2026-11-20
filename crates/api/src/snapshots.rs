@@ -361,7 +361,7 @@ pub enum SearchStopDto {
     /// The repository has more snapshots than it was told to read.
     Snapshots,
     /// It found as many matches as it was told to return, and there were
-    /// more.
+    /// more; or the matches reached the most one answer carries.
     Matches,
     /// Its time ran out.
     Time,

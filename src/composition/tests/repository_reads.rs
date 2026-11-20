@@ -508,6 +508,7 @@ async fn a_listing_that_ran_out_of_time_is_refused_as_a_read_that_timed_out() {
 async fn a_folder_read_that_ran_out_of_time_is_refused_as_a_read_that_timed_out() {
     let alias = RepositoryAlias::parse("slow").expect("an alias");
     let refused = folder_refusal(
+        "a folder of a snapshot",
         &alias,
         &timed_out_settings(),
         BrowseError::Read(app::maintenance::MaintenanceError::TimedOut),

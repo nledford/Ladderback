@@ -74,8 +74,8 @@ impl NamePattern {
     }
 
     /// Whether `name`, as the file system wrote it, matches the whole
-    /// pattern, whatever its case. Linear in the name for a pattern of one
-    /// `*`, and never worse than the name's length times the pattern's.
+    /// pattern, whatever its case. Never worse than the name's length times
+    /// the pattern's: only the last `*` seen is ever made to take more.
     pub fn matches(&self, name: &str) -> bool {
         let name: Vec<char> = name.to_lowercase().chars().collect();
         let pattern = self.folded.as_slice();
@@ -140,7 +140,8 @@ impl SearchCaps {
         self.snapshots
     }
 
-    /// The most matches the search returns: an entry in one snapshot is one.
+    /// The most matches the search returns: an entry at one path is one,
+    /// however many snapshots hold it.
     pub fn matches(self) -> u32 {
         self.matches
     }
@@ -206,7 +207,9 @@ pub fn choose(mut listed: Vec<Listed>, plan: Option<&PlanId>, most: u32) -> Chos
 pub enum SearchStop {
     /// The snapshots to read: more were there than it was told to read.
     Snapshots,
-    /// The matches to return: it found as many as it was told to return.
+    /// The matches to return: it found as many as it was told to return
+    /// and there were more, or the matches reached the most one answer
+    /// carries.
     Matches,
     /// Its time: [`SEARCH_SECONDS`] passed.
     Time,
