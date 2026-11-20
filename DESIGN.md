@@ -332,7 +332,7 @@ Every shared component takes the same choices, defined once in `crates/web/src/v
 
 ### Progress Bar
 
-A Ledger Gray pill track, half its size on the shared scale thick (Small, the default, 0.5em; up to 1.5em at Extra large), filling the room it is given up to 16rem, with a pill fill in its tone (Ladder Blue, Primary, by default) that eases to each report (0.4 s, sliding in from the track's start, its round end leading, never resizing) and jumps under reduced motion. The tone colors the fill only; the track stays Ledger Gray and the words keep the text's color. The fill is the tone's own color, never a status pair: a pair is for words on a tinted fill, and the fill carries none, so each tone's fill keeps 3:1 against the track and the page instead. The current step sits on its own line above it.
+A Ledger Gray pill track, half its size on the shared scale thick (Small, the default, 0.5em; up to 1.5em at Extra large), filling the room it is given up to 16rem, with a pill fill in its tone (Ladder Blue, Primary, by default) that eases to each report (0.4 s, sliding in from the track's start, its round end leading, never resizing) and jumps under reduced motion. The tone colors the fill only; the track stays Ledger Gray and the words keep the text's color. The fill is the tone's own color, never a status pair: a pair is for words on a tinted fill, and the fill carries none, so each tone's fill keeps 3:1 against the track and the page instead. The current step sits on its own line above it. A bar with no total shows no fill; below its words it says when its run last reported, an exact time on the daemon's clock that changes only with a new report, never "a minute ago".
 
 ### Banners
 
@@ -347,7 +347,7 @@ A Ledger Gray pill track, half its size on the shared scale thick (Small, the de
 ### Spinner
 
 - **Use:** a wait for something the page can't show yet. Where a spinner would start by itself beside content the reader can use and might turn past 5 s, the page shows the progress bar or words instead, since a spinner has no way to stop it (2.2.2); one the reader started, one over within 5 s, or one that is all the page shows while nothing can be used yet is fine. The technical design (§4.5) has the rule in full.
-- **Shape:** a faint full-circle track and a quarter arc with round ends, the arc turning steadily once in 0.9 s; under reduced motion it stands still, and its label carries the meaning.
+- **Shape:** a faint full-circle track and a quarter arc with round ends, the arc turning steadily once in 0.9 s; under reduced motion it is three still dots in a row instead, since a still arc reads as an amount, and its label carries the meaning.
 - **Size:** the shared sizes, in `em`, never pixels: Small (1em, as tall as the text, the default, inside a button or a line of text), Medium (1.5em), Large (2em) and XLarge (3em).
 - **Tone:** any of the shared tones, Primary (Ladder Blue) by default, Inherit (the text's color) inside a button or a toast. The tone colors the drawing only; the label keeps the text's color, so a Success, Warning or Error spinner still says in words what it waits for. The track is the arc's color at a quarter of its strength. Under forced colors the arc is the text's own color, as every tone is, and the track `GrayText`.
 - **Label:** always one, saying what the page waits for. Beside the spinner by default, where the drawing is hidden from a screen reader; where there's no room, the drawing is an image named by it.
