@@ -181,3 +181,18 @@ Feature: The toast
     Then the toast holds its icon, its words and its Dismiss button inside its edge
     And the page doesn't scroll sideways
     And no text is clipped
+
+  # A toast's slot keeps the room a longer toast took, so nothing after it
+  # moves; a shorter toast in it is drawn round its own words, its edge
+  # never stretched over that room.
+  Scenario: A shorter toast after a longer one is drawn round its own words, in the room the longer one kept
+    Given a viewport of 320 by 256 pixels
+    And the reader sets the text size to 200 percent
+    When I open the component gallery
+    And I skip to the content
+    And I press Tab until focus is on the button "Back up the demo plan"
+    And I press Enter
+    And I press Shift+Tab until focus is on the button "Save the demo settings"
+    And I press Enter
+    Then the toast reads "Settings saved." after its icon "Success"
+    And the toast's edge closes round its own words, inside a taller room

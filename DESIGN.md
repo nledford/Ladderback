@@ -375,6 +375,7 @@ A Ledger Gray pill track, half its size on the shared scale thick (Small, the de
 ### Toasts
 
 - **The component:** `Toast`, the answer to what the reader just did, in the page's flow where its page puts it, never fixed over the page: an icon, the words, then a Dismiss button. One at a time; a new one takes the place of the one shown.
+- **Room:** its slot keeps room for one line of toast from the page's first paint and never gives back what a toast took while the page is open, so a toast coming, going or dismissed never moves what follows it. An empty slot is the space a toast takes, no more. Only a toast taller than every one before it (words that wrap: a long sentence at Full page width, or a small screen with larger text) moves what follows, once.
 - **Look:** a status tone's toast lies on its status pair, its words, icon and Dismiss button in the pair's words; information on Ledger Gray in Graphite Ink. Edged 1px all round in its tone, with the small corner. Flat: its fill and edge set it off, never a lift.
 - **Tone:** Primary (information, the default), Success, Warning and Error, with the alert's icons, each named by its tone in words for a screen reader. No Secondary and no Inherit.
 - **Time:** information and success go by themselves after 6 s, held while the pointer rests on it or focus is in it; a warning or a failure stays until dismissed. A failure also stays on its page.

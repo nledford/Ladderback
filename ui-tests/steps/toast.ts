@@ -268,8 +268,64 @@ Then("the toast holds its icon, its words and its Dismiss button inside its edge
   for (const part of drawn.parts) assert.ok(part.inside, `${part.selector} lies outside the toast`);
 });
 
+// A toast lies at the top of its slot, as tall as its own content: its edge
+// ends its padding below the lowest of its parts, while the slot, which
+// keeps the room of a longer toast, is taller.
+Then("the toast's edge closes round its own words, inside a taller room", async function (this: BrowserWorld) {
+  const found = await toast(this.page);
+  const drawn = await found.evaluate((element) => {
+    const outer = element.getBoundingClientRect();
+    const style = getComputedStyle(element);
+    const lowest = Math.max(
+      ...[".toast-icon", ".toast-words", ".toast-dismiss"].map(
+        (selector) => element.querySelector(selector)?.getBoundingClientRect().bottom ?? Number.NaN,
+      ),
+    );
+    return {
+      bottom: outer.bottom,
+      closes: lowest + Number.parseFloat(style.paddingBlockEnd) + Number.parseFloat(style.borderBlockEndWidth),
+      room: element.parentElement?.getBoundingClientRect().height ?? Number.NaN,
+      tall: outer.height,
+    };
+  });
+  assert.ok(near(drawn.bottom, drawn.closes), `the toast's edge ends at ${drawn.bottom}, not round its content at ${drawn.closes}`);
+  assert.ok(drawn.room > drawn.tall + 1, `the toast's room is ${drawn.room} tall, no taller than the toast's ${drawn.tall}`);
+});
+
 // A toast is transient: the step waits until it has gone.
 // Scoped to main: the polite live region carries the same text.
 When("the toast {string} is gone", async function (this: BrowserWorld, text: string) {
   await expect(this.page.locator("main").getByText(text)).toBeHidden();
+});
+
+// A toast keeps its room on the page (§4.5), so its coming and going moves
+// nothing after it: the first row's button of a table, found by the table's
+// name and the rows' role, is noted where it lies on the page (scrolling
+// apart, which is the reader's), and compared later within half a pixel.
+const notedRowButtons = new WeakMap<BrowserWorld, Map<string, { x: number; y: number }>>();
+
+async function firstRowButtonLies(world: BrowserWorld, table: string): Promise<{ x: number; y: number }> {
+  // Row 0 is the column headers', whose buttons sort.
+  const button = world.page.getByRole("table", { name: table, exact: true }).getByRole("row").nth(1).getByRole("button").first();
+  await expect(button).toBeVisible();
+  return button.evaluate((element) => {
+    const rect = element.getBoundingClientRect();
+    return { x: rect.left + window.scrollX, y: rect.top + window.scrollY };
+  });
+}
+
+When("I note where the first row's button of the table {string} lies", async function (this: BrowserWorld, table: string) {
+  const noted = notedRowButtons.get(this) ?? new Map();
+  noted.set(table, await firstRowButtonLies(this, table));
+  notedRowButtons.set(this, noted);
+});
+
+Then("the first row's button of the table {string} lies where it was", async function (this: BrowserWorld, table: string) {
+  const before = notedRowButtons.get(this)?.get(table);
+  assert.ok(before !== undefined, `where the first row's button of "${table}" lies was never noted`);
+  const now = await firstRowButtonLies(this, table);
+  assert.ok(
+    near(now.x, before.x) && near(now.y, before.y),
+    `the first row's button of "${table}" lay at (${before.x}, ${before.y}), now at (${now.x}, ${now.y})`,
+  );
 });

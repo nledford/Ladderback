@@ -321,6 +321,74 @@ Feature: Each row of the Operations page names its operation and says what it di
     And the polite region keeps reading "Still waiting for Ladderback to say how the run ended."
     And the page has no accessibility violations
 
+  # The page keeps the toast's room above the table from its first paint,
+  # one line of a toast tall, and never gives it back while the page is
+  # open, so a toast coming or going never moves a row's button under the
+  # reader's pointer.
+  Scenario: A toast moves none of the operations table's rows when it comes, when it goes by itself, nor when it is dismissed
+    Given the page's clock can be moved on
+    And the daemon reports a running backup of "demo-home"
+    And the daemon queues each backup the page starts
+    And a viewport of 1280 by 800 pixels
+    When I open the address "/operations"
+    And I skip to the content
+    And I press Tab until focus is on the button "Start backup of demo-home"
+    And I press Enter
+    And the polite region comes to contain "Backup started."
+    And the table "Operations" has 2 rows
+    And I note where the first row's button of the table "Operations" lies
+    And the page's clock stands still until a step moves it on
+    And the page's clock moves on until the page stops waiting for the run's end
+    Then the toast reads "Still waiting for Ladderback to say how the run ended." after its icon "Information"
+    And the first row's button of the table "Operations" lies where it was
+    When the page's clock moves on 7 seconds
+    Then the page shows no toast
+    And the first row's button of the table "Operations" lies where it was
+    When I press Shift+Tab until focus is on the button "Start backup of demo-home"
+    And I press Enter
+    And the table "Operations" has 3 rows
+    And I note where the first row's button of the table "Operations" lies
+    And the page's clock moves on until the page stops waiting for the run's end
+    Then the first row's button of the table "Operations" lies where it was
+    When I press Tab until focus is on the toast's Dismiss button
+    And I press Enter
+    Then the page shows no toast
+    And the first row's button of the table "Operations" lies where it was
+
+  # On a small screen with larger text the toast's words take several lines,
+  # more than the one the page keeps; the first toast moves the table down
+  # once, by those lines, and from then on the page keeps that room.
+  Scenario: On a small screen with larger text, a toast moves none of the operations table's rows when it goes by itself, when it comes again, nor when it is dismissed
+    Given the page's clock can be moved on
+    And the daemon reports a running backup of "demo-home"
+    And the daemon queues each backup the page starts
+    And a viewport of 320 by 256 pixels
+    And the reader sets the text size to 200 percent
+    When I open the address "/operations"
+    And I skip to the content
+    And I press Tab until focus is on the button "Start backup of demo-home"
+    And I press Enter
+    And the polite region comes to contain "Backup started."
+    And the table "Operations" has 2 rows
+    And the page's clock stands still until a step moves it on
+    And the page's clock moves on until the page stops waiting for the run's end
+    Then the toast reads "Still waiting for Ladderback to say how the run ended." after its icon "Information"
+    When I note where the first row's button of the table "Operations" lies
+    And the page's clock moves on 7 seconds
+    Then the page shows no toast
+    And the first row's button of the table "Operations" lies where it was
+    When I press Shift+Tab until focus is on the button "Start backup of demo-home"
+    And I press Enter
+    And the table "Operations" has 3 rows
+    And I note where the first row's button of the table "Operations" lies
+    And the page's clock moves on until the page stops waiting for the run's end
+    Then the first row's button of the table "Operations" lies where it was
+    When I press Tab until focus is on the toast's Dismiss button
+    And I press Enter
+    Then the page shows no toast
+    And the first row's button of the table "Operations" lies where it was
+    And the page doesn't scroll sideways
+
   Scenario: Leaving the Operations page while it waits on a run and on its events stream ends both waits
     Given the daemon reports a running backup of "demo-home"
     And the daemon queues each backup the page starts
