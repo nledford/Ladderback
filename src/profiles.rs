@@ -20,18 +20,22 @@ use std::path::{Path, PathBuf};
 use std::process::ExitCode;
 use std::sync::Arc;
 
-use app::interop::{Consent, ExportProfile, ImportProfile, Imported};
-use app::ports::{ConfigStore, ExportCommands};
+use api::MsgArg;
+use app::interop::{
+    Consent, ExportProfile, ImportError, ImportProfile, Imported, ImportedCommand, Runs,
+};
+use app::ports::{ConfigStore, ExportCommands, ProfileNotice};
 use config_adapter::FileConfigStore;
 use domain::{PlanId, RepositoryAlias};
 use interop::{FileProfileReader, KeyringCommand, RusticProfileWriter};
 use l10n::{Localizer, PosixEnv, msg};
-use platform::{SystemClock, agent_id, dirs};
+use platform::{SystemClock, agent_id, dirs, terminal};
 
 use crate::composition::profile_refusals::{
     Notice, Refusal, config_folder_unknown, export_refusal, import_refusal, plan_unknown,
     profile_notice, repository_alias_invalid, runtime_unavailable,
 };
+use crate::confirm::{Question, confirmed};
 use crate::output::{self, Report, to_stderr, to_stdout, write_json};
 use crate::{finish, say, text};
 
@@ -143,6 +147,9 @@ enum NotImported {
     Runtime(io::Error),
     /// The import was refused, and the configuration is as it was.
     Refused(Refusal),
+    /// The profile runs these commands, which nobody confirmed: nothing was
+    /// saved.
+    Unconfirmed(Vec<ImportedCommand>),
 }
 
 impl NotImported {
@@ -153,6 +160,9 @@ impl NotImported {
             Self::Alias(_) => repository_alias_invalid(),
             Self::Runtime(error) => runtime_unavailable(&error),
             Self::Refused(refusal) => refusal,
+            Self::Unconfirmed(commands) => {
+                import_refusal(ImportError::CommandsUnconfirmed(commands), Path::new(""))
+            }
         }
     }
 
@@ -176,12 +186,24 @@ impl NotImported {
                 &[("detail", text(error))],
             ),
             Self::Refused(refusal) => refuse(localizer, refusal),
+            Self::Unconfirmed(commands) => refuse(
+                localizer,
+                &import_refusal(
+                    ImportError::CommandsUnconfirmed(commands.clone()),
+                    Path::new(""),
+                ),
+            ),
         }
     }
 }
 
-/// Does the import: what it added, or why it saved nothing.
-fn import(file: &Path, repo_name: Option<&str>) -> Result<Imported, NotImported> {
+/// Does the import of the commands `consent` agrees to: what it added, or
+/// why it saved nothing.
+fn import(
+    file: &Path,
+    repo_name: Option<&str>,
+    consent: Consent<'_>,
+) -> Result<Imported, NotImported> {
     let config_dir = dirs::config_dir().ok_or(NotImported::NoConfigDir)?;
     let config_file = config_dir.join("config.toml");
     let alias = repository_alias(file, repo_name).map_err(NotImported::Alias)?;
@@ -195,18 +217,39 @@ fn import(file: &Path, repo_name: Option<&str>) -> Result<Imported, NotImported>
         rustic_variables(std::env::vars_os()),
     );
     let use_case = ImportProfile::new(Arc::new(reader), config, Arc::new(engine::RusticSources));
-    runtime
-        .block_on(use_case.import(file, alias, Consent::Any))
-        .map_err(|error| NotImported::Refused(import_refusal(error, &config_file)))
+    match runtime.block_on(use_case.import(file, alias, consent)) {
+        Ok(imported) => Ok(imported),
+        Err(ImportError::CommandsUnconfirmed(commands)) => Err(NotImported::Unconfirmed(commands)),
+        Err(error) => Err(NotImported::Refused(import_refusal(error, &config_file))),
+    }
 }
 
-/// Says what the import did, in words: its notices on stderr, then what it
-/// added on stdout; or why it saved nothing, on stderr.
+/// Says what the import did, in words: the commands it makes runnable and
+/// its other notices on stderr, then what it added on stdout; or why it
+/// saved nothing, on stderr. Unless `yes`, a profile that runs commands
+/// is imported only once the person, asked at a terminal, agrees to them.
 fn tell_import(
     localizer: &Localizer,
     file: &Path,
-    outcome: Result<Imported, NotImported>,
+    repo_name: Option<&str>,
+    yes: bool,
 ) -> io::Result<ExitCode> {
+    let consent = if yes {
+        Consent::Any
+    } else {
+        Consent::Only(&[])
+    };
+    let mut outcome = import(file, repo_name, consent);
+    let mut listed = false;
+    if let Err(NotImported::Unconfirmed(commands)) = &outcome {
+        let commands = commands.clone();
+        list_commands(localizer, &commands)?;
+        listed = true;
+        if !confirmed(localizer, &IMPORT, terminal::stdin_is_terminal(), false)? {
+            return Ok(ExitCode::FAILURE);
+        }
+        outcome = import(file, repo_name, Consent::Only(&commands));
+    }
     let imported = match outcome {
         Ok(imported) => imported,
         Err(not_imported) => {
@@ -214,8 +257,15 @@ fn tell_import(
             return Ok(ExitCode::FAILURE);
         }
     };
+    if !listed && !imported.commands.is_empty() {
+        list_commands(localizer, &imported.commands)?;
+    }
+    // The commands were listed in full: their notices would only repeat
+    // them.
     for notice in imported.notices {
-        warn(localizer, &profile_notice(notice))?;
+        if !matches!(notice, ProfileNotice::CommandImported { .. }) {
+            warn(localizer, &profile_notice(notice))?;
+        }
     }
     let mut told = localizer
         .message(
@@ -237,6 +287,41 @@ fn tell_import(
     }
     to_stdout(&told)?;
     Ok(ExitCode::SUCCESS)
+}
+
+/// What `import-profile` asks before it makes a profile's commands runnable.
+const IMPORT: Question = Question {
+    ask: msg::CLI_PROFILE_IMPORT_CONFIRM,
+    declined: msg::CLI_PROFILE_IMPORT_NOT_CONFIRMED,
+    no_terminal: msg::CLI_PROFILE_IMPORT_NO_TERMINAL,
+};
+
+/// Lists `commands` on stderr, each in full where the configuration keeps
+/// it: a command's program and arguments, quoted as a shell would need
+/// them, and an option's value as written.
+fn list_commands(localizer: &Localizer, commands: &[ImportedCommand]) -> io::Result<()> {
+    say(
+        localizer,
+        msg::CLI_PROFILE_COMMANDS,
+        &[(
+            "count",
+            MsgArg::Count(u64::try_from(commands.len()).unwrap_or(u64::MAX)),
+        )],
+    )?;
+    for command in commands {
+        let line = match &command.runs {
+            Runs::Command(line) => shell_words::join(
+                std::iter::once(line.program()).chain(line.args().iter().map(String::as_str)),
+            ),
+            Runs::Option(value) => value.clone(),
+        };
+        say(
+            localizer,
+            msg::CLI_PROFILE_COMMAND,
+            &[("key", text(&command.key)), ("command", text(line))],
+        )?;
+    }
+    Ok(())
 }
 
 /// Prints what the import did, or why it saved nothing, as one JSON document
@@ -262,12 +347,25 @@ fn print_json(document: &impl serde::Serialize) -> io::Result<()> {
 
 /// Imports the rustic profile in `file`. The repository is saved under
 /// `repo_name`, or under the profile's file name made into a slug.
-pub(crate) fn import_profile(file: PathBuf, repo_name: Option<String>, report: Report) -> ExitCode {
+pub(crate) fn import_profile(
+    file: PathBuf,
+    repo_name: Option<String>,
+    report: Report,
+    yes: bool,
+) -> ExitCode {
     let localizer = Localizer::new(&PosixEnv::from_process().preferences());
-    let outcome = import(&file, repo_name.as_deref());
     let told = match report {
-        Report::Text => tell_import(&localizer, &file, outcome),
-        Report::Json => document_import(outcome),
+        Report::Text => tell_import(&localizer, &file, repo_name.as_deref(), yes),
+        // A script is never asked: without `yes`, a profile that runs
+        // commands is refused.
+        Report::Json => {
+            let consent = if yes {
+                Consent::Any
+            } else {
+                Consent::Only(&[])
+            };
+            document_import(import(&file, repo_name.as_deref(), consent))
+        }
     };
     finish(&localizer, told)
 }

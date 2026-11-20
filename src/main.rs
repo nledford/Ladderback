@@ -35,6 +35,7 @@ use shutdown::{REQUESTS_BOUND, Step, Stopping, WORKERS_BOUND};
 mod build_info;
 mod check_keyring;
 mod composition;
+mod confirm;
 mod dumps;
 #[cfg(feature = "hub")]
 mod hub;
@@ -101,6 +102,12 @@ enum Command {
         /// added, or the code of the refusal.
         #[arg(long)]
         json: bool,
+        /// Import the commands the profile runs (its hooks, the password's
+        /// command, an option rustic runs as a command) without asking.
+        /// Without it they are listed and confirmed at a terminal, and
+        /// anywhere else nothing is imported.
+        #[arg(long)]
+        yes: bool,
     },
     /// Write a plan as a rustic profile on stdout.
     ExportProfile {
@@ -301,7 +308,8 @@ fn main() -> ExitCode {
             file,
             repo_name,
             json,
-        } => profiles::import_profile(file, repo_name, output::Report::asked(json)),
+            yes,
+        } => profiles::import_profile(file, repo_name, output::Report::asked(json), yes),
         Command::ExportProfile { plan } => profiles::export_profile(plan),
         Command::SetPassword => set_password::set_password(),
         Command::InstallService => service::install_service(),

@@ -177,6 +177,29 @@ cli-profile-imported = imported the repository { $repository } from { $file }
 # $plan (text): the plan's ID.
 cli-profile-added-plan = added the plan { $plan }
 
+# Before the commands a profile runs, each on a line of its own: the import would make them runnable.
+# $count (count): how many commands follow.
+cli-profile-commands = { $count ->
+    [one] The profile runs { $count } command, which the import makes runnable:
+   *[other] The profile runs { $count } commands, which the import makes runnable:
+}
+
+# One command a profile runs, in full.
+# $key (text): where the configuration keeps it, such as hooks.run-before. Keep it as it is.
+# $command (text): the program and its arguments, as they would run.
+cli-profile-command = { $key } runs { $command }
+
+# `import-profile` asks before it makes the commands above runnable. The answer follows on the same line.
+# `[y/N]` is what the person types to answer, and only `y` or `Y` says yes: keep it a string literal.
+cli-profile-import-confirm = Import them? { "[y/N]" }
+
+# The person didn't answer y.
+cli-profile-import-not-confirmed = Not imported: nothing was written.
+
+# Standard input is not a terminal, so nobody can answer the question.
+# `--yes` is typed as it is: keep it a string literal.
+cli-profile-import-no-terminal = No terminal to ask on, so nothing was imported. Read the commands above, then run again with { "--yes" } to import them.
+
 # The name given for the imported repository is not a name the configuration takes.
 # $name (text): the name, as it was given.
 cli-profile-bad-repository-name = { $name } is not a repository name: use lowercase letters, digits and dashes

@@ -28,8 +28,8 @@ use std::path::Path;
 use std::sync::Arc;
 
 use domain::execution::plan_tags::PlanTags;
-use domain::planning::{AgentConfig, Hostname, Plan, RepositoryConfig, Violation};
-use domain::secrets::CommandLine;
+use domain::planning::{AgentConfig, Hooks, Hostname, Plan, RepositoryConfig, Violation};
+use domain::secrets::{CommandLine, SecretRef, is_command_option};
 use domain::{AgentId, PlanId, RepositoryAlias};
 
 use crate::globs::never_matching_globs;
@@ -168,7 +168,6 @@ impl ImportProfile {
         repository: RepositoryAlias,
         consent: Consent<'_>,
     ) -> Result<Imported, ImportError> {
-        let _ = consent;
         let loaded = self.config.load().await.map_err(ImportError::Config)?;
         let profile = self
             .reader
@@ -176,6 +175,14 @@ impl ImportProfile {
             .await
             .map_err(ImportError::Profile)?;
         let (saved, imported) = self.merged(&loaded, profile, repository).await?;
+        // What was agreed to is checked against what this very import would
+        // save, read again after the person answered: a profile edited in
+        // between is refused, naming what it runs now.
+        if let Consent::Only(agreed) = consent
+            && agreed != imported.commands.as_slice()
+        {
+            return Err(ImportError::CommandsUnconfirmed(imported.commands));
+        }
         self.config
             .save(&saved)
             .await
@@ -262,23 +269,48 @@ impl ImportProfile {
             );
         }
 
+        // The global hooks run around every job of the agent: in a
+        // configuration that already has plans or repositories, they would
+        // run around jobs the profile never had, so they are left out (§6.2).
+        let mut commands = Vec::new();
+        let mut hooks = loaded.hooks().clone();
+        if loaded.plans().is_empty() && loaded.repositories().is_empty() {
+            push_hooks(&mut commands, "hooks", &profile.hooks);
+            hooks.run_before.extend(profile.hooks.run_before);
+            hooks.run_after.extend(profile.hooks.run_after);
+            hooks.run_failed.extend(profile.hooks.run_failed);
+            hooks.run_finally.extend(profile.hooks.run_finally);
+        } else if !profile.hooks.is_empty() {
+            notices.push(ProfileNotice::GlobalHooksLeftOut);
+        }
+
+        let mut repositories = loaded.repositories().clone();
+        if kept.is_none() {
+            push_repository(&mut commands, &repository, &profile.repository);
+            repositories.insert(repository.clone(), profile.repository);
+        }
+        for plan in &profile.plans {
+            push_hooks(
+                &mut commands,
+                &format!("plans.{}.hooks", plan.id.as_str()),
+                &plan.hooks,
+            );
+        }
+        notices.extend(
+            commands
+                .iter()
+                .map(|command| ProfileNotice::CommandImported {
+                    key: command.key.clone(),
+                    program: command.runs.program(),
+                }),
+        );
+
         let mut agent = loaded.agent().clone();
         let mut plans = loaded.plans().to_vec();
         let first_imported = plans.len();
         let ids: Vec<PlanId> = profile.plans.iter().map(|plan| plan.id.clone()).collect();
         plans.extend(profile.plans);
         apply_hostname_rule(&mut agent.hostname, &mut plans, first_imported);
-
-        let mut hooks = loaded.hooks().clone();
-        hooks.run_before.extend(profile.hooks.run_before);
-        hooks.run_after.extend(profile.hooks.run_after);
-        hooks.run_failed.extend(profile.hooks.run_failed);
-        hooks.run_finally.extend(profile.hooks.run_finally);
-
-        let mut repositories = loaded.repositories().clone();
-        if kept.is_none() {
-            repositories.insert(repository.clone(), profile.repository);
-        }
 
         let saved = loaded
             .replacing(agent, hooks, repositories, plans)
@@ -297,11 +329,74 @@ impl ImportProfile {
             Imported {
                 repository,
                 plans: ids,
-                commands: Vec::new(),
+                commands,
                 notices,
             },
         ))
     }
+}
+
+impl Runs {
+    /// The program the command starts: for an option, the first word of
+    /// its value as rustic splits it, or the whole value when it can't be
+    /// split.
+    pub fn program(&self) -> String {
+        match self {
+            Self::Command(line) => line.program().to_owned(),
+            Self::Option(value) => CommandLine::parse(value)
+                .map_or_else(|_| value.clone(), |line| line.program().to_owned()),
+        }
+    }
+}
+
+/// Adds the commands of `hooks` to `commands`, each list under `at`.
+fn push_hooks(commands: &mut Vec<ImportedCommand>, at: &str, hooks: &Hooks) {
+    let lists = [
+        ("run-before", &hooks.run_before),
+        ("run-after", &hooks.run_after),
+        ("run-failed", &hooks.run_failed),
+        ("run-finally", &hooks.run_finally),
+    ];
+    for (list, entries) in lists {
+        commands.extend(entries.iter().map(|entry| ImportedCommand {
+            key: format!("{at}.{list}"),
+            runs: Runs::Command(entry.command.clone()),
+        }));
+    }
+}
+
+/// Adds the commands a new repository entry runs to `commands`: its
+/// password's command, the options rustic runs as commands, and its hooks.
+fn push_repository(
+    commands: &mut Vec<ImportedCommand>,
+    alias: &RepositoryAlias,
+    entry: &RepositoryConfig,
+) {
+    let at = format!("repositories.{}", alias.as_str());
+    let settings = &entry.settings;
+    if let SecretRef::Command(line) = &settings.password {
+        commands.push(ImportedCommand {
+            key: format!("{at}.password-command"),
+            runs: Runs::Command(line.clone()),
+        });
+    }
+    let tables = [
+        ("options", &settings.options),
+        ("options-hot", &settings.options_hot),
+        ("options-cold", &settings.options_cold),
+    ];
+    for (table, options) in tables {
+        commands.extend(
+            options
+                .iter()
+                .filter(|(name, _)| is_command_option(name))
+                .map(|(name, value)| ImportedCommand {
+                    key: format!("{at}.{table}.{name}"),
+                    runs: Runs::Option(value.clone()),
+                }),
+        );
+    }
+    push_hooks(commands, &format!("{at}.hooks"), &entry.hooks);
 }
 
 /// The settings of `entry` that `theirs`, a profile's repository at the same
@@ -1375,7 +1470,12 @@ mod tests {
     /// options and hooks: the profile's make nothing runnable.
     #[tokio::test]
     async fn the_commands_of_a_repository_entry_kept_are_not_listed() {
-        let config = holding(vec![("nas", repository())]).await;
+        // The same location, set up otherwise: a password from the
+        // environment, and no hooks.
+        let mut own = running_commands().repository;
+        own.settings.password = SecretRef::Env("DEMO_PASSWORD".to_owned());
+        own.hooks = Hooks::default();
+        let config = holding(vec![("nas", own)]).await;
         let imported = import_with(&config, running_commands(), Consent::Any)
             .await
             .expect("imported");

@@ -412,6 +412,7 @@ releases-adapter.workspace = true
 secrets.workspace = true
 serde.workspace = true
 serde_json.workspace = true
+shell-words.workspace = true
 store.workspace = true
 signing-adapter = { workspace = true, optional = true }
 tls-adapter = { workspace = true, optional = true }
