@@ -564,7 +564,8 @@ pub enum ProbeResult {
     Holds { id: RepositoryId },
     /// The location refused the credentials.
     Refused,
-    /// No repository's `config` is there.
+    /// No repository's `config` is there, and the location's folders list
+    /// as empty or not there. A listing that fails otherwise fails the probe.
     NotARepository,
     /// A repository is there, and the password opens nothing in it.
     PasswordNotAccepted,

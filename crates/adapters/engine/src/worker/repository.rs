@@ -141,6 +141,10 @@ pub(crate) fn open(
 /// [`open`], it removes no leftovers, since nothing has yet said the location
 /// holds the repository the entry means. A location that doesn't answer
 /// fails the probe with what rustic said; the daemon then calls it silent.
+/// So does one whose listing, asked when no `config` is found, fails other
+/// than by a refusal or a 404 from a REST server not run by rclone
+/// (`not_there`): only a location that answered that its folders are
+/// empty or not there holds no repository (#1175).
 pub(crate) fn probe(ctx: &Context, spec: &RepositorySpec) -> Result<ProbeResult, JobError> {
     if let Some(root) = missing_fs_root(spec) {
         return Err(JobError::failed(format!(
@@ -152,13 +156,16 @@ pub(crate) fn probe(ctx: &Context, spec: &RepositorySpec) -> Result<ProbeResult,
     match repository.config_id() {
         Ok(Some(_)) => {}
         // rustic's REST backend reads `config` with a `HEAD` and takes any
-        // failure for "not there", a refusal of the credentials included: a
-        // listing, which fails on a refusal, tells the two apart.
+        // failure for "not there", a refusal of the credentials or a server
+        // error included (rustic-rs/rustic_core#652): a listing, which fails
+        // with the server's status, tells them apart.
         Ok(None) => {
-            return Ok(match repository.infos_files() {
-                Err(error) if refused(&error) => ProbeResult::Refused,
-                Ok(_) | Err(_) => ProbeResult::NotARepository,
-            });
+            return match repository.infos_files() {
+                Ok(_) => Ok(ProbeResult::NotARepository),
+                Err(error) if refused(&error) => Ok(ProbeResult::Refused),
+                Err(error) if not_there(spec, &error) => Ok(ProbeResult::NotARepository),
+                Err(error) => Err(error.into()),
+            };
         }
         Err(error) if refused(&error) => return Ok(ProbeResult::Refused),
         Err(error) => return Err(error.into()),
@@ -298,6 +305,25 @@ fn answer(error: &(dyn std::error::Error + 'static)) -> Option<Option<StatusCode
 /// Whether `status` is a server's refusal of the credentials.
 fn refuses(status: &StatusCode) -> bool {
     matches!(*status, StatusCode::UNAUTHORIZED | StatusCode::FORBIDDEN)
+}
+
+/// Whether a REST server answered that the folder listed isn't there: HTTP
+/// 404, told by the status its client kept. rest-server answers it for a
+/// repository folder that doesn't exist, as rustic's local and OpenDAL
+/// backends list a missing folder as empty. restic reads it so too, but not
+/// from rclone, whose `serve restic` before 1.66 answers 404 when its remote
+/// fails (rclone#7550): nor does this, for a repository with a half on
+/// `rclone:`, since the status doesn't say which half answered.
+fn not_there(spec: &RepositorySpec, error: &RusticError) -> bool {
+    let on_rclone = std::iter::once(spec.repository.as_str())
+        .chain(spec.repo_hot.as_deref())
+        .any(|half| {
+            matches!(
+                location_to_type_and_path(half),
+                Ok((SupportedBackend::Rclone, _))
+            )
+        });
+    !on_rclone && answer(error).flatten() == Some(StatusCode::NOT_FOUND)
 }
 
 /// Each half of the repository on a REST server, the cold one first: which
@@ -850,6 +876,15 @@ mod tests {
     fn server_answering_by(
         status: impl Fn(&str) -> &'static str + Send + 'static,
     ) -> std::net::SocketAddr {
+        server_answering_with(move |request| (status(request), ""))
+    }
+
+    /// An HTTP server on a free local port that answers each request with
+    /// the status and body `respond` gives for its request line. It serves
+    /// until the test process ends.
+    fn server_answering_with(
+        respond: impl Fn(&str) -> (&'static str, &'static str) + Send + 'static,
+    ) -> std::net::SocketAddr {
         use std::io::{BufRead, BufReader, Write};
         let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
         let address = listener.local_addr().unwrap();
@@ -869,10 +904,13 @@ mod tests {
                     line.clear();
                 }
                 let _ = io::copy(&mut io::Read::take(&mut reader, length), &mut io::sink());
-                let status = status(&request);
+                let (status, body) = respond(&request);
                 let _ = (&stream).write_all(
-                    format!("HTTP/1.1 {status}\r\ncontent-length: 0\r\nconnection: close\r\n\r\n")
-                        .as_bytes(),
+                    format!(
+                        "HTTP/1.1 {status}\r\ncontent-length: {}\r\nconnection: close\r\n\r\n{body}",
+                        body.len()
+                    )
+                    .as_bytes(),
                 );
             }
         });
@@ -1142,6 +1180,30 @@ mod tests {
             probed(&spec_at(&forbidding)).ok(),
             Some(ProbeResult::Refused)
         );
+    }
+
+    /// A REST server that takes the credentials and holds no repository:
+    /// rest-server answers the `HEAD` of `config` and the listing of a
+    /// folder that isn't there with 404, and a server whose folders are
+    /// there and empty lists nothing. Either way the location answered, and
+    /// holds no repository (#1175).
+    #[test]
+    fn a_probe_of_a_rest_server_that_holds_no_repository_finds_none() {
+        let missing = server_answering("404 Not Found");
+        let empty = server_answering_with(|request| {
+            if request.starts_with("HEAD ") {
+                ("404 Not Found", "")
+            } else {
+                ("200 OK", "[]")
+            }
+        });
+        for server in [missing, empty] {
+            assert_eq!(
+                probed(&spec_at(&format!("rest:http://{server}/"))).ok(),
+                Some(ProbeResult::NotARepository),
+                "{server}"
+            );
+        }
     }
 
     /// rustic reads a REST server's `HEAD /config` answered with anything
