@@ -425,7 +425,7 @@ fn prune_preview(agent: &Agent) -> &PrunePreview {
 }
 
 #[then(
-    expr = "the preview says the prune would mark {int} packs, delete {int} and bring back {int}, freeing {int} bytes"
+    expr = "the preview says the prune would mark {int} packs, delete {int}, and mark for recovery or bring back {int}, freeing {int} bytes"
 )]
 fn prune_figures(agent: &mut Agent, marked: u64, deleted: u64, recovered: u64, bytes: u64) {
     let prune = prune_preview(agent);

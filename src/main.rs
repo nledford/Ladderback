@@ -149,8 +149,7 @@ enum Command {
     InstallService,
     RemoveService,
     CheckKeyring,
-    /// Serve the Model Context Protocol on standard input and output, for
-    /// AI agents and scripts: their tools read and drive Ladderback.
+    // Its description is the catalog's (`cli-help-mcp`), set in `parse`.
     #[command(
         group(clap::ArgGroup::new("mode").required(true).args(["connect", "headless", "scratch"])),
         subcommand_negates_reqs = true,
@@ -225,7 +224,7 @@ fn says_help(error: &clap::Error) -> bool {
 }
 
 /// `command` with the descriptions the catalog has (`cli-help-*`), in the
-/// reader's language: those of the service commands and `check-keyring`
+/// reader's language: those of the service commands, `check-keyring` and `mcp`
 /// (#299 moves the rest).
 fn with_catalog_help(command: clap::Command) -> clap::Command {
     let localizer = Localizer::new(&PosixEnv::from_process().preferences());
@@ -234,6 +233,7 @@ fn with_catalog_help(command: clap::Command) -> clap::Command {
             "install-service" => msg::CLI_HELP_INSTALL_SERVICE,
             "remove-service" => msg::CLI_HELP_REMOVE_SERVICE,
             "check-keyring" => msg::CLI_HELP_CHECK_KEYRING,
+            "mcp" => msg::CLI_HELP_MCP,
             _ => return subcommand,
         };
         let about = localizer.message(id, &[]).text().to_owned();

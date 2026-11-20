@@ -1563,6 +1563,53 @@ async fn a_default_route_out_of_an_interface_gone_is_passed_over() {
     assert_eq!(only_stale.link().await, Ok(Link::NoRoute));
 }
 
+/// The kernel stores a route's metric as an unsigned 32-bit number, so a
+/// default route at 2^31 or at 2^32 - 1 is read, in either family, and the
+/// lower metric of two still wins (#647). One past that is no metric.
+#[tokio::test]
+async fn a_route_metric_of_2_pow_31_or_more_is_read() {
+    let harness = KernelLinkHarness::new();
+    for metric in [1_u32 << 31, u32::MAX] {
+        let ipv4 = default_route("wlp2s0", metric);
+        let link = harness.machine(&ipv4, None, &[ETH0, WLAN0]);
+        assert_eq!(link.link().await, Ok(Link::WiFi), "IPv4 at {metric}");
+
+        let lower_wins = format!("{}{}", ipv4_default("eth0", metric, CARRIES), {
+            ipv4_default("wlp2s0", 600, CARRIES)
+        });
+        let link = harness.machine(
+            &format!("{ROUTE_HEADER}\n{lower_wins}"),
+            None,
+            &[ETH0, WLAN0],
+        );
+        assert_eq!(link.link().await, Ok(Link::WiFi), "IPv4 at {metric} loses");
+
+        let ipv6 = format!(
+            "{}{}{IPV6_UNREACHABLE}",
+            ipv6_default("wlp2s0", metric, CARRIES),
+            ipv6_default("eth0", 100, CARRIES)
+        );
+        let link = harness.machine(&format!("{ROUTE_HEADER}\n"), Some(&ipv6), &[ETH0, WLAN0]);
+        assert_eq!(link.link().await, Ok(Link::Wired), "IPv6 at {metric} loses");
+        let ipv6 = format!(
+            "{}{IPV6_UNREACHABLE}",
+            ipv6_default("wlp2s0", metric, CARRIES)
+        );
+        let link = harness.machine(&format!("{ROUTE_HEADER}\n"), Some(&ipv6), &[ETH0, WLAN0]);
+        assert_eq!(link.link().await, Ok(Link::WiFi), "IPv6 at {metric}");
+    }
+    let past = format!(
+        "{ROUTE_HEADER}\nwlp2s0\t00000000\t0101A8C0\t0003\t0\t0\t{}\t00000000\t0\t0\t0\n",
+        u64::from(u32::MAX) + 1
+    );
+    let answer = harness.machine(&past, None, &[WLAN0]).link().await;
+    assert_matches!(
+        answer,
+        Err(PlatformError::Unrecognized { .. }),
+        "{answer:?}"
+    );
+}
+
 /// `route -n get default` on a Mac whose default route leaves by `interface`.
 fn route_output(interface: &str) -> String {
     route_flagged(interface, "UP,GATEWAY,DONE,STATIC,PRCLONING,GLOBAL")

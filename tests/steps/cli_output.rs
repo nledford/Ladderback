@@ -281,6 +281,23 @@ fn stderr_never_says(agent: &mut Agent, text: String) {
     );
 }
 
+/// Standard error holds `shown`, as written (the escapes of control
+/// characters, `\u{1b}` and `\r`), and no control character but the break
+/// at the end of each line: text from outside reaches the terminal as text,
+/// never as a sequence the terminal acts on (#809).
+#[then(expr = "standard error writes each control character as its escape, as in {string}")]
+fn stderr_escapes_control_characters(agent: &mut Agent, shown: String) {
+    let stderr = &ran(agent).stderr;
+    assert!(
+        !stderr.chars().any(|c| c.is_control() && c != '\n'),
+        "standard error holds a control character: {stderr:?}"
+    );
+    assert!(
+        stderr.contains(&shown),
+        "standard error {stderr:?} doesn't say {shown:?}"
+    );
+}
+
 #[then("standard output is empty")]
 fn stdout_is_empty(agent: &mut Agent) {
     let stdout = &ran(agent).stdout;

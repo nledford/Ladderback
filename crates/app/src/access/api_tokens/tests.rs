@@ -7,6 +7,7 @@ use domain::access::api_token::{ApiTokenId, ApiTokenLabel, Scope, Scopes};
 use domain::access::{Password, PasswordFingerprint};
 
 use super::*;
+use crate::access::tests::{capture_the_log, logged};
 use crate::fakes::{FakeClock, InMemoryAdminPassword, InMemoryApiTokenStore, SeededRandom};
 use crate::ports::{AdminPassword, AdminPasswordError, ApiTokenStore};
 
@@ -262,46 +263,171 @@ async fn a_store_that_fails_is_unavailable_and_counts_nothing() {
     ));
 }
 
-/// The in-memory store, but its uses can't be written.
-struct NoUses(InMemoryApiTokenStore);
+/// The in-memory store, but its uses can't be written while it is failing.
+#[derive(Default)]
+struct NoUses {
+    kept: InMemoryApiTokenStore,
+    working: std::sync::atomic::AtomicBool,
+}
+
+impl NoUses {
+    fn working(&self, working: bool) {
+        self.working
+            .store(working, std::sync::atomic::Ordering::SeqCst);
+    }
+}
 
 #[async_trait]
 impl ApiTokenStore for NoUses {
     async fn add(&self, token: &ApiToken, at_most: usize) -> Result<Added, StoreError> {
-        self.0.add(token, at_most).await
+        self.kept.add(token, at_most).await
     }
     async fn get(&self, id: &ApiTokenId) -> Result<Option<ApiToken>, StoreError> {
-        self.0.get(id).await
+        self.kept.get(id).await
     }
     async fn all(&self) -> Result<Vec<ApiToken>, StoreError> {
-        self.0.all().await
+        self.kept.all().await
     }
     async fn revoke(&self, id: &ApiTokenId) -> Result<bool, StoreError> {
-        self.0.revoke(id).await
+        if self.working.load(std::sync::atomic::Ordering::SeqCst) {
+            self.kept.revoke(id).await
+        } else {
+            Err(broken())
+        }
     }
     async fn revoke_all_but(&self, password: PasswordFingerprint) -> Result<(), StoreError> {
-        self.0.revoke_all_but(password).await
+        self.kept.revoke_all_but(password).await
     }
-    async fn record_use(&self, _: &ApiTokenId, _: Timestamp) -> Result<(), StoreError> {
-        Err(broken())
+    async fn record_use(&self, id: &ApiTokenId, at: Timestamp) -> Result<(), StoreError> {
+        if self.working.load(std::sync::atomic::Ordering::SeqCst) {
+            self.kept.record_use(id, at).await
+        } else {
+            Err(broken())
+        }
     }
+}
+
+/// An access over a store whose uses can't be written, holding one token;
+/// the capture forgets the lines logged before.
+async fn over_uses_that_cannot_be_written() -> (Arc<FakeClock>, Arc<NoUses>, Access, CreatedApiToken)
+{
+    let clock = clock();
+    let store = Arc::new(NoUses::default());
+    let access = access_over(
+        Arc::new(InMemoryAdminPassword::with("demo-admin-pass")),
+        store.clone(),
+        &clock,
+    );
+    let token = created(&access).await;
+    capture_the_log();
+    (clock, store, access, token)
+}
+
+/// Checks `token` once its use is due to be written again.
+async fn used_a_minute_later(access: &Access, clock: &FakeClock, token: &CreatedApiToken) {
+    clock.advance(domain::access::api_token::LAST_USE_EVERY);
+    access
+        .check_api_token(HOME, Some(&presented(token)))
+        .await
+        .unwrap();
 }
 
 #[tokio::test]
 async fn a_use_that_cannot_be_written_still_lets_the_token_in() {
-    let clock = clock();
-    let access = access_over(
-        Arc::new(InMemoryAdminPassword::with("demo-admin-pass")),
-        Arc::new(NoUses(InMemoryApiTokenStore::new())),
-        &clock,
-    );
-    let token = created(&access).await;
+    let (_clock, _store, access, token) = over_uses_that_cannot_be_written().await;
     let grant = access
         .check_api_token(HOME, Some(&presented(&token)))
         .await
         .unwrap();
     assert_eq!(grant.id, token.token.id);
     assert_eq!(grant.label.as_str(), "nightly-mcp");
+}
+
+#[tokio::test]
+async fn the_first_use_the_store_cannot_write_is_logged_as_a_warning_with_its_code_alone() {
+    let (clock, _store, access, token) = over_uses_that_cannot_be_written().await;
+    used_a_minute_later(&access, &clock, &token).await;
+    let logged = logged();
+    assert_eq!(logged.len(), 1, "{logged:?}");
+    assert!(
+        matches!(logged.first(), Some((log::Level::Warn, line)) if line.contains("store-unavailable")),
+        "{logged:?}"
+    );
+    let shown = format!("{logged:?}");
+    assert!(!shown.contains(token.text.expose()), "{shown}");
+    assert!(!shown.contains("disk I/O error"), "{shown}");
+}
+
+#[tokio::test]
+async fn uses_the_store_keeps_failing_to_write_are_logged_once() {
+    let (clock, _store, access, token) = over_uses_that_cannot_be_written().await;
+    used_a_minute_later(&access, &clock, &token).await;
+    assert_eq!(logged().len(), 1);
+    used_a_minute_later(&access, &clock, &token).await;
+    used_a_minute_later(&access, &clock, &token).await;
+    assert_eq!(logged(), Vec::new());
+}
+
+#[tokio::test]
+async fn uses_that_fail_again_after_one_was_written_are_logged_again() {
+    let (clock, store, access, token) = over_uses_that_cannot_be_written().await;
+    used_a_minute_later(&access, &clock, &token).await;
+    assert_eq!(logged().len(), 1);
+    store.working(true);
+    used_a_minute_later(&access, &clock, &token).await;
+    assert_eq!(logged(), Vec::new());
+    store.working(false);
+    used_a_minute_later(&access, &clock, &token).await;
+    let logged = logged();
+    assert_eq!(logged.len(), 1, "{logged:?}");
+    assert!(matches!(logged.first(), Some((log::Level::Warn, _))));
+}
+
+#[tokio::test]
+async fn a_token_the_store_keeps_is_a_write_that_succeeded() {
+    let (clock, _store, access, token) = over_uses_that_cannot_be_written().await;
+    used_a_minute_later(&access, &clock, &token).await;
+    assert_eq!(logged().len(), 1);
+    let other = created(&access).await;
+    used_a_minute_later(&access, &clock, &other).await;
+    let logged = logged();
+    assert_eq!(logged.len(), 1, "{logged:?}");
+}
+
+#[tokio::test]
+async fn a_token_revoked_is_a_write_that_succeeded() {
+    let (clock, store, access, token) = over_uses_that_cannot_be_written().await;
+    store.working(true);
+    let other = created(&access).await;
+    store.working(false);
+    used_a_minute_later(&access, &clock, &token).await;
+    assert_eq!(logged().len(), 1);
+    store.working(true);
+    assert!(access.revoke_api_token(&other.token.id).await.unwrap());
+    store.working(false);
+    used_a_minute_later(&access, &clock, &token).await;
+    let logged = logged();
+    assert_eq!(logged.len(), 1, "{logged:?}");
+}
+
+#[tokio::test]
+async fn listing_the_tokens_changes_nothing_so_is_no_write_that_succeeded() {
+    let (clock, _store, access, token) = over_uses_that_cannot_be_written().await;
+    used_a_minute_later(&access, &clock, &token).await;
+    assert_eq!(logged().len(), 1);
+    assert_eq!(access.api_tokens().await.unwrap().len(), 1);
+    used_a_minute_later(&access, &clock, &token).await;
+    assert_eq!(logged(), Vec::new());
+}
+
+#[tokio::test]
+async fn a_failure_the_caller_is_told_is_left_to_the_caller() {
+    let (clock, _store, access, token) = over_uses_that_cannot_be_written().await;
+    assert!(access.revoke_api_token(&token.token.id).await.is_err());
+    assert_eq!(logged(), Vec::new(), "the caller says the revoke failed");
+    used_a_minute_later(&access, &clock, &token).await;
+    let logged = logged();
+    assert_eq!(logged.len(), 1, "{logged:?}");
 }
 
 #[tokio::test]

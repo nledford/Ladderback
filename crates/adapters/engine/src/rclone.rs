@@ -7,14 +7,14 @@
 //! call that hands back no child to stop: built inside the gate, it held
 //! every other start in the daemon until `rclone` served, however long that
 //! took, and built outside it, its starts could inherit another start's
-//! pipes, or be inherited. So this starts the server as that call does, at
-//! the pinned revision (`rclone.rs`), but holds the gate for each start
-//! alone: each start makes its pipes inside the call that starts the child,
-//! so they are close-on-exec once it lets go. Once the server says where it
-//! serves, the repository is rustic's own REST backend at that address,
-//! named `rclone:<path>`, as in rustic's. Unlike rustic's, the starts of
-//! one open have [`START_TIMEOUT`] to answer: an `rclone` that hasn't by
-//! then is killed and reaped, and the open fails (#326).
+//! pipes, or be inherited. So this starts the server as that call does, in
+//! the release the workspace depends on (`rclone.rs`), but holds the gate for
+//! each start alone: each start makes its pipes inside the call that starts
+//! the child, so they are close-on-exec once it lets go. Once the server says
+//! where it serves, the repository is rustic's own REST backend at that
+//! address, named `rclone:<path>`, as in rustic's. Unlike rustic's, the
+//! starts of one open have [`START_TIMEOUT`] to answer: an `rclone` that
+//! hasn't by then is killed and reaped, and the open fails (#326).
 
 use std::collections::BTreeMap;
 use std::io::{BufRead, BufReader};

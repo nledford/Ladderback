@@ -1,7 +1,7 @@
 ### Ladderback's own command-line messages. The program prints each after its
 ### name and a colon (`ladderback: listening on …`); `clap`'s help and usage
-### errors are not here and stay in English, but for the descriptions of the
-### service commands (`cli-help-*`).
+### errors are not here and stay in English, but for the descriptions of some
+### commands (`cli-help-*`).
 
 # The daemon is up. Scripts and the UI tests read the address after "listening on".
 # $url (text): where the web UI answers, such as http://127.0.0.1:9898.
@@ -326,6 +326,10 @@ cli-service-still-stopping = { $command } had not stopped the service after { $l
 cli-service-not-ours = { $file } is not a service file { -brand-name } wrote, so { -brand-name } leaves it as it is
 
 ## The MCP server (components §4.6): `ladderback mcp`.
+
+# What `mcp` does, in its `--help`.
+# "Model Context Protocol" is the protocol's name: keep it in English.
+cli-help-mcp = Serve the { "Model Context Protocol" } on standard input and output, for AI agents and scripts: their tools read and drive { -brand-name }.
 
 # `ladderback mcp --connect` was given an address it can't use, and did not start. The address isn't repeated: it may hold a password.
 cli-mcp-connect-invalid = the address after { "--connect" } isn't an http or https address of a host, such as { "http://127.0.0.1:9898" } or { "https://nas.example.com" }, with no user name, password, query or fragment

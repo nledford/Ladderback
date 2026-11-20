@@ -206,3 +206,39 @@ fn a_refused_host_name_is_transformed_in_a_pseudolocale_and_the_name_is_not() {
         }
     }
 }
+
+/// What `ladderback --help` prints with `LANGUAGE=language` and no other
+/// setting that could name a locale.
+#[cfg(feature = "pseudo")]
+fn top_level_help(language: &str) -> String {
+    let output = Command::new(LADDERBACK)
+        .arg("--help")
+        .env_clear()
+        .env("LANGUAGE", language)
+        .output()
+        .expect("ladderback --help runs");
+    assert!(
+        output.status.success(),
+        "ladderback --help fails with LANGUAGE={language}: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    String::from_utf8(output.stdout).expect("help is UTF-8")
+}
+
+#[cfg(feature = "pseudo")]
+#[test]
+fn the_catalog_described_commands_of_the_help_are_transformed_in_a_pseudolocale() {
+    for language in ["en-XA", "ar-XB"] {
+        let help = top_level_help(language);
+        for command in ["mcp", "install-service", "remove-service", "check-keyring"] {
+            let line = help
+                .lines()
+                .find(|line| line.trim_start().starts_with(&format!("{command} ")))
+                .unwrap_or_else(|| panic!("{language} help has no {command} line: {help}"));
+            assert!(
+                !line.is_ascii(),
+                "{language} leaves {command} in English: {line}"
+            );
+        }
+    }
+}

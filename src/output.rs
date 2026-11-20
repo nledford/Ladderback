@@ -13,7 +13,9 @@ use std::ffi::OsString;
 use std::io::{self, Write};
 use std::process::ExitCode;
 
+use api::{ErrorCode, ErrorDto, MsgArg};
 use clap::ColorChoice;
+use l10n::Localizer;
 use serde::Serialize;
 
 /// Whether `args`, a command line with the program's name first, ask for
@@ -89,6 +91,84 @@ pub(crate) fn to_stderr(text: &str) -> io::Result<()> {
     write_text(&mut io::stderr().lock(), text)
 }
 
+/// `text` as the command line shows text from outside it (a daemon's, a
+/// profile's, the configuration's, the operating system's): each control
+/// character, C0, DEL and C1, as its escape (`\u{1b}`, `\r`, `\u{9b}`), so a
+/// terminal shows it rather than acting on it.
+pub(crate) fn escaped(text: &str) -> String {
+    let mut shown = String::with_capacity(text.len());
+    for c in text.chars() {
+        if c.is_control() {
+            shown.extend(c.escape_default());
+        } else {
+            shown.push(c);
+        }
+    }
+    shown
+}
+
+/// `arg` with its text [`escaped`], if it has one.
+fn escaped_arg(arg: &MsgArg) -> MsgArg {
+    match arg {
+        MsgArg::Text(text) => MsgArg::Text(escaped(text)),
+        other => other.clone(),
+    }
+}
+
+/// A refusal's detail [`escaped`], without the white space at its ends: a
+/// line break at the end of a program's output is no word of it, and a
+/// detail of only white space stays no detail, as the catalog has it.
+fn escaped_detail(detail: Option<&str>) -> Option<String> {
+    detail.map(str::trim).map(escaped)
+}
+
+/// The sentence the catalog says a refusal in, `code` with `args` and
+/// `detail`, as the command line shows it: each text of its arguments and
+/// its detail [`escaped`], since they can come from outside; the catalog's
+/// own words as they are.
+pub(crate) fn refusal_said(
+    localizer: &Localizer,
+    code: ErrorCode,
+    args: &[(&str, MsgArg)],
+    detail: Option<&str>,
+) -> String {
+    let args: Vec<(&str, MsgArg)> = args
+        .iter()
+        .map(|(name, arg)| (*name, escaped_arg(arg)))
+        .collect();
+    let detail = escaped_detail(detail);
+    localizer.error(code, &args, detail.as_deref()).into_text()
+}
+
+/// The line a command prints a refusal in on standard error: the
+/// program's name, then the [`refusal_said`].
+pub(crate) fn refusal_line(
+    localizer: &Localizer,
+    code: ErrorCode,
+    args: &[(&str, MsgArg)],
+    detail: Option<&str>,
+) -> String {
+    format!(
+        "ladderback: {}\n",
+        refusal_said(localizer, code, args, detail)
+    )
+}
+
+/// `error` as the command line may have another localizer say it, as
+/// [`refusal_said`] says a refusal: each text of its arguments and its
+/// detail [`escaped`].
+pub(crate) fn escaped_error(error: &ErrorDto) -> ErrorDto {
+    ErrorDto {
+        code: error.code,
+        args: error
+            .args
+            .iter()
+            .map(|(name, arg)| (name.clone(), escaped_arg(arg)))
+            .collect(),
+        detail: escaped_detail(error.detail.as_deref()),
+    }
+}
+
 /// Whether a write failed because nobody reads what it wrote to: the reader
 /// of a pipe has gone, as `head` goes once it has its lines.
 fn nobody_reads(error: &io::Error) -> bool {
@@ -142,10 +222,18 @@ mod tests {
     use serde::ser::Error as _;
     use serde::{Serialize, Serializer};
 
+    use api::{ErrorCode, ErrorDto, MsgArg};
+    use l10n::Localizer;
+
     use super::{
-        Report, asked_for_plain, clap_colour, status_after, status_of_parser, write_json,
-        write_text,
+        Report, asked_for_plain, clap_colour, escaped_error, refusal_said, status_after,
+        status_of_parser, write_json, write_text,
     };
+
+    /// Text from outside with an escape sequence, a carriage return, a bell,
+    /// DEL and a C1 control in it, and how the command line writes it.
+    const UNSAFE: &str = "\u{1b}[2J\r\u{7}\u{7f}\u{9b}31m";
+    const ESCAPED: &str = r"\u{1b}[2J\r\u{7}\u{7f}\u{9b}31m";
 
     fn command_line(words: &[&str]) -> Vec<OsString> {
         words.iter().map(OsString::from).collect()
@@ -380,5 +468,68 @@ mod tests {
     fn the_parser_leaves_a_message_it_cannot_write_for_another_reason_unsaid() {
         let status = status_of_parser(2, Err(io::Error::other("no space left")));
         assert_eq!(status, ExitCode::from(2));
+    }
+
+    #[test]
+    fn a_refusal_is_said_with_each_control_character_of_its_arguments_escaped() {
+        let said = refusal_said(
+            &Localizer::new(&[]),
+            ErrorCode::PlanUnknown,
+            &[("plan", MsgArg::Text(format!("home{UNSAFE}é")))],
+            None,
+        );
+        assert!(!said.chars().any(char::is_control), "{said:?}");
+        assert!(said.contains(&format!("home{ESCAPED}é")), "{said:?}");
+    }
+
+    #[test]
+    fn a_refusal_is_said_with_each_control_character_of_its_detail_escaped() {
+        let said = refusal_said(
+            &Localizer::new(&[]),
+            ErrorCode::RuntimeUnavailable,
+            &[],
+            Some(&format!("Too many {UNSAFE}files")),
+        );
+        assert!(!said.chars().any(char::is_control), "{said:?}");
+        assert!(
+            said.contains(&format!("Too many {ESCAPED}files")),
+            "{said:?}"
+        );
+    }
+
+    /// A detail's line breaks and spaces at its ends are no words of it: a
+    /// detail of only those is no detail, as the catalog has it, and one
+    /// that ends in a line break, as a program's output does, is said
+    /// without it.
+    #[test]
+    fn a_refusal_is_said_without_the_white_space_at_the_ends_of_its_detail() {
+        let localizer = Localizer::new(&[]);
+        let said = |detail| refusal_said(&localizer, ErrorCode::RuntimeUnavailable, &[], detail);
+        assert_eq!(said(Some(" \r\n")), said(None));
+        assert_eq!(said(Some("Too many files\n")), said(Some("Too many files")));
+        assert!(said(Some("Too many files\n")).contains("(Too many files)"));
+    }
+
+    #[test]
+    fn an_error_another_localizer_says_has_each_control_character_of_its_texts_escaped() {
+        let error = ErrorDto::new(
+            ErrorCode::InvalidArguments,
+            [
+                ("field", MsgArg::Text(format!("x{UNSAFE}"))),
+                ("problem", MsgArg::Text("unknown-key".to_owned())),
+            ],
+            Some(format!("the daemon said {UNSAFE}\n")),
+        );
+        assert_eq!(
+            escaped_error(&error),
+            ErrorDto::new(
+                ErrorCode::InvalidArguments,
+                [
+                    ("field", MsgArg::Text(format!(r"x{ESCAPED}"))),
+                    ("problem", MsgArg::Text("unknown-key".to_owned())),
+                ],
+                Some(format!("the daemon said {ESCAPED}")),
+            )
+        );
     }
 }

@@ -32,7 +32,7 @@ use crate::composition::profile_refusals::{
     Notice, Refusal, config_folder_unknown, export_refusal, import_refusal, plan_unknown,
     profile_notice, repository_alias_invalid, runtime_unavailable,
 };
-use crate::output::{Report, to_stderr, to_stdout, write_json};
+use crate::output::{self, Report, to_stderr, to_stdout, write_json};
 use crate::{finish, say, text};
 
 /// Where stock rustic looks for the profiles a profile uses, when it is not
@@ -61,10 +61,19 @@ fn rustic_variables(
 
 /// Prints a refusal on stderr, as the catalog says it.
 fn refuse(localizer: &Localizer, refusal: &Refusal) -> io::Result<()> {
-    to_stderr(&format!(
-        "ladderback: {}\n",
-        localizer.error(refusal.code, &refusal.args, refusal.detail.as_deref())
-    ))
+    to_stderr(&refusal_said(localizer, refusal))
+}
+
+/// The line [`refuse`] prints: its arguments and detail, which can come
+/// from the profile, the configuration or the operating system, escaped
+/// ([`output::refusal_line`]).
+fn refusal_said(localizer: &Localizer, refusal: &Refusal) -> String {
+    output::refusal_line(
+        localizer,
+        refusal.code,
+        &refusal.args,
+        refusal.detail.as_deref(),
+    )
 }
 
 /// Prints a notice on stderr, as the catalog says it.
@@ -516,5 +525,70 @@ mod tests {
                 },
             })
         );
+    }
+
+    /// Text from outside (a profile's, the configuration's, the operating
+    /// system's) with an escape sequence, a carriage return, a bell, DEL and
+    /// a C1 control in it, and how the command line writes it.
+    const UNSAFE: &str = "\u{1b}[2J\r\u{7}\u{7f}\u{9b}31m";
+    const ESCAPED: &str = r"\u{1b}[2J\r\u{7}\u{7f}\u{9b}31m";
+
+    /// `line` is one line with no control character before its end.
+    fn one_line_without_control_characters(line: &str) {
+        let body = line.strip_suffix('\n').expect("a line ends with a break");
+        assert!(!body.chars().any(char::is_control), "{line:?}");
+    }
+
+    #[test]
+    fn an_import_refusal_is_said_with_each_control_character_of_its_arguments_escaped() {
+        let refusal = Refusal {
+            code: api::ErrorCode::ProfileInvalid,
+            args: vec![
+                ("file", text(format!("nas{UNSAFE}.toml"))),
+                ("key", text(format!("forget.{UNSAFE}"))),
+                ("line", text(7)),
+            ],
+            detail: None,
+        };
+        let line = refusal_said(&Localizer::new(&[]), &refusal);
+        one_line_without_control_characters(&line);
+        assert!(line.starts_with("ladderback: "), "{line:?}");
+        assert!(line.contains(&format!("nas{ESCAPED}.toml")), "{line:?}");
+        assert!(line.contains(&format!("forget.{ESCAPED}")), "{line:?}");
+    }
+
+    #[test]
+    fn an_import_refusal_is_said_with_each_control_character_of_its_detail_escaped() {
+        let refusal =
+            NotImported::Runtime(io::Error::other(format!("Too many {UNSAFE}files"))).refusal();
+        let line = refusal_said(&Localizer::new(&[]), &refusal);
+        one_line_without_control_characters(&line);
+        assert!(
+            line.contains(&format!("Too many {ESCAPED}files")),
+            "{line:?}"
+        );
+    }
+
+    #[test]
+    fn an_export_refusal_is_said_with_each_control_character_escaped() {
+        for (refusal, shown) in [
+            (
+                export_refusal(
+                    app::interop::ExportError::Render(app::ports::ExportRefusal::TagComma {
+                        tag: format!("a,{UNSAFE}"),
+                    }),
+                    Path::new("/config/config.toml"),
+                ),
+                format!("a,{ESCAPED}"),
+            ),
+            (
+                plan_unknown(&format!("home{UNSAFE}")),
+                format!("home{ESCAPED}"),
+            ),
+        ] {
+            let line = refusal_said(&Localizer::new(&[]), &refusal);
+            one_line_without_control_characters(&line);
+            assert!(line.contains(&shown), "{line:?}");
+        }
     }
 }

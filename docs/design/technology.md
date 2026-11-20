@@ -22,7 +22,7 @@ The pages' buttons (§4.5, #780) turn on `arrows`, `multimedia` and `files` (713
 | Concern | Crate |
 |---|---|
 | Async runtime / HTTP | `tokio`, `axum 0.8`, `tower-http` |
-| Engine | `rustic_core`, `rustic_backend` (one pinned git revision until a release has `Progress::error`; wrapped in our `engine` crate) |
+| Engine | `rustic_core`, `rustic_backend` (their crates.io releases, decision 7; wrapped in our `engine` crate) |
 | DB | `sqlx 0.9` (SQLite, bundled, migrations; runtime-checked queries with bound parameters, because compile-time-checked ones need `sqlx-cli` and committed query data in CI) |
 | Logging | `log` facade; `env_logger` in the daemon, writing to stderr at `info` unless `RUST_LOG` says otherwise |
 | Scheduling | `croner` (with its `jiff` feature, not `chrono`) |
@@ -37,7 +37,7 @@ The pages' buttons (§4.5, #780) turn on `arrows`, `multimedia` and `files` (713
 
 The minimum supported Rust version (MSRV) is **1.100.0**, the workspace's `rust-version`. Every crate inherits it. It is the exact version `rust-toolchain.toml` pins, which development, CI and the release builds use, and the two move together (§13.12, §16 decision 78).
 
-The git dependency means Ladderback can't be published to crates.io until it moves to a release. Distribution doesn't depend on crates.io (§12).
+Ladderback isn't published to crates.io: #207 decided it isn't worth publishing about 20 crates and a trunk-built UI every release. Distribution is §12.
 
 ### 8.3 Workspace layout
 

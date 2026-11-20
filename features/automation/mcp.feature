@@ -532,6 +532,13 @@ Feature: AI agents and scripts use Ladderback through MCP
     And line 1 says the tool "status" refused with "sign-in-required"
     And standard error says the refusal of line 1 as the catalog says it
 
+  Scenario: A refused one-shot call's sentence shows a control character it repeats as its escape
+    Given Ladderback is serving on loopback
+    When an agent runs 'mcp call list_plans --args {"\u001b[2J\r\u0007x":1} --connect {daemon}'
+    Then the command exits with status 1
+    And line 1 says the tool "list_plans" refused with "invalid-arguments"
+    And standard error writes each control character as its escape, as in "\u{1b}[2J\r\u{7}x"
+
   Scenario Outline: A one-shot call line that can't be read is refused before any call
     When an agent runs "mcp call <call line>"
     Then the command exits with status 2

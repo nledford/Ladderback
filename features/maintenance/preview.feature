@@ -190,7 +190,7 @@ Feature: A maintenance preview tells what a run would do before it does anything
   Scenario: A prune preview reports what the engine's plan would do and runs no prune
     Given a plan "home" keeping the last 1 snapshot
     When the owner previews pruning the repository
-    Then the preview says the prune would mark 2 packs, delete 1 and bring back 3, freeing 4096 bytes
+    Then the preview says the prune would mark 2 packs, delete 1, and mark for recovery or bring back 3, freeing 4096 bytes
     And the preview says marked packs wait the default time before a later prune deletes them
     And the engine was only asked to identify the repository, list its snapshots and plan a prune
     And the log holds no operation of this preview
@@ -219,7 +219,7 @@ Feature: A maintenance preview tells what a run would do before it does anything
     Given a plan "home" keeping the last 1 snapshot
     And a maintenance operation is already running on the repository
     When the owner previews pruning the repository
-    Then the preview says the prune would mark 2 packs, delete 1 and bring back 3, freeing 4096 bytes
+    Then the preview says the prune would mark 2 packs, delete 1, and mark for recovery or bring back 3, freeing 4096 bytes
     And the log holds only the operation that was already running
 
   Scenario: A prune preview of a repository that is not configured is refused

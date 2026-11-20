@@ -105,14 +105,16 @@ pub(crate) fn backup_result(
 /// rustic's prune options for a job. Prune only marks packs and deletes them
 /// in a later run, so `instant_delete` and `early_delete_index` stay off
 /// whatever the job says: they would let a concurrent backup lose data (I2).
-/// A `keep_delete` under rustic's default is refused like the daemon refuses
-/// it ([`KeepDelete`]).
+/// The job's `keep_delete` is rustic's `keep_marked`: how long a mark, for
+/// deletion or for recovery, stands before a later prune acts on it. One
+/// under rustic's default is refused like the daemon refuses it
+/// ([`KeepDelete`]).
 pub(crate) fn prune_options(keep_delete: SignedDuration) -> Result<PruneOptions, JobError> {
     let keep_delete = KeepDelete::new(keep_delete).map_err(|error| invalid_spec(&error))?;
-    let keep_delete = Span::try_from(keep_delete.get())
+    let keep_marked = Span::try_from(keep_delete.get())
         .map_err(|error| JobError::failed(format!("keep_delete is out of range: {error}")))?;
     Ok(PruneOptions::default()
-        .keep_delete(keep_delete)
+        .keep_marked(keep_marked)
         .instant_delete(false)
         .early_delete_index(false))
 }
@@ -210,8 +212,9 @@ fn invalid_spec(error: &dyn std::error::Error) -> JobError {
 ///   `keep_delete` has passed. A pack younger than rustic's `keep_pack`
 ///   (zero here) is counted although rustic leaves it alone.
 /// - `packs_deleted`: packs marked by an earlier run that rustic deletes now.
-/// - `packs_recovered`: marked packs a newer snapshot uses again; rustic
-///   unmarks them.
+/// - `packs_recovered`: marked packs a snapshot uses again. rustic marks
+///   each for recovery, and brings it back in the run that finds its
+///   recovery mark at least `keep_delete` old, so a pack counts in both.
 pub(crate) fn prune_result(repository: RepositoryId, stats: &PruneStats) -> PruneResult {
     PruneResult {
         repository,
@@ -431,9 +434,9 @@ mod tests {
         let options = prune_options(SignedDuration::from_hours(144)).unwrap();
         assert!(!options.instant_delete);
         assert!(!options.early_delete_index);
-        assert_eq!(options.keep_delete.get_seconds(), 144 * 3600);
+        assert_eq!(options.keep_marked.get_seconds(), 144 * 3600);
         // The seconds are the whole span: no calendar units to bend it.
-        assert_eq!(options.keep_delete.get_days(), 0);
+        assert_eq!(options.keep_marked.get_days(), 0);
     }
 
     #[test]
