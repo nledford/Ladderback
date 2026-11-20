@@ -14,7 +14,7 @@ Feature: The steps
       | Check                                                                 | Done    |
       | Copy                                                                  | Done    |
       | Commit the demo move once every demo snapshot has reached the new hub | Current |
-      | Switch the agents                                                     | To do   |
+      | Switch the machines                                                   | To do   |
       | Clean up                                                              | To do   |
     And the current step of the list of steps "Demo hub move" is "Commit the demo move once every demo snapshot has reached the new hub"
     And the list of steps "Demo pairing" reads, in order:
@@ -41,9 +41,9 @@ Feature: The steps
     And the list of steps "Demo pairing" is no live region, nor inside one
     And the polite region stays empty
     When I press Enter
-    Then the polite region reads "Step 4 of 5: Switch the agents"
+    Then the polite region reads "Step 4 of 5: Switch the machines"
     And focus is on the button "Advance the demo hub move"
-    And the current step of the list of steps "Demo hub move" is "Switch the agents"
+    And the current step of the list of steps "Demo hub move" is "Switch the machines"
     When I press Tab
     Then focus has left the steps demo
 

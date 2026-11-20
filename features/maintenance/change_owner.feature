@@ -1,7 +1,7 @@
 Feature: Turning maintenance from this agent on or off for a saved repository
   Exactly one party maintains a repository (I1). A person turns on
   maintenance from this agent for a repository already saved, as connecting
-  it with "Maintain this repository from this agent" would, or turns it off,
+  it with "Maintain this repository from this machine" would, or turns it off,
   and only that one setting of the entry changes. Without a hub nothing can
   tell whether another agent maintains it, so the person turns it on knowing
   only one place may (§7.3). Turned off, this agent forgets, prunes, checks

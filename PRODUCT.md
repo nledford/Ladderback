@@ -48,7 +48,7 @@ Success means: every machine's last good backup is visible at a glance, and a mi
 
 ## Positioning
 
-"Backrest, but built on rustic_core." Ladderback links rustic's library instead of shelling out to a CLI, so it inherits rustic's lock-free repository design: many hosts back up while one owner prunes. Missed runs on sleeping laptops catch up by default. The hub never receives agents' secrets.
+"Backrest, but built on rustic_core." Ladderback links rustic's library instead of shelling out to a CLI, so it inherits rustic's lock-free repository design: many hosts back up while one owner prunes. Missed runs on sleeping laptops catch up by default. The hub never receives paired machines' secrets.
 
 ## Brand Personality
 
