@@ -142,16 +142,50 @@ When("I type the hub's key ID", async function (this: BrowserWorld) {
   await this.page.keyboard.type(keyId);
 });
 
-// The steps a keyboard walk takes in the first scenario, in short: the key
-// ID typed in its field, then the form sent from its button.
+/** Asks for a token as a keyboard walk does, in short: the key ID typed in
+ *  its field, then the form sent from its button. */
+async function askForToken(world: BrowserWorld): Promise<void> {
+  await world.open("/settings#agents");
+  const { keyId } = await hubKey(world);
+  await tabTo(world, "textbox", "Hub key ID");
+  await world.page.keyboard.type(keyId);
+  await tabTo(world, "button", "Make a pairing token");
+  await world.page.keyboard.press("Enter");
+}
+
+When("I ask for a pairing token on the Machines tab", async function (this: BrowserWorld) {
+  await askForToken(this);
+});
+
+// The steps a keyboard walk takes in the first scenario, in short, until
+// the dialog shows the token.
 When("I make a pairing token on the Machines tab", async function (this: BrowserWorld) {
-  await this.open("/settings#agents");
+  await askForToken(this);
+  await dialog(this).waitFor({ state: "visible", timeout: patienceMs() });
+});
+
+// Back on the form once a dialog closed, without opening the page again:
+// the key ID typed in its field, which is before the button, then the form
+// sent again.
+When("I make another pairing token", async function (this: BrowserWorld) {
   const { keyId } = await hubKey(this);
-  await tabTo(this, "textbox", "Hub key ID");
+  await pressUntilFocusIsOn(this, "Shift+Tab", "textbox", "Hub key ID");
   await this.page.keyboard.type(keyId);
-  await tabTo(this, "button", "Make a pairing token");
+  await pressUntilFocusIsOn(this, "Tab", "button", "Make a pairing token");
   await this.page.keyboard.press("Enter");
   await dialog(this).waitFor({ state: "visible", timeout: patienceMs() });
+});
+
+// Settings is left within the page, so its work on the way still answers;
+// once the hub holds a making, only after the page has sent it.
+When("I leave Settings by the link {string}", async function (this: BrowserWorld, name: string) {
+  const held = heldMakes.get(this);
+  if (held) await untilSettled(held.request, "the page sent no making for the hub to hold");
+  await this.page
+    .getByRole("navigation", { name: namePattern("Pages") })
+    .getByRole("link", { name: namePattern(name) })
+    .click();
+  await expect(this.page.getByRole("heading", { level: 1, name: namePattern(name) })).toBeVisible();
 });
 
 When("I set the address machines will use to {string}", async function (this: BrowserWorld, address: string) {
@@ -190,20 +224,30 @@ Then("the textbox {string} holds the pairing token the dialog showed", async fun
   await expect(dialog(this).getByRole("textbox", { name: namePattern(name) })).toHaveValue(token);
 });
 
-// The page canceled the token, and the hub agreed: its cancel answered 204,
-// and a cancel now finds none waiting.
-Then("the hub has canceled the token the dialog showed", async function (this: BrowserWorld) {
-  const { id } = madeToken(this);
+/** The page canceled the token the hub made for it, and the hub agreed:
+ *  its cancel answered 204, and a cancel now finds none waiting. */
+async function hubCanceled(world: BrowserWorld): Promise<void> {
+  const { id } = madeToken(world);
   await expect
-    .poll(() => (pageCancels.get(this) ?? []).includes(`204 ${id}`), { message: "the page's cancel of the token answered 204" })
+    .poll(() => (pageCancels.get(world) ?? []).includes(`204 ${id}`), { message: "the page's cancel of the token answered 204" })
     .toBe(true);
-  const base = ownBase(this);
-  const session: unknown = await (await this.context.request.get(`${base}/api/v1/session`)).json();
+  const base = ownBase(world);
+  const session: unknown = await (await world.context.request.get(`${base}/api/v1/session`)).json();
   const csrf = field(session, "csrf-token");
-  const answer = await this.context.request.delete(`${base}/api/v1/hub/pairing-tokens/${id}`, {
+  const answer = await world.context.request.delete(`${base}/api/v1/hub/pairing-tokens/${id}`, {
     headers: { Origin: base, "Content-Type": "application/json", ...(csrf ? { "X-CSRF-Token": csrf } : {}) },
   });
   assert.equal(`${answer.status()} ${field(await answer.json().catch(() => null), "code") ?? ""}`, "404 pairing-token-unknown");
+}
+
+Then("the hub has canceled the token the dialog showed", async function (this: BrowserWorld) {
+  await hubCanceled(this);
+});
+
+// A token made once its dialog can no longer show it: nobody saw it, so the
+// page cancels it.
+Then("the hub has canceled the token it made", async function (this: BrowserWorld) {
+  await hubCanceled(this);
 });
 
 // The hub answers each cancel as it does when it can't keep its tokens
@@ -218,37 +262,111 @@ Given("the hub fails to cancel pairing tokens", function (this: BrowserWorld) {
   });
 });
 
-/** The page's first cancel the hub holds, per scenario, and the step's way
- *  to let the hub answer it. */
-const heldCancels = new WeakMap<BrowserWorld, { request: Promise<Request>; answer: () => void }>();
+/** A request of the page's the hub holds, and the step's way to let the
+ *  hub answer it. */
+interface Held {
+  request: Promise<Request>;
+  answer: () => void;
+}
 
-// The page's first cancel of a token waits for its answer until a step lets
-// the hub give it, so the page is left while it is on its way. Every other
-// cancel goes to the hub at once.
-Given("the hub holds its answer to the page's first cancel of a pairing token", function (this: BrowserWorld) {
+/** The page's first cancel of a token the hub holds, per scenario. */
+const heldCancels = new WeakMap<BrowserWorld, Held>();
+/** The page's first making of a token the hub holds, per scenario. */
+const heldMakes = new WeakMap<BrowserWorld, Held>();
+
+/** Holds the page's first `method` request to `url` until a step lets the
+ *  hub answer it: as the hub does, or, when `fails`, as a hub that can't
+ *  keep its tokens (503 hub-unavailable). Every other request goes to the
+ *  hub at once. */
+function holdFirst(world: BrowserWorld, held: WeakMap<BrowserWorld, Held>, method: string, url: string, fails: boolean): void {
   const answered = Promise.withResolvers<void>();
   const request = Promise.withResolvers<Request>();
-  heldCancels.set(this, { request: request.promise, answer: answered.resolve });
+  held.set(world, { request: request.promise, answer: answered.resolve });
   let holding = false;
-  this.contextRoutes.push(async (context) => {
-    await context.route("**/api/v1/hub/pairing-tokens/*", async (route) => {
-      if (route.request().method() !== "DELETE" || holding) {
+  world.contextRoutes.push(async (context) => {
+    await context.route(url, async (route) => {
+      if (route.request().method() !== method || holding) {
         await route.fallback();
         return;
       }
       holding = true;
       request.resolve(route.request());
       await answered.promise;
-      await route.fallback();
+      if (fails) {
+        await route.fulfill({ status: 503, contentType: "application/json", body: JSON.stringify({ code: "hub-unavailable" }) });
+      } else {
+        await route.fallback();
+      }
     });
   });
+}
+
+/** Lets the hub answer what it held, and waits until the page has the
+ *  answer and a frame has passed, so what the page does with it is done. */
+async function answerHeld(world: BrowserWorld, held: Held | undefined, what: string): Promise<void> {
+  assert.ok(held, `the hub holds no ${what}`);
+  const request = await untilSettled(held.request, `the page sent no ${what} for the hub to hold`);
+  held.answer();
+  await untilSettled(request.response(), `the page got no answer to its ${what}`);
+  await world.page.evaluate(() => {
+    const { promise, resolve } = Promise.withResolvers<void>();
+    requestAnimationFrame(() => requestAnimationFrame(() => resolve()));
+    return promise;
+  });
+}
+
+// The page's first cancel of a token waits for its answer until a step lets
+// the hub give it, so the page is left while it is on its way.
+Given("the hub holds its answer to the page's first cancel of a pairing token", function (this: BrowserWorld) {
+  holdFirst(this, heldCancels, "DELETE", "**/api/v1/hub/pairing-tokens/*", false);
+});
+
+// As above, and the answer, when it comes, is that the hub couldn't cancel it.
+Given("the hub holds the page's first cancel of a pairing token, then fails it", function (this: BrowserWorld) {
+  holdFirst(this, heldCancels, "DELETE", "**/api/v1/hub/pairing-tokens/*", true);
+});
+
+// The page's first making of a token waits for its answer until a step lets
+// the hub give it, so Settings is left while it is on its way.
+Given("the hub holds its answer to the page's first making of a pairing token", function (this: BrowserWorld) {
+  holdFirst(this, heldMakes, "POST", "**/api/v1/hub/pairing-tokens", false);
 });
 
 When("the hub answers the cancel it held", async function (this: BrowserWorld) {
-  const held = heldCancels.get(this);
-  assert.ok(held, "the hub holds no cancel");
-  await untilSettled(held.request, "the page sent no cancel for the hub to hold");
-  held.answer();
+  await answerHeld(this, heldCancels.get(this), "cancel");
+});
+
+When("the hub answers the making it held", async function (this: BrowserWorld) {
+  await answerHeld(this, heldMakes.get(this), "making");
+});
+
+// The hub's key never comes: the page's read of it waits with no answer.
+Given("the hub doesn't answer the page's read of its key", function (this: BrowserWorld) {
+  this.contextRoutes.push(async (context) => {
+    await context.route("**/api/v1/hub", (route) =>
+      route.request().method() === "GET" ? Promise.withResolvers<void>().promise : route.fallback(),
+    );
+  });
+});
+
+// The hub answers the page's first read of its key, and refuses each one
+// after it as a hub that can't read its keys (503 hub-unavailable).
+Given("the hub refuses each read of its key after the first", function (this: BrowserWorld) {
+  let reads = 0;
+  this.contextRoutes.push(async (context) => {
+    await context.route("**/api/v1/hub", async (route) => {
+      if (route.request().method() !== "GET") {
+        await route.fallback();
+        return;
+      }
+      reads += 1;
+      if (reads === 1) {
+        await route.fallback();
+      } else {
+        await route.fulfill({ status: 503, contentType: "application/json", body: JSON.stringify({ code: "hub-unavailable" }) });
+      }
+    });
+  });
 });
 
 // Only the held cancel went out for the token, and the hub agreed to it: a
@@ -320,12 +438,20 @@ Then("the dialog {string} shows no pairing token", async function (this: Browser
   await expect(shown).toBeHidden();
 });
 
-Then("the page warns {string}", async function (this: BrowserWorld, words: string) {
-  await expect(this.page.getByRole("main").getByText(words)).toBeVisible();
+// The warning describes the field it is about, so a screen reader says it
+// with the field (1.3.1).
+Then("the textbox {string} warns {string}", async function (this: BrowserWorld, name: string, words: string) {
+  await expect(this.page.getByRole("textbox", { name: namePattern(name) })).toHaveAccessibleDescription(new RegExp(words));
 });
 
-Then("the page warns of no address", async function (this: BrowserWorld) {
+Then("the textbox {string} warns of nothing", async function (this: BrowserWorld, name: string) {
+  const field = this.page.getByRole("textbox", { name: namePattern(name) });
+  await expect(field).not.toHaveAccessibleDescription(/This address is/);
   await expect(this.page.getByRole("main").getByText("This address is")).toHaveCount(0);
+});
+
+Then("the dialog {string} doesn't say {string}", async function (this: BrowserWorld, name: string, words: string) {
+  await expect(this.page.getByRole("dialog", { name: namePattern(name) })).not.toContainText(words);
 });
 
 Then("Settings has no tab {string}", async function (this: BrowserWorld, name: string) {

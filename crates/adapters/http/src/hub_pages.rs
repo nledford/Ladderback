@@ -126,14 +126,13 @@ async fn make_token(State(state): State<AppState>, request: Request) -> Response
 /// count, which the page counts down on its monotonic clock, so a browser
 /// whose clock is wrong still shows it right.
 fn token_dto(made: &MadeToken) -> api::PairingTokenDto {
-    let left = made.made_at.duration_until(made.expires_at);
     api::PairingTokenDto {
         token: made.token.to_text().expose().to_owned(),
         token_id: made.id.to_string(),
         fingerprint: Fingerprint::of_key(&made.hub_key).to_string(),
         address: made.token.address().as_str().to_owned(),
         expires_at: made.expires_at.to_string(),
-        seconds_left: u64::try_from(left.as_secs()).unwrap_or(0),
+        seconds_left: u64::try_from(made.left.as_secs()).unwrap_or(0),
     }
 }
 

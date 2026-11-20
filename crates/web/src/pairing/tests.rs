@@ -7,6 +7,7 @@ fn a_loopback_address_is_warned_of_as_one_another_machine_cant_reach() {
         "https://localhost:9443",
         "HTTP://LOCALHOST:9898/",
         "http://[::1]:8080",
+        "https://127.1:9443",
         "https://127.1.2.3:9443/sync",
         " http://127.0.0.1:9898 ",
     ] {
@@ -70,5 +71,45 @@ fn a_life_is_read_in_whole_minutes() {
     assert_eq!(life(" 1440 "), Some(1440));
     for typed in ["", "fifteen", "-5", "1.5", "15 minutes"] {
         assert_eq!(life(typed), None, "{typed:?}");
+    }
+}
+
+/// The same table as `crates/domain/src/fleet/route/tests.rs`, so the page
+/// warns of the hosts an agent takes for this computer: keep the two
+/// identical.
+#[test]
+fn loopback_is_localhost_or_a_loopback_address_in_any_form_the_resolver_reads() {
+    for host in [
+        "localhost",
+        "LOCALHOST",
+        "127.0.0.1",
+        "127.255.0.1",
+        "::1",
+        "127.1",
+        "127.0.1",
+        "0x7f.1",
+        "0177.0.0.1",
+        "2130706433",
+    ] {
+        assert!(is_loopback(host), "{host}");
+    }
+    for host in [
+        "hub.example",
+        "10.0.0.1",
+        "::",
+        "fe80::1",
+        "localhost.",
+        "128.1",
+        "0x80.1",
+        "2130706431",
+        "127.256.0.1",
+        "127.0.0.0.1",
+        "127..1",
+        "127.",
+        "0x",
+        "08.1",
+        "+127.1",
+    ] {
+        assert!(!is_loopback(host), "{host}");
     }
 }

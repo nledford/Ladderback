@@ -36,3 +36,9 @@ Feature: Making a pairing token on the hub's page
     When the person closes the dialog
     And an agent pairs with the token
     Then the pairing is refused as revoked
+
+  Scenario: The life a token is shown with is counted from when the hub has kept it
+    Given a hub with sign-in off
+    And the hub's registry takes 2 seconds to keep a token
+    When the person asks for a new pairing token on this machine and types the hub's key ID
+    Then the token is shown with 898 seconds of its life left

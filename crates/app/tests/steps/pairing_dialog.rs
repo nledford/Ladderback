@@ -162,6 +162,27 @@ async fn shows_token(agent: &mut Agent) {
     );
 }
 
+#[given(expr = "the hub's registry takes {int} seconds to keep a token")]
+async fn registry_takes(agent: &mut Agent, seconds: i64) {
+    let hub = agent.pairing.hub();
+    hub.registry
+        .takes_to_keep(hub.clock.clone(), SignedDuration::from_secs(seconds));
+}
+
+#[then(expr = "the token is shown with {int} seconds of its life left")]
+async fn shown_with_left(agent: &mut Agent, seconds: i64) {
+    let world = &agent.pairing;
+    let Some(Ok(made)) = &world.asked else {
+        panic!("no token was made: {:?}", world.asked);
+    };
+    assert_eq!(made.left, SignedDuration::from_secs(seconds));
+    assert_eq!(
+        world.hub().clock.now().duration_until(made.expires_at),
+        made.left,
+        "the life left is counted from the hub's answer"
+    );
+}
+
 #[then(
     "the token trusts a certificate authority's certificate, as the hub serves none of its own yet"
 )]

@@ -41,7 +41,8 @@ impl fmt::Debug for TokenAsk {
 }
 
 /// A token made for the page, shown once: its text, its token ID, the hub
-/// key it carries, and when it lapses.
+/// key it carries, when it lapses, and how much of its life is left as the
+/// hub answers.
 #[derive(Clone, Debug)]
 pub struct MadeToken {
     pub token: PairingToken,
@@ -49,6 +50,7 @@ pub struct MadeToken {
     pub hub_key: PublicKey,
     pub made_at: Timestamp,
     pub expires_at: Timestamp,
+    pub left: SignedDuration,
 }
 
 /// Why no token was made. None carries the confirmation (I4).
@@ -120,6 +122,7 @@ impl HubPairing {
             hub_key: record.hub_key,
             made_at: record.made_at,
             expires_at: record.expires_at,
+            left: record.made_at.duration_until(record.expires_at),
         })
     }
 }

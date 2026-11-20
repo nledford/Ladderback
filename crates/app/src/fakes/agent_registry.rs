@@ -1,4 +1,5 @@
-use std::sync::{Mutex, MutexGuard, PoisonError};
+use std::fmt;
+use std::sync::{Arc, Mutex, MutexGuard, PoisonError};
 
 use async_trait::async_trait;
 use domain::fleet::{
@@ -6,8 +7,9 @@ use domain::fleet::{
     PairingView, ProofRefusal, ProofRequest, ProofView, TokenId, TokenRecord, TokenUse,
     admits_unused_token, decide_pairing, decide_proof, voids_tokens_for_new_key,
 };
-use domain::{AgentId, Timestamp};
+use domain::{AgentId, SignedDuration, Timestamp};
 
+use super::FakeClock;
 use crate::ports::{Added, AgentRegistry, StoreError};
 
 /// The hub's registry in memory, for use-case tests and acceptance
@@ -15,6 +17,20 @@ use crate::ports::{Added, AgentRegistry, StoreError};
 #[derive(Debug, Default)]
 pub struct InMemoryAgentRegistry {
     kept: Mutex<Kept>,
+    keeping: Mutex<Option<Keeping>>,
+}
+
+/// How long keeping a token takes: `clock` moves on by `by` as one is kept,
+/// as a real store's write takes time.
+struct Keeping {
+    clock: Arc<FakeClock>,
+    by: SignedDuration,
+}
+
+impl fmt::Debug for Keeping {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("Keeping").field("by", &self.by).finish()
+    }
 }
 
 #[derive(Debug, Default)]
@@ -42,6 +58,12 @@ impl InMemoryAgentRegistry {
                 };
             }
         }
+    }
+
+    /// Keeping a token takes `by` from now on: `clock`, the hub's, moves on
+    /// by that much as each one is kept.
+    pub fn takes_to_keep(&self, clock: Arc<FakeClock>, by: SignedDuration) {
+        *self.keeping.lock().unwrap_or_else(PoisonError::into_inner) = Some(Keeping { clock, by });
     }
 }
 
@@ -102,6 +124,9 @@ impl AgentRegistry for InMemoryAgentRegistry {
         token.made_at = to_the_millisecond(token.made_at);
         token.expires_at = to_the_millisecond(token.expires_at);
         kept.tokens.push(token);
+        if let Some(keeping) = &*self.keeping.lock().unwrap_or_else(PoisonError::into_inner) {
+            keeping.clock.advance(keeping.by);
+        }
         Ok(Added::Kept)
     }
 
