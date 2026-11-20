@@ -346,6 +346,7 @@ pub(super) fn translate(event: WorkerEvent, redactor: &Redactor) -> Option<Engin
                 | ErrorCode::ConfigSchemaMissing
                 | ErrorCode::ConfigSchemaNewer
                 | ErrorCode::PlanUnknown
+                | ErrorCode::PlanRunWaiting
                 | ErrorCode::PlanInvalid
                 | ErrorCode::PlanInUse
                 | ErrorCode::KeyFilesNotLeftOut

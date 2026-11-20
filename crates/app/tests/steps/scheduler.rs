@@ -22,7 +22,7 @@ use app::schedule::{PlanRuns, ScheduleReport, Scheduler};
 use async_trait::async_trait;
 use cucumber::{given, then, when};
 use domain::execution::conditions::{PowerSource, UnmetCondition};
-use domain::execution::queue::Overlapping;
+use domain::execution::queue::{Overlapping, RunWaiting};
 use domain::execution::retry::{NoRetry, RetryScheduled};
 use domain::execution::{Operation, Trigger};
 use domain::planning::{
@@ -349,6 +349,9 @@ pub struct SchedulerWorld {
     events: Arc<RecordingEvents>,
     /// The agent's concurrency limit.
     concurrency: Concurrency,
+    /// How each start by hand went, oldest first: refused, or `None` once
+    /// it took its place.
+    by_hand: Vec<(PlanId, Option<RunWaiting>)>,
     plans: Vec<Plan>,
     /// The rule of the repository's one location, if any.
     rule: Option<LocationRule>,
@@ -380,6 +383,7 @@ impl Default for SchedulerWorld {
             events: Arc::default(),
             woke_at: None,
             network_back_at: None,
+            by_hand: Vec::new(),
         }
     }
 }
@@ -904,11 +908,37 @@ async fn retry_pending(agent: &mut Agent, attempt: u32, name: String, at: String
 #[when(expr = "a person starts a backup of the plan {string}")]
 async fn person_starts(agent: &mut Agent, name: String) {
     let plan = plan_id(&name);
-    let place = agent
+    let taken = agent
         .scheduler
         .queue
-        .push(&plan, agent.scheduler.concurrency);
-    agent.scheduler.runs.start_by_hand(&plan, place);
+        .by_hand(&plan, agent.scheduler.concurrency);
+    match taken {
+        Ok(place) => {
+            agent.scheduler.runs.start_by_hand(&plan, place);
+            agent.scheduler.by_hand.push((plan, None));
+        }
+        Err(refused) => agent.scheduler.by_hand.push((plan, Some(refused))),
+    }
+}
+
+#[then(
+    expr = "the person's last start of the plan {string} was refused because a run of it is already waiting"
+)]
+fn last_start_refused(agent: &mut Agent, name: String) {
+    let plan = plan_id(&name);
+    let last = agent
+        .scheduler
+        .by_hand
+        .iter()
+        .rev()
+        .find(|(started, _)| *started == plan)
+        .map(|(_, refused)| *refused);
+    assert_eq!(
+        last,
+        Some(Some(RunWaiting)),
+        "the starts by hand: {:?}",
+        agent.scheduler.by_hand
+    );
 }
 
 #[when("the person cancels that backup while it waits for its turn")]

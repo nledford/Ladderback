@@ -183,6 +183,49 @@ async fn a_scheduled_run_refused_for_a_secret_ends_as_one_failed_operation_that_
     );
 }
 
+/// A start by hand of a plan that has a run waiting is refused before its
+/// job is built (§16, decision 75, point 4; #1140): the queue answers
+/// first, so a flood of starts reads no secret, runs no password command
+/// and records nothing, and the refusal is the queue's, whatever the
+/// secret would have said. The answer says why; the log doesn't, so a
+/// client that retries in a loop can't fill it, as a cancel of an operation
+/// that isn't running leaves no line either.
+#[tokio::test]
+async fn a_start_by_hand_while_its_plan_has_a_run_waiting_is_refused_before_its_secret_is_read() {
+    capture();
+    const UNSET: &str = "LADDERBACK_TEST_WAITING_RUN_PASSWORD_UNSET";
+    let store = Arc::new(app::fakes::InMemoryOperationStore::new());
+    let (runner, _heard, scripted, plan) =
+        refused_password_runner(UNSET, store.clone(), Arc::new(BroadcastEventBus::new())).await;
+    let limit = domain::planning::Concurrency::default();
+    let _running = runner.queue.push(&plan, limit);
+    let _waiting = runner.queue.push(&plan, limit);
+
+    let refused =
+        Operations::start_backup(&runner, plan.as_str().to_owned(), Trigger::Manual).await;
+
+    assert_matches!(refused, Err(StartError::RunWaiting));
+    assert_eq!(jobs(&scripted), 0, "the engine was asked");
+    let history = store
+        .list(&app::ports::HistoryQuery::default())
+        .await
+        .expect("the log reads");
+    assert!(history.operations.is_empty(), "{history:?}");
+    let said: Vec<String> = captured_log::lines()
+        .into_iter()
+        .map(|(_, line)| line)
+        .chain(captured_log::infos())
+        .collect();
+    assert!(
+        !said.iter().any(|line| line.contains("(plan-run-waiting)")),
+        "the refusal was logged: {said:?}"
+    );
+    assert!(
+        !said.iter().any(|line| line.contains(UNSET)),
+        "the secret was looked for: {said:?}"
+    );
+}
+
 /// A run the schedule starts while the daemon starts, before the
 /// session's keyring service is up, waits for it and runs with the
 /// password the keyring holds. The daemon says so once in its log,

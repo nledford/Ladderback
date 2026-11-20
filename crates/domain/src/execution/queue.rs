@@ -3,7 +3,7 @@
 //! plan's overlap policy for a run its schedule starts. Nothing here runs
 //! anything or waits: `app::queue` hands each run its turn as this decides.
 
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 
 use crate::PlanId;
 use crate::planning::{Concurrency, Overlap};
@@ -25,10 +25,17 @@ pub enum Overlapping {
     Waiting,
 }
 
+/// Why a run started by hand was refused: a run of its plan is waiting for
+/// its turn already, and backs up the sources as they are when it starts,
+/// so a second one waiting would add nothing (decision 75, point 4).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct RunWaiting;
+
 /// The backups that hold a slot and the ones waiting for one: the domain
 /// side of the persistent queue (§5, the concurrency limit). At most
-/// `limit` run at once, across plans; a plan has at most one running, and a
-/// run its schedule starts never joins a run of its plan already waiting.
+/// `limit` run at once, across plans; a plan has at most one running, and
+/// neither a run its schedule starts nor one started by hand joins a run of
+/// its plan already waiting.
 #[derive(Clone, Debug)]
 pub struct BackupQueue {
     limit: Concurrency,
@@ -39,6 +46,9 @@ pub struct BackupQueue {
     waiting: BTreeMap<Ticket, PlanId>,
     /// Held for a restart: no waiting run starts again (decision 94).
     held: bool,
+    /// The plans whose runs from before the start are still to be handed
+    /// back to the queue (decision 73).
+    resuming: BTreeSet<PlanId>,
 }
 
 impl BackupQueue {
@@ -50,6 +60,7 @@ impl BackupQueue {
             running: BTreeMap::new(),
             waiting: BTreeMap::new(),
             held: false,
+            resuming: BTreeSet::new(),
         }
     }
 
@@ -64,7 +75,7 @@ impl BackupQueue {
     /// has a run waiting already skips it ([`Overlapping::Waiting`]); under
     /// `skip`, so does a plan whose last run is running.
     pub fn due(&mut self, plan: &PlanId, overlap: Overlap) -> Result<Ticket, Overlapping> {
-        if self.waiting.values().any(|waiting| waiting == plan) {
+        if self.has_waiting(plan) {
             return Err(Overlapping::Waiting);
         }
         if overlap == Overlap::Skip && self.running.values().any(|running| running == plan) {
@@ -73,15 +84,33 @@ impl BackupQueue {
         Ok(self.push(plan))
     }
 
-    /// A run of `plan` that waits for its turn whatever else of the plan is
-    /// running or waiting: a run started by hand, or one the queue held from
-    /// before the daemon started.
+    /// A run of `plan` started by hand: it waits for its turn behind a run
+    /// of the plan that is running, and is refused while one is waiting
+    /// ([`RunWaiting`]), whichever way that one came: a schedule, a person,
+    /// or the queue held from before the start, handed back or still to be
+    /// ([`Self::resuming`]).
+    pub fn by_hand(&mut self, plan: &PlanId) -> Result<Ticket, RunWaiting> {
+        if self.has_waiting(plan) || self.resuming.contains(plan) {
+            return Err(RunWaiting);
+        }
+        Ok(self.push(plan))
+    }
+
+    /// Whether a run of `plan` waits for its turn.
+    fn has_waiting(&self, plan: &PlanId) -> bool {
+        self.waiting.values().any(|waiting| waiting == plan)
+    }
+
+    /// A run of `plan` the queue held from before the daemon started: it
+    /// waits for its turn whatever else of the plan is running or waiting,
+    /// since the log has it queued already. The plan is handed back.
     pub fn push(&mut self, plan: &PlanId) -> Ticket {
         let ticket = Ticket(self.issued);
         // A daemon would have to queue a run every nanosecond for 584 years
         // to wrap it.
         self.issued = self.issued.wrapping_add(1);
         self.waiting.insert(ticket, plan.clone());
+        self.resuming.remove(plan);
         ticket
     }
 
@@ -142,6 +171,21 @@ impl BackupQueue {
         self.held = false;
     }
 
+    /// The plans of the runs the queue held from before the daemon started,
+    /// which the daemon is still handing back to it (decision 73): until a
+    /// plan's run takes its place again ([`Self::push`]), or the daemon has
+    /// handed back every one ([`Self::resumed`]), a run of the plan started
+    /// by hand is refused as if that run waited already ([`RunWaiting`]).
+    pub fn resuming(&mut self, plans: impl IntoIterator<Item = PlanId>) {
+        self.resuming.extend(plans);
+    }
+
+    /// The daemon has handed back, or ended, every run the queue held from
+    /// before the start: no plan is refused for one from now on.
+    pub fn resumed(&mut self) {
+        self.resuming.clear();
+    }
+
     /// How many backups hold a slot: running, past their turn.
     pub fn running(&self) -> usize {
         self.running.len()
@@ -150,7 +194,7 @@ impl BackupQueue {
 
 #[cfg(test)]
 mod tests {
-    use super::{BackupQueue, Overlapping, Ticket};
+    use super::{BackupQueue, Overlapping, RunWaiting, Ticket};
     use crate::PlanId;
     use crate::planning::{Concurrency, Overlap};
 
@@ -406,16 +450,116 @@ mod tests {
     }
 
     #[test]
+    fn a_run_by_hand_waits_behind_a_running_run_of_its_plan_whatever_its_policy() {
+        for overlap in [Overlap::Skip, Overlap::Queue] {
+            let mut queue = BackupQueue::new(limit(2));
+            let first = queue.due(&plan("home"), overlap).unwrap();
+            assert_eq!(queue.start(), vec![first]);
+            let by_hand = queue
+                .by_hand(&plan("home"))
+                .expect("a running run doesn't wait");
+            assert_eq!(queue.start(), Vec::<Ticket>::new(), "{overlap:?}");
+            queue.leave(first);
+            assert_eq!(queue.start(), vec![by_hand], "{overlap:?}");
+        }
+    }
+
+    #[test]
+    fn a_run_by_hand_is_refused_while_a_run_of_its_plan_waits_however_it_came() {
+        let waiting: [fn(&mut BackupQueue) -> Ticket; 4] = [
+            |queue| queue.due(&plan("home"), Overlap::Skip).unwrap(),
+            |queue| queue.due(&plan("home"), Overlap::Queue).unwrap(),
+            |queue| queue.by_hand(&plan("home")).unwrap(),
+            |queue| queue.push(&plan("home")),
+        ];
+        for (way, wait) in waiting.into_iter().enumerate() {
+            let mut queue = BackupQueue::new(limit(1));
+            let docs = queue.push(&plan("docs"));
+            assert_eq!(queue.start(), vec![docs]);
+            let home = wait(&mut queue);
+            assert_eq!(queue.by_hand(&plan("home")), Err(RunWaiting), "way {way}");
+            assert!(queue.by_hand(&plan("photos")).is_ok(), "way {way}");
+            queue.leave(docs);
+            assert_eq!(
+                queue.start(),
+                vec![home],
+                "way {way}: the refused run took no place"
+            );
+        }
+    }
+
+    #[test]
+    fn a_run_by_hand_is_refused_while_its_plans_run_from_before_the_start_is_handed_back() {
+        let mut queue = BackupQueue::new(limit(1));
+        queue.resuming([plan("home"), plan("docs")]);
+        assert_eq!(queue.by_hand(&plan("home")), Err(RunWaiting));
+        assert_eq!(queue.by_hand(&plan("docs")), Err(RunWaiting));
+        let photos = queue
+            .by_hand(&plan("photos"))
+            .expect("a plan with no run from before the start");
+        assert_eq!(
+            queue.start(),
+            vec![photos],
+            "the refused runs took no place"
+        );
+    }
+
+    #[test]
+    fn a_plans_run_from_before_the_start_back_in_the_queue_is_the_one_it_waits_on() {
+        let mut queue = BackupQueue::new(limit(1));
+        queue.resuming([plan("home"), plan("docs")]);
+        let held = queue.push(&plan("home"));
+        assert_eq!(queue.by_hand(&plan("home")), Err(RunWaiting), "it waits");
+        assert_eq!(queue.start(), vec![held]);
+        let by_hand = queue
+            .by_hand(&plan("home"))
+            .expect("its run from before the start is running, not waiting");
+        assert_eq!(
+            queue.by_hand(&plan("docs")),
+            Err(RunWaiting),
+            "still handed back"
+        );
+        queue.leave(held);
+        assert_eq!(queue.start(), vec![by_hand]);
+    }
+
+    #[test]
+    fn once_every_run_from_before_the_start_is_handed_back_no_plan_is_refused_for_one() {
+        let mut queue = BackupQueue::new(limit(1));
+        queue.resuming([plan("home")]);
+        queue.resumed();
+        let home = queue
+            .by_hand(&plan("home"))
+            .expect("its run from before the start ended rather than run");
+        assert_eq!(queue.start(), vec![home]);
+    }
+
+    #[test]
+    fn a_run_by_hand_that_waits_skips_its_plans_due_run_under_either_policy() {
+        for overlap in [Overlap::Skip, Overlap::Queue] {
+            let mut queue = BackupQueue::new(limit(1));
+            let docs = queue.push(&plan("docs"));
+            assert_eq!(queue.start(), vec![docs]);
+            queue.by_hand(&plan("home")).unwrap();
+            assert_eq!(
+                queue.due(&plan("home"), overlap),
+                Err(Overlapping::Waiting),
+                "{overlap:?}"
+            );
+        }
+    }
+
+    #[test]
     fn a_run_by_hand_waits_behind_its_plan_whatever_its_policy() {
         let mut queue = BackupQueue::new(limit(2));
         let first = queue.due(&plan("home"), Overlap::Skip).unwrap();
         assert_eq!(queue.start(), vec![first]);
-        let by_hand = queue.push(&plan("home"));
+        let held = queue.push(&plan("home"));
         let again = queue.push(&plan("home"));
         assert_eq!(queue.start(), Vec::<Ticket>::new());
         queue.leave(first);
-        assert_eq!(queue.start(), vec![by_hand]);
-        queue.leave(by_hand);
+        assert_eq!(queue.start(), vec![held]);
+        queue.leave(held);
         assert_eq!(queue.start(), vec![again]);
     }
 

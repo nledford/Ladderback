@@ -22,6 +22,7 @@ use async_trait::async_trait;
 use domain::execution::FailureReason;
 use domain::execution::deadline::backup_budget;
 use domain::execution::plan_tags::PlanTags;
+use domain::execution::queue::RunWaiting;
 use domain::execution::{Target, Trigger};
 use domain::secrets::SecretWarning;
 use domain::{AgentId, OperationId, PlanId};
@@ -207,7 +208,9 @@ impl PlanRunner {
     /// Starts a backup of plan `id`, started by `trigger`, on a task of its
     /// own, and returns its operation's ID once the log has it queued. It
     /// runs in `place` when the scheduler gave it one, else in a place it
-    /// takes in the queue now, as any run started by hand does (§5).
+    /// takes in the queue now, as any run started by hand does (§5): before
+    /// its job is built, so a start refused for a run of the plan waiting
+    /// already reads no secret and runs no command (decision 75, point 4).
     async fn start_plan(
         &self,
         id: &PlanId,
@@ -219,12 +222,18 @@ impl PlanRunner {
                 StartError::Unavailable { code, args, detail }
             }))
         })?;
+        let place = match place {
+            Some(place) => place,
+            None => self
+                .queue
+                .by_hand(id, config.agent().concurrency)
+                .map_err(|RunWaiting| Unbuilt::Refused(StartError::RunWaiting))?,
+        };
         let BuiltBackup {
             job,
             setup,
             warnings,
         } = self.backup_of(&config, id, &trigger).await?;
-        let place = place.unwrap_or_else(|| self.queue.push(id, config.agent().concurrency));
         // A UUIDv7: the log orders by ID, so the newest run is the highest.
         let operation = OperationId::from_uuid(Uuid::now_v7());
         let cancel = self.cancel_switch(operation);
@@ -370,6 +379,10 @@ fn start_refused(error: &StartError) -> String {
             "its sources hold the data folder, whose secret key files no glob can leave out, \
              as its path isn't UTF-8 ({})",
             wire_name(ErrorCode::KeyFilesNotLeftOut)
+        ),
+        StartError::RunWaiting => format!(
+            "a run of it is waiting for its turn already ({})",
+            wire_name(ErrorCode::PlanRunWaiting)
         ),
     }
 }
@@ -604,12 +617,19 @@ impl Operations for PlanRunner {
     async fn start_backup(&self, plan: String, trigger: Trigger) -> Result<String, StartError> {
         let id = PlanId::try_from(plan).map_err(|_| StartError::UnknownPlan)?;
         // Refused by hand as on a schedule, the run leaves a line in the log
-        // too, not only the answer the page shows for a moment (#483).
+        // too, not only the answer the page shows for a moment (#483). A run
+        // of the plan waiting already leaves none: the answer says so, and a
+        // client that retries in a loop can't fill the log (decision 75,
+        // point 4), as a cancel of an operation that isn't running can't.
         let operation = self
             .start_plan(&id, trigger.clone(), None)
             .await
             .map_err(Unbuilt::into_start_error)
-            .inspect_err(|error| log_not_started(&id, &trigger, error))?;
+            .inspect_err(|error| {
+                if !matches!(error, StartError::RunWaiting) {
+                    log_not_started(&id, &trigger, error);
+                }
+            })?;
         Ok(operation.as_uuid().hyphenated().to_string())
     }
 

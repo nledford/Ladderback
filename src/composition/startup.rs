@@ -191,6 +191,17 @@ impl Background {
         self.runner.runs.clone()
     }
 
+    /// What the orderly stop freezes ([`Self::runs`]) of a daemon that
+    /// leaves the queue's leftovers and the scheduler unstarted, as a
+    /// headless or scratch session does: the backups queued before it stay
+    /// in the log for the next `serve` (decision 73), so none waits in its
+    /// queue, and no plan is refused a run by hand for one (decision 75,
+    /// point 4).
+    pub(crate) fn unstarted(self) -> runs::Runs {
+        self.runner.queue.resumed();
+        self.runs()
+    }
+
     /// Runs the queue's leftovers, oldest first, then the scheduler, with
     /// `random` spreading its runs over their jitter, and beside them the
     /// release check, with `random` spreading its checks too, until the
@@ -223,6 +234,9 @@ impl Background {
                 runs.as_ref(),
             )
             .await;
+            // Every backup queued before the start has its place again, or
+            // has ended: a start by hand is refused only for a run waiting.
+            queue.resumed();
             Scheduler {
                 clock: Arc::new(SystemClock),
                 random,
@@ -722,6 +736,17 @@ async fn state_over(
         listings,
     });
     let notice = Arc::new(UpdateNotice::new());
+    // The daemon listens before the backups queued before the start are
+    // handed back to the queue (decision 73): until each is, a start by
+    // hand of its plan is refused as if it waited already, so a plan never
+    // has two runs waiting (decision 75, point 4).
+    runner.queue.resuming(
+        recovered
+            .queued
+            .iter()
+            .filter(|record| record.kind == domain::execution::OperationKind::Backup)
+            .filter_map(|record| record.target.plan.clone()),
+    );
     let background = Background {
         runner,
         restore_folder,

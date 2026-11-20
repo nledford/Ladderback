@@ -276,6 +276,10 @@ error-unknown = An unexpected error occurred.
 # $plan (text): the plan's ID, such as home.
 error-plan-unknown = There is no plan { $plan }. Add it to the configuration, or choose a plan that exists.
 
+# A backup of a plan was started by hand while a backup of the same plan was already waiting for its turn, so no other was queued. The waiting one backs up the files as they are when it starts.
+# $plan (text): the plan's ID, such as home.
+error-plan-run-waiting = A backup of plan { $plan } is already waiting for its turn, so no other was started. It will back up the files as they are when it starts.
+
 # A plan sent from the Plans page is not one the configuration file would load, so nothing was saved.
 # $field (text): the plan's setting at fault, as its key in the configuration file, such as schedule.cron, id, repository or sources.
 # $problem (text): what is wrong with it, one of { "missing" }, { "unknown-key" }, { "wrong-type" }, { "invalid" }, { "taken" }, { "unknown-repository" } or { "no-sources" }.

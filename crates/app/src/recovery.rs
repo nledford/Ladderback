@@ -1,6 +1,7 @@
 //! Startup recovery: ending what an earlier run left running, and running
 //! again what it left queued (technical design §5, §9; decisions 40 and 73).
 
+use std::collections::BTreeSet;
 use std::sync::Arc;
 
 use domain::Timestamp;
@@ -23,6 +24,10 @@ pub enum QueuedEnd {
     /// The backup's plan now backs up to another repository than the one the
     /// operation was queued for.
     RepositoryChanged,
+    /// An older queued backup of the same plan runs again: a plan never has
+    /// two runs waiting (decision 75), and that one backs up the sources as
+    /// they are when it starts.
+    PlanRunsAgain,
     /// Not a backup: the log doesn't keep the job of any other kind.
     JobNotKept,
 }
@@ -78,15 +83,17 @@ impl RecoverOperations {
         Ok(recovered)
     }
 
-    /// Runs again, oldest first, each queued backup of a plan `config` still
-    /// has, on the repository it was queued for, under its own ID and
-    /// trigger (decision 73). `config` is `None` when the configuration
-    /// can't be read. A queued operation the queue can't run again ends as
-    /// failed with [`FailureReason::DaemonStopped`] at `now`, as decision 40
-    /// ended every queued one, `runs` is told why ([`QueuedEnd`]), and the
-    /// end is announced once the log has it. A write the log refuses is
-    /// reported through `runs`, announces nothing and leaves that operation
-    /// queued.
+    /// Runs again, oldest first, the oldest queued backup of each plan
+    /// `config` still has, on the repository it was queued for, under its
+    /// own ID and trigger (decision 73): a plan never has two runs waiting
+    /// (decision 75), and that one backs up the sources as they are when it
+    /// starts. `config` is `None` when the configuration can't be read. A
+    /// queued operation the queue can't run again, or a later backup of a
+    /// plan that runs again, ends as failed with
+    /// [`FailureReason::DaemonStopped`] at `now`, as decision 40 ended every
+    /// queued one, `runs` is told why ([`QueuedEnd`]), and the end is
+    /// announced once the log has it. A write the log refuses is reported
+    /// through `runs`, announces nothing and leaves that operation queued.
     pub async fn resume(
         &self,
         queued: Vec<OperationRecord>,
@@ -94,6 +101,8 @@ impl RecoverOperations {
         runs: &dyn PlanRuns,
         now: Timestamp,
     ) {
+        // The plans a backup runs again for: one each.
+        let mut resumed = BTreeSet::new();
         for record in queued {
             // Recovery hands back queued rows only; one that isn't is the
             // log's fault, said and left as it is rather than run or ended.
@@ -105,10 +114,13 @@ impl RecoverOperations {
             };
             let why = match (record.kind, config) {
                 (OperationKind::Backup, Some(config)) => match ended_why(&record.target, config) {
-                    None => {
+                    // The oldest that can run is the one kept: a backup whose
+                    // repository changed takes no later one with it.
+                    None if resumed.insert(record.target.plan.clone()) => {
                         runs.resume(operation).await;
                         continue;
                     }
+                    None => QueuedEnd::PlanRunsAgain,
                     Some(why) => why,
                 },
                 (OperationKind::Backup, None) => QueuedEnd::ConfigUnreadable,
