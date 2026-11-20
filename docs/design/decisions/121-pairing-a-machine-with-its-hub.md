@@ -53,6 +53,8 @@ One rendering of a key's fingerprint is shown wherever a person compares one: **
 
 A cancel still on its way when the dialog is left answers for it. A lapse replaces the token with its status line, and focus goes to "Make a new token"; closing the dialog returns it to "Make a pairing token". Leaving the page, or closing the browser, with the dialog open doesn't cancel the token: it works until it lapses.
 
+The tab is named Machines; the sections above, written before it was built, call it Agents. A token the hub makes once Settings is left, which no one has seen, is canceled. Once a later token is shown, an earlier token's cancel is said only if it failed, as a cancel of an earlier unused pairing token.
+
 The address's kind is a certificate authority's only. The daemon doesn't serve the hub's built-in TLS yet (its TLS key has no caller), so there is no certificate fingerprint for a pinned token to carry, and the page says no token can pin one. The QR code and Share, the used token's status line and the agent's row, approval, the list of unused tokens, "Show all", the refusal on a page that isn't a secure context, and the agent's pairing page are not built yet. Nor is the warning that a hub behind a proxy that rewrites `Host` must turn sign-in on, which Settings and the docs give ([120, "Who may make a token, approve or re-key"](120-agent-hub-connection-security.md)).
 
 ## Waiting for approval
