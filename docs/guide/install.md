@@ -184,7 +184,7 @@ The first signing asks whether `codesign` may use the key: choose Always Allow, 
 
 Each release after 0.5.0 publishes a Docker image for x86_64 and aarch64 Linux, as `ghcr.io/nledford/ladderback` and `docker.io/nledford/ladderback`: the same image, tagged with the release's version. Only GitHub's latest release also gets `latest`, so a pre-release never moves it; to try a pre-release, pull it by its version. For 0.5.0, or a build of your own, `just image <version> <archive>... --tag ghcr.io/nledford/ladderback --load`, in a checkout, builds it from a release archive, as a release does. Docker Hub limits how often you may pull without an account; GitHub's registry doesn't.
 
-The image is there to try: it isn't yet a supported way to install and run Ladderback, and the package or the install script above is. It runs a machine's agent, which backs up the folders mounted into it. From M8's release it runs the hub too, and becomes the recommended way to run one ([decision 126](https://github.com/nledford/Ladderback/blob/main/docs/design/decisions/126-primary-install-channels.md)); until then it has no hub, and refuses `serve --hub`.
+The image is there to try: it isn't yet a supported way to install and run Ladderback, and the package or the install script above is. Its container is a machine of its own, which backs up the folders mounted into it. From M8's release it runs the hub too, and becomes the recommended way to run one ([decision 126](https://github.com/nledford/Ladderback/blob/main/docs/design/decisions/126-primary-install-channels.md)); until then it has no hub, and refuses `serve --hub`.
 
 The image runs `ladderback` as user and group 10001 and listens on port 9898. It keeps its configuration in the volume at `/var/lib/ladderback/config`, its data (the operation history and the admin password among them) in the volume at `/var/lib/ladderback/data`, and its cache in `/var/cache/ladderback`. Turn sign-in on first: `set-password` asks twice for an admin password of at least 8 characters, without showing it, and keeps it in the data volume. With `-i` alone in place of `-it`, it reads one line from a pipe instead.
 
@@ -192,7 +192,7 @@ The image runs `ladderback` as user and group 10001 and listens on port 9898. It
 docker run --rm -it -v ladderback-data:/var/lib/ladderback/data ghcr.io/nledford/ladderback set-password
 ```
 
-Then start the agent, here on a machine that browsers reach as `nas.example.com`, backing up `/srv/photos`:
+Then start the container, here on a computer that browsers reach as `nas.example.com`, backing up `/srv/photos`:
 
 ```sh
 docker run --detach --name ladderback \
@@ -206,7 +206,7 @@ docker run --detach --name ladderback \
   serve --listen 0.0.0.0:9898 --allowed-host nas.example.com --service-managed
 ```
 
-The same agent as a Compose file, with its port on loopback for a reverse proxy on the same machine, is [`examples/compose.yaml`](examples/compose.yaml): turn sign-in on with `docker compose run --rm ladderback set-password`, then start it with `docker compose up --detach`.
+The same container as a Compose file, with its port on loopback for a reverse proxy on the same computer, is [`examples/compose.yaml`](examples/compose.yaml): turn sign-in on with `docker compose run --rm ladderback set-password`, then start it with `docker compose up --detach`.
 
 What each part is for:
 
@@ -228,4 +228,4 @@ Mount them in place of the volumes, as in `-v ~/ladderback/data:/var/lib/ladderb
 
 A container has no keyring, so keep a repository's password in a file, such as a Docker secret under `/run/secrets`, in an environment variable or behind a command ([Secrets](secrets.md)). A repository on a local path needs a volume or a folder on the host mounted at that path, as `/srv/photos` is above: one written anywhere else lives in the container and goes when the container is removed. To update, pull the image, remove the container and run the same `docker run` again, with the same mounts: the volumes keep the configuration, the history and the password, and the repositories mounted into it stay where they are.
 
-On macOS, Docker runs Linux in a virtual machine, so an agent there sees only the folders shared with it and gets no Full Disk Access, Photos library or keychain: use the install script. From M8's release, the same image runs the hub with `serve --hub --listen 0.0.0.0:9898 --allowed-host <name>` in place of the agent's command; this guide will say how to pair machines with it then.
+On macOS, Docker runs Linux in a virtual machine, so Ladderback there sees only the folders shared with it and gets no Full Disk Access, Photos library or keychain: use the install script. From M8's release, the same image runs the hub with `serve --hub --listen 0.0.0.0:9898 --allowed-host <name>` in place of the command above; this guide will say how to pair machines with it then.

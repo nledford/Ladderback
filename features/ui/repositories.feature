@@ -250,14 +250,14 @@ Feature: Repositories page
     And I type "{repo}"
     And I press Tab until focus is on the textbox "Password"
     And I type "demo-password"
-    And I press Tab until focus is on the checkbox "Maintain this repository from this agent"
-    Then the checkbox "Maintain this repository from this agent" is not checked
-    And the checkbox "Maintain this repository from this agent" is described by "When this is on, this agent forgets, prunes and checks the repository you connect, and adopts history into its plans. Only one place may maintain a repository, so leave this off when another agent or the hub already does. A repository you create here under a name is always maintained from here."
+    And I press Tab until focus is on the checkbox "Maintain this repository from this machine"
+    Then the checkbox "Maintain this repository from this machine" is not checked
+    And the checkbox "Maintain this repository from this machine" is described by "When this is on, this machine forgets, prunes and checks the repository you connect, and adopts history into its plans. Only one place may maintain a repository, so leave this off when another machine or the hub already does. A repository you create here under a name is always maintained from here."
     When I press Space
     And I press Tab until focus is on the button "Connect the repository"
     And I press Enter
     Then the polite region comes to contain "Connected copy."
-    And the checkbox "Maintain this repository from this agent" is not checked
+    And the checkbox "Maintain this repository from this machine" is not checked
     And the page has no accessibility violations
     When I open the address "/snapshots"
     And I skip to the content
@@ -276,14 +276,14 @@ Feature: Repositories page
     And I type "{repo}"
     And I press Tab until focus is on the textbox "Password"
     And I type "demo-password"
-    And I press Tab until focus is on the checkbox "Maintain this repository from this agent"
+    And I press Tab until focus is on the checkbox "Maintain this repository from this machine"
     And I press Space
     And I press Tab until focus is on the button "Connect the repository"
     And I press Enter
     Then focus is on the heading "There is 1 problem with the form"
     And the page shows a message containing "already has a repository called demo"
     And the field "Name" is marked invalid
-    And the checkbox "Maintain this repository from this agent" is checked
+    And the checkbox "Maintain this repository from this machine" is checked
     And the page has no accessibility violations
 
   Scenario: A name that is not a name is refused at the name

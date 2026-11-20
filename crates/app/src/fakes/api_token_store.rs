@@ -3,7 +3,7 @@ use std::sync::{Mutex, MutexGuard, PoisonError};
 use async_trait::async_trait;
 use domain::Timestamp;
 use domain::access::PasswordFingerprint;
-use domain::access::api_token::{ApiToken, ApiTokenId, TokenPermissions};
+use domain::access::api_token::{ApiToken, ApiTokenId, TokenPermissions, admits_api_token};
 
 use crate::ports::{Added, ApiTokenStore, StoreError};
 
@@ -34,7 +34,7 @@ fn to_the_millisecond(at: Timestamp) -> Timestamp {
 impl ApiTokenStore for InMemoryApiTokenStore {
     async fn add(&self, token: &ApiToken, at_most: usize) -> Result<Added, StoreError> {
         let mut kept = self.kept();
-        if kept.len() >= at_most {
+        if admits_api_token(kept.len(), at_most).is_err() {
             return Ok(Added::Full);
         }
         if kept.iter().any(|other| other.id == token.id) {

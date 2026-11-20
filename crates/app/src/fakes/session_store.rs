@@ -51,15 +51,18 @@ impl SessionStore for InMemorySessionStore {
         Ok(0)
     }
 
-    async fn remove(&self, digests: &[SessionDigest]) -> Result<(), StoreError> {
-        self.kept()
-            .retain(|session| !digests.contains(&session.digest));
-        Ok(())
+    async fn remove(&self, digests: &[SessionDigest]) -> Result<bool, StoreError> {
+        let mut kept = self.kept();
+        let before = kept.len();
+        kept.retain(|session| !digests.contains(&session.digest));
+        Ok(kept.len() < before)
     }
 
-    async fn remove_all(&self) -> Result<(), StoreError> {
-        self.kept().clear();
-        Ok(())
+    async fn remove_all(&self) -> Result<bool, StoreError> {
+        let mut kept = self.kept();
+        let any = !kept.is_empty();
+        kept.clear();
+        Ok(any)
     }
 
     async fn record_use(&self, digest: &SessionDigest, at: Timestamp) -> Result<(), StoreError> {
@@ -77,8 +80,8 @@ impl SessionStore for InMemorySessionStore {
         Ok(*self.length.lock().unwrap_or_else(PoisonError::into_inner))
     }
 
-    async fn set_length(&self, length: SessionLength) -> Result<(), StoreError> {
-        *self.length.lock().unwrap_or_else(PoisonError::into_inner) = Some(length);
-        Ok(())
+    async fn set_length(&self, length: SessionLength) -> Result<bool, StoreError> {
+        let mut kept = self.length.lock().unwrap_or_else(PoisonError::into_inner);
+        Ok(kept.replace(length) != Some(length))
     }
 }

@@ -79,30 +79,33 @@ impl SessionStore for SqliteStore {
         Ok(unreadable.len())
     }
 
-    async fn remove(&self, digests: &[SessionDigest]) -> Result<(), StoreError> {
+    async fn remove(&self, digests: &[SessionDigest]) -> Result<bool, StoreError> {
         if digests.is_empty() {
-            return Ok(());
+            return Ok(false);
         }
         let _call = self.call().await;
         let mut conn = self.pool.acquire().await.map_err(unavailable)?;
         let mut tx = conn.begin().await.map_err(unavailable)?;
+        let mut forgot = false;
         for digest in digests {
-            sqlx::query(sql::DELETE_SESSION)
+            let done = sqlx::query(sql::DELETE_SESSION)
                 .bind(digest.as_bytes().as_slice())
                 .execute(&mut *tx)
                 .await
                 .map_err(unavailable)?;
+            forgot |= done.rows_affected() > 0;
         }
-        tx.commit().await.map_err(unavailable)
+        tx.commit().await.map_err(unavailable)?;
+        Ok(forgot)
     }
 
-    async fn remove_all(&self) -> Result<(), StoreError> {
+    async fn remove_all(&self) -> Result<bool, StoreError> {
         let _call = self.call().await;
-        sqlx::query(sql::DELETE_ALL_SESSIONS)
+        let done = sqlx::query(sql::DELETE_ALL_SESSIONS)
             .execute(&self.pool)
             .await
             .map_err(unavailable)?;
-        Ok(())
+        Ok(done.rows_affected() > 0)
     }
 
     async fn record_use(&self, digest: &SessionDigest, at: Timestamp) -> Result<(), StoreError> {
@@ -125,14 +128,14 @@ impl SessionStore for SqliteStore {
         found.as_ref().map(row::session_length).transpose()
     }
 
-    async fn set_length(&self, length: SessionLength) -> Result<(), StoreError> {
+    async fn set_length(&self, length: SessionLength) -> Result<bool, StoreError> {
         let _call = self.call().await;
-        sqlx::query(sql::SET_SESSION_LENGTH)
+        let done = sqlx::query(sql::SET_SESSION_LENGTH)
             .bind(length.as_str())
             .execute(&self.pool)
             .await
             .map_err(unavailable)?;
-        Ok(())
+        Ok(done.rows_affected() > 0)
     }
 }
 
