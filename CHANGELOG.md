@@ -34,25 +34,16 @@ All notable changes to Ladderback are listed here. The format follows
 - Draw every page-wide notice with the shared banner ([#1033](https://github.com/nledford/Ladderback/pull/1033))
 - Dry_run_plan counts what a draft plan would back up, within folders a person allows ([#1064](https://github.com/nledford/Ladderback/pull/1064))
 - Publish .deb and .rpm packages with each release ([#1085](https://github.com/nledford/Ladderback/pull/1085))
-- Add the hub's signing primitives and keep the hub out of releases ([#1081](https://github.com/nledford/Ladderback/pull/1081))
 - Show each page's first load in the shape of what is coming ([#1089](https://github.com/nledford/Ladderback/pull/1089))
 - Settings lists and edits the dry-run allowlist ([#1077](https://github.com/nledford/Ladderback/pull/1077))
 - Answer your own actions with a toast where the page shows nothing else ([#1090](https://github.com/nledford/Ladderback/pull/1090))
-- Keep the hub's and an agent's key files in the data folder, out of every backup ([#1092](https://github.com/nledford/Ladderback/pull/1092))
-- The hub's built-in TLS 1.3, its own key and certificate, and the agent's pinned client ([#1099](https://github.com/nledford/Ladderback/pull/1099))
 - Warn of missing Full Disk Access on every page ([#1087](https://github.com/nledford/Ladderback/pull/1087))
 - Switch the Settings tab when only the address's fragment changes ([#1105](https://github.com/nledford/Ladderback/pull/1105))
 - Add a shared Steps component ([#1095](https://github.com/nledford/Ladderback/pull/1095))
-- Pair an agent with its hub in the core, held pending ([#1111](https://github.com/nledford/Ladderback/pull/1111))
 - Every table scrolls in a frame of its own, words whole, times as their words ([#1119](https://github.com/nledford/Ladderback/pull/1119))
-- Pair a machine with its hub from a terminal over /sync/v1 ([#1128](https://github.com/nledford/Ladderback/pull/1128))
 - Show every page's messages in the shared alert ([#1143](https://github.com/nledford/Ladderback/pull/1143))
 - A status summary for AI agents, with overdue plans and unreadable repositories ([#1130](https://github.com/nledford/Ladderback/pull/1130))
 - Warn when an rclone-command gives a flag a credential as text ([#1162](https://github.com/nledford/Ladderback/pull/1162))
-
-### Changed
-
-- Cache the Cargo target tree again, not mbx's compiler outputs ([#1142](https://github.com/nledford/Ladderback/pull/1142))
 
 ### Fixed
 
@@ -65,14 +56,11 @@ All notable changes to Ladderback are listed here. The format follows
 - Say the keyring is locked when it couldn't keep a typed password ([#1034](https://github.com/nledford/Ladderback/pull/1034))
 - Make Warning badges and toasts read at least as strongly as Success, with Error stronger still ([#1061](https://github.com/nledford/Ladderback/pull/1061))
 - Answer 404 for an API path no route serves, not the web UI's page ([#1074](https://github.com/nledford/Ladderback/pull/1074))
-- Enable tokio's macros feature the crate uses ([#1086](https://github.com/nledford/Ladderback/pull/1086))
 - Restart the installed service after another program stops it (run install-service again) ([#1088](https://github.com/nledford/Ladderback/pull/1088))
 - Keep a badge's and an alert's words beside their icon ([#1084](https://github.com/nledford/Ladderback/pull/1084))
 - Show "Loading…" just before the busy region, outside it ([#1102](https://github.com/nledford/Ladderback/pull/1102))
-- Rerun the build script only for git changes to its own build ([#1108](https://github.com/nledford/Ladderback/pull/1108))
 - Install-restart replaces the installed binary only once the daemon is idle ([#1118](https://github.com/nledford/Ladderback/pull/1118))
 - Keep a snapshot's ID on one line in narrow tables ([#1149](https://github.com/nledford/Ladderback/pull/1149))
-- Refuse a browser's request to the sync routes, and every route added under them ([#1153](https://github.com/nledford/Ladderback/pull/1153))
 - Give the systemd service a 0077 umask ([#1158](https://github.com/nledford/Ladderback/pull/1158))
 - Warn about a secret file other users can change, and refuse a key file others can read or change ([#1154](https://github.com/nledford/Ladderback/pull/1154))
 - Log when the session store keeps failing to write ([#1168](https://github.com/nledford/Ladderback/pull/1168))
