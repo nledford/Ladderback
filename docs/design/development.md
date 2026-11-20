@@ -180,7 +180,7 @@ A change is done when:
 - for UI changes: axe-core is clean, the journey works by keyboard alone, and new components have contract tests; the milestone's screen-reader pass covers them (§4.5);
 - docs are updated, and `fmt` and `clippy` are clean, which includes the robustness rules (§13.5);
 - paragraphs and list items in `docs/` run to at most 150 words, which `just lint` checks (`scripts/check-paragraph-length.ts`);
-- the user docs site in `docs/guide/` builds with the pinned mdBook and every link in it resolves, which `just lint` checks too (`just docs-site`; §16, decision 128).
+- the user docs site in `docs/guide/` builds with the pinned mdBook and every link in it resolves, which `just lint` checks too (`just docs-site`; §16, decision 128); for a change to the site, axe-core finds nothing on its pages either (`just docs-site-a11y`, which the `Docs site` workflow runs; §13.8).
 
 ### 13.5 Robustness rules
 
@@ -339,7 +339,7 @@ A new workspace crate takes these steps, the third once a release holds it:
 
 ### 13.8 Pull requests and merging
 
-`AGENTS.md` carries the short form of the rules every pull request follows. This section is the full text for stacking, titles, hotfixes, break-glass, the required check names, the `Check` jobs' test step limit, CI's pinned Node and runner images, the `release` label, the jobs on the real service managers, and the Firefox and WebKit journeys.
+`AGENTS.md` carries the short form of the rules every pull request follows. This section is the full text for stacking, titles, hotfixes, break-glass, the required check names, the `Check` jobs' test step limit, CI's pinned Node and runner images, the `release` label, the jobs on the real service managers, the docs site's workflow, and the Firefox and WebKit journeys.
 
 **Stacking.** A pull request may stack on another that is still open when it builds on that work (a component that needs another component, the next slice of a feature) and waiting for the merge would hold it up. Pieces that can land independently still go off `main` separately.
 
@@ -409,6 +409,14 @@ Renaming one of those jobs blocks every merge, so don't, unless the maintainer u
 - **No skips.** Both steps fail, never skip, when no manager answers: a skip would hide what they exist to catch.
 - **`install` needs a throwaway machine.** `install` installs the real service under its real name, and the daemon keeps its data in the user's real folders. So it also needs `LADDERBACK_TEST_INSTALL_SERVICE=1`, which says the machine is a throwaway one such as a CI runner, and it refuses to start where a Ladderback service is installed or anything listens on its port; `contract` may run anywhere.
 - **Not required.** They are not required checks; the maintainer may add them to the ruleset once they have a clean record.
+
+**The docs site.** The `Docs site` workflow (`.github/workflows/docs-site.yml`) builds the user docs site and publishes it to GitHub Pages at `https://nledford.github.io/Ladderback/` (§16, decision 128).
+
+- **When it runs.** On every manual run, and on a pull request or a push to `main` that touches `docs/guide/`, the `Justfile`, the link check, the axe-core script (`ui-tests/scripts/docs-site-a11y.ts`), the UI tooling's `package.json`, lockfile or Node version, the browser and npm actions, `scripts/install-browser.sh`, or the workflow itself.
+- **What it checks.** `Docs site (build, links, axe-core)` runs `just docs-site-a11y`: the build with the pinned mdBook, the link check, then axe-core (WCAG 2.2 A and AA) over every page in Chromium, in each of mdBook's five themes at 1280 and 400 px wide. It also scans the landing page with the theme list open and with search results showing, and the page a result opens, with its matches marked. A violation fails the job, on a pull request and on `main` alike, and a site that fails isn't published.
+- **How it publishes.** On `main` alone, `Docs site (deploy to Pages)` deploys the checked build with GitHub's own Pages actions (`configure-pages`, `upload-pages-artifact`, `deploy-pages`), into the `github-pages` environment. It is the workflow's only job with write access (`pages: write`, `id-token: write`), and a concurrency group lets one deploy run at a time without cancelling one in progress.
+- **The maintainer's one-time step.** Settings, Pages, "Build and deployment", source "GitHub Actions", then a manual run of the workflow from `main` for the first deploy; check that the `github-pages` environment it deploys to allows `main` alone. Until the source is set, the deploy job fails and nothing is published; the check job is unaffected.
+- **Not required.** Neither job is a required check, and neither name matches one above. The workflow saves no cache: it restores the npm and Chromium caches `ci.yml` saves on `main`.
 
 **The Firefox and WebKit journeys.** The `UI journeys (Firefox, axe-core, keyboard)` and `UI journeys (WebKit, axe-core, keyboard)` jobs (`ui-engines` in `.github/workflows/ci.yml`) run on every push to `main`, every manual run and every pull request whose paths can change what they see, and the required Chromium job runs on every pull request that touches code (in MVP mode only on one whose paths can change what the engines see, by the same `ui` output). They are not required checks, and the nightly run doesn't start them, as it doesn't start Chromium's.
 
