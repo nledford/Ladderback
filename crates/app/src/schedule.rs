@@ -546,6 +546,20 @@ impl Scheduler {
                     unmet,
                 }),
             }
+            // A start that outlasted the following run — one that waited
+            // for the keyring service at startup — plans it again from now,
+            // as it was planned before runs were told their bound, so it
+            // isn't due the moment it is kept.
+            let now = self.clock.now();
+            let following = match following {
+                Ok(next) if next.at <= now => NextRun::after(
+                    &held.schedule,
+                    self.zone_of(&held.schedule),
+                    now,
+                    self.random.draw(),
+                ),
+                other => other,
+            };
             held.next = self.keep(plan, following).await;
         }
         due
@@ -1016,10 +1030,10 @@ mod tests {
         let clock = Arc::new(FakeClock::new(at("2026-06-10T03:00:00Z")));
         let mut scheduler = scheduler("2026-06-10T03:00:00Z", Arc::new(Started::default()));
         scheduler.clock = clock.clone();
-        scheduler.runs = Arc::new(SlowStart(clock, SignedDuration::from_hours(25)));
+        scheduler.runs = Arc::new(SlowStart(clock, SignedDuration::from_hours(24)));
         let mut planned = home_planned_for("2026-06-10T03:00:00Z");
         scheduler.start_due(&mut planned).await;
-        // The following run, due at 03:00 the next day, passed while the
+        // The following run, due at 03:00 the next day, came due as the
         // run started: it isn't kept due at once (#1221).
         assert_eq!(
             planned[&home()].next.as_ref().map(|next| next.at),
