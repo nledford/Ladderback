@@ -43,6 +43,7 @@ Feature: The component gallery
       | Progress          |
       | Tabs starting on a marked tab |
       | Steps             |
+      | Live table        |
       | Table             |
       | Tooltip           |
 
@@ -81,6 +82,7 @@ Feature: The component gallery
       | Icon        |
       | Button      |
       | Table       |
+      | Live table  |
       | Skeleton    |
       | Tooltip     |
       | Link        |
@@ -115,6 +117,7 @@ Feature: The component gallery
       | Icon        |
       | Button      |
       | Table       |
+      | Live table  |
       | Skeleton    |
       | Tooltip     |
       | Link        |

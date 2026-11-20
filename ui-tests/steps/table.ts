@@ -8,13 +8,16 @@
 // caption through aria-labelledby.
 
 import assert from "node:assert/strict";
+import { setTimeout as sleep } from "node:timers/promises";
 
 import { Then, When } from "@cucumber/cucumber";
 import type { Locator, Page } from "playwright";
 
 import { expect } from "../support/expect.ts";
 import { journey, namePattern, scrollKey } from "../support/keyboard.ts";
+import { patienceMs } from "../support/patience.ts";
 import type { BrowserWorld } from "../support/world.ts";
+import { rowNamed } from "./live.ts";
 
 // More presses than a frame needs to scroll from one end to the other.
 const MAX_SCROLL_PRESSES = 40;
@@ -366,4 +369,130 @@ Then("each table's row header leaves two fifths of its frame to the cells beside
     return found;
   });
   assert.deepEqual(covering, [], "row headers that leave the cells beside them less than two fifths of their frame");
+});
+
+// The change mark (decision 129): a row a live change marked "changed, not
+// yet seen" reads its watched column in bold and has an edge at its start,
+// on its row header, which stands at the frame's start. The edge is the
+// `--cue` token, or the system's text color under forced colors, at least
+// 2px wide and the row's full height. Bold is every element of the column's
+// cell that holds words of its own, and the cell itself when it does.
+interface Mark {
+  bold: string[];
+  notBold: string[];
+  edge: { content: string; color: string; width: number; start: number; top: number; bottom: number };
+  cue: string;
+}
+
+async function markOf(world: BrowserWorld, name: string, row: string, column: string): Promise<Mark> {
+  const found = rowNamed(world, name, row).first();
+  await found.waitFor({ state: "visible", timeout: patienceMs() });
+  const headers = (await table(world.page, name).locator("thead th").allInnerTexts()).map(headerWords);
+  const index = headers.indexOf(column);
+  assert.ok(index >= 0, `the table "${name}" has no column "${column}": ${headers.join(", ")}`);
+  return found.evaluate((element, at) => {
+    const probe = document.createElement("span");
+    probe.style.setProperty("forced-color-adjust", "none");
+    probe.style.color = matchMedia("(forced-colors: active)").matches ? "CanvasText" : "var(--cue)";
+    document.body.append(probe);
+    const cue = getComputedStyle(probe).color;
+    probe.remove();
+    const cell = element.querySelectorAll(":scope > :is(th, td)")[at];
+    const bold: string[] = [];
+    const notBold: string[] = [];
+    for (const part of cell === undefined ? [] : [cell, ...cell.querySelectorAll("*")]) {
+      const words = [...part.childNodes]
+        .filter((node) => node.nodeType === Node.TEXT_NODE)
+        .map((node) => node.textContent ?? "")
+        .join("")
+        .trim();
+      if (words === "") continue;
+      (Number.parseInt(getComputedStyle(part).fontWeight, 10) >= 700 ? bold : notBold).push(words);
+    }
+    const header = element.querySelector(':scope > th[scope="row"]');
+    const edge = header === null ? null : getComputedStyle(header, "::before");
+    const start = edge?.direction === "rtl" ? "right" : "left";
+    return {
+      bold,
+      notBold,
+      edge: {
+        content: edge?.content ?? "none",
+        color: edge?.backgroundColor ?? "",
+        width: Number.parseFloat(edge?.width ?? "0") || 0,
+        start: Number.parseFloat(edge?.getPropertyValue(start) ?? "") || 0,
+        top: Number.parseFloat(edge?.top ?? "") || 0,
+        bottom: Number.parseFloat(edge?.bottom ?? "") || 0,
+      },
+      cue,
+    };
+  }, index);
+}
+
+/** Whether `mark` draws a row as changed and not yet seen. */
+function marked(mark: Mark): boolean {
+  const edge = mark.edge;
+  return (
+    mark.bold.length > 0 &&
+    mark.notBold.length === 0 &&
+    edge.content !== "none" &&
+    edge.width >= 2 &&
+    edge.color === mark.cue &&
+    edge.start === 0 &&
+    edge.top === 0 &&
+    edge.bottom === 0
+  );
+}
+
+/** Whether `mark` draws a row with no mark: no edge, no bold. */
+function unmarked(mark: Mark): boolean {
+  return mark.bold.length === 0 && (mark.edge.content === "none" || mark.edge.width === 0);
+}
+
+/** Waits, up to the patience, until the row's mark is `wanted`. */
+async function waitForMark(
+  world: BrowserWorld,
+  name: string,
+  row: string,
+  column: string,
+  wanted: (mark: Mark) => boolean,
+): Promise<Mark> {
+  const until = Date.now() + patienceMs();
+  let mark = await markOf(world, name, row, column);
+  while (!wanted(mark) && Date.now() < until) {
+    await sleep(50);
+    mark = await markOf(world, name, row, column);
+  }
+  return mark;
+}
+
+Then(
+  "the row {string} of the table {string} is marked as changed, its {string} in bold and an edge at its start",
+  async function (this: BrowserWorld, row: string, name: string, column: string) {
+    const mark = await waitForMark(this, name, row, column, marked);
+    assert.ok(marked(mark), `the row ${row} isn't marked as changed: ${JSON.stringify(mark)}`);
+  },
+);
+
+Then("the row {string} of the table {string} is not marked", async function (this: BrowserWorld, row: string, name: string) {
+  const mark = await waitForMark(this, name, row, "Status", unmarked);
+  assert.ok(unmarked(mark), `the row ${row} is still marked as changed: ${JSON.stringify(mark)}`);
+});
+
+// The region a table's frame is, named as its table: where focus goes when
+// the control that had it leaves the page with nothing to take its place.
+Then("focus is on the region {string}", async function (this: BrowserWorld, name: string) {
+  const keys = journey(this.page);
+  const region = keys.byRole("region", { name: namePattern(name) });
+  assert.equal(await region.count(), 1, `the region "${name}" is not on the page once`);
+  await keys.assertFocused(region, `the region "${name}"`);
+});
+
+// Waits, as a control goes once what it was for is done: off the page, or
+// hidden on it (out of the accessibility tree), as a control whose line
+// stays so nothing moves.
+Then("the page doesn't offer the button {string}", async function (this: BrowserWorld, name: string) {
+  await this.page
+    .getByRole("button", { name: namePattern(name) })
+    .first()
+    .waitFor({ state: "hidden", timeout: patienceMs() });
 });

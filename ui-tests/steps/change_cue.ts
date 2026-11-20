@@ -1,7 +1,8 @@
 // Journey steps for the change cue (technical design §4.5, "Live updates";
-// decision 127): a row whose status a live update changed is lit once in
-// Ledger Gray (`--surface`), which settles back to the row's own fill; and
-// the reduced-motion rule, which keeps a fade and stops anything that moves.
+// decisions 127 and 129): a row whose status a live update changed arrives
+// with one fade, from the cue's fill (`--cue-fill`) into the still mark it
+// keeps until it is seen (`table.ts` checks the mark); and the
+// reduced-motion rule, which keeps a fade and stops anything that moves.
 
 import assert from "node:assert/strict";
 
@@ -85,12 +86,13 @@ Then("the row {string} of the table {string} is not lit", async function (this: 
   assert.deepEqual(await cuesOf(this, row), [], `the row ${row} was lit`);
 });
 
-// Once: every cell of the row runs one fade, from Ledger Gray to the fill it
-// has once settled, over 600 ms and a single run, and none runs again. The
-// step before it saw the row's new status, and the cue starts within the
-// frames after it, so a few seconds is long enough to wait for it.
+// Once: every cell of the row runs one fade, from the cue's fill to the fill
+// it has once settled, over 600 ms and a single run, and none runs again.
+// The mark stays after it (the step after checks it). The step before it
+// saw the row's new status, and the cue starts within the frames after it,
+// so a few seconds is long enough to wait for it.
 Then(
-  "the row {string} of the table {string} is lit once in Ledger Gray, settling back over 600 ms",
+  "the row {string} of the table {string} is lit once in the cue's fill, settling into its mark over 600 ms",
   async function (this: BrowserWorld, row: string, name: string) {
     const found = rowNamed(this, name, row).first();
     await found.waitFor({ state: "visible", timeout: patienceMs() });
@@ -99,14 +101,14 @@ Then(
     while ((await cuesOf(this, row)).length < cells && Date.now() < until) await sleep(50);
     await sleep(NO_CUE_MS);
     const cues = await cuesOf(this, row);
-    const [surface, settled] = await found.evaluate((element) => {
+    const [lit, settled] = await found.evaluate((element) => {
       const probe = document.createElement("div");
-      probe.style.backgroundColor = "var(--surface)";
+      probe.style.backgroundColor = "var(--cue-fill)";
       document.body.append(probe);
-      const gray = getComputedStyle(probe).backgroundColor;
+      const fill = getComputedStyle(probe).backgroundColor;
       probe.remove();
       const fills = [...element.querySelectorAll(":scope > :is(td, th)")].map((cell) => getComputedStyle(cell).backgroundColor);
-      return [gray, fills];
+      return [fill, fills];
     });
     assert.deepEqual(
       cues.map((cue) => cue.cell).sort(),
@@ -114,7 +116,7 @@ Then(
       `each cell of the row ${row} is lit once: ${JSON.stringify(cues)}`,
     );
     for (const cue of cues) {
-      assert.equal(cue.from, surface, `the cell ${cue.cell} is lit in ${cue.from}, not Ledger Gray`);
+      assert.equal(cue.from, lit, `the cell ${cue.cell} is lit in ${cue.from}, not the cue's fill`);
       assert.equal(cue.to, settled[cue.cell], `the cell ${cue.cell} settles to ${cue.to}, not its own fill`);
       assert.equal(cue.duration, CUE_MS, `the cell ${cue.cell} settles over ${cue.duration} ms`);
       assert.equal(cue.iterations, 1, `the cell ${cue.cell}'s cue runs ${cue.iterations} times`);

@@ -5,6 +5,9 @@
 //! cell is aligned and how wide the columns are. `components/table.rs`'s
 //! `Table` is the glue that draws it.
 
+use std::collections::HashSet;
+use std::hash::Hash;
+
 use lepticons_data::LucideGlyph;
 
 use crate::variants::Rem;
@@ -176,6 +179,71 @@ pub fn shown(state: State, rows: usize) -> Shown {
 /// the value as it was (a progress report, a re-sort) lights nothing.
 pub fn cues<T: PartialEq>(shown: Option<&T>, now: &T) -> bool {
     shown.is_some_and(|shown| shown != now)
+}
+
+/// The change marks of a table's rows (decision 129): which rows a live
+/// change marked "changed, not yet seen". A mark stays until it is seen:
+/// focus enters its row ([`Marks::see`]), the reader marks every row as seen
+/// at once ([`Marks::see_all`]), or the row leaves the table
+/// ([`Marks::gone`]); leaving the page drops them all, since nothing is
+/// stored.
+#[derive(Debug)]
+pub struct Marks<K> {
+    unseen: HashSet<K>,
+}
+
+impl<K> Default for Marks<K> {
+    fn default() -> Self {
+        Self {
+            unseen: HashSet::new(),
+        }
+    }
+}
+
+impl<K: Eq + Hash + Clone> Marks<K> {
+    /// The row `key` shows `now` where it last showed `shown`: whether it
+    /// takes the change cue's arrival fade, as [`cues`] decides. A row that
+    /// takes it is marked, unless focus is in it as it changes (`focused`):
+    /// the reader is there, so it is seen as it arrives.
+    pub fn change<T: PartialEq>(
+        &mut self,
+        key: &K,
+        shown: Option<&T>,
+        now: &T,
+        focused: bool,
+    ) -> bool {
+        let _ = (key, shown, now, focused);
+        todo!()
+    }
+
+    /// Focus entered the row `key`: its mark, if it had one, is seen.
+    /// Whether it had one.
+    pub fn see(&mut self, key: &K) -> bool {
+        let _ = key;
+        todo!()
+    }
+
+    /// The reader marked every row as seen: how many were marked.
+    pub fn see_all(&mut self) -> usize {
+        todo!()
+    }
+
+    /// The row `key` left the table, and its mark with it.
+    pub fn gone(&mut self, key: &K) {
+        let _ = key;
+        todo!()
+    }
+
+    /// Whether the row `key` is marked, changed and not yet seen.
+    pub fn is_unseen(&self, key: &K) -> bool {
+        let _ = key;
+        todo!()
+    }
+
+    /// Whether any row is marked, which shows the Mark all as seen button.
+    pub fn any(&self) -> bool {
+        todo!()
+    }
 }
 
 /// How a column's cells are aligned: at the start of the line, or, for
@@ -597,5 +665,66 @@ mod tests {
     #[test]
     fn an_update_that_leaves_the_status_as_it_was_lights_nothing() {
         assert!(!cues(Some(&"running"), &"running"));
+    }
+
+    #[test]
+    fn a_changed_row_stays_marked_until_focus_enters_it() {
+        let mut marks = Marks::default();
+        assert!(marks.change(&"docs", Some(&"running"), &"succeeded", false));
+        assert!(marks.is_unseen(&"docs"));
+        assert!(marks.any());
+        assert!(marks.see(&"docs"));
+        assert!(!marks.is_unseen(&"docs"));
+        assert!(!marks.any());
+        assert!(!marks.see(&"docs"), "a row seen once has no mark left to see");
+    }
+
+    #[test]
+    fn a_first_sight_and_an_unchanged_status_mark_nothing() {
+        let mut marks = Marks::default();
+        assert!(!marks.change(&"home", None, &"running", false));
+        assert!(!marks.change(&"home", Some(&"running"), &"running", false));
+        assert!(!marks.is_unseen(&"home"));
+        assert!(!marks.any());
+    }
+
+    #[test]
+    fn a_row_that_changes_with_focus_in_it_takes_the_fade_but_no_mark() {
+        let mut marks = Marks::default();
+        assert!(marks.change(&"home", Some(&"running"), &"cancelled", true));
+        assert!(!marks.is_unseen(&"home"));
+        assert!(!marks.any());
+    }
+
+    #[test]
+    fn a_second_change_fades_again_and_keeps_one_mark() {
+        let mut marks = Marks::default();
+        assert!(marks.change(&"home", Some(&"queued"), &"running", false));
+        assert!(marks.change(&"home", Some(&"running"), &"failed", false));
+        assert_eq!(marks.see_all(), 1);
+    }
+
+    #[test]
+    fn marking_all_as_seen_counts_the_marks_and_clears_them() {
+        let mut marks = Marks::default();
+        marks.change(&"home", Some(&"queued"), &"running", false);
+        marks.change(&"docs", Some(&"running"), &"succeeded", false);
+        marks.change(&"music", Some(&"running"), &"running", false);
+        assert_eq!(marks.see_all(), 2);
+        assert!(!marks.is_unseen(&"home"));
+        assert!(!marks.is_unseen(&"docs"));
+        assert!(!marks.any());
+        assert_eq!(marks.see_all(), 0);
+    }
+
+    #[test]
+    fn a_row_that_leaves_the_table_takes_its_mark_and_leaves_the_others() {
+        let mut marks = Marks::default();
+        marks.change(&"home", Some(&"queued"), &"running", false);
+        marks.change(&"docs", Some(&"running"), &"succeeded", false);
+        marks.gone(&"home");
+        assert!(!marks.is_unseen(&"home"));
+        assert!(marks.is_unseen(&"docs"));
+        assert_eq!(marks.see_all(), 1);
     }
 }

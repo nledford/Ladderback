@@ -94,3 +94,47 @@ Feature: The table
       | light colors  |
       | dark colors   |
       | forced colors |
+
+  # The change mark (decision 129): a live change to a row's watched column
+  # marks the row "changed, not yet seen" until the reader sees it. The demo's
+  # button stands in for a live update, changing the status of the next row
+  # in turn: photos first, then music.
+  Scenario: A row a live change marks stays marked until focus enters it
+    When I open the "Live table" demo
+    And I press Tab until focus is on the button "Change a demo status"
+    And I press Enter
+    Then the row "photos" of the table "Demo jobs" shows "Running" in its "Status" column
+    And the row "photos" of the table "Demo jobs" is marked as changed, its "Status" in bold and an edge at its start
+    And the row "music" of the table "Demo jobs" is not marked
+    And focus is kept on the button "Change a demo status"
+    When I press Tab until focus is on the button "Star photos"
+    Then the row "photos" of the table "Demo jobs" is not marked
+    And the page doesn't offer the button "Mark all as seen"
+
+  Scenario: Mark all as seen clears every mark, says how many, and hands focus to the table as it goes
+    When I open the "Live table" demo
+    And I press Tab until focus is on the button "Change a demo status"
+    And I press Enter
+    And I press Enter
+    Then the row "photos" of the table "Demo jobs" is marked as changed, its "Status" in bold and an edge at its start
+    And the row "music" of the table "Demo jobs" is marked as changed, its "Status" in bold and an edge at its start
+    When I press Tab until focus is on the button "Mark all as seen"
+    And I press Enter
+    Then the polite region reads "2 changed rows marked as seen."
+    And focus is on the region "Demo jobs"
+    And the row "photos" of the table "Demo jobs" is not marked
+    And the row "music" of the table "Demo jobs" is not marked
+    And the page doesn't offer the button "Mark all as seen"
+
+  Scenario Outline: A marked row keeps its bold status and its edge in <colors>
+    Given the browser asks for "<colors>"
+    When I open the "Live table" demo
+    And I press Tab until focus is on the button "Change a demo status"
+    And I press Enter
+    Then the row "photos" of the table "Demo jobs" is marked as changed, its "Status" in bold and an edge at its start
+
+    Examples:
+      | colors        |
+      | light colors  |
+      | dark colors   |
+      | forced colors |

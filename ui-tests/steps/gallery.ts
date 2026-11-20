@@ -294,6 +294,33 @@ const SNAPSHOTS: Record<string, string> = {
 - button "Pause the demo updates"
 - paragraph:
   - button "Finish a demo run"`,
+  "Live table": `- heading "Live table" [level=2]
+- paragraph:
+  - button "Change a demo status"
+- region "Demo jobs":
+  - table "Demo jobs":
+    - caption: Demo jobs
+    - rowgroup:
+      - row "Job Status Actions":
+        - columnheader "Job"
+        - columnheader "Status"
+        - columnheader "Actions"
+    - rowgroup:
+      - row "photos Waiting Star ⁨photos⁩":
+        - rowheader "photos"
+        - cell "Waiting"
+        - cell "Star ⁨photos⁩":
+          - button "Star ⁨photos⁩"
+      - row "music Waiting Star ⁨music⁩":
+        - rowheader "music"
+        - cell "Waiting"
+        - cell "Star ⁨music⁩":
+          - button "Star ⁨music⁩"
+      - row "documents Waiting Star ⁨documents⁩":
+        - rowheader "documents"
+        - cell "Waiting"
+        - cell "Star ⁨documents⁩":
+          - button "Star ⁨documents⁩"`,
   Tree: `- heading "Tree" [level=2]
 - tree "Demo snapshot":
   - treeitem "documents" [level=1] [selected]
