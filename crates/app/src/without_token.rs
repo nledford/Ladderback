@@ -1,7 +1,7 @@
 //! What AI agents may do without a token (technical design §10.1, decision
-//! 127): the one place the daemon holds a tokenless `ladderback mcp` session,
-//! headless or scratch, to the permissions a person set for it, and where a
-//! person changes them. They are kept in the configuration's
+//! 127): the one place the daemon holds a request `ladderback mcp` marks as
+//! an AI agent's, while sign-in is off, to the permissions a person set for
+//! it, and where a person changes them. They are kept in the configuration's
 //! `[without-token]` table, read again for every request, as the rest of it
 //! is.
 
@@ -46,16 +46,32 @@ impl WithoutToken {
     }
 
     /// The permissions the configuration holds.
+    #[expect(
+        clippy::result_large_err,
+        reason = "the configuration store's own error, which the routes map to its code"
+    )]
     pub async fn permissions(&self) -> Result<Permissions, ConfigError> {
-        todo!()
+        Ok(self.config.load().await?.without_token())
     }
 
     /// Lets a tokenless request that needs `permission` through when it is
     /// granted, with every permission the configuration holds: what the
     /// route then shows depends on them too, as a warning's path does on
     /// Snapshot contents.
+    #[expect(
+        clippy::result_large_err,
+        reason = "the configuration store's own error, which the routes map to its code"
+    )]
     pub async fn allow(&self, permission: Permission) -> Result<Permissions, WithoutTokenRefused> {
-        todo!()
+        let permissions = self
+            .permissions()
+            .await
+            .map_err(WithoutTokenRefused::Unavailable)?;
+        if permissions.grants(permission) {
+            Ok(permissions)
+        } else {
+            Err(WithoutTokenRefused::Lacks(permission))
+        }
     }
 
     /// Keeps `to` as what AI agents may do without a token, and writes the

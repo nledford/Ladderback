@@ -27,9 +27,10 @@ use uuid::Uuid;
 
 use super::startup::log_location;
 use super::{
-    FailureRefusal, config_unusable, failure_redactor, failure_refusal, locations_tried,
-    redacted_location, secret_refusal, too_much_to_mask, unavailable,
+    FailureRefusal, failure_redactor, failure_refusal, locations_tried, redacted_location,
+    secret_refusal, too_much_to_mask, unavailable,
 };
+use app::ports::config_unusable;
 
 /// Tests, connects and initialises repositories for the API (§4.2): each
 /// request's settings become domain values, run through the use cases of

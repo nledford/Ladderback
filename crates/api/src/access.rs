@@ -35,7 +35,7 @@ pub enum PermissionLevelDto {
 /// What an API token, or an AI agent without one, may do: each permission
 /// at its level or `none`. A permission a request leaves out is `none`, and
 /// a level its permission doesn't have (`"backups": "propose"`) is refused.
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "kebab-case", deny_unknown_fields, default)]
 pub struct PermissionsDto {
     pub backups: PermissionLevelDto,
@@ -45,12 +45,6 @@ pub struct PermissionsDto {
     pub snapshot_contents: PermissionLevelDto,
     pub daemon_log: PermissionLevelDto,
     pub repository_check: PermissionLevelDto,
-}
-
-impl Default for PermissionsDto {
-    fn default() -> Self {
-        todo!()
-    }
 }
 
 /// `GET /api/v1/session` and a sign-in's answer (§10.1): whether sign-in is

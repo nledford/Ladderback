@@ -248,7 +248,7 @@ async fn configured(
         .config
         .load()
         .await
-        .map_err(|error| super::config_unusable(error, unavailable))?;
+        .map_err(|error| app::ports::config_unusable(error, unavailable))?;
     let entry = config
         .repository(&alias)
         .ok_or(MaintenanceRefusal::UnknownRepository)?
@@ -523,7 +523,7 @@ pub(super) async fn refusal(
         MaintenanceError::UnknownRepository => MaintenanceRefusal::UnknownRepository,
         MaintenanceError::NotOwner => MaintenanceRefusal::NotOwner,
         // The configuration is refused as a save of it is (#347).
-        MaintenanceError::Unavailable(error) => super::config_unusable(*error, unavailable),
+        MaintenanceError::Unavailable(error) => app::ports::config_unusable(*error, unavailable),
         MaintenanceError::Resolve(error) => secret_refused(config, repository, &error).await,
         MaintenanceError::Engine { detail } => {
             unavailable(ErrorCode::EngineUnavailable, Vec::new(), Some(detail))
@@ -566,7 +566,7 @@ async fn secret_refused(
 ) -> MaintenanceRefusal {
     let loaded = match config.load().await {
         Ok(loaded) => loaded,
-        Err(unusable) => return super::config_unusable(unusable, unavailable),
+        Err(unusable) => return app::ports::config_unusable(unusable, unavailable),
     };
     match loaded.repository(repository) {
         Some(found) => MaintenanceRefusal::SecretRefused(

@@ -41,7 +41,7 @@ pub use clock::Clock;
 pub use config_drafts::{ConfigDraft, ConfigDrafts, SavedOver};
 pub use config_store::{
     CadenceProblem, ConfigError, ConfigStore, NotInPlace, PasswordProblem, Position, Problem,
-    RecordError,
+    RecordError, config_unusable,
 };
 pub use engine::{
     BackupJob, BackupSummary, BrowseJob, CheckJob, CheckSummary, DumpAnswer, DumpHeader, DumpJob,

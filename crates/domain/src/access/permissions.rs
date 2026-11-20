@@ -1,8 +1,9 @@
 //! Permissions (technical design §10.1, decision 127): what a program that
 //! isn't a person's browser may do. Each API token carries its own, as
 //! GitHub's fine-grained tokens do, and one setting holds what AI agents may
-//! do without a token, through `ladderback mcp` in headless and scratch
-//! modes. A permission is a row a person sets to no access or to its level;
+//! do without a token: the daemon holds a request `ladderback mcp` marks as
+//! an AI agent's to it while sign-in is off. A permission is a row a person
+//! sets to no access or to its level;
 //! a route or an MCP tool needs one [`Permission`]. Rules only: where they
 //! are kept and who changes them is the caller's.
 
@@ -42,19 +43,33 @@ impl Permission {
 
     /// Its name on the wire, in the store, in `config.toml` and in a refusal.
     pub fn as_str(self) -> &'static str {
-        todo!()
+        match self {
+            Self::Backups => "backups",
+            Self::BackupRuns => "backup-runs",
+            Self::Previews => "previews",
+            Self::Configuration => "configuration",
+            Self::SnapshotContents => "snapshot-contents",
+            Self::DaemonLog => "daemon-log",
+            Self::RepositoryCheck => "repository-check",
+        }
     }
 
     /// The row `text` names, exactly as [`Self::as_str`] writes it.
     pub fn parse(text: &str) -> Option<Self> {
-        todo!()
+        Self::ALL.into_iter().find(|row| row.as_str() == text)
     }
 
     /// The level the row grants when it isn't at no access. Each row has
     /// one level today; the level is still named, on the wire and in the
     /// store, so a row can gain a second one without a new format.
     pub fn level(self) -> Level {
-        todo!()
+        match self {
+            Self::Backups | Self::SnapshotContents | Self::DaemonLog => Level::Read,
+            Self::BackupRuns => Level::StartAndCancel,
+            Self::Previews => Level::Preview,
+            Self::Configuration => Level::Propose,
+            Self::RepositoryCheck => Level::Run,
+        }
     }
 
     fn bit(self) -> u8 {
@@ -91,12 +106,18 @@ impl Level {
 
     /// Its name on the wire, in the store and in `config.toml`.
     pub fn as_str(self) -> &'static str {
-        todo!()
+        match self {
+            Self::Read => "read",
+            Self::StartAndCancel => "start-and-cancel",
+            Self::Preview => "preview",
+            Self::Propose => "propose",
+            Self::Run => "run",
+        }
     }
 
     /// The level `text` names, exactly as [`Self::as_str`] writes it.
     pub fn parse(text: &str) -> Option<Self> {
-        todo!()
+        Self::ALL.into_iter().find(|level| level.as_str() == text)
     }
 }
 
@@ -131,13 +152,17 @@ impl Permissions {
 
     /// Whether `permission` is granted.
     pub fn grants(self, permission: Permission) -> bool {
-        todo!()
+        self.0 & permission.bit() != 0
     }
 
     /// These permissions with `permission` set to `level` (`None`: no
     /// access), the other rows as they are.
     pub fn with(self, permission: Permission, level: Option<Level>) -> Result<Self, NoSuchLevel> {
-        todo!()
+        match level {
+            None => Ok(Self(self.0 & !permission.bit())),
+            Some(level) if level == permission.level() => Ok(Self(self.0 | permission.bit())),
+            Some(level) => Err(NoSuchLevel { permission, level }),
+        }
     }
 
     /// These permissions with `permission` set as the configuration file
@@ -147,12 +172,17 @@ impl Permissions {
     ///
     /// `text` is neither, or names a level `permission` doesn't have.
     pub fn with_named(self, permission: Permission, text: &str) -> Result<Self, InvalidValue> {
-        todo!()
+        let invalid = || InvalidValue::new(ValueKind::PermissionLevel, text);
+        let level = match text {
+            "none" => None,
+            named => Some(Level::parse(named).ok_or_else(invalid)?),
+        };
+        self.with(permission, level).map_err(|_| invalid())
     }
 
     /// Whether every row is at no access.
     pub fn is_empty(self) -> bool {
-        todo!()
+        self.0 == 0
     }
 
     /// The rows that are on, with their level, in [`Permission::ALL`]'s

@@ -277,7 +277,12 @@ impl AgentConfig {
         repositories: BTreeMap<RepositoryAlias, RepositoryConfig>,
         plans: Vec<Plan>,
     ) -> Result<Self, Violation> {
-        todo!()
+        let rebuilt = Self::new(agent, hooks, repositories, plans)?
+            .with_notifications(self.notifications.clone())?;
+        Ok(Self {
+            without_token: self.without_token,
+            ..rebuilt
+        })
     }
 
     /// The notification rules and the channels they send to (§11).
@@ -298,8 +303,8 @@ impl AgentConfig {
         changed
     }
 
-    /// What AI agents may do without a token, through `ladderback mcp` in
-    /// headless and scratch modes, or in connect mode with sign-in off
+    /// What AI agents may do without a token: the daemon holds a request
+    /// `ladderback mcp` marks as an AI agent's to it while sign-in is off
     /// (§10.1).
     pub fn without_token(&self) -> Permissions {
         self.without_token

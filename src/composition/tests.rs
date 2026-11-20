@@ -9,8 +9,8 @@ use app::history::GetOperation;
 use app::locations::LocationReport;
 use app::notifications::Report;
 use app::ports::{
-    BackupJob, ConfigStore, HookRunner, Keyring, KeyringError, OperationStore, ScheduleStore,
-    SnapshotSummary,
+    BackupJob, ConfigError, ConfigStore, HookRunner, Keyring, KeyringError, OperationStore,
+    ScheduleStore, SnapshotSummary,
 };
 use app::queue::RunQueue;
 use app::repositories::Recording;

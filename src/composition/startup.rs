@@ -48,10 +48,11 @@ use super::key_files::KeyFilesLeftOut;
 use super::plan_runner::PlanRunner;
 use super::repositories::RepositoryService;
 use super::{
-    CancelRegistry, Daemon, EventEngine, OperationLog, Refused, SignInDecided, config_unusable,
-    downloads, dry_runs, exposed_args, inline_secret_warnings, log_secret_warning,
-    never_matching_glob_warnings, plain, plans, profiles, proposals, restores, runs, text,
+    CancelRegistry, Daemon, EventEngine, OperationLog, Refused, SignInDecided, downloads, dry_runs,
+    exposed_args, inline_secret_warnings, log_secret_warning, never_matching_glob_warnings, plain,
+    plans, profiles, proposals, restores, runs, text,
 };
+use app::ports::config_unusable;
 
 /// Says in the log, once at load, each secret the configuration holds as
 /// text (§10.2), in every location, and each location that sends its

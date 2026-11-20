@@ -11,7 +11,7 @@ use app::browse::{BrowseError, BrowseSnapshot};
 use app::conditions::NameWatch;
 use app::ports::{
     ConfigError, ConfigStore, Engine, EngineError, NormalizeSources, OperationStore, ScheduleStore,
-    SnapshotSummary,
+    SnapshotSummary, config_unusable,
 };
 use app::reads::ReadTurns;
 use app::repositories::CreateOffers;
@@ -34,7 +34,7 @@ use secrets::SystemSecrets;
 use uuid::Uuid;
 
 use super::{
-    config_unusable, exposed_args, failure_redactor, inline_secret_warning, inline_secret_warnings,
+    exposed_args, failure_redactor, inline_secret_warning, inline_secret_warnings,
     log_secret_warning, maintenance, never_matching_glob_warnings, redacted_location,
     secret_refusal, summary, text, too_much_to_mask,
 };

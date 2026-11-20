@@ -19,6 +19,7 @@ use app::access::{
     Access, ApiTokenChangeRefused, ApiTokenGrant, ApiTokenRefused, ApiTokensRefused,
     PasswordRefused, permissions_dto, permissions_of,
 };
+use app::ports::config_unusable;
 use app::without_token::{WithoutToken, WithoutTokenRefused};
 use axum::extract::rejection::JsonRejection;
 use axum::extract::{ConnectInfo, Path, Request, State};
@@ -34,7 +35,7 @@ use domain::access::api_token::{
 use domain::access::permissions::{Permission, Permissions};
 
 use crate::sign_in::SignIn;
-use crate::{refused, refused_with};
+use crate::{refused, refused_detailed, refused_with};
 
 /// The token routes' own path.
 pub(crate) const TOKENS_PATH: &str = "/api/v1/tokens";
@@ -80,7 +81,14 @@ pub(crate) fn warning_shown(
     permissions: Permissions,
     warning: api::OperationWarningDto,
 ) -> api::OperationWarningDto {
-    todo!()
+    if permissions.grants(Permission::SnapshotContents) {
+        return warning;
+    }
+    api::OperationWarningDto {
+        item: None,
+        detail: String::new(),
+        ..warning
+    }
 }
 
 /// What `permissions` may see of an operation's `summary`: a program
@@ -91,13 +99,45 @@ pub(crate) fn summary_shown(
     permissions: Permissions,
     summary: api::OperationSummaryDto,
 ) -> api::OperationSummaryDto {
-    todo!()
+    if permissions.grants(Permission::SnapshotContents) {
+        return summary;
+    }
+    api::OperationSummaryDto {
+        failure: summary
+            .failure
+            .map(|failure| api::ErrorDto::new(failure.code, [], None)),
+        entry: None,
+        ..summary
+    }
 }
 
 /// What `permissions` may see of the status summary: each operation in it
 /// as [`summary_shown`].
 pub(crate) fn status_shown(permissions: Permissions, status: api::StatusDto) -> api::StatusDto {
-    todo!()
+    api::StatusDto {
+        plans: status
+            .plans
+            .into_iter()
+            .map(|plan| api::PlanStatusDto {
+                last: plan.last.map(|last| summary_shown(permissions, last)),
+                ..plan
+            })
+            .collect(),
+        running: status
+            .running
+            .into_iter()
+            .map(|summary| summary_shown(permissions, summary))
+            .collect(),
+        unreadable_repositories: status
+            .unreadable_repositories
+            .into_iter()
+            .map(|unreadable| api::UnreadableRepositoryDto {
+                operation: summary_shown(permissions, unreadable.operation),
+                ..unreadable
+            })
+            .collect(),
+        ..status
+    }
 }
 
 /// What `permissions` may see of `event`: a warning's arguments, its item
@@ -105,7 +145,30 @@ pub(crate) fn status_shown(permissions: Permissions, status: api::StatusDto) -> 
 /// arguments and the engine's own words, as [`summary_shown`], only with
 /// Snapshot contents.
 pub(crate) fn event_shown(permissions: Permissions, event: api::UiEvent) -> api::UiEvent {
-    todo!()
+    if permissions.grants(Permission::SnapshotContents) {
+        return event;
+    }
+    match event {
+        api::UiEvent::OperationWarning {
+            operation, code, ..
+        } => api::UiEvent::OperationWarning {
+            operation,
+            code,
+            args: Vec::new(),
+        },
+        api::UiEvent::OperationFailed {
+            operation,
+            code,
+            finished_at,
+            ..
+        } => api::UiEvent::OperationFailed {
+            operation,
+            code,
+            args: Vec::new(),
+            finished_at,
+        },
+        event => event,
+    }
 }
 
 /// The token a request presents, when it has an `Authorization` header with
@@ -154,7 +217,47 @@ pub(crate) enum Needs {
 /// The permission table (decision 127): what a program needs for `method`
 /// on `path`. Every route the table doesn't name is a session's only.
 pub(crate) fn required_permission(method: &Method, path: &str) -> Needs {
-    todo!()
+    let Some(rest) = path.strip_prefix("/api/v1/") else {
+        return Needs::Session;
+    };
+    let segments: Vec<&str> = rest.split('/').collect();
+    if segments.iter().any(|segment| segment.is_empty()) {
+        return Needs::Session;
+    }
+    let reads = method == Method::GET || method == Method::HEAD;
+    let permission = match segments.as_slice() {
+        ["permissions"] if reads => return Needs::AnyToken,
+        ["log"] if reads => Permission::DaemonLog,
+        ["repositories", _, "snapshots", _, "folder"] if reads => Permission::SnapshotContents,
+        ["events" | "operations" | "plans" | "repositories" | "session" | "status"]
+        | ["operations", _]
+        | ["repositories", _, "snapshots" | "groups" | "stats"]
+        | ["plans", _, "profile"]
+            if reads =>
+        {
+            Permission::Backups
+        }
+        // Reading a repository's stats now opens the repository, as a test
+        // does, and keeps the reading (§16, decision 104).
+        ["operations"] | ["operations", _, "cancel"] | ["repositories", _, "test" | "stats"]
+            if method == Method::POST =>
+        {
+            Permission::BackupRuns
+        }
+        ["repositories", _, "maintenance", "preview"] | ["profiles", "preview"]
+            if method == Method::POST =>
+        {
+            Permission::Previews
+        }
+        // A token sees and withdraws only the proposals it made (§16,
+        // decision 89).
+        ["proposals"] | ["proposals", _] if reads => Permission::Configuration,
+        ["proposals"] | ["proposals", _, "withdraw"] | ["dry-runs"] if method == Method::POST => {
+            Permission::Configuration
+        }
+        _ => return Needs::Session,
+    };
+    Needs::Permission(permission)
 }
 
 /// `403 api-token-permission`, naming what the route needs.
@@ -177,7 +280,27 @@ pub(crate) async fn enforce_without_token(
     mut request: Request,
     next: Next,
 ) -> Response {
-    todo!()
+    let held = match required_permission(request.method(), request.uri().path()) {
+        Needs::Session => return without_token_refused(SESSION_ONLY),
+        Needs::AnyToken => without_token
+            .permissions()
+            .await
+            .map_err(WithoutTokenRefused::Unavailable),
+        Needs::Permission(permission) => without_token.allow(permission).await,
+    };
+    match held {
+        Ok(permissions) => {
+            request.extensions_mut().insert(Granted(permissions));
+            next.run(request).await
+        }
+        Err(WithoutTokenRefused::Lacks(permission)) => without_token_refused(permission.as_str()),
+        Err(WithoutTokenRefused::Unavailable(error)) => {
+            log::warn!("what AI agents may do without a token could not be read: {error}");
+            config_unusable(error, |code, args, detail| {
+                refused_detailed(StatusCode::SERVICE_UNAVAILABLE, code, args, detail)
+            })
+        }
+    }
 }
 
 /// `403 without-token-permission`, naming what the route needs.
@@ -284,12 +407,10 @@ fn listed(token: &ApiToken) -> ApiTokenDto {
     }
 }
 
-/// The permissions a body names, at least one: `None` answers its refusal.
-fn token_permissions(dto: api::PermissionsDto) -> Result<TokenPermissions, Response> {
-    let permissions = permissions_of(dto)
-        .map_err(|_| refused(StatusCode::BAD_REQUEST, ErrorCode::InvalidBody))?;
-    TokenPermissions::new(permissions)
-        .map_err(|_| refused(StatusCode::BAD_REQUEST, ErrorCode::ApiTokenNoPermission))
+/// The permissions a body names, at least one, or the code of its refusal.
+fn token_permissions(dto: api::PermissionsDto) -> Result<TokenPermissions, ErrorCode> {
+    let permissions = permissions_of(dto).map_err(|_| ErrorCode::InvalidBody)?;
+    TokenPermissions::new(permissions).map_err(|_| ErrorCode::ApiTokenNoPermission)
 }
 
 /// `GET /api/v1/permissions`: what the request may do. A token's
@@ -298,7 +419,8 @@ fn token_permissions(dto: api::PermissionsDto) -> Result<TokenPermissions, Respo
 /// unmarked request with sign-in off. The mark counts only with sign-in
 /// off: with sign-in on, a session is a person's whatever it carries.
 pub(crate) async fn permissions(granted: Option<axum::Extension<Granted>>) -> Response {
-    todo!()
+    let permissions = granted.map_or_else(every, |axum::Extension(Granted(held))| held);
+    (StatusCode::OK, axum::Json(permissions_dto(permissions))).into_response()
 }
 
 /// `GET /api/v1/tokens`: the tokens kept, oldest first.
@@ -342,7 +464,7 @@ pub(crate) async fn create(
     };
     let permissions = match token_permissions(permissions) {
         Ok(permissions) => permissions,
-        Err(refusal) => return refusal,
+        Err(code) => return refused(StatusCode::BAD_REQUEST, code),
     };
     match access.create_api_token(label, permissions).await {
         Ok(created) => (
@@ -389,7 +511,77 @@ pub(crate) async fn change_permissions(
     Path(id): Path<String>,
     request: Request,
 ) -> Response {
-    todo!()
+    let SignIn::On(access) = sign_in else {
+        return sign_in_off();
+    };
+    let peer = request
+        .extensions()
+        .get::<ConnectInfo<crate::PeerAddr>>()
+        .copied();
+    // The body limit has already read the body, bounded by the API's limit
+    // (`body_limit`), so this only takes the bytes it holds.
+    let Ok(body) = axum::body::to_bytes(request.into_body(), usize::MAX).await else {
+        return refused(StatusCode::BAD_REQUEST, ErrorCode::InvalidBody);
+    };
+    let Ok(ChangeApiTokenPermissionsDto {
+        permissions,
+        current_password,
+    }) = serde_json::from_slice(&body)
+    else {
+        return refused(StatusCode::BAD_REQUEST, ErrorCode::InvalidBody);
+    };
+    let permissions = match token_permissions(permissions) {
+        Ok(permissions) => permissions,
+        Err(code) => return refused(StatusCode::BAD_REQUEST, code),
+    };
+    let Some(ConnectInfo(crate::PeerAddr(peer))) = peer else {
+        log::error!(
+            "a change of an API token's permissions arrived without its connection's address; the server must be served with its connect info"
+        );
+        return refused(
+            StatusCode::SERVICE_UNAVAILABLE,
+            ErrorCode::SignInUnavailable,
+        );
+    };
+    // Empty, or longer than any admin password: not the admin password.
+    let Ok(current) = Password::parse(current_password) else {
+        return refused(StatusCode::FORBIDDEN, ErrorCode::CurrentPasswordWrong);
+    };
+    let unknown = |id: String| {
+        refused_with(
+            StatusCode::NOT_FOUND,
+            ErrorCode::ApiTokenUnknown,
+            vec![("token", MsgArg::Text(id))],
+        )
+    };
+    let Some(token) = ApiTokenId::parse(&id) else {
+        return unknown(id);
+    };
+    match access
+        .change_api_token_permissions(peer.ip(), &current, &token, permissions)
+        .await
+    {
+        Ok(true) => (
+            StatusCode::OK,
+            axum::Json(permissions_dto(permissions.get())),
+        )
+            .into_response(),
+        Ok(false) => unknown(id),
+        Err(ApiTokenChangeRefused::Password(PasswordRefused::WrongPassword)) => {
+            refused(StatusCode::FORBIDDEN, ErrorCode::CurrentPasswordWrong)
+        }
+        Err(ApiTokenChangeRefused::Password(PasswordRefused::Wait { seconds })) => {
+            crate::sign_in::wait_refused(seconds)
+        }
+        Err(ApiTokenChangeRefused::Password(PasswordRefused::Unavailable(detail))) => {
+            log::warn!("the admin password could not be checked: {detail}");
+            refused(
+                StatusCode::SERVICE_UNAVAILABLE,
+                ErrorCode::AdminPasswordUnavailable,
+            )
+        }
+        Err(ApiTokenChangeRefused::Unavailable(detail)) => unavailable(&detail),
+    }
 }
 
 #[cfg(test)]

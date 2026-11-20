@@ -21,18 +21,76 @@ use crate::ports::{Added, StoreError};
 /// `permissions` as a log line names them: each row that is on, with its
 /// level, as `backups: read`, joined by commas; `no access` for none.
 pub fn logged(permissions: Permissions) -> String {
-    todo!()
+    let rows: Vec<String> = permissions
+        .rows()
+        .map(|(row, level)| format!("{}: {}", row.as_str(), level.as_str()))
+        .collect();
+    if rows.is_empty() {
+        "no access".to_owned()
+    } else {
+        rows.join(", ")
+    }
 }
 
 /// `permissions` on the wire: each permission at its level or `none`.
 pub fn permissions_dto(permissions: Permissions) -> PermissionsDto {
-    todo!()
+    let at = |permission: Permission| {
+        if permissions.grants(permission) {
+            match permission.level() {
+                Level::Read => PermissionLevelDto::Read,
+                Level::StartAndCancel => PermissionLevelDto::StartAndCancel,
+                Level::Preview => PermissionLevelDto::Preview,
+                Level::Propose => PermissionLevelDto::Propose,
+                Level::Run => PermissionLevelDto::Run,
+            }
+        } else {
+            PermissionLevelDto::None
+        }
+    };
+    PermissionsDto {
+        backups: at(Permission::Backups),
+        backup_runs: at(Permission::BackupRuns),
+        previews: at(Permission::Previews),
+        configuration: at(Permission::Configuration),
+        snapshot_contents: at(Permission::SnapshotContents),
+        daemon_log: at(Permission::DaemonLog),
+        repository_check: at(Permission::RepositoryCheck),
+    }
 }
 
 /// The permissions a request names; a level its permission doesn't have,
 /// as `"backups": "propose"`, is refused.
 pub fn permissions_of(dto: PermissionsDto) -> Result<Permissions, NoSuchLevel> {
-    todo!()
+    let PermissionsDto {
+        backups,
+        backup_runs,
+        previews,
+        configuration,
+        snapshot_contents,
+        daemon_log,
+        repository_check,
+    } = dto;
+    [
+        (Permission::Backups, backups),
+        (Permission::BackupRuns, backup_runs),
+        (Permission::Previews, previews),
+        (Permission::Configuration, configuration),
+        (Permission::SnapshotContents, snapshot_contents),
+        (Permission::DaemonLog, daemon_log),
+        (Permission::RepositoryCheck, repository_check),
+    ]
+    .into_iter()
+    .try_fold(Permissions::NONE, |permissions, (permission, level)| {
+        let level = match level {
+            PermissionLevelDto::None => None,
+            PermissionLevelDto::Read => Some(Level::Read),
+            PermissionLevelDto::StartAndCancel => Some(Level::StartAndCancel),
+            PermissionLevelDto::Preview => Some(Level::Preview),
+            PermissionLevelDto::Propose => Some(Level::Propose),
+            PermissionLevelDto::Run => Some(Level::Run),
+        };
+        permissions.with(permission, level)
+    })
 }
 
 /// A token that has just been created, and its whole text, shown once.
@@ -179,7 +237,23 @@ impl Access {
         id: &ApiTokenId,
         permissions: TokenPermissions,
     ) -> Result<bool, ApiTokenChangeRefused> {
-    todo!()
+        self.step_up(address, current)
+            .await
+            .map_err(ApiTokenChangeRefused::Password)?;
+        let changed = self
+            .tokens
+            .set_permissions(id, permissions)
+            .await
+            .map_err(|error| ApiTokenChangeRefused::Unavailable(error.to_string()))?;
+        if changed {
+            self.tokens_written();
+            log::info!(
+                "API token {} now has {}",
+                id.as_str(),
+                logged(permissions.get())
+            );
+        }
+        Ok(changed)
     }
 
     /// Checks the token a request from `address` presents: `None` when the
@@ -247,7 +321,11 @@ impl Access {
     /// stream opened with it ends once it is `None` or lacks what the stream
     /// needs, and shows what the permissions it holds now allow.
     pub async fn api_token_permissions(&self, id: &ApiTokenId) -> Option<Permissions> {
-        todo!()
+        let under = self.password.fingerprint().ok()?;
+        match self.tokens.get(id).await {
+            Ok(Some(token)) if token.password == under => Some(token.permissions.get()),
+            _ => None,
+        }
     }
 
     fn not_waiting(&self, client: Client, now: Timestamp) -> Result<(), ApiTokenRefused> {

@@ -39,7 +39,27 @@ impl Scope {
     /// The permissions the scope gives, each at its level, every other at
     /// `none`.
     fn permissions(self) -> PermissionsDto {
-        todo!()
+        let none = PermissionsDto::default();
+        match self {
+            Self::Read => PermissionsDto {
+                backups: PermissionLevelDto::Read,
+                snapshot_contents: PermissionLevelDto::Read,
+                daemon_log: PermissionLevelDto::Read,
+                ..none
+            },
+            Self::Run => PermissionsDto {
+                backup_runs: PermissionLevelDto::StartAndCancel,
+                ..none
+            },
+            Self::Preview => PermissionsDto {
+                previews: PermissionLevelDto::Preview,
+                ..none
+            },
+            Self::Propose => PermissionsDto {
+                configuration: PermissionLevelDto::Propose,
+                ..none
+            },
+        }
     }
 }
 
@@ -93,7 +113,16 @@ fn permissions_of(levels: [PermissionLevelDto; 7]) -> PermissionsDto {
 /// The scopes a token's row lists for its `permissions`: each that gives
 /// at least one of them.
 pub(crate) fn scopes_of(permissions: PermissionsDto) -> Vec<Scope> {
-    todo!()
+    let held = levels(permissions);
+    SCOPES
+        .into_iter()
+        .filter(|scope| {
+            levels(scope.permissions())
+                .into_iter()
+                .zip(held)
+                .any(|(gives, has)| gives != PermissionLevelDto::None && gives == has)
+        })
+        .collect()
 }
 
 /// The `id` of the heading of the tokens' section, which names their table

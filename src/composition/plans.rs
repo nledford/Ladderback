@@ -14,7 +14,7 @@ use domain::PlanId;
 use domain::planning::{ChangeRefused, Plan, Violation};
 use http_adapter::{Plans, PlansError};
 
-use super::config_unusable;
+use app::ports::config_unusable;
 
 /// The plans of the configuration `config`, edited by `edits`.
 pub(super) struct PlanService {

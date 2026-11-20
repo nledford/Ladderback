@@ -784,7 +784,14 @@ impl Opener {
     /// revoked, and of the admin password kept now); what AI agents may do
     /// without a token now. `None` once there is none of these.
     async fn permissions(&self) -> Option<Permissions> {
-        todo!()
+        match self {
+            Self::Session(session) => session
+                .access
+                .peek(&session.token)
+                .map(|_| api_tokens::every()),
+            Self::Token(token) => token.access.api_token_permissions(&token.grant.id).await,
+            Self::AiAgent(without_token) => without_token.permissions().await.ok(),
+        }
     }
 }
 
