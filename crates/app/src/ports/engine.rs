@@ -154,7 +154,7 @@ pub enum Job {
     /// read, like [`Ls`](Self::Ls): no I7 slot, no operation log row.
     Browse(BrowseJob),
     /// Finds entries by name across the repository's snapshots (§16,
-    /// decision 127). A read, like [`Browse`](Self::Browse).
+    /// decision 132). A read, like [`Browse`](Self::Browse).
     Find(FindJob),
     /// Reads the repository's stats: its snapshots, then every index file
     /// (§16, decision 104). A read, not an operation: it takes no I7 slot and

@@ -118,7 +118,7 @@ pub(crate) fn browse(ctx: &Context, job: &BrowseJobSpec) -> Result<Done, JobErro
 }
 
 /// Finds entries by name across the repository's snapshots (§16, decision
-/// 127). A read: it emits `Started` after the open, as `ls` does, chooses the
+/// 132). A read: it emits `Started` after the open, as `ls` does, chooses the
 /// newest snapshots (of the plan, when the job names one), then walks their
 /// trees for at most [`SEARCH_SECONDS`], and sends one final result.
 pub(crate) fn find(ctx: &Context, job: &FindJobSpec) -> Result<Done, JobError> {

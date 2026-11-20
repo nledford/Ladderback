@@ -322,7 +322,7 @@ pub trait Catalog: Send + Sync {
 
     /// The entries whose names match `pattern` in the newest snapshots of
     /// the repository `alias`, of `plan` alone when it names one, within
-    /// `caps` (§16, decision 127), read live.
+    /// `caps` (§16, decision 132), read live.
     async fn find(
         &self,
         alias: String,
@@ -1173,7 +1173,7 @@ struct FindParams {
 }
 
 /// A search of a repository's snapshots for entries by name (§16, decision
-/// 127), read live like the listing (§9). The pattern, the plan and the caps
+/// 132), read live like the listing (§9). The pattern, the plan and the caps
 /// are parsed here, where they enter; a cap past its most is lowered to it.
 async fn find_in_snapshots(
     State(state): State<AppState>,

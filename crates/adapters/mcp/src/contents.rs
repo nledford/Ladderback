@@ -1,6 +1,6 @@
 //! The tools that show what snapshots hold (§4.6, #953): one page of a
 //! snapshot's folder, and a search of a repository's snapshots for entries
-//! by name (§16, decision 127). Both read the repository and change nothing;
+//! by name (§16, decision 132). Both read the repository and change nothing;
 //! restoring and downloading stay with the person (§16, decision 20).
 
 use api::{ErrorCode, ErrorDto, MsgArg};

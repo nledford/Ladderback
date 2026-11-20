@@ -1,5 +1,5 @@
 //! Finding entries by name across a repository's snapshots (§3.1, "Snapshot
-//! search"; §16, decision 127): which snapshots to search, what a name
+//! search"; §16, decision 132): which snapshots to search, what a name
 //! pattern matches, and the caps that bound a search. A pattern and the
 //! caps come from outside the process, so each is bounded where it is made.
 

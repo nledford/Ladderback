@@ -1,5 +1,5 @@
 //! A search of a repository's snapshots for entries by name (§16, decision
-//! 127): each chosen snapshot's tree walked from its top, newest snapshot
+//! 132): each chosen snapshot's tree walked from its top, newest snapshot
 //! first. A tree's ID is the hash of all it holds, so a folder that didn't
 //! change between snapshots is read once: what its tree held that matched is
 //! kept by its ID, and read from there for every other snapshot that holds

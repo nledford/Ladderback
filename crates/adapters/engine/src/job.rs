@@ -291,7 +291,7 @@ pub struct BrowseJobSpec {
 }
 
 /// A search of the repository's snapshots for entries by name (§16,
-/// decision 127).
+/// decision 132).
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct FindJobSpec {
     pub repo: RepositorySpec,

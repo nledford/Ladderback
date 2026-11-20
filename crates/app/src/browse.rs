@@ -1,6 +1,6 @@
 //! The snapshot-browsing use cases (§16, decision 102): one page of one
 //! folder of a snapshot, and a search of a repository's snapshots for
-//! entries by name (decision 127), each read live by one worker. The job
+//! entries by name (decision 132), each read live by one worker. The job
 //! names the ID the configuration's entry records, as a run's does, so the
 //! engine opens only that repository (refusing another at the location,
 //! §7.3) and gives the job the repository's cache. A read (§9): it takes no
