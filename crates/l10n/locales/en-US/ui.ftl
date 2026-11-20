@@ -1443,9 +1443,9 @@ ui-no-operations = No operations yet.
 ui-progress-working = Working…
 
 # Shown below the words of a progress bar that has no total to measure
-# against, so a reader can tell a run that is still reporting from one that
-# has gone quiet. It is an exact instant, never "a minute ago", so it
-# changes only when a new report arrives.
+# against, once its step counts, so a reader can tell a run that is still
+# reporting from one that has gone quiet. It is an exact instant, never "a
+# minute ago", so it changes only when a new report arrives.
 # $when (instant): when the daemon last heard the run report, in the daemon's clock.
 ui-progress-reported = Last report at { DATETIME($when, dateStyle: "short", timeStyle: "medium") }
 
@@ -1455,6 +1455,19 @@ ui-progress-reported = Last report at { DATETIME($when, dateStyle: "short", time
 # $step (text): the step's own message, such as "Backing up…", or "Working…" when the operation names no step.
 # $when (instant): when the daemon last heard the run report, in the daemon's clock.
 ui-progress-unknown-value = { $step } Last report at { DATETIME($when, dateStyle: "short", timeStyle: "medium") }
+
+# Shown below the words of a progress bar whose step has counted nothing yet:
+# such a step reports only as it begins and ends, so this says how long the
+# run has been in it, not when it last reported. It is an exact instant,
+# never "for 3 minutes", so it changes only when the step does.
+# $when (instant): when the daemon heard the step begin, in the daemon's clock.
+ui-progress-since = Since { DATETIME($when, dateStyle: "short", timeStyle: "medium") }
+
+# What a screen reader hears of a progress bar whose step has counted nothing
+# yet: the step, then since when the run has been in it.
+# $step (text): the step's own message, such as "Listing the packs…", or "Working…" when the operation names no step.
+# $when (instant): when the daemon heard the step begin, in the daemon's clock.
+ui-progress-since-value = { $step } Since { DATETIME($when, dateStyle: "short", timeStyle: "medium") }
 
 # The name of a running backup's progress bar, named as its row is, by its
 # plan, so two running backups' bars are told apart and a check's bar is

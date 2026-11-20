@@ -11,8 +11,8 @@ use crate::routes::text_with;
 use crate::text;
 use crate::variants::{Size, Tone};
 use rules::{
-    Clear, FILL, Next, REPORTED, STEP, TRACK, Teller, Told, WORDS, Wake, bar_class, default_size,
-    fill_shift, percent, progress_text, value_text, wait_for,
+    Clear, FILL, Heard, Next, REPORTED, STEP, TRACK, Teller, Told, WORDS, Wake, bar_class,
+    datetime, default_size, fill_shift, heard_of, percent, progress_text, value_text, wait_for,
 };
 
 // What a progress bar tells a screen reader, and when, decided on the host;
@@ -94,6 +94,9 @@ pub fn Progress(
         Memo::new(move |_| reading.with(|progress| percent(progress.current, progress.total)));
     let known = Memo::new(move |_| percent.get().is_some());
     let said = Memo::new(move |_| reading.with(progress_text));
+    // Apart from the step's words, so a report that only moves the time
+    // rebuilds the time alone.
+    let heard = Memo::new(move |_| reading.with(heard_of));
     let value_localizer = Arc::clone(&localizer);
     let step_localizer = Arc::clone(&localizer);
     let reported_localizer = Arc::clone(&localizer);
@@ -153,12 +156,16 @@ pub fn Progress(
                 }}
             </span>
             {move || {
-                said.get()
-                    .reported
-                    .map(|at| {
+                heard
+                    .get()
+                    .map(|heard| {
+                        let (id, at) = match heard {
+                            Heard::Since(_) => todo!(),
+                            Heard::Last(at) => (msg::UI_PROGRESS_REPORTED, at),
+                        };
                         let shown = text_with(
                             &reported_localizer,
-                            msg::UI_PROGRESS_REPORTED,
+                            id,
                             &[
                                 (
                                     "when",
@@ -171,7 +178,7 @@ pub fn Progress(
                         );
                         view! {
                             <span class=REPORTED>
-                                <time datetime=at.to_string()>{shown}</time>
+                                <time datetime=datetime(at)>{shown}</time>
                             </span>
                         }
                     })

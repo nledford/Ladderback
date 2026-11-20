@@ -18,10 +18,10 @@ use api::{
 };
 
 /// The live progress of a running operation: the step it is in, when the
-/// daemon names one, how far that step has come, and when the daemon heard
-/// the report, which a daemon older than the field doesn't say. Transient:
-/// never part of the stored history, and gone the moment the operation
-/// ends.
+/// daemon names one, how far that step has come, when the daemon heard the
+/// report, which a daemon older than the field doesn't say, and when it
+/// heard the first report of this measure. Transient: never part of the
+/// stored history, and gone the moment the operation ends.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub(crate) struct Progress {
     pub(crate) step: Option<OperationStep>,
@@ -30,6 +30,11 @@ pub(crate) struct Progress {
     pub(crate) current: u64,
     pub(crate) total: Option<u64>,
     pub(crate) reported_at: Option<jiff::Timestamp>,
+    /// When the daemon heard the first report of this measure the page
+    /// saw: a new step, a new total or a count that went back starts a new
+    /// one. A step that counts nothing reports only as it begins and ends
+    /// (a rustic spinner), so this, not `reported_at`, is what is true of it.
+    pub(crate) since: Option<jiff::Timestamp>,
 }
 
 /// One row of the operations table: what the daemon's history says about an
@@ -103,6 +108,7 @@ impl OperationsState {
                         // An instant that isn't RFC 3339 says nothing,
                         // never a guess.
                         reported_at: at.as_deref().and_then(|at| at.parse().ok()),
+                        since: None,
                     });
                 }
             }
@@ -645,6 +651,7 @@ mod tests {
                 current: 3,
                 total: Some(10),
                 reported_at: None,
+                since: None,
             })
         );
         assert_eq!(state.rows[0].summary.status, "running");
@@ -672,6 +679,7 @@ mod tests {
                 current: 3,
                 total: Some(10),
                 reported_at: None,
+                since: None,
             })
         );
         state.apply(&UiEvent::OperationProgress {
@@ -690,6 +698,7 @@ mod tests {
                 current: 1,
                 total: None,
                 reported_at: None,
+                since: None,
             })
         );
     }
@@ -751,6 +760,49 @@ mod tests {
         }
     }
 
+    /// A step that has counted nothing keeps the instant the daemon heard
+    /// it begin, however often it reports again: a rustic spinner reports
+    /// only as it begins and ends, so its last report says nothing of
+    /// whether it is still busy. A new step, a new total or a count that
+    /// goes back is a new measure, which begins at its own report.
+    #[test]
+    fn a_step_keeps_the_instant_the_daemon_heard_it_begin() {
+        let mut state =
+            OperationsState::from_history(vec![summary(FIRST, "running", true, false)], None);
+        let report = |step, current, total, at: &str| UiEvent::OperationProgress {
+            operation: id(FIRST),
+            step,
+            unit: ProgressUnit::Count,
+            current,
+            total,
+            at: Some(at.to_owned()),
+        };
+        let since = |state: &OperationsState| {
+            state.rows[0]
+                .progress
+                .and_then(|progress| progress.since)
+                .map(|at| at.to_string())
+        };
+        let listing = Some(api::OperationStep::ListingPacks);
+        let repacking = Some(api::OperationStep::Repacking);
+        state.apply(&report(listing, 0, None, "2026-11-09T10:01:00Z"));
+        state.apply(&report(listing, 0, None, "2026-11-09T10:03:00Z"));
+        state.apply(&report(listing, 4, None, "2026-11-09T10:04:00Z"));
+        assert_eq!(since(&state).as_deref(), Some("2026-11-09T10:01:00Z"));
+        for (step, current, total, at) in [
+            (repacking, 4, None, "2026-11-09T10:05:00Z"),
+            (repacking, 4, Some(10), "2026-11-09T10:06:00Z"),
+            (repacking, 1, Some(10), "2026-11-09T10:07:00Z"),
+        ] {
+            state.apply(&report(step, current, total, at));
+            assert_eq!(
+                since(&state).as_deref(),
+                Some(at),
+                "{step:?} {current} of {total:?}"
+            );
+        }
+    }
+
     #[test]
     fn a_succeeded_event_ends_the_row_and_its_progress_with_it() {
         let mut state =
@@ -761,6 +813,7 @@ mod tests {
             current: 9,
             total: Some(10),
             reported_at: None,
+            since: None,
         });
         state.apply(&UiEvent::OperationSucceeded {
             operation: id(FIRST),
@@ -898,6 +951,7 @@ mod tests {
                 current: 3,
                 total: Some(10),
                 reported_at: None,
+                since: None,
             }),
             "the live part of the row survives the merge"
         );
@@ -1030,6 +1084,7 @@ mod tests {
                 current: 4,
                 total: Some(9),
                 reported_at: None,
+                since: None,
             })
         );
     }
@@ -1116,6 +1171,7 @@ mod tests {
                 current: 3,
                 total: Some(10),
                 reported_at: None,
+                since: None,
             }),
             "the live part of the row survives the merge"
         );

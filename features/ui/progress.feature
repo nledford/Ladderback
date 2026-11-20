@@ -120,6 +120,27 @@ Feature: A running operation's progress bar can be reached by keyboard and never
     Then the progress bar "Backup progress of demo-home" reads "Working…" and its last report at "2026-11-09T10:01:10Z"
     And the live regions stay silent
 
+  # A step that counts nothing, such as rustic's listing of packs, reports
+  # only as it begins and ends, so its last report would make a busy run
+  # look stopped. Until it counts, the bar says since when the run has been
+  # in that step, which another report of the same step doesn't change.
+  Scenario: A bar whose step has counted nothing says since when the step began, and its last report once it counts
+    Given the page's clock can be moved on
+    And the daemon reports a running backup of "demo-home"
+    When I open the address "/operations"
+    And the table "Operations" has a row "demo-home" that shows "Running"
+    And the daemon reports 0 bytes processed of the backup of "demo-home" and not yet its total, at "2026-11-09T10:01:00Z"
+    Then the progress bar "Backup progress of demo-home" shows its step running since "2026-11-09T10:01:00Z"
+    And the progress bar "Backup progress of demo-home" reads "Working…" and since "2026-11-09T10:01:00Z"
+    When the page's clock moves on 120 seconds
+    And the daemon reports 0 bytes processed of the backup of "demo-home" and not yet its total, at "2026-11-09T10:03:00Z"
+    Then the progress bar "Backup progress of demo-home" shows its step running since "2026-11-09T10:01:00Z"
+    When the page's clock moves on 60 seconds
+    And the daemon reports 8 bytes processed of the backup of "demo-home" and not yet its total, at "2026-11-09T10:04:00Z"
+    Then the progress bar "Backup progress of demo-home" shows its last report at "2026-11-09T10:04:00Z"
+    And the progress bar "Backup progress of demo-home" reads "Working…" and its last report at "2026-11-09T10:04:00Z"
+    And the live regions stay silent
+
   Scenario Outline: A running backup's progress bar reads in a pseudolocale and fits a small screen with larger text
     Given the daemon reports a running backup of "demo-home"
     And a viewport of 320 by 256 pixels
