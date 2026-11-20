@@ -272,8 +272,14 @@ pub struct ChangeWithoutTokenDto {
 }
 
 impl std::fmt::Debug for ChangeWithoutTokenDto {
-    fn fmt(&self, _f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        todo!()
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("ChangeWithoutTokenDto")
+            .field("permissions", &self.permissions)
+            .field(
+                "current_password",
+                &self.current_password.as_ref().map(|_| "[hidden]"),
+            )
+            .finish()
     }
 }
 
