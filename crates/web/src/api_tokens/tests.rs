@@ -19,10 +19,18 @@ fn ago(unit: &'static str, count: u64) -> LastUsed {
     LastUsed::Ago { unit, count }
 }
 
-fn form(label: &str, scopes: &[Scope]) -> TokenForm {
+fn form(label: &str, permissions: PermissionsDto) -> TokenForm {
     TokenForm {
         label: label.to_owned(),
-        scopes: scopes.to_vec(),
+        permissions,
+    }
+}
+
+/// Only Backup runs, a permission that shows nothing on its own.
+fn starts_backups() -> PermissionsDto {
+    PermissionsDto {
+        backup_runs: PermissionLevelDto::StartAndCancel,
+        ..PermissionsDto::default()
     }
 }
 
@@ -32,106 +40,41 @@ fn said(id: MessageId, args: &[(&'static str, MsgArg)]) -> String {
 }
 
 #[test]
-fn a_form_without_a_label_or_a_scope_lacks_both_in_the_page_s_order() {
-    assert_eq!(form("", &[]).missing(), [Field::Label, Field::Scopes]);
+fn a_form_without_a_label_or_a_permission_lacks_both_in_the_page_s_order() {
+    assert_eq!(
+        form("", PermissionsDto::default()).missing(),
+        [Field::Label, Field::Permissions]
+    );
 }
 
 #[test]
 fn a_label_of_only_spaces_is_none() {
-    assert_eq!(form("   ", &[Scope::Read]).missing(), [Field::Label]);
+    assert_eq!(form("   ", new_token()).missing(), [Field::Label]);
 }
 
 #[test]
-fn a_token_needs_a_scope() {
-    assert_eq!(form("nightly-mcp", &[]).missing(), [Field::Scopes]);
-}
-
-#[test]
-fn a_label_and_a_scope_lack_nothing() {
-    assert!(form("nightly-mcp", &[Scope::Run]).missing().is_empty());
-}
-
-#[test]
-fn the_request_has_the_label_without_its_spaces_and_the_permissions_of_each_scope_chosen() {
-    let request = form(
-        "  nightly mcp  ",
-        &[Scope::Propose, Scope::Read, Scope::Propose],
-    )
-    .request();
-    assert_eq!(request.label, "nightly mcp");
+fn a_token_needs_a_permission() {
     assert_eq!(
-        request.permissions,
-        PermissionsDto {
-            backups: PermissionLevelDto::Read,
-            configuration: PermissionLevelDto::Propose,
-            snapshot_contents: PermissionLevelDto::Read,
-            daemon_log: PermissionLevelDto::Read,
-            ..PermissionsDto::default()
-        }
+        form("nightly-mcp", PermissionsDto::default()).missing(),
+        [Field::Permissions]
     );
 }
 
-/// Each scope gives what a token of that scope was migrated to (decision
-/// 127), so a token made with the form can do what it could before.
 #[test]
-fn each_scope_gives_the_permissions_its_tokens_were_migrated_to() {
-    let none = PermissionsDto::default();
-    for (scope, permissions) in [
-        (
-            Scope::Read,
-            PermissionsDto {
-                backups: PermissionLevelDto::Read,
-                snapshot_contents: PermissionLevelDto::Read,
-                daemon_log: PermissionLevelDto::Read,
-                ..none
-            },
-        ),
-        (
-            Scope::Run,
-            PermissionsDto {
-                backup_runs: PermissionLevelDto::StartAndCancel,
-                ..none
-            },
-        ),
-        (
-            Scope::Preview,
-            PermissionsDto {
-                previews: PermissionLevelDto::Preview,
-                ..none
-            },
-        ),
-        (
-            Scope::Propose,
-            PermissionsDto {
-                configuration: PermissionLevelDto::Propose,
-                ..none
-            },
-        ),
-    ] {
-        assert_eq!(
-            form("t", &[scope]).request().permissions,
-            permissions,
-            "{scope:?}"
-        );
-        assert_eq!(scopes_of(permissions), [scope], "{scope:?}");
-    }
+fn a_label_and_one_permission_lack_nothing() {
+    assert!(form("nightly-mcp", starts_backups()).missing().is_empty());
 }
 
-/// A token given only part of what a scope gives, over the API, still
-/// lists that scope, so no permission it has goes unsaid in its row.
 #[test]
-fn a_row_lists_each_scope_that_gives_any_of_the_token_s_permissions() {
-    let daemon_log_only = PermissionsDto {
-        daemon_log: PermissionLevelDto::Read,
-        ..PermissionsDto::default()
-    };
-    assert_eq!(scopes_of(daemon_log_only), [Scope::Read]);
-    assert!(scopes_of(PermissionsDto::default()).is_empty());
+fn the_request_has_the_label_without_its_spaces_and_the_permissions_chosen() {
+    let request = form("  nightly mcp  ", starts_backups()).request();
+    assert_eq!(request.label, "nightly mcp");
+    assert_eq!(request.permissions, starts_backups());
 }
 
 #[test]
 fn each_problem_links_to_its_field_and_says_the_daemon_s_own_words() {
-    let items = problems_of(&form("", &[]), said).unwrap();
+    let items = problems_of(&form("", PermissionsDto::default()), said).unwrap();
     assert_eq!(items.len(), 2);
     assert_eq!(items[0].field, Some("api-token-label"));
     assert_eq!(
@@ -141,7 +84,13 @@ fn each_problem_links_to_its_field_and_says_the_daemon_s_own_words() {
             &[("max", MsgArg::Count(LABEL_MAX_CHARS))]
         )
     );
-    assert_eq!(items[1].field, Some("api-token-scope-read"));
+    // The first choice of the first group, which the radio group names
+    // `{name}-{value}`.
+    assert_eq!(items[1].field, Some("api-token-backups-none"));
+    assert_eq!(
+        Field::Permissions.id(),
+        format!("{}-{NO_ACCESS}", Row::Backups.group(Form::Create))
+    );
     assert_eq!(
         items[1].sentence.plain(),
         said(msg::ERROR_API_TOKEN_NO_PERMISSION, &[])
@@ -150,28 +99,25 @@ fn each_problem_links_to_its_field_and_says_the_daemon_s_own_words() {
 
 #[test]
 fn a_complete_form_has_no_problems() {
-    assert_eq!(
-        problems_of(&form("nightly-mcp", &[Scope::Read]), said),
-        None
-    );
+    assert_eq!(problems_of(&form("nightly-mcp", new_token()), said), None);
 }
 
 #[test]
 fn a_field_shows_the_problem_that_is_about_it() {
-    let items = problems_of(&form("", &[Scope::Read]), said).unwrap();
+    let items = problems_of(&form("", new_token()), said).unwrap();
     assert_eq!(
         error_of(&items, Field::Label),
         Some(items[0].sentence.plain())
     );
-    assert_eq!(error_of(&items, Field::Scopes), None);
+    assert_eq!(error_of(&items, Field::Permissions), None);
 }
 
 #[test]
-fn a_refused_label_or_scope_is_about_its_field_and_the_cap_about_none() {
+fn a_refused_label_or_permission_is_about_its_field_and_the_cap_about_none() {
     assert_eq!(field_of(ErrorCode::ApiTokenLabel), Some(Field::Label));
     assert_eq!(
         field_of(ErrorCode::ApiTokenNoPermission),
-        Some(Field::Scopes)
+        Some(Field::Permissions)
     );
     assert_eq!(field_of(ErrorCode::ApiTokenLimit), None);
     assert_eq!(field_of(ErrorCode::ApiTokensUnavailable), None);
@@ -264,36 +210,6 @@ fn each_last_use_is_said_through_the_catalog() {
 }
 
 #[test]
-fn each_scope_has_its_code_its_checkbox_and_its_words() {
-    let codes: Vec<_> = SCOPES.into_iter().map(scope_code).collect();
-    assert_eq!(codes, ["read", "run", "preview", "propose"]);
-    let ids: Vec<_> = SCOPES.into_iter().map(scope_id).collect();
-    assert_eq!(
-        ids,
-        [
-            "api-token-scope-read",
-            "api-token-scope-run",
-            "api-token-scope-preview",
-            "api-token-scope-propose"
-        ]
-    );
-    assert_eq!(
-        scope_name(Scope::Run),
-        (
-            msg::UI_API_TOKEN_SCOPE,
-            vec![("scope", MsgArg::Text("run".to_owned()))]
-        )
-    );
-    assert_eq!(
-        scope_hint(Scope::Preview),
-        (
-            msg::UI_API_TOKEN_SCOPE_HINT,
-            vec![("scope", MsgArg::Text("preview".to_owned()))]
-        )
-    );
-}
-
-#[test]
 fn a_token_is_revoked_at_its_own_route_from_its_own_button() {
     assert_eq!(revoke_path("abcdefghijkl"), "/api/v1/tokens/abcdefghijkl");
     assert_eq!(revoke_id("abcdefghijkl"), "api-token-revoke-abcdefghijkl");
@@ -316,8 +232,25 @@ fn the_buttons_and_dialogs_of_a_token_are_named_for_its_label() {
     );
     assert_eq!(
         created_body("nightly-mcp"),
-        (msg::UI_API_TOKEN_CREATED_BODY, label)
+        (msg::UI_API_TOKEN_CREATED_BODY, label.clone())
     );
+    assert_eq!(
+        change_label("nightly-mcp"),
+        (msg::UI_API_TOKEN_CHANGE, label.clone())
+    );
+    assert_eq!(
+        change_title("nightly-mcp"),
+        (msg::UI_API_TOKEN_CHANGE_TITLE, label.clone())
+    );
+    assert_eq!(changed("nightly-mcp"), (msg::UI_API_TOKEN_CHANGED, label));
+}
+
+/// The change button is named apart from the revoke button of the same
+/// token, and from the change dialog's groups (`api-token-change-<code>`).
+#[test]
+fn a_token_s_permissions_change_from_its_own_button() {
+    assert_eq!(change_id("abcdefghijkl"), "api-token-edit-abcdefghijkl");
+    assert_ne!(change_id("abcdefghijkl"), revoke_id("abcdefghijkl"));
 }
 
 /// Decision 127's defaults: a new token sees and starts backups, previews

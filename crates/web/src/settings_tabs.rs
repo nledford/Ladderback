@@ -19,6 +19,8 @@ pub(crate) enum Section {
     SigningIn,
     /// The API tokens.
     ApiTokens,
+    /// What AI agents may do without a token (decision 127).
+    AiAgents,
     /// The dry-run allowlist: the folders a plan dry run an AI agent asks
     /// for may read (decision 89).
     DryRunAllowlist,
@@ -28,12 +30,13 @@ pub(crate) enum Section {
 
 impl Section {
     /// Every section, in the order of the tabs.
-    pub(crate) const ALL: [Self; 7] = [
+    pub(crate) const ALL: [Self; 8] = [
         Self::Language,
         Self::PageWidth,
         Self::AdminPassword,
         Self::SigningIn,
         Self::ApiTokens,
+        Self::AiAgents,
         Self::DryRunAllowlist,
         Self::Restart,
     ];
@@ -50,6 +53,7 @@ impl Section {
             Self::AdminPassword => "admin-password",
             Self::SigningIn => "signing-in",
             Self::ApiTokens => "api-tokens",
+            Self::AiAgents => "ai-agents",
             Self::DryRunAllowlist => "dry-run-allowlist",
             Self::Restart => "restart",
         }
@@ -70,12 +74,16 @@ impl Section {
     /// Tab stop of its own: every section has a control but two with
     /// sign-in off (`signed_in` false), which then only say why; the
     /// restart, which has a button only where a service manager runs
-    /// Ladderback; and the dry-run allowlist, whose controls show only once
-    /// the daemon has read the list, so a read refused or unanswered leaves
-    /// words alone.
+    /// Ladderback; and the dry-run allowlist's, whose controls show only once
+    /// the daemon has read what it holds, so a read refused or unanswered
+    /// leaves words alone. The AI agents' panel is taller than a window, so
+    /// it can't be a stop in sight: its first choice is, and a refused read
+    /// is said in its alert.
     pub(crate) fn holds(self, signed_in: bool) -> Holds {
         match self {
-            Self::Language | Self::PageWidth | Self::AdminPassword => Holds::Controls,
+            Self::Language | Self::PageWidth | Self::AdminPassword | Self::AiAgents => {
+                Holds::Controls
+            }
             Self::SigningIn | Self::ApiTokens if signed_in => Holds::Controls,
             Self::SigningIn | Self::ApiTokens | Self::DryRunAllowlist | Self::Restart => {
                 Holds::Text
@@ -113,6 +121,7 @@ mod tests {
                 "admin-password",
                 "signing-in",
                 "api-tokens",
+                "ai-agents",
                 "dry-run-allowlist",
                 "restart"
             ]
@@ -193,6 +202,7 @@ mod tests {
                 Holds::Controls,
                 Holds::Controls,
                 Holds::Controls,
+                Holds::Controls,
                 Holds::Text,
                 Holds::Text
             ]
@@ -211,6 +221,7 @@ mod tests {
                 Holds::Controls,
                 Holds::Text,
                 Holds::Text,
+                Holds::Controls,
                 Holds::Text,
                 Holds::Text
             ]

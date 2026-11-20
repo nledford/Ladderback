@@ -3071,7 +3071,7 @@ ui-sign-out-everywhere-working = Signing out every browser…
 ui-api-tokens-heading = { -api-token(form: "other") }
 
 # What that section says above the list.
-ui-api-tokens-body = An { -api-token } lets a program other than a browser, such as MCP connect mode, use { -brand-name } while sign-in is on. It can do only what its scopes allow, and it works until you revoke it or set a new admin password.
+ui-api-tokens-body = An { -api-token } lets a program other than a browser, such as MCP connect mode, use { -brand-name } while sign-in is on. It can do only what its permissions allow, and it works until you revoke it or set a new admin password.
 
 # Shown in place of the list when no token is kept.
 ui-api-tokens-none = No { -api-token(form: "other") } yet.
@@ -3079,35 +3079,14 @@ ui-api-tokens-none = No { -api-token(form: "other") } yet.
 # The header of the column of each token's label, which names its row.
 ui-api-tokens-column-label = Label
 
-# The header of the column of what each token may do.
-ui-api-tokens-column-scopes = Scopes
+# The header of the column that lists what each API token may do.
+ui-api-tokens-column-permissions = Permissions
 
 # The header of the column of when each token was created.
 ui-api-tokens-column-created = Created
 
 # The header of the column of when a program last used each token.
 ui-api-tokens-column-last-used = Last used
-
-# The name of a scope of an API token, as a token's row lists it and as the checkbox that chooses it says it.
-# $scope (text): the scope, as a code: read, run, preview or propose.
-ui-api-token-scope = { $scope ->
-    [read] Read
-    [run] Run
-    [preview] Preview
-   *[propose] Propose
-  }
-
-# The hint under the checkbox of a scope: what a program with a token of that scope may do.
-# $scope (text): the scope, as a code: read, run, preview or propose.
-ui-api-token-scope-hint = { $scope ->
-    [read] See the plans, the repositories and their snapshots, the operations and their live progress.
-    [run] Start a plan's backup, cancel a backup, and test a saved repository.
-    [preview] Ask what a forget, a prune or a check would do, without running it.
-   *[propose] Propose changes to the configuration for you to review here, and count what a draft plan would back up within the { -dry-run-allowlist }.
-  }
-
-# The header of the column that lists what each API token may do.
-ui-api-tokens-column-permissions = Permissions
 
 # A permission's name: the legend of its group of choices, in the API token form and in the AI agents tab.
 # $permission (text): the permission, as a code: backups, backup-runs, previews, configuration, snapshot-contents, daemon-log or repository-check.
@@ -3256,12 +3235,6 @@ ui-api-token-label-label = Label
 # The hint under that field.
 # $max (number): the most characters a label may have.
 ui-api-token-label-hint = Up to { $max } characters, so you can tell this token from the others: the program that uses it, for example.
-
-# The name of the group of checkboxes that choose the token's scopes.
-ui-api-token-scopes-legend = Scopes
-
-# The hint under that group's name.
-ui-api-token-scopes-hint = What a program with this token may do. Choose at least one.
 
 # The button that creates the token.
 ui-api-token-create = Create the token
