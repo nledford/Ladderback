@@ -104,6 +104,12 @@ struct Token {
     /// The whole seconds left, counted on the page's monotonic clock.
     left: RwSignal<u64>,
     open: RwSignal<bool>,
+    /// The ID of the token Cancel this token is canceling, while its cancel
+    /// is on its way: leaving the dialog meanwhile sends no second one, and
+    /// this one's answer is what the page says.
+    canceling: RwSignal<Option<String>>,
+    /// What the section says once a closed dialog's token is canceled.
+    page_said: RwSignal<Option<String>>,
 }
 
 impl Token {
@@ -114,7 +120,34 @@ impl Token {
             ended: RwSignal::new(None),
             left: RwSignal::new(0),
             open: RwSignal::new(false),
+            canceling: RwSignal::new(None),
+            page_said: RwSignal::new(None),
         }
+    }
+
+    /// Whether a cancel of the token `id` is on its way.
+    fn cancel_on_its_way(self, id: &str) -> bool {
+        self.canceling
+            .with_untracked(|canceling| canceling.as_deref() == Some(id))
+    }
+
+    /// Whether a cancel of the token the dialog shows is on its way, for
+    /// its Cancel this token button.
+    fn canceling_shown(self) -> bool {
+        self.canceling.with(|canceling| {
+            self.shown.with(|shown| match (canceling, shown) {
+                (Some(id), Some(shown)) => *id == shown.id,
+                _ => false,
+            })
+        })
+    }
+
+    /// Whether the open dialog shows the token `id`.
+    fn shows(self, id: &str) -> bool {
+        self.open.get_untracked()
+            && self
+                .shown
+                .with_untracked(|shown| shown.as_ref().is_some_and(|shown| shown.id == id))
     }
 
     /// Shows `made` in the dialog and starts counting its life down.
@@ -185,6 +218,20 @@ fn unanswered(localizer: &Localizer) -> Sentence {
     Sentence::new(&text(localizer, msg::UI_PAIRING_UNANSWERED), None)
 }
 
+/// What the section says of a cancel answered once its dialog is closed:
+/// that the token was canceled, or that the hub couldn't cancel it, so it
+/// still works until it lapses. A token the hub no longer holds was used or
+/// lapsed already, and nothing is said.
+fn said_once_closed(localizer: &Localizer, answer: Option<&Posted>) -> Option<String> {
+    match answer {
+        Some(Posted::Done(_)) => Some(text(localizer, msg::UI_PAIRING_CLOSED_CANCELED)),
+        Some(Posted::Refused(ErrorCode::PairingTokenUnknown, ..)) => None,
+        Some(Posted::Refused(..)) | None => {
+            Some(text(localizer, msg::UI_PAIRING_CLOSED_NOT_CANCELED))
+        }
+    }
+}
+
 /// The Agents section: what pairing is, the form that makes a token, and
 /// the dialog that shows it. `on` is sign-in: the step-up asks for the
 /// admin password then, and for the hub key's ID with sign-in off.
@@ -215,8 +262,6 @@ pub(crate) fn Agents(localizer: Arc<Localizer>, on: bool) -> impl IntoView {
     let problem = RwSignal::new(None::<Sentence>);
     say_refusals(problem);
     let busy = RwSignal::new(false);
-    // What the section says once a closed dialog's token is canceled.
-    let page_said = RwSignal::new(None::<String>);
     let token = Token::new();
 
     let make_localizer = Arc::clone(&localizer);
@@ -225,7 +270,7 @@ pub(crate) fn Agents(localizer: Arc<Localizer>, on: bool) -> impl IntoView {
             return;
         }
         problem.set(None);
-        page_said.set(None);
+        token.page_said.set(None);
         step_up_error.set(None);
         let Some(life_minutes) = life(&life_typed.get_untracked()) else {
             life_error.set(Some(text(&make_localizer, msg::UI_PAIRING_LIFE_INVALID)));
@@ -272,28 +317,25 @@ pub(crate) fn Agents(localizer: Arc<Localizer>, on: bool) -> impl IntoView {
     // still live: no agent can use a token nobody copied (decision 121).
     // A cancel the hub refuses or doesn't answer is said, since the dialog
     // promised it; one the hub no longer holds was used or lapsed already.
-    let closed_words = t(msg::UI_PAIRING_CLOSED_CANCELED);
-    let not_canceled_words = t(msg::UI_PAIRING_CLOSED_NOT_CANCELED);
+    // A cancel Cancel this token sent, still on its way, answers for the
+    // token: no second one goes out, which would find none.
+    let close_localizer = Arc::clone(&localizer);
     Effect::new(move |was_open: Option<bool>| {
         let now = token.open.get();
         if was_open == Some(true) && !now {
-            let live = token
-                .shown
-                .get_untracked()
-                .filter(|_| token.ended.get_untracked().is_none());
+            let live = token.shown.get_untracked().filter(|live| {
+                token.ended.get_untracked().is_none() && !token.cancel_on_its_way(&live.id)
+            });
             token.secret.set(String::new());
             token.shown.set(None);
             token.ended.set(None);
             if let Some(live) = live {
-                let canceled = closed_words.clone();
-                let not_canceled = not_canceled_words.clone();
+                let localizer = Arc::clone(&close_localizer);
                 spawn_local(async move {
-                    let said = match ws::delete(&cancel_url(&live.id)).await {
-                        Some(Posted::Done(_)) => Some(canceled),
-                        Some(Posted::Refused(ErrorCode::PairingTokenUnknown, ..)) => None,
-                        Some(Posted::Refused(..)) | None => Some(not_canceled),
-                    };
-                    page_said.try_set(said);
+                    let answer = ws::delete(&cancel_url(&live.id)).await;
+                    token
+                        .page_said
+                        .try_set(said_once_closed(&localizer, answer.as_ref()));
                 });
             }
         }
@@ -308,7 +350,7 @@ pub(crate) fn Agents(localizer: Arc<Localizer>, on: bool) -> impl IntoView {
                 {t(msg::UI_AGENTS_HEADING)}
             </h2>
             <p>{t(msg::UI_AGENTS_INTRO)}</p>
-            <p role="status">{move || page_said.get()}</p>
+            <p role="status">{move || token.page_said.get()}</p>
             <h3>{t(msg::UI_PAIRING_NEW_HEADING)}</h3>
             {move || problem.get().map(|sentence| refusal_alert(&problem_localizer, sentence))}
             <TextField
@@ -376,7 +418,6 @@ fn PairingDialog(localizer: Arc<Localizer>, token: Token) -> impl IntoView {
     };
     let copy_button = NodeRef::<leptos::html::Button>::new();
     let said = RwSignal::new(None::<String>);
-    let canceling = RwSignal::new(false);
     let fingerprint_name = t(msg::UI_PAIRING_FINGERPRINT);
     let copied = t(msg::UI_PAIRING_COPIED);
     let copy_refused = t(msg::UI_PAIRING_COPY_FAILED);
@@ -394,17 +435,27 @@ fn PairingDialog(localizer: Arc<Localizer>, token: Token) -> impl IntoView {
         else {
             return;
         };
-        if canceling.get_untracked() || token.ended.get_untracked().is_some() {
+        if token.cancel_on_its_way(&id) || token.ended.get_untracked().is_some() {
             return;
         }
-        canceling.set(true);
+        token.canceling.set(Some(id.clone()));
         let localizer = Arc::clone(&cancel_localizer);
         spawn_local(async move {
             let answer = ws::delete(&cancel_url(&id)).await;
-            if canceling.try_get_untracked().is_none() {
+            if token.canceling.try_get_untracked().is_none() {
                 return;
             }
-            canceling.set(false);
+            if token.cancel_on_its_way(&id) {
+                token.canceling.set(None);
+            }
+            // Left while the cancel was on its way: the section says its
+            // answer, as it does a cancel sent on leaving.
+            if !token.shows(&id) {
+                token
+                    .page_said
+                    .set(said_once_closed(&localizer, answer.as_ref()));
+                return;
+            }
             match answer {
                 Some(Posted::Done(_)) => token.end(Ended::Canceled),
                 Some(Posted::Refused(code, args, detail)) => {
@@ -489,7 +540,7 @@ fn PairingDialog(localizer: Arc<Localizer>, token: Token) -> impl IntoView {
                                 <Button
                                     id=CANCEL_ID
                                     content=Content::Text(token_t(msg::UI_PAIRING_CANCEL).into())
-                                    busy=canceling
+                                    busy=Signal::derive(move || token.canceling_shown())
                                     on_press=cancel
                                 />
                             </p>
