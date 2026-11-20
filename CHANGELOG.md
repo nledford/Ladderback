@@ -7,6 +7,80 @@ All notable changes to Ladderback are listed here. The format follows
 
 ## [Unreleased]
 
+## [0.5.0](https://github.com/nledford/Ladderback/compare/v0.4.0...v0.5.0) - 2026-11-20
+
+### Added
+
+- Add a shared tabs component ([#921](https://github.com/nledford/Ladderback/pull/921))
+- Show what a proposal would forget, before and after, on the Pending changes page ([#915](https://github.com/nledford/Ladderback/pull/915))
+- Say on the Repositories page when the keyring can't be started on demand ([#946](https://github.com/nledford/Ladderback/pull/946))
+- Add a shared alert component ([#964](https://github.com/nledford/Ladderback/pull/964))
+- Give Success, Warning and Error a color pair every component can use ([#966](https://github.com/nledford/Ladderback/pull/966))
+- Add vertical and responsive orientations to tabs ([#965](https://github.com/nledford/Ladderback/pull/965))
+- Approve a proposal that could delete snapshots from its forget preview ([#971](https://github.com/nledford/Ladderback/pull/971))
+- Show the Log and Plans pages' refusals as error alerts ([#984](https://github.com/nledford/Ladderback/pull/984))
+- Choose a narrow or full-width page in Settings ([#950](https://github.com/nledford/Ladderback/pull/950))
+- Draw the progress bar in the shared tone and size ([#987](https://github.com/nledford/Ladderback/pull/987))
+- Add a shared banner component that remembers its dismissal ([#1005](https://github.com/nledford/Ladderback/pull/1005))
+- Add a shared badge component ([#990](https://github.com/nledford/Ladderback/pull/990))
+- Move the toast onto the shared look, with a tone, an icon and a Dismiss button ([#1007](https://github.com/nledford/Ladderback/pull/1007))
+- Show refusals on the Snapshots page and in a snapshot's restore and download dialogs as error alerts ([#1018](https://github.com/nledford/Ladderback/pull/1018))
+- Show the Settings sections as tabs, each with an address ([#1031](https://github.com/nledford/Ladderback/pull/1031))
+- Show an operation that succeeded with warnings in the Warning tone ([#1028](https://github.com/nledford/Ladderback/pull/1028))
+- Draw the checkbox and radio group from the tokens ([#1027](https://github.com/nledford/Ladderback/pull/1027))
+- Show the Pending changes page's refusals as error alerts ([#1032](https://github.com/nledford/Ladderback/pull/1032))
+- Propose, read and withdraw setup changes from an AI agent ([#1049](https://github.com/nledford/Ladderback/pull/1049))
+- Draw every page link with the shared link ([#1017](https://github.com/nledford/Ladderback/pull/1017))
+- Draw every page-wide notice with the shared banner ([#1033](https://github.com/nledford/Ladderback/pull/1033))
+- Dry_run_plan counts what a draft plan would back up, within folders a person allows ([#1064](https://github.com/nledford/Ladderback/pull/1064))
+- Publish .deb and .rpm packages with each release ([#1085](https://github.com/nledford/Ladderback/pull/1085))
+- Add the hub's signing primitives and keep the hub out of releases ([#1081](https://github.com/nledford/Ladderback/pull/1081))
+- Show each page's first load in the shape of what is coming ([#1089](https://github.com/nledford/Ladderback/pull/1089))
+- Settings lists and edits the dry-run allowlist ([#1077](https://github.com/nledford/Ladderback/pull/1077))
+- Answer your own actions with a toast where the page shows nothing else ([#1090](https://github.com/nledford/Ladderback/pull/1090))
+- Keep the hub's and an agent's key files in the data folder, out of every backup ([#1092](https://github.com/nledford/Ladderback/pull/1092))
+- The hub's built-in TLS 1.3, its own key and certificate, and the agent's pinned client ([#1099](https://github.com/nledford/Ladderback/pull/1099))
+- Warn of missing Full Disk Access on every page ([#1087](https://github.com/nledford/Ladderback/pull/1087))
+- Switch the Settings tab when only the address's fragment changes ([#1105](https://github.com/nledford/Ladderback/pull/1105))
+- Add a shared Steps component ([#1095](https://github.com/nledford/Ladderback/pull/1095))
+- Pair an agent with its hub in the core, held pending ([#1111](https://github.com/nledford/Ladderback/pull/1111))
+- Every table scrolls in a frame of its own, words whole, times as their words ([#1119](https://github.com/nledford/Ladderback/pull/1119))
+- Pair a machine with its hub from a terminal over /sync/v1 ([#1128](https://github.com/nledford/Ladderback/pull/1128))
+- Show every page's messages in the shared alert ([#1143](https://github.com/nledford/Ladderback/pull/1143))
+- A status summary for AI agents, with overdue plans and unreadable repositories ([#1130](https://github.com/nledford/Ladderback/pull/1130))
+- Warn when an rclone-command gives a flag a credential as text ([#1162](https://github.com/nledford/Ladderback/pull/1162))
+
+### Changed
+
+- Cache the Cargo target tree again, not mbx's compiler outputs ([#1142](https://github.com/nledford/Ladderback/pull/1142))
+
+### Fixed
+
+- Name a restore's and a download's row on the Operations page by its repository and its kind ([#943](https://github.com/nledford/Ladderback/pull/943))
+- Time out a hook that can't get the spawn gate in time ([#988](https://github.com/nledford/Ladderback/pull/988))
+- Say a locked keyring is locked, with how to unlock it ([#1010](https://github.com/nledford/Ladderback/pull/1010))
+- Wrap an alert's words whole at 320 px with 200 % text ([#1012](https://github.com/nledford/Ladderback/pull/1012))
+- Read a forget preview's repositories at once, in the listings' turns ([#1009](https://github.com/nledford/Ladderback/pull/1009))
+- Line up the words of tabs in a column at its start ([#1021](https://github.com/nledford/Ladderback/pull/1021))
+- Say the keyring is locked when it couldn't keep a typed password ([#1034](https://github.com/nledford/Ladderback/pull/1034))
+- Make Warning badges and toasts read at least as strongly as Success, with Error stronger still ([#1061](https://github.com/nledford/Ladderback/pull/1061))
+- Answer 404 for an API path no route serves, not the web UI's page ([#1074](https://github.com/nledford/Ladderback/pull/1074))
+- Enable tokio's macros feature the crate uses ([#1086](https://github.com/nledford/Ladderback/pull/1086))
+- Restart the installed service after another program stops it (run install-service again) ([#1088](https://github.com/nledford/Ladderback/pull/1088))
+- Keep a badge's and an alert's words beside their icon ([#1084](https://github.com/nledford/Ladderback/pull/1084))
+- Show "Loading…" just before the busy region, outside it ([#1102](https://github.com/nledford/Ladderback/pull/1102))
+- Rerun the build script only for git changes to its own build ([#1108](https://github.com/nledford/Ladderback/pull/1108))
+- Install-restart replaces the installed binary only once the daemon is idle ([#1118](https://github.com/nledford/Ladderback/pull/1118))
+- Keep a snapshot's ID on one line in narrow tables ([#1149](https://github.com/nledford/Ladderback/pull/1149))
+- Refuse a browser's request to the sync routes, and every route added under them ([#1153](https://github.com/nledford/Ladderback/pull/1153))
+- Give the systemd service a 0077 umask ([#1158](https://github.com/nledford/Ladderback/pull/1158))
+- Warn about a secret file other users can change, and refuse a key file others can read or change ([#1154](https://github.com/nledford/Ladderback/pull/1154))
+- Log when the session store keeps failing to write ([#1168](https://github.com/nledford/Ladderback/pull/1168))
+- Use rustic_core 0.14.0, where a pack a snapshot uses again is recovered one prune later ([#1155](https://github.com/nledford/Ladderback/pull/1155))
+- Show the mcp command's description in the reader's language ([#1173](https://github.com/nledford/Ladderback/pull/1173))
+- Escape control characters in refusals the command line prints ([#1174](https://github.com/nledford/Ladderback/pull/1174))
+- Log when an API token's last use can't be saved ([#1176](https://github.com/nledford/Ladderback/pull/1176))
+
 ## [0.4.0](https://github.com/nledford/Ladderback/compare/v0.3.1...v0.4.0) - 2026-11-17
 
 ### Breaking
