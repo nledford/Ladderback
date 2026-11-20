@@ -275,6 +275,8 @@ These rules keep the daemon running and the workspace safe to work in. Rules 1 t
 - It is not a required check yet; the maintainer may add it to the ruleset once it has proved stable.
 - `just verify` leaves both out because they need the network.
 
+**The Docker image's base.** The `Containerfile`'s `debian:13-slim` is pinned by digest (operations.md §12), so it never moves on its own. `.github/dependabot.yml` proposes a new digest of that tag once a week, after a 7-day cooldown, so the image takes in Debian's security fixes, with the `build` prefix as for npm. A new Debian release, `14-slim`, is never proposed: moving to one is a pull request of its own, like a runner image bump.
+
 ### 13.7 Changes that touch several places
 
 Each list is one change, unless a step says it lands later (§13.7.6, step 3): leave out a step and something breaks later, often far from the edit.
