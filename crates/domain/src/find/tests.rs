@@ -73,6 +73,13 @@ fn a_question_mark_stands_for_one_character_of_the_name_as_written() {
 }
 
 #[test]
+fn a_final_sigma_matches_a_capital_sigma_wherever_it_stands() {
+    assert!(pattern("οδος").matches("ΟΔΟΣ"));
+    assert!(pattern("ΟΔΟΣ*").matches("οδος.txt"));
+    assert!(!pattern("οδος").matches("οδοι"));
+}
+
+#[test]
 fn a_pattern_of_many_stars_against_a_long_name_is_answered() {
     let stars = pattern(&"*a".repeat(100));
     let name = "a".repeat(99) + &"b".repeat(4_000);

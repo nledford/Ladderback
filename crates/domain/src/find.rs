@@ -35,7 +35,7 @@ pub const SEARCH_SECONDS: u64 = 15;
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct NamePattern {
     written: String,
-    folded: Vec<char>,
+    characters: Vec<char>,
 }
 
 /// Why a text is no name pattern.
@@ -64,7 +64,7 @@ impl NamePattern {
         }
         Ok(Self {
             written: text.to_owned(),
-            folded: text.to_lowercase().chars().collect(),
+            characters: text.chars().collect(),
         })
     }
 
@@ -74,11 +74,13 @@ impl NamePattern {
     }
 
     /// Whether `name`, as the file system wrote it, matches the whole
-    /// pattern, whatever its case. Never worse than the name's length times
-    /// the pattern's: only the last `*` seen is ever made to take more.
+    /// pattern, whatever its case. A `?` stands for one character of the
+    /// name as written, even one whose lowercase is two. Never worse than
+    /// the name's length times the pattern's: only the last `*` seen is ever
+    /// made to take more.
     pub fn matches(&self, name: &str) -> bool {
-        let name: Vec<char> = name.to_lowercase().chars().collect();
-        let pattern = self.folded.as_slice();
+        let name: Vec<char> = name.chars().collect();
+        let pattern = self.characters.as_slice();
         let (mut at_pattern, mut at_name) = (0_usize, 0_usize);
         // The last `*` seen, and where in the name it was last made to end.
         let mut star: Option<(usize, usize)> = None;
@@ -88,7 +90,7 @@ impl NamePattern {
                     star = Some((at_pattern, at_name));
                     at_pattern = at_pattern.saturating_add(1);
                 }
-                Some(wanted) if *wanted == '?' || wanted == character => {
+                Some(wanted) if *wanted == '?' || same_letter(*wanted, *character) => {
                     at_pattern = at_pattern.saturating_add(1);
                     at_name = at_name.saturating_add(1);
                 }
@@ -109,6 +111,19 @@ impl NamePattern {
             .get(at_pattern..)
             .is_some_and(|rest| rest.iter().all(|wanted| *wanted == '*'))
     }
+}
+
+/// Whether `a` and `b` are one character, whatever its case: their
+/// lowercase forms, each as long as it is, are the same. A final sigma
+/// counts as a sigma, as lowercasing a whole word would choose between them
+/// by where the letter stands.
+fn same_letter(a: char, b: char) -> bool {
+    let lower = |character: char| {
+        character
+            .to_lowercase()
+            .map(|lower| if lower == 'ς' { 'σ' } else { lower })
+    };
+    a == b || lower(a).eq(lower(b))
 }
 
 /// The caps a search is told: how many snapshots it reads and how many
