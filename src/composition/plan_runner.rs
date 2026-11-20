@@ -308,16 +308,24 @@ impl PlanRunner {
 
     /// A run parked waiting for its keyring to be unlocked, on a task of
     /// its own so the schedule and the queue went on: it resolves again
-    /// with that wait armed, runs in a place it takes once the keyring is
-    /// unlocked, or is refused as any run of the schedule is (#1221).
+    /// with that wait armed, is built again from the configuration as it
+    /// stands once the keyring is unlocked, runs in a place it takes then,
+    /// or is refused as any run of the schedule is (#1221).
     async fn start_parked(&self, plan: PlanId, trigger: Trigger, unlock: UnlockWait) {
         let Some(config) = self.config_for_a_run(&plan, &trigger).await else {
             return;
         };
         // The place it waited in was given up, and nothing is taken while
         // it waits: one of its own may have run meanwhile.
-        match self.backup_of(&config, &plan, &trigger, Some(unlock)).await {
-            Ok(built) => {
+        let rebuilt = match self.backup_of(&config, &plan, &trigger, Some(unlock)).await {
+            Ok(waited) => {
+                self.rebuilt_after_wait(&config, &waited, &plan, &trigger)
+                    .await
+            }
+            Err(unbuilt) => Err(unbuilt),
+        };
+        match rebuilt {
+            Ok(Some((built, limit))) => {
                 // A newer run of the plan may be going — running, or
                 // waiting for its turn — since this run waited with no
                 // place: it gives way to it.
@@ -325,15 +333,6 @@ impl PlanRunner {
                     log_not_started(&plan, &trigger, &StartError::RunWaiting);
                     return;
                 }
-                // The wait can outlast a change of the queue's limit: the
-                // place is taken under the limit as the configuration
-                // says now, falling back to the one the run parked with.
-                let limit = self
-                    .config
-                    .load()
-                    .await
-                    .map(|read| read.agent().concurrency)
-                    .unwrap_or_else(|_| config.agent().concurrency);
                 match self.queue.by_hand(&plan, limit) {
                     Ok(place) => {
                         self.run_built(built, trigger, place).await;
@@ -343,6 +342,12 @@ impl PlanRunner {
                     Err(RunWaiting) => log_not_started(&plan, &trigger, &StartError::RunWaiting),
                 }
             }
+            Ok(None) => log::warn!(
+                "{} of plan {} didn't start: the plan now backs up to another repository than \
+                 the one whose keyring it waited for",
+                run_named(&trigger),
+                plan.as_str()
+            ),
             Err(Unbuilt::Secret(secret)) => {
                 self.refused_for_secret(&plan, &trigger, *secret).await;
             }
@@ -350,14 +355,43 @@ impl PlanRunner {
         }
     }
 
+    /// The backup of `plan` built again once its wait for the keyring
+    /// ended unlocked, from the configuration as it stands now, with the
+    /// queue's limit it says: the wait can last hours, and the plan may
+    /// have been deleted, changed or moved meanwhile (#1221). `waited` is
+    /// the build the wait ended with, from `waited_config`. The keyring
+    /// answers at once now, so nothing waits again. `None` when the plan
+    /// now backs up to another repository than the one whose keyring it
+    /// waited for.
+    async fn rebuilt_after_wait(
+        &self,
+        waited_config: &domain::planning::AgentConfig,
+        waited: &BuiltBackup,
+        plan: &PlanId,
+        trigger: &Trigger,
+    ) -> Result<Option<(BuiltBackup, domain::planning::Concurrency)>, Unbuilt> {
+        let fresh = self.config.load().await.map_err(|error| {
+            Unbuilt::Refused(config_unusable(error, |code, args, detail| {
+                StartError::Unavailable { code, args, detail }
+            }))
+        })?;
+        let built = self.backup_of(&fresh, plan, trigger, None).await?;
+        let on = |config: &domain::planning::AgentConfig| {
+            config.plan(plan).map(|plan| plan.repository.clone())
+        };
+        let same_repository = on(&fresh) == on(waited_config)
+            && built.job.target().repository == waited.job.target().repository;
+        Ok(same_repository.then(|| (built, fresh.agent().concurrency)))
+    }
+
     /// A queued backup parked waiting for its keyring to be unlocked, on a
     /// task of its own so the queue's other leftovers went on: it resolves
     /// again with that wait armed — its operation shows as queued until
-    /// the keyring is — and runs in a place it takes once it is, giving
-    /// way to a newer run of its plan that is going, as the schedule's
-    /// parked run does. Whatever else its second build answers, or a
-    /// keyring that never unlocks by the plan's next kept run, ends it as
-    /// the queued run it is (#1221).
+    /// the keyring is — is built again from the configuration as it
+    /// stands then, and runs in a place it takes once it is, giving way to
+    /// a newer run of its plan that is going, as the schedule's parked run
+    /// does. Whatever else it answers, or a keyring that never unlocks by
+    /// the plan's next kept run, ends it as the queued run it is (#1221).
     async fn resume_parked(
         &self,
         operation: domain::execution::Operation,
@@ -365,90 +399,75 @@ impl PlanRunner {
         trigger: Trigger,
         unlock: UnlockWait,
     ) {
-        let built = match self.config.load().await {
-            Ok(config) => {
-                match self.backup_of(&config, &plan, &trigger, Some(unlock)).await {
-                    Ok(built) => {
-                        // The plan may have moved to another repository
-                        // while the run waited: it isn't run there under a
-                        // record of the old.
-                        if operation
-                            .target()
-                            .is_on(built.job.target().repository.as_ref())
-                        {
-                            Some((built, config.agent().concurrency))
-                        } else {
-                            None
-                        }
-                    }
-                    Err(Unbuilt::Secret(secret))
-                        if operation.target().is_on(secret.target.repository.as_ref()) =>
-                    {
-                        // The keyring never unlocked within the bound: the
-                        // queued backup ends failed with the refusal, as a
-                        // resumed one always did (§5, #490), so retries
-                        // follow it.
-                        let SecretUnbuilt {
-                            refusal, failure, ..
-                        } = *secret;
-                        log::warn!(
-                            "the queued backup {} can't run again, and ends as failed: {}",
-                            operation.id().as_uuid().hyphenated(),
-                            start_refused(&StartError::SecretRefused(refusal))
-                        );
-                        let finished = RunOperation::new(
-                            Arc::clone(&self.engine),
-                            Arc::new(SystemClock),
-                            Arc::clone(&self.store),
-                        )
-                        .with_events(Arc::clone(&self.events))
-                        .refuse_resumed(operation, failure)
-                        .await;
-                        log_recording_errors(&finished);
-                        say_how_it_ended(&self.ends, &finished);
-                        return;
-                    }
-                    // A secret of a repository the plan left: it isn't run
-                    // there under a record of the old.
-                    Err(Unbuilt::Secret(_)) => None,
-                    Err(Unbuilt::Refused(error)) => {
-                        let why = start_refused(&error);
-                        self.end_unrunnable(operation, &why).await;
-                        return;
-                    }
-                }
-            }
-            Err(error) => {
-                let why = start_refused(&config_unusable(error, |code, args, detail| {
-                    StartError::Unavailable { code, args, detail }
-                }));
-                self.end_unrunnable(operation, &why).await;
-                return;
-            }
-        };
-        let Some((built, parked_limit)) = built else {
-            self.end_unrunnable(operation, "its plan now backs up to another repository")
-                .await;
-            return;
-        };
-        // A newer run of the plan may be going — running, or waiting for
-        // its turn — since this run waited with no place: it gives way to
-        // it.
-        if self.queue.is_going(&plan) {
-            self.end_unrunnable(operation, "a newer run of its plan is going")
-                .await;
-            return;
-        }
-        // The wait can outlast a change of the queue's limit: the place is
-        // taken under the limit as the configuration says now, falling
-        // back to the one the run parked with.
-        let limit = self
-            .config
-            .load()
+        match self
+            .resumed_after_wait(&operation, &plan, &trigger, unlock)
             .await
-            .map(|read| read.agent().concurrency)
-            .unwrap_or_else(|_| parked_limit);
-        self.spawn_resumed(operation, built, plan, limit);
+        {
+            Waited::Runs(built, limit) => {
+                // A newer run of the plan may be going — running, or
+                // waiting for its turn — since this run waited with no
+                // place: it gives way to it.
+                if self.queue.is_going(&plan) {
+                    self.end_unrunnable(operation, "a newer run of its plan is going")
+                        .await;
+                    return;
+                }
+                self.spawn_resumed(operation, built, plan, limit);
+            }
+            Waited::Refused(secret) => self.refuse_resumed(operation, secret).await,
+            Waited::Unrunnable(why) => self.end_unrunnable(operation, &why).await,
+        }
+    }
+
+    /// How the wait of `operation`, a queued backup of `plan`, for its
+    /// keyring ended, as [`Self::resume_parked`] acts on it.
+    async fn resumed_after_wait(
+        &self,
+        operation: &domain::execution::Operation,
+        plan: &PlanId,
+        trigger: &Trigger,
+        unlock: UnlockWait,
+    ) -> Waited {
+        let config = match self.config.load().await {
+            Ok(config) => config,
+            Err(error) => {
+                return Waited::Unrunnable(start_refused(&config_unusable(
+                    error,
+                    |code, args, detail| StartError::Unavailable { code, args, detail },
+                )));
+            }
+        };
+        let rebuilt = match self.backup_of(&config, plan, trigger, Some(unlock)).await {
+            Ok(waited) => {
+                self.rebuilt_after_wait(&config, &waited, plan, trigger)
+                    .await
+            }
+            Err(unbuilt) => Err(unbuilt),
+        };
+        match rebuilt {
+            Ok(Some((built, limit)))
+                if operation
+                    .target()
+                    .is_on(built.job.target().repository.as_ref()) =>
+            {
+                Waited::Runs(built, limit)
+            }
+            // The keyring never unlocked within the bound, or another
+            // secret of the repository is refused: the queued backup ends
+            // failed with the refusal, as a resumed one always did (§5,
+            // #490), so retries follow it.
+            Err(Unbuilt::Secret(secret))
+                if operation.target().is_on(secret.target.repository.as_ref()) =>
+            {
+                Waited::Refused(*secret)
+            }
+            // The plan moved to another repository while the run waited:
+            // it isn't run there under a record of the old.
+            Ok(_) | Err(Unbuilt::Secret(_)) => {
+                Waited::Unrunnable("its plan now backs up to another repository".to_owned())
+            }
+            Err(Unbuilt::Refused(error)) => Waited::Unrunnable(start_refused(&error)),
+        }
     }
 
     /// Runs a queued backup in a place of the queue, on a task of its own
@@ -507,6 +526,32 @@ impl PlanRunner {
             ),
         }
     }
+
+    /// Ends `operation`, a queued backup refused for a secret of the
+    /// repository its plan still backs up to, failed with the refusal, as
+    /// a refused scheduled run does (§5, #490), and is heard as any run's
+    /// end, so retries follow it.
+    async fn refuse_resumed(&self, operation: domain::execution::Operation, secret: SecretUnbuilt) {
+        let SecretUnbuilt {
+            refusal, failure, ..
+        } = secret;
+        log::warn!(
+            "the queued backup {} can't run again, and ends as failed: {}",
+            operation.id().as_uuid().hyphenated(),
+            start_refused(&StartError::SecretRefused(refusal))
+        );
+        let finished = RunOperation::new(
+            Arc::clone(&self.engine),
+            Arc::new(SystemClock),
+            Arc::clone(&self.store),
+        )
+        .with_events(Arc::clone(&self.events))
+        .refuse_resumed(operation, failure)
+        .await;
+        log_recording_errors(&finished);
+        say_how_it_ended(&self.ends, &finished);
+    }
+
     /// Records a run refused for a secret of its repository as a failed
     /// backup that never started, and says how it ended, so the history and
     /// the page say why the schedule's backups stopped (§5, decision 76);
@@ -546,6 +591,19 @@ pub(super) struct BuiltBackup {
     /// What reading the repository's secrets told (#386), which the run
     /// carries from its start.
     warnings: Vec<domain::execution::Warning>,
+}
+
+/// How a queued backup's wait for its keyring ended, before anything is
+/// recorded of it ([`PlanRunner::resume_parked`]).
+enum Waited {
+    /// It runs, built from the configuration as it stands now, under the
+    /// queue's limit it says.
+    Runs(BuiltBackup, domain::planning::Concurrency),
+    /// Refused for a secret of the repository it was queued on: it ends
+    /// failed with that refusal.
+    Refused(SecretUnbuilt),
+    /// It can't run again, for this reason.
+    Unrunnable(String),
 }
 
 /// Why a plan's backup couldn't be built, so its run doesn't start.
@@ -712,7 +770,6 @@ impl PlanRuns for PlanRunner {
     }
 
     async fn resume(&self, operation: domain::execution::Operation, unlock: Option<UnlockWait>) {
-        let id = operation.id();
         let trigger = operation.trigger().clone();
         let built = match operation.target().plan.clone() {
             Some(plan) => match self.config.load().await {
@@ -751,24 +808,7 @@ impl PlanRuns for PlanRunner {
             Err(Unbuilt::Secret(secret))
                 if operation.target().is_on(secret.target.repository.as_ref()) =>
             {
-                let SecretUnbuilt {
-                    refusal, failure, ..
-                } = *secret;
-                log::warn!(
-                    "the queued backup {} can't run again, and ends as failed: {}",
-                    id.as_uuid().hyphenated(),
-                    start_refused(&StartError::SecretRefused(refusal))
-                );
-                let finished = RunOperation::new(
-                    Arc::clone(&self.engine),
-                    Arc::new(SystemClock),
-                    Arc::clone(&self.store),
-                )
-                .with_events(Arc::clone(&self.events))
-                .refuse_resumed(operation, failure)
-                .await;
-                log_recording_errors(&finished);
-                say_how_it_ended(&self.ends, &finished);
+                self.refuse_resumed(operation, *secret).await;
                 return;
             }
             Err(Unbuilt::Secret(_)) => {
