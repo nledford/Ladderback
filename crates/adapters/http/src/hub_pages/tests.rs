@@ -275,6 +275,77 @@ async fn a_wrong_key_id_is_a_step_up_that_failed() {
     );
 }
 
+// Nothing typed, or more than any password, is no confirmation: refused as
+// a wrong one, with sign-in off and on, and in no sign-in wait, so the
+// password from the same address still confirms at once.
+#[tokio::test]
+async fn an_empty_or_oversized_confirmation_is_a_step_up_that_failed_in_no_wait() {
+    let oversized = "a".repeat(domain::access::PASSWORD_MAX_BYTES + 1);
+    let signed_off = Daemon::hub(false);
+    let signed_on = Daemon::hub(true);
+    let session = signed_on.signed_in().await;
+    for confirmation in ["", oversized.as_str()] {
+        assert_eq!(
+            refusal(
+                signed_off
+                    .send(make(LOOPBACK, &[], &ask(confirmation)))
+                    .await
+            )
+            .await,
+            (StatusCode::FORBIDDEN, "step-up-failed".to_owned()),
+            "sign-in off, confirmed by {} bytes",
+            confirmation.len()
+        );
+        assert_eq!(
+            refusal(
+                signed_on
+                    .send(make(REMOTE, &session, &ask(confirmation)))
+                    .await
+            )
+            .await,
+            (StatusCode::FORBIDDEN, "step-up-failed".to_owned()),
+            "sign-in on, confirmed by {} bytes",
+            confirmation.len()
+        );
+    }
+    let made = signed_on.send(make(REMOTE, &session, &ask(PASSWORD))).await;
+    assert_eq!(made.status(), StatusCode::CREATED);
+}
+
+// With sign-in off, a request `ladderback mcp` marks as an AI agent's opens
+// no hub route: each is a session's only, and the refusal names it.
+#[tokio::test]
+async fn with_sign_in_off_an_ai_agent_opens_no_hub_route() {
+    let daemon = Daemon::hub(false);
+    let key_id = daemon.key_id().await;
+    let made = daemon.send(make(LOOPBACK, &[], &ask(&key_id))).await;
+    assert_eq!(made.status(), StatusCode::CREATED);
+    let made: api::PairingTokenDto = serde_json::from_value(json(made).await).unwrap();
+    let agent = [(api::AI_AGENT_HEADER, "1".to_owned())];
+    let cancel_path = format!("{}/{}", api::PAIRING_TOKENS_PATH, made.token_id);
+    for request in [
+        make(LOOPBACK, &agent, &ask(&key_id)),
+        build(Method::DELETE, &cancel_path, LOOPBACK, &agent, ""),
+        build(Method::GET, api::HUB_PATH, LOOPBACK, &agent, ""),
+    ] {
+        let route = format!("{} {}", request.method(), request.uri());
+        let response = daemon.send(request).await;
+        let status = response.status();
+        let body = json(response).await;
+        assert_eq!(
+            (status, body["code"].as_str(), &body["args"]),
+            (
+                StatusCode::FORBIDDEN,
+                Some("without-token-permission"),
+                &serde_json::json!({ "permission": { "type": "text", "value": "session" } })
+            ),
+            "{route}"
+        );
+    }
+    let cancel = build(Method::DELETE, &cancel_path, LOOPBACK, &[], "");
+    assert_eq!(daemon.send(cancel).await.status(), StatusCode::NO_CONTENT);
+}
+
 #[tokio::test]
 async fn with_sign_in_on_a_session_confirms_with_the_password_from_anywhere() {
     let daemon = Daemon::hub(true);
@@ -334,6 +405,9 @@ async fn an_api_token_with_every_permission_cant_make_or_cancel_a_token() {
             (StatusCode::FORBIDDEN, "api-token-permission".to_owned())
         );
     }
+    // The token survived the refused cancel: the session still cancels it.
+    let cancel = build(Method::DELETE, &cancel_path, LOOPBACK, &session, "");
+    assert_eq!(daemon.send(cancel).await.status(), StatusCode::NO_CONTENT);
 }
 
 #[tokio::test]
