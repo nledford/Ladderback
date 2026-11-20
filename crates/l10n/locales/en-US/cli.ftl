@@ -209,10 +209,10 @@ cli-profile-bad-repository-name = { $name } is not a repository name: use lowerc
 # $file (text): the profile's path, as it was given.
 cli-profile-no-repository-name = cannot make a repository name of the file name of { $file }: give one with { "--repo-name" }
 
-# An export needs the agent's ID, which is kept in the data folder, and could not read it.
+# An export needs this machine's ID, which is kept in the data folder, and could not read it.
 # $path (text): the data folder.
 # $detail (text): the operating system's own message. It is shown as it came.
-cli-profile-no-agent-id = cannot read the { -agent }'s ID in { $path }: { $detail }
+cli-profile-no-agent-id = cannot read this { -machine }'s ID in { $path }: { $detail }
 
 # A command could not write what it had to say, and ended with status 1: the disk is full, say. A reader that has gone is not this case: the command ends quietly with 141.
 # $detail (text): the operating system's message. It is shown as it came.
@@ -220,9 +220,9 @@ cli-cannot-write-output = cannot write the result: { $detail }
 
 ## The service (operations §12): `ladderback install-service` and `ladderback remove-service`.
 
-# What `install-service` does, in its `--help`.
+# What `install-service` does, in its `--help`: it installs Ladderback, not the machine. "launchd agent" is Apple's name for what it writes on macOS.
 # `install-service` is the command, typed as it is: keep it a string literal.
-cli-help-install-service = Install this { -agent } as a service of your user: the service manager runs it in the background, now and from each login on. On Linux that is a systemd user unit, on macOS a launchd agent.
+cli-help-install-service = Install { -brand-name } as a service of your user: the service manager runs it in the background, now and from each login on. On Linux that is a systemd user unit, on macOS a launchd agent.
 
 # What `remove-service` does, in its `--help`.
 # `install-service` is the command, typed as it is: keep it a string literal.
@@ -424,17 +424,17 @@ cli-pairing-token-daemon-running = the daemon is running on the data folder { $p
 # The address given for the hub isn't an http:// or https:// address of at most 200 bytes.
 # $address (text): the address as given. It is shown as it came.
 # `https://name` and `https://name:port` are examples of what a person types, with `name` standing for the hub's name: keep them string literals.
-cli-pairing-token-bad-address = { $address } isn't a { -hub } address: give it as { "https://name" } or { "https://name:port" }, as { -agent(form: "other") } reach the { -hub }.
+cli-pairing-token-bad-address = { $address } isn't a { -hub } address: give it as { "https://name" } or { "https://name:port" }, as { -machine(form: "other") } reach the { -hub }.
 
 # The token's address is loopback, which another machine can't reach.
 # `--address` is typed as it is: keep it a string literal.
-cli-pairing-token-loopback = The address is loopback: another machine can't reach it. Use { "--address" } with the address { -agent(form: "other") } will use.
+cli-pairing-token-loopback = The address is loopback: another { -machine } can't reach it. Use { "--address" } with the address { -machine(form: "other") } will use.
 
 # The token's address is plain http:// on another machine, which `ladderback pair` refuses because it would show the token to the network.
 # `http://`, `https://` and `--address` are typed as they are: keep them string literals.
-cli-pairing-token-plain = The address starts with { "http://" } and isn't this machine: an { -agent } won't pair over it, as it would show the token to the network. Use { "--address" } with the { -hub }'s { "https://" } address.
+cli-pairing-token-plain = The address starts with { "http://" } and isn't this { -machine }: no { -machine } pairs over it, as it would show the token to the network. Use { "--address" } with the { -hub }'s { "https://" } address.
 
-# The hub key's fingerprint, printed before the token so the person has something to compare with the agent's screen.
+# The hub key's fingerprint, printed before the token so the person has something to compare with the pairing machine's screen.
 # $fingerprint (text): the fingerprint, in groups of four characters.
 cli-pairing-token-hub-key = The { -hub } key: { $fingerprint }
 
@@ -514,11 +514,11 @@ cli-pair-not-confirmed = Not paired: nothing was sent.
 # `--yes` is typed as it is: keep it a string literal.
 cli-pair-no-terminal = No terminal to ask on. Compare the { -hub } key above with the { -hub }'s own screen, then run again with { "--yes" }.
 
-# The hub took the pairing and holds the agent pending until a person approves it there.
+# The hub took the pairing and holds the machine pending until a person approves it there.
 # $fingerprint (text): this machine's own key's fingerprint, to compare on the hub.
 cli-pair-pending = Paired. The { -hub } holds this machine pending until someone approves it there. This machine's key: { $fingerprint }. Compare it with the { -hub }'s screen.
 
-# `ladderback hub-status` on a machine with no hub pin or no agent key.
+# `ladderback hub-status` on a machine with no hub pin or no machine key.
 # `ladderback pair` is a command: keep it a string literal.
 cli-hub-status-not-paired = This machine isn't paired with a { -hub }. Pair it with { "ladderback pair" } and a token made on the { -hub }.
 

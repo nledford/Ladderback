@@ -47,13 +47,13 @@
 # The folders a plan dry run may read, set by a person on the Settings page. A plan dry run counts what a draft plan would back up without backing anything up.
 -dry-run-allowlist = dry-run allowlist
 
-# A machine that runs Ladderback and is paired with a hub (technical design §3.1). Not an AI agent, which is a program that acts through MCP or the API.
--agent = { $form ->
-   *[one] agent
-    [other] agents
+# A computer, virtual machine or container running Ladderback, whatever it runs on; the hub is one too (technical design §3.1; §16, decision 133). Not an AI agent, which is a program that acts through MCP or the API.
+-machine = { $form ->
+   *[one] machine
+    [other] machines
 }
 
-# The agent that runs with `--hub`: it holds the registry of the machines that pair with it, who owns what, and their history (technical design §3.1).
+# The machine that runs with `--hub`: it holds the registry of the machines that pair with it, who owns what, and their history (technical design §3.1).
 -hub = hub
 
 ## Sizes and durations. The program splits the value and picks the form; the
@@ -288,7 +288,7 @@ error-config-schema-missing = { -brand-name } did not read its configuration fil
 # $supported (text): the newest version of the format this version of { -brand-name } reads.
 error-config-schema-newer = { -brand-name } did not read its configuration file { $file }, because the file is in version { $found } of the format and this version of { -brand-name } reads up to version { $supported }. Update { -brand-name }, or restore an older copy of the file.
 
-# An error this version of the program has no message for, such as one from a newer agent.
+# An error this version of the program has no message for, such as one from a machine running a newer version.
 # $detail (text): the sender's own message. It is shown as it came.
 error-unknown = An unexpected error occurred.
     .with-detail = An unexpected error occurred: { $detail }
@@ -465,11 +465,11 @@ error-operation-unknown = There is no operation { $operation }. List the operati
 error-operation-not-running = Operation { $operation } has already ended, so there is nothing to cancel.
 
 
-# A maintenance operation is running on this agent, so the request was
+# A maintenance operation is running on this machine, so the request was
 # refused and nothing was done. For a maintenance run it is this
 # repository's; for turning maintenance off it may be another repository's.
 # $operation (text): the running operation's ID.
-error-maintenance-busy = Maintenance operation { $operation } is running on this { -agent }, so nothing was done. Wait for it to end, then ask again.
+error-maintenance-busy = Maintenance operation { $operation } is running on this { -machine }, so nothing was done. Wait for it to end, then ask again.
 
 # The confirmation a restore asks for first was not right: the admin
 # password with sign-in on, the snapshot's short ID with sign-in off.
@@ -480,36 +480,36 @@ error-step-up-failed = That confirmation is not right, so nothing was restored. 
 # path it restores in place, refused it. Whatever it wrote before stays.
 error-restore-target-unwritable = The restore could not write where it was to write, so it stopped. Make the restore folder, or the original files' folder, writable for the user { -brand-name } runs as, then restore again.
 
-# Another restore already runs on this agent, which runs one at a time, so
+# Another restore already runs on this machine, which runs one at a time, so
 # the request was refused and nothing ran.
 # $operation (text): the running restore's operation ID.
-error-restore-running = Restore { $operation } is already running, and this { -agent } runs one restore at a time. Wait for it to end, then restore again.
+error-restore-running = Restore { $operation } is already running, and this { -machine } runs one restore at a time. Wait for it to end, then restore again.
 
 # A restore over the original files was asked for from elsewhere than this
-# agent's own web UI, the only place it is offered, so nothing ran.
-error-restore-in-place-not-here = A restore over the original files can only be started in this { -agent }'s own web UI, so nothing was restored. Restore into a new folder instead, or open the { -agent }'s web UI.
+# machine's own web UI, the only place it is offered, so nothing ran.
+error-restore-in-place-not-here = A restore over the original files can only be started in this { -machine }'s own web UI, so nothing was restored. Restore into a new folder instead, or open the { -machine }'s web UI.
 
-# A restore was asked for through the hub, and this agent doesn't allow
+# A restore was asked for through the hub, and this machine doesn't allow
 # restores from the hub, so nothing ran.
-error-restore-hub-not-allowed = This { -agent } doesn't take restores from the { -hub }, so nothing was restored. Set { "allow-hub-restore = true" } in the { -agent }'s configuration file to allow them.
+error-restore-hub-not-allowed = This { -machine } doesn't take restores from the { -hub }, so nothing was restored. Set { "allow-hub-restore = true" } in the { -machine }'s configuration file to allow them.
 
-# A restore into a new folder was asked for, and this agent has no folder
+# A restore into a new folder was asked for, and this machine has no folder
 # to make it in: it has no home folder, and its configuration file doesn't
 # set restore-folder, so nothing ran.
-error-restore-folder-unset = This { -agent } has no home folder, so there is no folder to restore into and nothing was restored. Set { "restore-folder" } in the { -agent }'s configuration file to a folder for restores, then try again.
+error-restore-folder-unset = This { -machine } has no home folder, so there is no folder to restore into and nothing was restored. Set { "restore-folder" } in the { -machine }'s configuration file to a folder for restores, then try again.
 
-# A browser asked the agent to open System Settings at the Full Disk Access pane, and the browser isn't on the agent's own Mac, so nothing opened.
+# A browser asked the machine to open System Settings at the Full Disk Access pane, and the browser isn't on the machine's own Mac, so nothing opened.
 error-full-disk-access-not-local = { -brand-name } opens System Settings only for a browser on the Mac it runs on, so nothing opened. On that Mac, open System Settings, choose Privacy & Security, then { -full-disk-access }, and turn it on for { -brand-name }.
 
-# The agent was asked to open System Settings at the Full Disk Access pane, and couldn't: it isn't on macOS, or macOS refused.
+# The machine was asked to open System Settings at the Full Disk Access pane, and couldn't: it isn't on macOS, or macOS refused.
 error-full-disk-access-settings-unopened = { -brand-name } could not open System Settings. Open it yourself, choose Privacy & Security, then { -full-disk-access }, and turn it on for { -brand-name }.
 
-# Two downloads are already under way on this agent, confirmed or being
-# handed over, and an agent hands over two at a time, so nothing ran. The
+# Two downloads are already under way on this machine, confirmed or being
+# handed over, and a machine hands over two at a time, so nothing ran. The
 # third is refused rather than queued.
-error-downloads-busy = Two downloads are already under way on this { -agent }, and it hands over two at a time, so nothing was downloaded. Wait for one to finish, then download again.
+error-downloads-busy = Two downloads are already under way on this { -machine }, and it hands over two at a time, so nothing was downloaded. Wait for one to finish, then download again.
 
-# The agent's system gave no random bytes for a download's ticket, so the
+# The machine's system gave no random bytes for a download's ticket, so the
 # download wasn't confirmed and nothing ran. The daemon's log says why.
 error-downloads-unavailable = { -brand-name } could not get the download ready, so nothing was downloaded. Its log says why; try again, and if it happens again, check the computer it runs on.
 
@@ -525,10 +525,10 @@ error-download-unknown = This download is no longer waiting: it was already fetc
 # path, or a program newer or older than the daemon. Nothing was done.
 error-route-unknown = This version of { -brand-name } has no such route, so nothing was done. Check the path the program asked for; if the program is newer or older than this { -brand-name }, update the older one.
 
-# The pairing token was already spent. The hub answers the same agent with
+# The pairing token was already spent. The hub answers the same machine with
 # the same key as before, so a pairing whose answer was lost can be repeated.
 # `pair` is typed as it is: keep it a string literal.
-error-token-used = This token was already used. If this machine paired a moment ago and the reply was lost, run { "pair" } again with the same token: the { -hub } recognizes the same { -agent } and key and answers as before. If it says this again, another machine may have used the token first: look at the list of { -agent(form: "other") } on the { -hub }, reject any { -agent } you don't know, then make a new token.
+error-token-used = This token was already used. If this { -machine } paired a moment ago and the reply was lost, run { "pair" } again with the same token: the { -hub } recognizes the same { -machine } and key and answers as before. If it says this again, another { -machine } may have used the token first: look at the list of { -machine(form: "other") } on the { -hub }, reject any { -machine } you don't know, then make a new token.
 
 # The pairing token lapsed before anyone used it.
 error-token-expired = This token lapsed. Make a new one on the { -hub }.
@@ -540,34 +540,34 @@ error-token-revoked = This token was canceled on the { -hub }. Make a new one.
 # line or a chat app.
 error-token-malformed = That isn't a whole token. Copy all of it again: a wrapped line or a chat app may have cut or changed it.
 
-# The pairing token was made by a newer hub than this agent can read.
-error-token-unsupported = This token is newer than this { -agent }. Update the { -agent }, then pair.
+# The pairing token was made by a newer hub than this machine's version of Ladderback can read.
+error-token-unsupported = This token was made by a newer { -brand-name } than this { -machine } runs. Update { -brand-name } here, then pair.
 
-# Another agent of the hub already has this machine's hostname. The token
+# Another machine of the hub already has this machine's hostname. The token
 # stays good.
-# $hostname (text): the hostname the other agent registered, as it was given.
+# $hostname (text): the hostname the other machine registered, as it was given.
 # $last_seen (text): when the hub last heard from it, such as "3 days ago".
 # `--hostname` is typed as it is: keep it a string literal.
-error-hostname-taken = The { -hub } already has an { -agent } named { $hostname } (last seen { $last_seen }). If this is a different machine, pair under another name: add { "--hostname" }. If it is the same machine and its data folder was lost, don't rename it: remove the old { -agent } on the { -hub }, then pair with this same token.
+error-hostname-taken = The { -hub } already has a { -machine } named { $hostname } (last seen { $last_seen }). If this is a different { -machine }, pair under another name: add { "--hostname" }. If it is the same { -machine } and its data folder was lost, don't rename it: remove the old { -machine } on the { -hub }, then pair with this same token.
 
-# The hub has another machine under this agent's ID.
-error-agent-key-mismatch = The { -hub } has another machine under this { -agent } ID. Don't pair again; ask whoever runs the { -hub }.
+# The hub has another machine under this machine's ID.
+error-agent-key-mismatch = The { -hub } has another { -machine } under this { -machine }'s ID. Don't pair again; ask whoever runs the { -hub }.
 
-# The hub's key isn't the one this agent trusts or its token names. Nothing
+# The hub's key isn't the one this machine trusts or its token names. Nothing
 # of the token was sent.
-error-hub-key-mismatch = This { -hub }'s key isn't the one this { -agent } trusts. If you reset or reinstalled the { -hub } on purpose, make a new token on the { -hub } and pair again, and compare the { -hub } key's fingerprint on both screens first. If you didn't, don't pair again: someone may be posing as it.
+error-hub-key-mismatch = This { -hub }'s key isn't the one this { -machine } trusts. If you reset or reinstalled the { -hub } on purpose, make a new token on the { -hub } and pair again, and compare the { -hub } key's fingerprint on both screens first. If you didn't, don't pair again: someone may be posing as it.
 
 # The hub didn't prove it holds its key on this connection. Nothing of the
 # token was sent.
 error-hub-proof-invalid = The { -hub } didn't prove its key. If you reset or reinstalled the { -hub } on purpose, make a new token on the { -hub } and pair again, and compare the { -hub } key's fingerprint on both screens first. If you didn't, don't pair again: someone may be posing as it.
 
-# The hub refused this agent's proof. The hub gives one answer for every
+# The hub refused this machine's proof. The hub gives one answer for every
 # cause, so the message names them all.
-error-proof-refused = The { -hub } refused this { -agent }. It may have been removed, or its key may have changed. Look at the list of { -agent(form: "other") } on the { -hub }; to bring it back, make a replacement token for it. If this machine was never approved, its wait may have lapsed: make a new token and pair again.
+error-proof-refused = The { -hub } refused this { -machine }. It may have been removed, or its key may have changed. Look at the list of { -machine(form: "other") } on the { -hub }; to bring it back, make a replacement token for it. If this { -machine } was never approved, its wait may have lapsed: make a new token and pair again.
 
-# The hub already has as many agents waiting for approval as it allows. The
+# The hub already has as many machines waiting for approval as it allows. The
 # token stays good.
-error-pending-limit = The { -hub } already has 20 { -agent(form: "other") } waiting for approval. Approve or reject some, then pair again with this token.
+error-pending-limit = The { -hub } already has 20 { -machine(form: "other") } waiting for approval. Approve or reject some, then pair again with this token.
 
 # The hub closed the connection before proving itself: it can't offer the
 # kind of connection this machine's token names, as when a proxy ends TLS in
@@ -629,22 +629,22 @@ error-generation-lower = The { -hub } offered an older state than this machine h
 # than the other can use.
 error-protocol-out-of-date = The { -hub } is on an older release than this machine can use, or a newer one. This machine keeps backing up. Update whichever side is older.
 
-# This agent doesn't maintain the repository: its entry doesn't ask this
-# agent to maintain it, so a forget, a prune, a check or an adoption, or the
+# This machine doesn't maintain the repository: its entry doesn't ask this
+# machine to maintain it, so a forget, a prune, a check or an adoption, or the
 # preview of one, was refused and nothing in the repository was changed. The
 # refusal can come after the repository was read, when maintenance from this
-# agent was turned off meanwhile.
+# machine was turned off meanwhile.
 # $alias (text): the repository's alias, such as demo.
-error-maintenance-not-owner = This { -agent } does not maintain the repository { $alias }, so nothing in it was changed. To maintain it from this { -agent }, turn its maintenance on from the Snapshots page.
+error-maintenance-not-owner = This { -machine } does not maintain the repository { $alias }, so nothing in it was changed. To maintain it from this { -machine }, turn its maintenance on from the Snapshots page.
 
 # The plan's retention policy would keep nothing, so the forget was refused
 # before anything was removed.
 # $plan (text): the plan's ID, such as home.
 error-retention-keeps-nothing = The policy of plan { $plan } would keep none of its snapshots, so nothing was removed. Give the policy something to keep, or delete the snapshots you mean to delete.
 
-# The group an adoption named matches no plan of this agent, so nothing
+# The group an adoption named matches no plan of this machine, so nothing
 # was written.
-error-adoption-no-match = No plan of this { -agent } matches that history, so nothing was written. Point the adoption at the plan whose host, label and sources it carries.
+error-adoption-no-match = No plan of this { -machine } matches that history, so nothing was written. Point the adoption at the plan whose host, label and sources it carries.
 
 # More than one plan matches the group an adoption named, so nothing was
 # written.
@@ -730,7 +730,7 @@ warning-maintenance-partial = { $what ->
 warning-check-warning = The check found something in the repository to tidy. Unless it also found an error, no snapshot's data depends on it, and the next prune tidies most of what a check finds like this.
     .with-detail = The check found something in the repository to tidy. Unless it also found an error, no snapshot's data depends on it, and the next prune tidies most of what a check finds like this. What it found: { $detail }
 
-# A check found an error: damage in the repository, something in it that is not as its index or its snapshots say, or a part of the repository, or of this agent's copy of it, that could not be read or did not match.
+# A check found an error: damage in the repository, something in it that is not as its index or its snapshots say, or a part of the repository, or of this machine's copy of it, that could not be read or did not match.
 # $detail (text): rustic's own words, which name what it found. It is shown as it came, at the end of the message.
 warning-check-error = The check found an error in the repository or in reading it, so a snapshot that needs the part it concerns may not restore whole. Check the disk or the service the repository is on, then check the repository again.
     .with-detail = The check found an error in the repository or in reading it, so a snapshot that needs the part it concerns may not restore whole. Check the disk or the service the repository is on, then check the repository again. What it found: { $detail }
@@ -743,7 +743,7 @@ warning-maintenance-other-hosts = { $count ->
    *[other] This repository holds snapshots from { $count } other hosts, including { $hosts }. { -brand-name } forgets and prunes it from here, and cannot tell whether any of them does too. Make sure only one machine maintains it.
   }
 
-# A warning this version of the program has no message for, such as one from a newer agent.
+# A warning this version of the program has no message for, such as one from a machine running a newer version.
 # $detail (text): the sender's own message. It is shown as it came.
 warning-unknown = The operation reported a problem that this version of { -brand-name } cannot describe, and went on.
     .with-detail = The operation reported a problem that this version of { -brand-name } cannot describe, and went on: { $detail }
@@ -1131,7 +1131,7 @@ warning-profile-key-ignored = { -brand-name } left out { $key } of the profile, 
 
 # The profile prunes after its forget, and the repository now prunes from one place.
 # `maintenance` and `local` are a setting and its value in the configuration, typed as they are: keep them string literals.
-warning-profile-prune = Pruning will run from one place (the { -hub } or this { -agent }), not after every forget as the profile asked. The repository's { "maintenance" } setting is now { "local" }: change it if that is not what you want.
+warning-profile-prune = Pruning will run from one place (the { -hub } or this { -machine }), not after every forget as the profile asked. The repository's { "maintenance" } setting is now { "local" }: change it if that is not what you want.
 
 # The profile's environment table was left out.
 # `[global.env]`, `password-env` and `${VAR}` are typed as they are: keep them string literals.

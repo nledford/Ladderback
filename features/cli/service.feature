@@ -202,5 +202,5 @@ Feature: Install the agent as a service
 
       Examples:
         | command         | words                           |
-        | install-service | Install this agent as a service |
+        | install-service | Install Ladderback as a service |
         | remove-service  | Stop the service                |

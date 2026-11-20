@@ -96,9 +96,9 @@ Feature: Accessibility of the app shell
     And I skip to the content
     And I press Tab until focus is on the button "Say politely: backup finished"
     And I press Enter
-    And I press Tab until focus is on the button "Say politely: agent back online"
+    And I press Tab until focus is on the button "Say politely: machine back online"
     And I press Enter
-    Then the polite region reads "Backup finished. Agent back online."
+    Then the polite region reads "Backup finished. Machine back online."
 
   Scenario: An assertive message reaches the assertive region
     When I open the component gallery

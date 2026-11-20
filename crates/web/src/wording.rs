@@ -975,15 +975,15 @@ mod tests {
     fn the_reasons_no_group_is_adopted_read_in_english() {
         assert_eq!(
             written(&orphaned_stuck(Stuck::Untagged)),
-            "This history lacks the tag of an agent or a plan, so it cannot be adopted."
+            "This history lacks the tag of a machine or a plan, so it cannot be adopted."
         );
         assert_eq!(
             written(&orphaned_stuck(Stuck::NoPlan)),
-            "No plan of this agent could take this history, so it cannot be adopted."
+            "No plan of this machine could take this history, so it cannot be adopted."
         );
         assert_eq!(
             written(&unmanaged_stuck()),
-            "No plan of this agent backs up this host, label and paths, so this history cannot be adopted."
+            "No plan of this machine backs up this host, label and paths, so this history cannot be adopted."
         );
     }
 
@@ -1065,29 +1065,29 @@ mod tests {
         assert_eq!(
             read(both),
             (
-                "Plan old of agent agent-a".to_owned(),
-                "Snapshots of plan old of agent agent-a".to_owned()
+                "Plan old of machine agent-a".to_owned(),
+                "Snapshots of plan old of machine agent-a".to_owned()
             )
         );
         assert_eq!(
             read(Owner::Plan("old")),
             (
-                "Plan old of an unknown agent".to_owned(),
-                "Snapshots of plan old of an unknown agent".to_owned()
+                "Plan old of an unknown machine".to_owned(),
+                "Snapshots of plan old of an unknown machine".to_owned()
             )
         );
         assert_eq!(
             read(Owner::Agent("agent-a")),
             (
-                "An unknown plan of agent agent-a".to_owned(),
-                "Snapshots of an unknown plan of agent agent-a".to_owned()
+                "An unknown plan of machine agent-a".to_owned(),
+                "Snapshots of an unknown plan of machine agent-a".to_owned()
             )
         );
         assert_eq!(
             read(Owner::Neither),
             (
-                "History of an unknown agent and plan".to_owned(),
-                "Snapshots of an unknown agent and plan".to_owned()
+                "History of an unknown machine and plan".to_owned(),
+                "Snapshots of an unknown machine and plan".to_owned()
             )
         );
     }
@@ -1179,19 +1179,19 @@ mod tests {
         assert_eq!(
             read(switch(false, "demo")),
             (
-                "Maintain from this agent".to_owned(),
-                "Maintain demo from this agent".to_owned(),
+                "Maintain from this machine".to_owned(),
+                "Maintain demo from this machine".to_owned(),
                 "Turn on maintenance".to_owned(),
-                "This agent now maintains demo.".to_owned(),
+                "This machine now maintains demo.".to_owned(),
             )
         );
         assert_eq!(
             read(switch(true, "demo")),
             (
-                "Stop maintaining from this agent".to_owned(),
-                "Stop maintaining demo from this agent".to_owned(),
+                "Stop maintaining from this machine".to_owned(),
+                "Stop maintaining demo from this machine".to_owned(),
                 "Turn off maintenance".to_owned(),
-                "This agent no longer maintains demo.".to_owned(),
+                "This machine no longer maintains demo.".to_owned(),
             )
         );
         assert!(
