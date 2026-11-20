@@ -278,6 +278,10 @@ pub enum StartError {
     /// decision 120, "A copied data folder"): refused rather than back the
     /// keys up.
     KeyFilesNotLeftOut,
+    /// A run of the plan is waiting for its turn already, and backs up the
+    /// sources as they are when it starts: a plan never has two runs
+    /// waiting (§16, decision 75, point 4), so nothing was queued.
+    RunWaiting,
 }
 
 /// The catalog the API asks of the daemon (§4.2): the plans the operations
@@ -844,6 +848,7 @@ async fn run_plan(
             api::ErrorCode::KeyFilesNotLeftOut,
             Vec::new(),
         ),
+        Err(StartError::RunWaiting) => todo!(),
     }
 }
 

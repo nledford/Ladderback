@@ -11,7 +11,7 @@ use std::convert::Infallible;
 use std::sync::{Arc, Mutex, PoisonError};
 
 use domain::PlanId;
-use domain::execution::queue::{BackupQueue, Overlapping, Ticket};
+use domain::execution::queue::{BackupQueue, Overlapping, RunWaiting, Ticket};
 use domain::planning::{Concurrency, Overlap};
 use futures::channel::oneshot;
 
@@ -66,10 +66,19 @@ impl RunQueue {
         self.admit(|queue| queue.due(plan, overlap))
     }
 
-    /// A place for any other run of `plan`: one started by hand, or one the
-    /// queue held from before the start (`BackupQueue::push`). `limit` is
-    /// the agent's concurrency, as the configuration says now, and applies
-    /// from then on.
+    /// A place for a run of `plan` started by hand, by a person, an API
+    /// token, an AI tool or the hub, or why it is refused: a run of the plan
+    /// is waiting already (`BackupQueue::by_hand`). `limit` is the agent's
+    /// concurrency, as the configuration says now, and applies from then
+    /// on, refused or not.
+    pub fn by_hand(&self, plan: &PlanId, limit: Concurrency) -> Result<Place, RunWaiting> {
+        let _ = (plan, limit);
+        todo!()
+    }
+
+    /// A place for a run of `plan` the queue held from before the start
+    /// (`BackupQueue::push`). `limit` is the agent's concurrency, as the
+    /// configuration says now, and applies from then on.
     pub fn push(&self, plan: &PlanId, limit: Concurrency) -> Place {
         let taken = self.admit(|queue| {
             queue.set_limit(limit);
@@ -108,6 +117,21 @@ impl RunQueue {
         let mut state = self.state.lock().unwrap_or_else(PoisonError::into_inner);
         state.queue.release();
         state.start();
+    }
+
+    /// The plans of the runs the queue held from before the start, which the
+    /// daemon is still handing back to it: until a plan's run takes its
+    /// place again, or every one is handed back ([`Self::resumed`]), a run
+    /// of the plan started by hand is refused (`BackupQueue::resuming`).
+    pub fn resuming(&self, plans: impl IntoIterator<Item = PlanId>) {
+        let _ = plans.into_iter();
+        todo!()
+    }
+
+    /// Every run the queue held from before the start is handed back to it,
+    /// or ended (`BackupQueue::resumed`).
+    pub fn resumed(&self) {
+        todo!()
     }
 
     /// How many backups are running: past their turn, their place kept.
@@ -177,7 +201,7 @@ impl Drop for Place {
 #[cfg(test)]
 mod tests {
     use domain::PlanId;
-    use domain::execution::queue::Overlapping;
+    use domain::execution::queue::{Overlapping, RunWaiting};
     use domain::planning::{Concurrency, Overlap};
     use futures::FutureExt;
 
@@ -328,6 +352,35 @@ mod tests {
         ));
         drop(first);
         assert!(has_turn(&mut second));
+    }
+
+    #[test]
+    fn a_run_by_hand_waits_behind_its_plans_running_run() {
+        let queue = RunQueue::new();
+        let mut first = queue.by_hand(&plan("home"), limit(2)).unwrap();
+        assert!(has_turn(&mut first));
+        let mut second = queue
+            .by_hand(&plan("home"), limit(2))
+            .expect("a running run isn't waiting");
+        assert!(!has_turn(&mut second));
+        drop(first);
+        assert!(has_turn(&mut second));
+    }
+
+    #[test]
+    fn a_run_by_hand_is_refused_while_its_plan_has_one_waiting_and_takes_no_place() {
+        let queue = RunQueue::new();
+        let docs = queue.push(&plan("docs"), limit(1));
+        let mut home = queue.by_hand(&plan("home"), limit(1)).unwrap();
+        assert!(!has_turn(&mut home));
+        assert!(matches!(
+            queue.by_hand(&plan("home"), limit(1)),
+            Err(RunWaiting)
+        ));
+        drop(docs);
+        assert!(has_turn(&mut home));
+        drop(home);
+        assert!(!queue.is_busy(), "the refused run held no place");
     }
 
     #[test]

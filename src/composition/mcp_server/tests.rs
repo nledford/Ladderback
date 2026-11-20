@@ -664,6 +664,31 @@ async fn both_backends_refuse_a_run_whose_password_cant_be_read_alike() {
     );
 }
 
+/// A plan never has two runs waiting (§16, decision 75, point 4): `work`'s
+/// backup queued before the start is still to be handed back to the queue,
+/// as the daemon's background work never runs here, so a run of it is
+/// refused as if that backup waited already, by both backends alike,
+/// naming the code and the plan.
+#[tokio::test]
+async fn both_backends_refuse_a_run_of_a_plan_whose_backup_from_before_waits_alike_naming_it() {
+    let scratch = tempfile::tempdir().expect("a scratch dir");
+    let daemon = a_daemon(scratch.path()).await;
+    let connect = connected_to(&daemon).await;
+    let in_process = InProcess::over(&daemon.state);
+
+    let refused = in_process
+        .run("work".to_owned())
+        .await
+        .expect_err("a plan with a run waiting is refused");
+    assert_eq!(Err(refused.clone()), connect.run("work".to_owned()).await);
+    assert_eq!(wire_name(refused.code), "plan-run-waiting");
+    assert_eq!(
+        refused.args.get("plan"),
+        Some(&api::MsgArg::Text("work".to_owned())),
+        "{refused:?}"
+    );
+}
+
 #[tokio::test]
 async fn both_backends_refuse_to_cancel_what_isnt_a_queued_or_running_backup_alike() {
     let scratch = tempfile::tempdir().expect("a scratch dir");
@@ -913,14 +938,19 @@ struct Session {
 
 impl Session {
     fn over(backend: impl Backend) -> Self {
-        use tokio::io::AsyncBufReadExt as _;
-        let (client, server) = tokio::io::duplex(mcp::MAX_MESSAGE_BYTES);
-        let (server_input, server_output) = tokio::io::split(server);
-        let server = mcp::Server::new(
+        Self::serving(mcp::Server::new(
             Arc::new(backend),
             crate::build_info::running(),
             l10n::Localizer::new(&[]),
-        );
+        ))
+    }
+
+    /// A session with `server`, as a client on its standard input and
+    /// output sees it.
+    fn serving(server: mcp::Server) -> Self {
+        use tokio::io::AsyncBufReadExt as _;
+        let (client, server_end) = tokio::io::duplex(mcp::MAX_MESSAGE_BYTES);
+        let (server_input, server_output) = tokio::io::split(server_end);
         tokio::spawn(server.serve(server_input, server_output));
         let (output, input) = tokio::io::split(client);
         Self {

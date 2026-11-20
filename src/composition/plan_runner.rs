@@ -371,6 +371,7 @@ fn start_refused(error: &StartError) -> String {
              as its path isn't UTF-8 ({})",
             wire_name(ErrorCode::KeyFilesNotLeftOut)
         ),
+        StartError::RunWaiting => todo!(),
     }
 }
 

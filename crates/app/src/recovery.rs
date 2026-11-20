@@ -23,6 +23,10 @@ pub enum QueuedEnd {
     /// The backup's plan now backs up to another repository than the one the
     /// operation was queued for.
     RepositoryChanged,
+    /// An older queued backup of the same plan runs again: a plan never has
+    /// two runs waiting (decision 75), and that one backs up the sources as
+    /// they are when it starts.
+    PlanRunsAgain,
     /// Not a backup: the log doesn't keep the job of any other kind.
     JobNotKept,
 }

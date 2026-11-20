@@ -6,7 +6,8 @@ Feature: Crash recovery
   maintenance operation that was running no longer holds its repository (I7).
   A queued one never started, so it is the persistent queue's: a backup of a
   plan the configuration still has, on the repository it was queued for,
-  runs again under its own ID, oldest first. Anything else queued ends as
+  runs again under its own ID, oldest first, and only the oldest of each
+  plan's: a plan never has two runs waiting. Anything else queued ends as
   failed because the daemon stopped, and the agent says why. Each operation
   a start ends as failed is announced as any failed operation is, to the
   notification rules for its failure, once: only after the log has its end,
@@ -30,6 +31,15 @@ Feature: Crash recovery
     And the log shows a backup of the plan "docs" as queued
     When the daemon starts again
     Then the queued backups run again in the order "home", "docs"
+
+  Scenario: A plan's queued backups run again as one, the oldest
+    Given the log shows a backup of the plan "home" as queued
+    And the log shows a backup of the plan "docs" as queued
+    And the log shows a later backup of the plan "home" as queued
+    When the daemon starts again
+    Then the queued backups run again in the order "home", "docs"
+    And the log shows the later backup of the plan "home" as failed because the daemon stopped
+    And the agent said the later queued backup of the plan "home" ended because an older one of its plan runs again
 
   Scenario: A queued backup of a plan no longer configured ends as failed
     Given the log shows a backup of the plan "home" as queued

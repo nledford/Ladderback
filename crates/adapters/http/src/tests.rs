@@ -133,6 +133,7 @@ impl Operations for Plans {
                 detail: Some("no such entry".to_owned()),
             })),
             "keys" => Err(StartError::KeyFilesNotLeftOut),
+            "waiting" => Err(StartError::RunWaiting),
             "mistaken" => {
                 let (code, args, detail) = mistake();
                 Err(StartError::Unavailable { code, args, detail })
@@ -617,6 +618,24 @@ async fn a_plan_that_would_back_up_the_key_files_is_refused() {
     .await;
     assert_eq!(response.status(), StatusCode::CONFLICT);
     assert_eq!(body(response).await, r#"{"code":"key-files-not-left-out"}"#);
+}
+
+/// A plan that has a run waiting already is refused with its own code,
+/// naming the plan, and nothing is queued (§16, decision 75, point 4).
+#[tokio::test]
+async fn a_plan_that_has_a_run_waiting_is_refused() {
+    let response = request(
+        ui(),
+        Method::POST,
+        "/api/v1/operations",
+        r#"{"plan":"waiting"}"#,
+    )
+    .await;
+    assert_eq!(response.status(), StatusCode::CONFLICT);
+    assert_eq!(
+        body(response).await,
+        r#"{"code":"plan-run-waiting","args":{"plan":{"type":"text","value":"waiting"}}}"#
+    );
 }
 
 /// A secret of the plan's repository that can't be resolved is refused

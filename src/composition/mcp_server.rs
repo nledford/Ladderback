@@ -521,6 +521,7 @@ impl ::mcp::Backend for InProcess {
                 StartError::KeyFilesNotLeftOut => {
                     api::ErrorDto::new(api::ErrorCode::KeyFilesNotLeftOut, [], None)
                 }
+                StartError::RunWaiting => todo!(),
             })
     }
 

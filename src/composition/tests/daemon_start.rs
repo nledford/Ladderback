@@ -213,6 +213,48 @@ async fn the_daemon_ends_what_a_crash_left_unfinished_before_it_hands_over_its_s
     );
 }
 
+/// The daemon listens before it has handed the backups queued before the
+/// start back to the queue (decision 73): a start by hand in between, of a
+/// plan with one, is refused as if that backup waited already, so the plan
+/// never has two runs waiting (decision 75, point 4; #1140).
+#[tokio::test]
+async fn a_start_by_hand_before_its_plans_queued_backup_is_handed_back_is_refused() {
+    let scratch = tempfile::tempdir().expect("a scratch dir");
+    let (config, data) = own_folders(scratch.path());
+    let database = data.join("ladderback.db");
+    let earlier = SqliteStore::open(&database).await.expect("the log opens");
+    let queued = domain::execution::Operation::queue(
+        OperationId::from_uuid(Uuid::from_u128(0x1140)),
+        OperationKind::Backup,
+        Trigger::Schedule,
+        domain::execution::Target {
+            plan: Some(domain::PlanId::parse("home").expect("a plan's name")),
+            repository: None,
+        },
+        domain::Timestamp::from_second(1_800_000_000).expect("a time"),
+    );
+    earlier
+        .save(&queued, None)
+        .await
+        .expect("the queued backup is saved");
+    earlier.close().await;
+
+    let daemon = daemon_at(Some(config), Some(data), None)
+        .await
+        .map_err(|refused| refused.message)
+        .expect("the daemon starts");
+    let refused = daemon
+        .state
+        .operations
+        .start_backup("home".to_owned(), Trigger::Manual)
+        .await;
+
+    assert!(
+        matches!(refused, Err(http_adapter::StartError::RunWaiting)),
+        "{refused:?}"
+    );
+}
+
 #[tokio::test]
 async fn a_proposal_a_stop_left_being_applied_is_failed_once_the_daemon_starts() {
     use app::ports::{ProposalStore, StoredProposal};

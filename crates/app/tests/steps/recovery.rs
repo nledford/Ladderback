@@ -115,6 +115,20 @@ impl RecoveryWorld {
             })
     }
 
+    /// The newest backup of `plan` the scenario put in the log: the later of
+    /// two.
+    fn later_backup(&self, plan: &str) -> &Seeded {
+        self.seeded
+            .iter()
+            .rev()
+            .find(|seeded| {
+                seeded.kind == OperationKind::Backup && seeded.plan.as_deref() == Some(plan)
+            })
+            .unwrap_or_else(|| {
+                panic!("the scenario never put a backup of the plan {plan} in the log")
+            })
+    }
+
     fn maintenance(&self, kind: OperationKind, repository: &str) -> &Seeded {
         self.seeded
             .iter()
@@ -252,6 +266,18 @@ async fn backup_queued(agent: &mut Agent, plan: String) {
         .await
         .expect("the log answers a save");
     agent.recovery.remember(&op, Some(&plan), None, None);
+}
+
+#[given(expr = "the log shows a later backup of the plan {string} as queued")]
+async fn later_backup_queued(agent: &mut Agent, plan: String) {
+    backup_queued(agent, plan).await;
+}
+
+#[given(
+    expr = "the log shows a later backup of the plan {string} on the repository {string} as queued"
+)]
+async fn later_backup_queued_on(agent: &mut Agent, plan: String, repository: String) {
+    backup_queued_on(agent, plan, repository).await;
 }
 
 #[given(expr = "the log shows a backup of the plan {string} on the repository {string} as queued")]
@@ -464,6 +490,7 @@ fn queued_end(words: &str) -> QueuedEnd {
         "its plan's repository changed" => QueuedEnd::RepositoryChanged,
         "the configuration can't be read" => QueuedEnd::ConfigUnreadable,
         "the log doesn't keep its job" => QueuedEnd::JobNotKept,
+        "an older one of its plan runs again" => QueuedEnd::PlanRunsAgain,
         other => panic!("no step says why a queued operation ended as {other:?}"),
     }
 }
@@ -486,6 +513,14 @@ fn said_ended(agent: &Agent, id: OperationId, kind: OperationKind, why: &str) {
 #[then(regex = r#"^the agent said the queued backup of the plan "([^"]*)" ended because (.+)$"#)]
 fn said_backup_ended(agent: &mut Agent, plan: String, why: String) {
     let id = agent.recovery.backup(&plan).id;
+    said_ended(agent, id, OperationKind::Backup, &why);
+}
+
+#[then(
+    regex = r#"^the agent said the later queued backup of the plan "([^"]*)" ended because (.+)$"#
+)]
+fn said_later_backup_ended(agent: &mut Agent, plan: String, why: String) {
+    let id = agent.recovery.later_backup(&plan).id;
     said_ended(agent, id, OperationKind::Backup, &why);
 }
 
@@ -549,6 +584,14 @@ fn nothing_runs_again(agent: &mut Agent) {
 #[then(expr = "the log shows the backup of the plan {string} as failed because the daemon stopped")]
 async fn backup_failed_daemon_stopped(agent: &mut Agent, plan: String) {
     let id = agent.recovery.backup(&plan).id;
+    assert_failed_daemon_stopped(agent, id).await;
+}
+
+#[then(
+    expr = "the log shows the later backup of the plan {string} as failed because the daemon stopped"
+)]
+async fn later_backup_failed_daemon_stopped(agent: &mut Agent, plan: String) {
+    let id = agent.recovery.later_backup(&plan).id;
     assert_failed_daemon_stopped(agent, id).await;
 }
 
