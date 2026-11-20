@@ -81,7 +81,22 @@ const REQUEST_LIMIT_MS = 30_000;
 // past the daemon's own 65 s limit on a stop (decision 92).
 const STOP_SECONDS = "75";
 
-const docker = (args: string[], input?: string): Promise<Output> => run("docker", args, { input, limitMs: DOCKER_LIMIT_MS });
+// The Docker commands still running. Cleanup waits for them, so a volume or a
+// container one of them is making exists by the time it is removed; once
+// cleanup starts, no new command starts.
+const running = new Set<Promise<Output>>();
+let stopping = false;
+
+const command = (args: string[], input?: string): Promise<Output> => run("docker", args, { input, limitMs: DOCKER_LIMIT_MS });
+
+const docker = (args: string[], input?: string): Promise<Output> => {
+  if (stopping) return Promise.reject(new Error("the run is stopping"));
+  const started = command(args, input);
+  running.add(started);
+  const done = () => running.delete(started);
+  started.then(done, done);
+  return started;
+};
 
 const said = (output: Output) => `exit ${output.status}: ${`${output.stdout.toString()}${output.stderr}`.trim().slice(0, 300)}`;
 
@@ -93,11 +108,14 @@ class Scratch {
   readonly containers: string[] = [];
   readonly volumes: string[] = [];
 
+  private closing?: Promise<void>;
+
   async volume(name: string): Promise<string> {
     const volume = `${this.prefix}-${name}`;
+    // Named before it is made, so a cancellation during `create` still removes it.
+    this.volumes.push(volume);
     const made = await docker(["volume", "create", volume]);
     if (made.status !== 0) throw new Error(`docker volume create ${volume}: ${made.stderr.trim()}`);
-    this.volumes.push(volume);
     return volume;
   }
 
@@ -107,15 +125,36 @@ class Scratch {
     return container;
   }
 
-  /** Notes each container's log in `report`, then removes the containers and the volumes. */
-  async close(report: Report): Promise<void> {
+  /**
+   * Notes each container's log in `report`, then removes the containers and the
+   * volumes, once however often it is called. A removal that fails is a failed
+   * check: `rm --force` exits 0 for one that is already gone.
+   */
+  close(report: Report): Promise<void> {
+    this.closing ??= this.removeAll(report);
+    return this.closing;
+  }
+
+  private async removeAll(report: Report): Promise<void> {
+    stopping = true;
+    await Promise.allSettled([...running]);
+    const failures: string[] = [];
     for (const container of this.containers) {
-      const logs = await docker(["logs", container]);
+      const logs = await command(["logs", container]);
       if (logs.status === 0)
         report.note(details(`${container}: the daemon's log`, `${logs.stdout.toString()}${logs.stderr}` || "(nothing)"));
-      await docker(["rm", "--force", "--volumes", container]);
+      const removed = await command(["rm", "--force", "--volumes", container]);
+      if (removed.status !== 0) failures.push(`${container}: ${said(removed)}`);
     }
-    for (const volume of this.volumes) await docker(["volume", "rm", "--force", volume]);
+    for (const volume of this.volumes) {
+      const removed = await command(["volume", "rm", "--force", volume]);
+      if (removed.status !== 0) failures.push(`${volume}: ${said(removed)}`);
+    }
+    report.add(
+      "the run removes what it made",
+      failures.length === 0,
+      failures.join("; ") || `${this.containers.length} container(s), ${this.volumes.length} volume(s)`,
+    );
   }
 }
 
@@ -529,10 +568,14 @@ async function main(argv: string[]): Promise<number> {
 
   const report = new Report();
   const scratch = new Scratch();
-  // Ctrl-C or a CI cancellation still removes what the run made.
+  // Ctrl-C or a CI cancellation still removes what the run made, by the same
+  // cleanup as the end of a run, and says what it couldn't remove.
   for (const signal of ["SIGINT", "SIGTERM"] as const)
     process.once(signal, () => {
-      void scratch.close(report).finally(() => process.exit(130));
+      void scratch.close(report).finally(() => {
+        if (report.failed) console.error(report.markdown(`Image smoke test, cancelled: ${image}`));
+        process.exit(130);
+      });
     });
   try {
     await checkImage(image, expected, scratch, report);
