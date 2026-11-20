@@ -244,6 +244,23 @@ async fn beyond_loopback_with_sign_in_off_no_token_is_made() {
     }
 }
 
+// Beyond loopback with sign-in off, no confirmation can help: the person
+// sets an admin password first, whatever was typed, nothing or too much
+// included.
+#[tokio::test]
+async fn beyond_loopback_with_sign_in_off_any_confirmation_needs_sign_in() {
+    let daemon = Daemon::hub(false);
+    let oversized = "a".repeat(domain::access::PASSWORD_MAX_BYTES + 1);
+    for confirmation in ["", oversized.as_str(), "00000000"] {
+        assert_eq!(
+            refusal(daemon.send(make(REMOTE, &[], &ask(confirmation))).await).await,
+            (StatusCode::FORBIDDEN, "pairing-needs-sign-in".to_owned()),
+            "confirmed by {} bytes",
+            confirmation.len()
+        );
+    }
+}
+
 #[tokio::test]
 async fn a_wrong_key_id_is_a_step_up_that_failed() {
     let daemon = Daemon::hub(false);
