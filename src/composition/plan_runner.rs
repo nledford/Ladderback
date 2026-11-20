@@ -808,7 +808,8 @@ impl PlanRuns for PlanRunner {
         };
         // A queued run the schedule started or caught up on, whose
         // repository password is in a locked keyring with the plan's next
-        // kept run to wait within, parks on a task of its own — its
+        // kept run to wait within, parks on a task of its own when its plan
+        // still backs up to the repository it was recorded on — its
         // operation shows as queued while it waits — so the queue's other
         // leftovers go on (#1221). Its cancel switch is parked first, so a
         // cancel of what shows as queued finds it while it waits (§4.2). A
@@ -816,7 +817,9 @@ impl PlanRuns for PlanRunner {
         // it ends.
         if let (Some(plan), Some(unlock)) = (operation.target().plan.clone(), unlock)
             && matches!(trigger, Trigger::Schedule | Trigger::CatchUp)
-            && matches!(&built, Err(Unbuilt::Secret(secret)) if secret.refused_as_locked())
+            && matches!(&built, Err(Unbuilt::Secret(secret))
+                if secret.refused_as_locked()
+                    && operation.target().is_on(secret.target.repository.as_ref()))
         {
             let cancel = self.cancel_switch(operation.id());
             let runner = self.clone();
