@@ -410,10 +410,11 @@ pub(super) fn find_dto(pattern: &NamePattern, answer: SearchAnswer) -> api::Find
     }
 }
 
-/// A listing or a folder read the engine ran and failed, told by the code of
+/// A listing, a folder read or a search the engine ran and failed, told by the code of
 /// its failure as a read for maintenance tells it (#637): a wrong password is
-/// `password-not-accepted`, no repository at the location 404. `None` for a
-/// failure in the engine's own words or an engine that can't run, which the
+/// `password-not-accepted`, no repository at the location 404, and a failure
+/// in the engine's own words `operation-failed` with those words, which the
+/// engine masked (#836). `None` for an engine that can't run, which the
 /// caller tells as `engine-unavailable`, its words only in the log.
 fn told_failure(reason: &FailureReason) -> Option<SnapshotsError> {
     use http_adapter::MaintenanceRefusal as M;
@@ -421,8 +422,8 @@ fn told_failure(reason: &FailureReason) -> Option<SnapshotsError> {
         M::Unavailable {
             code: ErrorCode::EngineUnavailable,
             ..
-        }
-        | M::OperationFailed { .. } => None,
+        } => None,
+        M::OperationFailed { detail } => Some(SnapshotsError::OperationFailed { detail }),
         M::Unavailable { code, args, detail } => {
             Some(SnapshotsError::Unavailable { code, args, detail })
         }
@@ -482,8 +483,9 @@ fn catalog_refusal(error: ConfigError) -> CatalogError {
 /// the snapshots) of `alias`, configured with `settings`, that failed with
 /// `error`. A secret: its code and the words a command or the platform
 /// gave, masked of every secret of the repository, in the log as in the
-/// answer (I4). A read that ran out of time by its own code; the rest by
-/// its code alone, its masked words in the log.
+/// answer (I4). A read that ran out of time by its own code; a failure the
+/// engine told by [`told_failure`]; the rest by its code alone, its masked
+/// words in the log.
 pub(super) async fn folder_refusal(
     what: &str,
     alias: &RepositoryAlias,
@@ -541,7 +543,8 @@ pub(super) async fn folder_refusal(
 /// `settings`, that failed with `error`. A secret: its code and the words a
 /// command or the platform gave, masked of every secret of the repository,
 /// in the log as in the answer (I4). A read that ran out of time by its own
-/// code; the rest by its code alone, its masked words in the log.
+/// code; a failure the engine told by [`told_failure`]; the rest by its code
+/// alone, its masked words in the log.
 pub(super) async fn listing_refusal(
     alias: &RepositoryAlias,
     settings: &RepositorySettings,

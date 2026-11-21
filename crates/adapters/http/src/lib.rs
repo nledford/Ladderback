@@ -1119,7 +1119,12 @@ fn snapshots_refused(alias: String, error: SnapshotsError) -> Response {
         SnapshotsError::SecretRefused(secret) => repositories::secret_refusal(&secret),
         SnapshotsError::RepositoryNotFound => no_repository(None),
         SnapshotsError::RepositoryConfigNotFound { detail } => no_repository(Some(detail)),
-        SnapshotsError::OperationFailed { .. } => todo!(),
+        SnapshotsError::OperationFailed { detail } => refused_detailed(
+            StatusCode::UNPROCESSABLE_ENTITY,
+            api::ErrorCode::OperationFailed,
+            Vec::new(),
+            Some(detail),
+        ),
         SnapshotsError::Unavailable { code, args, detail } => unavailable(code, args, detail),
         SnapshotsError::TimedOut => read_timed_out(),
     }
