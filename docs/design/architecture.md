@@ -26,7 +26,7 @@
 | Role | Command | Runs where | Responsibility |
 |---|---|---|---|
 | **Agent** | `ladderback serve` | every machine | Local config, scheduler, op log, spawning workers, local web UI. Works fully standalone. |
-| **Hub** | `ladderback serve --hub` | one machine (often a server) | Everything an agent does, plus an agent registry, aggregated history, the repo ownership registry, maintenance for hub-managed repos, notifications |
+| **Hub** | `ladderback serve` in hub mode (its setting in `config.toml`, or `--hub`; §16, decision 136) | one machine (often a server) | Everything an agent does, plus an agent registry, aggregated history, the repo ownership registry, maintenance for hub-managed repos, notifications |
 | **Worker** | `ladderback worker` (internal) | spawned per operation | Runs exactly one `rustic_core` operation, streams events to stdout, then exits |
 | **MCP server** | `ladderback mcp` (started by an MCP client) | wherever the client runs | Lets AI agents and scripts drive a running agent (a hub from M9), or a headless session of their own, over stdio (§4.6) |
 
@@ -41,7 +41,7 @@ Ladderback's hard problems are domain rules, not CRUD: who may prune a repositor
 | Term | Meaning |
 |---|---|
 | Machine | A computer, virtual machine or container running `ladderback serve`, whatever it runs on, identified by its machine ID. Older design text, the scenarios and code call it an agent until #1220 (§16, decision 133) |
-| Hub | The machine running `--hub`; holds the registry, ownership and aggregated history |
+| Hub | The machine running in hub mode (its setting in `config.toml`, or `--hub`); holds the registry, ownership and aggregated history |
 | Machine key | The Ed25519 key pair a machine makes once and keeps in its data folder, never in its database. The hub registers its public half at pairing and checks every connection's proof against it (§7.1; §16, decision 120) |
 | Hub key | The Ed25519 key pair the hub makes once, kept in its data folder like the machine key, with an offline recovery key pinned beside it. Every paired machine pins both public halves at pairing, whichever way the hub's TLS is served, and the hub signs every message it sends with it. Not the hub's own machine key (§7.1; §16, decision 120) |
 | Recovery key | The offline Ed25519 key pair the hub makes with its hub key, whose seed the person keeps as a Recovery Kit. It signs the handover that replaces a lost or leaked hub key, and every agent pins its public half beside the hub key (§7.1; §16, decision 120) |
