@@ -96,7 +96,7 @@ Ladderback's hard problems are domain rules, not CRUD: who may prune a repositor
 | Repository ownership | Planned for M9: the hub's aggregate that holds a repository's claims, grant, lease and epoch (`RepositoryOwnership`, §7.3, layer 2) |
 | Prune guard | Planned for M9: the owner's check that waits for unfinished backups before a prune (`PruneGuard`, §7.3, layer 2). The backup budget and `Deadline` are layer 1 and live in Execution |
 | Claim / Grant / Lease | An agent's request to own maintenance; the hub's acceptance; the time-limited, epoch-numbered form of that acceptance |
-| Protection | A repository's setting for how the storage keeps a machine that backs up from deleting: `append-only`, `object-lock` or `none`. The UI shows "immutable" only after a delete probe, apart from a location's probe, confirms the storage refused a test delete. The 3-2-1 view counts a copy as protected only if it is immutable and no machine that backs up, nor the hub, reaches its storage through the file system (§7.3; §16, decision 138) |
+| Protection | A repository's setting for how the storage keeps a machine that backs up from deleting: `append-only`, `object-lock` or `none`. The UI shows "immutable" only after a delete probe, apart from a location's probe, confirms the storage refused a test delete. The 3-2-1 view counts a copy as protected only if it is immutable and neither the hub nor a machine that backs up has a route that can delete it (§7.3; §16, decision 138) |
 | Deadline | The latest time a backup may write its snapshot (I3) |
 | Prune margin | 1 h + the longest recorded prune on that repository |
 | Catch-up | One run in place of any number of runs missed while the agent was off or asleep |
