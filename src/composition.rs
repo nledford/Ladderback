@@ -717,11 +717,13 @@ fn failure_refusal(reason: FailureReason) -> FailureRefusal {
         F::SecretsTooLargeToMask { field, limit } => {
             FailureRefusal::SecretRefused(too_much_to_mask(field, limit))
         }
-        // Only an operation of the log can be ended by a stopped daemon, and
-        // neither a repository job nor a read of the repository is one; the
-        // failure has its code all the same, as it has everywhere it is told.
+        // Only an operation of the log can be ended by a stopped daemon, or
+        // give way to a newer run of its plan, and neither a repository job
+        // nor a read of the repository is one; the failure has its code all
+        // the same, as it has everywhere it is told.
         F::DaemonStopped => unavailable(ErrorCode::DaemonStopped, Vec::new(), None),
         F::DaemonShutDown => unavailable(ErrorCode::DaemonShutDown, Vec::new(), None),
+        F::Superseded => todo!(),
         F::NoLocationUsable => unavailable(ErrorCode::NoLocationUsable, Vec::new(), None),
         F::NoLocationRuleHolds => unavailable(ErrorCode::NoLocationRuleHolds, Vec::new(), None),
         F::PasswordNotAccepted => unavailable(ErrorCode::PasswordNotAccepted, Vec::new(), None),

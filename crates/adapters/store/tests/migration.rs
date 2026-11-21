@@ -138,6 +138,7 @@ fn demoted(n: u128, kind: OperationKind) -> OperationRecord {
         repository_alias: None,
         locations: None,
         entry: None,
+        restored_to: None,
     }
 }
 

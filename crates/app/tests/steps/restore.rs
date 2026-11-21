@@ -672,6 +672,30 @@ async fn history_names_entry(agent: &mut Agent, entry: String) {
     );
 }
 
+#[then(expr = "the history says the restore went into the folder {string}")]
+async fn history_says_went_into(agent: &mut Agent, folder: String) {
+    let history = agent.restore.history().await;
+    let [record] = history.as_slice() else {
+        panic!("one operation in {history:?}");
+    };
+    assert_eq!(
+        record.restored_to,
+        Some(domain::execution::logged_entry::RestoredTo::Folder(folder))
+    );
+}
+
+#[then("the history says the restore went in place")]
+async fn history_says_went_in_place(agent: &mut Agent) {
+    let history = agent.restore.history().await;
+    let [record] = history.as_slice() else {
+        panic!("one operation in {history:?}");
+    };
+    assert_eq!(
+        record.restored_to,
+        Some(domain::execution::logged_entry::RestoredTo::InPlace)
+    );
+}
+
 #[then("the history shows no operation")]
 async fn history_shows_none(agent: &mut Agent) {
     let history = agent.restore.history().await;

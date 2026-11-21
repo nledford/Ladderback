@@ -505,6 +505,7 @@ pub(crate) fn record(row: &SqliteRow) -> Result<OperationRecord, StoreError> {
         repository_alias,
         locations,
         entry,
+        restored_to: None,
     })
 }
 

@@ -10,10 +10,11 @@ import { Then, When } from "@cucumber/cucumber";
 import type { Locator } from "playwright";
 
 import { expect } from "../support/expect.ts";
-import { journey, namePattern } from "../support/keyboard.ts";
+import { ISOLATION, journey, namePattern } from "../support/keyboard.ts";
 import { patienceMs, untilStepLimit } from "../support/patience.ts";
 import { type BrowserWorld, engine } from "../support/world.ts";
 import { clipboardPermissions } from "./api_tokens.ts";
+import { table } from "./live.ts";
 import { latestSnapshotOf, sourcePath } from "./maintenance.ts";
 
 // A dry run reads the repository and the original files, and the page shows
@@ -168,6 +169,24 @@ Then(
       held.some((entry) => path.basename(entry) === name),
       `the folder ${folder} holds ${JSON.stringify(held)}, not ${name}`,
     );
+  },
+);
+
+// The row of a restore the daemon ran: its header names the entry, by its
+// whole path in the snapshot, which ends with `entry` and starts with the
+// scenario's own scratch source folder, the repository, and the new folder
+// it made in its restore folder, whose own name the daemon chose from the
+// host, the snapshot and the time (#813).
+Then(
+  "the table {string} has the row of a restore of {string} from {string} into a new folder in the agent's restore folder",
+  async function (this: BrowserWorld, name: string, entry: string, repository: string) {
+    assert.ok(this.ownServer, "this scenario's daemon was never started");
+    const restoreFolder = path.join(this.ownServer.scratch, "home", "ladderback-restore");
+    const said = (text: string) => [...text].map((ch) => ch.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")).join(ISOLATION);
+    const header = new RegExp(
+      `^${ISOLATION}${said("Restore of ")}${ISOLATION}/[^\\u2066-\\u2069]*${said(`/${entry} from ${repository} to ${restoreFolder}/`)}[^/\\u2066-\\u2069]+${ISOLATION}$`,
+    );
+    await table(this, name).getByRole("rowheader", { name: header }).first().waitFor({ state: "visible", timeout: patienceMs() });
   },
 );
 

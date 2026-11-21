@@ -178,6 +178,7 @@ pub fn failure(reason: &FailureReason) -> ErrorDto {
         ),
         F::DaemonStopped => ErrorDto::new(ErrorCode::DaemonStopped, [], None),
         F::DaemonShutDown => ErrorDto::new(ErrorCode::DaemonShutDown, [], None),
+        F::Superseded => todo!(),
         F::NoLocationUsable => ErrorDto::new(ErrorCode::NoLocationUsable, [], None),
         F::NoLocationRuleHolds => ErrorDto::new(ErrorCode::NoLocationRuleHolds, [], None),
         F::PasswordNotAccepted => ErrorDto::new(ErrorCode::PasswordNotAccepted, [], None),

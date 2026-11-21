@@ -334,6 +334,7 @@ mod tests {
             repository: repository.map(str::to_owned),
             locations: Vec::new(),
             entry: None,
+            restored_to: None,
         }
     }
 
@@ -893,6 +894,91 @@ mod tests {
             let mut run = summary(kind, "", Some("demo"), None);
             status.clone_into(&mut run.status);
             assert_eq!(english(&end(&run).1), english_end, "{kind} {status}");
+        }
+    }
+
+    /// A restore the log kept the entry and the target of: one into a new
+    /// folder, or one in place.
+    fn restore_of(restored_to: api::RestoredToDto) -> OperationSummaryDto {
+        summary("restore", "", Some("demo"), None)
+            .with_entry("/home/docs".to_owned())
+            .with_restored_to(restored_to)
+    }
+
+    fn into_folder() -> api::RestoredToDto {
+        api::RestoredToDto::Folder {
+            path: "/srv/restore/laptop-3f2a1b4c".to_owned(),
+        }
+    }
+
+    /// A restore's row, its Cancel button and its progress bar name the
+    /// entry it restored, the repository it read and the new folder it went
+    /// into, or say it went in place (#813).
+    #[test]
+    fn a_restore_is_named_for_its_entry_and_where_it_went() {
+        for (restored_to, row, cancel, progress) in [
+            (
+                into_folder(),
+                "Restore of /home/docs from demo to /srv/restore/laptop-3f2a1b4c",
+                "Cancel the restore of /home/docs from demo to /srv/restore/laptop-3f2a1b4c",
+                "Restore progress of /home/docs from demo to /srv/restore/laptop-3f2a1b4c",
+            ),
+            (
+                api::RestoredToDto::InPlace,
+                "In-place restore of /home/docs from demo",
+                "Cancel the in-place restore of /home/docs from demo",
+                "In-place restore progress of /home/docs from demo",
+            ),
+        ] {
+            let run = restore_of(restored_to);
+            let Name::Words(named) = name(&run) else {
+                panic!("a restore is named in words");
+            };
+            assert_eq!(english(&named), row);
+            assert_eq!(english(&cancel_label(&run)), cancel);
+            assert_eq!(english(&progress_label(&run)), progress);
+        }
+    }
+
+    /// The end of a restore the page watched names the entry and where it
+    /// went (#813).
+    #[test]
+    fn the_end_of_a_restore_names_its_entry_and_where_it_went() {
+        for (restored_to, status, english_end) in [
+            (
+                into_folder(),
+                "succeeded",
+                "Restore of /home/docs to /srv/restore/laptop-3f2a1b4c finished.",
+            ),
+            (
+                into_folder(),
+                "cancelled",
+                "Restore of /home/docs to /srv/restore/laptop-3f2a1b4c cancelled.",
+            ),
+            (
+                into_folder(),
+                "failed",
+                "Restore of /home/docs to /srv/restore/laptop-3f2a1b4c failed.",
+            ),
+            (
+                api::RestoredToDto::InPlace,
+                "succeeded",
+                "In-place restore of /home/docs finished.",
+            ),
+            (
+                api::RestoredToDto::InPlace,
+                "cancelled",
+                "In-place restore of /home/docs cancelled.",
+            ),
+            (
+                api::RestoredToDto::InPlace,
+                "failed",
+                "In-place restore of /home/docs failed.",
+            ),
+        ] {
+            let mut run = restore_of(restored_to);
+            status.clone_into(&mut run.status);
+            assert_eq!(english(&end(&run).1), english_end, "{status}");
         }
     }
 }

@@ -300,6 +300,7 @@ mod tests {
                 repository: Some("demo".to_owned()),
                 locations: Vec::new(),
                 entry: None,
+                restored_to: None,
             },
             warnings: Vec::new(),
         }))

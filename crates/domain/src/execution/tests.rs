@@ -789,6 +789,11 @@ fn a_daemon_that_was_shut_down_codes_as_daemon_shut_down() {
 }
 
 #[test]
+fn a_backup_that_gave_way_to_a_newer_run_codes_as_superseded() {
+    assert_eq!(FailureReason::Superseded.code(), "superseded");
+}
+
+#[test]
 fn a_job_with_too_much_to_mask_codes_as_secrets_too_large_to_mask() {
     let reason = FailureReason::SecretsTooLargeToMask {
         field: Some("HTTPS_PROXY".to_owned()),
