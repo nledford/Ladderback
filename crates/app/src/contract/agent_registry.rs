@@ -8,8 +8,9 @@ use std::sync::Arc;
 
 use async_trait::async_trait;
 use domain::fleet::{
-    AgentRecord, AgentStatus, BindingKind, Hostname, KEY_BYTES, PENDING_LIMIT, PairRefusal,
-    PairRequest, Pairing, ProofRefusal, ProofRequest, PublicKey, TokenRecord, TokenUse,
+    AgentRecord, AgentStatus, BindingKind, Fingerprint, Hostname, KEY_BYTES, PENDING_LIMIT,
+    PairRefusal, PairRequest, Pairing, ProofRefusal, ProofRequest, PublicKey, TokenRecord,
+    TokenUse,
 };
 use domain::{AgentId, Timestamp, Uuid};
 
@@ -44,6 +45,7 @@ pub async fn run(harness: &dyn AgentRegistryHarness) {
     racing_pairings_on_one_token_pair_one(harness).await;
     a_proof_keeps_the_greater_counter_and_when_it_was_seen(harness).await;
     a_proof_of_another_id_key_or_kind_changes_nothing(harness).await;
+    the_tls_key_is_recorded_once_and_outlives_the_hub(harness).await;
 }
 
 /// The value of `result`, after a failed assertion if it is an error.
@@ -532,6 +534,20 @@ async fn records_outlive_the_hub(harness: &dyn AgentRegistryHarness) {
         Some(Ok(Pairing::Repeated)),
         "the spent token remembers whom it paired"
     );
+}
+
+/// The first record of the TLS key stands: a second, of another key, is
+/// no replacement, and a restart reads the first.
+async fn the_tls_key_is_recorded_once_and_outlives_the_hub(harness: &dyn AgentRegistryHarness) {
+    let first = Fingerprint::from_digest([0x3c; KEY_BYTES]);
+    let other = Fingerprint::from_digest([0x5a; KEY_BYTES]);
+    let registry = harness.empty().await;
+    assert_eq!(ok(registry.tls_key().await, "reading"), Some(None));
+    ok(registry.record_tls_key(first).await, "recording");
+    ok(registry.record_tls_key(other).await, "recording again");
+    assert_eq!(ok(registry.tls_key().await, "reading"), Some(Some(first)));
+    let reopened = harness.reopened().await;
+    assert_eq!(ok(reopened.tls_key().await, "reading"), Some(Some(first)));
 }
 
 async fn racing_pairings_on_one_token_pair_one(harness: &dyn AgentRegistryHarness) {

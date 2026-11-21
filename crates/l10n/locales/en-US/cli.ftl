@@ -440,6 +440,14 @@ cli-pairing-token-plain = The address starts with { "http://" } and isn't this {
 # $fingerprint (text): the fingerprint, in groups of four characters.
 cli-pairing-token-hub-key = The { -hub } key: { $fingerprint }
 
+# The token pins the certificate the hub's built-in TLS serves at its https:// address, so the machine checks it without a certificate authority.
+# $fingerprint (text): the certificate's fingerprint, in groups of four characters.
+cli-pairing-token-pinned = The token pins the { -hub }'s own certificate: { $fingerprint }
+
+# The hub's TLS key file is missing, holds no key it can serve, or holds another key than the one this hub made, so no token can pin its certificate. The hub reads the key when it starts, and one that starts without it pairs no machine, whatever its token. This is said only while the hub's daemon is stopped.
+# `hub-tls-key` is the key file's name and `--certificate-authority` is typed as it is: keep them string literals.
+cli-pairing-token-no-tls-key = The { -hub }'s TLS key in { "hub-tls-key" } is missing, damaged or isn't the one this { -hub } made, so no token can pin its certificate, and the { -hub } pairs no machine until it starts with the key restored. Restore the file from your backup of the data folder, make the token again, then start the { -hub }. { "--certificate-authority" } only chooses a certificate authority's certificate in place of the { -hub }'s own: a token made with it pairs no machine either until the { -hub } starts with the key restored.
+
 # Printed after the token: it is one-time, its token ID, and when it lapses.
 # $id (text): the token ID, 8 hex digits.
 # $expires (text): when the token lapses, as an RFC 3339 instant in UTC.
@@ -597,6 +605,9 @@ cli-help-pairing-token = Make a one-time pairing token for a { -machine }, list 
 
 # What `pairing-token --address` takes. The address is an example, typed as it is: keep it a string literal.
 cli-help-pairing-token-address = The { -hub }'s address as { -machine(form: "other") } reach it, such as { "https://hub.example" }
+
+# What `pairing-token --certificate-authority` does. `https://` is typed as it is: keep it a string literal.
+cli-help-pairing-token-certificate-authority = The { "https://" } address is a proxy's, whose certificate a certificate authority signed: the token pins no certificate
 
 # What `pairing-token --ttl` takes.
 cli-help-pairing-token-ttl = How long the token lives, in minutes: 5 to 1440, 15 by default

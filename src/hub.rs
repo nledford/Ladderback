@@ -8,14 +8,15 @@ use std::process::ExitCode;
 use std::sync::Arc;
 
 use api::{ErrorCode, MsgArg};
+use app::hub_tls::{HubTlsKey, TlsKeyRefusal};
 use app::pairing::{
     AgentPairing, AgentPairingError, ChallengeRefused, ConnectFailure, ConnectToHub, HubPairing,
     HubPairingError, PairFailure, PairWithHub,
 };
 use app::ports::{AgentRegistry as _, Identity as _, IdentityError, LinkError, Signing as _};
 use domain::fleet::{
-    Approval, Fingerprint, Hostname, HubAddress, HubRoute, PairingToken, RouteRefused, TokenId,
-    TokenTls, WelcomeRefused, is_loopback,
+    Approval, Fingerprint, Hostname, HubAddress, HubRoute, PairingToken, RouteRefused,
+    RouteSession, TokenId, TokenTls, WelcomeRefused, is_loopback,
 };
 use domain::{SignedDuration, Timestamp};
 use l10n::{Localizer, MessageId, PosixEnv, msg};
@@ -25,7 +26,7 @@ use platform::random::OsRandom;
 use platform::{SystemClock, dirs, terminal};
 use signing_adapter::AwsLcSigning;
 use store::SqliteStore;
-use tls_adapter::WebSocketHubConnector;
+use tls_adapter::{RcgenTlsKeys, WebSocketHubConnector};
 
 use crate::confirm::{Question, confirmed};
 use crate::output::{refusal_line, to_stderr, to_stdout};
@@ -43,6 +44,9 @@ pub(crate) enum TokenAsk {
     Make {
         address: String,
         ttl_minutes: Option<i64>,
+        /// The `https://` address is a proxy's, whose certificate a
+        /// certificate authority signed, rather than the hub's own.
+        certificate_authority: bool,
     },
     List,
     Revoke(String),
@@ -58,6 +62,39 @@ pub(crate) fn hub_pairing(data_dir: &Path, store: Arc<SqliteStore>) -> HubPairin
         Arc::new(SystemClock),
         crate::build_info::SHOWN.as_str().to_owned(),
     )
+}
+
+/// The hub's TLS key in `data_dir`, from which its built-in TLS serves a
+/// certificate (§16, decision 120, "The hub key").
+pub(crate) fn hub_tls_key(data_dir: &Path) -> HubTlsKey {
+    HubTlsKey::new(
+        Arc::new(FileIdentity::in_data_dir(data_dir)),
+        Arc::new(RcgenTlsKeys),
+    )
+}
+
+/// Why the hub's TLS key can't serve and how to fix it, for the daemon's
+/// log, which is in English (decision 120, "The hub key"). It names the
+/// key file and none of the key (I4).
+pub(crate) fn tls_key_unserved(refusal: &TlsKeyRefusal) -> String {
+    let file = domain::fleet::KeyFile::HubTlsKey;
+    match refusal {
+        TlsKeyRefusal::Missing => format!(
+            "its key file `{file}` in the data folder is missing; restore it from your backup of the data folder, then restart the hub"
+        ),
+        TlsKeyRefusal::AnotherKey => format!(
+            "its key file `{file}` in the data folder holds another key than the one this hub made; restore it from your backup of the data folder, then restart the hub"
+        ),
+        TlsKeyRefusal::NotAKey | TlsKeyRefusal::Identity(IdentityError::Damaged { .. }) => {
+            format!(
+                "its key file `{file}` in the data folder holds no key the hub can serve; restore it from your backup of the data folder, then restart the hub"
+            )
+        }
+        TlsKeyRefusal::Identity(IdentityError::Exposed { file, mode }) => format!(
+            "its key file `{file}` can be read or changed by other users (mode {mode:04o}); make it its owner's only, as `chmod 600` does, then restart the hub"
+        ),
+        other => format!("{other:?}; fix what this names, then restart the hub"),
+    }
 }
 
 fn runtime(localizer: &Localizer) -> io::Result<Result<tokio::runtime::Runtime, ExitCode>> {
@@ -123,7 +160,11 @@ async fn on_the_hub(localizer: &Localizer, data_dir: &Path, ask: TokenAsk) -> io
         TokenAsk::Make {
             address,
             ttl_minutes,
-        } => make(localizer, &pairing, &store, &address, ttl_minutes).await,
+            certificate_authority,
+        } => {
+            let tls = (!certificate_authority).then(|| hub_tls_key(data_dir));
+            make(localizer, &pairing, &store, &address, ttl_minutes, tls).await
+        }
         TokenAsk::List => list(localizer, &store).await,
         TokenAsk::Revoke(id) => revoke(localizer, &pairing, &id).await,
     };
@@ -131,12 +172,16 @@ async fn on_the_hub(localizer: &Localizer, data_dir: &Path, ask: TokenAsk) -> io
     said
 }
 
+/// Makes a token for `address`. An `https://` address is the hub's own,
+/// whose certificate the token pins, when `tls` is its TLS key, and a
+/// proxy's, checked against a certificate authority, when it is `None`.
 async fn make(
     localizer: &Localizer,
     pairing: &HubPairing,
     store: &SqliteStore,
     address: &str,
     ttl_minutes: Option<i64>,
+    tls: Option<HubTlsKey>,
 ) -> io::Result<ExitCode> {
     let Ok(address) = HubAddress::parse(address) else {
         say(
@@ -172,15 +217,32 @@ async fn make(
         Ok(keys) => keys,
         Err(error) => return hub_refused(localizer, &error),
     };
-    // Built-in TLS isn't served yet, so every token is of a CA-checked
-    // address: `https://` behind a proxy, or plain `http://` on loopback.
+    // The hub's built-in TLS serves an `https://` address unless it is a
+    // proxy's: its key is taken (made on the first token) and its
+    // certificate pinned, so no certificate authority is needed.
+    let certificate = match (&route, tls) {
+        (Some(route), Some(tls)) if route.session == RouteSession::Ca => {
+            match tls.start(store).await {
+                Ok(served) => TokenTls::Pinned(served.fingerprint),
+                Err(refusal) => return tls_refused(localizer, &refusal),
+            }
+        }
+        _ => TokenTls::Ca,
+    };
     let token = match pairing
-        .make_token(&keys, address.clone(), TokenTls::Ca, life)
+        .make_token(&keys, address.clone(), certificate, life)
         .await
     {
         Ok(token) => token,
         Err(error) => return hub_refused(localizer, &error),
     };
+    if let TokenTls::Pinned(fingerprint) = certificate {
+        say(
+            localizer,
+            msg::CLI_PAIRING_TOKEN_PINNED,
+            &[("fingerprint", text(fingerprint))],
+        )?;
+    }
     match route {
         None => say(localizer, msg::CLI_PAIRING_TOKEN_PLAIN, &[])?,
         Some(route) if is_loopback(&route.host) => {
@@ -272,6 +334,25 @@ fn hub_refused(localizer: &Localizer, error: &HubPairingError) -> io::Result<Exi
     };
     say(localizer, id, &[])?;
     Ok(ExitCode::FAILURE)
+}
+
+fn tls_refused(localizer: &Localizer, refusal: &TlsKeyRefusal) -> io::Result<ExitCode> {
+    if let TlsKeyRefusal::Identity(identity) = refusal
+        && let Some(args) = exposed(identity)
+    {
+        say(localizer, msg::CLI_KEY_FILE_EXPOSED, &args)?;
+        return Ok(ExitCode::FAILURE);
+    }
+    match refusal {
+        TlsKeyRefusal::Missing
+        | TlsKeyRefusal::AnotherKey
+        | TlsKeyRefusal::NotAKey
+        | TlsKeyRefusal::Identity(IdentityError::Damaged { .. }) => {
+            say(localizer, msg::CLI_PAIRING_TOKEN_NO_TLS_KEY, &[])?;
+            Ok(ExitCode::FAILURE)
+        }
+        _ => refused(localizer, &format!("{refusal:?}")),
+    }
 }
 
 /// The arguments of `cli-key-file-exposed` when `error` refused a key file
