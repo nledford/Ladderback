@@ -367,17 +367,20 @@ fn plans_table(
     // the page shows is (§8.4).
     let viewer = l10n::viewer_zone();
     let plan = Column::new(
+        "plan",
         text(&localizer, msg::UI_COLUMN_PLAN),
         Rem::tenths(120),
         |row: Signal<PlanSummaryDto>| (move || row.with(|plan| plan.id.clone())).into_any(),
     );
     let repository = Column::new(
+        "repository",
         text(&localizer, msg::UI_PLANS_COLUMN_REPOSITORY),
         Rem::tenths(120),
         |row: Signal<PlanSummaryDto>| (move || row.with(|plan| plan.repository.clone())).into_any(),
     );
     let next_localizer = Arc::clone(&localizer);
     let next_run = Column::new(
+        "next-run",
         text(&localizer, msg::UI_COLUMN_NEXT_RUN),
         Rem::tenths(120),
         move |row: Signal<PlanSummaryDto>| {
@@ -393,6 +396,7 @@ fn plans_table(
     );
     let actions_localizer = Arc::clone(&localizer);
     let actions = Column::new(
+        "actions",
         text(&localizer, msg::UI_COLUMN_ACTIONS),
         Rem::tenths(200),
         move |row: Signal<PlanSummaryDto>| {

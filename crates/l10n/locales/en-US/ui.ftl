@@ -2427,6 +2427,44 @@ ui-mark-all-seen = Mark all as seen
 # reads on its own, after the cell's own words ("Failed").
 ui-table-cue-unseen = Changed, not yet seen
 
+# The button before a table that opens and closes its Columns panel, where
+# the reader hides, shows and reorders the table's columns. The panel's
+# list of columns is named by it too.
+ui-table-columns = Columns
+
+# The Columns panel's button that moves a column one place toward the
+# start of the table, shown as an arrow; its name.
+# $column (text): the column's header, as the table shows it.
+ui-table-columns-move-up = Move { $column } up
+
+# The Columns panel's button that moves a column one place toward the end
+# of the table, shown as an arrow; its name.
+# $column (text): the column's header, as the table shows it.
+ui-table-columns-move-down = Move { $column } down
+
+# The Columns panel's button that shows every column again, in the order
+# the page gives them.
+ui-table-columns-reset = Reset columns
+
+# Said politely, once, when the reader hides a column in the Columns panel.
+# $column (text): the column's header, as the table shows it.
+ui-table-columns-hidden = { $column } hidden.
+
+# Said politely, once, when the reader shows a hidden column again in the
+# Columns panel.
+# $column (text): the column's header, as the table shows it.
+ui-table-columns-shown = { $column } shown.
+
+# Said politely, once, when the reader moves a column in the Columns panel,
+# by a Move button or by dragging it.
+# $column (text): the column's header, as the table shows it.
+# $position (number): its place in the panel's list now, from 1.
+# $count (number): how many columns the list holds.
+ui-table-columns-moved = { $column } moved to position { $position } of { $count }.
+
+# Said politely, once, when "Reset columns" is pressed.
+ui-table-columns-was-reset = Columns reset: every column shown, in the order given.
+
 # Said politely, once, when "Mark all as seen" is pressed.
 # $count (number): how many rows it marked as seen.
 ui-marked-seen =

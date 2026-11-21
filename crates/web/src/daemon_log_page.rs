@@ -151,13 +151,19 @@ fn Lines(localizer: Arc<Localizer>, lines: RwSignal<Vec<LogLineDto>>) -> impl In
     .map(|id| text(&localizer, id));
     // A line is its place in the list: two lines of the log can say the
     // same thing at the same instant.
-    let row_header = Column::new(at, Rem::tenths(140), |row: Signal<(usize, LogLineDto)>| {
-        let at = move || row.with(|(_, line)| line.at.clone());
-        view! { <time datetime=at>{at}</time> }.into_any()
-    });
+    let row_header = Column::new(
+        "at",
+        at,
+        Rem::tenths(140),
+        |row: Signal<(usize, LogLineDto)>| {
+            let at = move || row.with(|(_, line)| line.at.clone());
+            view! { <time datetime=at>{at}</time> }.into_any()
+        },
+    );
     let level_localizer = Arc::clone(&localizer);
     let columns = vec![
         Column::new(
+            "level",
             level,
             Rem::tenths(70),
             move |row: Signal<(usize, LogLineDto)>| {
@@ -166,6 +172,7 @@ fn Lines(localizer: Arc<Localizer>, lines: RwSignal<Vec<LogLineDto>>) -> impl In
             },
         ),
         Column::new(
+            "source",
             source,
             Rem::tenths(120),
             |row: Signal<(usize, LogLineDto)>| {
@@ -175,6 +182,7 @@ fn Lines(localizer: Arc<Localizer>, lines: RwSignal<Vec<LogLineDto>>) -> impl In
         ),
         // A message keeps the line breaks the log wrote.
         Column::new(
+            "message",
             message,
             Rem::tenths(240),
             |row: Signal<(usize, LogLineDto)>| {

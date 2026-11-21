@@ -516,12 +516,14 @@ fn repositories_table(
     tested: RwSignal<HashMap<String, Vec<LocationTriedDto>>>,
 ) -> AnyView {
     let name = Column::new(
+        "name",
         text(localizer, msg::UI_COLUMN_NAME),
         Rem::tenths(70),
         |row: Signal<RepositoryDto>| row.with_untracked(|row| row.alias.clone()).into_any(),
     );
     let place_localizer = Arc::clone(localizer);
     let location = Column::new(
+        "location",
         text(localizer, msg::UI_COLUMN_LOCATION),
         // An address such as `sftp:me@nas.home.lan:/srv/data/repo/pc/main`
         // on one line in DejaVu Sans, Linux's default sans-serif, the widest
@@ -534,6 +536,7 @@ fn repositories_table(
     );
     let password_localizer = Arc::clone(localizer);
     let password = Column::new(
+        "password",
         text(localizer, msg::UI_COLUMN_PASSWORD),
         Rem::tenths(150),
         move |row: Signal<RepositoryDto>| {
@@ -543,6 +546,7 @@ fn repositories_table(
     );
     let actions_localizer = Arc::clone(localizer);
     let actions = Column::new(
+        "actions",
         text(localizer, msg::UI_COLUMN_ACTIONS),
         // A row's Create button ("Create demo") on one line in DejaVu Sans.
         Rem::tenths(95),
