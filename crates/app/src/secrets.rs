@@ -811,6 +811,11 @@ impl<'a> Run<'a> {
                         told = true;
                     }
                     hold.wait.clock.sleep(left.min(KEYRING_POLL)).await;
+                    // The entry isn't read at the bound, where a service
+                    // that came back could be acted on past it.
+                    if locked_until.is_some_and(UnlockWait::has_passed) {
+                        return read;
+                    }
                 }
                 KeyringCause::Locked => {
                     let Some(unlock) = hold.unlock else {
