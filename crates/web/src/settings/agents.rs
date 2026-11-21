@@ -601,6 +601,10 @@ fn PairingDialog(localizer: Arc<Localizer>, token: Token) -> impl IntoView {
             }
         });
     });
+    // The zone the browser reads its clock in, asked once: the dialog writes
+    // the token's lapse time in it, beside that zone's offset (§8.4).
+    let viewer = l10n::viewer_zone();
+    let status_viewer = viewer.clone();
     let shown_localizer = Arc::clone(&localizer);
     let status_localizer = Arc::clone(&localizer);
     let token_t = t.clone();
@@ -626,6 +630,7 @@ fn PairingDialog(localizer: Arc<Localizer>, token: Token) -> impl IntoView {
                     .get()
                     .map(|shown| {
                         let lapses_localizer = Arc::clone(&localizer);
+                        let lapses_viewer = viewer.clone();
                         let expires_at = shown.expires_at.clone();
                         view! {
                             <dl>
@@ -650,7 +655,7 @@ fn PairingDialog(localizer: Arc<Localizer>, token: Token) -> impl IntoView {
                                 <dd>
                                     {move || lapses(
                                         &lapses_localizer,
-                                        None,
+                                        lapses_viewer.as_ref(),
                                         &expires_at,
                                         token.left.get(),
                                     )}
@@ -703,7 +708,7 @@ fn PairingDialog(localizer: Arc<Localizer>, token: Token) -> impl IntoView {
                                     .with(|shown| {
                                         shown.as_ref().map(|shown| shown.expires_at.clone())
                                     })?;
-                                lapsed(&status_localizer, None, &expires_at)
+                                lapsed(&status_localizer, status_viewer.as_ref(), &expires_at)
                             }
                         },
                     )
@@ -734,27 +739,40 @@ fn PairingDialog(localizer: Arc<Localizer>, token: Token) -> impl IntoView {
 }
 
 /// When the token lapses, in the viewer's `zone` with its offset named,
-/// and in how many minutes, rounded up.
+/// and in how many minutes, rounded up. Without a zone the time is UTC's,
+/// as `instant` writes it, and so is the offset named.
 pub(crate) fn lapses(
-    _localizer: &Localizer,
-    _zone: Option<&api::IanaZone>,
-    _expires_at: &str,
-    _left: u64,
+    localizer: &Localizer,
+    zone: Option<&api::IanaZone>,
+    expires_at: &str,
+    left: u64,
 ) -> String {
-    todo!()
+    let offset = jiff::Timestamp::from_str(expires_at)
+        .map(|at| zone.map_or(jiff::tz::Offset::UTC, |_| viewer_offset(at)))
+        .map(|offset| api::ClockOffset::new(offset).to_string())
+        .unwrap_or_default();
+    text_with(
+        localizer,
+        msg::UI_PAIRING_LAPSES,
+        &[
+            ("when", MsgArg::Text(instant(localizer, expires_at, zone))),
+            ("offset", MsgArg::Text(offset)),
+            ("minutes", MsgArg::Count(minutes(left))),
+        ],
+    )
 }
 
 /// What the dialog says once the token lapsed, its time in the viewer's
 /// `zone`.
 pub(crate) fn lapsed(
     localizer: &Localizer,
-    _zone: Option<&api::IanaZone>,
+    zone: Option<&api::IanaZone>,
     expires_at: &str,
 ) -> String {
     text_with(
         localizer,
         msg::UI_PAIRING_LAPSED,
-        &[("when", MsgArg::Text(instant(localizer, expires_at, None)))],
+        &[("when", MsgArg::Text(instant(localizer, expires_at, zone)))],
     )
 }
 
