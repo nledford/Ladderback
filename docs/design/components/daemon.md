@@ -152,7 +152,7 @@ This section decides what the daemon does: its HTTP server and API, the schedule
   - `repository-replaced` (503, the snapshot listing only: the location holds another repository than the ID the configuration recorded).
   - The `config-*` codes (503).
 
-  The snapshot listing and a snapshot's folder read tell a read the engine ran and failed by the code of its failure, as the maintenance routes do, with the same statuses (#637, decision 112): only the engine's own words and an engine that can't run are `engine-unavailable`, the words in the log alone.
+  The snapshot listing, a snapshot's folder read and a search tell a read the engine ran and failed by the code of its failure, as the maintenance routes do, with the same statuses (#637, decision 112): a failure in the engine's own words is `operation-failed` (422) with those words, masked (I4), as `detail` (#836), and only an engine that can't run is `engine-unavailable`, by its code alone, its words in the log.
 
   Connecting tests and saves, and Create looks, creates and records the ID, under one lock, so two connections made at the same moment both survive and two Creates of one entry create it once; the lock is the composition root's, and a later writer of the configuration must take it too.
 

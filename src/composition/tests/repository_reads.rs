@@ -296,6 +296,20 @@ async fn a_listing_or_folder_read_that_failed_is_told_by_the_code_of_its_failure
                 detail: said.to_owned(),
             },
         ),
+        // An engine that can't run is told by its code alone, its words in
+        // the log (#836).
+        (
+            FailureReason::EngineUnavailable {
+                detail: "no worker program".to_owned(),
+            },
+            engine_unavailable_alone(),
+        ),
+        (
+            FailureReason::JobRejected {
+                detail: "the worker refused the job".to_owned(),
+            },
+            engine_unavailable_alone(),
+        ),
     ] {
         let engine = engine();
         *engine
@@ -317,6 +331,60 @@ async fn a_listing_or_folder_read_that_failed_is_told_by_the_code_of_its_failure
             "{reason:?}"
         );
     }
+}
+
+/// The refusal of a read whose engine can't run: its code alone.
+fn engine_unavailable_alone() -> SnapshotsError {
+    SnapshotsError::Unavailable {
+        code: ErrorCode::EngineUnavailable,
+        args: Vec::new(),
+        detail: None,
+    }
+}
+
+/// A listing, a folder read or a search the engine ran and failed in its own
+/// words, with no more specific code, is told as the maintenance routes tell
+/// such a failure: a failed operation with those words, which the engine
+/// masked (I4), never an engine that couldn't be reached (#836).
+#[tokio::test]
+async fn a_listing_folder_read_or_search_the_engine_failed_in_its_own_words_is_a_failed_operation()
+{
+    let said = "error sending request for url (http://demo:***@127.0.0.1:9/config)";
+    let engine = engine();
+    *engine
+        .outcome
+        .lock()
+        .unwrap_or_else(PoisonError::into_inner) = Err(FailureReason::EngineFailed {
+        detail: said.to_owned(),
+    });
+    let (catalog, _scratch) =
+        catalog_with_a_password_command("rustic-said", "echo not-a-real-password", engine).await;
+    let expected = SnapshotsError::OperationFailed {
+        detail: said.to_owned(),
+    };
+    assert_eq!(
+        catalog.snapshots("rustic-said".to_owned()).await,
+        Err(expected.clone())
+    );
+    assert_eq!(
+        catalog
+            .folder("rustic-said".to_owned(), a_snapshot(), docs(), 0, 1_000)
+            .await,
+        Err(FolderError::Repository(expected.clone()))
+    );
+    let pattern = domain::find::NamePattern::parse("tax*").expect("a pattern");
+    assert_eq!(
+        catalog
+            .find(
+                "rustic-said".to_owned(),
+                pattern,
+                None,
+                domain::find::SearchCaps::clamped(None, None),
+            )
+            .await
+            .map(|_| ()),
+        Err(expected)
+    );
 }
 
 use app::ports::FolderAnswer;

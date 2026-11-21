@@ -756,6 +756,20 @@ fn result_is_the_error(agent: &mut Agent, code: String) {
     assert_eq!(refusal["code"], code.as_str(), "{refusal}");
 }
 
+/// The engine's words name where it looked: an address that held a
+/// password, so words without it were masked, not silent (I4).
+#[then(expr = "the result is the error {string}, in the engine's own words naming {string}")]
+fn result_is_the_error_in_the_engines_words(agent: &mut Agent, code: String, named: String) {
+    let result = result(agent);
+    let refusal = refusal_of(result);
+    assert_eq!(refusal["code"], code.as_str(), "{refusal}");
+    let detail = refusal["detail"].as_str().unwrap_or_default();
+    assert!(detail.contains(named.as_str()), "{refusal}");
+    // The sentence an AI agent reads, or relays to the person, says them too.
+    let sentence = result["content"][1]["text"].as_str().unwrap_or_default();
+    assert!(sentence.contains(detail), "{result}");
+}
+
 #[then(expr = "after its code the error is said in {string} as the catalog says it")]
 fn error_is_said(agent: &mut Agent, language: String) {
     let result = result(agent);
