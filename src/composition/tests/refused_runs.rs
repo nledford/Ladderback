@@ -1332,6 +1332,96 @@ async fn a_parked_resumed_run_whose_plan_moved_before_it_waited_reads_no_new_pas
     );
 }
 
+/// A scheduled run whose plan's next run came due before its parked
+/// task began is refused as locked, as the schedule's run is at the
+/// bound, even when the keyring was unlocked in between: a read taken
+/// after the bound isn't one the run goes on (#1221, decision 135).
+#[tokio::test]
+async fn a_parked_run_whose_bound_passed_stays_refused_as_locked() {
+    capture();
+    let started = domain::Timestamp::from_second(1_800_000_000).expect("a timestamp");
+    let clock = Arc::new(FakeClock::new(started));
+    let secrets = Arc::new(FakeSecrets::new());
+    let entry = domain::secrets::KeyringEntry::parse("ladderback/demo").expect("an entry");
+    secrets.set_keyring_entry(&entry, KEYRING_PASSWORD);
+    // Locked for the first read, the schedule's own; unlocked after it.
+    secrets.lock_keyring_for_reads(1);
+    let store = Arc::new(app::fakes::InMemoryOperationStore::new());
+    let (runner, heard, scripted, home) =
+        keyring_parked_runner(secrets.clone(), clock.clone(), store.clone()).await;
+    let place = runner
+        .queue
+        .push(&home, domain::planning::Concurrency::default());
+    // The plan's next run is due already.
+    let unlock = app::secrets::UnlockWait::new(clock.clone(), started);
+    PlanRuns::start(&runner, &home, Trigger::Schedule, place, Some(unlock)).await;
+
+    let end = tokio::time::timeout(std::time::Duration::from_secs(5), heard.next())
+        .await
+        .expect("the schedule hears how the run ended")
+        .expect("an end");
+    assert_eq!(end.outcome, app::retry::RunOutcome::Failed, "{end:?}");
+    assert_eq!(jobs(&scripted), 0, "the engine was never asked");
+    let history = store
+        .list(&app::ports::HistoryQuery::default())
+        .await
+        .expect("the log reads");
+    let [record] = history.operations.as_slice() else {
+        panic!("one operation is recorded: {history:?}")
+    };
+    assert!(
+        matches!(
+            &record.status,
+            domain::execution::OperationStatus::Failed {
+                reason: domain::execution::FailureReason::SecretRefused {
+                    refusal: domain::execution::refusal::SettingRefusal::SecretKeyringLocked { .. },
+                    ..
+                },
+            }
+        ),
+        "refused as locked: {record:?}"
+    );
+}
+
+/// A queued backup whose plan's next run came due before its parked task
+/// began ends refused as locked, even when the keyring was unlocked in
+/// between (#1221, decision 135).
+#[tokio::test]
+async fn a_parked_resumed_run_whose_bound_passed_stays_refused_as_locked() {
+    capture();
+    let started = domain::Timestamp::from_second(1_800_000_000).expect("a timestamp");
+    let clock = Arc::new(FakeClock::new(started));
+    let secrets = Arc::new(FakeSecrets::new());
+    let entry = domain::secrets::KeyringEntry::parse("ladderback/demo").expect("an entry");
+    secrets.set_keyring_entry(&entry, KEYRING_PASSWORD);
+    secrets.lock_keyring_for_reads(1);
+    let store = Arc::new(app::fakes::InMemoryOperationStore::new());
+    let (runner, _heard, scripted, _home) =
+        keyring_parked_runner(secrets.clone(), clock.clone(), store.clone()).await;
+    let queued = queued_home_backup(0x1228, None);
+    store
+        .save(&queued, None)
+        .await
+        .expect("the queued backup is saved");
+    let unlock = app::secrets::UnlockWait::new(clock.clone(), started);
+    PlanRuns::resume(&runner, queued.clone(), Some(unlock)).await;
+
+    let status = until_ended(&store, queued.id()).await;
+    assert!(
+        matches!(
+            &status,
+            domain::execution::OperationStatus::Failed {
+                reason: domain::execution::FailureReason::SecretRefused {
+                    refusal: domain::execution::refusal::SettingRefusal::SecretKeyringLocked { .. },
+                    ..
+                },
+            }
+        ),
+        "refused as locked: {status:?}"
+    );
+    assert_eq!(jobs(&scripted), 0, "the engine was never asked");
+}
+
 /// A queued backup whose run waits for its keyring can be cancelled while
 /// it waits, as any queued backup can: it ends cancelled, and the engine
 /// is never asked (#1221, §4.2).

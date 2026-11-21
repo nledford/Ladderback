@@ -78,6 +78,10 @@ struct State {
     /// The keyring is locked until this clock reaches this time, as a login
     /// keyring nobody has unlocked yet; from then it is unlocked.
     unlock_at: Option<(Arc<dyn Clock>, Timestamp)>,
+    /// The keyring is locked until it has been read this many times, as one
+    /// a person unlocks right after the first look; from the next read it
+    /// is unlocked.
+    unlocks_after_reads: Option<usize>,
     /// The keyring's unlock prompt was dismissed: every keyring read fails,
     /// entry or not.
     unlock_prompt_dismissed: bool,
@@ -181,6 +185,14 @@ impl FakeSecrets {
     /// locked, and asking whether the keyring is locked says locked (#1221).
     pub fn lock_keyring_until(&self, clock: Arc<dyn Clock>, at: Timestamp) {
         self.lock().unlock_at = Some((clock, at));
+    }
+
+    /// A keyring that is locked for the first `reads` reads and unlocked
+    /// from the next, as one a person unlocks just after the daemon first
+    /// found it locked: no clock decides when, so a test can have the
+    /// unlock fall between two reads that follow each other at once.
+    pub fn lock_keyring_for_reads(&self, reads: usize) {
+        self.lock().unlocks_after_reads = Some(reads);
     }
 
     /// A keyring whose unlock prompt the person dismissed: every keyring
@@ -505,6 +517,9 @@ fn keyring_unavailable(state: &State) -> Option<(&'static str, KeyringCause)> {
             .unlock_at
             .as_ref()
             .is_some_and(|(clock, at)| clock.now() < *at)
+        || state
+            .unlocks_after_reads
+            .is_some_and(|reads| state.reads.len() <= reads)
     {
         Some(("the keyring is locked", KeyringCause::Locked))
     } else if state.unlock_prompt_dismissed {
