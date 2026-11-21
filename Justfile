@@ -433,7 +433,18 @@ serve: build
 # import-profile demo.toml` imports into the same scratch configuration. A
 # keyring password source still uses your real OS keyring (the Keychain on
 # macOS, the Secret Service on Linux). Delete the folder to start over.
-[doc('Run ladderback on scratch folders and a free port (default: serve).')]
+#
+# `just try --demo` uses a second scratch folder, `try-demo`, holding a
+# repository with months of history, for screenshots and demos: the first run
+# builds the rich history fixture (`tests/fixtures/history/rich.toml`,
+# development.md §13.9) into it, as this agent's backups, and writes a
+# configuration with its plans, a keep policy and the canary password
+# `demo-password` in a file; later runs reuse it. A build that stopped
+# part-way is started again. The fixture's failed run is a missing night and
+# data for prune to reclaim: the daemon's operation log starts empty, so no
+# page lists it as a failed run. Arguments after `--demo` replace `serve` as
+# above.
+[doc('Run ladderback on scratch folders and a free port (default: serve; --demo: on a demo history).')]
 [group('dev')]
 [no-cd]
 [positional-arguments]
@@ -442,6 +453,43 @@ try *args: build
     set -euo pipefail
     target="${CARGO_TARGET_DIR:-{{ root }}/target}"
     scratch="$target/try"
+    if [ "${1:-}" = --demo ]; then
+        shift
+        scratch="$target/try-demo"
+        mkdir -p "$scratch/config" "$scratch/data"
+        # The configuration names its folders by absolute paths, in TOML
+        # literal strings, which can't hold a `'`.
+        scratch="$(cd "$scratch" && pwd)"
+        case "$scratch" in
+            *"'"*) echo "try: --demo can't write a configuration for $scratch, whose path holds a '" >&2; exit 1 ;;
+        esac
+        if [ ! -e "$scratch/repo/config" ]; then
+            if [ -e "$scratch/repo" ]; then
+                echo "try: $scratch/repo holds no repository; delete $scratch to start over" >&2
+                exit 1
+            fi
+            rm -rf "$scratch/repo.partial" "$scratch/sources"
+            # The ID the daemon would choose, chosen first, so the history is
+            # this agent's own; an ID kept from an earlier run stays.
+            if [ ! -s "$scratch/data/agent-id" ]; then
+                echo 0190a1b2-c3d4-7e5f-8a6b-7c8d9e0f1a2b > "$scratch/data/agent-id"
+            fi
+            echo "try: building the demo history; it takes about a minute" >&2
+            plans="$(cargo run --quiet --manifest-path "{{ root }}/Cargo.toml" --package engine --features history-fixture --example history-fixture -- \
+                "{{ root }}/tests/fixtures/history/rich.toml" "$scratch/repo.partial" "$scratch/sources" "$(cat "$scratch/data/agent-id")")"
+            # The canary the builder sets, in a file: a password written in
+            # config.toml would show the daemon's warning on every page. The
+            # agent's host name is the one the declaration's snapshots carry.
+            printf %s demo-password > "$scratch/password"
+            {
+                printf "schema = 1\n\n[agent]\nhostname = \"demo-host\"\n\n[repositories.demo]\nrepository = '%s'\npassword-file = '%s'\nmaintenance = \"local\"\n" "$scratch/repo" "$scratch/password"
+                while IFS=$'\t' read -r plan folder; do
+                    printf "\n[[plans]]\nid = \"%s\"\nrepository = \"demo\"\nsources = ['%s']\n\n[plans.retention]\nkeep-daily = 14\nkeep-weekly = 8\nkeep-monthly = 6\n" "$plan" "$folder"
+                done <<< "$plans"
+            } > "$scratch/config/config.toml"
+            mv "$scratch/repo.partial" "$scratch/repo"
+        fi
+    fi
     mkdir -p "$scratch/config" "$scratch/data" "$scratch/home"
     if [ $# -eq 0 ]; then set -- serve --listen 127.0.0.1:0; fi
     echo "try: scratch folders in $scratch" >&2
