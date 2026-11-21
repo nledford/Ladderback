@@ -122,6 +122,7 @@ mod served {
     use axum::Router;
     use axum::extract::ws::{CloseFrame, Message, WebSocket, WebSocketUpgrade, close_code};
     use axum::routing::get;
+    use domain::fleet::Fingerprint;
     use tokio::sync::Notify;
 
     /// How long the hub waits to send its close frame to a peer that doesn't
@@ -173,6 +174,20 @@ mod served {
         /// The hub's pairing, when this daemon serves as a hub.
         pub(crate) fn pairing(&self) -> Option<&Arc<HubPairing>> {
             self.served.as_ref().map(|served| &served.pairing)
+        }
+
+        /// This hub, serving its built-in TLS with the certificate of
+        /// `fingerprint`, which a pinned token names (decision 120).
+        #[must_use]
+        pub fn with_certificate(self, fingerprint: Fingerprint) -> Self {
+            let _ = fingerprint;
+            todo!()
+        }
+
+        /// The fingerprint of the certificate the hub's built-in TLS
+        /// serves, when it serves one.
+        pub(crate) fn certificate(&self) -> Option<Fingerprint> {
+            None
         }
     }
 

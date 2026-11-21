@@ -15,12 +15,16 @@ use domain::fleet::AgentStatus;
 use store::SqliteStore;
 use testkit::children::Owned;
 
-use super::request_checks_steps::{Outcome, start};
+use super::request_checks_steps::{Outcome, Request, exchange, start};
 use super::{Agent, LADDERBACK, blocking};
 
 /// The address a token is made for: loopback, which the scenarios' machines
 /// replace with the port the hub serves on.
 const TOKEN_ADDRESS: &str = "http://127.0.0.1:9";
+
+/// The same over the hub's built-in TLS, whose certificate a token for it
+/// pins.
+const TLS_TOKEN_ADDRESS: &str = "https://127.0.0.1:9";
 
 /// What the scenarios keep between steps.
 #[derive(Debug, Default)]
@@ -29,6 +33,11 @@ pub struct PairingTerminal {
     /// The hub's daemon, ended when the scenario ends or a step stops it.
     hub: Option<Owned>,
     address: Option<SocketAddr>,
+    /// What the hub's daemon wrote to its standard error, its log among it.
+    hub_log: Option<PathBuf>,
+    /// Another hub's daemon, on folders of its own, and its address.
+    other_hub: Option<Owned>,
+    other_address: Option<SocketAddr>,
     said: Option<Said>,
 }
 
@@ -46,6 +55,10 @@ fn hub_root(agent: &Agent) -> PathBuf {
 
 fn machine_root(agent: &Agent) -> PathBuf {
     agent.scratch().join("machine")
+}
+
+fn other_hub_root(agent: &Agent) -> PathBuf {
+    agent.scratch().join("other-hub")
 }
 
 /// Runs `ladderback args` on the folders under `root`, in English, with
@@ -107,9 +120,18 @@ async fn pair_pasting(agent: &mut Agent, hostname: &str, address: &str, pasted: 
 
 #[given("a hub with a pairing token made at its terminal")]
 async fn token_made(agent: &mut Agent) {
+    make_token(agent, TOKEN_ADDRESS).await;
+}
+
+#[given("a hub with a pairing token for its https address made at its terminal")]
+async fn tls_token_made(agent: &mut Agent) {
+    make_token(agent, TLS_TOKEN_ADDRESS).await;
+}
+
+async fn make_token(agent: &mut Agent, address: &str) {
     let said = ladderback(
         hub_root(agent),
-        &["pairing-token", "--address", TOKEN_ADDRESS],
+        &["pairing-token", "--address", address],
         None,
     )
     .await;
@@ -134,19 +156,98 @@ async fn token_revoked(agent: &mut Agent) {
 
 #[given("the hub is serving on loopback")]
 async fn hub_serving(agent: &mut Agent) {
-    let root = hub_root(agent);
-    let (child, outcome, _) = start(
+    let (child, address, log) = serve_hub(agent, hub_root(agent), "127.0.0.1:0").await;
+    agent.pairing_terminal.hub = Some(child);
+    agent.pairing_terminal.address = Some(address);
+    agent.pairing_terminal.hub_log = Some(log);
+}
+
+#[given("another hub is serving on loopback")]
+async fn other_hub_serving(agent: &mut Agent) {
+    let (child, address, _) = serve_hub(agent, other_hub_root(agent), "127.0.0.1:0").await;
+    agent.pairing_terminal.other_hub = Some(child);
+    agent.pairing_terminal.other_address = Some(address);
+}
+
+#[given("the hub's TLS key file is lost")]
+fn tls_key_lost(agent: &mut Agent) {
+    let key = testkit::daemon::data_dir(&hub_root(agent)).join("hub-tls-key");
+    std::fs::remove_file(&key).unwrap_or_else(|error| panic!("{}: {error}", key.display()));
+}
+
+#[when("the hub restarts on the same address")]
+async fn hub_restarts(agent: &mut Agent) {
+    let address = agent.pairing_terminal.address.expect("a serving hub");
+    // Dropping the daemon ends it and waits for it.
+    agent.pairing_terminal.hub = None;
+    let (child, again, log) = serve_hub(agent, hub_root(agent), &address.to_string()).await;
+    assert_eq!(again, address);
+    agent.pairing_terminal.hub = Some(child);
+    agent.pairing_terminal.hub_log = Some(log);
+}
+
+/// `serve --hub` on the folders under `root`, listening on `listen`; its
+/// address and the file its standard error goes to.
+async fn serve_hub(agent: &Agent, root: PathBuf, listen: &str) -> (Owned, SocketAddr, PathBuf) {
+    let (child, outcome, log) = start(
         agent.scratch(),
         Some(&root),
-        &["--listen", "127.0.0.1:0", "--hub"],
+        &["--listen", listen, "--hub"],
         None,
     )
     .await;
     let Outcome::Listening(address) = outcome else {
         panic!("the hub didn't start: {outcome:?}");
     };
-    agent.pairing_terminal.hub = Some(child);
-    agent.pairing_terminal.address = Some(address);
+    (child, address, log)
+}
+
+/// A request to the serving hub, over plain HTTP on loopback.
+async fn ask_the_hub(agent: &Agent, path: &str, headers: &[&str]) -> u16 {
+    let address = agent.pairing_terminal.address.expect("a serving hub");
+    let request = Request {
+        method: "GET".to_owned(),
+        path: path.to_owned(),
+        headers: headers.iter().map(|header| (*header).to_owned()).collect(),
+        default_host: true,
+        body: String::new(),
+    };
+    blocking(move || exchange(address, &request).status).await
+}
+
+#[then("the hub refuses a machine's connection over plain http on loopback")]
+async fn sync_refused_plain(agent: &mut Agent) {
+    let status = ask_the_hub(
+        agent,
+        api::sync::PATH,
+        &[
+            "Connection: Upgrade",
+            "Upgrade: websocket",
+            "Sec-WebSocket-Version: 13",
+            "Sec-WebSocket-Key: dGhlIHNhbXBsZSBub25jZQ==",
+        ],
+    )
+    .await;
+    assert_eq!(status, 503, "the hub answered a machine's connection");
+}
+
+#[then("the hub still serves its own machine on loopback")]
+async fn serves_loopback(agent: &mut Agent) {
+    assert_eq!(ask_the_hub(agent, "/api/v1/repositories", &[]).await, 200);
+}
+
+#[then("the hub's log says its TLS key is missing and to restore it from a backup")]
+fn log_says_tls_missing(agent: &mut Agent) {
+    let log = agent
+        .pairing_terminal
+        .hub_log
+        .as_ref()
+        .expect("a hub's log");
+    let text = std::fs::read_to_string(log).expect("the hub's log");
+    assert!(
+        text.contains("hub-tls-key") && text.contains("restore it from your backup"),
+        "{text}"
+    );
 }
 
 #[when(expr = "a machine named {string} pairs with the token from its terminal")]
@@ -155,11 +256,49 @@ async fn machine_pairs(agent: &mut Agent, hostname: String) {
     pair(agent, &hostname, &format!("http://{address}")).await;
 }
 
+#[when(
+    expr = "a machine named {string} pairs with the token at the hub's https address from its terminal"
+)]
+async fn machine_pairs_over_tls(agent: &mut Agent, hostname: String) {
+    let address = agent.pairing_terminal.address.expect("a serving hub");
+    pair(agent, &hostname, &format!("https://{address}")).await;
+}
+
+#[when(
+    expr = "a machine named {string} pairs with the token at the other hub's https address from its terminal"
+)]
+async fn machine_pairs_with_other(agent: &mut Agent, hostname: String) {
+    let address = agent
+        .pairing_terminal
+        .other_address
+        .expect("another serving hub");
+    pair(agent, &hostname, &format!("https://{address}")).await;
+}
+
 #[given(expr = "a machine named {string} paired with the token from its terminal")]
 async fn machine_paired_before(agent: &mut Agent, hostname: String) {
     machine_pairs(agent, hostname).await;
     let said = said(agent);
     assert!(said.success, "{said:?}");
+}
+
+#[given(
+    expr = "a machine named {string} paired with the token at the hub's https address from its terminal"
+)]
+async fn machine_paired_over_tls_before(agent: &mut Agent, hostname: String) {
+    machine_pairs_over_tls(agent, hostname).await;
+    let said = said(agent);
+    assert!(said.success, "{said:?}");
+}
+
+#[then("the machine read a token pinned to the hub's own certificate")]
+fn read_pinned(agent: &mut Agent) {
+    let said = said(agent);
+    assert!(
+        said.stderr
+            .contains("its certificate is pinned by the token"),
+        "{said:?}"
+    );
 }
 
 #[when("the machine checks its link to the hub from its terminal")]
@@ -253,6 +392,10 @@ fn machine_refused(agent: &mut Agent, reason: String) {
     let expected = match reason.as_str() {
         "the token was revoked" => "This token was canceled on the hub",
         "the address would show the token to the network" => "shows the token to the network",
+        "the hub's certificate isn't the one the token names" => {
+            "showed a certificate that isn't the one its token names"
+        }
+        "the hub can't be reached" => "couldn't reach the hub at",
         other => panic!("no refusal is named {other:?}"),
     };
     let said = said(agent);

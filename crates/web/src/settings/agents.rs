@@ -12,6 +12,7 @@ use std::time::Duration;
 
 use api::{
     ErrorCode, HUB_PATH, HubDto, MakePairingTokenDto, MsgArg, PAIRING_TOKENS_PATH, PairingTokenDto,
+    TokenCertificateDto,
 };
 use l10n::{Localizer, msg};
 use leptos::prelude::*;
@@ -345,6 +346,7 @@ pub(crate) fn Agents(localizer: Arc<Localizer>, on: bool) -> impl IntoView {
         life_error.set(None);
         let ask = MakePairingTokenDto {
             address: address.get_untracked().trim().to_owned(),
+            certificate: TokenCertificateDto::Ca,
             life_minutes: Some(life_minutes),
             confirmation: confirmation.get_untracked(),
         };

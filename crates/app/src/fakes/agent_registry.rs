@@ -60,6 +60,12 @@ impl InMemoryAgentRegistry {
         }
     }
 
+    /// The registry holds `agent`, as if it had paired; nothing else
+    /// changes.
+    pub fn hold(&self, agent: AgentRecord) {
+        self.kept().agents.push(agent);
+    }
+
     /// Keeping a token takes `by` from now on: `clock`, the hub's, moves on
     /// by that much as each one is kept.
     pub fn takes_to_keep(&self, clock: Arc<FakeClock>, by: SignedDuration) {

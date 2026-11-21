@@ -9,7 +9,7 @@ use std::sync::Arc;
 
 use domain::fleet::{Fingerprint, TlsKey};
 
-use crate::ports::{Identity, IdentityError, TlsKeyError, TlsKeys};
+use crate::ports::{AgentRegistry, Identity, IdentityError, StoreError, TlsKeyError, TlsKeys};
 
 /// Takes the hub's TLS key at its start.
 pub struct HubTlsKey {
@@ -41,6 +41,8 @@ pub enum TlsKeyRefusal {
     Unavailable { detail: String },
     /// The key file couldn't be read or written.
     Identity(IdentityError),
+    /// The registry couldn't say whether an agent may have pinned a key.
+    Store(StoreError),
 }
 
 impl HubTlsKey {
@@ -67,6 +69,15 @@ impl HubTlsKey {
             _ => Ok(ServedTlsKey { key, fingerprint }),
         }
     }
+
+    /// The key to serve at a start of the hub. A key in `hub-tls-key` is
+    /// served as it is. With none there, one is made only while `registry`
+    /// holds no agent, since an agent may have pinned the key that is gone;
+    /// the unused tokens are voided with it, since one may pin that key.
+    pub async fn start(&self, registry: &dyn AgentRegistry) -> Result<ServedTlsKey, TlsKeyRefusal> {
+        let _ = registry;
+        todo!()
+    }
 }
 
 impl From<TlsKeyError> for TlsKeyRefusal {
@@ -84,15 +95,25 @@ impl From<IdentityError> for TlsKeyRefusal {
     }
 }
 
+impl From<StoreError> for TlsKeyRefusal {
+    fn from(error: StoreError) -> Self {
+        Self::Store(error)
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use std::sync::Arc;
 
     use async_trait::async_trait;
-    use domain::fleet::{HubPin, PublicKey, SeedFile, SigningSeed, TlsKey};
+    use domain::fleet::{
+        AgentRecord, AgentStatus, Hostname, HubPin, KEY_BYTES, PublicKey, SeedFile, SigningSeed,
+        TlsKey,
+    };
+    use domain::{AgentId, Timestamp, Uuid};
 
-    use super::HubTlsKey;
-    use crate::fakes::{FakeTlsKeys, InMemoryIdentity};
+    use super::{HubTlsKey, TlsKeyRefusal};
+    use crate::fakes::{FakeTlsKeys, InMemoryAgentRegistry, InMemoryIdentity};
     use crate::ports::{Attempt, Identity, IdentityError, TlsKeys};
 
     /// The key files of a hub whose other first start keeps `theirs` after
@@ -169,5 +190,46 @@ mod tests {
         assert_eq!(served.fingerprint, keys.fingerprint(&theirs).unwrap());
         let kept = identity.files.tls_key().await.unwrap().unwrap();
         assert_eq!(kept.der(), theirs.der());
+    }
+
+    /// A hub's first start makes its key and keeps it; the next start
+    /// serves that key, under the same fingerprint, and makes none.
+    #[tokio::test]
+    async fn a_start_makes_the_key_once_and_a_restart_serves_it() {
+        let keys = Arc::new(FakeTlsKeys::default());
+        let identity = Arc::new(InMemoryIdentity::default());
+        let registry = InMemoryAgentRegistry::new();
+        let use_case = HubTlsKey::new(identity.clone(), keys.clone());
+        let first = use_case.start(&registry).await.unwrap();
+        let kept = identity.tls_key().await.unwrap().expect("a key kept");
+        assert_eq!(first.key.der(), kept.der());
+        let again = use_case.start(&registry).await.unwrap();
+        assert_eq!(again.fingerprint, first.fingerprint);
+        assert_eq!(keys.made(), 1, "the restart made a key");
+    }
+
+    /// With an agent registered, a gone key isn't replaced: the agent may
+    /// have pinned it.
+    #[tokio::test]
+    async fn a_start_with_a_registered_agent_makes_no_key_in_place_of_a_gone_one() {
+        let keys = Arc::new(FakeTlsKeys::default());
+        let identity = Arc::new(InMemoryIdentity::default());
+        let registry = InMemoryAgentRegistry::new();
+        let since = Timestamp::from_second(1_800_000_000).unwrap();
+        registry.hold(AgentRecord {
+            agent_id: AgentId::from_uuid(Uuid::from_u128(7)),
+            key: PublicKey::from_bytes([7; KEY_BYTES]).unwrap(),
+            hostname: Hostname::parse("laptop").unwrap(),
+            status: AgentStatus::Pending { since },
+            counter: 0,
+            last_seen: since,
+        });
+        let refused = HubTlsKey::new(identity.clone(), keys.clone())
+            .start(&registry)
+            .await
+            .unwrap_err();
+        assert_eq!(refused, TlsKeyRefusal::Missing);
+        assert_eq!(keys.made(), 0);
+        assert!(identity.tls_key().await.unwrap().is_none());
     }
 }

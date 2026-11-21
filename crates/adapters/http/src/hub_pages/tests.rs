@@ -25,6 +25,8 @@ const PASSWORD: &str = "demo-admin-pass";
 const LOOPBACK: IpAddr = IpAddr::V4(Ipv4Addr::LOCALHOST);
 const REMOTE: IpAddr = IpAddr::V4(Ipv4Addr::new(192, 0, 2, 10));
 const ADDRESS: &str = "https://hub.example:9443";
+/// The certificate of the hub's built-in TLS, when a test's hub serves it.
+const CERTIFICATE: Fingerprint = Fingerprint::from_digest([0x3c; 32]);
 
 fn clock() -> Arc<FakeClock> {
     Arc::new(FakeClock::new(
@@ -32,10 +34,12 @@ fn clock() -> Arc<FakeClock> {
     ))
 }
 
-/// A daemon serving as a hub, with sign-in on when `access` is given.
+/// A daemon serving as a hub, with sign-in on when `access` is given, and
+/// its built-in TLS with `certificate` when that is given.
 struct Daemon {
     pairing: Option<Arc<HubPairing>>,
     access: Option<Arc<Access>>,
+    certificate: Option<Fingerprint>,
 }
 
 impl Daemon {
@@ -64,6 +68,15 @@ impl Daemon {
         Self {
             pairing: Some(Arc::new(pairing)),
             access,
+            certificate: None,
+        }
+    }
+
+    /// A hub with sign-in off serving its built-in TLS.
+    fn hub_on_tls() -> Self {
+        Self {
+            certificate: Some(CERTIFICATE),
+            ..Self::hub(false)
         }
     }
 
@@ -71,6 +84,7 @@ impl Daemon {
         Self {
             pairing: None,
             access: None,
+            certificate: None,
         }
     }
 
@@ -81,6 +95,9 @@ impl Daemon {
         }
         if let Some(pairing) = &self.pairing {
             state.sync = SyncHub::serving(Arc::clone(pairing));
+        }
+        if let Some(certificate) = self.certificate {
+            state.sync = state.sync.with_certificate(certificate);
         }
         router(
             Arc::new(NoUi),
@@ -139,6 +156,14 @@ fn build(
     request
 }
 
+/// `request` as it comes over the hub's built-in TLS.
+fn over_tls(mut request: Request) -> Request {
+    request.extensions_mut().insert(crate::BuiltInTls {
+        exporter: Some([9; 32]),
+    });
+    request
+}
+
 fn ask(confirmation: &str) -> String {
     serde_json::json!({ "address": ADDRESS, "confirmation": confirmation }).to_string()
 }
@@ -169,6 +194,66 @@ async fn the_hub_answers_its_keys_fingerprint_in_full_and_its_key_id() {
     let hub: api::HubDto = serde_json::from_value(json(response).await).unwrap();
     assert_eq!(hub.fingerprint, Fingerprint::of_key(&key).to_string());
     assert_eq!(hub.key_id, KeyId::of_key(&key).to_string());
+    assert_eq!(hub.certificate, api::TokenCertificateDto::Ca);
+    assert_eq!(hub.own_certificate, None);
+}
+
+/// A page that came over the hub's built-in TLS is offered the hub's own
+/// certificate first; one that came in plain, as through a proxy, a
+/// certificate authority's. Both are told the certificate's fingerprint.
+#[tokio::test]
+async fn the_page_is_offered_first_the_certificate_it_came_in_by() {
+    let daemon = Daemon::hub_on_tls();
+    for (request, offered) in [
+        (
+            over_tls(build(Method::GET, api::HUB_PATH, LOOPBACK, &[], "")),
+            api::TokenCertificateDto::Pinned,
+        ),
+        (
+            build(Method::GET, api::HUB_PATH, LOOPBACK, &[], ""),
+            api::TokenCertificateDto::Ca,
+        ),
+    ] {
+        let response = daemon.send(request).await;
+        assert_eq!(response.status(), StatusCode::OK);
+        let hub: api::HubDto = serde_json::from_value(json(response).await).unwrap();
+        assert_eq!(hub.certificate, offered);
+        assert_eq!(hub.own_certificate, Some(CERTIFICATE.to_string()));
+    }
+}
+
+/// A pinned ask on a hub serving its built-in TLS makes a token that pins
+/// that certificate, and says so; a certificate authority's ask, one that
+/// trusts the system's.
+#[tokio::test]
+async fn a_token_pins_the_hubs_certificate_when_asked_to() {
+    let daemon = Daemon::hub_on_tls();
+    let key_id = daemon.key_id().await;
+    for (kind, tls, said) in [
+        (
+            "pinned",
+            domain::fleet::TokenTls::Pinned(CERTIFICATE),
+            api::TokenCertificateDto::Pinned,
+        ),
+        (
+            "ca",
+            domain::fleet::TokenTls::Ca,
+            api::TokenCertificateDto::Ca,
+        ),
+    ] {
+        let body = serde_json::json!({
+            "address": ADDRESS,
+            "certificate": kind,
+            "confirmation": key_id,
+        })
+        .to_string();
+        let response = daemon.send(make(LOOPBACK, &[], &body)).await;
+        assert_eq!(response.status(), StatusCode::CREATED, "{kind}");
+        let made: api::PairingTokenDto = serde_json::from_value(json(response).await).unwrap();
+        assert_eq!(made.certificate, said);
+        let token = domain::fleet::PairingToken::parse(&made.token).unwrap();
+        assert_eq!(token.tls(), tls);
+    }
 }
 
 #[tokio::test]

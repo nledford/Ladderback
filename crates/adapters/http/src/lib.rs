@@ -17,6 +17,8 @@ mod downloads;
 mod dry_runs;
 mod full_disk_access;
 #[cfg(feature = "hub")]
+mod handed;
+#[cfg(feature = "hub")]
 mod hub_pages;
 mod listener;
 mod maintenance;
@@ -58,6 +60,8 @@ pub use api_tokens::{status_shown, summary_shown, warning_shown};
 pub use downloads::{DownloadRefusal, DownloadStart, Downloads, HandOff};
 pub use dry_runs::{DryRuns, DryRunsError};
 pub use full_disk_access::{FullDiskAccessRoute, SettingsOpener, SettingsUnopened};
+#[cfg(feature = "hub")]
+pub use handed::BuiltInTls;
 pub use listener::{GatedListener, PeerAddr};
 pub use maintenance::{MaintenanceRefusal, MaintenanceRequest};
 pub use plans::{Plans, PlansError};

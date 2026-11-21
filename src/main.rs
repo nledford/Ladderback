@@ -613,14 +613,19 @@ fn run_daemon(
     };
     // Open on the network with sign-in off is said on stderr once the
     // address is bound (below), not logged: no log setting hides it.
-    match (exposure, sign_in_on) {
-        (http_adapter::Exposure::Network, true) => log::warn!(
+    #[cfg(feature = "hub")]
+    let built_in_tls = hub;
+    #[cfg(not(feature = "hub"))]
+    let built_in_tls = false;
+    if warns_plain_http(exposure, sign_in_on, built_in_tls) {
+        log::warn!(
             "listening on {listen} beyond loopback over plain HTTP: the password crosses the network unencrypted unless a reverse proxy in front adds TLS"
-        ),
-        (http_adapter::Exposure::Loopback, false) => log::warn!(
+        );
+    }
+    if exposure == http_adapter::Exposure::Loopback && !sign_in_on {
+        log::warn!(
             "sign-in is off: anyone on this machine can use Ladderback; set an admin password with `ladderback set-password`"
-        ),
-        (http_adapter::Exposure::Network, false) | (http_adapter::Exposure::Loopback, true) => {}
+        );
     }
     let proxied: Vec<String> = http_adapter::proxied_hosts(&hosts)
         .into_iter()
@@ -826,6 +831,18 @@ fn run_daemon(
     }
 }
 
+/// Whether serving on `exposure` with sign-in on or off warns that the
+/// password crosses the network in plain HTTP. A hub serving its built-in
+/// TLS serves plain HTTP only from loopback, so it never does.
+fn warns_plain_http(
+    exposure: http_adapter::Exposure,
+    sign_in_on: bool,
+    built_in_tls: bool,
+) -> bool {
+    let _ = built_in_tls;
+    exposure == http_adapter::Exposure::Network && sign_in_on
+}
+
 /// The line `say` prints: one of Ladderback's own messages after the
 /// program's name.
 fn said(localizer: &Localizer, id: MessageId, args: &[(&str, MsgArg)]) -> String {
@@ -930,6 +947,26 @@ mod tests {
             line,
             "ladderback: cannot write the result: No space left on device\n"
         );
+    }
+
+    /// The password crossing the network in plain HTTP is warned of
+    /// beyond loopback with sign-in on, unless the hub's built-in TLS
+    /// serves, which serves plain HTTP only from loopback.
+    #[test]
+    fn plain_http_is_warned_of_beyond_loopback_unless_the_built_in_tls_serves() {
+        use http_adapter::Exposure::{Loopback, Network};
+        for (exposure, sign_in_on, built_in_tls, warned) in [
+            (Network, true, false, true),
+            (Network, true, true, false),
+            (Network, false, false, false),
+            (Loopback, true, false, false),
+        ] {
+            assert_eq!(
+                warns_plain_http(exposure, sign_in_on, built_in_tls),
+                warned,
+                "{exposure:?}, sign-in on {sign_in_on}, built-in TLS {built_in_tls}"
+            );
+        }
     }
 
     #[test]
