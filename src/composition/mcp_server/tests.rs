@@ -775,6 +775,11 @@ impl http_adapter::Catalog for WithSnapshots {
         if alias == "slow" {
             return Err(http_adapter::SnapshotsError::TimedOut);
         }
+        if alias == "rustic-said" {
+            return Err(http_adapter::SnapshotsError::OperationFailed {
+                detail: RUSTIC_SAID.to_owned(),
+            });
+        }
         if alias == "demo" {
             return Ok(api::SnapshotsDto {
                 snapshots: self.snapshots.clone(),
@@ -935,6 +940,34 @@ async fn both_backends_refuse_a_listing_that_ran_out_of_time_alike() {
         connect.snapshots("slow".to_owned()).await
     );
     assert_eq!(wire_name(refused.code), "repository-read-timed-out");
+}
+
+/// The engine's words, masked, for a listing of `rustic-said` it failed.
+const RUSTIC_SAID: &str = "error sending request for url (http://demo:***@127.0.0.1:9/config)";
+
+/// A listing the engine failed in its own words is a failed operation with
+/// those words, as the maintenance routes tell it, through either backend
+/// (#836).
+#[tokio::test]
+async fn both_backends_refuse_a_listing_the_engine_failed_in_its_own_words_alike() {
+    let scratch = tempfile::tempdir().expect("a scratch dir");
+    let daemon = a_daemon(scratch.path()).await;
+    let mut state = daemon.state.clone();
+    state.catalog = Arc::new(WithSnapshots {
+        catalog: Arc::clone(&daemon.state.catalog),
+        snapshots: Vec::new(),
+    });
+    let connect = connected_over(state.clone()).await;
+    let refused = InProcess::over(&state)
+        .snapshots("rustic-said".to_owned())
+        .await
+        .expect_err("a listing the engine failed is refused");
+    assert_eq!(
+        Err(refused.clone()),
+        connect.snapshots("rustic-said".to_owned()).await
+    );
+    assert_eq!(wire_name(refused.code), "operation-failed");
+    assert_eq!(refused.detail.as_deref(), Some(RUSTIC_SAID));
 }
 
 #[tokio::test]

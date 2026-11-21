@@ -272,6 +272,25 @@ Feature: AI agents and scripts use Ladderback through MCP
     When the MCP client lists the snapshots of the repository "demo"
     Then the result is the error "repository-config-not-found"
 
+  # A listing the engine ran and failed in its own words, with no more
+  # specific code, is told as the maintenance routes tell it (#836): a
+  # failed operation with the engine's words, masked of every secret of the
+  # repository (I4), not the engine being unavailable.
+  Scenario: Listing the snapshots of a repository the engine fails in its own words says why, without its secrets
+    Given the daemon's config file holds:
+      """
+      schema = 1
+
+      [repositories.nas]
+      repository = "rest:http://demo:canary-url-password@127.0.0.1:9/"
+      password = "canary-inline-password"
+      options = { retry = "off" }
+      """
+    And an MCP server running headless on that configuration
+    When the MCP client lists the snapshots of the repository "nas"
+    Then the result is the error "operation-failed", in the engine's own words naming "127.0.0.1:9"
+    And nothing the MCP server or Ladderback wrote or logged shows "canary-url-password" or "canary-inline-password"
+
   Scenario: An agent runs a plan through the daemon and waits for it to finish
     Given Ladderback is serving on loopback with the plan "home"
     And an MCP server connected to it

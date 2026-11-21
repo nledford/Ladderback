@@ -36,6 +36,28 @@ Feature: Listing a repository's snapshots
     When the agent lists the repository's snapshots
     Then the listing fails
 
+  # A listing the engine ran and failed in its own words, with no more
+  # specific code, is told as the maintenance routes tell such a failure: a
+  # failed operation with those words, which the engine masks of every
+  # secret of the repository first (I4). The engine being unavailable means
+  # only an engine that couldn't be run at all (#836).
+  @e2e
+  Scenario: A listing the engine fails in its own words says why, without the repository's secrets
+    Given the daemon's config file holds:
+      """
+      schema = 1
+
+      [repositories.nas]
+      repository = "rest:http://demo:canary-url-password@127.0.0.1:9/"
+      password = "canary-inline-password"
+      options = { retry = "off" }
+      """
+    And Ladderback is serving on loopback on that configuration
+    When the snapshots of the repository "nas" are listed over HTTP
+    Then the listing is refused as "operation-failed" with status 422, in the engine's own words naming "127.0.0.1:9"
+    And its log warns "could not be listed"
+    And neither the refusal nor Ladderback's log shows "canary-url-password" or "canary-inline-password"
+
   # A snapshot time is when the snapshot was taken, with the offset of the
   # clock that took it (§3.1): the listing carries that offset beside the
   # instant, so a page can show the day retention counts the snapshot on

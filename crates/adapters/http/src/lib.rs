@@ -372,6 +372,11 @@ pub enum SnapshotsError {
     /// tells whether it is empty or out of reach (#525). `detail` is the
     /// engine's own words, masked.
     RepositoryConfigNotFound { detail: String },
+    /// The engine ran the read and failed in its own words, with no more
+    /// specific code (`operation-failed`), as the maintenance routes tell
+    /// such a failure. `detail` is those words, which the engine masked of
+    /// every secret of the repository (I4).
+    OperationFailed { detail: String },
     /// The snapshots cannot be read just now: the configuration cannot be
     /// read or used (its `config-*` code, arguments and the store's words,
     /// as [`CatalogError::Unavailable`] carries them), or the engine cannot
@@ -1114,6 +1119,7 @@ fn snapshots_refused(alias: String, error: SnapshotsError) -> Response {
         SnapshotsError::SecretRefused(secret) => repositories::secret_refusal(&secret),
         SnapshotsError::RepositoryNotFound => no_repository(None),
         SnapshotsError::RepositoryConfigNotFound { detail } => no_repository(Some(detail)),
+        SnapshotsError::OperationFailed { .. } => todo!(),
         SnapshotsError::Unavailable { code, args, detail } => unavailable(code, args, detail),
         SnapshotsError::TimedOut => read_timed_out(),
     }

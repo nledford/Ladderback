@@ -736,6 +736,7 @@ fn snapshots_refusal(alias: String, error: http_adapter::SnapshotsError) -> api:
         SnapshotsError::RepositoryConfigNotFound { detail } => {
             api::ErrorDto::new(api::ErrorCode::RepositoryConfigNotFound, [], Some(detail))
         }
+        SnapshotsError::OperationFailed { .. } => todo!(),
         SnapshotsError::Unavailable { code, args, detail } => {
             api::ErrorDto::new(code, args, detail)
         }
