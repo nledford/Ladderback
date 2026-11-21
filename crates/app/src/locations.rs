@@ -186,6 +186,10 @@ impl ChooseLocation {
             )
             .await
             .map_err(|reason| (reason, None))?;
+        // A stopped job used no location, whatever its short record says.
+        if stopped(phase) {
+            return Err((failure(&record), Some(record)));
+        }
         (self.report)(LocationReport::Chosen {
             alias: saved.alias.clone(),
             record: record.clone(),
@@ -1560,10 +1564,14 @@ mod tests {
             .entry
             .locations
             .further = vec![in_turn("PUBLIC_TIMEOUT")];
-        let choose = choosing_with(
-            &sites,
-            resolve,
+        let reports = Arc::new(std::sync::Mutex::new(Vec::new()));
+        let kept = Arc::clone(&reports);
+        let choose = ChooseLocation::new(
+            Arc::new(sites.clone()),
             Arc::new(FakeClock::new(Timestamp::UNIX_EPOCH)),
+            Arc::new(FakeNetworkLink::new()),
+            resolve,
+            Arc::new(move |report| kept.lock().expect("the reports").push(report)),
         );
         let RunningJob {
             mut events,
@@ -1590,12 +1598,20 @@ mod tests {
                 .contains(&SecretRef::Env("PUBLIC_TIMEOUT".to_owned())),
             "nor are its secrets read"
         );
+        assert!(
+            !reports
+                .lock()
+                .expect("the reports")
+                .iter()
+                .any(|report| matches!(report, LocationReport::Chosen { .. })),
+            "a stopped choice reports no location used"
+        );
     }
 
     /// Secrets as [`FakeSecrets`] gives them, but the variable `HELD` only
     /// once `release` fires: a reference still being read.
     struct Held {
-        secrets: FakeSecrets,
+        secrets: Arc<FakeSecrets>,
         release: futures::future::Shared<oneshot::Receiver<()>>,
     }
 
@@ -1624,7 +1640,7 @@ mod tests {
         secrets.set_env("HELD", "30s");
         let (release, held) = oneshot::channel();
         let resolve = ResolveRepository::new(Arc::new(Held {
-            secrets,
+            secrets: Arc::new(secrets),
             release: held.shared(),
         }));
         let mut access = nas(&resolve, first("/srv/lan", &[])).await;
@@ -1666,6 +1682,64 @@ mod tests {
             vec!["/srv/lan".to_owned()],
             "the second location is never probed"
         );
+    }
+
+    /// A job cancelled while an early location's reference is read resolves
+    /// no later early location once the read ends (#498).
+    #[tokio::test]
+    async fn a_job_cancelled_while_an_early_locations_secret_is_read_resolves_no_later_one() {
+        let sites = Sites::silent_at("/srv/lan");
+        let secrets = Arc::new(FakeSecrets::default());
+        secrets.set_env("NAS_PASSWORD", "demo-password");
+        secrets.set_env("HELD", "30s");
+        secrets.set_env("THIRD", "30s");
+        let (release, held) = oneshot::channel();
+        let resolve = ResolveRepository::new(Arc::new(Held {
+            secrets: Arc::clone(&secrets),
+            release: held.shared(),
+        }));
+        let mut access = nas(&resolve, first("/srv/lan", &[])).await;
+        let early = |path: &str, reference: &str| Location {
+            repository: path.to_owned(),
+            options: BTreeMap::from([("timeout".to_owned(), format!("${{{reference}}}"))]),
+            ..Location::default()
+        };
+        access
+            .entry
+            .as_mut()
+            .expect("the entry")
+            .entry
+            .locations
+            .further = vec![early("/srv/second", "HELD"), early("/srv/third", "THIRD")];
+        let choose = choosing_with(
+            &sites,
+            resolve,
+            Arc::new(FakeClock::new(Timestamp::UNIX_EPOCH)),
+        );
+        let RunningJob {
+            mut events,
+            mut control,
+        } = choose
+            .run(op(), Job::Ls(access))
+            .await
+            .expect("the job starts");
+        assert!(
+            futures::poll!(events.next()).is_pending(),
+            "the second location's reference is being read"
+        );
+        control.stop().await;
+        let _ = release.send(());
+        assert!(
+            matches!(events.next().now_or_never(), Some(None)),
+            "the job ends at once, with nothing to say"
+        );
+        assert!(
+            !secrets
+                .reads()
+                .contains(&SecretRef::Env("THIRD".to_owned())),
+            "the third location is never resolved"
+        );
+        assert_eq!(probed(&sites), vec!["/srv/lan".to_owned()]);
     }
 
     /// A choice that fails in a location's turn, here on secrets past what
