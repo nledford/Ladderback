@@ -323,6 +323,75 @@ fn refused_at_the_second(agent: &mut Agent) {
     }
 }
 
+#[when(
+    expr = "the configuration gives the repository {string} a second location at the address of its first, written with \"local:\" before it and a slash at its end"
+)]
+async fn second_at_the_first_written_otherwise(agent: &mut Agent, alias: String) {
+    assert_eq!(agent.locations.alias.as_deref(), Some(alias.as_str()));
+    let first = agent
+        .locations
+        .places
+        .first()
+        .expect("a first location")
+        .1
+        .clone();
+    agent.locations.places[1].1 = PathBuf::from(format!("local:{}/", path_text(&first)));
+    write_config(agent);
+    load(agent).await;
+}
+
+#[given(expr = "the folder of the location {string} is gone")]
+async fn folder_gone(agent: &mut Agent, name: String) {
+    let folder = place(agent, &name);
+    blocking(move || fs::remove_dir_all(&folder).expect("the location's folder is removed")).await;
+}
+
+/// The position, from 1, of the location `name`.
+fn position(agent: &Agent, name: &str) -> usize {
+    agent
+        .locations
+        .places
+        .iter()
+        .position(|(known, _)| known == name)
+        .map(|index| index + 1)
+        .unwrap_or_else(|| panic!("no location {name:?}"))
+}
+
+/// The level a line of the daemon's log was written at, as env_logger
+/// writes it: `[<time> <LEVEL> <target>] <message>`.
+fn level_of(line: &str) -> Option<&str> {
+    line.strip_prefix('[')?.split_whitespace().nth(1)
+}
+
+#[then(
+    expr = "the daemon's log says in one line that the location {string} was used and the location {string} held no repository"
+)]
+fn log_says_used_and_skipped(agent: &mut Agent, used: String, skipped: String) {
+    let alias = agent.locations.alias.clone().expect("a repository");
+    let said = format!(
+        "repository {alias}: used location {} of {} (skipped: location {} not-a-repository)",
+        position(agent, &used),
+        agent.locations.places.len(),
+        position(agent, &skipped),
+    );
+    let log = agent.events.whole_log();
+    let lines: Vec<&str> = log.lines().filter(|line| line.contains(&said)).collect();
+    let [line] = lines.as_slice() else {
+        panic!("one line says {said:?}: {log}");
+    };
+    assert_eq!(level_of(line), Some("INFO"), "{line}");
+}
+
+#[then("the daemon's log holds no error")]
+fn log_holds_no_error(agent: &mut Agent) {
+    let log = agent.events.whole_log();
+    let errors: Vec<&str> = log
+        .lines()
+        .filter(|line| level_of(line) == Some("ERROR"))
+        .collect();
+    assert!(errors.is_empty(), "the daemon logged errors: {errors:#?}");
+}
+
 #[given(
     expr = "the location {string} carries the canary secret {string} in its option {string} as the reference {string}"
 )]

@@ -346,6 +346,11 @@ fn run_events(input: impl Read, events: Events, pid: u32, process: Process) -> i
     if let Some(repository) = repository_of(&spec.job) {
         events.redact_with(repository.redactor());
     }
+    // A probe tries a location the choice may skip: what the backend logs
+    // there is detail, and the daemon logs the choice itself (#494).
+    if matches!(spec.job, JobKind::Probe(_)) {
+        events.log_backend_at_debug();
+    }
     // The job is taken. The daemon times a worker out that has said nothing
     // by its start timeout, and opening a repository can take longer than
     // that: this line, which holds nothing of the job, comes before it.
@@ -588,6 +593,36 @@ mod tests {
             Some(WorkerEvent::Failed { .. }),
             "{events:?}"
         );
+    }
+
+    /// A probe's records from the backend go at debug: the location it
+    /// tries may well be skipped, and the daemon says so in one line of its
+    /// own (#494). Any other job's records keep their level.
+    #[test]
+    fn a_probe_logs_the_backend_at_debug_and_other_jobs_do_not() {
+        let logs_at_debug = |job: fn(RepositorySpec) -> JobKind| {
+            let spec = JobSpec {
+                op_id: OperationId::from_uuid(domain::Uuid::from_u128(9)),
+                cache_dir: None,
+                watchdog_interval_ms: 10,
+                job: job(RepositorySpec {
+                    repository: "/nonexistent/repo".to_owned(),
+                    repo_hot: None,
+                    password: SecretValue::new("hunter2"),
+                    options: Default::default(),
+                    options_hot: Default::default(),
+                    options_cold: Default::default(),
+                    secrets: Vec::new(),
+                    id: None,
+                }),
+            };
+            let (events, _capture) = capture();
+            let input = serde_json::to_vec(&spec).unwrap();
+            run_events(input.as_slice(), events.clone(), 1, Process::real(PROGRAM)).unwrap();
+            events.logs_backend_at_debug()
+        };
+        assert!(logs_at_debug(JobKind::Probe), "a probe");
+        assert!(!logs_at_debug(JobKind::Identify), "an identification");
     }
 
     #[test]

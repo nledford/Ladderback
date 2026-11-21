@@ -74,7 +74,7 @@ Two entries are one repository when both know their ID and the IDs are equal, or
 
 - `AgentConfig::new` refuses a configuration that names one repository twice (`SameRepository`, at the second entry's key).
 - Connecting or initialising under a new alias a repository the configuration already holds, at the same location or with the same ID, is refused with `repository-already-configured` (HTTP 409, naming the alias it has); an alias already taken is refused first, with `repository-alias-taken`.
-- A location written another way (an SFTP URL beside a mounted path) is caught only when both entries know their ID.
+- A local path is compared without `local:` and without trailing `/`s; any other location written another way (an SFTP URL beside a mounted path) is caught only when both entries know their ID (decision 49, point 2).
 
 A job opens the repository and, when the entry has an ID, compares it before it reads or writes anything: a location that now holds another repository fails the operation with `repository-replaced`. The forget preview's own read of the retention (`adapters/engine/src/retention.rs`) opens the repository again in process without comparing; it runs only after the preview's listing job, which compared it.
 

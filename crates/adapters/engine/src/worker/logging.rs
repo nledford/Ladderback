@@ -35,6 +35,7 @@ impl Log for EventLogger {
             return;
         }
         let level = match record.level() {
+            _ if self.events.logs_backend_at_debug() => Level::Debug,
             LogLevel::Error => Level::Error,
             LogLevel::Warn => Level::Warn,
             LogLevel::Info => Level::Info,
@@ -166,6 +167,35 @@ mod tests {
             })
             .collect();
         assert_eq!(levels, [WireLevel::Warn, WireLevel::Error]);
+    }
+
+    /// A probe's records are the backend's view of a location the choice
+    /// may skip: every one goes at debug, whatever its level (#494).
+    #[test]
+    fn a_probe_s_records_go_at_debug() {
+        let (events, capture) = capture();
+        events.log_backend_at_debug();
+        let logger = EventLogger::new(events);
+        record_of(
+            &logger,
+            Level::Error,
+            "rustic_backend::local",
+            "error listing index",
+        );
+        record_of(&logger, Level::Warn, "t", "careful");
+        record_of(&logger, Level::Info, "t", "said");
+        let levels: Vec<_> = capture
+            .parsed()
+            .into_iter()
+            .map(|event| match event {
+                WorkerEvent::Log { level, .. } => level,
+                other => panic!("not a log event: {other:?}"),
+            })
+            .collect();
+        assert_eq!(
+            levels,
+            [WireLevel::Debug, WireLevel::Debug, WireLevel::Debug]
+        );
     }
 
     #[test]
