@@ -24,7 +24,9 @@ pub(crate) enum Failure {
     /// platform's own words.
     Locked(String),
     /// The person dismissed the Secret Service's unlock prompt, so its
-    /// keyring stays locked. The platform's own words.
+    /// keyring stays locked. The platform reports a prompt that ended with
+    /// no answer, as when the service went away while it was up, the same
+    /// way. The platform's own words.
     Dismissed(String),
     /// The Secret Service answered and refused otherwise: it has no
     /// collection to look in. The platform's own words.

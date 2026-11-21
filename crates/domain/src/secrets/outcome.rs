@@ -82,7 +82,8 @@ pub enum KeyringCause {
     Locked,
     /// The person dismissed the service's unlock prompt, so its keyring
     /// stays locked: told as locked, but a no. Asking again would ask them
-    /// again (#993).
+    /// again (#993). A prompt that ended with no answer, as when the
+    /// service went away while it was up, is told the same way.
     Dismissed,
     /// The service answered and said no some other way: it has no
     /// collection to look in.
