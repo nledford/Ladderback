@@ -715,9 +715,10 @@ fn run_daemon(
     // Open on the network with sign-in off is said on stderr once the
     // address is bound (below), not logged: no log setting hides it.
     #[cfg(feature = "hub")]
-    let loopback_plain_only = front_door.is_some();
+    let (loopback_plain_only, built_in_tls) =
+        (front_door.is_some(), matches!(front_door, Some(Some(_))));
     #[cfg(not(feature = "hub"))]
-    let loopback_plain_only = false;
+    let (loopback_plain_only, built_in_tls) = (false, false);
     if warns_plain_http(exposure, sign_in_on, loopback_plain_only) {
         log::warn!(
             "listening on {listen} beyond loopback over plain HTTP: the password crosses the network unencrypted unless a reverse proxy in front adds TLS"
@@ -784,7 +785,7 @@ fn run_daemon(
             Ok(addr) => say(
                 localizer,
                 msg::CLI_LISTENING,
-                &[("url", text(format!("http://{addr}")))],
+                &[("url", text(listening_url(addr, built_in_tls)))],
             )?,
             Err(error) => say(
                 localizer,
@@ -968,7 +969,11 @@ fn warns_plain_http(
 /// when the hub's built-in TLS serves and the address is beyond loopback,
 /// where the front door closes plain HTTP.
 fn listening_url(bound: SocketAddr, built_in_tls: bool) -> String {
-    todo!("{bound} {built_in_tls}")
+    if built_in_tls && !bound.ip().to_canonical().is_loopback() {
+        format!("https://{bound}")
+    } else {
+        format!("http://{bound}")
+    }
 }
 
 /// The line `say` prints: one of Ladderback's own messages after the
