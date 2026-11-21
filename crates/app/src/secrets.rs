@@ -762,15 +762,18 @@ impl<'a> Run<'a> {
     /// to ask is read again every [`KEYRING_POLL`] while the daemon is in
     /// its first [`KEYRING_WAIT`], and one that answered that it is locked
     /// waits to be unlocked until the plan's next run is due; the hold's
-    /// `waiting` is told once of either wait. An entry still refused as
-    /// locked after the keyring answered that it is unlocked — it can sit
-    /// in a collection other than the one the keyring is asked about — is
-    /// read again no sooner than a [`KEYRING_POLL`] later, and never past
-    /// that bound. Every other answer, and the last, is as the resolver
-    /// gave it.
+    /// `waiting` is told once of either wait. A service that is gone after
+    /// the keyring answered that it is locked is waited for only until that
+    /// bound too, not until the daemon's start bound. An entry still
+    /// refused as locked after the keyring answered that it is unlocked —
+    /// it can sit in a collection other than the one the keyring is asked
+    /// about — is read again no sooner than a [`KEYRING_POLL`] later, and
+    /// never past that bound. Every other answer, and the last, is as the
+    /// resolver gave it.
     async fn read(&self, secret: &SecretRef) -> Result<Resolved, SecretError> {
         let mut told = false;
         let mut read_unlocked = false;
+        let mut locked_until: Option<&UnlockWait> = None;
         loop {
             let read = self.resolver.resolve(secret).await;
             let Some(hold) = self.hold else {
@@ -785,9 +788,18 @@ impl<'a> Run<'a> {
             };
             match *cause {
                 KeyringCause::NoService => {
-                    let Some(left) = hold.wait.left() else {
+                    let Some(mut left) = hold.wait.left() else {
                         return read;
                     };
+                    // A run that met a locked keyring waits for it by its
+                    // own bound, which the loss of the service after that
+                    // doesn't stretch to the daemon's start bound.
+                    if let Some(unlock) = locked_until {
+                        let Some(until_due) = unlock.left() else {
+                            return read;
+                        };
+                        left = left.min(until_due);
+                    }
                     if !told {
                         (hold.waiting)(source, KeyringWaitsFor::Service);
                         told = true;
@@ -798,6 +810,7 @@ impl<'a> Run<'a> {
                     let Some(unlock) = hold.unlock else {
                         return read;
                     };
+                    locked_until = Some(unlock);
                     if !told {
                         (hold.waiting)(source, KeyringWaitsFor::Unlock);
                         told = true;
@@ -830,7 +843,13 @@ impl<'a> Run<'a> {
             if unlock.left().is_none() {
                 return false;
             }
-            match self.resolver.keyring_lock().await {
+            let answer = self.resolver.keyring_lock().await;
+            // An answer that came after the bound is too late: the entry
+            // isn't read again past it, and the refusal stands.
+            if unlock.left().is_none() {
+                return false;
+            }
+            match answer {
                 KeyringLock::Unlocked => return true,
                 // Where there is no service to ask it can't be said: the
                 // hold for the service is the one that answers that
