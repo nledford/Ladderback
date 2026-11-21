@@ -527,6 +527,38 @@ pub(crate) fn change_request(
     }
 }
 
+/// The reads of the token list, numbered as each starts, so an answer that
+/// holds the list as it was before is dropped: that of a read a newer one
+/// overtook, or of one still unanswered when a token's permissions
+/// changed, which the daemon may have answered before the change.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub(crate) struct ListReads {
+    /// The number of the newest read started.
+    started: u64,
+    /// The number of the newest read answered.
+    answered: u64,
+}
+
+impl ListReads {
+    /// Starts a read, and gives its number for [`Self::counts`].
+    pub(crate) fn start(&mut self) -> u64 {
+        todo!()
+    }
+
+    /// Notes read `read` answered, and whether its answer is the list to
+    /// show: only the newest read's is.
+    pub(crate) fn counts(&mut self, read: u64) -> bool {
+        todo!("{read}")
+    }
+
+    /// Whether a change of a token's permissions, just kept, needs a read
+    /// of its own: a read still unanswered may hold the old permissions,
+    /// and the one started now overtakes it.
+    pub(crate) fn changed(&self) -> bool {
+        todo!()
+    }
+}
+
 /// The route of what AI agents may do without a token.
 pub(crate) const WITHOUT_TOKEN_PATH: &str = "/api/v1/settings/without-token";
 

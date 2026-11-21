@@ -440,3 +440,46 @@ fn what_ai_agents_may_do_is_sent_with_the_password_only_with_sign_in_on() {
     let off = without_token_request(new_token(), "typed anyway".to_owned(), false);
     assert_eq!(off.current_password, None);
 }
+
+#[test]
+fn a_lone_read_of_the_token_list_counts() {
+    let mut reads = ListReads::default();
+    let read = reads.start();
+    assert!(reads.counts(read));
+    // Answered, it leaves a change nothing to overtake.
+    assert!(!reads.changed());
+}
+
+#[test]
+fn a_read_a_newer_one_overtook_doesnt_count_whichever_answers_first() {
+    let mut reads = ListReads::default();
+    let (older, newer) = (reads.start(), reads.start());
+    assert!(!reads.counts(older));
+    assert!(reads.counts(newer));
+
+    let mut reads = ListReads::default();
+    let (older, newer) = (reads.start(), reads.start());
+    assert!(reads.counts(newer));
+    assert!(!reads.counts(older));
+}
+
+#[test]
+fn a_change_while_a_read_is_unanswered_reads_again_and_the_older_answer_doesnt_count() {
+    let mut reads = ListReads::default();
+    let before = reads.start();
+    // The change is kept while the read after a revoke is unanswered.
+    assert!(reads.changed());
+    let again = reads.start();
+    assert!(!reads.counts(before), "the list from before the change");
+    assert!(reads.counts(again));
+    assert!(!reads.changed());
+}
+
+#[test]
+fn a_change_with_no_read_unanswered_reads_nothing_again() {
+    let mut reads = ListReads::default();
+    assert!(!reads.changed(), "before any read");
+    let read = reads.start();
+    assert!(reads.counts(read));
+    assert!(!reads.changed());
+}
