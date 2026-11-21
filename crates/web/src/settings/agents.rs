@@ -372,7 +372,7 @@ pub(crate) fn Agents(localizer: Arc<Localizer>, on: bool) -> impl IntoView {
         };
         life_error.set(None);
         let ask = MakePairingTokenDto {
-            address: address.get_untracked().trim().to_owned(),
+            address: asked_address(&address.get_untracked(), certificate.get_untracked()),
             certificate: if certificate.get_untracked() == PINNED {
                 TokenCertificateDto::Pinned
             } else {
@@ -779,7 +779,11 @@ fn over_tls(address: &str) -> Option<String> {
 /// The address a token is asked for at: the one typed, over `https://`
 /// when it is to pin the hub's own certificate, whenever it was typed.
 fn asked_address(typed: &str, certificate: &str) -> String {
-    todo!("{typed} {certificate}")
+    let typed = typed.trim();
+    match over_tls(typed) {
+        Some(over_tls) if certificate == PINNED => over_tls,
+        _ => typed.to_owned(),
+    }
 }
 
 #[cfg(test)]
