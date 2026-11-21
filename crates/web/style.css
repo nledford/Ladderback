@@ -537,13 +537,6 @@ main:focus {
   font-weight: 600;
 }
 
-/* A row of actions stretches its items; a button in one keeps its own
-   height. It stays here with the row's own rules (`.actions`), whose move
-   to utilities is a step of its own (#931). */
-.actions > .button {
-  align-self: center;
-}
-
 /* A skeleton (§4.5), drawn with Tailwind utilities (`skeleton/rules.rs`)
    but for this rule. A line of text: as tall as the text (1em, which the
    page sets on each bar), centered on a line of the text's height, so a
@@ -614,22 +607,6 @@ main:focus {
   }
 }
 
-/* A field in a row of actions: the row's items meet at their foot, so the
-   field's box and a button of its size line up, the label above. */
-.actions:has(> .text-field) {
-  align-items: flex-end;
-}
-
-.actions:has(> .text-field) > .button {
-  align-self: auto;
-}
-
-.actions > .text-field {
-  flex: 1 1 12rem;
-  max-inline-size: 32rem;
-  margin-block: 0;
-}
-
 /* A group of choices, such as an API token's permissions: named by its
    legend, which reads as a field's label does, without the browser's frame. */
 fieldset.choices {
@@ -670,12 +647,6 @@ fieldset.choices > p {
 .error-summary ul {
   margin-block: 0.5rem;
   padding-inline-start: 1.25rem;
-}
-
-.actions {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 0.5rem;
 }
 
 /* The control that pauses live updates (§4.5): the button, then, while it is

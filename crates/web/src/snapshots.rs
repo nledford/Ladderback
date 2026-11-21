@@ -25,6 +25,7 @@ use leptos::task::{spawn_local, tick};
 use leptos::wasm_bindgen::JsValue;
 
 use crate::announcer::Politeness;
+use crate::components::ACTIONS;
 use crate::components::button::Content;
 use crate::components::skeleton::rules::Awaited;
 use crate::components::tree::rules::snapshot_link;
@@ -676,7 +677,7 @@ fn Repository(
     let buttons = move || {
         page.maintained.get().then(|| {
             view! {
-                <p class="actions">
+                <p class=ACTIONS>
                     <Button
                         content=Content::IconAndText {
                             glyph: LucideGlyph::Trash.into(),
@@ -764,7 +765,7 @@ fn Repository(
                     .collect_view()
             }}
             {buttons}
-            <p class="actions">
+            <p class=ACTIONS>
                 <Button
                     content=Content::Text(Signal::derive(switch_label))
                     id=MAINTAINER_BUTTON
@@ -870,7 +871,7 @@ fn stats_view(page: Page, heading: String) -> impl IntoView {
                 }
                 stats::Shown::Nothing => ().into_any(),
             }}
-            <p class="actions">
+            <p class=ACTIONS>
                 <Button
                     content=Content::Text(read.into())
                     busy=reading

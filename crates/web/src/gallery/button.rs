@@ -9,6 +9,7 @@ use leptos::prelude::*;
 
 use super::DemoHeading;
 use crate::announcer::Politeness;
+use crate::components::ACTIONS;
 use crate::components::Button;
 use crate::components::button::{Appearance, Content, Kind};
 use crate::live::reply;
@@ -73,7 +74,7 @@ pub(super) fn ButtonDemo(localizer: Arc<Localizer>) -> impl IntoView {
                 .into_iter()
                 .map(|(appearance, tones): (Appearance, &[(Tone, MessageId)])| {
                     view! {
-                        <p class="actions">
+                        <p class=ACTIONS>
                             {tones
                                 .iter()
                                 .map(|&(tone, name)| {
@@ -93,7 +94,7 @@ pub(super) fn ButtonDemo(localizer: Arc<Localizer>) -> impl IntoView {
                 .collect_view()}
             // Every size, in the defaults otherwise (Outlined, Secondary).
             // The Medium one names no size, so it shows the default.
-            <p class="actions">
+            <p class=ACTIONS>
                 <Button
                     content=Content::Text(t(msg::UI_GALLERY_BUTTON_SMALL).into())
                     size=Size::Small
@@ -116,7 +117,7 @@ pub(super) fn ButtonDemo(localizer: Arc<Localizer>) -> impl IntoView {
             </p>
             // An icon before its label, then an icon-only button at every
             // size, named by its label, the icon inside it decoration.
-            <p class="actions">
+            <p class=ACTIONS>
                 <Button
                     content=Content::IconAndText {
                         glyph: LucideGlyph::CalendarPlus.into(),
@@ -153,7 +154,7 @@ pub(super) fn ButtonDemo(localizer: Arc<Localizer>) -> impl IntoView {
             // an icon. Busy, each keeps its name and its place in the Tab
             // order, and ignores presses. The toggle comes first, so the
             // label that grows moves nothing the reader is about to press.
-            <p class="actions">
+            <p class=ACTIONS>
                 <Button
                     content=Content::Text(t(msg::UI_GALLERY_BUTTON_WORKING).into())
                     appearance=Appearance::Ghost
@@ -186,7 +187,7 @@ pub(super) fn ButtonDemo(localizer: Arc<Localizer>) -> impl IntoView {
             </p>
             // A button that can't be used, still in the Tab order, and a
             // toggle, bolder with an inset edge while pressed.
-            <p class="actions">
+            <p class=ACTIONS>
                 <Button
                     content=Content::IconAndText {
                         glyph: LucideGlyph::X.into(),
@@ -208,7 +209,7 @@ pub(super) fn ButtonDemo(localizer: Arc<Localizer>) -> impl IntoView {
                 event.prevent_default();
                 reply(Politeness::Polite, &form_sent);
             }>
-                <p class="actions">
+                <p class=ACTIONS>
                     <Button
                         content=Content::Text(t(msg::UI_GALLERY_BUTTON_SEND).into())
                         appearance=Appearance::Filled
