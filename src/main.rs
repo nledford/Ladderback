@@ -939,7 +939,14 @@ fn certificate_names(listen: SocketAddr, hosts: &[String]) -> Vec<String> {
     if !listen.ip().is_unspecified() {
         names.push(listen.ip().to_string());
     }
-    names.extend(hosts.iter().cloned());
+    // An allowed host is kept as `Host` carries it, an IPv6 address in
+    // brackets; the certificate names the address itself.
+    names.extend(hosts.iter().map(|host| {
+        host.strip_prefix('[')
+            .and_then(|host| host.strip_suffix(']'))
+            .unwrap_or(host)
+            .to_owned()
+    }));
     names.sort();
     names.dedup();
     names
@@ -1060,6 +1067,25 @@ mod tests {
         assert_eq!(
             line,
             "ladderback: cannot write the result: No space left on device\n"
+        );
+    }
+
+    /// The certificate names the hub's own machine and every allowed host,
+    /// an IPv6 one as an address rather than its bracketed form.
+    #[cfg(feature = "hub")]
+    #[test]
+    fn the_certificate_names_allowed_ipv6_hosts_as_addresses() {
+        let listen = "[::]:9898".parse().unwrap();
+        let hosts = ["[2001:db8::1]".to_owned(), "hub.example".to_owned()];
+        assert_eq!(
+            certificate_names(listen, &hosts),
+            [
+                "127.0.0.1",
+                "2001:db8::1",
+                "::1",
+                "hub.example",
+                "localhost"
+            ]
         );
     }
 
