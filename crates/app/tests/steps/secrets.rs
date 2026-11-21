@@ -571,6 +571,11 @@ fn relative_location(agent: &mut Agent) {
     assert_eq!(agent.secrets.cause(), &Cause::RelativePath);
 }
 
+#[then("the setting is refused because it is not a full path on this machine")]
+fn relative_setting(agent: &mut Agent) {
+    assert_eq!(agent.secrets.cause(), &Cause::RelativePath);
+}
+
 #[then(expr = "the failure names the variable {string}")]
 fn names_variable(agent: &mut Agent, name: String) {
     assert_eq!(agent.secrets.unresolved().source, SourceName::Env { name });

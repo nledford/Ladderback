@@ -11,6 +11,8 @@
 
 mod rclone;
 
+use std::collections::BTreeMap;
+
 use crate::secrets::{CommandLine, Part, SecretRef, Template};
 
 use super::RepositorySettings;
@@ -49,30 +51,63 @@ impl RepositorySettings {
         }
         let cold = cold.map(|cold| cold.backend);
         let hot = hot.map(|hot| hot.backend);
-        let reads = |backend: &Option<Backend>, name: &str, value: &str| {
-            backend
-                .as_ref()
-                .is_some_and(|backend| backend.reads_relative(name, value))
+        let relative = |table, name: &str, text: &str| {
+            counts_relative(
+                [cold.as_ref(), hot.as_ref()],
+                self,
+                table,
+                name,
+                Value::Written(text),
+            )
         };
-        // A shared option counts for each half that doesn't set its own.
-        for (name, value) in &self.options {
-            if (!self.options_cold.contains_key(name) && reads(&cold, name, value))
-                || (!self.options_hot.contains_key(name) && reads(&hot, name, value))
-            {
-                return Some(RepositoryField::Option(name.clone()));
-            }
+        let first = |table, options: &BTreeMap<String, String>| {
+            options
+                .iter()
+                .find(|(name, text)| relative(table, name, text))
+                .map(|(name, _)| name.clone())
+        };
+        if let Some(name) = first(OptionTable::Shared, &self.options) {
+            return Some(RepositoryField::Option(name));
         }
-        if let Some((name, _)) = self
-            .options_hot
-            .iter()
-            .find(|(name, value)| reads(&hot, name, value))
-        {
-            return Some(RepositoryField::OptionHot(name.clone()));
+        if let Some(name) = first(OptionTable::Hot, &self.options_hot) {
+            return Some(RepositoryField::OptionHot(name));
         }
-        self.options_cold
-            .iter()
-            .find(|(name, value)| reads(&cold, name, value))
-            .map(|(name, _)| RepositoryField::OptionCold(name.clone()))
+        first(OptionTable::Cold, &self.options_cold).map(RepositoryField::OptionCold)
+    }
+}
+
+/// Which of a repository's tables of options an option is in.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum OptionTable {
+    /// `options`, which counts for each half that doesn't set its own.
+    Shared,
+    /// `options-hot`.
+    Hot,
+    /// `options-cold`.
+    Cold,
+}
+
+/// Whether the option `name` of `table`, which holds `value`, names a file
+/// or runs a program by a relative path on the backend of a half it counts
+/// for, `cold` or `hot`: a shared option counts for each half whose own
+/// table in `settings` doesn't set it.
+fn counts_relative(
+    [cold, hot]: [Option<&Backend>; 2],
+    settings: &RepositorySettings,
+    table: OptionTable,
+    name: &str,
+    value: Value<'_>,
+) -> bool {
+    let reads = |backend: Option<&Backend>| {
+        backend.is_some_and(|backend| backend.reads_relative(name, value))
+    };
+    match table {
+        OptionTable::Shared => {
+            (!settings.options_cold.contains_key(name) && reads(cold))
+                || (!settings.options_hot.contains_key(name) && reads(hot))
+        }
+        OptionTable::Hot => reads(hot),
+        OptionTable::Cold => reads(cold),
     }
 }
 
@@ -108,6 +143,46 @@ impl RepositorySettings {
                 .map(move |found| (field.clone(), found))
         })
         .collect()
+    }
+}
+
+/// The backends a job's resolved locations name, `repository` and
+/// `repo-hot`, which judge the options it resolves.
+pub struct ResolvedBackends {
+    cold: Option<Backend>,
+    hot: Option<Backend>,
+}
+
+impl ResolvedBackends {
+    /// The backends of `repository` and `repo_hot` as a job resolved them.
+    pub fn of(repository: &str, repo_hot: Option<&str>) -> Self {
+        let backend = |location: &str| read_location(location, true).map(|read| read.backend);
+        Self {
+            cold: backend(repository),
+            hot: repo_hot.and_then(backend),
+        }
+    }
+
+    /// Whether the option `name` of `table` in `settings`, which a job
+    /// resolved to `value`, names a file or runs a program by a relative path
+    /// on the backend of a half it counts for, read as
+    /// [`RepositorySettings::relative_path`] reads an option all of which is
+    /// known: a `${` a reference held is text. The locations themselves are
+    /// judged by [`is_relative_location`].
+    pub fn reads_relative(
+        &self,
+        settings: &RepositorySettings,
+        table: OptionTable,
+        name: &str,
+        value: &str,
+    ) -> bool {
+        counts_relative(
+            [self.cold.as_ref(), self.hot.as_ref()],
+            settings,
+            table,
+            name,
+            Value::Resolved(value),
+        )
     }
 }
 
@@ -162,9 +237,41 @@ fn starts_relative(head: &str, whole: bool) -> bool {
     }
 }
 
-/// Whether `value`, a path, is known to be relative.
-fn is_relative_file(value: &str) -> bool {
-    Known::of(value).is_some_and(|known| starts_relative(&known.head, known.whole))
+/// An option's value, and how much of it is known.
+#[derive(Clone, Copy)]
+enum Value<'a> {
+    /// As the configuration writes it: what is before its first reference
+    /// is known ([`Known`]).
+    Written(&'a str),
+    /// As a job resolved it: all of it, a `${` a reference held being text.
+    Resolved(&'a str),
+}
+
+impl<'a> Value<'a> {
+    /// Whether the value, a path, is known to be relative.
+    fn is_relative_file(self) -> bool {
+        match self {
+            Self::Written(text) => {
+                Known::of(text).is_some_and(|known| starts_relative(&known.head, known.whole))
+            }
+            Self::Resolved(text) => starts_relative(text, true),
+        }
+    }
+
+    /// The value, a command line, split into words as rustic splits it,
+    /// when all of it is known ([`plain_command`]).
+    fn command(self) -> Option<CommandLine> {
+        match self {
+            Self::Written(text) => plain_command(text),
+            Self::Resolved(text) => CommandLine::parse(text).ok(),
+        }
+    }
+
+    fn text(self) -> &'a str {
+        match self {
+            Self::Written(text) | Self::Resolved(text) => text,
+        }
+    }
 }
 
 /// The backend rustic reaches a repository through, by its location's scheme.
@@ -223,12 +330,12 @@ impl Backend {
     /// Whether the option `name`, which this backend reads, names a file or
     /// runs a program by a relative path when it is `value`. rustic matches
     /// its own option names exactly; OpenDAL's, in any case.
-    fn reads_relative(&self, name: &str, value: &str) -> bool {
+    fn reads_relative(&self, name: &str, value: Value<'_>) -> bool {
         match (self, name) {
             (
                 Self::Rclone | Self::Rest | Self::OpenDal(_),
                 "http-cacert" | "http-tls-client-cert",
-            ) => is_relative_file(value),
+            ) => value.is_relative_file(),
             (Self::Rclone, "rclone-command") => runs_relative(value, true),
             (Self::Local, "post-create-command" | "post-delete-command") => {
                 runs_relative(value, false)
@@ -236,9 +343,9 @@ impl Backend {
             (Self::OpenDal(Some(service)), name) => {
                 let name = name.to_ascii_lowercase();
                 is_opendal_file(service, &name)
-                    && is_relative_file(value)
+                    && value.is_relative_file()
                     // ssh expands a `~` in the key it is given (`-i`) itself.
-                    && !(service == "sftp" && value.starts_with('~'))
+                    && !(service == "sftp" && value.text().starts_with('~'))
             }
             _ => false,
         }
@@ -260,8 +367,8 @@ fn is_opendal_file(service: &str, name: &str) -> bool {
 /// Whether the command line `value` starts its program by a relative path,
 /// or, for rclone, has a flag that names a file, a folder or a program by
 /// one ([`rclone::flags_relative`]).
-fn runs_relative(value: &str, starts_rclone: bool) -> bool {
-    plain_command(value).is_some_and(|command| {
+fn runs_relative(value: Value<'_>, starts_rclone: bool) -> bool {
+    value.command().is_some_and(|command| {
         is_relative_program(command.program())
             || (starts_rclone && rclone::flags_relative(command.args()))
     })
@@ -1015,5 +1122,137 @@ mod tests {
         ] {
             assert_eq!(at(location).location_programs(), [], "{location:?}");
         }
+    }
+
+    /// The first option of settings that hold what a job resolved that
+    /// [`ResolvedBackends::reads_relative`] finds, tried in the order a job
+    /// resolves them.
+    fn resolved(settings: &RepositorySettings) -> Option<RepositoryField> {
+        let backends = ResolvedBackends::of(&settings.repository, settings.repo_hot.as_deref());
+        let first = |table, options: &BTreeMap<String, String>| {
+            options
+                .iter()
+                .find(|(name, value)| backends.reads_relative(settings, table, name, value))
+                .map(|(name, _)| name.clone())
+        };
+        first(OptionTable::Shared, &settings.options)
+            .map(RepositoryField::Option)
+            .or_else(|| {
+                first(OptionTable::Hot, &settings.options_hot).map(RepositoryField::OptionHot)
+            })
+            .or_else(|| {
+                first(OptionTable::Cold, &settings.options_cold).map(RepositoryField::OptionCold)
+            })
+    }
+
+    #[test]
+    fn an_option_a_reference_made_relative_is_found_once_resolved() {
+        // `root = "${ROOT}"` with `ROOT=backups`, as a job resolves it (#310).
+        // A `${` the reference held is text: a folder of that name.
+        for value in [
+            "backups",
+            "./backups",
+            "../backups",
+            "~/backups",
+            "${HOME}/backups",
+        ] {
+            assert_eq!(
+                resolved(&with_option("opendal:fs", "root", value)),
+                option("root"),
+                "{value:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn a_plain_option_is_judged_by_the_backend_a_resolved_location_names() {
+        // `repository = "${REPO}"` with `REPO=opendal:fs` beside
+        // `root = "backups/repo"`, and `repository = "${HOME}/repo"` beside
+        // `post-create-command = "./notify"` (#310).
+        for (repository, name, value) in [
+            ("opendal:fs", "root", "backups/repo"),
+            ("opendal:FS", "ATOMIC_WRITE_DIR", "tmp"),
+            ("opendal:sftp:nas", "key", "keys/id"),
+            ("/home/demo/repo", "post-create-command", "./notify"),
+            (
+                "local:/home/demo/repo",
+                "post-delete-command",
+                "bin/notify --all",
+            ),
+            ("rclone:nas:repo", "rclone-command", "./rclone serve restic"),
+            (
+                "rclone:nas:repo",
+                "rclone-command",
+                "rclone serve restic --cert=tls/cert.pem",
+            ),
+            ("rest:https://nas.example/repo", "http-cacert", "ca.pem"),
+        ] {
+            assert_eq!(
+                resolved(&with_option(repository, name, value)),
+                option(name),
+                "{repository:?} {name:?} {value:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn an_option_the_resolved_backend_reads_as_no_relative_path_is_not_found() {
+        for (repository, name, value) in [
+            // A backend that doesn't read the option.
+            ("/home/demo/repo", "root", "backups/repo"),
+            ("opendal:s3", "root", "backups/repo"),
+            (
+                "rest:https://nas.example/repo",
+                "post-create-command",
+                "./notify",
+            ),
+            ("/home/demo/repo", "rclone-command", "./rclone"),
+            ("opendal:fs", "endpoint", "backups"),
+            // A full path, a program looked up on `PATH`, a key ssh expands.
+            ("opendal:fs", "root", "/srv/demo-repo"),
+            ("/home/demo/repo", "post-create-command", "notify --all"),
+            ("opendal:sftp", "key", "~/.ssh/id"),
+            // A backend rustic doesn't know, which it refuses.
+            ("nas:backups/repo", "root", "backups"),
+        ] {
+            assert_eq!(
+                resolved(&with_option(repository, name, value)),
+                None,
+                "{repository:?} {name:?} {value:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn each_half_judges_the_options_it_reads_by_its_own_location() {
+        let both = |cold: &str, hot: &str| {
+            let mut settings = at(cold);
+            settings.repo_hot = Some(hot.to_owned());
+            settings
+        };
+        let mut hot = both("/srv/demo-cold", "opendal:fs");
+        hot.options_hot
+            .insert("root".to_owned(), "backups/hot".to_owned());
+        assert_eq!(
+            resolved(&hot),
+            Some(RepositoryField::OptionHot("root".to_owned()))
+        );
+        let mut cold = both("opendal:fs", "/srv/demo-hot");
+        cold.options_cold
+            .insert("root".to_owned(), "backups/cold".to_owned());
+        assert_eq!(
+            resolved(&cold),
+            Some(RepositoryField::OptionCold("root".to_owned()))
+        );
+        // A shared option counts for each half that doesn't set its own.
+        let mut shared = both("/srv/demo-cold", "opendal:fs");
+        shared
+            .options
+            .insert("root".to_owned(), "backups".to_owned());
+        assert_eq!(resolved(&shared), option("root"));
+        shared
+            .options_hot
+            .insert("root".to_owned(), "/srv/hot".to_owned());
+        assert_eq!(resolved(&shared), None);
     }
 }

@@ -39,7 +39,9 @@ pub use link::{
     DefaultRoute, DefaultRoutes, Family, InterfaceKind, Link, Outgoing, RouteState, WiFiNames,
 };
 pub(crate) use local_paths::is_relative_program;
-pub use local_paths::{LocationProgram, RepositoryField, is_relative_location};
+pub use local_paths::{
+    LocationProgram, OptionTable, RepositoryField, ResolvedBackends, is_relative_location,
+};
 pub use location::{
     ExposedCredentials, LOCATION_PROBE_SECONDS, Location, LocationWarning, Locations,
     MAX_LOCATIONS, MAX_RECORDED_ADDRESS_BYTES, MixedLinkNote, RuleNote, check_location_count,
