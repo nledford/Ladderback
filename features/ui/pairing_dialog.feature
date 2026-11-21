@@ -121,6 +121,15 @@ Feature: Making a pairing token on the hub's page
     And the polite region comes to contain "The hub couldn't cancel an earlier unused pairing token, so it still works until it lapses."
     And the page says "The unused pairing token was canceled."
 
+  Scenario: A cancel answered once Settings is left is said on no other page
+    Given a hub with sign-in off
+    And the hub holds the page's first cancel of a pairing token, then fails it
+    When I make a pairing token on the Machines tab
+    And I press Escape
+    And I leave Settings by the link "Repositories"
+    And the hub answers the cancel it held
+    Then the polite region never says "still works until it lapses"
+
   Scenario: A token the hub makes once Settings is left is canceled, unseen
     Given a hub with sign-in off
     And the hub holds its answer to the page's first making of a pairing token
