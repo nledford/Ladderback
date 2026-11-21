@@ -45,6 +45,8 @@ use store::SqliteStore;
 mod catalog;
 mod downloads;
 mod dry_runs;
+#[cfg(feature = "hub")]
+pub(crate) mod front_door;
 mod key_files;
 mod maintenance;
 pub(crate) mod mcp_server;

@@ -1,7 +1,7 @@
 use async_trait::async_trait;
 use domain::fleet::{
-    AgentRecord, PairRefusal, PairRequest, Pairing, ProofRefusal, ProofRequest, TokenId,
-    TokenRecord,
+    AgentRecord, Fingerprint, PairRefusal, PairRequest, Pairing, ProofRefusal, ProofRequest,
+    TokenId, TokenRecord,
 };
 use domain::{AgentId, Timestamp};
 
@@ -38,6 +38,15 @@ pub trait AgentRegistry: Send + Sync {
     /// changes nothing and answers `false`, and no key may be made. The
     /// check and the revoking are one step, so no agent pairs between them.
     async fn void_tokens_for_new_key(&self) -> Result<bool, StoreError>;
+
+    /// The fingerprint of the hub's TLS key, recorded when the key was
+    /// made (§16, decision 120, "The hub key"), or `None` before then.
+    async fn tls_key(&self) -> Result<Option<Fingerprint>, StoreError>;
+
+    /// Records `fingerprint` as the hub's TLS key's, unless one is
+    /// recorded, which is kept: the key is made once, and of two first
+    /// starts the first record stands.
+    async fn record_tls_key(&self, fingerprint: Fingerprint) -> Result<(), StoreError>;
 
     /// Decides `request` with [`domain::fleet::decide_pairing`] on the
     /// records it holds at `now`, and applies the decision, in one step: a

@@ -14,8 +14,12 @@ Feature: Making a pairing token on the hub's page
     Given a hub with sign-in on
     When the person asks for a new pairing token and confirms with the admin password
     Then the hub shows a token for its own key and the address asked for
-    And the token trusts a certificate authority's certificate, as the hub serves none of its own yet
     And the hub lists 1 unused token
+
+  Scenario: A token pins the hub's own certificate when the person chooses it
+    Given a hub with sign-in on
+    When the person asks for a new pairing token for the hub's own certificate and confirms with the admin password
+    Then the token pins the certificate of the hub's built-in TLS
 
   Scenario: A remote page can't pair when sign-in is off
     Given a hub with sign-in off
