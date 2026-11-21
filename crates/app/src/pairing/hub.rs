@@ -2,11 +2,12 @@ use std::fmt;
 use std::sync::Arc;
 
 use domain::fleet::{
-    AgentEnvelope, AgentRecord, Approval, Binding, BindingKind, Challenge, Connect, EpochSeconds,
-    FIRST_SEQUENCE, HANDSHAKES, Holder, HubAddress, HubEnvelope, KEY_BYTES, KeyFile, ListedAgent,
-    Nonce, Pair, PairAnswer, PairRefusal, PairRequest, Paired, PairingToken, PayloadDigest, Proof,
-    ProofRefusal, ProofRequest, PublicKey, Refused, SeedFile, SignedMessage, SigningSeed, TokenId,
-    TokenRecord, TokenTls, TokenUse, UNUSED_TOKEN_LIMIT, Welcome, hello_kind, list_agents,
+    AgentEnvelope, AgentRecord, Approval, ApprovalRefused, Binding, BindingKind, Challenge,
+    Connect, EpochSeconds, FIRST_SEQUENCE, HANDSHAKES, Holder, Hostname, HubAddress, HubEnvelope,
+    KEY_BYTES, KeyFile, ListedAgent, Nonce, Pair, PairAnswer, PairRefusal, PairRequest, Paired,
+    PairingToken, PayloadDigest, Proof, ProofRefusal, ProofRequest, PublicKey, Refused, SeedFile,
+    SignedMessage, SigningSeed, TokenId, TokenRecord, TokenTls, TokenUse, UNUSED_TOKEN_LIMIT,
+    Welcome, hello_kind, list_agents,
     token_life, welcome_kind,
 };
 use domain::{AgentId, SignedDuration};
@@ -290,6 +291,32 @@ impl HubPairing {
     /// Revokes the unused token `id`, and answers whether there was one.
     pub async fn revoke_token(&self, id: TokenId) -> Result<bool, HubPairingError> {
         Ok(self.registry.revoke_token(id, self.clock.now()).await?)
+    }
+
+    /// The agents waiting for a person's approval, oldest first.
+    pub async fn pending(&self) -> Result<Vec<AgentRecord>, HubPairingError> {
+        todo!()
+    }
+
+    /// The agent registered under `hostname`, pending or approved: the one
+    /// whose hostname compares equal to it on the hub (decision 120,
+    /// "Hostnames").
+    pub async fn agent_named(
+        &self,
+        hostname: &Hostname,
+    ) -> Result<Option<AgentRecord>, HubPairingError> {
+        let _ = hostname;
+        todo!()
+    }
+
+    /// A person approves `agent`, as they compared it: its agent ID and
+    /// key (decision 120, "Pending approval").
+    pub async fn approve(
+        &self,
+        agent: &AgentRecord,
+    ) -> Result<Result<AgentRecord, ApprovalRefused>, HubPairingError> {
+        let _ = agent;
+        todo!()
     }
 
     /// The hub's answer to `connect` on a session whose `tls-exporter`

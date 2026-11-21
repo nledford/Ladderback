@@ -700,8 +700,13 @@ async fn an_agent_paired(agent: &mut Agent) {
 async fn approved(agent: &mut Agent) {
     let world = &agent.pairing;
     let hub = world.hub();
+    let id = world.first().agent_id;
+    let waiting = hub.registry.agent(id).await.unwrap().unwrap();
     hub.registry
-        .approve(world.first().agent_id, hub.clock.now());
+        .approve(id, waiting.key, hub.clock.now())
+        .await
+        .unwrap()
+        .unwrap();
 }
 
 #[when(regex = r"^the agent connects to its hub( twice)?$")]

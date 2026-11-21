@@ -6,9 +6,9 @@
 use app::ports::{Added, AgentRegistry, StoreError};
 use async_trait::async_trait;
 use domain::fleet::{
-    AgentRecord, AgentStatus, BindingKind, Fingerprint, HostnameKey, KEY_BYTES, PairRefusal,
-    PairRequest, Pairing, PairingView, ProofRefusal, ProofRequest, ProofView, PublicKey, TokenId,
-    TokenRecord, TokenUse, admits_unused_token, decide_pairing, decide_proof,
+    AgentRecord, AgentStatus, ApprovalRefused, BindingKind, Fingerprint, HostnameKey, KEY_BYTES,
+    PairRefusal, PairRequest, Pairing, PairingView, ProofRefusal, ProofRequest, ProofView,
+    PublicKey, TokenId, TokenRecord, TokenUse, admits_unused_token, decide_pairing, decide_proof,
     voids_tokens_for_new_key,
 };
 use domain::{AgentId, Timestamp};
@@ -364,5 +364,15 @@ impl AgentRegistry for SqliteStore {
             Err(_) => tx.rollback().await.map_err(unavailable)?,
         }
         Ok(decided)
+    }
+
+    async fn approve(
+        &self,
+        agent_id: AgentId,
+        agent_key: PublicKey,
+        now: Timestamp,
+    ) -> Result<Result<AgentRecord, ApprovalRefused>, StoreError> {
+        let _ = (agent_id, agent_key, now);
+        todo!()
     }
 }

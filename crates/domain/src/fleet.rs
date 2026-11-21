@@ -38,11 +38,12 @@ pub use keys::{
 };
 pub use pin::{HubPin, MAX_PIN_BYTES, PinRefused};
 pub use registry::{
-    AgentRecord, AgentStatus, HostnameKey, HostnameSkeleton, LONGEST_TOKEN_LIFE, ListedAgent,
-    Lookalike, PENDING_LIMIT, PairRefusal, PairRequest, Pairing, PairingView, ProofRefusal,
-    ProofRequest, ProofView, SHORTEST_TOKEN_LIFE, TOKEN_LIFE, TokenLifeRefused, TokenRecord,
-    TokenUse, UNUSED_TOKEN_LIMIT, UnusedTokensFull, admits_unused_token, decide_pairing,
-    decide_proof, list_agents, token_life, voids_tokens_for_new_key,
+    AgentRecord, AgentStatus, ApprovalRefused, HostnameKey, HostnameSkeleton, LONGEST_TOKEN_LIFE,
+    ListedAgent, Lookalike, PENDING_LIMIT, PairRefusal, PairRequest, Pairing, PairingView,
+    ProofRefusal, ProofRequest, ProofView, SHORTEST_TOKEN_LIFE, TOKEN_LIFE, TokenLifeRefused,
+    TokenRecord, TokenUse, UNUSED_TOKEN_LIMIT, UnusedTokensFull, admits_unused_token,
+    decide_approval, decide_pairing, decide_proof, list_agents, token_life,
+    voids_tokens_for_new_key,
 };
 pub use route::{HubRoute, RouteRefused, RouteSession, is_loopback};
 pub use signed::{
