@@ -776,9 +776,15 @@ fn over_tls(address: &str) -> Option<String> {
     })
 }
 
+/// The address a token is asked for at: the one typed, over `https://`
+/// when it is to pin the hub's own certificate, whenever it was typed.
+fn asked_address(typed: &str, certificate: &str) -> String {
+    todo!("{typed} {certificate}")
+}
+
 #[cfg(test)]
 mod tests {
-    use super::over_tls;
+    use super::{CA, PINNED, asked_address, over_tls};
 
     #[test]
     fn a_plain_address_goes_over_tls_on_the_same_port() {
@@ -792,5 +798,32 @@ mod tests {
             assert_eq!(over_tls(plain).as_deref(), Some(over), "{plain}");
         }
         assert_eq!(over_tls("https://hub.example"), None);
+    }
+
+    /// An address typed after the hub's own certificate was chosen is
+    /// asked for over TLS too, its port kept; a certificate authority's
+    /// token is asked for at the address as typed.
+    #[test]
+    fn a_pinned_token_is_asked_for_over_tls_whenever_its_address_was_typed() {
+        for (typed, certificate, asked) in [
+            (
+                " http://hub.example:9898 ",
+                PINNED,
+                "https://hub.example:9898",
+            ),
+            (
+                "https://hub.example:9443",
+                PINNED,
+                "https://hub.example:9443",
+            ),
+            ("http://hub.example:9898", CA, "http://hub.example:9898"),
+            ("https://proxy.example", CA, "https://proxy.example"),
+        ] {
+            assert_eq!(
+                asked_address(typed, certificate),
+                asked,
+                "{typed}, {certificate}"
+            );
+        }
     }
 }
