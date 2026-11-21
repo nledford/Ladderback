@@ -3299,8 +3299,20 @@ ui-pairing-warning-loopback = This address is loopback: only this computer can r
 # Said under the address when it starts with http:// and isn't loopback.
 ui-pairing-warning-plain = This address is plain { "http://" }, which a { -machine } refuses: its key would cross the network unprotected. Use the { "https://" } address.
 
-# Says which certificate a token tells the other machine to trust. Only one is offered while the hub serves no certificate of its own.
-ui-pairing-certificate = The token trusts a certificate authority's certificate for this address, as the system of the other { -machine } does. This { -hub } serves no certificate of its own yet, so no token can pin one.
+# Says which certificate a token tells the other machine to trust, on a hub that serves no certificate of its own, as when its TLS key couldn't be served.
+ui-pairing-certificate = The token trusts a certificate authority's certificate for this address, as the system of the other { -machine } does. This { -hub } serves no certificate of its own, so no token can pin one.
+
+# The legend of the choice of the certificate a token tells the other machine to trust.
+ui-pairing-certificate-legend = Certificate the token trusts
+
+# Said under the certificate choice. `https://` is typed as it is: keep it a string literal.
+ui-pairing-certificate-hint = The { -hub }'s own certificate needs no certificate authority: the token pins it, and the address starts with { "https://" }. Choose a certificate authority's when a proxy in front of the { -hub } serves the address.
+
+# The choice of the hub's own certificate, which the token pins.
+ui-pairing-certificate-own = The { -hub }'s own certificate
+
+# What the dialog lists as the certificate a token trusts when it pins the hub's own.
+ui-pairing-certificate-pinned = The token is pinned to the { -hub }'s own certificate
 
 # The label of the field of how long the token works.
 ui-pairing-life-label = Life in minutes

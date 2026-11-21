@@ -3,8 +3,8 @@ use std::sync::{Arc, Mutex, MutexGuard, PoisonError};
 
 use async_trait::async_trait;
 use domain::fleet::{
-    AgentRecord, AgentStatus, BindingKind, HostnameKey, PairRefusal, PairRequest, Pairing,
-    PairingView, ProofRefusal, ProofRequest, ProofView, TokenId, TokenRecord, TokenUse,
+    AgentRecord, AgentStatus, BindingKind, Fingerprint, HostnameKey, PairRefusal, PairRequest,
+    Pairing, PairingView, ProofRefusal, ProofRequest, ProofView, TokenId, TokenRecord, TokenUse,
     admits_unused_token, decide_pairing, decide_proof, voids_tokens_for_new_key,
 };
 use domain::{AgentId, SignedDuration, Timestamp};
@@ -37,6 +37,7 @@ impl fmt::Debug for Keeping {
 struct Kept {
     tokens: Vec<TokenRecord>,
     agents: Vec<AgentRecord>,
+    tls_key: Option<Fingerprint>,
 }
 
 impl InMemoryAgentRegistry {
@@ -58,6 +59,12 @@ impl InMemoryAgentRegistry {
                 };
             }
         }
+    }
+
+    /// The registry holds `agent`, as if it had paired; nothing else
+    /// changes.
+    pub fn hold(&self, agent: AgentRecord) {
+        self.kept().agents.push(agent);
     }
 
     /// Keeping a token takes `by` from now on: `clock`, the hub's, moves on
@@ -165,6 +172,15 @@ impl AgentRegistry for InMemoryAgentRegistry {
             }
         }
         Ok(true)
+    }
+
+    async fn tls_key(&self) -> Result<Option<Fingerprint>, StoreError> {
+        Ok(self.kept().tls_key)
+    }
+
+    async fn record_tls_key(&self, fingerprint: Fingerprint) -> Result<(), StoreError> {
+        self.kept().tls_key.get_or_insert(fingerprint);
+        Ok(())
     }
 
     async fn pair(

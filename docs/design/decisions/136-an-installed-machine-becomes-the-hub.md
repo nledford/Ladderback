@@ -2,6 +2,8 @@
 
 **Any installed machine can become the hub in place, by the command line or by a form in Settings, and a hub can run beside a machine instead, as a second Ladderback the machine pairs with. Moving a machine's data into a container is not supported until a general way to move a machine exists (#1050). From M8's first release, hub mode is a setting in `config.toml`, with the listening address and the allowed host names, and a command-line flag overrides it. Turning hub mode off is refused while any machine is paired. Decision 126 recommends by role, not by install channel** (recorded 2026-11-20, §7 and §12; the maintainer's decision on #1202).
 
+**Amended 2026-11-21 (#1206):** "Become a hub" asks whether a hub already exists and, if so, takes that hub's pairing token so the machine pairs first and can be promoted later. No network discovery is built. Points 7 and 9 below.
+
 ## Why
 
 - **Becoming the hub changes a mode, not an install.** The hub is a machine running in hub mode ([architecture.md](../architecture.md)), and from M8's release every build has the hub's code (decision 122). A machine that becomes the hub in place keeps its plans, its snapshots' host and paths, its secrets and its data folder: nothing is copied.
@@ -28,8 +30,9 @@
 4. **The config is the source of truth; a command-line flag overrides it.** When a flag does, Settings shows the value read-only and says the command line sets it, so the page never shows a setting that isn't in effect. `install-service` needs no `--hub` of its own.
 5. **Turning hub mode off is refused while any machine is paired,** naming them. Handing the hub role to another machine without pairing again is the durable answer and belongs with moving and restoring a hub (#1039).
 6. **A hub that sleeps or goes offline is warned about from what the hub observes,** not from a guess at the hardware (#1205). A battery check at setup may add an early hint through the platform adapter.
-7. **Finding a hub that already exists** on the local network, so the form offers pairing with it or a handover (#1039) first, is #1206. Discovery is a hint, never a gate: the form's option stays available.
+7. **"Become a hub" asks whether a hub already exists** (the maintainer's decision on #1206, 2026-11-21). On yes it takes that hub's pairing token, so the machine pairs first, checking the token and the hub's fingerprint as decision 121 has it, and can be promoted to hub later by the handover of #1039, which runs on the hub for a paired machine. The form makes no hub until the person confirms. A hint never gates: the option to become a hub stays available whatever the person answers.
 8. **A hub doesn't need sign-in on.** [Decision 120](120-agent-hub-connection-security.md) ("Who may make a token, approve or re-key") asks for it when a browser beyond loopback makes a pairing token or approves a machine, and for the Recovery Kit's page wherever it is opened. With sign-in off, a browser on the hub's own machine makes tokens and approves machines, and `ladderback pairing-token`, `recovery-kit`, `hub-recover` and the approval prompt work in a terminal as the data folder's owner. Sign-in stays the recommendation for a hub reachable on the network, and the guide says why.
+9. **No mDNS or other network discovery.** An announcement is an unauthenticated answer from whoever replies, the weakness decision 120 named in rejecting RFC 8628's device flow. It needs a new crate, with its own approval and `cargo deny`, and contends with Avahi and mDNSResponder for UDP port 5353. It also fits poorly with decision 87's loopback default and decision 122's `hub` build gate, since browsing would have to sit in builds without the hub. If discovery is wanted later it comes back as a new issue and only as a hint: it never pairs, never pre-trusts a fingerprint (none in the record, or one marked claimed and unchecked), never blocks "Become a hub", announces only when the hub already listens beyond loopback, and has its own crate approval.
 
 ## How a person does it
 
@@ -59,3 +62,4 @@ The guide's hub section, written for M8's release, takes these steps. Until a re
 - **Hub mode only as a flag of the service** (`install-service --hub`): the role would live outside the config, and every hub would need migrating once the config held it.
 - **The image as the hub's one recommended channel** (decision 126 before this amendment): it ties the role to an install channel, and a machine installed from a package would have to move to become the hub.
 - **Warning from a guess at the hardware,** such as "a laptop": what the hub observes (#1205) says whether it was asleep or offline.
+- **Finding a hub by mDNS** (#1206's first option), by the OS responders over D-Bus and `dns-sd` (two code paths, and Avahi isn't everywhere), or by probing the subnet for the port (it reads as a port scan): see point 9. Asking the person, then pairing first, needs none of them.
