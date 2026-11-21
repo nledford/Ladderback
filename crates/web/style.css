@@ -509,50 +509,17 @@ main:focus {
   }
 }
 
-/* A link (§4.5): its words in its tone (`--tone`: Ladder Blue unless its
-   page names the text around it), always underlined, so a link in a line of
-   text is never told by its color alone (1.4.1), and its color needs no 3:1
-   against the words around it. The underline is a token's thickness, drawn
-   far enough under the baseline to clear the letters' descenders, which ink
-   skipping keeps it off besides, and thicker under the pointer; focus keeps
-   the global ring. The page it names is bold (The Weight Not Color Rule). */
+/* A link (§4.5), drawn with Tailwind utilities (`link/rules.rs`) but for
+   its color: its words in its tone (`--tone`: Ladder Blue unless its page
+   names the text around it), and under forced colors the system's link
+   color, its underline and icon with it, whatever the tone (a WebKit that
+   only reports the media query keeps the author's). They stay here because
+   the base rule above colors every `<a>`, and a rule outside Tailwind's
+   layers outranks any utility. */
 .link {
   color: var(--tone);
-  text-decoration-line: underline;
-  text-decoration-thickness: var(--link-underline);
-  text-underline-offset: var(--link-underline-offset);
-  text-decoration-skip-ink: auto;
 }
 
-.link:hover {
-  text-decoration-thickness: var(--link-underline-hover);
-}
-
-.link[aria-current="page"] {
-  font-weight: 700;
-}
-
-/* An outside link's icon, after its words. */
-.link > .icon {
-  margin-inline-start: 0.25em;
-}
-
-/* An outside link's words for a screen reader, after its own: in its name,
-   out of sight, as the live regions are. */
-.link-note {
-  position: absolute;
-  inline-size: 1px;
-  block-size: 1px;
-  margin: -1px;
-  padding: 0;
-  overflow: hidden;
-  clip-path: inset(50%);
-  white-space: nowrap;
-  border: 0;
-}
-
-/* The system's link color, its underline and icon with it, whatever the
-   tone: a WebKit that only reports the media query keeps the author's. */
 @media (forced-colors: active) {
   .link {
     color: LinkText;
