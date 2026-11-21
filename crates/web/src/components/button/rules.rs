@@ -1,9 +1,10 @@
 //! What a button looks like, what a screen reader meets and whether it takes
-//! a press (components §4.5): its appearance, the classes of its tone and
-//! size, taken from the shared vocabulary (`variants.rs`), the tone and size
-//! it is drawn at when its page names none, what stands before its label,
-//! and the states it tells with ARIA. `components/button.rs`'s `Button` is
-//! the glue that draws it.
+//! a press (components §4.5): its appearance, its classes, its tone's and
+//! its size's from the shared vocabulary (`variants.rs`) and the Tailwind
+//! utilities that draw it (decision 117), the tone and size it is drawn at
+//! when its page names none, what stands before its label, and the states
+//! it tells with ARIA. `components/button.rs`'s `Button` is the glue that
+//! draws it.
 
 use crate::variants::{Size, Tone};
 
@@ -28,12 +29,47 @@ impl Appearance {
     #[cfg(test)]
     pub const ALL: [Self; 3] = [Self::Filled, Self::Outlined, Self::Ghost];
 
-    /// The class of `style.css` that draws a button so.
+    /// The class that names the appearance a button is drawn in.
     pub fn class(self) -> &'static str {
         match self {
             Self::Filled => "button-filled",
             Self::Outlined => "button-outlined",
             Self::Ghost => "button-ghost",
+        }
+    }
+
+    /// How a button of this appearance is colored, in Tailwind utilities.
+    /// Filled: a fill in its tone, the label in the color drawn on fills
+    /// (each pair at 4.5:1 or more in the contrast gate); its fill is its
+    /// edge, at 3:1 or more on the page and on a surface (1.4.11). Outlined:
+    /// an edge and a label in its tone. Ghost: the label alone, its edge
+    /// drawn only while pressed, but under forced colors, whose edge is the
+    /// button text's (`LOOK`).
+    ///
+    /// Under the pointer, while it takes presses: a fill a step darker
+    /// (lighter in the dark scheme), or the surface under a label and edge a
+    /// step darker, in its tone's hover color (`--tone-hover`, which
+    /// [`hover`] sets), each pair in the contrast gate. Forced colors keep
+    /// the reader's own.
+    fn look(self) -> &'static str {
+        match self {
+            Self::Filled => {
+                "bg-(--tone) border-(--tone) text-on-fill \
+                 not-forced-colors:not-aria-disabled:hover:bg-(--tone-hover) \
+                 not-forced-colors:not-aria-disabled:hover:border-(--tone-hover)"
+            }
+            Self::Outlined => {
+                "bg-transparent border-(--tone) text-(--tone) \
+                 not-forced-colors:not-aria-disabled:hover:bg-surface \
+                 not-forced-colors:not-aria-disabled:hover:border-(--tone-hover) \
+                 not-forced-colors:not-aria-disabled:hover:text-(--tone-hover)"
+            }
+            Self::Ghost => {
+                "bg-transparent border-transparent text-(--tone) \
+                 not-forced-colors:aria-pressed:border-(--tone) \
+                 not-forced-colors:not-aria-disabled:hover:bg-surface \
+                 not-forced-colors:not-aria-disabled:hover:text-(--tone-hover)"
+            }
         }
     }
 }
@@ -126,12 +162,60 @@ pub fn drawn(appearance: Appearance, tone: Tone) -> (Appearance, Tone) {
     }
 }
 
-/// The classes of the button: its appearance and tone as drawn, its size,
-/// which `style.css` makes its height and padding, for an icon-only button
-/// the class that makes it square, and, while it is busy, the class that
-/// keeps its label in the reader's button text with forced colors: busy and
-/// unavailable are both `aria-disabled`, but only an unavailable button
-/// takes the color of unavailable text, as a busy one is at work.
+/// How every button is drawn, in Tailwind utilities (decision 117), logical
+/// ones only: a native `<button>`, flat, its one small corner, its icon or
+/// spinner and its label in a row centered both ways, half an em apart. It
+/// is as tall as its size's control height and padded at its start and end
+/// by its control padding (`Size::control`); a label too long for its line
+/// wraps inside the button, which then grows taller. Its edge is a pixel,
+/// solid; while pressed (a toggle) it is two, inset, so the state is never
+/// color alone (The Weight Not Color Rule; `style.css` makes it bolder).
+/// While it takes no press it stays on the page, where a keyboard and a
+/// screen reader find it, and looks unavailable. Under forced colors it
+/// takes the reader's button colors, every appearance edged so it still
+/// reads as a button. Focus keeps the global ring.
+const LOOK: &str = "inline-flex items-center justify-center gap-[0.5em] \
+    min-block-(--control-height) py-0 border border-solid rounded-(--radius-small) \
+    text-center align-middle aria-pressed:[border-width:2px] aria-pressed:[border-style:inset] \
+    aria-disabled:cursor-not-allowed aria-disabled:opacity-60 \
+    forced-colors:bg-[color:ButtonFace] forced-colors:border-[color:ButtonText] \
+    forced-colors:text-[color:ButtonText]";
+
+/// A button with words: its control padding at its start and end, a pixel
+/// less while pressed, so the pressed edge's extra pixel doesn't widen it.
+const PADDED: &str =
+    "px-(--control-padding) aria-pressed:px-[max(0px,calc(var(--control-padding)_-_1px))]";
+
+/// An icon-only button: square at every size, as wide as it is tall.
+const SQUARE: &str = "inline-(--control-height) px-0";
+
+/// Under forced colors, an unavailable button in the color of unavailable
+/// text. Not a busy one, `aria-disabled` too: it is at work, not
+/// unavailable, so it keeps the button text, and its spinner's arc takes
+/// that color beside a `GrayText` track.
+const UNAVAILABLE: &str = "forced-colors:aria-disabled:border-[color:GrayText] \
+    forced-colors:aria-disabled:text-[color:GrayText]";
+
+/// The color a button of `tone` takes under the pointer (`--tone-hover`): a
+/// step darker than its tone, lighter in the dark scheme; for `Inherit` the
+/// text's own color, as its tone is.
+fn hover(tone: Tone) -> &'static str {
+    match tone {
+        Tone::Primary => "[--tone-hover:var(--accent-hover)]",
+        Tone::Secondary => "[--tone-hover:var(--muted-hover)]",
+        Tone::Success => "[--tone-hover:var(--success-hover)]",
+        Tone::Warning => "[--tone-hover:var(--warning-hover)]",
+        Tone::Error => "[--tone-hover:var(--error-hover)]",
+        Tone::Inherit => "[--tone-hover:currentColor]",
+    }
+}
+
+/// The classes of the button: its own, which names it, its appearance's and
+/// tone's as drawn, its size's and its size's control height and padding,
+/// then the utilities that draw it: every button's look, its appearance's
+/// colors, its tone's hover color, square for an icon-only button and padded
+/// otherwise, and, unless it is busy, the color of unavailable text under
+/// forced colors while it takes no press.
 pub fn button_class(
     appearance: Appearance,
     tone: Tone,
@@ -140,18 +224,23 @@ pub fn button_class(
     busy: bool,
 ) -> String {
     let (appearance, tone) = drawn(appearance, tone);
-    let square = if shape == Shape::IconOnly {
-        " button-icon-only"
+    let padding = if shape == Shape::IconOnly {
+        SQUARE
     } else {
-        ""
+        PADDED
     };
-    let busy = if busy { " button-busy" } else { "" };
+    let unavailable = if busy { "" } else { UNAVAILABLE };
     format!(
-        "button {} {} {}{square}{busy}",
+        "button {} {} {} {} {LOOK} {} {} {padding} {unavailable}",
         appearance.class(),
         tone.class(),
-        size.class()
+        size.class(),
+        size.control(),
+        appearance.look(),
+        hover(tone),
     )
+    .trim_end()
+    .to_owned()
 }
 
 /// Whether a press reaches the page's handler: never while the button is
@@ -204,76 +293,89 @@ mod tests {
         }
     }
 
-    #[test]
-    fn a_button_takes_its_tone_and_its_size_from_the_shared_vocabulary() {
-        assert_eq!(
-            button_class(
-                Appearance::Outlined,
-                Tone::Secondary,
-                Size::Medium,
-                Shape::Text,
-                false
-            ),
-            "button button-outlined tone-secondary size-medium"
-        );
-        assert_eq!(
-            button_class(
-                Appearance::Filled,
-                Tone::Error,
-                Size::XLarge,
-                Shape::IconAndText,
-                false
-            ),
-            "button button-filled tone-error size-xlarge"
-        );
-        assert_eq!(
-            button_class(
-                Appearance::Ghost,
-                Tone::Inherit,
-                Size::Small,
-                Shape::Text,
-                false
-            ),
-            "button button-ghost tone-inherit size-small"
-        );
+    fn classes(class: &str) -> Vec<&str> {
+        class.split_whitespace().collect()
+    }
+
+    fn contains_all(class: &str, set: &str) -> bool {
+        let classes = classes(class);
+        set.split_whitespace().all(|one| classes.contains(&one))
     }
 
     #[test]
-    fn an_icon_only_button_is_square() {
-        assert_eq!(
-            button_class(
-                Appearance::Ghost,
-                Tone::Primary,
-                Size::Large,
-                Shape::IconOnly,
-                false
-            ),
-            "button button-ghost tone-primary size-large button-icon-only"
-        );
+    fn a_button_takes_its_appearance_its_tone_and_its_size_from_the_shared_vocabulary() {
+        for appearance in Appearance::ALL {
+            for tone in Tone::ALL {
+                for size in Size::ALL {
+                    let class = button_class(appearance, tone, size, Shape::Text, false);
+                    let (appearance, tone) = drawn(appearance, tone);
+                    assert_eq!(classes(&class).first(), Some(&"button"), "{class}");
+                    for set in [
+                        appearance.class(),
+                        appearance.look(),
+                        tone.class(),
+                        hover(tone),
+                        size.class(),
+                        size.control(),
+                        LOOK,
+                    ] {
+                        assert!(contains_all(&class, set), "{set} in {class}");
+                    }
+                }
+            }
+        }
     }
 
     #[test]
-    fn a_busy_button_has_a_class_of_its_own_beside_the_others() {
-        assert_eq!(
-            button_class(
+    fn a_hover_is_its_own_tones_step_darker_and_the_text_around_an_inherit_one() {
+        for (tone, token) in [
+            (Tone::Primary, "var(--accent-hover)"),
+            (Tone::Secondary, "var(--muted-hover)"),
+            (Tone::Success, "var(--success-hover)"),
+            (Tone::Warning, "var(--warning-hover)"),
+            (Tone::Error, "var(--error-hover)"),
+            (Tone::Inherit, "currentColor"),
+        ] {
+            assert_eq!(hover(tone), format!("[--tone-hover:{token}]"), "{tone:?}");
+        }
+    }
+
+    #[test]
+    fn each_appearance_and_each_tone_is_drawn_in_colors_of_its_own() {
+        let looks = Appearance::ALL.map(Appearance::look);
+        let hovers = Tone::ALL.map(hover);
+        for (i, look) in looks.iter().enumerate() {
+            assert!(!looks[i + 1..].contains(look), "{look}");
+        }
+        for (i, hover) in hovers.iter().enumerate() {
+            assert!(!hovers[i + 1..].contains(hover), "{hover}");
+        }
+    }
+
+    #[test]
+    fn an_icon_only_button_is_square_and_a_button_with_words_is_padded() {
+        for shape in [Shape::Text, Shape::IconAndText, Shape::IconOnly] {
+            let class = button_class(Appearance::Ghost, Tone::Primary, Size::Large, shape, false);
+            let square = shape == Shape::IconOnly;
+            assert_eq!(contains_all(&class, SQUARE), square, "{shape:?}: {class}");
+            assert_eq!(contains_all(&class, PADDED), !square, "{shape:?}: {class}");
+        }
+    }
+
+    #[test]
+    fn a_busy_button_keeps_the_button_text_under_forced_colors_and_an_unavailable_one_does_not() {
+        for shape in [Shape::Text, Shape::IconOnly] {
+            let busy = button_class(Appearance::Filled, Tone::Primary, Size::Medium, shape, true);
+            let idle = button_class(
                 Appearance::Filled,
                 Tone::Primary,
                 Size::Medium,
-                Shape::Text,
-                true
-            ),
-            "button button-filled tone-primary size-medium button-busy"
-        );
-        assert_eq!(
-            button_class(
-                Appearance::Ghost,
-                Tone::Secondary,
-                Size::Small,
-                Shape::IconOnly,
-                true
-            ),
-            "button button-ghost tone-secondary size-small button-icon-only button-busy"
-        );
+                shape,
+                false,
+            );
+            assert!(!contains_all(&busy, UNAVAILABLE), "{busy}");
+            assert!(contains_all(&idle, UNAVAILABLE), "{idle}");
+        }
     }
 
     #[test]
@@ -282,16 +384,15 @@ mod tests {
             drawn(Appearance::Filled, Tone::Inherit),
             (Appearance::Outlined, Tone::Inherit)
         );
-        assert_eq!(
-            button_class(
-                Appearance::Filled,
-                Tone::Inherit,
-                Size::Medium,
-                Shape::Text,
-                false
-            ),
-            "button button-outlined tone-inherit size-medium"
+        let class = button_class(
+            Appearance::Filled,
+            Tone::Inherit,
+            Size::Medium,
+            Shape::Text,
+            false,
         );
+        assert!(contains_all(&class, "button-outlined"), "{class}");
+        assert!(!contains_all(&class, "button-filled"), "{class}");
         for appearance in Appearance::ALL {
             for tone in Tone::ALL {
                 let kept = !(appearance == Appearance::Filled && tone == Tone::Inherit);

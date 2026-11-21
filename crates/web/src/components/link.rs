@@ -70,10 +70,12 @@ pub fn Link(
         let location = use_location();
         Signal::derive(move || to.current(&location.pathname.get(), &location.search.get()))
     };
+    // The words that say it goes to another site, after its own: in its
+    // name, for a screen reader, and out of sight, as the live regions are.
     let outside_note = leaves.then(|| {
         view! {
             <Icon glyph=LucideGlyph::ExternalLink />
-            <span class="link-note">{text(&localizer, msg::UI_LINK_OUTSIDE)}</span>
+            <span class="sr-only">{text(&localizer, msg::UI_LINK_OUTSIDE)}</span>
         }
     });
     view! {

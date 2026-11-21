@@ -233,10 +233,25 @@ impl LinkTone {
     }
 }
 
-/// The classes of the link: the link's own, which underlines it, and its
-/// tone's.
+/// How a link is drawn, in Tailwind utilities (decision 117), logical ones
+/// only: always underlined, so a link in a line of text is never told by its
+/// color alone (1.4.1), and its color needs no 3:1 against the words around
+/// it. The underline is a token's thickness (`--link-underline`), drawn far
+/// enough under the baseline to clear the letters' descenders
+/// (`--link-underline-offset`), which ink skipping keeps it off besides, and
+/// thicker under the pointer (`--link-underline-hover`); focus keeps the
+/// global ring. The page it names is bold (The Weight Not Color Rule). An
+/// outside link's icon stands a quarter of an em after its words. Its color
+/// is `style.css`'s, which says why.
+const LOOK: &str = "underline decoration-(length:--link-underline) \
+    underline-offset-(--link-underline-offset) [text-decoration-skip-ink:auto] \
+    hover:decoration-(length:--link-underline-hover) aria-[current=page]:font-bold \
+    [&>.icon]:ms-[0.25em]";
+
+/// The classes of the link: the link's own, which names it and colors it in
+/// `style.css`, its tone's, and its look.
 pub fn link_class(tone: LinkTone) -> String {
-    format!("link {}", tone.tone().class())
+    format!("link {} {LOOK}", tone.tone().class())
 }
 
 #[cfg(test)]
@@ -474,7 +489,11 @@ mod tests {
         assert_eq!(LinkTone::default(), LinkTone::Primary);
         assert_eq!(LinkTone::Primary.tone(), Tone::Primary);
         assert_eq!(LinkTone::Inherit.tone(), Tone::Inherit);
-        assert_eq!(link_class(LinkTone::Primary), "link tone-primary");
-        assert_eq!(link_class(LinkTone::Inherit), "link tone-inherit");
+        for (tone, class) in [
+            (LinkTone::Primary, "tone-primary"),
+            (LinkTone::Inherit, "tone-inherit"),
+        ] {
+            assert_eq!(link_class(tone), format!("link {class} {LOOK}"), "{tone:?}");
+        }
     }
 }
