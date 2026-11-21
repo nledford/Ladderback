@@ -814,6 +814,9 @@ async fn state_over(
             without_token,
             full_disk_access: full_disk_access_route,
             sync: http_adapter::SyncHub::default(),
+            pairing: Arc::new(app::pairing::PairingState::new(Arc::new(
+                platform::identity::FileIdentity::in_data_dir(data_dir),
+            ))),
         },
         background,
         stopping,

@@ -58,6 +58,7 @@ mod contents;
 mod log;
 mod one_shot;
 mod pages;
+mod pairing;
 mod proposals;
 
 pub use actions::{CANCELLABLE_KIND, DEFAULT_WAIT, MAX_WAIT, WAIT_STEP, not_cancellable};
@@ -394,6 +395,12 @@ pub trait Backend: Send + Sync + 'static {
     /// token; in a session of its own the `[without-token]` setting. The
     /// tools listed are those these open.
     async fn permissions(&self) -> Result<PermissionsDto, ErrorDto>;
+
+    /// Whether this machine is paired with a hub, and with which, as its
+    /// pin says (`pairing_state`): the hub's address and the fingerprint of
+    /// its key, never a token or a secret (I4). It never connects to the
+    /// hub.
+    async fn pairing(&self) -> Result<api::PairingDto, ErrorDto>;
 }
 
 /// What a [`Backend`] tells `status`.

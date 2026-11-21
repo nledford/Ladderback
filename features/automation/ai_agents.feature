@@ -205,7 +205,7 @@ Feature: What AI agents may do without a token
       And Ladderback is serving on loopback with that config file
       And an MCP server connected to it
       When the MCP client lists the tools
-      Then the tools listed are "status, list_plans, list_repositories, list_snapshots, list_operations, get_operation, wait_operation, preview_forget, preview_import, export_profile, propose_setup, get_proposal, withdraw_proposal, dry_run_plan"
+      Then the tools listed are "status, list_plans, list_repositories, list_snapshots, list_operations, get_operation, pairing_state, wait_operation, preview_forget, preview_import, export_profile, propose_setup, get_proposal, withdraw_proposal, dry_run_plan"
       When the MCP client calls the tool "run_plan" with the arguments '{"plan": "home"}'
       Then the result is the error "without-token-permission"
       And the error names the permission "backup-runs"
@@ -220,7 +220,7 @@ Feature: What AI agents may do without a token
         """
       And an MCP server running headless on that configuration
       When the MCP client lists the tools
-      Then the tools listed are "status, list_plans, list_repositories, list_snapshots, list_operations, get_operation, run_plan, wait_operation, cancel_operation, test_repository, export_profile"
+      Then the tools listed are "status, list_plans, list_repositories, list_snapshots, list_operations, get_operation, pairing_state, run_plan, wait_operation, cancel_operation, test_repository, export_profile"
       When the MCP client calls the tool "preview_forget" with the arguments '{"repository": "demo"}'
       Then the result is the error "without-token-permission"
       And the error names the permission "previews"

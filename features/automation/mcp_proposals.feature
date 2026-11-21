@@ -40,7 +40,7 @@ Feature: AI agents propose configuration changes through MCP
     Given the admin has created an API token over HTTP with the permissions "backups: read" and the label "reader"
     And an MCP server connected to it with that API token in a file
     When the MCP client lists the tools
-    Then the tools listed are "status, list_plans, list_repositories, list_snapshots, list_operations, get_operation, wait_operation, export_profile"
+    Then the tools listed are "status, list_plans, list_repositories, list_snapshots, list_operations, get_operation, pairing_state, wait_operation, export_profile"
 
   # Approval needs a person's browser session with step-up (decision 89,
   # point 7): the server lists no tool that approves, and has none to call.

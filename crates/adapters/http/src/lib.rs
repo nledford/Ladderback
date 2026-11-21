@@ -139,6 +139,9 @@ pub struct AppState {
     /// What `/sync/` serves: the hub's handshake under `serve --hub`, and
     /// nothing otherwise (§16, decision 122).
     pub sync: SyncHub,
+    /// Whether this machine is paired with a hub, and with which, which
+    /// `GET /api/v1/pairing` and `pairing_state` read (components §4.6).
+    pub pairing: Arc<app::pairing::PairingState>,
 }
 
 impl axum::extract::FromRef<AppState> for SignIn {

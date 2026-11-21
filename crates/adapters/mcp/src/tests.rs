@@ -134,6 +134,10 @@ impl Backend for Told {
     async fn permissions(&self) -> Result<PermissionsDto, ErrorDto> {
         Ok(every())
     }
+
+    async fn pairing(&self) -> Result<api::PairingDto, ErrorDto> {
+        Err(untold())
+    }
 }
 
 fn build() -> BuildDto {
@@ -420,6 +424,7 @@ async fn the_tools_listed_are_the_golden_files() {
             "list_operations",
             "get_operation",
             "read_log",
+            "pairing_state",
             "run_plan",
             "wait_operation",
             "cancel_operation",
@@ -497,6 +502,7 @@ async fn each_field_at_every_level_has_one_type_and_only_the_arguments_needed_ar
         ("list_operations", vec![]),
         ("get_operation", vec!["operation"]),
         ("read_log", vec![]),
+        ("pairing_state", vec![]),
         ("run_plan", vec!["plan"]),
         ("wait_operation", vec!["operation"]),
         ("cancel_operation", vec!["operation"]),
@@ -597,7 +603,7 @@ async fn status_names_this_programs_build_field_by_field_and_what_the_backend_to
 }
 
 #[tokio::test(start_paused = true)]
-async fn the_server_offers_resources_and_lists_the_status_summary_as_one() {
+async fn the_server_offers_resources_and_lists_the_status_summary_and_the_pairing_guide() {
     let initialized = connect(told()).initialize("2025-11-25").await;
     assert!(
         initialized["result"]["capabilities"]["resources"].is_object(),
@@ -607,13 +613,22 @@ async fn the_server_offers_resources_and_lists_the_status_summary_as_one() {
     let listed = client.ask_current("resources/list", json!({})).await;
     assert_eq!(
         listed["result"]["resources"],
-        json!([{
-            "uri": "ladderback://status",
-            "name": "status",
-            "title": "Status summary",
-            "description": STATUS_RESOURCE_DESCRIPTION,
-            "mimeType": "application/json",
-        }]),
+        json!([
+            {
+                "uri": "ladderback://status",
+                "name": "status",
+                "title": "Status summary",
+                "description": STATUS_RESOURCE_DESCRIPTION,
+                "mimeType": "application/json",
+            },
+            {
+                "uri": "ladderback://pairing",
+                "name": "pairing",
+                "title": "Pairing a machine with its hub",
+                "description": pairing::PAIRING_RESOURCE_DESCRIPTION,
+                "mimeType": "application/json",
+            },
+        ]),
         "{listed}"
     );
 }
@@ -908,6 +923,8 @@ struct Lists {
     refusal: Option<ErrorDto>,
     /// What `permissions` answers; every permission when `None`.
     permissions: Option<Result<PermissionsDto, ErrorDto>>,
+    /// What `pairing` answers; not paired when `None`.
+    pairing: Option<api::PairingDto>,
     asked: Arc<Mutex<Vec<String>>>,
 }
 
@@ -1155,6 +1172,15 @@ impl Backend for Lists {
 
     async fn permissions(&self) -> Result<PermissionsDto, ErrorDto> {
         self.permissions.clone().unwrap_or_else(|| Ok(every()))
+    }
+
+    async fn pairing(&self) -> Result<api::PairingDto, ErrorDto> {
+        self.ask("pairing".to_owned());
+        let unpaired = api::PairingDto {
+            paired: false,
+            hub: None,
+        };
+        self.told(self.pairing.as_ref().unwrap_or(&unpaired))
     }
 }
 
@@ -1899,7 +1925,7 @@ async fn no_refusal_of_any_tool_carries_structured_content() {
 }
 
 /// Each tool, with arguments it takes.
-fn every_tool_called() -> [(&'static str, Value); 20] {
+fn every_tool_called() -> [(&'static str, Value); 21] {
     [
         ("status", json!({})),
         ("list_plans", json!({})),
@@ -1916,6 +1942,7 @@ fn every_tool_called() -> [(&'static str, Value); 20] {
         ("list_operations", json!({})),
         ("get_operation", json!({"operation": summary(1).id})),
         ("read_log", json!({})),
+        ("pairing_state", json!({})),
         ("run_plan", json!({"plan": "home"})),
         ("wait_operation", json!({"operation": summary(1).id})),
         ("cancel_operation", json!({"operation": summary(1).id})),
@@ -2287,6 +2314,10 @@ impl Backend for Running {
 
     async fn permissions(&self) -> Result<PermissionsDto, ErrorDto> {
         Ok(every())
+    }
+
+    async fn pairing(&self) -> Result<api::PairingDto, ErrorDto> {
+        Err(untold())
     }
 }
 
@@ -2824,7 +2855,7 @@ async fn a_server_of_its_own_offers_no_proposal_tool() {
         .iter()
         .collect();
     assert_eq!(listed, expected);
-    assert_eq!(listed.len(), 16);
+    assert_eq!(listed.len(), 17);
     for tool in proposal_tools {
         let answer = client.call(tool, json!({"proposal": "p"})).await;
         assert_eq!(answer["error"]["code"], -32602, "{tool}: {answer}");
@@ -2922,6 +2953,7 @@ async fn a_token_that_only_reads_is_listed_only_the_tools_that_read() {
             "list_snapshots",
             "list_operations",
             "get_operation",
+            "pairing_state",
             "wait_operation",
             "export_profile"
         ]
@@ -3007,7 +3039,7 @@ async fn permissions_that_cant_be_read_leave_every_tool_listed() {
         ..Lists::default()
     });
     let names = listed(&mut client).await;
-    assert_eq!(names.len(), 20, "{names:?}");
+    assert_eq!(names.len(), 21, "{names:?}");
     assert_eq!(names[0], "status");
 }
 
@@ -3214,4 +3246,170 @@ async fn a_proposal_tool_refuses_an_argument_it_cant_take_naming_it() {
         assert!(!answer.to_string().contains("canary"), "{answer}");
     }
     assert!(asked.lock().unwrap().is_empty(), "{:?}", asked.lock());
+}
+
+/// The pairing guide as `resources/read` answers it to `client`, parsed.
+async fn the_guide(client: &mut Client) -> Value {
+    let read = client
+        .ask_current("resources/read", json!({"uri": "ladderback://pairing"}))
+        .await;
+    let contents = &read["result"]["contents"];
+    assert_eq!(contents.as_array().map(Vec::len), Some(1), "{read}");
+    assert_eq!(contents[0]["uri"], "ladderback://pairing");
+    assert_eq!(contents[0]["mimeType"], "application/json");
+    let text = contents[0]["text"].as_str().expect("the guide as text");
+    serde_json::from_str(text).unwrap()
+}
+
+/// The codes the guide names at each step, in its order.
+fn codes(guide: &Value) -> Vec<(String, Vec<String>)> {
+    guide["steps"]
+        .as_array()
+        .unwrap_or_else(|| panic!("no steps: {guide}"))
+        .iter()
+        .map(|step| {
+            let codes = step["refusals"]
+                .as_array()
+                .unwrap_or_else(|| panic!("no refusals: {step}"))
+                .iter()
+                .map(|refusal| refusal["code"].as_str().expect("a code").to_owned())
+                .collect();
+            (step["step"].as_str().expect("a step").to_owned(), codes)
+        })
+        .collect()
+}
+
+/// The guide (§4.6): the three steps a person takes, where each is taken,
+/// and the refusals each most often meets. Reading it asks the backend
+/// nothing, so it is read even where every call is refused.
+#[tokio::test(start_paused = true)]
+async fn the_pairing_guide_names_each_step_where_it_is_taken_and_its_common_refusals() {
+    let mut client = connect(Told(Err(ErrorDto::new(
+        ErrorCode::SignInRequired,
+        [],
+        None,
+    ))));
+    let guide = the_guide(&mut client).await;
+    let on: Vec<&str> = guide["steps"]
+        .as_array()
+        .expect("steps")
+        .iter()
+        .map(|step| step["on"].as_str().expect("where"))
+        .collect();
+    assert_eq!(on, ["hub", "machine", "hub"]);
+    let owned = |codes: &[&str]| codes.iter().map(|&code| code.to_owned()).collect();
+    assert_eq!(
+        codes(&guide),
+        [
+            (
+                "make-token".to_owned(),
+                owned(&["pairing-needs-sign-in", "pairing-token-limit"])
+            ),
+            (
+                "pair".to_owned(),
+                owned(&[
+                    "token-expired",
+                    "token-used",
+                    "token-revoked",
+                    "hostname-taken",
+                    "pending-limit",
+                    "plain-address",
+                    "hub-unreachable",
+                    "hub-untrusted",
+                    "hub-pin-mismatch",
+                    "hub-connection-lost",
+                ])
+            ),
+            (
+                "approve".to_owned(),
+                owned(&["proof-refused", "hub-link-lost", "protocol-out-of-date"])
+            ),
+        ]
+    );
+}
+
+/// Each refusal says the catalog's sentence for its code, the names only a
+/// real refusal knows left as placeholders a person reads as such.
+#[test]
+fn each_refusal_in_the_guide_says_the_catalogs_sentence() {
+    let placeholders = [
+        ("address", api::MsgArg::Text("<address>".to_owned())),
+        ("hostname", api::MsgArg::Text("<hostname>".to_owned())),
+        ("last_seen", api::MsgArg::Text("<when>".to_owned())),
+    ];
+    let guide = pairing::guide(&english());
+    for step in guide["steps"].as_array().expect("steps") {
+        assert!(
+            !step["says"].as_str().expect("what it says").is_empty(),
+            "{step}"
+        );
+        for refusal in step["refusals"].as_array().expect("refusals") {
+            let code: ErrorCode = serde_json::from_value(refusal["code"].clone()).unwrap();
+            assert_eq!(
+                refusal["says"],
+                catalog(&english(), code, &placeholders, None),
+                "{refusal}"
+            );
+        }
+    }
+}
+
+/// The guide is said in the server's locale, its steps as its refusals.
+#[test]
+fn the_guide_is_said_in_the_locale_the_server_was_given() {
+    let english = pairing::guide(&english());
+    let pseudo = pairing::guide(&pseudo());
+    assert_eq!(codes(&english), codes(&pseudo));
+    for (english, pseudo) in english["steps"]
+        .as_array()
+        .expect("steps")
+        .iter()
+        .zip(pseudo["steps"].as_array().expect("steps"))
+    {
+        assert_ne!(english["says"], pseudo["says"], "{pseudo}");
+        assert_ne!(
+            english["refusals"][0]["says"], pseudo["refusals"][0]["says"],
+            "{pseudo}"
+        );
+    }
+}
+
+/// `pairing_state` answers what the backend reads of the machine's pin, and
+/// asks it nothing else.
+#[tokio::test(start_paused = true)]
+async fn pairing_state_answers_the_hub_the_backend_names() {
+    let paired = api::PairingDto {
+        paired: true,
+        hub: Some(api::PairedHubDto {
+            address: "https://hub.example".to_owned(),
+            fingerprint: "ABCD-EFGH-JKMN-PQRS-TVWX".to_owned(),
+            certificate: api::TokenCertificateDto::Pinned,
+        }),
+    };
+    let asked = Arc::new(Mutex::new(Vec::new()));
+    let mut client = proposing(Lists {
+        pairing: Some(paired),
+        asked: Arc::clone(&asked),
+        ..Lists::default()
+    });
+    let content = client.listed("pairing_state", json!({})).await;
+    assert_eq!(
+        content,
+        json!({"paired": true, "hub": {
+            "address": "https://hub.example",
+            "fingerprint": "ABCD-EFGH-JKMN-PQRS-TVWX",
+            "certificate": "pinned",
+        }})
+    );
+    assert_eq!(*asked.lock().unwrap(), ["pairing"]);
+}
+
+#[tokio::test(start_paused = true)]
+async fn a_refusal_reading_the_pairing_state_is_a_result_marked_as_an_error() {
+    let mut client = proposing(Lists {
+        refusal: Some(ErrorDto::new(ErrorCode::Unknown, [], None)),
+        ..Lists::default()
+    });
+    let answer = client.call("pairing_state", json!({})).await;
+    assert_eq!(refusal(&answer), json!({"code": "unknown"}));
 }

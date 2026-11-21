@@ -708,6 +708,10 @@ impl ::mcp::Backend for InProcess {
             .map(app::access::permissions_dto)
             .map_err(config_refusal)
     }
+
+    async fn pairing(&self) -> Result<api::PairingDto, api::ErrorDto> {
+        todo!("read the pin")
+    }
 }
 
 /// A catalog's refusal as the API answers it: the configuration's
