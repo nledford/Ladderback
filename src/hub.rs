@@ -16,7 +16,8 @@ use app::pairing::{
 use app::ports::{AgentRegistry as _, Identity as _, IdentityError, LinkError, Signing as _};
 use domain::fleet::{
     AgentStatus, Approval, ApprovalRefused, Fingerprint, Hostname, HubAddress, HubRoute,
-    PairingToken, RouteRefused, RouteSession, TokenId, TokenTls, WelcomeRefused, is_loopback,
+    MachineZone, PairingToken, RouteRefused, RouteSession, TokenId, TokenTls, WelcomeRefused,
+    is_loopback,
 };
 use domain::{SignedDuration, Timestamp};
 use l10n::{Localizer, MessageId, PosixEnv, msg};
@@ -601,7 +602,7 @@ async fn on_the_agent(
     );
     let address = token.address().as_str().to_owned();
     match PairWithHub::new(pairing, Arc::new(connector))
-        .pair(token, agent_id, hostname, None)
+        .pair(token, agent_id, hostname, machine_zone())
         .await
     {
         Ok(paired) => {
@@ -660,7 +661,8 @@ fn follow(
         return Ok(Some(ExitCode::from(2)));
     };
     let connecting = connecting(identity);
-    let outcome = runtime.block_on(connecting.connect_at(agent_id, hostname, None, parsed));
+    let outcome =
+        runtime.block_on(connecting.connect_at(agent_id, hostname, machine_zone(), parsed));
     let connected = match outcome {
         Ok(connected) => connected,
         // The hub there proved the pinned key but no longer knows this
@@ -715,6 +717,12 @@ fn hostname_or_said(
         return Ok(None);
     };
     Ok(Some(parsed))
+}
+
+/// The machine zone of the time zone this machine runs in, which it tells
+/// its hub; none when the zone has no IANA name.
+fn machine_zone() -> Option<MachineZone> {
+    MachineZone::of(&domain::TimeZone::system())
 }
 
 /// Connecting this machine to its hub, on the pin and keys in `identity`.
@@ -818,7 +826,10 @@ async fn connect_to_hub(
             .map_or_else(String::new, |address| address.as_str().to_owned()),
         Ok(None) | Err(_) => String::new(),
     };
-    match connecting(identity).connect(agent_id, hostname, None).await {
+    match connecting(identity)
+        .connect(agent_id, hostname, machine_zone())
+        .await
+    {
         Ok(connected) => {
             say_connected(localizer, &connected)?;
             Ok(ExitCode::SUCCESS)

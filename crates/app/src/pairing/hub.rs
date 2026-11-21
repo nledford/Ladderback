@@ -4,12 +4,13 @@ use std::sync::Arc;
 use domain::fleet::{
     AgentEnvelope, AgentRecord, Approval, ApprovalRefused, Binding, BindingKind, Challenge,
     Connect, EpochSeconds, FIRST_SEQUENCE, HANDSHAKES, Holder, Hostname, HostnameKey, HubAddress,
-    HubEnvelope, KEY_BYTES, KeyFile, ListedAgent, Nonce, Pair, PairAnswer, PairRefusal,
-    PairRequest, Paired, PairingToken, PayloadDigest, Proof, ProofRefusal, ProofRequest, PublicKey,
-    Refused, SeedFile, SignedMessage, SigningSeed, TokenId, TokenRecord, TokenTls, TokenUse,
-    UNUSED_TOKEN_LIMIT, Welcome, hello_kind, list_agents, token_life, welcome_kind,
+    HubEnvelope, KEY_BYTES, KeyFile, ListedAgent, MachineZone, Nonce, Pair, PairAnswer,
+    PairRefusal, PairRequest, Paired, PairingToken, PayloadDigest, Proof, ProofRefusal,
+    ProofRequest, PublicKey, Refused, SeedFile, SignedMessage, SigningSeed, TokenId, TokenRecord,
+    TokenTls, TokenUse, UNUSED_TOKEN_LIMIT, Welcome, hello_kind, list_agents, token_life,
+    welcome_kind,
 };
-use domain::{AgentId, SignedDuration};
+use domain::{AgentId, SignedDuration, TimeZoneDatabase};
 
 use super::wire::{read_hello, welcome_payload};
 use crate::access::Access;
@@ -383,7 +384,7 @@ impl HubPairing {
             binding: handshake.binding,
             counter: pair.counter,
             hostname: &pair.hostname,
-            zone: None,
+            zone: pair.zone.as_ref(),
         }
         .to_bytes();
         let authorized = self
@@ -402,7 +403,7 @@ impl HubPairing {
             agent_id: handshake.agent_id,
             agent_key: pair.agent_key,
             hostname: pair.hostname.clone(),
-            zone: None,
+            zone: known(pair.zone.as_ref()),
             counter: pair.counter,
             kind: handshake.kind,
             hub_key: keys.key,
@@ -483,8 +484,11 @@ impl HubPairing {
 
     /// The hub's signed `Welcome` to `hello`, the first message of the
     /// proved `agent`, when it holds: signed by the agent's key on this
-    /// connection, sequence number 1, kind `Hello`.
-    pub fn welcome(
+    /// connection, sequence number 1, kind `Hello`. The machine zone the
+    /// `Hello` reports is kept over the one the agent held, pending or
+    /// approved, so a machine that moved tells its hub at its next
+    /// connection.
+    pub async fn welcome(
         &self,
         keys: &HubKeys,
         handshake: &HubHandshake,
@@ -516,6 +520,12 @@ impl HubPairing {
         let Ok(read) = read_hello(&hello.payload) else {
             return Ok(Err(MessageRefused::Unexpected));
         };
+        let zone = known(read.zone.as_ref());
+        if zone != agent.zone {
+            self.registry
+                .record_zone(agent.agent_id, zone.as_ref())
+                .await?;
+        }
         let signed_at =
             EpochSeconds::from_timestamp(self.clock.now()).unwrap_or(EpochSeconds::from_seconds(0));
         let welcome = Welcome::answering(
@@ -580,4 +590,10 @@ impl HubPairing {
             signature,
         })
     }
+}
+
+/// `zone` as the hub's copy of the zone database spells it; none for a zone
+/// it doesn't know, which the hub holds as unknown rather than guess.
+fn known(zone: Option<&MachineZone>) -> Option<MachineZone> {
+    zone.and_then(|zone| zone.known_in(&TimeZoneDatabase::bundled()))
 }

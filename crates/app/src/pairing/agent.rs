@@ -279,7 +279,7 @@ impl AgentPairing {
             binding,
             counter,
             hostname: &handshake.hostname,
-            zone: None,
+            zone: handshake.zone.as_ref(),
         }
         .to_bytes();
         let pairing_seed = handshake.token.pairing_seed();
@@ -288,7 +288,7 @@ impl AgentPairing {
             agent_key,
             counter,
             hostname: handshake.hostname.clone(),
-            zone: None,
+            zone: handshake.zone.clone(),
             pairing_signature: self.signing.sign(pairing_seed, &message)?,
             agent_signature: self.signing.sign(&agent_seed, &message)?,
         };

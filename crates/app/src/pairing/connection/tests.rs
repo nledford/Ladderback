@@ -667,6 +667,7 @@ async fn the_hub_welcomes_only_a_proved_agents_first_hello() {
         assert_eq!(
             hub.pairing
                 .welcome(&keys, &handshake, &agent, &sent)
+                .await
                 .unwrap(),
             Err(refusal)
         );
@@ -679,6 +680,7 @@ async fn the_hub_welcomes_only_a_proved_agents_first_hello() {
             &agent,
             &hello(1, hello_kind(), &agent_seed),
         )
+        .await
         .unwrap()
         .unwrap();
     assert_eq!(welcome.seq, 1);

@@ -111,6 +111,13 @@ struct Opened {
     binding: Binding,
 }
 
+/// What the agent's `Hello` says of the machine: its hostname and its
+/// machine zone, none when its zone has no IANA name.
+struct Introduction {
+    hostname: Hostname,
+    zone: Option<MachineZone>,
+}
+
 impl ConnectToHub {
     pub fn new(
         identity: Arc<dyn Identity>,
@@ -144,7 +151,6 @@ impl ConnectToHub {
         hostname: Hostname,
         zone: Option<MachineZone>,
     ) -> Result<Connected, ConnectFailure> {
-        let _ = zone;
         let (pin, seed) = self.paired().await?;
         let addresses: Vec<HubAddress> = pin.addresses().cloned().collect();
         let mut first = None;
@@ -152,7 +158,14 @@ impl ConnectToHub {
             match self.open(&pin, address, agent_id).await {
                 Ok(opened) => {
                     return self
-                        .prove(pin, &seed, opened, agent_id, hostname, false)
+                        .prove(
+                            pin,
+                            &seed,
+                            opened,
+                            agent_id,
+                            Introduction { hostname, zone },
+                            false,
+                        )
                         .await;
                 }
                 Err(failure) => {
@@ -175,14 +188,20 @@ impl ConnectToHub {
         zone: Option<MachineZone>,
         address: HubAddress,
     ) -> Result<Connected, ConnectFailure> {
-        let _ = zone;
         let (mut pin, seed) = self.paired().await?;
         let opened = self.open(&pin, &address, agent_id).await?;
         let changed = pin
             .give_address(address)
             .map_err(|_| ConnectFailure::PinFull)?;
-        self.prove(pin, &seed, opened, agent_id, hostname, changed)
-            .await
+        self.prove(
+            pin,
+            &seed,
+            opened,
+            agent_id,
+            Introduction { hostname, zone },
+            changed,
+        )
+        .await
     }
 
     /// The pin and agent key seed of a paired machine.
@@ -242,7 +261,7 @@ impl ConnectToHub {
         seed: &SigningSeed,
         opened: Opened,
         agent_id: AgentId,
-        hostname: Hostname,
+        introduction: Introduction,
         changed: bool,
     ) -> Result<Connected, ConnectFailure> {
         let Opened {
@@ -272,11 +291,11 @@ impl ConnectToHub {
         .await?;
         let hello = Hello {
             agent_version: self.version.clone(),
-            hostname,
+            hostname: introduction.hostname,
             protocols: PROTOCOLS,
             clock: EpochSeconds::from_timestamp(self.clock.now())
                 .unwrap_or(EpochSeconds::from_seconds(0)),
-            zone: None,
+            zone: introduction.zone,
         };
         let payload = hello_payload(&hello);
         let kind = hello_kind();

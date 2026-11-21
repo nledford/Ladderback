@@ -265,8 +265,15 @@ impl AgentRegistry for InMemoryAgentRegistry {
         agent_id: AgentId,
         zone: Option<&MachineZone>,
     ) -> Result<(), StoreError> {
-        let _ = (agent_id, zone);
-        todo!()
+        if let Some(agent) = self
+            .kept()
+            .agents
+            .iter_mut()
+            .find(|agent| agent.agent_id == agent_id)
+        {
+            agent.zone = zone.cloned();
+        }
+        Ok(())
     }
 
     async fn approve(
