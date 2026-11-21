@@ -11,17 +11,35 @@ pub const HUB_PATH: &str = "/api/v1/hub";
 /// Where the page makes a pairing token: `POST` a [`MakePairingTokenDto`].
 pub const PAIRING_TOKENS_PATH: &str = "/api/v1/hub/pairing-tokens";
 
+/// The certificate a pairing token's address shows: the hub's own, which
+/// the token pins, or one a certificate authority signed, as a proxy's in
+/// front of the hub is (decision 120, "Binding to the TLS session").
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "kebab-case")]
+pub enum TokenCertificateDto {
+    Pinned,
+    #[default]
+    Ca,
+}
+
 /// The hub's key as a person compares it: its fingerprint in full (20
 /// Crockford base32 characters in groups of four) and its key ID, the 8 hex
-/// digits a step-up with sign-in off asks for.
+/// digits a step-up with sign-in off asks for; the certificate a token is
+/// offered first, the hub's own when the page came over the hub's built-in
+/// TLS; and the fingerprint of that certificate, when the hub serves one.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "kebab-case", deny_unknown_fields)]
 pub struct HubDto {
     pub fingerprint: String,
     pub key_id: String,
+    #[serde(default)]
+    pub certificate: TokenCertificateDto,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub own_certificate: Option<String>,
 }
 
-/// A pairing token asked for: the address agents will use, its life in
+/// A pairing token asked for: the address agents will use, the certificate
+/// that address shows (a certificate authority's when absent), its life in
 /// minutes (15 when absent, 5 to 1440), and the step-up confirmation: the
 /// admin password with sign-in on, the hub key's key ID otherwise. The
 /// confirmation is never logged or shown (I4): its `Debug` hides it.
@@ -29,6 +47,8 @@ pub struct HubDto {
 #[serde(rename_all = "kebab-case", deny_unknown_fields)]
 pub struct MakePairingTokenDto {
     pub address: String,
+    #[serde(default)]
+    pub certificate: TokenCertificateDto,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub life_minutes: Option<u32>,
     pub confirmation: String,
@@ -38,6 +58,7 @@ impl std::fmt::Debug for MakePairingTokenDto {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("MakePairingTokenDto")
             .field("address", &self.address)
+            .field("certificate", &self.certificate)
             .field("life_minutes", &self.life_minutes)
             .finish_non_exhaustive()
     }
@@ -56,6 +77,8 @@ pub struct PairingTokenDto {
     pub address: String,
     pub expires_at: String,
     pub seconds_left: u64,
+    /// The certificate the token's address shows, as it was made.
+    pub certificate: TokenCertificateDto,
 }
 
 impl std::fmt::Debug for PairingTokenDto {
@@ -64,6 +87,7 @@ impl std::fmt::Debug for PairingTokenDto {
             .field("token_id", &self.token_id)
             .field("fingerprint", &self.fingerprint)
             .field("address", &self.address)
+            .field("certificate", &self.certificate)
             .field("expires_at", &self.expires_at)
             .field("seconds_left", &self.seconds_left)
             .finish_non_exhaustive()

@@ -14,19 +14,30 @@ use app::ports::{AgentRegistry, Clock, Signing};
 use cucumber::{given, then, when};
 use domain::SignedDuration;
 use domain::access::step_up::StepUpConfirmation;
-use domain::fleet::{HubAddress, KeyId, TokenId, TokenTls};
+use domain::fleet::{Fingerprint, HubAddress, KeyId, TokenId, TokenTls};
 
 use super::{Agent, Hub, PairingWorld};
 
 const PASSWORD: &str = "demo-admin-pass";
 const ADDRESS: &str = "https://hub.example:9443";
 
+/// The fingerprint of the certificate the hub's built-in TLS serves.
+const CERTIFICATE: Fingerprint = Fingerprint::from_digest([0x3c; 32]);
+
 impl PairingWorld {
     /// Asks the hub for a token as its page does, from beyond loopback or
-    /// not, confirmed by `confirmation`; a token made becomes the world's.
+    /// not, confirmed by `confirmation`, for an address behind a certificate
+    /// authority's certificate; a token made becomes the world's.
     async fn ask_for_token(&mut self, beyond_loopback: bool, confirmation: &str) {
+        self.ask_for_token_of(beyond_loopback, confirmation, TokenTls::Ca)
+            .await;
+    }
+
+    /// Asks as [`Self::ask_for_token`] does, for an address of `tls`'s kind.
+    async fn ask_for_token_of(&mut self, beyond_loopback: bool, confirmation: &str, tls: TokenTls) {
         let ask = TokenAsk {
             address: HubAddress::parse(ADDRESS).expect("a hub address"),
+            tls,
             life: None,
             peer: if beyond_loopback {
                 IpAddr::V4(Ipv4Addr::new(192, 0, 2, 7))
@@ -93,6 +104,16 @@ async fn asks_with_wrong_password(agent: &mut Agent) {
 #[when("the person asks for a new pairing token and confirms with the admin password")]
 async fn asks_with_password(agent: &mut Agent) {
     agent.pairing.ask_for_token(false, PASSWORD).await;
+}
+
+#[when(
+    "the person asks for a new pairing token for the hub's own certificate and confirms with the admin password"
+)]
+async fn asks_pinned_with_password(agent: &mut Agent) {
+    agent
+        .pairing
+        .ask_for_token_of(false, PASSWORD, TokenTls::Pinned(CERTIFICATE))
+        .await;
 }
 
 #[when(
@@ -180,14 +201,12 @@ async fn shown_with_left(agent: &mut Agent, seconds: i64) {
     );
 }
 
-#[then(
-    "the token trusts a certificate authority's certificate, as the hub serves none of its own yet"
-)]
-fn trusts_a_ca(agent: &mut Agent) {
+#[then("the token pins the certificate of the hub's built-in TLS")]
+fn pins_the_certificate(agent: &mut Agent) {
     let Some(Ok(made)) = &agent.pairing.asked else {
         panic!("no token was made: {:?}", agent.pairing.asked);
     };
-    assert_eq!(made.token.tls(), TokenTls::Ca);
+    assert_eq!(made.token.tls(), TokenTls::Pinned(CERTIFICATE));
 }
 
 #[then(regex = r"^the hub lists (\d+) unused tokens?$")]
