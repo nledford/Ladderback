@@ -35,7 +35,8 @@ const WAITING: usize = 64;
 /// first byte, in their TLS handshake, or waiting to be handed to the
 /// server. A newcomer past it closes the oldest, as the hub's bound on
 /// unauthenticated agents does, so a flood of connections that send
-/// nothing can't hold the door shut (decision 120, "One listener").
+/// nothing can't hold the door shut (decision 120, "At most 64 connections
+/// at the door").
 const AT_THE_DOOR: usize = 64;
 
 /// What the front door does with a connection, by the first byte it sent
@@ -177,6 +178,7 @@ mod tests {
     use http_adapter::{GatedListener, HandedListener};
     use tokio::io::{AsyncReadExt as _, AsyncWriteExt as _};
     use tokio::net::TcpStream;
+    use tokio::time::Instant;
 
     use super::{AT_THE_DOOR, Door, FIRST_BYTE_WITHIN, door, open};
 
@@ -231,11 +233,12 @@ mod tests {
         assert_eq!(peer.addr, stream.local_addr().unwrap());
     }
 
-    /// Whether the door closed `stream` well before its own time limit for
-    /// a first byte would have.
-    async fn closed_soon(stream: &mut TcpStream) -> bool {
+    /// Whether the door closed `stream`, connected at `connected`, well
+    /// before its own time limit for a first byte would have.
+    async fn closed_soon(stream: &mut TcpStream, connected: Instant) -> bool {
         let mut byte = [0; 1];
-        let read = tokio::time::timeout(FIRST_BYTE_WITHIN / 2, stream.read(&mut byte)).await;
+        let soon = connected + FIRST_BYTE_WITHIN / 2;
+        let read = tokio::time::timeout_at(soon, stream.read(&mut byte)).await;
         matches!(read, Ok(Ok(0) | Err(_)))
     }
 
@@ -257,6 +260,7 @@ mod tests {
             .unwrap();
         let at = listener.local_addr().unwrap();
         let mut server = open(listener, at, None);
+        let connected = Instant::now();
         let mut oldest = silent(at).await;
         handed(at, &mut server).await;
         let mut others = Vec::new();
@@ -269,7 +273,7 @@ mod tests {
         others.push(silent(at).await);
         handed(at, &mut server).await;
         assert!(
-            closed_soon(&mut oldest).await,
+            closed_soon(&mut oldest, connected).await,
             "the oldest is still at the door"
         );
         assert!(
