@@ -73,6 +73,23 @@ Feature: Pairing an agent with its hub
     When a second agent named "café" in the other Unicode form pairs with the token
     Then the pairing is refused because the hostname is taken
 
+  Scenario: A lookalike hostname is flagged for the person
+    Given an agent paired under the hostname "laptop"
+    When another agent pairs as "lаptop" with a Cyrillic letter
+    Then the hub lists it as waiting for approval
+    And the hub says the name looks like "laptop"
+
+  Scenario: A lookalike that differs by case is flagged
+    Given an agent paired under the hostname "Laptop"
+    When another agent pairs as "lаptop" with a Cyrillic letter
+    Then the hub says the name looks like "Laptop"
+
+  Scenario: A name in another script that looks like no other isn't flagged
+    Given an agent paired under the hostname "laptop"
+    When another agent pairs as "ノートパソコン"
+    Then the hub lists it as waiting for approval
+    And the hub says the name looks like no other
+
   Scenario: A registered agent can't be taken over with another key
     Given an agent paired under the hostname "laptop"
     And a pairing token
