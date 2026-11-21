@@ -449,6 +449,8 @@ pub(super) fn translate(event: WorkerEvent, redactor: &Redactor) -> Option<Engin
                 | ErrorCode::PairingTokenLife
                 | ErrorCode::PairingTokenLimit
                 | ErrorCode::PairingTokenUnknown
+                | ErrorCode::AgentUnknown
+                | ErrorCode::AgentApprovedAlready
                 | ErrorCode::HubUnavailable
                 | ErrorCode::Unknown => FailureReason::EngineFailed { detail },
             })

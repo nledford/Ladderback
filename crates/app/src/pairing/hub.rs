@@ -20,7 +20,7 @@ use crate::ports::{
 
 mod dialog;
 
-pub use dialog::{ApprovalAsk, MadeToken, TokenAsk, TokenAskRefused};
+pub use dialog::{AgentsListed, ApprovalAsk, MadeToken, TokenAsk, TokenAskRefused};
 
 /// The hub's side of pairing: its keys, its tokens, and its answers to an
 /// agent's `Connect` and `Pair`.
