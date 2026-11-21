@@ -21,6 +21,7 @@ fn every_frame_reads_back_as_written() {
         agent_key: "ak".into(),
         counter: u64::MAX,
         hostname: "Nick's NAS \u{e9}".into(),
+        zone: Some("America/Chicago".into()),
         pairing_signature: "ps".into(),
         agent_signature: "as".into(),
     }];

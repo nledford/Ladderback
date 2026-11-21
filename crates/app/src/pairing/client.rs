@@ -1,7 +1,7 @@
 use std::sync::Arc;
 
 use domain::AgentId;
-use domain::fleet::{Hostname, HubRoute, PairingToken, RouteRefused};
+use domain::fleet::{Hostname, HubRoute, MachineZone, PairingToken, RouteRefused};
 
 use super::agent::{AgentPairing, AgentPairingError, PairedHub};
 use super::wire::{HubMessage, connect_frame, hub_message, pair_frame};
@@ -45,17 +45,22 @@ impl PairWithHub {
         Self { pairing, connector }
     }
 
-    /// Pairs this machine, as `agent_id` under `hostname`, with the hub
-    /// `token` names. The pin, the route and the hub's proof are checked
-    /// before anything of the token leaves the machine.
+    /// Pairs this machine, as `agent_id` under `hostname` in the machine
+    /// zone `zone`, with the hub `token` names. The pin, the route and the
+    /// hub's proof are checked before anything of the token leaves the
+    /// machine.
     pub async fn pair(
         &self,
         token: PairingToken,
         agent_id: AgentId,
         hostname: Hostname,
+        zone: Option<MachineZone>,
     ) -> Result<PairedHub, PairFailure> {
         let route = HubRoute::of(token.address(), token.tls()).map_err(PairFailure::Route)?;
-        let (connect, handshake) = self.pairing.connect(token, agent_id, hostname).await?;
+        let (connect, handshake) = self
+            .pairing
+            .connect(token, agent_id, hostname, zone)
+            .await?;
         let mut link = self.connector.connect(&route).await?;
         link.send(&connect_frame(&connect)).await?;
         let HubMessage::Challenge(challenge) = read(link.receive().await?)? else {

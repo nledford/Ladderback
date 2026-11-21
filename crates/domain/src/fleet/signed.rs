@@ -12,6 +12,7 @@ use jiff::Timestamp;
 use sha2::{Digest as _, Sha256};
 
 use super::Hostname;
+use super::MachineZone;
 use super::keys::{KEY_BYTES, PublicKey, lower_hex};
 use crate::AgentId;
 
@@ -167,6 +168,8 @@ pub enum SignedMessage<'a> {
         binding: Binding,
         counter: u64,
         hostname: &'a Hostname,
+        /// None when the agent's zone has no IANA name.
+        zone: Option<&'a MachineZone>,
     },
     /// `Paired`, signed by the hub key.
     Paired {
@@ -369,6 +372,7 @@ impl SignedMessage<'_> {
                 binding,
                 counter,
                 hostname,
+                zone: _,
             } => w
                 .key(hub_key)
                 .agent(*agent_id)

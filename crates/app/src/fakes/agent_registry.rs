@@ -3,10 +3,10 @@ use std::sync::{Arc, Mutex, MutexGuard, PoisonError};
 
 use async_trait::async_trait;
 use domain::fleet::{
-    AgentRecord, AgentStatus, ApprovalRefused, BindingKind, Fingerprint, HostnameKey, PairRefusal,
-    PairRequest, Pairing, PairingView, ProofRefusal, ProofRequest, ProofView, PublicKey, TokenId,
-    TokenRecord, TokenUse, admits_unused_token, decide_approval, decide_pairing, decide_proof,
-    voids_tokens_for_new_key,
+    AgentRecord, AgentStatus, ApprovalRefused, BindingKind, Fingerprint, HostnameKey, MachineZone,
+    PairRefusal, PairRequest, Pairing, PairingView, ProofRefusal, ProofRequest, ProofView,
+    PublicKey, TokenId, TokenRecord, TokenUse, admits_unused_token, decide_approval,
+    decide_pairing, decide_proof, voids_tokens_for_new_key,
 };
 use domain::{AgentId, SignedDuration, Timestamp};
 
@@ -258,6 +258,15 @@ impl AgentRegistry for InMemoryAgentRegistry {
             }
         }
         Ok(decided)
+    }
+
+    async fn record_zone(
+        &self,
+        agent_id: AgentId,
+        zone: Option<&MachineZone>,
+    ) -> Result<(), StoreError> {
+        let _ = (agent_id, zone);
+        todo!()
     }
 
     async fn approve(

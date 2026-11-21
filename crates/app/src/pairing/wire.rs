@@ -53,6 +53,7 @@ pub fn pair_frame(pair: &Pair) -> AgentFrame {
         agent_key: encoded(pair.agent_key.as_bytes()),
         counter: pair.counter,
         hostname: pair.hostname.as_str().to_owned(),
+        zone: None,
         pairing_signature: encoded(pair.pairing_signature.as_bytes()),
         agent_signature: encoded(pair.agent_signature.as_bytes()),
     }
@@ -117,6 +118,7 @@ pub fn hello_payload(hello: &Hello) -> Vec<u8> {
         hostname: hello.hostname.as_str().to_owned(),
         protocols: range(hello.protocols),
         clock: hello.clock.seconds(),
+        zone: None,
     }
     .to_bytes()
 }
@@ -129,6 +131,7 @@ pub fn read_hello(bytes: &[u8]) -> Result<Hello, WireRefused> {
         hostname: Hostname::parse(&payload.hostname).map_err(|_| WireRefused)?,
         protocols: protocols(payload.protocols)?,
         clock: EpochSeconds::from_seconds(payload.clock),
+        zone: None,
     })
 }
 
@@ -185,6 +188,7 @@ pub fn agent_message(frame: &AgentFrame) -> Result<AgentMessage, WireRefused> {
             agent_key,
             counter,
             hostname,
+            zone: _,
             pairing_signature,
             agent_signature,
         } => Ok(AgentMessage::Pair(Pair {
@@ -192,6 +196,7 @@ pub fn agent_message(frame: &AgentFrame) -> Result<AgentMessage, WireRefused> {
             agent_key: key(agent_key)?,
             counter: *counter,
             hostname: Hostname::parse(hostname).map_err(|_| WireRefused)?,
+            zone: None,
             pairing_signature: signature(pairing_signature)?,
             agent_signature: signature(agent_signature)?,
         })),

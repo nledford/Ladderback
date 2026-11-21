@@ -7,8 +7,8 @@ use app::ports::{Added, AgentRegistry, StoreError};
 use async_trait::async_trait;
 use domain::fleet::{
     AgentRecord, AgentStatus, ApprovalRefused, BindingKind, Fingerprint, HostnameKey, KEY_BYTES,
-    PairRefusal, PairRequest, Pairing, PairingView, ProofRefusal, ProofRequest, ProofView,
-    PublicKey, TokenId, TokenRecord, TokenUse, admits_unused_token, decide_approval,
+    MachineZone, PairRefusal, PairRequest, Pairing, PairingView, ProofRefusal, ProofRequest,
+    ProofView, PublicKey, TokenId, TokenRecord, TokenUse, admits_unused_token, decide_approval,
     decide_pairing, decide_proof, voids_tokens_for_new_key,
 };
 use domain::{AgentId, Timestamp};
@@ -364,6 +364,15 @@ impl AgentRegistry for SqliteStore {
             Err(_) => tx.rollback().await.map_err(unavailable)?,
         }
         Ok(decided)
+    }
+
+    async fn record_zone(
+        &self,
+        agent_id: AgentId,
+        zone: Option<&MachineZone>,
+    ) -> Result<(), StoreError> {
+        let _ = (agent_id, zone);
+        todo!()
     }
 
     /// One transaction, the write lock taken up front, so the record the

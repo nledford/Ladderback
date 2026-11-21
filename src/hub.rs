@@ -601,7 +601,7 @@ async fn on_the_agent(
     );
     let address = token.address().as_str().to_owned();
     match PairWithHub::new(pairing, Arc::new(connector))
-        .pair(token, agent_id, hostname)
+        .pair(token, agent_id, hostname, None)
         .await
     {
         Ok(paired) => {
@@ -660,7 +660,7 @@ fn follow(
         return Ok(Some(ExitCode::from(2)));
     };
     let connecting = connecting(identity);
-    let outcome = runtime.block_on(connecting.connect_at(agent_id, hostname, parsed));
+    let outcome = runtime.block_on(connecting.connect_at(agent_id, hostname, None, parsed));
     let connected = match outcome {
         Ok(connected) => connected,
         // The hub there proved the pinned key but no longer knows this
@@ -818,7 +818,7 @@ async fn connect_to_hub(
             .map_or_else(String::new, |address| address.as_str().to_owned()),
         Ok(None) | Err(_) => String::new(),
     };
-    match connecting(identity).connect(agent_id, hostname).await {
+    match connecting(identity).connect(agent_id, hostname, None).await {
         Ok(connected) => {
             say_connected(localizer, &connected)?;
             Ok(ExitCode::SUCCESS)

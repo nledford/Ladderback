@@ -3,8 +3,9 @@ use std::sync::Arc;
 
 use domain::AgentId;
 use domain::fleet::{
-    Binding, BindingKind, Challenge, Connect, HANDSHAKES, Hostname, HubPin, KEY_BYTES, Nonce, Pair,
-    PairAnswer, PairingToken, PublicKey, Refused, SeedFile, SignedMessage, SigningSeed,
+    Binding, BindingKind, Challenge, Connect, HANDSHAKES, Hostname, HubPin, KEY_BYTES, MachineZone,
+    Nonce, Pair, PairAnswer, PairingToken, PublicKey, Refused, SeedFile, SignedMessage,
+    SigningSeed,
 };
 
 use crate::ports::{
@@ -20,11 +21,12 @@ pub struct AgentPairing {
 }
 
 /// What the agent keeps of a pairing between its `Connect` and the hub's
-/// `Challenge`: the token, its ID and hostname, and its nonce.
+/// `Challenge`: the token, its ID, hostname and machine zone, and its nonce.
 pub struct AgentHandshake {
     token: PairingToken,
     agent_id: AgentId,
     hostname: Hostname,
+    zone: Option<MachineZone>,
     agent_nonce: Nonce,
     kind: BindingKind,
 }
@@ -34,6 +36,7 @@ impl fmt::Debug for AgentHandshake {
         f.debug_struct("AgentHandshake")
             .field("agent_id", &self.agent_id)
             .field("hostname", &self.hostname)
+            .field("zone", &self.zone)
             .field("kind", &self.kind)
             .finish_non_exhaustive()
     }
@@ -216,13 +219,15 @@ impl AgentPairing {
     }
 
     /// The agent's `Connect` for a pairing with `token` as `agent_id` under
-    /// `hostname`. It names the binding kind of the token's address, and
+    /// `hostname`, in the machine zone `zone` (none when its zone has no
+    /// IANA name). It names the binding kind of the token's address, and
     /// carries nothing of the token.
     pub async fn connect(
         &self,
         token: PairingToken,
         agent_id: AgentId,
         hostname: Hostname,
+        zone: Option<MachineZone>,
     ) -> Result<(Connect, AgentHandshake), AgentPairingError> {
         if let Some(pin) = self.identity.pin().await?
             && pin.hub_key != *token.hub_key()
@@ -237,6 +242,7 @@ impl AgentPairing {
             token,
             agent_id,
             hostname,
+            zone,
             agent_nonce: Nonce::from_bytes(self.random.token()?),
         };
         let connect = handshake.connect();
@@ -273,6 +279,7 @@ impl AgentPairing {
             binding,
             counter,
             hostname: &handshake.hostname,
+            zone: None,
         }
         .to_bytes();
         let pairing_seed = handshake.token.pairing_seed();
@@ -281,6 +288,7 @@ impl AgentPairing {
             agent_key,
             counter,
             hostname: handshake.hostname.clone(),
+            zone: None,
             pairing_signature: self.signing.sign(pairing_seed, &message)?,
             agent_signature: self.signing.sign(&agent_seed, &message)?,
         };

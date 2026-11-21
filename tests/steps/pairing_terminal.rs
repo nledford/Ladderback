@@ -1,7 +1,8 @@
 //! Steps for `features/fleet/pairing_from_a_terminal.feature`,
 //! `features/fleet/approving_from_a_terminal.feature`,
-//! `features/fleet/hub_status_from_a_terminal.feature` and the `@e2e`
-//! scenarios of `features/fleet/following_the_hub.feature`: the hub's
+//! `features/fleet/hub_status_from_a_terminal.feature`, the `@e2e`
+//! scenarios of `features/fleet/following_the_hub.feature` and the terminal
+//! scenarios of `features/fleet/machine_zone.feature`: the hub's
 //! `ladderback pairing-token` and `ladderback serve --hub`, and a machine's
 //! `ladderback pair` and `ladderback hub-status`, each a real process on
 //! folders of its own.
@@ -42,6 +43,9 @@ pub struct PairingTerminal {
     other_address: Option<SocketAddr>,
     /// The key fingerprint the machine showed when it paired.
     machine_key: Option<String>,
+    /// The time zone the machine's commands run in, through `TZ`; this
+    /// computer's when none.
+    machine_zone: Option<String>,
     said: Option<Said>,
 }
 
@@ -69,12 +73,25 @@ fn other_hub_root(agent: &Agent) -> PathBuf {
 /// `stdin` as its standard input, on a blocking thread: see [`blocking`].
 async fn ladderback(root: PathBuf, args: &[&str], stdin: Option<String>) -> Said {
     let args: Vec<String> = args.iter().map(|arg| (*arg).to_owned()).collect();
-    blocking(move || run(&root, &args, stdin)).await
+    blocking(move || run(&root, &args, stdin, None)).await
 }
 
-fn run(root: &Path, args: &[String], stdin: Option<String>) -> Said {
+/// [`ladderback`] on the machine's folders, in the machine's time zone.
+async fn on_machine(agent: &Agent, args: &[&str], stdin: Option<String>) -> Said {
+    let (root, zone) = (
+        machine_root(agent),
+        agent.pairing_terminal.machine_zone.clone(),
+    );
+    let args: Vec<String> = args.iter().map(|arg| (*arg).to_owned()).collect();
+    blocking(move || run(&root, &args, stdin, zone.as_deref())).await
+}
+
+fn run(root: &Path, args: &[String], stdin: Option<String>, zone: Option<&str>) -> Said {
     let mut command = Command::new(LADDERBACK);
     testkit::daemon::isolate(&mut command, root);
+    if let Some(zone) = zone {
+        command.env("TZ", zone);
+    }
     command
         .args(args)
         .stdin(if stdin.is_some() {
@@ -113,8 +130,8 @@ async fn pair(agent: &mut Agent, hostname: &str, address: &str) {
 }
 
 async fn pair_pasting(agent: &mut Agent, hostname: &str, address: &str, pasted: String) {
-    let said = ladderback(
-        machine_root(agent),
+    let said = on_machine(
+        agent,
         &["pair", address, "--hostname", hostname, "--yes"],
         Some(pasted),
     )
@@ -216,12 +233,7 @@ async fn hub_moves(agent: &mut Agent) {
 /// `ladderback pair <address>` on the paired machine, with nothing on its
 /// standard input: no token.
 async fn give_address(agent: &mut Agent, address: SocketAddr) {
-    let said = ladderback(
-        machine_root(agent),
-        &["pair", &format!("https://{address}")],
-        None,
-    )
-    .await;
+    let said = on_machine(agent, &["pair", &format!("https://{address}")], None).await;
     agent.pairing_terminal.said = Some(said);
 }
 
@@ -363,6 +375,24 @@ async fn machine_paired_before(agent: &mut Agent, hostname: String) {
         .unwrap_or_else(|| panic!("the machine showed its key: {said:?}"))
         .to_owned();
     agent.pairing_terminal.machine_key = Some(key);
+}
+
+#[when(
+    expr = "a machine named {string} in the time zone {string} pairs with the token from its terminal"
+)]
+async fn machine_in_zone_pairs(agent: &mut Agent, hostname: String, zone: String) {
+    agent.pairing_terminal.machine_zone = Some(zone);
+    machine_pairs(agent, hostname).await;
+    let said = said(agent);
+    assert!(said.success, "{said:?}");
+}
+
+#[given(
+    expr = "a machine named {string} in the time zone {string} paired with the token from its terminal"
+)]
+async fn machine_in_zone_paired_before(agent: &mut Agent, hostname: String, zone: String) {
+    agent.pairing_terminal.machine_zone = Some(zone);
+    machine_paired_before(agent, hostname).await;
 }
 
 fn machine_key(agent: &Agent) -> &str {
@@ -530,8 +560,18 @@ fn read_pinned(agent: &mut Agent) {
 
 #[when("the machine checks its link to the hub from its terminal")]
 async fn machine_checks(agent: &mut Agent) {
-    let said = ladderback(machine_root(agent), &["hub-status"], None).await;
+    let said = on_machine(agent, &["hub-status"], None).await;
     agent.pairing_terminal.said = Some(said);
+}
+
+#[when(
+    expr = "the machine, now in the time zone {string}, checks its link to the hub from its terminal"
+)]
+async fn moved_machine_checks(agent: &mut Agent, zone: String) {
+    agent.pairing_terminal.machine_zone = Some(zone);
+    machine_checks(agent).await;
+    let said = said(agent);
+    assert!(said.success, "{said:?}");
 }
 
 #[when(expr = "a machine pairs with the token at the address {string} from its terminal")]
@@ -601,6 +641,24 @@ async fn hub_lists_pending(agent: &mut Agent, hostname: String) {
     assert_eq!(listed.hostname.as_str(), hostname);
     assert!(
         matches!(listed.status, AgentStatus::Pending { .. }),
+        "{listed:?}"
+    );
+}
+
+#[then(expr = "once the hub stops, it holds {string} as the machine's time zone")]
+async fn hub_holds_zone(agent: &mut Agent, zone: String) {
+    // Dropping the daemon ends it and waits for it.
+    agent.pairing_terminal.hub = None;
+    let database = testkit::daemon::data_dir(&hub_root(agent)).join("ladderback.db");
+    let store = SqliteStore::open(&database).await.expect("the hub's store");
+    let agents = store.agents().await.expect("the hub's agents");
+    store.close().await;
+    let [listed] = agents.as_slice() else {
+        panic!("one agent: {agents:?}");
+    };
+    assert_eq!(
+        listed.zone.as_ref().map(|zone| zone.as_str()),
+        Some(zone.as_str()),
         "{listed:?}"
     );
 }

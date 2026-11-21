@@ -9,8 +9,8 @@ use std::sync::Arc;
 use async_trait::async_trait;
 use domain::fleet::{
     AgentRecord, AgentStatus, ApprovalRefused, BindingKind, Fingerprint, Hostname, KEY_BYTES,
-    PENDING_LIMIT, PairRefusal, PairRequest, Pairing, ProofRefusal, ProofRequest, PublicKey,
-    TokenRecord, TokenUse,
+    MachineZone, PENDING_LIMIT, PairRefusal, PairRequest, Pairing, ProofRefusal, ProofRequest,
+    PublicKey, TokenRecord, TokenUse,
 };
 use domain::{AgentId, Timestamp, Uuid};
 
@@ -49,6 +49,7 @@ pub async fn run(harness: &dyn AgentRegistryHarness) {
     an_approval_of_an_unknown_agent_or_another_key_changes_nothing(harness).await;
     racing_approvals_approve_once(harness).await;
     the_tls_key_is_recorded_once_and_outlives_the_hub(harness).await;
+    the_machine_zone_an_agent_reported_last_is_kept(harness).await;
 }
 
 /// The value of `result`, after a failed assertion if it is an error.
@@ -75,6 +76,10 @@ fn hostname(text: &str) -> Option<Hostname> {
     ok(Hostname::parse(text), "a test hostname")
 }
 
+fn zone(name: &str) -> Option<MachineZone> {
+    ok(MachineZone::parse(name), "a test zone")
+}
+
 /// The token whose pairing key is `key(byte)`, made at `made` and lapsing
 /// 15 minutes later.
 fn token(byte: u8, made: i64) -> Option<TokenRecord> {
@@ -96,6 +101,7 @@ fn request(n: u8, byte: u8, name: &str) -> Option<PairRequest> {
         agent_id: agent_id(u128::from(n)),
         agent_key: key(n.wrapping_add(100))?,
         hostname: hostname(name)?,
+        zone: None,
         counter: u64::from(n),
         kind: BindingKind::TlsExporter,
         hub_key: key(200)?,
@@ -265,6 +271,7 @@ async fn a_pairing_keeps_a_pending_agent_and_spends_the_token(harness: &dyn Agen
         status: AgentStatus::Pending { since: at(10) },
         counter: first.counter,
         last_seen: at(10),
+        zone: None,
     };
     assert_eq!(
         pair(registry.as_ref(), &first, at(10)).await,
@@ -537,6 +544,73 @@ async fn records_outlive_the_hub(harness: &dyn AgentRegistryHarness) {
         Some(Ok(Pairing::Repeated)),
         "the spent token remembers whom it paired"
     );
+}
+
+/// The machine zone an agent reported last is the one kept, none included:
+/// the one it paired with, then each one a `Hello` reports, across a
+/// restart (#114). A report for an ID it doesn't hold changes nothing.
+async fn the_machine_zone_an_agent_reported_last_is_kept(harness: &dyn AgentRegistryHarness) {
+    let (Some(token), Some(request), Some(proving), Some(chicago), Some(berlin)) = (
+        token(1, 0),
+        request(1, 1, "laptop"),
+        proof(1, 5),
+        zone("America/Chicago"),
+        zone("Europe/Berlin"),
+    ) else {
+        return;
+    };
+    let registry = harness.empty().await;
+    add(registry.as_ref(), &token).await;
+    let reported = PairRequest {
+        zone: Some(chicago.clone()),
+        ..request
+    };
+    let paired = pair(registry.as_ref(), &reported, at(10)).await;
+    assert!(matches!(paired, Some(Ok(Pairing::New(_)))), "{paired:?}");
+    let zone_of = async |registry: &dyn AgentRegistry| {
+        let found = ok(registry.agent(reported.agent_id).await, "reading the agent");
+        found.flatten().map(|agent| agent.zone)
+    };
+    assert_eq!(
+        zone_of(registry.as_ref()).await,
+        Some(Some(chicago.clone()))
+    );
+    prove_and_approve(registry.as_ref(), &proving, &reported).await;
+    assert_eq!(
+        zone_of(registry.as_ref()).await,
+        Some(Some(chicago)),
+        "a proof and an approval keep the zone"
+    );
+    ok(
+        registry.record_zone(reported.agent_id, Some(&berlin)).await,
+        "recording a zone",
+    );
+    let reopened = harness.reopened().await;
+    assert_eq!(zone_of(reopened.as_ref()).await, Some(Some(berlin)));
+    let before = agents(reopened.as_ref()).await;
+    ok(
+        reopened.record_zone(agent_id(9), None).await,
+        "recording the zone of no agent",
+    );
+    assert_eq!(agents(reopened.as_ref()).await, before);
+    ok(
+        reopened.record_zone(reported.agent_id, None).await,
+        "recording no zone",
+    );
+    assert_eq!(zone_of(reopened.as_ref()).await, Some(None));
+}
+
+/// Takes `proving` at `at(20)` and approves the agent of `request` at
+/// `at(30)`, each of which must succeed.
+async fn prove_and_approve(
+    registry: &dyn AgentRegistry,
+    proving: &ProofRequest,
+    request: &PairRequest,
+) {
+    let proven = ok(registry.take_proof(proving, at(20)).await, "proving");
+    assert!(matches!(proven, Some(Ok(_))), "{proven:?}");
+    let approved = approve(registry, request, at(30)).await;
+    assert!(matches!(approved, Some(Ok(_))), "{approved:?}");
 }
 
 /// The first record of the TLS key stands: a second, of another key, is

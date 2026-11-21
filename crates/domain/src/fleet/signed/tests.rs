@@ -26,6 +26,10 @@ fn hostname() -> Hostname {
     Hostname::parse("Nick's MacBook Pro").unwrap()
 }
 
+fn chicago() -> MachineZone {
+    MachineZone::parse("America/Chicago").unwrap()
+}
+
 fn name(text: &str) -> WireName {
     WireName::parse(text).unwrap()
 }
@@ -34,6 +38,7 @@ fn name(text: &str) -> WireName {
 /// made from, in the table's order, with its vector.
 fn every_message<'a>(
     host: &'a Hostname,
+    zone: &'a MachineZone,
     grants: &'a WireName,
     heartbeat: &'a WireName,
     refused: &'a WireName,
@@ -74,6 +79,7 @@ fn every_message<'a>(
                 binding: binding(),
                 counter: 7,
                 hostname: host,
+                zone: Some(zone),
             },
             hex(PAIR),
         ),
@@ -160,13 +166,14 @@ fn every_message<'a>(
 /// so a change to the layout fails here rather than between two builds.
 #[test]
 fn each_message_encodes_to_its_fixed_vector() {
-    let (host, grants, heartbeat, refused) = (
+    let (host, zone, grants, heartbeat, refused) = (
         hostname(),
+        chicago(),
         name("RepoGrants"),
         name("Heartbeat"),
         name("proof-refused"),
     );
-    for (message, vector) in every_message(&host, &grants, &heartbeat, &refused) {
+    for (message, vector) in every_message(&host, &zone, &grants, &heartbeat, &refused) {
         assert_eq!(
             lower_hex(message.to_bytes().as_bytes()),
             vector,
@@ -180,13 +187,14 @@ fn each_message_encodes_to_its_fixed_vector() {
 /// messages share one, and a signature of one never verifies as another.
 #[test]
 fn every_message_has_its_own_label() {
-    let (host, grants, heartbeat, refused) = (
+    let (host, zone, grants, heartbeat, refused) = (
         hostname(),
+        chicago(),
         name("RepoGrants"),
         name("Heartbeat"),
         name("proof-refused"),
     );
-    let messages = every_message(&host, &grants, &heartbeat, &refused);
+    let messages = every_message(&host, &zone, &grants, &heartbeat, &refused);
     let mut labels: Vec<_> = messages.iter().map(|(m, _)| m.label()).collect();
     labels.sort_unstable();
     labels.dedup();
@@ -285,6 +293,33 @@ fn a_variable_field_carries_its_length() {
     assert_eq!(long.as_bytes()[at], 4);
 }
 
+/// A pairing signs its machine zone, so nobody between the agent and the
+/// hub can change the zone the hub keeps. None is a zero length, which no
+/// zone name has.
+#[test]
+fn a_pairing_signs_its_machine_zone() {
+    let host = hostname();
+    let berlin = MachineZone::parse("Europe/Berlin").unwrap();
+    let pair = |zone: Option<&MachineZone>| {
+        SignedMessage::Pair {
+            hub_key: key(0x11),
+            agent_id: agent(),
+            agent_key: key(0x22),
+            agent_nonce: nonce(0xaa),
+            hub_nonce: nonce(0xbb),
+            binding: binding(),
+            counter: 7,
+            hostname: &host,
+            zone,
+        }
+        .to_bytes()
+    };
+    let (none, zoned) = (pair(None), pair(Some(&chicago())));
+    assert_eq!(none.as_bytes().last(), Some(&0));
+    assert_ne!(zoned, none);
+    assert_ne!(zoned, pair(Some(&berlin)));
+}
+
 #[test]
 fn a_wire_name_is_1_to_255_visible_ascii_characters() {
     assert_eq!(name("proof-refused").as_str(), "proof-refused");
@@ -373,7 +408,8 @@ const PAIR: &[&str] = &[
     "222222222222222222222222222222222222222222222222aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
     "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaabbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
     "bbbbbbbbbbbbbbbb01cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
-    "cc0000000000000007124e69636b2773204d6163426f6f6b2050726f",
+    "cc0000000000000007124e69636b2773204d6163426f6f6b2050726f0f416d65726963612f436869",
+    "6361676f",
 ];
 
 /// `paired`.

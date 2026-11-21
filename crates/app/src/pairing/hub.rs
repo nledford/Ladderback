@@ -383,6 +383,7 @@ impl HubPairing {
             binding: handshake.binding,
             counter: pair.counter,
             hostname: &pair.hostname,
+            zone: None,
         }
         .to_bytes();
         let authorized = self
@@ -401,6 +402,7 @@ impl HubPairing {
             agent_id: handshake.agent_id,
             agent_key: pair.agent_key,
             hostname: pair.hostname.clone(),
+            zone: None,
             counter: pair.counter,
             kind: handshake.kind,
             hub_key: keys.key,

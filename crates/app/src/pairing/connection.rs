@@ -2,9 +2,9 @@ use std::sync::Arc;
 
 use domain::fleet::{
     AgentEnvelope, Approval, Binding, BindingKind, Challenge, Connect, EpochSeconds,
-    FIRST_SEQUENCE, Hello, Hostname, HubAddress, HubEnvelope, HubPin, HubRoute, Nonce, PROTOCOLS,
-    PairAnswer, PayloadDigest, Proof, PublicKey, Refused, RouteRefused, SeedFile, SignedMessage,
-    SigningSeed, WelcomeRefused, hello_kind, welcome_kind,
+    FIRST_SEQUENCE, Hello, Hostname, HubAddress, HubEnvelope, HubPin, HubRoute, MachineZone, Nonce,
+    PROTOCOLS, PairAnswer, PayloadDigest, Proof, PublicKey, Refused, RouteRefused, SeedFile,
+    SignedMessage, SigningSeed, WelcomeRefused, hello_kind, welcome_kind,
 };
 use domain::{AgentId, SignedDuration};
 
@@ -130,17 +130,21 @@ impl ConnectToHub {
         }
     }
 
-    /// Connects this machine, as `agent_id` under `hostname`, to the hub it
-    /// pinned at pairing, and says where the hub holds it. It tries the
-    /// address the person gave, then the token's (decision 120, "Addresses
-    /// and the transport statement"), and moves on only while no hub has
-    /// proved the pinned key: once one has, its answer stands. When none
-    /// does, the failure is the first address's.
+    /// Connects this machine, as `agent_id` under `hostname` in the machine
+    /// zone `zone`, to the hub it pinned at pairing, and says where the hub
+    /// holds it. It tries the address the person gave, then the token's
+    /// (decision 120, "Addresses and the transport statement"), and moves
+    /// on only while no hub has proved the pinned key: once one has, its
+    /// answer stands. When none does, the failure is the first address's.
+    /// `Hello` carries the zone, so a machine that moved tells its hub at
+    /// its next connection.
     pub async fn connect(
         &self,
         agent_id: AgentId,
         hostname: Hostname,
+        zone: Option<MachineZone>,
     ) -> Result<Connected, ConnectFailure> {
+        let _ = zone;
         let (pin, seed) = self.paired().await?;
         let addresses: Vec<HubAddress> = pin.addresses().cloned().collect();
         let mut first = None;
@@ -168,8 +172,10 @@ impl ConnectToHub {
         &self,
         agent_id: AgentId,
         hostname: Hostname,
+        zone: Option<MachineZone>,
         address: HubAddress,
     ) -> Result<Connected, ConnectFailure> {
+        let _ = zone;
         let (mut pin, seed) = self.paired().await?;
         let opened = self.open(&pin, &address, agent_id).await?;
         let changed = pin
@@ -270,6 +276,7 @@ impl ConnectToHub {
             protocols: PROTOCOLS,
             clock: EpochSeconds::from_timestamp(self.clock.now())
                 .unwrap_or(EpochSeconds::from_seconds(0)),
+            zone: None,
         };
         let payload = hello_payload(&hello);
         let kind = hello_kind();

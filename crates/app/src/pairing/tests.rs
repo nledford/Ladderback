@@ -81,7 +81,7 @@ async fn pair(
     token: PairingToken,
 ) -> Result<PairedHub, AgentPairingError> {
     let keys = hub.pairing.keys().await.unwrap();
-    let (connect, handshake) = agent.connect(token, agent_id(), laptop()).await?;
+    let (connect, handshake) = agent.connect(token, agent_id(), laptop(), None).await?;
     let (challenge, hub_side) = hub
         .pairing
         .challenge(&keys, &connect, Some(EXPORTER))
@@ -431,7 +431,7 @@ async fn an_agent_pinned_to_another_hub_stops() {
     let token = hub.token(pinned()).await;
     let hub_key = *token.hub_key();
     let refused = agent(identity.clone())
-        .connect(token, agent_id(), laptop())
+        .connect(token, agent_id(), laptop(), None)
         .await
         .unwrap_err();
     assert_eq!(
@@ -452,7 +452,7 @@ async fn a_bad_challenge_gets_nothing_of_the_token() {
     let keys = hub.pairing.keys().await.unwrap();
     let agent = agent(Arc::default());
     let (connect, _) = agent
-        .connect(hub.token(pinned()).await, agent_id(), laptop())
+        .connect(hub.token(pinned()).await, agent_id(), laptop(), None)
         .await
         .unwrap();
     let (good, _) = hub
@@ -483,7 +483,7 @@ async fn a_bad_challenge_gets_nothing_of_the_token() {
         (good, None, AgentPairingError::BindingUnavailable),
     ] {
         let (_, handshake) = agent
-            .connect(hub.token(pinned()).await, agent_id(), laptop())
+            .connect(hub.token(pinned()).await, agent_id(), laptop(), None)
             .await
             .unwrap();
         let refused = agent
@@ -502,7 +502,7 @@ async fn a_hub_that_speaks_no_common_handshake_is_named() {
     let keys = hub.pairing.keys().await.unwrap();
     let agent = agent(Arc::default());
     let (connect, handshake) = agent
-        .connect(hub.token(TokenTls::Ca).await, agent_id(), laptop())
+        .connect(hub.token(TokenTls::Ca).await, agent_id(), laptop(), None)
         .await
         .unwrap();
     let hub_seed = hub.identity.seed(SeedFile::HubKey).await.unwrap().unwrap();
@@ -538,7 +538,7 @@ async fn the_hub_needs_the_binding_the_agent_names() {
     let hub = Hub::new(1);
     let keys = hub.pairing.keys().await.unwrap();
     let (connect, _) = agent(Arc::default())
-        .connect(hub.token(pinned()).await, agent_id(), laptop())
+        .connect(hub.token(pinned()).await, agent_id(), laptop(), None)
         .await
         .unwrap();
     assert_eq!(
@@ -556,7 +556,10 @@ async fn a_pair_with_a_bad_signature_is_refused() {
     let agent = agent(Arc::default());
     for spoil_agent_signature in [true, false] {
         let token = hub.token(pinned()).await;
-        let (connect, handshake) = agent.connect(token, agent_id(), laptop()).await.unwrap();
+        let (connect, handshake) = agent
+            .connect(token, agent_id(), laptop(), None)
+            .await
+            .unwrap();
         let (challenge, hub_side) = hub
             .pairing
             .challenge(&keys, &connect, Some(EXPORTER))
@@ -605,7 +608,7 @@ async fn an_unsigned_answer_is_a_dropped_connection() {
     ];
     for answer in answers {
         let (connect, handshake) = agent
-            .connect(hub.token(pinned()).await, agent_id(), laptop())
+            .connect(hub.token(pinned()).await, agent_id(), laptop(), None)
             .await
             .unwrap();
         let (challenge, _) = hub
@@ -640,7 +643,7 @@ async fn a_taken_hostname_names_its_holder() {
     let keys = hub.pairing.keys().await.unwrap();
     let other_id = AgentId::from_uuid(Uuid::from_u128(2));
     let (connect, handshake) = other
-        .connect(second, other_id, Hostname::parse("LAPTOP").unwrap())
+        .connect(second, other_id, Hostname::parse("LAPTOP").unwrap(), None)
         .await
         .unwrap();
     let (challenge, hub_side) = hub
@@ -680,6 +683,7 @@ fn held(n: u8, name: &str, pending: bool) -> AgentRecord {
         },
         counter: 1,
         last_seen: at,
+        zone: None,
     }
 }
 
@@ -747,7 +751,10 @@ async fn nothing_shown_holds_a_secret() {
     let pairing_seed = token.pairing_seed().to_hex();
     let hub_seed = hub.identity.seed(SeedFile::HubKey).await.unwrap().unwrap();
     let agent = agent(Arc::default());
-    let (connect, handshake) = agent.connect(token, agent_id(), laptop()).await.unwrap();
+    let (connect, handshake) = agent
+        .connect(token, agent_id(), laptop(), None)
+        .await
+        .unwrap();
     let (challenge, hub_side) = hub
         .pairing
         .challenge(&keys, &connect, Some(EXPORTER))

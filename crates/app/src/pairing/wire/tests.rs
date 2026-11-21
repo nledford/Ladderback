@@ -1,7 +1,8 @@
 use api::sync::{AgentFrame, HolderFrame, HubFrame};
 use domain::fleet::{
-    BindingKind, Challenge, Connect, EpochSeconds, Handshakes, Holder, Hostname, KEY_BYTES, Nonce,
-    Pair, PairAnswer, Paired, PublicKey, Refused, SIGNATURE_BYTES, Signature, WireName,
+    BindingKind, Challenge, Connect, EpochSeconds, Handshakes, Holder, Hostname, KEY_BYTES,
+    MachineZone, Nonce, Pair, PairAnswer, Paired, PublicKey, Refused, SIGNATURE_BYTES, Signature,
+    WireName,
 };
 use domain::{AgentId, Uuid};
 
@@ -32,6 +33,7 @@ fn pair() -> Pair {
         agent_key: key(0x22),
         counter: 7,
         hostname: Hostname::parse("nas").unwrap(),
+        zone: None,
         pairing_signature: signature(0x33),
         agent_signature: signature(0x44),
     }
@@ -242,6 +244,7 @@ fn hello() -> Hello {
         hostname: Hostname::parse("Nick's NAS").unwrap(),
         protocols: domain::fleet::PROTOCOLS,
         clock: EpochSeconds::from_seconds(1_800_000_001),
+        zone: None,
     }
 }
 
@@ -316,6 +319,38 @@ fn a_payload_out_of_shape_is_refused() {
     let mut welcome = String::from_utf8(welcome_payload(&welcome())).unwrap();
     welcome = welcome.replace("[1,3]", "[3,1]");
     assert_eq!(read_welcome(welcome.as_bytes()), Err(WireRefused));
+}
+
+/// The machine zone travels in `Pair` and in `Hello`, and is left out of
+/// both when there is none, so a frame without one reads as before (#114).
+#[test]
+fn the_machine_zone_travels_in_a_pair_and_a_hello() {
+    let zone = Some(MachineZone::parse("America/Chicago").unwrap());
+    let zoned_pair = Pair {
+        zone: zone.clone(),
+        ..pair()
+    };
+    let frame = AgentFrame::from_text(&pair_frame(&zoned_pair).to_text()).unwrap();
+    assert_eq!(agent_message(&frame), Ok(AgentMessage::Pair(zoned_pair)));
+    let zoned_hello = Hello { zone, ..hello() };
+    assert_eq!(read_hello(&hello_payload(&zoned_hello)), Ok(zoned_hello));
+    assert!(!pair_frame(&pair()).to_text().contains("zone"));
+    let plain = String::from_utf8(hello_payload(&hello())).unwrap();
+    assert!(!plain.contains("zone"), "{plain}");
+}
+
+/// A zone that isn't an IANA-shaped name refuses the frame, as a hostname
+/// that isn't one does (#114).
+#[test]
+fn a_zone_out_of_shape_is_refused() {
+    let mut frame = pair_frame(&pair());
+    if let AgentFrame::Pair { zone, .. } = &mut frame {
+        *zone = Some("../etc/passwd".to_owned());
+    }
+    assert_eq!(agent_message(&frame), Err(WireRefused));
+    let hello =
+        br#"{"agent_version":"x","hostname":"nas","protocols":[1,1],"clock":1,"zone":"Europe/"}"#;
+    assert_eq!(read_hello(hello), Err(WireRefused));
 }
 
 #[test]

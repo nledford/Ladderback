@@ -75,6 +75,7 @@ async fn the_rows_the_cases_start_from_are_good() {
             status: AgentStatus::Approved { at: at(10) },
             counter: u64::MAX,
             last_seen: at(20),
+            zone: None,
         }])
     );
     assert_eq!(
