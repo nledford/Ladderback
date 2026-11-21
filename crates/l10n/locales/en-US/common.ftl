@@ -160,6 +160,9 @@ error-daemon-stopped = { -brand-name } stopped before this operation ended, so t
 # The daemon was told to stop while the operation was running: a service stop, a restart, the computer shutting down. No notification is sent of it.
 error-daemon-shut-down = { -brand-name } was shut down while this operation was running, so the operation stopped before it finished. Run the operation again if you still need it.
 
+# A queued backup's turn came while a newer run of its plan was already going, so it gave way to that run and never ran.
+error-superseded = A newer run of this plan was already going when this backup's turn came, so this backup didn't run. Nothing was written.
+
 # The request named a host the daemon does not answer for.
 # `localhost`, `127.0.0.1` and `--allowed-host` are typed as they are: keep them string literals.
 error-host-not-allowed = { -brand-name } refused this request because it names a host that { -brand-name } does not answer for. Open { -brand-name } at { "localhost" } or { "127.0.0.1" }, or allow the host with { "--allowed-host" }.

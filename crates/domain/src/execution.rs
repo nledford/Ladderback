@@ -251,7 +251,7 @@ impl FailureReason {
             Self::CredentialsRefused { .. } => "credentials-refused",
             Self::DaemonStopped => "daemon-stopped",
             Self::DaemonShutDown => "daemon-shut-down",
-            Self::Superseded => todo!(),
+            Self::Superseded => "superseded",
             Self::NoLocationUsable => "no-location-usable",
             Self::RestoreTargetUnwritable => "restore-target-unwritable",
             Self::NoLocationRuleHolds => "no-location-rule-holds",

@@ -723,7 +723,7 @@ fn failure_refusal(reason: FailureReason) -> FailureRefusal {
         // the same, as it has everywhere it is told.
         F::DaemonStopped => unavailable(ErrorCode::DaemonStopped, Vec::new(), None),
         F::DaemonShutDown => unavailable(ErrorCode::DaemonShutDown, Vec::new(), None),
-        F::Superseded => todo!(),
+        F::Superseded => unavailable(ErrorCode::Superseded, Vec::new(), None),
         F::NoLocationUsable => unavailable(ErrorCode::NoLocationUsable, Vec::new(), None),
         F::NoLocationRuleHolds => unavailable(ErrorCode::NoLocationRuleHolds, Vec::new(), None),
         F::PasswordNotAccepted => unavailable(ErrorCode::PasswordNotAccepted, Vec::new(), None),

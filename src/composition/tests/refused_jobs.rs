@@ -71,6 +71,10 @@ async fn a_failed_job_is_refused_by_the_kind_of_its_failure() {
             unavailable(ErrorCode::DaemonShutDown, vec![], None),
         ),
         (
+            F::Superseded,
+            unavailable(ErrorCode::Superseded, vec![], None),
+        ),
+        (
             F::SecretsTooLargeToMask {
                 field: Some("HTTPS_PROXY".to_owned()),
                 limit: 262_144,
