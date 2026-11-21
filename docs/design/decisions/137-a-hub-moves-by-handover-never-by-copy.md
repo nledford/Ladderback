@@ -1,15 +1,17 @@
 # Decision 137: A hub moves by handover, never by copy, and a hub that finds itself rewound recovers before it grants
 
-**Each machine keeps, for every repository, the highest lease epoch it has seen, and refuses a grant below it as `epoch-lower`, keeping its own lease until it expires; the floor never resets, not even in a recovery. A hub that starts on a machine whose machine identifier differs from the one it recorded, or that a machine's heartbeat shows to be behind an epoch floor, enters recovery mode: it serves status and grants nothing until a person confirms, then issues epochs above the highest any machine reported. Moving a hub is a handover, never a file copy: a promotion while the old hub lives, the recovery handover when it is gone, and no private key is copied. A restore doesn't raise the generation, and M9 has no signed export bundle** (recorded 2026-11-21, §7.3, §16; the maintainer's decision on #1039).
+**Each machine keeps, for every repository, the highest lease epoch it has seen, and refuses a grant below it as `epoch-lower`; the floor never resets, not even in a recovery. A hub that starts on a different machine, by its machine identifier, or that a heartbeat shows to be behind a floor, enters recovery mode: it serves status and grants nothing until a person confirms, and on a different machine only the recovery handover ends it. After any start, no repository changes owner until every machine using it has sent a heartbeat or 7 days have passed. Moving a hub is a handover, never a file copy, and no private key is copied. A restore doesn't raise the generation, and M9 has no signed export bundle** (recorded 2026-11-21, §7.3, §16; the maintainer's decision on #1039 and his answers of the same day).
 
 ## Why
 
 - **The generation floor alone misses a same-generation restore.** Decision 120 reserves the hub's generation, and nothing raises it before a move. A hub restored from a backup keeps its generation but has older epochs, so it passes the floor and can grant a lease a machine already holds at a higher epoch: two maintenance owners, which I1 forbids.
 - **The machine holds the floor, so a rewound hub can't rewrite it.** Every `RepoGrants` entry for a repository that a machine acts on raises its floor for that repository, whoever the entry names as owner; an entry at the floor is a renewal. A refusal applies to that entry only, so one stale entry stops no other lease. A refused entry leaves a lease as it was, to expire as any lease does (§7.3). Nothing a hub sends lowers the floor, and a recovery handover restarts the generation floor (decision 120) and leaves this one alone.
-- **Recovery mode is the hub's answer to a rewind it can see.** The first trigger is the machine identifier that decision 120 stores beside an agent's ID (#296). The hub records it too, so a restore onto another machine is caught, and a restore onto the same machine isn't. The second trigger catches that one: a heartbeat reports a floor above the hub's own counter for a repository. Both put the hub in recovery mode, which it says on its pages and in its log.
+- **Recovery mode is the hub's answer to a rewind it can see.** The first trigger is the machine identifier that decision 120 stores beside an agent's ID (#296), the operating system's own value. The hub records it too and compares it at every start, so a restore onto another machine is caught and a restore onto the same machine isn't. A machine identifier that can't be read, now or when it was recorded, counts as different, the safe side. The second trigger catches the same-machine restore: a heartbeat reports a floor above the hub's own counter for a repository. Both put the hub in recovery mode, which it says on its pages and in its log.
 - **A report counts only with its proof.** A heartbeat carries, for each repository, the floor and the hub-signed entry that set it. The hub acts only on a floor its own key chain signed and logs any other, so a machine that claims a huge floor can't hold the hub in recovery or leave it no epoch to issue.
-- **Recovery grants nothing, and backups go on.** The hub serves status, runs no maintenance of its own and renews and grants no lease until a person confirms with the step-up decision 120 asks for approving a machine. The confirmation says that a copy of the hub's files looks the same as a restore and asks whether the old hub is stopped or gone. Machines keep backing up, as decision 88 has them do when the hub is missing, and keep the leases they hold until those expire.
-- **A recovered hub learns the epochs from the machines.** After the confirmation it issues epochs above the highest floor reported. It grants a repository to a machine other than the one that reported holding it only after that machine's `ReleaseAck`, or 7 days after the hub entered recovery mode, since a lease the hub renewed before the rewind can run that long (§7.3).
+- **Recovery grants nothing, and backups go on.** The hub serves status, runs no maintenance of its own and renews and grants no lease until it leaves recovery mode. Machines keep backing up, as decision 88 has them do when the hub is missing, and keep the leases they hold until those expire.
+- **How it ends depends on the machine.** On the same machine, a person's confirmation with the step-up decision 120 asks for approving a machine is enough. On a different machine, or one whose identifier can't be read, only the recovery handover ends it, with the recovery seed (`hub-recover`): it makes a fresh key that machines follow, so a hub copied with the old key files can't grant beside the old hub under the old key. A confirmation alone is never enough there.
+- **After any start, an owner changes only once every machine has reported.** After a restore, a copy or an ordinary restart, the hub grants no lease to a machine that doesn't report holding it, moves no repository to another owner and renews only a lease its holder reports, until every machine the registry lists as using the repository has sent a heartbeat to this hub or 7 days, the lease length, have passed since the start. A restored hub can't see the rewind until a machine reports, and a lease the hub renewed before it can run that long. So the grant that two owners need can't be made before the holder has spoken, and the epoch floor is the second line.
+- **A recovered hub learns the epochs from the machines.** After it leaves recovery mode it issues epochs above the highest floor reported, and changes an owner only under the rule above (§7.3).
 - **A move is a handover, so ownership never changes hands in it.** While the old hub lives, a paired machine is promoted: the old hub signs a handover to the new machine's own hub key, raising the generation by one as decision 120 reserved. Signing it retires the old hub, which grants and renews nothing after, so there is one arbiter. The promoted hub starts with the epoch counters of the hub it replaces, and records its own machine identifier at its first start. Leases keep their owners.
 - **Recovery is the move when the old hub is gone.** A backup of the data folder leaves the key files out (decision 120), so the person recovers with the recovery seed, which signs the recovery handover to a fresh key. A hub made new after "What losing both costs" has counters behind every floor and enters recovery mode once. A repository removed and added again keeps its counter, so it only rises.
 - **No private key is copied.** Every machine already follows the chain of handovers from the key it pinned, so none pairs again and the old key is trusted nowhere afterward. A file copy of the registry would carry no fence of its own and would rely wholly on the floor and recovery mode.
@@ -22,7 +24,7 @@ The move's own steps, its freeze of the hub, its page and its command line are b
 
 ## Scenario
 
-This scenario joins M9's `maintenance/ownership.feature`.
+These scenarios join M9's `maintenance/ownership.feature`. The first is the issue's, and shows the epoch floor as the second line after the start rule.
 
 ```gherkin
   Scenario: A machine refuses a grant from a hub restored to an older epoch
@@ -35,6 +37,22 @@ This scenario joins M9's `maintenance/ownership.feature`.
     Then the restored hub enters recovery mode
 ```
 
+```gherkin
+  Scenario: A restarted hub moves no owner before the machines have reported
+    Given a laptop holds the lease on repository R and a NAS also uses R
+    When the hub is restored from a backup and starts
+    And the hub is asked to grant R to the NAS
+    Then the hub grants nothing for R until the laptop and the NAS have sent a heartbeat or 7 days have passed
+
+  Scenario: A hub copied to another machine needs the recovery handover
+    Given a hub copied with its key files to a machine with another machine identifier
+    When the hub starts
+    Then it enters recovery mode
+    And a person's confirmation doesn't end it
+    When the person recovers the hub with the recovery seed
+    Then it leaves recovery mode under a fresh key
+```
+
 ## Rejected
 
 - **The generation floor only:** it misses the same-generation restore above.
@@ -42,12 +60,13 @@ This scenario joins M9's `maintenance/ownership.feature`.
 - **The machine identifier check alone:** it misses a restore onto the same machine.
 - **Raising the generation on a restore:** a hub restored onto its own machine can't tell it was restored, so nothing would raise it. The epoch floor covers that restore.
 - **Refusing only `/sync/v1` on a different machine,** as a missing key does today: the hub would still grant, which is the harm.
+- **A person's confirmation alone on a different machine:** a copy with the key files would grant under the old key beside a running old hub.
 - **A signed export and import bundle in M9:** see "Why".
 
-## What this doesn't close
+## What it costs
 
-- **A window after a same-machine restore.** The hub can't see the rewind until a machine reports a floor above its counter, and `RepoGrants` go out at connect, before any report. A grant it makes in that time to a machine that never held the repository, such as the NAS in the scenario, stands until its lease lapses, up to 7 days, beside the holder's. Recovery mode stops renewals and grants, not leases already given. Closing it needs a rule this decision doesn't make, such as no change of owner after any start until every machine using the repository has reported.
-- **A copy that carries the key files** starts in recovery mode, and a person's confirmation is all that lets it grant. Whether a different machine should leave recovery only by the recovery handover is the maintainer's to decide.
-- **A leaked key.** A grant it signs can raise a machine's floor to the maximum for a repository, and that machine then refuses the repository's leases for good: no recovery, reset or setting lowers a floor, so only a data folder made new, a new machine, starts without one. Its backups go on, and the hub can't issue above the maximum.
+- **A transfer after any hub start waits.** A repository moves to another owner, as in a handover, only after one heartbeat interval from the hub's start, or, with a machine that is offline, up to 7 days from the start. It delays moves only: renewals of leases their holders report, and backups, go on.
+- **A hub whose machine identifier can't be read** enters recovery mode at every start, so each restart needs the recovery handover. The safe side has that price.
+- **A leaked key** can sign a grant that raises a machine's floor to the maximum for a repository, and that machine then refuses the repository's leases. This is accepted, and the floor never resets. It fails safe: no two owners. The machine's backups go on, and it recovers by starting with a new data folder and pairing again.
 
 Amends decision 120's scope: a move of the hub and a restore are decided here, no longer open.
