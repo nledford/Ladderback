@@ -343,9 +343,9 @@ pub(crate) fn Agents(localizer: Arc<Localizer>, on: bool) -> impl IntoView {
     // plain address the same one over `https://`, as the hub serves both.
     Effect::new(move |_| {
         if certificate.get() == PINNED
-            && let Some(rest) = address.get_untracked().trim().strip_prefix("http://")
+            && let Some(over_tls) = over_tls(address.get_untracked().trim())
         {
-            address.set(format!("https://{rest}"));
+            address.set(over_tls);
         }
     });
     let life_typed = RwSignal::new(DEFAULT_LIFE.to_owned());
@@ -756,4 +756,41 @@ fn lapses(localizer: &Localizer, expires_at: &str, left: u64) -> String {
             ("minutes", MsgArg::Count(minutes(left))),
         ],
     )
+}
+
+/// The plain `address` as the same one over `https://`, its port kept: the
+/// hub serves both on one port, so `http://hub` is `https://hub:80`.
+/// `None` for an address that isn't plain.
+fn over_tls(address: &str) -> Option<String> {
+    let rest = address.strip_prefix("http://")?;
+    let end = rest.find(['/', '?', '#']).unwrap_or(rest.len());
+    let (authority, path) = rest.split_at(end);
+    // A port follows the last colon, outside an IPv6 address's brackets.
+    let has_port = authority
+        .rsplit_once(':')
+        .is_some_and(|(host, _)| host.ends_with(']') || !host.contains('['));
+    Some(if has_port {
+        format!("https://{rest}")
+    } else {
+        format!("https://{authority}:80{path}")
+    })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::over_tls;
+
+    #[test]
+    fn a_plain_address_goes_over_tls_on_the_same_port() {
+        for (plain, over) in [
+            ("http://hub.example:9898", "https://hub.example:9898"),
+            ("http://hub.example", "https://hub.example:80"),
+            ("http://hub.example/", "https://hub.example:80/"),
+            ("http://[::1]", "https://[::1]:80"),
+            ("http://[::1]:9898/x", "https://[::1]:9898/x"),
+        ] {
+            assert_eq!(over_tls(plain).as_deref(), Some(over), "{plain}");
+        }
+        assert_eq!(over_tls("https://hub.example"), None);
+    }
 }
