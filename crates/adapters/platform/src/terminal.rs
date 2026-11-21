@@ -98,7 +98,10 @@ fn read_line_from(input: &mut impl BufRead, max: usize) -> io::Result<String> {
 }
 
 /// The terminal's echo turned off until this is dropped; the line ending a
-/// person types is still shown, so the next line starts on its own.
+/// person types is still shown, so the next line starts on its own. A drop
+/// never runs when a signal ends the process, so Ctrl-C and `SIGTERM` put
+/// the terminal's settings back first (#399, [`ending`]). One prompt is
+/// open at a time, as the process has one standard input.
 struct EchoOff {
     #[cfg(unix)]
     tty: Tty,
@@ -109,16 +112,19 @@ struct EchoOff {
 impl EchoOff {
     #[cfg(unix)]
     fn start(tty: &Tty) -> io::Result<Self> {
-        use nix::sys::termios::{LocalFlags, SetArg, tcgetattr, tcsetattr};
+        use nix::sys::termios::{LocalFlags, tcgetattr};
         let saved = tcgetattr(tty).map_err(io::Error::from)?;
         let mut quiet = saved.clone();
         quiet.local_flags.remove(LocalFlags::ECHO);
         quiet.local_flags.insert(LocalFlags::ECHONL);
-        tcsetattr(tty, SetArg::TCSAFLUSH, &quiet).map_err(io::Error::from)?;
-        Ok(Self {
+        // Everything that can fail is done before echo goes off, which only
+        // a drop of this, or a signal, then turns back on.
+        let echo_off = Self {
             tty: tty.try_clone()?,
-            saved,
-        })
+            saved: saved.clone(),
+        };
+        ending::quiet(tty, saved, &quiet)?;
+        Ok(echo_off)
     }
 
     #[cfg(not(unix))]
@@ -130,10 +136,87 @@ impl EchoOff {
 #[cfg(unix)]
 impl Drop for EchoOff {
     fn drop(&mut self) {
-        use nix::sys::termios::{SetArg, tcsetattr};
+        ending::put_back_now(&self.tty, &self.saved);
+    }
+}
+
+/// Ctrl-C (`SIGINT`) and `SIGTERM` at the prompt (#399): their default
+/// action ends the process at once, with no drop run, which would leave the
+/// terminal silent until `reset` or `stty echo`. A thread of their own takes
+/// them instead, puts the prompt's terminal settings back, and then ends the
+/// process by the signal's own default action, so the shell sees the same
+/// end as before.
+///
+/// The thread stays for the rest of the process once a prompt has started
+/// it: no safe code can give a signal back to its default action, and the
+/// thread ends the process as that action would, prompt or not. So a
+/// signal the parent set to be ignored ends the process too from then on,
+/// and if the thread can't be started, the prompt fails and these signals
+/// do nothing until the process, which then ends, has.
+#[cfg(unix)]
+mod ending {
+    use std::io;
+    use std::os::fd::OwnedFd;
+    use std::sync::{Mutex, PoisonError};
+
+    use nix::sys::termios::{SetArg, Termios, tcdrain, tcsetattr};
+    use signal_hook::consts::{SIGINT, SIGTERM};
+
+    /// The terminal a prompt has changed, and its settings from before.
+    static CHANGED: Mutex<Option<(OwnedFd, Termios)>> = Mutex::new(None);
+
+    /// Whether the thread that takes the signals runs.
+    static WATCHING: Mutex<bool> = Mutex::new(false);
+
+    /// Sets `quiet` on `tty`, whose settings were `saved`, and has Ctrl-C or
+    /// `SIGTERM` put `saved` back before it ends the process, until
+    /// [`put_back_now`]. Both happen under the lock the signal's thread
+    /// takes, so it finds either echo still on or `saved` to put back.
+    pub(super) fn quiet(tty: &OwnedFd, saved: Termios, quiet: &Termios) -> io::Result<()> {
+        watch()?;
+        let kept = tty.try_clone()?;
+        // The prompt's own output is waited for outside the lock: a terminal
+        // that holds it back (after Ctrl-S) would hold a signal back too.
+        tcdrain(tty).map_err(io::Error::from)?;
+        let mut changed = CHANGED.lock().unwrap_or_else(PoisonError::into_inner);
+        tcsetattr(tty, SetArg::TCSAFLUSH, quiet).map_err(io::Error::from)?;
+        *changed = Some((kept, saved));
+        Ok(())
+    }
+
+    /// Puts `saved` back on `tty` now, and nothing on a signal after.
+    pub(super) fn put_back_now(tty: &OwnedFd, saved: &Termios) {
+        let mut changed = CHANGED.lock().unwrap_or_else(PoisonError::into_inner);
         // Nothing more can be done for a terminal that won't take its own
         // settings back.
-        let _ = tcsetattr(&self.tty, SetArg::TCSANOW, &self.saved);
+        let _ = tcsetattr(tty, SetArg::TCSANOW, saved);
+        *changed = None;
+    }
+
+    fn watch() -> io::Result<()> {
+        let mut watching = WATCHING.lock().unwrap_or_else(PoisonError::into_inner);
+        if *watching {
+            return Ok(());
+        }
+        let mut signals = signal_hook::iterator::Signals::new([SIGINT, SIGTERM])?;
+        std::thread::Builder::new()
+            .name("prompt-signals".to_owned())
+            .spawn(move || {
+                for signal in signals.forever() {
+                    // Held until the process ends, so a prompt's own drop
+                    // can't change the terminal meanwhile.
+                    let mut changed = CHANGED.lock().unwrap_or_else(PoisonError::into_inner);
+                    if let Some((tty, saved)) = changed.take() {
+                        let _ = tcsetattr(&tty, SetArg::TCSANOW, &saved);
+                    }
+                    // Ends the process as the signal would have; it returns
+                    // only for a signal whose default is to go on.
+                    let _ = signal_hook::low_level::emulate_default_handler(signal);
+                    drop(changed);
+                }
+            })?;
+        *watching = true;
+        Ok(())
     }
 }
 
@@ -230,5 +313,48 @@ mod tty_tests {
         );
         drop(input);
         let _master = paste.join().unwrap();
+    }
+
+    /// Set in the copy of this test binary that
+    /// [`a_signal_after_the_prompt_still_ends_the_process`] runs.
+    const CHILD: &str = "LADDERBACK_TEST_SIGNAL_AFTER_PROMPT";
+
+    /// Once a prompt has closed, the thread that took its signals stays, and
+    /// a signal still ends the process as its default action would: Ctrl-C
+    /// while `set-password` hashes and writes the password still stops it.
+    #[test]
+    fn a_signal_after_the_prompt_still_ends_the_process() {
+        use std::os::unix::process::ExitStatusExt;
+        use std::process::{Command, Stdio};
+
+        use nix::sys::signal::{Signal, kill};
+        use nix::unistd::Pid;
+        if std::env::var_os(CHILD).is_some() {
+            let pty = openpty(None, None).unwrap();
+            let tty = pty.slave;
+            let reader = BufReader::new(File::from(tty.try_clone().unwrap()));
+            drop(SecretInput::over(tty, reader).unwrap());
+            kill(Pid::this(), Signal::SIGTERM).unwrap();
+            // Reached only while the signal does nothing: the copy then ends
+            // well, which the test below refuses.
+            std::thread::sleep(Duration::from_secs(5));
+            drop(pty.master);
+            return;
+        }
+        let status = Command::new(std::env::current_exe().unwrap())
+            .args([
+                "--exact",
+                "terminal::tty_tests::a_signal_after_the_prompt_still_ends_the_process",
+            ])
+            .env(CHILD, "1")
+            .stdout(Stdio::null())
+            .stderr(Stdio::null())
+            .status()
+            .unwrap();
+        assert_eq!(
+            status.signal().map(Signal::try_from),
+            Some(Ok(Signal::SIGTERM)),
+            "{status:?}"
+        );
     }
 }
