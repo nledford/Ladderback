@@ -179,9 +179,17 @@ mod ending {
         // that holds it back (after Ctrl-S) would hold a signal back too.
         tcdrain(tty).map_err(io::Error::from)?;
         let mut changed = CHANGED.lock().unwrap_or_else(PoisonError::into_inner);
-        tcsetattr(tty, SetArg::TCSAFLUSH, quiet).map_err(io::Error::from)?;
+        set_quiet(tty, quiet).map_err(io::Error::from)?;
         *changed = Some((kept, saved));
         Ok(())
+    }
+
+    /// Sets `quiet` on `tty` and drops what was typed before it, without
+    /// waiting for the terminal's output: [`quiet`] does this under the lock
+    /// the signal's thread takes, and another writer's output that the
+    /// terminal holds back (after Ctrl-S) mustn't hold a signal back.
+    pub(super) fn set_quiet(tty: &OwnedFd, quiet: &Termios) -> nix::Result<()> {
+        tcsetattr(tty, SetArg::TCSAFLUSH, quiet)
     }
 
     /// Puts `saved` back on `tty` now, and nothing on a signal after.
@@ -313,6 +321,35 @@ mod tty_tests {
         );
         drop(input);
         let _master = paste.join().unwrap();
+    }
+
+    /// Output another writer has queued that the terminal won't take (after
+    /// Ctrl-S) doesn't hold up turning echo off, which happens under the
+    /// lock the signal's thread needs before it can end the process.
+    #[test]
+    fn echo_goes_off_without_waiting_for_held_output() {
+        let pty = openpty(None, None).unwrap();
+        let tty = pty.slave;
+        // Nobody takes the terminal's output, so this writer fills its queue
+        // and then waits.
+        let mut writer = File::from(tty.try_clone().unwrap());
+        std::thread::spawn(move || {
+            let line = [b'x'; 256];
+            while writer.write_all(&line).is_ok() {}
+        });
+        std::thread::sleep(Duration::from_millis(500));
+        let mut quiet = tcgetattr(&tty).unwrap();
+        quiet.local_flags.remove(LocalFlags::ECHO);
+        let slave = tty.try_clone().unwrap();
+        let (done, set) = std::sync::mpsc::channel();
+        std::thread::spawn(move || {
+            let _ = done.send(ending::set_quiet(&slave, &quiet));
+        });
+        let result = set.recv_timeout(Duration::from_secs(5));
+        assert!(matches!(result, Ok(Ok(()))), "{result:?}");
+        let echo = tcgetattr(&tty).unwrap().local_flags;
+        assert!(!echo.contains(LocalFlags::ECHO));
+        drop(pty.master);
     }
 
     /// Set in the copy of this test binary that
