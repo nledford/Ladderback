@@ -93,8 +93,8 @@ impl HostnameKey {
 pub struct HostnameSkeleton(String);
 
 impl HostnameSkeleton {
-    pub fn of(_name: &Hostname) -> Self {
-        todo!("the skeleton of a hostname's key")
+    pub fn of(name: &Hostname) -> Self {
+        Self(unicode_security::skeleton(HostnameKey::of(name).as_str()).collect())
     }
 
     pub fn as_str(&self) -> &str {
@@ -161,8 +161,38 @@ pub struct ListedAgent {
 /// [`HostnameSkeleton`]. A lookalike isn't refused at pairing, since a false
 /// match would lock out an honest name; the person sees the flag and
 /// compares keys before approving (decision 120, "Hostnames").
-pub fn list_agents(_agents: Vec<AgentRecord>) -> Vec<ListedAgent> {
-    todo!("flag each pending agent's lookalike")
+pub fn list_agents(agents: Vec<AgentRecord>) -> Vec<ListedAgent> {
+    let skeletons: Vec<HostnameSkeleton> = agents
+        .iter()
+        .map(|agent| HostnameSkeleton::of(&agent.hostname))
+        .collect();
+    let looks_like = |agent: &AgentRecord, skeleton: &HostnameSkeleton| {
+        agents
+            .iter()
+            .zip(&skeletons)
+            .find(|(other, theirs)| other.agent_id != agent.agent_id && *theirs == skeleton)
+            .map(|(other, _)| Lookalike {
+                agent_id: other.agent_id,
+                hostname: other.hostname.clone(),
+                last_seen: other.last_seen,
+            })
+    };
+    let flags: Vec<Option<Lookalike>> = agents
+        .iter()
+        .zip(&skeletons)
+        .map(|(agent, skeleton)| {
+            if agent.is_pending() {
+                looks_like(agent, skeleton)
+            } else {
+                None
+            }
+        })
+        .collect();
+    agents
+        .into_iter()
+        .zip(flags)
+        .map(|(record, looks_like)| ListedAgent { record, looks_like })
+        .collect()
 }
 
 /// What has become of a pairing token.

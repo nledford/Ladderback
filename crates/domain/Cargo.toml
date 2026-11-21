@@ -19,6 +19,9 @@ sha2.workspace = true
 subtle.workspace = true
 # Hostnames compare as casefold(NFC(name)) on the hub (§16, decision 120).
 unicode-normalization.workspace = true
+# The hub flags a hostname that looks like another agent's by their UTS #39
+# skeletons (§16, decision 120).
+unicode-security.workspace = true
 uuid.workspace = true
 # Secrets and passwords wipe their bytes when they are dropped (§10.2).
 zeroize.workspace = true

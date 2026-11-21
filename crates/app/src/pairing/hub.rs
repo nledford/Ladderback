@@ -6,8 +6,8 @@ use domain::fleet::{
     FIRST_SEQUENCE, HANDSHAKES, Holder, HubAddress, HubEnvelope, KEY_BYTES, KeyFile, ListedAgent,
     Nonce, Pair, PairAnswer, PairRefusal, PairRequest, Paired, PairingToken, PayloadDigest, Proof,
     ProofRefusal, ProofRequest, PublicKey, Refused, SeedFile, SignedMessage, SigningSeed, TokenId,
-    TokenRecord, TokenTls, TokenUse, UNUSED_TOKEN_LIMIT, Welcome, hello_kind, token_life,
-    welcome_kind,
+    TokenRecord, TokenTls, TokenUse, UNUSED_TOKEN_LIMIT, Welcome, hello_kind, list_agents,
+    token_life, welcome_kind,
 };
 use domain::{AgentId, SignedDuration};
 
@@ -396,7 +396,7 @@ impl HubPairing {
     /// flagged with the agent its hostname looks like (decision 120,
     /// "Hostnames"), which the pending row shows (decision 121).
     pub async fn agents(&self) -> Result<Vec<ListedAgent>, HubPairingError> {
-        todo!("the registered agents with their lookalikes")
+        Ok(list_agents(self.registry.agents().await?))
     }
 
     /// The hub's answer to a paired agent's `proof`: the agent's record,
