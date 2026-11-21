@@ -92,6 +92,8 @@ enum Command {
         address: Option<String>,
         #[arg(long, value_name = "MINUTES")]
         ttl: Option<i64>,
+        #[arg(long, requires = "address", conflicts_with_all = ["list", "revoke"])]
+        certificate_authority: bool,
         #[arg(long, conflicts_with_all = ["address", "ttl", "revoke"])]
         list: bool,
         #[arg(long, value_name = "TOKEN_ID", conflicts_with_all = ["address", "ttl"])]
@@ -234,6 +236,9 @@ fn description(path: &str, argument: Option<&str>) -> Option<MessageId> {
         ("set-password", None) => msg::CLI_HELP_SET_PASSWORD,
         ("pairing-token", None) => msg::CLI_HELP_PAIRING_TOKEN,
         ("pairing-token", Some("address")) => msg::CLI_HELP_PAIRING_TOKEN_ADDRESS,
+        ("pairing-token", Some("certificate_authority")) => {
+            msg::CLI_HELP_PAIRING_TOKEN_CERTIFICATE_AUTHORITY
+        }
         ("pairing-token", Some("ttl")) => msg::CLI_HELP_PAIRING_TOKEN_TTL,
         ("pairing-token", Some("list")) => msg::CLI_HELP_PAIRING_TOKEN_LIST,
         ("pairing-token", Some("revoke")) => msg::CLI_HELP_PAIRING_TOKEN_REVOKE,
@@ -289,6 +294,7 @@ fn main() -> ExitCode {
         Command::PairingToken {
             address,
             ttl,
+            certificate_authority,
             list,
             revoke,
         } => hub::pairing_token(match (list, revoke, address) {
@@ -297,6 +303,7 @@ fn main() -> ExitCode {
             (false, None, address) => hub::TokenAsk::Make {
                 address: address.unwrap_or_default(),
                 ttl_minutes: ttl,
+                certificate_authority,
             },
         }),
         #[cfg(feature = "hub")]
@@ -611,16 +618,10 @@ fn run_daemon(
             return Ok(ExitCode::FAILURE);
         }
     };
-    // Open on the network with sign-in off is said on stderr once the
-    // address is bound (below), not logged: no log setting hides it.
-    match (exposure, sign_in_on) {
-        (http_adapter::Exposure::Network, true) => log::warn!(
-            "listening on {listen} beyond loopback over plain HTTP: the password crosses the network unencrypted unless a reverse proxy in front adds TLS"
-        ),
-        (http_adapter::Exposure::Loopback, false) => log::warn!(
+    if exposure == http_adapter::Exposure::Loopback && !sign_in_on {
+        log::warn!(
             "sign-in is off: anyone on this machine can use Ladderback; set an admin password with `ladderback set-password`"
-        ),
-        (http_adapter::Exposure::Network, false) | (http_adapter::Exposure::Loopback, true) => {}
+        );
     }
     let proxied: Vec<String> = http_adapter::proxied_hosts(&hosts)
         .into_iter()
@@ -660,12 +661,19 @@ fn run_daemon(
             return Ok(ExitCode::FAILURE);
         }
     };
-    // `serve --hub` carries the pairing handshake at `/sync/v1` on this
-    // listener, whose sessions have no TLS of the hub's own (decision 120),
-    // and the page's pairing tokens under `/api/v1/hub`, confirmed by the
-    // admin password when sign-in is on (decision 121).
+    // `serve --hub` serves its built-in TLS on this listener, whose
+    // sessions carry the pairing handshake at `/sync/v1` with the binding
+    // to the session (decision 120), and the page's pairing tokens under
+    // `/api/v1/hub`, confirmed by the admin password when sign-in is on
+    // (decision 121). A hub takes every connection through its front door,
+    // which serves plain HTTP only from loopback. A TLS key it can't serve
+    // fails closed ("The hub key"): the door serves only this machine, on
+    // loopback, `/sync/v1` refuses every machine, and the log says why and
+    // how to fix it; the daemon, and this machine's own backups, go on.
     #[cfg(feature = "hub")]
     let mut state = state;
+    #[cfg(feature = "hub")]
+    let mut front_door: Option<Option<tls_adapter::HubListener>> = None;
     #[cfg(feature = "hub")]
     if hub && let Some(data_dir) = platform::dirs::data_dir() {
         let pairing = hub::hub_pairing(&data_dir, Arc::clone(&operation_log.store));
@@ -674,7 +682,47 @@ fn run_daemon(
             http_adapter::SignIn::Off { .. } => pairing,
         };
         state.sync = http_adapter::SyncHub::serving(Arc::new(pairing));
-        log::info!("serving the hub's pairing at {}", api::sync::PATH);
+        let names = certificate_names(listen, &hosts);
+        let served = runtime
+            .block_on(hub::hub_tls_key(&data_dir).start(operation_log.store.as_ref()))
+            .map_err(|refusal| hub::tls_key_unserved(&refusal))
+            .and_then(|served| {
+                tls_adapter::HubListener::new(&served.key, &names, domain::Timestamp::now())
+                    .map(|listener| (listener, served.fingerprint))
+                    .map_err(|error| {
+                        format!(
+                            "its certificate couldn't be made ({error:?}); restart the hub, and report it if this is said again"
+                        )
+                    })
+            });
+        match served {
+            Ok((listener, fingerprint)) => {
+                log::info!("serving the hub's pairing at {}", api::sync::PATH);
+                log::info!("serving the hub's built-in TLS, its certificate {fingerprint}");
+                state.sync = state.sync.with_certificate(fingerprint);
+                front_door = Some(Some(listener));
+            }
+            Err(fix) => {
+                log::error!(
+                    "the hub's built-in TLS isn't served: {fix}. Until then the hub serves only this machine, over plain HTTP on loopback, and refuses every machine at {}; this machine's own backups go on",
+                    api::sync::PATH
+                );
+                state.sync = state.sync.without_tls();
+                front_door = Some(None);
+            }
+        }
+    }
+    // Open on the network with sign-in off is said on stderr once the
+    // address is bound (below), not logged: no log setting hides it.
+    #[cfg(feature = "hub")]
+    let (loopback_plain_only, built_in_tls) =
+        (front_door.is_some(), matches!(front_door, Some(Some(_))));
+    #[cfg(not(feature = "hub"))]
+    let (loopback_plain_only, built_in_tls) = (false, false);
+    if warns_plain_http(exposure, sign_in_on, loopback_plain_only) {
+        log::warn!(
+            "listening on {listen} beyond loopback over plain HTTP: the password crosses the network unencrypted unless a reverse proxy in front adds TLS"
+        );
     }
     // What came of serving, and the stop once it began; what is said on
     // stderr before then can fail the whole of it.
@@ -697,6 +745,22 @@ fn run_daemon(
             }
         };
         let bound = listener.local_addr();
+        // A hub takes each connection through its front door first.
+        #[cfg(feature = "hub")]
+        let listener = match (front_door, &bound) {
+            (Some(tls), Ok(local)) => {
+                Listening::Door(composition::front_door::open(listener, *local, tls))
+            }
+            (Some(_), Err(error)) => {
+                say(
+                    localizer,
+                    msg::CLI_CANNOT_LISTEN,
+                    &[("address", text(listen)), ("detail", text(error))],
+                )?;
+                return Ok((Ok(ExitCode::FAILURE), None));
+            }
+            (None, _) => Listening::Gated(listener),
+        };
         // With sign-in off on loopback, a host name beyond it is one a
         // reverse proxy brings people in by: each is said, as the network
         // is (§10.1, decision 87).
@@ -721,7 +785,7 @@ fn run_daemon(
             Ok(addr) => say(
                 localizer,
                 msg::CLI_LISTENING,
-                &[("url", text(format!("http://{addr}")))],
+                &[("url", text(listening_url(addr, built_in_tls)))],
             )?,
             Err(error) => say(
                 localizer,
@@ -741,14 +805,24 @@ fn run_daemon(
             state,
         );
         let (cause_tx, mut cause) = tokio::sync::oneshot::channel();
-        let serving = axum::serve(
-            listener,
-            app.into_make_service_with_connect_info::<http_adapter::PeerAddr>(),
-        )
-        .with_graceful_shutdown(async move {
+        let shutdown = async move {
             let _ = cause_tx.send(shutdown_signal(interrupt, terminate, restart).await);
-        })
-        .into_future();
+        };
+        #[cfg(feature = "hub")]
+        let serving = match listener {
+            Listening::Door(listener) => Box::pin(
+                axum::serve(
+                    listener,
+                    http_adapter::handed(app)
+                        .into_make_service_with_connect_info::<http_adapter::HandedPeer>(),
+                )
+                .with_graceful_shutdown(shutdown)
+                .into_future(),
+            ) as Serving,
+            Listening::Gated(listener) => served_gated(listener, app, shutdown),
+        };
+        #[cfg(not(feature = "hub"))]
+        let serving = served_gated(listener, app, shutdown);
         tokio::pin!(serving);
         // Told to stop, the server stops taking connections and waits for
         // the requests still open; the stop begins then, not once they end.
@@ -823,6 +897,84 @@ fn run_daemon(
             drop(lock);
             ran.and_then(|(code, _)| code)
         }
+    }
+}
+
+/// The server's run to its end, whichever listener it serves.
+type Serving = std::pin::Pin<Box<dyn Future<Output = io::Result<()>>>>;
+
+/// What the daemon serves on: its listener as it is, or, on a hub serving
+/// its built-in TLS, the front door on it.
+#[cfg(feature = "hub")]
+enum Listening {
+    Gated(http_adapter::GatedListener),
+    Door(http_adapter::HandedListener),
+}
+
+/// `app` served on `listener` until `shutdown`.
+fn served_gated(
+    listener: http_adapter::GatedListener,
+    app: axum::Router,
+    shutdown: impl Future<Output = ()> + Send + 'static,
+) -> Serving {
+    Box::pin(
+        axum::serve(
+            listener,
+            app.into_make_service_with_connect_info::<http_adapter::PeerAddr>(),
+        )
+        .with_graceful_shutdown(shutdown)
+        .into_future(),
+    )
+}
+
+/// The names the hub's certificate carries: loopback's, the address it
+/// listens on, and every allowed host. A machine whose token pins the
+/// certificate checks its fingerprint, not these; a browser checks them.
+#[cfg(feature = "hub")]
+fn certificate_names(listen: SocketAddr, hosts: &[String]) -> Vec<String> {
+    let mut names = vec![
+        "localhost".to_owned(),
+        "127.0.0.1".to_owned(),
+        "::1".to_owned(),
+    ];
+    if !listen.ip().is_unspecified() {
+        names.push(listen.ip().to_string());
+    }
+    // An allowed host is kept as `Host` carries it, an IPv6 address in
+    // brackets; the certificate names the address itself.
+    names.extend(hosts.iter().map(|host| {
+        host.strip_prefix('[')
+            .and_then(|host| host.strip_suffix(']'))
+            .unwrap_or(host)
+            .to_owned()
+    }));
+    names.sort();
+    names.dedup();
+    names
+}
+
+/// Whether serving on `exposure` with sign-in on or off warns that the
+/// password crosses the network in plain HTTP. A hub's front door serves
+/// plain HTTP only from loopback, with its built-in TLS or without it, so
+/// it never does.
+fn warns_plain_http(
+    exposure: http_adapter::Exposure,
+    sign_in_on: bool,
+    loopback_plain_only: bool,
+) -> bool {
+    exposure == http_adapter::Exposure::Network && sign_in_on && !loopback_plain_only
+}
+
+/// The address the daemon says it listens at, `bound`: over `https://`
+/// when the hub's built-in TLS serves and the address is beyond loopback,
+/// where the front door closes plain HTTP. An unspecified address is no
+/// address another machine can use, and on this one it reaches loopback.
+fn listening_url(bound: SocketAddr, built_in_tls: bool) -> String {
+    let ip = bound.ip().to_canonical();
+    if built_in_tls && !ip.is_loopback() && !ip.is_unspecified() {
+        format!("https://{bound}")
+    } else {
+        format!("http://{bound}")
     }
 }
 
@@ -930,6 +1082,70 @@ mod tests {
             line,
             "ladderback: cannot write the result: No space left on device\n"
         );
+    }
+
+    /// The certificate names the hub's own machine and every allowed host,
+    /// an IPv6 one as an address rather than its bracketed form.
+    #[cfg(feature = "hub")]
+    #[test]
+    fn the_certificate_names_allowed_ipv6_hosts_as_addresses() {
+        let listen = "[::]:9898".parse().unwrap();
+        let hosts = ["[2001:db8::1]".to_owned(), "hub.example".to_owned()];
+        assert_eq!(
+            certificate_names(listen, &hosts),
+            [
+                "127.0.0.1",
+                "2001:db8::1",
+                "::1",
+                "hub.example",
+                "localhost"
+            ]
+        );
+    }
+
+    /// The password crossing the network in plain HTTP is warned of
+    /// beyond loopback with sign-in on, unless the hub's built-in TLS
+    /// serves, which serves plain HTTP only from loopback.
+    #[test]
+    fn plain_http_is_warned_of_beyond_loopback_unless_the_built_in_tls_serves() {
+        use http_adapter::Exposure::{Loopback, Network};
+        for (exposure, sign_in_on, built_in_tls, warned) in [
+            (Network, true, false, true),
+            (Network, true, true, false),
+            (Network, false, false, false),
+            (Loopback, true, false, false),
+        ] {
+            assert_eq!(
+                warns_plain_http(exposure, sign_in_on, built_in_tls),
+                warned,
+                "{exposure:?}, sign-in on {sign_in_on}, built-in TLS {built_in_tls}"
+            );
+        }
+    }
+
+    /// A hub serving its built-in TLS beyond loopback says its address over
+    /// `https://`, the only way another machine reaches it; on loopback,
+    /// where plain HTTP is served too, and without the TLS, over `http://`.
+    /// An unspecified address is no address another machine can use, and
+    /// on this one it reaches loopback.
+    #[test]
+    fn a_hub_beyond_loopback_says_its_address_over_tls() {
+        for (bound, built_in_tls, url) in [
+            ("192.0.2.10:9898", true, "https://192.0.2.10:9898"),
+            ("[2001:db8::1]:9898", true, "https://[2001:db8::1]:9898"),
+            ("0.0.0.0:9898", true, "http://0.0.0.0:9898"),
+            ("[::]:9898", true, "http://[::]:9898"),
+            ("127.0.0.1:9898", true, "http://127.0.0.1:9898"),
+            ("[::1]:9898", true, "http://[::1]:9898"),
+            ("192.0.2.10:9898", false, "http://192.0.2.10:9898"),
+        ] {
+            let bound: SocketAddr = bound.parse().unwrap();
+            assert_eq!(
+                listening_url(bound, built_in_tls),
+                url,
+                "{bound}, {built_in_tls}"
+            );
+        }
     }
 
     #[test]

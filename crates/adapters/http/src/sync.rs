@@ -9,8 +9,11 @@
 //! closes the connection, as does a first frame that
 //! isn't there within 2 s or a handshake not over within 15 s, and at most
 //! 32 connections are unauthenticated at once, the oldest evicted for a
-//! newcomer. This listener has no TLS of the hub's own, so each session's
-//! exporter is `None`, and a `Connect` naming one closes
+//! newcomer. Over the hub's built-in TLS each connection has its own
+//! address, and one address may hold at most 4 of them, its oldest evicted
+//! for its newcomer; behind a proxy only the total applies. A session's
+//! exporter is there only when it came over the built-in TLS with the
+//! hybrid key exchange, and a `Connect` naming one on any other closes
 //! `binding-unavailable`.
 //!
 //! In a build with the hub, every path under `/sync/` is these routes',
@@ -114,6 +117,7 @@ mod check {
 #[cfg(feature = "hub")]
 mod served {
     use std::collections::VecDeque;
+    use std::net::IpAddr;
     use std::sync::{Arc, Mutex, PoisonError};
     use std::time::Duration;
 
@@ -121,8 +125,12 @@ mod served {
     use app::pairing::{HubPairing, HubStep, PROTOCOL_ERROR};
     use axum::Router;
     use axum::extract::ws::{CloseFrame, Message, WebSocket, WebSocketUpgrade, close_code};
+    use axum::extract::{ConnectInfo, Extension};
     use axum::routing::get;
+    use domain::fleet::{Fingerprint, KEY_BYTES};
     use tokio::sync::Notify;
+
+    use crate::{BuiltInTls, PeerAddr};
 
     /// How long the hub waits to send its close frame to a peer that doesn't
     /// read, once the handshake is over or abandoned.
@@ -137,6 +145,8 @@ mod served {
         pub(crate) handshake_within: Duration,
         /// How many connections may be unauthenticated at once.
         pub(crate) unauthenticated: usize,
+        /// How many of them one address may hold over the built-in TLS.
+        pub(crate) per_address: usize,
     }
 
     impl Bounds {
@@ -144,14 +154,20 @@ mod served {
             connect_within: Duration::from_secs(2),
             handshake_within: Duration::from_secs(15),
             unauthenticated: 32,
+            per_address: 4,
         };
     }
 
     /// What `/sync/` serves: the handshake, under `serve --hub`, or
-    /// nothing.
+    /// nothing; and the fingerprint of the certificate the hub's built-in
+    /// TLS serves, when it serves one.
     #[derive(Clone, Debug, Default)]
     pub struct SyncHub {
         served: Option<Arc<Served>>,
+        certificate: Option<Fingerprint>,
+        /// The hub's TLS key doesn't serve, so `/sync/v1` refuses every
+        /// machine until it does.
+        without_tls: bool,
     }
 
     impl SyncHub {
@@ -167,12 +183,43 @@ mod served {
                     bounds,
                     waiting: Mutex::default(),
                 })),
+                certificate: None,
+                without_tls: false,
             }
         }
 
         /// The hub's pairing, when this daemon serves as a hub.
         pub(crate) fn pairing(&self) -> Option<&Arc<HubPairing>> {
             self.served.as_ref().map(|served| &served.pairing)
+        }
+
+        /// This hub, serving its built-in TLS with the certificate of
+        /// `fingerprint`, which a pinned token names (decision 120).
+        #[must_use]
+        pub fn with_certificate(self, fingerprint: Fingerprint) -> Self {
+            Self {
+                certificate: Some(fingerprint),
+                ..self
+            }
+        }
+
+        /// The fingerprint of the certificate the hub's built-in TLS
+        /// serves, when it serves one.
+        pub(crate) fn certificate(&self) -> Option<Fingerprint> {
+            self.certificate
+        }
+
+        /// This hub, whose built-in TLS key can't serve: `/sync/v1` answers
+        /// `503` until a restart with the key restored, rather than serve
+        /// machines without it (decision 120, "The hub key"). The pages
+        /// keep its pairing, to list and revoke tokens.
+        #[must_use]
+        pub fn without_tls(self) -> Self {
+            Self {
+                certificate: None,
+                without_tls: true,
+                ..self
+            }
         }
     }
 
@@ -181,18 +228,40 @@ mod served {
         S: Clone + Send + Sync + 'static,
     {
         let served = hub.served.clone()?;
+        if hub.without_tls {
+            return Some(Router::new().route(
+                PATH,
+                get(|| async { axum::http::StatusCode::SERVICE_UNAVAILABLE }),
+            ));
+        }
         Some(Router::new().route(
             PATH,
-            get(move |upgrade: WebSocketUpgrade| async move {
-                upgrade
-                    .max_message_size(MAX_FRAME_BYTES)
-                    .max_frame_size(MAX_FRAME_BYTES)
-                    // Writes go out at once, and what a peer that doesn't
-                    // read leaves queued, its pongs among it, stays bounded.
-                    .write_buffer_size(0)
-                    .max_write_buffer_size(2 * MAX_FRAME_BYTES)
-                    .on_upgrade(move |socket| served.run(socket))
-            }),
+            // A connection over the hub's built-in TLS carries its session's
+            // exporter value when it negotiated the hybrid key exchange; a
+            // kind-1 `Connect` on any other is `binding-unavailable`. Its
+            // address is its own, which bounds how many it may hold; behind
+            // a proxy every connection has the proxy's, so none is kept.
+            get(
+                move |upgrade: WebSocketUpgrade,
+                      tls: Option<Extension<BuiltInTls>>,
+                      peer: Option<Extension<ConnectInfo<PeerAddr>>>| async move {
+                    let from = match (&tls, peer) {
+                        (Some(_), Some(Extension(ConnectInfo(PeerAddr(peer))))) => {
+                            Some(peer.ip().to_canonical())
+                        }
+                        _ => None,
+                    };
+                    let exporter = tls.and_then(|Extension(tls)| tls.exporter);
+                    upgrade
+                        .max_message_size(MAX_FRAME_BYTES)
+                        .max_frame_size(MAX_FRAME_BYTES)
+                        // Writes go out at once, and what a peer that doesn't
+                        // read leaves queued, its pongs among it, stays bounded.
+                        .write_buffer_size(0)
+                        .max_write_buffer_size(2 * MAX_FRAME_BYTES)
+                        .on_upgrade(move |socket| served.run(socket, exporter, from))
+                },
+            ),
         ))
     }
 
@@ -210,12 +279,19 @@ mod served {
         }
     }
 
-    /// The unauthenticated connections, oldest first, each with what tells
-    /// it it was evicted.
+    /// The unauthenticated connections, oldest first.
     #[derive(Default)]
     struct Waiting {
         next: u64,
-        open: VecDeque<(u64, Arc<Notify>)>,
+        open: VecDeque<Open>,
+    }
+
+    /// An unauthenticated connection: its address, when it came over the
+    /// built-in TLS, and what tells it it was evicted.
+    struct Open {
+        id: u64,
+        from: Option<IpAddr>,
+        evicted: Arc<Notify>,
     }
 
     /// How a connection ends.
@@ -237,12 +313,17 @@ mod served {
     }
 
     impl Served {
-        async fn run(self: Arc<Self>, mut socket: WebSocket) {
-            let (id, evicted) = self.admit();
+        async fn run(
+            self: Arc<Self>,
+            mut socket: WebSocket,
+            exporter: Option<[u8; KEY_BYTES]>,
+            from: Option<IpAddr>,
+        ) {
+            let (id, evicted) = self.admit(from);
             let end = tokio::select! {
                 end = tokio::time::timeout(
                     self.bounds.handshake_within,
-                    self.converse(&mut socket),
+                    self.converse(&mut socket, exporter),
                 ) => end.unwrap_or(End::Dropped),
                 () = evicted.notified() => End::Dropped,
             };
@@ -262,20 +343,38 @@ mod served {
                 tokio::time::timeout(CLOSE_WITHIN, socket.send(Message::Close(Some(close)))).await;
         }
 
-        /// A place among the unauthenticated, evicting the oldest when the
-        /// table is full.
-        fn admit(&self) -> (u64, Arc<Notify>) {
+        /// A place among the unauthenticated, evicting the address's oldest
+        /// when it holds its share, and the oldest of all when the table is
+        /// full.
+        fn admit(&self, from: Option<IpAddr>) -> (u64, Arc<Notify>) {
             let mut waiting = self.waiting.lock().unwrap_or_else(PoisonError::into_inner);
+            if from.is_some() {
+                let mut held = waiting.open.iter().filter(|open| open.from == from).count();
+                while held >= self.bounds.per_address {
+                    let Some(oldest) = waiting.open.iter().position(|open| open.from == from)
+                    else {
+                        break;
+                    };
+                    if let Some(oldest) = waiting.open.remove(oldest) {
+                        oldest.evicted.notify_one();
+                    }
+                    held = held.saturating_sub(1);
+                }
+            }
             while waiting.open.len() >= self.bounds.unauthenticated {
-                let Some((_, oldest)) = waiting.open.pop_front() else {
+                let Some(oldest) = waiting.open.pop_front() else {
                     break;
                 };
-                oldest.notify_one();
+                oldest.evicted.notify_one();
             }
             let id = waiting.next;
             waiting.next = waiting.next.wrapping_add(1);
             let evicted = Arc::new(Notify::new());
-            waiting.open.push_back((id, Arc::clone(&evicted)));
+            waiting.open.push_back(Open {
+                id,
+                from,
+                evicted: Arc::clone(&evicted),
+            });
             (id, evicted)
         }
 
@@ -284,15 +383,15 @@ mod served {
                 .lock()
                 .unwrap_or_else(PoisonError::into_inner)
                 .open
-                .retain(|(open, _)| *open != id);
+                .retain(|open| open.id != id);
         }
 
-        async fn converse(&self, socket: &mut WebSocket) -> End {
+        async fn converse(&self, socket: &mut WebSocket, exporter: Option<[u8; KEY_BYTES]>) -> End {
             // The first bound counts from the connection's admission, so
             // reading the hub's keys is within it.
             let first_by = tokio::time::Instant::now() + self.bounds.connect_within;
             let mut session =
-                match tokio::time::timeout_at(first_by, self.pairing.session(None)).await {
+                match tokio::time::timeout_at(first_by, self.pairing.session(exporter)).await {
                     Ok(Ok(session)) => session,
                     Ok(Err(error)) => {
                         log::warn!("/sync/v1: the hub's keys couldn't be read: {error:?}");

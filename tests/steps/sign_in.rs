@@ -22,6 +22,16 @@ pub struct SignInE2e {
     /// The `Cookie` header's `name=value` of a session another browser
     /// signed in with.
     second_cookie: Option<String>,
+    /// What came of stopping `set-password` while it asked for the password
+    /// at a terminal.
+    stopped_at_prompt: Option<StoppedAtPrompt>,
+}
+
+#[derive(Debug)]
+struct StoppedAtPrompt {
+    status: std::process::ExitStatus,
+    /// Whether the terminal shows what is typed once `set-password` ended.
+    echo: bool,
 }
 
 #[derive(Debug)]
@@ -71,6 +81,118 @@ async fn set_password(agent: &mut Agent, args: &[&str], input: &str) {
 
 fn ran(agent: &Agent) -> &Ran {
     agent.sign_in.ran.as_ref().expect("set-password ran")
+}
+
+/// The signal `how` sends: Ctrl-C at a terminal sends `SIGINT`.
+fn signal_of(how: &str) -> nix::sys::signal::Signal {
+    match how {
+        "Ctrl-C" => nix::sys::signal::Signal::SIGINT,
+        "SIGTERM" => nix::sys::signal::Signal::SIGTERM,
+        other => panic!("no signal for {other:?}"),
+    }
+}
+
+/// Runs `ladderback set-password` with a terminal as its standard input,
+/// waits until it has turned the terminal's echo off to ask for the
+/// password, then sends it the signal `how` stands for. The signal is sent
+/// to the process: the terminal is not its controlling one, so a typed
+/// Ctrl-C would reach nobody.
+#[when(expr = "set-password is stopped by {word} while it asks for the password at a terminal")]
+async fn stopped_at_prompt(agent: &mut Agent, how: String) {
+    let signal = signal_of(&how);
+    let pty = match nix::pty::openpty(None, None) {
+        Ok(pty) => pty,
+        Err(error) => testkit::skip!("no pseudo-terminal can be opened here: {error}"),
+    };
+    let mut command = Command::new(LADDERBACK);
+    testkit::daemon::isolate(&mut command, &home(agent));
+    command
+        .arg("set-password")
+        .stdin(Stdio::from(
+            pty.slave.try_clone().expect("the terminal's other end"),
+        ))
+        .stdout(Stdio::null())
+        .stderr(Stdio::null())
+        .env("LC_ALL", "C")
+        .env_remove("LANGUAGE");
+    let stopped = blocking(move || {
+        use std::time::{Duration, Instant};
+
+        use nix::sys::termios::{LocalFlags, tcgetattr};
+        let terminal = pty.slave;
+        // The terminal stays open while the program runs.
+        let _screen = pty.master;
+        let echo = || {
+            tcgetattr(&terminal)
+                .expect("the terminal's settings")
+                .local_flags
+                .contains(LocalFlags::ECHO)
+        };
+        let bound = Duration::from_secs(5);
+        let child = testkit::children::Owned::spawn(&mut command).expect("ladderback runs");
+        let began = Instant::now();
+        while echo() {
+            assert_eq!(
+                child.try_wait().expect("its status"),
+                None,
+                "set-password ended before it asked for the password"
+            );
+            assert!(
+                began.elapsed() < bound,
+                "set-password didn't turn echo off within {bound:?}"
+            );
+            std::thread::sleep(Duration::from_millis(20));
+        }
+        let pid = i32::try_from(child.id()).expect("a process ID");
+        nix::sys::signal::kill(nix::unistd::Pid::from_raw(pid), signal)
+            .expect("the signal is sent");
+        let sent = Instant::now();
+        let status = loop {
+            if let Some(status) = child.try_wait().expect("its status") {
+                break status;
+            }
+            assert!(
+                sent.elapsed() < bound,
+                "set-password didn't end within {bound:?} of {signal}"
+            );
+            std::thread::sleep(Duration::from_millis(20));
+        };
+        StoppedAtPrompt {
+            status,
+            echo: echo(),
+        }
+    })
+    .await;
+    agent.sign_in.stopped_at_prompt = Some(stopped);
+}
+
+fn stopped_at(agent: &Agent) -> Option<&StoppedAtPrompt> {
+    agent.sign_in.stopped_at_prompt.as_ref()
+}
+
+#[then(expr = "set-password ends as {word} ends any program")]
+fn ends_as_the_signal_ends_any_program(agent: &mut Agent, how: String) {
+    use std::os::unix::process::ExitStatusExt;
+    let Some(stopped) = stopped_at(agent) else {
+        testkit::skip!("no pseudo-terminal could be opened");
+    };
+    assert_eq!(
+        stopped
+            .status
+            .signal()
+            .map(nix::sys::signal::Signal::try_from),
+        Some(Ok(signal_of(&how))),
+        "{:?}",
+        stopped.status
+    );
+}
+
+#[then("the terminal shows what is typed again")]
+fn terminal_shows_typing(agent: &mut Agent) {
+    let Some(stopped) = stopped_at(agent) else {
+        testkit::skip!("no pseudo-terminal could be opened");
+    };
+    assert!(stopped.echo, "the terminal's echo is still off");
 }
 
 #[when(expr = "the admin password {string} is set from standard input")]
@@ -231,9 +353,36 @@ fn not_a_hash(agent: &mut Agent) {
     }
 }
 
+#[given("the data folder holds an admin password file that is a named pipe")]
+#[when("the data folder holds an admin password file that is a named pipe")]
+fn named_pipe(agent: &mut Agent) {
+    use nix::sys::stat::Mode;
+    let path = hash_file(agent);
+    std::fs::create_dir_all(path.parent().expect("the data folder")).expect("the data folder");
+    nix::unistd::mkfifo(&path, Mode::S_IRUSR | Mode::S_IWUSR).expect("the named pipe");
+}
+
+#[when("the admin password file is made readable by other users")]
+fn made_readable_by_others(agent: &mut Agent) {
+    use std::os::unix::fs::PermissionsExt;
+    std::fs::set_permissions(hash_file(agent), std::fs::Permissions::from_mode(0o644))
+        .expect("the file's mode");
+}
+
 #[then("the refusal gives the platform's message")]
 fn refusal_gives_platform_message(agent: &mut Agent) {
-    let expected = format!("({} is not an argon2id hash)", hash_file(agent).display());
+    refusal_says(agent, "is not an argon2id hash");
+}
+
+#[then("the refusal says the admin password file is not a regular file")]
+fn refusal_says_not_a_regular_file(agent: &mut Agent) {
+    refusal_says(agent, "is not a regular file");
+}
+
+/// The refusal to start gives the platform's message: the admin password
+/// file's path, then `said`.
+fn refusal_says(agent: &mut Agent, said: &str) {
+    let expected = format!("({} {said})", hash_file(agent).display());
     let (_, log) = web::exited(agent);
     // Fluent wraps each placeable in Unicode isolation marks.
     let log: String = log

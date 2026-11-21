@@ -40,6 +40,9 @@ zeroize.workspace = true
 # launchd agent lives in the `gui/<uid>` domain. `resource` and `process`:
 # the core-dump limit and, on Linux, the dumpable flag (decision 98).
 nix = { workspace = true, features = ["process", "resource", "term", "user"] }
+# A signal that ends the process while the password prompt has echo off
+# puts the terminal's settings back first (#399).
+signal-hook.workspace = true
 
 # The Wi-Fi network's name from NetworkManager (decision 80). `vendored`
 # builds libdbus from source, as `secrets` does, so a bare toolchain image
