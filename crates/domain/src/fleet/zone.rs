@@ -36,20 +36,29 @@ impl MachineZone {
     /// with no such name: a fixed offset, a POSIX TZ string, or the
     /// database's "unknown" when the system's zone couldn't be found.
     pub fn of(zone: &TimeZone) -> Option<Self> {
-        let _ = zone;
-        todo!()
+        zone.iana_name().and_then(|name| Self::parse(name).ok())
     }
 
     /// `name`, if it has the shape of an IANA time-zone name.
     pub fn parse(name: &str) -> Result<Self, InvalidZoneName> {
-        let _ = name;
-        todo!()
+        let shaped = !name.is_empty()
+            && name.len() <= MAX_ZONE_BYTES
+            && name.split('/').all(|segment| {
+                !segment.is_empty()
+                    && segment
+                        .bytes()
+                        .all(|b| b.is_ascii_alphanumeric() || matches!(b, b'_' | b'+' | b'-'))
+            });
+        if shaped {
+            Ok(Self(name.to_owned()))
+        } else {
+            Err(InvalidZoneName)
+        }
     }
 
     /// This zone as `database` spells it, when `database` holds it.
     pub fn known_in(&self, database: &TimeZoneDatabase) -> Option<Self> {
-        let _ = database;
-        todo!()
+        database.get(&self.0).ok().as_ref().and_then(Self::of)
     }
 
     pub fn as_str(&self) -> &str {

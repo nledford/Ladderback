@@ -1,8 +1,9 @@
 //! The bytes every hub and agent signature is made over (§16, decision 120,
 //! "The signed messages"): one byte for the label's length, the label, then
 //! the message's fields in a fixed order with no separator. Every field but a
-//! hostname, a message kind and a refusal code has a fixed width, and those
-//! three carry a length byte, so two messages with different labels or
+//! hostname, a machine zone, a message kind and a refusal code has a fixed
+//! width, and those four carry a length byte (a zone the agent has no name
+//! for is a zero length), so two messages with different labels or
 //! fields never encode to the same bytes. Changing a byte of this is a new
 //! handshake, which the fixed vectors in the tests stand guard over.
 
@@ -372,7 +373,7 @@ impl SignedMessage<'_> {
                 binding,
                 counter,
                 hostname,
-                zone: _,
+                zone,
             } => w
                 .key(hub_key)
                 .agent(*agent_id)
@@ -381,7 +382,8 @@ impl SignedMessage<'_> {
                 .nonce(hub_nonce)
                 .binding(binding)
                 .number(*counter)
-                .short(hostname.as_str().as_bytes()),
+                .short(hostname.as_str().as_bytes())
+                .short(zone.map_or(&[][..], |zone| zone.as_str().as_bytes())),
             Self::Paired {
                 hub_key,
                 agent_id,

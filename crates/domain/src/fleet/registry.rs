@@ -377,6 +377,7 @@ pub fn decide_pairing(
         return Ok(Pairing::Again(AgentRecord {
             counter: record.counter.max(request.counter),
             last_seen: now,
+            zone: request.zone.clone(),
             ..record.clone()
         }));
     }
@@ -396,7 +397,7 @@ pub fn decide_pairing(
         status: AgentStatus::Pending { since: now },
         counter: request.counter,
         last_seen: now,
-        zone: None,
+        zone: request.zone.clone(),
     }))
 }
 
