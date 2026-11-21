@@ -967,9 +967,11 @@ fn warns_plain_http(
 
 /// The address the daemon says it listens at, `bound`: over `https://`
 /// when the hub's built-in TLS serves and the address is beyond loopback,
-/// where the front door closes plain HTTP.
+/// where the front door closes plain HTTP. An unspecified address is no
+/// address another machine can use, and on this one it reaches loopback.
 fn listening_url(bound: SocketAddr, built_in_tls: bool) -> String {
-    if built_in_tls && !bound.ip().to_canonical().is_loopback() {
+    let ip = bound.ip().to_canonical();
+    if built_in_tls && !ip.is_loopback() && !ip.is_unspecified() {
         format!("https://{bound}")
     } else {
         format!("http://{bound}")
