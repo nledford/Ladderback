@@ -6,6 +6,7 @@
 //! keeps the door without the TLS ("The hub key"): it serves its own
 //! machine on loopback and closes every other connection.
 
+use std::collections::VecDeque;
 use std::net::SocketAddr;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -16,6 +17,7 @@ use http_adapter::{BuiltInTls, GatedListener, Handed, HandedListener, HandedPeer
 use tls_adapter::{HubListener, SessionBinding as _};
 use tokio::net::TcpStream;
 use tokio::sync::mpsc;
+use tokio::task::AbortHandle;
 
 /// The first byte of a TLS record that carries a handshake, as a
 /// `ClientHello` opens a connection with.
@@ -63,7 +65,8 @@ pub(crate) fn door(first: u8, peer: SocketAddr) -> Door {
 /// The front door on `listener`, bound to `local`, serving `tls` when the
 /// hub's key serves one: each connection is taken through its door on a
 /// task of its own, so a slow one holds up no other, and handed to the
-/// server once it is let in.
+/// server once it is let in. At most [`AT_THE_DOOR`] are at the door at
+/// once; a newcomer past it closes the oldest still there.
 pub(crate) fn open(
     listener: GatedListener,
     local: SocketAddr,
@@ -74,18 +77,27 @@ pub(crate) fn open(
     let said = Arc::new(AtomicBool::new(false));
     let accepting = tokio::spawn(async move {
         let mut listener = listener;
+        // The tasks of the connections at the door, oldest first.
+        let mut at_the_door: VecDeque<AbortHandle> = VecDeque::with_capacity(AT_THE_DOOR);
         loop {
             let (stream, peer) = axum::serve::Listener::accept(&mut listener).await;
+            at_the_door.retain(|task| !task.is_finished());
+            if at_the_door.len() >= AT_THE_DOOR
+                && let Some(oldest) = at_the_door.pop_front()
+            {
+                oldest.abort();
+            }
             let hand = hand.clone();
             let tls = tls.clone();
             let said = Arc::clone(&said);
-            tokio::spawn(async move {
+            let task = tokio::spawn(async move {
                 if let Some(handed) = let_in(stream, peer, tls.as_deref(), &said).await {
                     // The server is gone when this fails, and the
                     // connection closes with it.
                     let _ = hand.send(handed).await;
                 }
             });
+            at_the_door.push_back(task.abort_handle());
         }
     });
     HandedListener::new(connections, local, accepting)
