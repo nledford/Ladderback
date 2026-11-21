@@ -67,7 +67,17 @@ pub(crate) fn test_state() -> AppState {
         without_token: without_token_over(Arc::new(app::fakes::InMemoryConfigStore::new())),
         full_disk_access: crate::FullDiskAccessRoute::default(),
         sync: crate::SyncHub::default(),
+        #[cfg(feature = "hub")]
+        pairing: unpaired(),
     }
+}
+
+/// The pairing state of a machine that holds no pin.
+#[cfg(feature = "hub")]
+pub(crate) fn unpaired() -> Arc<app::pairing::PairingState> {
+    Arc::new(app::pairing::PairingState::new(Arc::new(
+        app::fakes::InMemoryIdentity::default(),
+    )))
 }
 
 /// The build these tests' daemon runs: between releases, with changes.

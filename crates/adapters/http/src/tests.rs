@@ -503,6 +503,8 @@ fn state() -> AppState {
         )),
         full_disk_access: FullDiskAccessRoute::default(),
         sync: SyncHub::default(),
+        #[cfg(feature = "hub")]
+        pairing: crate::request_checks::tests::unpaired(),
     }
 }
 
@@ -550,6 +552,8 @@ async fn serving() -> (std::net::SocketAddr, Arc<app::fakes::InMemoryEventBus>) 
         )),
         full_disk_access: FullDiskAccessRoute::default(),
         sync: SyncHub::default(),
+        #[cfg(feature = "hub")]
+        pairing: crate::request_checks::tests::unpaired(),
     };
     let app = router(ui(), RequestChecks::default(), state);
     tokio::spawn(async move {
@@ -2250,6 +2254,8 @@ async fn send_counted(method: Method, path: &str, body: String) -> (Response, us
         )),
         full_disk_access: FullDiskAccessRoute::default(),
         sync: SyncHub::default(),
+        #[cfg(feature = "hub")]
+        pairing: crate::request_checks::tests::unpaired(),
     };
     let response = router(ui(), RequestChecks::default(), state)
         .oneshot(
@@ -2588,5 +2594,144 @@ async fn the_test_and_init_routes_take_nothing_but_a_post() {
     for route in [TEST, INIT] {
         let response = request(ui(), Method::GET, route, "").await;
         assert_eq!(response.status(), StatusCode::METHOD_NOT_ALLOWED, "{route}");
+    }
+}
+
+#[cfg(feature = "hub")]
+#[tokio::test]
+async fn a_machine_that_holds_no_pin_answers_that_it_isnt_paired() {
+    let (status, answer) = json_of(get(api::PAIRING_PATH).await).await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(answer, serde_json::json!({"paired": false}));
+}
+
+#[cfg(feature = "hub")]
+#[tokio::test]
+async fn a_paired_machine_names_its_hub_by_address_and_key() {
+    use domain::fleet::{Fingerprint, HubAddress, HubPin, PublicKey, TokenTls};
+    let key = |byte| PublicKey::from_bytes([byte; 32]).expect("a key");
+    let identity = Arc::new(app::fakes::InMemoryIdentity::default());
+    let address = HubAddress::parse("https://hub.example").expect("an address");
+    app::ports::Identity::write_pin(
+        identity.as_ref(),
+        &HubPin::new(key(7), TokenTls::Ca, key(9), address),
+    )
+    .await
+    .expect("the pin is kept");
+    let state = AppState {
+        pairing: Arc::new(app::pairing::PairingState::new(identity)),
+        ..state()
+    };
+    let response = router(ui(), RequestChecks::default(), state)
+        .oneshot(
+            Request::builder()
+                .uri(api::PAIRING_PATH)
+                .header(header::HOST, "localhost:9898")
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    let (status, answer) = json_of(response).await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(
+        answer,
+        serde_json::json!({"paired": true, "hub": {
+            "address": "https://hub.example",
+            "fingerprint": Fingerprint::of_key(&key(7)).to_string(),
+            "certificate": "ca",
+        }})
+    );
+}
+
+/// A pin that can't be read is `unknown`: whether the machine is paired
+/// isn't known, and the reason goes to the daemon's log only (I4).
+#[cfg(feature = "hub")]
+#[tokio::test]
+async fn a_pin_that_cant_be_read_is_unknown() {
+    let state = AppState {
+        pairing: Arc::new(app::pairing::PairingState::new(Arc::new(DamagedKeys))),
+        ..state()
+    };
+    let response = router(ui(), RequestChecks::default(), state)
+        .oneshot(
+            Request::builder()
+                .uri(api::PAIRING_PATH)
+                .header(header::HOST, "localhost:9898")
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    let (status, answer) = json_of(response).await;
+    assert_eq!(status, StatusCode::SERVICE_UNAVAILABLE);
+    assert_eq!(answer["code"], "unknown", "{answer}");
+}
+
+/// Key files that are all damaged, the pin among them.
+#[cfg(feature = "hub")]
+struct DamagedKeys;
+
+#[cfg(feature = "hub")]
+fn damaged(file: domain::fleet::KeyFile) -> app::ports::IdentityError {
+    app::ports::IdentityError::Damaged { file }
+}
+
+#[cfg(feature = "hub")]
+#[async_trait::async_trait]
+impl app::ports::Identity for DamagedKeys {
+    async fn seed(
+        &self,
+        _: domain::fleet::SeedFile,
+    ) -> Result<Option<domain::fleet::SigningSeed>, app::ports::IdentityError> {
+        Err(damaged(domain::fleet::KeyFile::AgentKey))
+    }
+
+    async fn keep_seed(
+        &self,
+        _: domain::fleet::SeedFile,
+        _: domain::fleet::SigningSeed,
+    ) -> Result<domain::fleet::SigningSeed, app::ports::IdentityError> {
+        Err(damaged(domain::fleet::KeyFile::AgentKey))
+    }
+
+    async fn forget_recovery_seed(&self) -> Result<(), app::ports::IdentityError> {
+        Err(damaged(domain::fleet::KeyFile::RecoverySeed))
+    }
+
+    async fn recovery_key(
+        &self,
+    ) -> Result<Option<domain::fleet::PublicKey>, app::ports::IdentityError> {
+        Err(damaged(domain::fleet::KeyFile::RecoveryKey))
+    }
+
+    async fn keep_recovery_key(
+        &self,
+        _: domain::fleet::PublicKey,
+    ) -> Result<domain::fleet::PublicKey, app::ports::IdentityError> {
+        Err(damaged(domain::fleet::KeyFile::RecoveryKey))
+    }
+
+    async fn tls_key(&self) -> Result<Option<domain::fleet::TlsKey>, app::ports::IdentityError> {
+        Err(damaged(domain::fleet::KeyFile::HubTlsKey))
+    }
+
+    async fn keep_tls_key(
+        &self,
+        _: domain::fleet::TlsKey,
+    ) -> Result<domain::fleet::TlsKey, app::ports::IdentityError> {
+        Err(damaged(domain::fleet::KeyFile::HubTlsKey))
+    }
+
+    async fn pin(&self) -> Result<Option<domain::fleet::HubPin>, app::ports::IdentityError> {
+        Err(damaged(domain::fleet::KeyFile::HubPin))
+    }
+
+    async fn write_pin(&self, _: &domain::fleet::HubPin) -> Result<(), app::ports::IdentityError> {
+        Err(damaged(domain::fleet::KeyFile::HubPin))
+    }
+
+    async fn begin_attempt(&self) -> Result<app::ports::Attempt, app::ports::IdentityError> {
+        Err(damaged(domain::fleet::KeyFile::ConnectionCounter))
     }
 }

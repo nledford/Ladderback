@@ -311,6 +311,11 @@ fn the_permission_table_names_each_route_a_token_may_use_and_no_other() {
         (Method::GET, "/api/v1/repositories", Some(Backups)),
         // The status summary, read as the plans are (§4.6).
         (Method::GET, "/api/v1/status", Some(Backups)),
+        // Which hub this machine is paired with, read as the status is
+        // (§4.6, `pairing_state`): public, and never a way to pair.
+        (Method::GET, "/api/v1/pairing", Some(Backups)),
+        (Method::HEAD, "/api/v1/pairing", Some(Backups)),
+        (Method::POST, "/api/v1/pairing", None),
         (Method::POST, "/api/v1/status", None),
         (
             Method::GET,

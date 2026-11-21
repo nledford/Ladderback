@@ -57,8 +57,19 @@ fn hub_root(agent: &Agent) -> PathBuf {
     agent.scratch().join("hub")
 }
 
-fn machine_root(agent: &Agent) -> PathBuf {
+/// The folders of the machine the scenario pairs.
+pub(super) fn machine_root(agent: &Agent) -> PathBuf {
     agent.scratch().join("machine")
+}
+
+/// The pairing token the hub's terminal made last.
+pub(super) fn token(agent: &Agent) -> &str {
+    agent.pairing_terminal.token.as_deref().expect("a token")
+}
+
+/// The address the hub serves on.
+pub(super) fn hub_address(agent: &Agent) -> SocketAddr {
+    agent.pairing_terminal.address.expect("a serving hub")
 }
 
 fn other_hub_root(agent: &Agent) -> PathBuf {

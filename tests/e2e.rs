@@ -79,6 +79,9 @@ mod maintenance_steps;
 mod mcp_call_steps;
 #[path = "steps/mcp_log.rs"]
 mod mcp_log_steps;
+#[cfg(feature = "hub")]
+#[path = "steps/mcp_pairing.rs"]
+mod mcp_pairing_steps;
 #[path = "steps/mcp_proposals.rs"]
 mod mcp_proposals_steps;
 #[path = "steps/mcp.rs"]

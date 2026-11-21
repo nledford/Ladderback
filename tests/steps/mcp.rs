@@ -214,7 +214,7 @@ impl Session {
 
 /// The `_meta` every request of the current revision carries: its revision
 /// and the client's capabilities.
-fn current(mut params: Value) -> Value {
+pub(super) fn current(mut params: Value) -> Value {
     params["_meta"] = json!({
         "io.modelcontextprotocol/protocolVersion": "2026-07-28",
         "io.modelcontextprotocol/clientCapabilities": {},
@@ -259,7 +259,7 @@ pub(super) fn save_token(path: &Path, token: &str, shared: bool) {
 
 /// Starts `ladderback mcp` with `args` on the folders under `root` and waits
 /// until it answers, so whatever it does before it serves is done.
-async fn start_serving(agent: &mut Agent, root: PathBuf, args: &'static [&'static str]) {
+pub(super) async fn start_serving(agent: &mut Agent, root: PathBuf, args: &'static [&'static str]) {
     start_on(agent, root, args).await;
     ask(agent, "server/discover", current(json!({}))).await;
     result(agent);
@@ -287,7 +287,7 @@ fn scratch_folders(agent: &Agent) -> Vec<PathBuf> {
 }
 
 /// Sends a request on the scenario's server and keeps the answer.
-async fn ask(agent: &mut Agent, method: &'static str, params: Value) {
+pub(super) async fn ask(agent: &mut Agent, method: &'static str, params: Value) {
     ask_within(agent, method, params, ANSWER).await;
 }
 
@@ -994,7 +994,7 @@ fn nothing_shows(agent: &mut Agent, secret: String) {
 
 /// Checks that no line the server wrote on standard output holds any of
 /// `secrets`.
-fn shows_none(agent: &Agent, secrets: &[&str]) {
+pub(super) fn shows_none(agent: &Agent, secrets: &[&str]) {
     let session = agent
         .mcp
         .session

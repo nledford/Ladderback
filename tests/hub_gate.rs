@@ -128,6 +128,8 @@ fn every_path_under_sync_answers_404() {
     }
     // The daemon's own routes are still served: the 404 is the agent routes'.
     assert_eq!(daemon.status_of("/api/v1/log", "127.0.0.1"), 200);
+    // Nothing in the build can pair, so it has no pairing state to answer.
+    assert_eq!(daemon.status_of("/api/v1/pairing", "127.0.0.1"), 404);
 }
 
 /// Without the hub, `/sync/v1` isn't behind a check of its own: a name the
@@ -172,4 +174,86 @@ fn the_hub_commands_are_unknown() {
             .expect("ladderback ran");
         assert_eq!(output.status.code(), Some(2), "{args:?}");
     }
+}
+
+/// The MCP server has no `pairing_state` without the hub, since nothing in
+/// the build can pair: a one-shot call of it is an unknown tool, refused
+/// before any session starts, as any tool the server doesn't have is.
+#[test]
+fn the_mcp_server_has_no_pairing_tool() {
+    let scratch = tempfile::tempdir().expect("a scratch folder");
+    let mut command = Command::new(LADDERBACK);
+    testkit::daemon::isolate(&mut command, scratch.path());
+    command
+        .args(["mcp", "call", "pairing_state"])
+        .env("LC_ALL", "C")
+        .env_remove("LANGUAGE")
+        .stdin(Stdio::null())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped());
+    let output = spawn_gate::hold(|| command.spawn())
+        .expect("ladderback ran")
+        .wait_with_output()
+        .expect("ladderback ran");
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert_eq!(output.status.code(), Some(2), "{stderr}");
+    assert!(stderr.contains("pairing_state"), "{stderr}");
+}
+
+/// Nor has it the pairing guide, which explains a `pair` command the build
+/// doesn't have: `resources/list` leaves it out, and reading it is refused
+/// as reading any resource the server doesn't have is.
+#[test]
+fn the_mcp_server_has_no_pairing_guide() {
+    let scratch = tempfile::tempdir().expect("a scratch folder");
+    let mut command = Command::new(LADDERBACK);
+    testkit::daemon::isolate(&mut command, scratch.path());
+    command
+        .args(["mcp", "--headless"])
+        .env("LC_ALL", "C")
+        .env_remove("LANGUAGE")
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped());
+    let mut child = spawn_gate::hold(|| command.spawn()).expect("ladderback mcp started");
+    let meta = serde_json::json!({
+        "io.modelcontextprotocol/protocolVersion": "2026-07-28",
+        "io.modelcontextprotocol/clientCapabilities": {},
+    });
+    let requests = [
+        serde_json::json!({"jsonrpc": "2.0", "id": 1, "method": "resources/list",
+            "params": {"_meta": meta}}),
+        serde_json::json!({"jsonrpc": "2.0", "id": 2, "method": "resources/read",
+            "params": {"_meta": meta, "uri": "ladderback://pairing"}}),
+    ];
+    {
+        let mut stdin = child.stdin.take().expect("a piped stdin");
+        for request in requests {
+            writeln!(stdin, "{request}").expect("the request is sent");
+        }
+    }
+    let output = child.wait_with_output().expect("ladderback mcp ended");
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    let answers: Vec<serde_json::Value> = String::from_utf8_lossy(&output.stdout)
+        .lines()
+        .map(|line| serde_json::from_str(line).expect("a JSON-RPC answer"))
+        .collect();
+    let answer = |id: u64| {
+        answers
+            .iter()
+            .find(|answer| answer["id"] == id)
+            .unwrap_or_else(|| panic!("no answer to {id} in {answers:#?}; stderr: {stderr}"))
+    };
+    let listed = answer(1)["result"]["resources"]
+        .as_array()
+        .unwrap_or_else(|| panic!("a resource list in {:#}", answer(1)));
+    assert!(!listed.is_empty(), "the other resources are listed");
+    assert!(
+        listed
+            .iter()
+            .all(|resource| resource["uri"] != "ladderback://pairing"),
+        "{listed:#?}"
+    );
+    assert!(answer(2)["result"].is_null(), "{:#}", answer(2));
+    assert!(answer(2)["error"]["code"].is_i64(), "{:#}", answer(2));
 }

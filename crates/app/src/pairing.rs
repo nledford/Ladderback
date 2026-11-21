@@ -8,6 +8,7 @@ mod client;
 mod connection;
 mod hub;
 mod session;
+mod state;
 mod wire;
 
 pub use agent::{
@@ -20,6 +21,7 @@ pub use hub::{
     TokenAsk, TokenAskRefused,
 };
 pub use session::{BINDING_UNAVAILABLE, HubSession, HubStep, PROTOCOL_ERROR, SEQUENCE_ERROR};
+pub use state::PairingState;
 
 #[cfg(test)]
 mod tests;
