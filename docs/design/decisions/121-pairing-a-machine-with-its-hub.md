@@ -58,7 +58,9 @@ The tab is named Machines; the sections above, written before it was built, call
 
 The address's kind follows the hub's built-in TLS (#1210). When it serves its certificate, the dialog offers both kinds in a radio group, the hub's own certificate and a certificate authority's, and chooses the hub's own first on a page that came over the built-in TLS and a certificate authority's on one that came in plain, as through a proxy. Choosing the hub's own makes a token pinned to its certificate, rewrites an `http://` address to `https://` and says the token is pinned. When the hub serves no certificate (its TLS key can't serve, [120, "The hub key"](120-agent-hub-connection-security.md)), the kind is a certificate authority's only, and the page says no token can pin one.
 
-The QR code and Share, the used token's status line and the agent's row, approval, the list of unused tokens, "Show all", the refusal on a page that isn't a secure context, and the agent's pairing page are not built yet. Nor is the warning that a hub behind a proxy that rewrites `Host` must turn sign-in on, which Settings and the docs give ([120, "Who may make a token, approve or re-key"](120-agent-hub-connection-security.md)).
+With sign-in off, the tab warns in a warning Alert that a hub reached through a reverse proxy must turn sign-in on, with a link to the guide's section "A hub behind a reverse proxy", which says the same ([120, "Who may make a token, approve or re-key"](120-agent-hub-connection-security.md), #1227). The link is to the guide on `main`: only a build that isn't a release has a hub ([122](122-hub-out-of-releases-until-m8.md)), and its release's tag predates the section. The warning shows wherever the step-up is the typed key ID, the case a proxy that rewrites `Host` defeats; with sign-in on it doesn't show.
+
+The QR code and Share, the used token's status line and the agent's row, approval, the list of unused tokens, "Show all", the refusal on a page that isn't a secure context, and the agent's pairing page are not built yet.
 
 ## Waiting for approval
 
