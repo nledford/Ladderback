@@ -89,6 +89,7 @@ fn a_pair_no_challenge_was_made_for() -> AgentFrame {
         agent_key: encoded(&[8; 32]),
         counter: 0,
         hostname: "laptop".to_owned(),
+        zone: None,
         pairing_signature: encoded(&[9; 64]),
         agent_signature: encoded(&[10; 64]),
     }

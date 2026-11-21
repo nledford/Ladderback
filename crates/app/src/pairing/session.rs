@@ -110,7 +110,10 @@ impl HubPairing {
                 }
             }
             (AgentMessage::Signed(hello), Stage::Proved(handshake, agent)) => {
-                match self.welcome(&session.keys, &handshake, &agent, &hello) {
+                match self
+                    .welcome(&session.keys, &handshake, &agent, &hello)
+                    .await
+                {
                     Ok(Ok(welcome)) => HubStep::Last(hub_envelope_frame(&welcome)),
                     Ok(Err(MessageRefused::Unexpected)) => HubStep::Close(PROTOCOL_ERROR),
                     Ok(Err(MessageRefused::Unsigned | MessageRefused::OutOfSequence)) => {

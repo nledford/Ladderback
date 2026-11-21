@@ -247,6 +247,7 @@ mod tests {
             status: AgentStatus::Pending { since },
             counter: 0,
             last_seen: since,
+            zone: None,
         }
     }
 

@@ -29,12 +29,15 @@ pub enum AgentFrame {
         agent_nonce: String,
         binding_kind: u8,
     },
-    /// The pairing, in place of `Proof`.
+    /// The pairing, in place of `Proof`. `zone` is the agent's IANA time
+    /// zone name, absent when its zone has no such name.
     Pair {
         pairing_key: String,
         agent_key: String,
         counter: u64,
         hostname: String,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        zone: Option<String>,
         pairing_signature: String,
         agent_signature: String,
     },
@@ -96,6 +99,10 @@ pub struct HelloPayload {
     pub protocols: [u64; 2],
     /// The agent's clock, in seconds since the Unix epoch.
     pub clock: u64,
+    /// The agent's IANA time zone name, absent when its zone has no such
+    /// name.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub zone: Option<String>,
 }
 
 /// The payload of the hub's `Welcome`.

@@ -12,6 +12,7 @@ use super::handshake::BindingKind;
 use super::hostname::Hostname;
 use super::keys::PublicKey;
 use super::signed::WireName;
+use super::zone::MachineZone;
 use crate::AgentId;
 
 /// The most agents that may wait for approval at once; a pairing past it
@@ -138,6 +139,9 @@ pub struct AgentRecord {
     pub counter: u64,
     /// When the hub last heard from the agent.
     pub last_seen: Timestamp,
+    /// The machine zone the agent last reported, as the hub's database
+    /// knows it; none while it is unknown.
+    pub zone: Option<MachineZone>,
 }
 
 impl AgentRecord {
@@ -254,6 +258,9 @@ pub struct PairRequest {
     pub agent_id: AgentId,
     pub agent_key: PublicKey,
     pub hostname: Hostname,
+    /// The machine zone the agent reported, as the hub's database knows
+    /// it; none when it is unknown.
+    pub zone: Option<MachineZone>,
     pub counter: u64,
     /// The binding kind the agent named in `Connect`.
     pub kind: BindingKind,
@@ -370,6 +377,7 @@ pub fn decide_pairing(
         return Ok(Pairing::Again(AgentRecord {
             counter: record.counter.max(request.counter),
             last_seen: now,
+            zone: request.zone.clone(),
             ..record.clone()
         }));
     }
@@ -389,6 +397,7 @@ pub fn decide_pairing(
         status: AgentStatus::Pending { since: now },
         counter: request.counter,
         last_seen: now,
+        zone: request.zone.clone(),
     }))
 }
 
