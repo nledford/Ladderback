@@ -34,6 +34,7 @@ Feature: Reading each keyring entry once, while someone is there
         | why                                       | code                       |
         | the keyring has no entry "ladderback/nas" | secret-missing             |
         | the keyring is locked                     | secret-keyring-locked      |
+        | the keyring's unlock prompt was dismissed | secret-keyring-locked      |
         | the machine has no keyring service        | secret-keyring-unavailable |
 
     Scenario: Repositories that share an entry have it read once

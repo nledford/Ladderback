@@ -16,11 +16,12 @@ use domain::secrets::{KeyringEntry, SecretValue};
 ///   entry that isn't there is no error.
 /// - With no keyring service to ask (on Linux no Secret Service, no session
 ///   bus to reach one by, or one that refused otherwise than as locked, as
-///   when its unlock prompt was dismissed), both fail with
+///   when it has no collection), both fail with
 ///   [`KeyringError::Unavailable`]. A service that says its keyring is
 ///   locked fails both with [`KeyringError::Locked`], as the resolver reads
 ///   it as [`KeyringCause::Locked`](domain::secrets::KeyringCause::Locked)
-///   (#993). A call that outlives the resolver's
+///   (#993), and so does one whose unlock prompt the person dismissed,
+///   which leaves it locked. A call that outlives the resolver's
 ///   limit fails with [`KeyringError::TimedOut`], and any other failure with
 ///   [`KeyringError::Unwritable`].
 /// - An error never holds the password.

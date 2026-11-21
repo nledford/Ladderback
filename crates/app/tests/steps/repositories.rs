@@ -687,6 +687,13 @@ fn keyring_locked(agent: &mut super::Agent) {
     agent.repositories.secrets.lock_keyring();
 }
 
+/// A desktop whose Secret Service runs, whose unlock prompt the person
+/// dismissed, so its keyring stays locked.
+#[given("a machine whose keyring's unlock prompt was dismissed")]
+fn unlock_prompt_dismissed(agent: &mut super::Agent) {
+    agent.repositories.secrets.dismiss_unlock_prompt();
+}
+
 #[given(expr = "the keyring entry {string} holds {string}")]
 fn entry_holds(agent: &mut super::Agent, name: String, secret: String) {
     agent
