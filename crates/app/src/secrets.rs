@@ -170,10 +170,11 @@ pub fn unresolved_refusal(secret: &SecretError, redactor: &Redactor) -> SettingR
         },
         // The platform's words about the service, never about a secret it
         // gave: none was read. Masked all the same. A locked keyring is told
-        // apart, as the person can unlock it (#993).
+        // apart, as the person can unlock it (#993), and so is one whose
+        // unlock prompt they dismissed, which stays locked.
         Problem::KeyringUnavailable {
             detail,
-            cause: KeyringCause::Locked,
+            cause: KeyringCause::Locked | KeyringCause::Dismissed,
         } => SettingRefusal::SecretKeyringLocked {
             source,
             detail: said(detail),
@@ -258,6 +259,24 @@ impl ResolveError {
                 limit,
             },
         }
+    }
+
+    /// Whether a run nobody waits on may wait for the keyring to be
+    /// unlocked past this error: only when the keyring service answered
+    /// that its keyring is locked (decision 135). An unlock prompt the
+    /// person dismissed is refused as locked too, but it is a no, never
+    /// waited on (#993).
+    pub fn waits_for_unlock(&self) -> bool {
+        matches!(
+            &self.cause,
+            Cause::Unresolved(SecretError {
+                problem: Problem::KeyringUnavailable {
+                    cause: KeyringCause::Locked,
+                    ..
+                },
+                ..
+            })
+        )
     }
 }
 
@@ -837,10 +856,10 @@ impl<'a> Run<'a> {
                     }
                     read_unlocked = true;
                 }
-                // An unlock prompt the person dismissed is a no: the run
-                // fails at once and never asks again.
-                KeyringCause::Refused => return read,
-                KeyringCause::Dismissed => todo!(),
+                // An unlock prompt the person dismissed is a no, and so is
+                // a service with no collection: the run fails at once and
+                // never asks again.
+                KeyringCause::Dismissed | KeyringCause::Refused => return read,
             }
         }
     }

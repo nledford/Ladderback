@@ -498,10 +498,11 @@ impl Keyring for FakeSecrets {
 /// there.
 fn unavailable(state: &State) -> Result<(), KeyringError> {
     match keyring_unavailable(state) {
-        Some((detail, KeyringCause::Locked)) => Err(KeyringError::Locked {
-            detail: detail.to_owned(),
-        }),
-        Some((_, KeyringCause::Dismissed)) => todo!(),
+        Some((detail, KeyringCause::Locked | KeyringCause::Dismissed)) => {
+            Err(KeyringError::Locked {
+                detail: detail.to_owned(),
+            })
+        }
         Some((detail, KeyringCause::NoService | KeyringCause::Refused)) => {
             Err(KeyringError::Unavailable {
                 detail: detail.to_owned(),

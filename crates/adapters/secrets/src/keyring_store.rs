@@ -272,7 +272,7 @@ pub(crate) fn failure(
             Some(KeyringCause::NoService) => Failure::NoService(error.to_string()),
             Some(KeyringCause::Locked) => Failure::Locked(error.to_string()),
             Some(KeyringCause::Refused) => Failure::Refused(error.to_string()),
-            Some(KeyringCause::Dismissed) => todo!(),
+            Some(KeyringCause::Dismissed) => Failure::Dismissed(error.to_string()),
             None => Failure::Unreachable(error.to_string()),
         },
     }
@@ -280,9 +280,9 @@ pub(crate) fn failure(
 
 /// What the error `keyring` boxed for a Secret Service failure says of the
 /// service: none to ask (no session bus, no daemon on it, a provider that
-/// isn't there), one whose collection is locked, or one that refused
-/// otherwise (a missing collection, a dismissed unlock prompt). Anything
-/// else, or an error of another type, is a read that failed: `None`.
+/// isn't there), one whose collection is locked, one whose unlock prompt
+/// was dismissed, or one that refused otherwise (a missing collection).
+/// Anything else, or an error of another type, is a read that failed: `None`.
 #[cfg(target_os = "linux")]
 fn secret_service_unavailable(
     source: &(dyn std::error::Error + Send + Sync + 'static),
@@ -291,7 +291,8 @@ fn secret_service_unavailable(
     match source.downcast_ref::<Error>() {
         Some(Error::Unavailable) => Some(KeyringCause::NoService),
         Some(Error::Locked) => Some(KeyringCause::Locked),
-        Some(Error::NoResult | Error::Prompt) => Some(KeyringCause::Refused),
+        Some(Error::Prompt) => Some(KeyringCause::Dismissed),
+        Some(Error::NoResult) => Some(KeyringCause::Refused),
         Some(Error::Dbus(error)) => error.name().and_then(bus_error_cause),
         _ => None,
     }
