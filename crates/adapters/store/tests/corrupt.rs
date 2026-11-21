@@ -10,7 +10,7 @@ use app::ports::{
     ScheduleStore, StoreError,
 };
 use domain::Timestamp;
-use domain::execution::{FailureReason, OperationKind, OperationStatus, Target, Trigger};
+use domain::execution::{FailureReason, HookEnd, OperationKind, OperationStatus, Target, Trigger};
 use domain::execution::{Warning, WarningKind};
 use sqlx::sqlite::SqliteConnection;
 use support::*;
@@ -346,6 +346,152 @@ fn cases() -> Vec<Case> {
             ),
         ),
         broken(
+            "a hook level nobody knows",
+            "error_args",
+            error_of(
+                "hook-failed",
+                text(
+                    r#"[["level",{"type":"text","value":"machine"}],["position",{"type":"text","value":"1"}]]"#,
+                ),
+                Cell::Null,
+            ),
+        ),
+        broken(
+            "a hook level without its place",
+            "error_args",
+            error_of(
+                "hook-failed",
+                text(r#"[["level",{"type":"text","value":"plan"}]]"#),
+                Cell::Null,
+            ),
+        ),
+        broken(
+            "a hook place without its level",
+            "error_args",
+            error_of(
+                "hook-failed",
+                text(r#"[["position",{"type":"text","value":"1"}]]"#),
+                Cell::Null,
+            ),
+        ),
+        broken(
+            "a hook status on an end that is no exit",
+            "error_args",
+            error_of(
+                "hook-failed",
+                text(
+                    r#"[["ended",{"type":"text","value":"signal"}],["exit_code",{"type":"text","value":"3"}]]"#,
+                ),
+                Cell::Null,
+            ),
+        ),
+        broken(
+            "a hook place counted from 0",
+            "error_args",
+            error_of(
+                "hook-failed",
+                text(
+                    r#"[["level",{"type":"text","value":"plan"}],["position",{"type":"text","value":"0"}]]"#,
+                ),
+                Cell::Null,
+            ),
+        ),
+        broken(
+            "a hook end nobody knows",
+            "error_args",
+            error_of(
+                "hook-failed",
+                text(r#"[["ended",{"type":"text","value":"crashed"}]]"#),
+                Cell::Null,
+            ),
+        ),
+        broken(
+            "a hook exit without its status",
+            "error_args",
+            error_of(
+                "hook-failed",
+                text(r#"[["ended",{"type":"text","value":"exit"}]]"#),
+                Cell::Null,
+            ),
+        ),
+        broken(
+            "a hook level that is not text",
+            "error_args",
+            error_of(
+                "hook-failed",
+                text(
+                    r#"[["level",{"type":"count","value":1}],["position",{"type":"text","value":"1"}]]"#,
+                ),
+                Cell::Null,
+            ),
+        ),
+        broken(
+            "a hook place that is not text",
+            "error_args",
+            error_of(
+                "hook-failed",
+                text(
+                    r#"[["level",{"type":"text","value":"plan"}],["position",{"type":"count","value":1}]]"#,
+                ),
+                Cell::Null,
+            ),
+        ),
+        broken(
+            "a hook end that is not text",
+            "error_args",
+            error_of(
+                "hook-failed",
+                text(r#"[["ended",{"type":"count","value":1}]]"#),
+                Cell::Null,
+            ),
+        ),
+        broken(
+            "a hook place that is no number",
+            "error_args",
+            error_of(
+                "hook-failed",
+                text(
+                    r#"[["level",{"type":"text","value":"plan"}],["position",{"type":"text","value":"one"}]]"#,
+                ),
+                Cell::Null,
+            ),
+        ),
+        broken(
+            "a hook place past the largest a list can have",
+            "error_args",
+            error_of(
+                "hook-failed",
+                text(
+                    r#"[["level",{"type":"text","value":"plan"}],["position",{"type":"text","value":"4294967296"}]]"#,
+                ),
+                Cell::Null,
+            ),
+        ),
+        // The store writes a place as plain digits; a sign or a leading zero
+        // is no row it wrote, so it isn't quietly rewritten on the next save.
+        broken(
+            "a hook place with a sign",
+            "error_args",
+            error_of(
+                "hook-failed",
+                text(
+                    r#"[["level",{"type":"text","value":"plan"}],["position",{"type":"text","value":"+1"}]]"#,
+                ),
+                Cell::Null,
+            ),
+        ),
+        broken(
+            "a hook place with a leading zero",
+            "error_args",
+            error_of(
+                "hook-failed",
+                text(
+                    r#"[["level",{"type":"text","value":"plan"}],["position",{"type":"text","value":"01"}]]"#,
+                ),
+                Cell::Null,
+            ),
+        ),
+        broken(
             "an engine failure without its message",
             "error_detail",
             error_of("operation-failed", text("[]"), Cell::Null),
@@ -623,6 +769,53 @@ async fn the_rows_the_cases_start_from_are_good() {
         .await
         .expect("listing works");
     assert_eq!(page.operations.len(), 2);
+}
+
+// A hook failure an earlier version kept records no more than the exit
+// status, when there was one: it is read as a failure of no known hook,
+// that exited with that status or ended without one (#480).
+#[tokio::test]
+async fn a_hook_failure_an_earlier_version_kept_is_still_read() {
+    let scratch = Scratch::new();
+    let store = scratch.open().await;
+    let mut raw = scratch.raw().await;
+    for (byte, args) in [
+        (0x01, r#"[["exit_code",{"type":"text","value":"3"}]]"#),
+        (0x02, "[]"),
+    ] {
+        RawRow::failed(&id_text(byte))
+            .with("error_code", "hook-failed")
+            .with("error_args", args)
+            .null("error_detail")
+            .insert(&mut raw)
+            .await;
+    }
+
+    let status = async |byte| {
+        store
+            .get(id(byte))
+            .await
+            .expect("reading works")
+            .map(|detail| detail.record.status)
+    };
+    assert_eq!(
+        status(0x01).await,
+        Some(OperationStatus::Failed {
+            reason: FailureReason::HookFailed {
+                hook: None,
+                ended: Some(HookEnd::Exited { code: 3 }),
+            }
+        })
+    );
+    assert_eq!(
+        status(0x02).await,
+        Some(OperationStatus::Failed {
+            reason: FailureReason::HookFailed {
+                hook: None,
+                ended: None,
+            }
+        })
+    );
 }
 
 #[tokio::test]

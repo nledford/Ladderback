@@ -721,13 +721,58 @@ fn hook_warning(detail: &str) -> Warning {
 }
 
 #[test]
+fn hook_levels_and_ends_read_back_from_their_codes() {
+    for level in [HookLevel::Agent, HookLevel::Repository, HookLevel::Plan] {
+        assert_eq!(HookLevel::parse(level.code()), Some(level));
+    }
+    assert_eq!(
+        [HookLevel::Agent, HookLevel::Repository, HookLevel::Plan].map(HookLevel::code),
+        ["agent", "repository", "plan"]
+    );
+    assert_eq!(HookLevel::parse("machine"), None);
+    for end in [
+        HookEnd::Exited { code: 3 },
+        HookEnd::Signalled,
+        HookEnd::TimedOut,
+        HookEnd::NotStarted,
+    ] {
+        assert_eq!(HookEnd::parse(end.code(), end.exit_code()), Some(end));
+    }
+    assert_eq!(
+        [
+            HookEnd::Exited { code: 3 },
+            HookEnd::Signalled,
+            HookEnd::TimedOut,
+            HookEnd::NotStarted,
+        ]
+        .map(HookEnd::code),
+        ["exit", "signal", "timeout", "not-started"]
+    );
+    assert_eq!(HookEnd::Exited { code: -1 }.exit_code(), Some(-1));
+    assert_eq!(HookEnd::TimedOut.exit_code(), None);
+    // An exit without its status, or a status on anything but an exit,
+    // is no end a failure records.
+    assert_eq!(HookEnd::parse("exit", None), None);
+    assert_eq!(HookEnd::parse("signal", Some(3)), None);
+    assert_eq!(HookEnd::parse("crashed", None), None);
+}
+
+#[test]
 fn a_hook_failure_codes_as_hook_failed() {
     assert_eq!(
-        FailureReason::HookFailed { exit_code: Some(3) }.code(),
+        FailureReason::HookFailed {
+            hook: None,
+            ended: Some(HookEnd::Exited { code: 3 }),
+        }
+        .code(),
         "hook-failed"
     );
     assert_eq!(
-        FailureReason::HookFailed { exit_code: None }.code(),
+        FailureReason::HookFailed {
+            hook: None,
+            ended: None,
+        }
+        .code(),
         "hook-failed"
     );
     assert_eq!(FailureReason::RepositoryExists.code(), "repository-exists");
@@ -925,7 +970,10 @@ fn an_operation_unfinished_cancelled_or_failed_for_its_own_reason_tells_nothing(
         failed(FailureReason::EngineFailed {
             detail: "source unreadable".to_owned(),
         }),
-        failed(FailureReason::HookFailed { exit_code: Some(1) }),
+        failed(FailureReason::HookFailed {
+            hook: None,
+            ended: Some(HookEnd::Exited { code: 1 }),
+        }),
         failed(FailureReason::DeadlinePassed),
         failed(FailureReason::DaemonStopped),
         failed(FailureReason::DaemonShutDown),

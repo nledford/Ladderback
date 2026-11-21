@@ -304,6 +304,35 @@ Feature: Each row of the Operations page names its operation and says what it di
     And the polite region reads "Backup finished."
     And the polite region keeps reading "Backup finished."
 
+  # A before-hook's warning is told to an open page as the hook ends, as an
+  # engine's warning is (#369): the run ends on the page with its warnings
+  # as soon as its end is heard, before the page has read the history
+  # again, and its end is told once.
+  Scenario: A before-hook's warning reaches an open Operations page as it happens
+    Given a demo plan "home" whose before-hooks wait until they are let go, then warn
+    And a backup of the plan "home" has been asked for
+    When I open the address "/operations"
+    And the table "Operations" has a row "home" that shows "Queued"
+    And the daemon's next answer to a reading of the history is held back
+    And the before-hooks of the plan "home" are let go
+    Then the row "home" of the table "Operations" shows "Succeeded with warnings" in its "Status" column
+    And the page's reading of the history is still held back
+    And the polite region reads "Backup finished."
+    And the polite region keeps reading "Backup finished."
+
+  # A backup a before-hook stopped says which hook it was, by its place in
+  # the plan's run-before list, and how it ended, never what the hook wrote:
+  # that could hold a secret (#480, #853).
+  Scenario: A backup a before-hook stopped says which hook failed and how
+    Given a demo plan "home" whose before-hook says "canary-hook-output" and exits 3, with on-failure error
+    And a backup of the plan "home" has failed
+    When I open the address "/operations"
+    Then the row "home" of the table "Operations" shows "Failed" in its "Status" column
+    And the row "home" of the table "Operations" shows "Hook 1 of the plan's run-before list failed" in its "Result" column
+    And the row "home" of the table "Operations" shows "It exited with status 3." in its "Result" column
+    And the row "home" of the table "Operations" doesn't show "canary-hook-output" in its "Result" column
+    And the page has no accessibility violations
+
   # The page listens to the daemon only while the reader is on it: leaving it
   # closes its events stream, ends the wait to reconnect a dropped one, and
   # stops the polling of a run the page started or cancelled, so coming back

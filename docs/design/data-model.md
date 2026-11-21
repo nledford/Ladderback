@@ -191,7 +191,7 @@ Later tables, columns and indexes arrive as migrations of the features that need
   - `credentials-refused` (no detail: a REST server answered 401 or 403 to the repository's credentials, decision 85; argument `half`, `cold` or `hot`, for a hot/cold repository, left out otherwise, and a stored half that is neither doesn't read back, decision 112)
   - `engine-start-timed-out`
   - `engine-exit-timed-out`
-  - `hook-failed` (argument `exit_code`, left out when no exit status is known)
+  - `hook-failed` (arguments `level`, `agent`, `repository` or `plan`, and `position`, the hook's place in that level's `run-before` list from 1; `ended`, `exit`, `signal`, `timeout` or `not-started`; and `exit_code`, for an exit only. A row an earlier version wrote has only `exit_code`, or nothing: it reads back with no hook, and with how it ended taken from `exit_code` when there is one, #480)
   - `secrets-too-large-to-mask` (arguments `limit`, in bytes, and `field`, the proxy variable whose credentials took the job's secrets past the cap, left out when the job's own secrets did, security.md §10.2)
   - `daemon-stopped` (no argument and no detail: startup recovery wrote it for an operation the daemon never saw end)
   - `daemon-shut-down` (no argument and no detail: the daemon's orderly stop wrote it for an operation still running once its workers had stopped, with the stop's time as `finished_at`; §4.2, decision 92)
