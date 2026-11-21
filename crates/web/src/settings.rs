@@ -61,6 +61,7 @@ use crate::api_tokens::{
     granted_of, new_token, permissions_from, problems_of, revoke_id, revoke_label, revoke_path,
     revoke_title, revoked,
 };
+use crate::components::ACTIONS;
 use crate::components::button::{Appearance, Content, Kind};
 use crate::components::skeleton::rules::Awaited;
 use crate::components::tabs::{Orientation, TabSet, TabsName};
@@ -868,7 +869,7 @@ fn token_actions(
     let (change_id_of, revoke_id_of) = (change_id(&token.id), revoke_id(&token.id));
     let change_for = token.clone();
     view! {
-        <div class="actions">
+        <div class=ACTIONS>
             <Button
                 content=Content::IconAndText {
                     glyph: LucideGlyph::Pencil.into(),
@@ -989,7 +990,7 @@ fn CreateForm(
                         chosen=inputs.permissions
                     />
                 </fieldset>
-                <p class="actions">
+                <p class=ACTIONS>
                     <Button
                         content=Content::Text(field_text(msg::UI_API_TOKEN_CREATE).into())
                         appearance=Appearance::Filled
@@ -1044,7 +1045,7 @@ fn CreatedDialog(
                 access=text_field::Access::ReadOnly
                 token=true
             />
-            <p class="actions">
+            <p class=ACTIONS>
                 <Button
                     content=Content::Text(text(&localizer, msg::UI_API_TOKEN_COPY).into())
                     node_ref=copy_button

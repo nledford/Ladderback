@@ -9,6 +9,7 @@ use leptos::task::{spawn_local, tick};
 
 use super::DemoHeading;
 use crate::announcer::Politeness;
+use crate::components::ACTIONS;
 use crate::components::button::{Appearance, Content};
 use crate::components::{Button, ModalDialog, TitleLevel};
 use crate::live::say;
@@ -101,7 +102,7 @@ pub(super) fn ModalDialogDemo(localizer: Arc<Localizer>) -> impl IntoView {
                 <p aria-live="polite" aria-atomic="true">
                     {move || warning_kept.get().then(|| warning_kept_text.clone())}
                 </p>
-                <p class="actions">
+                <p class=ACTIONS>
                     <Button
                         content=Content::Text(warning_answer.into())
                         on_press=Callback::new(move |()| warning_open.set(false))
@@ -151,7 +152,7 @@ pub(super) fn ModalDialogDemo(localizer: Arc<Localizer>) -> impl IntoView {
                 returns_to="gallery-demo-setting"
             >
                 <p id="gallery-demo-setting-body">{setting_body}</p>
-                <p class="actions">
+                <p class=ACTIONS>
                     <Button
                         content=Content::Text(setting_keep.into())
                         on_press=Callback::new(move |()| setting_open.set(false))

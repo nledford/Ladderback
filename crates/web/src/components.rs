@@ -78,6 +78,18 @@ pub use toast::{Toast, ToastTone, Toasts};
 pub use tooltip::{Tip, Tooltip};
 pub(crate) use tree::{FolderLoader, FolderPage, Tree};
 
+/// A row of actions, in Tailwind utilities (decision 117), logical ones
+/// only: its buttons, and any text field, half a rem apart in a row that
+/// wraps on a small screen, so each stands apart from the next and none
+/// leaves the screen. The row stretches its items, so a button keeps its
+/// own height, centered on the row. A row that holds a text field lines its
+/// items up at their foot instead, so the field's box and a button of its
+/// size stand level, the label above; that field grows from 12rem up to
+/// 32rem, without the rem above and below a field takes elsewhere.
+pub const ACTIONS: &str = "actions flex flex-wrap gap-2 [&>.button]:self-center \
+    has-[>.text-field]:items-end has-[>.text-field]:[&>.button]:self-auto \
+    [&>.text-field]:flex-[1_1_12rem] [&>.text-field]:max-inline-[32rem] [&>.text-field]:my-0";
+
 /// Wraps Tab focus from the dialog's last focusable back to its first (and
 /// Shift-Tab from the first to the last), keeping keyboard focus inside the
 /// open dialog however the Tab key was pressed. The wrap decision is

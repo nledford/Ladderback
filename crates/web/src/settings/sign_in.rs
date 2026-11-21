@@ -14,6 +14,7 @@ use leptos::prelude::*;
 use leptos::task::spawn_local;
 
 use crate::announcer::Politeness;
+use crate::components::ACTIONS;
 use crate::components::alert::rules::AlertTone;
 use crate::components::button::{Appearance, Content, Kind};
 use crate::components::skeleton::rules::Awaited;
@@ -211,7 +212,7 @@ fn Choices(localizer: Arc<Localizer>) -> impl IntoView {
                             options=options
                             chosen=chosen
                         />
-                        <p class="actions">
+                        <p class=ACTIONS>
                             <Button
                                 content=Content::Text(
                                     text(&form_localizer, msg::UI_SESSION_LENGTH_SAVE).into(),
@@ -256,7 +257,7 @@ fn Choices(localizer: Arc<Localizer>) -> impl IntoView {
             save_error.get().map(|sentence| refusal_alert(&save_error_localizer, sentence))
         }}
         <p>{text(&localizer, msg::UI_SIGN_OUT_EVERYWHERE_BODY)}</p>
-        <p class="actions">
+        <p class=ACTIONS>
             <Button
                 content=Content::Text(text(&localizer, msg::UI_SIGN_OUT_EVERYWHERE).into())
                 tone=Tone::Error

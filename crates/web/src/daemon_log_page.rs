@@ -10,6 +10,7 @@ use l10n::{Localizer, msg};
 use leptos::prelude::*;
 use leptos::task::spawn_local;
 
+use crate::components::ACTIONS;
 use crate::components::button::Content;
 use crate::components::skeleton::rules::Awaited;
 use crate::components::{
@@ -194,7 +195,7 @@ fn Lines(localizer: Arc<Localizer>, lines: RwSignal<Vec<LogLineDto>>) -> impl In
             options=options
             chosen=chosen
         />
-        <p class="actions">
+        <p class=ACTIONS>
             <Button
                 content=Content::Text(text(&localizer, msg::UI_LOG_COPY).into())
                 id=COPY_ID

@@ -18,6 +18,7 @@ use leptos::task::spawn_local;
 use leptos_router::hooks::use_location;
 
 use crate::announcer::Politeness;
+use crate::components::ACTIONS;
 use crate::components::banner::rules::BannerTone;
 use crate::components::button::{Appearance, Button, Content};
 use crate::components::link::rules::{Destination, Matching};
@@ -248,7 +249,7 @@ pub(crate) fn FullDiskAccessSteps(localizer: Arc<Localizer>) -> impl IntoView {
                     <ol>
                         {steps.iter().map(|step| view! { <li>{step.clone()}</li> }).collect_view()}
                     </ol>
-                    <div class="actions">
+                    <div class=ACTIONS>
                         {move || {
                             offers_settings
                                 .get()

@@ -7,6 +7,7 @@ use lepticons_data::LucideGlyph;
 use leptos::prelude::*;
 
 use super::DemoHeading;
+use crate::components::ACTIONS;
 use crate::components::button::Content;
 use crate::components::icon::Meaning;
 use crate::components::{Button, Icon};
@@ -83,7 +84,7 @@ pub(super) fn IconDemo(localizer: Arc<Localizer>) -> impl IntoView {
             // so a screen reader hears the name and the state once. The bell
             // is crossed out while it is off, so the shape shows the state
             // too. Pressing it changes nothing but the demo's own state.
-            <p class="actions">
+            <p class=ACTIONS>
                 <Button
                     content=Content::IconOnly {
                         glyph: Signal::derive(move || {
