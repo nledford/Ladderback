@@ -5,7 +5,7 @@
 //! plain address off loopback would show the token to the network, so it is
 //! refused before anything is sent.
 
-use std::net::{IpAddr, Ipv6Addr};
+use std::net::{Ipv4Addr, Ipv6Addr};
 
 use super::fingerprint::Fingerprint;
 use super::token::{HubAddress, TokenTls};
@@ -122,10 +122,51 @@ fn port_number(text: &str) -> Result<u16, RouteRefused> {
     }
 }
 
-/// Whether `host` names this computer: `localhost`, or a loopback address.
+/// Whether `host` names this computer: `localhost`, the IPv6 loopback, or
+/// an IPv4 address in `127.0.0.0/8` in a form every resolver reads alike
+/// (`ipv4_read_alike`), as `127.1`, which the agent's connection resolves
+/// there. Its twin, `crates/web/src/pairing.rs::is_loopback`, warns the
+/// page of the same hosts; the two are tested with one table, so keep them
+/// alike.
 pub fn is_loopback(host: &str) -> bool {
     host.eq_ignore_ascii_case("localhost")
-        || host.parse::<IpAddr>().is_ok_and(|ip| ip.is_loopback())
+        || host.parse::<Ipv6Addr>().is_ok_and(|ip| ip.is_loopback())
+        || ipv4_read_alike(host).is_some_and(|ip| ip.is_loopback())
+}
+
+/// An IPv4 address in a form every resolver reads alike: one to four
+/// decimal parts split by dots, the last filling the bytes the others
+/// leave, as `127.1` is `127.0.0.1` and `2130706433` is too. A part with a
+/// leading `0` or `0x` is none: glibc reads it as octal or hex and macOS,
+/// in four parts, as decimal, so `0177.0.0.1` is `127.0.0.1` on one and
+/// `177.0.0.1` on the other.
+fn ipv4_read_alike(host: &str) -> Option<Ipv4Addr> {
+    let parts = host.split('.').map(number).collect::<Option<Vec<u64>>>()?;
+    let (&last, leading) = parts.split_last()?;
+    let room = 4_u32.checked_sub(u32::try_from(leading.len()).ok()?)?;
+    let span = 256_u64.checked_pow(room)?;
+    if room == 0 || last >= span {
+        return None;
+    }
+    let mut address = 0_u64;
+    for &part in leading {
+        if part > 255 {
+            return None;
+        }
+        address = address.checked_mul(256)?.checked_add(part)?;
+    }
+    let address = address.checked_mul(span)?.checked_add(last)?;
+    u32::try_from(address).ok().map(Ipv4Addr::from)
+}
+
+/// One part of an IPv4 address in decimal digits, with no leading `0`
+/// unless it is `0` itself.
+fn number(part: &str) -> Option<u64> {
+    let decimal = !part.is_empty() && part.bytes().all(|byte| byte.is_ascii_digit());
+    if !decimal || (part.len() > 1 && part.starts_with('0')) {
+        return None;
+    }
+    part.parse().ok()
 }
 
 #[cfg(test)]

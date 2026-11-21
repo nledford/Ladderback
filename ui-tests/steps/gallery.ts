@@ -597,4 +597,28 @@ const SNAPSHOTS: Record<string, string> = {
   - listitem: Token Done
   - listitem: Connect Failed
   - listitem: Approval To do`,
+  Fingerprint: `- heading "Fingerprint" [level=2]
+- paragraph:
+  - text: Demo hub key fingerprint
+  - group "Demo hub key fingerprint":
+    - img "7"
+    - img "K"
+    - img "3"
+    - img "Q"
+    - img "M"
+    - img "9"
+    - img "X"
+    - img "D"
+    - img "2"
+    - img "R"
+    - img "T"
+    - img "V"
+    - img "8"
+    - img "H"
+    - img "F"
+    - img "A"
+    - img "Q"
+    - img "W"
+    - img "5"
+    - img "N"`,
 };

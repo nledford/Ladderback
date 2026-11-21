@@ -22,3 +22,5 @@ A scope opened too much at once: `read` gave the names inside every snapshot and
 - **And the web UI sets them.** The token form gives each row a group of its own, No access or its level, starting at a new token's defaults, and a token's row lists its permissions. Changing them is a dialog that takes the admin password. A Settings tab of its own, AI agents, sets the `[without-token]` table through `GET` and `PUT /api/v1/settings/without-token`, a person's only: with sign-in on, the admin's session and the current admin password; with sign-in off, any request but an AI agent's, with no password to give.
 
 **Amended by decision 132** (2026-11-20, #953): Snapshot contents also opens the snapshot search (`GET /api/v1/repositories/{alias}/find`), which names what a folder's page names; Backups alone doesn't.
+
+**Amended by [decision 134](134-an-agent-reads-the-log-a-page-at-a-time.md)** (2026-11-20, #957): the MCP tool `read_log` reads `GET /api/v1/log`, so the row Daemon log opens it too, and an AI agent without a token reads the log only where the `[without-token]` table opens that row.

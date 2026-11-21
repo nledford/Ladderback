@@ -135,13 +135,21 @@ pub fn error_id(id: &str) -> String {
 }
 
 /// The input's `aria-describedby`: its description, the note of its state
-/// and its error, each while the field shows it, in the order they stand;
-/// none when it shows none.
-pub fn described_by(id: &str, description: bool, access: Access, error: bool) -> Option<String> {
+/// and its error, each while the field shows it, in the order they stand,
+/// then `also`, an element of the caller's that describes it too; none when
+/// there is none of them.
+pub fn described_by(
+    id: &str,
+    description: bool,
+    access: Access,
+    error: bool,
+    also: Option<&str>,
+) -> Option<String> {
     let parts: Vec<String> = [
         description.then(|| description_id(id)),
         access.note().map(|_| note_id(id)),
         error.then(|| error_id(id)),
+        also.map(str::to_owned),
     ]
     .into_iter()
     .flatten()
@@ -296,22 +304,37 @@ mod tests {
 
     #[test]
     fn the_input_is_described_by_what_the_field_shows_in_order() {
-        assert_eq!(described_by("f", false, Access::Editable, false), None);
         assert_eq!(
-            described_by("f", true, Access::Editable, false).as_deref(),
+            described_by("f", false, Access::Editable, false, None),
+            None
+        );
+        assert_eq!(
+            described_by("f", true, Access::Editable, false, None).as_deref(),
             Some("f-description")
         );
         assert_eq!(
-            described_by("f", true, Access::Editable, true).as_deref(),
+            described_by("f", true, Access::Editable, true, None).as_deref(),
             Some("f-description f-error")
         );
         assert_eq!(
-            described_by("f", true, Access::ReadOnly, false).as_deref(),
+            described_by("f", true, Access::ReadOnly, false, None).as_deref(),
             Some("f-description f-note")
         );
         assert_eq!(
-            described_by("f", false, Access::Disabled, true).as_deref(),
+            described_by("f", false, Access::Disabled, true, None).as_deref(),
             Some("f-note f-error")
+        );
+    }
+
+    #[test]
+    fn an_element_of_the_caller_s_describes_the_input_after_its_own_parts() {
+        assert_eq!(
+            described_by("f", false, Access::Editable, false, Some("warning")).as_deref(),
+            Some("warning")
+        );
+        assert_eq!(
+            described_by("f", true, Access::ReadOnly, true, Some("warning")).as_deref(),
+            Some("f-description f-note f-error warning")
         );
     }
 

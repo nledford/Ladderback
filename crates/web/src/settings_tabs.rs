@@ -5,6 +5,9 @@
 
 use crate::components::tabs::Holds;
 
+/// How many sections a build has: the Agents one only with the hub.
+const SECTIONS: usize = if cfg!(feature = "hub") { 9 } else { 8 };
+
 /// A section of Settings, each a tab of its own, in the order the tabs
 /// stand.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -21,6 +24,10 @@ pub(crate) enum Section {
     ApiTokens,
     /// What AI agents may do without a token (decision 127).
     AiAgents,
+    /// The pairing tokens a hub makes for another machine (decision 121),
+    /// only in a build with the hub and on a daemon serving as one.
+    #[cfg(feature = "hub")]
+    Agents,
     /// The dry-run allowlist: the folders a plan dry run an AI agent asks
     /// for may read (decision 89).
     DryRunAllowlist,
@@ -30,13 +37,15 @@ pub(crate) enum Section {
 
 impl Section {
     /// Every section, in the order of the tabs.
-    pub(crate) const ALL: [Self; 8] = [
+    pub(crate) const ALL: [Self; SECTIONS] = [
         Self::Language,
         Self::PageWidth,
         Self::AdminPassword,
         Self::SigningIn,
         Self::ApiTokens,
         Self::AiAgents,
+        #[cfg(feature = "hub")]
+        Self::Agents,
         Self::DryRunAllowlist,
         Self::Restart,
     ];
@@ -54,6 +63,8 @@ impl Section {
             Self::SigningIn => "signing-in",
             Self::ApiTokens => "api-tokens",
             Self::AiAgents => "ai-agents",
+            #[cfg(feature = "hub")]
+            Self::Agents => "agents",
             Self::DryRunAllowlist => "dry-run-allowlist",
             Self::Restart => "restart",
         }
@@ -84,6 +95,10 @@ impl Section {
         match self {
             Self::Language | Self::PageWidth | Self::AdminPassword => Holds::Controls,
             Self::AiAgents if ai_agents_read => Holds::Controls,
+            // Shown only with sign-in off or in a session, always with its
+            // form.
+            #[cfg(feature = "hub")]
+            Self::Agents => Holds::Controls,
             Self::SigningIn | Self::ApiTokens if signed_in => Holds::Controls,
             Self::SigningIn
             | Self::ApiTokens
@@ -124,6 +139,8 @@ mod tests {
                 "signing-in",
                 "api-tokens",
                 "ai-agents",
+                #[cfg(feature = "hub")]
+                "agents",
                 "dry-run-allowlist",
                 "restart"
             ]
@@ -205,6 +222,8 @@ mod tests {
                 Holds::Controls,
                 Holds::Controls,
                 Holds::Controls,
+                #[cfg(feature = "hub")]
+                Holds::Controls,
                 Holds::Text,
                 Holds::Text
             ]
@@ -225,6 +244,8 @@ mod tests {
                 Holds::Controls,
                 Holds::Text,
                 Holds::Text,
+                Holds::Controls,
+                #[cfg(feature = "hub")]
                 Holds::Controls,
                 Holds::Text,
                 Holds::Text

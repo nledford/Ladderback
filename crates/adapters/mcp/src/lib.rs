@@ -55,6 +55,7 @@ mod arguments;
 mod checks;
 mod connect;
 mod contents;
+mod log;
 mod one_shot;
 mod pages;
 mod proposals;
@@ -105,6 +106,7 @@ const LIST_SNAPSHOT_FOLDER: &str = "list_snapshot_folder";
 const FIND_IN_SNAPSHOTS: &str = "find_in_snapshots";
 const LIST_OPERATIONS: &str = "list_operations";
 const GET_OPERATION: &str = "get_operation";
+const READ_LOG: &str = "read_log";
 const RUN_PLAN: &str = "run_plan";
 const WAIT_OPERATION: &str = "wait_operation";
 const CANCEL_OPERATION: &str = "cancel_operation";
@@ -128,6 +130,7 @@ pub(crate) enum ToolName {
     FindInSnapshots,
     ListOperations,
     GetOperation,
+    ReadLog,
     RunPlan,
     WaitOperation,
     CancelOperation,
@@ -143,7 +146,7 @@ pub(crate) enum ToolName {
 
 impl ToolName {
     /// Every tool.
-    const ALL: [Self; 19] = [
+    const ALL: [Self; 20] = [
         Self::Status,
         Self::ListPlans,
         Self::ListRepositories,
@@ -152,6 +155,7 @@ impl ToolName {
         Self::FindInSnapshots,
         Self::ListOperations,
         Self::GetOperation,
+        Self::ReadLog,
         Self::RunPlan,
         Self::WaitOperation,
         Self::CancelOperation,
@@ -181,6 +185,7 @@ impl ToolName {
             Self::FindInSnapshots => FIND_IN_SNAPSHOTS,
             Self::ListOperations => LIST_OPERATIONS,
             Self::GetOperation => GET_OPERATION,
+            Self::ReadLog => READ_LOG,
             Self::RunPlan => RUN_PLAN,
             Self::WaitOperation => WAIT_OPERATION,
             Self::CancelOperation => CANCEL_OPERATION,
@@ -222,6 +227,8 @@ impl ToolName {
             Self::PreviewForget | Self::PreviewImport => &[Permission::Previews],
             // A folder's page and a search name files (decision 132).
             Self::ListSnapshotFolder | Self::FindInSnapshots => &[Permission::SnapshotContents],
+            // The recent log can name files and folders (decision 134).
+            Self::ReadLog => &[Permission::DaemonLog],
             Self::ProposeSetup | Self::GetProposal | Self::WithdrawProposal | Self::DryRunPlan => {
                 &[Permission::Configuration]
             }
@@ -339,6 +346,10 @@ pub trait Backend: Send + Sync + 'static {
     /// and each step of a wait read, the same size however many warnings
     /// the operation recorded.
     async fn summary(&self, id: String) -> Result<OperationSummaryDto, ErrorDto>;
+
+    /// The recent log (§3.1), newest first, every line of it, as
+    /// `GET /api/v1/log` answers it.
+    async fn recent_log(&self) -> Result<api::RecentLogDto, ErrorDto>;
 
     /// Queues a backup of the plan whose ID is `plan` now, under the plan's
     /// overlap policy, and returns its operation's ID. The trigger recorded
@@ -591,6 +602,7 @@ impl Server {
             }
             ToolName::ListOperations => answered(self.list_operations(given).await),
             ToolName::GetOperation => answered(self.get_operation(given).await),
+            ToolName::ReadLog => answered(self.read_log(given).await),
             ToolName::RunPlan => answered(self.run_plan(given).await),
             ToolName::WaitOperation => answered(self.wait_operation(given, context).await),
             ToolName::CancelOperation => answered(self.cancel_operation(given).await),
@@ -733,6 +745,11 @@ impl Server {
             warnings,
         } = self.backend.operation(arguments.operation).await?;
         Ok(Operation::listing(operation, warnings))
+    }
+
+    async fn read_log(&self, given: Option<JsonObject>) -> Result<log::LogPage, ErrorDto> {
+        let arguments: log::LogArguments = read(given)?;
+        log::read_page(self.backend.recent_log().await?, arguments)
     }
 
     async fn run_plan(&self, given: Option<JsonObject>) -> Result<Started, ErrorDto> {
@@ -1080,6 +1097,17 @@ fn tools() -> Vec<Tool> {
         )
         .with_title("Get operation")
         .with_raw_output_schema(output_schema::<Operation>())
+        .with_annotations(read_only()),
+        Tool::new(
+            READ_LOG,
+            "The daemon's recent log, newest first, as the web UI's Log page shows it: of a level \
+             or worse, and of an operation, a plan or a time range when asked. At most 200 lines \
+             and 32 KiB of text a call; stopped says which cap cut the page short, and next \
+             reads on from it.",
+            input_schema::<log::LogArguments>(),
+        )
+        .with_title("Read log")
+        .with_raw_output_schema(output_schema::<log::LogPage>())
         .with_annotations(read_only()),
         Tool::new(
             RUN_PLAN,

@@ -15,7 +15,10 @@ pub use agent::{
 };
 pub use client::{PairFailure, PairWithHub};
 pub use connection::{ConnectFailure, ConnectToHub, Connected};
-pub use hub::{HubHandshake, HubKeys, HubPairing, HubPairingError, MessageRefused, ProofAnswer};
+pub use hub::{
+    HubHandshake, HubKeys, HubPairing, HubPairingError, MadeToken, MessageRefused, ProofAnswer,
+    TokenAsk, TokenAskRefused,
+};
 pub use session::{BINDING_UNAVAILABLE, HubSession, HubStep, PROTOCOL_ERROR, SEQUENCE_ERROR};
 
 #[cfg(test)]

@@ -617,6 +617,24 @@ pub enum ErrorCode {
     /// The hub and the agent share no protocol: one of them is on an older
     /// release than the other can use.
     ProtocolOutOfDate,
+    /// A pairing token, or another high-impact action on the hub, was asked
+    /// for from beyond loopback while sign-in is off, so there is no
+    /// password to confirm it with (§16, decision 120, "Who may make a
+    /// token, approve or re-key"). Nothing was made.
+    PairingNeedsSignIn,
+    /// The address asked for a pairing token isn't `http://` or
+    /// `https://` with a host and a port, or is longer than a token holds.
+    HubAddressInvalid,
+    /// A pairing token's life outside 5 minutes to 24 hours was asked for.
+    PairingTokenLife,
+    /// As many pairing tokens as the hub keeps are unused already: one must
+    /// be used, lapse or be canceled first.
+    PairingTokenLimit,
+    /// No unused pairing token has the ID asked for: it was used, lapsed or
+    /// canceled already.
+    PairingTokenUnknown,
+    /// The hub couldn't read or keep its key or its tokens.
+    HubUnavailable,
     #[serde(other)]
     Unknown,
 }
@@ -1589,6 +1607,12 @@ impl ErrorCode {
             | Self::HubLinkLost
             | Self::GenerationLower
             | Self::ProtocolOutOfDate
+            | Self::PairingNeedsSignIn
+            | Self::HubAddressInvalid
+            | Self::PairingTokenLife
+            | Self::PairingTokenLimit
+            | Self::PairingTokenUnknown
+            | Self::HubUnavailable
             | Self::Unknown => &[],
         }
     }

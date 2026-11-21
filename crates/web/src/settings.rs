@@ -24,6 +24,9 @@
 //! left, clears it from the page (I4).
 
 mod ai_agents;
+// The Agents section's DOM glue, on a hub; `pairing.rs` decides for it.
+#[cfg(feature = "hub")]
+pub(crate) mod agents;
 mod dry_run_allowlist;
 mod language;
 mod page_width;
@@ -114,8 +117,29 @@ const SECRET_ID: &str = "api-token-secret";
 /// The admin password's and the signing-in sections are offered with
 /// sign-in off and in a session; with the daemon unread, the page can't say
 /// which form they would be.
+///
+/// On a hub, its Machines tab shows when the page has read the hub's key,
+/// so the tabs are drawn once that read has answered or waited its while,
+/// and only once: a later read never draws them again, which would lose
+/// what their panels hold, as an API token's one-time secret (decision
+/// 121).
 #[component]
 pub(crate) fn Settings(localizer: Arc<Localizer>) -> impl IntoView {
+    #[cfg(feature = "hub")]
+    let hub = agents::hub_known();
+    #[cfg(not(feature = "hub"))]
+    let hub = || Some(false);
+    let drawn = Memo::new(move |was: Option<&Option<bool>>| was.copied().flatten().or_else(hub));
+    move || {
+        drawn
+            .get()
+            .map(|hub| view! { <SettingsTabs localizer=Arc::clone(&localizer) hub=hub /> })
+    }
+}
+
+/// Settings' heading and tabs, the Agents tab among them when `hub`.
+#[component]
+fn SettingsTabs(localizer: Arc<Localizer>, hub: bool) -> impl IntoView {
     let heading = text(&localizer, msg::UI_SETTINGS_HEADING);
     let waiting = RwSignal::new(None::<MessageId>);
     let standing = use_context::<RwSignal<Standing>>().map(|standing| standing.get_untracked());
@@ -167,6 +191,13 @@ pub(crate) fn Settings(localizer: Arc<Localizer>) -> impl IntoView {
         msg::UI_AI_AGENTS_TAB,
         ai_agents.into_any(),
     ));
+    #[cfg(feature = "hub")]
+    if hub {
+        let agents = view! { <agents::Agents localizer=Arc::clone(&localizer) on=signed_in /> };
+        sections.push((Section::Agents, msg::UI_AGENTS_HEADING, agents.into_any()));
+    }
+    #[cfg(not(feature = "hub"))]
+    let _ = hub;
     let restart = view! { <RestartSection localizer=Arc::clone(&localizer) /> };
     let allowlist = view! { <DryRunAllowlistSection localizer=Arc::clone(&localizer) /> };
     sections.push((

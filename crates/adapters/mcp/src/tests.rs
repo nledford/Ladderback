@@ -99,6 +99,10 @@ impl Backend for Told {
         Err(untold())
     }
 
+    async fn recent_log(&self) -> Result<api::RecentLogDto, ErrorDto> {
+        Err(untold())
+    }
+
     async fn run(&self, _plan: String) -> Result<String, ErrorDto> {
         Err(untold())
     }
@@ -415,6 +419,7 @@ async fn the_tools_listed_are_the_golden_files() {
             "find_in_snapshots",
             "list_operations",
             "get_operation",
+            "read_log",
             "run_plan",
             "wait_operation",
             "cancel_operation",
@@ -491,6 +496,7 @@ async fn each_field_at_every_level_has_one_type_and_only_the_arguments_needed_ar
         ("find_in_snapshots", vec!["repository", "pattern"]),
         ("list_operations", vec![]),
         ("get_operation", vec!["operation"]),
+        ("read_log", vec![]),
         ("run_plan", vec!["plan"]),
         ("wait_operation", vec!["operation"]),
         ("cancel_operation", vec!["operation"]),
@@ -1093,6 +1099,10 @@ impl Backend for Lists {
     async fn summary(&self, id: String) -> Result<OperationSummaryDto, ErrorDto> {
         self.ask(format!("summary of {id}"));
         self.told(&self.detail.as_ref().expect("a detail to tell").operation)
+    }
+
+    async fn recent_log(&self) -> Result<api::RecentLogDto, ErrorDto> {
+        self.told(&api::RecentLogDto { lines: Vec::new() })
     }
 
     async fn run(&self, plan: String) -> Result<String, ErrorDto> {
@@ -1777,6 +1787,7 @@ async fn every_tool_but_status_hands_on_a_refusal_from_the_backend_as_an_error()
         ),
         ("list_operations", json!({})),
         ("get_operation", json!({"operation": summary(1).id})),
+        ("read_log", json!({})),
         ("run_plan", json!({"plan": "home"})),
         ("wait_operation", json!({"operation": summary(1).id})),
         ("cancel_operation", json!({"operation": summary(1).id})),
@@ -1888,7 +1899,7 @@ async fn no_refusal_of_any_tool_carries_structured_content() {
 }
 
 /// Each tool, with arguments it takes.
-fn every_tool_called() -> [(&'static str, Value); 19] {
+fn every_tool_called() -> [(&'static str, Value); 20] {
     [
         ("status", json!({})),
         ("list_plans", json!({})),
@@ -1904,6 +1915,7 @@ fn every_tool_called() -> [(&'static str, Value); 19] {
         ),
         ("list_operations", json!({})),
         ("get_operation", json!({"operation": summary(1).id})),
+        ("read_log", json!({})),
         ("run_plan", json!({"plan": "home"})),
         ("wait_operation", json!({"operation": summary(1).id})),
         ("cancel_operation", json!({"operation": summary(1).id})),
@@ -2238,6 +2250,10 @@ impl Backend for Running {
         let running = *reads < self.running;
         *reads += 1;
         Ok(Running::state(running))
+    }
+
+    async fn recent_log(&self) -> Result<api::RecentLogDto, ErrorDto> {
+        Err(untold())
     }
 
     async fn run(&self, _plan: String) -> Result<String, ErrorDto> {
@@ -2808,7 +2824,7 @@ async fn a_server_of_its_own_offers_no_proposal_tool() {
         .iter()
         .collect();
     assert_eq!(listed, expected);
-    assert_eq!(listed.len(), 15);
+    assert_eq!(listed.len(), 16);
     for tool in proposal_tools {
         let answer = client.call(tool, json!({"proposal": "p"})).await;
         assert_eq!(answer["error"]["code"], -32602, "{tool}: {answer}");
@@ -2966,11 +2982,20 @@ async fn snapshot_contents_alone_opens_the_folder_and_search_tools() {
 #[tokio::test(start_paused = true)]
 async fn the_permissions_no_tool_needs_alone_list_no_tool() {
     let mut client = proposing(granting(PermissionsDto {
-        daemon_log: PermissionLevelDto::Read,
         repository_check: PermissionLevelDto::Run,
         ..PermissionsDto::default()
     }));
     assert!(listed(&mut client).await.is_empty());
+}
+
+/// Daemon log alone opens `read_log` and nothing else (decision 134).
+#[tokio::test(start_paused = true)]
+async fn daemon_log_alone_lists_read_log_alone() {
+    let mut client = proposing(granting(PermissionsDto {
+        daemon_log: PermissionLevelDto::Read,
+        ..PermissionsDto::default()
+    }));
+    assert_eq!(listed(&mut client).await, ["read_log"]);
 }
 
 /// Permissions that can't be read hide nothing: the daemon still refuses
@@ -2982,7 +3007,7 @@ async fn permissions_that_cant_be_read_leave_every_tool_listed() {
         ..Lists::default()
     });
     let names = listed(&mut client).await;
-    assert_eq!(names.len(), 19, "{names:?}");
+    assert_eq!(names.len(), 20, "{names:?}");
     assert_eq!(names[0], "status");
 }
 

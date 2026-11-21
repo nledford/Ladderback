@@ -19,7 +19,7 @@ import { type BrowserWorld, binary, binaryEnv, fixtureRepo, startServer } from "
 import { expand } from "./repositories.ts";
 
 /** The folders a scenario's daemon keeps its data, config and cache in. */
-function folders(scratch: string): Record<string, string> {
+export function folders(scratch: string): Record<string, string> {
   return {
     LADDERBACK_CONFIG_DIR: path.join(scratch, "config"),
     LADDERBACK_DATA_DIR: path.join(scratch, "data"),
@@ -30,7 +30,7 @@ function folders(scratch: string): Record<string, string> {
 /** Sets the admin password of the daemon whose folders are in `scratch`, as
  *  a person would from standard input: `set-password` never takes it as an
  *  argument. */
-async function setPassword(scratch: string, password: string): Promise<void> {
+export async function setPassword(scratch: string, password: string): Promise<void> {
   const child = spawn(binary, ["set-password"], {
     stdio: ["pipe", "ignore", "pipe"],
     env: binaryEnv(scratch, folders(scratch)),

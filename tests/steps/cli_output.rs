@@ -77,6 +77,42 @@ async fn runs(agent: &mut Agent, command_line: String) {
     run(agent, &args).await;
 }
 
+/// The entries of a help that are the parser's own, not Ladderback's: they
+/// stay English (technical design §8.4).
+const PARSERS_OWN: [&str; 3] = ["-h, --help", "-V, --version", "help"];
+
+/// What the help says the command does, before its usage line, and the
+/// description of each command, argument and option it lists, after the
+/// names on its line, are transformed by the pseudolocale the scenario set:
+/// none is plain ASCII. The parser's own entries are left out. English with a
+/// character beyond ASCII would pass, so this reads the help as a person
+/// does; the unit tests in `src/main.rs` check that no description is written
+/// in the code.
+#[then("the help describes the command and everything it lists in the reader's language")]
+fn help_in_the_readers_language(agent: &mut Agent) {
+    let stdout = &ran(agent).stdout;
+    let (about, listed) = stdout
+        .split_once("\nUsage:")
+        .unwrap_or_else(|| panic!("no usage line in the help: {stdout}"));
+    let mut english: Vec<&str> = Vec::new();
+    if about.trim().is_ascii() {
+        english.push(about.trim());
+    }
+    for line in listed.lines().filter(|line| line.starts_with("  ")) {
+        // A second usage line has no description: one space parts its words.
+        let Some((names, description)) = line.trim_start().split_once("  ") else {
+            continue;
+        };
+        if !PARSERS_OWN.contains(&names) && description.trim().is_ascii() {
+            english.push(line);
+        }
+    }
+    assert!(
+        english.is_empty(),
+        "left in English or empty: {english:#?}\nin the help:\n{stdout}"
+    );
+}
+
 #[when(expr = "the daemon is started with {string}")]
 async fn daemon_started(agent: &mut Agent, options: String) {
     let scratch = agent.scratch().to_owned();

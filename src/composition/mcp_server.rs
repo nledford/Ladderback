@@ -177,14 +177,19 @@ fn api_token(
 
 /// The server for a headless session on Ladderback's folders, which it
 /// holds as `serve` does: one a daemon or another session holds is refused.
-/// It starts with `serve`'s recovery, and plans and runs nothing.
-pub(crate) async fn headless() -> Result<(::mcp::Server, Held), Refused> {
-    let daemon = daemon_at(
+/// It starts with `serve`'s recovery, and plans and runs nothing. Its
+/// `read_log` reads `recent`, the session's own log, as the daemon's Log
+/// page reads the daemon's.
+pub(crate) async fn headless(
+    recent: Arc<dyn app::ports::RecentLogStore>,
+) -> Result<(::mcp::Server, Held), Refused> {
+    let mut daemon = daemon_at(
         platform::dirs::config_dir(),
         platform::dirs::data_dir(),
         platform::dirs::cache_dir(),
     )
     .await?;
+    daemon.state.recent_log = recent;
     Ok(in_process(daemon, None))
 }
 
@@ -198,8 +203,12 @@ const SCRATCH_FILES: usize = 3;
 /// The server for a session in a new scratch folder in the temporary
 /// folder: a plan over a few generated files, backing up to a repository of
 /// its own whose password is a file in the folder. The scratch folders
-/// crashed sessions left are swept first.
-pub(crate) async fn scratch(random: &dyn Random) -> Result<(::mcp::Server, Held), Refused> {
+/// crashed sessions left are swept first. Its `read_log` reads `recent`, as
+/// a headless session's does.
+pub(crate) async fn scratch(
+    random: &dyn Random,
+    recent: Arc<dyn app::ports::RecentLogStore>,
+) -> Result<(::mcp::Server, Held), Refused> {
     let parent = std::env::temp_dir();
     let swept = scratch::sweep(&parent);
     for path in &swept.removed {
@@ -219,7 +228,10 @@ pub(crate) async fn scratch(random: &dyn Random) -> Result<(::mcp::Server, Held)
     let name = hex(name.get(..8).unwrap_or_default());
     let folder = Scratch::create(&parent, &name).map_err(|error| unavailable(error.to_string()))?;
     match seeded(&folder, random).await {
-        Ok(daemon) => Ok(in_process(daemon, Some(folder))),
+        Ok(mut daemon) => {
+            daemon.state.recent_log = recent;
+            Ok(in_process(daemon, Some(folder)))
+        }
         Err(unseeded) => {
             // Nothing of a session that never started is left.
             let _ = folder.remove();
@@ -347,11 +359,13 @@ fn scratch_config(files: &Path, repository: &Path, password: &Path) -> Result<Ag
         group_by: Default::default(),
         hooks: Hooks::default(),
     };
-    let without_token = Permissions::default()
-        .with(
-            Permission::SnapshotContents,
-            Some(Permission::SnapshotContents.level()),
-        )
+    // Its files and its log are made up, so a scratch session's agent may
+    // look inside snapshots and read the log as well.
+    let without_token = [Permission::SnapshotContents, Permission::DaemonLog]
+        .into_iter()
+        .try_fold(Permissions::default(), |held, permission| {
+            held.with(permission, Some(permission.level()))
+        })
         .map_err(|error| format!("{error:?}"))?;
     AgentConfig::new(
         AgentSettings::default(),
@@ -413,6 +427,7 @@ pub(crate) struct InProcess {
     profiles: Arc<dyn http_adapter::Profiles>,
     full_disk_access: http_adapter::FullDiskAccessRoute,
     without_token: Arc<app::without_token::WithoutToken>,
+    recent_log: Arc<dyn app::ports::RecentLogStore>,
 }
 
 impl InProcess {
@@ -425,6 +440,7 @@ impl InProcess {
             profiles: Arc::clone(&state.profiles),
             full_disk_access: state.full_disk_access.clone(),
             without_token: Arc::clone(&state.without_token),
+            recent_log: Arc::clone(&state.recent_log),
         }
     }
 
@@ -578,6 +594,11 @@ impl ::mcp::Backend for InProcess {
     /// on what it reads.
     async fn summary(&self, id: String) -> Result<api::OperationSummaryDto, api::ErrorDto> {
         Ok(self.operation(id).await?.operation)
+    }
+
+    async fn recent_log(&self) -> Result<api::RecentLogDto, api::ErrorDto> {
+        self.allow(Permission::DaemonLog).await?;
+        Ok(app::recent_log::answer(self.recent_log.as_ref()))
     }
 
     async fn run(&self, plan: String) -> Result<String, api::ErrorDto> {

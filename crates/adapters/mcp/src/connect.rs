@@ -502,6 +502,12 @@ impl Backend for Connect {
         })
     }
 
+    /// The Log page's own read: the route asks for the permission Daemon
+    /// log of a token (decision 127).
+    async fn recent_log(&self) -> Result<api::RecentLogDto, ErrorDto> {
+        self.get("api/v1/log", &[], &[]).await
+    }
+
     /// The first of the history page of one just past `id`: the history is
     /// newest first by ID, and its cursor need not name an operation that
     /// exists, so that page starts with the operation `id` names, when the
