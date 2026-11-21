@@ -120,7 +120,7 @@ pub fn Button(
         // is hidden from a screen reader with all it holds.
         (Leading::Spinner, _) => Some(
             view! {
-                <span class="button-spinner" aria-hidden="true">
+                <span class="button-spinner inline-flex" aria-hidden="true">
                     <Spinner shown=LabelShown::Hidden tone=Tone::Inherit label=label />
                 </span>
             }
@@ -143,7 +143,9 @@ pub fn Button(
             {leading}
             {shape
                 .shows_label()
-                .then(|| view! { <span class="button-label">{move || label.get()}</span> })}
+                .then(|| {
+                    view! { <span class="button-label min-inline-0">{move || label.get()}</span> }
+                })}
         </button>
     }
 }

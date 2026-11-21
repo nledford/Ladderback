@@ -12,6 +12,13 @@
 
 @source "./src";
 
+/* `hover:` is a plain `:hover`, as style.css's own hover rules are (a tab's),
+ * not Tailwind's default, which applies only where the primary pointer can
+ * hover (`@media (hover: hover)`): a reader whose touch screen is the primary
+ * pointer but who also uses a mouse or trackpad still sees a hover, and every
+ * hover of the UI follows the one rule. */
+@custom-variant hover (&:hover);
+
 @theme inline {
   --color-bg: var(--bg);
   --color-fg: var(--fg);
@@ -19,6 +26,7 @@
   --color-accent: var(--accent);
   --color-focus: var(--focus);
   --color-surface: var(--surface);
+  --color-on-fill: var(--on-fill);
   --color-badge-loading-fg: var(--badge-loading-fg);
   --color-badge-loading-bg: var(--badge-loading-bg);
   --color-badge-empty-fg: var(--badge-empty-fg);

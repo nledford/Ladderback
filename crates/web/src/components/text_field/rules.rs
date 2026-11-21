@@ -107,14 +107,18 @@ pub fn default_size() -> Size {
     Size::Medium
 }
 
-/// The classes of the field's box, the edge around its input: its size,
-/// which `style.css` makes the height and padding of a button of that size,
-/// with a leading icon the room for it, and for a token's whole text the
-/// monospace and the width it takes.
+/// The classes of the field's box, the edge around its input: its size, and
+/// its size's control height and padding (`Size::control`), a button of that
+/// size's, which `style.css` draws the box with, with a leading icon the room
+/// for it, and for a token's whole text the monospace and the width it takes.
 pub fn box_class(size: Size, icon: bool, token: bool) -> String {
     let icon = if icon { " text-field-with-icon" } else { "" };
     let token = if token { " text-field-token" } else { "" };
-    format!("text-field-box {}{icon}{token}", size.class())
+    format!(
+        "text-field-box {} {}{icon}{token}",
+        size.class(),
+        size.control()
+    )
 }
 
 /// The ids a field's parts are wired by, each from the input's `id`.
@@ -282,15 +286,21 @@ mod tests {
     fn the_box_takes_its_size_from_the_shared_vocabulary_and_makes_room_for_an_icon() {
         assert_eq!(
             box_class(Size::Medium, false, false),
-            "text-field-box size-medium"
+            format!("text-field-box size-medium {}", Size::Medium.control())
         );
         assert_eq!(
             box_class(Size::XLarge, true, false),
-            "text-field-box size-xlarge text-field-with-icon"
+            format!(
+                "text-field-box size-xlarge {} text-field-with-icon",
+                Size::XLarge.control()
+            )
         );
         assert_eq!(
             box_class(Size::Small, false, true),
-            "text-field-box size-small text-field-token"
+            format!(
+                "text-field-box size-small {} text-field-token",
+                Size::Small.control()
+            )
         );
     }
 
