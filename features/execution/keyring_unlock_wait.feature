@@ -67,7 +67,7 @@ Feature: A run whose keyring is locked waits for it to be unlocked
     And the plan's next run is due 40 seconds after the daemon started
     When the schedule starts a backup 10 seconds after the daemon started
     Then the run fails 40 seconds after the daemon started because there is no keyring service to ask
-    And the keyring entry "ladderback/demo" was read 3 times
+    And the keyring entry "ladderback/demo" was read 2 times
 
   Scenario: An unlocked answer that comes after the plan's next run is due is not acted on
     Given the keyring unlocks 15 seconds after the daemon started
