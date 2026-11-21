@@ -8,6 +8,7 @@
 
 use std::net::SocketAddr;
 use std::sync::Arc;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::Duration;
 
 use domain::fleet::Binding;
@@ -63,14 +64,16 @@ pub(crate) fn open(
 ) -> HandedListener {
     let (hand, connections) = mpsc::channel(WAITING);
     let tls = tls.map(Arc::new);
+    let said = Arc::new(AtomicBool::new(false));
     let accepting = tokio::spawn(async move {
         let mut listener = listener;
         loop {
             let (stream, peer) = axum::serve::Listener::accept(&mut listener).await;
             let hand = hand.clone();
             let tls = tls.clone();
+            let said = Arc::clone(&said);
             tokio::spawn(async move {
-                if let Some(handed) = let_in(stream, peer, tls.as_deref()).await {
+                if let Some(handed) = let_in(stream, peer, tls.as_deref(), &said).await {
                     // The server is gone when this fails, and the
                     // connection closes with it.
                     let _ = hand.send(handed).await;
@@ -83,8 +86,16 @@ pub(crate) fn open(
 
 /// The connection from `peer`, let in through its door, or `None` once it
 /// is closed: it sent nothing in time, plain HTTP from beyond loopback, or
-/// a TLS handshake that failed, took too long or found no TLS served.
-async fn let_in(stream: TcpStream, peer: SocketAddr, tls: Option<&HubListener>) -> Option<Handed> {
+/// a TLS handshake that failed, took too long or found no TLS served. The
+/// first plain close is logged as a warning, since a proxy that forwards to
+/// `http://` from another machine or a container's gateway meets it, and
+/// `said` keeps the rest to debug.
+async fn let_in(
+    stream: TcpStream,
+    peer: SocketAddr,
+    tls: Option<&HubListener>,
+    said: &AtomicBool,
+) -> Option<Handed> {
     let mut first = [0; 1];
     let peeked = tokio::time::timeout(FIRST_BYTE_WITHIN, stream.peek(&mut first)).await;
     if !matches!(peeked, Ok(Ok(1))) {
@@ -92,7 +103,13 @@ async fn let_in(stream: TcpStream, peer: SocketAddr, tls: Option<&HubListener>) 
     }
     match door(first[0], peer) {
         Door::Closed => {
-            log::debug!("closed a plain HTTP connection from {peer}, beyond loopback");
+            if said.swap(true, Ordering::Relaxed) {
+                log::debug!("closed a plain HTTP connection from {peer}, beyond loopback");
+            } else {
+                log::warn!(
+                    "closed a plain HTTP connection from {peer}: the hub serves plain HTTP only to its own machine, over loopback. Reach it at its https:// address, or have a proxy forward to that; later closes are logged at debug level"
+                );
+            }
             None
         }
         Door::Plain => Some(Handed {
