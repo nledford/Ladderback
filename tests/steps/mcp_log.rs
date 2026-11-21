@@ -116,6 +116,30 @@ fn many_repositories(agent: &mut Agent) {
     std::fs::write(folder.join("config.toml"), text).expect("the daemon's config file");
 }
 
+/// With sign-in off, `read_log` is held to the `[without-token]` table's
+/// Daemon log (decision 127), which its defaults leave out: the config file
+/// written so far allows it.
+#[given("the daemon's config file lets AI agents without a token read the log")]
+fn config_allows_daemon_log(agent: &mut Agent) {
+    let file = testkit::daemon::config_dir(&agent.scratch().join("daemon")).join("config.toml");
+    let mut text = std::fs::read_to_string(&file).expect("the daemon's config file");
+    text.push_str("\n[without-token]\ndaemon-log = \"read\"\n");
+    std::fs::write(&file, text).expect("the daemon's config file");
+}
+
+/// With sign-in off, `read_log` is held to the `[without-token]` table's
+/// Daemon log (decision 127), which its defaults leave out.
+#[given("AI agents without a token may read the daemon's log")]
+async fn without_token_daemon_log(agent: &mut Agent) {
+    use domain::access::permissions::{Permission, Permissions};
+    let log = Permission::DaemonLog;
+    let permissions = Permissions::default()
+        .with(log, Some(log.level()))
+        .expect("Daemon log has its level");
+    agent.backup.without_token = Some(permissions);
+    super::events_steps::save_daemon_config(agent, None).await;
+}
+
 #[when("the MCP client reads the log")]
 async fn reads(agent: &mut Agent) {
     read(agent, json!({})).await;

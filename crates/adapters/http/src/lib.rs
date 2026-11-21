@@ -54,6 +54,7 @@ use rust_embed::RustEmbed;
 use rust_embed as _;
 use serde::{Deserialize, Serialize};
 
+pub use api_tokens::{status_shown, summary_shown, warning_shown};
 pub use downloads::{DownloadRefusal, DownloadStart, Downloads, HandOff};
 pub use dry_runs::{DryRuns, DryRunsError};
 pub use full_disk_access::{FullDiskAccessRoute, SettingsOpener, SettingsUnopened};
@@ -561,6 +562,13 @@ pub fn router(assets: Arc<dyn AssetSource>, checks: RequestChecks, state: AppSta
         .route(
             api_tokens::PERMISSIONS_PATH,
             axum::routing::get(api_tokens::permissions),
+        )
+        // A session's only: the route table names no permission for it, so
+        // neither a token nor an AI agent changes what AI agents may do
+        // without a token (decision 127).
+        .route(
+            api_tokens::WITHOUT_TOKEN_PATH,
+            axum::routing::get(api_tokens::without_token).put(api_tokens::change_without_token),
         )
         .route(
             sign_in::settings::SETTINGS_PATH,

@@ -1,7 +1,8 @@
 //! Steps for the `@e2e` rules of `features/security/api_tokens.feature`: API
 //! tokens the admin creates, changes and revokes in a session over HTTP,
 //! presented to the real daemon as `Authorization: Bearer <token>` (§10.1,
-//! decisions 93 and 127).
+//! decisions 93 and 127); and a person's change of what AI agents may do
+//! without a token, in `features/automation/ai_agents.feature`.
 
 use cucumber::{given, then, when};
 
@@ -221,6 +222,62 @@ fn change_with_the_token(agent: &mut Agent, permissions: String, password: Strin
         .request()
         .headers
         .push(format!("Authorization: Bearer {text}"));
+}
+
+/// Where the daemon keeps what AI agents may do without a token.
+const WITHOUT_TOKEN_PATH: &str = "/api/v1/settings/without-token";
+
+/// Reads `response` as permissions on the wire, after a 200.
+fn answered_permissions(response: &Response) -> serde_json::Value {
+    assert_eq!(response.status, 200, "body {:?}", response.body);
+    serde_json::from_str(&response.body).expect("JSON")
+}
+
+/// The change the AI agents tab sends with sign-in off: the permissions
+/// named at their level, the others at no access.
+#[when(expr = "a person allows AI agents without a token {string}")]
+fn allows_without_token(agent: &mut Agent, permissions: String) {
+    web::request_for(agent, "PUT".to_owned(), WITHOUT_TOKEN_PATH.to_owned());
+    let request = agent.web.request();
+    request
+        .headers
+        .push("Content-Type: application/json".to_owned());
+    request.body = serde_json::json!({ "permissions": permissions_body(&permissions) }).to_string();
+    web::send(agent);
+}
+
+/// The change's answer holds what was kept, and a read of the table after
+/// it holds the same.
+#[then(expr = "the change is kept, and AI agents without a token may do {string}")]
+fn without_token_kept(agent: &mut Agent, permissions: String) {
+    let wanted = permissions_body(&permissions);
+    assert_eq!(
+        answered_permissions(agent.web.response()),
+        wanted,
+        "the change's answer"
+    );
+    web::request_for(agent, "GET".to_owned(), WITHOUT_TOKEN_PATH.to_owned());
+    web::send(agent);
+    assert_eq!(
+        answered_permissions(agent.web.response()),
+        wanted,
+        "a read after the change"
+    );
+}
+
+/// A request `ladderback mcp` marks as an AI agent's, with sign-in off, for
+/// the daemon's log, which Daemon log opens.
+#[then("an AI agent without a token may read the daemon's log")]
+fn agent_reads_the_log(agent: &mut Agent) {
+    web::request_for(agent, "GET".to_owned(), "/api/v1/log".to_owned());
+    agent
+        .web
+        .request()
+        .headers
+        .push("x-ladderback-ai-agent: 1".to_owned());
+    web::send(agent);
+    let response = agent.web.response();
+    assert_eq!(response.status, 200, "body {:?}", response.body);
 }
 
 #[then(expr = "the refusal names the permission {string}")]

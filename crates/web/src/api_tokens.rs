@@ -1,11 +1,13 @@
 //! The decisions behind the API tokens of Settings (security §10.1,
-//! decisions 93 and 127): what the form lacks, the request it sends, which
-//! field a refusal is about, how a scope and a token's last use read, and
-//! the words of each button and dialog. Host-tested here; the DOM glue that
+//! decisions 93 and 127) and its AI agents tab: what the form lacks, the
+//! request it sends, which field a refusal is about, each permission's
+//! group of choices, how a token's permissions and last use read, and the
+//! words of each button and dialog. Host-tested here; the DOM glue that
 //! holds the signals and sends the requests is `settings.rs`.
 
 use api::{
-    CreateApiTokenDto, CreatedApiTokenDto, ErrorCode, MsgArg, PermissionLevelDto, PermissionsDto,
+    ChangeApiTokenPermissionsDto, ChangeWithoutTokenDto, CreateApiTokenDto, CreatedApiTokenDto,
+    ErrorCode, MsgArg, PermissionLevelDto, PermissionsDto,
 };
 use l10n::{MessageId, msg};
 
@@ -22,49 +24,6 @@ pub(crate) const TOKENS_PATH: &str = "/api/v1/tokens";
 /// (`domain::access::LABEL_MAX_CHARS`): the hint and the form's own check say
 /// it, and the daemon decides.
 pub(crate) const LABEL_MAX_CHARS: u64 = 64;
-
-/// A scope the form offers: a group of permissions, each one the
-/// permissions a token of the scope of that name was given when scopes
-/// were replaced by permissions (decision 127), so the form reads as it did
-/// until it sets each permission on its own.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub(crate) enum Scope {
-    Read,
-    Run,
-    Preview,
-    Propose,
-}
-
-impl Scope {
-    /// The permissions the scope gives, each at its level, every other at
-    /// `none`.
-    fn permissions(self) -> PermissionsDto {
-        let none = PermissionsDto::default();
-        match self {
-            Self::Read => PermissionsDto {
-                backups: PermissionLevelDto::Read,
-                snapshot_contents: PermissionLevelDto::Read,
-                daemon_log: PermissionLevelDto::Read,
-                ..none
-            },
-            Self::Run => PermissionsDto {
-                backup_runs: PermissionLevelDto::StartAndCancel,
-                ..none
-            },
-            Self::Preview => PermissionsDto {
-                previews: PermissionLevelDto::Preview,
-                ..none
-            },
-            Self::Propose => PermissionsDto {
-                configuration: PermissionLevelDto::Propose,
-                ..none
-            },
-        }
-    }
-}
-
-/// Every scope, in the order the form offers them.
-pub(crate) const SCOPES: [Scope; 4] = [Scope::Read, Scope::Run, Scope::Preview, Scope::Propose];
 
 /// Each permission's level, in the API's order.
 fn levels(permissions: PermissionsDto) -> [PermissionLevelDto; 7] {
@@ -110,21 +69,6 @@ fn permissions_of(levels: [PermissionLevelDto; 7]) -> PermissionsDto {
     }
 }
 
-/// The scopes a token's row lists for its `permissions`: each that gives
-/// at least one of them.
-pub(crate) fn scopes_of(permissions: PermissionsDto) -> Vec<Scope> {
-    let held = levels(permissions);
-    SCOPES
-        .into_iter()
-        .filter(|scope| {
-            levels(scope.permissions())
-                .into_iter()
-                .zip(held)
-                .any(|(gives, has)| gives != PermissionLevelDto::None && gives == has)
-        })
-        .collect()
-}
-
 /// The `id` of the heading of the tokens' section, which names their table
 /// and takes focus when the control that held it goes.
 pub(crate) const HEADING_ID: &str = "api-tokens-heading";
@@ -138,42 +82,6 @@ pub(crate) const CREATED_BODY_ID: &str = "api-token-created-body";
 
 /// The `id` of what the revoke dialog says, which describes it.
 pub(crate) const REVOKE_BODY_ID: &str = "api-token-revoke-body";
-
-/// A scope as the catalog's selects name it.
-pub(crate) fn scope_code(scope: Scope) -> &'static str {
-    match scope {
-        Scope::Read => "read",
-        Scope::Run => "run",
-        Scope::Preview => "preview",
-        Scope::Propose => "propose",
-    }
-}
-
-/// The `id` of a scope's checkbox.
-pub(crate) fn scope_id(scope: Scope) -> &'static str {
-    match scope {
-        Scope::Read => "api-token-scope-read",
-        Scope::Run => "api-token-scope-run",
-        Scope::Preview => "api-token-scope-preview",
-        Scope::Propose => "api-token-scope-propose",
-    }
-}
-
-/// A scope's name, as a row lists it and its checkbox says it.
-pub(crate) fn scope_name(scope: Scope) -> Said {
-    (
-        msg::UI_API_TOKEN_SCOPE,
-        vec![("scope", MsgArg::Text(scope_code(scope).to_owned()))],
-    )
-}
-
-/// What a token of `scope` may do, under its checkbox.
-pub(crate) fn scope_hint(scope: Scope) -> Said {
-    (
-        msg::UI_API_TOKEN_SCOPE_HINT,
-        vec![("scope", MsgArg::Text(scope_code(scope).to_owned()))],
-    )
-}
 
 /// The route that revokes the token `id`.
 pub(crate) fn revoke_path(id: &str) -> String {
@@ -190,16 +98,16 @@ pub(crate) fn revoke_id(id: &str) -> String {
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) enum Field {
     Label,
-    Scopes,
+    Permissions,
 }
 
 impl Field {
     /// The `id` an error summary's link points at: the label's input, or the
-    /// first scope's checkbox.
+    /// first choice of the first permission's group.
     pub(crate) fn id(self) -> &'static str {
         match self {
             Self::Label => "api-token-label",
-            Self::Scopes => scope_id(Scope::Read),
+            Self::Permissions => "api-token-backups-none",
         }
     }
 
@@ -210,7 +118,7 @@ impl Field {
                 msg::ERROR_API_TOKEN_LABEL,
                 vec![("max", MsgArg::Count(LABEL_MAX_CHARS))],
             ),
-            Self::Scopes => (msg::ERROR_API_TOKEN_NO_PERMISSION, Vec::new()),
+            Self::Permissions => (msg::ERROR_API_TOKEN_NO_PERMISSION, Vec::new()),
         }
     }
 }
@@ -219,17 +127,20 @@ impl Field {
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub(crate) struct TokenForm {
     pub(crate) label: String,
-    pub(crate) scopes: Vec<Scope>,
+    pub(crate) permissions: PermissionsDto,
 }
 
 impl TokenForm {
     /// What the form leaves out, in the page's order: a label of only spaces
-    /// is none, and a token needs a scope. The daemon judges the rest of the
-    /// label (its length and characters).
+    /// is none, and a token needs a permission. The daemon judges the rest of
+    /// the label (its length and characters).
     pub(crate) fn missing(&self) -> Vec<Field> {
         let wanted = [
             (Field::Label, self.label.trim().is_empty()),
-            (Field::Scopes, self.scopes.is_empty()),
+            (
+                Field::Permissions,
+                self.permissions == PermissionsDto::default(),
+            ),
         ];
         wanted
             .into_iter()
@@ -238,22 +149,11 @@ impl TokenForm {
     }
 
     /// The body of the create request: the label without the spaces around
-    /// it, and the permissions of the scopes chosen.
+    /// it, and the permissions chosen.
     pub(crate) fn request(&self) -> CreateApiTokenDto {
-        let mut chosen = levels(PermissionsDto::default());
-        for scope in SCOPES
-            .into_iter()
-            .filter(|scope| self.scopes.contains(scope))
-        {
-            for (slot, gives) in chosen.iter_mut().zip(levels(scope.permissions())) {
-                if gives != PermissionLevelDto::None {
-                    *slot = gives;
-                }
-            }
-        }
         CreateApiTokenDto {
             label: self.label.trim().to_owned(),
-            permissions: permissions_of(chosen),
+            permissions: self.permissions,
         }
     }
 }
@@ -282,7 +182,7 @@ pub(crate) fn problems_of(
 pub(crate) fn field_of(code: ErrorCode) -> Option<Field> {
     match code {
         ErrorCode::ApiTokenLabel => Some(Field::Label),
-        ErrorCode::ApiTokenNoPermission => Some(Field::Scopes),
+        ErrorCode::ApiTokenNoPermission => Some(Field::Permissions),
         _ => None,
     }
 }
@@ -389,6 +289,293 @@ pub(crate) fn revoked(label: &str) -> Said {
 /// What the dialog that shows the new token `label` says.
 pub(crate) fn created_body(label: &str) -> Said {
     about(msg::UI_API_TOKEN_CREATED_BODY, label)
+}
+
+/// The `id` of the button that changes the permissions of the token `id`,
+/// where focus returns when its dialog is left.
+pub(crate) fn change_id(id: &str) -> String {
+    format!("api-token-edit-{id}")
+}
+
+/// The button that changes the permissions of the token `label`, named
+/// for it.
+pub(crate) fn change_label(label: &str) -> Said {
+    about(msg::UI_API_TOKEN_CHANGE, label)
+}
+
+/// The title of the dialog that changes the permissions of the token
+/// `label`.
+pub(crate) fn change_title(label: &str) -> Said {
+    about(msg::UI_API_TOKEN_CHANGE_TITLE, label)
+}
+
+/// What is announced once the permissions of the token `label` are
+/// changed.
+pub(crate) fn changed(label: &str) -> Said {
+    about(msg::UI_API_TOKEN_CHANGED, label)
+}
+
+/// A permission a form offers as a group of its own (decision 127): no
+/// access, or the permission's one level.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum Row {
+    Backups,
+    BackupRuns,
+    Previews,
+    Configuration,
+    SnapshotContents,
+    DaemonLog,
+    RepositoryCheck,
+}
+
+/// Every permission, in the API's order, which the forms and a token's row
+/// keep.
+pub(crate) const ROWS: [Row; 7] = [
+    Row::Backups,
+    Row::BackupRuns,
+    Row::Previews,
+    Row::Configuration,
+    Row::SnapshotContents,
+    Row::DaemonLog,
+    Row::RepositoryCheck,
+];
+
+/// The value of the radio that grants no access.
+pub(crate) const NO_ACCESS: &str = "none";
+
+/// A form of permissions: a new token's, an existing token's change, or
+/// what AI agents may do without a token. Each names its groups apart, as
+/// a page can hold two of them.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum Form {
+    Create,
+    Change,
+    WithoutToken,
+}
+
+impl Row {
+    /// The permission's code, as the API and the catalog's selects name it.
+    pub(crate) const fn code(self) -> &'static str {
+        match self {
+            Self::Backups => "backups",
+            Self::BackupRuns => "backup-runs",
+            Self::Previews => "previews",
+            Self::Configuration => "configuration",
+            Self::SnapshotContents => "snapshot-contents",
+            Self::DaemonLog => "daemon-log",
+            Self::RepositoryCheck => "repository-check",
+        }
+    }
+
+    /// The row's one level, which its group's second choice grants.
+    const fn level(self) -> PermissionLevelDto {
+        match self {
+            Self::Backups | Self::SnapshotContents | Self::DaemonLog => PermissionLevelDto::Read,
+            Self::BackupRuns => PermissionLevelDto::StartAndCancel,
+            Self::Previews => PermissionLevelDto::Preview,
+            Self::Configuration => PermissionLevelDto::Propose,
+            Self::RepositoryCheck => PermissionLevelDto::Run,
+        }
+    }
+
+    /// The code of the row's one level: the value of the radio that grants
+    /// it.
+    pub(crate) const fn level_code(self) -> &'static str {
+        match self.level() {
+            PermissionLevelDto::None => NO_ACCESS,
+            PermissionLevelDto::Read => "read",
+            PermissionLevelDto::StartAndCancel => "start-and-cancel",
+            PermissionLevelDto::Preview => "preview",
+            PermissionLevelDto::Propose => "propose",
+            PermissionLevelDto::Run => "run",
+        }
+    }
+
+    /// The `name` of the row's group in `form`; its radios' ids are this
+    /// and their values.
+    pub(crate) const fn group(self, form: Form) -> &'static str {
+        match form {
+            Form::Create => match self {
+                Self::Backups => "api-token-backups",
+                Self::BackupRuns => "api-token-backup-runs",
+                Self::Previews => "api-token-previews",
+                Self::Configuration => "api-token-configuration",
+                Self::SnapshotContents => "api-token-snapshot-contents",
+                Self::DaemonLog => "api-token-daemon-log",
+                Self::RepositoryCheck => "api-token-repository-check",
+            },
+            Form::Change => match self {
+                Self::Backups => "api-token-change-backups",
+                Self::BackupRuns => "api-token-change-backup-runs",
+                Self::Previews => "api-token-change-previews",
+                Self::Configuration => "api-token-change-configuration",
+                Self::SnapshotContents => "api-token-change-snapshot-contents",
+                Self::DaemonLog => "api-token-change-daemon-log",
+                Self::RepositoryCheck => "api-token-change-repository-check",
+            },
+            Form::WithoutToken => match self {
+                Self::Backups => "without-token-backups",
+                Self::BackupRuns => "without-token-backup-runs",
+                Self::Previews => "without-token-previews",
+                Self::Configuration => "without-token-configuration",
+                Self::SnapshotContents => "without-token-snapshot-contents",
+                Self::DaemonLog => "without-token-daemon-log",
+                Self::RepositoryCheck => "without-token-repository-check",
+            },
+        }
+    }
+
+    /// A message about the row's permission.
+    fn about(self, id: MessageId) -> Said {
+        (
+            id,
+            vec![("permission", MsgArg::Text(self.code().to_owned()))],
+        )
+    }
+
+    /// The row's name: its group's legend.
+    pub(crate) fn name(self) -> Said {
+        self.about(msg::UI_PERMISSION)
+    }
+
+    /// What the row opens, in plain words, under its legend.
+    pub(crate) fn hint(self) -> Said {
+        self.about(msg::UI_PERMISSION_HINT)
+    }
+
+    /// How a token's row lists the permission: its name and its level.
+    pub(crate) fn granted(self) -> Said {
+        self.about(msg::UI_PERMISSION_GRANTED)
+    }
+
+    /// The group's choices, values and words: no access, then the level.
+    pub(crate) fn choices(self) -> [(&'static str, Said); 2] {
+        let level = |code: &'static str| {
+            (
+                code,
+                (
+                    msg::UI_PERMISSION_LEVEL,
+                    vec![("level", MsgArg::Text(code.to_owned()))],
+                ),
+            )
+        };
+        [level(NO_ACCESS), level(self.level_code())]
+    }
+}
+
+/// What a new token starts with (decision 127): it sees and starts
+/// backups, previews and proposes; what can show a file's name or a log
+/// line is off until chosen.
+pub(crate) fn new_token() -> PermissionsDto {
+    PermissionsDto {
+        backups: PermissionLevelDto::Read,
+        backup_runs: PermissionLevelDto::StartAndCancel,
+        previews: PermissionLevelDto::Preview,
+        configuration: PermissionLevelDto::Propose,
+        ..PermissionsDto::default()
+    }
+}
+
+/// The value each group holds for `permissions`, in [`ROWS`]' order.
+pub(crate) fn chosen_of(permissions: &PermissionsDto) -> [&'static str; 7] {
+    let mut chosen = [NO_ACCESS; 7];
+    for (value, (row, held)) in chosen
+        .iter_mut()
+        .zip(ROWS.into_iter().zip(levels(*permissions)))
+    {
+        if held == row.level() {
+            *value = row.level_code();
+        }
+    }
+    chosen
+}
+
+/// The permissions the groups' values `chosen` give, in [`ROWS`]' order: a
+/// group at its row's level holds it, and any other value is no access.
+pub(crate) fn permissions_from(chosen: [&str; 7]) -> PermissionsDto {
+    let mut held = [PermissionLevelDto::None; 7];
+    for (level, (row, value)) in held.iter_mut().zip(ROWS.into_iter().zip(chosen)) {
+        if value == row.level_code() {
+            *level = row.level();
+        }
+    }
+    permissions_of(held)
+}
+
+/// The permissions a token's row lists: each it holds, in [`ROWS`]' order.
+pub(crate) fn granted_of(permissions: &PermissionsDto) -> Vec<Row> {
+    ROWS.into_iter()
+        .zip(levels(*permissions))
+        .filter_map(|(row, level)| (level != PermissionLevelDto::None).then_some(row))
+        .collect()
+}
+
+/// The route that changes the permissions of the token `id`.
+pub(crate) fn change_path(id: &str) -> String {
+    format!("{TOKENS_PATH}/{id}/permissions")
+}
+
+/// The body of a token's change: its permissions from now on and the
+/// current admin password.
+pub(crate) fn change_request(
+    permissions: PermissionsDto,
+    password: String,
+) -> ChangeApiTokenPermissionsDto {
+    ChangeApiTokenPermissionsDto {
+        permissions,
+        current_password: password,
+    }
+}
+
+/// The reads of the token list, numbered as each starts, so an answer that
+/// holds the list as it was before is dropped: that of a read a newer one
+/// overtook, or of one still unanswered when a token's permissions
+/// changed, which the daemon may have answered before the change.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub(crate) struct ListReads {
+    /// The number of the newest read started.
+    started: u64,
+    /// The number of the newest read answered.
+    answered: u64,
+}
+
+impl ListReads {
+    /// Starts a read, and gives its number for [`Self::counts`].
+    pub(crate) fn start(&mut self) -> u64 {
+        self.started = self.started.saturating_add(1);
+        self.started
+    }
+
+    /// Notes read `read` answered, and whether its answer is the list to
+    /// show: only the newest read's is.
+    pub(crate) fn counts(&mut self, read: u64) -> bool {
+        self.answered = self.answered.max(read);
+        read == self.started
+    }
+
+    /// Whether a change of a token's permissions, just kept, needs a read
+    /// of its own: a read still unanswered may hold the old permissions,
+    /// and the one started now overtakes it.
+    pub(crate) fn changed(&self) -> bool {
+        self.answered < self.started
+    }
+}
+
+/// The route of what AI agents may do without a token.
+pub(crate) const WITHOUT_TOKEN_PATH: &str = "/api/v1/settings/without-token";
+
+/// The body of a change of what AI agents may do without a token: the
+/// current admin password only with sign-in on (`signed_in`), as with
+/// sign-in off there is none.
+pub(crate) fn without_token_request(
+    permissions: PermissionsDto,
+    password: String,
+    signed_in: bool,
+) -> ChangeWithoutTokenDto {
+    ChangeWithoutTokenDto {
+        permissions,
+        current_password: signed_in.then_some(password),
+    }
 }
 
 #[cfg(test)]

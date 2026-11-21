@@ -6,11 +6,11 @@
 
 import assert from "node:assert/strict";
 
-import { Given, Then } from "@cucumber/cucumber";
-import type { BrowserContext } from "playwright";
+import { Given, Then, When } from "@cucumber/cucumber";
+import type { BrowserContext, Locator, Page } from "playwright";
 
 import { expect } from "../support/expect.ts";
-import { namePattern } from "../support/keyboard.ts";
+import { namePattern, pressUntilFocused } from "../support/keyboard.ts";
 import { type BrowserWorld, type Engine, engine } from "../support/world.ts";
 
 // How long the page may still hold the token once the dialog is left: a
@@ -48,24 +48,27 @@ export async function changeHeaders(context: BrowserContext, base: string): Prom
   return { Origin: base, "X-CSRF-Token": token };
 }
 
-/** The permissions each scope of the token form gives (decision 127). */
-const SCOPE_PERMISSIONS: Record<string, Record<string, string>> = {
-  read: { backups: "read", "snapshot-contents": "read", "daemon-log": "read" },
-  run: { "backup-runs": "start-and-cancel" },
-  preview: { previews: "preview" },
-  propose: { configuration: "propose" },
-};
-
-/** Creates a token through the token route with the permissions of
- *  `scopes`, as Settings does, and keeps its secret by its label. */
-async function createToken(world: BrowserWorld, context: BrowserContext, label: string, scopes: string[]): Promise<void> {
-  const base = ownBase(world);
+/** The permissions on the wire `named` gives: `name: level` pairs, as
+ *  "backups: read, daemon-log: read"; every other permission is `none`. */
+function permissionsOf(named: string): Record<string, string> {
   const permissions: Record<string, string> = {};
-  for (const scope of scopes) {
-    const gives = SCOPE_PERMISSIONS[scope];
-    assert.ok(gives, `the token form has no scope ${scope}`);
-    Object.assign(permissions, gives);
+  for (const pair of named.split(",").map((part) => part.trim())) {
+    const [permission, level] = pair.split(":").map((part) => part.trim());
+    assert.ok(permission && level, `a permission as "name: level": ${pair}`);
+    permissions[permission] = level;
   }
+  return permissions;
+}
+
+/** Creates a token through the token route with `permissions`, as Settings
+ *  does, and keeps its secret by its label. */
+async function createToken(
+  world: BrowserWorld,
+  context: BrowserContext,
+  label: string,
+  permissions: Record<string, string>,
+): Promise<void> {
+  const base = ownBase(world);
   const answer = await context.request.post(`${base}/api/v1/tokens`, {
     data: { label, permissions },
     headers: await changeHeaders(context, base),
@@ -90,16 +93,16 @@ Given("the admin is signed in with {string}", function (this: BrowserWorld, pass
 });
 
 Given(
-  "the admin has created the API token {string} with the scopes {string}",
-  function (this: BrowserWorld, label: string, scopes: string) {
-    const listed = scopes.split(",").map((scope) => scope.trim());
-    this.contextRoutes.push(async (context) => createToken(this, context, label, listed));
+  "the admin has created the API token {string} with the permissions {string}",
+  function (this: BrowserWorld, label: string, named: string) {
+    const permissions = permissionsOf(named);
+    this.contextRoutes.push(async (context) => createToken(this, context, label, permissions));
   },
 );
 
 Given("the admin has created {int} API tokens", function (this: BrowserWorld, count: number) {
   this.contextRoutes.push(async (context) => {
-    for (let n = 1; n <= count; n += 1) await createToken(this, context, `token-${n}`, ["read"]);
+    for (let n = 1; n <= count; n += 1) await createToken(this, context, `token-${n}`, { backups: "read" });
   });
 });
 
@@ -205,4 +208,68 @@ Then("nothing on the page holds the token the dialog showed", async function (th
       { timeout: TOKEN_GONE_MS, message: "the page still holds the token the dialog showed" },
     )
     .toBe(false);
+});
+
+// The daemon answers the page's read of what AI agents may do without a
+// token as it does when it can't read the configuration file (503
+// config-unavailable).
+Given("the daemon can't read what AI agents may do without a token", function (this: BrowserWorld) {
+  this.contextRoutes.push(async (context) => {
+    await context.route(
+      (url) => url.pathname === "/api/v1/settings/without-token",
+      async (route) => {
+        if (route.request().method() !== "GET") return route.continue();
+        await route.fulfill({
+          status: 503,
+          contentType: "application/json",
+          body: JSON.stringify({
+            code: "config-unavailable",
+            args: { file: { type: "text", value: "/home/demo/.config/ladderback/config.toml" } },
+          }),
+        });
+      },
+    );
+  });
+});
+
+// A permission's group of choices (decision 127), in the open dialog when
+// there is one: the token form behind a token's dialog has groups of the
+// same names.
+async function permissionGroup(page: Page, name: string): Promise<Locator> {
+  const dialog = page.getByRole("dialog");
+  const scope = (await dialog.count()) === 1 ? dialog : page.locator("main");
+  return scope.getByRole("radiogroup", { name, exact: true });
+}
+
+When("I press Tab until focus is in the group {string}", async function (this: BrowserWorld, name: string) {
+  const group = await permissionGroup(this.page, name);
+  await pressUntilFocused(this.page, "Tab", group.getByRole("radio"), `a radio of the group "${name}"`, {
+    reached: () => group.evaluate((el) => el.contains(document.activeElement)),
+  });
+});
+
+// Every permission's group has a "No access" choice, and several a "Read":
+// the group names the one meant.
+When(
+  "I press the down arrow until focus is on the choice {string} of the group {string}",
+  async function (this: BrowserWorld, choice: string, name: string) {
+    const group = await permissionGroup(this.page, name);
+    const radio = group.getByRole("radio", { name: namePattern(choice) });
+    await pressUntilFocused(this.page, "ArrowDown", radio, `the choice "${choice}" of the group "${name}"`);
+  },
+);
+
+Then("the group {string} has {string} chosen", async function (this: BrowserWorld, name: string, choice: string) {
+  const group = await permissionGroup(this.page, name);
+  await expect(group.getByRole("radio", { name: namePattern(choice) })).toBeChecked();
+});
+
+Then("the group {string} is described as saying {string}", async function (this: BrowserWorld, name: string, text: string) {
+  const group = await permissionGroup(this.page, name);
+  await expect(group).toHaveAccessibleDescription(new RegExp(text.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")));
+});
+
+Then("focus is on the choice {string} of the group {string}", async function (this: BrowserWorld, choice: string, name: string) {
+  const group = await permissionGroup(this.page, name);
+  await expect(group.getByRole("radio", { name: namePattern(choice) })).toBeFocused();
 });

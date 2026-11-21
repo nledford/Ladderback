@@ -7,9 +7,9 @@ use std::time::Duration;
 
 use api::{
     ErrorCode, ErrorDto, FindDto, FolderDto, LocationsTestDto, MaintenancePreviewDto, MsgArg,
-    NewProposalDto, OperationDetailDto, OperationSummaryDto, OperationsPageDto, PlanDryRunDto,
-    PlanDto, PlansDto, ProfileExportDto, ProfileImportDto, ProposalDto, RepositoriesDto,
-    SessionDto, SignInStateDto, SnapshotsDto,
+    NewProposalDto, OperationDetailDto, OperationSummaryDto, OperationsPageDto, PermissionsDto,
+    PlanDryRunDto, PlanDto, PlansDto, ProfileExportDto, ProfileImportDto, ProposalDto,
+    RepositoriesDto, SessionDto, SignInStateDto, SnapshotsDto,
 };
 use async_trait::async_trait;
 use domain::browse::FolderPath;
@@ -238,7 +238,7 @@ impl Connect {
         if !query.is_empty() {
             url.query_pairs_mut().extend_pairs(query);
         }
-        let mut request = self.client.get(url);
+        let mut request = self.client.get(url).header(api::AI_AGENT_HEADER, "1");
         if let Some(token) = &self.token {
             request = request.header(AUTHORIZATION, token.0.clone());
         }
@@ -276,6 +276,7 @@ impl Connect {
             .client
             .post(url)
             .header(CONTENT_TYPE, "application/json")
+            .header(api::AI_AGENT_HEADER, "1")
             .body(body.to_string());
         if let Some(token) = &self.token {
             request = request.header(AUTHORIZATION, token.0.clone());
@@ -611,14 +612,20 @@ impl Backend for Connect {
                 None,
             ));
         };
-        // With sign-in off the daemon can't tell this server from a browser,
-        // so it is asked to leave the commands out (#856).
+        // The daemon leaves the commands out for an API token on its own.
+        // With sign-in off it now knows these requests are an AI agent's,
+        // but its profile route reads only a token, so it is asked to leave
+        // them out (#856).
         self.get(
             "api/v1/plans",
             &[segment, "profile"],
             &[("commands", "left-out")],
         )
         .await
+    }
+
+    async fn permissions(&self) -> Result<PermissionsDto, ErrorDto> {
+        self.get("api/v1/permissions", &[], &[]).await
     }
 }
 

@@ -3078,7 +3078,7 @@ ui-sign-out-everywhere-working = Signing out every browser…
 ui-api-tokens-heading = { -api-token(form: "other") }
 
 # What that section says above the list.
-ui-api-tokens-body = An { -api-token } lets a program other than a browser, such as MCP connect mode, use { -brand-name } while sign-in is on. It can do only what its scopes allow, and it works until you revoke it or set a new admin password.
+ui-api-tokens-body = An { -api-token } lets a program other than a browser, such as MCP connect mode, use { -brand-name } while sign-in is on. It can do only what its permissions allow, and it works until you revoke it or set a new admin password.
 
 # Shown in place of the list when no token is kept.
 ui-api-tokens-none = No { -api-token(form: "other") } yet.
@@ -3086,8 +3086,8 @@ ui-api-tokens-none = No { -api-token(form: "other") } yet.
 # The header of the column of each token's label, which names its row.
 ui-api-tokens-column-label = Label
 
-# The header of the column of what each token may do.
-ui-api-tokens-column-scopes = Scopes
+# The header of the column that lists what each API token may do.
+ui-api-tokens-column-permissions = Permissions
 
 # The header of the column of when each token was created.
 ui-api-tokens-column-created = Created
@@ -3095,23 +3095,100 @@ ui-api-tokens-column-created = Created
 # The header of the column of when a program last used each token.
 ui-api-tokens-column-last-used = Last used
 
-# The name of a scope of an API token, as a token's row lists it and as the checkbox that chooses it says it.
-# $scope (text): the scope, as a code: read, run, preview or propose.
-ui-api-token-scope = { $scope ->
-    [read] Read
-    [run] Run
-    [preview] Preview
-   *[propose] Propose
+# A permission's name: the legend of its group of choices, in the API token form and in the AI agents tab.
+# $permission (text): the permission, as a code: backups, backup-runs, previews, configuration, snapshot-contents, daemon-log or repository-check.
+ui-permission = { $permission ->
+    [backups] Backups
+    [backup-runs] Backup runs
+    [previews] Previews
+    [configuration] Configuration
+    [snapshot-contents] Snapshot contents
+    [daemon-log] Daemon log
+   *[repository-check] Repository check
   }
 
-# The hint under the checkbox of a scope: what a program with a token of that scope may do.
-# $scope (text): the scope, as a code: read, run, preview or propose.
-ui-api-token-scope-hint = { $scope ->
-    [read] See the plans, the repositories and their snapshots, the operations and their live progress.
-    [run] Start a plan's backup, cancel a backup, and test a saved repository.
-    [preview] Ask what a forget, a prune or a check would do, without running it.
-   *[propose] Propose changes to the configuration for you to review here, and count what a draft plan would back up within the { -dry-run-allowlist }.
+# The hint under a permission's name: what it opens, in plain words.
+# $permission (text): the permission, as a code: backups, backup-runs, previews, configuration, snapshot-contents, daemon-log or repository-check.
+ui-permission-hint = { $permission ->
+    [backups] See plans, every { -repository }, the list of { -snapshot(form: "other") }, operations and their progress, and status. Not the files inside a { -snapshot }, and not the daemon's log: each is a permission of its own.
+    [backup-runs] Start a plan's backup, cancel a backup, and test a saved { -repository }. On its own it shows nothing, so a scheduler can start backups without reading anything.
+    [previews] Ask what forgetting or pruning { -snapshot(form: "other") }, checking a { -repository }, adopting { -snapshot(form: "other") } into another plan or importing a profile would do, without doing it.
+    [configuration] Propose changes to plans for you to approve on the Pending changes page, and try a plan in a dry run.
+    [snapshot-contents] See the names of the files and folders inside { -snapshot(form: "other") }, and those a warning or a failure names.
+    [daemon-log] Read { -brand-name }'s log, which can name your files and folders.
+   *[repository-check] Start a check of a { -repository }. Nothing offers this yet: it is here so that what you allow today allows no check a later version adds.
   }
+
+# A choice in a permission's group: no access, or the one level the permission has.
+# $level (text): none, read, start-and-cancel, preview, propose or run.
+ui-permission-level = { $level ->
+    [none] No access
+    [read] Read
+    [start-and-cancel] Start and cancel
+    [preview] Preview
+    [propose] Propose
+   *[run] Run
+  }
+
+# How an API token's row lists a permission it holds: the permission's name and its level.
+# $permission (text): the permission, as a code: backups, backup-runs, previews, configuration, snapshot-contents, daemon-log or repository-check.
+ui-permission-granted = { $permission ->
+    [backups] Backups: Read
+    [backup-runs] Backup runs: Start and cancel
+    [previews] Previews: Preview
+    [configuration] Configuration: Propose
+    [snapshot-contents] Snapshot contents: Read
+    [daemon-log] Daemon log: Read
+   *[repository-check] Repository check: Run
+  }
+
+# The legend of the permissions of the API token form, around one group per permission.
+ui-api-token-permissions-legend = Permissions
+
+# The hint under the legend of the token form's permissions.
+ui-api-token-permissions-hint = What a program with this token may do. Give it only what its job needs, and at least one permission.
+
+# The button on an API token's row that opens the dialog that changes its permissions, named for the token.
+# $label (text): the token's label.
+ui-api-token-change = Change permissions of token { $label }
+
+# The title of the dialog that changes an API token's permissions.
+# $label (text): the token's label.
+ui-api-token-change-title = Permissions of token { $label }
+
+# What the dialog that changes an API token's permissions says, above its groups.
+ui-api-token-change-body = A program that uses this token may do only what you choose here, from its next request on. Saving takes the admin password.
+
+# The button that saves an API token's new permissions.
+ui-api-token-change-confirm = Save the permissions
+
+# What the save button says while the change is sent.
+ui-api-token-changing = Saving the permissions…
+
+# What is announced once an API token's permissions are changed.
+# $label (text): the token's label.
+ui-api-token-changed = Token { $label } has its new permissions.
+
+# The name of the Settings tab of what AI agents may do without an API token.
+ui-ai-agents-tab = AI agents
+
+# The heading of the AI agents tab.
+ui-ai-agents-heading = What AI agents may do without a token
+
+# What the AI agents tab says first: what its permissions limit.
+ui-ai-agents-body = These permissions limit what an AI agent may do through { "ladderback mcp" } when it has no { -api-token }: in a session of its own, and when it connects to { -brand-name } while sign-in is off. An AI agent with a token may do what its token allows.
+
+# What the AI agents tab says with sign-in off.
+ui-ai-agents-sign-in-off = Sign-in is off, so these permissions limit only { "ladderback mcp" }: any other program on this machine or your network may use { -brand-name } without asking. Set an admin password to turn sign-in on, and give each program a token of its own.
+
+# The button that saves what AI agents may do without a token.
+ui-ai-agents-save = Save what AI agents may do
+
+# What the save button says while the change is sent.
+ui-ai-agents-saving = Saving…
+
+# What is announced once what AI agents may do without a token is saved.
+ui-ai-agents-saved = AI agents without a token now have the permissions you chose.
 
 # The Last used column of a token no program has used yet.
 ui-api-token-never-used = Never
@@ -3165,12 +3242,6 @@ ui-api-token-label-label = Label
 # The hint under that field.
 # $max (number): the most characters a label may have.
 ui-api-token-label-hint = Up to { $max } characters, so you can tell this token from the others: the program that uses it, for example.
-
-# The name of the group of checkboxes that choose the token's scopes.
-ui-api-token-scopes-legend = Scopes
-
-# The hint under that group's name.
-ui-api-token-scopes-hint = What a program with this token may do. Choose at least one.
 
 # The button that creates the token.
 ui-api-token-create = Create the token

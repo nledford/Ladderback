@@ -4,22 +4,26 @@
 //! in this browser too, whose glue is `settings/page_width.rs`; its admin
 //! password (security §10.1, decision 70), set with sign-in off and changed
 //! in a session, whose glue is `settings/password.rs`; its API tokens
-//! (decision 93), listed, created and revoked in a session; the dry-run
-//! allowlist (decision 89), whose glue is `settings/dry_run_allowlist.rs`;
-//! and the restart of Ladderback (decision 94). The tabs, the address that
-//! opens each, the tab an address changed while the page is open chooses
-//! and what each panel holds are `settings_tabs.rs`'s; what the token form
-//! lacks, the request it sends, which field a refusal is about and how a
-//! token's row reads are `api_tokens.rs`'s, and what the restart section
-//! offers and waits for is `restart.rs`'s, all host-tested; this is the DOM
-//! glue, which the `@ui` scenarios of `features/ui/settings.feature`,
-//! `features/security/api_tokens.feature` and
+//! (decisions 93 and 127), listed, created, changed and revoked in a
+//! session; what AI agents may do without a token (decision 127), whose
+//! glue is `settings/ai_agents.rs`; the dry-run allowlist (decision 89),
+//! whose glue is `settings/dry_run_allowlist.rs`; and the restart of
+//! Ladderback (decision 94). The tabs, the address that opens each, the tab
+//! an address changed while the page is open chooses and what each panel
+//! holds are `settings_tabs.rs`'s; what the token form lacks, the requests
+//! it sends, which field a refusal is about, each permission's group and
+//! how a token's row reads are `api_tokens.rs`'s, and what the restart
+//! section offers and waits for is `restart.rs`'s, all host-tested; this is
+//! the DOM glue, which the `@ui` scenarios of `features/ui/settings.feature`,
+//! `features/security/api_tokens.feature`,
+//! `features/automation/ai_agents_settings.feature` and
 //! `features/execution/restart_from_settings.feature` run in Chromium.
 //!
 //! A new token's whole text is shown once, in a dialog, and held in one
 //! signal only while that dialog is open: leaving the dialog, however it is
 //! left, clears it from the page (I4).
 
+mod ai_agents;
 // The Agents section's DOM glue, on a hub; `pairing.rs` decides for it.
 #[cfg(feature = "hub")]
 pub(crate) mod agents;
@@ -29,6 +33,7 @@ mod page_width;
 mod password;
 mod sign_in;
 
+use ai_agents::AiAgentsSection;
 use dry_run_allowlist::DryRunAllowlistSection;
 use language::LanguageSection;
 use page_width::PageWidthSection;
@@ -38,27 +43,32 @@ use sign_in::SignInSection;
 use std::rc::Rc;
 use std::sync::Arc;
 
-use api::{ApiTokenDto, ApiTokensDto, IanaZone, MsgArg, RestartDto, RestartWhenDto};
+use api::{
+    ApiTokenDto, ApiTokensDto, ErrorCode, IanaZone, MsgArg, PermissionsDto, RestartDto,
+    RestartWhenDto,
+};
 use l10n::{Localizer, MessageId, msg};
 use lepticons_data::LucideGlyph;
 use leptos::ev;
 use leptos::prelude::*;
-use leptos::task::spawn_local;
+use leptos::task::{spawn_local, tick};
 
 use crate::announcer::Politeness;
 use crate::api_tokens::{
-    CREATE_ID, CREATED_BODY_ID, Field, HEADING_ID, LABEL_MAX_CHARS, LastUsed, REVOKE_BODY_ID,
-    SCOPES, Said, Scope, TOKENS_PATH, TokenForm, created, created_body, error_of, field_of,
-    problems_of, revoke_id, revoke_label, revoke_path, revoke_title, revoked, scope_hint, scope_id,
-    scope_name, scopes_of,
+    CREATE_ID, CREATED_BODY_ID, Field, Form, HEADING_ID, LABEL_MAX_CHARS, LastUsed, ListReads,
+    REVOKE_BODY_ID, ROWS, Said, TOKENS_PATH, TokenForm, change_id, change_label, change_path,
+    change_request, change_title, changed, chosen_of, created, created_body, error_of, field_of,
+    granted_of, new_token, permissions_from, problems_of, revoke_id, revoke_label, revoke_path,
+    revoke_title, revoked,
 };
 use crate::components::button::{Appearance, Content, Kind};
 use crate::components::skeleton::rules::Awaited;
 use crate::components::tabs::{Orientation, TabSet, TabsName};
 use crate::components::{
-    Banner, Button, Checkbox, Column, Confirmation, ErrorSummary, Name, ReviewDialog, Sentences,
-    State, SummaryItem, Tab, Table, Tabs, TextField, Toast, ToastTone, Toasts, Working, copy_text,
-    dialog_refusal_alert, hand_focus_when_gone, refusal_alert, say_refusals, text_field,
+    Banner, Button, Column, Confirmation, ErrorSummary, Name, RadioGroup, ReviewDialog, Sentences,
+    State, StepUp, StepUpField, SummaryItem, Tab, Table, Tabs, TextField, Toast, ToastTone, Toasts,
+    Working, copy_text, dialog_refusal_alert, hand_focus_when_gone, refusal_alert, say_refusals,
+    text_field,
 };
 use crate::components::{first_load, paced};
 use crate::live::reply;
@@ -80,11 +90,19 @@ fn say(localizer: &Localizer, (id, args): Said) -> String {
     text_with(localizer, id, &args)
 }
 
-/// The `id` of the scopes' hint, which describes their group.
-const SCOPES_HINT_ID: &str = "api-token-scopes-hint";
+/// The `id` of the permissions' hint, which describes their group.
+const PERMISSIONS_HINT_ID: &str = "api-token-permissions-hint";
 
-/// The `id` of the scopes' error, which describes their group while it shows.
-const SCOPES_ERROR_ID: &str = "api-token-scopes-error";
+/// The `id` of the permissions' error, which describes their group while it
+/// shows.
+const PERMISSIONS_ERROR_ID: &str = "api-token-permissions-error";
+
+/// The `id` of what the dialog that changes a token's permissions says,
+/// which describes it.
+const CHANGE_BODY_ID: &str = "api-token-change-body";
+
+/// The `id` of the admin password's field in that dialog.
+const CHANGE_PASSWORD_ID: &str = "api-token-change-password";
 
 /// The `id` of the field that holds a new token's whole text.
 const SECRET_ID: &str = "api-token-secret";
@@ -163,6 +181,16 @@ fn SettingsTabs(localizer: Arc<Localizer>, hub: bool) -> impl IntoView {
         msg::UI_API_TOKENS_HEADING,
         tokens.into_any(),
     ));
+    // Whether the daemon has read what AI agents may do, so the AI agents'
+    // panel holds its choices and its first choice is the stop after its tab.
+    let ai_agents_read = RwSignal::new(false);
+    let ai_agents =
+        view! { <AiAgentsSection localizer=Arc::clone(&localizer) on=!off read=ai_agents_read /> };
+    sections.push((
+        Section::AiAgents,
+        msg::UI_AI_AGENTS_TAB,
+        ai_agents.into_any(),
+    ));
     #[cfg(feature = "hub")]
     if hub {
         let agents = view! { <agents::Agents localizer=Arc::clone(&localizer) on=signed_in /> };
@@ -185,8 +213,8 @@ fn SettingsTabs(localizer: Arc<Localizer>, hub: bool) -> impl IntoView {
 
     let named = Section::named(&page::address_fragment());
     let tab = |section: Section, words: MessageId, panel: AnyView| {
-        Tab::new(text(&localizer, words), section.holds(signed_in), panel)
-            .selected_at_start(named == Some(section))
+        let holds = Signal::derive(move || section.holds(signed_in, ai_agents_read.get()));
+        Tab::new(text(&localizer, words), holds, panel).selected_at_start(named == Some(section))
     };
     let language = view! { <LanguageSection localizer=Arc::clone(&localizer) /> };
     let first = tab(
@@ -251,38 +279,81 @@ fn SettingsTabs(localizer: Arc<Localizer>, hub: bool) -> impl IntoView {
     }
 }
 
+/// The value each permission's group holds, one signal per group, in
+/// [`ROWS`]' order: a token's form, its change, or what AI agents may do
+/// without a token.
+#[derive(Clone, Copy)]
+struct Chosen([RwSignal<&'static str>; 7]);
+
+impl Chosen {
+    fn new(permissions: &PermissionsDto) -> Self {
+        Self(chosen_of(permissions).map(RwSignal::new))
+    }
+
+    /// Makes each group hold what `permissions` grant.
+    fn set(self, permissions: &PermissionsDto) {
+        for (group, value) in self.0.into_iter().zip(chosen_of(permissions)) {
+            group.set(value);
+        }
+    }
+
+    /// The permissions the groups hold.
+    fn read(self) -> PermissionsDto {
+        permissions_from(self.0.map(|group| group.get_untracked()))
+    }
+}
+
+/// One radio group per permission (decision 127), named for it, with a
+/// hint saying what it opens, and its two choices: no access, or its level.
+#[component]
+fn PermissionGroups(localizer: Arc<Localizer>, form: Form, chosen: Chosen) -> impl IntoView {
+    ROWS.into_iter()
+        .zip(chosen.0)
+        .map(|(row, value)| {
+            let options = row
+                .choices()
+                .into_iter()
+                .map(|(code, said)| (code, say(&localizer, said)))
+                .collect();
+            view! {
+                <RadioGroup
+                    name=row.group(form)
+                    legend=say(&localizer, row.name())
+                    description=say(&localizer, row.hint())
+                    options=options
+                    chosen=value
+                />
+            }
+        })
+        .collect_view()
+}
+
 /// What a person has typed and chosen in the form, one signal per part.
 #[derive(Clone, Copy)]
 struct Inputs {
     label: RwSignal<String>,
-    scopes: [RwSignal<bool>; 4],
+    permissions: Chosen,
 }
 
 impl Inputs {
+    /// An empty label, and a new token's permissions (decision 127).
     fn new() -> Self {
         Self {
             label: RwSignal::new(String::new()),
-            scopes: SCOPES.map(|_| RwSignal::new(false)),
+            permissions: Chosen::new(&new_token()),
         }
     }
 
     fn read(self) -> TokenForm {
         TokenForm {
             label: self.label.get_untracked(),
-            scopes: SCOPES
-                .into_iter()
-                .zip(self.scopes)
-                .filter(|(_, chosen)| chosen.get_untracked())
-                .map(|(scope, _)| scope)
-                .collect(),
+            permissions: self.permissions.read(),
         }
     }
 
     fn clear(self) {
         self.label.set(String::new());
-        for chosen in self.scopes {
-            chosen.set(false);
-        }
+        self.permissions.set(&new_token());
     }
 }
 
@@ -292,7 +363,7 @@ impl Inputs {
 struct Problems {
     summary: RwSignal<Vec<SummaryItem>>,
     label: RwSignal<Option<String>>,
-    scopes: RwSignal<Option<String>>,
+    permissions: RwSignal<Option<String>>,
 }
 
 impl Problems {
@@ -300,21 +371,60 @@ impl Problems {
         Self {
             summary: RwSignal::new(Vec::new()),
             label: RwSignal::new(None),
-            scopes: RwSignal::new(None),
+            permissions: RwSignal::new(None),
         }
     }
 
     fn show(self, items: Vec<SummaryItem>) {
         self.label.set(error_of(&items, Field::Label));
-        self.scopes.set(error_of(&items, Field::Scopes));
+        self.permissions.set(error_of(&items, Field::Permissions));
         self.summary.set(items);
     }
 }
 
+/// What the dialog that changes a token's permissions holds: the token it
+/// is about, its groups, the admin password typed and its error, a refusal
+/// that is about no field, and whether the daemon is saving.
+#[derive(Clone, Copy)]
+struct Change {
+    token: RwSignal<Option<ApiTokenDto>>,
+    open: RwSignal<bool>,
+    busy: RwSignal<bool>,
+    chosen: Chosen,
+    password: RwSignal<String>,
+    password_error: RwSignal<Option<String>>,
+    error: RwSignal<Option<Sentence>>,
+}
+
+impl Change {
+    fn new() -> Self {
+        Self {
+            token: RwSignal::new(None),
+            open: RwSignal::new(false),
+            busy: RwSignal::new(false),
+            chosen: Chosen::new(&PermissionsDto::default()),
+            password: RwSignal::new(String::new()),
+            password_error: RwSignal::new(None),
+            error: RwSignal::new(None),
+        }
+    }
+
+    /// Opens the dialog on `token`, its groups holding what it holds now.
+    fn ask(self, token: ApiTokenDto) {
+        self.chosen.set(&token.permissions);
+        self.password.set(String::new());
+        self.password_error.set(None);
+        self.error.set(None);
+        self.token.set(Some(token));
+        self.open.set(true);
+    }
+}
+
 /// The API tokens' section: the list, the toast that answers a token
-/// revoked, which nothing else in it confirms, the form that creates one,
-/// the dialog that shows a new one's whole text once, and the dialog that
-/// asks before one is revoked. With sign-in off the daemon refuses the list
+/// revoked or changed, which nothing else in it confirms, the form that
+/// creates one, the dialog that shows a new one's whole text once, the
+/// dialog that changes a token's permissions, and the dialog that asks
+/// before one is revoked. With sign-in off the daemon refuses the list
 /// (`sign-in-off`), and the section says why in its place, with no form.
 #[component]
 fn ApiTokens(localizer: Arc<Localizer>) -> impl IntoView {
@@ -326,13 +436,23 @@ fn ApiTokens(localizer: Arc<Localizer>) -> impl IntoView {
     // calmly in the list's place, as the daemon said it.
     let refused = RwSignal::<Option<Sentence>>::new(None);
     let load_localizer = Arc::clone(&localizer);
+    // The reads of the list, so an answer from before a newer read or a
+    // change of a token's permissions doesn't bring the old list back.
+    let reads = StoredValue::new(ListReads::default());
     let load = Callback::new(move |()| {
         let url = format!("{}{TOKENS_PATH}", base.get_value());
         let localizer = Arc::clone(&load_localizer);
+        let mine = reads.try_update_value(ListReads::start).unwrap_or_default();
         spawn_local(async move {
             let read = ws::get::<ApiTokensDto>(&url).await;
             // The reader may have left the page before the answer came.
             if phase.try_get_untracked().is_none() {
+                return;
+            }
+            if !reads
+                .try_update_value(|reads| reads.counts(mine))
+                .unwrap_or(false)
+            {
                 return;
             }
             match read {
@@ -466,6 +586,87 @@ fn ApiTokens(localizer: Arc<Localizer>) -> impl IntoView {
         });
     });
 
+    // The change dialog: once saved, the token's row holds its new
+    // permissions, read back from the daemon's answer.
+    let changing = Change::new();
+    let ask_change = Callback::new(move |token: ApiTokenDto| changing.ask(token));
+    let change_localizer = Arc::clone(&localizer);
+    let change = Callback::new(move |token: ApiTokenDto| {
+        if changing.busy.get_untracked() {
+            return;
+        }
+        changing.busy.set(true);
+        changing.error.set(None);
+        let localizer = Arc::clone(&change_localizer);
+        let url = format!("{}{}", base.get_value(), change_path(&token.id));
+        let body = change_request(changing.chosen.read(), changing.password.get_untracked());
+        spawn_local(async move {
+            let answer = ws::put(&url, &body).await;
+            if changing.busy.try_get_untracked().is_none() {
+                return;
+            }
+            let kept = match answer {
+                Some(Posted::Done(answer)) => serde_json::from_str::<PermissionsDto>(&answer).ok(),
+                Some(Posted::Refused(ErrorCode::CurrentPasswordWrong, args, detail)) => {
+                    changing.busy.set(false);
+                    // Cleared first, so a second wrong try is said again.
+                    changing.password_error.set(None);
+                    tick().await;
+                    changing.password_error.try_set(Some(
+                        refused_sentence(
+                            &localizer,
+                            ErrorCode::CurrentPasswordWrong,
+                            &args,
+                            detail.as_deref(),
+                        )
+                        .plain(),
+                    ));
+                    return;
+                }
+                Some(Posted::Refused(code, args, detail)) => {
+                    changing.busy.set(false);
+                    changing.error.set(Some(refused_sentence(
+                        &localizer,
+                        code,
+                        &args,
+                        detail.as_deref(),
+                    )));
+                    return;
+                }
+                None => None,
+            };
+            let Some(permissions) = kept else {
+                // No answer, or not the one the route gives.
+                changing.busy.set(false);
+                changing.error.set(Some(Sentence::new(
+                    &text(&localizer, msg::UI_SESSION_UNREACHABLE),
+                    None,
+                )));
+                return;
+            };
+            changing.password.set(String::new());
+            changing.password_error.set(None);
+            tokens.update(|tokens| {
+                if let Some(kept) = tokens.iter_mut().flatten().find(|kept| kept.id == token.id) {
+                    kept.permissions = permissions;
+                }
+            });
+            // A read still unanswered, as after a revoke, may hold the old
+            // permissions: a new one overtakes it.
+            if reads.try_with_value(ListReads::changed).unwrap_or(false) {
+                load.run(());
+            }
+            // Once the row is drawn again, so the dialog hands focus to its
+            // new Change button; busy until then, so the confirm button
+            // takes no press.
+            request_animation_frame(move || {
+                changing.busy.try_set(false);
+                changing.open.try_set(false);
+                toasts.show(ToastTone::Success, say(&localizer, changed(&token.label)));
+            });
+        });
+    });
+
     let heading = text(&localizer, msg::UI_API_TOKENS_HEADING);
     let body = text(&localizer, msg::UI_API_TOKENS_BODY);
     let loading = text(&localizer, msg::UI_LOADING);
@@ -474,6 +675,7 @@ fn ApiTokens(localizer: Arc<Localizer>) -> impl IntoView {
     let list_localizer = Arc::clone(&localizer);
     let form_localizer = Arc::clone(&localizer);
     let revoke_dialog_localizer = Arc::clone(&localizer);
+    let change_dialog_localizer = Arc::clone(&localizer);
     let viewer = l10n::viewer_zone();
     let (phase, pace) = paced(move || phase.get(), |phase| *phase == Phase::Loading);
     view! {
@@ -491,7 +693,13 @@ fn ApiTokens(localizer: Arc<Localizer>) -> impl IntoView {
                     match (refused.get(), tokens.get()) {
                         (Some(sentence), _) => refusal_alert(&list_localizer, sentence).into_any(),
                         (None, Some(list)) if !list.is_empty() => {
-                            tokens_table(&list_localizer, list, ask_revoke, viewer.as_ref())
+                            tokens_table(
+                                    &list_localizer,
+                                    list,
+                                    ask_change,
+                                    ask_revoke,
+                                    viewer.as_ref(),
+                                )
                                 .into_any()
                         }
                         _ => view! { <p>{none.clone()}</p> }.into_any(),
@@ -536,35 +744,52 @@ fn ApiTokens(localizer: Arc<Localizer>) -> impl IntoView {
                         }
                     })
             }}
+            {move || {
+                changing
+                    .token
+                    .get()
+                    .map(|token| {
+                        view! {
+                            <ChangeDialog
+                                localizer=Arc::clone(&change_dialog_localizer)
+                                token=token
+                                changing=changing
+                                change=change
+                            />
+                        }
+                    })
+            }}
         </section>
     }
 }
 
 /// The table of the tokens kept, named by the section's heading: each
-/// token's label as its row's header, its scopes (one said as it is,
+/// token's label as its row's header, its permissions (one said as it is,
 /// several as a list, #430), when it was created and last used, and its
-/// Revoke button, named for it. The button hands focus to the section's
-/// heading when its row goes while it holds focus, as after a revoke.
+/// Change permissions and Revoke buttons, named for it. Each button hands
+/// focus to the section's heading when its row goes while it holds focus,
+/// as after a revoke.
 fn tokens_table(
     localizer: &Arc<Localizer>,
     tokens: Vec<ApiTokenDto>,
+    ask_change: Callback<ApiTokenDto>,
     ask_revoke: Callback<ApiTokenDto>,
     viewer: Option<&IanaZone>,
 ) -> impl IntoView + use<> {
     let now_ms = ws::now_ms();
     let label = Column::new(
         text(localizer, msg::UI_API_TOKENS_COLUMN_LABEL),
-        Rem::tenths(100),
+        Rem::tenths(80),
         |row: Signal<ApiTokenDto>| (move || row.with(|token| token.label.clone())).into_any(),
     );
-    let scopes_localizer = Arc::clone(localizer);
-    let scopes = Column::new(
-        text(localizer, msg::UI_API_TOKENS_COLUMN_SCOPES),
-        Rem::tenths(80),
+    let permissions_localizer = Arc::clone(localizer);
+    let permissions = Column::new(
+        text(localizer, msg::UI_API_TOKENS_COLUMN_PERMISSIONS),
+        // Wide enough for "Configuration" on one line; the label's column gave
+        // up the 2 rem, so the table still fits its panel.
+        Rem::tenths(100),
         move |row: Signal<ApiTokenDto>| {
-            row.with_untracked(|token| {
-                scopes_view(&scopes_localizer, &scopes_of(token.permissions))
-            })
+            row.with_untracked(|token| permissions_view(&permissions_localizer, &token.permissions))
         },
     );
     let created_localizer = Arc::clone(localizer);
@@ -599,24 +824,12 @@ fn tokens_table(
         text(localizer, msg::UI_COLUMN_ACTIONS),
         Rem::tenths(90),
         move |row: Signal<ApiTokenDto>| {
-            let token = row.get_untracked();
-            let label = say(&actions_localizer, revoke_label(&token.label));
-            let button = NodeRef::<leptos::html::Button>::new();
-            hand_focus_when_gone(button, HEADING_ID.to_owned());
-            view! {
-                <Button
-                    content=Content::IconAndText {
-                        glyph: LucideGlyph::Trash.into(),
-                        label: label.into(),
-                    }
-                    tone=Tone::Error
-                    size=Size::Small
-                    id=revoke_id(&token.id)
-                    node_ref=button
-                    on_press=Callback::new(move |()| ask_revoke.run(token.clone()))
-                />
-            }
-            .into_any()
+            token_actions(
+                &actions_localizer,
+                row.get_untracked(),
+                ask_change,
+                ask_revoke,
+            )
         },
     );
     let sentences = Sentences {
@@ -628,7 +841,7 @@ fn tokens_table(
         <Table
             name=Name::Heading(HEADING_ID.to_owned())
             row_header=label
-            columns=vec![scopes, created, last_used, actions]
+            columns=vec![permissions, created, last_used, actions]
             rows=Signal::stored(tokens)
             key=|token: &ApiTokenDto| token.id.clone()
             state=State::Ready
@@ -637,11 +850,56 @@ fn tokens_table(
     }
 }
 
-/// A token's scopes in its row: one said as it is, several as a list.
-fn scopes_view(localizer: &Localizer, scopes: &[Scope]) -> AnyView {
-    let names: Vec<String> = scopes
-        .iter()
-        .map(|scope| say(localizer, scope_name(*scope)))
+/// A token's Change permissions and Revoke buttons, named for it.
+fn token_actions(
+    localizer: &Localizer,
+    token: ApiTokenDto,
+    ask_change: Callback<ApiTokenDto>,
+    ask_revoke: Callback<ApiTokenDto>,
+) -> AnyView {
+    let (change_text, revoke_text) = (
+        say(localizer, change_label(&token.label)),
+        say(localizer, revoke_label(&token.label)),
+    );
+    let change_button = NodeRef::<leptos::html::Button>::new();
+    let revoke_button = NodeRef::<leptos::html::Button>::new();
+    hand_focus_when_gone(change_button, HEADING_ID.to_owned());
+    hand_focus_when_gone(revoke_button, HEADING_ID.to_owned());
+    let (change_id_of, revoke_id_of) = (change_id(&token.id), revoke_id(&token.id));
+    let change_for = token.clone();
+    view! {
+        <div class="actions">
+            <Button
+                content=Content::IconAndText {
+                    glyph: LucideGlyph::Pencil.into(),
+                    label: change_text.into(),
+                }
+                size=Size::Small
+                id=change_id_of
+                node_ref=change_button
+                on_press=Callback::new(move |()| ask_change.run(change_for.clone()))
+            />
+            <Button
+                content=Content::IconAndText {
+                    glyph: LucideGlyph::Trash.into(),
+                    label: revoke_text.into(),
+                }
+                tone=Tone::Error
+                size=Size::Small
+                id=revoke_id_of
+                node_ref=revoke_button
+                on_press=Callback::new(move |()| ask_revoke.run(token.clone()))
+            />
+        </div>
+    }
+    .into_any()
+}
+
+/// A token's permissions in its row: one said as it is, several as a list.
+fn permissions_view(localizer: &Localizer, permissions: &PermissionsDto) -> AnyView {
+    let names: Vec<String> = granted_of(permissions)
+        .into_iter()
+        .map(|row| say(localizer, row.granted()))
         .collect();
     match names.as_slice() {
         [one] => one.clone().into_any(),
@@ -650,9 +908,9 @@ fn scopes_view(localizer: &Localizer, scopes: &[Scope]) -> AnyView {
     }
 }
 
-/// The form that creates a token: its label, its scopes (a group of
-/// checkboxes, each with a hint naming what it allows), and the error
-/// summary that takes focus when the form is refused.
+/// The form that creates a token: its label, its permissions (a radio group
+/// each, with a hint naming what it opens, starting at a new token's), and
+/// the error summary that takes focus when the form is refused.
 #[component]
 fn CreateForm(
     localizer: Arc<Localizer>,
@@ -669,20 +927,6 @@ fn CreateForm(
         &[("max", MsgArg::Count(LABEL_MAX_CHARS))],
     );
     let creating = text(&localizer, msg::UI_API_TOKEN_CREATING);
-    let checkboxes = SCOPES
-        .into_iter()
-        .zip(inputs.scopes)
-        .map(|(scope, checked)| {
-            view! {
-                <Checkbox
-                    id=scope_id(scope)
-                    label=say(&localizer, scope_name(scope))
-                    description=say(&localizer, scope_hint(scope))
-                    checked=checked
-                />
-            }
-        })
-        .collect_view();
     view! {
         <section aria-labelledby="api-token-form-heading">
             <h3 id="api-token-form-heading">{field_text(msg::UI_API_TOKEN_FORM_HEADING)}</h3>
@@ -718,28 +962,32 @@ fn CreateForm(
                 <fieldset
                     class="choices"
                     aria-describedby=move || {
-                        if problems.scopes.get().is_some() {
-                            format!("{SCOPES_HINT_ID} {SCOPES_ERROR_ID}")
+                        if problems.permissions.get().is_some() {
+                            format!("{PERMISSIONS_HINT_ID} {PERMISSIONS_ERROR_ID}")
                         } else {
-                            SCOPES_HINT_ID.to_owned()
+                            PERMISSIONS_HINT_ID.to_owned()
                         }
                     }
                 >
-                    <legend>{field_text(msg::UI_API_TOKEN_SCOPES_LEGEND)}</legend>
-                    <p id=SCOPES_HINT_ID>{field_text(msg::UI_API_TOKEN_SCOPES_HINT)}</p>
+                    <legend>{field_text(msg::UI_API_TOKEN_PERMISSIONS_LEGEND)}</legend>
+                    <p id=PERMISSIONS_HINT_ID>{field_text(msg::UI_API_TOKEN_PERMISSIONS_HINT)}</p>
                     {move || {
                         problems
-                            .scopes
+                            .permissions
                             .get()
                             .map(|error| {
                                 view! {
-                                    <p id=SCOPES_ERROR_ID class="form-error">
+                                    <p id=PERMISSIONS_ERROR_ID class="form-error">
                                         {error}
                                     </p>
                                 }
                             })
                     }}
-                    {checkboxes}
+                    <PermissionGroups
+                        localizer=Arc::clone(&localizer)
+                        form=Form::Create
+                        chosen=inputs.permissions
+                    />
                 </fieldset>
                 <p class="actions">
                     <Button
@@ -853,6 +1101,65 @@ fn RevokeDialog(
         >
             <p id=REVOKE_BODY_ID>{text(&localizer, msg::UI_API_TOKEN_REVOKE_BODY)}</p>
             {move || error.get().map(|sentence| dialog_refusal_alert(&error_localizer, sentence))}
+        </ReviewDialog>
+    }
+}
+
+/// The dialog that changes the token's permissions, named for it: its
+/// groups, starting at what the token holds, and the admin password, which
+/// saving takes (decision 127). Cancel first, so a stray Enter backs out.
+/// A wrong password is the field's error, said in the dialog; any other
+/// refusal is an alert inside it. Once saved, focus returns to the token's
+/// Change permissions button.
+#[component]
+fn ChangeDialog(
+    localizer: Arc<Localizer>,
+    token: ApiTokenDto,
+    changing: Change,
+    change: Callback<ApiTokenDto>,
+) -> impl IntoView {
+    let title = say(&localizer, change_title(&token.label));
+    let returns_to = change_id(&token.id);
+    let confirm = Confirmation {
+        label: text(&localizer, msg::UI_API_TOKEN_CHANGE_CONFIRM),
+        tone: Tone::Primary,
+        action: Callback::new(move |()| change.run(token.clone())),
+    };
+    let working = Working {
+        active: changing.busy.into(),
+        status: text(&localizer, msg::UI_API_TOKEN_CHANGING),
+    };
+    let error_localizer = Arc::clone(&localizer);
+    view! {
+        <ReviewDialog
+            open=changing.open
+            title=title
+            dismiss_label=text(&localizer, msg::UI_REVIEW_CANCEL)
+            confirm=Some(confirm)
+            returns_to=returns_to
+            described_by=CHANGE_BODY_ID.to_owned()
+            working=working
+            fallback=HEADING_ID.to_owned()
+        >
+            <p id=CHANGE_BODY_ID>{text(&localizer, msg::UI_API_TOKEN_CHANGE_BODY)}</p>
+            <PermissionGroups
+                localizer=Arc::clone(&localizer)
+                form=Form::Change
+                chosen=changing.chosen
+            />
+            <StepUpField
+                id=CHANGE_PASSWORD_ID
+                localizer=Arc::clone(&localizer)
+                step_up=StepUp::Password
+                value=changing.password
+                error=changing.password_error
+            />
+            {move || {
+                changing
+                    .error
+                    .get()
+                    .map(|sentence| dialog_refusal_alert(&error_localizer, sentence))
+            }}
         </ReviewDialog>
     }
 }

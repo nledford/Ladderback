@@ -15,11 +15,27 @@ import type { BrowserWorld } from "../support/world.ts";
 
 // The field's own error is on screen and in its description; a form's error
 // summary may repeat the words as a link, so they are looked for among what
-// the field points at, not anywhere on the page.
+// the field points at, not anywhere on the page. The field points at its
+// error only once the error comes, which may be after a slow check on the
+// daemon, so what it points at is read again until then.
 Then("the field {string} shows the error {string}", async function (this: BrowserWorld, name: string, error: string) {
   const input = this.page.getByRole("textbox", { name });
-  const ids = ((await input.getAttribute("aria-describedby")) ?? "").split(/\s+/).filter(Boolean);
-  await expect(this.page.locator(ids.map((id) => `#${id}`).join(", ") || ":not(*)").filter({ hasText: error })).toBeVisible();
+  await expect
+    .poll(
+      async () => {
+        const ids = ((await input.getAttribute("aria-describedby")) ?? "").split(/\s+/).filter(Boolean);
+        return (
+          ids.length > 0 &&
+          (await this.page
+            .locator(ids.map((id) => `#${id}`).join(", "))
+            .filter({ hasText: error })
+            .first()
+            .isVisible())
+        );
+      },
+      { message: `the field "${name}" shows the error "${error}"` },
+    )
+    .toBe(true);
 });
 
 Then("the field {string} is described by {string}", async function (this: BrowserWorld, name: string, description: string) {

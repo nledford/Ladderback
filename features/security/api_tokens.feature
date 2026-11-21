@@ -236,7 +236,7 @@ Feature: API tokens
       Then the route answers with status 409 and the error code "sign-in-off"
 
   @ui
-  Rule: In Settings, the admin creates, lists and revokes API tokens by keyboard alone, and sees a secret only once
+  Rule: In Settings, the admin creates, lists, changes and revokes API tokens by keyboard alone, and sees a secret only once
 
     Scenario: The Settings link in the navigation moves focus to the page's heading
       When I open the web UI
@@ -257,10 +257,8 @@ Feature: API tokens
       And the page shows the paragraph "No API tokens yet."
       When I press Tab until focus is on the textbox "Label"
       And I type "nightly-mcp"
-      And I press Tab until focus is on the checkbox "Read"
-      And I press Space
-      And I press Tab until focus is on the checkbox "Run"
-      And I press Space
+      And I press Tab until focus is in the group "Snapshot contents"
+      And I press the down arrow until focus is on the choice "Read" of the group "Snapshot contents"
       And I press Tab until focus is on the button "Create the token"
       And I press Enter
       Then the dialog "Copy the new API token" opens with focus on the button "Copy the token"
@@ -274,10 +272,28 @@ Feature: API tokens
       And I press Enter
       Then the dialog "Copy the new API token" is closed
       And focus is on the button "Create the token"
-      And the row "nightly-mcp" of the table "API tokens" lists "Read" in its "Scopes" column
-      And the row "nightly-mcp" of the table "API tokens" lists "Run" in its "Scopes" column
+      And the row "nightly-mcp" of the table "API tokens" lists "Backups: Read" in its "Permissions" column
+      And the row "nightly-mcp" of the table "API tokens" lists "Backup runs: Start and cancel" in its "Permissions" column
+      And the row "nightly-mcp" of the table "API tokens" lists "Snapshot contents: Read" in its "Permissions" column
       And the row "nightly-mcp" of the table "API tokens" shows "Never" in its "Last used" column
       And nothing on the page holds the token the dialog showed
+      And the page has no accessibility violations
+
+    # A new token starts from the safe defaults (decision 127): it sees and
+    # starts backups, previews and proposes; what can show a file's name or a
+    # log line to whatever model an AI agent uses is off until chosen.
+    Scenario: The form offers each permission as a group of its own, starting at the defaults of a new token
+      Given a daemon with sign-in on and the admin password "demo-admin-pass"
+      And the admin is signed in with "demo-admin-pass"
+      When I open the address "/settings#api-tokens"
+      Then the group "Backups" has "Read" chosen
+      And the group "Backup runs" has "Start and cancel" chosen
+      And the group "Previews" has "Preview" chosen
+      And the group "Configuration" has "Propose" chosen
+      And the group "Snapshot contents" has "No access" chosen
+      And the group "Daemon log" has "No access" chosen
+      And the group "Repository check" has "No access" chosen
+      And the group "Backups" is described as saying "Not the files inside a snapshot, and not the daemon's log"
       And the page has no accessibility violations
 
     Scenario: Escape leaves the token's dialog and takes its secret off the page
@@ -287,8 +303,6 @@ Feature: API tokens
       And I skip to the content
       And I press Tab until focus is on the textbox "Label"
       And I type "nightly-mcp"
-      And I press Tab until focus is on the checkbox "Read"
-      And I press Space
       And I press Tab until focus is on the button "Create the token"
       And I press Enter
       Then the dialog "Copy the new API token" shows a token that starts with "ladderback_"
@@ -300,17 +314,71 @@ Feature: API tokens
     Scenario: A token's row says in words when a program last used it
       Given a daemon with sign-in on and the admin password "demo-admin-pass"
       And the admin is signed in with "demo-admin-pass"
-      And the admin has created the API token "nightly-mcp" with the scopes "read"
+      And the admin has created the API token "nightly-mcp" with the permissions "backups: read"
       And a program has used the API token "nightly-mcp"
       When I open the address "/settings#api-tokens"
-      Then the row "nightly-mcp" of the table "API tokens" says "Read" in its "Scopes" column, not as a list
+      Then the row "nightly-mcp" of the table "API tokens" says "Backups: Read" in its "Permissions" column, not as a list
       And the row "nightly-mcp" of the table "API tokens" shows "Less than a minute ago" in its "Last used" column
       And the page has no accessibility violations
+
+    # 1a's Scopes column showed a token with only Daemon log as "Read" and one
+    # with only Repository check as nothing.
+    Scenario: A token's row names each permission it holds, whichever they are
+      Given a daemon with sign-in on and the admin password "demo-admin-pass"
+      And the admin is signed in with "demo-admin-pass"
+      And the admin has created the API token "log-reader" with the permissions "daemon-log: read"
+      And the admin has created the API token "checker" with the permissions "repository-check: run"
+      When I open the address "/settings#api-tokens"
+      Then the row "log-reader" of the table "API tokens" says "Daemon log: Read" in its "Permissions" column, not as a list
+      And the row "checker" of the table "API tokens" says "Repository check: Run" in its "Permissions" column, not as a list
+
+    Scenario: Changing a token's permissions by keyboard alone takes the admin password
+      Given a daemon with sign-in on and the admin password "demo-admin-pass"
+      And the admin is signed in with "demo-admin-pass"
+      And the admin has created the API token "nightly-mcp" with the permissions "backups: read"
+      When I open the address "/settings#api-tokens"
+      And I skip to the content
+      And I press Tab until focus is on the button "Change permissions of token nightly-mcp"
+      And I press Enter
+      Then the dialog "Permissions of token nightly-mcp" opens with focus on the button "Cancel"
+      And the group "Backups" has "Read" chosen
+      And the group "Daemon log" has "No access" chosen
+      And the page has no accessibility violations
+      When I press Tab until focus is in the group "Daemon log"
+      And I press the down arrow until focus is on the choice "Read" of the group "Daemon log"
+      And I press Tab until focus is on the textbox "Admin password"
+      And I type "demo-admin-pass"
+      And I press Tab until focus is on the button "Save the permissions"
+      And I press Enter
+      Then the dialog "Permissions of token nightly-mcp" is closed
+      And focus is on the button "Change permissions of token nightly-mcp"
+      And the toast reads "Token nightly-mcp has its new permissions." after its icon "Success"
+      And the row "nightly-mcp" of the table "API tokens" lists "Daemon log: Read" in its "Permissions" column
+      And the page has no accessibility violations
+
+    Scenario: A wrong admin password keeps a token's permissions, and the dialog says why
+      Given a daemon with sign-in on and the admin password "demo-admin-pass"
+      And the admin is signed in with "demo-admin-pass"
+      And the admin has created the API token "nightly-mcp" with the permissions "backups: read"
+      When I open the address "/settings#api-tokens"
+      And I skip to the content
+      And I press Tab until focus is on the button "Change permissions of token nightly-mcp"
+      And I press Enter
+      And I press Tab until focus is in the group "Daemon log"
+      And I press the down arrow until focus is on the choice "Read" of the group "Daemon log"
+      And I press Tab until focus is on the textbox "Admin password"
+      And I type "not-the-password"
+      And I press Tab until focus is on the button "Save the permissions"
+      And I press Enter
+      Then the field "Admin password" shows the error "That is not the current admin password"
+      And the page has no accessibility violations
+      When I press Escape
+      Then the row "nightly-mcp" of the table "API tokens" says "Backups: Read" in its "Permissions" column, not as a list
 
     Scenario: Revoking a token asks first, and Escape keeps it
       Given a daemon with sign-in on and the admin password "demo-admin-pass"
       And the admin is signed in with "demo-admin-pass"
-      And the admin has created the API token "nightly-mcp" with the scopes "read, run"
+      And the admin has created the API token "nightly-mcp" with the permissions "backups: read, backup-runs: start-and-cancel"
       When I open the address "/settings#api-tokens"
       And I skip to the content
       And I press Tab until focus is on the button "Revoke token nightly-mcp"
@@ -333,7 +401,7 @@ Feature: API tokens
     Scenario: A revoked token is answered in a toast, said once, and focus goes to the section's heading as its row goes
       Given a daemon with sign-in on and the admin password "demo-admin-pass"
       And the admin is signed in with "demo-admin-pass"
-      And the admin has created the API token "nightly-mcp" with the scopes "read, run"
+      And the admin has created the API token "nightly-mcp" with the permissions "backups: read, backup-runs: start-and-cancel"
       When I open the address "/settings#api-tokens"
       And I skip to the content
       And I press Tab until focus is on the button "Revoke token nightly-mcp"
@@ -347,11 +415,19 @@ Feature: API tokens
       And the polite region keeps reading "Token nightly-mcp revoked."
       And the page has no accessibility violations
 
-    Scenario: A form without a label or a scope moves focus to an error summary that names both
+    Scenario: A form without a label or a permission moves focus to an error summary that names both
       Given a daemon with sign-in on and the admin password "demo-admin-pass"
       And the admin is signed in with "demo-admin-pass"
       When I open the address "/settings#api-tokens"
       And I skip to the content
+      And I press Tab until focus is in the group "Backups"
+      And I press the down arrow until focus is on the choice "No access" of the group "Backups"
+      And I press Tab until focus is in the group "Backup runs"
+      And I press the down arrow until focus is on the choice "No access" of the group "Backup runs"
+      And I press Tab until focus is in the group "Previews"
+      And I press the down arrow until focus is on the choice "No access" of the group "Previews"
+      And I press Tab until focus is in the group "Configuration"
+      And I press the down arrow until focus is on the choice "No access" of the group "Configuration"
       And I press Tab until focus is on the button "Create the token"
       And I press Enter
       Then focus is on the heading "There are 2 problems with the form"
@@ -367,8 +443,6 @@ Feature: API tokens
       When I open the address "/settings#api-tokens"
       And I press Shift+Tab until focus is on the textbox "Label"
       And I type "one-more"
-      And I press Tab until focus is on the checkbox "Read"
-      And I press Space
       And I press Tab until focus is on the button "Create the token"
       And I press Enter
       Then focus is on the heading "There is 1 problem with the form"
@@ -390,7 +464,7 @@ Feature: API tokens
     Scenario: The API tokens fit a small screen
       Given a daemon with sign-in on and the admin password "demo-admin-pass"
       And the admin is signed in with "demo-admin-pass"
-      And the admin has created the API token "nightly-mcp" with the scopes "read, run, preview"
+      And the admin has created the API token "nightly-mcp" with the permissions "backups: read, backup-runs: start-and-cancel, previews: preview"
       And a viewport of 320 by 256 pixels
       When I open the address "/settings#api-tokens"
       Then the page shows the row "nightly-mcp"
@@ -401,7 +475,7 @@ Feature: API tokens
     Scenario Outline: The API tokens are in the language of the page
       Given a daemon with sign-in on and the admin password "demo-admin-pass"
       And the admin is signed in with "demo-admin-pass"
-      And the admin has created the API token "nightly-mcp" with the scopes "read"
+      And the admin has created the API token "nightly-mcp" with the permissions "backups: read"
       When I open the address "/settings?locale=<locale>#api-tokens"
       Then the page shows the row "nightly-mcp"
       And every visible text but the data of the tables and lists is transformed

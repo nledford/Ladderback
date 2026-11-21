@@ -12,15 +12,15 @@
 use std::sync::Arc;
 
 use api::{
-    ApiTokenDto, ApiTokensDto, ChangeApiTokenPermissionsDto, CreateApiTokenDto, CreatedApiTokenDto,
-    ErrorCode, MsgArg,
+    ApiTokenDto, ApiTokensDto, ChangeApiTokenPermissionsDto, ChangeWithoutTokenDto,
+    CreateApiTokenDto, CreatedApiTokenDto, ErrorCode, MsgArg,
 };
 use app::access::{
     Access, ApiTokenChangeRefused, ApiTokenGrant, ApiTokenRefused, ApiTokensRefused,
     PasswordRefused, permissions_dto, permissions_of,
 };
 use app::ports::config_unusable;
-use app::without_token::{WithoutToken, WithoutTokenRefused};
+use app::without_token::{WithoutToken, WithoutTokenChangeRefused, WithoutTokenRefused};
 use axum::extract::rejection::JsonRejection;
 use axum::extract::{ConnectInfo, Path, Request, State};
 use axum::http::header::{AUTHORIZATION, RETRY_AFTER};
@@ -77,7 +77,7 @@ pub(crate) fn every() -> Permissions {
 /// What `permissions` may see of `warning`: a program without Snapshot
 /// contents sees neither its item nor the engine's own words, either of
 /// which can name a file (decision 127).
-pub(crate) fn warning_shown(
+pub fn warning_shown(
     permissions: Permissions,
     warning: api::OperationWarningDto,
 ) -> api::OperationWarningDto {
@@ -95,7 +95,7 @@ pub(crate) fn warning_shown(
 /// without Snapshot contents gets its failure's code only, neither the
 /// failure's arguments nor the engine's own words, and not the snapshot
 /// entry a restore read, any of which can name a file (decision 127).
-pub(crate) fn summary_shown(
+pub fn summary_shown(
     permissions: Permissions,
     summary: api::OperationSummaryDto,
 ) -> api::OperationSummaryDto {
@@ -113,7 +113,7 @@ pub(crate) fn summary_shown(
 
 /// What `permissions` may see of the status summary: each operation in it
 /// as [`summary_shown`].
-pub(crate) fn status_shown(permissions: Permissions, status: api::StatusDto) -> api::StatusDto {
+pub fn status_shown(permissions: Permissions, status: api::StatusDto) -> api::StatusDto {
     api::StatusDto {
         plans: status
             .plans
@@ -299,9 +299,7 @@ pub(crate) async fn enforce_without_token(
         Err(WithoutTokenRefused::Lacks(permission)) => without_token_refused(permission.as_str()),
         Err(WithoutTokenRefused::Unavailable(error)) => {
             log::warn!("what AI agents may do without a token could not be read: {error}");
-            config_unusable(error, |code, args, detail| {
-                refused_detailed(StatusCode::SERVICE_UNAVAILABLE, code, args, detail)
-            })
+            config_refused(error)
         }
     }
 }
@@ -570,20 +568,108 @@ pub(crate) async fn change_permissions(
         )
             .into_response(),
         Ok(false) => unknown(id),
-        Err(ApiTokenChangeRefused::Password(PasswordRefused::WrongPassword)) => {
+        Err(ApiTokenChangeRefused::Password(refusal)) => password_refused(refusal),
+        Err(ApiTokenChangeRefused::Unavailable(detail)) => unavailable(&detail),
+    }
+}
+
+/// The route of what AI agents may do without a token (decision 127).
+pub(crate) const WITHOUT_TOKEN_PATH: &str = "/api/v1/settings/without-token";
+
+/// `GET /api/v1/settings/without-token`: what AI agents may do without a
+/// token, every permission at its level or `none`.
+pub(crate) async fn without_token(State(without_token): State<Arc<WithoutToken>>) -> Response {
+    match without_token.permissions().await {
+        Ok(permissions) => {
+            (StatusCode::OK, axum::Json(permissions_dto(permissions))).into_response()
+        }
+        Err(error) => config_refused(error),
+    }
+}
+
+/// The configuration's refusal, `503` with its `config-*` code.
+fn config_refused(error: app::ports::ConfigError) -> Response {
+    config_unusable(error, |code, args, detail| {
+        refused_detailed(StatusCode::SERVICE_UNAVAILABLE, code, args, detail)
+    })
+}
+
+/// `PUT /api/v1/settings/without-token`: keeps what AI agents may do
+/// without a token and answers it. With sign-in on it takes the current
+/// admin password, checked in the waits of the connection's address as a
+/// token's change is; with sign-in off there is none to ask for.
+pub(crate) async fn change_without_token(
+    State(sign_in): State<SignIn>,
+    State(without_token): State<Arc<WithoutToken>>,
+    request: Request,
+) -> Response {
+    let peer = request
+        .extensions()
+        .get::<ConnectInfo<crate::PeerAddr>>()
+        .copied();
+    // The body limit has already read the body, bounded by the API's limit
+    // (`body_limit`), so this only takes the bytes it holds.
+    let Ok(body) = axum::body::to_bytes(request.into_body(), usize::MAX).await else {
+        return refused(StatusCode::BAD_REQUEST, ErrorCode::InvalidBody);
+    };
+    let Ok(ChangeWithoutTokenDto {
+        permissions,
+        current_password,
+    }) = serde_json::from_slice(&body)
+    else {
+        return refused(StatusCode::BAD_REQUEST, ErrorCode::InvalidBody);
+    };
+    let Ok(permissions) = permissions_of(permissions) else {
+        return refused(StatusCode::BAD_REQUEST, ErrorCode::InvalidBody);
+    };
+    let Some(ConnectInfo(crate::PeerAddr(peer))) = peer else {
+        log::error!(
+            "a change of what AI agents may do without a token arrived without its connection's address; the server must be served with its connect info"
+        );
+        return refused(
+            StatusCode::SERVICE_UNAVAILABLE,
+            ErrorCode::SignInUnavailable,
+        );
+    };
+    let access = match &sign_in {
+        SignIn::On(access) => Some(access.as_ref()),
+        SignIn::Off { .. } => None,
+    };
+    let current = match (access, current_password) {
+        (None, _) => None,
+        // Missing, empty, or longer than any admin password: not the admin
+        // password.
+        (Some(_), None) => return refused(StatusCode::FORBIDDEN, ErrorCode::CurrentPasswordWrong),
+        (Some(_), Some(text)) => match Password::parse(text) {
+            Ok(current) => Some(current),
+            Err(_) => return refused(StatusCode::FORBIDDEN, ErrorCode::CurrentPasswordWrong),
+        },
+    };
+    match without_token
+        .change(access, peer.ip(), current.as_ref(), permissions)
+        .await
+    {
+        Ok(kept) => (StatusCode::OK, axum::Json(permissions_dto(kept))).into_response(),
+        Err(WithoutTokenChangeRefused::Password(refusal)) => password_refused(refusal),
+        Err(WithoutTokenChangeRefused::Unavailable(error)) => config_refused(error),
+    }
+}
+
+/// A current admin password that was wrong, met a wait, or couldn't be
+/// checked.
+fn password_refused(refusal: PasswordRefused) -> Response {
+    match refusal {
+        PasswordRefused::WrongPassword => {
             refused(StatusCode::FORBIDDEN, ErrorCode::CurrentPasswordWrong)
         }
-        Err(ApiTokenChangeRefused::Password(PasswordRefused::Wait { seconds })) => {
-            crate::sign_in::wait_refused(seconds)
-        }
-        Err(ApiTokenChangeRefused::Password(PasswordRefused::Unavailable(detail))) => {
+        PasswordRefused::Wait { seconds } => crate::sign_in::wait_refused(seconds),
+        PasswordRefused::Unavailable(detail) => {
             log::warn!("the admin password could not be checked: {detail}");
             refused(
                 StatusCode::SERVICE_UNAVAILABLE,
                 ErrorCode::AdminPasswordUnavailable,
             )
         }
-        Err(ApiTokenChangeRefused::Unavailable(detail)) => unavailable(&detail),
     }
 }
 

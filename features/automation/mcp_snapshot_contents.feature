@@ -8,10 +8,13 @@ Feature: AI agents look inside snapshots through MCP
   for a folder of the snapshot page, and neither costs an unbounded walk: a
   search reads at most 100 snapshots for at most 15 seconds and returns at
   most 500 matches, and says which cap cut it short. Restoring and
-  downloading stay the person's, in the web UI.
+  downloading stay the person's, in the web UI. With sign-in off, an MCP
+  server is held to what AI agents may do without a token, which leaves
+  Snapshot contents out until a person opens it.
 
   Scenario: A file is found in the snapshots that hold it and its folder listed
     Given Ladderback is serving on loopback with the plan "home"
+    And AI agents without a token may look inside snapshots
     And an MCP server connected to it
     When the daemon has finished 1 backup of the plan "home"
     And the plan's source holds the file "Tax-2026.pdf" reading "return"
@@ -24,6 +27,7 @@ Feature: AI agents look inside snapshots through MCP
 
   Scenario: A search a cap cut short says which cap it was
     Given Ladderback is serving on loopback with the plan "home"
+    And AI agents without a token may look inside snapshots
     And an MCP server connected to it
     When the daemon has finished 2 backups of the plan "home"
     And the MCP client looks for "file-*.txt" in the repository "demo", in 1 snapshot
@@ -57,6 +61,7 @@ Feature: AI agents look inside snapshots through MCP
   # opens it, a wrong one fails, and neither is ever shown or logged.
   Scenario: Looking inside snapshots never shows or logs the repository's password
     Given Ladderback is serving on loopback with the plan "home"
+    And AI agents without a token may look inside snapshots
     And the plan's repository reads its password from a file
     And an MCP server connected to it
     And the MCP client has run the plan "home" to the end

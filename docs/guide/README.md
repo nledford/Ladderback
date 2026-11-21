@@ -8,3 +8,4 @@ These guides are for running it. The [README](https://github.com/nledford/Ladder
 - [A first plan](first-plan.md): connect a repository, add a plan to `config.toml`, and read its keep policy.
 - [Moving a repository's password out of `config.toml`](secrets.md): the system keyring, a password file or an environment variable.
 - [Sign-in and remote access](remote-access.md): setting an admin password, `--listen` and `--allowed-host`, and TLS behind a reverse proxy.
+- [API tokens and AI agents](api-tokens.md): which permissions to give a program or an AI agent, and what AI agents may do without a token.
