@@ -98,7 +98,10 @@ fn read_line_from(input: &mut impl BufRead, max: usize) -> io::Result<String> {
 }
 
 /// The terminal's echo turned off until this is dropped; the line ending a
-/// person types is still shown, so the next line starts on its own.
+/// person types is still shown, so the next line starts on its own. A drop
+/// never runs when a signal ends the process, so Ctrl-C and `SIGTERM` put
+/// the terminal's settings back first (#399, [`ending`]). One prompt is
+/// open at a time, as the process has one standard input.
 struct EchoOff {
     #[cfg(unix)]
     tty: Tty,
@@ -114,11 +117,15 @@ impl EchoOff {
         let mut quiet = saved.clone();
         quiet.local_flags.remove(LocalFlags::ECHO);
         quiet.local_flags.insert(LocalFlags::ECHONL);
-        tcsetattr(tty, SetArg::TCSAFLUSH, &quiet).map_err(io::Error::from)?;
-        Ok(Self {
+        // Everything that can fail is done before echo goes off, which only
+        // a drop of this, or a signal, then turns back on.
+        let echo_off = Self {
             tty: tty.try_clone()?,
-            saved,
-        })
+            saved: saved.clone(),
+        };
+        ending::put_back_first(tty.try_clone()?, saved)?;
+        tcsetattr(tty, SetArg::TCSAFLUSH, &quiet).map_err(io::Error::from)?;
+        Ok(echo_off)
     }
 
     #[cfg(not(unix))]
@@ -130,10 +137,76 @@ impl EchoOff {
 #[cfg(unix)]
 impl Drop for EchoOff {
     fn drop(&mut self) {
-        use nix::sys::termios::{SetArg, tcsetattr};
+        ending::put_back_now(&self.tty, &self.saved);
+    }
+}
+
+/// Ctrl-C (`SIGINT`) and `SIGTERM` at the prompt (#399): their default
+/// action ends the process at once, with no drop run, which would leave the
+/// terminal silent until `reset` or `stty echo`. A thread of their own takes
+/// them instead, puts the prompt's terminal settings back, and then ends the
+/// process by the signal's own default action, so the shell sees the same
+/// end as before.
+///
+/// The thread stays for the rest of the process once a prompt has started
+/// it: no safe code can give a signal back to its default action, and the
+/// thread ends the process as that action would, prompt or not.
+#[cfg(unix)]
+mod ending {
+    use std::io;
+    use std::os::fd::OwnedFd;
+    use std::sync::{Mutex, PoisonError};
+
+    use nix::sys::termios::{SetArg, Termios, tcsetattr};
+    use signal_hook::consts::{SIGINT, SIGTERM};
+
+    /// The terminal a prompt has changed, and its settings from before.
+    static CHANGED: Mutex<Option<(OwnedFd, Termios)>> = Mutex::new(None);
+
+    /// Whether the thread that takes the signals runs.
+    static WATCHING: Mutex<bool> = Mutex::new(false);
+
+    /// Puts `saved` back on `tty` before Ctrl-C or `SIGTERM` ends the
+    /// process, until [`put_back_now`].
+    pub(super) fn put_back_first(tty: OwnedFd, saved: Termios) -> io::Result<()> {
+        watch()?;
+        *CHANGED.lock().unwrap_or_else(PoisonError::into_inner) = Some((tty, saved));
+        Ok(())
+    }
+
+    /// Puts `saved` back on `tty` now, and nothing on a signal after.
+    pub(super) fn put_back_now(tty: &OwnedFd, saved: &Termios) {
+        let mut changed = CHANGED.lock().unwrap_or_else(PoisonError::into_inner);
         // Nothing more can be done for a terminal that won't take its own
         // settings back.
-        let _ = tcsetattr(&self.tty, SetArg::TCSANOW, &self.saved);
+        let _ = tcsetattr(tty, SetArg::TCSANOW, saved);
+        *changed = None;
+    }
+
+    fn watch() -> io::Result<()> {
+        let mut watching = WATCHING.lock().unwrap_or_else(PoisonError::into_inner);
+        if *watching {
+            return Ok(());
+        }
+        let mut signals = signal_hook::iterator::Signals::new([SIGINT, SIGTERM])?;
+        std::thread::Builder::new()
+            .name("prompt-signals".to_owned())
+            .spawn(move || {
+                for signal in signals.forever() {
+                    // Held until the process ends, so a prompt's own drop
+                    // can't change the terminal meanwhile.
+                    let mut changed = CHANGED.lock().unwrap_or_else(PoisonError::into_inner);
+                    if let Some((tty, saved)) = changed.take() {
+                        let _ = tcsetattr(&tty, SetArg::TCSANOW, &saved);
+                    }
+                    // Ends the process as the signal would have; it returns
+                    // only for a signal whose default is to go on.
+                    let _ = signal_hook::low_level::emulate_default_handler(signal);
+                    drop(changed);
+                }
+            })?;
+        *watching = true;
+        Ok(())
     }
 }
 
