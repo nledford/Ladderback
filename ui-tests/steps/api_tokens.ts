@@ -210,6 +210,28 @@ Then("nothing on the page holds the token the dialog showed", async function (th
     .toBe(false);
 });
 
+// The daemon answers the page's read of what AI agents may do without a
+// token as it does when it can't read the configuration file (503
+// config-unavailable).
+Given("the daemon can't read what AI agents may do without a token", function (this: BrowserWorld) {
+  this.contextRoutes.push(async (context) => {
+    await context.route(
+      (url) => url.pathname === "/api/v1/settings/without-token",
+      async (route) => {
+        if (route.request().method() !== "GET") return route.continue();
+        await route.fulfill({
+          status: 503,
+          contentType: "application/json",
+          body: JSON.stringify({
+            code: "config-unavailable",
+            args: { file: { type: "text", value: "/home/demo/.config/ladderback/config.toml" } },
+          }),
+        });
+      },
+    );
+  });
+});
+
 // A permission's group of choices (decision 127), in the open dialog when
 // there is one: the token form behind a token's dialog has groups of the
 // same names.
@@ -245,4 +267,9 @@ Then("the group {string} has {string} chosen", async function (this: BrowserWorl
 Then("the group {string} is described as saying {string}", async function (this: BrowserWorld, name: string, text: string) {
   const group = await permissionGroup(this.page, name);
   await expect(group).toHaveAccessibleDescription(new RegExp(text.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")));
+});
+
+Then("focus is on the choice {string} of the group {string}", async function (this: BrowserWorld, choice: string, name: string) {
+  const group = await permissionGroup(this.page, name);
+  await expect(group.getByRole("radio", { name: namePattern(choice) })).toBeFocused();
 });

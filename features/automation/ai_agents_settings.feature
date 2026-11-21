@@ -17,7 +17,10 @@ Feature: Choosing in Settings what AI agents may do without a token
     And the group "Daemon log" has "No access" chosen
     And the page has no accessibility violations
     When I skip to the content
-    And I press Tab until focus is in the group "Daemon log"
+    And I press Tab until focus is on the tab "AI agents"
+    And I press Tab
+    Then focus is on the choice "Read" of the group "Backups"
+    When I press Tab until focus is in the group "Daemon log"
     And I press the down arrow until focus is on the choice "Read" of the group "Daemon log"
     And I press Tab until focus is on the button "Save what AI agents may do"
     And I press Enter
@@ -41,3 +44,15 @@ Feature: Choosing in Settings what AI agents may do without a token
     And the page has no accessibility violations
     When I reload the page
     Then the group "Backup runs" has "No access" chosen
+
+  Scenario: Permissions the daemon can't read are said in an alert, with no form, and the panel is a Tab stop
+    Given a daemon with sign-in off
+    And the daemon can't read what AI agents may do without a token
+    When I open the address "/settings#ai-agents"
+    Then the page shows an error alert containing "could not read or write its configuration file"
+    And the page offers no button "Save what AI agents may do"
+    When I skip to the content
+    And I press Tab until focus is on the tab "AI agents"
+    And I press Tab
+    Then focus is on the panel of the tab "AI agents", which the tab names
+    And the page has no accessibility violations
