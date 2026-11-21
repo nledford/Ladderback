@@ -3,9 +3,10 @@ use std::sync::{Arc, Mutex, MutexGuard, PoisonError};
 
 use async_trait::async_trait;
 use domain::fleet::{
-    AgentRecord, AgentStatus, BindingKind, Fingerprint, HostnameKey, PairRefusal, PairRequest,
-    Pairing, PairingView, ProofRefusal, ProofRequest, ProofView, TokenId, TokenRecord, TokenUse,
-    admits_unused_token, decide_pairing, decide_proof, voids_tokens_for_new_key,
+    AgentRecord, AgentStatus, ApprovalRefused, BindingKind, Fingerprint, HostnameKey, PairRefusal,
+    PairRequest, Pairing, PairingView, ProofRefusal, ProofRequest, ProofView, PublicKey, TokenId,
+    TokenRecord, TokenUse, admits_unused_token, decide_approval, decide_pairing, decide_proof,
+    voids_tokens_for_new_key,
 };
 use domain::{AgentId, SignedDuration, Timestamp};
 
@@ -47,18 +48,6 @@ impl InMemoryAgentRegistry {
 
     fn kept(&self) -> MutexGuard<'_, Kept> {
         self.kept.lock().unwrap_or_else(PoisonError::into_inner)
-    }
-
-    /// A person approves the agent under `agent_id` at `at`, as the hub's
-    /// web UI will (#567); nothing else changes.
-    pub fn approve(&self, agent_id: AgentId, at: Timestamp) {
-        for agent in &mut self.kept().agents {
-            if agent.agent_id == agent_id {
-                agent.status = AgentStatus::Approved {
-                    at: to_the_millisecond(at),
-                };
-            }
-        }
     }
 
     /// The registry holds `agent`, as if it had paired; nothing else
@@ -259,6 +248,29 @@ impl AgentRegistry for InMemoryAgentRegistry {
                 kinds: &kinds,
             },
             request,
+            now,
+        );
+        if let Ok(agent) = &decided {
+            for kept_one in &mut kept.agents {
+                if kept_one.agent_id == agent.agent_id {
+                    *kept_one = kept_agent(agent.clone());
+                }
+            }
+        }
+        Ok(decided)
+    }
+
+    async fn approve(
+        &self,
+        agent_id: AgentId,
+        agent_key: PublicKey,
+        now: Timestamp,
+    ) -> Result<Result<AgentRecord, ApprovalRefused>, StoreError> {
+        let now = to_the_millisecond(now);
+        let mut kept = self.kept();
+        let decided = decide_approval(
+            kept.agents.iter().find(|a| a.agent_id == agent_id),
+            &agent_key,
             now,
         );
         if let Ok(agent) = &decided {

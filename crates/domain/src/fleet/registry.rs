@@ -458,5 +458,36 @@ pub fn decide_proof(
     })
 }
 
+/// Why a person's approval of an agent changed nothing (decision 120,
+/// "Pending approval").
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum ApprovalRefused {
+    /// No agent is registered under the ID with the key the person
+    /// compared: it never paired, was dropped, or holds another key now.
+    Unknown,
+    /// The agent is approved already: an agent is approved once.
+    AlreadyApproved,
+}
+
+/// The decision a person's approval of the agent under `agent_key` gets at
+/// `now`, given `record`, the agent registered under its ID: a pending
+/// agent becomes approved at `now`, with the rest of its record kept.
+pub fn decide_approval(
+    record: Option<&AgentRecord>,
+    agent_key: &PublicKey,
+    now: Timestamp,
+) -> Result<AgentRecord, ApprovalRefused> {
+    let record = record
+        .filter(|record| record.key == *agent_key)
+        .ok_or(ApprovalRefused::Unknown)?;
+    match record.status {
+        AgentStatus::Approved { .. } => Err(ApprovalRefused::AlreadyApproved),
+        AgentStatus::Pending { .. } => Ok(AgentRecord {
+            status: AgentStatus::Approved { at: now },
+            ..record.clone()
+        }),
+    }
+}
+
 #[cfg(test)]
 mod tests;

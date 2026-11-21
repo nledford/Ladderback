@@ -420,8 +420,8 @@ cli-mcp-call-line-too-long = line { $line } of the script is longer than { $limi
 
 # `ladderback pairing-token` writes the hub's store from its own process, and the daemon holds the data folder.
 # $path (text): the data folder. It is shown as it is.
-# `ladderback serve --hub` is typed as it is: keep it a string literal.
-cli-pairing-token-daemon-running = the daemon is running on the data folder { $path }. Stop it, make the token, then start it again with { "ladderback serve --hub" }.
+# `--hub` and `--listen` are typed as they are: keep them string literals.
+cli-pairing-token-daemon-running = the daemon is running on the data folder { $path }. Stop it, run this command again, then start the daemon again as you started it before: through its service, or with { "--hub" } and the same options, such as { "--listen" }.
 
 # The address given for the hub isn't an http:// or https:// address of at most 200 bytes.
 # $address (text): the address as given. It is shown as it came.
@@ -473,6 +473,38 @@ cli-pairing-token-bad-ttl = a token lives 5 to 1440 minutes: give { "--ttl" } in
 # The hub keeps at most a few unused tokens at once.
 # `ladderback pairing-token --revoke` is typed as it is: keep it a string literal.
 cli-pairing-token-too-many = there are too many unused tokens. Use one, wait for one to lapse, or revoke one with { "ladderback pairing-token --revoke" }.
+
+# `ladderback pairing-token --pending` found no machine waiting for approval.
+cli-pairing-token-none-waiting = no { -machine(form: "other") } waiting for approval
+
+# `ladderback pairing-token --approve` names the machine before it asks, so the person compares its key with that machine's own screen, where `ladderback pair` and `ladderback hub-status` show it.
+# $hostname (text): the machine's hostname as it paired. It is shown as it came.
+# $agent_id (text): the machine's agent ID, a UUID.
+# $fingerprint (text): the machine's key fingerprint, in groups of four characters.
+cli-pairing-token-approve-waiting = { $hostname } (agent ID { $agent_id }) is waiting with key { $fingerprint }. Compare it with that { -machine }'s own screen.
+
+# Asked before the hub approves the machine. `[y/N]` is typed as it is: keep it a string literal.
+cli-pairing-token-approve-confirm = Approve it? { "[y/N]" }
+
+# The person answered anything but `y` to `cli-pairing-token-approve-confirm`.
+cli-pairing-token-approve-declined = Not approved: nothing changed.
+
+# Standard input isn't a terminal and `--yes` wasn't given, so nothing was approved.
+# `--yes` is typed as it is: keep it a string literal.
+cli-pairing-token-approve-no-terminal = No terminal to ask on, so nothing was approved. Compare the key above with that { -machine }'s own screen, then run again with { "--yes" }.
+
+# The hub approved the machine: it is welcomed approved the next time it connects.
+# $hostname (text): the machine's hostname as it paired. It is shown as it came.
+cli-pairing-token-approved = { $hostname } is approved: the { -hub } welcomes it as approved the next time it connects.
+
+# No machine with this hostname paired with the hub.
+# $hostname (text): the hostname as given. It is shown as it came.
+# `ladderback pairing-token --pending` is typed as it is: keep it a string literal.
+cli-pairing-token-approve-unknown = no { -machine } named { $hostname } has paired with this { -hub }. See the { -machine(form: "other") } waiting with { "ladderback pairing-token --pending" }.
+
+# The machine was approved before.
+# $hostname (text): the machine's hostname as it paired. It is shown as it came.
+cli-pairing-token-approve-already = { $hostname } is approved already: nothing changed.
 
 # A hub command failed for a reason the system gave.
 # $detail (text): the system's message. It is shown as it came.
@@ -601,7 +633,7 @@ cli-help-export-profile-plan = The ID of the plan to export
 cli-help-set-password = Set the admin password, which turns sign-in on, and end every session. It is typed twice at a terminal, without being shown, or read as one line of standard input; never given as an argument
 
 # What `pairing-token` does.
-cli-help-pairing-token = Make a one-time pairing token for a { -machine }, list the unused ones, or revoke one. Run it while the daemon is stopped
+cli-help-pairing-token = Make a one-time pairing token for a { -machine }, list or revoke the unused ones, or list and approve the { -machine(form: "other") } waiting for approval. Run it while the daemon is stopped
 
 # What `pairing-token --address` takes. The address is an example, typed as it is: keep it a string literal.
 cli-help-pairing-token-address = The { -hub }'s address as { -machine(form: "other") } reach it, such as { "https://hub.example" }
@@ -614,6 +646,15 @@ cli-help-pairing-token-ttl = How long the token lives, in minutes: 5 to 1440, 15
 
 # What `pairing-token --list` does.
 cli-help-pairing-token-list = List the unused tokens by token ID, with when each lapses
+
+# What `pairing-token --pending` does.
+cli-help-pairing-token-pending = List the { -machine(form: "other") } waiting for approval, with each one's agent ID and key fingerprint
+
+# What `pairing-token --approve` takes.
+cli-help-pairing-token-approve = Approve the { -machine } with this hostname, after showing its key fingerprint to compare with that { -machine }'s own screen
+
+# What `pairing-token --yes` does.
+cli-help-pairing-token-yes = Approve without asking. Without it the { -machine } is approved only once confirmed at a terminal, and anywhere else nothing is approved
 
 # What `pairing-token --revoke` does.
 cli-help-pairing-token-revoke = Revoke the unused token with this token ID

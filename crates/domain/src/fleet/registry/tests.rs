@@ -549,3 +549,45 @@ fn a_new_hub_key_voids_the_unused_tokens_only_while_no_agent_is_registered() {
     assert!(!voids_tokens_for_new_key(1));
     assert!(!voids_tokens_for_new_key(2));
 }
+
+fn waiting_with(agent: u128, agent_key: PublicKey, hostname: &str) -> AgentRecord {
+    AgentRecord {
+        status: AgentStatus::Pending { since: at(-100) },
+        ..record(agent, agent_key, hostname)
+    }
+}
+
+/// A pending agent a person approves is approved from then on, and the
+/// rest of its record stays as it was.
+#[test]
+fn an_approved_pending_agent_is_approved_now_and_keeps_its_record() {
+    let waiting = waiting_with(1, key(4), "laptop");
+    assert_eq!(
+        decide_approval(Some(&waiting), &key(4), at(10)),
+        Ok(AgentRecord {
+            status: AgentStatus::Approved { at: at(10) },
+            ..waiting.clone()
+        })
+    );
+}
+
+/// An agent is approved once: approving it again is refused, and so is an
+/// approval of an agent the registry doesn't hold, or holds under another
+/// key than the one the person compared.
+#[test]
+fn an_approval_of_an_approved_unknown_or_rekeyed_agent_is_refused() {
+    let approved = record(1, key(4), "laptop");
+    assert_eq!(
+        decide_approval(Some(&approved), &key(4), at(10)),
+        Err(ApprovalRefused::AlreadyApproved)
+    );
+    assert_eq!(
+        decide_approval(None, &key(4), at(10)),
+        Err(ApprovalRefused::Unknown)
+    );
+    let waiting = waiting_with(1, key(4), "laptop");
+    assert_eq!(
+        decide_approval(Some(&waiting), &key(5), at(10)),
+        Err(ApprovalRefused::Unknown)
+    );
+}

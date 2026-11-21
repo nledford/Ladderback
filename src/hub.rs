@@ -15,8 +15,8 @@ use app::pairing::{
 };
 use app::ports::{AgentRegistry as _, Identity as _, IdentityError, LinkError, Signing as _};
 use domain::fleet::{
-    Approval, Fingerprint, Hostname, HubAddress, HubRoute, PairingToken, RouteRefused,
-    RouteSession, TokenId, TokenTls, WelcomeRefused, is_loopback,
+    AgentStatus, Approval, ApprovalRefused, Fingerprint, Hostname, HubAddress, HubRoute,
+    PairingToken, RouteRefused, RouteSession, TokenId, TokenTls, WelcomeRefused, is_loopback,
 };
 use domain::{SignedDuration, Timestamp};
 use l10n::{Localizer, MessageId, PosixEnv, msg};
@@ -50,6 +50,14 @@ pub(crate) enum TokenAsk {
     },
     List,
     Revoke(String),
+    /// List the machines waiting for approval.
+    Pending,
+    /// Approve the machine with this hostname, once the person confirms or
+    /// gave `--yes`.
+    Approve {
+        hostname: String,
+        yes: bool,
+    },
 }
 
 /// The hub's pairing over `store` and the key files in `data_dir`.
@@ -167,6 +175,8 @@ async fn on_the_hub(localizer: &Localizer, data_dir: &Path, ask: TokenAsk) -> io
         }
         TokenAsk::List => list(localizer, &store).await,
         TokenAsk::Revoke(id) => revoke(localizer, &pairing, &id).await,
+        TokenAsk::Pending => pending(localizer, &pairing).await,
+        TokenAsk::Approve { hostname, yes } => approve(localizer, &pairing, &hostname, yes).await,
     };
     store.close().await;
     said
@@ -318,6 +328,102 @@ async fn revoke(localizer: &Localizer, pairing: &HubPairing, id: &str) -> io::Re
         }
         Err(error) => hub_refused(localizer, &error),
     }
+}
+
+/// `pairing-token --pending`: one line per machine waiting for approval,
+/// its agent ID, key fingerprint, since when it waits and, last, since it
+/// alone may hold spaces, its hostname.
+async fn pending(localizer: &Localizer, pairing: &HubPairing) -> io::Result<ExitCode> {
+    let agents = match pairing.pending().await {
+        Ok(agents) => agents,
+        Err(error) => return hub_refused(localizer, &error),
+    };
+    if agents.is_empty() {
+        say(localizer, msg::CLI_PAIRING_TOKEN_NONE_WAITING, &[])?;
+    }
+    for agent in agents {
+        let since = match agent.status {
+            AgentStatus::Pending { since } => since,
+            AgentStatus::Approved { at } => at,
+        };
+        to_stdout(&format!(
+            "{}  {}  {since}  {}\n",
+            agent.agent_id.as_uuid(),
+            Fingerprint::of_key(&agent.key),
+            agent.hostname,
+        ))?;
+    }
+    Ok(ExitCode::SUCCESS)
+}
+
+/// What `pairing-token --approve` asks before it approves.
+const APPROVE: Question = Question {
+    ask: msg::CLI_PAIRING_TOKEN_APPROVE_CONFIRM,
+    declined: msg::CLI_PAIRING_TOKEN_APPROVE_DECLINED,
+    no_terminal: msg::CLI_PAIRING_TOKEN_APPROVE_NO_TERMINAL,
+};
+
+/// `pairing-token --approve`: names the machine with its agent ID and key
+/// fingerprint, for the person to compare with that machine's screen, and
+/// once they confirm approves it as named (decision 120, "Pending
+/// approval").
+async fn approve(
+    localizer: &Localizer,
+    pairing: &HubPairing,
+    hostname: &str,
+    yes: bool,
+) -> io::Result<ExitCode> {
+    let found = match Hostname::parse(hostname) {
+        Ok(name) => match pairing.agent_named(&name).await {
+            Ok(found) => found,
+            Err(error) => return hub_refused(localizer, &error),
+        },
+        Err(_) => None,
+    };
+    let Some(agent) = found else {
+        return approval_refused(localizer, ApprovalRefused::Unknown, hostname);
+    };
+    let name = agent.hostname.to_string();
+    if !agent.is_pending() {
+        return approval_refused(localizer, ApprovalRefused::AlreadyApproved, &name);
+    }
+    say(
+        localizer,
+        msg::CLI_PAIRING_TOKEN_APPROVE_WAITING,
+        &[
+            ("hostname", text(&name)),
+            ("agent_id", text(agent.agent_id.as_uuid())),
+            ("fingerprint", text(Fingerprint::of_key(&agent.key))),
+        ],
+    )?;
+    if !confirmed(localizer, &APPROVE, terminal::stdin_is_terminal(), yes)? {
+        return Ok(ExitCode::FAILURE);
+    }
+    match pairing.approve(&agent).await {
+        Ok(Ok(_)) => {
+            say(
+                localizer,
+                msg::CLI_PAIRING_TOKEN_APPROVED,
+                &[("hostname", text(&name))],
+            )?;
+            Ok(ExitCode::SUCCESS)
+        }
+        Ok(Err(refused)) => approval_refused(localizer, refused, &name),
+        Err(error) => hub_refused(localizer, &error),
+    }
+}
+
+fn approval_refused(
+    localizer: &Localizer,
+    refused: ApprovalRefused,
+    hostname: &str,
+) -> io::Result<ExitCode> {
+    let message = match refused {
+        ApprovalRefused::Unknown => msg::CLI_PAIRING_TOKEN_APPROVE_UNKNOWN,
+        ApprovalRefused::AlreadyApproved => msg::CLI_PAIRING_TOKEN_APPROVE_ALREADY,
+    };
+    say(localizer, message, &[("hostname", text(hostname))])?;
+    Ok(ExitCode::FAILURE)
 }
 
 fn hub_refused(localizer: &Localizer, error: &HubPairingError) -> io::Result<ExitCode> {
