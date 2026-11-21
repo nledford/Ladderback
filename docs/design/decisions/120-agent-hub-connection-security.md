@@ -183,6 +183,7 @@ A token carries one address and one kind. The hub may later publish more.
 - **Why.** A laptop that reaches the hub pinned on the LAN and through a proxy away from home needs both kinds, and a hub whose address, certificate or proxy changes would otherwise re-pair every agent. The person publishes the new address first and removes the old one later.
 - **The agent tries the address that last worked, then the others,** a statement's and the fallbacks, each with its own kind and pin, one attempt in flight at a time. A statement's addresses follow the plain `http://` rule above.
 - **The hub knows who has the list.** An agent answers a statement with `TransportAck { number }`. Settings shows which agents hold the current list, so the person removes an old address only when the agents that matter have the new one. An agent that doesn't speak the message (an older protocol, "Versions") stays listed as unconfirmed.
+- **What is built so far (#567):** one address the person gives with `ladderback pair <address>`, kept as `given-address` once the hub proved the pinned key there, with the pin's kind; a later address of another kind takes a name of its own, so an older build still reads the pin. The agent tries it before the token's address, and moves to the next only while no hub has proved the pinned key. Statements, Settings and the address that last worked aren't built.
 
 ## Signed messages after the handshake
 
