@@ -6,7 +6,7 @@
 
 import assert from "node:assert/strict";
 import { once } from "node:events";
-import { cp, mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
+import { cp, mkdir, mkdtemp, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 
@@ -19,6 +19,7 @@ import { besideIconProblems, partsBrokenInside, wordsBesideIcon } from "../suppo
 import { patienceMs, stepLimit, untilStepLimit } from "../support/patience.ts";
 import { said } from "../support/said.ts";
 import { ScriptedDaemon } from "../support/scripted-daemon.ts";
+import { tearDown } from "../support/teardown.ts";
 import { type BrowserWorld, fixtureRepo, startServer } from "../support/world.ts";
 import { drawnOnItsFill } from "../support/gallery.ts";
 
@@ -120,15 +121,11 @@ export async function serveDemoPlans(
   world.baseUrl = url;
 }
 
+// The scenario's own daemon stops, killed if it doesn't within its grace, and
+// its scratch folder goes even then (`tearDown`).
 After(async function (this: BrowserWorld) {
   const own = this.ownServer;
-  if (own && own.child.exitCode === null) {
-    own.child.kill("SIGTERM");
-    await once(own.child, "exit");
-  }
-  if (own) {
-    await rm(own.scratch, { recursive: true, force: true });
-  }
+  if (own) await tearDown({ daemon: own.child, scratch: own.scratch });
 });
 
 Given("a demo plan {string} with a scratch repository", async function (this: BrowserWorld, plan: string) {
