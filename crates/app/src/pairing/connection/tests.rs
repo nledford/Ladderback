@@ -851,3 +851,25 @@ async fn when_no_address_reaches_the_hub_the_first_failure_is_said() {
     );
     assert_eq!(proofs(&connector), 0);
 }
+
+/// The pinned hub proving itself at an address isn't enough: an address
+/// is kept only once the hub's `Welcome` holds, so a hub that refuses the
+/// proof leaves the pin as it was.
+#[tokio::test]
+async fn an_address_where_the_hub_refuses_the_proof_is_not_kept() {
+    let hub = hub(1);
+    let identity = paired(&hub, 1).await;
+    let stranger = with_pin_of(&identity).await;
+    let before = stranger.pin().await.unwrap().unwrap();
+    let failure = connecting(
+        stranger.clone(),
+        Arc::new(LoopbackHubConnector::to(hub.pairing.clone())),
+    )
+    .connect_at(agent_id(9), hostname(9), new_address())
+    .await;
+    assert!(
+        matches!(failure, Err(ConnectFailure::Refused(_))),
+        "{failure:?}"
+    );
+    assert_eq!(stranger.pin().await.unwrap().unwrap(), before);
+}

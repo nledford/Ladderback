@@ -557,6 +557,14 @@ fn follow(
     let outcome = runtime.block_on(connecting.connect_at(agent_id, hostname, parsed));
     let connected = match outcome {
         Ok(connected) => connected,
+        // The hub there proved the pinned key but no longer knows this
+        // machine, or the machine lost its key: it pairs again, with a
+        // token, at that address.
+        Err(failure) if pairs_again(&failure) => {
+            // The pairing that follows gives the exit code.
+            let _ = say_unconnected(localizer, &failure, address)?;
+            return Ok(None);
+        }
         Err(failure) => {
             let code = say_unconnected(localizer, &failure, address)?;
             say(localizer, msg::CLI_PAIR_ADDRESS_NOT_KEPT, &[])?;
@@ -570,6 +578,19 @@ fn follow(
     )?;
     say_connected(localizer, &connected)?;
     Ok(Some(ExitCode::SUCCESS))
+}
+
+/// Whether a failure to follow the hub leaves pairing again with a token
+/// as the way on: the hub refused the proof, so it no longer knows this
+/// machine, or the machine holds a pin but no key.
+fn pairs_again(failure: &ConnectFailure) -> bool {
+    match failure {
+        ConnectFailure::NotPaired => true,
+        ConnectFailure::Refused(refusal) => {
+            api::sync::refusal_code(refusal.code.as_str()) == ErrorCode::ProofRefused
+        }
+        _ => false,
+    }
 }
 
 /// `hostname`, or the machine's, when it is one; `None` once it said why
@@ -980,6 +1001,31 @@ mod tests {
         ] {
             let said = format!("{other:?}");
             assert_eq!(connect_message(&other), None, "{said}");
+        }
+    }
+
+    /// A machine the hub no longer knows, or one that lost its key, pairs
+    /// again at the address it was given; any other failure keeps the
+    /// addresses it had and ends there.
+    #[test]
+    fn only_a_refused_proof_or_a_lost_key_pairs_again() {
+        let refused = |code: &str| {
+            ConnectFailure::Refused(domain::fleet::Refused {
+                code: domain::fleet::WireName::parse(code).unwrap(),
+                holder: None,
+                signature: domain::fleet::Signature::from_bytes([0; 64]).unwrap(),
+            })
+        };
+        assert!(pairs_again(&ConnectFailure::NotPaired));
+        assert!(pairs_again(&refused("proof-refused")));
+        for other in [
+            refused("hub-unavailable"),
+            ConnectFailure::Challenge(ChallengeRefused::HubKeyMismatch),
+            ConnectFailure::Link(LinkError::PinMismatch),
+            ConnectFailure::Unsigned,
+        ] {
+            let said = format!("{other:?}");
+            assert!(!pairs_again(&other), "{said}");
         }
     }
 

@@ -532,7 +532,7 @@ cli-pair-pending = Paired. The { -hub } holds this machine pending until someone
 # key the machine pinned at the address the person gave, so the machine
 # keeps it. The hub's own answer follows on its own line.
 # $address (text): the address the person gave.
-cli-pair-address-kept = The { -hub } proved the key this machine pinned at { $address }. This machine tries that address first from now on, then the one in its token.
+cli-pair-address-kept = The { -hub } proved the key this machine pinned at { $address }. This machine reaches it there from now on, and still tries the address in its token when that one doesn't answer.
 
 # `ladderback pair <address>` on a machine that paired: the connection at the
 # address failed, said on the line before, and the machine kept nothing of it.

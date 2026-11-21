@@ -233,7 +233,7 @@ fn says_address_kept(agent: &mut Agent) {
     let said = said(agent);
     assert!(said.success, "{said:?}");
     let connected = format!("pinned at https://{address}");
-    for expected in [connected.as_str(), "tries that address first from now on"] {
+    for expected in [connected.as_str(), "reaches it there from now on"] {
         assert!(said.stderr.contains(expected), "{expected}: {said:?}");
     }
 }

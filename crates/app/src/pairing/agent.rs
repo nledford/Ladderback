@@ -346,7 +346,20 @@ impl AgentPairing {
             return Err(AgentPairingError::Unsigned);
         }
         let pin = match self.identity.pin().await? {
-            Some(kept) if kept.hub_key == hub_key => kept,
+            // Pairing again at another address of the same kind, as
+            // `ladderback pair <address>` does for a machine the hub no
+            // longer knows, keeps that address beside the token's; a pin
+            // with no room for it pairs all the same.
+            Some(mut kept) if kept.hub_key == hub_key => {
+                if kept.tls == handshake.token.tls()
+                    && kept
+                        .give_address(handshake.token.address().clone())
+                        .unwrap_or(false)
+                {
+                    self.identity.write_pin(&kept).await?;
+                }
+                kept
+            }
             Some(other) => {
                 return Err(AgentPairingError::PinnedToAnotherHub {
                     pinned: other.hub_key,
