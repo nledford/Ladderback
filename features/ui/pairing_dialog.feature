@@ -59,6 +59,20 @@ Feature: Making a pairing token on the hub's page
     And the hub has canceled the token the dialog showed
     And nothing on the page holds the pairing token the dialog showed
 
+  Scenario: The announcer says the unused token was canceled, and the Machines tab has no live region of its own
+    Given a hub with sign-in on and the admin password "demo-admin-pass"
+    And the admin is signed in with "demo-admin-pass"
+    When I open the address "/settings#agents"
+    And I skip to the content
+    And I press Tab until focus is on the textbox "Admin password"
+    And I type "demo-admin-pass"
+    And I press Tab until focus is on the button "Make a pairing token"
+    And I press Enter
+    Then the dialog "Copy the pairing token" shows the hub key's fingerprint in full
+    When I press Escape
+    Then the polite region reads "The unused pairing token was canceled."
+    And the page has no live region but the announcer's
+
   Scenario: A token the hub fails to cancel on Escape is said to still work until it lapses
     Given a hub with sign-in off
     And the hub fails to cancel pairing tokens
@@ -104,6 +118,7 @@ Feature: Making a pairing token on the hub's page
     Then the page says "The unused pairing token was canceled."
     When the hub answers the cancel it held
     Then the page says "The hub couldn't cancel an earlier unused pairing token, so it still works until it lapses."
+    And the polite region comes to contain "The hub couldn't cancel an earlier unused pairing token, so it still works until it lapses."
     And the page says "The unused pairing token was canceled."
 
   Scenario: A token the hub makes once Settings is left is canceled, unseen
