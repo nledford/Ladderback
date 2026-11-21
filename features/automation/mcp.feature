@@ -249,8 +249,11 @@ Feature: AI agents and scripts use Ladderback through MCP
 
   # The engine masks every secret of the job in its own words before the
   # log keeps them (I4); the tool hands on the failure as the log has it.
+  # Those words can name files, so they reach an AI agent only with Snapshot
+  # contents (decision 127).
   Scenario: A failed operation says why, without the repository's password
     Given Ladderback is serving on loopback with the plan "home"
+    And AI agents without a token may look inside snapshots
     And the plan's repository password in the configuration is "canary-not-a-secret", which isn't the repository's
     And the plan's repository folder is gone
     And an MCP server connected to it
