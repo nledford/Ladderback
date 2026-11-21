@@ -91,3 +91,11 @@ Feature: Pairing a machine from a terminal
     And the hub refuses a machine's connection over plain http on loopback
     And the hub still serves its own machine on loopback
     And the hub's log says its TLS key is missing and to restore it from a backup
+
+  @e2e
+  Scenario: The hub's terminal makes no pinned token while its TLS key is lost, and says no machine pairs until the hub starts with it restored
+    Given a hub with a pairing token for its https address made at its terminal
+    And the hub's TLS key file is lost
+    When the person asks the hub's terminal for a pairing token for "https://127.0.0.1:9"
+    Then the terminal refuses because no machine pairs until the hub starts with its TLS key restored from a backup
+    And the terminal shows no token

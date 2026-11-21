@@ -431,6 +431,22 @@ fn refused_life(agent: &mut Agent) {
     );
 }
 
+#[then(
+    "the terminal refuses because no machine pairs until the hub starts with its TLS key restored from a backup"
+)]
+fn refused_tls_key_lost(agent: &mut Agent) {
+    let said = said(agent);
+    assert!(!said.success, "{said:?}");
+    for expected in [
+        "hub-tls-key",
+        "pairs no machine until it starts with the key restored",
+        "Restore the file from your backup",
+        "start the hub",
+    ] {
+        assert!(said.stderr.contains(expected), "{expected}: {said:?}");
+    }
+}
+
 #[then("the machine says the hub holds it waiting for approval")]
 fn says_pending(agent: &mut Agent) {
     let said = said(agent);
