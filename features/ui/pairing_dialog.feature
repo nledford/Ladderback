@@ -6,6 +6,10 @@ Feature: Making a pairing token on the hub's page
   trusts and when it lapses, counted down on the page's own clock. Closing
   the dialog, by Close or Escape, cancels a token no machine has used, and the
   dialog says so beside Close (§16, decision 121, "The hub's dialog").
+  With sign-in off, the tab warns that a hub reached through a reverse proxy
+  must turn sign-in on, since the proxy makes a request from anywhere look
+  as if it came from the hub's own computer (§16, decision 120, "Who may make
+  a token, approve or re-key").
 
   Scenario: A token is made by keyboard alone and shown once, with the hub key's fingerprint in full
     Given a hub with sign-in off
@@ -37,6 +41,14 @@ Feature: Making a pairing token on the hub's page
     And I press Tab until focus is on the button "Make a pairing token"
     And I press Enter
     Then the dialog "Copy the pairing token" shows the hub key's fingerprint in full
+    And the page shows no warning alert containing "reverse proxy"
+
+  Scenario: With sign-in off, the Machines tab warns that a hub reached through a reverse proxy must turn sign-in on
+    Given a hub with sign-in off
+    When I open the address "/settings#agents"
+    Then the page shows a warning alert containing "reached through a reverse proxy must turn sign-in on"
+    And the link "A hub behind a reverse proxy, in the guide on GitHub (goes to another site)" leads to the section "A hub behind a reverse proxy" of "docs/guide/remote-access.md" on main
+    And the page has no accessibility violations
 
   Scenario: Escape cancels a token no machine has used, and the page says so
     Given a hub with sign-in off
