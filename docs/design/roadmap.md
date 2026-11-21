@@ -218,6 +218,7 @@ Decisions 1–6 recorded 2026-11-08. Decisions 7–12 recorded 2026-11-08 after 
 | [134](decisions/134-an-agent-reads-the-log-a-page-at-a-time.md) | How an AI agent reads the daemon's log |
 | [135](decisions/135-keyring-unlock-wait.md) | A run whose keyring is locked waits for it to be unlocked |
 | [136](decisions/136-an-installed-machine-becomes-the-hub.md) | How an installed machine becomes the hub |
+| [137](decisions/137-a-hub-moves-by-handover-never-by-copy.md) | A hub moves by handover, never by copy, and a hub that finds itself rewound recovers before it grants |
 | [138](decisions/138-the-storage-protects-an-offsite-copy.md) | The storage, not Ladderback, keeps an offsite copy that a machine that backs up can't delete |
 
 ## 17. Open questions

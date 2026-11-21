@@ -3,7 +3,7 @@ use leptos::task::{spawn_local, tick};
 use leptos::wasm_bindgen::JsCast;
 
 use super::button::{Appearance, Content};
-use super::{Button, ModalDialog, TitleLevel};
+use super::{ACTIONS, Button, ModalDialog, TitleLevel};
 use crate::variants::Tone;
 
 /// What a review's confirm button says, the tone it is drawn in (`Error`
@@ -199,7 +199,7 @@ pub fn ReviewDialog(
                     }
                 }}
             </p>
-            <p class="actions" on:click=press_held>
+            <p class=ACTIONS on:click=press_held>
                 <Button
                     content=Content::Text(dismiss_label.into())
                     node_ref=dismiss

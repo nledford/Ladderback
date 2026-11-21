@@ -303,7 +303,7 @@ Every shared component takes the same choices, defined once in `crates/web/src/v
 
 - **The component:** `TextField`, a native `<input>`, or `<textarea>` for many lines, drawn from the tokens (decision 113); every page's field uses it.
 - **Style:** a 1 px Field Edge, the small corner (`rounded.sm`), flat on the page's background, no shadow; full line width up to 32rem (40rem in Mono for a token); label above in Label weight, its description under it.
-- **Size:** a button's height (Small 1.75em, Medium 2em, the default, Large 2.5em, XLarge 3em) and inline padding, read from the one size rule both share, so a field and a button of one size stand level in a row of actions.
+- **Size:** a button's height (Small 1.75em, Medium 2em, the default, Large 2.5em, XLarge 3em) and inline padding, from the one set of size utilities both take, so a field and a button of one size stand level in a row of actions.
 - **Required:** "(required)" after the label, in words.
 - **Read only and unavailable:** told in words by a note under the description; read only has a dashed edge and stays focusable, unavailable takes Ledger Gray with Slate Note text.
 - **Icon:** optional, decorative, inside the edge at the inline start.

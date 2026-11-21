@@ -11,6 +11,7 @@ use l10n::{Localizer, msg};
 use leptos::prelude::*;
 
 use crate::announcer::Politeness;
+use crate::components::ACTIONS;
 use crate::components::alert::rules::AlertTone;
 use crate::components::button::{Appearance, Content, Kind};
 use crate::components::{Alert, Button, LabelLanguage, RadioGroup};
@@ -79,7 +80,7 @@ pub(super) fn LanguageSection(localizer: Arc<Localizer>) -> impl IntoView {
                     label_languages=label_languages
                     chosen=chosen
                 />
-                <p class="actions">
+                <p class=ACTIONS>
                     <Button
                         content=Content::Text(text(&localizer, msg::UI_LANGUAGE_SAVE).into())
                         appearance=Appearance::Filled

@@ -8,6 +8,7 @@ use leptos::prelude::*;
 
 use super::DemoHeading;
 use crate::announcer::Politeness;
+use crate::components::ACTIONS;
 use crate::components::button::Content;
 use crate::components::{Button, TextField, text_field};
 use crate::live::reply;
@@ -176,7 +177,7 @@ pub(super) fn TextFieldDemo(localizer: Arc<Localizer>) -> impl IntoView {
                 .into_iter()
                 .map(|(id, size, label, add)| {
                     view! {
-                        <div class="actions">
+                        <div class=ACTIONS>
                             <TextField
                                 id=id
                                 localizer=Arc::clone(&localizer)

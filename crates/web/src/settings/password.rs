@@ -24,6 +24,7 @@ use crate::admin_password::{
     button, error_of, problems_of, said_once_set, steps,
 };
 use crate::announcer::Politeness;
+use crate::components::ACTIONS;
 use crate::components::button::{Appearance, Content, Kind};
 use crate::components::{Button, ErrorSummary, SummaryItem, TextField, text_field};
 use crate::live::reply;
@@ -246,7 +247,7 @@ pub(super) fn AdminPassword(
                     autocomplete="new-password"
                     required=true
                 />
-                <p class="actions">
+                <p class=ACTIONS>
                     <Button
                         content=Content::Text(button_text.into())
                         appearance=Appearance::Filled

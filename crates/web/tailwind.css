@@ -26,6 +26,7 @@
   --color-accent: var(--accent);
   --color-focus: var(--focus);
   --color-surface: var(--surface);
+  --color-field-edge: var(--field-edge);
   --color-on-fill: var(--on-fill);
   --color-badge-loading-fg: var(--badge-loading-fg);
   --color-badge-loading-bg: var(--badge-loading-bg);
