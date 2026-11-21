@@ -2,11 +2,12 @@ use std::fmt;
 use std::sync::Arc;
 
 use domain::fleet::{
-    AgentEnvelope, AgentRecord, Approval, Binding, BindingKind, Challenge, Connect, EpochSeconds,
-    FIRST_SEQUENCE, HANDSHAKES, Holder, HubAddress, HubEnvelope, KEY_BYTES, KeyFile, Nonce, Pair,
-    PairAnswer, PairRefusal, PairRequest, Paired, PairingToken, PayloadDigest, Proof, ProofRefusal,
-    ProofRequest, PublicKey, Refused, SeedFile, SignedMessage, SigningSeed, TokenId, TokenRecord,
-    TokenTls, TokenUse, UNUSED_TOKEN_LIMIT, Welcome, hello_kind, token_life, welcome_kind,
+    AgentEnvelope, AgentRecord, Approval, ApprovalRefused, Binding, BindingKind, Challenge,
+    Connect, EpochSeconds, FIRST_SEQUENCE, HANDSHAKES, Holder, Hostname, HostnameKey, HubAddress,
+    HubEnvelope, KEY_BYTES, KeyFile, ListedAgent, Nonce, Pair, PairAnswer, PairRefusal,
+    PairRequest, Paired, PairingToken, PayloadDigest, Proof, ProofRefusal, ProofRequest, PublicKey,
+    Refused, SeedFile, SignedMessage, SigningSeed, TokenId, TokenRecord, TokenTls, TokenUse,
+    UNUSED_TOKEN_LIMIT, Welcome, hello_kind, list_agents, token_life, welcome_kind,
 };
 use domain::{AgentId, SignedDuration};
 
@@ -291,6 +292,41 @@ impl HubPairing {
         Ok(self.registry.revoke_token(id, self.clock.now()).await?)
     }
 
+    /// The agents waiting for a person's approval, in the registry's order.
+    pub async fn pending(&self) -> Result<Vec<AgentRecord>, HubPairingError> {
+        let mut agents = self.registry.agents().await?;
+        agents.retain(AgentRecord::is_pending);
+        Ok(agents)
+    }
+
+    /// The agent registered under `hostname`, pending or approved: the one
+    /// whose hostname compares equal to it on the hub (decision 120,
+    /// "Hostnames").
+    pub async fn agent_named(
+        &self,
+        hostname: &Hostname,
+    ) -> Result<Option<AgentRecord>, HubPairingError> {
+        let key = HostnameKey::of(hostname);
+        Ok(self
+            .registry
+            .agents()
+            .await?
+            .into_iter()
+            .find(|agent| agent.hostname_key() == key))
+    }
+
+    /// A person approves `agent`, as they compared it: its agent ID and
+    /// key (decision 120, "Pending approval").
+    pub async fn approve(
+        &self,
+        agent: &AgentRecord,
+    ) -> Result<Result<AgentRecord, ApprovalRefused>, HubPairingError> {
+        Ok(self
+            .registry
+            .approve(agent.agent_id, agent.key, self.clock.now())
+            .await?)
+    }
+
     /// The hub's answer to `connect` on a session whose `tls-exporter`
     /// value is `exporter`: a fresh nonce and its proof over the
     /// connection.
@@ -389,6 +425,13 @@ impl HubPairing {
                 .refuse(keys, handshake, &refusal)
                 .map(PairAnswer::Refused),
         }
+    }
+
+    /// Every agent the hub has registered, oldest first, each pending one
+    /// flagged with the agent its hostname looks like (decision 120,
+    /// "Hostnames"), which the pending row shows (decision 121).
+    pub async fn agents(&self) -> Result<Vec<ListedAgent>, HubPairingError> {
+        Ok(list_agents(self.registry.agents().await?))
     }
 
     /// The hub's answer to a paired agent's `proof`: the agent's record,

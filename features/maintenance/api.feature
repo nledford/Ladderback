@@ -39,7 +39,7 @@ Feature: The Snapshots page asks the daemon for a repository's history and for a
     Then the refusal has status 404 and the typed code "repository-unknown"
 
   Scenario: In the running daemon, a forget preview names what goes and removes nothing
-    Given the daemon holds 3 snapshots of the plan "home"
+    Given the repository holds the declared history "small": 3 snapshots of the plan "home"
     And the daemon's plan keeps the last 1 snapshot
     When the owner previews forgetting
     Then the forget preview names 2 of the 3 snapshots of the plan "home" for removal, the oldest ones

@@ -1,8 +1,9 @@
 use std::sync::Arc;
 
 use domain::fleet::{
-    AgentStatus, BindingKind, Challenge, Fingerprint, Handshakes, Hostname, HubAddress, KeyFile,
-    PairAnswer, PairingToken, PublicKey, Refused, SeedFile, Signature, TokenTls, WireName,
+    AgentRecord, AgentStatus, ApprovalRefused, BindingKind, Challenge, Fingerprint, Handshakes,
+    Hostname, HubAddress, KeyFile, PairAnswer, PairingToken, PublicKey, Refused, SeedFile,
+    Signature, TokenTls, WireName,
 };
 use domain::{AgentId, SignedDuration, Timestamp, Uuid};
 
@@ -662,6 +663,76 @@ async fn a_taken_hostname_names_its_holder() {
     assert_eq!(
         Some(holder.last_seen),
         domain::fleet::EpochSeconds::from_timestamp(hub.clock.now())
+    );
+}
+
+/// A record the hub holds of agent `n` under `name`, pending or approved.
+fn held(n: u8, name: &str, pending: bool) -> AgentRecord {
+    let at = Timestamp::from_second(1_700_000_000).unwrap();
+    AgentRecord {
+        agent_id: AgentId::from_uuid(Uuid::from_u128(u128::from(n))),
+        key: PublicKey::from_bytes([n; 32]).unwrap(),
+        hostname: Hostname::parse(name).unwrap(),
+        status: if pending {
+            AgentStatus::Pending { since: at }
+        } else {
+            AgentStatus::Approved { at }
+        },
+        counter: 1,
+        last_seen: at,
+    }
+}
+
+/// The hub lists only the agents waiting for approval, and finds an agent
+/// by a hostname that compares equal to its own, pending or approved.
+#[tokio::test]
+async fn the_hub_lists_the_waiting_agents_and_finds_one_by_its_name() {
+    let hub = Hub::new(1);
+    let (laptop, desktop, nas) = (
+        held(1, "laptop", true),
+        held(2, "desktop", false),
+        held(3, "nas", true),
+    );
+    for one in [&laptop, &desktop, &nas] {
+        hub.registry.hold(one.clone());
+    }
+    assert_eq!(
+        hub.pairing.pending().await.unwrap(),
+        vec![laptop.clone(), nas]
+    );
+    let named = |name: &str| Hostname::parse(name).unwrap();
+    let pairing = &hub.pairing;
+    assert_eq!(
+        pairing.agent_named(&named("LAPTOP")).await.unwrap(),
+        Some(laptop)
+    );
+    assert_eq!(
+        pairing.agent_named(&named("desktop")).await.unwrap(),
+        Some(desktop)
+    );
+    assert_eq!(pairing.agent_named(&named("phone")).await.unwrap(), None);
+}
+
+/// A person's approval approves the agent at the hub's time, once.
+#[tokio::test]
+async fn an_approval_approves_the_agent_as_compared_at_the_hubs_time() {
+    let hub = Hub::new(1);
+    let laptop = held(1, "laptop", true);
+    hub.registry.hold(laptop.clone());
+    let approved = AgentRecord {
+        status: AgentStatus::Approved {
+            at: hub.clock.now(),
+        },
+        ..laptop.clone()
+    };
+    assert_eq!(
+        hub.pairing.approve(&laptop).await.unwrap(),
+        Ok(approved.clone())
+    );
+    assert_eq!(hub.registry.agents().await.unwrap(), vec![approved]);
+    assert_eq!(
+        hub.pairing.approve(&laptop).await.unwrap(),
+        Err(ApprovalRefused::AlreadyApproved)
     );
 }
 

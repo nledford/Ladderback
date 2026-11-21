@@ -88,16 +88,27 @@ enum Command {
     SetPassword,
     #[cfg(feature = "hub")]
     PairingToken {
-        #[arg(long, required_unless_present_any = ["list", "revoke"])]
+        #[arg(long, required_unless_present_any = ["list", "revoke", "pending", "approve"])]
         address: Option<String>,
         #[arg(long, value_name = "MINUTES")]
         ttl: Option<i64>,
         #[arg(long, requires = "address", conflicts_with_all = ["list", "revoke"])]
         certificate_authority: bool,
-        #[arg(long, conflicts_with_all = ["address", "ttl", "revoke"])]
+        #[arg(long, conflicts_with_all = ["address", "ttl", "revoke", "pending", "approve"])]
         list: bool,
-        #[arg(long, value_name = "TOKEN_ID", conflicts_with_all = ["address", "ttl"])]
+        #[arg(long, value_name = "TOKEN_ID", conflicts_with_all = ["address", "ttl", "pending", "approve"])]
         revoke: Option<String>,
+        #[arg(long, conflicts_with_all = ["address", "ttl", "approve"])]
+        pending: bool,
+        #[arg(
+            long,
+            value_name = "HOSTNAME",
+            value_parser = clap::builder::NonEmptyStringValueParser::new(),
+            conflicts_with_all = ["address", "ttl"]
+        )]
+        approve: Option<String>,
+        #[arg(long, requires = "approve")]
+        yes: bool,
     },
     #[cfg(feature = "hub")]
     Pair {
@@ -242,6 +253,9 @@ fn description(path: &str, argument: Option<&str>) -> Option<MessageId> {
         ("pairing-token", Some("ttl")) => msg::CLI_HELP_PAIRING_TOKEN_TTL,
         ("pairing-token", Some("list")) => msg::CLI_HELP_PAIRING_TOKEN_LIST,
         ("pairing-token", Some("revoke")) => msg::CLI_HELP_PAIRING_TOKEN_REVOKE,
+        ("pairing-token", Some("pending")) => msg::CLI_HELP_PAIRING_TOKEN_PENDING,
+        ("pairing-token", Some("approve")) => msg::CLI_HELP_PAIRING_TOKEN_APPROVE,
+        ("pairing-token", Some("yes")) => msg::CLI_HELP_PAIRING_TOKEN_YES,
         ("pair", None) => msg::CLI_HELP_PAIR,
         ("pair", Some("address")) => msg::CLI_HELP_PAIR_ADDRESS,
         ("pair", Some("hostname")) => msg::CLI_HELP_PAIR_HOSTNAME,
@@ -297,10 +311,15 @@ fn main() -> ExitCode {
             certificate_authority,
             list,
             revoke,
-        } => hub::pairing_token(match (list, revoke, address) {
-            (true, _, _) => hub::TokenAsk::List,
-            (false, Some(id), _) => hub::TokenAsk::Revoke(id),
-            (false, None, address) => hub::TokenAsk::Make {
+            pending,
+            approve,
+            yes,
+        } => hub::pairing_token(match (list, revoke, pending, approve, address) {
+            (true, ..) => hub::TokenAsk::List,
+            (false, Some(id), ..) => hub::TokenAsk::Revoke(id),
+            (false, None, true, ..) => hub::TokenAsk::Pending,
+            (false, None, false, Some(hostname), _) => hub::TokenAsk::Approve { hostname, yes },
+            (false, None, false, None, address) => hub::TokenAsk::Make {
                 address: address.unwrap_or_default(),
                 ttl_minutes: ttl,
                 certificate_authority,

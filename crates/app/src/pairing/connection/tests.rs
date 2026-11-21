@@ -163,7 +163,8 @@ async fn a_paired_agent_is_welcomed_pending_and_its_counter_kept() {
 async fn an_approved_agent_is_welcomed_approved() {
     let hub = hub(1);
     let identity = paired(&hub, 1).await;
-    hub.registry.approve(agent_id(1), hub.clock.now());
+    let waiting = hub.registry.agent(agent_id(1)).await.unwrap().unwrap();
+    hub.pairing.approve(&waiting).await.unwrap().unwrap();
     let connector = Arc::new(LoopbackHubConnector::to(hub.pairing.clone()));
     let connected = connecting(identity, connector)
         .connect(agent_id(1), hostname(1))

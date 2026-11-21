@@ -85,6 +85,9 @@ struct State {
     /// The keyring's unlock prompt was dismissed: every keyring read fails,
     /// entry or not.
     unlock_prompt_dismissed: bool,
+    /// The keyring service has no collection to look in: every keyring read
+    /// fails, entry or not.
+    no_default_collection: bool,
     /// The keyring answers that it is unlocked, but its entries are in a
     /// collection that stays locked, as one the default alias doesn't name:
     /// every keyring read fails as locked while asking whether the keyring
@@ -196,9 +199,16 @@ impl FakeSecrets {
     }
 
     /// A keyring whose unlock prompt the person dismissed: every keyring
-    /// entry, there or not, fails as `KeyringUnavailable`, refused.
+    /// entry, there or not, fails as `KeyringUnavailable`, dismissed.
     pub fn dismiss_unlock_prompt(&self) {
         self.lock().unlock_prompt_dismissed = true;
+    }
+
+    /// A keyring service with no collection to look in, as one no default
+    /// collection is set for: every keyring entry, there or not, fails as
+    /// `KeyringUnavailable`, refused.
+    pub fn remove_default_collection(&self) {
+        self.lock().no_default_collection = true;
     }
 
     /// A keyring that answers it is unlocked while its entries stay locked,
@@ -430,10 +440,10 @@ impl SecretResolver for FakeSecrets {
             let mut state = self.lock();
             state.lock_queries += 1;
             let answer = match keyring_unavailable(&state) {
-                Some((_, KeyringCause::NoService)) => KeyringLock::Unknown,
+                Some((_, KeyringCause::NoService | KeyringCause::Refused)) => KeyringLock::Unknown,
                 // A dismissed unlock prompt leaves the collection locked, and a
                 // run refused that way never waits to ask.
-                Some((_, KeyringCause::Locked | KeyringCause::Refused)) => KeyringLock::Locked,
+                Some((_, KeyringCause::Locked | KeyringCause::Dismissed)) => KeyringLock::Locked,
                 None => KeyringLock::Unlocked,
             };
             (answer, state.lock_answer_takes.clone())
@@ -488,9 +498,11 @@ impl Keyring for FakeSecrets {
 /// there.
 fn unavailable(state: &State) -> Result<(), KeyringError> {
     match keyring_unavailable(state) {
-        Some((detail, KeyringCause::Locked)) => Err(KeyringError::Locked {
-            detail: detail.to_owned(),
-        }),
+        Some((detail, KeyringCause::Locked | KeyringCause::Dismissed)) => {
+            Err(KeyringError::Locked {
+                detail: detail.to_owned(),
+            })
+        }
         Some((detail, KeyringCause::NoService | KeyringCause::Refused)) => {
             Err(KeyringError::Unavailable {
                 detail: detail.to_owned(),
@@ -523,7 +535,9 @@ fn keyring_unavailable(state: &State) -> Option<(&'static str, KeyringCause)> {
     {
         Some(("the keyring is locked", KeyringCause::Locked))
     } else if state.unlock_prompt_dismissed {
-        Some(("the unlock prompt was dismissed", KeyringCause::Refused))
+        Some(("the unlock prompt was dismissed", KeyringCause::Dismissed))
+    } else if state.no_default_collection {
+        Some(("no default collection", KeyringCause::Refused))
     } else {
         None
     }

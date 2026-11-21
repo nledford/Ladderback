@@ -154,6 +154,7 @@ impl PlanRunner {
                         plan: Some(plan.id.clone()),
                         repository: repository.id.clone(),
                     },
+                    waits_for_unlock: error.waits_for_unlock(),
                 })));
             }
         };
@@ -626,6 +627,7 @@ impl PlanRunner {
             refusal,
             failure,
             target,
+            ..
         } = secret;
         let operation = OperationId::from_uuid(Uuid::now_v7());
         log::warn!(
@@ -725,15 +727,11 @@ pub(super) struct SecretUnbuilt {
     refusal: SecretRefusal,
     failure: FailureReason,
     target: Target,
-}
-
-impl SecretUnbuilt {
     /// Whether the repository's password is in a keyring the service
     /// answered is locked: a run the schedule starts waits for it to be
-    /// unlocked, past this refusal (#1221).
-    fn refused_as_locked(&self) -> bool {
-        self.refusal.code == ErrorCode::SecretKeyringLocked
-    }
+    /// unlocked, past this refusal (#1221). One whose unlock prompt was
+    /// dismissed is refused as locked too, but never waits (#993).
+    waits_for_unlock: bool,
 }
 
 impl Unbuilt {
@@ -847,7 +845,7 @@ impl PlanRuns for PlanRunner {
             Ok(built) => {
                 self.run_built(built, trigger, place).await;
             }
-            Err(Unbuilt::Secret(secret)) => match (unlock, secret.refused_as_locked()) {
+            Err(Unbuilt::Secret(secret)) => match (unlock, secret.waits_for_unlock) {
                 (Some(unlock), true) if trigger.is_unattended() => {
                     // The wait can outlast the scheduler's turn and the
                     // run's place in the queue: both go on without it, and
@@ -903,7 +901,7 @@ impl PlanRuns for PlanRunner {
         let built = match (built, operation.target().plan.clone(), unlock) {
             (Err(Unbuilt::Secret(secret)), Some(plan), Some(unlock))
                 if matches!(trigger, Trigger::Schedule | Trigger::CatchUp)
-                    && secret.refused_as_locked()
+                    && secret.waits_for_unlock
                     && operation.target().is_on(secret.target.repository.as_ref()) =>
             {
                 let cancel = self.cancel_switch(operation.id());
