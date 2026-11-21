@@ -11,14 +11,16 @@
 // then (`backstop`). This module takes neither cucumber nor Playwright, so
 // that `node --test` can drive it with fakes (scripts/ui-teardown.test.ts).
 
-import type { ChildProcess } from "node:child_process";
+import { type ChildProcess, execFileSync } from "node:child_process";
 import { once } from "node:events";
 import { rm } from "node:fs/promises";
 import { BroadcastChannel, isMainThread } from "node:worker_threads";
 
-/** How long a daemon has to stop in order after SIGTERM before it is killed:
- *  an idle one takes well under a second. */
-export const STOP_MS = 10_000;
+/** How long a daemon has to stop in order after SIGTERM before it is killed,
+ *  and the hook fails saying so: an idle one takes well under a second. Below
+ *  the 30 s of a scenario's `After` hook, so that the kill and the message
+ *  come before cucumber's bare timeout. */
+export const STOP_MS = 25_000;
 
 /** How long the teardown waits for the browser to close: past the 30 s
  *  Playwright gives a browser to exit before it kills it itself. */
@@ -51,21 +53,64 @@ async function within(promise: Promise<unknown>, ms: number): Promise<boolean> {
   }
 }
 
-/** Stops `daemon`: SIGTERM, which it answers by stopping in order, then
- *  SIGKILL if it still runs after `graceMs`. Resolves once it has exited. */
+/** Kills the process `pid` and what it started: it is stopped first, so that
+ *  it starts nothing more, then the process group each of its children leads
+ *  (a daemon's workers and hooks each lead one) is killed, or the child alone
+ *  where it leads none, then the process itself, as `testkit::children` does
+ *  for the e2e runner. Synchronous, so that it can run as the process exits. */
+function killWithChildren(pid: number): void {
+  try {
+    process.kill(pid, "SIGSTOP");
+  } catch {
+    return; // It has exited.
+  }
+  let children: number[] = [];
+  try {
+    children = execFileSync("pgrep", ["-P", String(pid)], { encoding: "utf8" })
+      .split("\n")
+      .filter(Boolean)
+      .map(Number);
+  } catch {
+    // pgrep exits 1 when the process has no children.
+  }
+  for (const child of children) {
+    // A group with the child's ID is the child's: a process group's ID is
+    // its leader's, never reused while it lives.
+    try {
+      process.kill(-child, "SIGKILL");
+    } catch {
+      try {
+        process.kill(child, "SIGKILL");
+      } catch {
+        // It exited since.
+      }
+    }
+  }
+  try {
+    process.kill(pid, "SIGKILL");
+  } catch {
+    // It exited since.
+  }
+}
+
+/** Stops `daemon`: SIGTERM, which it answers by stopping in order. If it
+ *  still runs after `graceMs`, it is killed with what it started, and the
+ *  stop fails saying so: a daemon that doesn't stop in order is a fault the
+ *  run must show, not hide. */
 export async function stopDaemon(daemon: ChildProcess, graceMs = STOP_MS): Promise<void> {
-  if (daemon.exitCode !== null || daemon.signalCode !== null) return;
+  if (daemon.exitCode !== null || daemon.signalCode !== null || daemon.pid === undefined) return;
   const exit = once(daemon, "exit");
   daemon.kill("SIGTERM");
   if (await within(exit, graceMs)) return;
-  daemon.kill("SIGKILL");
+  killWithChildren(daemon.pid);
   await exit;
+  throw new Error(`the daemon had not stopped ${graceMs} ms after SIGTERM, so it was killed`);
 }
 
 /** Stops the daemon and closes the browser side by side, then removes the
  *  scratch folder, even when one of them failed, and only then passes on
  *  the first failure. A browser that hasn't closed within `closeMs` is left
- *  to Playwright, which kills it when the process exits. */
+ *  to end with the run's process. */
 export async function tearDown(started: Started, { closeMs = CLOSE_MS, stopMs = STOP_MS } = {}): Promise<void> {
   const { browser, daemon, scratch } = started;
   try {
@@ -74,7 +119,7 @@ export async function tearDown(started: Started, { closeMs = CLOSE_MS, stopMs = 
       browser === undefined
         ? undefined
         : within(browser.close(), closeMs).then((closed) => {
-            if (!closed) process.stderr.write(`the browser had not closed after ${closeMs} ms; leaving it to Playwright\n`);
+            if (!closed) process.stderr.write(`the browser had not closed after ${closeMs} ms; leaving it to end with the run\n`);
           }),
     ]);
     for (const end of ended) if (end.status === "rejected") throw end.reason;
@@ -111,13 +156,7 @@ if (isMainThread) {
     else running.delete(pid);
   };
   process.on("exit", () => {
-    for (const pid of running) {
-      try {
-        process.kill(pid, "SIGKILL");
-      } catch {
-        // It exited since; nothing to kill.
-      }
-    }
+    for (const pid of running) killWithChildren(pid);
   });
 }
 
