@@ -346,6 +346,11 @@ fn run_events(input: impl Read, events: Events, pid: u32, process: Process) -> i
     if let Some(repository) = repository_of(&spec.job) {
         events.redact_with(repository.redactor());
     }
+    // A probe tries a location the choice may skip: what the backend logs
+    // there is detail, and the daemon logs the choice itself (#494).
+    if matches!(spec.job, JobKind::Probe(_)) {
+        events.log_backend_at_debug();
+    }
     // The job is taken. The daemon times a worker out that has said nothing
     // by its start timeout, and opening a repository can take longer than
     // that: this line, which holds nothing of the job, comes before it.

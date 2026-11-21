@@ -35,6 +35,9 @@ struct Shared {
     sink: Mutex<Sink>,
     redactor: RwLock<Redactor>,
     started: AtomicBool,
+    /// Every log record crosses at the debug level: see
+    /// [`Events::log_backend_at_debug`].
+    backend_at_debug: AtomicBool,
     /// What a caller with nobody to tell does when it finds the stream
     /// broken: see [`Events::report`].
     on_broken: Option<Box<dyn Fn() + Send + Sync>>,
@@ -73,6 +76,7 @@ impl Events {
             }),
             redactor: RwLock::new(Redactor::default()),
             started: AtomicBool::new(false),
+            backend_at_debug: AtomicBool::new(false),
             on_broken,
         }))
     }
@@ -98,14 +102,16 @@ impl Events {
     }
 
     /// From now on, every record of the backend crosses this stream at the
-    /// debug level, whatever level it was logged at: a probe's (#494).
+    /// debug level, whatever level it was logged at: a probe's. The location
+    /// it tries may well be skipped, and the daemon says so in one line of
+    /// its own, so the backend's errors there are nobody's error (#494).
     pub(crate) fn log_backend_at_debug(&self) {
-        todo!()
+        self.0.backend_at_debug.store(true, Ordering::SeqCst);
     }
 
     /// Whether [`Events::log_backend_at_debug`] was called.
     pub(crate) fn logs_backend_at_debug(&self) -> bool {
-        todo!()
+        self.0.backend_at_debug.load(Ordering::SeqCst)
     }
 
     /// Whether [`WorkerEvent::Started`] was written. Progress that begins

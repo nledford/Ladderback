@@ -35,6 +35,7 @@ impl Log for EventLogger {
             return;
         }
         let level = match record.level() {
+            _ if self.events.logs_backend_at_debug() => Level::Debug,
             LogLevel::Error => Level::Error,
             LogLevel::Warn => Level::Warn,
             LogLevel::Info => Level::Info,
