@@ -18,6 +18,7 @@ use l10n::{Localizer, msg};
 use leptos::prelude::*;
 use leptos::task::spawn_local;
 
+use super::machines;
 use crate::announcer::Clock;
 use crate::components::ACTIONS;
 use crate::components::alert::rules::AlertTone;
@@ -460,6 +461,7 @@ pub(crate) fn Agents(localizer: Arc<Localizer>, on: bool) -> impl IntoView {
             <p>{t(msg::UI_AGENTS_INTRO)}</p>
             <p role="status">{move || token.page_said.get()}</p>
             <p role="status">{move || token.earlier_said.get()}</p>
+            <machines::Machines localizer=Arc::clone(&localizer) step_up=step_up.clone() />
             <h3>{t(msg::UI_PAIRING_NEW_HEADING)}</h3>
             {move || problem.get().map(|sentence| refusal_alert(&problem_localizer, sentence))}
             <TextField

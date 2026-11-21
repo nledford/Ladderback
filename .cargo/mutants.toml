@@ -185,6 +185,18 @@
 # "Adding the home folder warns of what it opens, starting on Cancel, and
 # suggests a narrower folder" adds the home folder).
 #
+# `crates/web/src/settings/machines.rs` is the DOM glue of the Machines tab's
+# machines on a hub (§16, decision 121, "Waiting for approval"): it reads the
+# list every few seconds while the tab is mounted, draws the waiting and the
+# approved machines' tables, opens the review, sends the approval and says
+# its answer. What the step-up asks and how it is checked, which agent a key
+# approves and each refusal's code are the hub's, tested on the host
+# (`crates/adapters/http/src/hub_pages/tests.rs`, `crates/app/src/pairing/`
+# and the acceptance scenarios of
+# `features/fleet/approving_on_the_hubs_page.feature`); its words are the
+# catalog's. The `@ui` scenarios of `features/ui/approving_machines.feature`
+# run the glue in Chromium, Firefox and WebKit.
+#
 # The wasm32-only test modules of `web` (`formatting.rs`, `time_zones.rs`) are
 # not listed: they are declared `#[cfg(test)]`, which cargo-mutants skips (see
 # `main.rs`), and their tests run in `just test-wasm`.
@@ -211,6 +223,7 @@ exclude_globs = [
     "crates/web/src/settings/page_width.rs",
     "crates/web/src/full_disk_access_warning.rs",
     "crates/web/src/settings/dry_run_allowlist.rs",
+    "crates/web/src/settings/machines.rs",
 ]
 # Mutants that no test can tell from the real code, or that no host can run:
 exclude_re = [
