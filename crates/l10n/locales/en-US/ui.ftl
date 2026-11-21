@@ -3357,8 +3357,8 @@ ui-pairing-certificate-ca = A certificate authority's certificate
 ui-pairing-lapses-label = Lapses
 
 # When the token lapses, counted down while the dialog is open.
-# $when (text): the time it lapses, in this computer's zone.
-# $offset (text): that zone's offset from UTC, as UTC+02:00.
+# $when (text): the time it lapses, in this computer's zone, or in UTC where the browser names no zone.
+# $offset (text): the offset from UTC of the zone $when is written in, as -05:00.
 # $minutes (number): the whole minutes left, rounded up.
 ui-pairing-lapses = { $when } ({ $offset }), in { $minutes ->
     [one] { $minutes } minute
@@ -3387,7 +3387,7 @@ ui-pairing-close-note = Closing this dialog cancels the token if no { -machine }
 ui-pairing-canceled = The token is canceled. No { -machine } can use it.
 
 # Said in the dialog in place of the token once it lapses.
-# $when (text): the time it lapsed, in this computer's zone.
+# $when (text): the time it lapsed, in this computer's zone, or in UTC where the browser names no zone.
 ui-pairing-lapsed = Lapsed at { $when }. Make a new token to pair a { -machine }.
 
 # The button that closes the dialog once its token is canceled or lapsed, back to the form.
