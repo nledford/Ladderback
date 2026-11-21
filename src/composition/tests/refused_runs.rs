@@ -619,9 +619,12 @@ async fn a_resumed_run_of_a_plan_with_no_next_run_is_refused_at_once() {
     };
     assert!(
         matches!(
-            record.status,
+            &record.status,
             domain::execution::OperationStatus::Failed {
-                reason: domain::execution::FailureReason::SecretRefused { .. },
+                reason: domain::execution::FailureReason::SecretRefused {
+                    refusal: domain::execution::refusal::SettingRefusal::SecretKeyringLocked { .. },
+                    ..
+                },
             }
         ),
         "refused as locked, at once: {record:?}"
@@ -766,6 +769,33 @@ async fn until_logged(words: &[&str]) {
     .unwrap_or_else(|_| panic!("the daemon logs a line with {words:?}"));
 }
 
+/// Waits until the operation log holds `id` with a status that is final,
+/// and returns it: the daemon's log can say a run ended before the log
+/// has its end.
+async fn until_ended(
+    store: &app::fakes::InMemoryOperationStore,
+    id: OperationId,
+) -> domain::execution::OperationStatus {
+    tokio::time::timeout(std::time::Duration::from_secs(5), async {
+        loop {
+            let history = store
+                .list(&app::ports::HistoryQuery::default())
+                .await
+                .expect("the log reads");
+            if let Some(record) = history
+                .operations
+                .iter()
+                .find(|record| record.id == id && record.status.is_finished())
+            {
+                break record.status.clone();
+            }
+            tokio::time::sleep(std::time::Duration::from_millis(10)).await;
+        }
+    })
+    .await
+    .unwrap_or_else(|_| panic!("the operation log ends operation {id:?}"))
+}
+
 /// The plan `home` of `runner`'s configuration, rewritten by `change`, is
 /// saved in its place.
 async fn change_home(runner: &PlanRunner, change: impl FnOnce(&mut domain::planning::Plan)) {
@@ -875,11 +905,102 @@ fn other_entry() -> domain::secrets::KeyringEntry {
     domain::secrets::KeyringEntry::parse("ladderback/other").expect("an entry")
 }
 
-/// The person adds the repository `other`, whose password is in the
-/// keyring under [`other_entry`], and moves the plan `home` there.
-async fn move_home_to_other(runner: &PlanRunner, secrets: &FakeSecrets) {
-    secrets.set_keyring_entry(&other_entry(), "canary-other");
-    let config = runner.config.load().await.expect("the configuration reads");
+/// The ID of the repository `other`, once the daemon has opened it.
+fn other_id() -> RepositoryId {
+    RepositoryId::parse(&"b".repeat(64)).expect("a repository ID")
+}
+
+/// `config` with the repository `demo` rewritten by `change`.
+fn with_demo(
+    config: &domain::planning::AgentConfig,
+    change: impl FnOnce(&mut domain::planning::RepositoryConfig),
+) -> domain::planning::AgentConfig {
+    let demo = domain::RepositoryAlias::parse("demo").expect("an alias");
+    let mut repositories = config.repositories().clone();
+    change(repositories.get_mut(&demo).expect("the repository"));
+    let home = PlanId::parse("home").expect("a plan id");
+    let plan = config.plan(&home).expect("the plan").clone();
+    config
+        .replacing(
+            config.agent().clone(),
+            config.hooks().clone(),
+            repositories,
+            vec![plan],
+        )
+        .expect("a valid configuration")
+}
+
+/// `config` saved in place of the runner's.
+async fn save_config(runner: &PlanRunner, config: &domain::planning::AgentConfig) {
+    app::ports::ConfigStore::save(&*runner.config, config)
+        .await
+        .expect("the configuration saves");
+}
+
+/// The repository `demo` as the daemon found it once it opened it: it
+/// records its ID.
+fn demo_opened(entry: &mut domain::planning::RepositoryConfig) {
+    entry.id = Some(repository_id());
+}
+
+/// The repository `demo` as the person rewrote it to name the repository
+/// `other`, under the same alias: another ID, another password.
+fn demo_now_other(entry: &mut domain::planning::RepositoryConfig) {
+    entry.id = Some(other_id());
+    entry.settings.repository = "/srv/other".to_owned();
+    entry.settings.password = SecretRef::Keyring(other_entry());
+}
+
+/// A configuration store that answers its first load with `first` and
+/// every later one with `later`: the person changed the configuration
+/// between a run's first look and its next.
+struct ChangesAfterFirstLoad {
+    first: domain::planning::AgentConfig,
+    later: domain::planning::AgentConfig,
+    loads: std::sync::atomic::AtomicUsize,
+}
+
+impl ChangesAfterFirstLoad {
+    fn new(first: domain::planning::AgentConfig, later: domain::planning::AgentConfig) -> Self {
+        Self {
+            first,
+            later,
+            loads: std::sync::atomic::AtomicUsize::new(0),
+        }
+    }
+}
+
+#[async_trait]
+impl app::ports::ConfigStore for ChangesAfterFirstLoad {
+    async fn load(&self) -> Result<domain::planning::AgentConfig, app::ports::ConfigError> {
+        let loads = self.loads.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+        Ok(if loads == 0 {
+            self.first.clone()
+        } else {
+            self.later.clone()
+        })
+    }
+
+    async fn save(
+        &self,
+        _config: &domain::planning::AgentConfig,
+    ) -> Result<(), app::ports::ConfigError> {
+        Ok(())
+    }
+
+    async fn record_id(
+        &self,
+        _alias: &domain::RepositoryAlias,
+        _read: &domain::planning::RepositoryConfig,
+        _id: &RepositoryId,
+    ) -> Result<(), app::ports::RecordError> {
+        Ok(())
+    }
+}
+
+/// `config` with the plan `home` moved to the repository `other`, whose
+/// password is in the keyring under [`other_entry`].
+fn home_on_other(config: &domain::planning::AgentConfig) -> domain::planning::AgentConfig {
     let other = domain::RepositoryAlias::parse("other").expect("an alias");
     let mut repositories = config.repositories().clone();
     repositories.insert(
@@ -903,17 +1024,22 @@ async fn move_home_to_other(runner: &PlanRunner, secrets: &FakeSecrets) {
     let home = PlanId::parse("home").expect("a plan id");
     let mut plan = config.plan(&home).expect("the plan").clone();
     plan.repository = other;
-    let moved = config
+    config
         .replacing(
             config.agent().clone(),
             config.hooks().clone(),
             repositories,
             vec![plan],
         )
-        .expect("a valid configuration");
-    app::ports::ConfigStore::save(&*runner.config, &moved)
-        .await
-        .expect("the configuration saves");
+        .expect("a valid configuration")
+}
+
+/// The person adds the repository `other`, whose password is in the
+/// keyring under [`other_entry`], and moves the plan `home` there.
+async fn move_home_to_other(runner: &PlanRunner, secrets: &FakeSecrets) {
+    secrets.set_keyring_entry(&other_entry(), "canary-other");
+    let config = runner.config.load().await.expect("the configuration reads");
+    save_config(runner, &home_on_other(&config)).await;
 }
 
 /// A scheduled run that waited for its keyring, and whose plan moved to
@@ -988,6 +1114,216 @@ async fn a_resumed_run_whose_plan_moved_while_it_waited_ends_unrun() {
     move_home_to_other(&runner, &secrets).await;
     clock.advance(domain::SignedDuration::from_secs(60));
     until_logged(&["can't run again", "another repository"]).await;
+    // The log line comes before the status is saved: the operation itself
+    // ends, and ends as failed, not left queued.
+    let status = until_ended(&store, queued.id()).await;
+    assert!(
+        matches!(
+            status,
+            domain::execution::OperationStatus::Failed {
+                reason: domain::execution::FailureReason::DaemonStopped,
+            }
+        ),
+        "the queued backup ends failed: {status:?}"
+    );
+    assert_eq!(jobs(&scripted), 0, "the engine was never asked");
+    assert_eq!(
+        secrets.read_count(&SecretRef::Keyring(other_entry())),
+        0,
+        "the new repository's password isn't read"
+    );
+}
+
+/// A scheduled run that waited for its keyring, whose plan kept its alias
+/// while the repository behind the alias changed — another recorded ID —
+/// doesn't start, and the other repository's password isn't read for it:
+/// the comparison of the recorded IDs comes before the build that
+/// resolves it (#1221, decision 135).
+#[tokio::test]
+async fn a_run_whose_alias_now_names_another_repository_reads_no_new_password() {
+    capture();
+    let started = domain::Timestamp::from_second(1_800_000_000).expect("a timestamp");
+    let clock = Arc::new(FakeClock::new(started));
+    let secrets = Arc::new(FakeSecrets::new());
+    keyring_locked_until(
+        &secrets,
+        &clock,
+        started + domain::SignedDuration::from_secs(60),
+    );
+    let store = Arc::new(app::fakes::InMemoryOperationStore::new());
+    let (runner, _heard, scripted, home) =
+        keyring_parked_runner(secrets.clone(), clock.clone(), store).await;
+    let config = runner.config.load().await.expect("the configuration reads");
+    save_config(&runner, &with_demo(&config, demo_opened)).await;
+    let place = runner
+        .queue
+        .push(&home, domain::planning::Concurrency::default());
+    let unlock = app::secrets::UnlockWait::new(
+        clock.clone(),
+        started + domain::SignedDuration::from_secs(600),
+    );
+    PlanRuns::start(&runner, &home, Trigger::Schedule, place, Some(unlock)).await;
+    until_it_waits(&clock).await;
+
+    secrets.set_keyring_entry(&other_entry(), "canary-other");
+    let config = runner.config.load().await.expect("the configuration reads");
+    save_config(&runner, &with_demo(&config, demo_now_other)).await;
+    clock.advance(domain::SignedDuration::from_secs(60));
+    until_logged(&["home", "didn't start", "another repository"]).await;
+    assert_eq!(jobs(&scripted), 0, "the engine was never asked");
+    assert_eq!(
+        secrets.read_count(&SecretRef::Keyring(other_entry())),
+        0,
+        "the other repository's password isn't read"
+    );
+}
+
+/// A queued backup whose run waited for its keyring, whose plan kept its
+/// alias while the repository behind the alias changed, ends unrun, and
+/// the other repository's password isn't read for it (#1221, decision
+/// 135).
+#[tokio::test]
+async fn a_resumed_run_whose_alias_now_names_another_repository_reads_no_new_password() {
+    capture();
+    let started = domain::Timestamp::from_second(1_800_000_000).expect("a timestamp");
+    let clock = Arc::new(FakeClock::new(started));
+    let secrets = Arc::new(FakeSecrets::new());
+    keyring_locked_until(
+        &secrets,
+        &clock,
+        started + domain::SignedDuration::from_secs(60),
+    );
+    let store = Arc::new(app::fakes::InMemoryOperationStore::new());
+    let (runner, _heard, scripted, _home) =
+        keyring_parked_runner(secrets.clone(), clock.clone(), store.clone()).await;
+    let config = runner.config.load().await.expect("the configuration reads");
+    save_config(&runner, &with_demo(&config, demo_opened)).await;
+    let queued = queued_home_backup(0x1226, Some(repository_id()));
+    store
+        .save(&queued, None)
+        .await
+        .expect("the queued backup is saved");
+    let unlock = app::secrets::UnlockWait::new(
+        clock.clone(),
+        started + domain::SignedDuration::from_secs(600),
+    );
+    PlanRuns::resume(&runner, queued.clone(), Some(unlock)).await;
+    until_it_waits(&clock).await;
+
+    secrets.set_keyring_entry(&other_entry(), "canary-other");
+    let config = runner.config.load().await.expect("the configuration reads");
+    save_config(&runner, &with_demo(&config, demo_now_other)).await;
+    clock.advance(domain::SignedDuration::from_secs(60));
+    let status = until_ended(&store, queued.id()).await;
+    assert!(
+        matches!(
+            status,
+            domain::execution::OperationStatus::Failed {
+                reason: domain::execution::FailureReason::DaemonStopped,
+            }
+        ),
+        "the queued backup ends failed: {status:?}"
+    );
+    assert_eq!(jobs(&scripted), 0, "the engine was never asked");
+    assert_eq!(
+        secrets.read_count(&SecretRef::Keyring(other_entry())),
+        0,
+        "the other repository's password isn't read"
+    );
+}
+
+/// A scheduled run refused as locked for one repository, whose plan moved
+/// to another before the parked run looked at the configuration again,
+/// resolves no secret of the other: the repository it was refused for
+/// is compared with the plan's before anything is read (#1221, decision
+/// 135). Whether it then runs on the new repository is open (#1247).
+#[tokio::test]
+async fn a_parked_run_whose_plan_moved_before_it_waited_reads_no_new_password() {
+    capture();
+    let started = domain::Timestamp::from_second(1_800_000_000).expect("a timestamp");
+    let clock = Arc::new(FakeClock::new(started));
+    let secrets = Arc::new(FakeSecrets::new());
+    keyring_locked_until(
+        &secrets,
+        &clock,
+        started + domain::SignedDuration::from_secs(3600),
+    );
+    secrets.set_keyring_entry(&other_entry(), "canary-other");
+    let store = Arc::new(app::fakes::InMemoryOperationStore::new());
+    let (mut runner, _heard, scripted, home) =
+        keyring_parked_runner(secrets.clone(), clock.clone(), store).await;
+    let config = runner.config.load().await.expect("the configuration reads");
+    runner.config = Arc::new(ChangesAfterFirstLoad::new(
+        config.clone(),
+        home_on_other(&config),
+    ));
+    let place = runner
+        .queue
+        .push(&home, domain::planning::Concurrency::default());
+    let unlock = app::secrets::UnlockWait::new(
+        clock.clone(),
+        started + domain::SignedDuration::from_secs(600),
+    );
+    PlanRuns::start(&runner, &home, Trigger::Schedule, place, Some(unlock)).await;
+
+    until_logged(&["home", "didn't start", "another repository"]).await;
+    assert_eq!(jobs(&scripted), 0, "the engine was never asked");
+    assert_eq!(
+        secrets.read_count(&SecretRef::Keyring(other_entry())),
+        0,
+        "the new repository's password isn't read"
+    );
+}
+
+/// A queued backup refused as locked on the repository it was recorded
+/// on, whose plan moved before the parked run looked at the configuration
+/// again, ends unrun and resolves no secret of the other repository: its
+/// recorded repository is compared with the plan's before anything is
+/// read (#1221, decision 135).
+#[tokio::test]
+async fn a_parked_resumed_run_whose_plan_moved_before_it_waited_reads_no_new_password() {
+    capture();
+    let started = domain::Timestamp::from_second(1_800_000_000).expect("a timestamp");
+    let clock = Arc::new(FakeClock::new(started));
+    let secrets = Arc::new(FakeSecrets::new());
+    keyring_locked_until(
+        &secrets,
+        &clock,
+        started + domain::SignedDuration::from_secs(3600),
+    );
+    secrets.set_keyring_entry(&other_entry(), "canary-other");
+    let store = Arc::new(app::fakes::InMemoryOperationStore::new());
+    let (mut runner, _heard, scripted, _home) =
+        keyring_parked_runner(secrets.clone(), clock.clone(), store.clone()).await;
+    let config = with_demo(
+        &runner.config.load().await.expect("the configuration reads"),
+        demo_opened,
+    );
+    runner.config = Arc::new(ChangesAfterFirstLoad::new(
+        config.clone(),
+        home_on_other(&config),
+    ));
+    let queued = queued_home_backup(0x1227, Some(repository_id()));
+    store
+        .save(&queued, None)
+        .await
+        .expect("the queued backup is saved");
+    let unlock = app::secrets::UnlockWait::new(
+        clock.clone(),
+        started + domain::SignedDuration::from_secs(600),
+    );
+    PlanRuns::resume(&runner, queued.clone(), Some(unlock)).await;
+
+    let status = until_ended(&store, queued.id()).await;
+    assert!(
+        matches!(
+            status,
+            domain::execution::OperationStatus::Failed {
+                reason: domain::execution::FailureReason::DaemonStopped,
+            }
+        ),
+        "the queued backup ends failed: {status:?}"
+    );
     assert_eq!(jobs(&scripted), 0, "the engine was never asked");
     assert_eq!(
         secrets.read_count(&SecretRef::Keyring(other_entry())),
