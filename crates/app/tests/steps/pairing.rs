@@ -25,6 +25,9 @@ use domain::{AgentId, SignedDuration, Timestamp, Uuid};
 
 use super::Agent;
 
+#[path = "pairing_dialog.rs"]
+mod dialog;
+
 const EXPORTER: [u8; 32] = [0xee; 32];
 
 /// One hub: its registry, its key files, its keys and its clock.
@@ -37,18 +40,28 @@ struct Hub {
 
 impl Hub {
     async fn new(seed: u64) -> Self {
+        Self::with_access(seed, None).await
+    }
+
+    /// A hub whose sign-in by the admin password is on when `access` is
+    /// given.
+    async fn with_access(seed: u64, access: Option<Arc<app::access::Access>>) -> Self {
         let registry = Arc::new(InMemoryAgentRegistry::new());
         let clock = Arc::new(FakeClock::new(
             Timestamp::from_second(1_800_000_000).unwrap(),
         ));
-        let pairing = Arc::new(HubPairing::new(
+        let pairing = HubPairing::new(
             registry.clone(),
             Arc::new(InMemoryIdentity::default()),
             Arc::new(FakeSigning),
             Arc::new(SeededRandom::new(seed)),
             clock.clone(),
             "0.5.0-hub".to_owned(),
-        ));
+        );
+        let pairing = Arc::new(match access {
+            Some(access) => pairing.with_access(access),
+            None => pairing,
+        });
         let keys = pairing.keys().await.expect("the hub's keys");
         Self {
             registry,
@@ -162,6 +175,8 @@ pub struct PairingWorld {
     connections: Vec<Result<Connected, ConnectFailure>>,
     /// The hub's counter for the first agent after each connection.
     counters: Vec<u64>,
+    /// What the hub answered the last token asked for on its page.
+    asked: Option<Result<app::pairing::MadeToken, app::pairing::TokenAskRefused>>,
 }
 
 impl std::fmt::Debug for PairingWorld {

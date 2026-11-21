@@ -118,12 +118,64 @@ fn a_plain_address_with_a_pinned_certificate_is_refused() {
     );
 }
 
+/// The same table as `crates/web/src/pairing/tests.rs`, so the page warns
+/// of the hosts an agent takes for this computer: keep the two identical.
+/// A part with a leading `0` or `0x` is read apart by resolvers (octal by
+/// glibc, decimal by macOS in four parts), so it is never loopback.
 #[test]
-fn loopback_is_localhost_or_a_loopback_address() {
-    for host in ["localhost", "LOCALHOST", "127.0.0.1", "127.255.0.1", "::1"] {
+fn loopback_is_localhost_or_a_loopback_address_in_a_form_every_resolver_reads_alike() {
+    for host in [
+        "localhost",
+        "LOCALHOST",
+        "127.0.0.1",
+        "127.255.0.1",
+        "::1",
+        "127.1",
+        "127.0.1",
+        "2130706433",
+    ] {
         assert!(is_loopback(host), "{host}");
     }
-    for host in ["hub.example", "10.0.0.1", "::", "fe80::1", "localhost."] {
+    for host in [
+        "hub.example",
+        "10.0.0.1",
+        "::",
+        "fe80::1",
+        "localhost.",
+        "128.1",
+        "0x80.1",
+        "2130706431",
+        "127.256.0.1",
+        "127.0.0.0.1",
+        "127..1",
+        "127.",
+        "0x",
+        "08.1",
+        "0x7f.1",
+        "0177.0.0.1",
+        "0177.0.1",
+        "127.0.0.01",
+        "0x7f.0.0.1",
+        "+127.1",
+    ] {
         assert!(!is_loopback(host), "{host}");
     }
+}
+
+#[test]
+fn a_plain_address_to_loopback_in_shorthand_is_routed_plain() {
+    assert_eq!(
+        route("http://127.1:9898", TokenTls::Ca).map(|route| route.session),
+        Ok(RouteSession::Plain)
+    );
+}
+
+/// macOS reads `0177.0.0.1` as `177.0.0.1`, beyond this computer: a plain
+/// address in a form resolvers read apart is refused.
+#[test]
+fn a_plain_address_in_a_form_resolvers_read_apart_is_refused() {
+    assert_eq!(
+        route("http://0177.0.0.1:9898", TokenTls::Ca).map(|route| route.session),
+        Err(RouteRefused::PlainOffLoopback)
+    );
 }

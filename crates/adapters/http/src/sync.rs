@@ -169,6 +169,11 @@ mod served {
                 })),
             }
         }
+
+        /// The hub's pairing, when this daemon serves as a hub.
+        pub(crate) fn pairing(&self) -> Option<&Arc<HubPairing>> {
+            self.served.as_ref().map(|served| &served.pairing)
+        }
     }
 
     pub(super) fn routes<S>(hub: &SyncHub) -> Option<Router<S>>

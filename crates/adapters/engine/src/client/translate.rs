@@ -444,6 +444,12 @@ pub(super) fn translate(event: WorkerEvent, redactor: &Redactor) -> Option<Engin
                 | ErrorCode::HubLinkLost
                 | ErrorCode::GenerationLower
                 | ErrorCode::ProtocolOutOfDate
+                | ErrorCode::PairingNeedsSignIn
+                | ErrorCode::HubAddressInvalid
+                | ErrorCode::PairingTokenLife
+                | ErrorCode::PairingTokenLimit
+                | ErrorCode::PairingTokenUnknown
+                | ErrorCode::HubUnavailable
                 | ErrorCode::Unknown => FailureReason::EngineFailed { detail },
             })
         }

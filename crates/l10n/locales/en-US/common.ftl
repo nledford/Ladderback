@@ -629,6 +629,25 @@ error-generation-lower = The { -hub } offered an older state than this machine h
 # than the other can use.
 error-protocol-out-of-date = The { -hub } is on an older release than this machine can use, or a newer one. This machine keeps backing up. Update whichever side is older.
 
+# A pairing token was asked for on the hub's page from another computer
+# while sign-in is off, so there is no password to confirm it with.
+error-pairing-needs-sign-in = Pairing a machine from another computer needs sign-in to be on, so nothing was made. Set an admin password under Settings, start { -brand-name } again, then sign in and try again.
+
+# The address for a pairing token isn't one a machine can use.
+error-hub-address-invalid = That address isn't one a { -machine } can use. Type it as { "https://" }, then the host name and the port, such as { "https://hub.example:9443" }.
+
+# A pairing token's life outside what the hub allows was asked for.
+error-pairing-token-life = A pairing token lives from 5 minutes to 24 hours. Choose a life in that range.
+
+# As many pairing tokens as the hub keeps are unused already.
+error-pairing-token-limit = The { -hub } has as many unused pairing tokens as it keeps. Wait until one lapses, then make the new one.
+
+# No unused pairing token has the ID asked for.
+error-pairing-token-unknown = That pairing token isn't waiting any more: it was used, it lapsed or it was canceled already.
+
+# The hub couldn't read or keep its key or its tokens.
+error-hub-unavailable = The { -hub } couldn't read or keep its key or its pairing tokens. Its log says why.
+
 # This machine doesn't maintain the repository: its entry doesn't ask this
 # machine to maintain it, so a forget, a prune, a check or an adoption, or the
 # preview of one, was refused and nothing in the repository was changed. The

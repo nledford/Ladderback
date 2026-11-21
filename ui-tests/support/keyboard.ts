@@ -102,6 +102,20 @@ export function whereFocusIs(page: Page): Promise<string> {
   });
 }
 
+/** Waits, within the step's patience, until `locator` is the focused
+ *  element: focus a page moves once an answer is in, or in a frame (a dialog
+ *  closing, a button handing it on), comes a moment after the step before
+ *  it. When it doesn't come, says where focus is, then Playwright's own
+ *  words, which also tell of a locator that finds no element or several. */
+export async function focusComesTo(page: Page, locator: Locator, description: string): Promise<void> {
+  try {
+    await expect(locator).toBeFocused();
+  } catch (error) {
+    const words = error instanceof Error ? error.message : String(error);
+    assert.fail(`expected focus on ${description}: it is ${await whereFocusIs(page)}\n${words}`);
+  }
+}
+
 /** Presses `key` until focus is on the one element `target` finds, or, given
  *  `reached`, until it says so. Each press but one to the header itself must
  *  stay out of the header and the skip link: a walk on the page's content

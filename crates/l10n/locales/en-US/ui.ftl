@@ -809,6 +809,13 @@ ui-gallery-spinner-end = Loading at the end of the line…
 # it.
 ui-gallery-spinner-save = Save the demo notes
 
+# The heading of the gallery's fingerprint demo (§4.5): a key's fingerprint
+# in groups of four, spoken a character at a time.
+ui-gallery-fingerprint-heading = Fingerprint
+
+# The name of the demo's fingerprint, the shape of a hub key's.
+ui-gallery-fingerprint-name = Demo { -hub } key fingerprint
+
 # The heading of the gallery's steps demo (§4.5): a process's steps in
 # order, each with its state, and where the process has reached.
 ui-gallery-steps-heading = Steps
@@ -3196,6 +3203,124 @@ ui-api-token-copied = Copied.
 
 # Said in the dialog when the browser would not let the page write to the clipboard, as on a page not served over HTTPS or from this computer.
 ui-api-token-copy-failed = The browser would not let the page copy it. Select the token in the field and copy it yourself.
+
+## Settings' "Machines" tab, only on a hub (decision 121): the pairing token a
+## person makes for another machine, confirmed by a step-up, shown once.
+
+# The tab and the heading of the section of Settings that makes pairing tokens. The same word as the term -machine in its plural, written out because a heading starts with a capital letter.
+ui-agents-heading = Machines
+
+# What that section says above its form.
+ui-agents-intro = To pair another { -machine } with this { -hub }, make a pairing token here and give it to { "ladderback pair" } on that { -machine }. A token works once, for a few minutes, and only for the address it names.
+
+# The heading of the form that makes a pairing token.
+ui-pairing-new-heading = Make a pairing token
+
+# The label of the field of the address the other machine will reach this hub at.
+ui-pairing-address-label = Address { -machine(form: "other") } will use
+
+# The hint under that field.
+ui-pairing-address-hint = The address another { -machine } reaches this { -hub } at, as { "https://hub.example:9443" }. It goes into the token.
+
+# Said under the address when it names this computer alone, as localhost or 127.0.0.1.
+ui-pairing-warning-loopback = This address is loopback: only this computer can reach it, so another { -machine } can't use the token. Type the address other { -machine(form: "other") } reach this { -hub } at.
+
+# Said under the address when it starts with http:// and isn't loopback.
+ui-pairing-warning-plain = This address is plain { "http://" }, which a { -machine } refuses: its key would cross the network unprotected. Use the { "https://" } address.
+
+# Says which certificate a token tells the other machine to trust. Only one is offered while the hub serves no certificate of its own.
+ui-pairing-certificate = The token trusts a certificate authority's certificate for this address, as the system of the other { -machine } does. This { -hub } serves no certificate of its own yet, so no token can pin one.
+
+# The label of the field of how long the token works.
+ui-pairing-life-label = Life in minutes
+
+# The hint under that field.
+ui-pairing-life-hint = From 5 to 1440 minutes. A token no { -machine } has used by then lapses.
+
+# Said under the life field when what is typed isn't a whole number of minutes.
+ui-pairing-life-invalid = Type the life as a whole number of minutes, from 5 to 1440.
+
+# The label of the field a step-up with sign-in off asks for: the hub key's ID, which the section shows.
+ui-pairing-key-id-label = Hub key ID
+
+# The hint under that field, which shows the key ID to type.
+ui-pairing-key-id-hint = To confirm, type this { -hub } key's ID:
+
+# Said when the step-up is wrong: no token was made.
+ui-pairing-step-up-failed = That isn't right, so no token was made. Try again.
+
+# The button that makes the token.
+ui-pairing-make = Make a pairing token
+
+# The title of the dialog that shows a new pairing token, the only time it is shown.
+ui-pairing-dialog-title = Copy the pairing token
+
+# What that dialog says above the token.
+ui-pairing-dialog-body = Give this token to { "ladderback pair" } on the other { -machine } before it lapses. It is shown only this once. Check there that the { -hub } key's fingerprint is the one below.
+
+# The name of the fingerprint of the hub's key, as the dialog lists it.
+ui-pairing-fingerprint = Hub key fingerprint
+
+# The name of the address the token names, as the dialog lists it.
+ui-pairing-address = Address
+
+# The name of the certificate the token trusts, as the dialog lists it.
+ui-pairing-certificate-label = Certificate
+
+# What the dialog lists as the certificate the token trusts.
+ui-pairing-certificate-ca = A certificate authority's certificate
+
+# The name of when the token lapses, as the dialog lists it.
+ui-pairing-lapses-label = Lapses
+
+# When the token lapses, counted down while the dialog is open.
+# $when (text): the time it lapses, in this computer's zone.
+# $offset (text): that zone's offset from UTC, as UTC+02:00.
+# $minutes (number): the whole minutes left, rounded up.
+ui-pairing-lapses = { $when } ({ $offset }), in { $minutes ->
+    [one] { $minutes } minute
+   *[other] { $minutes } minutes
+  }
+
+# The name of the token's text in the dialog.
+ui-pairing-token = The pairing token
+
+# The button that copies the token to the clipboard.
+ui-pairing-copy = Copy the token
+
+# Said in the dialog once the token is on the clipboard.
+ui-pairing-copied = Copied.
+
+# Said in the dialog when the browser would not let the page write to the clipboard.
+ui-pairing-copy-failed = The browser would not let the page copy it. Select the token and copy it yourself.
+
+# The button that cancels the token before any machine uses it.
+ui-pairing-cancel = Cancel this token
+
+# Said beside the dialog's Close button.
+ui-pairing-close-note = Closing this dialog cancels the token if no { -machine } has used it.
+
+# Said in the dialog in place of the token once it is canceled.
+ui-pairing-canceled = The token is canceled. No { -machine } can use it.
+
+# Said in the dialog in place of the token once it lapses.
+# $when (text): the time it lapsed, in this computer's zone.
+ui-pairing-lapsed = Lapsed at { $when }. Make a new token to pair a { -machine }.
+
+# The button that closes the dialog once its token is canceled or lapsed, back to the form.
+ui-pairing-make-new = Make a new token
+
+# Said on the page once the dialog is closed and the hub canceled the token no machine had used.
+ui-pairing-closed-canceled = The unused pairing token was canceled.
+
+# Said on the page once the dialog is closed and the hub refused or didn't answer the cancel of the token no machine had used.
+ui-pairing-closed-not-canceled = The { -hub } couldn't cancel the unused pairing token, so it still works until it lapses.
+
+# Said on the page when the hub refused or didn't answer the cancel of a closed dialog's token after the dialog showed a later one.
+ui-pairing-earlier-not-canceled = The { -hub } couldn't cancel an earlier unused pairing token, so it still works until it lapses.
+
+# Said when the hub didn't answer the page's request about a pairing token, or answered with what isn't one.
+ui-pairing-unanswered = The { -hub } didn't answer. Try again.
 
 ## Settings' "Dry-run allowlist" tab (decision 89): the folders a plan dry
 ## run an AI agent asks for may read, which only a person sets.
