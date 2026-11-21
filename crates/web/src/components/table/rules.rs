@@ -363,6 +363,141 @@ impl Name {
     }
 }
 
+/// How a table's columns after its row header's stand, as the reader chose
+/// them in its Columns panel (decision 140): their order, and which of
+/// them are hidden. A column is told by its place among the columns its
+/// caller gives (`0`, the first after the row header's), whatever place
+/// the reader has moved it to. Until the reader changes it, the caller's
+/// order with every column shown ([`Layout::given`]).
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct Layout {
+    /// The caller's places, in the order the table shows them.
+    order: Vec<usize>,
+    /// Whether each column, by its caller's place, is hidden.
+    hidden: Vec<bool>,
+}
+
+/// Which way a Move button moves its column in the Columns panel's list:
+/// up, toward the row header, or down, toward the table's end.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Step {
+    Up,
+    Down,
+}
+
+impl Layout {
+    /// The caller's order of its `count` columns, every one shown.
+    pub fn given(count: usize) -> Self {
+        let _ = count;
+        todo!()
+    }
+
+    /// The layout this browser `kept` for a table whose columns' ids are
+    /// `ids`, in the caller's order. What the browser kept is outside
+    /// input: an id no column has any more drops, a column it doesn't name
+    /// (one a later release adds) comes after the others, shown, in the
+    /// caller's order, and a value that isn't one Ladderback keeps (an id
+    /// named twice, words that are no id, more than the cap) is the given
+    /// layout.
+    pub fn from_kept(kept: Option<&str>, ids: &[&str]) -> Self {
+        let _ = (kept, ids);
+        todo!()
+    }
+
+    /// What the browser keeps for the layout of a table whose columns' ids
+    /// are `ids`: each id in its order, a hidden one after a `!`, between
+    /// commas (`size,!changed,files`), or nothing for the given layout,
+    /// which forgets the one kept.
+    pub fn to_keep(&self, ids: &[&str]) -> Option<String> {
+        let _ = ids;
+        todo!()
+    }
+
+    /// Every column, shown or hidden, in its order: the Columns panel's
+    /// list.
+    pub fn order(&self) -> &[usize] {
+        todo!()
+    }
+
+    /// The columns the table shows, in their order.
+    pub fn shown(&self) -> Vec<usize> {
+        todo!()
+    }
+
+    /// Whether the table shows `column`; one it doesn't have isn't.
+    pub fn is_shown(&self, column: usize) -> bool {
+        let _ = column;
+        todo!()
+    }
+
+    /// Where `column` stands in the order, from 0.
+    pub fn position(&self, column: usize) -> Option<usize> {
+        let _ = column;
+        todo!()
+    }
+
+    /// The layout with `column` shown or hidden. Every column but the row
+    /// header's may be hidden; the row header always shows.
+    pub fn showing(&self, column: usize, shown: bool) -> Self {
+        let _ = (column, shown);
+        todo!()
+    }
+
+    /// Whether `column` can move a `step`: not up from the first place, nor
+    /// down from the last.
+    pub fn can_move(&self, column: usize, step: Step) -> bool {
+        let _ = (column, step);
+        todo!()
+    }
+
+    /// The layout with `column` moved one place a `step`; the same where it
+    /// can't move so.
+    pub fn moved(&self, column: usize, step: Step) -> Self {
+        let _ = (column, step);
+        todo!()
+    }
+
+    /// The layout with `column` moved to the place `to`, from 0, or the
+    /// last place where `to` is past it.
+    pub fn moved_to(&self, column: usize, to: usize) -> Self {
+        let _ = (column, to);
+        todo!()
+    }
+}
+
+/// The gap of the Columns panel's list a pointer at `y` stands at: 0 above
+/// the first item's middle, one more past each item's middle, `middles`
+/// the items' middles from the top.
+pub fn gap_at(middles: &[f64], y: f64) -> usize {
+    let _ = (middles, y);
+    todo!()
+}
+
+/// The place a column dragged from the place `from` takes, dropped at the
+/// gap `gap` ([`gap_at`]): the gap counts the column itself, which leaves
+/// its place as it moves.
+pub fn drop_place(from: usize, gap: usize) -> usize {
+    let _ = (from, gap);
+    todo!()
+}
+
+/// The sort the table keeps once its columns are laid out as `layout`:
+/// none, the caller's order, once the column it sorts by (`Sorted`
+/// counts the row header's as 0) is hidden, so no row is ordered by a
+/// value the table no longer shows or says (decision 140).
+pub fn sort_kept(sorted: Option<Sorted>, layout: &Layout) -> Option<Sorted> {
+    let _ = (sorted, layout);
+    todo!()
+}
+
+/// Whether a change to the cued column of a row is seen as it comes, and
+/// so marks nothing: focus is in the row (`focused`), or the column is
+/// hidden (`!cue_shown`), where no cell could say the mark (decision 140).
+pub fn seen_as_it_comes(focused: bool, cue_shown: bool) -> bool {
+    let _ = (focused, cue_shown);
+    todo!()
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -733,5 +868,208 @@ mod tests {
         assert!(!marks.is_unseen(&"home"));
         assert!(marks.is_unseen(&"docs"));
         assert_eq!(marks.see_all(), 1);
+    }
+
+    const IDS: [&str; 4] = ["size", "changed", "files", "actions"];
+    const CHANGED: usize = 1;
+    const FILES_PLACE: usize = 2;
+    const ACTIONS: usize = 3;
+
+    fn all_hidden() -> Layout {
+        (0..4).fold(Layout::given(4), |layout, column| {
+            layout.showing(column, false)
+        })
+    }
+
+    #[test]
+    fn the_given_layout_shows_every_column_in_the_callers_order() {
+        let given = Layout::given(4);
+        assert_eq!(given.order(), [0, 1, 2, 3]);
+        assert_eq!(given.shown(), [0, 1, 2, 3]);
+        assert!(given.is_shown(ACTIONS));
+        assert!(!given.is_shown(4));
+        assert_eq!(given.position(FILES_PLACE), Some(2));
+        assert_eq!(given.position(4), None);
+    }
+
+    #[test]
+    fn a_hidden_column_keeps_its_place_in_the_list_and_leaves_the_table() {
+        let hidden = Layout::given(4).showing(CHANGED, false);
+        assert_eq!(hidden.order(), [0, 1, 2, 3]);
+        assert_eq!(hidden.shown(), [0, 2, 3]);
+        assert!(!hidden.is_shown(CHANGED));
+        assert_eq!(hidden.showing(CHANGED, true), Layout::given(4));
+        assert_eq!(hidden.showing(4, false), hidden);
+    }
+
+    #[test]
+    fn every_column_after_the_row_headers_may_be_hidden() {
+        let none = all_hidden();
+        assert!(none.shown().is_empty());
+        assert_eq!(none.order(), [0, 1, 2, 3]);
+    }
+
+    #[test]
+    fn a_column_moves_one_place_up_or_down_and_never_past_an_end() {
+        let given = Layout::given(4);
+        assert_eq!(given.moved(CHANGED, Step::Up).order(), [1, 0, 2, 3]);
+        assert_eq!(given.moved(CHANGED, Step::Down).order(), [0, 2, 1, 3]);
+        assert!(!given.can_move(0, Step::Up));
+        assert!(given.can_move(0, Step::Down));
+        assert!(given.can_move(ACTIONS, Step::Up));
+        assert!(!given.can_move(ACTIONS, Step::Down));
+        assert!(!given.can_move(4, Step::Up));
+        assert_eq!(given.moved(0, Step::Up), given);
+        assert_eq!(given.moved(ACTIONS, Step::Down), given);
+        assert_eq!(given.moved(4, Step::Down), given);
+    }
+
+    #[test]
+    fn a_moved_column_keeps_whether_it_is_hidden() {
+        let moved = Layout::given(4)
+            .showing(CHANGED, false)
+            .moved(CHANGED, Step::Down);
+        assert_eq!(moved.order(), [0, 2, 1, 3]);
+        assert_eq!(moved.shown(), [0, 2, 3]);
+        assert_eq!(moved.position(CHANGED), Some(2));
+    }
+
+    #[test]
+    fn a_column_moved_to_a_place_takes_it_or_the_last_place_past_the_end() {
+        let given = Layout::given(4);
+        assert_eq!(given.moved_to(ACTIONS, 0).order(), [3, 0, 1, 2]);
+        assert_eq!(given.moved_to(0, 2).order(), [1, 2, 0, 3]);
+        assert_eq!(given.moved_to(0, 9).order(), [1, 2, 3, 0]);
+        assert_eq!(given.moved_to(CHANGED, 1), given);
+        assert_eq!(given.moved_to(4, 0), given);
+    }
+
+    #[test]
+    fn the_given_layout_keeps_nothing_and_a_changed_one_keeps_its_ids_in_order() {
+        assert_eq!(Layout::given(4).to_keep(&IDS), None);
+        let changed = Layout::given(4)
+            .moved(FILES_PLACE, Step::Up)
+            .showing(CHANGED, false);
+        assert_eq!(
+            changed.to_keep(&IDS).as_deref(),
+            Some("size,files,!changed,actions")
+        );
+        assert_eq!(
+            Layout::from_kept(changed.to_keep(&IDS).as_deref(), &IDS),
+            changed
+        );
+    }
+
+    #[test]
+    fn a_kept_layout_is_read_back_whole() {
+        let kept = Layout::from_kept(Some("actions,!size,files,changed"), &IDS);
+        assert_eq!(kept.order(), [3, 0, 2, 1]);
+        assert_eq!(kept.shown(), [3, 2, 1]);
+    }
+
+    #[test]
+    fn a_kept_id_no_column_has_drops_and_a_column_it_misses_comes_last_shown() {
+        let kept = Layout::from_kept(Some("files,gone,!size"), &IDS);
+        assert_eq!(kept.order(), [2, 0, 1, 3]);
+        assert_eq!(kept.shown(), [2, 1, 3]);
+        assert_eq!(Layout::from_kept(Some("gone"), &IDS), Layout::given(4));
+    }
+
+    #[test]
+    fn nothing_kept_is_the_given_layout() {
+        assert_eq!(Layout::from_kept(None, &IDS), Layout::given(4));
+    }
+
+    #[test]
+    fn a_kept_value_ladderback_doesnt_keep_is_the_given_layout() {
+        for junk in [
+            "",
+            "size,size",
+            "size,!size",
+            "size,,files",
+            "Size",
+            "size;files",
+            "!!size",
+            "size ,files",
+            "{\"order\":[1]}",
+        ] {
+            assert_eq!(
+                Layout::from_kept(Some(junk), &IDS),
+                Layout::given(4),
+                "{junk:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn a_kept_value_past_the_cap_is_the_given_layout() {
+        // Well formed, its ids ones no column has, which drop: 64 entries
+        // are the most read, the 65th is past the cap.
+        let gone = |count: usize| vec!["gone"; count].join(",");
+        let at_cap = format!("files,{}", gone(63));
+        assert_eq!(Layout::from_kept(Some(&at_cap), &IDS).order(), [2, 0, 1, 3]);
+        let past_cap = format!("files,{}", gone(64));
+        assert_eq!(Layout::from_kept(Some(&past_cap), &IDS), Layout::given(4));
+        let longest_id = "a".repeat(64);
+        assert_eq!(
+            Layout::from_kept(Some(&format!("files,{longest_id}")), &IDS).order(),
+            [2, 0, 1, 3]
+        );
+        let long_id = "a".repeat(65);
+        assert_eq!(
+            Layout::from_kept(Some(&format!("files,{long_id}")), &IDS),
+            Layout::given(4)
+        );
+    }
+
+    #[test]
+    fn ids_may_hold_digits_and_hyphens() {
+        let ids = ["last-run", "files2"];
+        assert_eq!(
+            Layout::from_kept(Some("files2,!last-run"), &ids).order(),
+            [1, 0]
+        );
+    }
+
+    #[test]
+    fn a_pointer_stands_at_the_gap_past_the_middles_above_it() {
+        let middles = [10.0, 30.0, 50.0];
+        assert_eq!(gap_at(&middles, 0.0), 0);
+        assert_eq!(gap_at(&middles, 10.0), 0);
+        assert_eq!(gap_at(&middles, 11.0), 1);
+        assert_eq!(gap_at(&middles, 49.0), 2);
+        assert_eq!(gap_at(&middles, 99.0), 3);
+        assert_eq!(gap_at(&[], 5.0), 0);
+    }
+
+    #[test]
+    fn a_column_dropped_below_its_own_place_takes_the_gap_less_itself() {
+        assert_eq!(drop_place(1, 0), 0);
+        assert_eq!(drop_place(1, 1), 1);
+        assert_eq!(drop_place(1, 2), 1);
+        assert_eq!(drop_place(1, 4), 3);
+        assert_eq!(drop_place(0, 0), 0);
+    }
+
+    #[test]
+    fn hiding_the_sorted_column_ends_the_sort_and_hiding_another_keeps_it() {
+        let by_changed = sorted(CHANGED + 1, Direction::Descending);
+        let changed_hidden = Layout::given(4).showing(CHANGED, false);
+        assert_eq!(sort_kept(by_changed, &changed_hidden), None);
+        let files_hidden = Layout::given(4).showing(FILES_PLACE, false);
+        assert_eq!(sort_kept(by_changed, &files_hidden), by_changed);
+        let moved = Layout::given(4).moved(CHANGED, Step::Up);
+        assert_eq!(sort_kept(by_changed, &moved), by_changed);
+        let by_name = sorted(0, Direction::Ascending);
+        assert_eq!(sort_kept(by_name, &all_hidden()), by_name);
+        assert_eq!(sort_kept(None, &all_hidden()), None);
+    }
+
+    #[test]
+    fn a_change_to_a_hidden_cued_column_is_seen_as_it_comes() {
+        assert!(!seen_as_it_comes(false, true));
+        assert!(seen_as_it_comes(true, true));
+        assert!(seen_as_it_comes(false, false));
+        assert!(seen_as_it_comes(true, false));
     }
 }
