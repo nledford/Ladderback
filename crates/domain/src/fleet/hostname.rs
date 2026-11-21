@@ -96,11 +96,15 @@ fn is_format(c: char) -> bool {
     in_ranges(FORMAT, c)
 }
 
-/// Characters outside Cf that show as nothing, or as a break, in a name
-/// (#1065): Unicode 17.0's assigned default-ignorable characters that
-/// aren't format characters (the combining grapheme joiner, the Hangul
-/// fillers, the Khmer inherent vowels and the variation selectors), and the
-/// line and paragraph separators.
+/// Characters outside Cf that show as nothing, as a blank or as a break in
+/// a name (#1065): the assigned default-ignorable characters that aren't
+/// format characters (the combining grapheme joiner, the Hangul fillers,
+/// the Khmer inherent vowels and the variation selectors), checked against
+/// `unicode-security`'s Unicode 18.0 table; the line and paragraph
+/// separators; and the braille blank, which shows as a space without being
+/// one. Unassigned default-ignorable code points are kept, as other
+/// unassigned code points are, since a name holding one is flagged beside
+/// the name without it: the skeleton drops them.
 const INVISIBLE: &[(char, char)] = &[
     ('\u{034F}', '\u{034F}'),
     ('\u{115F}', '\u{1160}'),
@@ -108,6 +112,7 @@ const INVISIBLE: &[(char, char)] = &[
     ('\u{180B}', '\u{180D}'),
     ('\u{180F}', '\u{180F}'),
     ('\u{2028}', '\u{2029}'),
+    ('\u{2800}', '\u{2800}'),
     ('\u{3164}', '\u{3164}'),
     ('\u{FE00}', '\u{FE0F}'),
     ('\u{FFA0}', '\u{FFA0}'),

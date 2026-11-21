@@ -85,20 +85,32 @@ impl HostnameKey {
     }
 }
 
-/// What the hub tells lookalike hostnames by: the UTS #39 skeleton of a
-/// name's [`HostnameKey`], `skeleton(casefold(NFC(name)))` (decision 120,
-/// "Hostnames"). Two names with one skeleton look alike, as "lаptop" with a
-/// Cyrillic а looks like "Laptop", though their keys differ.
+/// What the hub tells lookalike hostnames by (decision 120, "Lookalike
+/// hostnames"): the UTS #39 skeleton of the case fold of the name's
+/// skeleton, `skeleton(casefold(skeleton(NFC(name))))`, with each run of
+/// spaces read as one. Two names with one skeleton look alike, as "lаptop"
+/// with a Cyrillic а looks like "Laptop", though their keys differ. The
+/// inner skeleton reads a capital before the case fold can change it, so a
+/// capital I is an l, as it looks, not an i.
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]
 pub struct HostnameSkeleton(String);
 
 impl HostnameSkeleton {
+    /// A skeleton starts with NFD, so the name's NFC form would change
+    /// nothing and isn't made.
     pub fn of(name: &Hostname) -> Self {
-        Self(unicode_security::skeleton(HostnameKey::of(name).as_str()).collect())
-    }
-
-    pub fn as_str(&self) -> &str {
-        &self.0
+        let folded = unicode_security::skeleton(name.as_str())
+            .collect::<String>()
+            .to_lowercase();
+        let mut skeleton = String::with_capacity(folded.len());
+        for c in unicode_security::skeleton(&folded) {
+            if !c.is_whitespace() {
+                skeleton.push(c);
+            } else if !skeleton.ends_with(' ') {
+                skeleton.push(' ');
+            }
+        }
+        Self(skeleton)
     }
 }
 
