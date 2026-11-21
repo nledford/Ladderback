@@ -23,6 +23,31 @@ thread_local! {
     static NEXT_ID: Cell<u32> = const { Cell::new(0) };
 }
 
+/// How the note is drawn, in Tailwind utilities (decision 117), logical ones
+/// only: in the top layer at the `left` and `top` the page sets (in the
+/// viewport, `position: fixed`), so no container clips it. The page's
+/// colors swapped, the small corner, flat (a popover draws no shadow of its
+/// own, and `shadow-none` would compute as five clear ones), no arrow; a
+/// step smaller than its control's text, in em, so it grows with the
+/// reader's text (1.4.4), and wrapping at about 20 of its em, or at the
+/// room the page gives it
+/// (`--room`: the viewport's width, without its scroll bar, less an edge at
+/// each end), never cut. It fades in over 100 ms and out over 60 ms, sooner,
+/// since what the reader turned from should not linger (a transition takes
+/// the duration of the state it goes to: the open one's is `open:`'s, which
+/// on this `<span>` is only `:popover-open`), with `display` and `overlay`
+/// held until the fade ends, for a reader who asks for less motion too (a
+/// fade, which the reduced-motion rule keeps); it never takes the pointer
+/// while hidden. Under forced colors it is the page's own colors, edged in
+/// its text color, so it stands apart from what it lies over.
+const NOTE: &str = "tooltip fixed inset-auto m-0 border-0 rounded-(--radius-small) \
+    bg-fg text-bg text-[0.875em] leading-[1.4] py-[0.25em] px-[0.5em] \
+    max-inline-[min(20em,var(--room,100vw))] wrap-anywhere opacity-100 \
+    transition-[opacity,display,overlay] duration-60 ease-[ease] transition-discrete \
+    open:duration-100 starting:open:opacity-0 not-open:opacity-0 not-open:pointer-events-none \
+    forced-colors:border forced-colors:border-[color:CanvasText] \
+    forced-colors:bg-[color:Canvas] forced-colors:text-[color:CanvasText]";
+
 /// A tooltip (§4.5): `tip`, a short note beside the one control its
 /// `children` are, standing on `side` of it (Above unless the caller names
 /// another) where there is room, flipping where there isn't ([`rules::place`]).
@@ -166,7 +191,7 @@ pub fn Tooltip(tip: Tip, #[prop(optional)] side: Side, children: Children) -> im
             on:pointerleave=move |event| on_pointer(event, Event::PointerOut)
         >
             {children()}
-            <span class="tooltip" node_ref=note id=id popover="manual" role=role aria-hidden=hidden>
+            <span class=NOTE node_ref=note id=id popover="manual" role=role aria-hidden=hidden>
                 {text}
             </span>
         </span>

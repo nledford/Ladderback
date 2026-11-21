@@ -555,65 +555,6 @@ main:focus {
   margin-block: calc((1lh - 1em) / 2);
 }
 
-/* A tooltip (§4.5): a short note in the top layer (`popover="manual"`),
-   placed beside its control by the page (`left` and `top`, in the
-   viewport), so no container clips it. The page's colors swapped, flat, no
-   arrow; a step smaller than its control's text, in em, so it grows with
-   the reader's text (1.4.4), and wrapping at about 20 of its em, or at the
-   room the page gives it (`--room`: the viewport's width, without its
-   scroll bar, less an edge at each end), never cut. It fades in over
-   100 ms and out over 60 ms, sooner, since what the reader turned from
-   should not linger (a transition takes the duration of the state it goes
-   to: the hidden one's here, the open one's below), for a reader who asks
-   for less motion too (a fade, which the reduced-motion rule keeps), and
-   it never takes the pointer while hidden. Under forced colors it is the
-   page's own colors, edged in its text color, so it stands apart from what
-   it lies over. */
-.tooltip {
-  position: fixed;
-  inset: auto;
-  margin: 0;
-  border: 0;
-  border-radius: var(--radius-small);
-  box-shadow: none;
-  background-color: var(--fg);
-  color: var(--bg);
-  font-size: 0.875em;
-  line-height: 1.4;
-  padding-block: 0.25em;
-  padding-inline: 0.5em;
-  max-inline-size: min(20em, var(--room, 100vw));
-  overflow-wrap: anywhere;
-  opacity: 1;
-  transition:
-    opacity 60ms,
-    display 60ms allow-discrete,
-    overlay 60ms allow-discrete;
-}
-
-.tooltip:popover-open {
-  transition-duration: 100ms;
-}
-
-@starting-style {
-  .tooltip:popover-open {
-    opacity: 0;
-  }
-}
-
-.tooltip:not(:popover-open) {
-  opacity: 0;
-  pointer-events: none;
-}
-
-@media (forced-colors: active) {
-  .tooltip {
-    background-color: Canvas;
-    color: CanvasText;
-    border: 1px solid CanvasText;
-  }
-}
-
 /* A text field (§4.5): its label above in the Label weight, its
    description, the note of its state and its error under the label, then
    the field: a 1 px edge (`--field-edge`, 3:1 or more on the page and on a
