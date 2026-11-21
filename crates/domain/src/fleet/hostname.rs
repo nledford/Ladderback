@@ -7,9 +7,10 @@ use std::fmt;
 /// The most bytes of UTF-8 a hostname has.
 pub const MAX_HOSTNAME_BYTES: usize = 255;
 
-/// 1 to 255 bytes of UTF-8 with no control, format or bidirectional-control
-/// character. Not limited to ASCII: machines are named "Nick's MacBook Pro"
-/// or in other scripts. How two names compare is the registry's rule.
+/// 1 to 255 bytes of UTF-8 with no control, format, bidirectional-control
+/// or other invisible character, and no space at either end. Not limited to
+/// ASCII: machines are named "Nick's MacBook Pro" or in other scripts. How
+/// two names compare is the registry's rule.
 #[derive(Clone, PartialEq, Eq, Hash)]
 pub struct Hostname(String);
 
@@ -19,7 +20,8 @@ pub enum InvalidHostname {
     Empty,
     TooLong,
     /// A control or format character, the bidirectional controls among
-    /// them, which can make a name show as another.
+    /// them, another character that shows as nothing, or a space at either
+    /// end, any of which can make a name show as another.
     Hidden(char),
 }
 
@@ -31,8 +33,15 @@ impl Hostname {
         if text.len() > MAX_HOSTNAME_BYTES {
             return Err(InvalidHostname::TooLong);
         }
-        if let Some(hidden) = text.chars().find(|&c| c.is_control() || is_format(c)) {
+        if let Some(hidden) = text
+            .chars()
+            .find(|&c| c.is_control() || is_format(c) || is_invisible(c))
+        {
             return Err(InvalidHostname::Hidden(hidden));
+        }
+        let ends = [text.chars().next(), text.chars().next_back()];
+        if let Some(space) = ends.into_iter().flatten().find(|c| c.is_whitespace()) {
+            return Err(InvalidHostname::Hidden(space));
         }
         Ok(Self(text.to_owned()))
     }
@@ -84,7 +93,33 @@ const FORMAT: &[(char, char)] = &[
 ];
 
 fn is_format(c: char) -> bool {
-    FORMAT
+    in_ranges(FORMAT, c)
+}
+
+/// Characters outside Cf that show as nothing, or as a break, in a name
+/// (#1065): Unicode 17.0's assigned default-ignorable characters that
+/// aren't format characters (the combining grapheme joiner, the Hangul
+/// fillers, the Khmer inherent vowels and the variation selectors), and the
+/// line and paragraph separators.
+const INVISIBLE: &[(char, char)] = &[
+    ('\u{034F}', '\u{034F}'),
+    ('\u{115F}', '\u{1160}'),
+    ('\u{17B4}', '\u{17B5}'),
+    ('\u{180B}', '\u{180D}'),
+    ('\u{180F}', '\u{180F}'),
+    ('\u{2028}', '\u{2029}'),
+    ('\u{3164}', '\u{3164}'),
+    ('\u{FE00}', '\u{FE0F}'),
+    ('\u{FFA0}', '\u{FFA0}'),
+    ('\u{E0100}', '\u{E01EF}'),
+];
+
+fn is_invisible(c: char) -> bool {
+    in_ranges(INVISIBLE, c)
+}
+
+fn in_ranges(ranges: &[(char, char)], c: char) -> bool {
+    ranges
         .iter()
         .any(|&(first, last)| (first..=last).contains(&c))
 }
