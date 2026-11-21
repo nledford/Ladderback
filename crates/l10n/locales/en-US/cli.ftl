@@ -560,6 +560,16 @@ cli-pair-no-terminal = No terminal to ask on. Compare the { -hub } key above wit
 # $fingerprint (text): this machine's own key's fingerprint, to compare on the hub.
 cli-pair-pending = Paired. The { -hub } holds this machine pending until someone approves it there. This machine's key: { $fingerprint }. Compare it with the { -hub }'s screen.
 
+# `ladderback pair <address>` on a machine that paired: the hub proved the
+# key the machine pinned at the address the person gave, so the machine
+# keeps it. The hub's own answer follows on its own line.
+# $address (text): the address the person gave.
+cli-pair-address-kept = The { -hub } proved the key this { -machine } pinned at { $address }. This { -machine } reaches it there from now on, and still tries the address in its token when that one doesn't answer.
+
+# `ladderback pair <address>` on a machine that paired: the connection at the
+# address failed, said on the line before, and the machine kept nothing of it.
+cli-pair-address-not-kept = This { -machine } kept the { -hub } addresses it had.
+
 # `ladderback hub-status` on a machine with no hub pin or no machine key.
 # `ladderback pair` is a command: keep it a string literal.
 cli-hub-status-not-paired = This machine isn't paired with a { -hub }. Pair it with { "ladderback pair" } and a token made on the { -hub }.
@@ -663,7 +673,7 @@ cli-help-pairing-token-revoke = Revoke the unused token with this token ID
 cli-help-pair = Pair this { -machine } with a { -hub }. The token is pasted at the prompt, without being shown, or read as standard input; never given as an argument
 
 # The address `pair` takes.
-cli-help-pair-address = The { -hub }'s address, when this { -machine } reaches it another way than the token's
+cli-help-pair-address = The { -hub }'s address, when this { -machine } reaches it another way than the token's. On a { -machine } that paired, the { -hub }'s new address, which needs no token
 
 # What `pair --hostname` does.
 cli-help-pair-hostname = Pair under this hostname instead of the { -machine }'s

@@ -1,9 +1,10 @@
 use std::sync::Arc;
 
 use domain::fleet::{
-    AgentEnvelope, Approval, BindingKind, Connect, EpochSeconds, FIRST_SEQUENCE, Hello, Hostname,
-    HubEnvelope, HubPin, HubRoute, Nonce, PROTOCOLS, PairAnswer, PayloadDigest, Proof, PublicKey,
-    Refused, RouteRefused, SeedFile, SignedMessage, WelcomeRefused, hello_kind, welcome_kind,
+    AgentEnvelope, Approval, Binding, BindingKind, Challenge, Connect, EpochSeconds,
+    FIRST_SEQUENCE, Hello, Hostname, HubAddress, HubEnvelope, HubPin, HubRoute, Nonce, PROTOCOLS,
+    PairAnswer, PayloadDigest, Proof, PublicKey, Refused, RouteRefused, SeedFile, SignedMessage,
+    SigningSeed, WelcomeRefused, hello_kind, welcome_kind,
 };
 use domain::{AgentId, SignedDuration};
 
@@ -13,8 +14,8 @@ use super::wire::{
     read_welcome,
 };
 use crate::ports::{
-    Clock, HubConnector, Identity, IdentityError, LinkError, Random, RandomUnavailable, Signing,
-    SigningError,
+    Clock, HubConnector, HubLink, Identity, IdentityError, LinkError, Random, RandomUnavailable,
+    Signing, SigningError,
 };
 
 /// A paired agent connecting to its hub (§7.1, §7.2; §16, decision 120,
@@ -68,6 +69,10 @@ pub enum ConnectFailure {
     Refused(Refused),
     /// The hub's `Welcome` doesn't hold, and the agent acts on none of it.
     Welcome(WelcomeRefused),
+    /// The pin has no room for the address the person gave: written with
+    /// it, it would be past the most a pin may hold, and it is kept as it
+    /// was.
+    PinFull,
     Identity(IdentityError),
     Signing(SigningError),
     Random(RandomUnavailable),
@@ -97,6 +102,15 @@ impl From<RandomUnavailable> for ConnectFailure {
     }
 }
 
+/// A connection whose hub proved the pinned key, before the agent proved
+/// anything.
+struct Opened {
+    link: Box<dyn HubLink>,
+    connect: Connect,
+    challenge: Challenge,
+    binding: Binding,
+}
+
 impl ConnectToHub {
     pub fn new(
         identity: Arc<dyn Identity>,
@@ -117,20 +131,75 @@ impl ConnectToHub {
     }
 
     /// Connects this machine, as `agent_id` under `hostname`, to the hub it
-    /// pinned at pairing, and says where the hub holds it.
+    /// pinned at pairing, and says where the hub holds it. It tries the
+    /// address the person gave, then the token's (decision 120, "Addresses
+    /// and the transport statement"), and moves on only while no hub has
+    /// proved the pinned key: once one has, its answer stands. When none
+    /// does, the failure is the first address's.
     pub async fn connect(
         &self,
         agent_id: AgentId,
         hostname: Hostname,
     ) -> Result<Connected, ConnectFailure> {
-        let (Some(pin), Some(seed)) = (
+        let (pin, seed) = self.paired().await?;
+        let addresses: Vec<HubAddress> = pin.addresses().cloned().collect();
+        let mut first = None;
+        for address in &addresses {
+            match self.open(&pin, address, agent_id).await {
+                Ok(opened) => {
+                    return self
+                        .prove(pin, &seed, opened, agent_id, hostname, false)
+                        .await;
+                }
+                Err(failure) => {
+                    first.get_or_insert(failure);
+                }
+            }
+        }
+        // A pin always has its token's address, so `first` is set here.
+        Err(first.unwrap_or(ConnectFailure::NotPaired))
+    }
+
+    /// Connects this machine to its hub at `address`, the one the person
+    /// gave it (`ladderback pair <address>`), and keeps the address in the
+    /// pin only once the hub there proved the key the machine pinned and
+    /// its `Welcome` holds. It tries no other address.
+    pub async fn connect_at(
+        &self,
+        agent_id: AgentId,
+        hostname: Hostname,
+        address: HubAddress,
+    ) -> Result<Connected, ConnectFailure> {
+        let (mut pin, seed) = self.paired().await?;
+        let opened = self.open(&pin, &address, agent_id).await?;
+        let changed = pin
+            .give_address(address)
+            .map_err(|_| ConnectFailure::PinFull)?;
+        self.prove(pin, &seed, opened, agent_id, hostname, changed)
+            .await
+    }
+
+    /// The pin and agent key seed of a paired machine.
+    async fn paired(&self) -> Result<(HubPin, SigningSeed), ConnectFailure> {
+        match (
             self.identity.pin().await?,
             self.identity.seed(SeedFile::AgentKey).await?,
-        ) else {
-            return Err(ConnectFailure::NotPaired);
-        };
-        let route = HubRoute::of(&pin.address, pin.tls).map_err(ConnectFailure::Route)?;
-        let agent_key = self.signing.public_key(&seed)?;
+        ) {
+            (Some(pin), Some(seed)) => Ok((pin, seed)),
+            _ => Err(ConnectFailure::NotPaired),
+        }
+    }
+
+    /// Opens a connection at `address` and checks the hub's `Challenge`
+    /// against the pin: until it holds, no hub there proved the pinned key,
+    /// and the agent has sent nothing it couldn't send to anyone.
+    async fn open(
+        &self,
+        pin: &HubPin,
+        address: &HubAddress,
+        agent_id: AgentId,
+    ) -> Result<Opened, ConnectFailure> {
+        let route = HubRoute::of(address, pin.tls).map_err(ConnectFailure::Route)?;
         let connect = Connect {
             agent_id,
             agent_nonce: Nonce::from_bytes(self.random.token()?),
@@ -149,6 +218,34 @@ impl ConnectToHub {
             link.exporter(),
         )
         .map_err(ConnectFailure::Challenge)?;
+        Ok(Opened {
+            link,
+            connect,
+            challenge,
+            binding,
+        })
+    }
+
+    /// Proves the agent on a connection whose hub proved the pinned key,
+    /// says `Hello`, and takes the hub's signed `Welcome`. `changed` says
+    /// the pin changed before the connection, so it is written once the
+    /// `Welcome` holds.
+    async fn prove(
+        &self,
+        pin: HubPin,
+        seed: &SigningSeed,
+        opened: Opened,
+        agent_id: AgentId,
+        hostname: Hostname,
+        changed: bool,
+    ) -> Result<Connected, ConnectFailure> {
+        let Opened {
+            mut link,
+            connect,
+            challenge,
+            binding,
+        } = opened;
+        let agent_key = self.signing.public_key(seed)?;
         // The counter is held until the hub has answered the proof.
         let attempt = self.identity.begin_attempt().await?;
         let counter = attempt.counter().get();
@@ -161,7 +258,7 @@ impl ConnectToHub {
             binding,
             counter,
         };
-        let agent_proof = self.signing.sign(&seed, &proved.to_bytes())?;
+        let agent_proof = self.signing.sign(seed, &proved.to_bytes())?;
         link.send(&proof_frame(&Proof {
             counter,
             agent_proof,
@@ -186,7 +283,7 @@ impl ConnectToHub {
             kind: &kind,
             payload: PayloadDigest::of(&payload),
         };
-        let signature = self.signing.sign(&seed, &said.to_bytes())?;
+        let signature = self.signing.sign(seed, &said.to_bytes())?;
         // A refused proof is answered before `Hello` reaches the hub, which
         // may have closed the connection: its refusal is still read.
         let hello_sent = self.clock.monotonic();
@@ -244,18 +341,21 @@ impl ConnectToHub {
             return Err(ConnectFailure::Unsigned);
         }
         let waited = self.clock.monotonic().saturating_sub(hello_sent);
-        self.take_welcome(pin, agent_key, &welcome, waited).await
+        self.take_welcome(pin, agent_key, &welcome, waited, changed)
+            .await
     }
 
     /// The agent's pin and approval after the hub's signed `welcome`,
     /// which reached it `waited` after it sent `Hello` and which it acts on
-    /// only once the welcome holds.
+    /// only once the welcome holds. The pin is written when its generation
+    /// rises or it `changed` before the connection.
     async fn take_welcome(
         &self,
         mut pin: HubPin,
         agent_key: PublicKey,
         welcome: &HubEnvelope,
         waited: SignedDuration,
+        changed: bool,
     ) -> Result<Connected, ConnectFailure> {
         if welcome.kind != welcome_kind() {
             return Err(ConnectFailure::OutOfTurn);
@@ -263,8 +363,11 @@ impl ConnectToHub {
         let read = read_welcome(&welcome.payload).map_err(|_| ConnectFailure::Unsigned)?;
         read.check(welcome.expires_at, waited, PROTOCOLS, pin.generation)
             .map_err(ConnectFailure::Welcome)?;
-        if read.generation > pin.generation {
+        let raised = read.generation > pin.generation;
+        if raised {
             pin.generation = read.generation;
+        }
+        if raised || changed {
             self.identity.write_pin(&pin).await?;
         }
         Ok(Connected {

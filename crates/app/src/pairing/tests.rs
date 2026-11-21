@@ -388,6 +388,31 @@ async fn a_pin_of_the_same_hub_is_kept() {
     assert_eq!(identity.pin().await.unwrap(), Some(pin));
 }
 
+/// A machine the hub no longer knows pairs again with a new token at the
+/// hub's new address (`ladderback pair <address>`): it keeps its pin and
+/// reaches the hub at that address from then on (decision 120,
+/// "Addresses and the transport statement").
+#[tokio::test]
+async fn pairing_again_at_another_address_keeps_that_address() {
+    let hub = Hub::new(1);
+    let keys = hub.pairing.keys().await.unwrap();
+    let identity = Arc::new(InMemoryIdentity::default());
+    let mut pin = domain::fleet::HubPin::new(
+        *keys.key(),
+        pinned(),
+        *keys.recovery_key(),
+        HubAddress::parse("https://old.example").unwrap(),
+    );
+    pin.generation = 4;
+    identity.write_pin(&pin).await.unwrap();
+    let moved = HubAddress::parse("https://hub-new.example:9443").unwrap();
+    let token = hub.token(pinned()).await.with_address(moved.clone());
+    let paired = pair(&hub, &agent(identity.clone()), token).await.unwrap();
+    pin.given_address = Some(moved);
+    assert_eq!(paired.pin, pin);
+    assert_eq!(identity.pin().await.unwrap(), Some(pin));
+}
+
 /// An agent that pins another hub sends nothing before its person
 /// confirms the change.
 #[tokio::test]

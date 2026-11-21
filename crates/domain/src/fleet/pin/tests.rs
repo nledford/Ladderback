@@ -248,3 +248,124 @@ fn a_pin_that_would_be_written_past_the_most_bytes_is_refused() {
     let read = HubPin::parse(&fits).unwrap();
     assert_eq!(read.to_text(), fits);
 }
+
+fn address(text: &str) -> HubAddress {
+    HubAddress::parse(text).unwrap()
+}
+
+/// Decision 120: the address the person gives a paired machine is kept in
+/// `hub-pin` beside the token's, written after it and read back.
+#[test]
+fn an_address_the_person_gave_is_written_after_the_tokens_and_read_back() {
+    let mut pin = pin();
+    assert!(
+        pin.give_address(address("https://hub-new.example:9898"))
+            .unwrap()
+    );
+    let written = pin.to_text();
+    assert!(
+        written.ends_with(&text(&[
+            "address = https://hub.example:9898",
+            "given-address = https://hub-new.example:9898",
+        ])),
+        "{written}"
+    );
+    assert_eq!(HubPin::parse(&written), Ok(pin.clone()));
+    assert_eq!(
+        pin.given_address,
+        Some(address("https://hub-new.example:9898"))
+    );
+}
+
+/// Decision 120: the agent tries the address the person gave, then the
+/// token's, which no later address removes.
+#[test]
+fn the_address_the_person_gave_is_tried_before_the_tokens() {
+    let mut pin = pin();
+    let tried = |pin: &HubPin| -> Vec<String> {
+        pin.addresses()
+            .map(|address| address.as_str().to_owned())
+            .collect()
+    };
+    assert_eq!(tried(&pin), ["https://hub.example:9898"]);
+    assert!(
+        pin.give_address(address("https://hub-new.example:9898"))
+            .unwrap()
+    );
+    assert_eq!(
+        tried(&pin),
+        ["https://hub-new.example:9898", "https://hub.example:9898"]
+    );
+    assert!(
+        pin.give_address(address("https://hub-newer.example:9898"))
+            .unwrap()
+    );
+    assert_eq!(
+        tried(&pin),
+        ["https://hub-newer.example:9898", "https://hub.example:9898"]
+    );
+}
+
+/// Giving the address already kept changes nothing, and giving the
+/// token's own address drops the other, so no address is tried twice.
+#[test]
+fn giving_an_address_already_kept_changes_nothing() {
+    let mut pin = pin();
+    assert!(
+        !pin.give_address(address("https://hub.example:9898"))
+            .unwrap()
+    );
+    assert_eq!(pin, self::pin());
+    assert!(
+        pin.give_address(address("https://hub-new.example:9898"))
+            .unwrap()
+    );
+    assert!(
+        !pin.give_address(address("https://hub-new.example:9898"))
+            .unwrap()
+    );
+    assert!(
+        pin.give_address(address("https://hub.example:9898"))
+            .unwrap()
+    );
+    assert_eq!(pin, self::pin());
+    assert!(!pin.to_text().contains("given-address"));
+}
+
+#[test]
+fn a_given_address_that_cant_be_read_or_is_given_twice_is_refused() {
+    let good = pin().to_text();
+    assert_eq!(
+        HubPin::parse(&format!("{good}given-address = ftp://hub.example\n")),
+        Err(PinRefused::Unreadable {
+            name: "given-address"
+        })
+    );
+    assert_eq!(
+        HubPin::parse(&format!(
+            "{good}given-address = https://a.example\ngiven-address = https://b.example\n"
+        )),
+        Err(PinRefused::Repeated {
+            name: "given-address"
+        })
+    );
+}
+
+/// A pin a given address would make too long to read again keeps what it
+/// had, so a machine never writes a pin it can't read.
+#[test]
+fn an_address_that_would_make_the_pin_too_long_is_refused() {
+    let mut text = pin().to_text();
+    let mut n = 0;
+    while text.len() + 14 <= MAX_PIN_BYTES {
+        text.push_str(&format!("x{n:07} = 1\n"));
+        n += 1;
+    }
+    let mut full = HubPin::parse(&text).unwrap();
+    assert_eq!(
+        full.give_address(address("https://hub-new.example:9898")),
+        Err(PinRefused::TooLong)
+    );
+    assert_eq!(full.given_address, None);
+    assert_eq!(full.to_text(), text);
+}
