@@ -22,9 +22,9 @@ use crate::components::banner::rules::BannerTone;
 use crate::components::button::{Content, Kind};
 use crate::components::skeleton::rules::Awaited;
 use crate::components::{
-    Alert, Banner, Button, Checkbox, Column, ErrorSummary, Name as TableName, RadioGroup,
-    Sentences, State, SummaryItem, Table, TextField, address_view, refusal_alert, runs_view,
-    say_refusals, text_field,
+    Alert, Banner, Button, Checkbox, Column, ColumnsChoice, ErrorSummary, Name as TableName,
+    RadioGroup, Sentences, State, SummaryItem, Table, TextField, address_view, refusal_alert,
+    runs_view, say_refusals, text_field,
 };
 use crate::components::{first_load, paced};
 use crate::live::reply;
@@ -583,6 +583,7 @@ fn repositories_table(
     view! {
         <Table
             name=TableName::Heading(PAGE_HEADING_ID.to_owned())
+            columns_choice=ColumnsChoice::new("repositories", Arc::clone(localizer))
             row_header=name
             columns=vec![location, password, actions]
             rows=Memo::new(move |_| rows.get().unwrap_or_default())

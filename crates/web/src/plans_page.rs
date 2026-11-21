@@ -20,9 +20,10 @@ use crate::components::ACTIONS;
 use crate::components::button::{self, Appearance, Content};
 use crate::components::skeleton::rules::Awaited;
 use crate::components::{
-    Button, Checkbox, Column, Confirmation, ErrorSummary, Name, ReviewDialog, Sentences, State,
-    SummaryItem, Table, TextField, Toast, ToastTone, Toasts, Working, dialog_refusal_alert,
-    focus_element, hand_focus_when_gone, recover_focus, refusal_alert, say_refusals, text_field,
+    Button, Checkbox, Column, ColumnsChoice, Confirmation, ErrorSummary, Name, ReviewDialog,
+    Sentences, State, SummaryItem, Table, TextField, Toast, ToastTone, Toasts, Working,
+    dialog_refusal_alert, focus_element, hand_focus_when_gone, recover_focus, refusal_alert,
+    say_refusals, text_field,
 };
 use crate::components::{first_load, paced};
 use crate::live::reply;
@@ -416,6 +417,7 @@ fn plans_table(
     view! {
         <Table
             name=Name::Heading(PAGE_HEADING_ID.to_owned())
+            columns_choice=ColumnsChoice::new("plans", Arc::clone(&localizer))
             row_header=plan
             columns=vec![repository, next_run, actions]
             rows=Memo::new(move |_| list.plans.get().unwrap_or_default())

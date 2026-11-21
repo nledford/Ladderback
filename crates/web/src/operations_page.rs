@@ -24,8 +24,8 @@ use crate::components::button::Content;
 use crate::components::skeleton::rules::Awaited;
 use crate::components::status_badge::rules::BadgeState;
 use crate::components::{
-    Button, ChangeMarks, Column, Cue, MarkAllSeen, Name as TableName, PauseUpdates, Progress,
-    Sentences, Sort, SortKey, State, StatusBadge, Table, Toast, ToastTone, Toasts,
+    Button, ChangeMarks, Column, ColumnsChoice, Cue, MarkAllSeen, Name as TableName, PauseUpdates,
+    Progress, Sentences, Sort, SortKey, State, StatusBadge, Table, Toast, ToastTone, Toasts,
     cell_sentence_view, hand_focus_when_gone, refusal_alert, runs_view, say_refusals,
 };
 use crate::components::{first_load, paced};
@@ -521,6 +521,7 @@ fn operations_table(
     view! {
         <Table
             name=TableName::Heading(PAGE_HEADING_ID.to_owned())
+            columns_choice=ColumnsChoice::new("operations", Arc::clone(localizer))
             row_header=operation
             columns=vec![status, started, result, actions]
             rows=Memo::new(move |_| page.with(|state| state.rows.clone()))

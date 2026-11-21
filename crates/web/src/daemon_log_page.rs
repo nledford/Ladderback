@@ -14,8 +14,8 @@ use crate::components::ACTIONS;
 use crate::components::button::Content;
 use crate::components::skeleton::rules::Awaited;
 use crate::components::{
-    Button, Column, Name, RadioGroup, Sentences, State, Table, Toast, ToastTone, Toasts,
-    refusal_alert, say_refusals, write_clipboard,
+    Button, Column, ColumnsChoice, Name, RadioGroup, Sentences, State, Table, Toast, ToastTone,
+    Toasts, refusal_alert, say_refusals, write_clipboard,
 };
 use crate::components::{first_load, paced};
 use crate::daemon_log::{LOG_PATH, Levels, bug_report, level_name, shown};
@@ -213,6 +213,7 @@ fn Lines(localizer: Arc<Localizer>, lines: RwSignal<Vec<LogLineDto>>) -> impl In
         <Toast localizer=Arc::clone(&localizer) toasts=toasts then_focus=COPY_ID />
         <Table
             name=Name::Heading(PAGE_HEADING_ID.to_owned())
+            columns_choice=ColumnsChoice::new("log", Arc::clone(&localizer))
             row_header=row_header
             columns=columns
             rows=rows
