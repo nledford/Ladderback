@@ -10,7 +10,9 @@
 //! The hub sends the page no event when a machine starts to wait, so the list
 //! is read again every few seconds while Settings is open (it builds every
 //! tab's panel once, so this one reads while another tab is shown too), and
-//! at once after an approval.
+//! at once after an approval. "Pause live updates" holds both tables still
+//! (A3, decision 65); what they show while paused, and what the resume says,
+//! is `machines_list.rs`'s.
 
 use std::sync::Arc;
 use std::time::Duration;
@@ -27,10 +29,13 @@ use crate::announcer::Politeness;
 use crate::components::alert::rules::AlertTone;
 use crate::components::button::Content;
 use crate::components::{
-    Alert, Button, Column, Confirmation, Fingerprint, Name, ReviewDialog, Sentences, State, StepUp,
-    StepUpField, Table, Working, dialog_refusal_alert, focus_element, hand_focus_when_gone,
+    Alert, Button, Column, Confirmation, Fingerprint, Name, PauseUpdates, ReviewDialog, Sentences,
+    State, StepUp, StepUpField, Table, Working, dialog_refusal_alert, focus_element,
+    hand_focus_when_gone,
 };
 use crate::live::reply;
+use crate::machines_list::Listed;
+use crate::pause;
 use crate::repositories::Sentence;
 use crate::routes::{refused_sentence, text_with};
 use crate::text;
@@ -47,6 +52,8 @@ const APPROVED_HEADING_ID: &str = "machines-approved-heading";
 const REVIEW_BODY_ID: &str = "machines-review-body";
 /// The review's step-up field, where focus goes when the step-up is refused.
 const STEP_UP_ID: &str = "machines-confirmation";
+/// The banner beside the pause button while the tables are paused.
+const PAUSED_ID: &str = "machines-paused";
 /// How often the list is read again while Settings is open.
 const READ_EVERY: Duration = Duration::from_secs(5);
 /// How long one read of the list may take before it counts as unanswered.
@@ -67,75 +74,36 @@ fn of_machine(localizer: &Localizer, id: l10n::MessageId, hostname: &str) -> Str
     )
 }
 
-/// The list as the page last read it, and whether a read has answered.
-#[derive(Clone, Copy)]
-struct Listed {
-    agents: RwSignal<Vec<HubAgentDto>>,
-    state: RwSignal<State>,
+/// Reads the list once into `listed`. A read that fails after one that
+/// answered keeps the rows already shown.
+async fn read(listed: Listed) {
+    let url = format!("{}{HUB_AGENTS_PATH}", ws::origin());
+    let read = ws::poll::<HubAgentsDto>(&url, READ_PATIENCE).await;
+    match read {
+        Some(read) => {
+            let _ = listed.agents.try_set(read.agents);
+            let _ = listed.state.try_set(State::Ready);
+        }
+        None => {
+            if listed.state.try_get_untracked() == Some(State::Loading) {
+                let _ = listed.state.try_set(State::Unreachable);
+            }
+        }
+    }
 }
 
-impl Listed {
-    fn new() -> Self {
-        Self {
-            agents: RwSignal::new(Vec::new()),
-            state: RwSignal::new(State::Loading),
-        }
-    }
-
-    /// Reads the list once. A read that fails after one that answered keeps
-    /// the rows already shown.
-    async fn read(self) {
-        let url = format!("{}{HUB_AGENTS_PATH}", ws::origin());
-        let read = ws::poll::<HubAgentsDto>(&url, READ_PATIENCE).await;
-        match read {
-            Some(read) => {
-                let _ = self.agents.try_set(read.agents);
-                let _ = self.state.try_set(State::Ready);
-            }
-            None => {
-                if self.state.try_get_untracked() == Some(State::Loading) {
-                    let _ = self.state.try_set(State::Unreachable);
-                }
+/// Reads the list into `listed` now and every [`READ_EVERY`] until Settings
+/// is left, paused or not: a pause holds what the page shows, not the reads.
+fn keep_reading(listed: Listed) {
+    spawn_local(async move {
+        loop {
+            read(listed).await;
+            gloo_timers::future::sleep(READ_EVERY).await;
+            if listed.agents.try_get_untracked().is_none() {
+                return;
             }
         }
-    }
-
-    /// Reads the list now and every [`READ_EVERY`] until Settings is left.
-    fn keep_reading(self) {
-        spawn_local(async move {
-            loop {
-                self.read().await;
-                gloo_timers::future::sleep(READ_EVERY).await;
-                if self.agents.try_get_untracked().is_none() {
-                    return;
-                }
-            }
-        });
-    }
-
-    /// The agents of `status`, oldest first.
-    fn of(self, status: AgentStatusDto) -> Signal<Vec<HubAgentDto>> {
-        Signal::derive(move || {
-            self.agents.with(|agents| {
-                agents
-                    .iter()
-                    .filter(|agent| agent.status == status)
-                    .cloned()
-                    .collect()
-            })
-        })
-    }
-
-    /// Shows `agent` approved at once, so its row leaves the waiting table
-    /// before the review closes and focus goes to the heading, not the page.
-    fn approved(self, agent_id: &str) {
-        self.agents.update(|agents| {
-            for agent in agents.iter_mut().filter(|agent| agent.agent_id == agent_id) {
-                agent.status = AgentStatusDto::Approved;
-                agent.seconds_ago = 0;
-            }
-        });
-    }
+    });
 }
 
 #[component]
@@ -145,7 +113,17 @@ pub(crate) fn Machines(localizer: Arc<Localizer>, step_up: StepUp) -> impl IntoV
         move |id| text(&localizer, id)
     };
     let listed = Listed::new();
-    listed.keep_reading();
+    keep_reading(listed);
+    let (pause_label, paused_said) = (
+        text(&localizer, msg::UI_LIVE_PAUSE),
+        text(&localizer, msg::UI_LIVE_PAUSED),
+    );
+    let banner_localizer = Arc::clone(&localizer);
+    let resume_localizer = Arc::clone(&localizer);
+    let on_resume = Callback::new(move |()| {
+        let words = listed.resume();
+        text_with(&resume_localizer, words.id, &words.args)
+    });
     let chosen = RwSignal::new(None::<HubAgentDto>);
     let open = RwSignal::new(false);
     let confirmation = RwSignal::new(String::new());
@@ -197,7 +175,7 @@ pub(crate) fn Machines(localizer: Arc<Localizer>, step_up: StepUp) -> impl IntoV
                     reply(Politeness::Polite, &words);
                     said.set(Some(words));
                     open.set(false);
-                    listed.read().await;
+                    read(listed).await;
                 }
                 Some(Posted::Refused(ErrorCode::StepUpFailed, ..)) => {
                     step_up_error.set(Some(text(&localizer, msg::UI_MACHINES_STEP_UP_FAILED)));
@@ -212,7 +190,10 @@ pub(crate) fn Machines(localizer: Arc<Localizer>, step_up: StepUp) -> impl IntoV
                     )));
                     // The list may have changed under the review: another
                     // tab approved it, or it paired again under a new key.
-                    listed.read().await;
+                    // The refusal answers the reader, so that row shows as
+                    // read even while paused.
+                    read(listed).await;
+                    listed.refused(&agent.agent_id);
                 }
                 None => problem.set(Some(Sentence::new(
                     &text(&localizer, msg::UI_PAIRING_UNANSWERED),
@@ -226,6 +207,18 @@ pub(crate) fn Machines(localizer: Arc<Localizer>, step_up: StepUp) -> impl IntoV
     let (approved_header, approved_columns) = approved_columns(&localizer);
     let review_localizer = Arc::clone(&localizer);
     view! {
+        <PauseUpdates
+            label=pause_label
+            paused_said=paused_said
+            paused=Signal::derive(move || listed.paused())
+            banner=Signal::derive(move || {
+                let words = pause::banner(listed.pending());
+                text_with(&banner_localizer, words.id, &words.args)
+            })
+            banner_id=PAUSED_ID
+            on_pause=Callback::new(move |()| listed.pause())
+            on_resume=on_resume
+        />
         <p>{move || said.get()}</p>
         <h3 id=WAITING_HEADING_ID tabindex="-1">
             {t(msg::UI_MACHINES_WAITING_HEADING)}
@@ -236,7 +229,7 @@ pub(crate) fn Machines(localizer: Arc<Localizer>, step_up: StepUp) -> impl IntoV
             columns=waiting_columns
             rows=listed.of(AgentStatusDto::Pending)
             key=|row: &HubAgentDto| row.agent_id.clone()
-            state=listed.state
+            state=listed.shown_state()
             sentences=Sentences {
                 loading: t(msg::UI_MACHINES_LOADING),
                 empty: t(msg::UI_MACHINES_NONE_WAITING),
@@ -250,7 +243,7 @@ pub(crate) fn Machines(localizer: Arc<Localizer>, step_up: StepUp) -> impl IntoV
             columns=approved_columns
             rows=listed.of(AgentStatusDto::Approved)
             key=|row: &HubAgentDto| row.agent_id.clone()
-            state=listed.state
+            state=listed.shown_state()
             sentences=Sentences {
                 loading: t(msg::UI_MACHINES_LOADING),
                 empty: t(msg::UI_MACHINES_NONE_APPROVED),

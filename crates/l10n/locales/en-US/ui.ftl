@@ -3491,6 +3491,22 @@ ui-machines-none-approved = No { -machine } is approved yet.
 # Shown in place of the tables when the hub didn't answer the page's request for its machines.
 ui-machines-unreachable = The { -hub } didn't answer, so its { -machine(form: "other") } can't be listed. The page asks again in a few seconds.
 
+# Said politely when live updates on the Machines tab are on again, in place
+# of the generic sentence that counts the runs that ended.
+# $count (number): how many machines started to wait for approval while the
+# updates were paused, which the tab now lists.
+ui-machines-resumed =
+    { $count ->
+        [0] Live updates are on again. No { -machine } started waiting while they were paused.
+        [one] Live updates are on again. One { -machine } started waiting while they were paused.
+       *[other] Live updates are on again. { $count } { -machine(form: "other") } started waiting while they were paused.
+    }
+
+# Said politely when live updates on the Machines tab are on again after a
+# pause taken before the tab had listed any machine, so none can be counted
+# as having started to wait meanwhile.
+ui-machines-resumed-unlisted = Live updates are on again.
+
 ## Settings' "Dry-run allowlist" tab (decision 89): the folders a plan dry
 ## run an AI agent asks for may read, which only a person sets.
 

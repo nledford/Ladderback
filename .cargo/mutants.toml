@@ -189,9 +189,11 @@
 # machines on a hub (§16, decision 121, "Waiting for approval"): it reads the
 # list every few seconds while the tab is mounted, draws the waiting and the
 # approved machines' tables, opens the review, sends the approval and says
-# its answer. What the step-up asks and how it is checked, which agent a key
-# approves and each refusal's code are the hub's, tested on the host
-# (`crates/adapters/http/src/hub_pages/tests.rs`, `crates/app/src/pairing/`
+# its answer. What the tables show while live updates are paused, what waits
+# and what the resume says are `crates/web/src/machines_list.rs`'s, tested
+# on the host and gated. What the step-up asks and how it is checked, which
+# agent a key approves and each refusal's code are the hub's, tested on the
+# host (`crates/adapters/http/src/hub_pages/tests.rs`, `crates/app/src/pairing/`
 # and the acceptance scenarios of
 # `features/fleet/approving_on_the_hubs_page.feature`); its words are the
 # catalog's. The `@ui` scenarios of `features/ui/approving_machines.feature`
