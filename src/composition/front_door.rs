@@ -29,6 +29,13 @@ const HANDSHAKE_WITHIN: Duration = Duration::from_secs(10);
 /// How many connections let in may wait for the server to take them.
 const WAITING: usize = 64;
 
+/// How many connections may be at the door at once: waiting to send their
+/// first byte, in their TLS handshake, or waiting to be handed to the
+/// server. A newcomer past it closes the oldest, as the hub's bound on
+/// unauthenticated agents does, so a flood of connections that send
+/// nothing can't hold the door shut (decision 120, "One listener").
+const AT_THE_DOOR: usize = 64;
+
 /// What the front door does with a connection, by the first byte it sent
 /// and the address it came from.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -153,8 +160,13 @@ async fn let_in(
 #[cfg(test)]
 mod tests {
     use std::net::{IpAddr, Ipv4Addr, Ipv6Addr, SocketAddr};
+    use std::time::Duration;
 
-    use super::{Door, door};
+    use http_adapter::{GatedListener, HandedListener};
+    use tokio::io::{AsyncReadExt as _, AsyncWriteExt as _};
+    use tokio::net::TcpStream;
+
+    use super::{AT_THE_DOOR, Door, FIRST_BYTE_WITHIN, door, open};
 
     /// The first byte of a TLS handshake record.
     const HANDSHAKE: u8 = 0x16;
@@ -192,5 +204,65 @@ mod tests {
         ] {
             assert_eq!(door(b'G', from(ip)), expected, "{ip}");
         }
+    }
+
+    /// A connection at the door that has sent nothing yet.
+    async fn silent(at: SocketAddr) -> TcpStream {
+        TcpStream::connect(at).await.unwrap()
+    }
+
+    /// A plain request from loopback, let in and handed to the server.
+    async fn handed(at: SocketAddr, listener: &mut HandedListener) {
+        let mut stream = TcpStream::connect(at).await.unwrap();
+        stream.write_all(b"GET / HTTP/1.1\r\n\r\n").await.unwrap();
+        let (_, peer) = axum::serve::Listener::accept(listener).await;
+        assert_eq!(peer.addr, stream.local_addr().unwrap());
+    }
+
+    /// Whether the door closed `stream` well before its own time limit for
+    /// a first byte would have.
+    async fn closed_soon(stream: &mut TcpStream) -> bool {
+        let mut byte = [0; 1];
+        let read = tokio::time::timeout(FIRST_BYTE_WITHIN / 2, stream.read(&mut byte)).await;
+        matches!(read, Ok(Ok(0) | Err(_)))
+    }
+
+    /// Whether `stream` is still open: nothing is read from it for a while.
+    /// A connection the door closed is read as closed within it.
+    async fn still_open(stream: &mut TcpStream) -> bool {
+        let mut byte = [0; 1];
+        let read = tokio::time::timeout(Duration::from_millis(200), stream.read(&mut byte)).await;
+        read.is_err()
+    }
+
+    /// A flood of connections that send nothing can't hold the door: one
+    /// past `AT_THE_DOOR` closes the oldest still there and is let in, and
+    /// one already handed on no longer counts.
+    #[tokio::test]
+    async fn a_connection_past_the_door_s_bound_closes_the_oldest_still_at_it() {
+        let listener = GatedListener::bind(SocketAddr::from((Ipv4Addr::LOCALHOST, 0)))
+            .await
+            .unwrap();
+        let at = listener.local_addr().unwrap();
+        let mut server = open(listener, at, None);
+        let mut oldest = silent(at).await;
+        handed(at, &mut server).await;
+        let mut others = Vec::new();
+        for _ in 0..AT_THE_DOOR - 2 {
+            others.push(silent(at).await);
+        }
+        // With the one handed on gone, this is the last the door holds.
+        handed(at, &mut server).await;
+        assert!(still_open(&mut oldest).await, "closed within the bound");
+        others.push(silent(at).await);
+        handed(at, &mut server).await;
+        assert!(
+            closed_soon(&mut oldest).await,
+            "the oldest is still at the door"
+        );
+        assert!(
+            still_open(&mut others[0]).await,
+            "closed another than the oldest"
+        );
     }
 }
