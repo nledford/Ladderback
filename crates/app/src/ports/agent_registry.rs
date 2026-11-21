@@ -1,7 +1,7 @@
 use async_trait::async_trait;
 use domain::fleet::{
-    AgentRecord, Fingerprint, PairRefusal, PairRequest, Pairing, ProofRefusal, ProofRequest,
-    TokenId, TokenRecord,
+    AgentRecord, ApprovalRefused, Fingerprint, PairRefusal, PairRequest, Pairing, ProofRefusal,
+    ProofRequest, PublicKey, TokenId, TokenRecord,
 };
 use domain::{AgentId, Timestamp};
 
@@ -74,4 +74,16 @@ pub trait AgentRegistry: Send + Sync {
         request: &ProofRequest,
         now: Timestamp,
     ) -> Result<Result<AgentRecord, ProofRefusal>, StoreError>;
+
+    /// Approves the agent registered under `agent_id` with `agent_key`, the
+    /// key the person compared, at `now`, with
+    /// [`domain::fleet::decide_approval`] on the record it holds, in one
+    /// step: of two approvals at once, one approves and the other is
+    /// refused `AlreadyApproved`. A refusal changes nothing.
+    async fn approve(
+        &self,
+        agent_id: AgentId,
+        agent_key: PublicKey,
+        now: Timestamp,
+    ) -> Result<Result<AgentRecord, ApprovalRefused>, StoreError>;
 }

@@ -125,6 +125,7 @@ Feature: The tabs
     When I open the component gallery
     Then the tab "Demo overview" is bold, with a 3 pixel bar in --accent on the rule under its list
     And the tab "Demo note" is in the text's weight and color, with no bar, on a 1 pixel rule in --muted
+    And the tab "Demo note" is as wide as it is bold, so choosing it moves no tab
     And the tab list of the tab "Demo overview" stands on a 1 pixel rule in --muted
     And the tabs of the list of the tab "Demo overview" touch their neighbours on each line
     And the "Tabs" demo has no accessibility violations

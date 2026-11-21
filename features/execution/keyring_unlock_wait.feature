@@ -9,9 +9,9 @@ Feature: A run whose keyring is locked waits for it to be unlocked
   may raise a prompt. The run gives up when the plan's next run is due,
   never waiting past its successor, and is refused once as locked. A
   keyring with no service to ask still waits only while the daemon starts
-  (decision 116), and one whose unlock prompt was dismissed still fails at
-  once. Stopping the daemon ends the wait, and a person who asked is
-  answered at once (#1221).
+  (decision 116), and one whose unlock prompt was dismissed is refused as
+  locked at once, never waited on. Stopping the daemon ends the wait, and a
+  person who asked is answered at once (#1221).
 
   Background:
     Given the daemon started a moment ago
@@ -48,6 +48,15 @@ Feature: A run whose keyring is locked waits for it to be unlocked
     When the schedule starts a backup 30 seconds after the daemon started
     Then the run fails 30 seconds after the daemon started because the keyring is locked
     And the daemon asked whether the keyring is locked 0 times
+
+  Scenario: A dismissed unlock prompt is refused as locked at once, and the run doesn't wait for an unlock
+    Given the keyring's unlock prompt was dismissed
+    When the schedule starts a backup 30 seconds after the daemon started
+    Then the run fails 30 seconds after the daemon started because the keyring's unlock prompt was dismissed
+    And the run is refused with "secret-keyring-locked" for the keyring entry "ladderback/demo"
+    And the keyring entry "ladderback/demo" was read 1 time
+    And the daemon asked whether the keyring is locked 0 times
+    And the daemon never logged that the run waits
 
   Scenario: The daemon logs the unlock wait once, naming the keyring entry and no secret
     Given the keyring unlocks 45 seconds after the daemon started

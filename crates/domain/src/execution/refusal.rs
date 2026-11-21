@@ -24,13 +24,14 @@ pub enum SettingRefusal {
     },
     /// `source` is a keyring entry, and the machine has no keyring service
     /// that can be asked for it, or the service refused it otherwise than as
-    /// locked, as when its unlock prompt was dismissed.
+    /// locked, as when it has no collection.
     SecretKeyringUnavailable {
         source: String,
         detail: Option<String>,
     },
     /// `source` is a keyring entry, and the keyring service answered that
-    /// its keyring is locked.
+    /// its keyring is locked, or its unlock prompt was dismissed, which
+    /// leaves it locked.
     SecretKeyringLocked {
         source: String,
         detail: Option<String>,

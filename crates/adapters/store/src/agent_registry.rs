@@ -6,10 +6,10 @@
 use app::ports::{Added, AgentRegistry, StoreError};
 use async_trait::async_trait;
 use domain::fleet::{
-    AgentRecord, AgentStatus, BindingKind, Fingerprint, HostnameKey, KEY_BYTES, PairRefusal,
-    PairRequest, Pairing, PairingView, ProofRefusal, ProofRequest, ProofView, PublicKey, TokenId,
-    TokenRecord, TokenUse, admits_unused_token, decide_pairing, decide_proof,
-    voids_tokens_for_new_key,
+    AgentRecord, AgentStatus, ApprovalRefused, BindingKind, Fingerprint, HostnameKey, KEY_BYTES,
+    PairRefusal, PairRequest, Pairing, PairingView, ProofRefusal, ProofRequest, ProofView,
+    PublicKey, TokenId, TokenRecord, TokenUse, admits_unused_token, decide_approval,
+    decide_pairing, decide_proof, voids_tokens_for_new_key,
 };
 use domain::{AgentId, Timestamp};
 use sqlx::{Connection, SqliteConnection};
@@ -356,6 +356,34 @@ impl AgentRegistry for SqliteStore {
             kinds: &kinds,
         };
         let decided = decide_proof(&view, request, now);
+        match &decided {
+            Ok(agent) => {
+                write_agent(&mut tx, agent, false).await?;
+                tx.commit().await.map_err(unavailable)?;
+            }
+            Err(_) => tx.rollback().await.map_err(unavailable)?,
+        }
+        Ok(decided)
+    }
+
+    /// One transaction, the write lock taken up front, so the record the
+    /// decision reads is the one its change is written over: of two
+    /// approvals at once, the second sees the agent approved.
+    async fn approve(
+        &self,
+        agent_id: AgentId,
+        agent_key: PublicKey,
+        now: Timestamp,
+    ) -> Result<Result<AgentRecord, ApprovalRefused>, StoreError> {
+        let now = to_the_millisecond(now);
+        let _call = self.call().await;
+        let mut conn = self.pool.acquire().await.map_err(unavailable)?;
+        let mut tx = conn
+            .begin_with("BEGIN IMMEDIATE")
+            .await
+            .map_err(unavailable)?;
+        let record = agent(&mut tx, sql::AGENT, row::agent_id_text(agent_id)).await?;
+        let decided = decide_approval(record.as_ref(), &agent_key, now);
         match &decided {
             Ok(agent) => {
                 write_agent(&mut tx, agent, false).await?;

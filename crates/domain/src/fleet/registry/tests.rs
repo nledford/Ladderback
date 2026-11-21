@@ -98,6 +98,105 @@ fn hostnames_compare_by_case_fold_of_their_nfc_form() {
     assert_eq!(HostnameKey::of(&name("Caf\u{e9}")).as_str(), "caf\u{e9}");
 }
 
+/// Names that look alike share a skeleton whatever their case, as a
+/// Cyrillic а beside a Latin a does, or "rn" beside "m"; names that don't,
+/// in any script, have their own.
+#[test]
+fn lookalike_hostnames_share_a_skeleton() {
+    let alike = |a: &str, b: &str| HostnameSkeleton::of(&name(a)) == HostnameSkeleton::of(&name(b));
+    assert!(alike("l\u{430}ptop", "laptop"));
+    assert!(alike("l\u{430}ptop", "Laptop"));
+    assert!(alike("LAPTOP", "laptop"));
+    assert!(alike("rnacbook", "macbook"));
+    assert!(alike("caf\u{e9}", "cafe\u{301}"));
+    assert!(!alike("laptop", "desktop"));
+    assert!(!alike(
+        "\u{30ce}\u{30fc}\u{30c8}\u{30d1}\u{30bd}\u{30b3}\u{30f3}",
+        "laptop"
+    ));
+    assert!(!alike("caf\u{e9}", "cafe"));
+}
+
+/// A capital that looks like another letter is read as that letter before
+/// the case fold, so a capital I is an l and a zero beside capitals is an
+/// O; a run of spaces looks like one space.
+#[test]
+fn capitals_and_runs_of_spaces_look_like_what_they_show() {
+    let alike = |a: &str, b: &str| HostnameSkeleton::of(&name(a)) == HostnameSkeleton::of(&name(b));
+    assert!(alike("Iaptop", "laptop"));
+    assert!(alike("I\u{430}ptop", "Laptop"));
+    assert!(alike("LAPTOP0", "LAPTOPO"));
+    assert!(alike("\u{412}ob", "Bob"));
+    assert!(alike("lap  top", "lap top"));
+    assert!(alike("lap \u{3000}\u{a0}top", "lap top"));
+    assert!(!alike("lap top", "laptop"));
+    assert!(!alike("iaptop", "laptop"));
+}
+
+fn pending(agent: u128, hostname: &str, last_seen: i64) -> AgentRecord {
+    AgentRecord {
+        status: AgentStatus::Pending { since: at(0) },
+        last_seen: at(last_seen),
+        ..record(agent, key(20), hostname)
+    }
+}
+
+/// A pending agent whose name looks like another's, pending or approved,
+/// is flagged with that agent as it is registered; the approved agent
+/// isn't, nor is a pending one whose name looks like no other.
+#[test]
+fn a_pending_lookalike_is_flagged_with_the_agent_it_looks_like() {
+    let approved = record(1, key(11), "Laptop");
+    let lookalike = pending(2, "l\u{430}ptop", 5);
+    let other_script = pending(
+        3,
+        "\u{30ce}\u{30fc}\u{30c8}\u{30d1}\u{30bd}\u{30b3}\u{30f3}",
+        6,
+    );
+    let listed = list_agents(vec![
+        approved.clone(),
+        lookalike.clone(),
+        other_script.clone(),
+    ]);
+    assert_eq!(
+        listed,
+        vec![
+            ListedAgent {
+                record: approved,
+                looks_like: None,
+            },
+            ListedAgent {
+                record: lookalike,
+                looks_like: Some(Lookalike {
+                    agent_id: id(1),
+                    hostname: name("Laptop"),
+                    last_seen: at(-50),
+                }),
+            },
+            ListedAgent {
+                record: other_script,
+                looks_like: None,
+            },
+        ]
+    );
+}
+
+/// Two pending lookalikes are each flagged with the other, whichever paired
+/// first; of several it looks like, a pending agent is flagged with the
+/// first listed.
+#[test]
+fn pending_lookalikes_flag_each_other_and_name_the_first_listed() {
+    let first = pending(1, "laptop", 1);
+    let second = pending(2, "l\u{430}ptop", 2);
+    let third = pending(3, "LAPT\u{41e}P", 3);
+    let flagged = |listed: &ListedAgent| listed.looks_like.as_ref().map(|like| like.agent_id);
+    let listed = list_agents(vec![first, second, third]);
+    assert_eq!(
+        listed.iter().map(flagged).collect::<Vec<_>>(),
+        vec![Some(id(2)), Some(id(1)), Some(id(1))]
+    );
+}
+
 /// A token is unused until it is spent or revoked, and only before it
 /// lapses; its ID is its pairing key's.
 #[test]
@@ -449,4 +548,46 @@ fn a_new_hub_key_voids_the_unused_tokens_only_while_no_agent_is_registered() {
     assert!(voids_tokens_for_new_key(0));
     assert!(!voids_tokens_for_new_key(1));
     assert!(!voids_tokens_for_new_key(2));
+}
+
+fn waiting_with(agent: u128, agent_key: PublicKey, hostname: &str) -> AgentRecord {
+    AgentRecord {
+        status: AgentStatus::Pending { since: at(-100) },
+        ..record(agent, agent_key, hostname)
+    }
+}
+
+/// A pending agent a person approves is approved from then on, and the
+/// rest of its record stays as it was.
+#[test]
+fn an_approved_pending_agent_is_approved_now_and_keeps_its_record() {
+    let waiting = waiting_with(1, key(4), "laptop");
+    assert_eq!(
+        decide_approval(Some(&waiting), &key(4), at(10)),
+        Ok(AgentRecord {
+            status: AgentStatus::Approved { at: at(10) },
+            ..waiting.clone()
+        })
+    );
+}
+
+/// An agent is approved once: approving it again is refused, and so is an
+/// approval of an agent the registry doesn't hold, or holds under another
+/// key than the one the person compared.
+#[test]
+fn an_approval_of_an_approved_unknown_or_rekeyed_agent_is_refused() {
+    let approved = record(1, key(4), "laptop");
+    assert_eq!(
+        decide_approval(Some(&approved), &key(4), at(10)),
+        Err(ApprovalRefused::AlreadyApproved)
+    );
+    assert_eq!(
+        decide_approval(None, &key(4), at(10)),
+        Err(ApprovalRefused::Unknown)
+    );
+    let waiting = waiting_with(1, key(4), "laptop");
+    assert_eq!(
+        decide_approval(Some(&waiting), &key(5), at(10)),
+        Err(ApprovalRefused::Unknown)
+    );
 }

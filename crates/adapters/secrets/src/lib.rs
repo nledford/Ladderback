@@ -249,6 +249,10 @@ impl SystemSecrets {
                 detail,
                 cause: KeyringCause::Refused,
             })),
+            Err(Failure::Dismissed(detail)) => Err(fail(Problem::KeyringUnavailable {
+                detail,
+                cause: KeyringCause::Dismissed,
+            })),
         }
     }
 
@@ -411,8 +415,9 @@ fn refused(failure: Failure) -> KeyringError {
         Failure::NoService(detail) | Failure::Refused(detail) => {
             KeyringError::Unavailable { detail }
         }
-        // The person can unlock it and save again (#993).
-        Failure::Locked(detail) => KeyringError::Locked { detail },
+        // The person can unlock it and save again (#993), as they can when
+        // they dismissed its unlock prompt, which leaves it locked.
+        Failure::Locked(detail) | Failure::Dismissed(detail) => KeyringError::Locked { detail },
         Failure::Unreachable(detail) => KeyringError::Unwritable { detail },
         // An entry that holds what isn't text holds another secret.
         Failure::NotUnicode => KeyringError::Taken,

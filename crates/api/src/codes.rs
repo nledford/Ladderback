@@ -128,12 +128,13 @@ pub enum ErrorCode {
     /// A repository's secret is in a keyring entry, and the machine has no
     /// keyring service that can be asked for it: on Linux no Secret Service
     /// runs, there is no session bus to reach one by (a server, a system
-    /// service), or the service refused otherwise than as locked, as when its
-    /// unlock prompt was dismissed. As `SecretMissing`; the platform's words,
+    /// service), or the service refused otherwise than as locked, as when it
+    /// has no collection. As `SecretMissing`; the platform's words,
     /// redacted, are the `detail`.
     SecretKeyringUnavailable,
     /// A repository's secret is in a keyring entry, and the keyring service
-    /// answered that its keyring is locked. As `SecretMissing`; the
+    /// answered that its keyring is locked, or its unlock prompt was
+    /// dismissed, which leaves it locked. As `SecretMissing`; the
     /// platform's words, redacted, are the `detail`.
     SecretKeyringLocked,
     /// A repository's secret isn't text: its source holds bytes that are not
@@ -191,14 +192,15 @@ pub enum ErrorCode {
     /// The password typed for a repository was to be kept in the system
     /// keyring, and this computer has no keyring service to keep it in: on
     /// Linux no Secret Service, no session bus to reach one by, or one that
-    /// refused otherwise than as locked, as when its unlock prompt was
-    /// dismissed. Nothing was saved or created. The argument `entry` names
-    /// the keyring entry (`service/name`); the platform's words, masked, are
-    /// the `detail`.
+    /// refused otherwise than as locked, as when it has no collection.
+    /// Nothing was saved or created. The argument `entry` names the keyring
+    /// entry (`service/name`); the platform's words, masked, are the
+    /// `detail`.
     KeyringUnavailable,
     /// The password typed for a repository was to be kept in the system
-    /// keyring, and the keyring service answered that its keyring is locked.
-    /// As `KeyringUnavailable`.
+    /// keyring, and the keyring service answered that its keyring is locked,
+    /// or its unlock prompt was dismissed, which leaves it locked. As
+    /// `KeyringUnavailable`.
     KeyringLocked,
     /// The password typed for a repository was to be kept in the system
     /// keyring, and the keyring refused it, failed or didn't answer in time.

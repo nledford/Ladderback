@@ -8,7 +8,8 @@ Feature: Keeping a repository's password in the system keyring
   the typed password is used as it is. Where there is no keyring to keep it
   in, or the keyring is locked, nothing is saved and nothing is created, and
   a locked keyring is named as locked, since unlocking it lets the person
-  save again. A request that fails after it
+  save again; so is one whose unlock prompt was dismissed, which stays
+  locked. A request that fails after it
   added an entry removes it again, unless a repository was created with that
   password, whose only copy the entry may then be.
 
@@ -43,6 +44,13 @@ Feature: Keeping a repository's password in the system keyring
   Scenario: Where the keyring is locked, keeping the password in it is refused because it is locked, and nothing is saved
     Given a repository the engine identifies
     And a machine whose keyring is locked
+    When the agent connects it as "demo", keeping the password in the keyring
+    Then the request is refused because the keyring is locked
+    And the agent has no repository configured
+
+  Scenario: Where the keyring's unlock prompt was dismissed, keeping the password in it is refused because it is locked
+    Given a repository the engine identifies
+    And a machine whose keyring's unlock prompt was dismissed
     When the agent connects it as "demo", keeping the password in the keyring
     Then the request is refused because the keyring is locked
     And the agent has no repository configured

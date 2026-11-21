@@ -241,6 +241,21 @@ Then("the tab {string} stands on a line above the last of its list", async funct
   assert.ok(own.bottom < last.bottom - 1, `the tab "${name}" ends at ${own.bottom}, on the last line (${last.bottom})`);
 });
 
+// A tab is as wide in the text's weight as bold, held by an unseen bold copy
+// of its words, so choosing a tab moves none along its list: its width read
+// as drawn, then with the tab made bold for the measure alone.
+Then("the tab {string} is as wide as it is bold, so choosing it moves no tab", async function (this: BrowserWorld, name: string) {
+  const [drawn, bold] = await tab(this, name).evaluate((element) => {
+    const button = element as HTMLElement;
+    const drawn = button.getBoundingClientRect().width;
+    button.style.fontWeight = "700";
+    const bold = button.getBoundingClientRect().width;
+    button.style.fontWeight = "";
+    return [drawn, bold];
+  });
+  assert.ok(Math.abs(drawn - bold) < 0.5, `the tab "${name}" is ${drawn} pixels wide, ${bold} bold`);
+});
+
 // The rules under tabs side by side join into one unbroken line: no gap
 // between neighbours on a line, in either reading direction.
 Then(
@@ -504,9 +519,9 @@ async function drawnVerticalTab(world: BrowserWorld, name: string, token: string
 }
 
 // In a column the selected tab's bar stands at its end, on the list's rule
-// between the list and the panel, and nothing is drawn under a tab; the
-// selected one is told by its weight and that shape, never color alone
-// (1.4.1).
+// between the list and the panel, and nothing is drawn under a tab (its
+// edge there 0px wide, whatever its style); the selected one is told by its
+// weight and that shape, never color alone (1.4.1).
 for (const [what, token, forced] of [
   ["--accent", "var(--accent)", false],
   ["--muted", "var(--muted)", false],
@@ -518,7 +533,7 @@ for (const [what, token, forced] of [
       const drawn = await drawnVerticalTab(this, name, token);
       assert.equal(drawn.weight, "700", `the weight of the tab "${name}"`);
       assert.deepEqual(drawn.bar, { width: `${width}px`, color: drawn.wanted, style: "solid" }, `the bar beside the tab "${name}"`);
-      assert.equal(drawn.under.style, "none", `a line under the tab "${name}"`);
+      assert.equal(drawn.under.width, "0px", `a line under the tab "${name}"`);
       assert.ok(
         Math.abs(drawn.end - drawn.listEnd) <= 0.5,
         `the bar beside the tab "${name}" stands at ${drawn.end}, the list's rule at ${drawn.listEnd}`,
@@ -533,7 +548,7 @@ for (const [what, token, forced] of [
       assert.equal(drawn.weight, "400", `the weight of the tab "${name}"`);
       assert.equal(drawn.color, forced ? drawn.wanted : drawn.text, `the words of the tab "${name}" are not in the text's color`);
       assert.deepEqual(drawn.bar, { width: `${width}px`, color: drawn.wanted, style: "solid" }, `the rule beside the tab "${name}"`);
-      assert.equal(drawn.under.style, "none", `a line under the tab "${name}"`);
+      assert.equal(drawn.under.width, "0px", `a line under the tab "${name}"`);
       assert.ok(
         Math.abs(drawn.end - drawn.listEnd) <= 0.5,
         `the rule beside the tab "${name}" stands at ${drawn.end}, the list's at ${drawn.listEnd}`,

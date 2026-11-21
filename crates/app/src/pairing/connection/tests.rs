@@ -163,7 +163,8 @@ async fn a_paired_agent_is_welcomed_pending_and_its_counter_kept() {
 async fn an_approved_agent_is_welcomed_approved() {
     let hub = hub(1);
     let identity = paired(&hub, 1).await;
-    hub.registry.approve(agent_id(1), hub.clock.now());
+    let waiting = hub.registry.agent(agent_id(1)).await.unwrap().unwrap();
+    hub.pairing.approve(&waiting).await.unwrap().unwrap();
     let connector = Arc::new(LoopbackHubConnector::to(hub.pairing.clone()));
     let connected = connecting(identity, connector)
         .connect(agent_id(1), hostname(1))
@@ -701,4 +702,175 @@ async fn the_hub_welcomes_only_a_proved_agents_first_hello() {
     assert_eq!(read.approval, Approval::Pending);
     assert_eq!(read.hub_version, "0.5.0-hub");
     assert_eq!(read.protocol, Some(1));
+}
+
+/// The hub's new address in these tests; the token's is
+/// `https://hub.example:9443`.
+fn new_address() -> HubAddress {
+    HubAddress::parse("https://hub-new.example:9443").unwrap()
+}
+
+/// The host and port of each route connected to, in order.
+fn hosts(connector: &LoopbackHubConnector) -> Vec<String> {
+    connector
+        .routes()
+        .into_iter()
+        .map(|route| format!("{}:{}", route.host, route.port))
+        .collect()
+}
+
+fn proofs(connector: &LoopbackHubConnector) -> usize {
+    connector
+        .sent()
+        .iter()
+        .filter(|text| matches!(AgentFrame::from_text(text), Ok(AgentFrame::Proof { .. })))
+        .count()
+}
+
+/// Decision 120, "Addresses and the transport statement": an address the
+/// person gives is kept once the pinned hub proved itself there, and tried
+/// first from then on; the token's address stays the fallback.
+#[tokio::test]
+async fn an_address_the_person_gave_is_kept_once_the_hub_proves_itself_there() {
+    let hub = hub(1);
+    let identity = paired(&hub, 1).await;
+    let moved =
+        || Arc::new(LoopbackHubConnector::to(hub.pairing.clone()).only_at("hub-new.example", 9443));
+    let given = moved();
+    let connected = connecting(identity.clone(), given.clone())
+        .connect_at(agent_id(1), hostname(1), new_address())
+        .await
+        .unwrap();
+    assert_eq!(connected.approval, Approval::Pending);
+    let pin = identity.pin().await.unwrap().unwrap();
+    assert_eq!(pin.given_address, Some(new_address()));
+    assert_eq!(connected.pin, pin);
+    assert_eq!(hosts(&given), ["hub-new.example:9443"]);
+    let again = moved();
+    connecting(identity.clone(), again.clone())
+        .connect(agent_id(1), hostname(1))
+        .await
+        .unwrap();
+    assert_eq!(hosts(&again), ["hub-new.example:9443"]);
+    let back = Arc::new(LoopbackHubConnector::to(hub.pairing.clone()).only_at("hub.example", 9443));
+    connecting(identity, back.clone())
+        .connect(agent_id(1), hostname(1))
+        .await
+        .unwrap();
+    assert_eq!(hosts(&back), ["hub-new.example:9443", "hub.example:9443"]);
+    assert_eq!(proofs(&back), 1);
+}
+
+/// An address where the pinned hub doesn't prove itself is not kept:
+/// another hub's, or one where nothing answers. The agent tries only the
+/// address it was given.
+#[tokio::test]
+async fn an_address_where_the_pinned_hub_doesnt_prove_itself_is_not_kept() {
+    let pinned = hub(1);
+    let identity = paired(&pinned, 1).await;
+    let before = identity.pin().await.unwrap().unwrap();
+    let other = hub(2);
+    let failure = connecting(
+        identity.clone(),
+        Arc::new(LoopbackHubConnector::to(other.pairing.clone())),
+    )
+    .connect_at(agent_id(1), hostname(1), new_address())
+    .await;
+    assert_eq!(
+        failure,
+        Err(ConnectFailure::Challenge(ChallengeRefused::HubKeyMismatch))
+    );
+    let unanswered = Arc::new(LoopbackHubConnector::unanswered());
+    let failure = connecting(identity.clone(), unanswered.clone())
+        .connect_at(agent_id(1), hostname(1), new_address())
+        .await;
+    assert!(
+        matches!(
+            failure,
+            Err(ConnectFailure::Link(LinkError::Unreachable { .. }))
+        ),
+        "{failure:?}"
+    );
+    assert_eq!(hosts(&unanswered), ["hub-new.example:9443"]);
+    assert_eq!(identity.pin().await.unwrap().unwrap(), before);
+}
+
+/// Once the pinned hub has proved itself at an address, its answer stands:
+/// the agent tries no other address after it.
+#[tokio::test]
+async fn once_the_pinned_hub_proves_itself_no_other_address_is_tried() {
+    let hub = hub(1);
+    let identity = paired(&hub, 1).await;
+    connecting(
+        identity.clone(),
+        Arc::new(LoopbackHubConnector::to(hub.pairing.clone())),
+    )
+    .connect_at(agent_id(1), hostname(1), new_address())
+    .await
+    .unwrap();
+    let stranger = with_pin_of(&identity).await;
+    let connector = Arc::new(LoopbackHubConnector::to(hub.pairing.clone()));
+    let failure = connecting(stranger, connector.clone())
+        .connect(agent_id(9), hostname(9))
+        .await;
+    assert!(
+        matches!(failure, Err(ConnectFailure::Refused(_))),
+        "{failure:?}"
+    );
+    assert_eq!(hosts(&connector), ["hub-new.example:9443"]);
+}
+
+/// When no address leads to the pinned hub, the agent says what went wrong
+/// at the first, the one the person gave, and proved itself to no one.
+#[tokio::test]
+async fn when_no_address_reaches_the_hub_the_first_failure_is_said() {
+    let pinned = hub(1);
+    let identity = paired(&pinned, 1).await;
+    connecting(
+        identity.clone(),
+        Arc::new(LoopbackHubConnector::to(pinned.pairing.clone())),
+    )
+    .connect_at(agent_id(1), hostname(1), new_address())
+    .await
+    .unwrap();
+    let other = hub(2);
+    let connector =
+        Arc::new(LoopbackHubConnector::to(other.pairing.clone()).only_at("hub.example", 9443));
+    let failure = connecting(identity, connector.clone())
+        .connect(agent_id(1), hostname(1))
+        .await;
+    assert!(
+        matches!(
+            failure,
+            Err(ConnectFailure::Link(LinkError::Unreachable { .. }))
+        ),
+        "{failure:?}"
+    );
+    assert_eq!(
+        hosts(&connector),
+        ["hub-new.example:9443", "hub.example:9443"]
+    );
+    assert_eq!(proofs(&connector), 0);
+}
+
+/// The pinned hub proving itself at an address isn't enough: an address
+/// is kept only once the hub's `Welcome` holds, so a hub that refuses the
+/// proof leaves the pin as it was.
+#[tokio::test]
+async fn an_address_where_the_hub_refuses_the_proof_is_not_kept() {
+    let hub = hub(1);
+    let identity = paired(&hub, 1).await;
+    let stranger = with_pin_of(&identity).await;
+    let before = stranger.pin().await.unwrap().unwrap();
+    let failure = connecting(
+        stranger.clone(),
+        Arc::new(LoopbackHubConnector::to(hub.pairing.clone())),
+    )
+    .connect_at(agent_id(9), hostname(9), new_address())
+    .await;
+    assert!(
+        matches!(failure, Err(ConnectFailure::Refused(_))),
+        "{failure:?}"
+    );
+    assert_eq!(stranger.pin().await.unwrap().unwrap(), before);
 }

@@ -571,6 +571,11 @@ fn relative_location(agent: &mut Agent) {
     assert_eq!(agent.secrets.cause(), &Cause::RelativePath);
 }
 
+#[then("the setting is refused because it is not a full path on this machine")]
+fn relative_setting(agent: &mut Agent) {
+    assert_eq!(agent.secrets.cause(), &Cause::RelativePath);
+}
+
 #[then(expr = "the failure names the variable {string}")]
 fn names_variable(agent: &mut Agent, name: String) {
     assert_eq!(agent.secrets.unresolved().source, SourceName::Env { name });
@@ -1138,9 +1143,11 @@ fn fails_locked(agent: &mut Agent, seconds: i64) {
     assert_eq!(agent.clock.now(), agent.secrets.after_start(seconds));
 }
 
-#[then(expr = "the run fails {int} seconds after the daemon started because the keyring refused")]
-fn fails_refused(agent: &mut Agent, seconds: i64) {
-    assert_eq!(agent.secrets.keyring_cause(), KeyringCause::Refused);
+#[then(
+    expr = "the run fails {int} seconds after the daemon started because the keyring's unlock prompt was dismissed"
+)]
+fn fails_dismissed(agent: &mut Agent, seconds: i64) {
+    assert_eq!(agent.secrets.keyring_cause(), KeyringCause::Dismissed);
     assert_eq!(agent.clock.now(), agent.secrets.after_start(seconds));
 }
 

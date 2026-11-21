@@ -399,6 +399,12 @@ impl SecretsHarness for FakeSecretsHarness {
 
     fn with_refusing_keyring(&self) -> Arc<dyn SecretResolver> {
         let secrets = FakeSecrets::new();
+        secrets.remove_default_collection();
+        Arc::new(secrets)
+    }
+
+    fn with_dismissed_unlock_prompt(&self) -> Arc<dyn SecretResolver> {
+        let secrets = FakeSecrets::new();
         secrets.dismiss_unlock_prompt();
         Arc::new(secrets)
     }
@@ -414,7 +420,8 @@ impl SecretsHarness for FakeSecretsHarness {
         match cause {
             KeyringCause::NoService => secrets.remove_keyring_service(),
             KeyringCause::Locked => secrets.lock_keyring(),
-            KeyringCause::Refused => secrets.dismiss_unlock_prompt(),
+            KeyringCause::Dismissed => secrets.dismiss_unlock_prompt(),
+            KeyringCause::Refused => secrets.remove_default_collection(),
         }
         Arc::new(secrets)
     }

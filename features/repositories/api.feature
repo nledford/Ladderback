@@ -208,3 +208,16 @@ Feature: Repositories over HTTP
     And the refusal names the setting "repository"
     And no answer shows "CANARY-relative"
     And the daemon lists no repositories
+
+  Scenario Outline: An option resolved to a relative path on the backend it is read by is refused at that option, never showing what it held: <what>
+    Given the file "{scratch}/demo-setting" holds "<held>"
+    When the client sends <body> to "/api/v1/repositories/_test"
+    Then the refusal has status 422 and the typed code "repository-path-relative"
+    And the refusal names the setting "<setting>"
+    And no answer shows "CANARY-relative"
+    And the daemon lists no repositories
+
+    Examples:
+      | what                                  | held                   | body                                                                                                                                                               | setting                     |
+      | a reference in the option             | CANARY-relative/ca.pem | {"settings":{"repository":"rest:http://127.0.0.1:9/repo","password":{"source":"inline","value":"p"},"options":{"http-cacert":"${file:{scratch}/demo-setting}"}}} | options.http-cacert         |
+      | a reference in the location before it | /CANARY-relative/repo  | {"settings":{"repository":"${file:{scratch}/demo-setting}","password":{"source":"inline","value":"p"},"options":{"post-create-command":"./notify"}}}             | options.post-create-command |

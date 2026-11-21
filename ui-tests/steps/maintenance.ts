@@ -6,7 +6,6 @@
 // found by role and accessible name.
 
 import assert from "node:assert/strict";
-import { once } from "node:events";
 import { copyFile, mkdir, readdir, readFile, rm, writeFile } from "node:fs/promises";
 import path from "node:path";
 
@@ -15,6 +14,7 @@ import type { Locator } from "playwright";
 
 import { ISOLATION, journey, namePattern, pressUntilFocused } from "../support/keyboard.ts";
 import { patienceMs, untilStepLimit } from "../support/patience.ts";
+import { stopDaemon } from "../support/teardown.ts";
 import { type BrowserWorld, startServer } from "../support/world.ts";
 import { rowNamed, serveDemoPlans, table, untilCellLists } from "./live.ts";
 
@@ -252,10 +252,7 @@ Given(
     try {
       await backUp({ baseUrl: url }, plan);
     } finally {
-      if (child.exitCode === null) {
-        child.kill("SIGTERM");
-        await once(child, "exit");
-      }
+      await stopDaemon(child);
     }
   },
 );

@@ -220,6 +220,7 @@ Decisions 1–6 recorded 2026-11-08. Decisions 7–12 recorded 2026-11-08 after 
 | [136](decisions/136-an-installed-machine-becomes-the-hub.md) | How an installed machine becomes the hub |
 | [137](decisions/137-a-hub-moves-by-handover-never-by-copy.md) | A hub moves by handover, never by copy, and a hub that finds itself rewound recovers before it grants |
 | [138](decisions/138-the-storage-protects-an-offsite-copy.md) | The storage, not Ladderback, keeps an offsite copy that a machine that backs up can't delete |
+| [139](decisions/139-no-graphql-api.md) | No GraphQL API |
 
 ## 17. Open questions
 

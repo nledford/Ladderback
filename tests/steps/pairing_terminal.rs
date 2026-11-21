@@ -1,5 +1,7 @@
-//! Steps for `features/fleet/pairing_from_a_terminal.feature` and
-//! `features/fleet/hub_status_from_a_terminal.feature`: the hub's
+//! Steps for `features/fleet/pairing_from_a_terminal.feature`,
+//! `features/fleet/approving_from_a_terminal.feature`,
+//! `features/fleet/hub_status_from_a_terminal.feature` and the `@e2e`
+//! scenarios of `features/fleet/following_the_hub.feature`: the hub's
 //! `ladderback pairing-token` and `ladderback serve --hub`, and a machine's
 //! `ladderback pair` and `ladderback hub-status`, each a real process on
 //! folders of its own.
@@ -38,6 +40,8 @@ pub struct PairingTerminal {
     /// Another hub's daemon, on folders of its own, and its address.
     other_hub: Option<Owned>,
     other_address: Option<SocketAddr>,
+    /// The key fingerprint the machine showed when it paired.
+    machine_key: Option<String>,
     said: Option<Said>,
 }
 
@@ -197,6 +201,77 @@ async fn hub_restarts(agent: &mut Agent) {
     agent.pairing_terminal.hub_log = Some(log);
 }
 
+#[when("the hub moves to another address")]
+async fn hub_moves(agent: &mut Agent) {
+    let before = agent.pairing_terminal.address.expect("a serving hub");
+    // Dropping the daemon ends it and waits for it, so nothing answers at
+    // the address the machine paired at.
+    agent.pairing_terminal.hub = None;
+    // The OS may hand back the port just released; start again until it
+    // doesn't (dropping a daemon ends it), so the move is a real one.
+    let mut started = serve_hub(agent, hub_root(agent), "127.0.0.1:0").await;
+    for _ in 0..3 {
+        if started.1 != before {
+            break;
+        }
+        drop(started);
+        started = serve_hub(agent, hub_root(agent), "127.0.0.1:0").await;
+    }
+    let (child, moved, log) = started;
+    assert_ne!(moved, before);
+    agent.pairing_terminal.hub = Some(child);
+    agent.pairing_terminal.address = Some(moved);
+    agent.pairing_terminal.hub_log = Some(log);
+}
+
+/// `ladderback pair <address>` on the paired machine, with nothing on its
+/// standard input: no token.
+async fn give_address(agent: &mut Agent, address: SocketAddr) {
+    let said = ladderback(
+        machine_root(agent),
+        &["pair", &format!("https://{address}")],
+        None,
+    )
+    .await;
+    agent.pairing_terminal.said = Some(said);
+}
+
+#[when("the person gives the machine the hub's new address from its terminal")]
+async fn gives_new_address(agent: &mut Agent) {
+    let address = agent.pairing_terminal.address.expect("a serving hub");
+    give_address(agent, address).await;
+}
+
+#[when("the person gives the machine the other hub's address from its terminal")]
+async fn gives_other_address(agent: &mut Agent) {
+    let address = agent
+        .pairing_terminal
+        .other_address
+        .expect("another serving hub");
+    give_address(agent, address).await;
+}
+
+#[then("the machine says it keeps the hub's new address")]
+fn says_address_kept(agent: &mut Agent) {
+    let address = agent.pairing_terminal.address.expect("a serving hub");
+    let said = said(agent);
+    assert!(said.success, "{said:?}");
+    let connected = format!("pinned at https://{address}");
+    for expected in [connected.as_str(), "reaches it there from now on"] {
+        assert!(said.stderr.contains(expected), "{expected}: {said:?}");
+    }
+}
+
+#[then("the machine says it kept the hub addresses it had")]
+fn says_addresses_unchanged(agent: &mut Agent) {
+    let said = said(agent);
+    assert!(!said.success, "{said:?}");
+    assert!(
+        said.stderr.contains("kept the hub addresses it had"),
+        "{said:?}"
+    );
+}
+
 /// `serve --hub` on the folders under `root`, listening on `listen`; its
 /// address and the file its standard error goes to.
 async fn serve_hub(agent: &Agent, root: PathBuf, listen: &str) -> (Owned, SocketAddr, PathBuf) {
@@ -291,6 +366,158 @@ async fn machine_paired_before(agent: &mut Agent, hostname: String) {
     machine_pairs(agent, hostname).await;
     let said = said(agent);
     assert!(said.success, "{said:?}");
+    let key = said
+        .stderr
+        .split("This machine's key: ")
+        .nth(1)
+        .and_then(|rest| rest.split(". ").next())
+        .unwrap_or_else(|| panic!("the machine showed its key: {said:?}"))
+        .to_owned();
+    agent.pairing_terminal.machine_key = Some(key);
+}
+
+fn machine_key(agent: &Agent) -> &str {
+    agent
+        .pairing_terminal
+        .machine_key
+        .as_deref()
+        .expect("the machine showed its key")
+}
+
+#[given("the hub has stopped")]
+fn hub_stopped(agent: &mut Agent) {
+    // Dropping the daemon ends it and waits for it.
+    agent.pairing_terminal.hub = None;
+}
+
+#[when("the hub serves again on the same address")]
+async fn hub_serves_again(agent: &mut Agent) {
+    let address = agent.pairing_terminal.address.expect("the hub served");
+    let (child, again, log) = serve_hub(agent, hub_root(agent), &address.to_string()).await;
+    assert_eq!(again, address);
+    agent.pairing_terminal.hub = Some(child);
+    agent.pairing_terminal.hub_log = Some(log);
+}
+
+#[when(expr = "the person approves {string} at the hub's terminal with --yes")]
+async fn approves_with_yes(agent: &mut Agent, hostname: String) {
+    let args = ["pairing-token", "--approve", &hostname, "--yes"];
+    let said = ladderback(hub_root(agent), &args, None).await;
+    agent.pairing_terminal.said = Some(said);
+}
+
+#[given(expr = "the person approved {string} at the hub's terminal")]
+async fn approved_before(agent: &mut Agent, hostname: String) {
+    approves_with_yes(agent, hostname).await;
+    let said = said(agent);
+    assert!(said.success, "{said:?}");
+}
+
+#[when(expr = "the person approves {string} at the hub's terminal with no terminal to ask on")]
+async fn approves_without_terminal(agent: &mut Agent, hostname: String) {
+    let args = ["pairing-token", "--approve", &hostname];
+    let said = ladderback(hub_root(agent), &args, None).await;
+    agent.pairing_terminal.said = Some(said);
+}
+
+#[when("the person lists the machines waiting at the hub's terminal")]
+async fn lists_waiting(agent: &mut Agent) {
+    let said = ladderback(hub_root(agent), &["pairing-token", "--pending"], None).await;
+    agent.pairing_terminal.said = Some(said);
+}
+
+#[then(expr = "the terminal named {string} with the key the machine showed, and approved it")]
+fn named_and_approved(agent: &mut Agent, hostname: String) {
+    let said = said(agent);
+    assert!(said.success, "{said:?}");
+    let key = machine_key(agent);
+    assert!(
+        said.stderr.contains(&format!("{hostname} (agent ID "))
+            && said.stderr.contains(&format!("is waiting with key {key}")),
+        "{said:?}"
+    );
+    assert!(
+        said.stderr.contains(&format!("{hostname} is approved")),
+        "{said:?}"
+    );
+}
+
+#[then("the machine says the hub approved it")]
+fn says_approved(agent: &mut Agent) {
+    let said = said(agent);
+    assert!(said.success, "{said:?}");
+    assert!(
+        said.stderr
+            .contains("Connected. The hub approved this machine."),
+        "{said:?}"
+    );
+}
+
+#[then(expr = "the terminal lists {string} with the key the machine showed")]
+fn lists_with_key(agent: &mut Agent, hostname: String) {
+    let said = said(agent);
+    assert!(said.success, "{said:?}");
+    let key = machine_key(agent);
+    let lines: Vec<&str> = said.stdout.lines().collect();
+    let [line] = lines.as_slice() else {
+        panic!("one machine waits: {said:?}");
+    };
+    // The hostname comes last, since it alone may hold spaces.
+    assert!(
+        line.contains(&format!("  {key}  ")) && line.ends_with(&format!("  {hostname}")),
+        "{said:?}"
+    );
+}
+
+#[then("the terminal says no machine waits for approval")]
+fn says_none_waiting(agent: &mut Agent) {
+    let said = said(agent);
+    assert!(said.success, "{said:?}");
+    assert!(said.stdout.is_empty(), "{said:?}");
+    assert!(
+        said.stderr.contains("no machines waiting for approval"),
+        "{said:?}"
+    );
+}
+
+#[then("the terminal approved nothing and says to compare the key and run again with --yes")]
+fn approved_nothing(agent: &mut Agent) {
+    let said = said(agent);
+    assert!(!said.success, "{said:?}");
+    assert!(
+        said.stderr
+            .contains(&format!("is waiting with key {}", machine_key(agent))),
+        "{said:?}"
+    );
+    assert!(
+        said.stderr.contains("nothing was approved") && said.stderr.contains("--yes"),
+        "{said:?}"
+    );
+}
+
+#[then(expr = "the terminal refuses because {string} is approved already")]
+fn refused_approved(agent: &mut Agent, hostname: String) {
+    let said = said(agent);
+    assert!(!said.success, "{said:?}");
+    assert!(
+        said.stderr
+            .contains(&format!("{hostname} is approved already")),
+        "{said:?}"
+    );
+    // An approved machine is refused before anything is asked.
+    assert!(!said.stderr.contains("is waiting with key"), "{said:?}");
+}
+
+#[then(expr = "the terminal refuses because no machine named {string} paired with the hub")]
+fn refused_unknown(agent: &mut Agent, hostname: String) {
+    let said = said(agent);
+    assert!(!said.success, "{said:?}");
+    assert!(
+        said.stderr.contains(&format!(
+            "no machine named {hostname} has paired with this hub"
+        )),
+        "{said:?}"
+    );
 }
 
 #[given(

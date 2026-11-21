@@ -8,9 +8,9 @@ use std::sync::Arc;
 
 use async_trait::async_trait;
 use domain::fleet::{
-    AgentRecord, AgentStatus, BindingKind, Fingerprint, Hostname, KEY_BYTES, PENDING_LIMIT,
-    PairRefusal, PairRequest, Pairing, ProofRefusal, ProofRequest, PublicKey, TokenRecord,
-    TokenUse,
+    AgentRecord, AgentStatus, ApprovalRefused, BindingKind, Fingerprint, Hostname, KEY_BYTES,
+    PENDING_LIMIT, PairRefusal, PairRequest, Pairing, ProofRefusal, ProofRequest, PublicKey,
+    TokenRecord, TokenUse,
 };
 use domain::{AgentId, Timestamp, Uuid};
 
@@ -45,6 +45,9 @@ pub async fn run(harness: &dyn AgentRegistryHarness) {
     racing_pairings_on_one_token_pair_one(harness).await;
     a_proof_keeps_the_greater_counter_and_when_it_was_seen(harness).await;
     a_proof_of_another_id_key_or_kind_changes_nothing(harness).await;
+    an_approval_approves_a_pending_agent_once_and_outlives_the_hub(harness).await;
+    an_approval_of_an_unknown_agent_or_another_key_changes_nothing(harness).await;
+    racing_approvals_approve_once(harness).await;
     the_tls_key_is_recorded_once_and_outlives_the_hub(harness).await;
 }
 
@@ -571,4 +574,111 @@ async fn racing_pairings_on_one_token_pair_one(harness: &dyn AgentRegistryHarnes
         .count();
     assert_eq!((paired, used), (1, racers.len() - 1), "{results:?}");
     assert_eq!(agents(registry.as_ref()).await.len(), 1);
+}
+
+async fn approve(
+    registry: &dyn AgentRegistry,
+    request: &PairRequest,
+    now: Timestamp,
+) -> Option<Result<AgentRecord, ApprovalRefused>> {
+    ok(
+        registry
+            .approve(request.agent_id, request.agent_key, now)
+            .await,
+        "approving",
+    )
+}
+
+/// A pending agent is approved once, at the time given to the millisecond
+/// as kept; the record answered is the one kept, and a restart reads it.
+async fn an_approval_approves_a_pending_agent_once_and_outlives_the_hub(
+    harness: &dyn AgentRegistryHarness,
+) {
+    let (Some(token), Some(request)) = (token(1, 0), request(1, 1, "laptop")) else {
+        return;
+    };
+    let registry = harness.empty().await;
+    add(registry.as_ref(), &token).await;
+    let paired = pair(registry.as_ref(), &request, at(10)).await;
+    assert!(matches!(paired, Some(Ok(Pairing::New(_)))), "{paired:?}");
+    let when = Timestamp::constant(1_800_000_020, 123_456_789);
+    let answered = approve(registry.as_ref(), &request, when).await;
+    assert!(matches!(answered, Some(Ok(_))), "{answered:?}");
+    let Some(Ok(approved)) = answered else {
+        return;
+    };
+    assert_eq!(
+        approved.status,
+        AgentStatus::Approved {
+            at: Timestamp::constant(1_800_000_020, 123_000_000)
+        }
+    );
+    assert_eq!(
+        (approved.hostname.as_str(), approved.key, approved.last_seen),
+        ("laptop", request.agent_key, at(10)),
+        "nothing else changes"
+    );
+    assert_eq!(agents(registry.as_ref()).await, vec![approved.clone()]);
+    assert_eq!(
+        approve(registry.as_ref(), &request, at(30)).await,
+        Some(Err(ApprovalRefused::AlreadyApproved))
+    );
+    let reopened = harness.reopened().await;
+    assert_eq!(agents(reopened.as_ref()).await, vec![approved]);
+}
+
+async fn an_approval_of_an_unknown_agent_or_another_key_changes_nothing(
+    harness: &dyn AgentRegistryHarness,
+) {
+    let (Some(token), Some(request), Some(stranger), Some(other_key)) = (
+        token(1, 0),
+        request(1, 1, "laptop"),
+        request(2, 1, "desktop"),
+        key(55),
+    ) else {
+        return;
+    };
+    let registry = harness.empty().await;
+    assert_eq!(
+        approve(registry.as_ref(), &request, at(5)).await,
+        Some(Err(ApprovalRefused::Unknown)),
+        "an empty registry approves no one"
+    );
+    add(registry.as_ref(), &token).await;
+    pair(registry.as_ref(), &request, at(10)).await;
+    let before = agents(registry.as_ref()).await;
+    assert_eq!(
+        approve(registry.as_ref(), &stranger, at(20)).await,
+        Some(Err(ApprovalRefused::Unknown))
+    );
+    let rekeyed = PairRequest {
+        agent_key: other_key,
+        ..request
+    };
+    assert_eq!(
+        approve(registry.as_ref(), &rekeyed, at(20)).await,
+        Some(Err(ApprovalRefused::Unknown))
+    );
+    assert_eq!(agents(registry.as_ref()).await, before);
+}
+
+async fn racing_approvals_approve_once(harness: &dyn AgentRegistryHarness) {
+    let (Some(token), Some(request)) = (token(1, 0), request(1, 1, "laptop")) else {
+        return;
+    };
+    let registry = harness.empty().await;
+    add(registry.as_ref(), &token).await;
+    pair(registry.as_ref(), &request, at(10)).await;
+    let approvals =
+        (0..8).map(|n| registry.approve(request.agent_id, request.agent_key, at(20 + n)));
+    let results = futures::future::join_all(approvals).await;
+    let approved = results
+        .iter()
+        .filter(|result| matches!(result, Ok(Ok(_))))
+        .count();
+    let refused = results
+        .iter()
+        .filter(|result| matches!(result, Ok(Err(ApprovalRefused::AlreadyApproved))))
+        .count();
+    assert_eq!((approved, refused), (1, 7), "{results:?}");
 }

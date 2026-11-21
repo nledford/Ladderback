@@ -10,13 +10,13 @@ use std::sync::Arc;
 use api::{ErrorCode, MsgArg};
 use app::hub_tls::{HubTlsKey, TlsKeyRefusal};
 use app::pairing::{
-    AgentPairing, AgentPairingError, ChallengeRefused, ConnectFailure, ConnectToHub, HubPairing,
-    HubPairingError, PairFailure, PairWithHub,
+    AgentPairing, AgentPairingError, ChallengeRefused, ConnectFailure, ConnectToHub, Connected,
+    HubPairing, HubPairingError, PairFailure, PairWithHub,
 };
 use app::ports::{AgentRegistry as _, Identity as _, IdentityError, LinkError, Signing as _};
 use domain::fleet::{
-    Approval, Fingerprint, Hostname, HubAddress, HubRoute, PairingToken, RouteRefused,
-    RouteSession, TokenId, TokenTls, WelcomeRefused, is_loopback,
+    AgentStatus, Approval, ApprovalRefused, Fingerprint, Hostname, HubAddress, HubRoute,
+    PairingToken, RouteRefused, RouteSession, TokenId, TokenTls, WelcomeRefused, is_loopback,
 };
 use domain::{SignedDuration, Timestamp};
 use l10n::{Localizer, MessageId, PosixEnv, msg};
@@ -50,6 +50,14 @@ pub(crate) enum TokenAsk {
     },
     List,
     Revoke(String),
+    /// List the machines waiting for approval.
+    Pending,
+    /// Approve the machine with this hostname, once the person confirms or
+    /// gave `--yes`.
+    Approve {
+        hostname: String,
+        yes: bool,
+    },
 }
 
 /// The hub's pairing over `store` and the key files in `data_dir`.
@@ -167,6 +175,8 @@ async fn on_the_hub(localizer: &Localizer, data_dir: &Path, ask: TokenAsk) -> io
         }
         TokenAsk::List => list(localizer, &store).await,
         TokenAsk::Revoke(id) => revoke(localizer, &pairing, &id).await,
+        TokenAsk::Pending => pending(localizer, &pairing).await,
+        TokenAsk::Approve { hostname, yes } => approve(localizer, &pairing, &hostname, yes).await,
     };
     store.close().await;
     said
@@ -320,6 +330,102 @@ async fn revoke(localizer: &Localizer, pairing: &HubPairing, id: &str) -> io::Re
     }
 }
 
+/// `pairing-token --pending`: one line per machine waiting for approval,
+/// its agent ID, key fingerprint, since when it waits and, last, since it
+/// alone may hold spaces, its hostname.
+async fn pending(localizer: &Localizer, pairing: &HubPairing) -> io::Result<ExitCode> {
+    let agents = match pairing.pending().await {
+        Ok(agents) => agents,
+        Err(error) => return hub_refused(localizer, &error),
+    };
+    if agents.is_empty() {
+        say(localizer, msg::CLI_PAIRING_TOKEN_NONE_WAITING, &[])?;
+    }
+    for agent in agents {
+        let since = match agent.status {
+            AgentStatus::Pending { since } => since,
+            AgentStatus::Approved { at } => at,
+        };
+        to_stdout(&format!(
+            "{}  {}  {since}  {}\n",
+            agent.agent_id.as_uuid(),
+            Fingerprint::of_key(&agent.key),
+            agent.hostname,
+        ))?;
+    }
+    Ok(ExitCode::SUCCESS)
+}
+
+/// What `pairing-token --approve` asks before it approves.
+const APPROVE: Question = Question {
+    ask: msg::CLI_PAIRING_TOKEN_APPROVE_CONFIRM,
+    declined: msg::CLI_PAIRING_TOKEN_APPROVE_DECLINED,
+    no_terminal: msg::CLI_PAIRING_TOKEN_APPROVE_NO_TERMINAL,
+};
+
+/// `pairing-token --approve`: names the machine with its agent ID and key
+/// fingerprint, for the person to compare with that machine's screen, and
+/// once they confirm approves it as named (decision 120, "Pending
+/// approval").
+async fn approve(
+    localizer: &Localizer,
+    pairing: &HubPairing,
+    hostname: &str,
+    yes: bool,
+) -> io::Result<ExitCode> {
+    let found = match Hostname::parse(hostname) {
+        Ok(name) => match pairing.agent_named(&name).await {
+            Ok(found) => found,
+            Err(error) => return hub_refused(localizer, &error),
+        },
+        Err(_) => None,
+    };
+    let Some(agent) = found else {
+        return approval_refused(localizer, ApprovalRefused::Unknown, hostname);
+    };
+    let name = agent.hostname.to_string();
+    if !agent.is_pending() {
+        return approval_refused(localizer, ApprovalRefused::AlreadyApproved, &name);
+    }
+    say(
+        localizer,
+        msg::CLI_PAIRING_TOKEN_APPROVE_WAITING,
+        &[
+            ("hostname", text(&name)),
+            ("agent_id", text(agent.agent_id.as_uuid())),
+            ("fingerprint", text(Fingerprint::of_key(&agent.key))),
+        ],
+    )?;
+    if !confirmed(localizer, &APPROVE, terminal::stdin_is_terminal(), yes)? {
+        return Ok(ExitCode::FAILURE);
+    }
+    match pairing.approve(&agent).await {
+        Ok(Ok(_)) => {
+            say(
+                localizer,
+                msg::CLI_PAIRING_TOKEN_APPROVED,
+                &[("hostname", text(&name))],
+            )?;
+            Ok(ExitCode::SUCCESS)
+        }
+        Ok(Err(refused)) => approval_refused(localizer, refused, &name),
+        Err(error) => hub_refused(localizer, &error),
+    }
+}
+
+fn approval_refused(
+    localizer: &Localizer,
+    refused: ApprovalRefused,
+    hostname: &str,
+) -> io::Result<ExitCode> {
+    let message = match refused {
+        ApprovalRefused::Unknown => msg::CLI_PAIRING_TOKEN_APPROVE_UNKNOWN,
+        ApprovalRefused::AlreadyApproved => msg::CLI_PAIRING_TOKEN_APPROVE_ALREADY,
+    };
+    say(localizer, message, &[("hostname", text(hostname))])?;
+    Ok(ExitCode::FAILURE)
+}
+
 fn hub_refused(localizer: &Localizer, error: &HubPairingError) -> io::Result<ExitCode> {
     if let HubPairingError::Identity(identity) = error
         && let Some(args) = exposed(identity)
@@ -399,6 +505,11 @@ fn run_pair(localizer: &Localizer, ask: PairAsk) -> io::Result<ExitCode> {
         say(localizer, msg::CLI_NO_DATA_DIR, &[])?;
         return Ok(ExitCode::FAILURE);
     };
+    if let Some(address) = ask.address.as_deref()
+        && let Some(code) = follow(localizer, &data_dir, address, ask.hostname.clone())?
+    {
+        return Ok(code);
+    }
     let at_terminal = terminal::stdin_is_terminal();
     if at_terminal {
         to_stderr(&format!(
@@ -434,13 +545,7 @@ fn run_pair(localizer: &Localizer, ask: PairAsk) -> io::Result<ExitCode> {
         };
         token = token.with_address(parsed);
     }
-    let hostname = ask.hostname.unwrap_or_else(platform::hostname);
-    let Ok(hostname) = Hostname::parse(&hostname) else {
-        say(
-            localizer,
-            msg::CLI_PAIR_BAD_HOSTNAME,
-            &[("name", text(hostname))],
-        )?;
+    let Some(hostname) = hostname_or_said(localizer, ask.hostname)? else {
         return Ok(ExitCode::from(2));
     };
     // Each kind of address has its own whole sentence, not a phrase put into
@@ -521,6 +626,150 @@ async fn on_the_agent(
     }
 }
 
+/// `ladderback pair <address>` on a machine that paired: the hub's new
+/// address, which needs no token (decision 120, "Addresses and the
+/// transport statement"). `None` when the machine holds no pin, so the
+/// address goes with the token it pairs with.
+fn follow(
+    localizer: &Localizer,
+    data_dir: &Path,
+    address: &str,
+    hostname: Option<String>,
+) -> io::Result<Option<ExitCode>> {
+    let Ok(Some(agent_id)) = platform::agent_id::load(data_dir) else {
+        return Ok(None);
+    };
+    let runtime = match runtime(localizer)? {
+        Ok(runtime) => runtime,
+        Err(code) => return Ok(Some(code)),
+    };
+    let identity = Arc::new(FileIdentity::in_data_dir(data_dir));
+    // A pin that can't be read is still a pin: connecting says why.
+    if matches!(runtime.block_on(identity.pin()), Ok(None)) {
+        return Ok(None);
+    }
+    let Ok(parsed) = HubAddress::parse(address) else {
+        say(
+            localizer,
+            msg::CLI_PAIRING_TOKEN_BAD_ADDRESS,
+            &[("address", text(address))],
+        )?;
+        return Ok(Some(ExitCode::from(2)));
+    };
+    let Some(hostname) = hostname_or_said(localizer, hostname)? else {
+        return Ok(Some(ExitCode::from(2)));
+    };
+    let connecting = connecting(identity);
+    let outcome = runtime.block_on(connecting.connect_at(agent_id, hostname, parsed));
+    let connected = match outcome {
+        Ok(connected) => connected,
+        // The hub there proved the pinned key but no longer knows this
+        // machine, or the machine lost its key: it pairs again, with a
+        // token, at that address.
+        Err(failure) if pairs_again(&failure) => {
+            // The pairing that follows gives the exit code.
+            let _ = say_unconnected(localizer, &failure, address)?;
+            return Ok(None);
+        }
+        Err(failure) => {
+            let code = say_unconnected(localizer, &failure, address)?;
+            say(localizer, msg::CLI_PAIR_ADDRESS_NOT_KEPT, &[])?;
+            return Ok(Some(code));
+        }
+    };
+    say(
+        localizer,
+        msg::CLI_PAIR_ADDRESS_KEPT,
+        &[("address", text(address))],
+    )?;
+    say_connected(localizer, &connected)?;
+    Ok(Some(ExitCode::SUCCESS))
+}
+
+/// Whether a failure to follow the hub leaves pairing again with a token
+/// as the way on: the hub refused the proof, so it no longer knows this
+/// machine, or the machine holds a pin but no key.
+fn pairs_again(failure: &ConnectFailure) -> bool {
+    match failure {
+        ConnectFailure::NotPaired => true,
+        ConnectFailure::Refused(refusal) => {
+            api::sync::refusal_code(refusal.code.as_str()) == ErrorCode::ProofRefused
+        }
+        _ => false,
+    }
+}
+
+/// `hostname`, or the machine's, when it is one; `None` once it said why
+/// it isn't.
+fn hostname_or_said(
+    localizer: &Localizer,
+    hostname: Option<String>,
+) -> io::Result<Option<Hostname>> {
+    let hostname = hostname.unwrap_or_else(platform::hostname);
+    let Ok(parsed) = Hostname::parse(&hostname) else {
+        say(
+            localizer,
+            msg::CLI_PAIR_BAD_HOSTNAME,
+            &[("name", text(hostname))],
+        )?;
+        return Ok(None);
+    };
+    Ok(Some(parsed))
+}
+
+/// Connecting this machine to its hub, on the pin and keys in `identity`.
+fn connecting(identity: Arc<FileIdentity>) -> ConnectToHub {
+    ConnectToHub::new(
+        identity,
+        Arc::new(AwsLcSigning),
+        Arc::new(OsRandom),
+        Arc::new(SystemClock),
+        Arc::new(WebSocketHubConnector::new()),
+        crate::build_info::SHOWN.as_str().to_owned(),
+    )
+}
+
+/// Says where the hub holds this machine.
+fn say_connected(localizer: &Localizer, connected: &Connected) -> io::Result<()> {
+    match connected.approval {
+        Approval::Pending => say(
+            localizer,
+            msg::CLI_HUB_STATUS_PENDING,
+            &[(
+                "fingerprint",
+                text(Fingerprint::of_key(&connected.agent_key)),
+            )],
+        ),
+        Approval::Approved => say(localizer, msg::CLI_HUB_STATUS_APPROVED, &[]),
+    }
+}
+
+/// Says why this machine didn't connect to its hub at `address`, the
+/// first it tried.
+fn say_unconnected(
+    localizer: &Localizer,
+    failure: &ConnectFailure,
+    address: &str,
+) -> io::Result<ExitCode> {
+    if let ConnectFailure::NotPaired = failure {
+        say(localizer, msg::CLI_HUB_STATUS_NOT_PAIRED, &[])?;
+        return Ok(ExitCode::FAILURE);
+    }
+    if let ConnectFailure::Identity(identity) = failure
+        && let Some(args) = exposed(identity)
+    {
+        say(localizer, msg::CLI_KEY_FILE_EXPOSED, &args)?;
+        return Ok(ExitCode::FAILURE);
+    }
+    if let Some(message) = connect_message(failure) {
+        say(localizer, message, &[("address", text(address))])?;
+        return Ok(ExitCode::FAILURE);
+    }
+    let (code, args, detail) = connect_failed(failure, address);
+    to_stderr(&refusal_line(localizer, code, &args, detail.as_deref()))?;
+    Ok(ExitCode::FAILURE)
+}
+
 /// `ladderback hub-status`: connects to the hub this machine pinned at
 /// pairing, proves who it is, and says whether the hub holds it waiting for
 /// approval or has approved it.
@@ -534,13 +783,7 @@ fn run_hub_status(localizer: &Localizer, hostname: Option<String>) -> io::Result
         say(localizer, msg::CLI_NO_DATA_DIR, &[])?;
         return Ok(ExitCode::FAILURE);
     };
-    let hostname = hostname.unwrap_or_else(platform::hostname);
-    let Ok(hostname) = Hostname::parse(&hostname) else {
-        say(
-            localizer,
-            msg::CLI_PAIR_BAD_HOSTNAME,
-            &[("name", text(hostname))],
-        )?;
+    let Some(hostname) = hostname_or_said(localizer, hostname)? else {
         return Ok(ExitCode::from(2));
     };
     let runtime = match runtime(localizer)? {
@@ -566,53 +809,21 @@ async fn connect_to_hub(
         Err(error) => return refused(localizer, &error.to_string()),
     };
     let identity = Arc::new(FileIdentity::in_data_dir(data_dir));
-    // The address a failure names; the use case reads the pin it trusts.
+    // The address a failure names, the first tried; the use case reads the
+    // pin it trusts.
     let address = match identity.pin().await {
-        Ok(Some(pin)) => pin.address.as_str().to_owned(),
+        Ok(Some(pin)) => pin
+            .addresses()
+            .next()
+            .map_or_else(String::new, |address| address.as_str().to_owned()),
         Ok(None) | Err(_) => String::new(),
     };
-    let connecting = ConnectToHub::new(
-        identity,
-        Arc::new(AwsLcSigning),
-        Arc::new(OsRandom),
-        Arc::new(SystemClock),
-        Arc::new(WebSocketHubConnector::new()),
-        crate::build_info::SHOWN.as_str().to_owned(),
-    );
-    match connecting.connect(agent_id, hostname).await {
+    match connecting(identity).connect(agent_id, hostname).await {
         Ok(connected) => {
-            match connected.approval {
-                Approval::Pending => say(
-                    localizer,
-                    msg::CLI_HUB_STATUS_PENDING,
-                    &[(
-                        "fingerprint",
-                        text(Fingerprint::of_key(&connected.agent_key)),
-                    )],
-                )?,
-                Approval::Approved => say(localizer, msg::CLI_HUB_STATUS_APPROVED, &[])?,
-            }
+            say_connected(localizer, &connected)?;
             Ok(ExitCode::SUCCESS)
         }
-        Err(ConnectFailure::NotPaired) => {
-            say(localizer, msg::CLI_HUB_STATUS_NOT_PAIRED, &[])?;
-            Ok(ExitCode::FAILURE)
-        }
-        Err(failure) => {
-            if let ConnectFailure::Identity(identity) = &failure
-                && let Some(args) = exposed(identity)
-            {
-                say(localizer, msg::CLI_KEY_FILE_EXPOSED, &args)?;
-                return Ok(ExitCode::FAILURE);
-            }
-            if let Some(message) = connect_message(&failure) {
-                say(localizer, message, &[("address", text(&address))])?;
-                return Ok(ExitCode::FAILURE);
-            }
-            let (code, args, detail) = connect_failed(&failure, &address);
-            to_stderr(&refusal_line(localizer, code, &args, detail.as_deref()))?;
-            Ok(ExitCode::FAILURE)
-        }
+        Err(failure) => say_unconnected(localizer, &failure, &address),
     }
 }
 
@@ -660,6 +871,7 @@ fn connect_failed(failure: &ConnectFailure, address: &str) -> Said {
             ),
         },
         ConnectFailure::NotPaired
+        | ConnectFailure::PinFull
         | ConnectFailure::Identity(_)
         | ConnectFailure::Signing(_)
         | ConnectFailure::Random(_) => (ErrorCode::Unknown, vec![], Some(format!("{failure:?}"))),
@@ -895,6 +1107,31 @@ mod tests {
         ] {
             let said = format!("{other:?}");
             assert_eq!(connect_message(&other), None, "{said}");
+        }
+    }
+
+    /// A machine the hub no longer knows, or one that lost its key, pairs
+    /// again at the address it was given; any other failure keeps the
+    /// addresses it had and ends there.
+    #[test]
+    fn only_a_refused_proof_or_a_lost_key_pairs_again() {
+        let refused = |code: &str| {
+            ConnectFailure::Refused(domain::fleet::Refused {
+                code: domain::fleet::WireName::parse(code).unwrap(),
+                holder: None,
+                signature: domain::fleet::Signature::from_bytes([0; 64]).unwrap(),
+            })
+        };
+        assert!(pairs_again(&ConnectFailure::NotPaired));
+        assert!(pairs_again(&refused("proof-refused")));
+        for other in [
+            refused("hub-unavailable"),
+            ConnectFailure::Challenge(ChallengeRefused::HubKeyMismatch),
+            ConnectFailure::Link(LinkError::PinMismatch),
+            ConnectFailure::Unsigned,
+        ] {
+            let said = format!("{other:?}");
+            assert!(!pairs_again(&other), "{said}");
         }
     }
 

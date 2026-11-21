@@ -27,8 +27,12 @@ pub trait SecretsHarness: Send + Sync {
     fn without_keyring_service(&self) -> Arc<dyn SecretResolver>;
 
     /// A resolver whose keyring service answers and refuses otherwise than as
-    /// locked: its unlock prompt was dismissed.
+    /// locked: it has no collection to look in.
     fn with_refusing_keyring(&self) -> Arc<dyn SecretResolver>;
+
+    /// A resolver whose keyring service's unlock prompt the person
+    /// dismissed.
+    fn with_dismissed_unlock_prompt(&self) -> Arc<dyn SecretResolver>;
 
     /// A resolver whose keyring service answers that its keyring is locked.
     fn with_locked_keyring(&self) -> Arc<dyn SecretResolver>;
@@ -545,11 +549,12 @@ async fn an_entry_that_is_not_there_is_missing(harness: &dyn SecretsHarness) {
     );
 }
 
-/// A keyring with no service to ask, one whose service says it is locked and
-/// one whose service refuses otherwise are all unavailable, by the entry, and
-/// told apart by their cause: only the first can pass by itself, as when the
-/// daemon outruns the service at login, and only the second is unlocked by
-/// the person (#993).
+/// A keyring with no service to ask, one whose service says it is locked,
+/// one whose unlock prompt was dismissed and one whose service refuses
+/// otherwise are all unavailable, by the entry, and told apart by their
+/// cause: only the first can pass by itself, as when the daemon outruns the
+/// service at login, and only the second and third are unlocked by the
+/// person (#993).
 async fn a_keyring_with_no_service_is_told_apart_from_one_that_refuses(
     harness: &dyn SecretsHarness,
 ) {
@@ -571,22 +576,32 @@ async fn a_keyring_with_no_service_is_told_apart_from_one_that_refuses(
         Some(KeyringCause::Locked)
     );
     assert_eq!(
+        cause(
+            harness
+                .with_dismissed_unlock_prompt()
+                .resolve(&secret)
+                .await
+        ),
+        Some(KeyringCause::Dismissed)
+    );
+    assert_eq!(
         cause(harness.with_refusing_keyring().resolve(&secret).await),
         Some(KeyringCause::Refused)
     );
 }
 
 /// A keyring that can't keep or remove a password says why as one that
-/// can't be read does: a locked one is told apart, since the person can
-/// unlock it and save again (#993); one with no service to ask, or one that
-/// refused otherwise, as when its unlock prompt was dismissed, has no keyring
-/// to keep it in.
+/// can't be read does: a locked one, and one whose unlock prompt was
+/// dismissed, are told apart, since the person can unlock it and save again
+/// (#993); one with no service to ask, or one that refused otherwise, has no
+/// keyring to keep it in.
 async fn a_locked_keyring_keeps_nothing_and_says_it_is_locked(harness: &dyn SecretsHarness) {
     let entry = harness.unused_keyring_entry("locked");
     let password = SecretValue::new("hunter2");
     for (cause, said) in [
         (KeyringCause::NoService, "unavailable"),
         (KeyringCause::Locked, "locked"),
+        (KeyringCause::Dismissed, "locked"),
         (KeyringCause::Refused, "unavailable"),
     ] {
         let keyring = harness.keyring_that_cannot_be_asked(cause);

@@ -8,7 +8,9 @@ use std::sync::Arc;
 use domain::RepositoryAlias;
 use domain::execution::FailureReason;
 use domain::execution::refusal::SettingRefusal;
-use domain::planning::{RepositoryConfig, RepositorySettings, is_relative_location};
+use domain::planning::{
+    OptionTable, RepositoryConfig, RepositorySettings, ResolvedBackends, is_relative_location,
+};
 use domain::secrets::{
     KeyringCause, MAX_MASKED_BYTES, MAX_RCLONE_CREDENTIALS, MAX_SECRET_BYTES, MaskedSecrets, Part,
     Problem, Redactor, Reference, RepositorySecrets, SecretError, SecretRef, SecretValue,
@@ -127,11 +129,12 @@ pub enum Cause {
     /// with this field's: more than a job masks, so the job can't run (I4).
     /// Nothing after this field is read.
     TooMuchToMask { limit: usize },
-    /// The field is a location that, resolved, names a folder on this machine
-    /// by a relative path
-    /// ([`is_relative_location`]),
-    /// which rustic would read from wherever the daemon was started. Nothing
-    /// of what it resolved to is kept: a reference may hold a secret (I4).
+    /// The field names a folder on this machine by a relative path once
+    /// resolved, which rustic would read from wherever the daemon was
+    /// started: a location ([`is_relative_location`]), or an option that
+    /// names a file or runs a program on the backend its resolved location
+    /// names ([`ResolvedBackends::reads_relative`]). Nothing of what it
+    /// resolved to is kept: a reference may hold a secret (I4).
     RelativePath,
 }
 
@@ -170,10 +173,11 @@ pub fn unresolved_refusal(secret: &SecretError, redactor: &Redactor) -> SettingR
         },
         // The platform's words about the service, never about a secret it
         // gave: none was read. Masked all the same. A locked keyring is told
-        // apart, as the person can unlock it (#993).
+        // apart, as the person can unlock it (#993), and so is one whose
+        // unlock prompt they dismissed, which stays locked.
         Problem::KeyringUnavailable {
             detail,
-            cause: KeyringCause::Locked,
+            cause: KeyringCause::Locked | KeyringCause::Dismissed,
         } => SettingRefusal::SecretKeyringLocked {
             source,
             detail: said(detail),
@@ -258,6 +262,24 @@ impl ResolveError {
                 limit,
             },
         }
+    }
+
+    /// Whether a run nobody waits on may wait for the keyring to be
+    /// unlocked past this error: only when the keyring service answered
+    /// that its keyring is locked (decision 135). An unlock prompt the
+    /// person dismissed is refused as locked too, but it is a no, never
+    /// waited on (#993).
+    pub fn waits_for_unlock(&self) -> bool {
+        matches!(
+            &self.cause,
+            Cause::Unresolved(SecretError {
+                problem: Problem::KeyringUnavailable {
+                    cause: KeyringCause::Locked,
+                    ..
+                },
+                ..
+            })
+        )
     }
 }
 
@@ -837,9 +859,10 @@ impl<'a> Run<'a> {
                     }
                     read_unlocked = true;
                 }
-                // An unlock prompt the person dismissed is a no: the run
-                // fails at once and never asks again.
-                KeyringCause::Refused => return read,
+                // An unlock prompt the person dismissed is a no, and so is
+                // a service with no collection: the run fails at once and
+                // never asks again.
+                KeyringCause::Dismissed | KeyringCause::Refused => return read,
             }
         }
     }
@@ -888,12 +911,15 @@ impl<'a> Run<'a> {
             Some(text) => Some(self.location(Field::RepoHot, text).await?),
             None => None,
         };
-        let options = self.expand_all(&settings.options, Field::Option).await?;
+        let backends = ResolvedBackends::of(&repository, repo_hot.as_deref());
+        let options = self
+            .expand_all(settings, OptionTable::Shared, &backends)
+            .await?;
         let options_hot = self
-            .expand_all(&settings.options_hot, Field::OptionHot)
+            .expand_all(settings, OptionTable::Hot, &backends)
             .await?;
         let options_cold = self
-            .expand_all(&settings.options_cold, Field::OptionCold)
+            .expand_all(settings, OptionTable::Cold, &backends)
             .await?;
         Ok(RepositoryAccess {
             repository,
@@ -946,15 +972,34 @@ impl<'a> Run<'a> {
         Ok(expanded)
     }
 
-    /// Options with their references in, and their secrets counted.
+    /// The options of `table` with their references in, each judged by the
+    /// backend of a half it counts for and its secrets counted.
     async fn expand_all(
         &mut self,
-        options: &BTreeMap<String, String>,
-        field: fn(String) -> Field,
+        settings: &RepositorySettings,
+        table: OptionTable,
+        backends: &ResolvedBackends,
     ) -> Result<BTreeMap<String, String>, ResolveError> {
+        let (options, field): (_, fn(String) -> Field) = match table {
+            OptionTable::Shared => (&settings.options, Field::Option),
+            OptionTable::Hot => (&settings.options_hot, Field::OptionHot),
+            OptionTable::Cold => (&settings.options_cold, Field::OptionCold),
+        };
         let mut expanded = BTreeMap::new();
         for (name, text) in options {
             let value = self.expand(field(name.clone()), text).await?;
+            // The backend that reads an option is known only once both are
+            // resolved: one that names a file or runs a program by a
+            // relative path would be read or run from the daemon's working
+            // directory, as the configuration refuses one written so
+            // (#310). The refusal holds nothing of the value, which may be a
+            // secret.
+            if backends.reads_relative(settings, table, name, &value) {
+                return Err(ResolveError {
+                    field: field(name.clone()),
+                    cause: Cause::RelativePath,
+                });
+            }
             self.masked
                 .option(name, &value)
                 .map_err(|too_much| ResolveError {
@@ -1121,12 +1166,23 @@ mod tests {
             (
                 keyring("ladderback/demo"),
                 Problem::KeyringUnavailable {
-                    detail: "Secret Service: prompt dismissed".to_owned(),
+                    detail: "Secret Service: unlock prompt was dismissed".to_owned(),
+                    cause: domain::secrets::KeyringCause::Dismissed,
+                },
+                R::SecretKeyringLocked {
+                    source: "ladderback/demo".to_owned(),
+                    detail: said("Secret Service: unlock prompt was dismissed"),
+                },
+            ),
+            (
+                keyring("ladderback/demo"),
+                Problem::KeyringUnavailable {
+                    detail: "Secret Service: no result found".to_owned(),
                     cause: domain::secrets::KeyringCause::Refused,
                 },
                 R::SecretKeyringUnavailable {
                     source: "ladderback/demo".to_owned(),
-                    detail: said("Secret Service: prompt dismissed"),
+                    detail: said("Secret Service: no result found"),
                 },
             ),
             (
