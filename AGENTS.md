@@ -18,7 +18,7 @@ Every workflow is a `just` recipe, and CI runs the same recipes. `just` lists th
 | `just architecture` | Dependency and build rules: banned crates in `domain` and `app`, the allowed graph of workspace crates and the owners of foreign models (`scripts/check-crate-graph.ts`), no `async` in `domain`, pseudolocales in a default build and out of a release build, the `gallery` feature in neither, the engine's `history-fixture` feature in tests only, the `hub` feature in a default build of `ladderback` and `web` and in no crate of a release build, nor a crate only the hub uses (§16, decision 122), the no-panic settings, `testkit` only as a dev-dependency |
 | `just deny` | `cargo deny` (§13.6). Needs the network; a new advisory can fail it with no change of yours. Not a required check |
 | `just test [args]` | Unit and contract tests (nextest; `args` go to it), doc tests, the acceptance and `@e2e` runners (each runs even when one before it fails; the recipe then names the failed ones), then the skipped-test list. `NEXTEST_PROFILE=ci` adds retries and a JUnit report |
-| `just test-release [args]` | `l10n` and daemon tests built with `--no-default-features`, which `just test` can't run |
+| `just test-release [args]` | Tests of every package with default features (`l10n`, the daemon, the `hub` crates), each built alone with `--no-default-features`, which `just test` can't run |
 | `just mutants [base] [args]` | `cargo mutants` on code changed since `base` (default `origin/main`) in the gated crates, and on the whole of a crate the branch adds to the gate |
 | `just red-first [base]` | Checks that the first commit is a `test:` commit whose tests fail at run time (§13.1) |
 
