@@ -217,6 +217,7 @@ Decisions 1–6 recorded 2026-11-08. Decisions 7–12 recorded 2026-11-08 after 
 | [133](decisions/133-a-machine-not-an-agent.md) | A machine running Ladderback is a machine, not an agent |
 | [134](decisions/134-an-agent-reads-the-log-a-page-at-a-time.md) | How an AI agent reads the daemon's log |
 | [135](decisions/135-keyring-unlock-wait.md) | A run whose keyring is locked waits for it to be unlocked |
+| [136](decisions/136-an-installed-machine-becomes-the-hub.md) | How an installed machine becomes the hub |
 
 ## 17. Open questions
 
