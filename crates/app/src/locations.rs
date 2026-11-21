@@ -313,6 +313,11 @@ impl ChooseLocation {
         for (((index, location), early), position) in
             settings.iter().enumerate().zip(early).zip(1u8..)
         {
+            // Once the job is stopped, no later location is resolved or
+            // probed (decision 80, #498).
+            if stopped(phase) {
+                break;
+            }
             if !early {
                 continue;
             }
@@ -344,6 +349,9 @@ impl ChooseLocation {
             for (((index, location), verdict), position) in
                 settings.iter().enumerate().zip(verdicts).zip(1u8..)
             {
+                if stopped(phase) {
+                    break;
+                }
                 let address = recorded_address(
                     &Location::of(location).masked_address(),
                     MAX_RECORDED_ADDRESS_BYTES,
@@ -451,6 +459,11 @@ impl ChooseLocation {
     ) -> LocationOutcome {
         location.id = None;
         location.entry = None;
+        // A stop that came while this location was resolved: its probe
+        // never starts (#498).
+        if stopped(phase) {
+            return LocationOutcome::Silent;
+        }
         let RunningJob { events, control } = match self.inner.run(op, Job::Probe(location)).await {
             Ok(running) => running,
             Err(_) => return LocationOutcome::Silent,
@@ -778,6 +791,14 @@ enum Phase {
     /// The job that follows the choice runs.
     Running(Box<dyn JobControl>),
     Stopped,
+}
+
+/// Whether the job was stopped: nothing is started from then on.
+fn stopped(phase: &Probing) -> bool {
+    matches!(
+        *phase.lock().unwrap_or_else(PoisonError::into_inner),
+        Phase::Stopped
+    )
 }
 
 /// Stops a located job: every probe while they run, the job once it does,
