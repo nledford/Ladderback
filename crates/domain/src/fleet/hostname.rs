@@ -186,11 +186,11 @@ mod tests {
         }
     }
 
-    /// Characters that show as nothing though they aren't format
-    /// characters, the assigned default-ignorable ones (the Hangul fillers,
-    /// the variation selectors, the combining grapheme joiner and the
-    /// Khmer inherent vowels), and the line and paragraph separators, are
-    /// refused anywhere in a name.
+    /// Characters that show as nothing, or as a blank, though they aren't
+    /// format characters or spaces: the assigned default-ignorable ones
+    /// (the Hangul fillers, the variation selectors, the combining grapheme
+    /// joiner and the Khmer inherent vowels), the braille blank, and the
+    /// line and paragraph separators, are refused anywhere in a name.
     #[test]
     fn fillers_variation_selectors_and_separators_are_refused() {
         for hidden in [
@@ -209,6 +209,7 @@ mod tests {
             '\u{e01ef}',
             '\u{2028}',
             '\u{2029}',
+            '\u{2800}',
         ] {
             assert_eq!(
                 Hostname::parse(&format!("lap{hidden}top")),
@@ -262,6 +263,8 @@ mod tests {
             '\u{e00ff}',
             '\u{e01f0}',
             '\u{2027}',
+            '\u{27ff}',
+            '\u{2801}',
         ] {
             assert!(Hostname::parse(&format!("lap{kept}top")).is_ok(), "{kept}");
         }

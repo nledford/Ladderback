@@ -495,8 +495,12 @@ async fn second_pairs(agent: &mut Agent, hostname: String, other_form: String) {
     world.second = Some(machine);
 }
 
-#[when(regex = r#"^another agent pairs as "([^"]+)"(?: with a Cyrillic letter)?$"#)]
-async fn another_pairs_as(agent: &mut Agent, hostname: String) {
+#[when(regex = r#"^another agent pairs as "([^"]+)"( with a Cyrillic letter)?$"#)]
+async fn another_pairs_as(agent: &mut Agent, hostname: String, cyrillic: String) {
+    if !cyrillic.is_empty() {
+        let is_cyrillic = |c: char| ('\u{400}'..='\u{4ff}').contains(&c);
+        assert!(hostname.chars().any(is_cyrillic), "{hostname:?}");
+    }
     let world = &mut agent.pairing;
     world.new_token().await;
     let machine = Machine::new(99, &hostname);

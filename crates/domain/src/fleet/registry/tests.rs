@@ -117,6 +117,22 @@ fn lookalike_hostnames_share_a_skeleton() {
     assert!(!alike("caf\u{e9}", "cafe"));
 }
 
+/// A capital that looks like another letter is read as that letter before
+/// the case fold, so a capital I is an l and a zero beside capitals is an
+/// O; a run of spaces looks like one space.
+#[test]
+fn capitals_and_runs_of_spaces_look_like_what_they_show() {
+    let alike = |a: &str, b: &str| HostnameSkeleton::of(&name(a)) == HostnameSkeleton::of(&name(b));
+    assert!(alike("Iaptop", "laptop"));
+    assert!(alike("I\u{430}ptop", "Laptop"));
+    assert!(alike("LAPTOP0", "LAPTOPO"));
+    assert!(alike("\u{412}ob", "Bob"));
+    assert!(alike("lap  top", "lap top"));
+    assert!(alike("lap \u{3000}\u{a0}top", "lap top"));
+    assert!(!alike("lap top", "laptop"));
+    assert!(!alike("iaptop", "laptop"));
+}
+
 fn pending(agent: u128, hostname: &str, last_seen: i64) -> AgentRecord {
     AgentRecord {
         status: AgentStatus::Pending { since: at(0) },
