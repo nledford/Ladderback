@@ -420,8 +420,8 @@ cli-mcp-call-line-too-long = line { $line } of the script is longer than { $limi
 
 # `ladderback pairing-token` writes the hub's store from its own process, and the daemon holds the data folder.
 # $path (text): the data folder. It is shown as it is.
-# `ladderback serve --hub` is typed as it is: keep it a string literal.
-cli-pairing-token-daemon-running = the daemon is running on the data folder { $path }. Stop it, run this command again, then start the daemon again with { "ladderback serve --hub" }.
+# `--hub` and `--listen` are typed as they are: keep them string literals.
+cli-pairing-token-daemon-running = the daemon is running on the data folder { $path }. Stop it, run this command again, then start the daemon again as you started it before: through its service, or with { "--hub" } and the same options, such as { "--listen" }.
 
 # The address given for the hub isn't an http:// or https:// address of at most 200 bytes.
 # $address (text): the address as given. It is shown as it came.
