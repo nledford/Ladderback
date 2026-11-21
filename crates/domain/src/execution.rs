@@ -303,12 +303,18 @@ impl HookLevel {
     /// The level's name on the wire and in the operation log: `agent`,
     /// `repository` or `plan`.
     pub fn code(self) -> &'static str {
-        todo!()
+        match self {
+            Self::Agent => "agent",
+            Self::Repository => "repository",
+            Self::Plan => "plan",
+        }
     }
 
     /// The level [`code`](Self::code) names, or `None` for any other text.
-    pub fn parse(_code: &str) -> Option<Self> {
-        todo!()
+    pub fn parse(code: &str) -> Option<Self> {
+        [Self::Agent, Self::Repository, Self::Plan]
+            .into_iter()
+            .find(|level| level.code() == code)
     }
 }
 
@@ -327,18 +333,33 @@ impl HookEnd {
     /// `signal`, `timeout` or `not-started`. An exit's status is
     /// [`exit_code`](Self::exit_code).
     pub fn code(self) -> &'static str {
-        todo!()
+        match self {
+            Self::Exited { .. } => "exit",
+            Self::Signalled => "signal",
+            Self::TimedOut => "timeout",
+            Self::NotStarted => "not-started",
+        }
     }
 
     /// The exit status, for a hook that exited.
     pub fn exit_code(self) -> Option<i32> {
-        todo!()
+        match self {
+            Self::Exited { code } => Some(code),
+            Self::Signalled | Self::TimedOut | Self::NotStarted => None,
+        }
     }
 
     /// The end [`code`](Self::code) names, with `exit_code` for an exit, or
-    /// `None` for any other text or an exit without its status.
-    pub fn parse(_code: &str, _exit_code: Option<i32>) -> Option<Self> {
-        todo!()
+    /// `None` for any other text, an exit without its status or a status on
+    /// anything but an exit.
+    pub fn parse(code: &str, exit_code: Option<i32>) -> Option<Self> {
+        match (code, exit_code) {
+            ("exit", Some(code)) => Some(Self::Exited { code }),
+            ("signal", None) => Some(Self::Signalled),
+            ("timeout", None) => Some(Self::TimedOut),
+            ("not-started", None) => Some(Self::NotStarted),
+            _ => None,
+        }
     }
 }
 

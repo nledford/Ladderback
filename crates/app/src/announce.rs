@@ -9,7 +9,7 @@
 
 use api::{ErrorCode, ErrorDto, MsgArg, UiEvent};
 use domain::execution::refusal::SettingRefusal;
-use domain::execution::{FailureReason, Operation, OperationStatus};
+use domain::execution::{FailureReason, HookEnd, HookPlace, Operation, OperationStatus};
 use domain::{OperationId, RepositoryId, Timestamp};
 
 use crate::ports::EventBus;
@@ -117,7 +117,9 @@ pub fn failure(reason: &FailureReason) -> ErrorDto {
             ErrorDto::new(ErrorCode::EngineUnavailable, [], said(detail))
         }
         F::EngineFailed { detail } => ErrorDto::new(ErrorCode::OperationFailed, [], said(detail)),
-        F::HookFailed { .. } => ErrorDto::new(ErrorCode::OperationFailed, [], None),
+        F::HookFailed { hook, ended } => {
+            ErrorDto::new(ErrorCode::HookFailed, hook_failed_args(*hook, *ended), None)
+        }
         F::EngineExited { exit_code } => ErrorDto::new(
             ErrorCode::EngineExited,
             exit_code.map(|code| ("exit_code", MsgArg::Text(code.to_string()))),
@@ -166,6 +168,33 @@ pub fn failure(reason: &FailureReason) -> ErrorDto {
             ErrorDto::new(code, args, detail)
         }
     }
+}
+
+/// The arguments of a before-hook's failure, in the order its code declares
+/// them: the level whose list holds the hook, its place in that list, how it
+/// ended and, for an exit, its status. A failure an earlier version kept
+/// lacks the hook, and may lack how it ended; what the hook wrote is never
+/// one of them (#480, #853).
+pub fn hook_failed_args(
+    hook: Option<HookPlace>,
+    ended: Option<HookEnd>,
+) -> Vec<(&'static str, MsgArg)> {
+    let text = |name, value: String| (name, MsgArg::Text(value));
+    hook.into_iter()
+        .flat_map(|hook| {
+            [
+                text("level", hook.level.code().to_owned()),
+                text("position", hook.position.to_string()),
+            ]
+        })
+        .chain(ended.into_iter().flat_map(|ended| {
+            std::iter::once(text("ended", ended.code().to_owned())).chain(
+                ended
+                    .exit_code()
+                    .map(|code| text("exit_code", code.to_string())),
+            )
+        }))
+        .collect()
 }
 
 /// A run's refusal as a request to start it is answered and as a page shows
@@ -654,17 +683,6 @@ mod tests {
                 ),
             ),
             (
-                F::HookFailed {
-                    hook: None,
-                    ended: Some(HookEnd::Exited { code: 3 }),
-                },
-                ErrorDto::new(
-                    C::HookFailed,
-                    [("ended", text("exit")), ("exit_code", text("3"))],
-                    None,
-                ),
-            ),
-            (
                 F::EngineExited { exit_code: Some(3) },
                 ErrorDto::new(C::EngineExited, [("exit_code", text("3"))], None),
             ),
@@ -791,6 +809,20 @@ mod tests {
                 "{reason:?}"
             );
         }
+        // A hook failure an earlier version kept names no hook. The history
+        // shows it by name; no event tells it, since only a run of this
+        // version announces its end, so it has no reading by position.
+        assert_eq!(
+            failure(&F::HookFailed {
+                hook: None,
+                ended: Some(HookEnd::Exited { code: 3 }),
+            }),
+            ErrorDto::new(
+                C::HookFailed,
+                [("ended", text("exit")), ("exit_code", text("3"))],
+                None,
+            )
+        );
     }
 
     /// A refusal of a setting, its codes, its arguments and what was said.

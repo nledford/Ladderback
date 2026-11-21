@@ -1,13 +1,14 @@
 //! Execution use cases.
 
+use std::num::NonZeroU32;
 use std::pin::pin;
 use std::sync::Arc;
 
 use domain::execution::deadline::Deadline;
 use domain::execution::full_disk_access::FullDiskAccess;
 use domain::execution::{
-    FailureReason, HookEnd, Operation, OperationKind, OperationStatus, Target, Trigger, Warning,
-    WarningKind,
+    FailureReason, HookEnd, HookLevel, HookPlace, Operation, OperationKind, OperationStatus,
+    Target, Trigger, Warning, WarningKind,
 };
 use domain::planning::{HookEntry, OnFailure};
 use domain::{OperationId, RepositoryId, SignedDuration, SnapshotId};
@@ -636,7 +637,7 @@ impl RunOperation {
             return;
         };
         let setup = hooks.setup.clone();
-        for entry in before_list(&setup) {
+        for (place, entry) in before_list(&setup) {
             let context = self.context(run, &setup, HookPhase::Before);
             let outcome = hooks.runner.run(entry, &context, &setup.redactor).await;
             if outcome.succeeded() {
@@ -646,8 +647,8 @@ impl RunOperation {
                 self.fail(
                     run,
                     FailureReason::HookFailed {
-                        hook: None,
-                        ended: exit_code_of(&outcome).map(|code| HookEnd::Exited { code }),
+                        hook: Some(place),
+                        ended: end_of(&outcome),
                     },
                 );
                 run.stopped_by_hook = true;
@@ -744,14 +745,20 @@ async fn stop_past_deadline(run: &Run, control: &mut dyn JobControl) {
 }
 
 /// The before-hooks of the three levels in §6.1's order: agent,
-/// repository, plan.
-fn before_list(setup: &HookSetup) -> impl Iterator<Item = &'_ HookEntry> {
-    setup
-        .agent
-        .run_before
-        .iter()
-        .chain(&setup.repository.run_before)
-        .chain(&setup.plan.run_before)
+/// repository, plan, each with its place in its level's list.
+fn before_list(setup: &HookSetup) -> impl Iterator<Item = (HookPlace, &'_ HookEntry)> {
+    placed(HookLevel::Agent, &setup.agent.run_before)
+        .chain(placed(HookLevel::Repository, &setup.repository.run_before))
+        .chain(placed(HookLevel::Plan, &setup.plan.run_before))
+}
+
+/// The hooks of `level`'s `list`, each with its place in it, counted from 1.
+fn placed(level: HookLevel, list: &[HookEntry]) -> impl Iterator<Item = (HookPlace, &HookEntry)> {
+    list.iter().enumerate().map(move |(index, entry)| {
+        let index = u32::try_from(index).unwrap_or(u32::MAX);
+        let position = NonZeroU32::MIN.saturating_add(index);
+        (HookPlace { level, position }, entry)
+    })
 }
 
 /// The `phase` hooks of the three levels in §6.1's order: plan,
@@ -788,11 +795,17 @@ fn ending_phase(status: &OperationStatus, stopped_by_hook: bool) -> Option<HookP
     }
 }
 
-/// The exit a hook's outcome reports, when it ran and gave one.
-fn exit_code_of(outcome: &HookOutcome) -> Option<i32> {
+/// How a failing hook ended, as its outcome reports it: `None` only for one
+/// that succeeded.
+fn end_of(outcome: &HookOutcome) -> Option<HookEnd> {
     match outcome.status {
-        HookStatus::Failed { exit_code } => exit_code,
-        _ => None,
+        HookStatus::Failed {
+            exit_code: Some(code),
+        } => Some(HookEnd::Exited { code }),
+        HookStatus::Failed { exit_code: None } => Some(HookEnd::Signalled),
+        HookStatus::TimedOut => Some(HookEnd::TimedOut),
+        HookStatus::NotStarted { .. } => Some(HookEnd::NotStarted),
+        HookStatus::Succeeded => None,
     }
 }
 
