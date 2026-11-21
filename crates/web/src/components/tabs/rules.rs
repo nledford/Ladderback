@@ -120,7 +120,133 @@ impl Orientation {
             Self::Responsive => None,
         }
     }
+
+    /// The classes of the set's parts in this orientation.
+    pub fn classes(self) -> Classes {
+        match self {
+            Self::Horizontal => ROW,
+            Self::Vertical => COLUMN,
+            Self::Responsive => RESPONSIVE,
+        }
+    }
 }
+
+/// The classes of each part of a set of tabs: its own name, which the
+/// scenarios find it by, then the Tailwind utilities that draw it in the
+/// set's orientation (decision 117), logical ones only. Each part takes
+/// one orientation's utilities, so no utility of another orientation is
+/// there to override.
+///
+/// The selected tab is bold with a 3px Ladder Blue bar over the Slate Note
+/// rule, told by weight and a shape, never by color alone (1.4.1, The
+/// Weight Not Color Rule). Flat: no fill and no box. Each tab draws its own
+/// stretch of the rule, edge to edge with the next, so the rule shows
+/// beside every tab, and a tab's edge reaches one pixel into the list's
+/// rule, so the two are one. The bar is that edge 3px thick, the tab's
+/// padding there 2px less, so choosing a tab moves nothing; a hovered tab
+/// that isn't selected shows a Slate Note line as thick as the bar (on the
+/// selected tab it is the bar's own width). Under forced colors the tabs
+/// are text on the reader's page colors, the rule and the bar in the text's
+/// color as the focus ring is (`Highlight` need not reach 3:1 on `Canvas`,
+/// 1.4.11), no hover line; the bar stands apart from the rule by its
+/// thickness and from the ring by its place. The weights stay in
+/// `style.css`: the base rule `button { font: inherit }`, outside
+/// Tailwind's layers, outranks any utility on the tab.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct Classes {
+    /// The set.
+    pub frame: &'static str,
+    /// The box inside the set that lays out the list and the panels: a
+    /// container query can't style its own container.
+    pub layout: &'static str,
+    /// The `tablist`.
+    pub list: &'static str,
+    /// Each tab, a native button.
+    pub tab: &'static str,
+    /// The words in each tab, as wide bold as not, so the row stays still as
+    /// the selection moves along it: an unseen bold copy of the words, which
+    /// a screen reader skips (its alternative text is empty), sets its width.
+    pub label: &'static str,
+    /// Each panel.
+    pub panel: &'static str,
+}
+
+/// A row of tabs over the panels, on the rule under the list. On a narrow
+/// screen the row wraps onto more lines, each tab whole (The 320 Rule), and
+/// the list's own rule runs on under the last line to the row's end. A
+/// panel keeps the room of the tabs' row between it and the list.
+const ROW: Classes = Classes {
+    frame: "tabs",
+    layout: "tabs-layout",
+    list: "tab-list flex flex-wrap gap-y-1 border-be border-be-muted \
+        forced-colors:border-be-[color:CanvasText]",
+    tab: "tab min-block-6 -mbe-px py-1 px-3 border-0 border-be border-be-muted bg-transparent \
+        text-fg aria-selected:pbe-[calc(0.25rem-2px)] aria-selected:border-be-[3px] \
+        not-forced-colors:aria-selected:border-be-accent \
+        not-forced-colors:hover:pbe-[calc(0.25rem-2px)] not-forced-colors:hover:border-be-[3px] \
+        forced-colors:bg-[color:Canvas] forced-colors:border-be-[color:CanvasText] \
+        forced-colors:text-[color:CanvasText]",
+    label: "tab-label inline-flex flex-col items-center after:content-[attr(data-label)_/_''] \
+        after:block-0 after:overflow-hidden after:invisible after:font-bold",
+    panel: "tab-panel py-3",
+};
+
+/// A column of tabs at the panels' start, on the rule at the list's end,
+/// between it and the panels, where the selected tab's bar lies. The list
+/// takes at most half the room, and the panels the rest. Every tab is as
+/// wide as the list, its words wrapping and standing at its start, so the
+/// labels line up down the column, wrapped lines too (#1011).
+const COLUMN: Classes = Classes {
+    frame: "tabs tabs-vertical",
+    layout: "tabs-layout flex items-start",
+    list: "tab-list flex flex-col max-inline-1/2 border-e border-e-muted \
+        forced-colors:border-e-[color:CanvasText]",
+    tab: "tab min-block-6 mbe-0 -me-px py-1 px-3 border-0 border-e border-e-muted bg-transparent \
+        text-fg text-start wrap-anywhere aria-selected:pe-[calc(0.75rem-2px)] \
+        aria-selected:border-e-[3px] not-forced-colors:aria-selected:border-e-accent \
+        not-forced-colors:hover:pe-[calc(0.75rem-2px)] not-forced-colors:hover:border-e-[3px] \
+        forced-colors:bg-[color:Canvas] forced-colors:border-e-[color:CanvasText] \
+        forced-colors:text-[color:CanvasText]",
+    label: "tab-label inline-flex flex-col items-start after:content-[attr(data-label)_/_''] \
+        after:block-0 after:overflow-hidden after:invisible after:font-bold",
+    panel: "tab-panel flex-1 min-inline-0 py-1 ps-4",
+};
+
+/// A column while the set's own container has room for the list beside the
+/// panels, 42rem (in rem, so larger text needs a wider container), and a
+/// row below that: the column's utilities under `@min-[42rem]:`, the row's
+/// under `@max-[42rem]:`, and what both share bare. The set is the
+/// container (`@container`), so a caller sets its width, as a block's.
+const RESPONSIVE: Classes = Classes {
+    frame: "tabs tabs-responsive @container",
+    layout: "tabs-layout @min-[42rem]:flex @min-[42rem]:items-start",
+    list: "tab-list flex @max-[42rem]:flex-wrap @max-[42rem]:gap-y-1 @max-[42rem]:border-be \
+        @max-[42rem]:border-be-muted @max-[42rem]:forced-colors:border-be-[color:CanvasText] \
+        @min-[42rem]:flex-col @min-[42rem]:max-inline-1/2 @min-[42rem]:border-e \
+        @min-[42rem]:border-e-muted @min-[42rem]:forced-colors:border-e-[color:CanvasText]",
+    tab: "tab min-block-6 py-1 px-3 border-0 bg-transparent text-fg \
+        forced-colors:bg-[color:Canvas] forced-colors:text-[color:CanvasText] \
+        @max-[42rem]:-mbe-px @max-[42rem]:border-be @max-[42rem]:border-be-muted \
+        @max-[42rem]:aria-selected:pbe-[calc(0.25rem-2px)] \
+        @max-[42rem]:aria-selected:border-be-[3px] \
+        @max-[42rem]:not-forced-colors:aria-selected:border-be-accent \
+        @max-[42rem]:not-forced-colors:hover:pbe-[calc(0.25rem-2px)] \
+        @max-[42rem]:not-forced-colors:hover:border-be-[3px] \
+        @max-[42rem]:forced-colors:border-be-[color:CanvasText] \
+        @min-[42rem]:mbe-0 @min-[42rem]:-me-px @min-[42rem]:border-e @min-[42rem]:border-e-muted \
+        @min-[42rem]:text-start @min-[42rem]:wrap-anywhere \
+        @min-[42rem]:aria-selected:pe-[calc(0.75rem-2px)] \
+        @min-[42rem]:aria-selected:border-e-[3px] \
+        @min-[42rem]:not-forced-colors:aria-selected:border-e-accent \
+        @min-[42rem]:not-forced-colors:hover:pe-[calc(0.75rem-2px)] \
+        @min-[42rem]:not-forced-colors:hover:border-e-[3px] \
+        @min-[42rem]:forced-colors:border-e-[color:CanvasText]",
+    label: "tab-label inline-flex flex-col after:content-[attr(data-label)_/_''] after:block-0 \
+        after:overflow-hidden after:invisible after:font-bold @max-[42rem]:items-center \
+        @min-[42rem]:items-start",
+    panel: "tab-panel @max-[42rem]:py-3 @min-[42rem]:flex-1 @min-[42rem]:min-inline-0 \
+        @min-[42rem]:py-1 @min-[42rem]:ps-4",
+};
 
 /// The layout a tab list is shown in, which its arrow keys and its
 /// `aria-orientation` follow.
@@ -470,6 +596,95 @@ mod tests {
         assert_eq!(
             TabsName::LabelledBy("demo-heading".to_owned()).attributes(),
             (None, Some("demo-heading".to_owned()))
+        );
+    }
+
+    /// The classes of each part, in the order `Classes` lists them.
+    fn parts(classes: Classes) -> [&'static str; 6] {
+        [
+            classes.frame,
+            classes.layout,
+            classes.list,
+            classes.tab,
+            classes.label,
+            classes.panel,
+        ]
+    }
+
+    fn set(class: &str) -> std::collections::BTreeSet<&str> {
+        class.split_whitespace().collect()
+    }
+
+    #[test]
+    fn every_part_keeps_its_name_in_every_orientation() {
+        let names = [
+            "tabs",
+            "tabs-layout",
+            "tab-list",
+            "tab",
+            "tab-label",
+            "tab-panel",
+        ];
+        for orientation in [
+            Orientation::Horizontal,
+            Orientation::Vertical,
+            Orientation::Responsive,
+        ] {
+            for (class, name) in parts(orientation.classes()).into_iter().zip(names) {
+                assert!(set(class).contains(name), "{orientation:?}: {class}");
+            }
+        }
+        assert!(set(Orientation::Vertical.classes().frame).contains("tabs-vertical"));
+        assert!(set(Orientation::Responsive.classes().frame).contains("tabs-responsive"));
+    }
+
+    #[test]
+    fn a_row_draws_its_rule_and_bar_under_the_tabs_and_a_column_at_their_end() {
+        let row = Orientation::Horizontal.classes();
+        let column = Orientation::Vertical.classes();
+        for under in ["border-be", "aria-selected:border-be-[3px]"] {
+            assert!(set(row.tab).contains(under), "{under}");
+            assert!(!set(column.tab).contains(under), "{under}");
+        }
+        for end in ["border-e", "aria-selected:border-e-[3px]"] {
+            assert!(set(column.tab).contains(end), "{end}");
+            assert!(!set(row.tab).contains(end), "{end}");
+        }
+        assert!(set(row.list).contains("flex-wrap"));
+        assert!(set(column.list).contains("flex-col"));
+        assert!(set(column.layout).contains("flex"));
+        assert!(!set(row.layout).contains("flex"));
+    }
+
+    /// A responsive set is a row below 42rem of its own width and a column
+    /// from there: each part takes what the row's and the column's share,
+    /// the row's own utilities only under `@max-[42rem]:` and the column's
+    /// only under `@min-[42rem]:`, so the two never meet, and the set is
+    /// the container its query measures.
+    #[test]
+    fn responsive_tabs_are_a_row_below_42rem_and_a_column_from_there() {
+        let (row, column) = (
+            Orientation::Horizontal.classes(),
+            Orientation::Vertical.classes(),
+        );
+        let parts = parts(row)
+            .into_iter()
+            .zip(parts(column))
+            .zip(parts(Orientation::Responsive.classes()))
+            .skip(1);
+        for ((row, column), responsive) in parts {
+            let (row, column) = (set(row), set(column));
+            let mut wanted: std::collections::BTreeSet<String> =
+                row.intersection(&column).map(|&c| c.to_owned()).collect();
+            wanted.extend(row.difference(&column).map(|c| format!("@max-[42rem]:{c}")));
+            wanted.extend(column.difference(&row).map(|c| format!("@min-[42rem]:{c}")));
+            let drawn: std::collections::BTreeSet<String> =
+                set(responsive).into_iter().map(str::to_owned).collect();
+            assert_eq!(drawn, wanted);
+        }
+        assert_eq!(
+            set(Orientation::Responsive.classes().frame),
+            set("tabs tabs-responsive @container")
         );
     }
 }
