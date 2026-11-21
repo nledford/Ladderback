@@ -1255,8 +1255,17 @@ fn columns_panel(panel: ColumnsPanel) -> AnyView {
                 })
             };
             view! {
+                // Where the panel has room (`@md`, in rem, so larger text
+                // narrows it too), a row of the list's grid
+                // (`grid-cols-subgrid`): every label shares one column and
+                // the Move buttons line up however long a column's name is.
+                // Without that room, as at 320 px with 200 % text, the row
+                // wraps its buttons under the label instead (1.4.10). The
+                // checkbox's own block margin is a form's spacing between
+                // fields; in a list of rows it would open a gap above and
+                // below each, so it goes.
                 <li
-                    class="group relative flex flex-wrap items-center gap-2 py-0.5"
+                    class="group relative flex flex-wrap items-center gap-x-1 py-0.5 @md:col-span-4 @md:grid @md:grid-cols-subgrid [&>div]:my-0"
                     data-drop=drop_mark
                 >
                     // The drop line: shown only where a drop would land, so
@@ -1384,10 +1393,15 @@ fn columns_panel(panel: ColumnsPanel) -> AnyView {
         }
     };
     view! {
-        <div class="flex flex-col items-start gap-2 mbe-2" on:keydown=close>
+        <div class="@container flex flex-col items-start gap-2 mbe-2" on:keydown=close>
             <Button
                 id=button_id.clone()
-                content=Content::Text(Signal::stored(text(&localizer, msg::UI_TABLE_COLUMNS)))
+                content=Content::IconAndText {
+                    glyph: Signal::derive(move || {
+                        if open.get() { LucideGlyph::ChevronUp } else { LucideGlyph::ChevronDown }
+                    }),
+                    label: Signal::stored(text(&localizer, msg::UI_TABLE_COLUMNS)),
+                }
                 appearance=Appearance::Ghost
                 size=Size::Small
                 expanded=open
@@ -1396,15 +1410,15 @@ fn columns_panel(panel: ColumnsPanel) -> AnyView {
                 on_press=Callback::new(move |()| open.update(|open| *open = !*open))
             />
             // The panel's own box shows (`hidden`); its flex box is inside.
-            <div id=panel_id hidden=move || !open.get() class="border border-muted p-2">
-                <div class="flex flex-col items-start gap-2">
+            <div id=panel_id hidden=move || !open.get() class="border border-muted p-3">
+                <div class="flex flex-col items-start gap-3">
                     // Preflight takes its markers, and with them Safari's
                     // list role, which the list's name and count need.
                     <ul
                         node_ref=list
                         role="list"
                         aria-labelledby=button_id
-                        class="flex flex-col"
+                        class="m-0 flex flex-col ps-0 @md:grid @md:grid-cols-[auto_1fr_auto_auto] @md:items-center @md:gap-x-1"
                         on:pointermove=drag
                         on:pointerup=drop
                         on:pointercancel=cancel
