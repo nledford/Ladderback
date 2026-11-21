@@ -130,3 +130,30 @@ fn the_viewers_offset_is_the_one_the_browsers_clock_had_at_that_instant() {
     );
     assert_eq!(at("2026-11-01T06:00:00Z"), Offset::constant(-5));
 }
+
+/// The pairing dialog writes when its token lapses in the viewer's zone, the
+/// zone whose offset it names beside the time (#1271), and so does the line
+/// that says the token lapsed.
+#[cfg(feature = "hub")]
+#[wasm_bindgen_test]
+fn a_pairing_tokens_lapse_time_is_the_viewers_reading_beside_the_viewers_offset() {
+    use crate::settings::agents::{lapsed, lapses};
+    let localizer = Localizer::new(&["en-US".parse().unwrap()]);
+    let viewer = l10n::viewer_zone();
+    let fold = |text: String| text.replace(['\u{202f}', '\u{a0}'], " ");
+    // `just test-wasm` pins `TZ=America/New_York`: 17:25 UTC is 12:25 there.
+    let raw = "2026-11-21T17:25:04Z";
+    assert_eq!(
+        fold(lapses(&localizer, viewer.as_ref(), raw, 15 * 60)),
+        "11/21/26, 12:25:04 PM (-05:00), in 15 minutes"
+    );
+    assert_eq!(
+        fold(lapsed(&localizer, viewer.as_ref(), raw)),
+        "Lapsed at 11/21/26, 12:25:04 PM. Make a new token to pair a machine."
+    );
+    assert_eq!(
+        fold(lapses(&localizer, None, raw, 15 * 60)),
+        "11/21/26, 5:25:04 PM (+00:00), in 15 minutes",
+        "without the viewer's zone, the time and the offset named are UTC's"
+    );
+}
