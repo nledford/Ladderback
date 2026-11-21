@@ -241,6 +241,21 @@ Then("the tab {string} stands on a line above the last of its list", async funct
   assert.ok(own.bottom < last.bottom - 1, `the tab "${name}" ends at ${own.bottom}, on the last line (${last.bottom})`);
 });
 
+// A tab is as wide in the text's weight as bold, held by an unseen bold copy
+// of its words, so choosing a tab moves none along its list: its width read
+// as drawn, then with the tab made bold for the measure alone.
+Then("the tab {string} is as wide as it is bold, so choosing it moves no tab", async function (this: BrowserWorld, name: string) {
+  const [drawn, bold] = await tab(this, name).evaluate((element) => {
+    const button = element as HTMLElement;
+    const drawn = button.getBoundingClientRect().width;
+    button.style.fontWeight = "700";
+    const bold = button.getBoundingClientRect().width;
+    button.style.fontWeight = "";
+    return [drawn, bold];
+  });
+  assert.ok(Math.abs(drawn - bold) < 0.5, `the tab "${name}" is ${drawn} pixels wide, ${bold} bold`);
+});
+
 // The rules under tabs side by side join into one unbroken line: no gap
 // between neighbours on a line, in either reading direction.
 Then(
