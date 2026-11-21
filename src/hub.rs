@@ -85,9 +85,11 @@ pub(crate) fn tls_key_unserved(refusal: &TlsKeyRefusal) -> String {
         TlsKeyRefusal::AnotherKey => format!(
             "its key file `{file}` in the data folder holds another key than the one this hub made; restore it from your backup of the data folder, then restart the hub"
         ),
-        TlsKeyRefusal::NotAKey => format!(
-            "its key file `{file}` in the data folder holds no key the hub can serve; restore it from your backup of the data folder, then restart the hub"
-        ),
+        TlsKeyRefusal::NotAKey | TlsKeyRefusal::Identity(IdentityError::Damaged { .. }) => {
+            format!(
+                "its key file `{file}` in the data folder holds no key the hub can serve; restore it from your backup of the data folder, then restart the hub"
+            )
+        }
         TlsKeyRefusal::Identity(IdentityError::Exposed { file, mode }) => format!(
             "its key file `{file}` can be read or changed by other users (mode {mode:04o}); make it its owner's only, as `chmod 600` does, then restart the hub"
         ),
@@ -342,7 +344,10 @@ fn tls_refused(localizer: &Localizer, refusal: &TlsKeyRefusal) -> io::Result<Exi
         return Ok(ExitCode::FAILURE);
     }
     match refusal {
-        TlsKeyRefusal::Missing | TlsKeyRefusal::AnotherKey => {
+        TlsKeyRefusal::Missing
+        | TlsKeyRefusal::AnotherKey
+        | TlsKeyRefusal::NotAKey
+        | TlsKeyRefusal::Identity(IdentityError::Damaged { .. }) => {
             say(localizer, msg::CLI_PAIRING_TOKEN_NO_TLS_KEY, &[])?;
             Ok(ExitCode::FAILURE)
         }
