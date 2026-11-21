@@ -964,6 +964,13 @@ fn warns_plain_http(
     exposure == http_adapter::Exposure::Network && sign_in_on && !loopback_plain_only
 }
 
+/// The address the daemon says it listens at, `bound`: over `https://`
+/// when the hub's built-in TLS serves and the address is beyond loopback,
+/// where the front door closes plain HTTP.
+fn listening_url(bound: SocketAddr, built_in_tls: bool) -> String {
+    todo!("{bound} {built_in_tls}")
+}
+
 /// The line `say` prints: one of Ladderback's own messages after the
 /// program's name.
 fn said(localizer: &Localizer, id: MessageId, args: &[(&str, MsgArg)]) -> String {
@@ -1105,6 +1112,28 @@ mod tests {
                 warns_plain_http(exposure, sign_in_on, built_in_tls),
                 warned,
                 "{exposure:?}, sign-in on {sign_in_on}, built-in TLS {built_in_tls}"
+            );
+        }
+    }
+
+    /// A hub serving its built-in TLS beyond loopback says its address over
+    /// `https://`, the only way another machine reaches it; on loopback,
+    /// where plain HTTP is served too, and without the TLS, over `http://`.
+    #[test]
+    fn a_hub_beyond_loopback_says_its_address_over_tls() {
+        for (bound, built_in_tls, url) in [
+            ("192.0.2.10:9898", true, "https://192.0.2.10:9898"),
+            ("[2001:db8::1]:9898", true, "https://[2001:db8::1]:9898"),
+            ("0.0.0.0:9898", true, "https://0.0.0.0:9898"),
+            ("127.0.0.1:9898", true, "http://127.0.0.1:9898"),
+            ("[::1]:9898", true, "http://[::1]:9898"),
+            ("192.0.2.10:9898", false, "http://192.0.2.10:9898"),
+        ] {
+            let bound: SocketAddr = bound.parse().unwrap();
+            assert_eq!(
+                listening_url(bound, built_in_tls),
+                url,
+                "{bound}, {built_in_tls}"
             );
         }
     }
