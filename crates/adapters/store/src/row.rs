@@ -18,7 +18,7 @@ use domain::access::api_token::{
 use domain::access::permissions::{Level, Permission, Permissions};
 use domain::access::{KeptSession, PasswordFingerprint, SessionDigest, SessionLength};
 use domain::execution::locations::LocationsRecord;
-use domain::execution::logged_entry::LoggedEntry;
+use domain::execution::logged_entry::{LoggedEntry, RestoredTo};
 use domain::execution::retry::RetryScheduled;
 use domain::execution::{OperationStatus, Target, Trigger, Warning, WarningKind};
 use domain::maintenance::{RepositoryStats, StatsReading};
@@ -489,6 +489,15 @@ pub(crate) fn record(row: &SqliteRow) -> Result<OperationRecord, StoreError> {
         reader.id_of("repo_alias", "repository alias", RepositoryAlias::parse)?;
     let locations = reader.locations()?;
     let entry = reader.text("entry")?.map(LoggedEntry::kept);
+    // `''` is a restore over the entry's own path; a new folder's path is
+    // absolute, so never empty.
+    let restored_to = reader.text("restored_to")?.map(|kept| {
+        if kept.is_empty() {
+            RestoredTo::InPlace
+        } else {
+            RestoredTo::Folder(kept)
+        }
+    });
 
     Ok(OperationRecord {
         id,
@@ -505,7 +514,7 @@ pub(crate) fn record(row: &SqliteRow) -> Result<OperationRecord, StoreError> {
         repository_alias,
         locations,
         entry,
-        restored_to: None,
+        restored_to,
     })
 }
 

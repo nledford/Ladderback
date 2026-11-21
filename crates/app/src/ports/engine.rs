@@ -4,7 +4,7 @@ use std::time::Duration;
 use async_trait::async_trait;
 use domain::browse::{DisplayName, FolderPage, FolderPath};
 use domain::execution::deadline::KeepDelete;
-use domain::execution::logged_entry::LoggedEntry;
+use domain::execution::logged_entry::{LoggedEntry, RestoredTo};
 use domain::execution::plan_tags::{PlanTags, UserTag};
 use domain::execution::{FailureReason, OperationKind, Target, Warning};
 use domain::find::{NamePattern, SearchAnswer, SearchCaps};
@@ -304,6 +304,22 @@ impl Job {
         match self {
             Self::Restore(job) => Some(LoggedEntry::of(&job.entry, &job.repository.redactor())),
             Self::Dump(job) => Some(LoggedEntry::of(&job.entry, &job.repository.redactor())),
+            _ => None,
+        }
+    }
+
+    /// Where a restore writes, as the operation log names it (#813): over
+    /// the entry's own path, or into its new folder, masked with the
+    /// repository's own secrets as the entry is (I4). `None` for every other
+    /// job.
+    pub fn restored_to(&self) -> Option<RestoredTo> {
+        match self {
+            Self::Restore(job) => Some(match &job.target {
+                RestoreTarget::NewFolder(path) => {
+                    RestoredTo::folder(path, &job.repository.redactor())
+                }
+                RestoreTarget::InPlace => RestoredTo::InPlace,
+            }),
             _ => None,
         }
     }

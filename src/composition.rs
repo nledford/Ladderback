@@ -16,6 +16,7 @@ use std::sync::Arc;
 use api::{ErrorCode, MsgArg, UiEvent, WarningCode};
 use app::announce::failure;
 use domain::execution::locations::LocationsRecord;
+use domain::execution::logged_entry::RestoredTo;
 
 use app::ports::SecretResolver;
 use app::ports::{
@@ -462,8 +463,15 @@ fn summary(record: &OperationRecord) -> Option<api::OperationSummaryDto> {
     .map(|summary| {
         let summary =
             summary.with_locations(record.locations.as_ref().map_or_default(locations_tried));
-        match &record.entry {
+        let summary = match &record.entry {
             Some(entry) => summary.with_entry(entry.as_str().to_owned()),
+            None => summary,
+        };
+        match &record.restored_to {
+            Some(RestoredTo::InPlace) => summary.with_restored_to(api::RestoredToDto::InPlace),
+            Some(RestoredTo::Folder(path)) => {
+                summary.with_restored_to(api::RestoredToDto::Folder { path: path.clone() })
+            }
             None => summary,
         }
     })

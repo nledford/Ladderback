@@ -10,7 +10,7 @@ macro_rules! select_operations {
             "SELECT id, kind, plan_id, repo_uuid, \"trigger\", status, queued_at, started_at, ",
             "finished_at, snapshot_id, summary_json, error_code, error_args, error_detail, ",
             "warning_count, repo_alias, location_no, locations_json, token_id, token_label, ",
-            "entry ",
+            "entry, restored_to ",
             "FROM operations",
             $($clause),+
         )
@@ -22,13 +22,13 @@ macro_rules! select_operations {
 /// `kind`, `plan_id`, `repo_uuid`, `trigger`, `status`, `queued_at`,
 /// `started_at`, `finished_at`, `snapshot_id`, `summary_json`, `error_code`,
 /// `error_args`, `error_detail`, `warning_count`, `repo_alias`, `location_no`,
-/// `locations_json`, `token_id`, `token_label`, `entry`.
+/// `locations_json`, `token_id`, `token_label`, `entry`, `restored_to`.
 pub(crate) const UPSERT_OPERATION: &str = concat!(
     "INSERT INTO operations (id, agent_id, kind, plan_id, repo_uuid, \"trigger\", status, ",
     "queued_at, started_at, finished_at, snapshot_id, summary_json, error_code, error_args, ",
     "error_detail, warning_count, repo_alias, location_no, locations_json, token_id, ",
-    "token_label, entry) ",
-    "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) ",
+    "token_label, entry, restored_to) ",
+    "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) ",
     "ON CONFLICT(id) DO UPDATE SET ",
     "agent_id = excluded.agent_id, kind = excluded.kind, plan_id = excluded.plan_id, ",
     "repo_uuid = excluded.repo_uuid, \"trigger\" = excluded.\"trigger\", ",
@@ -39,7 +39,8 @@ pub(crate) const UPSERT_OPERATION: &str = concat!(
     "error_detail = excluded.error_detail, warning_count = excluded.warning_count, ",
     "repo_alias = excluded.repo_alias, location_no = excluded.location_no, ",
     "locations_json = excluded.locations_json, token_id = excluded.token_id, ",
-    "token_label = excluded.token_label, entry = excluded.entry"
+    "token_label = excluded.token_label, entry = excluded.entry, ",
+    "restored_to = excluded.restored_to"
 );
 
 /// Parameter: the operation's ID.

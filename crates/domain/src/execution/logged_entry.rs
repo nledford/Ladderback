@@ -82,14 +82,17 @@ pub enum RestoredTo {
 }
 
 impl RestoredTo {
-    /// The new folder at `path` as the log names it: every character that
-    /// would break the line or reorder it made visible, as the snapshot's
-    /// tree shows a name ([`DisplayName`]), and a path longer than
+    /// The new folder at `path` as the log names it, as [`LoggedEntry::of`]
+    /// names an entry: masked with the repository's own secrets, since the
+    /// folder's name holds the snapshot's host, which the repository wrote
+    /// (I4); every character that would break the line or reorder it made
+    /// visible, as the snapshot's tree shows a name ([`DisplayName`]), and
+    /// masked again in that shown form; and a path longer than
     /// [`MAX_LOGGED_ENTRY_BYTES`] cut to its end, on a character boundary,
-    /// after `…`. The folder is the agent's own, under its restore folder,
-    /// and holds no secret of the repository.
-    pub fn folder(path: &str) -> Self {
-        todo!("{path}")
+    /// after `…`.
+    pub fn folder(path: &str, redactor: &Redactor) -> Self {
+        let visible = DisplayName::new(&redactor.redact(path));
+        Self::Folder(cut_to_end(redactor.redact(visible.as_str())))
     }
 }
 
@@ -239,15 +242,31 @@ mod tests {
     #[test]
     fn a_restores_new_folder_is_named_by_its_path() {
         assert_eq!(
-            RestoredTo::folder("/home/demo/ladderback-restore/laptop-3f2a1b4c"),
+            RestoredTo::folder(
+                "/home/demo/ladderback-restore/laptop-3f2a1b4c",
+                &Redactor::new(&[])
+            ),
             RestoredTo::Folder("/home/demo/ladderback-restore/laptop-3f2a1b4c".to_owned())
+        );
+    }
+
+    // The new folder's name holds the snapshot's host, which the repository
+    // wrote, so a host that spells one of its secrets is masked (I4).
+    #[test]
+    fn a_secret_in_the_folder_is_masked() {
+        assert_eq!(
+            RestoredTo::folder(
+                "/home/demo/ladderback-restore/canary-pass-3f2a1b4c",
+                &masking("canary-pass")
+            ),
+            RestoredTo::Folder(format!("/home/demo/ladderback-restore/{REDACTED}-3f2a1b4c"))
         );
     }
 
     #[test]
     fn a_character_in_the_folder_that_would_break_the_line_is_made_visible() {
         assert_eq!(
-            RestoredTo::folder("/srv/a\nb\u{202e}c"),
+            RestoredTo::folder("/srv/a\nb\u{202e}c", &Redactor::new(&[])),
             RestoredTo::Folder("/srv/a\u{240a}b[U+202E]c".to_owned())
         );
     }
@@ -255,7 +274,7 @@ mod tests {
     #[test]
     fn a_folder_past_the_limit_keeps_its_end() {
         let long = format!("/{}/end", "a".repeat(MAX_LOGGED_ENTRY_BYTES));
-        let RestoredTo::Folder(kept) = RestoredTo::folder(&long) else {
+        let RestoredTo::Folder(kept) = RestoredTo::folder(&long, &Redactor::new(&[])) else {
             panic!("a folder");
         };
         assert_eq!(kept.len(), MAX_LOGGED_ENTRY_BYTES);
