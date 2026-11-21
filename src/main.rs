@@ -665,12 +665,15 @@ fn run_daemon(
     // sessions carry the pairing handshake at `/sync/v1` with the binding
     // to the session (decision 120), and the page's pairing tokens under
     // `/api/v1/hub`, confirmed by the admin password when sign-in is on
-    // (decision 121). A TLS key it can't serve is logged, and the hub serves
-    // as it would behind a proxy.
+    // (decision 121). A hub takes every connection through its front door,
+    // which serves plain HTTP only from loopback. A TLS key it can't serve
+    // fails closed ("The hub key"): the door serves only this machine, on
+    // loopback, `/sync/v1` refuses every machine, and the log says why and
+    // how to fix it; the daemon, and this machine's own backups, go on.
     #[cfg(feature = "hub")]
     let mut state = state;
     #[cfg(feature = "hub")]
-    let mut front_door = None;
+    let mut front_door: Option<Option<tls_adapter::HubListener>> = None;
     #[cfg(feature = "hub")]
     if hub && let Some(data_dir) = platform::dirs::data_dir() {
         let pairing = hub::hub_pairing(&data_dir, Arc::clone(&operation_log.store));
@@ -679,34 +682,43 @@ fn run_daemon(
             http_adapter::SignIn::Off { .. } => pairing,
         };
         state.sync = http_adapter::SyncHub::serving(Arc::new(pairing));
-        log::info!("serving the hub's pairing at {}", api::sync::PATH);
         let names = certificate_names(listen, &hosts);
         let served = runtime
             .block_on(hub::hub_tls_key(&data_dir).start(operation_log.store.as_ref()))
-            .map_err(|refusal| format!("{refusal:?}"))
+            .map_err(|refusal| hub::tls_key_unserved(&refusal))
             .and_then(|served| {
                 tls_adapter::HubListener::new(&served.key, &names, domain::Timestamp::now())
                     .map(|listener| (listener, served.fingerprint))
-                    .map_err(|error| format!("{error:?}"))
+                    .map_err(|error| {
+                        format!(
+                            "its certificate couldn't be made ({error:?}); restart the hub, and report it if this is said again"
+                        )
+                    })
             });
         match served {
             Ok((listener, fingerprint)) => {
+                log::info!("serving the hub's pairing at {}", api::sync::PATH);
                 log::info!("serving the hub's built-in TLS, its certificate {fingerprint}");
                 state.sync = state.sync.with_certificate(fingerprint);
-                front_door = Some(listener);
+                front_door = Some(Some(listener));
             }
-            Err(reason) => log::error!(
-                "the hub's built-in TLS isn't served: {reason}; machines whose tokens pin its certificate can't connect until its key is restored"
-            ),
+            Err(fix) => {
+                log::error!(
+                    "the hub's built-in TLS isn't served: {fix}. Until then the hub serves only this machine, over plain HTTP on loopback, and refuses every machine at {}; this machine's own backups go on",
+                    api::sync::PATH
+                );
+                state.sync = state.sync.without_tls();
+                front_door = Some(None);
+            }
         }
     }
     // Open on the network with sign-in off is said on stderr once the
     // address is bound (below), not logged: no log setting hides it.
     #[cfg(feature = "hub")]
-    let built_in_tls = front_door.is_some();
+    let loopback_plain_only = front_door.is_some();
     #[cfg(not(feature = "hub"))]
-    let built_in_tls = false;
-    if warns_plain_http(exposure, sign_in_on, built_in_tls) {
+    let loopback_plain_only = false;
+    if warns_plain_http(exposure, sign_in_on, loopback_plain_only) {
         log::warn!(
             "listening on {listen} beyond loopback over plain HTTP: the password crosses the network unencrypted unless a reverse proxy in front adds TLS"
         );
@@ -732,8 +744,7 @@ fn run_daemon(
             }
         };
         let bound = listener.local_addr();
-        // A hub serving its built-in TLS takes each connection through its
-        // front door first.
+        // A hub takes each connection through its front door first.
         #[cfg(feature = "hub")]
         let listener = match (front_door, &bound) {
             (Some(tls), Ok(local)) => {
@@ -935,14 +946,15 @@ fn certificate_names(listen: SocketAddr, hosts: &[String]) -> Vec<String> {
 }
 
 /// Whether serving on `exposure` with sign-in on or off warns that the
-/// password crosses the network in plain HTTP. A hub serving its built-in
-/// TLS serves plain HTTP only from loopback, so it never does.
+/// password crosses the network in plain HTTP. A hub's front door serves
+/// plain HTTP only from loopback, with its built-in TLS or without it, so
+/// it never does.
 fn warns_plain_http(
     exposure: http_adapter::Exposure,
     sign_in_on: bool,
-    built_in_tls: bool,
+    loopback_plain_only: bool,
 ) -> bool {
-    exposure == http_adapter::Exposure::Network && sign_in_on && !built_in_tls
+    exposure == http_adapter::Exposure::Network && sign_in_on && !loopback_plain_only
 }
 
 /// The line `say` prints: one of Ladderback's own messages after the

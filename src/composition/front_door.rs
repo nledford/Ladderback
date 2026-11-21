@@ -2,7 +2,9 @@
 //! listener for the web UI, the API and `/sync/v1`, where a connection that
 //! opens with a TLS handshake gets the hub's built-in TLS 1.3, and one that
 //! opens in plain HTTP is served only from loopback, as a local proxy's or
-//! a browser's on the hub's own machine is.
+//! a browser's on the hub's own machine is. A hub whose TLS key can't serve
+//! keeps the door without the TLS ("The hub key"): it serves its own
+//! machine on loopback and closes every other connection.
 
 use std::net::SocketAddr;
 use std::sync::Arc;
@@ -50,20 +52,25 @@ pub(crate) fn door(first: u8, peer: SocketAddr) -> Door {
     }
 }
 
-/// The front door on `listener`, bound to `local`, serving `tls`: each
-/// connection is taken through its door on a task of its own, so a slow one
-/// holds up no other, and handed to the server once it is let in.
-pub(crate) fn open(listener: GatedListener, local: SocketAddr, tls: HubListener) -> HandedListener {
+/// The front door on `listener`, bound to `local`, serving `tls` when the
+/// hub's key serves one: each connection is taken through its door on a
+/// task of its own, so a slow one holds up no other, and handed to the
+/// server once it is let in.
+pub(crate) fn open(
+    listener: GatedListener,
+    local: SocketAddr,
+    tls: Option<HubListener>,
+) -> HandedListener {
     let (hand, connections) = mpsc::channel(WAITING);
-    let tls = Arc::new(tls);
+    let tls = tls.map(Arc::new);
     let accepting = tokio::spawn(async move {
         let mut listener = listener;
         loop {
             let (stream, peer) = axum::serve::Listener::accept(&mut listener).await;
             let hand = hand.clone();
-            let tls = Arc::clone(&tls);
+            let tls = tls.clone();
             tokio::spawn(async move {
-                if let Some(handed) = let_in(stream, peer, &tls).await {
+                if let Some(handed) = let_in(stream, peer, tls.as_deref()).await {
                     // The server is gone when this fails, and the
                     // connection closes with it.
                     let _ = hand.send(handed).await;
@@ -76,8 +83,8 @@ pub(crate) fn open(listener: GatedListener, local: SocketAddr, tls: HubListener)
 
 /// The connection from `peer`, let in through its door, or `None` once it
 /// is closed: it sent nothing in time, plain HTTP from beyond loopback, or
-/// a TLS handshake that failed or took too long.
-async fn let_in(stream: TcpStream, peer: SocketAddr, tls: &HubListener) -> Option<Handed> {
+/// a TLS handshake that failed, took too long or found no TLS served.
+async fn let_in(stream: TcpStream, peer: SocketAddr, tls: Option<&HubListener>) -> Option<Handed> {
     let mut first = [0; 1];
     let peeked = tokio::time::timeout(FIRST_BYTE_WITHIN, stream.peek(&mut first)).await;
     if !matches!(peeked, Ok(Ok(1))) {
@@ -96,6 +103,10 @@ async fn let_in(stream: TcpStream, peer: SocketAddr, tls: &HubListener) -> Optio
             },
         }),
         Door::Tls => {
+            let Some(tls) = tls else {
+                log::debug!("closed a TLS handshake from {peer}: the hub's TLS key doesn't serve");
+                return None;
+            };
             let session = match tokio::time::timeout(HANDSHAKE_WITHIN, tls.accept(stream)).await {
                 Ok(Ok(session)) => session,
                 Ok(Err(error)) => {

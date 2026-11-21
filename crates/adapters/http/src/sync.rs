@@ -158,6 +158,9 @@ mod served {
     pub struct SyncHub {
         served: Option<Arc<Served>>,
         certificate: Option<Fingerprint>,
+        /// The hub's TLS key doesn't serve, so `/sync/v1` refuses every
+        /// machine until it does.
+        without_tls: bool,
     }
 
     impl SyncHub {
@@ -174,6 +177,7 @@ mod served {
                     waiting: Mutex::default(),
                 })),
                 certificate: None,
+                without_tls: false,
             }
         }
 
@@ -197,6 +201,19 @@ mod served {
         pub(crate) fn certificate(&self) -> Option<Fingerprint> {
             self.certificate
         }
+
+        /// This hub, whose built-in TLS key can't serve: `/sync/v1` answers
+        /// `503` until a restart with the key restored, rather than serve
+        /// machines without it (decision 120, "The hub key"). The pages
+        /// keep its pairing, to list and revoke tokens.
+        #[must_use]
+        pub fn without_tls(self) -> Self {
+            Self {
+                certificate: None,
+                without_tls: true,
+                ..self
+            }
+        }
     }
 
     pub(super) fn routes<S>(hub: &SyncHub) -> Option<Router<S>>
@@ -204,6 +221,12 @@ mod served {
         S: Clone + Send + Sync + 'static,
     {
         let served = hub.served.clone()?;
+        if hub.without_tls {
+            return Some(Router::new().route(
+                PATH,
+                get(|| async { axum::http::StatusCode::SERVICE_UNAVAILABLE }),
+            ));
+        }
         Some(Router::new().route(
             PATH,
             // A connection over the hub's built-in TLS carries its session's

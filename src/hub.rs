@@ -73,6 +73,28 @@ pub(crate) fn hub_tls_key(data_dir: &Path) -> HubTlsKey {
     )
 }
 
+/// Why the hub's TLS key can't serve and how to fix it, for the daemon's
+/// log, which is in English (decision 120, "The hub key"). It names the
+/// key file and none of the key (I4).
+pub(crate) fn tls_key_unserved(refusal: &TlsKeyRefusal) -> String {
+    let file = domain::fleet::KeyFile::HubTlsKey;
+    match refusal {
+        TlsKeyRefusal::Missing => format!(
+            "its key file `{file}` in the data folder is missing; restore it from your backup of the data folder, then restart the hub"
+        ),
+        TlsKeyRefusal::AnotherKey => format!(
+            "its key file `{file}` in the data folder holds another key than the one this hub made; restore it from your backup of the data folder, then restart the hub"
+        ),
+        TlsKeyRefusal::NotAKey => format!(
+            "its key file `{file}` in the data folder holds no key the hub can serve; restore it from your backup of the data folder, then restart the hub"
+        ),
+        TlsKeyRefusal::Identity(IdentityError::Exposed { file, mode }) => format!(
+            "its key file `{file}` can be read or changed by other users (mode {mode:04o}); make it its owner's only, as `chmod 600` does, then restart the hub"
+        ),
+        other => format!("{other:?}; fix what this names, then restart the hub"),
+    }
+}
+
 fn runtime(localizer: &Localizer) -> io::Result<Result<tokio::runtime::Runtime, ExitCode>> {
     match tokio::runtime::Builder::new_current_thread()
         .enable_all()

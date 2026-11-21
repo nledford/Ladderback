@@ -319,6 +319,18 @@ async fn without_the_hub_every_path_under_sync_answers_404() {
     assert_eq!(response.status(), StatusCode::NOT_FOUND);
 }
 
+/// A hub whose TLS key can't serve refuses every machine at `/sync/v1`
+/// rather than serve one without it (decision 120, "The hub key").
+#[tokio::test]
+async fn a_hub_without_its_tls_refuses_every_machine() {
+    let address = serve(&SyncHub::serving(pairing()).without_tls()).await;
+    let refused = connect_async(format!("ws://{address}{PATH}")).await;
+    let Err(tokio_tungstenite::tungstenite::Error::Http(response)) = refused else {
+        panic!("upgraded without the hub's TLS");
+    };
+    assert_eq!(response.status(), StatusCode::SERVICE_UNAVAILABLE);
+}
+
 /// The daemon's whole router, with `serve --hub`'s sync routes.
 fn daemon() -> Router {
     let state = crate::AppState {
