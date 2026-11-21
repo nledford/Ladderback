@@ -47,9 +47,9 @@ impl KeyringWait {
 
 /// When a run nobody waits on gives up waiting for its keyring to be
 /// unlocked: the plan's next due run, which a run never waits past. While
-/// it waits, the keyring is asked whether it is locked — never read, so
-/// waiting can raise no unlock prompt — and the entry is read again the
-/// moment it is unlocked (#1221, amending decision 116).
+/// it waits, the keyring is asked whether it is locked — a question that
+/// reads no entry and raises no unlock prompt — and the entry is read
+/// again the moment it is unlocked (#1221, amending decision 116).
 #[derive(Clone)]
 pub struct UnlockWait {
     clock: Arc<dyn Clock>,
@@ -487,8 +487,8 @@ impl ResolveRepository {
     /// [`KEYRING_POLL`] until the service answers or the bound comes; when
     /// the keyring answered that it is locked and
     /// [`Self::waiting_for_unlock`] armed a bound, the run waits for it to
-    /// be unlocked — asking whether it is, never reading the entry, so
-    /// waiting can raise no unlock prompt — and reads the entry again the
+    /// be unlocked — asking whether it is, which reads no entry and
+    /// raises no unlock prompt — and reads the entry again the
     /// moment it is. `waiting` is told once of either wait. Nothing else
     /// is read again; a locked keyring with no bound, and one whose prompt
     /// was dismissed, fail at once. Dropping the future ends the wait.

@@ -1,14 +1,17 @@
 Feature: A run whose keyring is locked waits for it to be unlocked
   A run nobody waits on whose repository password is in the keyring isn't
   refused at once when the keyring service answers that its keyring is
-  locked: the run waits for the keyring to be unlocked, asking only whether
-  it is locked — never reading the entry, so waiting can raise no unlock
-  prompt — and reads the entry again the moment it is. It gives up when the
-  plan's next run is due, never waiting past its successor, and is refused
-  once as locked. A keyring with no service to ask still waits only while
-  the daemon starts (decision 116), and one whose unlock prompt was
-  dismissed still fails at once. Stopping the daemon ends the wait, and a
-  person who asked is answered at once (#1221).
+  locked: the run waits for the keyring to be unlocked, asking whether it
+  is locked — a question that reads no entry and raises no unlock prompt —
+  and reads the entry again the moment it is. An entry the service still
+  finds locked once the keyring says it is unlocked is read again, no
+  sooner than every 10 seconds, and those reads, as any read of an entry,
+  may raise a prompt. The run gives up when the plan's next run is due,
+  never waiting past its successor, and is refused once as locked. A
+  keyring with no service to ask still waits only while the daemon starts
+  (decision 116), and one whose unlock prompt was dismissed still fails at
+  once. Stopping the daemon ends the wait, and a person who asked is
+  answered at once (#1221).
 
   Background:
     Given the daemon started a moment ago
