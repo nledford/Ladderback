@@ -97,6 +97,17 @@ impl Events {
             .redact(text)
     }
 
+    /// From now on, every record of the backend crosses this stream at the
+    /// debug level, whatever level it was logged at: a probe's (#494).
+    pub(crate) fn log_backend_at_debug(&self) {
+        todo!()
+    }
+
+    /// Whether [`Events::log_backend_at_debug`] was called.
+    pub(crate) fn logs_backend_at_debug(&self) -> bool {
+        todo!()
+    }
+
     /// Whether [`WorkerEvent::Started`] was written. Progress that begins
     /// before it never reports: the daemon accepts progress only from a
     /// started job.

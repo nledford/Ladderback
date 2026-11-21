@@ -920,11 +920,12 @@ mod tests {
     use domain::planning::{
         GroupBy, Hooks, Locations, Maintenance, RepositoryConfig, RepositorySettings,
     };
-    use domain::secrets::SecretRef;
+    use domain::secrets::{SecretError, SecretRef};
     use domain::{Timestamp, Uuid};
 
     use super::*;
     use crate::fakes::{FakeClock, FakeNetworkLink, FakeSecrets};
+    use crate::ports::{KeyringLock, Resolved, SecretResolver};
 
     const ID: &str = "4c6f636174696f6e73206f6620746865207265706f7369746f72792066697273";
 
@@ -1491,6 +1492,158 @@ mod tests {
         assert!(
             sites.jobs().iter().all(|job| matches!(job, Job::Probe(_))),
             "no job opens the repository after a cancel"
+        );
+    }
+
+    /// The further location of "nas": over plain HTTP, so it is probed only
+    /// in its turn, with an option that holds the variable `reference`.
+    fn in_turn(reference: &str) -> Location {
+        Location {
+            repository: "rest:http://backup.example.net/r".to_owned(),
+            options: BTreeMap::from([("timeout".to_owned(), format!("${{{reference}}}"))]),
+            ..Location::default()
+        }
+    }
+
+    /// The choice in front of `sites`, with `resolve`, on `clock`.
+    fn choosing_with(
+        sites: &Sites,
+        resolve: ResolveRepository,
+        clock: Arc<FakeClock>,
+    ) -> ChooseLocation {
+        ChooseLocation::new(
+            Arc::new(sites.clone()),
+            clock,
+            Arc::new(FakeNetworkLink::new()),
+            resolve,
+            Arc::new(|_| {}),
+        )
+    }
+
+    /// A job cancelled while its choice waits on a location's probe, and
+    /// whose events are read on afterwards, as the engine port allows,
+    /// starts no later location's probe and reads none of its secrets
+    /// (#498).
+    #[tokio::test]
+    async fn a_job_cancelled_while_a_location_is_probed_tries_no_later_location() {
+        let sites = Sites::silent_at("/srv/lan");
+        let secrets = Arc::new(FakeSecrets::default());
+        secrets.set_env("NAS_PASSWORD", "demo-password");
+        secrets.set_env("PUBLIC_TIMEOUT", "30s");
+        let resolve = ResolveRepository::new(secrets.clone());
+        let mut access = nas(&resolve, first("/srv/lan", &[])).await;
+        access
+            .entry
+            .as_mut()
+            .expect("the entry")
+            .entry
+            .locations
+            .further = vec![in_turn("PUBLIC_TIMEOUT")];
+        let choose = choosing_with(
+            &sites,
+            resolve,
+            Arc::new(FakeClock::new(Timestamp::UNIX_EPOCH)),
+        );
+        let RunningJob {
+            mut events,
+            mut control,
+        } = choose
+            .run(op(), Job::Ls(access))
+            .await
+            .expect("the job starts");
+        assert!(futures::poll!(events.next()).is_pending());
+        assert_eq!(probed(&sites), vec!["/srv/lan".to_owned()]);
+        control.stop().await;
+        assert!(
+            matches!(events.next().now_or_never(), Some(None)),
+            "the job ends at once, with nothing to say"
+        );
+        assert_eq!(
+            probed(&sites),
+            vec!["/srv/lan".to_owned()],
+            "no later location is probed after the cancel"
+        );
+        assert!(
+            !secrets
+                .reads()
+                .contains(&SecretRef::Env("PUBLIC_TIMEOUT".to_owned())),
+            "nor are its secrets read"
+        );
+    }
+
+    /// Secrets as [`FakeSecrets`] gives them, but the variable `HELD` only
+    /// once `release` fires: a reference still being read.
+    struct Held {
+        secrets: FakeSecrets,
+        release: futures::future::Shared<oneshot::Receiver<()>>,
+    }
+
+    #[async_trait]
+    impl SecretResolver for Held {
+        async fn resolve(&self, secret: &SecretRef) -> Result<Resolved, SecretError> {
+            if *secret == SecretRef::Env("HELD".to_owned()) {
+                let _ = self.release.clone().await;
+            }
+            self.secrets.resolve(secret).await
+        }
+
+        async fn keyring_lock(&self) -> KeyringLock {
+            self.secrets.keyring_lock().await
+        }
+    }
+
+    /// A job cancelled while a later location's reference is still being
+    /// read, in that location's turn, starts no probe of it once the read
+    /// ends (#498).
+    #[tokio::test]
+    async fn a_job_cancelled_while_a_locations_secret_is_read_starts_no_probe_of_it() {
+        let sites = Sites::silent_at("/srv/lan");
+        let secrets = FakeSecrets::default();
+        secrets.set_env("NAS_PASSWORD", "demo-password");
+        secrets.set_env("HELD", "30s");
+        let (release, held) = oneshot::channel();
+        let resolve = ResolveRepository::new(Arc::new(Held {
+            secrets,
+            release: held.shared(),
+        }));
+        let mut access = nas(&resolve, first("/srv/lan", &[])).await;
+        access
+            .entry
+            .as_mut()
+            .expect("the entry")
+            .entry
+            .locations
+            .further = vec![in_turn("HELD")];
+        let clock = Arc::new(FakeClock::new(Timestamp::UNIX_EPOCH));
+        let choose = choosing_with(&sites, resolve, Arc::<FakeClock>::clone(&clock));
+        let RunningJob {
+            mut events,
+            mut control,
+        } = choose
+            .run(op(), Job::Ls(access))
+            .await
+            .expect("the job starts");
+        assert!(futures::poll!(events.next()).is_pending());
+        clock.advance(SignedDuration::from_secs(LOCATION_PROBE_SECONDS));
+        assert!(
+            futures::poll!(events.next()).is_pending(),
+            "the second location's reference is being read"
+        );
+        assert_eq!(
+            sites.running(),
+            0,
+            "the first location gave up at its bound"
+        );
+        control.stop().await;
+        let _ = release.send(());
+        assert!(
+            matches!(events.next().now_or_never(), Some(None)),
+            "the job ends at once, with nothing to say"
+        );
+        assert_eq!(
+            probed(&sites),
+            vec!["/srv/lan".to_owned()],
+            "the second location is never probed"
         );
     }
 

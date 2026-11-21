@@ -781,4 +781,47 @@ mod tests {
         elsewhere.repository = "rest:http://demo:CANARY-url-password@nas.lan/other".to_owned();
         assert!(!settings().same_location(&elsewhere));
     }
+
+    /// A local path is one location whether `local:` names its backend or
+    /// not and whether it ends in a `/`, in `repository` and `repo-hot`
+    /// alike; any other backend's address is compared as written (#493).
+    #[test]
+    fn a_local_path_is_one_location_however_it_is_written() {
+        let at = |repository: &str, hot: Option<&str>| RepositorySettings {
+            repository: repository.to_owned(),
+            repo_hot: hot.map(str::to_owned),
+            ..settings()
+        };
+        for (one, other) in [
+            ("/srv/demo", "local:/srv/demo"),
+            ("/srv/demo", "/srv/demo/"),
+            ("local:/srv/demo/", "/srv/demo"),
+            ("/srv/demo", "local:/srv/demo//"),
+            ("/", "local:/"),
+        ] {
+            assert!(
+                at(one, None).same_location(&at(other, None)),
+                "{one} and {other}"
+            );
+            assert!(
+                at("/srv/cold", Some(one)).same_location(&at("/srv/cold", Some(other))),
+                "the hot halves {one} and {other}"
+            );
+        }
+        for (one, other) in [
+            ("/srv/demo", "/srv/demo-2"),
+            ("/", "local:"),
+            ("rest:https://nas.lan/demo", "rest:https://nas.lan/demo/"),
+            ("local:/srv/demo", "rclone::local:/srv/demo"),
+        ] {
+            assert!(
+                !at(one, None).same_location(&at(other, None)),
+                "{one} and {other}"
+            );
+            assert!(
+                !at("/srv/cold", Some(one)).same_location(&at("/srv/cold", Some(other))),
+                "the hot halves {one} and {other}"
+            );
+        }
+    }
 }
