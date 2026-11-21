@@ -111,7 +111,8 @@ async fn write_agent(
         .bind(status)
         .bind(status_at.as_millisecond())
         .bind(row::counter_text(agent.counter))
-        .bind(agent.last_seen.as_millisecond());
+        .bind(agent.last_seen.as_millisecond())
+        .bind(agent.zone.as_ref().map(MachineZone::as_str));
     let query = if new { query } else { query.bind(id.as_str()) };
     query.execute(&mut *tx).await.map_err(unavailable)?;
     Ok(())
@@ -371,8 +372,15 @@ impl AgentRegistry for SqliteStore {
         agent_id: AgentId,
         zone: Option<&MachineZone>,
     ) -> Result<(), StoreError> {
-        let _ = (agent_id, zone);
-        todo!()
+        let _call = self.call().await;
+        let mut conn = self.pool.acquire().await.map_err(unavailable)?;
+        sqlx::query(sql::RECORD_ZONE)
+            .bind(zone.map(MachineZone::as_str))
+            .bind(row::agent_id_text(agent_id))
+            .execute(&mut *conn)
+            .await
+            .map_err(unavailable)?;
+        Ok(())
     }
 
     /// One transaction, the write lock taken up front, so the record the

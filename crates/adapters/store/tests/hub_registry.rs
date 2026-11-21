@@ -165,6 +165,11 @@ fn agent_cases() -> Vec<(&'static str, &'static str, String)> {
             "last_seen",
             "UPDATE agents SET last_seen = 'soon'".to_owned(),
         ),
+        (
+            "a zone not shaped like a zone name",
+            "zone",
+            "UPDATE agents SET zone = '../etc/localtime'".to_owned(),
+        ),
     ]
 }
 

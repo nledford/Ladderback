@@ -401,7 +401,7 @@ pub(crate) mod hub {
     macro_rules! select_agents {
         ($($clause:literal),+ $(,)?) => {
             concat!(
-                "SELECT id, pubkey, hostname, status, status_at, counter, last_seen ",
+                "SELECT id, pubkey, hostname, status, status_at, counter, last_seen, zone ",
                 "FROM agents",
                 $($clause),+
             )
@@ -473,17 +473,22 @@ pub(crate) mod hub {
     pub(crate) const ALL_AGENTS: &str = select_agents!(" ORDER BY rowid");
 
     /// Keeps a new agent. Parameters, in order: `id`, `pubkey`, `hostname`,
-    /// `hostname_key`, `status`, `status_at`, `counter`, `last_seen`.
+    /// `hostname_key`, `status`, `status_at`, `counter`, `last_seen`, `zone`.
     pub(crate) const INSERT_AGENT: &str = concat!(
         "INSERT INTO agents (id, pubkey, hostname, hostname_key, status, status_at, counter, ",
-        "last_seen) VALUES (?, ?, ?, ?, ?, ?, ?, ?)"
+        "last_seen, zone) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)"
     );
 
     /// Writes an agent's record over the one kept under its ID, every
     /// column but the ID. Parameters, in order: `pubkey`, `hostname`,
-    /// `hostname_key`, `status`, `status_at`, `counter`, `last_seen`, `id`.
+    /// `hostname_key`, `status`, `status_at`, `counter`, `last_seen`,
+    /// `zone`, `id`.
     pub(crate) const UPDATE_AGENT: &str = concat!(
         "UPDATE agents SET pubkey = ?, hostname = ?, hostname_key = ?, status = ?, ",
-        "status_at = ?, counter = ?, last_seen = ? WHERE id = ?"
+        "status_at = ?, counter = ?, last_seen = ?, zone = ? WHERE id = ?"
     );
+
+    /// Keeps the machine zone an agent reported, NULL for none, over the
+    /// one it held. Parameters: the zone, the agent ID.
+    pub(crate) const RECORD_ZONE: &str = "UPDATE agents SET zone = ? WHERE id = ?";
 }
