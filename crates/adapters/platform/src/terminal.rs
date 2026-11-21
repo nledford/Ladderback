@@ -159,7 +159,7 @@ mod ending {
     use std::os::fd::OwnedFd;
     use std::sync::{Mutex, PoisonError};
 
-    use nix::sys::termios::{SetArg, Termios, tcdrain, tcsetattr};
+    use nix::sys::termios::{FlushArg, SetArg, Termios, tcdrain, tcflush, tcsetattr};
     use signal_hook::consts::{SIGINT, SIGTERM};
 
     /// The terminal a prompt has changed, and its settings from before.
@@ -189,7 +189,10 @@ mod ending {
     /// the signal's thread takes, and another writer's output that the
     /// terminal holds back (after Ctrl-S) mustn't hold a signal back.
     pub(super) fn set_quiet(tty: &OwnedFd, quiet: &Termios) -> nix::Result<()> {
-        tcsetattr(tty, SetArg::TCSAFLUSH, quiet)
+        // Settings first, then the flush: a key pressed between them is
+        // dropped rather than shown.
+        tcsetattr(tty, SetArg::TCSANOW, quiet)?;
+        tcflush(tty, FlushArg::TCIFLUSH)
     }
 
     /// Puts `saved` back on `tty` now, and nothing on a signal after.
