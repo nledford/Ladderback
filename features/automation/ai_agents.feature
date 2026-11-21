@@ -127,21 +127,10 @@ Feature: What AI agents may do without a token
         schema = 1
         """
       And Ladderback is serving on loopback with that config file
-      And a "PUT" request for "/api/v1/settings/without-token"
-      And the request has the header "Content-Type: application/json"
-      And the request has the body "{\"permissions\":{\"backups\":\"read\",\"daemon-log\":\"read\"}}"
-      When the request is sent
-      Then the request is answered with status 200
-      And the answer lists the permissions "backups: read, daemon-log: read"
+      When a person allows AI agents without a token "backups: read, daemon-log: read"
+      Then the change is kept, and AI agents without a token may do "backups: read, daemon-log: read"
       And its log says "AI agents without a token now have backups: read, daemon-log: read"
-      Given a "GET" request for "/api/v1/settings/without-token"
-      When the request is sent
-      Then the request is answered with status 200
-      And the answer lists the permissions "backups: read, daemon-log: read"
-      Given a "GET" request for "/api/v1/log"
-      And the request has the header "x-ladderback-ai-agent: 1"
-      When the request is sent
-      Then the request is answered with status 200
+      And an AI agent without a token may read the daemon's log
 
     Scenario: With sign-in off, an AI agent can't change what it may do
       Given Ladderback is serving on loopback
