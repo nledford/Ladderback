@@ -4,9 +4,8 @@
 // which each worker checks before its first scenario.
 
 import { type ChildProcess, execFileSync, spawn } from "node:child_process";
-import { once } from "node:events";
 import { mkdirSync } from "node:fs";
-import { mkdir, mkdtemp, readFile, rm } from "node:fs/promises";
+import { mkdir, mkdtemp, readFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
@@ -40,6 +39,7 @@ import { avoidLabelledByCrash } from "./labelledby-crash.ts";
 import { clockStandsStill } from "./keyboard.ts";
 import { patienceMs, STEP_LIMIT_MS, timed } from "./patience.ts";
 import type { ScriptedDaemon } from "./scripted-daemon.ts";
+import { backstop, TEARDOWN_MS, tearDown } from "./teardown.ts";
 
 setDefaultTimeout(STEP_LIMIT_MS);
 // Each step and hook starts its clock, which its waits run until (#1104).
@@ -165,16 +165,19 @@ export function binaryEnv(scratch: string, extra: Record<string, string> = {}): 
 // daemons never contend on one database (the e2e suites hit that), with its
 // home in `scratch` (`binaryEnv`). `extraEnv` names what a caller has already
 // prepared, such as the config folder of a scenario's demo plan; `args`
-// follow `serve`, a loopback address by default.
+// follow `serve`, a loopback address by default. A daemon its scenario or
+// worker never stopped is killed when the run's process exits (`backstop`).
 export function startServer(
   scratch: string,
   extraEnv: Record<string, string> = {},
   args: string[] = ["--listen", "127.0.0.1:0"],
 ): Promise<Server> {
-  const child = spawn(binary, ["serve", ...args], {
-    stdio: ["ignore", "inherit", "pipe"],
-    env: binaryEnv(scratch, { LADDERBACK_RELEASES_URL: NO_RELEASE_FEED, ...extraEnv }),
-  });
+  const child = backstop(
+    spawn(binary, ["serve", ...args], {
+      stdio: ["ignore", "inherit", "pipe"],
+      env: binaryEnv(scratch, { LADDERBACK_RELEASES_URL: NO_RELEASE_FEED, ...extraEnv }),
+    }),
+  );
   return new Promise((resolve, reject) => {
     let output = "";
     let listening = false;
@@ -240,13 +243,11 @@ BeforeAll(async () => {
   browser = await browserType.launch();
 });
 
-AfterAll(async () => {
-  await browser?.close();
-  if (server && server.exitCode === null) {
-    server.kill("SIGTERM");
-    await once(server, "exit");
-  }
-  await rm(serverScratch, { recursive: true, force: true });
+// The daemon stops alongside the browser's close, rather than after it, and
+// the scratch folder goes whatever failed (`tearDown`, #866). The limit leaves
+// room past the 30 s Playwright gives a browser to exit before it kills it.
+AfterAll({ timeout: TEARDOWN_MS }, async () => {
+  await tearDown({ browser, daemon: server, scratch: serverScratch });
 });
 
 /** A daemon a scenario started for itself, and its scratch folder. */

@@ -20,6 +20,8 @@ pub const LOOPBACK_EXPORTER: [u8; KEY_BYTES] = [0xee; KEY_BYTES];
 pub struct LoopbackHubConnector {
     hub: Option<Arc<HubPairing>>,
     hub_binds: bool,
+    /// The one host and port the hub answers on, when it answers on one.
+    only: Option<(String, u16)>,
     tap: Arc<Tap>,
 }
 
@@ -35,6 +37,7 @@ impl LoopbackHubConnector {
         Self {
             hub: Some(hub),
             hub_binds: true,
+            only: None,
             tap: Arc::default(),
         }
     }
@@ -44,6 +47,7 @@ impl LoopbackHubConnector {
         Self {
             hub: None,
             hub_binds: true,
+            only: None,
             tap: Arc::default(),
         }
     }
@@ -53,6 +57,15 @@ impl LoopbackHubConnector {
     #[must_use]
     pub fn behind_a_proxy(mut self) -> Self {
         self.hub_binds = false;
+        self
+    }
+
+    /// The hub answers only on `host` and `port`, as a hub that moved to a
+    /// new address no longer answers at its old one; nothing answers on
+    /// any other route.
+    #[must_use]
+    pub fn only_at(mut self, host: &str, port: u16) -> Self {
+        self.only = Some((host.to_owned(), port));
         self
     }
 
@@ -83,7 +96,11 @@ impl HubConnector for LoopbackHubConnector {
             .lock()
             .unwrap_or_else(PoisonError::into_inner)
             .push(route.clone());
-        let Some(hub) = self.hub.clone() else {
+        let answers = self
+            .only
+            .as_ref()
+            .is_none_or(|(host, port)| *host == route.host && *port == route.port);
+        let Some(hub) = self.hub.clone().filter(|_| answers) else {
             return Err(LinkError::Unreachable {
                 detail: "nothing answers on this route".to_owned(),
             });

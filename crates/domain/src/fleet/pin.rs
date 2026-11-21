@@ -18,6 +18,10 @@ const RECOVERY_KEY: &str = "recovery-key";
 const RECOVERY_NUMBER: &str = "recovery-number";
 const GENERATION: &str = "generation";
 const ADDRESS: &str = "address";
+/// The address the person gave after pairing; optional, so not in `KNOWN`.
+/// Its kind is the pin's `tls`: an address of another kind would need a
+/// name of its own, so a build that reads this pin still reads that one.
+const GIVEN_ADDRESS: &str = "given-address";
 
 /// The names this build reads, in the order it writes them.
 const KNOWN: [&str; 6] = [
@@ -49,6 +53,10 @@ pub struct HubPin {
     pub generation: u64,
     /// The address in the pairing token.
     pub address: HubAddress,
+    /// The address the person gave this machine for its hub after pairing
+    /// (`ladderback pair <address>`), kept once the hub proved its key
+    /// there. It is tried before the token's, with the same `tls`.
+    pub given_address: Option<HubAddress>,
     /// The lines whose names this build doesn't know, in their order.
     unknown: Vec<(String, String)>,
 }
@@ -85,6 +93,7 @@ impl HubPin {
             recovery_number: 0,
             generation: 1,
             address,
+            given_address: None,
             unknown: Vec::new(),
         }
     }
@@ -133,15 +142,48 @@ impl HubPin {
             (GENERATION, self.generation.to_string()),
             (ADDRESS, self.address.as_str().to_owned()),
         ];
+        let given = self
+            .given_address
+            .iter()
+            .map(|address| (GIVEN_ADDRESS, address.as_str().to_owned()));
         let unknown = self
             .unknown
             .iter()
             .map(|(name, value)| (name.as_str(), value.clone()));
         known
             .into_iter()
+            .chain(given)
             .chain(unknown)
             .map(|(name, value)| format!("{name} = {value}\n"))
             .collect()
+    }
+
+    /// The addresses to try, in order: the one the person gave, then the
+    /// token's, which nothing removes (decision 120, "Addresses and the
+    /// transport statement").
+    pub fn addresses(&self) -> impl Iterator<Item = &HubAddress> {
+        let given = self
+            .given_address
+            .as_ref()
+            .filter(|given| **given != self.address);
+        given.into_iter().chain(std::iter::once(&self.address))
+    }
+
+    /// Keeps `address` as the one the person gave; the token's own address
+    /// is always kept, so giving it drops the other. Says whether the pin
+    /// changed; one that would be written past [`MAX_PIN_BYTES`] is refused
+    /// and kept as it was.
+    pub fn give_address(&mut self, address: HubAddress) -> Result<bool, PinRefused> {
+        let given = (address != self.address).then_some(address);
+        if given == self.given_address {
+            return Ok(false);
+        }
+        let kept = std::mem::replace(&mut self.given_address, given);
+        if self.to_text().len() > MAX_PIN_BYTES {
+            self.given_address = kept;
+            return Err(PinRefused::TooLong);
+        }
+        Ok(true)
     }
 }
 
@@ -162,11 +204,19 @@ struct Read {
     recovery_number: Option<u64>,
     generation: Option<u64>,
     address: Option<HubAddress>,
+    given_address: Option<HubAddress>,
     unknown: Vec<(String, String)>,
 }
 
 impl Read {
     fn line(&mut self, name: &str, value: &str) -> Result<(), PinRefused> {
+        if name == GIVEN_ADDRESS {
+            let unreadable = PinRefused::Unreadable {
+                name: GIVEN_ADDRESS,
+            };
+            let address = HubAddress::parse(value).map_err(|_| unreadable)?;
+            return set(&mut self.given_address, GIVEN_ADDRESS, address);
+        }
         let Some(known) = KNOWN.into_iter().find(|known| *known == name) else {
             self.unknown.push((name.to_owned(), value.to_owned()));
             return Ok(());
@@ -203,6 +253,7 @@ impl Read {
             recovery_number: self.recovery_number.ok_or(missing(RECOVERY_NUMBER))?,
             generation: self.generation.ok_or(missing(GENERATION))?,
             address: self.address.ok_or(missing(ADDRESS))?,
+            given_address: self.given_address,
             unknown: self.unknown,
         })
     }

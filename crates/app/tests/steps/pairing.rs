@@ -184,6 +184,8 @@ pub struct PairingWorld {
             app::pairing::TokenAskRefused,
         >,
     >,
+    /// The one host and port the hub answers at, once it answers at one.
+    only_at: Option<(&'static str, u16)>,
 }
 
 impl std::fmt::Debug for PairingWorld {
@@ -312,21 +314,72 @@ impl PairingWorld {
         self.first.as_ref().expect("the first agent")
     }
 
+    /// The connector to `hub`, which answers only where the world says.
+    fn connector_to(&self, hub: &Hub) -> Arc<LoopbackHubConnector> {
+        let connector = LoopbackHubConnector::to(hub.pairing.clone());
+        Arc::new(match self.only_at {
+            Some((host, port)) => connector.only_at(host, port),
+            None => connector,
+        })
+    }
+
     /// `machine` connects to its hub; `answering` is the hub that answers
     /// at the pinned address, the world's by default.
     async fn connect(&mut self, machine: &Machine, answering: Option<&Hub>) {
         let hub = answering.unwrap_or_else(|| self.hub());
-        let connector = Arc::new(LoopbackHubConnector::to(hub.pairing.clone()));
+        let connector = self.connector_to(hub);
         let outcome = machine
             .connecting(connector.clone())
             .connect(machine.agent_id, machine.hostname.clone())
             .await;
+        self.record(outcome, connector).await;
+    }
+
+    /// The person gives `machine` the address `address` for its hub;
+    /// `answering` is the hub that answers there, the world's by default.
+    async fn give_address(&mut self, machine: &Machine, address: &str, answering: Option<&Hub>) {
+        let hub = answering.unwrap_or_else(|| self.hub());
+        let connector = self.connector_to(hub);
+        let outcome = machine
+            .connecting(connector.clone())
+            .connect_at(
+                machine.agent_id,
+                machine.hostname.clone(),
+                HubAddress::parse(address).unwrap(),
+            )
+            .await;
+        self.record(outcome, connector).await;
+    }
+
+    async fn record(
+        &mut self,
+        outcome: Result<Connected, ConnectFailure>,
+        connector: Arc<LoopbackHubConnector>,
+    ) {
         let first = self.first().agent_id;
         let record = self.hub().registry.agent(first).await.unwrap();
         self.counters
             .push(record.map_or(0, |record| record.counter));
         self.connections.push(outcome);
         self.connector = Some(connector);
+    }
+
+    /// The addresses the first agent's pin says to try, in order.
+    async fn addresses(&self) -> Vec<String> {
+        let pin = self.first().identity.pin().await.unwrap().expect("a pin");
+        pin.addresses()
+            .map(|address| address.as_str().to_owned())
+            .collect()
+    }
+
+    /// The host and port of each route the last connection tried.
+    fn tried(&self) -> Vec<String> {
+        let connector = self.connector.as_ref().expect("a connector");
+        connector
+            .routes()
+            .into_iter()
+            .map(|route| format!("{}:{}", route.host, route.port))
+            .collect()
     }
 
     fn connected(&self) -> &Connected {
@@ -847,4 +900,72 @@ async fn still_holds_key(agent: &mut Agent) {
     };
     assert_eq!(held.key, FakeSigning.public_key(&seed).unwrap());
     assert!(held.is_pending(), "{held:?}");
+}
+
+/// The hub's new address in `following_the_hub.feature`; the token's is
+/// `https://hub.example:9443`.
+const NEW_ADDRESS: &str = "https://hub-new.example:9443";
+
+#[given("the hub answers only at a new address")]
+fn answers_at_new(agent: &mut Agent) {
+    agent.pairing.only_at = Some(("hub-new.example", 9443));
+}
+
+#[given("the hub answers only at the address in its token")]
+fn answers_at_token(agent: &mut Agent) {
+    agent.pairing.only_at = Some(("hub.example", 9443));
+}
+
+#[when("the person gives the agent the hub's new address")]
+async fn gives_new_address(agent: &mut Agent) {
+    let world = &mut agent.pairing;
+    let machine = world.first().clone();
+    world.give_address(&machine, NEW_ADDRESS, None).await;
+}
+
+#[given("the person gave the agent the hub's new address")]
+async fn gave_new_address(agent: &mut Agent) {
+    gives_new_address(agent).await;
+    agent.pairing.connected();
+}
+
+#[when("the person gives the agent an address where another hub that has another key answers")]
+async fn gives_other_hubs_address(agent: &mut Agent) {
+    let world = &mut agent.pairing;
+    let other = Hub::new(500).await;
+    let machine = world.first().clone();
+    world
+        .give_address(&machine, NEW_ADDRESS, Some(&other))
+        .await;
+}
+
+#[then("the agent keeps the hub's new address")]
+async fn keeps_new_address(agent: &mut Agent) {
+    let world = &agent.pairing;
+    world.connected();
+    assert_eq!(
+        world.addresses().await,
+        [NEW_ADDRESS, "https://hub.example:9443"]
+    );
+}
+
+#[then("the agent keeps only the address in its token")]
+async fn keeps_token_address(agent: &mut Agent) {
+    assert_eq!(
+        agent.pairing.addresses().await,
+        ["https://hub.example:9443"]
+    );
+}
+
+#[then("the agent tried the hub's new address first")]
+fn tried_new_first(agent: &mut Agent) {
+    assert_eq!(agent.pairing.tried(), ["hub-new.example:9443"]);
+}
+
+#[then("the agent tried the hub's new address, then the address in its token")]
+fn tried_new_then_token(agent: &mut Agent) {
+    assert_eq!(
+        agent.pairing.tried(),
+        ["hub-new.example:9443", "hub.example:9443"]
+    );
 }
