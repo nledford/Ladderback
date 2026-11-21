@@ -96,7 +96,11 @@ impl SecretsHarness for RealHarness {
     }
 
     fn with_refusing_keyring(&self) -> Arc<dyn SecretResolver> {
-        Arc::new(self.system().with_keyring(Arc::new(Refusing)))
+        Arc::new(self.system().with_keyring(Arc::new(NoCollection)))
+    }
+
+    fn with_dismissed_unlock_prompt(&self) -> Arc<dyn SecretResolver> {
+        Arc::new(self.system().with_keyring(Arc::new(DismissedPrompt)))
     }
 
     fn with_locked_keyring(&self) -> Arc<dyn SecretResolver> {
@@ -111,7 +115,8 @@ impl SecretsHarness for RealHarness {
         let store: Arc<dyn KeyringStore> = match cause {
             KeyringCause::NoService => Arc::new(NoService),
             KeyringCause::Locked => Arc::new(LockedSecretService),
-            KeyringCause::Refused => Arc::new(Refusing),
+            KeyringCause::Dismissed => Arc::new(DismissedPrompt),
+            KeyringCause::Refused => Arc::new(NoCollection),
         };
         Arc::new(self.system().with_keyring(store))
     }
@@ -1177,24 +1182,47 @@ impl KeyringStore for NoService {
 }
 
 /// A Secret Service whose unlock prompt the person dismissed.
-struct Refusing;
+struct DismissedPrompt;
 
-impl KeyringStore for Refusing {
+impl KeyringStore for DismissedPrompt {
+    fn get(&self, _service: &str, _name: &str) -> Result<String, Failure> {
+        Err(Failure::Dismissed(
+            "Secret Service: unlock prompt was dismissed".to_owned(),
+        ))
+    }
+
+    fn set(&self, _service: &str, _name: &str, _secret: &str) -> Result<(), Failure> {
+        Err(Failure::Dismissed(
+            "Secret Service: unlock prompt was dismissed".to_owned(),
+        ))
+    }
+
+    fn delete(&self, _service: &str, _name: &str) -> Result<(), Failure> {
+        Err(Failure::Dismissed(
+            "Secret Service: unlock prompt was dismissed".to_owned(),
+        ))
+    }
+}
+
+/// A Secret Service with no collection to look in.
+struct NoCollection;
+
+impl KeyringStore for NoCollection {
     fn get(&self, _service: &str, _name: &str) -> Result<String, Failure> {
         Err(Failure::Refused(
-            "Secret Service: prompt dismissed".to_owned(),
+            "Secret Service: no result found".to_owned(),
         ))
     }
 
     fn set(&self, _service: &str, _name: &str, _secret: &str) -> Result<(), Failure> {
         Err(Failure::Refused(
-            "Secret Service: prompt dismissed".to_owned(),
+            "Secret Service: no result found".to_owned(),
         ))
     }
 
     fn delete(&self, _service: &str, _name: &str) -> Result<(), Failure> {
         Err(Failure::Refused(
-            "Secret Service: prompt dismissed".to_owned(),
+            "Secret Service: no result found".to_owned(),
         ))
     }
 }
@@ -1257,6 +1285,50 @@ async fn a_locked_keyring_says_so_and_why() {
             },
         })
     );
+}
+
+/// A Secret Service whose unlock prompt the person dismissed is told apart
+/// from one that isn't there, in its own words: its keyring stays locked,
+/// and the person can unlock it and try again (#993).
+#[tokio::test]
+async fn a_dismissed_unlock_prompt_says_the_keyring_stays_locked_and_why() {
+    let entry = KeyringEntry::parse("ladderback-demo/nas").unwrap();
+    let result = resolver(Duration::from_secs(1))
+        .with_keyring(Arc::new(DismissedPrompt))
+        .resolve(&SecretRef::Keyring(entry))
+        .await;
+    assert_eq!(
+        result,
+        Err(SecretError {
+            source: SourceName::Keyring {
+                entry: "ladderback-demo/nas".to_owned()
+            },
+            problem: Problem::KeyringUnavailable {
+                detail: "Secret Service: unlock prompt was dismissed".to_owned(),
+                cause: KeyringCause::Dismissed,
+            },
+        })
+    );
+}
+
+/// A password a keyring whose unlock prompt was dismissed couldn't keep, or
+/// remove, is refused as locked, in the platform's words: the person can
+/// unlock it and save again (#993).
+#[tokio::test]
+async fn a_dismissed_unlock_prompt_keeps_nothing_and_says_the_keyring_is_locked() {
+    let entry = KeyringEntry::parse("ladderback-demo/nas").unwrap();
+    let dismissed = resolver(Duration::from_secs(1)).with_keyring(Arc::new(DismissedPrompt));
+    let locked = KeyringError::Locked {
+        detail: "Secret Service: unlock prompt was dismissed".to_owned(),
+    };
+    assert_eq!(
+        dismissed
+            .keep(&entry, &SecretValue::new("hunter2"))
+            .await
+            .map(|_| ()),
+        Err(locked.clone())
+    );
+    assert_eq!(dismissed.remove(&entry).await, Err(locked));
 }
 
 #[tokio::test]
@@ -1653,9 +1725,10 @@ fn a_secret_service_that_is_not_on_the_bus_is_no_keyring_service() {
 
 /// A Secret Service that answered and refused, as the `keyring` crate
 /// reports it on Linux: its collection locked (its D-Bus error, or the
-/// `dbus-secret-service` error) is locked; missing, or its unlock prompt
-/// dismissed, is refused. Each is in the platform's words, never a service
-/// that isn't there: asking again would ask the person again.
+/// `dbus-secret-service` error) is locked; its unlock prompt dismissed is
+/// dismissed (#993); no collection to look in is refused. Each is in the
+/// platform's words, never a service that isn't there: asking again would
+/// ask the person again.
 #[cfg(target_os = "linux")]
 #[test]
 fn a_secret_service_that_is_locked_is_told_apart_from_one_that_refused() {
@@ -1676,17 +1749,18 @@ fn a_secret_service_that_is_locked_is_told_apart_from_one_that_refused() {
             Failure::Locked(said)
         );
     }
-    let refused = [
-        keyring::Error::NoStorageAccess(Box::new(Error::NoResult)),
-        keyring::Error::NoStorageAccess(Box::new(Error::Prompt)),
-    ];
-    for error in refused {
-        let said = error.to_string();
-        assert_eq!(
-            failure(error, OsStore::SecretService, never_asked),
-            Failure::Refused(said)
-        );
-    }
+    let dismissed = keyring::Error::NoStorageAccess(Box::new(Error::Prompt));
+    let said = dismissed.to_string();
+    assert_eq!(
+        failure(dismissed, OsStore::SecretService, never_asked),
+        Failure::Dismissed(said)
+    );
+    let refused = keyring::Error::NoStorageAccess(Box::new(Error::NoResult));
+    let said = refused.to_string();
+    assert_eq!(
+        failure(refused, OsStore::SecretService, never_asked),
+        Failure::Refused(said)
+    );
 }
 
 /// A Secret Service that answered and still gave no secret is unreadable,

@@ -23,9 +23,11 @@ pub(crate) enum Failure {
     /// The Secret Service answered that its keyring is locked. The
     /// platform's own words.
     Locked(String),
-    /// The Secret Service answered and refused otherwise: its unlock prompt
-    /// was dismissed, or it has no collection to look in. The platform's own
-    /// words.
+    /// The person dismissed the Secret Service's unlock prompt, so its
+    /// keyring stays locked. The platform's own words.
+    Dismissed(String),
+    /// The Secret Service answered and refused otherwise: it has no
+    /// collection to look in. The platform's own words.
     Refused(String),
     /// The Secret Service found no entry but couldn't say whether its
     /// keyring is locked, where an entry goes unseen: the entry may be
@@ -270,6 +272,7 @@ pub(crate) fn failure(
             Some(KeyringCause::NoService) => Failure::NoService(error.to_string()),
             Some(KeyringCause::Locked) => Failure::Locked(error.to_string()),
             Some(KeyringCause::Refused) => Failure::Refused(error.to_string()),
+            Some(KeyringCause::Dismissed) => todo!(),
             None => Failure::Unreachable(error.to_string()),
         },
     }

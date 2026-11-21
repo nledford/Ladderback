@@ -6,7 +6,7 @@ Feature: A scheduled run waits for the session's keyring service while the daemo
   10 seconds, until the service answers or the daemon has been up for 2
   minutes. The daemon logs the wait once, naming the entry and never a
   secret. A keyring that is locked, or whose unlock prompt was dismissed, is
-  not asked again, and a locked one is refused as locked, never as a missing
+  not asked again, and both are refused as locked, never as a missing
   keyring service; a person who asked for something, such as a test of the
   repository, is answered at once; and after those 2 minutes no run waits
   (technical design §5).
@@ -50,13 +50,13 @@ Feature: A scheduled run waits for the session's keyring service while the daemo
     When the schedule starts a backup 30 seconds after the daemon started
     Then the run is refused with "secret-keyring-locked" for the keyring entry "ladderback/demo"
 
-  Scenario: A dismissed unlock prompt fails the run at once and isn't asked again
+  Scenario: A dismissed unlock prompt fails the run at once as locked, and isn't asked again
     Given the keyring's unlock prompt was dismissed
     When the schedule starts a backup 30 seconds after the daemon started
-    Then the run fails 30 seconds after the daemon started because the keyring refused
+    Then the run fails 30 seconds after the daemon started because the keyring's unlock prompt was dismissed
     And the keyring entry "ladderback/demo" was read 1 time
     And the daemon never logged that the run waits
-    And the run is refused with "secret-keyring-unavailable" for the keyring entry "ladderback/demo"
+    And the run is refused with "secret-keyring-locked" for the keyring entry "ladderback/demo"
 
   Scenario: A person who tests the repository is answered at once
     Given the session's keyring service starts 55 seconds after the daemon

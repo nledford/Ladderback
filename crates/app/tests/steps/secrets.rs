@@ -1138,9 +1138,11 @@ fn fails_locked(agent: &mut Agent, seconds: i64) {
     assert_eq!(agent.clock.now(), agent.secrets.after_start(seconds));
 }
 
-#[then(expr = "the run fails {int} seconds after the daemon started because the keyring refused")]
-fn fails_refused(agent: &mut Agent, seconds: i64) {
-    assert_eq!(agent.secrets.keyring_cause(), KeyringCause::Refused);
+#[then(
+    expr = "the run fails {int} seconds after the daemon started because the keyring's unlock prompt was dismissed"
+)]
+fn fails_dismissed(agent: &mut Agent, seconds: i64) {
+    assert_eq!(agent.secrets.keyring_cause(), KeyringCause::Dismissed);
     assert_eq!(agent.clock.now(), agent.secrets.after_start(seconds));
 }
 

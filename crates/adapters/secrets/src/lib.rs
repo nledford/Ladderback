@@ -249,6 +249,7 @@ impl SystemSecrets {
                 detail,
                 cause: KeyringCause::Refused,
             })),
+            Err(Failure::Dismissed(_)) => todo!(),
         }
     }
 
@@ -413,6 +414,7 @@ fn refused(failure: Failure) -> KeyringError {
         }
         // The person can unlock it and save again (#993).
         Failure::Locked(detail) => KeyringError::Locked { detail },
+        Failure::Dismissed(_) => todo!(),
         Failure::Unreachable(detail) => KeyringError::Unwritable { detail },
         // An entry that holds what isn't text holds another secret.
         Failure::NotUnicode => KeyringError::Taken,

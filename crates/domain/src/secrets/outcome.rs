@@ -48,8 +48,9 @@ pub enum Problem {
     /// The source is a keyring entry, and the keyring couldn't be asked for
     /// it: on Linux no Secret Service runs, there is no session bus to reach
     /// one by (a server, a system service), or the service answered that its
-    /// keyring is locked or that its unlock prompt was dismissed. What the
-    /// platform said is the detail, and `cause` which of these it is.
+    /// keyring is locked, that its unlock prompt was dismissed, or that it
+    /// has no collection to look in. What the platform said is the detail,
+    /// and `cause` which of these it is.
     KeyringUnavailable { detail: String, cause: KeyringCause },
     /// A secret has to be text, and this isn't valid UTF-8.
     NotUnicode,
@@ -79,9 +80,12 @@ pub enum KeyringCause {
     /// it since login, or it was locked again. Asking again would ask the
     /// person to unlock it.
     Locked,
-    /// The service answered and said no some other way: the person
-    /// dismissed its unlock prompt, or it has no collection to look in.
-    /// Asking again would ask them again.
+    /// The person dismissed the service's unlock prompt, so its keyring
+    /// stays locked: told as locked, but a no. Asking again would ask them
+    /// again (#993).
+    Dismissed,
+    /// The service answered and said no some other way: it has no
+    /// collection to look in.
     Refused,
 }
 

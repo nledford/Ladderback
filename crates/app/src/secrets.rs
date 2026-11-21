@@ -840,6 +840,7 @@ impl<'a> Run<'a> {
                 // An unlock prompt the person dismissed is a no: the run
                 // fails at once and never asks again.
                 KeyringCause::Refused => return read,
+                KeyringCause::Dismissed => todo!(),
             }
         }
     }
@@ -1121,12 +1122,23 @@ mod tests {
             (
                 keyring("ladderback/demo"),
                 Problem::KeyringUnavailable {
-                    detail: "Secret Service: prompt dismissed".to_owned(),
+                    detail: "Secret Service: unlock prompt was dismissed".to_owned(),
+                    cause: domain::secrets::KeyringCause::Dismissed,
+                },
+                R::SecretKeyringLocked {
+                    source: "ladderback/demo".to_owned(),
+                    detail: said("Secret Service: unlock prompt was dismissed"),
+                },
+            ),
+            (
+                keyring("ladderback/demo"),
+                Problem::KeyringUnavailable {
+                    detail: "Secret Service: no result found".to_owned(),
                     cause: domain::secrets::KeyringCause::Refused,
                 },
                 R::SecretKeyringUnavailable {
                     source: "ladderback/demo".to_owned(),
-                    detail: said("Secret Service: prompt dismissed"),
+                    detail: said("Secret Service: no result found"),
                 },
             ),
             (
