@@ -3,12 +3,11 @@ use std::sync::Arc;
 
 use domain::fleet::{
     AgentEnvelope, AgentRecord, Approval, ApprovalRefused, Binding, BindingKind, Challenge,
-    Connect, EpochSeconds, FIRST_SEQUENCE, HANDSHAKES, Holder, Hostname, HubAddress, HubEnvelope,
-    KEY_BYTES, KeyFile, ListedAgent, Nonce, Pair, PairAnswer, PairRefusal, PairRequest, Paired,
-    PairingToken, PayloadDigest, Proof, ProofRefusal, ProofRequest, PublicKey, Refused, SeedFile,
-    SignedMessage, SigningSeed, TokenId, TokenRecord, TokenTls, TokenUse, UNUSED_TOKEN_LIMIT,
-    Welcome, hello_kind, list_agents,
-    token_life, welcome_kind,
+    Connect, EpochSeconds, FIRST_SEQUENCE, HANDSHAKES, Holder, Hostname, HostnameKey, HubAddress,
+    HubEnvelope, KEY_BYTES, KeyFile, ListedAgent, Nonce, Pair, PairAnswer, PairRefusal,
+    PairRequest, Paired, PairingToken, PayloadDigest, Proof, ProofRefusal, ProofRequest, PublicKey,
+    Refused, SeedFile, SignedMessage, SigningSeed, TokenId, TokenRecord, TokenTls, TokenUse,
+    UNUSED_TOKEN_LIMIT, Welcome, hello_kind, list_agents, token_life, welcome_kind,
 };
 use domain::{AgentId, SignedDuration};
 
@@ -295,7 +294,9 @@ impl HubPairing {
 
     /// The agents waiting for a person's approval, oldest first.
     pub async fn pending(&self) -> Result<Vec<AgentRecord>, HubPairingError> {
-        todo!()
+        let mut agents = self.registry.agents().await?;
+        agents.retain(AgentRecord::is_pending);
+        Ok(agents)
     }
 
     /// The agent registered under `hostname`, pending or approved: the one
@@ -305,8 +306,13 @@ impl HubPairing {
         &self,
         hostname: &Hostname,
     ) -> Result<Option<AgentRecord>, HubPairingError> {
-        let _ = hostname;
-        todo!()
+        let key = HostnameKey::of(hostname);
+        Ok(self
+            .registry
+            .agents()
+            .await?
+            .into_iter()
+            .find(|agent| agent.hostname_key() == key))
     }
 
     /// A person approves `agent`, as they compared it: its agent ID and
@@ -315,8 +321,10 @@ impl HubPairing {
         &self,
         agent: &AgentRecord,
     ) -> Result<Result<AgentRecord, ApprovalRefused>, HubPairingError> {
-        let _ = agent;
-        todo!()
+        Ok(self
+            .registry
+            .approve(agent.agent_id, agent.key, self.clock.now())
+            .await?)
     }
 
     /// The hub's answer to `connect` on a session whose `tls-exporter`

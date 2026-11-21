@@ -5,7 +5,7 @@ use async_trait::async_trait;
 use domain::fleet::{
     AgentRecord, AgentStatus, ApprovalRefused, BindingKind, Fingerprint, HostnameKey, PairRefusal,
     PairRequest, Pairing, PairingView, ProofRefusal, ProofRequest, ProofView, PublicKey, TokenId,
-    TokenRecord, TokenUse, admits_unused_token, decide_pairing, decide_proof,
+    TokenRecord, TokenUse, admits_unused_token, decide_approval, decide_pairing, decide_proof,
     voids_tokens_for_new_key,
 };
 use domain::{AgentId, SignedDuration, Timestamp};
@@ -266,7 +266,20 @@ impl AgentRegistry for InMemoryAgentRegistry {
         agent_key: PublicKey,
         now: Timestamp,
     ) -> Result<Result<AgentRecord, ApprovalRefused>, StoreError> {
-        let _ = (agent_id, agent_key, now);
-        todo!()
+        let now = to_the_millisecond(now);
+        let mut kept = self.kept();
+        let decided = decide_approval(
+            kept.agents.iter().find(|a| a.agent_id == agent_id),
+            &agent_key,
+            now,
+        );
+        if let Ok(agent) = &decided {
+            for kept_one in &mut kept.agents {
+                if kept_one.agent_id == agent.agent_id {
+                    *kept_one = kept_agent(agent.clone());
+                }
+            }
+        }
+        Ok(decided)
     }
 }

@@ -477,8 +477,16 @@ pub fn decide_approval(
     agent_key: &PublicKey,
     now: Timestamp,
 ) -> Result<AgentRecord, ApprovalRefused> {
-    let _ = (record, agent_key, now);
-    todo!()
+    let record = record
+        .filter(|record| record.key == *agent_key)
+        .ok_or(ApprovalRefused::Unknown)?;
+    match record.status {
+        AgentStatus::Approved { .. } => Err(ApprovalRefused::AlreadyApproved),
+        AgentStatus::Pending { .. } => Ok(AgentRecord {
+            status: AgentStatus::Approved { at: now },
+            ..record.clone()
+        }),
+    }
 }
 
 #[cfg(test)]
