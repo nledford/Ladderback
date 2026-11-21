@@ -3322,6 +3322,12 @@ ui-agents-heading = Machines
 # What that section says above its form.
 ui-agents-intro = To pair another { -machine } with this { -hub }, make a pairing token here and give it to { "ladderback pair" } on that { -machine }. A token works once, for a few minutes, and only for the address it names.
 
+# A warning under that, shown only with sign-in off: a reverse proxy on the hub's own computer can make a request from anywhere look local, and with sign-in off the step-up is the hub key's ID, which anyone can read (decision 120).
+ui-agents-proxy-sign-in = A { -hub } reached through a reverse proxy must turn sign-in on, by setting an admin password: a proxy on this computer can make a request from anywhere look as if it came from this computer, and with sign-in off anyone who can reach the proxy can then use { -brand-name } and make a pairing token.
+
+# The link after that warning, to the guide's section on a hub behind a reverse proxy, on GitHub.
+ui-agents-proxy-link = A { -hub } behind a reverse proxy, in the guide on GitHub
+
 # The heading of the form that makes a pairing token.
 ui-pairing-new-heading = Make a pairing token
 

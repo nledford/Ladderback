@@ -419,9 +419,21 @@ Then("the page shows an information alert containing {string}", async function (
   await pageShowsAlert(this, "primary", needle);
 });
 
+Then("the page shows a warning alert containing {string}", async function (this: BrowserWorld, needle: string) {
+  await pageShowsAlert(this, "warning", needle);
+});
+
 // Nothing the page shows now: an alert drawn with the page is there at once.
-Then("the page shows no error alert containing {string}", async function (this: BrowserWorld, needle: string) {
+async function pageShowsNoAlert(world: BrowserWorld, tone: string, needle: string) {
   const heard = [...needle].map(escapeRegExp).join(ISOLATION);
-  const alerts = this.page.locator(".alert.tone-error").filter({ hasText: new RegExp(heard) });
-  assert.equal(await alerts.count(), 0, `the page shows an error alert containing "${needle}"`);
+  const alerts = world.page.locator(`.alert.tone-${tone}`).filter({ hasText: new RegExp(heard) });
+  assert.equal(await alerts.count(), 0, `the page shows a ${tone} alert containing "${needle}"`);
+}
+
+Then("the page shows no error alert containing {string}", async function (this: BrowserWorld, needle: string) {
+  await pageShowsNoAlert(this, "error", needle);
+});
+
+Then("the page shows no warning alert containing {string}", async function (this: BrowserWorld, needle: string) {
+  await pageShowsNoAlert(this, "warning", needle);
 });

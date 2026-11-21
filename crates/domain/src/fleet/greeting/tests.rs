@@ -12,6 +12,7 @@ fn hello(protocols: Protocols) -> Hello {
         hostname: Hostname::parse("laptop").unwrap(),
         protocols,
         clock: EpochSeconds::from_seconds(1_800_000_000),
+        zone: None,
     }
 }
 

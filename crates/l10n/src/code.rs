@@ -39,6 +39,7 @@ code_messages!(ERRORS, error_message, ErrorCode {
     ProtocolViolated => msg::ERROR_PROTOCOL_VIOLATED,
     EngineStartTimedOut => msg::ERROR_ENGINE_START_TIMED_OUT,
     EngineExitTimedOut => msg::ERROR_ENGINE_EXIT_TIMED_OUT,
+    HookFailed => msg::ERROR_HOOK_FAILED,
     DaemonStopped => msg::ERROR_DAEMON_STOPPED,
     DaemonShutDown => msg::ERROR_DAEMON_SHUT_DOWN,
     HostNotAllowed => msg::ERROR_HOST_NOT_ALLOWED,

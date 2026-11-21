@@ -5,7 +5,7 @@
 
 use std::sync::{Arc, Mutex, PoisonError};
 
-use api::{ErrorCode, UiEvent};
+use api::{ErrorCode, MsgArg, UiEvent, WarningCode};
 use app::execution::RunOperation;
 use app::fakes::InMemoryOperationStore;
 use app::maintenance::RunMaintenance;
@@ -303,6 +303,44 @@ fn hears_failure(agent: &mut Agent, code: String) {
     );
 }
 
+#[then(
+    expr = "the page hears a hook warning from the {word} phase before it hears the operation started"
+)]
+fn hears_hook_warning_first(agent: &mut Agent, phase: String) {
+    let id = agent.operation().id().as_uuid().hyphenated().to_string();
+    let heard = agent.announcement.heard();
+    let warned = heard
+        .iter()
+        .position(|heard| {
+            matches!(
+                &heard.news,
+                UiEvent::OperationWarning { operation, code: WarningCode::HookWarning, args }
+                    if *operation == id && args.first() == Some(&MsgArg::Text(phase.clone()))
+            )
+        })
+        .unwrap_or_else(|| panic!("the page heard no hook warning from {phase}: {heard:?}"));
+    let started = heard
+        .iter()
+        .position(|heard| matches!(heard.news, UiEvent::OperationStarted { .. }))
+        .expect("the page heard the operation started");
+    assert!(
+        warned < started,
+        "the warning came after the start: {heard:?}"
+    );
+}
+
+#[then(expr = "the page hears {int} warning(s)")]
+fn hears_warnings(agent: &mut Agent, count: usize) {
+    let heard = agent.announcement.heard();
+    assert_eq!(
+        heard
+            .iter()
+            .filter(|heard| matches!(heard.news, UiEvent::OperationWarning { .. }))
+            .count(),
+        count,
+        "the warnings the page heard: {heard:?}"
+    );
+}
 #[then("the page has heard nothing")]
 fn heard_nothing(agent: &mut Agent) {
     assert!(agent.announcement.heard().is_empty());

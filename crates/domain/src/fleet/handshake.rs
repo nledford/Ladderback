@@ -7,6 +7,7 @@ use super::hostname::Hostname;
 use super::keys::{KEY_BYTES, PublicKey, Signature};
 use super::signed::{Binding, EpochSeconds, Handshakes, Nonce, WireName};
 use super::token::TokenTls;
+use super::zone::MachineZone;
 use crate::AgentId;
 
 /// The handshakes this build speaks: handshake 1, `/sync/v1`.
@@ -84,14 +85,16 @@ pub struct Challenge {
 }
 
 /// The agent's pairing, in place of `Proof`: the token's pairing key, which
-/// lets the hub find the token, the key the agent registers, its counter
-/// and hostname, and the `pair` message signed by both keys.
+/// lets the hub find the token, the key the agent registers, its counter,
+/// hostname and machine zone, and the `pair` message signed by both keys.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Pair {
     pub pairing_key: PublicKey,
     pub agent_key: PublicKey,
     pub counter: u64,
     pub hostname: Hostname,
+    /// None when the agent's zone has no IANA name.
+    pub zone: Option<MachineZone>,
     pub pairing_signature: Signature,
     pub agent_signature: Signature,
 }

@@ -340,6 +340,22 @@ Feature: An agent's configuration
       When the agent loads the config file
       Then the load is refused because "nas" and "nas-2" are one repository
 
+    Scenario: Two entries for one folder are refused however its path is written
+      Given a config file holding:
+        """
+        schema = 1
+
+        [repositories.nas]
+        repository = "/srv/demo-repo"
+        password-env = "DEMO_PASSWORD"
+
+        [repositories.nas-2]
+        repository = "local:/srv/demo-repo/"
+        password-env = "DEMO_PASSWORD"
+        """
+      When the agent loads the config file
+      Then the load is refused because "nas" and "nas-2" are one repository
+
     Scenario: A file with two entries for one repository ID is refused, naming both
       Given a config file holding:
         """

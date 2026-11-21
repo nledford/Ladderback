@@ -7,12 +7,12 @@
 //! engine's own start and end are no news: only the run knows when the log
 //! has them.
 
-use api::{ErrorCode, ErrorDto, MsgArg, UiEvent};
+use api::{ErrorCode, ErrorDto, MsgArg, UiEvent, WarningCode};
 use domain::execution::refusal::SettingRefusal;
-use domain::execution::{FailureReason, Operation, OperationStatus};
+use domain::execution::{FailureReason, HookEnd, HookPlace, Operation, OperationStatus};
 use domain::{OperationId, RepositoryId, Timestamp};
 
-use crate::ports::EventBus;
+use crate::ports::{EventBus, HookPhase};
 
 /// The news that `operation` started: what is running, on which repository,
 /// and when it started, as the log has it. `opened` is the repository the
@@ -104,6 +104,24 @@ pub fn daemon_stopped(operation: OperationId, at: Timestamp) -> UiEvent {
     }
 }
 
+/// The news that a hook of `phase` around `operation` failed where its
+/// `on-failure` said to go on: the phase and, when it exited, its status, as
+/// the warning's message takes them, and nothing the hook wrote.
+pub(crate) fn hook_warning(
+    operation: OperationId,
+    phase: HookPhase,
+    exit_code: Option<i32>,
+) -> UiEvent {
+    UiEvent::OperationWarning {
+        operation: operation.as_uuid().hyphenated().to_string(),
+        code: WarningCode::HookWarning,
+        args: std::iter::once(phase.as_env().to_owned())
+            .chain(exit_code.map(|code| code.to_string()))
+            .map(MsgArg::Text)
+            .collect(),
+    }
+}
+
 /// Why an operation failed, as a page shows it: the code, the arguments its
 /// message takes, by name, and the engine's own words as the detail, which
 /// the engine masked of every secret of the job (I4). A run refused for a
@@ -117,7 +135,9 @@ pub fn failure(reason: &FailureReason) -> ErrorDto {
             ErrorDto::new(ErrorCode::EngineUnavailable, [], said(detail))
         }
         F::EngineFailed { detail } => ErrorDto::new(ErrorCode::OperationFailed, [], said(detail)),
-        F::HookFailed { .. } => ErrorDto::new(ErrorCode::OperationFailed, [], None),
+        F::HookFailed { hook, ended } => {
+            ErrorDto::new(ErrorCode::HookFailed, hook_failed_args(*hook, *ended), None)
+        }
         F::EngineExited { exit_code } => ErrorDto::new(
             ErrorCode::EngineExited,
             exit_code.map(|code| ("exit_code", MsgArg::Text(code.to_string()))),
@@ -166,6 +186,33 @@ pub fn failure(reason: &FailureReason) -> ErrorDto {
             ErrorDto::new(code, args, detail)
         }
     }
+}
+
+/// The arguments of a before-hook's failure, in the order its code declares
+/// them: the level whose list holds the hook, its place in that list, how it
+/// ended and, for an exit, its status. A failure an earlier version kept
+/// lacks the hook, and may lack how it ended; what the hook wrote is never
+/// one of them (#480, #853).
+pub fn hook_failed_args(
+    hook: Option<HookPlace>,
+    ended: Option<HookEnd>,
+) -> Vec<(&'static str, MsgArg)> {
+    let text = |name, value: String| (name, MsgArg::Text(value));
+    hook.into_iter()
+        .flat_map(|hook| {
+            [
+                text("level", hook.level.code().to_owned()),
+                text("position", hook.position.to_string()),
+            ]
+        })
+        .chain(ended.into_iter().flat_map(|ended| {
+            std::iter::once(text("ended", ended.code().to_owned())).chain(
+                ended
+                    .exit_code()
+                    .map(|code| text("exit_code", code.to_string())),
+            )
+        }))
+        .collect()
 }
 
 /// A run's refusal as a request to start it is answered and as a page shows
@@ -245,9 +292,11 @@ pub fn refused(
 
 #[cfg(test)]
 mod tests {
+    use std::num::NonZeroU32;
+
     use domain::execution::{
-        FailureReason, Operation, OperationKind, OperationStatus, RepositoryHalf, Target,
-        Transition, Trigger, Warning, WarningKind,
+        FailureReason, HookEnd, HookLevel, HookPlace, Operation, OperationKind, OperationStatus,
+        RepositoryHalf, Target, Transition, Trigger, Warning, WarningKind,
     };
     use domain::{OperationId, Timestamp, Uuid};
 
@@ -463,8 +512,33 @@ mod tests {
                 vec![text("repository not found")],
             ),
             (
-                F::HookFailed { exit_code: Some(3) },
-                C::OperationFailed,
+                F::HookFailed {
+                    hook: Some(HookPlace {
+                        level: HookLevel::Plan,
+                        position: NonZeroU32::new(2).unwrap(),
+                    }),
+                    ended: Some(HookEnd::Exited { code: 3 }),
+                },
+                C::HookFailed,
+                vec![text("plan"), text("2"), text("exit"), text("3")],
+            ),
+            (
+                F::HookFailed {
+                    hook: Some(HookPlace {
+                        level: HookLevel::Agent,
+                        position: NonZeroU32::new(1).unwrap(),
+                    }),
+                    ended: Some(HookEnd::Signalled),
+                },
+                C::HookFailed,
+                vec![text("agent"), text("1"), text("signal")],
+            ),
+            (
+                F::HookFailed {
+                    hook: None,
+                    ended: None,
+                },
+                C::HookFailed,
                 vec![],
             ),
             (
@@ -590,8 +664,41 @@ mod tests {
                 ErrorDto::new(C::OperationFailed, [], said("no key opens the repository")),
             ),
             (
-                F::HookFailed { exit_code: Some(3) },
-                ErrorDto::new(C::OperationFailed, [], None),
+                F::HookFailed {
+                    hook: Some(HookPlace {
+                        level: HookLevel::Plan,
+                        position: NonZeroU32::new(2).unwrap(),
+                    }),
+                    ended: Some(HookEnd::Exited { code: 3 }),
+                },
+                ErrorDto::new(
+                    C::HookFailed,
+                    [
+                        ("level", text("plan")),
+                        ("position", text("2")),
+                        ("ended", text("exit")),
+                        ("exit_code", text("3")),
+                    ],
+                    None,
+                ),
+            ),
+            (
+                F::HookFailed {
+                    hook: Some(HookPlace {
+                        level: HookLevel::Repository,
+                        position: NonZeroU32::new(1).unwrap(),
+                    }),
+                    ended: Some(HookEnd::TimedOut),
+                },
+                ErrorDto::new(
+                    C::HookFailed,
+                    [
+                        ("level", text("repository")),
+                        ("position", text("1")),
+                        ("ended", text("timeout")),
+                    ],
+                    None,
+                ),
             ),
             (
                 F::EngineExited { exit_code: Some(3) },
@@ -720,6 +827,20 @@ mod tests {
                 "{reason:?}"
             );
         }
+        // A hook failure an earlier version kept names no hook. The history
+        // shows it by name; no event tells it, since only a run of this
+        // version announces its end, so it has no reading by position.
+        assert_eq!(
+            failure(&F::HookFailed {
+                hook: None,
+                ended: Some(HookEnd::Exited { code: 3 }),
+            }),
+            ErrorDto::new(
+                C::HookFailed,
+                [("ended", text("exit")), ("exit_code", text("3"))],
+                None,
+            )
+        );
     }
 
     /// A refusal of a setting, its codes, its arguments and what was said.

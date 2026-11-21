@@ -3,13 +3,16 @@
 //! operation runs with them attached.
 
 use std::assert_matches;
+use std::num::NonZeroU32;
 use std::sync::Arc;
 
 use cucumber::{given, then};
 
 use app::fakes::{FakeHookRunner, Scripted};
-use app::ports::HookSetup;
-use domain::execution::{FailureReason, OperationStatus, WarningKind};
+use app::ports::{HookSetup, HookStatus};
+use domain::execution::{
+    FailureReason, HookEnd, HookLevel, HookPlace, OperationStatus, WarningKind,
+};
 use domain::planning::{HookEntry, Hooks, OnFailure};
 use domain::{PlanId, RepositoryAlias};
 
@@ -134,6 +137,40 @@ fn timing_out(agent: &mut Agent, phase: String, level: String) {
     );
 }
 
+#[given(expr = "a second before hook at the {word} level that exits {int} with on-failure {word}")]
+fn second_failing(agent: &mut Agent, level: String, code: i32, on_failure_word: String) {
+    let name = format!("{level}-before-2");
+    agent.hooks.runner.script(&name, Scripted::fails_with(code));
+    list(agent, &level, "before").push(
+        HookEntry::new(&name, ["demo"], on_failure(&on_failure_word))
+            .expect("the demo hook is valid"),
+    );
+}
+
+#[given(
+    regex = r"^a before hook at the (\w+) level that (a signal ends|runs out of time|can't start), with on-failure error$"
+)]
+fn ending_without_status(agent: &mut Agent, level: String, ends: String) {
+    let status = match ends.as_str() {
+        "a signal ends" => HookStatus::Failed { exit_code: None },
+        "runs out of time" => HookStatus::TimedOut,
+        _ => HookStatus::NotStarted {
+            detail: "no such file".to_owned(),
+        },
+    };
+    add(
+        agent,
+        "before",
+        &level,
+        Scripted {
+            status,
+            stdout: String::new(),
+            stderr: String::new(),
+        },
+        OnFailure::Error,
+    );
+}
+
 #[then(expr = "the hooks ran in the order {string}")]
 fn ran_in_order(agent: &mut Agent, order: String) {
     let ran: Vec<String> = agent
@@ -177,13 +214,14 @@ fn never_ran(agent: &mut Agent, phase: String, level: String) {
 
 #[then(expr = "the operation ends as failed because a hook failed with exit code {int}")]
 fn failed_by_hook(agent: &mut Agent, code: i32) {
-    assert_eq!(
+    assert_matches!(
         agent.operation().status(),
-        &OperationStatus::Failed {
+        OperationStatus::Failed {
             reason: FailureReason::HookFailed {
-                exit_code: Some(code)
+                ended: Some(HookEnd::Exited { code: exited }),
+                ..
             }
-        }
+        } if *exited == code
     );
 }
 
@@ -192,7 +230,52 @@ fn failed_by_timeout(agent: &mut Agent) {
     assert_matches!(
         agent.operation().status(),
         OperationStatus::Failed {
-            reason: FailureReason::HookFailed { exit_code: None }
+            reason: FailureReason::HookFailed {
+                ended: Some(HookEnd::TimedOut),
+                ..
+            }
+        }
+    );
+}
+
+/// The level a scenario names, as the failure records it.
+fn level_word(word: &str) -> HookLevel {
+    match word {
+        "agent" => HookLevel::Agent,
+        "repository" => HookLevel::Repository,
+        "plan" => HookLevel::Plan,
+        other => panic!("unknown hook level {other}"),
+    }
+}
+
+#[then(
+    regex = r"^the operation ends as failed because before-hook (\d+) at the (\w+) level (exited with status (\d+)|was ended by a signal|timed out|could not be started)$"
+)]
+fn failed_by_named_hook(
+    agent: &mut Agent,
+    position: u32,
+    level: String,
+    ended: String,
+    code: String,
+) {
+    let ended = match ended.as_str() {
+        "was ended by a signal" => HookEnd::Signalled,
+        "timed out" => HookEnd::TimedOut,
+        "could not be started" => HookEnd::NotStarted,
+        _ => HookEnd::Exited {
+            code: code.parse().expect("an exit status"),
+        },
+    };
+    assert_eq!(
+        agent.operation().status(),
+        &OperationStatus::Failed {
+            reason: FailureReason::HookFailed {
+                hook: Some(HookPlace {
+                    level: level_word(&level),
+                    position: NonZeroU32::new(position).expect("a place counted from 1"),
+                }),
+                ended: Some(ended),
+            }
         }
     );
 }

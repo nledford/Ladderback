@@ -89,28 +89,41 @@ Then("the link {string} in the banner is marked as the current page", async func
 });
 
 // The project's own documentation at the tag of the release this build is,
-// where a reader of that release finds what the page says is there. The
-// section must exist in this checkout, so a renamed heading fails here and not
-// for a reader. GitHub's anchor for a heading is its text in lower case, with
-// spaces as hyphens and other punctuation left out.
+// where a reader of that release finds what the page says is there.
 Then(
   "the link {string} leads to the section {string} of {string} in this release",
   async function (this: BrowserWorld, name: string, heading: string, file: string) {
-    const version = await workspaceVersion();
-    const document = await readFile(path.join(repoRoot, file), "utf8");
-    const headings = document.split("\n").filter((line) => /^#+ /.test(line));
-    assert.ok(
-      headings.some((line) => line.replace(/^#+ /, "") === heading),
-      `${file} has no heading "${heading}"`,
-    );
-    const anchor = heading
-      .toLowerCase()
-      .replace(/[^a-z0-9 -]/g, "")
-      .replaceAll(" ", "-");
-    const link = this.page.getByRole("link", { name: namePattern(name) });
-    await expect(link).toHaveAttribute("href", `https://github.com/nledford/Ladderback/blob/v${version}/${file}#${anchor}`);
+    await leadsToSection(this, name, heading, file, `v${await workspaceVersion()}`);
   },
 );
+
+// The same on `main`, for a page only builds that aren't releases have, whose
+// release tag predates it, as a hub's (§16, decision 122).
+Then(
+  "the link {string} leads to the section {string} of {string} on main",
+  async function (this: BrowserWorld, name: string, heading: string, file: string) {
+    await leadsToSection(this, name, heading, file, "main");
+  },
+);
+
+// The link `name` goes to the section `heading` of `file` on GitHub at
+// `revision`. The section must exist in this checkout, so a renamed heading
+// fails here and not for a reader. GitHub's anchor for a heading is its text
+// in lower case, with spaces as hyphens and other punctuation left out.
+async function leadsToSection(world: BrowserWorld, name: string, heading: string, file: string, revision: string): Promise<void> {
+  const document = await readFile(path.join(repoRoot, file), "utf8");
+  const headings = document.split("\n").filter((line) => /^#+ /.test(line));
+  assert.ok(
+    headings.some((line) => line.replace(/^#+ /, "") === heading),
+    `${file} has no heading "${heading}"`,
+  );
+  const anchor = heading
+    .toLowerCase()
+    .replace(/[^a-z0-9 -]/g, "")
+    .replaceAll(" ", "-");
+  const link = world.page.getByRole("link", { name: namePattern(name) });
+  await expect(link).toHaveAttribute("href", `https://github.com/nledford/Ladderback/blob/${revision}/${file}#${anchor}`);
+}
 
 // The workspace's version, which the binary and the web UI are built with.
 async function workspaceVersion(): Promise<string> {

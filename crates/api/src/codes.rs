@@ -33,6 +33,15 @@ pub enum ErrorCode {
     /// The engine stopped reporting, but its process stayed alive and was
     /// killed.
     EngineExitTimedOut,
+    /// A before-hook whose `on-failure` is `error` failed, so the operation
+    /// stopped before the engine started. The arguments say which hook it
+    /// was, `level` (`agent`, `repository` or `plan`) and `position` (its
+    /// place in that level's `run-before` list, from 1), and how it ended,
+    /// `ended` (`exit`, `signal`, `timeout` or `not-started`), with
+    /// `exit_code` for an exit. Each is left out where a failure an earlier
+    /// version kept doesn't have it. Never what the hook wrote: it can hold
+    /// a secret (#853).
+    HookFailed,
     /// The daemon stopped while the operation was queued or running (a crash,
     /// a kill, a power cut), so the operation never reached its end and what
     /// it did is unknown. The next start ended it as failed.
@@ -1034,6 +1043,28 @@ impl ErrorCode {
                 kind: ArgKind::Text,
                 optional: false,
             }],
+            Self::HookFailed => &[
+                ArgSpec {
+                    name: "level",
+                    kind: ArgKind::Text,
+                    optional: true,
+                },
+                ArgSpec {
+                    name: "position",
+                    kind: ArgKind::Text,
+                    optional: true,
+                },
+                ArgSpec {
+                    name: "ended",
+                    kind: ArgKind::Text,
+                    optional: true,
+                },
+                ArgSpec {
+                    name: "exit_code",
+                    kind: ArgKind::Text,
+                    optional: true,
+                },
+            ],
             Self::EngineExited => &[ArgSpec {
                 name: "exit_code",
                 kind: ArgKind::Text,

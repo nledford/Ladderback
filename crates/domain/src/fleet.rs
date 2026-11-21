@@ -17,6 +17,7 @@ mod registry;
 mod route;
 mod signed;
 mod token;
+mod zone;
 
 pub use fingerprint::{Fingerprint, KeyId, TokenId};
 pub use greeting::{
@@ -54,3 +55,4 @@ pub use token::{
     HubAddress, InvalidHubAddress, MAX_ADDRESS_BYTES, PairingToken, TOKEN_PREFIX, TOKEN_VERSION,
     TokenRefused, TokenTls,
 };
+pub use zone::{InvalidZoneName, MAX_ZONE_BYTES, MachineZone};

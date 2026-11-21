@@ -11,8 +11,8 @@ use base64::Engine as _;
 use base64::engine::general_purpose::URL_SAFE_NO_PAD;
 use domain::fleet::{
     AgentEnvelope, Approval, BindingKind, Challenge, Connect, EpochSeconds, Handshakes, Hello,
-    Holder, Hostname, HubEnvelope, KEY_BYTES, Nonce, Pair, PairAnswer, Paired, Proof, Protocols,
-    PublicKey, Refused, SIGNATURE_BYTES, Signature, Welcome, WireName,
+    Holder, Hostname, HubEnvelope, KEY_BYTES, MachineZone, Nonce, Pair, PairAnswer, Paired, Proof,
+    Protocols, PublicKey, Refused, SIGNATURE_BYTES, Signature, Welcome, WireName,
 };
 use domain::{AgentId, Uuid};
 
@@ -53,6 +53,7 @@ pub fn pair_frame(pair: &Pair) -> AgentFrame {
         agent_key: encoded(pair.agent_key.as_bytes()),
         counter: pair.counter,
         hostname: pair.hostname.as_str().to_owned(),
+        zone: pair.zone.as_ref().map(|zone| zone.as_str().to_owned()),
         pairing_signature: encoded(pair.pairing_signature.as_bytes()),
         agent_signature: encoded(pair.agent_signature.as_bytes()),
     }
@@ -117,6 +118,7 @@ pub fn hello_payload(hello: &Hello) -> Vec<u8> {
         hostname: hello.hostname.as_str().to_owned(),
         protocols: range(hello.protocols),
         clock: hello.clock.seconds(),
+        zone: hello.zone.as_ref().map(|zone| zone.as_str().to_owned()),
     }
     .to_bytes()
 }
@@ -129,6 +131,7 @@ pub fn read_hello(bytes: &[u8]) -> Result<Hello, WireRefused> {
         hostname: Hostname::parse(&payload.hostname).map_err(|_| WireRefused)?,
         protocols: protocols(payload.protocols)?,
         clock: EpochSeconds::from_seconds(payload.clock),
+        zone: zone(payload.zone.as_deref())?,
     })
 }
 
@@ -185,6 +188,7 @@ pub fn agent_message(frame: &AgentFrame) -> Result<AgentMessage, WireRefused> {
             agent_key,
             counter,
             hostname,
+            zone: sent_zone,
             pairing_signature,
             agent_signature,
         } => Ok(AgentMessage::Pair(Pair {
@@ -192,6 +196,7 @@ pub fn agent_message(frame: &AgentFrame) -> Result<AgentMessage, WireRefused> {
             agent_key: key(agent_key)?,
             counter: *counter,
             hostname: Hostname::parse(hostname).map_err(|_| WireRefused)?,
+            zone: zone(sent_zone.as_deref())?,
             pairing_signature: signature(pairing_signature)?,
             agent_signature: signature(agent_signature)?,
         })),
@@ -313,6 +318,13 @@ fn key(text: &str) -> Result<PublicKey, WireRefused> {
 
 fn signature(text: &str) -> Result<Signature, WireRefused> {
     Signature::from_bytes(decoded::<SIGNATURE_BYTES>(text)?).map_err(|_| WireRefused)
+}
+
+/// A machine zone, when one was sent: a name not shaped like one refuses
+/// the frame. Whether the hub's zone database knows it is for the hub.
+fn zone(name: Option<&str>) -> Result<Option<MachineZone>, WireRefused> {
+    name.map(|name| MachineZone::parse(name).map_err(|_| WireRefused))
+        .transpose()
 }
 
 #[cfg(test)]

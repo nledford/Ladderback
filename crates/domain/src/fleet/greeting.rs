@@ -10,6 +10,7 @@ use super::hostname::Hostname;
 use super::keys::Signature;
 use super::registry::AgentStatus;
 use super::signed::{EpochSeconds, Handshakes, WireName};
+use super::zone::MachineZone;
 
 /// The sync protocols one side speaks: every one from `lowest` to
 /// `highest`.
@@ -125,6 +126,9 @@ pub struct Hello {
     pub protocols: Protocols,
     /// The agent's clock when it sent `Hello`.
     pub clock: EpochSeconds,
+    /// The agent's machine zone when it sent `Hello`; none when its zone
+    /// has no IANA name.
+    pub zone: Option<MachineZone>,
 }
 
 /// The hub's answer to `Hello`.
