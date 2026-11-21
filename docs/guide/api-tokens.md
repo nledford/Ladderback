@@ -14,7 +14,7 @@ Each permission is No access or the one thing it allows:
 
 | Permission | Allows |
 |---|---|
-| Backups | See plans, repositories, the list of snapshots, operations and their progress, and status. Not the files inside a snapshot, and not the log |
+| Backups | See plans, every repository, the list of snapshots, operations and their progress, and status. Not the files inside a snapshot, and not the log |
 | Backup runs | Start a plan's backup, cancel a backup, and test a saved repository |
 | Previews | Ask what forgetting or pruning snapshots, checking a repository, adopting snapshots into another plan or importing a profile would do, without doing it |
 | Configuration | Propose changes to plans, which you approve on the Pending changes page, and try a plan in a dry run |

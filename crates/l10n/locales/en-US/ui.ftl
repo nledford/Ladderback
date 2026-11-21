@@ -3103,13 +3103,13 @@ ui-permission = { $permission ->
 # The hint under a permission's name: what it opens, in plain words.
 # $permission (text): the permission, as a code: backups, backup-runs, previews, configuration, snapshot-contents, daemon-log or repository-check.
 ui-permission-hint = { $permission ->
-    [backups] See plans, repositories, the list of snapshots, operations and their progress, and status. Not the files inside a snapshot, and not the daemon's log: each is a permission of its own.
-    [backup-runs] Start a plan's backup, cancel a backup, and test a saved repository. On its own it shows nothing, so a scheduler can start backups without reading anything.
-    [previews] Ask what forgetting or pruning snapshots, checking a repository, adopting snapshots into another plan or importing a profile would do, without doing it.
+    [backups] See plans, every { -repository }, the list of { -snapshot(form: "other") }, operations and their progress, and status. Not the files inside a { -snapshot }, and not the daemon's log: each is a permission of its own.
+    [backup-runs] Start a plan's backup, cancel a backup, and test a saved { -repository }. On its own it shows nothing, so a scheduler can start backups without reading anything.
+    [previews] Ask what forgetting or pruning { -snapshot(form: "other") }, checking a { -repository }, adopting { -snapshot(form: "other") } into another plan or importing a profile would do, without doing it.
     [configuration] Propose changes to plans for you to approve on the Pending changes page, and try a plan in a dry run.
-    [snapshot-contents] See the names of the files and folders inside snapshots, and those a warning or a failure names.
+    [snapshot-contents] See the names of the files and folders inside { -snapshot(form: "other") }, and those a warning or a failure names.
     [daemon-log] Read { -brand-name }'s log, which can name your files and folders.
-   *[repository-check] Start a check of a repository. Nothing offers this yet: it is here so that what you allow today allows no check a later version adds.
+   *[repository-check] Start a check of a { -repository }. Nothing offers this yet: it is here so that what you allow today allows no check a later version adds.
   }
 
 # A choice in a permission's group: no access, or the one level the permission has.
