@@ -13,6 +13,10 @@
 //!   places the part in it, in logical terms, so it follows the page's
 //!   direction.
 //!
+//! A size's control height and padding, which a control in a row of actions
+//! draws with, are Tailwind utilities instead ([`Size::control`], decision
+//! 117), the first of the vocabulary to move (#931).
+//!
 //! A side has no class: which side a floating part stands on depends on the
 //! room around its anchor, measured as the page is drawn, so the component
 //! that floats it decides it (`components/tooltip/rules.rs`).
@@ -129,6 +133,25 @@ impl Size {
             Self::Medium => "size-medium",
             Self::Large => "size-large",
             Self::XLarge => "size-xlarge",
+        }
+    }
+
+    /// The height and inline padding of a control of this size, which a
+    /// control that sits in a row of actions (a button, a text field) draws
+    /// with, so two of one size stand level: Tailwind utilities (decision
+    /// 117) that set two custom properties, `--control-height` and
+    /// `--control-padding`. Its size is its height, in `em`, so it grows
+    /// with the reader's text (1.4.4) and stays at least 24 px a side at
+    /// 100 % (2.5.8): Small 1.75em, Medium 2em, Large 2.5em, XLarge 3em, its
+    /// inline padding growing with it. These are heights, not the shared
+    /// scale's lengths, which size a glyph: an icon or spinner inside stays
+    /// as tall as the text.
+    pub fn control(self) -> &'static str {
+        match self {
+            Self::Small => "[--control-height:1.75em] [--control-padding:0.5em]",
+            Self::Medium => "[--control-height:2em] [--control-padding:0.75em]",
+            Self::Large => "[--control-height:2.5em] [--control-padding:1em]",
+            Self::XLarge => "[--control-height:3em] [--control-padding:1.25em]",
         }
     }
 }
@@ -289,6 +312,31 @@ mod tests {
             assert_eq!(size.class(), class, "{size:?}");
         }
         distinct(&Size::ALL.map(Size::class));
+    }
+
+    #[test]
+    fn each_size_sets_a_controls_height_and_padding_of_its_own() {
+        let controls = [
+            (
+                Size::Small,
+                "[--control-height:1.75em] [--control-padding:0.5em]",
+            ),
+            (
+                Size::Medium,
+                "[--control-height:2em] [--control-padding:0.75em]",
+            ),
+            (
+                Size::Large,
+                "[--control-height:2.5em] [--control-padding:1em]",
+            ),
+            (
+                Size::XLarge,
+                "[--control-height:3em] [--control-padding:1.25em]",
+            ),
+        ];
+        for (size, control) in controls {
+            assert_eq!(size.control(), control, "{size:?}");
+        }
     }
 
     #[test]

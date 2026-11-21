@@ -559,176 +559,22 @@ main:focus {
   }
 }
 
-/* A control's height and inline padding per size, one rule for every
-   control that sits in a row of actions (a button, a text field), so two of
-   one size stand level. Its size is its height, in `em`, so it grows with
-   the reader's text (1.4.4) and stays at least 24 px a side at 100 %
-   (2.5.8): Small 1.75em, Medium 2em, Large 2.5em, XLarge 3em, its inline
-   padding growing with it. These are heights, not the shared scale's
-   lengths, which size a glyph: an icon or spinner inside stays as tall as
-   the text. */
-.button,
-.text-field-box {
-  --control-height: 2em;
-  --control-padding: 0.75em;
-}
-
-:is(.button, .text-field-box).size-small {
-  --control-height: 1.75em;
-  --control-padding: 0.5em;
-}
-
-:is(.button, .text-field-box).size-large {
-  --control-height: 2.5em;
-  --control-padding: 1em;
-}
-
-:is(.button, .text-field-box).size-xlarge {
-  --control-height: 3em;
-  --control-padding: 1.25em;
-}
-
-/* A button (§4.5): a native `<button>` drawn from the tokens, flat, its one
-   small corner, a control's height and padding for its size. A label too
-   long for its line wraps inside the button, which then grows taller. */
-.button {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  gap: 0.5em;
-  min-block-size: var(--control-height);
-  padding-block: 0;
-  padding-inline: var(--control-padding);
-  border: 1px solid transparent;
-  border-radius: var(--radius-small);
-  background-color: transparent;
-  color: var(--tone);
-  text-align: center;
-  vertical-align: middle;
+/* A button (§4.5), drawn with Tailwind utilities (`button/rules.rs`, its
+   size's control height and padding `Size::control` in `variants.rs`) but
+   for this rule. Pressed (a toggle): bolder, as well as its inset edge,
+   never color alone (The Weight Not Color Rule). It stays here because the
+   base rule above gives every `<button>` the font of the text around it
+   (`font: inherit`, its weight with it), and a rule outside Tailwind's
+   layers outranks any utility. */
+.button[aria-pressed="true"] {
+  font-weight: 600;
 }
 
 /* A row of actions stretches its items; a button in one keeps its own
-   height. */
+   height. It stays here with the row's own rules (`.actions`), whose move
+   to utilities is a step of its own (#931). */
 .actions > .button {
   align-self: center;
-}
-
-.button-label {
-  min-inline-size: 0;
-}
-
-/* An icon-only button is square at every size. */
-.button-icon-only {
-  inline-size: var(--control-height);
-  padding-inline: 0;
-}
-
-.button-spinner {
-  display: inline-flex;
-}
-
-/* Each tone's hover color: a step darker, lighter in the dark scheme. */
-.button.tone-primary {
-  --tone-hover: var(--accent-hover);
-}
-
-.button.tone-secondary {
-  --tone-hover: var(--muted-hover);
-}
-
-.button.tone-success {
-  --tone-hover: var(--success-hover);
-}
-
-.button.tone-warning {
-  --tone-hover: var(--warning-hover);
-}
-
-.button.tone-error {
-  --tone-hover: var(--error-hover);
-}
-
-.button.tone-inherit {
-  --tone-hover: currentColor;
-}
-
-/* Filled: a fill in its tone, the label in `--on-fill` (each pair at 4.5:1
-   or more in the contrast gate); its fill is its edge, at 3:1 or more on
-   the page and on a surface (1.4.11). Outlined: an edge and a label in its
-   tone. Ghost: the label alone, its edge drawn only while pressed. */
-.button-filled {
-  background-color: var(--tone);
-  border-color: var(--tone);
-  color: var(--on-fill);
-}
-
-.button-outlined {
-  border-color: var(--tone);
-}
-
-/* Hover, on a button that takes presses: a fill a step darker (lighter in
-   the dark scheme), or the surface under a label and edge a step darker,
-   each pair in the contrast gate. Forced colors keep the reader's own. */
-@media (forced-colors: none) {
-  .button-filled:not([aria-disabled="true"]):hover {
-    background-color: var(--tone-hover);
-    border-color: var(--tone-hover);
-  }
-
-  .button-outlined:not([aria-disabled="true"]):hover,
-  .button-ghost:not([aria-disabled="true"]):hover {
-    background-color: var(--surface);
-    color: var(--tone-hover);
-  }
-
-  .button-outlined:not([aria-disabled="true"]):hover {
-    border-color: var(--tone-hover);
-  }
-}
-
-/* Pressed (a toggle): bolder, with an inset edge, never color alone (The
-   Weight Not Color Rule). The edge's extra pixel comes out of the inline
-   padding, so the thicker edge doesn't widen it. */
-.button[aria-pressed="true"] {
-  font-weight: 600;
-  border-style: inset;
-  border-width: 2px;
-  padding-inline: max(0px, calc(var(--control-padding) - 1px));
-}
-
-.button-icon-only[aria-pressed="true"] {
-  padding-inline: 0;
-}
-
-.button-ghost[aria-pressed="true"] {
-  border-color: var(--tone);
-}
-
-/* Forced colors: the reader's button colors, every appearance edged so it
-   still reads as a button; an unavailable one in the color of unavailable
-   text. A busy one (`.button-busy`), `aria-disabled` too, keeps the button
-   text: it is at work, not unavailable, and its spinner's arc takes the
-   text's color beside a GrayText track. Pressed keeps its weight and inset
-   edge, a Ghost one's edge in the button text too: its tone's edge outranks
-   the rule above, so it is named again here. */
-@media (forced-colors: active) {
-  .button,
-  .button-filled,
-  .button-outlined,
-  .button-ghost {
-    background-color: ButtonFace;
-    border-color: ButtonText;
-    color: ButtonText;
-  }
-
-  .button-ghost[aria-pressed="true"] {
-    border-color: ButtonText;
-  }
-
-  .button[aria-disabled="true"]:not(.button-busy) {
-    border-color: GrayText;
-    color: GrayText;
-  }
 }
 
 /* A skeleton (§4.5), drawn with Tailwind utilities (`skeleton/rules.rs`)
@@ -805,7 +651,9 @@ main:focus {
    description, the note of its state and its error under the label, then
    the field: a 1 px edge (`--field-edge`, 3:1 or more on the page and on a
    surface), the button's small corner, a control's height and padding for
-   its size, as wide as its line up to 32rem. Flat: no shadow. */
+   its size (`--control-height`, `--control-padding`, which its size's
+   utilities set: `Size::control`), as wide as its line up to 32rem. Flat:
+   no shadow. */
 .text-field {
   margin-block: 1rem;
 }
@@ -984,13 +832,6 @@ fieldset.choices > p {
   display: flex;
   flex-wrap: wrap;
   gap: 0.5rem;
-}
-
-/* A button that cannot be used for now stays on the page, where a keyboard and
-   a screen reader find it, and looks unavailable. */
-button[aria-disabled="true"] {
-  cursor: not-allowed;
-  opacity: 0.6;
 }
 
 /* The control that pauses live updates (§4.5): the button, then, while it is
