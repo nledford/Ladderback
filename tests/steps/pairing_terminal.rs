@@ -1,5 +1,6 @@
-//! Steps for `features/fleet/pairing_from_a_terminal.feature` and
-//! `features/fleet/hub_status_from_a_terminal.feature`: the hub's
+//! Steps for `features/fleet/pairing_from_a_terminal.feature`,
+//! `features/fleet/hub_status_from_a_terminal.feature` and the `@e2e`
+//! scenarios of `features/fleet/following_the_hub.feature`: the hub's
 //! `ladderback pairing-token` and `ladderback serve --hub`, and a machine's
 //! `ladderback pair` and `ladderback hub-status`, each a real process on
 //! folders of its own.
@@ -184,6 +185,67 @@ async fn hub_restarts(agent: &mut Agent) {
     assert_eq!(again, address);
     agent.pairing_terminal.hub = Some(child);
     agent.pairing_terminal.hub_log = Some(log);
+}
+
+#[when("the hub moves to another address")]
+async fn hub_moves(agent: &mut Agent) {
+    let before = agent.pairing_terminal.address.expect("a serving hub");
+    // Dropping the daemon ends it and waits for it, so nothing answers at
+    // the address the machine paired at.
+    agent.pairing_terminal.hub = None;
+    let (child, moved, log) = serve_hub(agent, hub_root(agent), "127.0.0.1:0").await;
+    assert_ne!(moved, before);
+    agent.pairing_terminal.hub = Some(child);
+    agent.pairing_terminal.address = Some(moved);
+    agent.pairing_terminal.hub_log = Some(log);
+}
+
+/// `ladderback pair <address>` on the paired machine, with nothing on its
+/// standard input: no token.
+async fn give_address(agent: &mut Agent, address: SocketAddr) {
+    let said = ladderback(
+        machine_root(agent),
+        &["pair", &format!("https://{address}")],
+        None,
+    )
+    .await;
+    agent.pairing_terminal.said = Some(said);
+}
+
+#[when("the person gives the machine the hub's new address from its terminal")]
+async fn gives_new_address(agent: &mut Agent) {
+    let address = agent.pairing_terminal.address.expect("a serving hub");
+    give_address(agent, address).await;
+}
+
+#[when("the person gives the machine the other hub's address from its terminal")]
+async fn gives_other_address(agent: &mut Agent) {
+    let address = agent
+        .pairing_terminal
+        .other_address
+        .expect("another serving hub");
+    give_address(agent, address).await;
+}
+
+#[then("the machine says it keeps the hub's new address")]
+fn says_address_kept(agent: &mut Agent) {
+    let address = agent.pairing_terminal.address.expect("a serving hub");
+    let said = said(agent);
+    assert!(said.success, "{said:?}");
+    let connected = format!("pinned at https://{address}");
+    for expected in [connected.as_str(), "tries that address first from now on"] {
+        assert!(said.stderr.contains(expected), "{expected}: {said:?}");
+    }
+}
+
+#[then("the machine says it kept the hub addresses it had")]
+fn says_addresses_unchanged(agent: &mut Agent) {
+    let said = said(agent);
+    assert!(!said.success, "{said:?}");
+    assert!(
+        said.stderr.contains("kept the hub addresses it had"),
+        "{said:?}"
+    );
 }
 
 /// `serve --hub` on the folders under `root`, listening on `listen`; its

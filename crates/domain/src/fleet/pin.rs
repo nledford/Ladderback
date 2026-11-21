@@ -49,6 +49,10 @@ pub struct HubPin {
     pub generation: u64,
     /// The address in the pairing token.
     pub address: HubAddress,
+    /// The address the person gave this machine for its hub after pairing
+    /// (`ladderback pair <address>`), kept once the hub proved its key
+    /// there. It is tried before the token's, with the same `tls`.
+    pub given_address: Option<HubAddress>,
     /// The lines whose names this build doesn't know, in their order.
     unknown: Vec<(String, String)>,
 }
@@ -85,6 +89,7 @@ impl HubPin {
             recovery_number: 0,
             generation: 1,
             address,
+            given_address: None,
             unknown: Vec::new(),
         }
     }
@@ -142,6 +147,25 @@ impl HubPin {
             .chain(unknown)
             .map(|(name, value)| format!("{name} = {value}\n"))
             .collect()
+    }
+
+    /// The addresses to try, in order: the one the person gave, then the
+    /// token's, which nothing removes (decision 120, "Addresses and the
+    /// transport statement").
+    pub fn addresses(&self) -> impl Iterator<Item = &HubAddress> {
+        let addresses: std::iter::Chain<
+            std::option::IntoIter<&HubAddress>,
+            std::iter::Once<&HubAddress>,
+        > = todo!();
+        addresses
+    }
+
+    /// Keeps `address` as the one the person gave. Says whether the pin
+    /// changed; one that would be written past [`MAX_PIN_BYTES`] is refused
+    /// and kept as it was.
+    pub fn give_address(&mut self, address: HubAddress) -> Result<bool, PinRefused> {
+        let _ = address;
+        todo!()
     }
 }
 
@@ -203,6 +227,7 @@ impl Read {
             recovery_number: self.recovery_number.ok_or(missing(RECOVERY_NUMBER))?,
             generation: self.generation.ok_or(missing(GENERATION))?,
             address: self.address.ok_or(missing(ADDRESS))?,
+            given_address: None,
             unknown: self.unknown,
         })
     }

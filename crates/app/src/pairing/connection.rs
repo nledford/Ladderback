@@ -2,8 +2,9 @@ use std::sync::Arc;
 
 use domain::fleet::{
     AgentEnvelope, Approval, BindingKind, Connect, EpochSeconds, FIRST_SEQUENCE, Hello, Hostname,
-    HubEnvelope, HubPin, HubRoute, Nonce, PROTOCOLS, PairAnswer, PayloadDigest, Proof, PublicKey,
-    Refused, RouteRefused, SeedFile, SignedMessage, WelcomeRefused, hello_kind, welcome_kind,
+    HubAddress, HubEnvelope, HubPin, HubRoute, Nonce, PROTOCOLS, PairAnswer, PayloadDigest, Proof,
+    PublicKey, Refused, RouteRefused, SeedFile, SignedMessage, WelcomeRefused, hello_kind,
+    welcome_kind,
 };
 use domain::{AgentId, SignedDuration};
 
@@ -245,6 +246,19 @@ impl ConnectToHub {
         }
         let waited = self.clock.monotonic().saturating_sub(hello_sent);
         self.take_welcome(pin, agent_key, &welcome, waited).await
+    }
+
+    /// Connects this machine to its hub at `address`, the one the person
+    /// gave it (`ladderback pair <address>`), and keeps the address in the
+    /// pin only once the hub there proved the key the machine pinned.
+    pub async fn connect_at(
+        &self,
+        agent_id: AgentId,
+        hostname: Hostname,
+        address: HubAddress,
+    ) -> Result<Connected, ConnectFailure> {
+        let _ = (agent_id, hostname, address);
+        todo!()
     }
 
     /// The agent's pin and approval after the hub's signed `welcome`,
