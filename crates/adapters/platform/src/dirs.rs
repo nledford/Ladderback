@@ -233,6 +233,21 @@ mod rustic_xdg {
             Some(PathBuf::from("/home/demo/.config/rustic"))
         );
     }
+
+    /// rustic finds its profiles where the XDG specification says, which
+    /// ignores a relative `XDG_CONFIG_HOME` (#261).
+    #[test]
+    fn a_relative_xdg_config_home_is_ignored() {
+        let from = |name: &str| match name {
+            "HOME" => Some(OsString::from("/home/demo")),
+            "XDG_CONFIG_HOME" => Some(OsString::from("config")),
+            _ => None,
+        };
+        assert_eq!(
+            rustic_config_dir_from(from),
+            Some(PathBuf::from("/home/demo/.config/rustic"))
+        );
+    }
 }
 
 #[cfg(all(test, unix))]
@@ -322,6 +337,29 @@ mod tests {
             config_dir_from(&from),
             Some(PathBuf::from("/home/demo/.config/ladderback"))
         );
+        assert_eq!(
+            data_dir_from(&from),
+            Some(PathBuf::from("/home/demo/.local/share/ladderback"))
+        );
+    }
+
+    /// The XDG base directory specification: "If an implementation encounters
+    /// a relative path in any of these variables it should consider the path
+    /// invalid and ignore it" (#261).
+    #[cfg(all(unix, not(target_os = "macos")))]
+    #[test]
+    fn a_relative_xdg_config_home_is_ignored() {
+        let from = env(&[("HOME", "/home/demo"), ("XDG_CONFIG_HOME", "config")]);
+        assert_eq!(
+            config_dir_from(&from),
+            Some(PathBuf::from("/home/demo/.config/ladderback"))
+        );
+    }
+
+    #[cfg(all(unix, not(target_os = "macos")))]
+    #[test]
+    fn a_relative_xdg_data_home_is_ignored() {
+        let from = env(&[("HOME", "/home/demo"), ("XDG_DATA_HOME", "./data")]);
         assert_eq!(
             data_dir_from(&from),
             Some(PathBuf::from("/home/demo/.local/share/ladderback"))
