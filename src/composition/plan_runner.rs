@@ -310,16 +310,20 @@ impl PlanRunner {
     /// its own so the schedule and the queue went on: it resolves again
     /// with that wait armed, is built again from the configuration as it
     /// stands once the keyring is unlocked, runs in a place it takes then,
-    /// or is refused as any run of the schedule is (#1221). `refused_on` is
-    /// the repository the run was refused for, as the configuration it
-    /// started under named it: a plan that backs up to another by now
-    /// doesn't start, and none of its secrets is resolved to find out
-    /// (#1247 is whether it should run on the new one).
+    /// or is refused as any run of the schedule is (#1221). `refused` is
+    /// the refusal that parked it, and `refused_on` the repository it was
+    /// refused for, as the configuration it started under named it: a plan
+    /// that backs up to another by now doesn't start, and none of its
+    /// secrets is resolved to find out (#1247 is whether it should run on
+    /// the new one). A plan whose next run is due by the time the parked
+    /// task looks stays refused as it was: no read taken after that bound
+    /// lets the run go on.
     async fn start_parked(
         &self,
         plan: PlanId,
         trigger: Trigger,
         unlock: UnlockWait,
+        refused: SecretUnbuilt,
         refused_on: Option<PlanRepository>,
     ) {
         let Some(config) = self.config_for_a_run(&plan, &trigger).await else {
@@ -330,6 +334,10 @@ impl PlanRunner {
             && now.is_other_than(then)
         {
             log_moved(&plan, &trigger);
+            return;
+        }
+        if unlock.has_passed() {
+            self.refused_for_secret(&plan, &trigger, refused).await;
             return;
         }
         // The place it waited in was given up, and nothing is taken while
@@ -407,13 +415,16 @@ impl PlanRunner {
     /// the plan's next kept run, ends it as the queued run it is (#1221).
     /// `cancel` is its cancel switch, parked before it waits: a cancel
     /// while it waits ends it cancelled at once, as a queued backup
-    /// waiting for its turn is (§5, decision 75).
+    /// waiting for its turn is (§5, decision 75). `refused` is the refusal
+    /// that parked it: a plan whose next run is due by the time the
+    /// parked task looks stays refused as it was.
     async fn resume_parked(
         &self,
         operation: domain::execution::Operation,
         plan: PlanId,
         trigger: Trigger,
         unlock: UnlockWait,
+        refused: SecretUnbuilt,
         cancel: impl Future<Output = ()> + Send + 'static,
     ) {
         let id = operation.id();
@@ -421,7 +432,7 @@ impl PlanRunner {
         let waited = tokio::select! {
             biased;
             () = &mut cancel => None,
-            waited = self.resumed_after_wait(&operation, &plan, &trigger, unlock) => Some(waited),
+            waited = self.resumed_after_wait(&operation, &plan, &trigger, unlock, refused) => Some(waited),
         };
         let Some(waited) = waited else {
             self.registry.finish(&id);
@@ -469,6 +480,7 @@ impl PlanRunner {
         plan: &PlanId,
         trigger: &Trigger,
         unlock: UnlockWait,
+        refused: SecretUnbuilt,
     ) -> Waited {
         let config = match self.config.load().await {
             Ok(config) => config,
@@ -486,6 +498,9 @@ impl PlanRunner {
             && !operation.target().is_on(now.id.as_ref())
         {
             return Waited::Unrunnable("its plan now backs up to another repository".to_owned());
+        }
+        if unlock.has_passed() {
+            return Waited::Refused(refused);
         }
         let rebuilt = match self.backup_of(&config, plan, trigger, Some(unlock)).await {
             Ok(waited) => {
@@ -846,7 +861,7 @@ impl PlanRuns for PlanRunner {
                     let frozen = self.runs.clone();
                     tokio::spawn(frozen.until_frozen(async move {
                         runner
-                            .start_parked(plan, trigger, unlock, refused_on)
+                            .start_parked(plan, trigger, unlock, *secret, refused_on)
                             .await;
                     }));
                 }
@@ -885,22 +900,24 @@ impl PlanRuns for PlanRunner {
         // cancel of what shows as queued finds it while it waits (§4.2). A
         // retry is answered at once, as ever: its next try is planned when
         // it ends.
-        if let (Some(plan), Some(unlock)) = (operation.target().plan.clone(), unlock)
-            && matches!(trigger, Trigger::Schedule | Trigger::CatchUp)
-            && matches!(&built, Err(Unbuilt::Secret(secret))
-                if secret.refused_as_locked()
-                    && operation.target().is_on(secret.target.repository.as_ref()))
-        {
-            let cancel = self.cancel_switch(operation.id());
-            let runner = self.clone();
-            let frozen = self.runs.clone();
-            tokio::spawn(frozen.until_frozen(async move {
-                runner
-                    .resume_parked(operation, plan, trigger, unlock, cancel)
-                    .await;
-            }));
-            return;
-        }
+        let built = match (built, operation.target().plan.clone(), unlock) {
+            (Err(Unbuilt::Secret(secret)), Some(plan), Some(unlock))
+                if matches!(trigger, Trigger::Schedule | Trigger::CatchUp)
+                    && secret.refused_as_locked()
+                    && operation.target().is_on(secret.target.repository.as_ref()) =>
+            {
+                let cancel = self.cancel_switch(operation.id());
+                let runner = self.clone();
+                let frozen = self.runs.clone();
+                tokio::spawn(frozen.until_frozen(async move {
+                    runner
+                        .resume_parked(operation, plan, trigger, unlock, *secret, cancel)
+                        .await;
+                }));
+                return;
+            }
+            (built, _, _) => built,
+        };
         // Refused for a secret of the repository its plan still backs up to,
         // it ends failed with the refusal, as a refused scheduled run does
         // (§5, #490), and is heard as any run's end, so retries follow it.

@@ -552,6 +552,12 @@ impl UnlockWait {
         let left = self.clock.now().duration_until(self.until);
         left.is_positive().then_some(left)
     }
+
+    /// Whether the plan's next run is due already.
+    pub fn has_passed(&self) -> bool {
+        self.left().is_none()
+    }
+
     /// When the plan's next run is due.
     pub fn until(&self) -> domain::Timestamp {
         self.until
