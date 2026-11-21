@@ -35,7 +35,8 @@ function machineScratch(world: BrowserWorld, hostname: string): string {
 
 /** Runs `ladderback args` on the folders of the machine named `hostname`,
  *  with `input` on its standard input: what it wrote to standard error, once
- *  it succeeded. */
+ *  it succeeded. It waits for `close`, not `exit`, so the standard error is
+ *  read to its end before it is returned. */
 async function onMachine(world: BrowserWorld, hostname: string, args: string[], input = ""): Promise<string> {
   const scratch = machineScratch(world, hostname);
   const child = spawn(binary, args, {
@@ -47,7 +48,7 @@ async function onMachine(world: BrowserWorld, hostname: string, args: string[], 
     said += chunk;
   });
   child.stdin.end(input);
-  const [code] = (await once(child, "exit")) as [number | null];
+  const [code] = (await once(child, "close")) as [number | null];
   assert.equal(code, 0, `ladderback ${args.join(" ")} failed:\n${said}`);
   return said;
 }
@@ -168,13 +169,18 @@ Then("the table {string} says {string}", async function (this: BrowserWorld, nam
   await expect.poll(async () => ((await table(this, name).textContent()) ?? "").replace(ISOLATION_MARKS, "")).toContain(words);
 });
 
-// The page reads the list again every few seconds: one read, and the frames
-// it is drawn in.
+// The page reads the list again every few seconds: one read, answered in
+// full, and drawn. Each read finds the waiting machines older by the seconds
+// between reads, so the table reading otherwise than before shows the read
+// drawn.
 When("the page reads the list of machines again", async function (this: BrowserWorld) {
-  await this.page.waitForResponse((answer) => new URL(answer.url()).pathname === "/api/v1/hub/agents", {
+  const waiting = table(this, "Waiting for approval");
+  const before = (await waiting.textContent()) ?? "";
+  const answer = await this.page.waitForResponse((answer) => new URL(answer.url()).pathname === "/api/v1/hub/agents", {
     timeout: patienceMs(),
   });
-  await this.page.evaluate(() => new Promise((drawn) => requestAnimationFrame(() => requestAnimationFrame(drawn))));
+  await answer.finished();
+  await expect(waiting).not.toHaveText(before);
 });
 
 Then("the page lists no machine waiting for approval", async function (this: BrowserWorld) {
