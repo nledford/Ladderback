@@ -292,7 +292,7 @@ impl HubPairing {
         Ok(self.registry.revoke_token(id, self.clock.now()).await?)
     }
 
-    /// The agents waiting for a person's approval, oldest first.
+    /// The agents waiting for a person's approval, in the registry's order.
     pub async fn pending(&self) -> Result<Vec<AgentRecord>, HubPairingError> {
         let mut agents = self.registry.agents().await?;
         agents.retain(AgentRecord::is_pending);
