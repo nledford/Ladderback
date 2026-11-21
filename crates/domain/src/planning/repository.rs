@@ -251,18 +251,25 @@ impl Place<'_> {
 /// A location's address as two are compared (#493). rustic reads an
 /// address with no `:` as a local path, and one that starts with `local:`
 /// as the path after it; a local path names one folder with or without a
-/// trailing `/`, so neither the prefix nor that `/` is compared. The path is
-/// compared as written otherwise: a link is not followed, nor is a relative
-/// path made whole. Every other backend's address is compared as written.
-fn compared_address(address: &str) -> &str {
+/// trailing `/`, so neither the prefix nor that `/` is compared, and a path
+/// of `/`s alone is the root. The path is compared as written otherwise: a
+/// link is not followed, nor is a relative path made whole. Every other
+/// backend's address is compared as written, and is never a local path.
+#[derive(PartialEq, Eq)]
+enum Address<'a> {
+    Local(&'a str),
+    Other(&'a str),
+}
+
+fn compared_address(address: &str) -> Address<'_> {
     let path = match address.strip_prefix("local:") {
         Some(path) => path,
         None if !address.contains(':') => address,
-        None => return address,
+        None => return Address::Other(address),
     };
     match path.trim_end_matches('/') {
-        "" => path,
-        trimmed => trimmed,
+        "" if !path.is_empty() => Address::Local("/"),
+        trimmed => Address::Local(trimmed),
     }
 }
 
@@ -818,6 +825,8 @@ mod tests {
             ("local:/srv/demo/", "/srv/demo"),
             ("/srv/demo", "local:/srv/demo//"),
             ("/", "local:/"),
+            ("//", "local:/"),
+            ("local://", "/"),
         ] {
             assert!(
                 at(one, None).same_location(&at(other, None)),
@@ -833,6 +842,8 @@ mod tests {
             ("/", "local:"),
             ("rest:https://nas.lan/demo", "rest:https://nas.lan/demo/"),
             ("local:/srv/demo", "rclone::local:/srv/demo"),
+            ("local:rest:http://nas.lan/demo", "rest:http://nas.lan/demo"),
+            ("/srv/a:b", "local:/srv/a:b"),
         ] {
             assert!(
                 !at(one, None).same_location(&at(other, None)),
