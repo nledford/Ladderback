@@ -33,7 +33,7 @@ export const scrollKey = (page: Page, key: string): string =>
 // stand, and the anchors keep the match whole.
 export const ISOLATION = "[\\u2066-\\u2069]*";
 export const namePattern = (name: string): RegExp =>
-  new RegExp(`^${[...name].map((ch) => ch.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")).join(ISOLATION)}${ISOLATION}$`);
+  new RegExp(`^${ISOLATION}${[...name].map((ch) => ch.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")).join(ISOLATION)}${ISOLATION}$`);
 
 export function journey(page: Page) {
   // WebKit on macOS moves Tab only between text fields and lists, as Safari

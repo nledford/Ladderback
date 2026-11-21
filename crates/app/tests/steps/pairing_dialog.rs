@@ -1,6 +1,8 @@
-//! Steps for `features/fleet/pairing_dialog.feature`: a pairing token asked
-//! for on the hub's web page, with its step-up (§16, decision 120, "Who may
-//! make a token, approve or re-key"; decision 121, "The hub's dialog").
+//! Steps for `features/fleet/pairing_dialog.feature` and
+//! `features/fleet/approving_on_the_hubs_page.feature`: a pairing token
+//! asked for, and a waiting agent approved, on the hub's web page, with the
+//! step-up (§16, decision 120, "Who may make a token, approve or re-key";
+//! decision 121, "The hub's dialog", "Waiting for approval").
 
 use std::net::{IpAddr, Ipv4Addr};
 use std::sync::Arc;
@@ -9,12 +11,15 @@ use app::access::Access;
 use app::fakes::{
     FakeSigning, InMemoryAdminPassword, InMemoryApiTokenStore, InMemorySessionStore, SeededRandom,
 };
-use app::pairing::{TokenAsk, TokenAskRefused};
+use app::pairing::{ApprovalAsk, TokenAsk, TokenAskRefused};
 use app::ports::{AgentRegistry, Clock, Signing};
 use cucumber::{given, then, when};
 use domain::SignedDuration;
 use domain::access::step_up::StepUpConfirmation;
-use domain::fleet::{Fingerprint, HubAddress, KeyId, TokenId, TokenTls};
+use domain::fleet::{
+    AgentStatus, ApprovalRefused, Fingerprint, HubAddress, KeyId, PublicKey, SigningSeed, TokenId,
+    TokenTls,
+};
 
 use super::{Agent, Hub, PairingWorld};
 
@@ -63,6 +68,48 @@ impl PairingWorld {
             Err(refused) => refused,
             Ok(made) => panic!("a token was made: {:?}", made.id),
         }
+    }
+
+    /// Asks the hub to approve the agent registered as `hostname`, as its
+    /// page does, under `key` or the key it registered.
+    async fn ask_to_approve(
+        &mut self,
+        hostname: &str,
+        beyond_loopback: bool,
+        key: Option<PublicKey>,
+        confirmation: &str,
+    ) {
+        let record = self.agent_named(hostname).await;
+        let ask = ApprovalAsk {
+            agent_id: record.agent_id,
+            agent_key: key.unwrap_or(record.key),
+            peer: peer(beyond_loopback),
+            beyond_loopback,
+            confirmation: StepUpConfirmation::parse(confirmation.to_owned()).ok(),
+        };
+        self.approved = Some(self.hub().pairing.approve_asked(ask).await);
+    }
+
+    async fn agent_named(&self, hostname: &str) -> domain::fleet::AgentRecord {
+        self.agents()
+            .await
+            .into_iter()
+            .find(|agent| agent.hostname.as_str() == hostname)
+            .unwrap_or_else(|| panic!("an agent named {hostname}"))
+    }
+
+    fn approval(
+        &self,
+    ) -> &Result<Result<domain::fleet::AgentRecord, ApprovalRefused>, TokenAskRefused> {
+        self.approved.as_ref().expect("an approval asked for")
+    }
+}
+
+fn peer(beyond_loopback: bool) -> IpAddr {
+    if beyond_loopback {
+        IpAddr::V4(Ipv4Addr::new(192, 0, 2, 7))
+    } else {
+        IpAddr::V4(Ipv4Addr::LOCALHOST)
     }
 }
 
@@ -214,4 +261,77 @@ async fn unused_tokens(agent: &mut Agent, count: usize) {
     let hub = agent.pairing.hub();
     let unused = hub.registry.unused_tokens(hub.clock.now()).await;
     assert_eq!(unused.expect("the unused tokens").len(), count);
+}
+
+#[when(
+    regex = r#"^the person approves "([^"]+)" (on the hub's page|from another computer) with (the key it showed|another key), confirming with (the admin password|a wrong password|the hub's key ID)$"#
+)]
+async fn approves_on_the_page(
+    agent: &mut Agent,
+    hostname: String,
+    from: String,
+    key: String,
+    confirmation: String,
+) {
+    let world = &mut agent.pairing;
+    let key = (key == "another key").then(|| {
+        FakeSigning
+            .public_key(&SigningSeed::from_bytes([0x5a; 32]))
+            .expect("a key")
+    });
+    let confirmation = match confirmation.as_str() {
+        "the admin password" => PASSWORD.to_owned(),
+        "a wrong password" => "not-the-password".to_owned(),
+        _ => world.key_id(),
+    };
+    world
+        .ask_to_approve(&hostname, from != "on the hub's page", key, &confirmation)
+        .await;
+}
+
+#[given(expr = "the person approved {string} on the hub's page")]
+async fn approved_before(agent: &mut Agent, hostname: String) {
+    let world = &mut agent.pairing;
+    let key_id = world.key_id();
+    world.ask_to_approve(&hostname, false, None, &key_id).await;
+    assert!(
+        matches!(world.approval(), Ok(Ok(_))),
+        "{:?}",
+        world.approved
+    );
+}
+
+#[then(expr = "the hub lists {string} as approved")]
+async fn listed_approved(agent: &mut Agent, hostname: String) {
+    let world = &agent.pairing;
+    let Ok(Ok(approved)) = world.approval() else {
+        panic!("nothing was approved: {:?}", world.approved);
+    };
+    let listed = world.agent_named(&hostname).await;
+    assert_eq!(&listed, approved);
+    assert_eq!(
+        listed.status,
+        AgentStatus::Approved {
+            at: world.hub().clock.now()
+        }
+    );
+}
+
+#[then(expr = "the hub lists {string} as waiting for approval")]
+async fn listed_waiting(agent: &mut Agent, hostname: String) {
+    let listed = agent.pairing.agent_named(&hostname).await;
+    assert!(listed.is_pending(), "{listed:?}");
+}
+
+#[then(
+    regex = r#"^the hub refuses the approval (as a step-up that failed|and says to set an admin password|because no such machine waits|because "[^"]+" is approved already)$"#
+)]
+fn approval_refused(agent: &mut Agent, why: String) {
+    let expected = match why.as_str() {
+        "as a step-up that failed" => Err(TokenAskRefused::StepUpFailed),
+        "and says to set an admin password" => Err(TokenAskRefused::NeedsSignIn),
+        "because no such machine waits" => Ok(Err(ApprovalRefused::Unknown)),
+        _ => Ok(Err(ApprovalRefused::AlreadyApproved)),
+    };
+    assert_eq!(agent.pairing.approval(), &expected);
 }

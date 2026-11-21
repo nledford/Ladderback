@@ -7,13 +7,14 @@ use app::fakes::{
     InMemoryIdentity, InMemorySessionStore, SeededRandom,
 };
 use app::pairing::HubPairing;
+use app::ports::{AgentRegistry as _, Signing as _};
 use axum::body::Body;
 use axum::http::header::{HOST, SET_COOKIE};
 use axum::http::{Method, StatusCode};
-use domain::Timestamp;
 use domain::access::api_token::{ApiTokenLabel, TokenPermissions};
 use domain::access::permissions::{Permission, Permissions};
-use domain::fleet::{Fingerprint, KeyId};
+use domain::fleet::{AgentRecord, AgentStatus, Fingerprint, Hostname, KeyId, SigningSeed};
+use domain::{AgentId, Timestamp, Uuid};
 use http_body_util::BodyExt;
 use tower::ServiceExt;
 
@@ -38,6 +39,7 @@ fn clock() -> Arc<FakeClock> {
 /// its built-in TLS with `certificate` when that is given.
 struct Daemon {
     pairing: Option<Arc<HubPairing>>,
+    registry: Arc<InMemoryAgentRegistry>,
     access: Option<Arc<Access>>,
     certificate: Option<Fingerprint>,
 }
@@ -53,8 +55,9 @@ impl Daemon {
                 Arc::new(InMemorySessionStore::new()),
             ))
         });
+        let registry = Arc::new(InMemoryAgentRegistry::new());
         let pairing = HubPairing::new(
-            Arc::new(InMemoryAgentRegistry::new()),
+            Arc::clone(&registry) as _,
             Arc::new(InMemoryIdentity::default()),
             Arc::new(FakeSigning),
             Arc::new(SeededRandom::new(5)),
@@ -67,6 +70,7 @@ impl Daemon {
         };
         Self {
             pairing: Some(Arc::new(pairing)),
+            registry,
             access,
             certificate: None,
         }
@@ -83,6 +87,7 @@ impl Daemon {
     fn not_a_hub() -> Self {
         Self {
             pairing: None,
+            registry: Arc::new(InMemoryAgentRegistry::new()),
             access: None,
             certificate: None,
         }
@@ -569,4 +574,211 @@ fn a_loopback_peer_and_host_alone_are_on_loopback() {
     assert!(beyond_loopback(&host("127.0.0.1:8080"), REMOTE));
     assert!(beyond_loopback(&host("hub.example:8080"), LOOPBACK));
     assert!(beyond_loopback(&HeaderMap::new(), LOOPBACK));
+}
+
+/// An agent the hub holds, `n` its agent ID's and key's seed, approved at
+/// or pending since `at`.
+fn agent(n: u8, hostname: &str, approved: bool, at: Timestamp) -> AgentRecord {
+    AgentRecord {
+        agent_id: AgentId::from_uuid(Uuid::from_bytes([n; 16])),
+        key: FakeSigning
+            .public_key(&SigningSeed::from_bytes([n; 32]))
+            .unwrap(),
+        hostname: Hostname::parse(hostname).unwrap(),
+        status: if approved {
+            AgentStatus::Approved { at }
+        } else {
+            AgentStatus::Pending { since: at }
+        },
+        counter: 1,
+        last_seen: at,
+    }
+}
+
+fn approve(
+    peer: IpAddr,
+    headers: &[(&str, String)],
+    waiting: &AgentRecord,
+    confirmation: &str,
+) -> Request {
+    let body = serde_json::json!({ "key": waiting.key.to_hex(), "confirmation": confirmation });
+    let path = api::agent_approval_path(&waiting.agent_id.as_uuid().to_string());
+    build(Method::POST, &path, peer, headers, &body.to_string())
+}
+
+fn now() -> Timestamp {
+    Timestamp::from_second(1_800_000_000).unwrap()
+}
+
+#[tokio::test]
+async fn the_page_lists_each_agent_with_its_key_its_wait_and_its_lookalike() {
+    let daemon = Daemon::hub(false);
+    let earlier = Timestamp::from_second(1_799_999_400).unwrap();
+    let approved = agent(1, "macbook", true, earlier);
+    let waiting = agent(2, "rnacbook", false, earlier);
+    daemon.registry.hold(approved.clone());
+    daemon.registry.hold(waiting.clone());
+    let response = daemon
+        .send(build(Method::GET, api::HUB_AGENTS_PATH, LOOPBACK, &[], ""))
+        .await;
+    assert_eq!(response.status(), StatusCode::OK);
+    let listed: api::HubAgentsDto = serde_json::from_value(json(response).await).unwrap();
+    let expected = |record: &AgentRecord, status, looks_like| api::HubAgentDto {
+        agent_id: record.agent_id.as_uuid().to_string(),
+        hostname: record.hostname.as_str().to_owned(),
+        key: record.key.to_hex(),
+        fingerprint: Fingerprint::of_key(&record.key).to_string(),
+        status,
+        since: earlier.to_string(),
+        seconds_ago: 600,
+        looks_like,
+    };
+    assert_eq!(
+        listed.agents,
+        [
+            expected(&approved, api::AgentStatusDto::Approved, None),
+            expected(
+                &waiting,
+                api::AgentStatusDto::Pending,
+                Some(api::LookalikeDto {
+                    agent_id: approved.agent_id.as_uuid().to_string(),
+                    hostname: "macbook".to_owned(),
+                    last_seen: earlier.to_string(),
+                })
+            ),
+        ]
+    );
+}
+
+#[tokio::test]
+async fn on_loopback_the_key_id_approves_the_agent_under_the_key_compared_once() {
+    let daemon = Daemon::hub(false);
+    let waiting = agent(2, "laptop", false, now());
+    // The hub key is made while no agent is registered, as on a real hub.
+    let key_id = daemon.key_id().await;
+    daemon.registry.hold(waiting.clone());
+    let response = daemon.send(approve(LOOPBACK, &[], &waiting, &key_id)).await;
+    assert_eq!(response.status(), StatusCode::OK);
+    let answered: api::HubAgentDto = serde_json::from_value(json(response).await).unwrap();
+    assert_eq!(answered.status, api::AgentStatusDto::Approved);
+    assert_eq!(answered.hostname, "laptop");
+    assert_eq!(answered.key, waiting.key.to_hex());
+    let kept = daemon.registry.agent(waiting.agent_id).await.unwrap();
+    assert!(kept.is_some_and(|kept| !kept.is_pending()));
+    let again = daemon.send(approve(LOOPBACK, &[], &waiting, &key_id)).await;
+    assert_eq!(
+        refusal(again).await,
+        (StatusCode::CONFLICT, "agent-approved-already".to_owned())
+    );
+}
+
+#[tokio::test]
+async fn an_agent_or_key_that_never_paired_is_unknown_and_approves_nothing() {
+    let daemon = Daemon::hub(false);
+    let waiting = agent(2, "laptop", false, now());
+    // The hub key is made while no agent is registered, as on a real hub.
+    let key_id = daemon.key_id().await;
+    daemon.registry.hold(waiting.clone());
+    let other_key = AgentRecord {
+        key: agent(3, "laptop", false, now()).key,
+        ..waiting.clone()
+    };
+    let never = agent(4, "desktop", false, now());
+    for asked in [&other_key, &never] {
+        assert_eq!(
+            refusal(daemon.send(approve(LOOPBACK, &[], asked, &key_id)).await).await,
+            (StatusCode::NOT_FOUND, "agent-unknown".to_owned())
+        );
+    }
+    let body = serde_json::json!({ "key": waiting.key.to_hex(), "confirmation": key_id });
+    let not_an_id = api::agent_approval_path("laptop");
+    let not_an_id = build(Method::POST, &not_an_id, LOOPBACK, &[], &body.to_string());
+    assert_eq!(
+        refusal(daemon.send(not_an_id).await).await,
+        (StatusCode::NOT_FOUND, "agent-unknown".to_owned())
+    );
+    let path = api::agent_approval_path(&waiting.agent_id.as_uuid().to_string());
+    let not_a_key = serde_json::json!({ "key": "laptop", "confirmation": key_id }).to_string();
+    let not_a_key = build(Method::POST, &path, LOOPBACK, &[], &not_a_key);
+    assert_eq!(
+        refusal(daemon.send(not_a_key).await).await,
+        (StatusCode::BAD_REQUEST, "invalid-body".to_owned())
+    );
+    let kept = daemon.registry.agent(waiting.agent_id).await.unwrap();
+    assert!(kept.is_some_and(|kept| kept.is_pending()));
+}
+
+#[tokio::test]
+async fn an_approval_is_confirmed_as_a_token_is() {
+    let daemon = Daemon::hub(false);
+    let waiting = agent(2, "laptop", false, now());
+    // The hub key is made while no agent is registered, as on a real hub.
+    let key_id = daemon.key_id().await;
+    daemon.registry.hold(waiting.clone());
+    assert_eq!(
+        refusal(daemon.send(approve(REMOTE, &[], &waiting, &key_id)).await).await,
+        (StatusCode::FORBIDDEN, "pairing-needs-sign-in".to_owned())
+    );
+    let wrong = if key_id == "00000000" {
+        "11111111"
+    } else {
+        "00000000"
+    };
+    assert_eq!(
+        refusal(daemon.send(approve(LOOPBACK, &[], &waiting, wrong)).await).await,
+        (StatusCode::FORBIDDEN, "step-up-failed".to_owned())
+    );
+    let kept = daemon.registry.agent(waiting.agent_id).await.unwrap();
+    assert!(kept.is_some_and(|kept| kept.is_pending()));
+}
+
+#[tokio::test]
+async fn with_sign_in_on_only_a_session_lists_or_approves_and_confirms_with_the_password() {
+    let daemon = Daemon::hub(true);
+    let waiting = agent(2, "laptop", false, now());
+    // The hub key is made while no agent is registered, as on a real hub.
+    daemon.pairing.as_ref().unwrap().hub_key().await.unwrap();
+    daemon.registry.hold(waiting.clone());
+    let list = build(Method::GET, api::HUB_AGENTS_PATH, LOOPBACK, &[], "");
+    assert_eq!(daemon.send(list).await.status(), StatusCode::UNAUTHORIZED);
+    let unsigned = daemon
+        .send(approve(LOOPBACK, &[], &waiting, PASSWORD))
+        .await;
+    assert_eq!(unsigned.status(), StatusCode::UNAUTHORIZED);
+    let created = daemon
+        .access
+        .as_ref()
+        .unwrap()
+        .create_api_token(
+            ApiTokenLabel::new("assistant".to_owned()).unwrap(),
+            TokenPermissions::new(Permission::ALL.iter().fold(Permissions::NONE, |held, row| {
+                held.with(*row, Some(row.level())).unwrap()
+            }))
+            .unwrap(),
+        )
+        .await
+        .unwrap();
+    let bearer = [("authorization", format!("Bearer {}", created.text.expose()))];
+    for request in [
+        build(Method::GET, api::HUB_AGENTS_PATH, LOOPBACK, &bearer, ""),
+        approve(LOOPBACK, &bearer, &waiting, PASSWORD),
+    ] {
+        assert_eq!(
+            refusal(daemon.send(request).await).await,
+            (StatusCode::FORBIDDEN, "api-token-permission".to_owned())
+        );
+    }
+    let session = daemon.signed_in().await;
+    let wrong = daemon
+        .send(approve(REMOTE, &session, &waiting, "not-it"))
+        .await;
+    assert_eq!(
+        refusal(wrong).await,
+        (StatusCode::FORBIDDEN, "step-up-failed".to_owned())
+    );
+    let peer = IpAddr::V4(Ipv4Addr::new(192, 0, 2, 12));
+    let approved = daemon
+        .send(approve(peer, &session, &waiting, PASSWORD))
+        .await;
+    assert_eq!(approved.status(), StatusCode::OK);
 }

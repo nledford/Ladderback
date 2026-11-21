@@ -1,14 +1,18 @@
-//! A pairing token asked for on the hub's web page (§16, decision 121, "The
-//! hub's dialog"): a high-impact action, confirmed by a fresh step-up every
-//! time and refused beyond loopback while sign-in is off (decision 120, "Who
-//! may make a token, approve or re-key").
+//! A pairing token asked for, and a waiting agent approved, on the hub's
+//! web page (§16, decision 121, "The hub's dialog", "Waiting for
+//! approval"): high-impact actions, each confirmed by a fresh step-up every
+//! time and refused beyond loopback while sign-in is off (decision 120,
+//! "Who may make a token, approve or re-key").
 
 use std::fmt;
 use std::net::IpAddr;
 
 use domain::access::step_up::{StepUpConfirmation, StepUpFor};
-use domain::fleet::{HubAddress, KeyId, PairingToken, PublicKey, TokenId, TokenTls, needs_sign_in};
-use domain::{SignedDuration, Timestamp};
+use domain::fleet::{
+    AgentRecord, ApprovalRefused, HubAddress, KeyId, PairingToken, PublicKey, TokenId, TokenTls,
+    needs_sign_in,
+};
+use domain::{AgentId, SignedDuration, Timestamp};
 
 use super::{HubPairing, HubPairingError};
 use crate::access::{StepUpRefused, confirm_step_up};
@@ -80,6 +84,32 @@ impl From<HubPairingError> for TokenAskRefused {
     }
 }
 
+/// What the page asks for: the agent `agent_id`, under the key
+/// `agent_key` the person compared with the machine's own screen, approved,
+/// confirmed by `confirmation`.
+pub struct ApprovalAsk {
+    pub agent_id: AgentId,
+    pub agent_key: PublicKey,
+    /// The connection's address, whose sign-in waits a wrong password
+    /// counts against.
+    pub peer: IpAddr,
+    /// Whether the request came from beyond loopback.
+    pub beyond_loopback: bool,
+    /// As [`TokenAsk::confirmation`]. Never shown (I4).
+    pub confirmation: Option<StepUpConfirmation>,
+}
+
+impl fmt::Debug for ApprovalAsk {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("ApprovalAsk")
+            .field("agent_id", &self.agent_id)
+            .field("agent_key", &self.agent_key)
+            .field("peer", &self.peer)
+            .field("beyond_loopback", &self.beyond_loopback)
+            .finish_non_exhaustive()
+    }
+}
+
 impl HubPairing {
     /// The hub key every agent pins, made while no agent is registered.
     pub async fn hub_key(&self) -> Result<PublicKey, HubPairingError> {
@@ -129,5 +159,15 @@ impl HubPairing {
             expires_at: record.expires_at,
             left,
         })
+    }
+
+    /// The agent `ask` names approved, once its step-up is confirmed as a
+    /// token's is: only that agent ID with that key, never another key the
+    /// agent holds now (decision 120, "Pending approval").
+    pub async fn approve_asked(
+        &self,
+        ask: ApprovalAsk,
+    ) -> Result<Result<AgentRecord, ApprovalRefused>, TokenAskRefused> {
+        todo!("{ask:?}")
     }
 }

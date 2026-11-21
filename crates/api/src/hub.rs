@@ -93,3 +93,80 @@ impl std::fmt::Debug for PairingTokenDto {
             .finish_non_exhaustive()
     }
 }
+
+/// Where the page reads the machines the hub has registered: `GET`,
+/// answered with a [`HubAgentsDto`].
+pub const HUB_AGENTS_PATH: &str = "/api/v1/hub/agents";
+
+/// Where the page approves the waiting agent `agent_id`: `POST` an
+/// [`ApproveAgentDto`], answered with the agent's [`HubAgentDto`].
+pub fn agent_approval_path(agent_id: &str) -> String {
+    format!("{HUB_AGENTS_PATH}/{agent_id}/approval")
+}
+
+/// Whether a registered agent waits for a person's approval or has it.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "kebab-case")]
+pub enum AgentStatusDto {
+    Pending,
+    Approved,
+}
+
+/// The agent a waiting agent's hostname looks like (decision 120,
+/// "Hostnames"): its agent ID, its hostname and when the hub last heard
+/// from it (RFC 3339).
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "kebab-case", deny_unknown_fields)]
+pub struct LookalikeDto {
+    pub agent_id: String,
+    pub hostname: String,
+    pub last_seen: String,
+}
+
+/// One agent the hub has registered, as a person compares it with the
+/// machine's own screen: its agent ID, its hostname, its key (64 hex
+/// digits, which an approval names back) and that key's fingerprint in full;
+/// whether it waits or is approved, since when (RFC 3339) and how many
+/// seconds ago that was by the hub's clock, so a browser whose clock is
+/// wrong still shows it right; and, while it waits, the agent its hostname
+/// looks like.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "kebab-case", deny_unknown_fields)]
+pub struct HubAgentDto {
+    pub agent_id: String,
+    pub hostname: String,
+    pub key: String,
+    pub fingerprint: String,
+    pub status: AgentStatusDto,
+    pub since: String,
+    pub seconds_ago: u64,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub looks_like: Option<LookalikeDto>,
+}
+
+/// The agents the hub has registered, oldest first.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "kebab-case", deny_unknown_fields)]
+pub struct HubAgentsDto {
+    pub agents: Vec<HubAgentDto>,
+}
+
+/// An approval asked for: the key the person compared (64 hex digits, as
+/// [`HubAgentDto::key`]), so the hub approves that agent with that key and
+/// no other, and the step-up confirmation: the admin password with sign-in
+/// on, the hub key's key ID otherwise. The confirmation is never logged or
+/// shown (I4): its `Debug` hides it.
+#[derive(Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "kebab-case", deny_unknown_fields)]
+pub struct ApproveAgentDto {
+    pub key: String,
+    pub confirmation: String,
+}
+
+impl std::fmt::Debug for ApproveAgentDto {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("ApproveAgentDto")
+            .field("key", &self.key)
+            .finish_non_exhaustive()
+    }
+}

@@ -177,6 +177,13 @@ pub struct PairingWorld {
     counters: Vec<u64>,
     /// What the hub answered the last token asked for on its page.
     asked: Option<Result<app::pairing::MadeToken, app::pairing::TokenAskRefused>>,
+    /// What the hub answered the last approval asked for on its page.
+    approved: Option<
+        Result<
+            Result<domain::fleet::AgentRecord, domain::fleet::ApprovalRefused>,
+            app::pairing::TokenAskRefused,
+        >,
+    >,
 }
 
 impl std::fmt::Debug for PairingWorld {
