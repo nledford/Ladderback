@@ -40,7 +40,7 @@ Select **Change permissions of token** and the token's label on its row, choose 
 
 ## AI agents without a token
 
-Settings has a tab of its own, "AI agents", for what an AI agent may do through `ladderback mcp` without a token: in a session of its own (`--headless`), and when it connects while sign-in is off. It holds the same permissions, with the same defaults, so an AI agent without a token can't look inside your snapshots until you allow Snapshot contents there. With sign-in on, saving a change takes the admin password. A `--scratch` session has a configuration of its own, so it always starts from the defaults.
+Settings has a tab of its own, "AI agents", for what an AI agent may do through `ladderback mcp` without a token: in a session of its own (`--headless`), and when it connects while sign-in is off. It holds the same permissions, with the same defaults, so an AI agent without a token can't look inside your snapshots until you allow Snapshot contents there. With sign-in on, saving a change takes the admin password. A `--scratch` session has a configuration of its own: it always starts from the defaults plus Snapshot contents, since its files are made up.
 
 With sign-in off, these permissions hold only `ladderback mcp`: any other program on the machine, or on your network if Ladderback listens there, can use Ladderback without asking. To limit every program, turn sign-in on and give each one a token.
 
