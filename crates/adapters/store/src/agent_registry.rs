@@ -6,9 +6,10 @@
 use app::ports::{Added, AgentRegistry, StoreError};
 use async_trait::async_trait;
 use domain::fleet::{
-    AgentRecord, AgentStatus, BindingKind, HostnameKey, PairRefusal, PairRequest, Pairing,
-    PairingView, ProofRefusal, ProofRequest, ProofView, PublicKey, TokenId, TokenRecord, TokenUse,
-    admits_unused_token, decide_pairing, decide_proof, voids_tokens_for_new_key,
+    AgentRecord, AgentStatus, BindingKind, Fingerprint, HostnameKey, KEY_BYTES, PairRefusal,
+    PairRequest, Pairing, PairingView, ProofRefusal, ProofRequest, ProofView, PublicKey, TokenId,
+    TokenRecord, TokenUse, admits_unused_token, decide_pairing, decide_proof,
+    voids_tokens_for_new_key,
 };
 use domain::{AgentId, Timestamp};
 use sqlx::{Connection, SqliteConnection};
@@ -220,6 +221,38 @@ impl AgentRegistry for SqliteStore {
             .map_err(unavailable)?;
         tx.commit().await.map_err(unavailable)?;
         Ok(true)
+    }
+
+    async fn tls_key(&self) -> Result<Option<Fingerprint>, StoreError> {
+        let _call = self.call().await;
+        let mut conn = self.pool.acquire().await.map_err(unavailable)?;
+        let recorded: Option<Vec<u8>> = sqlx::query_scalar(sql::TLS_KEY)
+            .fetch_optional(&mut *conn)
+            .await
+            .map_err(unavailable)?;
+        recorded
+            .map(|bytes| {
+                <[u8; KEY_BYTES]>::try_from(bytes)
+                    .map(Fingerprint::from_digest)
+                    .map_err(|bytes| StoreError::Corrupt {
+                        detail: format!(
+                            "hub_tls_key.fingerprint holds {} bytes, not {KEY_BYTES}",
+                            bytes.len()
+                        ),
+                    })
+            })
+            .transpose()
+    }
+
+    async fn record_tls_key(&self, fingerprint: Fingerprint) -> Result<(), StoreError> {
+        let _call = self.call().await;
+        let mut conn = self.pool.acquire().await.map_err(unavailable)?;
+        sqlx::query(sql::RECORD_TLS_KEY)
+            .bind(fingerprint.digest().as_slice())
+            .execute(&mut *conn)
+            .await
+            .map_err(unavailable)?;
+        Ok(())
     }
 
     /// One transaction, the write lock taken up front, so the records the

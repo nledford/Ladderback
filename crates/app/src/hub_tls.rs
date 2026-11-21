@@ -70,13 +70,26 @@ impl HubTlsKey {
         }
     }
 
-    /// The key to serve at a start of the hub. A key in `hub-tls-key` is
-    /// served as it is. With none there, one is made only while `registry`
-    /// holds no agent, since an agent may have pinned the key that is gone;
-    /// the unused tokens are voided with it, since one may pin that key.
+    /// The key to serve at a start of the hub, checked against the
+    /// fingerprint `registry` recorded when the key was made. With no key
+    /// in `hub-tls-key` and none recorded, one is made only while
+    /// `registry` holds no agent, since an agent may have pinned a key
+    /// whose record went with an earlier database. A key made, or found
+    /// with none recorded, is recorded (§16, decision 120, "The hub key").
+    /// No unused token is voided: with no key recorded, none can pin one.
     pub async fn start(&self, registry: &dyn AgentRegistry) -> Result<ServedTlsKey, TlsKeyRefusal> {
-        let _ = registry;
-        todo!()
+        let recorded = registry.tls_key().await?;
+        if recorded.is_none()
+            && self.identity.tls_key().await?.is_none()
+            && !registry.agents().await?.is_empty()
+        {
+            return Err(TlsKeyRefusal::Missing);
+        }
+        let served = self.take(recorded).await?;
+        if recorded.is_none() {
+            registry.record_tls_key(served.fingerprint).await?;
+        }
+        Ok(served)
     }
 }
 
@@ -114,7 +127,7 @@ mod tests {
 
     use super::{HubTlsKey, TlsKeyRefusal};
     use crate::fakes::{FakeTlsKeys, InMemoryAgentRegistry, InMemoryIdentity};
-    use crate::ports::{Attempt, Identity, IdentityError, TlsKeys};
+    use crate::ports::{AgentRegistry, Attempt, Identity, IdentityError, TlsKeys};
 
     /// The key files of a hub whose other first start keeps `theirs` after
     /// this start found no key and before it keeps its own.
@@ -215,15 +228,7 @@ mod tests {
         let keys = Arc::new(FakeTlsKeys::default());
         let identity = Arc::new(InMemoryIdentity::default());
         let registry = InMemoryAgentRegistry::new();
-        let since = Timestamp::from_second(1_800_000_000).unwrap();
-        registry.hold(AgentRecord {
-            agent_id: AgentId::from_uuid(Uuid::from_u128(7)),
-            key: PublicKey::from_bytes([7; KEY_BYTES]).unwrap(),
-            hostname: Hostname::parse("laptop").unwrap(),
-            status: AgentStatus::Pending { since },
-            counter: 0,
-            last_seen: since,
-        });
+        registry.hold(laptop());
         let refused = HubTlsKey::new(identity.clone(), keys.clone())
             .start(&registry)
             .await
@@ -231,5 +236,64 @@ mod tests {
         assert_eq!(refused, TlsKeyRefusal::Missing);
         assert_eq!(keys.made(), 0);
         assert!(identity.tls_key().await.unwrap().is_none());
+    }
+
+    fn laptop() -> AgentRecord {
+        let since = Timestamp::from_second(1_800_000_000).unwrap();
+        AgentRecord {
+            agent_id: AgentId::from_uuid(Uuid::from_u128(7)),
+            key: PublicKey::from_bytes([7; KEY_BYTES]).unwrap(),
+            hostname: Hostname::parse("laptop").unwrap(),
+            status: AgentStatus::Pending { since },
+            counter: 0,
+            last_seen: since,
+        }
+    }
+
+    /// The key made is recorded, so a restart once an agent has paired
+    /// serves it, though no key could be made then.
+    #[tokio::test]
+    async fn a_start_records_the_key_it_makes_and_serves_it_once_an_agent_pairs() {
+        let keys = Arc::new(FakeTlsKeys::default());
+        let registry = InMemoryAgentRegistry::new();
+        let use_case = HubTlsKey::new(Arc::new(InMemoryIdentity::default()), keys.clone());
+        let first = use_case.start(&registry).await.unwrap();
+        assert_eq!(registry.tls_key().await.unwrap(), Some(first.fingerprint));
+        registry.hold(laptop());
+        let again = use_case.start(&registry).await.unwrap();
+        assert_eq!(again.fingerprint, first.fingerprint);
+    }
+
+    /// Once a key is recorded, another key in the file is refused, and so
+    /// is no key, with no agent registered too: the hub never makes a
+    /// replacement by itself.
+    #[tokio::test]
+    async fn a_start_serves_only_the_recorded_key() {
+        let keys = Arc::new(FakeTlsKeys::default());
+        let recorded = keys.generate().unwrap();
+        let registry = InMemoryAgentRegistry::new();
+        registry
+            .record_tls_key(keys.fingerprint(&recorded).unwrap())
+            .await
+            .unwrap();
+        let identity = Arc::new(InMemoryIdentity::default());
+        let use_case = HubTlsKey::new(identity.clone(), keys.clone());
+        assert_eq!(
+            use_case.start(&registry).await.unwrap_err(),
+            TlsKeyRefusal::Missing
+        );
+        assert_eq!(
+            keys.made(),
+            1,
+            "a key was made in place of the recorded one"
+        );
+        identity
+            .keep_tls_key(keys.generate().unwrap())
+            .await
+            .unwrap();
+        assert_eq!(
+            use_case.start(&registry).await.unwrap_err(),
+            TlsKeyRefusal::AnotherKey
+        );
     }
 }

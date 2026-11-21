@@ -114,11 +114,7 @@ impl HubPairing {
             StepUpRefused::Wait { seconds } => TokenAskRefused::StepUpWait { seconds },
             StepUpRefused::Unavailable(text) => TokenAskRefused::StepUpUnavailable(text),
         })?;
-        // Built-in TLS isn't served yet, so every token is of an address a
-        // certificate authority's chain vouches for, or of loopback.
-        let (token, record) = self
-            .mint(&keys, ask.address, TokenTls::Ca, ask.life)
-            .await?;
+        let (token, record) = self.mint(&keys, ask.address, ask.tls, ask.life).await?;
         // Counted once the token is kept, so the time keeping it took is
         // never shown as life it has left.
         let left = self
