@@ -13,7 +13,7 @@
 
 mod browse;
 mod cancel;
-mod convert;
+pub(crate) mod convert;
 mod dump;
 mod events;
 mod fake;

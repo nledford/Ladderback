@@ -1,0 +1,21 @@
+# The rich history, for screenshots and demos (`just try --demo`): four
+# months of nightly backups of the plan "demo-home", one of which failed (a
+# missing night whose data waits for prune; no operation log records it), and
+# six months of weekly backups of the plan "demo-photos". Its names are
+# neutral (development.md §13.9). `engine::history_fixture` builds it.
+host = "demo-host"
+
+[[series]]
+plan = "demo-home"
+first = "2026-07-01T02:00:00+02:00"
+every = "1 day"
+runs = 120
+files = { count = 240, bytes = "24 MB" }
+failed = [37]
+
+[[series]]
+plan = "demo-photos"
+first = "2026-05-03T03:30:00+02:00"
+every = "1 week"
+runs = 26
+files = { count = 80, bytes = "64 MB" }
