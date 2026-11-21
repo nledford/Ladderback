@@ -12,6 +12,7 @@ use std::time::Duration;
 
 use api::{
     ErrorCode, HUB_PATH, HubDto, MakePairingTokenDto, MsgArg, PAIRING_TOKENS_PATH, PairingTokenDto,
+    TokenCertificateDto,
 };
 use l10n::{Localizer, msg};
 use leptos::prelude::*;
@@ -22,8 +23,8 @@ use crate::components::alert::rules::AlertTone;
 use crate::components::button::Content;
 use crate::components::text_field::{Access, Kind};
 use crate::components::{
-    Alert, Button, Fingerprint, ReviewDialog, StepUp, StepUpField, TextField, focus_element,
-    holds_focus, refusal_alert, say_refusals,
+    Alert, Button, Fingerprint, RadioGroup, ReviewDialog, StepUp, StepUpField, TextField,
+    focus_element, holds_focus, refusal_alert, say_refusals,
 };
 use crate::live::PageClock;
 use crate::pairing::{AddressWarning, Countdown, life, minutes};
@@ -42,6 +43,12 @@ const ADDRESS_ID: &str = "pairing-address";
 const WARNING_ID: &str = "pairing-address-warning";
 /// The field of the token's life.
 const LIFE_ID: &str = "pairing-life";
+
+/// The certificate choice's group, and its two values.
+const CERTIFICATE_GROUP: &str = "pairing-certificate";
+const PINNED: &str = "pinned";
+const CA: &str = "ca";
+
 /// The step-up field, where focus goes when the step-up is refused.
 const STEP_UP_ID: &str = "pairing-confirmation";
 /// The button that makes a token, which opens the dialog: focus returns to
@@ -104,6 +111,9 @@ struct Shown {
     fingerprint: String,
     address: String,
     expires_at: String,
+    /// The token pins the hub's own certificate, rather than trusting a
+    /// certificate authority's.
+    pinned: bool,
 }
 
 /// How a token the dialog showed ended while it was open.
@@ -215,6 +225,7 @@ impl Token {
             fingerprint: made.fingerprint,
             address: made.address,
             expires_at: made.expires_at,
+            pinned: made.certificate == TokenCertificateDto::Pinned,
         }));
         self.open.set(true);
         self.count_down(id, countdown);
@@ -305,11 +316,19 @@ pub(crate) fn Agents(localizer: Arc<Localizer>, on: bool) -> impl IntoView {
         let localizer = Arc::clone(&localizer);
         move |id| text(&localizer, id)
     };
-    let key_id = use_context::<HubKey>()
+    let hub = use_context::<HubKey>()
         .and_then(|HubKey(key)| key.get_untracked())
-        .and_then(|(_, key)| key)
-        .map(|key| key.key_id)
-        .unwrap_or_default();
+        .and_then(|(_, key)| key);
+    // The hub's own certificate is offered while it serves one, first when
+    // the page came in over it; a certificate authority's otherwise.
+    let serves_own = hub
+        .as_ref()
+        .is_some_and(|hub| hub.own_certificate.is_some());
+    let certificate = RwSignal::new(match hub.as_ref().map(|hub| hub.certificate) {
+        Some(TokenCertificateDto::Pinned) if serves_own => PINNED,
+        _ => CA,
+    });
+    let key_id = hub.map(|key| key.key_id).unwrap_or_default();
     let step_up = if on {
         StepUp::Password
     } else {
@@ -320,6 +339,15 @@ pub(crate) fn Agents(localizer: Arc<Localizer>, on: bool) -> impl IntoView {
         }
     };
     let address = RwSignal::new(ws::origin());
+    // The hub's own certificate is served over TLS: choosing it makes a
+    // plain address the same one over `https://`, as the hub serves both.
+    Effect::new(move |_| {
+        if certificate.get() == PINNED
+            && let Some(over_tls) = over_tls(address.get_untracked().trim())
+        {
+            address.set(over_tls);
+        }
+    });
     let life_typed = RwSignal::new(DEFAULT_LIFE.to_owned());
     let life_error = RwSignal::new(None::<String>);
     let confirmation = RwSignal::new(String::new());
@@ -344,7 +372,12 @@ pub(crate) fn Agents(localizer: Arc<Localizer>, on: bool) -> impl IntoView {
         };
         life_error.set(None);
         let ask = MakePairingTokenDto {
-            address: address.get_untracked().trim().to_owned(),
+            address: asked_address(&address.get_untracked(), certificate.get_untracked()),
+            certificate: if certificate.get_untracked() == PINNED {
+                TokenCertificateDto::Pinned
+            } else {
+                TokenCertificateDto::Ca
+            },
             life_minutes: Some(life_minutes),
             confirmation: confirmation.get_untracked(),
         };
@@ -461,7 +494,23 @@ pub(crate) fn Agents(localizer: Arc<Localizer>, on: bool) -> impl IntoView {
                         }
                     })
             }}
-            <p>{t(msg::UI_PAIRING_CERTIFICATE)}</p>
+            {if serves_own {
+                view! {
+                    <RadioGroup
+                        name=CERTIFICATE_GROUP
+                        legend=t(msg::UI_PAIRING_CERTIFICATE_LEGEND)
+                        description=t(msg::UI_PAIRING_CERTIFICATE_HINT)
+                        options=vec![
+                            (PINNED, t(msg::UI_PAIRING_CERTIFICATE_OWN)),
+                            (CA, t(msg::UI_PAIRING_CERTIFICATE_CA)),
+                        ]
+                        chosen=certificate
+                    />
+                }
+                    .into_any()
+            } else {
+                view! { <p>{t(msg::UI_PAIRING_CERTIFICATE)}</p> }.into_any()
+            }}
             <TextField
                 id=LIFE_ID
                 localizer=Arc::clone(&localizer)
@@ -586,7 +635,16 @@ fn PairingDialog(localizer: Arc<Localizer>, token: Token) -> impl IntoView {
                                 <dt>{text(&localizer, msg::UI_PAIRING_ADDRESS)}</dt>
                                 <dd>{shown.address}</dd>
                                 <dt>{text(&localizer, msg::UI_PAIRING_CERTIFICATE_LABEL)}</dt>
-                                <dd>{text(&localizer, msg::UI_PAIRING_CERTIFICATE_CA)}</dd>
+                                <dd>
+                                    {text(
+                                        &localizer,
+                                        if shown.pinned {
+                                            msg::UI_PAIRING_CERTIFICATE_PINNED
+                                        } else {
+                                            msg::UI_PAIRING_CERTIFICATE_CA
+                                        },
+                                    )}
+                                </dd>
                                 <dt>{text(&localizer, msg::UI_PAIRING_LAPSES_LABEL)}</dt>
                                 <dd>
                                     {move || lapses(
@@ -698,4 +756,78 @@ fn lapses(localizer: &Localizer, expires_at: &str, left: u64) -> String {
             ("minutes", MsgArg::Count(minutes(left))),
         ],
     )
+}
+
+/// The plain `address` as the same one over `https://`, its port kept: the
+/// hub serves both on one port, so `http://hub` is `https://hub:80`.
+/// `None` for an address that isn't plain.
+fn over_tls(address: &str) -> Option<String> {
+    let rest = address.strip_prefix("http://")?;
+    let end = rest.find(['/', '?', '#']).unwrap_or(rest.len());
+    let (authority, path) = rest.split_at(end);
+    // A port follows the last colon, outside an IPv6 address's brackets.
+    let has_port = authority
+        .rsplit_once(':')
+        .is_some_and(|(host, _)| host.ends_with(']') || !host.contains('['));
+    Some(if has_port {
+        format!("https://{rest}")
+    } else {
+        format!("https://{authority}:80{path}")
+    })
+}
+
+/// The address a token is asked for at: the one typed, over `https://`
+/// when it is to pin the hub's own certificate, whenever it was typed.
+fn asked_address(typed: &str, certificate: &str) -> String {
+    let typed = typed.trim();
+    match over_tls(typed) {
+        Some(over_tls) if certificate == PINNED => over_tls,
+        _ => typed.to_owned(),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{CA, PINNED, asked_address, over_tls};
+
+    #[test]
+    fn a_plain_address_goes_over_tls_on_the_same_port() {
+        for (plain, over) in [
+            ("http://hub.example:9898", "https://hub.example:9898"),
+            ("http://hub.example", "https://hub.example:80"),
+            ("http://hub.example/", "https://hub.example:80/"),
+            ("http://[::1]", "https://[::1]:80"),
+            ("http://[::1]:9898/x", "https://[::1]:9898/x"),
+        ] {
+            assert_eq!(over_tls(plain).as_deref(), Some(over), "{plain}");
+        }
+        assert_eq!(over_tls("https://hub.example"), None);
+    }
+
+    /// An address typed after the hub's own certificate was chosen is
+    /// asked for over TLS too, its port kept; a certificate authority's
+    /// token is asked for at the address as typed.
+    #[test]
+    fn a_pinned_token_is_asked_for_over_tls_whenever_its_address_was_typed() {
+        for (typed, certificate, asked) in [
+            (
+                " http://hub.example:9898 ",
+                PINNED,
+                "https://hub.example:9898",
+            ),
+            (
+                "https://hub.example:9443",
+                PINNED,
+                "https://hub.example:9443",
+            ),
+            ("http://hub.example:9898", CA, "http://hub.example:9898"),
+            ("https://proxy.example", CA, "https://proxy.example"),
+        ] {
+            assert_eq!(
+                asked_address(typed, certificate),
+                asked,
+                "{typed}, {certificate}"
+            );
+        }
+    }
 }

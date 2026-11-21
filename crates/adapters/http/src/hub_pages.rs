@@ -18,7 +18,7 @@ use axum::http::{HeaderMap, StatusCode};
 use axum::response::{IntoResponse, Response};
 use domain::SignedDuration;
 use domain::access::step_up::StepUpConfirmation;
-use domain::fleet::{Fingerprint, HubAddress, KeyId, TokenId};
+use domain::fleet::{Fingerprint, HubAddress, HubRoute, KeyId, RouteRefused, TokenId, TokenTls};
 
 use crate::AppState;
 
@@ -44,15 +44,26 @@ fn not_a_hub() -> Response {
     crate::refused(StatusCode::NOT_FOUND, ErrorCode::RouteUnknown)
 }
 
-/// The hub key's fingerprint and key ID.
-async fn hub(State(state): State<AppState>) -> Response {
+/// The hub key's fingerprint and key ID, and the certificate a token is
+/// offered first: the hub's own when the page came over its built-in TLS,
+/// a certificate authority's when it came in plain, as through a proxy.
+async fn hub(State(state): State<AppState>, request: Request) -> Response {
     let Some(pairing) = pairing_of(&state) else {
         return not_a_hub();
+    };
+    let own = state.sync.certificate();
+    let over_tls = request.extensions().get::<crate::BuiltInTls>().is_some();
+    let certificate = if over_tls && own.is_some() {
+        api::TokenCertificateDto::Pinned
+    } else {
+        api::TokenCertificateDto::Ca
     };
     match pairing.hub_key().await {
         Ok(key) => axum::Json(api::HubDto {
             fingerprint: Fingerprint::of_key(&key).to_string(),
             key_id: KeyId::of_key(&key).to_string(),
+            certificate,
+            own_certificate: own.map(|fingerprint| fingerprint.to_string()),
         })
         .into_response(),
         Err(error) => hub_refusal(&error),
@@ -85,17 +96,35 @@ async fn make_token(State(state): State<AppState>, request: Request) -> Response
     };
     let Ok(api::MakePairingTokenDto {
         address,
+        certificate,
         life_minutes,
         confirmation,
     }) = serde_json::from_slice(&body)
     else {
         return crate::refused(StatusCode::BAD_REQUEST, ErrorCode::InvalidBody);
     };
+    // A pinned token names the certificate the hub serves: one that
+    // serves none has nothing to pin, so a pinned ask is no ask it reads.
+    let tls = match certificate {
+        api::TokenCertificateDto::Ca => TokenTls::Ca,
+        api::TokenCertificateDto::Pinned => match state.sync.certificate() {
+            Some(fingerprint) => TokenTls::Pinned(fingerprint),
+            None => return crate::refused(StatusCode::BAD_REQUEST, ErrorCode::InvalidBody),
+        },
+    };
+    // A pinned certificate is served over TLS: an `http://` address has
+    // none to pin.
     let Ok(address) = HubAddress::parse(&address) else {
         return crate::refused(StatusCode::BAD_REQUEST, ErrorCode::HubAddressInvalid);
     };
+    if matches!(tls, TokenTls::Pinned(_))
+        && HubRoute::of(&address, tls) == Err(RouteRefused::Malformed)
+    {
+        return crate::refused(StatusCode::BAD_REQUEST, ErrorCode::HubAddressInvalid);
+    }
     let ask = TokenAsk {
         address,
+        tls,
         life: life_minutes.map(|minutes| SignedDuration::from_mins(i64::from(minutes))),
         peer: peer.ip(),
         beyond_loopback: beyond,
@@ -133,6 +162,10 @@ fn token_dto(made: &MadeToken) -> api::PairingTokenDto {
         address: made.token.address().as_str().to_owned(),
         expires_at: made.expires_at.to_string(),
         seconds_left: u64::try_from(made.left.as_secs()).unwrap_or(0),
+        certificate: match made.token.tls() {
+            TokenTls::Pinned(_) => api::TokenCertificateDto::Pinned,
+            TokenTls::Ca => api::TokenCertificateDto::Ca,
+        },
     }
 }
 

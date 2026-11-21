@@ -13,10 +13,13 @@ use domain::{SignedDuration, Timestamp};
 use super::{HubPairing, HubPairingError};
 use crate::access::{StepUpRefused, confirm_step_up};
 
-/// What the page asks for: a token for `address`, living `life` or 15
-/// minutes, confirmed by `confirmation`.
+/// What the page asks for: a token for `address`, of `tls`'s kind, living
+/// `life` or 15 minutes, confirmed by `confirmation`.
 pub struct TokenAsk {
     pub address: HubAddress,
+    /// The certificate the address shows: the hub's own, pinned, or one a
+    /// certificate authority signed, as a proxy's is.
+    pub tls: TokenTls,
     pub life: Option<SignedDuration>,
     /// The connection's address, whose sign-in waits a wrong password
     /// counts against.
@@ -34,6 +37,7 @@ impl fmt::Debug for TokenAsk {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.debug_struct("TokenAsk")
             .field("address", &self.address)
+            .field("tls", &self.tls)
             .field("life", &self.life)
             .field("beyond_loopback", &self.beyond_loopback)
             .finish_non_exhaustive()
@@ -110,11 +114,7 @@ impl HubPairing {
             StepUpRefused::Wait { seconds } => TokenAskRefused::StepUpWait { seconds },
             StepUpRefused::Unavailable(text) => TokenAskRefused::StepUpUnavailable(text),
         })?;
-        // Built-in TLS isn't served yet, so every token is of an address a
-        // certificate authority's chain vouches for, or of loopback.
-        let (token, record) = self
-            .mint(&keys, ask.address, TokenTls::Ca, ask.life)
-            .await?;
+        let (token, record) = self.mint(&keys, ask.address, ask.tls, ask.life).await?;
         // Counted once the token is kept, so the time keeping it took is
         // never shown as life it has left.
         let left = self
