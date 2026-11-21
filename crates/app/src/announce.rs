@@ -7,12 +7,12 @@
 //! engine's own start and end are no news: only the run knows when the log
 //! has them.
 
-use api::{ErrorCode, ErrorDto, MsgArg, UiEvent};
+use api::{ErrorCode, ErrorDto, MsgArg, UiEvent, WarningCode};
 use domain::execution::refusal::SettingRefusal;
 use domain::execution::{FailureReason, HookEnd, HookPlace, Operation, OperationStatus};
 use domain::{OperationId, RepositoryId, Timestamp};
 
-use crate::ports::EventBus;
+use crate::ports::{EventBus, HookPhase};
 
 /// The news that `operation` started: what is running, on which repository,
 /// and when it started, as the log has it. `opened` is the repository the
@@ -101,6 +101,24 @@ pub fn daemon_stopped(operation: OperationId, at: Timestamp) -> UiEvent {
         code: failure.code,
         args: failure.positional(),
         finished_at: at.to_string(),
+    }
+}
+
+/// The news that a hook of `phase` around `operation` failed where its
+/// `on-failure` said to go on: the phase and, when it exited, its status, as
+/// the warning's message takes them, and nothing the hook wrote.
+pub(crate) fn hook_warning(
+    operation: OperationId,
+    phase: HookPhase,
+    exit_code: Option<i32>,
+) -> UiEvent {
+    UiEvent::OperationWarning {
+        operation: operation.as_uuid().hyphenated().to_string(),
+        code: WarningCode::HookWarning,
+        args: std::iter::once(phase.as_env().to_owned())
+            .chain(exit_code.map(|code| code.to_string()))
+            .map(MsgArg::Text)
+            .collect(),
     }
 }
 

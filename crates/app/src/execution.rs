@@ -15,7 +15,7 @@ use domain::{OperationId, RepositoryId, SignedDuration, SnapshotId};
 use futures::future::{BoxFuture, Fuse, FusedFuture};
 use futures::{FutureExt, StreamExt, select_biased};
 
-use crate::announce::{announce_end, announce_start};
+use crate::announce::{announce_end, announce_start, hook_warning};
 use crate::full_disk_access::FullDiskAccessCheck;
 use crate::log_write::save_within_bound;
 use crate::ports::{
@@ -655,7 +655,7 @@ impl RunOperation {
                 return;
             }
             if entry.on_failure == OnFailure::Warn {
-                self.warn(run, HookPhase::Before, &outcome);
+                self.warn(run, HookPhase::Before, &outcome).await;
             }
         }
     }
@@ -677,7 +677,7 @@ impl RunOperation {
                 let context = self.context(run, &setup, phase);
                 let outcome = hooks.runner.run(entry, &context, &setup.redactor).await;
                 if !outcome.succeeded() && entry.on_failure != OnFailure::Ignore {
-                    self.warn(run, phase, &outcome);
+                    self.warn(run, phase, &outcome).await;
                 }
             }
         }
@@ -685,7 +685,7 @@ impl RunOperation {
             let context = self.context(run, &setup, HookPhase::Finally);
             let outcome = hooks.runner.run(entry, &context, &setup.redactor).await;
             if !outcome.succeeded() && entry.on_failure != OnFailure::Ignore {
-                self.warn(run, HookPhase::Finally, &outcome);
+                self.warn(run, HookPhase::Finally, &outcome).await;
             }
         }
     }
@@ -711,15 +711,25 @@ impl RunOperation {
     }
 
     /// Attaches a hook's failure as a warning, with how it ended and no
-    /// English: a code's own words are the renderer's business (§8.4).
-    fn warn(&self, run: &mut Run, phase: HookPhase, outcome: &HookOutcome) {
+    /// English: a code's own words are the renderer's business (§8.4). An
+    /// open page is told of it as it happens, as it is of an engine's
+    /// warning (#369).
+    async fn warn(&self, run: &mut Run, phase: HookPhase, outcome: &HookOutcome) {
         let warning = Warning {
             kind: WarningKind::Hook,
             item: None,
             during: phase.as_env().to_owned(),
             detail: outcome_detail(outcome),
         };
-        let _ = run.operation.attach_warning(warning);
+        if run.operation.attach_warning(warning).is_err() {
+            return;
+        }
+        if let Some(events) = &self.events {
+            let exit_code = end_of(outcome).and_then(HookEnd::exit_code);
+            events
+                .publish(hook_warning(run.operation.id(), phase, exit_code))
+                .await;
+        }
     }
 
     fn fail(&self, run: &mut Run, reason: FailureReason) {
@@ -1069,6 +1079,118 @@ mod tests {
             "not-started"
         );
         assert_eq!(super::outcome_detail(&outcome(HookStatus::Succeeded)), "");
+    }
+
+    /// What an open page is told of a run whose plan has a failing after
+    /// hook (exit 3) and a finally hook that runs out of time, both with
+    /// `on-failure = "warn"`, and how the run ended. `cancel` ends the run
+    /// before its engine reports anything.
+    async fn told_of_hook_warnings(cancel: bool) -> (Vec<api::UiEvent>, OperationStatus) {
+        use futures::{FutureExt, StreamExt};
+
+        use crate::fakes::{FakeHookRunner, InMemoryEventBus, Scripted};
+        use crate::ports::{EventBus, FakeEnd, FakeJob, Job};
+
+        let warn = |name: &str| {
+            HookEntry::new(name, ["demo"], OnFailure::Warn).expect("the demo hook is valid")
+        };
+        let runner = Arc::new(FakeHookRunner::new());
+        runner.script("after", Scripted::fails_with(3));
+        runner.script("finally", Scripted::times_out());
+        let bus = Arc::new(InMemoryEventBus::new());
+        let mut heard = bus.subscribe().await;
+        let events = if cancel {
+            Vec::new()
+        } else {
+            vec![
+                EngineEvent::Started {
+                    index_read_at: t(1),
+                    repository: None,
+                },
+                EngineEvent::Succeeded(backup_result()),
+            ]
+        };
+        let use_case = RunOperation::new(
+            Arc::new(Reports(events)),
+            Arc::new(FakeClock::new(t(0))),
+            Arc::new(InMemoryOperationStore::new()),
+        )
+        .with_hooks(
+            runner,
+            HookSetup {
+                agent: Hooks::default(),
+                repository: Hooks::default(),
+                plan: Hooks {
+                    run_after: vec![warn("after")],
+                    run_finally: vec![warn("finally")],
+                    ..Hooks::default()
+                },
+                plan_id: PlanId::parse("demo-plan").expect("the demo plan parses"),
+                repository_alias: RepositoryAlias::parse("nas").expect("the demo alias parses"),
+                redactor: Default::default(),
+            },
+        )
+        .with_events(bus);
+        let job = Job::Fake(FakeJob {
+            steps: 0,
+            step_delay: std::time::Duration::ZERO,
+            warnings: Vec::new(),
+            end: FakeEnd::Succeed,
+            deadline_budget: None,
+        });
+        let id = OperationId::from_uuid(uuid::Uuid::from_u128(9));
+        let finished = if cancel {
+            use_case
+                .run(id, Trigger::Manual, job, std::future::ready(()))
+                .await
+        } else {
+            use_case
+                .run(id, Trigger::Manual, job, std::future::pending::<()>())
+                .await
+        };
+        // Every publish was awaited before the run returned, so what the
+        // page was told is waiting in its queue; the stream itself never
+        // ends.
+        let mut warnings = Vec::new();
+        while let Some(Some(event)) = heard.next().now_or_never() {
+            if matches!(event, api::UiEvent::OperationWarning { .. }) {
+                warnings.push(event);
+            }
+        }
+        (warnings, finished.operation.status().clone())
+    }
+
+    /// An open page is told of each hook's warning as the hook ends, with
+    /// its phase and, for an exit, its status, as the history shows it
+    /// (#369).
+    #[tokio::test]
+    async fn a_hook_warning_is_told_with_its_phase_and_its_exit_status() {
+        let text = |text: &str| api::MsgArg::Text(text.to_owned());
+        let warning = |args| api::UiEvent::OperationWarning {
+            operation: "00000000-0000-0000-0000-000000000009".to_owned(),
+            code: api::WarningCode::HookWarning,
+            args,
+        };
+        assert_eq!(
+            told_of_hook_warnings(false).await,
+            (
+                vec![
+                    warning(vec![text("after"), text("3")]),
+                    warning(vec![text("finally")]),
+                ],
+                OperationStatus::SucceededWithWarnings
+            )
+        );
+    }
+
+    /// A cancelled operation keeps no warning, so a page is told of none,
+    /// though its finally hook ran and failed.
+    #[tokio::test]
+    async fn a_hook_warning_a_cancelled_operation_does_not_keep_is_not_told() {
+        assert_eq!(
+            told_of_hook_warnings(true).await,
+            (Vec::new(), OperationStatus::Cancelled)
+        );
     }
 
     /// What the job's secrets told is the run's from its start, not the
