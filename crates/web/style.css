@@ -938,8 +938,8 @@ textarea.text-field-input {
   }
 }
 
-/* A group of choices, such as an API token's scopes: named by its legend,
-   which reads as a field's label does, without the browser's frame. */
+/* A group of choices, such as an API token's permissions: named by its
+   legend, which reads as a field's label does, without the browser's frame. */
 fieldset.choices {
   border: 0;
   margin-block: 1rem;

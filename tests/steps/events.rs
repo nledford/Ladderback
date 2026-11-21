@@ -651,6 +651,10 @@ pub(crate) async fn save_daemon_config(agent: &Agent, keep_last: Option<i64>) {
         Some(notifications) => config.with_notifications(notifications.clone()),
         None => Ok(config),
     })
+    .map(|config| match agent.backup.without_token {
+        Some(permissions) => config.with_without_token(permissions),
+        None => config,
+    })
     .expect("a valid configuration");
     let dir = Events::config_dir(agent);
     std::fs::create_dir_all(&dir).expect("the config folder");

@@ -1,0 +1,2056 @@
+use super::*;
+
+fn redactor(secrets: &[&str]) -> Redactor {
+    let secrets: Vec<SecretValue> = secrets.iter().map(|&s| SecretValue::new(s)).collect();
+    Redactor::new(&secrets)
+}
+
+#[test]
+fn a_secret_never_shows_in_its_debug_form() {
+    let secret = SecretValue::new("hunter2");
+    let debug = format!("{secret:?}");
+    assert!(!debug.contains("hunter2"), "{debug}");
+    assert!(
+        debug.contains(REDACTED),
+        "a masked value still shows: {debug}"
+    );
+    assert_eq!(secret.expose(), "hunter2");
+}
+
+/// A secret wipes its bytes when it is dropped (it is `ZeroizeOnDrop`).
+/// What its drop does is done here to one still in scope, so what is
+/// left of it can be looked at; a clone has bytes of its own and is
+/// wiped on its own.
+#[test]
+fn a_secret_wiped_as_its_drop_wipes_it_keeps_none_of_its_bytes() {
+    fn wiped_on_drop(_: &impl zeroize::ZeroizeOnDrop) {}
+    let mut secret = SecretValue::new("canary-7f3a");
+    let mut clone = secret.clone();
+    wiped_on_drop(&secret);
+
+    zeroize::Zeroize::zeroize(&mut secret);
+
+    assert_eq!(secret.expose(), "");
+    assert_eq!(clone.expose(), "canary-7f3a");
+    zeroize::Zeroize::zeroize(&mut clone);
+    assert_eq!(clone.expose(), "");
+}
+
+#[test]
+fn a_redactor_never_shows_what_it_hides_in_its_debug_form() {
+    let debug = format!("{:?}", redactor(&["hunter2", "tok-ABC", "a b"]));
+    for secret in ["hunter2", "tok-ABC", "tok-abc", "a%20b"] {
+        assert!(!debug.contains(secret), "{secret} leaked: {debug}");
+    }
+    assert!(debug.contains("Redactor"), "{debug}");
+}
+
+#[test]
+fn a_secret_that_overlaps_itself_is_replaced_whole() {
+    for (secret, text) in [
+        ("abab", "ababab"),
+        ("abcabc", "abcabcabc"),
+        ("aaaa", "aaaaa"),
+    ] {
+        assert_eq!(
+            redactor(&[secret]).redact(text),
+            "***",
+            "{secret} in {text}"
+        );
+    }
+    // At character boundaries, with text around it.
+    assert_eq!(redactor(&["éé"]).redact("xéééy"), "x***y");
+}
+
+#[test]
+fn every_occurrence_of_every_secret_is_replaced() {
+    let redactor = redactor(&["hunter2", "s3cr3t"]);
+    assert_eq!(
+        redactor.redact("hunter2 then s3cr3t then hunter2"),
+        "*** then *** then ***"
+    );
+}
+
+#[test]
+fn a_secret_inside_a_url_is_replaced_in_its_encoded_form() {
+    let redactor = redactor(&["p@ss word/1"]);
+    assert_eq!(
+        redactor.redact("rest:https://demo:p%40ss%20word%2F1@nas/ and p%40ss%20word%2f1"),
+        "rest:https://demo:***@nas/ and ***"
+    );
+}
+
+/// The url crate leaves `!`, `$`, `&` and the like unencoded in a
+/// userinfo, and rustic quotes URLs as the url crate writes them.
+#[test]
+fn a_secret_is_replaced_as_the_url_crate_encodes_a_userinfo() {
+    let redactor = redactor(&["P@ssw0rd!"]);
+    assert_eq!(
+        redactor.redact("URL `rest:https://demo:P%40ssw0rd!@nas:80x/b` parsing failed"),
+        "URL `rest:https://demo:***@nas:80x/b` parsing failed"
+    );
+}
+
+#[test]
+fn lowercase_percent_encoding_keeps_the_letters_case() {
+    let redactor = redactor(&["Ab/C"]);
+    assert_eq!(redactor.redact("x Ab%2fC x"), "x *** x");
+}
+
+/// A library that logs a value with `{:?}` prints a secret in it escaped:
+/// rustic logs the command it starts rclone with so, the location last
+/// (#330).
+#[test]
+fn a_secret_is_replaced_as_a_debug_form_escapes_it() {
+    let secret = "CANARY\"quote\\slash\ttab\u{1}e\u{301}";
+    let whole = redactor(&[secret]);
+    let command = ["rclone", &format!(":s3,secret_access_key={secret}:b")];
+    assert_eq!(
+        whole.redact(&format!("starting rclone via {command:?}")),
+        r#"starting rclone via ["rclone", ":s3,secret_access_key=***:b"]"#
+    );
+    assert_eq!(whole.redact(&format!("{secret:#?}")), r#""***""#);
+    // Its other raw forms too: without the white space around it, and
+    // each line of one that spans lines.
+    let key = "CANARY\"line-one\nCANARY\\line-two\n";
+    let by_line = redactor(&[key]);
+    for logged in [key.trim(), "CANARY\"line-one", "CANARY\\line-two"] {
+        assert_eq!(by_line.redact(&format!("{logged:?}")), r#""***""#);
+    }
+}
+
+/// rclone, written in Go, quotes what it can't serve as `%q` does
+/// (`Failed to create file system for "…"`): a control character as
+/// `\x01` or `\a`, a format character, a separator other than the space,
+/// a private-use or unassigned character as `\u200b` or `\U000e0001`, and
+/// a combining character as it is, where `Debug` escapes it (#331). The
+/// quoted forms are Go's own, from `strconv.Quote`.
+#[test]
+fn a_secret_is_replaced_as_go_quotes_it() {
+    let masked = "CRITICAL: Failed to create file system for \
+                  \":s3,secret_access_key=***:demo-bucket/repo\": demo error";
+    for (secret, quoted) in [
+        (
+            "CANARY\u{1}bell\u{7}del\u{7f}nul\u{0}",
+            r"CANARY\x01bell\adel\x7fnul\x00",
+        ),
+        ("CANARY\u{8}\u{c}\u{b}\r", r"CANARY\b\f\v\r"),
+        (
+            "CANARY\u{200b}zw\u{85}nel\u{a0}nbsp\u{2028}ls\u{e000}pua\u{378}na\u{e0001}tag\u{ffff}",
+            r"CANARY\u200bzw\u0085nel\u00a0nbsp\u2028ls\ue000pua\u0378na\U000e0001tag\uffff",
+        ),
+        (
+            "CANARY'it\"s\\e\u{301}\t\u{1}",
+            "CANARY'it\\\"s\\\\e\u{301}\\t\\x01",
+        ),
+        // A variation selector, the combining grapheme joiner and a
+        // Hangul filler print in Go; newer Rust's `Debug` escapes them.
+        (
+            "CANARY\u{fe0f}\u{34f}\u{115f}\u{1}",
+            "CANARY\u{fe0f}\u{34f}\u{115f}\\x01",
+        ),
+    ] {
+        let line = format!(
+            "CRITICAL: Failed to create file system for \
+             \":s3,secret_access_key={quoted}:demo-bucket/repo\": demo error"
+        );
+        assert_eq!(redactor(&[secret]).redact(&line), masked, "{secret:?}");
+    }
+    // Its other raw forms too: without the white space around it, and
+    // each line of one that spans lines.
+    let by_line = redactor(&["  CANARY\u{1}line-one\nCANARY\u{7f}line-two\n"]);
+    for quoted in [
+        r"CANARY\x01line-one\nCANARY\x7fline-two",
+        r"CANARY\x01line-one",
+        r"CANARY\x7fline-two",
+    ] {
+        assert_eq!(by_line.redact(&format!("\"{quoted}\"")), r#""***""#);
+    }
+}
+
+/// A secret in a TOML file (`config.toml`, a rustic profile) is written
+/// in a basic string with TOML's escapes: `\b`, `\t`, `\n`, `\f`, `\r`,
+/// `\e`, `\"` and `\\`, any character as `\xHH`, `\uHHHH` or
+/// `\UHHHHHHHH` in either case, which the `toml` crate writes for a
+/// control character (`\u0007`), or a person for any one (#839). Text
+/// that quotes such a file shows the secret so, and it is masked whole.
+#[test]
+fn a_secret_is_replaced_as_toml_escapes_it() {
+    for (secret, written) in [
+        ("canary\u{7}bell", r"canary\u0007bell"),
+        ("canary\u{7}bell", r"canary\U00000007bell"),
+        ("canary\u{7}bell", r"canary\x07bell"),
+        ("canary\u{1b}bell", r"canary\u001Bbell"),
+        ("canary\u{1b}bell", r"canary\u001bbell"),
+        ("canary\u{1b}bell", r"canary\ebell"),
+        ("canary\u{c}bell\u{8}", r"canary\u000Cbell\b"),
+        ("canary\u{7f}del", r"canary\u007Fdel"),
+        ("canary\"it\\s\t\n\r", r#"canary\"it\\s\t\n\r"#),
+        // Any character may be escaped, a letter or one beyond the BMP.
+        ("canary-bell", r"\u0063anary\x2Dbe\U0000006Cl"),
+        ("canary\u{1f600}", r"canary\U0001F600"),
+    ] {
+        let line = format!("password = \"{written}\"");
+        assert_eq!(
+            redactor(&[secret]).redact(&line),
+            r#"password = "***""#,
+            "{secret:?} written {written:?}"
+        );
+        assert_eq!(
+            Redactor::redact_together([&redactor(&["other"]), &redactor(&[secret])], &line),
+            r#"password = "***""#,
+            "{secret:?} written {written:?}, masked together"
+        );
+    }
+}
+
+/// A multi-line basic string may break a secret at a backslash that
+/// ends a line: TOML drops it, the line break and the white space up to
+/// the next character, line breaks included. The secret is masked whole,
+/// from its first character to its last, with the break inside it.
+#[test]
+fn a_secret_broken_by_a_line_ending_backslash_is_replaced_whole() {
+    let redactor = redactor(&["canary-bell demo"]);
+    for written in [
+        "canary-\\\n    bell demo",
+        "canary-\\  \r\n\n\t  bell\\u0020demo",
+        "can\\\nary-bell\\\n \\u0020\\\n demo",
+    ] {
+        assert_eq!(
+            redactor.redact(&format!("password = \"\"\"\n{written}\"\"\"\n")),
+            "password = \"\"\"\n***\"\"\"\n",
+            "{written:?}"
+        );
+    }
+}
+
+/// A text masked a line at a time (a worker's stderr, a log record)
+/// splits a multi-line string where a backslash ends a line. A line
+/// that ends so is masked as a cut one is, from where a secret the
+/// break may go through begins; an escape open at the end of a whole
+/// text, or a line end after no start of a secret, is text.
+#[test]
+fn a_line_that_ends_in_a_line_ending_backslash_is_masked_as_a_cut_one() {
+    let redactor = redactor(&["canary-bell demo"]);
+    for line in [
+        "password = \"\"\"canary-\\",
+        "password = \"\"\"canary-\\ \t",
+        "password = \"\"\"canary-\\\r",
+        "password = \"\"\"can\\u0061ry-\\",
+    ] {
+        assert_eq!(redactor.redact(line), "password = \"\"\"***", "{line:?}");
+    }
+    for line in [
+        r"canary\u00",
+        r"canary\x0",
+        r"canary\U0",
+        r"C:\temp\",
+        "done \\  ",
+    ] {
+        assert_eq!(redactor.redact(line), line);
+    }
+}
+
+/// A text masked a line at a time splits a multi-line string where a
+/// backslash ends a line, and the rest of a secret the break went
+/// through begins the next line, after the white space TOML drops. A
+/// text that begins, after its white space, with the last 4 bytes or
+/// more of a secret is masked from there to where the secret ends,
+/// however it is masked (#861).
+#[test]
+fn a_text_that_begins_with_the_end_of_a_secret_is_masked_to_where_it_ends() {
+    let redactor = redactor(&["canary-bell demo"]);
+    for (line, masked) in [
+        ("bell demo\"\"\"", "***\"\"\""),
+        ("    bell demo\"\"\"", "    ***\"\"\""),
+        ("\t \t-bell demo\"\"\"", "\t \t***\"\"\""),
+        ("demo, it said", "***, it said"),
+        (" \tdemo", " \t***"),
+    ] {
+        assert_eq!(redactor.redact(line), masked, "{line:?}");
+        assert_eq!(redactor.redact_cut(line.as_bytes()), masked, "{line:?} cut");
+        assert_eq!(
+            redactor.redact_clipped(&format!("{line}…"), "…"),
+            format!("{masked}…"),
+            "{line:?} clipped"
+        );
+        assert_eq!(
+            Redactor::redact_together([&redactor], line),
+            masked,
+            "{line:?} together"
+        );
+    }
+    // The end of a form of a secret, as `Debug` writes it.
+    let bell = super::Redactor::new(&[SecretValue::new("canary\u{7}bell")]);
+    assert_eq!(bell.redact("{7}bell failed"), "*** failed");
+}
+
+/// TOML drops only spaces, tabs and line breaks after a line-ending
+/// backslash, so other white space (a no-break space, an ideographic
+/// space) may begin the rest of a secret and is masked with it. Where
+/// the text begins with such white space and a tail follows it, that
+/// tail is masked too.
+#[test]
+fn white_space_toml_keeps_after_a_break_is_masked_with_the_rest_of_a_secret() {
+    for (secret, line, masked) in [
+        ("canary-bell\u{3000}xyz", "\u{3000}xyz\"\"\"", "***\"\"\""),
+        ("canary-bell\u{a0}wxyz", "\u{a0}wxyz\"\"\"", "***\"\"\""),
+        ("canary-bell\u{a0}wxyz", "  \u{a0}wxyz\"\"\"", "  ***\"\"\""),
+        (
+            "canary-bell demo",
+            "\u{3000}bell demo\"\"\"",
+            "\u{3000}***\"\"\"",
+        ),
+    ] {
+        let redactor = redactor(&[secret]);
+        assert_eq!(redactor.redact(line), masked, "{line:?}");
+        assert_eq!(redactor.redact_cut(line.as_bytes()), masked, "{line:?} cut");
+    }
+}
+
+/// A tail of 1 to 3 bytes stays: it is too short to tell from other
+/// text. Nor is a tail masked anywhere but at the start of the text.
+#[test]
+fn only_a_text_that_begins_with_four_bytes_or_more_of_the_end_of_a_secret_is_masked_so() {
+    let redactor = redactor(&["canary-bell demo"]);
+    assert_eq!(redactor.redact("  demo"), "  ***");
+    for text in [
+        "emo said",
+        "  emo",
+        "mo",
+        "o",
+        "a demo",
+        "said: demo",
+        "x\n demo",
+        "bell dem",
+        "",
+        "   ",
+    ] {
+        assert_eq!(redactor.redact(text), text, "{text:?}");
+        assert_eq!(redactor.redact_cut(text.as_bytes()), text, "{text:?} cut");
+    }
+}
+
+/// The rest of a secret after a line-ending backslash is TOML too, and
+/// may be written with its escapes: it is read as TOML reads it, and a
+/// tail of 4 bytes or more of the secret as read is masked, the escapes
+/// it was read from included.
+#[test]
+fn a_secret_broken_by_a_line_ending_backslash_is_masked_line_by_line() {
+    let redactor = redactor(&["canary-bell demo"]);
+    let file = "password = \"\"\"canary-\\\n    bell\\u0020demo\"\"\"\n";
+    let masked: Vec<String> = file.lines().map(|line| redactor.redact(line)).collect();
+    assert_eq!(masked, ["password = \"\"\"***", "    ***\"\"\""]);
+    for (line, masked) in [
+        (r#"\u0064emo""""#, r#"***""""#),
+        (r#"  \x64\x65\x6d\x6F""""#, r#"  ***""""#),
+        (r"-\U00000062ell demo, it said", "***, it said"),
+    ] {
+        assert_eq!(redactor.redact(line), masked, "{line:?}");
+        assert_eq!(redactor.redact_cut(line.as_bytes()), masked, "{line:?} cut");
+    }
+    // Three bytes of it, however written, stay.
+    for line in [r#"\u0065mo""""#, r#"  e\x6do""""#] {
+        assert_eq!(redactor.redact(line), line, "{line:?}");
+    }
+}
+
+/// A text cut inside an escape (`\u00` of `\u0007`) may end partway
+/// through a secret: it is masked from where the secret begins, the
+/// escape included, as a cut text is (`redact_cut`, `redact_clipped`).
+#[test]
+fn a_text_cut_inside_a_toml_escape_is_masked_from_where_the_secret_begins() {
+    let redactor = redactor(&["canary\u{7}bell"]);
+    for (kept, masked) in [
+        (r#"password = "canary\u00"#, r#"password = "***"#),
+        (r#"password = "canary\U0000000"#, r#"password = "***"#),
+        (r#"password = "canary\x0"#, r#"password = "***"#),
+        (r#"password = "\u0063anary\u0"#, r#"password = "***"#),
+        // Where the escape may begin the secret, it is masked alone.
+        (r#"password = "\u006"#, r#"password = "***"#),
+        ("password = \"\"\"\ncanary\\\n  ", "password = \"\"\"\n***"),
+    ] {
+        assert_eq!(redactor.redact_cut(kept.as_bytes()), masked, "{kept:?}");
+        assert_eq!(
+            redactor.redact_clipped(&format!("{kept}…"), "…"),
+            format!("{masked}…"),
+            "{kept:?} clipped"
+        );
+    }
+}
+
+/// Each of TOML's short escapes is read as its character: beside a
+/// `\u0007`, which neither `Debug` nor Go writes so, only TOML's reading
+/// finds the secret.
+#[test]
+fn each_short_escape_of_toml_is_read_as_its_character() {
+    for (c, written) in [
+        ('\u{8}', r"\b"),
+        ('\t', r"\t"),
+        ('\n', r"\n"),
+        ('\u{c}', r"\f"),
+        ('\r', r"\r"),
+        ('\u{1b}', r"\e"),
+        ('"', r#"\""#),
+        ('\\', r"\\"),
+    ] {
+        let secret = format!("canary{c}\u{7}");
+        assert_eq!(
+            redactor(&[&secret]).redact(&format!(r#"password = "canary{written}\u0007""#)),
+            r#"password = "***""#,
+            "{written}"
+        );
+    }
+}
+
+/// A line-ending backslash drops the line breaks after it, a CRLF
+/// among them; a backslash and white space before anything but a line
+/// break is no line end. A text cut partway through one, after the
+/// start of a secret, is masked from there, between the CR and the LF
+/// of a later break too.
+#[test]
+fn a_line_ending_backslash_is_read_only_before_a_line_break() {
+    let redactor = redactor(&["canary-bell demo"]);
+    assert_eq!(
+        redactor.redact("\"\"\"canary-\\\n\r\n  bell demo\"\"\""),
+        "\"\"\"***\"\"\""
+    );
+    let no_line_end = r#""canary-\ bell demo""#;
+    assert_eq!(redactor.redact(no_line_end), no_line_end);
+    for kept in [
+        "\"\"\"canary-\\  ",
+        "\"\"\"canary-\\ \r",
+        "\"\"\"canary-\\",
+        "\"\"\"canary-\\\n\r",
+        "\"\"\"canary-\\\n  \r",
+        "\"\"\"canary-\\\r\n\r",
+    ] {
+        assert_eq!(
+            redactor.redact_cut(kept.as_bytes()),
+            "\"\"\"***",
+            "{kept:?}"
+        );
+    }
+}
+
+/// What reads as no escape is text, and a text cut inside an escape that
+/// can't begin a secret is kept: `\u01` can't be how `c` starts, nor
+/// `\u` how a character beyond the BMP does. A line end begins nothing,
+/// but a backslash alone may begin any escape, and is masked.
+#[test]
+fn an_escape_that_stands_for_no_secret_leaves_the_text_as_it_was() {
+    let redactor = redactor(&["canary\u{7}bell"]);
+    for text in [
+        r"C:\new\temp\canary",
+        r"\q \uZZZZ \uD800 \U00110000 \x",
+        r"done \u00",
+    ] {
+        assert_eq!(redactor.redact(text), text);
+    }
+    for kept in [r"done \u01", r"done \x7", r"done \U0001", "done \\ \t"] {
+        assert_eq!(redactor.redact_cut(kept.as_bytes()), kept);
+    }
+    for kept in [r"done \", r"done \x6", r"done \U0000006"] {
+        assert_eq!(redactor.redact_cut(kept.as_bytes()), "done ***", "{kept:?}");
+    }
+    // The largest character each escape writes; Go writes U+FFFF as
+    // `\uffff`, so the upper case is TOML's alone. (A shorter escape
+    // may still write the `%` its URL-encoded needles begin with.)
+    for (secret, fits) in [
+        ("\u{ff}canary", r"done \xF"),
+        ("\u{ffff}canary", r"done \uFF"),
+        ("\u{1f600}canary", r"done \U0001f"),
+    ] {
+        let largest = super::Redactor::new(&[SecretValue::new(secret)]);
+        assert_eq!(largest.redact_cut(fits.as_bytes()), "done ***", "{fits:?}");
+    }
+    // The end of a text that isn't cut is text, and what it ends a
+    // secret with is read so.
+    let ends_open = super::Redactor::new(&[SecretValue::new("canary\u{7}C:\\u")]);
+    assert_eq!(ends_open.redact(r"x canary\u0007C:\u"), "x ***");
+}
+
+/// A text whose backslashes stand for nothing is looked at once per
+/// needle, as one without them: only a text with an escape in it, or a
+/// cut one, is read again as TOML reads it.
+#[test]
+fn a_text_whose_backslashes_stand_for_nothing_is_not_read_again() {
+    let redactor = redactor(&["canary\u{7}bell"]);
+    let text = r"done \q \u00 \x";
+    let (masked, work) = compared(|| redactor.redact(text));
+    assert_eq!(masked, text);
+    let without = r"done /q /u00 /x";
+    assert_eq!(work, compared(|| redactor.redact(without)).1);
+}
+
+/// A secret Go prints as it is, `'` and a combining character included,
+/// adds no needle: only what Go escapes costs one.
+#[test]
+fn a_secret_go_prints_as_it_is_has_no_go_quoted_form() {
+    assert_eq!(go_quoted("CANARY 'plain' e\u{301}"), None);
+    assert_eq!(go_quoted("CANARY\u{1}"), Some(r"CANARY\x01".to_owned()));
+}
+
+/// A character is quoted as Go quotes it whatever Rust toolchain builds
+/// Ladderback: Rust 1.100's `Debug` escapes a combining mark even after
+/// a letter, and prints U+0558, which Unicode 17, Go 1.27's, hasn't
+/// assigned (#406).
+#[test]
+fn a_character_is_quoted_as_go_quotes_it_whatever_the_toolchain() {
+    // Nonspacing, enclosing and spacing marks.
+    assert_eq!(go_quoted("CANARY e\u{301}\u{489}\u{9be}"), None);
+    assert_eq!(go_quoted("CANARY\u{558}"), Some(r"CANARY\u0558".to_owned()));
+}
+
+/// Every character is quoted as Go 1.27.3's `strconv.Quote` quotes it
+/// (Unicode 17): the count of characters Go escapes and an FNV-1a hash
+/// of every quoted form, each followed by a line break, in order, are
+/// Go's own. [`go_prints`] reads a table generated from Unicode's tables,
+/// so this holds whatever Rust toolchain builds Ladderback; when rclone's
+/// Go moves to a new Unicode version, regenerate the table, quote every
+/// character with that Go again and pin its answer (technical design
+/// §10.2).
+#[test]
+fn every_character_is_quoted_as_go_quotes_it() {
+    let mut escaped = 0_u32;
+    let mut hash = 0xcbf2_9ce4_8422_2325_u64;
+    for c in (0..=u32::from(char::MAX)).filter_map(char::from_u32) {
+        let text = c.to_string();
+        let form = go_quoted(&text).inspect(|_| escaped += 1).unwrap_or(text);
+        for byte in form.bytes().chain(*b"\n") {
+            hash = (hash ^ u64::from(byte)).wrapping_mul(0x0100_0000_01b3);
+        }
+    }
+    assert_eq!((escaped, hash), (952_453, 0x7b11_61e7_95fe_c298));
+}
+
+#[test]
+fn a_secret_containing_another_is_replaced_whole() {
+    let redactor = redactor(&["abc", "abcdef"]);
+    assert_eq!(redactor.redact("xabcdefx abc"), "x***x ***");
+}
+
+/// Masked with each in turn, the mask of `CANARY-reused` would leave
+/// `-tail` of `CANARY-reused-tail`, and that one's mask would leave `-on`
+/// of `reused-tail-on`, or the other way round `CANARY-` of it.
+#[test]
+fn redactors_masking_together_replace_a_secret_of_one_holding_one_of_another_whole() {
+    let short = redactor(&["CANARY-reused"]);
+    let long = redactor(&["CANARY-reused-tail"]);
+    let overlapping = redactor(&["reused-tail-on"]);
+    for (redactors, text, masked) in [
+        ([&short, &long], "x CANARY-reused-tail y", "x *** y"),
+        ([&long, &short], "x CANARY-reused-tail y", "x *** y"),
+        (
+            [&long, &overlapping],
+            "x CANARY-reused-tail-on y",
+            "x *** y",
+        ),
+        (
+            [&overlapping, &long],
+            "x CANARY-reused-tail-on y",
+            "x *** y",
+        ),
+        ([&short, &long], "x CANARY-reused y", "x *** y"),
+        ([&short, &long], "nothing secret", "nothing secret"),
+    ] {
+        assert_eq!(Redactor::redact_together(redactors, text), masked);
+    }
+    assert_eq!(
+        Redactor::redact_together([], "nothing to mask"),
+        "nothing to mask"
+    );
+}
+
+#[test]
+fn redactors_masking_together_mask_every_text_whole_where_one_masks_everything() {
+    let everything = Redactor::masking_everything();
+    let some = redactor(&["CANARY-some"]);
+    for redactors in [
+        [&some, &everything],
+        [&everything, &some],
+        [&everything, &everything],
+    ] {
+        assert_eq!(Redactor::redact_together(redactors, "plain text"), REDACTED);
+        assert_eq!(Redactor::redact_together(redactors, ""), "");
+    }
+}
+
+#[test]
+fn secrets_that_overlap_are_replaced_as_one_span() {
+    let redactor = redactor(&["abcdefghij", "defghijklm"]);
+    assert_eq!(redactor.redact("abcdefghijklm"), "***");
+    assert_eq!(redactor.redact("x abcdefghijklm y"), "x *** y");
+}
+
+#[test]
+fn a_second_pass_over_a_secret_with_the_mask_character_never_reveals() {
+    // #287: it may mask more, but what is left besides masks is what the
+    // first pass left, in order, and never more of it.
+    let redactor = redactor(&["*?"]);
+    let once = redactor.redact("*??");
+    let twice = redactor.redact(&once);
+    assert!(!once.contains("??"), "{once:?}");
+    let mut first = once.chars().filter(|&c| c != '*');
+    assert!(
+        twice
+            .chars()
+            .filter(|&c| c != '*')
+            .all(|c| first.any(|f| f == c)),
+        "{once:?} then {twice:?}"
+    );
+}
+
+/// A mask that ends between the two backslashes of `\\` leaves the
+/// second before the text after it, where it can begin a TOML escape of
+/// another secret: a second pass masks that too, never less.
+#[test]
+fn a_second_pass_may_mask_a_toml_escape_a_mask_left_a_backslash_of() {
+    let redactor = redactor(&[r"\u0041Z\", "\u{7}bell"]);
+    let once = redactor.redact(r"x \u0041Z\\x07bell y");
+    assert_eq!(once, r"x ***\x07bell y");
+    assert_eq!(redactor.redact(&once), "x ****** y");
+}
+
+#[test]
+fn secrets_that_touch_are_replaced_as_one_span() {
+    let redactor = redactor(&["abc", "def"]);
+    assert_eq!(redactor.redact("abcdef ghi abc"), "*** ghi ***");
+}
+
+#[test]
+fn text_that_is_not_ascii_is_cut_only_at_character_boundaries() {
+    let redactor = redactor(&["päss", "ssé"]);
+    assert_eq!(redactor.redact("é pässéé ü"), "é ***é ü");
+}
+
+/// Where a secret may land in a URL, and what a URL parser makes of it:
+/// the parser, not the redactor, decides how it is printed, so the
+/// `url` crate is the oracle.
+#[derive(Clone, Copy, Debug)]
+enum Place {
+    Userinfo,
+    Host,
+    Path,
+    Query,
+    Fragment,
+}
+
+fn url_with(place: Place, secret: &str) -> String {
+    match place {
+        Place::Userinfo => format!("http://demo:{secret}@nas.example/b"),
+        Place::Host => format!("http://{secret}.example/b"),
+        Place::Path => format!("http://nas.example/{secret}/b"),
+        Place::Query => format!("http://nas.example/b?k={secret}&z=1"),
+        Place::Fragment => format!("http://nas.example/b#{secret}"),
+    }
+}
+
+#[test]
+fn a_secret_shows_nowhere_as_the_url_parser_prints_it() {
+    const PIECES: [&str; 14] = [
+        "a b:c",
+        "q=1&x y",
+        "\"q\\b",
+        "tab\there",
+        "nl\nine",
+        "it's",
+        "Host",
+        "ab+/=",
+        "100%",
+        "päss",
+        "a;b=c|d^e",
+        "x[y]z",
+        "{x} <y>",
+        "back`tick",
+    ];
+    let mut checked = 0;
+    for piece in PIECES {
+        let secret = format!("CANARY{piece}ZZEND");
+        for place in [
+            Place::Userinfo,
+            Place::Host,
+            Place::Path,
+            Place::Query,
+            Place::Fragment,
+        ] {
+            // What the parser refuses, or what changes the URL's shape
+            // (a `/` ends a host), is not a case of this kind.
+            // A host that isn't ASCII is written in punycode, which needs
+            // an IDNA library that the domain doesn't link: not covered.
+            if matches!(place, Place::Host) && !secret.is_ascii() {
+                continue;
+            }
+            let Ok(url) = url::Url::parse(&url_with(place, &secret)) else {
+                continue;
+            };
+            let kept_shape = match place {
+                Place::Host => url.host_str().is_some_and(|h| h.ends_with(".example")),
+                Place::Userinfo => {
+                    url.password().is_some() && url.host_str() == Some("nas.example")
+                }
+                _ => url.host_str() == Some("nas.example"),
+            };
+            if !kept_shape {
+                continue;
+            }
+            checked += 1;
+            let printed = url.as_str();
+            let redacted = redactor(&[&secret]).redact(printed).to_lowercase();
+            for marker in ["canary", "zzend"] {
+                assert!(
+                    !redacted.contains(marker),
+                    "{piece:?} in {place:?} shows as {printed:?}, redacted to {redacted:?}"
+                );
+            }
+        }
+    }
+    assert!(checked >= 50, "only {checked} cases ran");
+}
+
+/// The pieces of a secret that a URL parser takes apart: each of at
+/// least 8 bytes, in mixed case, so that a parser that lower-cases a host
+/// shows a piece in a case the secret doesn't have.
+const MARKERS: [&str; 3] = ["Canary-Alpha", "Bravo-Delta", "Echo-ZzEnd"];
+
+/// Secrets made of the markers and the characters a parser splits a URL
+/// at (`@`, `#`, `?`, `/`, `:`), in every order of two.
+fn splitting_secrets() -> Vec<String> {
+    let delimiters = ["@", "#", "?", "/", ":"];
+    let [first, second, third] = MARKERS;
+    let mut secrets = Vec::new();
+    for one in delimiters {
+        secrets.push(format!("{first}{one}{second}"));
+        for two in delimiters {
+            secrets.push(format!("{first}{one}{second}{two}{third}"));
+        }
+    }
+    secrets
+}
+
+const PLACES: [Place; 5] = [
+    Place::Userinfo,
+    Place::Host,
+    Place::Path,
+    Place::Query,
+    Place::Fragment,
+];
+
+/// A secret that holds a character a parser splits a URL at is shown in
+/// pieces, each as its part of the URL is printed (a host in lower case,
+/// a path as it is). The whole URL, as it is printed, shows none.
+#[test]
+fn a_secret_a_url_parser_splits_shows_nowhere_in_the_url_it_prints() {
+    let mut checked = 0;
+    for secret in splitting_secrets() {
+        let redactor = redactor(&[&secret]);
+        for place in PLACES {
+            // What the parser refuses is not a case of this kind.
+            let Ok(url) = url::Url::parse(&url_with(place, &secret)) else {
+                continue;
+            };
+            checked += 1;
+            let printed = url.as_str();
+            let redacted = redactor.redact(printed).to_lowercase();
+            for marker in MARKERS {
+                assert!(
+                    !redacted.contains(&marker.to_lowercase()),
+                    "{secret:?} in {place:?} shows as {printed:?}, redacted to {redacted:?}"
+                );
+            }
+        }
+    }
+    assert!(checked >= 70, "only {checked} cases ran");
+}
+
+/// A library that takes a URL apart may log its parts one by one. No part
+/// of a secret that is 8 bytes or more shows in any of them.
+#[test]
+fn the_parts_of_a_split_secret_show_nowhere_when_printed_one_by_one() {
+    let mut checked = 0;
+    for secret in splitting_secrets() {
+        let redactor = redactor(&[&secret]);
+        for place in PLACES {
+            let Ok(url) = url::Url::parse(&url_with(place, &secret)) else {
+                continue;
+            };
+            checked += 1;
+            let parts = [
+                url.username(),
+                url.password().unwrap_or_default(),
+                url.host_str().unwrap_or_default(),
+                url.path(),
+                url.query().unwrap_or_default(),
+                url.fragment().unwrap_or_default(),
+            ];
+            for part in parts {
+                let redacted = redactor.redact(part).to_lowercase();
+                for marker in MARKERS {
+                    assert!(
+                        !redacted.contains(&marker.to_lowercase()),
+                        "{secret:?} in {place:?}: the part {part:?} shows {marker}"
+                    );
+                }
+            }
+        }
+    }
+    assert!(checked >= 70, "only {checked} cases ran");
+}
+
+/// Pieces too short to be needles of their own (a secret may be made of
+/// them) still show nowhere in the URL that is printed whole, where the
+/// parser writes each in its part's way.
+#[test]
+fn a_secret_of_short_pieces_shows_nowhere_in_the_url_it_prints() {
+    let markers = ["Qx1", "Zy2", "Wv3"];
+    let delimiters = ["@", "#", "?", "/", ":"];
+    let [first, second, third] = markers;
+    let secrets = delimiters.into_iter().flat_map(|one| {
+        delimiters.into_iter().flat_map(move |two| {
+            [
+                format!("{first}{one}{second}"),
+                format!("{first}{one}{second}{two}{third}"),
+            ]
+        })
+    });
+    let mut checked = 0;
+    for secret in secrets {
+        let redactor = redactor(&[&secret]);
+        for place in PLACES {
+            let Ok(url) = url::Url::parse(&url_with(place, &secret)) else {
+                continue;
+            };
+            checked += 1;
+            let printed = url.as_str();
+            let redacted = redactor.redact(printed).to_lowercase();
+            assert!(
+                !redacted.contains("qx1") && !redacted.contains("zy2"),
+                "{secret:?} in {place:?} shows as {printed:?}, redacted to {redacted:?}"
+            );
+        }
+    }
+    assert!(checked >= 100, "only {checked} cases ran");
+}
+
+/// A piece of 8 bytes is a needle of its own; one of 7 is not, or it
+/// would mask ordinary text.
+#[test]
+fn a_piece_of_a_split_secret_is_masked_alone_from_8_bytes_on() {
+    let redactor = redactor(&["Abcdefgh/ijklmno@Pqrstuvw"]);
+    assert_eq!(redactor.redact("x Abcdefgh y"), "x *** y");
+    assert_eq!(redactor.redact("x Pqrstuvw y"), "x *** y");
+    assert_eq!(redactor.redact("x ijklmno y"), "x ijklmno y");
+    // ... and as a host writes it.
+    assert_eq!(redactor.redact("x abcdefgh y"), "x *** y");
+}
+
+/// The pieces of a secret that are needles of their own are limited, the
+/// first ones kept.
+#[test]
+fn only_the_first_64_pieces_of_a_secret_are_needles_of_their_own() {
+    let piece = |n: usize| format!("piece{n:03}x");
+    let secret: Vec<String> = (0..65).map(piece).collect();
+    let redactor = redactor(&[&secret.join("/")]);
+    assert_eq!(redactor.redact(&piece(0)), "***");
+    assert_eq!(redactor.redact(&piece(63)), "***");
+    // Not at the start of a text, where it would be the end of the secret.
+    let later = format!("x {}", piece(64));
+    assert_eq!(redactor.redact(&later), later);
+}
+
+/// A piece that is the same in every rewrite of a secret takes one place
+/// of the 64, not one for each rewrite, so the pieces that only a rewrite
+/// has (a `\` is read as `/`) still find a place.
+#[test]
+fn a_piece_that_every_rewrite_has_takes_one_place_of_the_64() {
+    let secret: Vec<String> = (0..40)
+        .map(|n| format!("a{n:02}-head\\z{n:02}-tail"))
+        .collect();
+    let redactor = redactor(&[&secret.join("/")]);
+    assert_eq!(redactor.redact("z00-tail"), "***");
+    assert_eq!(redactor.redact("z11-tail"), "***");
+}
+
+/// The secret as it is written when it starts in a part of the URL and
+/// is carried over into the next at each delimiter.
+#[test]
+fn a_secret_is_written_part_by_part_as_the_parts_of_a_url_write_it() {
+    use Stage::{Host, Path, Query};
+    let write = |value, start, special, caret| written_across_parts(value, start, special, caret);
+    // A host is lower-cased, the rest of it is not.
+    assert_eq!(write("Ab/Cd?Ef#Gh", Host, false, false), "ab/Cd?Ef#Gh");
+    // A special URL has the path `/` when it has none.
+    assert_eq!(write("Ab?Cd", Host, true, false), "ab/?Cd");
+    assert_eq!(write("Ab#Cd", Host, true, false), "ab/#Cd");
+    assert_eq!(write("Ab/Cd", Host, true, false), "ab/Cd");
+    assert_eq!(write("Ab?Cd", Host, false, false), "ab?Cd");
+    assert_eq!(write("Ab#Cd", Host, false, false), "ab#Cd");
+    // A path escapes its own set, and a `^` as the newer standard does.
+    assert_eq!(
+        write("a b{c}`d^e", Path, false, false),
+        "a%20b%7Bc%7D%60d^e"
+    );
+    assert_eq!(
+        write("a b{c}`d^e", Path, false, true),
+        "a%20b%7Bc%7D%60d%5Ee"
+    );
+    // The query escapes its own, and `'` in a special URL's.
+    assert_eq!(
+        write("a'b\"c<d>e f", Query, false, false),
+        "a'b%22c%3Cd%3Ee%20f"
+    );
+    assert_eq!(
+        write("a'b\"c<d>e f", Query, true, false),
+        "a%27b%22c%3Cd%3Ee%20f"
+    );
+    // `?` ends a path but not a query; `#` ends them both, and not a
+    // fragment, which escapes only its own.
+    assert_eq!(
+        write("a?b/c d#e?f#g`h'i", Path, true, false),
+        "a?b/c%20d#e?f#g%60h'i"
+    );
+    assert_eq!(write("a?b#c", Query, true, false), "a?b#c");
+    assert_eq!(write("a b#c d", Query, false, false), "a%20b#c%20d");
+    // The userinfo of a host: split at its last `@`, its user name from
+    // its password at the first `:`, each escaped as a userinfo is.
+    assert_eq!(
+        write("Us:Pa:ss@Ho/St", Host, false, false),
+        "Us:Pa%3Ass@ho/St"
+    );
+    assert_eq!(write("A@b/c@D", Host, false, false), "A@b/c@D");
+    assert_eq!(write("A/b@C@D", Host, false, false), "a/b@C@D");
+    assert_eq!(write("Us@Ho", Host, false, false), "Us@ho");
+    assert_eq!(write("U@s@Ho", Host, false, false), "U%40s@ho");
+    assert_eq!(write("U s:P w@Ho", Host, false, false), "U%20s:P%20w@ho");
+}
+
+#[test]
+fn an_empty_secret_redacts_nothing() {
+    assert_eq!(redactor(&[""]).redact("text"), "text");
+    assert_eq!(redactor(&[]).redact("text"), "text");
+}
+
+fn passwords(repository: &str) -> Vec<String> {
+    url_passwords(repository)
+        .iter()
+        .map(|secret| secret.expose().to_owned())
+        .collect()
+}
+
+/// A repository's settings as a redactor is built from them: only what a
+/// test sets is there.
+struct Settings {
+    repository: String,
+    repo_hot: Option<String>,
+    password: SecretValue,
+    options: BTreeMap<String, String>,
+    options_hot: BTreeMap<String, String>,
+    options_cold: BTreeMap<String, String>,
+    resolved: Vec<SecretValue>,
+}
+
+impl Settings {
+    fn new(repository: &str) -> Self {
+        Self {
+            repository: repository.to_owned(),
+            repo_hot: None,
+            password: SecretValue::new("hunter2"),
+            options: BTreeMap::new(),
+            options_hot: BTreeMap::new(),
+            options_cold: BTreeMap::new(),
+            resolved: Vec::new(),
+        }
+    }
+
+    fn secrets(&self) -> RepositorySecrets<'_> {
+        RepositorySecrets {
+            repository: &self.repository,
+            repo_hot: self.repo_hot.as_deref(),
+            password: &self.password,
+            options: &self.options,
+            options_hot: &self.options_hot,
+            options_cold: &self.options_cold,
+            resolved: &self.resolved,
+        }
+    }
+
+    fn redactor(&self) -> Redactor {
+        Redactor::for_repository(self.secrets())
+    }
+}
+
+fn for_repository(repository: &str, password: &str) -> Redactor {
+    let mut settings = Settings::new(repository);
+    settings.password = SecretValue::new(password);
+    settings.redactor()
+}
+
+#[test]
+fn the_password_of_a_url_in_a_repository_string_is_found() {
+    for repository in [
+        "rest:https://demo:s3cr3t@nas:8000/backups",
+        "https://demo:s3cr3t@nas/backups",
+        "rest:https://demo:s3cr3t@nas",
+    ] {
+        assert_eq!(passwords(repository), ["s3cr3t"], "{repository}");
+    }
+}
+
+#[test]
+fn a_percent_encoded_url_password_is_found_decoded_and_as_written() {
+    assert_eq!(
+        passwords("rest:https://demo:p%40ss%2Fw%20rd@nas/b"),
+        ["p%40ss%2Fw%20rd", "p@ss/w rd"]
+    );
+}
+
+#[test]
+fn an_unencoded_at_sign_in_the_password_stays_in_the_password() {
+    assert_eq!(passwords("rest:https://demo:p@ss@nas/b"), ["p@ss"]);
+}
+
+/// The last `@` of the authority ends its userinfo, and the last `@` of
+/// the whole URL another (a raw `/` in a password): both are masked.
+#[test]
+fn an_at_sign_in_the_path_leaves_the_password_of_the_authority_found() {
+    assert_eq!(
+        passwords("rest:https://demo:s3cr3t@nas/a@b"),
+        ["s3cr3t", "s3cr3t@nas/a"]
+    );
+}
+
+/// Read to its first `/` alone, the authority keeps a `?` a parser ends
+/// it at, and the password before its `@` is masked as well.
+#[test]
+fn a_password_with_a_question_mark_is_found_to_the_first_slash() {
+    let found = passwords("rest:https://demo:pw?x@nas.example/a@b");
+    assert!(found.contains(&"pw?x".to_owned()), "{found:?}");
+}
+
+/// Without its `://` a repository string holds no URL, so nothing in it
+/// is a password.
+#[test]
+fn a_location_without_a_scheme_separator_has_no_url_password() {
+    assert!(passwords("sftp:demo:pw@nas.example:/r").is_empty());
+    assert!(!url_password_written("sftp:demo:pw@nas.example:/r"));
+}
+
+/// A URL parser ends an `http` URL's authority at its first `/`, `\`,
+/// `?` or `#`, so the password before the `@` there is one, whatever
+/// `@` follows.
+#[test]
+fn the_password_is_found_where_a_url_parser_ends_the_authority() {
+    for repository in [
+        "rest:http://demo:pw-canary@nas.example\\x@y",
+        "rest:http://demo:pw-canary@nas.example:8000?x@y",
+        "rest:http://demo:pw-canary@nas.example:8000#x@y",
+    ] {
+        let found = passwords(repository);
+        assert!(
+            found.contains(&"pw-canary".to_owned()),
+            "{repository}: {found:?}"
+        );
+    }
+}
+
+/// A resolved location, or one an export has taken its escapes out of,
+/// may hold `${…}` as text: a URL parser reads it character by
+/// character, and so is it read too, beside the reading as a template.
+#[test]
+fn a_reference_written_as_text_hides_no_password() {
+    for (repository, password) in [
+        (
+            "rest:http://demo:pw-canary@x${file:/y}@nas.example/r",
+            "pw-canary",
+        ),
+        (
+            "rest:http://x${file:/y:pw-canary}@nas.example/r",
+            "/y:pw-canary}",
+        ),
+    ] {
+        let found = passwords(repository);
+        assert!(
+            found.contains(&password.to_owned()),
+            "{repository}: {found:?}"
+        );
+    }
+}
+
+#[test]
+fn a_password_that_is_not_valid_percent_encoding_is_taken_as_it_is() {
+    assert_eq!(passwords("rest:https://demo:100%@nas/b"), ["100%"]);
+    assert_eq!(passwords("rest:https://demo:a%zzb@nas/b"), ["a%zzb"]);
+}
+
+/// A raw `/` ends the authority, so the URL doesn't parse, and rustic's
+/// error quotes the whole string.
+#[test]
+fn a_raw_slash_in_the_password_does_not_hide_it() {
+    let redactor = for_repository("rest:https://demo:ab/cd@nas/b", "hunter2");
+    assert_eq!(
+        redactor.redact("URL `rest:https://demo:ab/cd@nas/b` parsing failed"),
+        "URL `rest:https://demo:***@nas/b` parsing failed"
+    );
+}
+
+#[test]
+fn a_repository_string_without_a_url_password_has_none() {
+    for repository in [
+        "/backups/home",
+        "local:/backups/home",
+        "opendal:s3",
+        "rclone:remote:path",
+        "rest:https://demo@nas/b",
+        "rest:https://nas:8000/b",
+        // The @ is in the path, not in the authority.
+        "rest:https://nas/b/x:y@z",
+    ] {
+        assert_eq!(passwords(repository), Vec::<String>::new(), "{repository}");
+    }
+}
+
+#[test]
+fn an_rclone_connection_string_holds_a_secret_when_a_piece_names_one() {
+    for location in [
+        "rclone::s3,provider=AWS,secret_access_key=abc:bucket/repo",
+        "rclone::drive,token=abc:repo",
+        "rclone::sftp,host=nas.demo,CLIENT_SECRET=abc",
+        "rclone:remote,password=abc:path",
+        "rclone:::s3,x=1:sas-token=abc",
+    ] {
+        assert!(rclone_secret(location), "{location}");
+    }
+}
+
+#[test]
+fn an_address_that_is_not_an_rclone_connection_string_or_names_no_secret_holds_none() {
+    for location in [
+        "rclone:remote:path",
+        "rclone::s3,provider=AWS,access_key_id=demo:bucket",
+        "rclone::s3,use_password=true:bucket",
+        "rclone:",
+        "rclone",
+        "/srv/repo,token=demo",
+        "local:rclone::s3,token=demo",
+        "sftp:demo@nas:/srv/repo,secret=demo",
+        "Rclone::s3,token=demo",
+    ] {
+        assert!(!rclone_secret(location), "{location}");
+    }
+}
+
+fn credentials(url: &str) -> Vec<String> {
+    let mut found: Vec<String> = url_credentials(url)
+        .iter()
+        .map(|secret| secret.expose().to_owned())
+        .collect();
+    found.sort();
+    found
+}
+
+#[test]
+fn the_password_and_the_whole_userinfo_of_a_url_are_credentials() {
+    for url in [
+        "http://demo:s3cr3t@proxy.demo:3128",
+        "https://demo:s3cr3t@proxy.demo",
+        "socks5h://demo:s3cr3t@proxy.demo:1080/",
+    ] {
+        assert_eq!(credentials(url), ["demo:s3cr3t", "s3cr3t"], "{url}");
+    }
+}
+
+/// Proxy settings often leave the scheme out.
+#[test]
+fn a_url_without_its_scheme_has_its_credentials_too() {
+    assert_eq!(
+        credentials("demo:s3cr3t@proxy.demo:3128"),
+        ["demo:s3cr3t", "s3cr3t"]
+    );
+    assert_eq!(credentials("tok3n-demo@proxy.demo:3128"), ["tok3n-demo"]);
+}
+
+#[test]
+fn a_user_name_without_a_password_is_a_credential_too() {
+    assert_eq!(credentials("https://tok3n-demo@proxy.demo"), ["tok3n-demo"]);
+}
+
+/// `http://token:@proxy` is how a token as the user name is often
+/// written: the empty password is no credential, the token is.
+#[test]
+fn a_user_name_with_an_empty_password_is_a_credential_too() {
+    assert_eq!(
+        credentials("https://tok3n-demo:@proxy.demo"),
+        ["tok3n-demo", "tok3n-demo:"]
+    );
+}
+
+#[test]
+fn percent_encoded_credentials_are_found_decoded_and_as_written() {
+    assert_eq!(
+        credentials("http://demo:p%40ss@proxy.demo"),
+        ["demo:p%40ss", "demo:p@ss", "p%40ss", "p@ss"]
+    );
+    assert_eq!(credentials("http://t%40k@proxy.demo"), ["t%40k", "t@k"]);
+}
+
+#[test]
+fn credentials_that_are_not_valid_percent_encoding_are_taken_as_they_are() {
+    assert_eq!(
+        credentials("http://demo:100%@proxy.demo"),
+        ["100%", "demo:100%"]
+    );
+}
+
+#[test]
+fn an_at_sign_or_a_slash_in_the_password_stays_in_the_credentials() {
+    assert_eq!(
+        credentials("http://demo:p@ss@proxy.demo"),
+        ["demo:p@ss", "p@ss"]
+    );
+    assert_eq!(
+        credentials("http://demo:ab/cd@proxy.demo"),
+        ["ab/cd", "demo:ab/cd"]
+    );
+}
+
+#[test]
+fn a_url_without_a_userinfo_has_no_credentials() {
+    for url in [
+        "",
+        "http://proxy.demo:3128",
+        "proxy.demo:3128",
+        "http://@proxy.demo",
+        "@proxy.demo",
+        // The @ is in the path, not in the authority.
+        "http://proxy.demo/a@b",
+        "http://proxy.demo/p/x:y@z",
+        "proxy.demo/a@b",
+    ] {
+        assert_eq!(credentials(url), Vec::<String>::new(), "{url}");
+    }
+}
+
+#[test]
+fn what_a_proxy_echoes_of_its_credentials_is_masked() {
+    let redactor = Redactor::new(&url_credentials("http://demo:p%40ss@proxy.demo:3128"));
+    assert_eq!(
+        redactor.redact("proxy http://demo:p%40ss@proxy.demo:3128 said 407 for p@ss"),
+        "proxy http://***@proxy.demo:3128 said 407 for ***"
+    );
+}
+
+#[test]
+fn a_repository_redactor_masks_the_password_and_the_url_password_in_any_form() {
+    let redactor = for_repository("rest:https://demo:p%40ss@nas/b", "hunter2");
+    assert_eq!(
+        redactor.redact("open rest:https://demo:p%40ss@nas/b with hunter2: p@ss"),
+        "open rest:https://demo:***@nas/b with ***: ***"
+    );
+}
+
+/// rustic quotes a URL as the url crate writes it: a raw `@` in the
+/// password comes back as `%40`.
+#[test]
+fn a_raw_password_is_masked_as_the_url_crate_rewrites_it() {
+    let redactor = for_repository("rest:https://demo:P@ssw0rd!@nas/b", "hunter2");
+    assert_eq!(
+        redactor.redact("join https://demo:P%40ssw0rd!@nas/b/config"),
+        "join https://demo:***@nas/b/config"
+    );
+}
+
+#[test]
+fn a_repository_with_an_empty_password_redacts_nothing() {
+    let redactor = for_repository("/backups/home", "");
+    assert_eq!(redactor.redact("nothing to hide"), "nothing to hide");
+}
+
+/// rclone reads a quoted value without its quotes and with a quote
+/// written twice as one, and may quote it so; the location shows it as
+/// written.
+#[test]
+fn a_credential_written_in_an_rclone_connection_string_is_masked_as_written_and_as_rclone_reads_it()
+{
+    let location = "rclone::sftp,host=nas.example.com,user=demo,pass='CANARY,it''s:x':/backups";
+    let redactor = for_repository(location, "hunter2");
+    assert_eq!(
+        redactor.redact(location),
+        "rclone::sftp,host=nas.example.com,user=demo,pass=***:/backups"
+    );
+    assert_eq!(redactor.redact("denied CANARY,it's:x"), "denied ***");
+    assert_eq!(redactor.redact("denied CANARY,it''s:x"), "denied ***");
+    let location = "rclone::s3,provider=AWS,access_key_id=AKIADEMO,secret_access_key=\"CANARY-s3\":bucket/repo";
+    assert_eq!(
+        for_repository(location, "hunter2").redact(location),
+        "rclone::s3,provider=AWS,access_key_id=AKIADEMO,secret_access_key=***:bucket/repo"
+    );
+    // A remote's name alone, and a value of characters wider than a byte.
+    assert_eq!(
+        for_repository("rclone::pass=é€", "hunter2").redact("é€"),
+        REDACTED
+    );
+}
+
+#[test]
+fn a_credential_written_in_the_hot_rclone_location_is_masked_too() {
+    let mut settings = Settings::new("/srv/demo/repo");
+    let hot = "rclone:demo-remote,key=CANARY-b2-key:demo-bucket";
+    settings.repo_hot = Some(hot.to_owned());
+    assert_eq!(
+        settings.redactor().redact(hot),
+        "rclone:demo-remote,key=***:demo-bucket"
+    );
+}
+
+/// A reference in an rclone location is refused before it is resolved,
+/// but the location still shows as written; a doubled dollar is text,
+/// which rclone reads as `${`.
+#[test]
+fn an_rclone_credential_with_a_reference_or_an_escape_is_masked_as_written() {
+    let location = "rclone::sftp,pass=pre${DEMO_PASS}post:/backups";
+    assert_eq!(
+        for_repository(location, "hunter2").redact(location),
+        "rclone::sftp,pass=***:/backups"
+    );
+    let location = "rclone::sftp,pass=CANARY$${b}c:/backups";
+    let redactor = for_repository(location, "hunter2");
+    assert_eq!(redactor.redact(location), "rclone::sftp,pass=***:/backups");
+    assert_eq!(redactor.redact("denied CANARY${b}c"), "denied ***");
+}
+
+/// rclone opens a quote only where a value starts: a quote further on is
+/// text, and the `,` after it ends the value all the same.
+#[test]
+fn a_quote_inside_an_rclone_value_is_text_as_rclone_reads_it() {
+    let location = "rclone::s3,pass=a='b,secret_access_key=XX':bucket";
+    let redactor = for_repository(location, "hunter2");
+    assert_eq!(
+        redactor.redact(location),
+        "rclone::s3,pass=***,secret_access_key=***:bucket"
+    );
+    assert_eq!(redactor.redact("denied a='b and XX'"), "denied *** and ***");
+}
+
+/// A location `depth` deep: each level but the last is a crypt remote
+/// whose `remote` is the next level, quoted; the last is `innermost`.
+fn nested(depth: usize, innermost: &str) -> String {
+    (1..depth).fold(innermost.to_owned(), |inner, _| {
+        format!(":crypt,remote='{}':p", inner.replace('\'', "''"))
+    })
+}
+
+/// A setting's value may be a location of its own (crypt's `remote`),
+/// which rclone reads as it reads any: its credentials are masked too,
+/// as written, as each level reads it and as rclone reads it last.
+#[test]
+fn a_credential_of_an_rclone_location_written_in_a_setting_is_masked() {
+    let location = "rclone::crypt,remote=':s3,secret_access_key=XX:bucket',password=YY:path";
+    let redactor = for_repository(location, "hunter2");
+    assert_eq!(
+        redactor.redact(location),
+        "rclone::crypt,remote=':s3,secret_access_key=***:bucket',password=***:path"
+    );
+    assert_eq!(redactor.redact("denied XX"), "denied ***");
+    // A named remote with settings of its own, in which a quoted value
+    // holds a quote: each is written twice once more in the location.
+    let location = "rclone::crypt,remote='demo,pass=''CANARY,it''''s'':bucket':path";
+    let redactor = for_repository(location, "hunter2");
+    assert_eq!(
+        redactor.redact(location),
+        "rclone::crypt,remote='demo,pass=***:bucket':path"
+    );
+    assert_eq!(
+        redactor.redact("open demo,pass='CANARY,it''s':bucket"),
+        "open demo,pass=***:bucket"
+    );
+    assert_eq!(redactor.redact("denied CANARY,it's"), "denied ***");
+    // A backend's settings with no path after them are a location too.
+    let location = "rclone::crypt,remote=':s3,secret_access_key=CANARY-s3':path";
+    assert_eq!(
+        for_repository(location, "hunter2").redact("denied CANARY-s3"),
+        "denied ***"
+    );
+}
+
+/// Four levels are read; a location deeper than that is masked whole.
+#[test]
+fn an_rclone_location_nested_deeper_than_four_is_masked_whole() {
+    let innermost = ":s3,secret_access_key=CANARY-a,session_token=CANARY-b:b";
+    let four = format!("rclone:{}", nested(4, innermost));
+    let redactor = for_repository(&four, "hunter2");
+    assert_eq!(
+        redactor.redact(&four),
+        format!(
+            "rclone:{}",
+            nested(4, ":s3,secret_access_key=***,session_token=***:b")
+        )
+    );
+    assert_eq!(redactor.redact("denied CANARY-a"), "denied ***");
+    let five = format!("rclone:{}", nested(5, innermost));
+    assert_eq!(
+        for_repository(&five, "hunter2").redact(&five),
+        format!("rclone:{}", nested(4, ":crypt,remote=***:p"))
+    );
+}
+
+/// Only what rclone reads as a location is read as one: a quoted value
+/// with no `:` outside quotes in it is a local path to rclone.
+#[test]
+fn a_value_that_is_no_location_hides_no_credential() {
+    let location = "rclone::crypt,remote='demo,pass=visible':path";
+    assert_eq!(
+        for_repository(location, "hunter2").redact(location),
+        location
+    );
+}
+
+#[test]
+fn rclones_own_credential_names_are_masked() {
+    for name in [
+        "access_grant",
+        "master_keys",
+        "authorization",
+        "headers",
+        "2fa",
+    ] {
+        let location = format!("rclone::demo,{name}='CANARY,{name}':bucket");
+        assert_eq!(
+            for_repository(&location, "hunter2").redact(&location),
+            format!("rclone::demo,{name}=***:bucket")
+        );
+    }
+}
+
+/// rustic's OpenDAL SFTP backend reads its option `key` as the path of
+/// a key file: it stays readable, where an rclone setting `key` doesn't.
+#[test]
+fn a_rustic_sftp_key_option_is_not_masked() {
+    let mut settings = Settings::new("opendal:sftp");
+    settings.options = options(&[("key", "/home/demo/.ssh/id_demo")]);
+    assert_eq!(
+        settings
+            .redactor()
+            .redact("no key at /home/demo/.ssh/id_demo"),
+        "no key at /home/demo/.ssh/id_demo"
+    );
+}
+
+#[test]
+fn what_is_no_rclone_credential_is_not_masked() {
+    for location in [
+        "rclone::sftp,host=nas.example.com,key_file=/home/demo/.ssh/id,bypass_cache=true:/backups",
+        // What follows the first `:` outside quotes is the path.
+        "rclone:demo-remote:backups/pass=visible",
+        "rclone::sftp,pass='':/backups",
+        "rclone::sftp,pass=:/backups",
+        "/srv/pass=visible",
+        "local:rclone::sftp,pass=visible",
+    ] {
+        assert_eq!(
+            for_repository(location, "hunter2").redact(location),
+            location
+        );
+    }
+}
+
+/// Each credential is a secret of its own to look for in every text, so
+/// a location with more than 16 of them is masked whole instead.
+#[test]
+fn an_rclone_location_with_more_credentials_than_are_read_is_masked_whole() {
+    let location = |count: usize| {
+        let settings: String = (0..count)
+            .map(|n| format!(",secret{n}=CANARY{n}"))
+            .collect();
+        format!("rclone::demo{settings}:/backups")
+    };
+    let sixteen = location(16);
+    let shown = for_repository(&sixteen, "hunter2").redact(&sixteen);
+    assert!(
+        shown.starts_with("rclone::demo,secret0=***,secret1=***") && !shown.contains("CANARY"),
+        "{shown}"
+    );
+    let seventeen = location(17);
+    assert_eq!(
+        for_repository(&seventeen, "hunter2").redact(&seventeen),
+        REDACTED
+    );
+}
+
+#[test]
+fn hostile_rclone_locations_end_without_a_panic() {
+    // One pass over each is milliseconds; a reading quadratic in the
+    // length, or a needle for every one of thousands of settings, would
+    // run past the test runner's time limit.
+    let many: String = (0..20_000).map(|n| format!(",pass=v{n}")).collect();
+    let long = [
+        format!("rclone::demo{many}:/backups"),
+        format!("rclone::demo{}", ",secret=x".repeat(100_000)),
+        format!("rclone::sftp,pass='{}", "'',".repeat(100_000)),
+        format!("rclone::sftp,pass={}", "${A}".repeat(50_000)),
+        format!("rclone::sftp,pass=\"{}\":/b", "é".repeat(100_000)),
+        format!("rclone:{}", "$${".repeat(100_000)),
+        format!("rclone::crypt{}:/b", ",remote=':a,pass=v:b'".repeat(20_000)),
+        format!("rclone::crypt,remote='{}':/b", "''".repeat(100_000)),
+        format!("rclone::crypt,remote=':a,x={}':/b", "''''".repeat(50_000)),
+    ];
+    let short = [
+        "rclone:",
+        "rclone::",
+        "rclone:,",
+        "rclone:=",
+        "rclone:,=,",
+        "rclone::pass='",
+        "rclone::pass=''",
+        "rclone::pass='''",
+        "rclone::pass=\"'\"",
+        "rclone::pass=${A}",
+        "rclone::pass=$${",
+        "rclone::${A}=x",
+        "rclone::pass=é€",
+    ];
+    for location in long.iter().map(String::as_str) {
+        let _ = for_repository(location, "hunter2").redact("a short text");
+    }
+    for location in short {
+        let _ = for_repository(location, "hunter2").redact(location);
+    }
+}
+
+fn options(pairs: &[(&str, &str)]) -> BTreeMap<String, String> {
+    pairs
+        .iter()
+        .map(|&(name, value)| (name.to_owned(), value.to_owned()))
+        .collect()
+}
+
+#[test]
+fn a_repository_redactor_masks_the_value_of_every_option_that_holds_a_credential() {
+    let mut settings = Settings::new("opendal:azblob");
+    settings.options = options(&[
+        ("sas_token", "sv=2024&sig=abc123"),
+        ("secret_access_key", "AKIA-demo-secret"),
+        ("application_key_id", "0021a7c1"),
+        ("bucket", "demo-bucket"),
+    ]);
+    let redactor = settings.redactor();
+    assert_eq!(
+        redactor.redact(
+            "url: http://nas/demo-bucket/config?sv=2024&sig=abc123 key AKIA-demo-secret id 0021a7c1"
+        ),
+        "url: http://nas/demo-bucket/config?*** key *** id 0021a7c1"
+    );
+}
+
+#[test]
+fn a_repository_redactor_masks_what_the_references_in_its_settings_resolved_to() {
+    let mut settings = Settings::new("opendal:s3");
+    settings.resolved = vec![
+        SecretValue::new("canary-from-a-file"),
+        SecretValue::new("canary-from-env"),
+    ];
+    let redactor = settings.redactor();
+    assert_eq!(
+        redactor.redact("GET https://canary-from-env/canary-from-a-file/config failed"),
+        "GET https://***/***/config failed"
+    );
+}
+
+/// An endpoint isn't a secret, but a URL may carry credentials in its
+/// userinfo, and OpenDAL's errors quote the URL it built from it.
+#[test]
+fn a_repository_redactor_masks_the_password_of_a_url_an_option_holds() {
+    let mut settings = Settings::new("opendal:s3");
+    settings.options = options(&[
+        ("endpoint", "https://demo:s3cr3t@minio.example:9000"),
+        ("root", "/backups/home"),
+    ]);
+    let redactor = settings.redactor();
+    assert_eq!(
+        redactor.redact("url: https://demo:s3cr3t@minio.example:9000/demo/config failed"),
+        "url: https://demo:***@minio.example:9000/demo/config failed"
+    );
+}
+
+/// The control is the third URL: without it, a redactor that looks at no
+/// option would pass this test too.
+#[test]
+fn an_option_url_without_a_password_hides_nothing() {
+    let mut settings = Settings::new("opendal:s3");
+    settings.options = options(&[
+        ("endpoint", "https://demo@minio.example:9000/data"),
+        ("rest-url", "https://minio.example:9000"),
+        ("proxy", "https://demo:s3cr3t@proxy.example:3128"),
+    ]);
+    let redactor = settings.redactor();
+    assert_eq!(
+        redactor.redact(
+            "https://demo@minio.example:9000/data/demo/config via https://demo:s3cr3t@proxy.example:3128"
+        ),
+        "https://demo@minio.example:9000/data/demo/config via https://demo:***@proxy.example:3128"
+    );
+}
+
+/// A hot/cold repository is opened through both halves, and the errors
+/// of rustic and of OpenDAL quote whichever half failed: what only the
+/// hot half or only the cold half holds is hidden like the rest.
+#[test]
+fn a_repository_redactor_masks_the_password_in_the_url_of_the_hot_repository() {
+    let mut settings = Settings::new("/backups/cold");
+    settings.repo_hot = Some("rest:https://demo:hot-s3cr3t@nas:8000/hot".to_owned());
+    assert_eq!(
+        settings
+            .redactor()
+            .redact("URL `rest:https://demo:hot-s3cr3t@nas:8000/hot/` parsing failed"),
+        "URL `rest:https://demo:***@nas:8000/hot/` parsing failed"
+    );
+}
+
+#[test]
+fn a_repository_redactor_masks_the_value_of_every_hot_and_cold_option_that_holds_a_credential() {
+    let mut settings = Settings::new("opendal:s3");
+    settings.repo_hot = Some("opendal:s3".to_owned());
+    settings.options_hot = options(&[
+        ("secret_access_key", "AKIA-hot-secret"),
+        ("region", "eu-hot-1"),
+    ]);
+    settings.options_cold =
+        options(&[("sas_token", "sv=cold&sig=xyz789"), ("region", "eu-cold-1")]);
+    assert_eq!(
+        settings
+            .redactor()
+            .redact("hot AKIA-hot-secret in eu-hot-1, cold sv=cold&sig=xyz789 in eu-cold-1"),
+        "hot *** in eu-hot-1, cold *** in eu-cold-1"
+    );
+}
+
+#[test]
+fn a_repository_redactor_masks_the_password_of_a_url_a_hot_or_cold_option_holds() {
+    let mut settings = Settings::new("opendal:s3");
+    settings.repo_hot = Some("opendal:s3".to_owned());
+    settings.options_hot = options(&[("endpoint", "https://demo:hot-s3cr3t@hot.example:9000")]);
+    settings.options_cold = options(&[("endpoint", "https://demo:cold-s3cr3t@cold.example:9000")]);
+    assert_eq!(
+        settings.redactor().redact(
+            "https://demo:hot-s3cr3t@hot.example:9000/config, https://demo:cold-s3cr3t@cold.example:9000/keys"
+        ),
+        "https://demo:***@hot.example:9000/config, https://demo:***@cold.example:9000/keys"
+    );
+}
+
+/// A text cut at a cap can end in the beginning of a secret, which no
+/// needle matches whole: that end is masked as the secret would be, and
+/// a whole secret just before the cut is masked whole (I4).
+#[test]
+fn a_secret_a_cut_went_through_is_masked_and_so_is_one_just_before_it() {
+    let masked = redactor(&["hunter2-canary"]);
+    // The cut went through it.
+    assert_eq!(masked.redact_cut(b"rejected hunter2-ca"), "rejected ***");
+    assert_eq!(masked.redact_cut(b"rejected h"), "rejected ***");
+    // Longer than what was kept.
+    assert_eq!(masked.redact_cut(b"hunter2"), "***");
+    // Whole, and ending just before the cut, and then cut again.
+    assert_eq!(masked.redact_cut(b"x hunter2-canary!"), "x ***!");
+    assert_eq!(masked.redact_cut(b"x hunter2-canary hunter"), "x *** ***");
+    // Nothing of a secret at the end: the text as it is.
+    assert_eq!(masked.redact_cut(b"nothing here"), "nothing here");
+    assert_eq!(redactor(&[]).redact_cut(b"nothing here"), "nothing here");
+}
+
+/// Bytes cut inside a character: the part of it that was kept is not
+/// shown, and the secret it began is still masked.
+#[test]
+fn a_cut_inside_a_character_of_a_secret_still_masks_it() {
+    let masked = redactor(&["pässwort-canary"]);
+    assert_eq!(masked.redact_cut(b"key p\xC3"), "key ***");
+    assert_eq!(masked.redact_cut(b"key \xC3"), "key ");
+    assert_eq!(masked.redact_cut("key pä".as_bytes()), "key ***");
+    // A byte that is no character, before the end, is shown as one that
+    // can't be read, and the text goes on after it.
+    assert_eq!(
+        masked.redact_cut(b"bad \xFF here p\xC3"),
+        "bad \u{FFFD} here ***"
+    );
+}
+
+/// Someone who knew fewer secrets cut a text and marked the cut: what it
+/// kept is masked as any cut text is, and the mark stays.
+#[test]
+fn a_text_marked_as_cut_is_masked_as_a_cut_text_and_keeps_its_mark() {
+    let masked = redactor(&["hunter2-canary"]);
+    assert_eq!(masked.redact_clipped("said hunter2-ca…", "…"), "said ***…");
+    // Not marked: only what is whole is a secret.
+    assert_eq!(
+        masked.redact_clipped("said hunter2-canary h", "…"),
+        "said *** h"
+    );
+}
+
+/// A secret that ends in what looks like the mark is a whole secret
+/// there: it is masked with its last character, as `redact` masks it,
+/// and no mark is put back after it (I4).
+#[test]
+fn a_secret_that_ends_in_the_mark_is_masked_whole_with_it() {
+    let masked = redactor(&["hunter2-canary…"]);
+    assert_eq!(
+        masked.redact_clipped("said hunter2-canary…", "…"),
+        "said ***"
+    );
+    // Cut in it and marked: what was kept of it is masked, and the mark
+    // stays.
+    assert_eq!(masked.redact_clipped("said hunter2-ca…", "…"), "said ***…");
+}
+
+/// A worker's stderr reaches the daemon a line at a time, so no needle
+/// of a whole key could match any of it.
+#[test]
+fn a_secret_that_spans_lines_is_masked_line_by_line_too() {
+    let key = "-----BEGIN KEY-----\r\n  MIIEvQIBADANBgkqhkiG9w0B  \nshort\nAQEFAASCBKcwggSj\n-----END KEY-----\n";
+    let redactor = redactor(&[key]);
+    for line in [
+        "-----BEGIN KEY-----",
+        "MIIEvQIBADANBgkqhkiG9w0B",
+        "AQEFAASCBKcwggSj",
+        "-----END KEY-----",
+    ] {
+        assert_eq!(
+            redactor.redact(&format!("rclone: {line} failed")),
+            "rclone: *** failed"
+        );
+    }
+    // The whole text is still replaced as one.
+    assert_eq!(redactor.redact(&format!("[{key}]")), "[***]");
+    // A line too short to stand for the secret doesn't mask other text.
+    assert_eq!(redactor.redact("a short line"), "a short line");
+}
+
+#[test]
+fn a_line_of_a_secret_is_a_needle_of_its_own_from_eight_bytes_on() {
+    let redactor = redactor(&["1234567\n12345678\nabcdefgh"]);
+    assert_eq!(redactor.redact("7: 1234567"), "7: 1234567");
+    assert_eq!(redactor.redact("8: 12345678"), "8: ***");
+    assert_eq!(redactor.redact("9: abcdefgh"), "9: ***");
+}
+
+#[test]
+fn only_the_first_lines_of_a_very_long_secret_are_needles_of_their_own() {
+    let lines: Vec<String> = (0..70).map(|n| format!("line-number-{n:03}")).collect();
+    let redactor = redactor(&[lines.join("\n").as_str()]);
+    assert_eq!(redactor.redact("line-number-063"), "***");
+    assert_eq!(redactor.redact("line-number-064"), "line-number-064");
+}
+
+/// `${VAR}` gives a value as it is, and a log line doesn't have its
+/// newline.
+#[test]
+fn the_white_space_around_a_secret_is_masked_without_it() {
+    let redactor = redactor(&["hunter2\n", "  pad  "]);
+    assert_eq!(
+        redactor.redact("login hunter2 failed, pad."),
+        "login *** failed, ***."
+    );
+    // The secret with its white space is replaced as a whole.
+    assert_eq!(redactor.redact("[hunter2\n]"), "[***]");
+    // A secret of nothing but white space has no trimmed form.
+    let blank = super::Redactor::new(&[SecretValue::new(" \n ")]);
+    assert_eq!(blank.redact("a b"), "a b");
+    assert_eq!(blank.redact("x \n y"), "x***y");
+}
+
+/// What `work` gives, and how many bytes of a needle and the text a
+/// redactor compared while doing it, on this thread.
+fn compared<T>(work: impl FnOnce() -> T) -> (T, usize) {
+    let before = COMPARED.with(std::cell::Cell::get);
+    let done = work();
+    (done, COMPARED.with(std::cell::Cell::get) - before)
+}
+
+/// A redactor of dozens of needles that share their first 32 KiB: a
+/// password half the cap long, one byte over and over, then the
+/// characters a URL parser writes in different ways, and a location at
+/// the cap whose password is the same. All of it is in a text of `a` at
+/// every byte.
+fn a_redactor_of_long_repetitive_needles() -> Redactor {
+    let cap = MAX_SECRET_BYTES;
+    let mut settings = Settings::new(&format!("rest:https://demo:{}@nas/", "a".repeat(cap - 23)));
+    assert_eq!(settings.repository.len(), cap);
+    settings.password = SecretValue::new(format!("{}\"`#'^{{}}?/:@\\ <>|", "a".repeat(cap / 2)));
+    let redactor = settings.redactor();
+    assert!(redactor.needles.len() > 40, "{}", redactor.needles.len());
+    redactor
+}
+
+/// Masking compares each byte of the text at least once and at most
+/// twice per needle, however long and repetitive a secret and the text
+/// are: the work grows with the length of the text, never with the
+/// length of a needle (#236). Looking for the end of a needle at the
+/// start of the text compares as many of the needle's last bytes as the
+/// text has, each at most twice, after the start of the text itself
+/// (#861): at most twice per byte of the text in each pass, the text
+/// and its start, and twice more. A count, not a time, so it can't
+/// flake. A text much shorter than the needles costs as little.
+#[test]
+fn masking_a_text_compares_each_byte_at_most_twice_per_needle_in_each_pass() {
+    let cap = MAX_SECRET_BYTES;
+    let redactor = a_redactor_of_long_repetitive_needles();
+    let needles = redactor.needles.len();
+    let text = "a".repeat(cap);
+    let clipped = format!("{text}…");
+    let short = "a".repeat(64);
+    for (what, length, (masked, work), expected) in [
+        ("whole", cap, compared(|| redactor.redact(&text)), "***"),
+        (
+            "cut",
+            cap,
+            compared(|| redactor.redact_cut(text.as_bytes())),
+            "***",
+        ),
+        (
+            "clipped",
+            clipped.len(),
+            compared(|| redactor.redact_clipped(&clipped, "…")),
+            "***…",
+        ),
+        (
+            "short",
+            short.len(),
+            compared(|| redactor.redact(&short)),
+            "***",
+        ),
+    ] {
+        assert_eq!(masked, expected, "{what}");
+        assert!(
+            (length * needles..=4 * length * needles + 2 * length).contains(&work),
+            "{what}: {work} comparisons for {length} bytes and {needles} needles"
+        );
+    }
+}
+
+/// A text that begins with white space TOML keeps (an ideographic
+/// space) has two starts, one where TOML's white space ends and one
+/// where Unicode's does, each looked at once more per needle: at most
+/// twice per byte of the text in each of three passes, and twice more
+/// for each start.
+#[test]
+fn masking_a_text_with_two_starts_compares_each_byte_at_most_twice_per_needle_in_each_pass() {
+    let redactor = a_redactor_of_long_repetitive_needles();
+    let needles = redactor.needles.len();
+    let text = format!("\u{3000}{}", "a".repeat(MAX_SECRET_BYTES - 3));
+    let (masked, work) = compared(|| redactor.redact(&text));
+    assert_eq!(masked, "\u{3000}***");
+    let length = text.len();
+    assert!(
+        (length * needles..=6 * length * needles + 4 * length).contains(&work),
+        "{work} comparisons for {length} bytes and {needles} needles"
+    );
+}
+
+/// A text with a TOML escape in it is read a second time, as TOML reads
+/// it, and what is read is no longer than the text: each byte of the
+/// text is compared at most twice per needle in each of four passes,
+/// the text, what was read and the start of each (#839, #861), and
+/// twice more for each start. The most is where the escape is one byte
+/// shorter as read than as written, so the text is read again nearly
+/// whole.
+#[test]
+fn masking_a_text_with_a_toml_escape_compares_each_byte_at_most_twice_per_needle_in_each_pass() {
+    let redactor = a_redactor_of_long_repetitive_needles();
+    let needles = redactor.needles.len();
+    let text = format!(r"{}\t", "a".repeat(MAX_SECRET_BYTES - 2));
+    let clipped = format!("{text}…");
+    let short = format!(r"{}\t", "a".repeat(62));
+    for (what, length, (masked, work), expected) in [
+        (
+            "whole",
+            text.len(),
+            compared(|| redactor.redact(&text)),
+            r"***\t",
+        ),
+        (
+            "cut",
+            text.len(),
+            compared(|| redactor.redact_cut(text.as_bytes())),
+            r"***\t",
+        ),
+        (
+            "clipped",
+            clipped.len(),
+            compared(|| redactor.redact_clipped(&clipped, "…")),
+            r"***\t…",
+        ),
+        (
+            "short",
+            short.len(),
+            compared(|| redactor.redact(&short)),
+            r"***\t",
+        ),
+    ] {
+        assert_eq!(masked, expected, "{what}");
+        assert!(
+            ((2 * length - 1) * needles..=8 * length * needles + 4 * length).contains(&work),
+            "{what}: {work} comparisons for {length} bytes and {needles} needles"
+        );
+    }
+}
+
+/// A needle longer than a `u32` holds can't be built in a test (4 GiB),
+/// so this builds the redactor such a needle leaves: it masks every text
+/// that isn't empty whole, cut or not.
+#[test]
+fn a_redactor_with_a_needle_too_long_to_search_masks_every_text_whole() {
+    let redactor = Redactor {
+        needles: Vec::new(),
+        whole: true,
+    };
+    assert_eq!(redactor.redact(""), "");
+    assert_eq!(redactor.redact("x"), REDACTED);
+    assert_eq!(redactor.redact_cut(b"x"), REDACTED);
+    assert_eq!(redactor.redact_clipped("x…", "…"), REDACTED);
+}
+
+/// Distinct secrets of `total` bytes, each of its own letter.
+fn secrets_of(total: usize) -> Vec<SecretValue> {
+    let count = total.div_ceil(MAX_SECRET_BYTES);
+    (0..count)
+        .map(|at| {
+            let share = total / count + usize::from(at < total % count);
+            let letter = char::from(b'a' + u8::try_from(at).unwrap());
+            SecretValue::new(letter.to_string().repeat(share))
+        })
+        .collect()
+}
+
+/// How many secrets a redactor built the forms of while doing `work`,
+/// on this thread.
+fn formed<T>(work: impl FnOnce() -> T) -> (T, usize) {
+    let before = FORMED.with(std::cell::Cell::get);
+    let done = work();
+    (done, FORMED.with(std::cell::Cell::get) - before)
+}
+
+/// Up to the cap, a redactor masks each secret; past it, it builds no
+/// form of any (each about 80 times its size) and masks every text
+/// whole: more than a secret, never less (I4).
+#[test]
+fn a_redactor_builds_no_forms_of_secrets_past_the_cap() {
+    let at_the_cap = secrets_of(MAX_MASKED_BYTES);
+    assert_eq!(
+        at_the_cap.iter().map(|s| s.expose().len()).sum::<usize>(),
+        MAX_MASKED_BYTES
+    );
+    let (redactor, built) = formed(|| Redactor::new(&at_the_cap));
+    assert_eq!(built, at_the_cap.len());
+    assert!(!redactor.masks_everything());
+    assert_eq!(redactor.redact("a b"), "a b");
+    assert_eq!(
+        redactor.redact(&format!("[{}]", at_the_cap[0].expose())),
+        "[***]"
+    );
+
+    let over = secrets_of(MAX_MASKED_BYTES + 1);
+    let (redactor, built) = formed(|| Redactor::new(&over));
+    assert_eq!(built, 0);
+    assert!(redactor.masks_everything());
+    assert_eq!(redactor.redact("a b"), REDACTED);
+    assert_eq!(redactor.redact(""), "");
+}
+
+/// The cap counts each secret once, however often it is given, and an
+/// empty one not at all.
+#[test]
+fn a_secret_given_twice_counts_once_toward_the_cap() {
+    let mut secrets = secrets_of(MAX_MASKED_BYTES);
+    secrets.push(secrets[0].clone());
+    secrets.push(SecretValue::new(""));
+    assert!(!Redactor::new(&secrets).masks_everything());
+}
+
+#[test]
+fn a_redactor_masking_everything_masks_every_text_that_is_not_empty_whole() {
+    let redactor = Redactor::masking_everything();
+    assert!(redactor.masks_everything());
+    assert_eq!(redactor.redact(""), "");
+    assert_eq!(redactor.redact("x"), REDACTED);
+    assert_eq!(redactor.redact_cut(b"x"), REDACTED);
+    assert!(!Redactor::default().masks_everything());
+}
+
+/// What the count takes from a location and an option is what a
+/// redactor for the repository is built from, so a repository the count
+/// lets through gets a redactor that masks each secret.
+#[test]
+fn the_count_takes_from_each_setting_what_a_redactor_masks() {
+    let mut count = MaskedSecrets::default();
+    let mut secrets = secrets_of(MAX_MASKED_BYTES - 19);
+    for secret in &secrets {
+        assert_eq!(count.secret(secret), Ok(()));
+    }
+    // Counted already, and not a credential by its name: nothing more.
+    assert_eq!(count.secret(&secrets[0]), Ok(()));
+    assert_eq!(count.option("region", "eu-demo-1-not-a-secret"), Ok(()));
+    assert_eq!(count.location("/srv/demo/repo"), Ok(()));
+    // 8 bytes of a URL's password, 6 of an rclone credential, 5 of a
+    // credential option: the cap.
+    assert_eq!(count.location("rest:https://demo:pw-12345@nas/"), Ok(()));
+    assert_eq!(count.location("rclone::sftp,pass=rc-123:/b"), Ok(()));
+    assert_eq!(count.option("secret_access_key", "sk-12"), Ok(()));
+    let mut settings = Settings::new("rest:https://demo:pw-12345@nas/");
+    settings.repo_hot = Some("rclone::sftp,pass=rc-123:/b".to_owned());
+    settings.password = secrets.remove(0);
+    settings.resolved = secrets;
+    settings
+        .options
+        .insert("secret_access_key".to_owned(), "sk-12".to_owned());
+    assert!(!settings.redactor().masks_everything());
+    // One byte more, in a URL in an option: past the cap, for both.
+    assert_eq!(
+        count.option("endpoint", "https://u:x@h"),
+        Err(TooMuchToMask)
+    );
+    assert_eq!(count.secret(&SecretValue::new("")), Err(TooMuchToMask));
+    settings
+        .options
+        .insert("endpoint".to_owned(), "https://u:x@h".to_owned());
+    assert!(settings.redactor().masks_everything());
+}
+
+/// A repository is counted with every secret a redactor for it masks:
+/// any one of them, of any setting, takes it past the cap.
+#[test]
+fn a_repository_is_counted_with_every_secret_its_redactor_masks() {
+    let at_the_cap = || {
+        let mut settings = Settings::new("/srv/demo/repo");
+        settings.password = SecretValue::new("");
+        settings.resolved = secrets_of(MAX_MASKED_BYTES - 1);
+        settings
+    };
+    let counted = |settings: &Settings| MaskedSecrets::default().repository(settings.secrets());
+    assert_eq!(counted(&at_the_cap()), Ok(()));
+    type Add = fn(&mut Settings);
+    let parts: [(&str, Add); 7] = [
+        ("password", |s| s.password = SecretValue::new("p1")),
+        ("repository", |s| {
+            s.repository = "rest:https://demo:p2@nas/".to_owned();
+        }),
+        ("repo-hot", |s| {
+            s.repo_hot = Some("rclone::sftp,pass=p3:/b".to_owned());
+        }),
+        ("options", |s| {
+            s.options
+                .insert("secret_access_key".to_owned(), "p4".to_owned());
+        }),
+        ("options-hot", |s| {
+            s.options_hot.insert("password".to_owned(), "p5".to_owned());
+        }),
+        ("options-cold", |s| {
+            s.options_cold
+                .insert("endpoint".to_owned(), "https://u:p6@h".to_owned());
+        }),
+        ("resolved", |s| s.resolved.push(SecretValue::new("p7"))),
+    ];
+    for (part, add) in parts {
+        let mut settings = at_the_cap();
+        add(&mut settings);
+        assert_eq!(counted(&settings), Err(TooMuchToMask), "{part}");
+        assert!(settings.redactor().masks_everything(), "{part}");
+    }
+}

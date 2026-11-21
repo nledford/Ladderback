@@ -1,8 +1,8 @@
 use serde_json::{from_str, json, to_value};
 
 use crate::{
-    ApiTokenDto, ApiTokensDto, ChangeApiTokenPermissionsDto, CreateApiTokenDto, CreatedApiTokenDto,
-    PermissionLevelDto, PermissionsDto,
+    ApiTokenDto, ApiTokensDto, ChangeApiTokenPermissionsDto, ChangeWithoutTokenDto,
+    CreateApiTokenDto, CreatedApiTokenDto, PermissionLevelDto, PermissionsDto,
 };
 
 fn listed() -> ApiTokenDto {
@@ -85,6 +85,17 @@ fn a_permissions_change_never_shows_the_password_in_debug() {
     assert_eq!(change.permissions.backups, PermissionLevelDto::Read);
     let shown = format!("{change:?}");
     assert!(!shown.contains("canary-password"), "{shown}");
+}
+
+#[test]
+fn a_without_token_change_never_shows_the_password_in_debug() {
+    let change: ChangeWithoutTokenDto =
+        from_str(r#"{"permissions":{"daemon-log":"read"},"current-password":"canary-password"}"#)
+            .unwrap();
+    assert_eq!(change.permissions.daemon_log, PermissionLevelDto::Read);
+    let shown = format!("{change:?}");
+    assert!(!shown.contains("canary-password"), "{shown}");
+    assert!(shown.contains("daemon_log: Read"), "{shown}");
 }
 
 #[test]

@@ -11,12 +11,11 @@ import path from "node:path";
 import { Given, Then, When } from "@cucumber/cucumber";
 
 import { expect } from "../support/expect.ts";
-import { ISOLATION, journey, namePattern } from "../support/keyboard.ts";
+import { focusComesTo, ISOLATION, journey, namePattern } from "../support/keyboard.ts";
 import { patienceMs, untilStepLimit } from "../support/patience.ts";
 import type { BrowserWorld } from "../support/world.ts";
 import { pressUntilFocusIsOn } from "./accessibility.ts";
 import { PASSWORD, serveDemoPlans } from "./live.ts";
-import { focusComesTo } from "./repositories.ts";
 import { toastReads } from "./toast.ts";
 
 // The proposal each scenario made, by its ID.
@@ -90,7 +89,7 @@ When("I press Tab until focus is on the proposal's Review button", async functio
 
 Then("focus is on the proposal's heading", async function (this: BrowserWorld) {
   const name = `Proposal ${proposalOf(this)}`;
-  await focusComesTo(this, "heading", name, `the heading "${name}"`);
+  await focusComesTo(this.page, journey(this.page).byRole("heading", { name: namePattern(name) }), `the heading "${name}"`);
 });
 
 // The toast that answers a decision names the proposal by its ID, which only

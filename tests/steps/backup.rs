@@ -672,6 +672,9 @@ pub struct BackupSetup {
     /// The hooks around every operation of the agent, written to the
     /// daemon's configuration.
     pub agent_hooks: domain::planning::Hooks,
+    /// What AI agents may do without a token, written to the daemon's
+    /// configuration; the defaults when unset.
+    pub without_token: Option<domain::access::permissions::Permissions>,
     /// Where the daemon's configuration says the repository's password
     /// comes from; the inline [`PASSWORD`] when unset.
     pub password: Option<domain::secrets::SecretRef>,

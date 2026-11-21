@@ -21,7 +21,7 @@ pub use rules::{Activation, Holds, Orientation, TabsName};
 /// the panel once, with the tabs, and it stays drawn while another shows.
 pub struct Tab {
     label: String,
-    holds: Holds,
+    holds: Signal<Holds>,
     panel: AnyView,
     start: bool,
 }
@@ -29,11 +29,16 @@ pub struct Tab {
 impl Tab {
     /// A tab named `label`, its words, whose panel is `panel`. `holds` says
     /// whether anything in the panel takes focus, which decides whether the
-    /// panel is a Tab stop of its own.
-    pub fn new(label: String, holds: Holds, panel: impl IntoView + 'static) -> Self {
+    /// panel is a Tab stop of its own; it may follow what the panel shows,
+    /// as for a panel whose controls come only once the daemon answers.
+    pub fn new(
+        label: String,
+        holds: impl Into<Signal<Holds>>,
+        panel: impl IntoView + 'static,
+    ) -> Self {
         Self {
             label,
-            holds,
+            holds: holds.into(),
             panel: panel.into_any(),
             start: false,
         }
@@ -200,7 +205,7 @@ pub fn Tabs(
                 selection.set(chosen);
             }
         };
-        let (label, words) = (tab.label.clone(), tab.label);
+        let (label, words, holds) = (tab.label.clone(), tab.label, tab.holds);
         buttons.push(view! {
             <button
                 type="button"
@@ -226,7 +231,7 @@ pub fn Tabs(
                 id=panel_id
                 class="tab-panel"
                 aria-labelledby=tab_id
-                tabindex=rules::panel_stop(tab.holds)
+                tabindex=move || rules::panel_stop(holds.get())
                 hidden=move || !is_selected()
             >
                 {tab.panel}

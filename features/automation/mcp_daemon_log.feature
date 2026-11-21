@@ -18,6 +18,7 @@ Feature: AI agents read the recent log through MCP
       repository = "rest:https://demo:CANARY-location-password@backup.example.com/nas"
       password-env = "DEMO_PASSWORD"
       """
+    And the daemon's config file lets AI agents without a token read the log
     And Ladderback is serving on loopback with that config file
     And an MCP server connected to it
     When the MCP client reads the log at the level "warn"
@@ -28,6 +29,7 @@ Feature: AI agents read the recent log through MCP
 
   Scenario: The lines of one operation are those that name it
     Given Ladderback is serving on loopback with the plan "home"
+    And AI agents without a token may read the daemon's log
     And an MCP server connected to it
     And the MCP client has run the plan "home" to the end
     When the MCP client reads the log of that operation
@@ -37,6 +39,7 @@ Feature: AI agents read the recent log through MCP
   Scenario: The lines of one plan are those that name it
     Given Ladderback is serving on loopback with the plan "home"
     And the plan's repository reads its password from a command that prints "e2e-scratch-password" and then fails saying "vault sealed"
+    And AI agents without a token may read the daemon's log
     And an MCP server connected to it
     When the MCP client calls the tool "run_plan" with the arguments '{"plan": "home"}'
     And the MCP client reads the log of the plan "home"
@@ -45,6 +48,7 @@ Feature: AI agents read the recent log through MCP
 
   Scenario: Lines are read within a time range
     Given Ladderback is serving on loopback with the plan "home"
+    And AI agents without a token may read the daemon's log
     And an MCP server connected to it
     And the MCP client has run the plan "home" to the end
     When the MCP client reads the log since the time of the line saying that operation ended
@@ -58,6 +62,7 @@ Feature: AI agents read the recent log through MCP
 
   Scenario: The log is read newest first, a page at a time, and a page cut short by its lines says so
     Given Ladderback is serving on loopback with the plan "home"
+    And AI agents without a token may read the daemon's log
     And an MCP server connected to it
     And the MCP client has run the plan "home" to the end
     When the MCP client reads the log, 2 lines to a page
@@ -68,6 +73,7 @@ Feature: AI agents read the recent log through MCP
 
   Scenario: A page cut short by its bytes says so
     Given the daemon's config file holds 150 repositories, each with a password in its address
+    And the daemon's config file lets AI agents without a token read the log
     And Ladderback is serving on loopback with that config file
     And an MCP server connected to it
     When the MCP client reads the log at the level "warn", 200 lines to a page

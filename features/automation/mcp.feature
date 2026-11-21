@@ -39,11 +39,13 @@ Feature: AI agents and scripts use Ladderback through MCP
       | 2025-06-18 |
       | 2025-11-25 |
 
+  # With sign-in off, the server lists the tools AI agents may use without a
+  # token (decision 127): by default not the two that look inside snapshots.
   Scenario: The server lists its tools
     Given Ladderback is serving on loopback
     And an MCP server connected to it
     When the MCP client lists the tools
-    Then the tools listed are "status, list_plans, list_repositories, list_snapshots, list_snapshot_folder, find_in_snapshots, list_operations, get_operation, read_log, run_plan, wait_operation, cancel_operation, test_repository, preview_forget, preview_import, export_profile, propose_setup, get_proposal, withdraw_proposal, dry_run_plan"
+    Then the tools listed are "status, list_plans, list_repositories, list_snapshots, list_operations, get_operation, run_plan, wait_operation, cancel_operation, test_repository, preview_forget, preview_import, export_profile, propose_setup, get_proposal, withdraw_proposal, dry_run_plan"
 
   # A proposal waits for a person on the web UI's "Pending changes" page,
   # which only a running Ladderback serves: a session of its own offers no
@@ -247,8 +249,11 @@ Feature: AI agents and scripts use Ladderback through MCP
 
   # The engine masks every secret of the job in its own words before the
   # log keeps them (I4); the tool hands on the failure as the log has it.
+  # Those words can name files, so they reach an AI agent only with Snapshot
+  # contents (decision 127).
   Scenario: A failed operation says why, without the repository's password
     Given Ladderback is serving on loopback with the plan "home"
+    And AI agents without a token may look inside snapshots
     And the plan's repository password in the configuration is "canary-not-a-secret", which isn't the repository's
     And the plan's repository folder is gone
     And an MCP server connected to it

@@ -5,6 +5,9 @@
 
 use crate::components::tabs::Holds;
 
+/// How many sections a build has: the Agents one only with the hub.
+const SECTIONS: usize = if cfg!(feature = "hub") { 9 } else { 8 };
+
 /// A section of Settings, each a tab of its own, in the order the tabs
 /// stand.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -19,6 +22,12 @@ pub(crate) enum Section {
     SigningIn,
     /// The API tokens.
     ApiTokens,
+    /// What AI agents may do without a token (decision 127).
+    AiAgents,
+    /// The pairing tokens a hub makes for another machine (decision 121),
+    /// only in a build with the hub and on a daemon serving as one.
+    #[cfg(feature = "hub")]
+    Agents,
     /// The dry-run allowlist: the folders a plan dry run an AI agent asks
     /// for may read (decision 89).
     DryRunAllowlist,
@@ -28,12 +37,15 @@ pub(crate) enum Section {
 
 impl Section {
     /// Every section, in the order of the tabs.
-    pub(crate) const ALL: [Self; 7] = [
+    pub(crate) const ALL: [Self; SECTIONS] = [
         Self::Language,
         Self::PageWidth,
         Self::AdminPassword,
         Self::SigningIn,
         Self::ApiTokens,
+        Self::AiAgents,
+        #[cfg(feature = "hub")]
+        Self::Agents,
         Self::DryRunAllowlist,
         Self::Restart,
     ];
@@ -50,6 +62,9 @@ impl Section {
             Self::AdminPassword => "admin-password",
             Self::SigningIn => "signing-in",
             Self::ApiTokens => "api-tokens",
+            Self::AiAgents => "ai-agents",
+            #[cfg(feature = "hub")]
+            Self::Agents => "agents",
             Self::DryRunAllowlist => "dry-run-allowlist",
             Self::Restart => "restart",
         }
@@ -70,16 +85,26 @@ impl Section {
     /// Tab stop of its own: every section has a control but two with
     /// sign-in off (`signed_in` false), which then only say why; the
     /// restart, which has a button only where a service manager runs
-    /// Ladderback; and the dry-run allowlist, whose controls show only once
-    /// the daemon has read the list, so a read refused or unanswered leaves
-    /// words alone.
-    pub(crate) fn holds(self, signed_in: bool) -> Holds {
+    /// Ladderback; and the dry-run allowlist's, whose controls show only once
+    /// the daemon has read what it holds, so a read refused or unanswered
+    /// leaves words alone. The AI agents' panel holds its choices once the
+    /// daemon has read them (`ai_agents_read`), and its first choice is then
+    /// the stop, since the panel is taller than a window; until then, and
+    /// after a read refused or unanswered, it holds only words.
+    pub(crate) fn holds(self, signed_in: bool, ai_agents_read: bool) -> Holds {
         match self {
             Self::Language | Self::PageWidth | Self::AdminPassword => Holds::Controls,
+            Self::AiAgents if ai_agents_read => Holds::Controls,
+            // Shown only with sign-in off or in a session, always with its
+            // form.
+            #[cfg(feature = "hub")]
+            Self::Agents => Holds::Controls,
             Self::SigningIn | Self::ApiTokens if signed_in => Holds::Controls,
-            Self::SigningIn | Self::ApiTokens | Self::DryRunAllowlist | Self::Restart => {
-                Holds::Text
-            }
+            Self::SigningIn
+            | Self::ApiTokens
+            | Self::AiAgents
+            | Self::DryRunAllowlist
+            | Self::Restart => Holds::Text,
         }
     }
 }
@@ -113,6 +138,9 @@ mod tests {
                 "admin-password",
                 "signing-in",
                 "api-tokens",
+                "ai-agents",
+                #[cfg(feature = "hub")]
+                "agents",
                 "dry-run-allowlist",
                 "restart"
             ]
@@ -184,7 +212,7 @@ mod tests {
 
     #[test]
     fn signed_in_every_section_but_the_dry_run_allowlist_and_the_restart_holds_a_control() {
-        let held: Vec<_> = Section::ALL.map(|section| section.holds(true)).into();
+        let held: Vec<_> = Section::ALL.map(|section| section.holds(true, true)).into();
         assert_eq!(
             held,
             [
@@ -192,6 +220,9 @@ mod tests {
                 Holds::Controls,
                 Holds::Controls,
                 Holds::Controls,
+                Holds::Controls,
+                Holds::Controls,
+                #[cfg(feature = "hub")]
                 Holds::Controls,
                 Holds::Text,
                 Holds::Text
@@ -202,7 +233,9 @@ mod tests {
     #[test]
     fn with_sign_in_off_signing_in_the_api_tokens_the_dry_run_allowlist_and_the_restart_may_hold_only_words()
      {
-        let held: Vec<_> = Section::ALL.map(|section| section.holds(false)).into();
+        let held: Vec<_> = Section::ALL
+            .map(|section| section.holds(false, true))
+            .into();
         assert_eq!(
             held,
             [
@@ -211,9 +244,27 @@ mod tests {
                 Holds::Controls,
                 Holds::Text,
                 Holds::Text,
+                Holds::Controls,
+                #[cfg(feature = "hub")]
+                Holds::Controls,
                 Holds::Text,
                 Holds::Text
             ]
         );
+    }
+
+    #[test]
+    fn the_ai_agents_panel_holds_words_alone_until_the_daemon_has_read_its_permissions() {
+        for signed_in in [true, false] {
+            assert_eq!(Section::AiAgents.holds(signed_in, false), Holds::Text);
+            assert_eq!(Section::AiAgents.holds(signed_in, true), Holds::Controls);
+            for section in Section::ALL.into_iter().filter(|s| *s != Section::AiAgents) {
+                assert_eq!(
+                    section.holds(signed_in, false),
+                    section.holds(signed_in, true),
+                    "{section:?}"
+                );
+            }
+        }
     }
 }

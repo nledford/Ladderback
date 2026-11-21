@@ -16,6 +16,8 @@ mod body_limit;
 mod downloads;
 mod dry_runs;
 mod full_disk_access;
+#[cfg(feature = "hub")]
+mod hub_pages;
 mod listener;
 mod maintenance;
 mod plans;
@@ -52,6 +54,7 @@ use rust_embed::RustEmbed;
 use rust_embed as _;
 use serde::{Deserialize, Serialize};
 
+pub use api_tokens::{status_shown, summary_shown, warning_shown};
 pub use downloads::{DownloadRefusal, DownloadStart, Downloads, HandOff};
 pub use dry_runs::{DryRuns, DryRunsError};
 pub use full_disk_access::{FullDiskAccessRoute, SettingsOpener, SettingsUnopened};
@@ -560,6 +563,13 @@ pub fn router(assets: Arc<dyn AssetSource>, checks: RequestChecks, state: AppSta
             api_tokens::PERMISSIONS_PATH,
             axum::routing::get(api_tokens::permissions),
         )
+        // A session's only: the route table names no permission for it, so
+        // neither a token nor an AI agent changes what AI agents may do
+        // without a token (decision 127).
+        .route(
+            api_tokens::WITHOUT_TOKEN_PATH,
+            axum::routing::get(api_tokens::without_token).put(api_tokens::change_without_token),
+        )
         .route(
             sign_in::settings::SETTINGS_PATH,
             axum::routing::get(sign_in::settings::read).put(sign_in::settings::change),
@@ -733,6 +743,10 @@ pub fn router(assets: Arc<dyn AssetSource>, checks: RequestChecks, state: AppSta
     // browser's checks, as every other path does (§16, decision 122).
     #[cfg(not(feature = "hub"))]
     let routes = routes.merge(sync::routes(&state.sync));
+    // With it, the hub's own routes under `/api/v1/hub` are the page's,
+    // behind every check the others are.
+    #[cfg(feature = "hub")]
+    let routes = hub_pages::routes(routes);
     let app = routes
         .with_state(state)
         .fallback(move |method: Method, uri: Uri| {

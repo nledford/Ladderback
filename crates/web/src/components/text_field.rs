@@ -59,7 +59,9 @@ pub use rules::{Access, Kind};
 /// `description_code` ends the description on a value set as data, in
 /// monospace, such as the short ID a step-up asks to be typed back; and
 /// `children` stand between the description and the field, such as the
-/// button that copies that value.
+/// button that copies that value. `also_described_by` names an element of
+/// the caller's, such as a warning under the field, that describes it too
+/// while the signal names it, after the field's own parts.
 ///
 /// What the caller owes WCAG 2.2 AA, since the field does none of it:
 ///
@@ -79,6 +81,7 @@ pub fn TextField(
     #[prop(optional, into)] description: Option<String>,
     #[prop(optional, into)] description_code: Option<String>,
     #[prop(optional, into)] error: Signal<Option<String>>,
+    #[prop(optional, into)] also_described_by: Signal<Option<String>>,
     #[prop(optional)] alert: bool,
     value: RwSignal<String>,
     #[prop(optional)] kind: Kind,
@@ -100,7 +103,17 @@ pub fn TextField(
     let has_description = description.is_some() || description_code.is_some();
     let described_by = {
         let id = id.clone();
-        move || rules::described_by(&id, has_description, access, error.with(Option::is_some))
+        move || {
+            also_described_by.with(|also| {
+                rules::described_by(
+                    &id,
+                    has_description,
+                    access,
+                    error.with(Option::is_some),
+                    also.as_deref(),
+                )
+            })
+        }
     };
     let invalid = move || rules::invalid(error.with(Option::is_some));
     let shown = RwSignal::new(false);

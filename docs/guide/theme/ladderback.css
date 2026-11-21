@@ -49,6 +49,12 @@
     --searchresults-header-fg: #a6a6a6;
 }
 
+/* A table's header row: coal's text on its own header fill reads at about
+ * 3.5:1, so the fill is darker. */
+.coal {
+    --table-header-bg: hsl(200, 7%, 20%);
+}
+
 /* Tomorrow Night's red, the code colors of coal and navy. */
 .coal :is(.hljs-variable, .hljs-attribute, .hljs-attr, .hljs-tag, .hljs-regexp),
 .navy :is(.hljs-variable, .hljs-attribute, .hljs-attr, .hljs-tag, .hljs-regexp) {

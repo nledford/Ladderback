@@ -1,8 +1,9 @@
 @ui
 Feature: Settings shows its sections as tabs
   Settings holds several sections: the language of the web UI, the width of
-  its pages, the admin password, signing in, the API tokens, the dry-run
-  allowlist and the restart of Ladderback. Each is a tab of its own, in a
+  its pages, the admin password, signing in, the API tokens, what AI agents
+  may do without a token, the dry-run allowlist and the restart of
+  Ladderback. Each is a tab of its own, in a
   column beside its section where the page is wide and in a row above it
   where it is narrow, and the first is
   selected when the page opens. Each tab has an address, Settings' own with
@@ -24,6 +25,7 @@ Feature: Settings shows its sections as tabs
       | Admin password     |
       | Signing in         |
       | API tokens         |
+      | AI agents          |
       | Dry-run allowlist  |
       | Restart Ladderback |
     And the tab "Language" is selected and the one Tab stop of its list
@@ -79,6 +81,7 @@ Feature: Settings shows its sections as tabs
       | admin-password    | Admin password     |
       | signing-in        | Signing in         |
       | api-tokens        | API tokens         |
+      | ai-agents         | AI agents          |
       | dry-run-allowlist | Dry-run allowlist  |
       | restart           | Restart Ladderback |
 
@@ -157,8 +160,6 @@ Feature: Settings shows its sections as tabs
     And I skip to the content
     And I press Tab until focus is on the textbox "Label"
     And I type "nightly-mcp"
-    And I press Tab until focus is on the checkbox "Read"
-    And I press Space
     And I press Tab until focus is on the button "Create the token"
     And I press Enter
     And I press Shift+Tab until focus is on the tab "API tokens"

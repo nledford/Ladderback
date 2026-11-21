@@ -57,7 +57,7 @@ pub fn Checkbox(
                     prop:checked=move || checked.get()
                     on:change=move |event| checked.set(event_target_checked(&event))
                     aria-describedby=move || {
-                        described_by(id, has_description, Access::Editable, has_error())
+                        described_by(id, has_description, Access::Editable, has_error(), None)
                     }
                     aria-invalid=move || invalid(has_error())
                 />

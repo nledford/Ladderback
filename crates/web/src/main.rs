@@ -96,6 +96,10 @@ mod repositories;
 mod repositories_page;
 // What a paused live page shows, counts and says, decided on the host.
 mod pause;
+// What the hub's pairing dialog decides, on the host; `settings/agents.rs`
+// is its glue. Only a build with the hub has it (decision 122).
+#[cfg(feature = "hub")]
+mod pairing;
 // What the Plans page shows, sends and says, decided on the host;
 // `plans_page.rs` is its glue.
 mod plans;
@@ -411,6 +415,13 @@ fn App(localizer: Arc<Localizer>) -> impl IntoView {
     // on each page and the start page's steps check again (decision 115).
     provide_context(FullDiskAccessFound(RwSignal::new(None)));
     ws::watch_session(warning, ended, told, keep_offered);
+    // The hub's key, on a daemon serving as a hub, with the standing it was
+    // read in: Settings shows its Machines tab once it is read (decision
+    // 121).
+    #[cfg(feature = "hub")]
+    let hub = RwSignal::new(None::<(Standing, Option<api::HubDto>)>);
+    #[cfg(feature = "hub")]
+    provide_context(settings::agents::HubKey(hub));
     spawn_local(async move {
         // A live session's CSRF token and lease are the page's once read.
         let read = ws::session().await;
@@ -418,6 +429,29 @@ fn App(localizer: Arc<Localizer>) -> impl IntoView {
         notice.set(SignInOffNotice::of(read.as_ref()));
         standing.set(Standing::of(read.as_ref()));
     });
+    // The page reads the hub's key once for each standing it is in, with
+    // sign-in off or in a session, as the hub answers no one else; in any
+    // other it has none. A read answered once the standing has changed
+    // again is dropped, so an old answer never stands for the new one.
+    #[cfg(feature = "hub")]
+    {
+        let reads = StoredValue::new(0_u64);
+        Effect::new(move |_| {
+            let now = shown.get();
+            let read = reads.get_value().wrapping_add(1);
+            reads.set_value(read);
+            match now {
+                Standing::Asking => {}
+                Standing::Off | Standing::SignedIn => spawn_local(async move {
+                    let key = settings::agents::read_hub().await;
+                    if reads.try_get_value() == Some(read) {
+                        hub.try_set(Some((now, key)));
+                    }
+                }),
+                Standing::SignedOut | Standing::Unread => hub.set(Some((now, None))),
+            }
+        });
+    }
     // The sign-in page has a title of its own; once signed in, the page asked
     // for has the title its address names.
     let titles = Arc::clone(&localizer);

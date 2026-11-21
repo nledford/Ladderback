@@ -19,10 +19,18 @@ fn ago(unit: &'static str, count: u64) -> LastUsed {
     LastUsed::Ago { unit, count }
 }
 
-fn form(label: &str, scopes: &[Scope]) -> TokenForm {
+fn form(label: &str, permissions: PermissionsDto) -> TokenForm {
     TokenForm {
         label: label.to_owned(),
-        scopes: scopes.to_vec(),
+        permissions,
+    }
+}
+
+/// Only Backup runs, a permission that shows nothing on its own.
+fn starts_backups() -> PermissionsDto {
+    PermissionsDto {
+        backup_runs: PermissionLevelDto::StartAndCancel,
+        ..PermissionsDto::default()
     }
 }
 
@@ -32,106 +40,41 @@ fn said(id: MessageId, args: &[(&'static str, MsgArg)]) -> String {
 }
 
 #[test]
-fn a_form_without_a_label_or_a_scope_lacks_both_in_the_page_s_order() {
-    assert_eq!(form("", &[]).missing(), [Field::Label, Field::Scopes]);
+fn a_form_without_a_label_or_a_permission_lacks_both_in_the_page_s_order() {
+    assert_eq!(
+        form("", PermissionsDto::default()).missing(),
+        [Field::Label, Field::Permissions]
+    );
 }
 
 #[test]
 fn a_label_of_only_spaces_is_none() {
-    assert_eq!(form("   ", &[Scope::Read]).missing(), [Field::Label]);
+    assert_eq!(form("   ", new_token()).missing(), [Field::Label]);
 }
 
 #[test]
-fn a_token_needs_a_scope() {
-    assert_eq!(form("nightly-mcp", &[]).missing(), [Field::Scopes]);
-}
-
-#[test]
-fn a_label_and_a_scope_lack_nothing() {
-    assert!(form("nightly-mcp", &[Scope::Run]).missing().is_empty());
-}
-
-#[test]
-fn the_request_has_the_label_without_its_spaces_and_the_permissions_of_each_scope_chosen() {
-    let request = form(
-        "  nightly mcp  ",
-        &[Scope::Propose, Scope::Read, Scope::Propose],
-    )
-    .request();
-    assert_eq!(request.label, "nightly mcp");
+fn a_token_needs_a_permission() {
     assert_eq!(
-        request.permissions,
-        PermissionsDto {
-            backups: PermissionLevelDto::Read,
-            configuration: PermissionLevelDto::Propose,
-            snapshot_contents: PermissionLevelDto::Read,
-            daemon_log: PermissionLevelDto::Read,
-            ..PermissionsDto::default()
-        }
+        form("nightly-mcp", PermissionsDto::default()).missing(),
+        [Field::Permissions]
     );
 }
 
-/// Each scope gives what a token of that scope was migrated to (decision
-/// 127), so a token made with the form can do what it could before.
 #[test]
-fn each_scope_gives_the_permissions_its_tokens_were_migrated_to() {
-    let none = PermissionsDto::default();
-    for (scope, permissions) in [
-        (
-            Scope::Read,
-            PermissionsDto {
-                backups: PermissionLevelDto::Read,
-                snapshot_contents: PermissionLevelDto::Read,
-                daemon_log: PermissionLevelDto::Read,
-                ..none
-            },
-        ),
-        (
-            Scope::Run,
-            PermissionsDto {
-                backup_runs: PermissionLevelDto::StartAndCancel,
-                ..none
-            },
-        ),
-        (
-            Scope::Preview,
-            PermissionsDto {
-                previews: PermissionLevelDto::Preview,
-                ..none
-            },
-        ),
-        (
-            Scope::Propose,
-            PermissionsDto {
-                configuration: PermissionLevelDto::Propose,
-                ..none
-            },
-        ),
-    ] {
-        assert_eq!(
-            form("t", &[scope]).request().permissions,
-            permissions,
-            "{scope:?}"
-        );
-        assert_eq!(scopes_of(permissions), [scope], "{scope:?}");
-    }
+fn a_label_and_one_permission_lack_nothing() {
+    assert!(form("nightly-mcp", starts_backups()).missing().is_empty());
 }
 
-/// A token given only part of what a scope gives, over the API, still
-/// lists that scope, so no permission it has goes unsaid in its row.
 #[test]
-fn a_row_lists_each_scope_that_gives_any_of_the_token_s_permissions() {
-    let daemon_log_only = PermissionsDto {
-        daemon_log: PermissionLevelDto::Read,
-        ..PermissionsDto::default()
-    };
-    assert_eq!(scopes_of(daemon_log_only), [Scope::Read]);
-    assert!(scopes_of(PermissionsDto::default()).is_empty());
+fn the_request_has_the_label_without_its_spaces_and_the_permissions_chosen() {
+    let request = form("  nightly mcp  ", starts_backups()).request();
+    assert_eq!(request.label, "nightly mcp");
+    assert_eq!(request.permissions, starts_backups());
 }
 
 #[test]
 fn each_problem_links_to_its_field_and_says_the_daemon_s_own_words() {
-    let items = problems_of(&form("", &[]), said).unwrap();
+    let items = problems_of(&form("", PermissionsDto::default()), said).unwrap();
     assert_eq!(items.len(), 2);
     assert_eq!(items[0].field, Some("api-token-label"));
     assert_eq!(
@@ -141,7 +84,13 @@ fn each_problem_links_to_its_field_and_says_the_daemon_s_own_words() {
             &[("max", MsgArg::Count(LABEL_MAX_CHARS))]
         )
     );
-    assert_eq!(items[1].field, Some("api-token-scope-read"));
+    // The first choice of the first group, which the radio group names
+    // `{name}-{value}`.
+    assert_eq!(items[1].field, Some("api-token-backups-none"));
+    assert_eq!(
+        Field::Permissions.id(),
+        format!("{}-{NO_ACCESS}", Row::Backups.group(Form::Create))
+    );
     assert_eq!(
         items[1].sentence.plain(),
         said(msg::ERROR_API_TOKEN_NO_PERMISSION, &[])
@@ -150,28 +99,25 @@ fn each_problem_links_to_its_field_and_says_the_daemon_s_own_words() {
 
 #[test]
 fn a_complete_form_has_no_problems() {
-    assert_eq!(
-        problems_of(&form("nightly-mcp", &[Scope::Read]), said),
-        None
-    );
+    assert_eq!(problems_of(&form("nightly-mcp", new_token()), said), None);
 }
 
 #[test]
 fn a_field_shows_the_problem_that_is_about_it() {
-    let items = problems_of(&form("", &[Scope::Read]), said).unwrap();
+    let items = problems_of(&form("", new_token()), said).unwrap();
     assert_eq!(
         error_of(&items, Field::Label),
         Some(items[0].sentence.plain())
     );
-    assert_eq!(error_of(&items, Field::Scopes), None);
+    assert_eq!(error_of(&items, Field::Permissions), None);
 }
 
 #[test]
-fn a_refused_label_or_scope_is_about_its_field_and_the_cap_about_none() {
+fn a_refused_label_or_permission_is_about_its_field_and_the_cap_about_none() {
     assert_eq!(field_of(ErrorCode::ApiTokenLabel), Some(Field::Label));
     assert_eq!(
         field_of(ErrorCode::ApiTokenNoPermission),
-        Some(Field::Scopes)
+        Some(Field::Permissions)
     );
     assert_eq!(field_of(ErrorCode::ApiTokenLimit), None);
     assert_eq!(field_of(ErrorCode::ApiTokensUnavailable), None);
@@ -264,36 +210,6 @@ fn each_last_use_is_said_through_the_catalog() {
 }
 
 #[test]
-fn each_scope_has_its_code_its_checkbox_and_its_words() {
-    let codes: Vec<_> = SCOPES.into_iter().map(scope_code).collect();
-    assert_eq!(codes, ["read", "run", "preview", "propose"]);
-    let ids: Vec<_> = SCOPES.into_iter().map(scope_id).collect();
-    assert_eq!(
-        ids,
-        [
-            "api-token-scope-read",
-            "api-token-scope-run",
-            "api-token-scope-preview",
-            "api-token-scope-propose"
-        ]
-    );
-    assert_eq!(
-        scope_name(Scope::Run),
-        (
-            msg::UI_API_TOKEN_SCOPE,
-            vec![("scope", MsgArg::Text("run".to_owned()))]
-        )
-    );
-    assert_eq!(
-        scope_hint(Scope::Preview),
-        (
-            msg::UI_API_TOKEN_SCOPE_HINT,
-            vec![("scope", MsgArg::Text("preview".to_owned()))]
-        )
-    );
-}
-
-#[test]
 fn a_token_is_revoked_at_its_own_route_from_its_own_button() {
     assert_eq!(revoke_path("abcdefghijkl"), "/api/v1/tokens/abcdefghijkl");
     assert_eq!(revoke_id("abcdefghijkl"), "api-token-revoke-abcdefghijkl");
@@ -316,6 +232,254 @@ fn the_buttons_and_dialogs_of_a_token_are_named_for_its_label() {
     );
     assert_eq!(
         created_body("nightly-mcp"),
-        (msg::UI_API_TOKEN_CREATED_BODY, label)
+        (msg::UI_API_TOKEN_CREATED_BODY, label.clone())
     );
+    assert_eq!(
+        change_label("nightly-mcp"),
+        (msg::UI_API_TOKEN_CHANGE, label.clone())
+    );
+    assert_eq!(
+        change_title("nightly-mcp"),
+        (msg::UI_API_TOKEN_CHANGE_TITLE, label.clone())
+    );
+    assert_eq!(changed("nightly-mcp"), (msg::UI_API_TOKEN_CHANGED, label));
+}
+
+/// The change button is named apart from the revoke button of the same
+/// token, and from the change dialog's groups (`api-token-change-<code>`).
+#[test]
+fn a_token_s_permissions_change_from_its_own_button() {
+    assert_eq!(change_id("abcdefghijkl"), "api-token-edit-abcdefghijkl");
+    assert_ne!(change_id("abcdefghijkl"), revoke_id("abcdefghijkl"));
+}
+
+/// Decision 127's defaults: a new token sees and starts backups, previews
+/// and proposes, and is given what can show a file's name or a log line
+/// only when chosen.
+#[test]
+fn a_new_token_starts_at_the_defaults_of_a_new_token() {
+    assert_eq!(
+        chosen_of(&new_token()),
+        [
+            "read",
+            "start-and-cancel",
+            "preview",
+            "propose",
+            "none",
+            "none",
+            "none"
+        ]
+    );
+}
+
+/// Each permission's group holds its level or no access, and gives back
+/// what it was set from.
+#[test]
+fn each_group_gives_back_the_permission_it_was_set_from() {
+    for (row, permissions) in ROWS.into_iter().zip([
+        PermissionsDto {
+            backups: PermissionLevelDto::Read,
+            ..PermissionsDto::default()
+        },
+        PermissionsDto {
+            backup_runs: PermissionLevelDto::StartAndCancel,
+            ..PermissionsDto::default()
+        },
+        PermissionsDto {
+            previews: PermissionLevelDto::Preview,
+            ..PermissionsDto::default()
+        },
+        PermissionsDto {
+            configuration: PermissionLevelDto::Propose,
+            ..PermissionsDto::default()
+        },
+        PermissionsDto {
+            snapshot_contents: PermissionLevelDto::Read,
+            ..PermissionsDto::default()
+        },
+        PermissionsDto {
+            daemon_log: PermissionLevelDto::Read,
+            ..PermissionsDto::default()
+        },
+        PermissionsDto {
+            repository_check: PermissionLevelDto::Run,
+            ..PermissionsDto::default()
+        },
+    ]) {
+        let chosen = chosen_of(&permissions);
+        for (other, value) in ROWS.into_iter().zip(chosen) {
+            let expected = if other == row {
+                row.level_code()
+            } else {
+                NO_ACCESS
+            };
+            assert_eq!(value, expected, "{row:?}: {other:?}");
+        }
+        assert_eq!(permissions_from(chosen), permissions, "{row:?}");
+        assert_eq!(granted_of(&permissions), [row], "{row:?}");
+    }
+}
+
+#[test]
+fn each_row_has_its_api_code_and_level() {
+    let codes: Vec<_> = ROWS
+        .into_iter()
+        .map(|row| (row.code(), row.level_code()))
+        .collect();
+    assert_eq!(
+        codes,
+        [
+            ("backups", "read"),
+            ("backup-runs", "start-and-cancel"),
+            ("previews", "preview"),
+            ("configuration", "propose"),
+            ("snapshot-contents", "read"),
+            ("daemon-log", "read"),
+            ("repository-check", "run"),
+        ]
+    );
+}
+
+/// A value that isn't the row's own level, such as another row's, grants
+/// nothing.
+#[test]
+fn a_value_that_isnt_the_rows_level_is_no_access() {
+    let chosen = ["run", "read", "propose", "preview", "none", "none", "none"];
+    assert_eq!(permissions_from(chosen), PermissionsDto::default());
+}
+
+/// 1a's Scopes column said "Read" for a token with only Daemon log, and
+/// nothing for one with only Repository check (#1214): each permission is
+/// listed by its own name.
+#[test]
+fn a_row_lists_each_permission_the_token_holds_by_its_own_name() {
+    let mixed = PermissionsDto {
+        backups: PermissionLevelDto::Read,
+        daemon_log: PermissionLevelDto::Read,
+        repository_check: PermissionLevelDto::Run,
+        ..PermissionsDto::default()
+    };
+    assert_eq!(
+        granted_of(&mixed),
+        [Row::Backups, Row::DaemonLog, Row::RepositoryCheck]
+    );
+    assert!(granted_of(&PermissionsDto::default()).is_empty());
+    let code = |row: Row| vec![("permission", MsgArg::Text(row.code().to_owned()))];
+    assert_eq!(
+        Row::DaemonLog.granted(),
+        (msg::UI_PERMISSION_GRANTED, code(Row::DaemonLog))
+    );
+    assert_eq!(
+        Row::Backups.name(),
+        (msg::UI_PERMISSION, code(Row::Backups))
+    );
+    assert_eq!(
+        Row::Previews.hint(),
+        (msg::UI_PERMISSION_HINT, code(Row::Previews))
+    );
+}
+
+/// A group offers no access first, then the row's level, each in the
+/// catalog's words.
+#[test]
+fn a_group_offers_no_access_then_its_level() {
+    let level = |code: &str| {
+        (
+            msg::UI_PERMISSION_LEVEL,
+            vec![("level", MsgArg::Text(code.to_owned()))],
+        )
+    };
+    assert_eq!(
+        Row::BackupRuns.choices(),
+        [
+            ("none", level("none")),
+            ("start-and-cancel", level("start-and-cancel")),
+        ]
+    );
+}
+
+/// A page can hold two forms of permissions, a token's dialog over the new
+/// token form: no two groups share a name.
+#[test]
+fn every_group_of_every_form_has_a_name_of_its_own() {
+    let mut names: Vec<&str> = [Form::Create, Form::Change, Form::WithoutToken]
+        .into_iter()
+        .flat_map(|form| ROWS.into_iter().map(move |row| row.group(form)))
+        .collect();
+    assert_eq!(Row::Backups.group(Form::Create), "api-token-backups");
+    assert_eq!(
+        Row::DaemonLog.group(Form::Change),
+        "api-token-change-daemon-log"
+    );
+    assert_eq!(
+        Row::RepositoryCheck.group(Form::WithoutToken),
+        "without-token-repository-check"
+    );
+    names.sort_unstable();
+    names.dedup();
+    assert_eq!(names.len(), 21);
+}
+
+#[test]
+fn a_change_goes_to_the_token_s_own_route_with_the_admin_password() {
+    assert_eq!(
+        change_path("abcdefghijkl"),
+        "/api/v1/tokens/abcdefghijkl/permissions"
+    );
+    let change = change_request(new_token(), "demo-admin-pass".to_owned());
+    assert_eq!(change.permissions, new_token());
+    assert_eq!(change.current_password, "demo-admin-pass");
+}
+
+/// With sign-in off there is no admin password to give, so none is sent.
+#[test]
+fn what_ai_agents_may_do_is_sent_with_the_password_only_with_sign_in_on() {
+    let on = without_token_request(new_token(), "demo-admin-pass".to_owned(), true);
+    assert_eq!(on.permissions, new_token());
+    assert_eq!(on.current_password.as_deref(), Some("demo-admin-pass"));
+    let off = without_token_request(new_token(), "typed anyway".to_owned(), false);
+    assert_eq!(off.current_password, None);
+}
+
+#[test]
+fn a_lone_read_of_the_token_list_counts() {
+    let mut reads = ListReads::default();
+    let read = reads.start();
+    assert!(reads.counts(read));
+    // Answered, it leaves a change nothing to overtake.
+    assert!(!reads.changed());
+}
+
+#[test]
+fn a_read_a_newer_one_overtook_doesnt_count_whichever_answers_first() {
+    let mut reads = ListReads::default();
+    let (older, newer) = (reads.start(), reads.start());
+    assert!(!reads.counts(older));
+    assert!(reads.counts(newer));
+
+    let mut reads = ListReads::default();
+    let (older, newer) = (reads.start(), reads.start());
+    assert!(reads.counts(newer));
+    assert!(!reads.counts(older));
+}
+
+#[test]
+fn a_change_while_a_read_is_unanswered_reads_again_and_the_older_answer_doesnt_count() {
+    let mut reads = ListReads::default();
+    let before = reads.start();
+    // The change is kept while the read after a revoke is unanswered.
+    assert!(reads.changed());
+    let again = reads.start();
+    assert!(!reads.counts(before), "the list from before the change");
+    assert!(reads.counts(again));
+    assert!(!reads.changed());
+}
+
+#[test]
+fn a_change_with_no_read_unanswered_reads_nothing_again() {
+    let mut reads = ListReads::default();
+    assert!(!reads.changed(), "before any read");
+    let read = reads.start();
+    assert!(reads.counts(read));
+    assert!(!reads.changed());
 }

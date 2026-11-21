@@ -9,7 +9,7 @@ import { type DataTable, Then, When } from "@cucumber/cucumber";
 import type { Locator, Page } from "playwright";
 
 import { expect } from "../support/expect.ts";
-import { journey, namePattern, pressUntilFocused } from "../support/keyboard.ts";
+import { focusComesTo, journey, namePattern, pressUntilFocused } from "../support/keyboard.ts";
 import { patienceMs } from "../support/patience.ts";
 import type { BrowserWorld } from "../support/world.ts";
 import { demoSection } from "../support/gallery.ts";
@@ -17,7 +17,8 @@ import { demoSection } from "../support/gallery.ts";
 // The button's whole name, read past the isolation marks around a name the
 // reader gave, such as a token's label.
 Then("focus is on the button {string}", async function (this: BrowserWorld, name: string) {
-  await journey(this.page).assertFocused(
+  await focusComesTo(
+    this.page,
     journey(this.page).byRole("button", { name: namePattern(name) }),
     `the button ${JSON.stringify(name)}`,
   );
@@ -26,7 +27,8 @@ Then("focus is on the button {string}", async function (this: BrowserWorld, name
 // One of several buttons of one name, told apart by the whole of what it is
 // described by: each field's Show password button by its field's label.
 Then("focus is on the button {string} described by {string}", async function (this: BrowserWorld, name: string, description: string) {
-  await journey(this.page).assertFocused(
+  await focusComesTo(
+    this.page,
     journey(this.page).byRole("button", { name: namePattern(name), description: namePattern(description) }),
     `the button ${JSON.stringify(name)} described by ${JSON.stringify(description)}`,
   );
@@ -47,7 +49,8 @@ When(
 );
 
 Then("focus is on the button {string} of the {string} demo", async function (this: BrowserWorld, name: string, component: string) {
-  await journey(this.page).assertFocused(
+  await focusComesTo(
+    this.page,
     demoButton(this.page, name, component),
     `the button ${JSON.stringify(name)} of the ${JSON.stringify(component)} demo`,
   );

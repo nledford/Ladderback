@@ -394,6 +394,20 @@ async fn connected(agent: &mut Agent) {
     start(agent, url, None).await;
 }
 
+/// With sign-in off, an MCP server is held to what AI agents may do without
+/// a token (decision 127), which leaves Snapshot contents out until a person
+/// opens it.
+#[given("AI agents without a token may look inside snapshots")]
+async fn without_token_snapshot_contents(agent: &mut Agent) {
+    use domain::access::permissions::{Permission, Permissions};
+    let contents = Permission::SnapshotContents;
+    let permissions = Permissions::default()
+        .with(contents, Some(contents.level()))
+        .expect("Snapshot contents has its level");
+    agent.backup.without_token = Some(permissions);
+    events_steps::save_daemon_config(agent, None).await;
+}
+
 /// Starts an MCP server connected to the scenario's daemon, with `token`
 /// in a token file it names.
 async fn connected_with(agent: &mut Agent, token: String) {

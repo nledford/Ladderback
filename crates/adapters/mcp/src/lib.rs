@@ -27,10 +27,11 @@ use std::sync::Arc;
 use api::{
     BuildDto, ErrorCode, ErrorDto, ExposureDto, FindDto, FolderDto, LocationsTestDto,
     MaintenancePreviewDto, OperationDetailDto, OperationSummaryDto, OperationsPageDto,
-    PlanDryRunDto, PlansDto, ProfileExportDto, ProfileImportDto, ProposalDto, RepositoriesDto,
-    SnapshotsDto, StatusDto,
+    PermissionLevelDto, PermissionsDto, PlanDryRunDto, PlansDto, ProfileExportDto,
+    ProfileImportDto, ProposalDto, RepositoriesDto, SnapshotsDto, StatusDto,
 };
 use async_trait::async_trait;
+use domain::access::permissions::Permission;
 use l10n::Localizer;
 use rmcp::handler::server::tool::{schema_for_input, schema_for_output};
 use rmcp::model::{
@@ -207,6 +208,54 @@ impl ToolName {
                 Self::ProposeSetup | Self::GetProposal | Self::WithdrawProposal | Self::DryRunPlan
             )
     }
+
+    /// The permissions the tool needs (decision 127), as the daemon's routes
+    /// it calls need them: cancelling reads the operation it cancels first,
+    /// so it needs Backups beside Backup runs.
+    pub(crate) const fn needs(self) -> &'static [Permission] {
+        match self {
+            Self::Status
+            | Self::ListPlans
+            | Self::ListRepositories
+            | Self::ListSnapshots
+            | Self::ListOperations
+            | Self::GetOperation
+            | Self::WaitOperation
+            | Self::ExportProfile => &[Permission::Backups],
+            Self::RunPlan | Self::TestRepository => &[Permission::BackupRuns],
+            Self::CancelOperation => &[Permission::Backups, Permission::BackupRuns],
+            Self::PreviewForget | Self::PreviewImport => &[Permission::Previews],
+            // A folder's page and a search name files (decision 132).
+            Self::ListSnapshotFolder | Self::FindInSnapshots => &[Permission::SnapshotContents],
+            // The recent log can name files and folders (decision 134).
+            Self::ReadLog => &[Permission::DaemonLog],
+            Self::ProposeSetup | Self::GetProposal | Self::WithdrawProposal | Self::DryRunPlan => {
+                &[Permission::Configuration]
+            }
+        }
+    }
+
+    /// Whether `permissions` grant every permission the tool needs.
+    pub(crate) fn opened_by(self, permissions: &PermissionsDto) -> bool {
+        self.needs()
+            .iter()
+            .all(|&permission| grants(permissions, permission))
+    }
+}
+
+/// Whether `permissions` hold `permission` at its level: a row on the wire
+/// is its level or `none`.
+fn grants(permissions: &PermissionsDto, permission: Permission) -> bool {
+    let level = match permission {
+        Permission::Backups => permissions.backups,
+        Permission::BackupRuns => permissions.backup_runs,
+        Permission::Previews => permissions.previews,
+        Permission::Configuration => permissions.configuration,
+        Permission::SnapshotContents => permissions.snapshot_contents,
+        Permission::DaemonLog => permissions.daemon_log,
+        Permission::RepositoryCheck => permissions.repository_check,
+    };
+    level != PermissionLevelDto::None
 }
 
 /// Which tools a server offers (§4.6). Connect mode offers every tool: the
@@ -338,6 +387,13 @@ pub trait Backend: Send + Sync + 'static {
     /// and what was left out of it. A password stored inline is refused as
     /// `inline-secret`, never written out (I4).
     async fn export_profile(&self, plan: String) -> Result<ProfileExportDto, ErrorDto>;
+
+    /// What this backend's AI agent may do (decision 127): in connect mode
+    /// what the daemon says this program's requests may do, its token's
+    /// permissions or, with sign-in off, what AI agents may do without a
+    /// token; in a session of its own the `[without-token]` setting. The
+    /// tools listed are those these open.
+    async fn permissions(&self) -> Result<PermissionsDto, ErrorDto>;
 }
 
 /// What a [`Backend`] tells `status`.
@@ -1171,6 +1227,27 @@ fn tools() -> Vec<Tool> {
     ]
 }
 
+impl Server {
+    /// The tools `tools/list` gives: those this server's offer holds and its
+    /// backend's permissions open (decision 127). Permissions that can't be
+    /// read hide no tool: the daemon still refuses what isn't allowed.
+    async fn offered(&self) -> Vec<Tool> {
+        let offer = self.offer();
+        let permissions = self.backend.permissions().await.ok();
+        tools()
+            .into_iter()
+            .filter(|tool| {
+                ToolName::named(&tool.name).is_some_and(|named| {
+                    named.offered_in(offer)
+                        && permissions
+                            .as_ref()
+                            .is_none_or(|permissions| named.opened_by(permissions))
+                })
+            })
+            .collect()
+    }
+}
+
 impl ServerHandler for Server {
     fn get_info(&self) -> ServerConfig {
         let mut info = ServerConfig::new(
@@ -1192,12 +1269,7 @@ impl ServerHandler for Server {
         _request: Option<PaginatedRequestParams>,
         _context: RequestContext<RoleServer>,
     ) -> Result<ListToolsResult, McpError> {
-        let offer = self.offer();
-        let offered = tools()
-            .into_iter()
-            .filter(|tool| ToolName::named(&tool.name).is_some_and(|named| named.offered_in(offer)))
-            .collect();
-        Ok(ListToolsResult::with_all_items(offered))
+        Ok(ListToolsResult::with_all_items(self.offered().await))
     }
 
     /// The one resource: the status summary (§4.6).

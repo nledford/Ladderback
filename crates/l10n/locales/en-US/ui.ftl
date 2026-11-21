@@ -809,6 +809,13 @@ ui-gallery-spinner-end = Loading at the end of the line…
 # it.
 ui-gallery-spinner-save = Save the demo notes
 
+# The heading of the gallery's fingerprint demo (§4.5): a key's fingerprint
+# in groups of four, spoken a character at a time.
+ui-gallery-fingerprint-heading = Fingerprint
+
+# The name of the demo's fingerprint, the shape of a hub key's.
+ui-gallery-fingerprint-name = Demo { -hub } key fingerprint
+
 # The heading of the gallery's steps demo (§4.5): a process's steps in
 # order, each with its state, and where the process has reached.
 ui-gallery-steps-heading = Steps
@@ -3071,7 +3078,7 @@ ui-sign-out-everywhere-working = Signing out every browser…
 ui-api-tokens-heading = { -api-token(form: "other") }
 
 # What that section says above the list.
-ui-api-tokens-body = An { -api-token } lets a program other than a browser, such as MCP connect mode, use { -brand-name } while sign-in is on. It can do only what its scopes allow, and it works until you revoke it or set a new admin password.
+ui-api-tokens-body = An { -api-token } lets a program other than a browser, such as MCP connect mode, use { -brand-name } while sign-in is on. It can do only what its permissions allow, and it works until you revoke it or set a new admin password.
 
 # Shown in place of the list when no token is kept.
 ui-api-tokens-none = No { -api-token(form: "other") } yet.
@@ -3079,8 +3086,8 @@ ui-api-tokens-none = No { -api-token(form: "other") } yet.
 # The header of the column of each token's label, which names its row.
 ui-api-tokens-column-label = Label
 
-# The header of the column of what each token may do.
-ui-api-tokens-column-scopes = Scopes
+# The header of the column that lists what each API token may do.
+ui-api-tokens-column-permissions = Permissions
 
 # The header of the column of when each token was created.
 ui-api-tokens-column-created = Created
@@ -3088,23 +3095,100 @@ ui-api-tokens-column-created = Created
 # The header of the column of when a program last used each token.
 ui-api-tokens-column-last-used = Last used
 
-# The name of a scope of an API token, as a token's row lists it and as the checkbox that chooses it says it.
-# $scope (text): the scope, as a code: read, run, preview or propose.
-ui-api-token-scope = { $scope ->
-    [read] Read
-    [run] Run
-    [preview] Preview
-   *[propose] Propose
+# A permission's name: the legend of its group of choices, in the API token form and in the AI agents tab.
+# $permission (text): the permission, as a code: backups, backup-runs, previews, configuration, snapshot-contents, daemon-log or repository-check.
+ui-permission = { $permission ->
+    [backups] Backups
+    [backup-runs] Backup runs
+    [previews] Previews
+    [configuration] Configuration
+    [snapshot-contents] Snapshot contents
+    [daemon-log] Daemon log
+   *[repository-check] Repository check
   }
 
-# The hint under the checkbox of a scope: what a program with a token of that scope may do.
-# $scope (text): the scope, as a code: read, run, preview or propose.
-ui-api-token-scope-hint = { $scope ->
-    [read] See the plans, the repositories and their snapshots, the operations and their live progress.
-    [run] Start a plan's backup, cancel a backup, and test a saved repository.
-    [preview] Ask what a forget, a prune or a check would do, without running it.
-   *[propose] Propose changes to the configuration for you to review here, and count what a draft plan would back up within the { -dry-run-allowlist }.
+# The hint under a permission's name: what it opens, in plain words.
+# $permission (text): the permission, as a code: backups, backup-runs, previews, configuration, snapshot-contents, daemon-log or repository-check.
+ui-permission-hint = { $permission ->
+    [backups] See plans, every { -repository }, the list of { -snapshot(form: "other") }, operations and their progress, and status. Not the files inside a { -snapshot }, and not the daemon's log: each is a permission of its own.
+    [backup-runs] Start a plan's backup, cancel a backup, and test a saved { -repository }. On its own it shows nothing, so a scheduler can start backups without reading anything.
+    [previews] Ask what forgetting or pruning { -snapshot(form: "other") }, checking a { -repository }, adopting { -snapshot(form: "other") } into another plan or importing a profile would do, without doing it.
+    [configuration] Propose changes to plans for you to approve on the Pending changes page, and try a plan in a dry run.
+    [snapshot-contents] See the names of the files and folders inside { -snapshot(form: "other") }, and those a warning or a failure names.
+    [daemon-log] Read { -brand-name }'s log, which can name your files and folders.
+   *[repository-check] Start a check of a { -repository }. Nothing offers this yet: it is here so that what you allow today allows no check a later version adds.
   }
+
+# A choice in a permission's group: no access, or the one level the permission has.
+# $level (text): none, read, start-and-cancel, preview, propose or run.
+ui-permission-level = { $level ->
+    [none] No access
+    [read] Read
+    [start-and-cancel] Start and cancel
+    [preview] Preview
+    [propose] Propose
+   *[run] Run
+  }
+
+# How an API token's row lists a permission it holds: the permission's name and its level.
+# $permission (text): the permission, as a code: backups, backup-runs, previews, configuration, snapshot-contents, daemon-log or repository-check.
+ui-permission-granted = { $permission ->
+    [backups] Backups: Read
+    [backup-runs] Backup runs: Start and cancel
+    [previews] Previews: Preview
+    [configuration] Configuration: Propose
+    [snapshot-contents] Snapshot contents: Read
+    [daemon-log] Daemon log: Read
+   *[repository-check] Repository check: Run
+  }
+
+# The legend of the permissions of the API token form, around one group per permission.
+ui-api-token-permissions-legend = Permissions
+
+# The hint under the legend of the token form's permissions.
+ui-api-token-permissions-hint = What a program with this token may do. Give it only what its job needs, and at least one permission.
+
+# The button on an API token's row that opens the dialog that changes its permissions, named for the token.
+# $label (text): the token's label.
+ui-api-token-change = Change permissions of token { $label }
+
+# The title of the dialog that changes an API token's permissions.
+# $label (text): the token's label.
+ui-api-token-change-title = Permissions of token { $label }
+
+# What the dialog that changes an API token's permissions says, above its groups.
+ui-api-token-change-body = A program that uses this token may do only what you choose here, from its next request on. Saving takes the admin password.
+
+# The button that saves an API token's new permissions.
+ui-api-token-change-confirm = Save the permissions
+
+# What the save button says while the change is sent.
+ui-api-token-changing = Saving the permissions…
+
+# What is announced once an API token's permissions are changed.
+# $label (text): the token's label.
+ui-api-token-changed = Token { $label } has its new permissions.
+
+# The name of the Settings tab of what AI agents may do without an API token.
+ui-ai-agents-tab = AI agents
+
+# The heading of the AI agents tab.
+ui-ai-agents-heading = What AI agents may do without a token
+
+# What the AI agents tab says first: what its permissions limit.
+ui-ai-agents-body = These permissions limit what an AI agent may do through { "ladderback mcp" } when it has no { -api-token }: in a session of its own, and when it connects to { -brand-name } while sign-in is off. An AI agent with a token may do what its token allows.
+
+# What the AI agents tab says with sign-in off.
+ui-ai-agents-sign-in-off = Sign-in is off, so these permissions limit only { "ladderback mcp" }: any other program on this machine or your network may use { -brand-name } without asking. Set an admin password to turn sign-in on, and give each program a token of its own.
+
+# The button that saves what AI agents may do without a token.
+ui-ai-agents-save = Save what AI agents may do
+
+# What the save button says while the change is sent.
+ui-ai-agents-saving = Saving…
+
+# What is announced once what AI agents may do without a token is saved.
+ui-ai-agents-saved = AI agents without a token now have the permissions you chose.
 
 # The Last used column of a token no program has used yet.
 ui-api-token-never-used = Never
@@ -3159,12 +3243,6 @@ ui-api-token-label-label = Label
 # $max (number): the most characters a label may have.
 ui-api-token-label-hint = Up to { $max } characters, so you can tell this token from the others: the program that uses it, for example.
 
-# The name of the group of checkboxes that choose the token's scopes.
-ui-api-token-scopes-legend = Scopes
-
-# The hint under that group's name.
-ui-api-token-scopes-hint = What a program with this token may do. Choose at least one.
-
 # The button that creates the token.
 ui-api-token-create = Create the token
 
@@ -3196,6 +3274,124 @@ ui-api-token-copied = Copied.
 
 # Said in the dialog when the browser would not let the page write to the clipboard, as on a page not served over HTTPS or from this computer.
 ui-api-token-copy-failed = The browser would not let the page copy it. Select the token in the field and copy it yourself.
+
+## Settings' "Machines" tab, only on a hub (decision 121): the pairing token a
+## person makes for another machine, confirmed by a step-up, shown once.
+
+# The tab and the heading of the section of Settings that makes pairing tokens. The same word as the term -machine in its plural, written out because a heading starts with a capital letter.
+ui-agents-heading = Machines
+
+# What that section says above its form.
+ui-agents-intro = To pair another { -machine } with this { -hub }, make a pairing token here and give it to { "ladderback pair" } on that { -machine }. A token works once, for a few minutes, and only for the address it names.
+
+# The heading of the form that makes a pairing token.
+ui-pairing-new-heading = Make a pairing token
+
+# The label of the field of the address the other machine will reach this hub at.
+ui-pairing-address-label = Address { -machine(form: "other") } will use
+
+# The hint under that field.
+ui-pairing-address-hint = The address another { -machine } reaches this { -hub } at, as { "https://hub.example:9443" }. It goes into the token.
+
+# Said under the address when it names this computer alone, as localhost or 127.0.0.1.
+ui-pairing-warning-loopback = This address is loopback: only this computer can reach it, so another { -machine } can't use the token. Type the address other { -machine(form: "other") } reach this { -hub } at.
+
+# Said under the address when it starts with http:// and isn't loopback.
+ui-pairing-warning-plain = This address is plain { "http://" }, which a { -machine } refuses: its key would cross the network unprotected. Use the { "https://" } address.
+
+# Says which certificate a token tells the other machine to trust. Only one is offered while the hub serves no certificate of its own.
+ui-pairing-certificate = The token trusts a certificate authority's certificate for this address, as the system of the other { -machine } does. This { -hub } serves no certificate of its own yet, so no token can pin one.
+
+# The label of the field of how long the token works.
+ui-pairing-life-label = Life in minutes
+
+# The hint under that field.
+ui-pairing-life-hint = From 5 to 1440 minutes. A token no { -machine } has used by then lapses.
+
+# Said under the life field when what is typed isn't a whole number of minutes.
+ui-pairing-life-invalid = Type the life as a whole number of minutes, from 5 to 1440.
+
+# The label of the field a step-up with sign-in off asks for: the hub key's ID, which the section shows.
+ui-pairing-key-id-label = Hub key ID
+
+# The hint under that field, which shows the key ID to type.
+ui-pairing-key-id-hint = To confirm, type this { -hub } key's ID:
+
+# Said when the step-up is wrong: no token was made.
+ui-pairing-step-up-failed = That isn't right, so no token was made. Try again.
+
+# The button that makes the token.
+ui-pairing-make = Make a pairing token
+
+# The title of the dialog that shows a new pairing token, the only time it is shown.
+ui-pairing-dialog-title = Copy the pairing token
+
+# What that dialog says above the token.
+ui-pairing-dialog-body = Give this token to { "ladderback pair" } on the other { -machine } before it lapses. It is shown only this once. Check there that the { -hub } key's fingerprint is the one below.
+
+# The name of the fingerprint of the hub's key, as the dialog lists it.
+ui-pairing-fingerprint = Hub key fingerprint
+
+# The name of the address the token names, as the dialog lists it.
+ui-pairing-address = Address
+
+# The name of the certificate the token trusts, as the dialog lists it.
+ui-pairing-certificate-label = Certificate
+
+# What the dialog lists as the certificate the token trusts.
+ui-pairing-certificate-ca = A certificate authority's certificate
+
+# The name of when the token lapses, as the dialog lists it.
+ui-pairing-lapses-label = Lapses
+
+# When the token lapses, counted down while the dialog is open.
+# $when (text): the time it lapses, in this computer's zone.
+# $offset (text): that zone's offset from UTC, as UTC+02:00.
+# $minutes (number): the whole minutes left, rounded up.
+ui-pairing-lapses = { $when } ({ $offset }), in { $minutes ->
+    [one] { $minutes } minute
+   *[other] { $minutes } minutes
+  }
+
+# The name of the token's text in the dialog.
+ui-pairing-token = The pairing token
+
+# The button that copies the token to the clipboard.
+ui-pairing-copy = Copy the token
+
+# Said in the dialog once the token is on the clipboard.
+ui-pairing-copied = Copied.
+
+# Said in the dialog when the browser would not let the page write to the clipboard.
+ui-pairing-copy-failed = The browser would not let the page copy it. Select the token and copy it yourself.
+
+# The button that cancels the token before any machine uses it.
+ui-pairing-cancel = Cancel this token
+
+# Said beside the dialog's Close button.
+ui-pairing-close-note = Closing this dialog cancels the token if no { -machine } has used it.
+
+# Said in the dialog in place of the token once it is canceled.
+ui-pairing-canceled = The token is canceled. No { -machine } can use it.
+
+# Said in the dialog in place of the token once it lapses.
+# $when (text): the time it lapsed, in this computer's zone.
+ui-pairing-lapsed = Lapsed at { $when }. Make a new token to pair a { -machine }.
+
+# The button that closes the dialog once its token is canceled or lapsed, back to the form.
+ui-pairing-make-new = Make a new token
+
+# Said on the page once the dialog is closed and the hub canceled the token no machine had used.
+ui-pairing-closed-canceled = The unused pairing token was canceled.
+
+# Said on the page once the dialog is closed and the hub refused or didn't answer the cancel of the token no machine had used.
+ui-pairing-closed-not-canceled = The { -hub } couldn't cancel the unused pairing token, so it still works until it lapses.
+
+# Said on the page when the hub refused or didn't answer the cancel of a closed dialog's token after the dialog showed a later one.
+ui-pairing-earlier-not-canceled = The { -hub } couldn't cancel an earlier unused pairing token, so it still works until it lapses.
+
+# Said when the hub didn't answer the page's request about a pairing token, or answered with what isn't one.
+ui-pairing-unanswered = The { -hub } didn't answer. Try again.
 
 ## Settings' "Dry-run allowlist" tab (decision 89): the folders a plan dry
 ## run an AI agent asks for may read, which only a person sets.
