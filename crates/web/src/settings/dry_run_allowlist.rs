@@ -17,6 +17,7 @@ use leptos::task::spawn_local;
 
 use super::say;
 use crate::announcer::Politeness;
+use crate::components::ACTIONS;
 use crate::components::button::{Appearance, Content, Kind};
 use crate::components::{
     Button, Column, Confirmation, Name, ReviewDialog, Sentences, State, Table, TextField, Working,
@@ -280,7 +281,7 @@ pub(super) fn DryRunAllowlistSection(localizer: Arc<Localizer>) -> impl IntoView
                     .get()
                     .map(|home| {
                         view! {
-                            <p class="actions">
+                            <p class=ACTIONS>
                                 <Button
                                     content=Content::Text(home_button.clone().into())
                                     id=ADD_HOME_ID
@@ -512,7 +513,7 @@ fn AddForm(
                     value=typed
                     required=true
                 />
-                <p class="actions">
+                <p class=ACTIONS>
                     <Button
                         content=Content::Text(text(&localizer, msg::UI_DRY_RUN_FOLDER_ADD).into())
                         appearance=Appearance::Filled

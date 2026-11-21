@@ -20,6 +20,8 @@ mod cache_lock;
 mod cache_tidy;
 mod client;
 mod environment;
+#[cfg(feature = "history-fixture")]
+pub mod history_fixture;
 pub mod job;
 mod log_masking;
 mod rclone;

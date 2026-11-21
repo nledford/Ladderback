@@ -13,6 +13,9 @@
 #     when built with the release flags (`--no-default-features`, as a release is);
 #   - a release build leaves out the component gallery, the dev-only route
 #     `/_gallery` (the `web` feature `gallery`).
+#   - a build of `ladderback` leaves out the history fixture builder (the
+#     `engine` feature `history-fixture`, development.md §13.9), which only
+#     its tests and `just try --demo` turn on.
 #   - a release build leaves out the hub (§16, decision 122): `ladderback` and
 #     `web` have the `hub` feature by default, and with the release flags no
 #     crate has it, nor a crate only the hub uses.
@@ -215,6 +218,36 @@ gallery() {
 gallery has --features gallery
 gallery lacks
 gallery lacks "${release_flags[@]}"
+
+# The history fixture builder (development.md §13.9) writes repositories from a
+# declared history with a canary password: test support, which no build of
+# the daemon has. The `engine` feature `history-fixture` is on only through a
+# dev-dependency (the root crate's and engine's own tests) and for
+# `just try --demo`'s example. Without dev edges the tree resolves features
+# as a build does. As for the pseudolocales, both sides are checked, so that
+# this cannot pass with nothing to find.
+history_fixture() {
+  local want=$1 edges=$2
+  shift 2
+  local tree found
+  # Separate from the pipeline, as in `check`: a failing `cargo tree` must
+  # stop the script, while "no match" must not.
+  tree=$(cargo tree --package ladderback --edges "$edges" --prefix none --format '{p}|{f}' "$@")
+  found=$(awk -F'|' '$1 ~ /^engine v/ { n = split($2, features, ","); for (i = 1; i <= n; i++) if (features[i] == "history-fixture") print $1 }' <<<"$tree")
+  if [[ $want == has && -z $found ]]; then
+    echo "error: ladderback's tests (edges $edges ${*}) lack the history fixture builder, so the scenarios that use it can't build" >&2
+    status=1
+  elif [[ $want == lacks && -n $found ]]; then
+    echo "error: ladderback (edges $edges ${*:-default features}) has the history fixture builder, which only tests may have" >&2
+    status=1
+  else
+    echo "ok: ladderback (edges $edges ${*:-default features}) $want the history fixture builder"
+  fi
+}
+
+history_fixture has normal,build,dev
+history_fixture lacks normal,build
+history_fixture lacks normal,build "${release_flags[@]}"
 
 # The hub stays out of a release until M8 (§16, decision 122, item 6). The
 # tree lists each package with the features it is built with, so each

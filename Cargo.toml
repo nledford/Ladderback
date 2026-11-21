@@ -249,6 +249,9 @@ unic-langid = { version = "0.9.6", features = ["macros"] }
 # The hub compares hostnames as casefold(NFC(name)) (§16, decision 120,
 # "Hostnames"); already in the tree through `idna`.
 unicode-normalization = "0.1.26"
+# The hub flags a hostname whose UTS #39 skeleton is another agent's (§16,
+# decision 120, "Hostnames").
+unicode-security = "0.1.3"
 url = "2.5.8"
 uuid = { version = "1.29.1", features = ["serde"] }
 # `JsValue` for the browser host, and the `wasm-bindgen-test` lanes that run
@@ -425,9 +428,12 @@ async-trait.workspace = true
 cucumber.workspace = true
 config-adapter.workspace = true
 domain.workspace = true
+# The history fixture builder (#1122): scenarios start from a declared history.
+engine = { workspace = true, features = ["history-fixture"] }
 futures.workspace = true
 log.workspace = true
-nix = { workspace = true, features = ["fs"] }
+# `term`: a pseudo-terminal for `set-password`'s prompt.
+nix = { workspace = true, features = ["fs", "term"] }
 platform.workspace = true
 rustic_backend.workspace = true
 hooks.workspace = true

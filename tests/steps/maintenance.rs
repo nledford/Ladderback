@@ -20,7 +20,7 @@ use api::{
 };
 use cucumber::{given, then, when};
 
-use super::events_steps::save_daemon_config;
+use super::events_steps::{Events, save_daemon_config};
 use super::forget_steps::snapshots_of;
 use super::operations_steps::{exchange_at, finished_backups, wait_ended};
 use super::repositories_steps::api_post;
@@ -228,6 +228,49 @@ async fn daemon_holds(agent: &mut Agent, count: usize, plan: String) {
         change_source(agent);
         finished_backups(agent, 1, plan.clone()).await;
     }
+}
+
+/// The repository gets the history a checked-in declaration states
+/// (`tests/fixtures/history/<name>.toml`), built by the history fixture
+/// builder as the running daemon's own backups, with no daemon run in
+/// between; the scenario names what it holds, and the step checks that the
+/// declaration says so. The daemon's agent ID is the one in its own data
+/// folder, which differs from the scenario's: a snapshot tagged with any
+/// other is another owner's, and no plan of the daemon's holds it.
+#[given(
+    expr = "the repository holds the declared history {string}: {int} snapshot(s) of the plan {string}"
+)]
+async fn repository_holds_declared(agent: &mut Agent, name: String, count: usize, plan: String) {
+    let daemons = platform::agent_id::load(&Events::data_dir(agent))
+        .expect("the daemon's agent ID reads")
+        .expect("the daemon has started and chosen its agent ID");
+    let path = Path::new(env!("CARGO_MANIFEST_DIR"))
+        .join("tests/fixtures/history")
+        .join(format!("{name}.toml"));
+    let text = std::fs::read_to_string(&path)
+        .unwrap_or_else(|error| panic!("{}: {error}", path.display()));
+    let history: engine::history_fixture::History =
+        toml::from_str(&text).unwrap_or_else(|error| panic!("{}: {error}", path.display()));
+    let target = engine::history_fixture::Target {
+        repository: agent.backup.repository.clone().expect("a repository"),
+        start: engine::history_fixture::Start::Existing,
+        password: super::backup_steps::PASSWORD.to_owned(),
+        sources: agent.scratch().join("history"),
+        agent: daemons,
+    };
+    let built = blocking(move || engine::history_fixture::build(&history, &target))
+        .await
+        .unwrap_or_else(|error| panic!("{}: {error}", path.display()));
+    let saved: Vec<&str> = built
+        .iter()
+        .filter(|snapshot| snapshot.id.is_some())
+        .map(|snapshot| snapshot.plan.as_str())
+        .collect();
+    assert_eq!(
+        saved,
+        vec![plan.as_str(); count],
+        "the plans of the snapshots {name} declares"
+    );
 }
 
 #[given(expr = "the daemon's plan keeps the last {int} snapshot(s)")]

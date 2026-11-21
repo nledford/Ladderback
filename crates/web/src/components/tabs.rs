@@ -168,6 +168,7 @@ pub fn Tabs(
         follow_drawn_layout(frame, list, layout);
     }
     let (label, labelled_by) = name.attributes();
+    let classes = orientation.classes();
     let mut buttons = Vec::with_capacity(last.saturating_add(1));
     let mut panels = Vec::with_capacity(last.saturating_add(1));
     for (index, tab) in std::iter::once(first).chain(rest).enumerate() {
@@ -211,7 +212,7 @@ pub fn Tabs(
                 type="button"
                 role="tab"
                 id=tab_id.clone()
-                class="tab"
+                class=classes.tab
                 aria-selected=move || rules::aria_selected(is_selected())
                 aria-controls=panel_id.clone()
                 tabindex=move || rules::tab_stop(is_selected())
@@ -219,8 +220,8 @@ pub fn Tabs(
                 on:keydown=keydown
             >
                 // An unseen bold copy of the words keeps the tab as wide
-                // selected as not (style.css, `.tab-label`).
-                <span class="tab-label" data-label=label>
+                // selected as not (`rules::Classes::label`).
+                <span class=classes.label data-label=label>
                     {words}
                 </span>
             </button>
@@ -229,7 +230,7 @@ pub fn Tabs(
             <div
                 role="tabpanel"
                 id=panel_id
-                class="tab-panel"
+                class=classes.panel
                 aria-labelledby=tab_id
                 tabindex=move || rules::panel_stop(holds.get())
                 hidden=move || !is_selected()
@@ -238,20 +239,12 @@ pub fn Tabs(
             </div>
         });
     }
-    // The orientation's rules in style.css (the tabs' own are custom CSS
-    // until #931 moves them); a responsive set is the container its query
-    // measures.
-    let frame_class = match orientation {
-        Orientation::Horizontal => "tabs",
-        Orientation::Vertical => "tabs tabs-vertical",
-        Orientation::Responsive => "tabs tabs-responsive",
-    };
     view! {
-        <div class=frame_class node_ref=frame>
-            <div class="tabs-layout">
+        <div class=classes.frame node_ref=frame>
+            <div class=classes.layout>
                 <div
                     role="tablist"
-                    class="tab-list"
+                    class=classes.list
                     node_ref=list
                     aria-label=label
                     aria-labelledby=labelled_by

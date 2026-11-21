@@ -19,6 +19,7 @@ use leptos::prelude::*;
 use leptos::task::{spawn_local, tick};
 
 use crate::announcer::Politeness;
+use crate::components::ACTIONS;
 use crate::components::banner::rules::BannerTone;
 use crate::components::button::{Appearance, Content, Kind};
 use crate::components::skeleton::rules::Awaited;
@@ -537,7 +538,7 @@ fn Review(
                     value=value
                     error=error
                 />
-                <p class="actions">
+                <p class=ACTIONS>
                     <Button
                         content=Content::Text(text(&localizer, msg::UI_PROPOSAL_APPROVE).into())
                         appearance=Appearance::Filled
@@ -621,7 +622,7 @@ fn Review(
                 }
             >
                 {reason_fields}
-                <p class="actions">
+                <p class=ACTIONS>
                     <Button
                         content=Content::Text(text(&localizer, msg::UI_PROPOSAL_REJECT).into())
                         kind=Kind::Submit
@@ -733,7 +734,7 @@ fn ForgetPreview(
         })
     };
     view! {
-        <p class="actions">
+        <p class=ACTIONS>
             <Button
                 content=Content::Text(text(&localizer, msg::UI_PROPOSAL_FORGET_PREVIEW).into())
                 busy=Signal::derive(move || reading.get())

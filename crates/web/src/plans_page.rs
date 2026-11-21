@@ -16,6 +16,7 @@ use leptos::prelude::*;
 use leptos::task::spawn_local;
 
 use crate::announcer::Politeness;
+use crate::components::ACTIONS;
 use crate::components::button::{self, Appearance, Content};
 use crate::components::skeleton::rules::Awaited;
 use crate::components::{
@@ -301,7 +302,7 @@ pub(crate) fn Plans(localizer: Arc<Localizer>) -> impl IntoView {
             }
             (Phase::Ready, None, false) => view! { <p>{none.clone()}</p> }.into_any(),
         }}
-        <p class="actions">
+        <p class=ACTIONS>
             <Button
                 content=Content::IconAndText {
                     glyph: LucideGlyph::Plus.into(),
@@ -439,7 +440,7 @@ fn plan_actions(
     hand_focus_when_gone(delete_button, PAGE_HEADING_ID.to_owned());
     let (change_for, delete_for) = (id.clone(), id.clone());
     view! {
-        <div class="actions">
+        <div class=ACTIONS>
             <Button
                 content=Content::IconAndText {
                     glyph: LucideGlyph::Pencil.into(),
@@ -705,7 +706,7 @@ fn PlanEditor(
                 {name}
                 {repository}
                 {groups}
-                <p class="actions">
+                <p class=ACTIONS>
                     <Button
                         content=Content::Text(save_label.into())
                         appearance=Appearance::Filled

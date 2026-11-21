@@ -7,6 +7,18 @@ rust-version.workspace = true
 license.workspace = true
 publish.workspace = true
 
+[features]
+# The history fixture builder (#1122, development.md §13.9): a real repository
+# from a declared snapshot history, for scenarios, screenshots and `just try
+# --demo`. Test tooling: the daemon's build and a release build leave it out,
+# and `just architecture` checks both.
+history-fixture = []
+
+# Builds a declared history into a new repository: `just try --demo` runs it.
+[[example]]
+name = "history-fixture"
+required-features = ["history-fixture"]
+
 [dependencies]
 api.workspace = true
 app.workspace = true
@@ -41,9 +53,13 @@ signal-hook.workspace = true
 
 [dev-dependencies]
 app = { workspace = true, features = ["fakes"] }
+# This crate's own tests build histories with the fixture builder.
+engine = { workspace = true, features = ["history-fixture"] }
 tempfile.workspace = true
 testkit.workspace = true
 tokio = { workspace = true, features = ["macros", "rt-multi-thread"] }
+# The history declarations' format, read by the tests and the example.
+toml.workspace = true
 
 [lints]
 workspace = true

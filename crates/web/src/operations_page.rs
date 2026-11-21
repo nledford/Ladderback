@@ -19,6 +19,7 @@ use serde::Serialize;
 
 use crate::announcer::Politeness;
 use crate::backend::{OperationRow, OperationsState, ended};
+use crate::components::ACTIONS;
 use crate::components::button::Content;
 use crate::components::skeleton::rules::Awaited;
 use crate::components::status_badge::rules::BadgeState;
@@ -268,7 +269,7 @@ pub(crate) fn Operations(localizer: Arc<Localizer>) -> impl IntoView {
         // it, before the table, so a keyboard reaches it before the rows whose
         // focus would see their marks one by one; the row is there with no
         // plans too, as its room is (decision 129).
-        <p class="actions">
+        <p class=ACTIONS>
             // A press that is refused again in the same words is said again
             // (§4.5).
             {move || {

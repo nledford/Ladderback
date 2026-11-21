@@ -85,6 +85,35 @@ impl HostnameKey {
     }
 }
 
+/// What the hub tells lookalike hostnames by (decision 120, "Lookalike
+/// hostnames"): the UTS #39 skeleton of the case fold of the name's
+/// skeleton, `skeleton(casefold(skeleton(NFC(name))))`, with each run of
+/// spaces read as one. Two names with one skeleton look alike, as "lаptop"
+/// with a Cyrillic а looks like "Laptop", though their keys differ. The
+/// inner skeleton reads a capital before the case fold can change it, so a
+/// capital I is an l, as it looks, not an i.
+#[derive(Clone, Debug, PartialEq, Eq, Hash)]
+pub struct HostnameSkeleton(String);
+
+impl HostnameSkeleton {
+    /// A skeleton starts with NFD, so the name's NFC form would change
+    /// nothing and isn't made.
+    pub fn of(name: &Hostname) -> Self {
+        let folded = unicode_security::skeleton(name.as_str())
+            .collect::<String>()
+            .to_lowercase();
+        let mut skeleton = String::with_capacity(folded.len());
+        for c in unicode_security::skeleton(&folded) {
+            if !c.is_whitespace() {
+                skeleton.push(c);
+            } else if !skeleton.ends_with(' ') {
+                skeleton.push(' ');
+            }
+        }
+        Self(skeleton)
+    }
+}
+
 /// Where an agent stands with the hub.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum AgentStatus {
@@ -119,6 +148,63 @@ impl AgentRecord {
     pub const fn is_pending(&self) -> bool {
         matches!(self.status, AgentStatus::Pending { .. })
     }
+}
+
+/// The agent a pending agent's hostname looks like, which the hub flags on
+/// the pending row (decision 120, "Hostnames"; decision 121): its ID, its
+/// hostname as registered and when it was last seen.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct Lookalike {
+    pub agent_id: AgentId,
+    pub hostname: Hostname,
+    pub last_seen: Timestamp,
+}
+
+/// A registered agent as the hub lists it: its record, and, while it is
+/// pending, the agent its hostname looks like, if one does.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct ListedAgent {
+    pub record: AgentRecord,
+    pub looks_like: Option<Lookalike>,
+}
+
+/// The hub's agents, in the order given, each pending one flagged with the
+/// first other agent, pending or approved, whose hostname has its
+/// [`HostnameSkeleton`]. A lookalike isn't refused at pairing, since a false
+/// match would lock out an honest name; the person sees the flag and
+/// compares keys before approving (decision 120, "Hostnames").
+pub fn list_agents(agents: Vec<AgentRecord>) -> Vec<ListedAgent> {
+    let skeletons: Vec<HostnameSkeleton> = agents
+        .iter()
+        .map(|agent| HostnameSkeleton::of(&agent.hostname))
+        .collect();
+    let looks_like = |agent: &AgentRecord, skeleton: &HostnameSkeleton| {
+        agents
+            .iter()
+            .zip(&skeletons)
+            .find(|(other, theirs)| other.agent_id != agent.agent_id && *theirs == skeleton)
+            .map(|(other, _)| Lookalike {
+                agent_id: other.agent_id,
+                hostname: other.hostname.clone(),
+                last_seen: other.last_seen,
+            })
+    };
+    let flags: Vec<Option<Lookalike>> = agents
+        .iter()
+        .zip(&skeletons)
+        .map(|(agent, skeleton)| {
+            if agent.is_pending() {
+                looks_like(agent, skeleton)
+            } else {
+                None
+            }
+        })
+        .collect();
+    agents
+        .into_iter()
+        .zip(flags)
+        .map(|(record, looks_like)| ListedAgent { record, looks_like })
+        .collect()
 }
 
 /// What has become of a pairing token.

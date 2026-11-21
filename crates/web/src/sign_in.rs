@@ -15,6 +15,7 @@ use leptos::prelude::*;
 use leptos::task::spawn_local;
 
 use crate::announcer::Politeness;
+use crate::components::ACTIONS;
 use crate::components::alert::rules::AlertTone;
 use crate::components::button::{Appearance, Content, Kind};
 use crate::components::{
@@ -200,7 +201,7 @@ fn SignInForm(
                         </div>
                     }
                 })}
-            <p class="actions">
+            <p class=ACTIONS>
                 <Button
                     content=Content::Text(text(&localizer, msg::UI_SIGN_IN_SUBMIT).into())
                     appearance=Appearance::Filled
@@ -363,7 +364,7 @@ pub(crate) fn IdleWarning(localizer: Arc<Localizer>, warning: RwSignal<bool>) ->
                         })
                 }}
             </div>
-            <p class="actions">
+            <p class=ACTIONS>
                 <Button
                     content=Content::Text(text(&localizer, msg::UI_IDLE_WARNING_STAY).into())
                     appearance=Appearance::Filled

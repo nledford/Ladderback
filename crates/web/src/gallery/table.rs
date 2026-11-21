@@ -8,6 +8,7 @@ use leptos::prelude::*;
 
 use super::link::RUSTIC_DOCS;
 use super::{DemoHeading, demo_link};
+use crate::components::ACTIONS;
 use crate::components::button::Content;
 use crate::components::link::rules::Destination;
 use crate::components::{
@@ -448,7 +449,7 @@ pub(super) fn LiveTableDemo(localizer: Arc<Localizer>) -> impl IntoView {
             <DemoHeading text=t(msg::UI_GALLERY_LIVE_TABLE_HEADING) id=LIVE_TABLE_HEADING_ID />
             // Its row of actions, as a page's: the stand-in for a live update,
             // then Mark all as seen, whose press hands focus to the heading.
-            <p class="actions">
+            <p class=ACTIONS>
                 <Button
                     content=Content::Text(t(msg::UI_GALLERY_LIVE_TABLE_CHANGE).into())
                     on_press=change

@@ -16,6 +16,7 @@ use leptos::prelude::*;
 use leptos::task::spawn_local;
 
 use crate::announcer::Politeness;
+use crate::components::ACTIONS;
 use crate::components::alert::rules::AlertTone;
 use crate::components::banner::rules::BannerTone;
 use crate::components::button::{Content, Kind};
@@ -450,7 +451,7 @@ pub(crate) fn Repositories(localizer: Arc<Localizer>) -> impl IntoView {
                     description=field_text(msg::UI_REPOSITORIES_MAINTAIN_HINT)
                     checked=inputs.maintain_here
                 />
-                <p class="actions">
+                <p class=ACTIONS>
                     <Button
                         content=Content::Text(test_label.into())
                         kind=Kind::Submit

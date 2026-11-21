@@ -1,0 +1,21 @@
+# The small history: three snapshots of the plan "home", a few kilobytes
+# each, which build in a few seconds, for the @e2e and @ui scenarios that need
+# a history rather than backups run one by one. Its names are neutral
+# (development.md §13.9). `engine::history_fixture` builds it; the times keep
+# the offset of the clock that took them (§16, decision 56).
+host = "demo-host"
+
+[[snapshot]]
+plan = "home"
+time = "2026-08-01T02:00:00+00:00"
+files = { count = 3, bytes = "6 KiB" }
+
+[[snapshot]]
+plan = "home"
+time = "2026-08-02T04:00:00+02:00"
+files = { count = 3, bytes = "6 KiB" }
+
+[[snapshot]]
+plan = "home"
+time = "2026-08-03T02:00:00+00:00"
+files = { count = 4, bytes = "8 KiB" }

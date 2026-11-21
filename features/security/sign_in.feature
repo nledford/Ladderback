@@ -163,6 +163,16 @@ Feature: Sign-in
       Then set-password rejects the argument "demo-admin-pass"
       And the data folder holds no admin password
 
+    Scenario Outline: set-password stopped by <how> at its prompt leaves the terminal showing what is typed
+      When set-password is stopped by <how> while it asks for the password at a terminal
+      Then set-password ends as <how> ends any program
+      And the terminal shows what is typed again
+
+      Examples:
+        | how     |
+        | Ctrl-C  |
+        | SIGTERM |
+
   @e2e
   Rule: Sign-in is decided when Ladderback starts, so an admin password set while sign-in is off waits for a restart, and Ladderback says so
 
@@ -177,6 +187,16 @@ Feature: Sign-in
 
     Scenario: An admin password file Ladderback can't read, found while sign-in is off, is said to be damaged
       When the data folder holds an admin password file that is not a password hash
+      Then Ladderback says sign-in is still off and the admin password file is damaged
+
+    Scenario: An admin password file other users can read, found while sign-in is off, is said to be one the next start refuses
+      When the admin password "demo-admin-pass" is set from standard input
+      Then Ladderback says sign-in is still off and a restart turns it on
+      When the admin password file is made readable by other users
+      Then Ladderback says sign-in is still off and the admin password file is damaged
+
+    Scenario: An admin password file that is a named pipe, found while sign-in is off, is said to be damaged at once
+      When the data folder holds an admin password file that is a named pipe
       Then Ladderback says sign-in is still off and the admin password file is damaged
 
   @e2e
@@ -249,6 +269,12 @@ Feature: Sign-in
       When Ladderback is started with the arguments "--listen 127.0.0.1:0"
       Then Ladderback refuses to start
       And the refusal gives the platform's message
+
+    Scenario: An admin password file that is a named pipe is a refusal to start, never a wait
+      Given the data folder holds an admin password file that is a named pipe
+      When Ladderback is started with the arguments "--listen 127.0.0.1:0"
+      Then Ladderback refuses to start
+      And the refusal says the admin password file is not a regular file
 
   @e2e
   Rule: With sign-in on, the API and the events stream answer a session only
