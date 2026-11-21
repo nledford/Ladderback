@@ -444,9 +444,9 @@ cli-pairing-token-hub-key = The { -hub } key: { $fingerprint }
 # $fingerprint (text): the certificate's fingerprint, in groups of four characters.
 cli-pairing-token-pinned = The token pins the { -hub }'s own certificate: { $fingerprint }
 
-# The hub's TLS key file is missing, holds no key it can serve, or holds another key than the one this hub made, so no token can pin its certificate.
+# The hub's TLS key file is missing, holds no key it can serve, or holds another key than the one this hub made, so no token can pin its certificate. The hub reads the key when it starts, and one that starts without it pairs no machine, whatever its token. This is said only while the hub's daemon is stopped.
 # `hub-tls-key` is the key file's name and `--certificate-authority` is typed as it is: keep them string literals.
-cli-pairing-token-no-tls-key = The { -hub }'s TLS key in { "hub-tls-key" } is missing, damaged or isn't the one this { -hub } made, so no token can pin its certificate. Restore the file from your backup of the data folder, or give { "--certificate-authority" } for an address whose certificate a certificate authority signed.
+cli-pairing-token-no-tls-key = The { -hub }'s TLS key in { "hub-tls-key" } is missing, damaged or isn't the one this { -hub } made, so no token can pin its certificate, and the { -hub } pairs no machine until it starts with the key restored. Restore the file from your backup of the data folder, make the token again, then start the { -hub }. { "--certificate-authority" } only chooses a certificate authority's certificate in place of the { -hub }'s own: a token made with it pairs no machine either until the { -hub } starts with the key restored.
 
 # Printed after the token: it is one-time, its token ID, and when it lapses.
 # $id (text): the token ID, 8 hex digits.
