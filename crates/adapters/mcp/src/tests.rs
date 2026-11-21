@@ -398,8 +398,11 @@ async fn the_tools_listed_are_the_golden_files() {
     let tools = &answer["result"]["tools"];
     let golden =
         std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/golden/tools-list.json");
-    let expected: Value =
+    let mut expected: Value =
         serde_json::from_str(&std::fs::read_to_string(&golden).expect("the golden file")).unwrap();
+    if let Some(golden_tools) = expected.as_array_mut() {
+        golden_tools.retain(|tool| ToolName::named(tool["name"].as_str().unwrap_or("")).is_some());
+    }
     assert!(
         *tools == expected,
         "the tools listed aren't the golden file's; if the change is meant, write this to {}:\n{}",
@@ -414,7 +417,7 @@ async fn the_tools_listed_are_the_golden_files() {
         .collect();
     assert_eq!(
         names,
-        [
+        in_this_build(&[
             "status",
             "list_plans",
             "list_repositories",
@@ -436,7 +439,7 @@ async fn the_tools_listed_are_the_golden_files() {
             "get_proposal",
             "withdraw_proposal",
             "dry_run_plan",
-        ]
+        ])
     );
     for tool in tools.as_array().expect("a list of tools") {
         // Starting and stopping a backup changes what Ladderback does, never
@@ -492,7 +495,7 @@ async fn each_field_at_every_level_has_one_type_and_only_the_arguments_needed_ar
             .collect();
         required.insert(name, needed);
     }
-    let expected: HashMap<&str, Vec<&str>> = [
+    let mut expected: HashMap<&str, Vec<&str>> = [
         ("status", vec![]),
         ("list_plans", vec![]),
         ("list_repositories", vec![]),
@@ -517,6 +520,7 @@ async fn each_field_at_every_level_has_one_type_and_only_the_arguments_needed_ar
     ]
     .into_iter()
     .collect();
+    expected.retain(|name, _| ToolName::named(name).is_some());
     assert_eq!(required, expected);
 }
 
@@ -611,26 +615,23 @@ async fn the_server_offers_resources_and_lists_the_status_summary_and_the_pairin
     );
     let mut client = connect(told());
     let listed = client.ask_current("resources/list", json!({})).await;
-    assert_eq!(
-        listed["result"]["resources"],
-        json!([
-            {
-                "uri": "ladderback://status",
-                "name": "status",
-                "title": "Status summary",
-                "description": STATUS_RESOURCE_DESCRIPTION,
-                "mimeType": "application/json",
-            },
-            {
-                "uri": "ladderback://pairing",
-                "name": "pairing",
-                "title": "Pairing a machine with its hub",
-                "description": pairing::PAIRING_RESOURCE_DESCRIPTION,
-                "mimeType": "application/json",
-            },
-        ]),
-        "{listed}"
-    );
+    let mut resources = vec![json!({
+        "uri": "ladderback://status",
+        "name": "status",
+        "title": "Status summary",
+        "description": STATUS_RESOURCE_DESCRIPTION,
+        "mimeType": "application/json",
+    })];
+    if cfg!(feature = "hub") {
+        resources.push(json!({
+            "uri": "ladderback://pairing",
+            "name": "pairing",
+            "title": "Pairing a machine with its hub",
+            "description": pairing::PAIRING_RESOURCE_DESCRIPTION,
+            "mimeType": "application/json",
+        }));
+    }
+    assert_eq!(listed["result"]["resources"], json!(resources), "{listed}");
 }
 
 #[tokio::test(start_paused = true)]
@@ -1838,7 +1839,7 @@ async fn every_tool_but_status_hands_on_a_refusal_from_the_backend_as_an_error()
     }
 }
 
-/// The golden file's output schema of each tool, by name.
+/// The golden file's output schema of each tool this build has, by name.
 fn golden_output_schemas() -> HashMap<String, Value> {
     let golden =
         std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/golden/tools-list.json");
@@ -1848,6 +1849,7 @@ fn golden_output_schemas() -> HashMap<String, Value> {
         .as_array()
         .expect("a list of tools")
         .iter()
+        .filter(|tool| ToolName::named(tool["name"].as_str().unwrap_or("")).is_some())
         .map(|tool| {
             (
                 tool["name"].as_str().expect("a name").to_owned(),
@@ -1924,9 +1926,9 @@ async fn no_refusal_of_any_tool_carries_structured_content() {
     assert_eq!(checked.len(), schemas.len(), "every tool listed is checked");
 }
 
-/// Each tool, with arguments it takes.
-fn every_tool_called() -> [(&'static str, Value); 21] {
-    [
+/// Each tool this build has, with arguments it takes.
+fn every_tool_called() -> Vec<(&'static str, Value)> {
+    let mut called = vec![
         ("status", json!({})),
         ("list_plans", json!({})),
         ("list_repositories", json!({})),
@@ -1957,7 +1959,9 @@ fn every_tool_called() -> [(&'static str, Value); 21] {
         ("get_proposal", json!({"proposal": "p"})),
         ("withdraw_proposal", json!({"proposal": "p"})),
         ("dry_run_plan", json!({"plan": tables()[0].0})),
-    ]
+    ];
+    called.retain(|(tool, _)| ToolName::named(tool).is_some());
+    called
 }
 
 /// What each tool answers has every key its output schema requires and,
@@ -2683,7 +2687,10 @@ fn a_script_line_is_a_tool_and_its_arguments() {
 
 #[test]
 fn every_tool_listed_can_be_called_by_its_name() {
-    for tool in tools() {
+    for tool in tools()
+        .into_iter()
+        .filter(|tool| ToolName::named(&tool.name).is_some())
+    {
         let call = Call::of_words(&tool.name, &[]).unwrap();
         assert_eq!(call.tool(), tool.name, "{}", tool.name);
     }
@@ -2855,7 +2862,7 @@ async fn a_server_of_its_own_offers_no_proposal_tool() {
         .iter()
         .collect();
     assert_eq!(listed, expected);
-    assert_eq!(listed.len(), 17);
+    assert_eq!(listed.len(), in_this_build(&["pairing_state"]).len() + 16);
     for tool in proposal_tools {
         let answer = client.call(tool, json!({"proposal": "p"})).await;
         assert_eq!(answer["error"]["code"], -32602, "{tool}: {answer}");
@@ -2901,7 +2908,10 @@ fn the_servers_offer_is_told_by_whether_it_proposes() {
 /// offered; every other tool is offered in both modes.
 #[test]
 fn only_connect_mode_offers_the_proposal_tools_to_a_one_shot_call() {
-    for tool in tools() {
+    for tool in tools()
+        .into_iter()
+        .filter(|tool| ToolName::named(&tool.name).is_some())
+    {
         let call = Call::of_words(&tool.name, &[]).unwrap();
         let proposes = matches!(
             tool.name.as_ref(),
@@ -2928,6 +2938,16 @@ async fn listed(client: &mut Client) -> Vec<String> {
         .collect()
 }
 
+/// `names` less the tools this build doesn't have: without the `hub`
+/// feature there is no `pairing_state` (§16, decision 122).
+fn in_this_build<'a>(names: &[&'a str]) -> Vec<&'a str> {
+    names
+        .iter()
+        .copied()
+        .filter(|name| ToolName::named(name).is_some())
+        .collect()
+}
+
 /// A stand-in that grants `permissions` and lists nothing.
 fn granting(permissions: PermissionsDto) -> Lists {
     Lists {
@@ -2946,7 +2966,7 @@ async fn a_token_that_only_reads_is_listed_only_the_tools_that_read() {
     }));
     assert_eq!(
         listed(&mut client).await,
-        [
+        in_this_build(&[
             "status",
             "list_plans",
             "list_repositories",
@@ -2955,8 +2975,8 @@ async fn a_token_that_only_reads_is_listed_only_the_tools_that_read() {
             "get_operation",
             "pairing_state",
             "wait_operation",
-            "export_profile"
-        ]
+            "export_profile",
+        ])
     );
 }
 
@@ -3039,7 +3059,11 @@ async fn permissions_that_cant_be_read_leave_every_tool_listed() {
         ..Lists::default()
     });
     let names = listed(&mut client).await;
-    assert_eq!(names.len(), 21, "{names:?}");
+    assert_eq!(
+        names.len(),
+        in_this_build(&["pairing_state"]).len() + 20,
+        "{names:?}"
+    );
     assert_eq!(names[0], "status");
 }
 
@@ -3248,6 +3272,7 @@ async fn a_proposal_tool_refuses_an_argument_it_cant_take_naming_it() {
     assert!(asked.lock().unwrap().is_empty(), "{:?}", asked.lock());
 }
 
+#[cfg(feature = "hub")]
 /// The pairing guide as `resources/read` answers it to `client`, parsed.
 async fn the_guide(client: &mut Client) -> Value {
     let read = client
@@ -3282,6 +3307,7 @@ fn codes(guide: &Value) -> Vec<(String, Vec<String>)> {
 /// The guide (§4.6): the three steps a person takes, where each is taken,
 /// and the refusals each most often meets. Reading it asks the backend
 /// nothing, so it is read even where every call is refused.
+#[cfg(feature = "hub")]
 #[tokio::test(start_paused = true)]
 async fn the_pairing_guide_names_each_step_where_it_is_taken_and_its_common_refusals() {
     let mut client = connect(Told(Err(ErrorDto::new(
@@ -3376,6 +3402,7 @@ fn the_guide_is_said_in_the_locale_the_server_was_given() {
 
 /// `pairing_state` answers what the backend reads of the machine's pin, and
 /// asks it nothing else.
+#[cfg(feature = "hub")]
 #[tokio::test(start_paused = true)]
 async fn pairing_state_answers_the_hub_the_backend_names() {
     let paired = api::PairingDto {
@@ -3404,6 +3431,7 @@ async fn pairing_state_answers_the_hub_the_backend_names() {
     assert_eq!(*asked.lock().unwrap(), ["pairing"]);
 }
 
+#[cfg(feature = "hub")]
 #[tokio::test(start_paused = true)]
 async fn a_refusal_reading_the_pairing_state_is_a_result_marked_as_an_error() {
     let mut client = proposing(Lists {
