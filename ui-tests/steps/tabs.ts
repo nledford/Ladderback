@@ -504,9 +504,9 @@ async function drawnVerticalTab(world: BrowserWorld, name: string, token: string
 }
 
 // In a column the selected tab's bar stands at its end, on the list's rule
-// between the list and the panel, and nothing is drawn under a tab; the
-// selected one is told by its weight and that shape, never color alone
-// (1.4.1).
+// between the list and the panel, and nothing is drawn under a tab (its
+// edge there 0px wide, whatever its style); the selected one is told by its
+// weight and that shape, never color alone (1.4.1).
 for (const [what, token, forced] of [
   ["--accent", "var(--accent)", false],
   ["--muted", "var(--muted)", false],
@@ -518,7 +518,7 @@ for (const [what, token, forced] of [
       const drawn = await drawnVerticalTab(this, name, token);
       assert.equal(drawn.weight, "700", `the weight of the tab "${name}"`);
       assert.deepEqual(drawn.bar, { width: `${width}px`, color: drawn.wanted, style: "solid" }, `the bar beside the tab "${name}"`);
-      assert.equal(drawn.under.style, "none", `a line under the tab "${name}"`);
+      assert.equal(drawn.under.width, "0px", `a line under the tab "${name}"`);
       assert.ok(
         Math.abs(drawn.end - drawn.listEnd) <= 0.5,
         `the bar beside the tab "${name}" stands at ${drawn.end}, the list's rule at ${drawn.listEnd}`,
@@ -533,7 +533,7 @@ for (const [what, token, forced] of [
       assert.equal(drawn.weight, "400", `the weight of the tab "${name}"`);
       assert.equal(drawn.color, forced ? drawn.wanted : drawn.text, `the words of the tab "${name}" are not in the text's color`);
       assert.deepEqual(drawn.bar, { width: `${width}px`, color: drawn.wanted, style: "solid" }, `the rule beside the tab "${name}"`);
-      assert.equal(drawn.under.style, "none", `a line under the tab "${name}"`);
+      assert.equal(drawn.under.width, "0px", `a line under the tab "${name}"`);
       assert.ok(
         Math.abs(drawn.end - drawn.listEnd) <= 0.5,
         `the rule beside the tab "${name}" stands at ${drawn.end}, the list's at ${drawn.listEnd}`,
