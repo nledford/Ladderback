@@ -308,6 +308,56 @@ async fn a_full_table_evicts_its_oldest_connection() {
     assert!(matches!(next(&mut newcomer).await, Some(Message::Text(_))));
 }
 
+/// `hub`'s routes on loopback as the hub's built-in TLS hands each
+/// connection on: with its session, and with `peer` as its address.
+async fn serve_over_tls(hub: &SyncHub, peer: std::net::SocketAddr) -> String {
+    let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let address = listener.local_addr().unwrap();
+    let app = routes::<()>(hub)
+        .layer(axum::Extension(crate::BuiltInTls { exporter: None }))
+        .layer(axum::Extension(axum::extract::ConnectInfo(
+            crate::PeerAddr(peer),
+        )));
+    tokio::spawn(async move { axum::serve(listener, app).await });
+    format!("127.0.0.1:{}", address.port())
+}
+
+/// Five unauthenticated connections, each answered in turn, the last with
+/// the hub's challenge once it is in the table.
+async fn five_answered(address: &str) -> Vec<Socket> {
+    let mut sockets = Vec::new();
+    for _ in 0..5 {
+        let mut socket = open(address).await;
+        socket.send(connect(0)).await.unwrap();
+        assert!(matches!(next(&mut socket).await, Some(Message::Text(_))));
+        sockets.push(socket);
+    }
+    sockets
+}
+
+/// Over the hub's built-in TLS, one address may hold 4 unauthenticated
+/// connections: a fifth evicts that address's oldest, and the others stay
+/// in the handshake (decision 120, "Bounds before the proofs").
+#[tokio::test]
+async fn over_built_in_tls_a_fifth_connection_from_one_address_evicts_its_oldest() {
+    let peer = "192.0.2.7:50000".parse().unwrap();
+    let address = serve_over_tls(&SyncHub::serving(pairing()), peer).await;
+    let mut sockets = five_answered(&address).await;
+    assert_eq!(closed_with(&mut sockets[0]).await, "");
+    sockets[1].send(Message::text("not a frame")).await.unwrap();
+    assert_eq!(closed_with(&mut sockets[1]).await, PROTOCOL_ERROR);
+}
+
+/// Behind a proxy every connection has the proxy's address, so only the
+/// total bounds them: a fifth evicts none.
+#[tokio::test]
+async fn behind_a_proxy_a_fifth_connection_evicts_none() {
+    let address = serve(&SyncHub::serving(pairing())).await;
+    let mut sockets = five_answered(&address).await;
+    sockets[0].send(Message::text("not a frame")).await.unwrap();
+    assert_eq!(closed_with(&mut sockets[0]).await, PROTOCOL_ERROR);
+}
+
 /// `serve` without `--hub` answers 404 under `/sync/`, as a release does.
 #[tokio::test]
 async fn without_the_hub_every_path_under_sync_answers_404() {
