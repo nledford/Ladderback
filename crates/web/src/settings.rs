@@ -52,11 +52,11 @@ use leptos::task::{spawn_local, tick};
 
 use crate::announcer::Politeness;
 use crate::api_tokens::{
-    CREATE_ID, CREATED_BODY_ID, Field, Form, HEADING_ID, LABEL_MAX_CHARS, LastUsed, REVOKE_BODY_ID,
-    ROWS, Said, TOKENS_PATH, TokenForm, change_id, change_label, change_path, change_request,
-    change_title, changed, chosen_of, created, created_body, error_of, field_of, granted_of,
-    new_token, permissions_from, problems_of, revoke_id, revoke_label, revoke_path, revoke_title,
-    revoked,
+    CREATE_ID, CREATED_BODY_ID, Field, Form, HEADING_ID, LABEL_MAX_CHARS, LastUsed, ListReads,
+    REVOKE_BODY_ID, ROWS, Said, TOKENS_PATH, TokenForm, change_id, change_label, change_path,
+    change_request, change_title, changed, chosen_of, created, created_body, error_of, field_of,
+    granted_of, new_token, permissions_from, problems_of, revoke_id, revoke_label, revoke_path,
+    revoke_title, revoked,
 };
 use crate::components::button::{Appearance, Content, Kind};
 use crate::components::skeleton::rules::Awaited;
@@ -405,13 +405,23 @@ fn ApiTokens(localizer: Arc<Localizer>) -> impl IntoView {
     // calmly in the list's place, as the daemon said it.
     let refused = RwSignal::<Option<Sentence>>::new(None);
     let load_localizer = Arc::clone(&localizer);
+    // The reads of the list, so an answer from before a newer read or a
+    // change of a token's permissions doesn't bring the old list back.
+    let reads = StoredValue::new(ListReads::default());
     let load = Callback::new(move |()| {
         let url = format!("{}{TOKENS_PATH}", base.get_value());
         let localizer = Arc::clone(&load_localizer);
+        let mine = reads.try_update_value(ListReads::start).unwrap_or_default();
         spawn_local(async move {
             let read = ws::get::<ApiTokensDto>(&url).await;
             // The reader may have left the page before the answer came.
             if phase.try_get_untracked().is_none() {
+                return;
+            }
+            if !reads
+                .try_update_value(|reads| reads.counts(mine))
+                .unwrap_or(false)
+            {
                 return;
             }
             match read {
@@ -610,6 +620,11 @@ fn ApiTokens(localizer: Arc<Localizer>) -> impl IntoView {
                     kept.permissions = permissions;
                 }
             });
+            // A read still unanswered, as after a revoke, may hold the old
+            // permissions: a new one overtakes it.
+            if reads.try_with_value(ListReads::changed).unwrap_or(false) {
+                load.run(());
+            }
             // Once the row is drawn again, so the dialog hands focus to its
             // new Change button; busy until then, so the confirm button
             // takes no press.

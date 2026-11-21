@@ -542,20 +542,22 @@ pub(crate) struct ListReads {
 impl ListReads {
     /// Starts a read, and gives its number for [`Self::counts`].
     pub(crate) fn start(&mut self) -> u64 {
-        todo!()
+        self.started = self.started.saturating_add(1);
+        self.started
     }
 
     /// Notes read `read` answered, and whether its answer is the list to
     /// show: only the newest read's is.
     pub(crate) fn counts(&mut self, read: u64) -> bool {
-        todo!("{read}")
+        self.answered = self.answered.max(read);
+        read == self.started
     }
 
     /// Whether a change of a token's permissions, just kept, needs a read
     /// of its own: a read still unanswered may hold the old permissions,
     /// and the one started now overtakes it.
     pub(crate) fn changed(&self) -> bool {
-        todo!()
+        self.answered < self.started
     }
 }
 
