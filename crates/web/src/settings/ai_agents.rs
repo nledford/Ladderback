@@ -16,6 +16,7 @@ use leptos::task::{spawn_local, tick};
 use super::{Chosen, PermissionGroups};
 use crate::announcer::Politeness;
 use crate::api_tokens::{Form, WITHOUT_TOKEN_PATH, without_token_request};
+use crate::components::ACTIONS;
 use crate::components::button::{Appearance, Content, Kind};
 use crate::components::skeleton::rules::Awaited;
 use crate::components::{
@@ -206,7 +207,7 @@ pub(super) fn AiAgentsSection(
                                         chosen=chosen
                                     />
                                     {password_field}
-                                    <p class="actions">
+                                    <p class=ACTIONS>
                                         <Button
                                             content=Content::Text(save_label.clone().into())
                                             appearance=Appearance::Filled

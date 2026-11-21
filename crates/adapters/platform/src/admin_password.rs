@@ -35,29 +35,33 @@ pub struct FileAdminPassword {
     seen: Mutex<Option<(Stamp, PasswordFingerprint)>>,
 }
 
-/// What the hash file's metadata says of which file it is. `set-password`
-/// writes a new file and renames it over the old one, so a new password is a
-/// new file (another inode), and its time and length change with it too.
+/// What the hash file's metadata says of which file it is, and of what
+/// [`read_hash`] checks of it. `set-password` writes a new file and renames
+/// it over the old one, so a new password is a new file (another inode), and
+/// its time and length change with it too; a `chmod` changes only its mode,
+/// which decides whether the next start refuses it (#633).
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 struct Stamp {
     len: u64,
     modified: Option<SystemTime>,
     file: (u64, u64),
+    mode: u32,
 }
 
 impl Stamp {
     fn of(metadata: &std::fs::Metadata) -> Self {
         #[cfg(unix)]
-        let file = {
+        let (file, mode) = {
             use std::os::unix::fs::MetadataExt;
-            (metadata.dev(), metadata.ino())
+            ((metadata.dev(), metadata.ino()), metadata.mode())
         };
         #[cfg(not(unix))]
-        let file = (0, 0);
+        let (file, mode) = ((0, 0), 0);
         Self {
             len: metadata.len(),
             modified: metadata.modified().ok(),
             file,
+            mode,
         }
     }
 }
@@ -84,11 +88,13 @@ impl FileAdminPassword {
     }
 }
 
-/// Reads and checks the hash file: present, small, its owner's alone, and an
-/// argon2id PHC string.
+/// Reads and checks the hash file: present, a regular file, small, its
+/// owner's alone, and an argon2id PHC string. The start and the session
+/// route's check with sign-in off both come here, so they refuse the same
+/// files.
 fn read_hash(path: &Path) -> Result<String, AdminPasswordError> {
     let unreadable = |error: std::io::Error| AdminPasswordError::Unreadable(error.to_string());
-    let file = match std::fs::File::open(path) {
+    let file = match open_without_waiting(path) {
         Ok(file) => file,
         Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
             return Err(AdminPasswordError::NotSet);
@@ -96,6 +102,12 @@ fn read_hash(path: &Path) -> Result<String, AdminPasswordError> {
         Err(error) => return Err(unreadable(error)),
     };
     let metadata = file.metadata().map_err(unreadable)?;
+    if !metadata.is_file() {
+        return Err(AdminPasswordError::Unreadable(format!(
+            "{} is not a regular file",
+            path.display()
+        )));
+    }
     #[cfg(unix)]
     {
         use std::os::unix::fs::PermissionsExt;
@@ -124,6 +136,21 @@ fn read_hash(path: &Path) -> Result<String, AdminPasswordError> {
         return Err(not_a_hash());
     }
     Ok(text)
+}
+
+/// Opens `path` to read without waiting for anything: opening a named pipe
+/// waits for a writer, which would hold the start, or a request's thread,
+/// for ever (#633). `O_NONBLOCK` opens it at once, for [`read_hash`] to
+/// refuse as no regular file; it changes nothing for a regular file.
+fn open_without_waiting(path: &Path) -> std::io::Result<std::fs::File> {
+    let mut options = std::fs::OpenOptions::new();
+    options.read(true);
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::OpenOptionsExt;
+        options.custom_flags(nix::libc::O_NONBLOCK);
+    }
+    options.open(path)
 }
 
 /// Which password `hash` is: the first 8 bytes of the SHA-256 of its salt.

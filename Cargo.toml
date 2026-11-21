@@ -425,9 +425,12 @@ async-trait.workspace = true
 cucumber.workspace = true
 config-adapter.workspace = true
 domain.workspace = true
+# The history fixture builder (#1122): scenarios start from a declared history.
+engine = { workspace = true, features = ["history-fixture"] }
 futures.workspace = true
 log.workspace = true
-nix = { workspace = true, features = ["fs"] }
+# `term`: a pseudo-terminal for `set-password`'s prompt.
+nix = { workspace = true, features = ["fs", "term"] }
 platform.workspace = true
 rustic_backend.workspace = true
 hooks.workspace = true

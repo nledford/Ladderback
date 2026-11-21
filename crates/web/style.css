@@ -537,13 +537,6 @@ main:focus {
   font-weight: 600;
 }
 
-/* A row of actions stretches its items; a button in one keeps its own
-   height. It stays here with the row's own rules (`.actions`), whose move
-   to utilities is a step of its own (#931). */
-.actions > .button {
-  align-self: center;
-}
-
 /* A skeleton (§4.5), drawn with Tailwind utilities (`skeleton/rules.rs`)
    but for this rule. A line of text: as tall as the text (1em, which the
    page sets on each bar), centered on a line of the text's height, so a
@@ -553,145 +546,6 @@ main:focus {
    arbitrary value could, which would hide the arithmetic in a class name. */
 .skeleton-lines > .skeleton-bar {
   margin-block: calc((1lh - 1em) / 2);
-}
-
-/* A text field (§4.5): its label above in the Label weight, its
-   description, the note of its state and its error under the label, then
-   the field: a 1 px edge (`--field-edge`, 3:1 or more on the page and on a
-   surface), the button's small corner, a control's height and padding for
-   its size (`--control-height`, `--control-padding`, which its size's
-   utilities set: `Size::control`), as wide as its line up to 32rem. Flat:
-   no shadow. */
-.text-field {
-  margin-block: 1rem;
-}
-
-.text-field label {
-  display: block;
-  font-weight: 600;
-}
-
-.text-field p {
-  margin-block: 0.25rem;
-}
-
-.text-field-row {
-  display: flex;
-  align-items: flex-start;
-  gap: 0.5rem;
-  margin-block-start: 0.25rem;
-}
-
-.text-field-box {
-  position: relative;
-  display: block;
-  flex: 1 1 auto;
-  min-inline-size: 0;
-  max-inline-size: 32rem;
-}
-
-.text-field-input {
-  display: block;
-  inline-size: 100%;
-  min-block-size: var(--control-height);
-  margin: 0;
-  padding-block: 0;
-  padding-inline: var(--control-padding);
-  border: 1px solid var(--field-edge);
-  border-radius: var(--radius-small);
-  background-color: var(--bg);
-  color: var(--fg);
-}
-
-input.text-field-input {
-  block-size: var(--control-height);
-}
-
-textarea.text-field-input {
-  padding-block: calc((var(--control-height) - 1lh) / 2 - 1px);
-}
-
-/* The icon at the field's start, inside its edge, decoration. */
-.text-field-icon {
-  position: absolute;
-  inset-block-start: calc((var(--control-height) - 1em) / 2);
-  inset-inline-start: var(--control-padding);
-  display: inline-flex;
-  pointer-events: none;
-}
-
-.text-field-with-icon .text-field-input {
-  padding-inline-start: calc(var(--control-padding) + 1.5em);
-}
-
-/* Invalid: an Error-tone edge a pixel thicker, beside the message, so the
-   state is in its words and its weight, never color alone. Its padding a
-   pixel less on each side, so its text stays where it was. */
-.text-field-input[aria-invalid="true"] {
-  border-width: 2px;
-  border-color: var(--error);
-  padding-inline: calc(var(--control-padding) - 1px);
-}
-
-.text-field-with-icon .text-field-input[aria-invalid="true"] {
-  padding-inline-start: calc(var(--control-padding) + 1.5em - 1px);
-}
-
-/* A token's whole text: data, in the monospace a terminal shows it in,
-   and wide enough for its 66 characters where the screen has room. */
-.text-field-box.text-field-token {
-  max-inline-size: 40rem;
-}
-
-.text-field-token .text-field-input {
-  font-family: ui-monospace, monospace;
-}
-
-/* A field in a row of actions: the row's items meet at their foot, so the
-   field's box and a button of its size line up, the label above. */
-.actions:has(> .text-field) {
-  align-items: flex-end;
-}
-
-.actions:has(> .text-field) > .button {
-  align-self: auto;
-}
-
-.actions > .text-field {
-  flex: 1 1 12rem;
-  max-inline-size: 32rem;
-  margin-block: 0;
-}
-
-/* Read only: a dashed edge, its note saying it in words. Disabled: the
-   surface under muted text, its note saying it too. */
-.text-field-input[readonly] {
-  border-style: dashed;
-}
-
-.text-field-input:disabled {
-  background-color: var(--surface);
-  color: var(--muted);
-  cursor: not-allowed;
-}
-
-/* Forced colors: the reader's field colors; invalid keeps its thicker
-   edge and read only its dashes, a disabled field `GrayText`. */
-@media (forced-colors: active) {
-  .text-field-input,
-  .text-field-input[aria-invalid="true"] {
-    background-color: Field;
-    border-color: FieldText;
-    color: FieldText;
-  }
-
-  /* Its fill named again: the surface a disabled field takes outside forced
-     colors outranks the rule above, and only Chromium forces it back. */
-  .text-field-input:disabled {
-    background-color: Field;
-    border-color: GrayText;
-    color: GrayText;
-  }
 }
 
 /* A group of choices, such as an API token's permissions: named by its
@@ -734,12 +588,6 @@ fieldset.choices > p {
 .error-summary ul {
   margin-block: 0.5rem;
   padding-inline-start: 1.25rem;
-}
-
-.actions {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 0.5rem;
 }
 
 /* The control that pauses live updates (§4.5): the button, then, while it is

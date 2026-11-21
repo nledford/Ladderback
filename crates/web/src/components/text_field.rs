@@ -130,11 +130,12 @@ pub fn TextField(
         });
     }
     let input_ref = NodeRef::<leptos::html::Input>::new();
+    let input_class = rules::input_class(kind, icon.is_some());
     let control = match kind.rows() {
         Some(rows) => view! {
             <textarea
                 id=id.clone()
-                class="text-field-input"
+                class=input_class
                 rows=rows
                 autocomplete=autocomplete
                 spellcheck=kind.spellcheck()
@@ -158,7 +159,7 @@ pub fn TextField(
             <input
                 id=id.clone()
                 node_ref=input_ref
-                class="text-field-input"
+                class=input_class
                 type=move || kind.input_type(shown.get())
                 inputmode=kind.input_mode()
                 autocomplete=autocomplete
@@ -229,7 +230,7 @@ pub fn TextField(
     let label_id = rules::label_id(&id);
     let error_id = rules::error_id(&id);
     view! {
-        <div class="text-field">
+        <div class=rules::FIELD>
             <label id=label_id for=id>
                 {label}
                 {marker}
@@ -248,7 +249,7 @@ pub fn TextField(
                         }
                     })
             }}
-            <div class="text-field-row">
+            <div class=rules::ROW>
                 <span class=rules::box_class(
                     size,
                     icon.is_some(),
@@ -257,7 +258,7 @@ pub fn TextField(
                     {icon
                         .map(|glyph| {
                             view! {
-                                <span class="text-field-icon">
+                                <span class=rules::ICON>
                                     <super::Icon glyph=glyph />
                                 </span>
                             }

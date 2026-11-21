@@ -24,6 +24,7 @@ use leptos::prelude::*;
 use leptos::task::{spawn_local, tick};
 use leptos_router::hooks::use_params_map;
 
+use crate::components::ACTIONS;
 use crate::components::button::{Appearance, Content};
 use crate::components::link::rules::{Destination, Matching};
 use crate::components::tree::rules::{Selection, folder_url};
@@ -182,7 +183,7 @@ fn EntryPane(
             let download_label = text_with(&button_localizer, msg::UI_DOWNLOAD_BUTTON, &named);
             let restored = selection.clone();
             view! {
-                <p class="actions">
+                <p class=ACTIONS>
                     <Button
                         content=Content::IconAndText {
                             glyph: LucideGlyph::RotateCcw.into(),

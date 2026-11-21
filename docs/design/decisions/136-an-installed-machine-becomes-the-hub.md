@@ -28,9 +28,9 @@
 2. **Hub mode lives in `config.toml` from M8's first release,** with the listening address and the allowed host names (today `serve --listen` and `--allowed-host`, security §10.1). No M8 hub keeps its role only in a service file, so none needs migrating later. The Settings form is a thin layer over that setting and can follow M8.
 3. **Decision 126 recommends by role, not by install channel:** any installed machine can become the hub, and the Docker image is the recommended channel for a machine whose only job is the hub.
 4. **The config is the source of truth; a command-line flag overrides it.** When a flag does, Settings shows the value read-only and says the command line sets it, so the page never shows a setting that isn't in effect. `install-service` needs no `--hub` of its own.
-5. **Turning hub mode off is refused while any machine is paired,** naming them. Handing the hub role to another machine without pairing again is the durable answer and belongs with moving and restoring a hub (#1039).
+5. **Turning hub mode off is refused while any machine is paired,** naming them. Handing the hub role to another machine without pairing again is the durable answer: the handover of [decision 137](137-a-hub-moves-by-handover-never-by-copy.md).
 6. **A hub that sleeps or goes offline is warned about from what the hub observes,** not from a guess at the hardware (#1205). A battery check at setup may add an early hint through the platform adapter.
-7. **"Become a hub" asks whether a hub already exists** (the maintainer's decision on #1206, 2026-11-21). On yes it takes that hub's pairing token, so the machine pairs first, checking the token and the hub's fingerprint as decision 121 has it, and can be promoted to hub later by the handover of #1039, which runs on the hub for a paired machine. The form makes no hub until the person confirms. A hint never gates: the option to become a hub stays available whatever the person answers.
+7. **"Become a hub" asks whether a hub already exists** (the maintainer's decision on #1206, 2026-11-21). On yes it takes that hub's pairing token, so the machine pairs first, checking the token and the hub's fingerprint as decision 121 has it, and can be promoted to hub later by decision 137's handover, which runs on the hub for a paired machine. The form makes no hub until the person confirms. A hint never gates: the option to become a hub stays available whatever the person answers.
 8. **A hub doesn't need sign-in on.** [Decision 120](120-agent-hub-connection-security.md) ("Who may make a token, approve or re-key") asks for it when a browser beyond loopback makes a pairing token or approves a machine, and for the Recovery Kit's page wherever it is opened. With sign-in off, a browser on the hub's own machine makes tokens and approves machines, and `ladderback pairing-token`, `recovery-kit`, `hub-recover` and the approval prompt work in a terminal as the data folder's owner. Sign-in stays the recommendation for a hub reachable on the network, and the guide says why.
 9. **No mDNS or other network discovery.** An announcement is an unauthenticated answer from whoever replies, the weakness decision 120 named in rejecting RFC 8628's device flow. It needs a new crate, with its own approval and `cargo deny`, and contends with Avahi and mDNSResponder for UDP port 5353. It also fits poorly with decision 87's loopback default and decision 122's `hub` build gate, since browsing would have to sit in builds without the hub. If discovery is wanted later it comes back as a new issue and only as a hint: it never pairs, never pre-trusts a fingerprint (none in the record, or one marked claimed and unchecked), never blocks "Become a hub", announces only when the hub already listens beyond loopback, and has its own crate approval.
 
@@ -44,7 +44,7 @@ The guide's hub section, written for M8's release, takes these steps. Until a re
 2. The hub serves its pages on the listener the other machines sync with (§7.1). With built-in TLS its address becomes `https://` with a self-signed certificate: the browser warns once, and bookmarks and MCP connect addresses change.
 3. Save the Recovery Kit offline within its 7 days ([decision 121](121-pairing-a-machine-with-its-hub.md)).
 4. Pair each other machine: a pairing token on the hub, `ladderback pair` on the machine, then approve it (§7.1).
-5. Back up the hub's own state: a plan for its data folder, with what restoring it needs written down (#1039 decides what a restored hub may do).
+5. Back up the hub's own state: a plan for its data folder, with what restoring it needs written down ([decision 137](137-a-hub-moves-by-handover-never-by-copy.md) says what a restored hub may do).
 
 **Beside.** Run the hub as a second Ladderback on the same computer, such as the Docker image with volumes of its own and another port, and pair the computer's installed machine with it like any other. Nothing moves, and the hub's own machine backs up nothing.
 
@@ -53,7 +53,7 @@ The guide's hub section, written for M8's release, takes these steps. Until a re
 ## What it costs
 
 - Until the form follows M8, the command line is the only in-place route.
-- A machine paired with a hub that is to stop being one has to be unpaired first, until #1039 decides a handover.
+- A machine paired with a hub that is to stop being one has to be unpaired first, until decision 137's handover is built (M9 or M10).
 - The form's own checks, and the names of the new `config.toml` keys, are settled when they are built.
 
 ## Rejected

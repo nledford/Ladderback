@@ -1,8 +1,9 @@
 //! What a text field takes, how it is drawn and what a screen reader meets
 //! (components §4.5): its kind and what each kind asks of the browser, the
-//! classes of its size, the ids its label, description, note and error are
-//! wired by and what it says in words of its state.
-//! `components/text_field.rs`'s `TextField` is the glue that draws it.
+//! classes of its parts (its size's from the shared vocabulary and the
+//! Tailwind utilities that draw it, decision 117), the ids its label,
+//! description, note and error are wired by and what it says in words of its
+//! state. `components/text_field.rs`'s `TextField` is the glue that draws it.
 
 use l10n::{MessageId, msg};
 use lepticons_data::LucideGlyph;
@@ -107,18 +108,105 @@ pub fn default_size() -> Size {
     Size::Medium
 }
 
+/// How the field and its parts are drawn, in Tailwind utilities (decision
+/// 117), logical ones only. The field: a rem above and below it (none in a
+/// row of actions, `components::ACTIONS`), its label on a line of its own in
+/// the Label weight, and each paragraph in it (its description, the note of
+/// its state, its error, and any of its caller's) a quarter rem above and
+/// below. Each rule reaches every label and paragraph inside the field, as
+/// a caller's paragraph is one of them.
+pub const FIELD: &str = "text-field my-4 [&_label]:block [&_label]:font-semibold [&_p]:my-1";
+
+/// The row a quarter rem under the field's words: the box, then a
+/// password's show button, at their tops, half a rem apart.
+pub const ROW: &str = "text-field-row flex items-start gap-2 mbs-1";
+
+/// The icon at the field's start, inside its edge by the control padding
+/// and centered on the control's height, decoration that lets a press
+/// through to the input under it.
+pub const ICON: &str = "text-field-icon absolute inline-flex pointer-events-none \
+    inset-bs-[calc((var(--control-height)_-_1em)/2)] inset-s-(--control-padding)";
+
+/// The box, the place of the input and its icon: the icon's container,
+/// filling its row beside a show button, and never wider than its row.
+const BOX: &str = "relative block flex-auto min-inline-0";
+
+/// As wide as its line, up to 32rem.
+const LINE_WIDTH: &str = "max-inline-[32rem]";
+
+/// A token's whole text: data, in the monospace a terminal shows it in,
+/// which the input takes from its box (the base rule's `font: inherit` on
+/// every input outranks any utility on the input itself), and wide enough
+/// for its 66 characters where the screen has room.
+const TOKEN: &str = "max-inline-[40rem] [font-family:ui-monospace,monospace]";
+
 /// The classes of the field's box, the edge around its input: its size, and
 /// its size's control height and padding (`Size::control`), a button of that
-/// size's, which `style.css` draws the box with, with a leading icon the room
-/// for it, and for a token's whole text the monospace and the width it takes.
+/// size's, which the input and its icon are drawn with, then the box's
+/// utilities, its width, and the names of a box with a leading icon and of a
+/// token's, whose monospace and width it takes.
 pub fn box_class(size: Size, icon: bool, token: bool) -> String {
     let icon = if icon { " text-field-with-icon" } else { "" };
-    let token = if token { " text-field-token" } else { "" };
+    let (width, token) = if token {
+        (TOKEN, " text-field-token")
+    } else {
+        (LINE_WIDTH, "")
+    };
     format!(
-        "text-field-box {} {}{icon}{token}",
+        "text-field-box {} {} {BOX} {width}{icon}{token}",
         size.class(),
         size.control()
     )
+}
+
+/// How every input is drawn: a block filling its box, at least the control's
+/// height, a 1 px solid edge in `--field-edge` (3:1 or more on the page and
+/// on a surface), the button's small corner, the page's colors. Flat: no
+/// shadow. Read only: its edge dashed. Invalid: an Error-tone edge a pixel
+/// thicker, beside its message, so the state is in its words and its weight,
+/// never color alone. Disabled: muted text on the surface, a not-allowed
+/// cursor. Under forced colors the reader's field colors, invalid keeping
+/// its thicker edge and read only its dashes, a disabled field `GrayText`.
+/// Its focus keeps the global ring.
+const INPUT: &str = "block inline-full min-block-(--control-height) m-0 \
+    border border-solid border-field-edge rounded-(--radius-small) bg-bg text-fg \
+    [&[readonly]]:border-dashed aria-[invalid=true]:[border-width:2px] \
+    not-forced-colors:aria-[invalid=true]:border-error disabled:cursor-not-allowed \
+    not-forced-colors:disabled:bg-surface not-forced-colors:disabled:text-muted \
+    forced-colors:bg-[color:Field] forced-colors:border-[color:FieldText] \
+    forced-colors:text-[color:FieldText] forced-colors:disabled:border-[color:GrayText] \
+    forced-colors:disabled:text-[color:GrayText]";
+
+/// One line: exactly the control's height.
+const ONE_LINE: &str = "block-(--control-height) py-0";
+
+/// Many lines: padded above and below so its first line stands where a one
+/// line field's text does, inside its edge.
+const LINES: &str = "py-[calc((var(--control-height)_-_1lh)/2_-_1px)]";
+
+/// The control padding at its start and end, a pixel less while invalid,
+/// so its text stays where it was inside the thicker edge.
+const PADDED: &str =
+    "px-(--control-padding) aria-[invalid=true]:px-[calc(var(--control-padding)_-_1px)]";
+
+/// With a leading icon: room for the icon (1em and half an em's gap) at its
+/// start, a pixel less on each side while invalid.
+const PADDED_FOR_ICON: &str = "pe-(--control-padding) \
+    ps-[calc(var(--control-padding)_+_1.5em)] \
+    aria-[invalid=true]:pe-[calc(var(--control-padding)_-_1px)] \
+    aria-[invalid=true]:ps-[calc(var(--control-padding)_+_1.5em_-_1px)]";
+
+/// The classes of the input (or the text area of a `Lines` field): its own,
+/// which names it, and the utilities that draw it, its height for one line
+/// or many, and its padding with or without a leading icon.
+pub fn input_class(kind: Kind, icon: bool) -> String {
+    let height = if kind.rows().is_some() {
+        LINES
+    } else {
+        ONE_LINE
+    };
+    let padding = if icon { PADDED_FOR_ICON } else { PADDED };
+    format!("text-field-input {INPUT} {height} {padding}")
 }
 
 /// The ids a field's parts are wired by, each from the input's `id`.
@@ -282,26 +370,76 @@ mod tests {
         assert_eq!(Access::Disabled.note(), Some(msg::UI_TEXT_FIELD_DISABLED));
     }
 
+    fn classes(class: &str) -> Vec<&str> {
+        class.split_whitespace().collect()
+    }
+
+    fn contains_all(class: &str, set: &str) -> bool {
+        let classes = classes(class);
+        set.split_whitespace().all(|one| classes.contains(&one))
+    }
+
     #[test]
     fn the_box_takes_its_size_from_the_shared_vocabulary_and_makes_room_for_an_icon() {
-        assert_eq!(
-            box_class(Size::Medium, false, false),
-            format!("text-field-box size-medium {}", Size::Medium.control())
+        for size in Size::ALL {
+            for (icon, token) in [(false, false), (true, false), (false, true), (true, true)] {
+                let class = box_class(size, icon, token);
+                assert_eq!(classes(&class).first(), Some(&"text-field-box"), "{class}");
+                for set in [size.class(), size.control(), BOX] {
+                    assert!(contains_all(&class, set), "{set} in {class}");
+                }
+                let names = classes(&class);
+                assert_eq!(names.contains(&"text-field-with-icon"), icon, "{class}");
+                assert_eq!(names.contains(&"text-field-token"), token, "{class}");
+            }
+        }
+    }
+
+    #[test]
+    fn a_tokens_box_is_wider_and_in_monospace_and_any_other_as_wide_as_a_line() {
+        let token = box_class(Size::Medium, false, true);
+        assert!(contains_all(&token, TOKEN), "{token}");
+        assert!(!contains_all(&token, LINE_WIDTH), "{token}");
+        let line = box_class(Size::Medium, true, false);
+        assert!(contains_all(&line, LINE_WIDTH), "{line}");
+        let line_classes = classes(&line);
+        assert!(
+            !TOKEN
+                .split_whitespace()
+                .any(|one| line_classes.contains(&one)),
+            "{line}"
         );
-        assert_eq!(
-            box_class(Size::XLarge, true, false),
-            format!(
-                "text-field-box size-xlarge {} text-field-with-icon",
-                Size::XLarge.control()
-            )
-        );
-        assert_eq!(
-            box_class(Size::Small, false, true),
-            format!(
-                "text-field-box size-small {} text-field-token",
-                Size::Small.control()
-            )
-        );
+    }
+
+    #[test]
+    fn many_lines_are_padded_to_a_lines_place_and_one_line_is_the_controls_height() {
+        for icon in [false, true] {
+            let lines = input_class(Kind::Lines { rows: 3 }, icon);
+            assert_eq!(
+                classes(&lines).first(),
+                Some(&"text-field-input"),
+                "{lines}"
+            );
+            assert!(contains_all(&lines, INPUT), "{lines}");
+            assert!(contains_all(&lines, LINES), "{lines}");
+            assert!(!contains_all(&lines, ONE_LINE), "{lines}");
+            for kind in [Kind::Line, Kind::Password, Kind::Number, Kind::Code] {
+                let line = input_class(kind, icon);
+                assert!(contains_all(&line, INPUT), "{line}");
+                assert!(contains_all(&line, ONE_LINE), "{line}");
+                assert!(!contains_all(&line, LINES), "{line}");
+            }
+        }
+    }
+
+    #[test]
+    fn an_input_with_an_icon_leaves_room_for_it_at_its_start_and_any_other_is_padded_alike() {
+        let with = input_class(Kind::Line, true);
+        assert!(contains_all(&with, PADDED_FOR_ICON), "{with}");
+        assert!(!contains_all(&with, PADDED), "{with}");
+        let without = input_class(Kind::Line, false);
+        assert!(contains_all(&without, PADDED), "{without}");
+        assert!(!contains_all(&without, PADDED_FOR_ICON), "{without}");
     }
 
     #[test]

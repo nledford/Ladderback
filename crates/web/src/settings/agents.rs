@@ -19,6 +19,7 @@ use leptos::prelude::*;
 use leptos::task::spawn_local;
 
 use crate::announcer::Clock;
+use crate::components::ACTIONS;
 use crate::components::alert::rules::AlertTone;
 use crate::components::button::Content;
 use crate::components::text_field::{Access, Kind};
@@ -526,7 +527,7 @@ pub(crate) fn Agents(localizer: Arc<Localizer>, on: bool) -> impl IntoView {
                 value=confirmation
                 error=step_up_error
             />
-            <p class="actions">
+            <p class=ACTIONS>
                 <Button
                     id=MAKE_ID
                     content=Content::Text(t(msg::UI_PAIRING_MAKE).into())
@@ -672,7 +673,7 @@ fn PairingDialog(localizer: Arc<Localizer>, token: Token) -> impl IntoView {
                                     token=true
                                 />
                             </div>
-                            <p class="actions">
+                            <p class=ACTIONS>
                                 <Button
                                     id=COPY_ID
                                     content=Content::Text(token_t(msg::UI_PAIRING_COPY).into())
@@ -722,7 +723,7 @@ fn PairingDialog(localizer: Arc<Localizer>, token: Token) -> impl IntoView {
                     .get()
                     .map(|_| {
                         view! {
-                            <p class="actions">
+                            <p class=ACTIONS>
                                 <Button
                                     id=MAKE_NEW_ID
                                     content=Content::Text(new_t(msg::UI_PAIRING_MAKE_NEW).into())

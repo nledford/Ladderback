@@ -147,6 +147,55 @@ async fn a_hash_file_others_can_read_is_refused_never_sign_in_off() {
     );
 }
 
+/// The session route's check with sign-in off gives the answer the next
+/// start would (#633), even for a file it read before its mode changed.
+#[cfg(unix)]
+#[tokio::test]
+async fn a_hash_file_made_readable_by_others_after_it_was_read_is_refused_as_at_the_next_start() {
+    use std::os::unix::fs::PermissionsExt;
+    let data = tempfile::tempdir().unwrap();
+    let path = data.path().join(FILE);
+    let kept = FileAdminPassword::in_data_dir(data.path());
+    kept.set(&password("demo-admin-pass")).await.unwrap();
+    let fingerprint = kept.fingerprint().unwrap();
+    std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o644)).unwrap();
+    assert_matches!(
+        FileAdminPassword::in_data_dir(data.path()).is_set(),
+        Err(AdminPasswordError::Unreadable(text)) if text.contains("other users")
+    );
+    assert_matches!(
+        kept.fingerprint(),
+        Err(AdminPasswordError::Unreadable(text)) if text.contains("other users")
+    );
+    std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o600)).unwrap();
+    assert_eq!(kept.fingerprint(), Ok(fingerprint));
+}
+
+/// A named pipe is no hash file: opening one to read waits for a writer,
+/// which would hold the start, or a request's thread, for ever (#633).
+#[cfg(unix)]
+#[test]
+fn a_named_pipe_is_refused_at_once_never_waited_on() {
+    use nix::sys::stat::Mode;
+    let data = tempfile::tempdir().unwrap();
+    nix::unistd::mkfifo(&data.path().join(FILE), Mode::S_IRUSR | Mode::S_IWUSR).unwrap();
+    let (said, told) = std::sync::mpsc::channel();
+    let folder = data.path().to_owned();
+    std::thread::spawn(move || {
+        let kept = FileAdminPassword::in_data_dir(&folder);
+        let _ = said.send((kept.is_set(), kept.fingerprint()));
+    });
+    let (start, route) = told
+        .recv_timeout(std::time::Duration::from_secs(5))
+        .expect("the named pipe was waited on");
+    for refused in [start.map(|_| ()), route.map(|_| ())] {
+        assert_matches!(
+            refused,
+            Err(AdminPasswordError::Unreadable(text)) if text.ends_with("is not a regular file")
+        );
+    }
+}
+
 #[tokio::test]
 async fn a_file_that_is_not_an_argon2id_hash_is_refused_never_sign_in_off() {
     let data = tempfile::tempdir().unwrap();

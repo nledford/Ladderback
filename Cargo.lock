@@ -1792,6 +1792,7 @@ dependencies = [
  "base64 0.22.1",
  "bytes",
  "domain",
+ "engine",
  "futures",
  "jiff",
  "log",
@@ -1807,6 +1808,7 @@ dependencies = [
  "tempfile",
  "testkit",
  "tokio",
+ "toml",
  "zip",
 ]
 
@@ -5032,6 +5034,7 @@ dependencies = [
  "serde_json",
  "sha2 0.10.9",
  "shell-words",
+ "signal-hook",
  "spawn-gate",
  "tempfile",
  "testkit",
