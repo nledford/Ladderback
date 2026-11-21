@@ -195,9 +195,11 @@ impl RepositorySettings {
         }
     }
 
-    /// Whether `other` points at the same place: the same `repository`,
-    /// `repo-hot` and the three option sets, where an `opendal:` backend
-    /// keeps its bucket or root. The password and the options that hold a
+    /// Whether `other` points at the same place: the same `repository` and
+    /// `repo-hot`, a local path compared with or without `local:` and a
+    /// trailing `/` (`compared_address`), and the three option sets, where
+    /// an `opendal:` backend keeps its bucket or root. The password and the
+    /// options that hold a
     /// credential ([`is_secret_option`], as the `inline-secret` warning
     /// takes them) are how to open it, not where it is: one moved from text
     /// to `${VAR}`, added or removed leaves the same location. On a drive
@@ -238,11 +240,36 @@ impl Place<'_> {
     pub(super) fn is(&self, other: &Place<'_>) -> bool {
         let cold = is_drive(self.repository);
         let hot = self.repo_hot.is_some_and(is_drive);
-        self.repository == other.repository
-            && self.repo_hot == other.repo_hot
+        compared_address(self.repository) == compared_address(other.repository)
+            && self.repo_hot.map(compared_address) == other.repo_hot.map(compared_address)
             && same_places(self.options, other.options, cold || hot)
             && same_places(self.options_hot, other.options_hot, hot)
             && same_places(self.options_cold, other.options_cold, cold)
+    }
+}
+
+/// A location's address as two are compared (#493). rustic reads an
+/// address with no `:` as a local path, and one that starts with `local:`
+/// as the path after it; a local path names one folder with or without a
+/// trailing `/`, so neither the prefix nor that `/` is compared, and a path
+/// of `/`s alone is the root. The path is compared as written otherwise: a
+/// link is not followed, nor is a relative path made whole. Every other
+/// backend's address is compared as written, and is never a local path.
+#[derive(PartialEq, Eq)]
+enum Address<'a> {
+    Local(&'a str),
+    Other(&'a str),
+}
+
+fn compared_address(address: &str) -> Address<'_> {
+    let path = match address.strip_prefix("local:") {
+        Some(path) => path,
+        None if !address.contains(':') => address,
+        None => return Address::Other(address),
+    };
+    match path.trim_end_matches('/') {
+        "" if !path.is_empty() => Address::Local("/"),
+        trimmed => Address::Local(trimmed),
     }
 }
 
@@ -780,5 +807,52 @@ mod tests {
         let mut elsewhere = settings();
         elsewhere.repository = "rest:http://demo:CANARY-url-password@nas.lan/other".to_owned();
         assert!(!settings().same_location(&elsewhere));
+    }
+
+    /// A local path is one location whether `local:` names its backend or
+    /// not and whether it ends in a `/`, in `repository` and `repo-hot`
+    /// alike; any other backend's address is compared as written (#493).
+    #[test]
+    fn a_local_path_is_one_location_however_it_is_written() {
+        let at = |repository: &str, hot: Option<&str>| RepositorySettings {
+            repository: repository.to_owned(),
+            repo_hot: hot.map(str::to_owned),
+            ..settings()
+        };
+        for (one, other) in [
+            ("/srv/demo", "local:/srv/demo"),
+            ("/srv/demo", "/srv/demo/"),
+            ("local:/srv/demo/", "/srv/demo"),
+            ("/srv/demo", "local:/srv/demo//"),
+            ("/", "local:/"),
+            ("//", "local:/"),
+            ("local://", "/"),
+        ] {
+            assert!(
+                at(one, None).same_location(&at(other, None)),
+                "{one} and {other}"
+            );
+            assert!(
+                at("/srv/cold", Some(one)).same_location(&at("/srv/cold", Some(other))),
+                "the hot halves {one} and {other}"
+            );
+        }
+        for (one, other) in [
+            ("/srv/demo", "/srv/demo-2"),
+            ("/", "local:"),
+            ("rest:https://nas.lan/demo", "rest:https://nas.lan/demo/"),
+            ("local:/srv/demo", "rclone::local:/srv/demo"),
+            ("local:rest:http://nas.lan/demo", "rest:http://nas.lan/demo"),
+            ("/srv/a:b", "local:/srv/a:b"),
+        ] {
+            assert!(
+                !at(one, None).same_location(&at(other, None)),
+                "{one} and {other}"
+            );
+            assert!(
+                !at("/srv/cold", Some(one)).same_location(&at("/srv/cold", Some(other))),
+                "the hot halves {one} and {other}"
+            );
+        }
     }
 }

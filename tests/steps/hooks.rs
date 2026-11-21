@@ -6,7 +6,7 @@ use std::assert_matches;
 
 use app::ports::{HookRunner, HookSetup};
 use cucumber::{given, then};
-use domain::execution::{FailureReason, OperationStatus};
+use domain::execution::{FailureReason, HookEnd, OperationStatus};
 use domain::planning::{HookEntry, OnFailure};
 use domain::{PlanId, RepositoryAlias};
 use hooks::ProcessHookRunner;
@@ -107,7 +107,10 @@ fn failed_by_timeout(agent: &mut Agent) {
     assert_matches!(
         agent.operation().status(),
         OperationStatus::Failed {
-            reason: FailureReason::HookFailed { exit_code: None }
+            reason: FailureReason::HookFailed {
+                ended: Some(HookEnd::TimedOut),
+                ..
+            }
         }
     );
 }

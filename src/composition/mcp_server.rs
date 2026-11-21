@@ -428,6 +428,8 @@ pub(crate) struct InProcess {
     full_disk_access: http_adapter::FullDiskAccessRoute,
     without_token: Arc<app::without_token::WithoutToken>,
     recent_log: Arc<dyn app::ports::RecentLogStore>,
+    #[cfg(feature = "hub")]
+    pairing: Arc<app::pairing::PairingState>,
 }
 
 impl InProcess {
@@ -441,6 +443,8 @@ impl InProcess {
             full_disk_access: state.full_disk_access.clone(),
             without_token: Arc::clone(&state.without_token),
             recent_log: Arc::clone(&state.recent_log),
+            #[cfg(feature = "hub")]
+            pairing: Arc::clone(&state.pairing),
         }
     }
 
@@ -707,6 +711,24 @@ impl ::mcp::Backend for InProcess {
             .await
             .map(app::access::permissions_dto)
             .map_err(config_refusal)
+    }
+
+    /// A pin that can't be read is `unknown`, as the daemon answers it; the
+    /// error names the key file, never its text (I4).
+    #[cfg(feature = "hub")]
+    async fn pairing(&self) -> Result<api::PairingDto, api::ErrorDto> {
+        self.allow(Permission::Backups).await?;
+        self.pairing.read().await.map_err(|error| {
+            log::error!("could not read this machine's pin of its hub: {error:?}");
+            api::ErrorDto::new(api::ErrorCode::Unknown, [], None)
+        })
+    }
+
+    /// A build without the hub can't pair and its server has no
+    /// `pairing_state` to call this (§16, decision 122).
+    #[cfg(not(feature = "hub"))]
+    async fn pairing(&self) -> Result<api::PairingDto, api::ErrorDto> {
+        Err(api::ErrorDto::new(api::ErrorCode::Unknown, [], None))
     }
 }
 

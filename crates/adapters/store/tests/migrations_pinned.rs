@@ -104,6 +104,11 @@ const PINNED: &[(i64, &str, &str)] = &[
         "hub tls key",
         "e057a5dc118f0f41846e5d508466456b29797f226263b0ded669e5e084bc47436aed08e4809af14735f281b2c59f0db0",
     ),
+    (
+        19,
+        "agent zone",
+        "b7854d21e3698c75a1cc30c93aac694790235efd2f7ef914e90ebebab9ba88c9b27b67b8fbd598c1f2bd5e348a949931",
+    ),
 ];
 
 /// The migration's file name, as `sqlx::migrate!` reads it: sqlx turns the

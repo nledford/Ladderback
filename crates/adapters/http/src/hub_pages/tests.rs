@@ -592,6 +592,7 @@ fn agent(n: u8, hostname: &str, approved: bool, at: Timestamp) -> AgentRecord {
         },
         counter: 1,
         last_seen: at,
+        zone: None,
     }
 }
 

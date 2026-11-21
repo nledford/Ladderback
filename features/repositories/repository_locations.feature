@@ -110,6 +110,14 @@ Feature: A repository reached at several locations
       And the operation used the location "public"
       And the operation shows the location "office" as not tried
 
+    Scenario: A run cancelled while a location is tried tries no later location
+      Given the location "lan" doesn't answer within 8 seconds
+      And the location "public" is "rest:http://backup.example.net/nas" with a user and a password in it
+      And the location "public" answers
+      When the plan "home" is cancelled while the location "lan" is tried
+      Then the location "public" was never tried
+      And no probe of a location still runs
+
   Rule: A location is tried only when its rule holds
 
     Scenario: A location whose rule doesn't hold is skipped
@@ -409,6 +417,11 @@ Feature: A repository reached at several locations
       When the configuration gives the repository "nas" a second location at the address of its first
       Then the configuration is refused at the second location's key
 
+    @e2e
+    Scenario: Two locations at one folder are refused however its path is written
+      When the configuration gives the repository "nas" a second location at the address of its first, written with "local:" before it and a slash at its end
+      Then the configuration is refused at the second location's key
+
   Rule: A location that sends its credentials where an impostor could read them is warned about
 
     Scenario Outline: A location that sends its credentials where an impostor could read them is warned about
@@ -653,6 +666,13 @@ Feature: A repository reached at several locations
       When the plan "home" runs
       Then the canary appears in no log line, event, operation record or page
       And the Repositories page shows the reference "${LAN_KEY}" and never its value
+
+    @e2e
+    Scenario: A location skipped because its folder is gone is one line of the daemon's log, never an error
+      Given the folder of the location "lan" is gone
+      When the plan "home" runs
+      Then the daemon's log says in one line that the location "public" was used and the location "lan" held no repository
+      And the daemon's log holds no error
 
     @e2e
     Scenario: An export names the first location and says what it left out

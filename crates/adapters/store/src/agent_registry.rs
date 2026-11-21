@@ -7,8 +7,8 @@ use app::ports::{Added, AgentRegistry, StoreError};
 use async_trait::async_trait;
 use domain::fleet::{
     AgentRecord, AgentStatus, ApprovalRefused, BindingKind, Fingerprint, HostnameKey, KEY_BYTES,
-    PairRefusal, PairRequest, Pairing, PairingView, ProofRefusal, ProofRequest, ProofView,
-    PublicKey, TokenId, TokenRecord, TokenUse, admits_unused_token, decide_approval,
+    MachineZone, PairRefusal, PairRequest, Pairing, PairingView, ProofRefusal, ProofRequest,
+    ProofView, PublicKey, TokenId, TokenRecord, TokenUse, admits_unused_token, decide_approval,
     decide_pairing, decide_proof, voids_tokens_for_new_key,
 };
 use domain::{AgentId, Timestamp};
@@ -111,7 +111,8 @@ async fn write_agent(
         .bind(status)
         .bind(status_at.as_millisecond())
         .bind(row::counter_text(agent.counter))
-        .bind(agent.last_seen.as_millisecond());
+        .bind(agent.last_seen.as_millisecond())
+        .bind(agent.zone.as_ref().map(MachineZone::as_str));
     let query = if new { query } else { query.bind(id.as_str()) };
     query.execute(&mut *tx).await.map_err(unavailable)?;
     Ok(())
@@ -364,6 +365,22 @@ impl AgentRegistry for SqliteStore {
             Err(_) => tx.rollback().await.map_err(unavailable)?,
         }
         Ok(decided)
+    }
+
+    async fn record_zone(
+        &self,
+        agent_id: AgentId,
+        zone: Option<&MachineZone>,
+    ) -> Result<(), StoreError> {
+        let _call = self.call().await;
+        let mut conn = self.pool.acquire().await.map_err(unavailable)?;
+        sqlx::query(sql::RECORD_ZONE)
+            .bind(zone.map(MachineZone::as_str))
+            .bind(row::agent_id_text(agent_id))
+            .execute(&mut *conn)
+            .await
+            .map_err(unavailable)?;
+        Ok(())
     }
 
     /// One transaction, the write lock taken up front, so the record the

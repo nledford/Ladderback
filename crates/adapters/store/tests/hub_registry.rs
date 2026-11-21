@@ -75,6 +75,7 @@ async fn the_rows_the_cases_start_from_are_good() {
             status: AgentStatus::Approved { at: at(10) },
             counter: u64::MAX,
             last_seen: at(20),
+            zone: None,
         }])
     );
     assert_eq!(
@@ -163,6 +164,11 @@ fn agent_cases() -> Vec<(&'static str, &'static str, String)> {
             "a time that isn't a number",
             "last_seen",
             "UPDATE agents SET last_seen = 'soon'".to_owned(),
+        ),
+        (
+            "a zone not shaped like a zone name",
+            "zone",
+            "UPDATE agents SET zone = '../etc/localtime'".to_owned(),
         ),
     ]
 }

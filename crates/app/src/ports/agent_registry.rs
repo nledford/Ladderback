@@ -1,7 +1,7 @@
 use async_trait::async_trait;
 use domain::fleet::{
-    AgentRecord, ApprovalRefused, Fingerprint, PairRefusal, PairRequest, Pairing, ProofRefusal,
-    ProofRequest, PublicKey, TokenId, TokenRecord,
+    AgentRecord, ApprovalRefused, Fingerprint, MachineZone, PairRefusal, PairRequest, Pairing,
+    ProofRefusal, ProofRequest, PublicKey, TokenId, TokenRecord,
 };
 use domain::{AgentId, Timestamp};
 
@@ -74,6 +74,15 @@ pub trait AgentRegistry: Send + Sync {
         request: &ProofRequest,
         now: Timestamp,
     ) -> Result<Result<AgentRecord, ProofRefusal>, StoreError>;
+
+    /// Keeps `zone` as the machine zone of the agent registered under
+    /// `agent_id`, none included, over the one it held: the agent's last
+    /// report wins (#114). An ID it doesn't hold changes nothing.
+    async fn record_zone(
+        &self,
+        agent_id: AgentId,
+        zone: Option<&MachineZone>,
+    ) -> Result<(), StoreError>;
 
     /// Approves the agent registered under `agent_id` with `agent_key`, the
     /// key the person compared, at `now`, with

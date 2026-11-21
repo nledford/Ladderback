@@ -816,6 +816,47 @@ async fn gives_the_failure(agent: &mut Agent, code: String) {
     );
 }
 
+/// The failure names the before-hook by its level and its place in that
+/// level's run-before list, and how it ended, as text arguments, with no
+/// words of the hook's own (#480).
+#[then(
+    expr = "the history page gives the operation's failure as {string}, for before-hook {int} at the {word} level, which exited with status {int}"
+)]
+async fn gives_the_hook_failure(
+    agent: &mut Agent,
+    code: String,
+    position: u32,
+    level: String,
+    status: i32,
+) {
+    let id = agent.ops.the_operation();
+    let operation = listed(agent, &id).await;
+    let failure = operation
+        .get("failure")
+        .unwrap_or_else(|| panic!("the operation has a failure: {operation}"));
+    assert_eq!(
+        failure.get("code").and_then(serde_json::Value::as_str),
+        Some(code.as_str()),
+        "the operation's failure: {operation}"
+    );
+    let text = |value: String| serde_json::json!({ "type": "text", "value": value });
+    assert_eq!(
+        failure.get("args"),
+        Some(&serde_json::json!({
+            "level": text(level),
+            "position": text(position.to_string()),
+            "ended": text("exit".to_owned()),
+            "exit_code": text(status.to_string()),
+        })),
+        "the failure's arguments: {operation}"
+    );
+    assert_eq!(
+        failure.get("detail"),
+        None,
+        "the failure keeps none of the hook's own words: {operation}"
+    );
+}
+
 #[then(expr = "neither the history page nor the operation's detail shows {string}")]
 async fn neither_shows(agent: &mut Agent, secret: String) {
     let id = agent.ops.the_operation();

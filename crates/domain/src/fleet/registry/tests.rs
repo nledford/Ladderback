@@ -36,6 +36,7 @@ fn request() -> PairRequest {
         agent_id: id(1),
         agent_key: key(4),
         hostname: name("laptop"),
+        zone: None,
         counter: 5,
         kind: BindingKind::None,
         hub_key: key(3),
@@ -50,6 +51,7 @@ fn record(agent: u128, agent_key: PublicKey, hostname: &str) -> AgentRecord {
         status: AgentStatus::Approved { at: at(-100) },
         counter: 9,
         last_seen: at(-50),
+        zone: None,
     }
 }
 
@@ -228,8 +230,45 @@ fn a_new_agent_is_kept_pending() {
             status: AgentStatus::Pending { since: at(10) },
             counter: 5,
             last_seen: at(10),
+            zone: None,
         }))
     );
+}
+
+/// A new agent is kept with the machine zone it reported, and an identity
+/// paired again with the one it reports now, none included: the last
+/// report wins (#114).
+#[test]
+fn a_pairing_keeps_the_machine_zone_the_agent_reported_last() {
+    let chicago = MachineZone::parse("America/Chicago").unwrap();
+    let berlin = MachineZone::parse("Europe/Berlin").unwrap();
+    let token = token(TokenUse::Unused);
+    let reported = PairRequest {
+        zone: Some(chicago.clone()),
+        ..request()
+    };
+    let Ok(Pairing::New(kept)) = decide_pairing(&view(&token), &reported, at(10)) else {
+        panic!("a new agent");
+    };
+    assert_eq!(kept.zone, Some(chicago.clone()));
+    let registered = AgentRecord {
+        zone: Some(chicago),
+        ..record(1, key(4), "laptop")
+    };
+    let again = PairingView {
+        by_id: Some(&registered),
+        ..view(&token)
+    };
+    for zone in [Some(berlin), None] {
+        let moved = PairRequest {
+            zone: zone.clone(),
+            ..request()
+        };
+        let Ok(Pairing::Again(kept)) = decide_pairing(&again, &moved, at(10)) else {
+            panic!("the same identity again");
+        };
+        assert_eq!(kept.zone, zone);
+    }
 }
 
 /// A pairing key no token has, or a binding kind other than the token's,

@@ -627,6 +627,11 @@ impl Backend for Connect {
     async fn permissions(&self) -> Result<PermissionsDto, ErrorDto> {
         self.get("api/v1/permissions", &[], &[]).await
     }
+
+    /// The route asks for Backups of a token, as the status does.
+    async fn pairing(&self) -> Result<api::PairingDto, ErrorDto> {
+        self.get("api/v1/pairing", &[], &[]).await
+    }
 }
 
 /// The proposal routes, as the API token sent sees them: only its own

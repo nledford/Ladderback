@@ -18,10 +18,10 @@ use app::pairing::{
 use app::ports::{AgentRegistry, Clock, Identity, LinkError, Signing};
 use cucumber::{given, then, when};
 use domain::fleet::{
-    AgentStatus, Approval, Fingerprint, Hostname, HubAddress, ListedAgent, PairingToken,
-    RouteRefused, SeedFile, SigningSeed, TokenId, TokenTls,
+    AgentStatus, Approval, Fingerprint, Hostname, HubAddress, ListedAgent, MachineZone,
+    PairingToken, RouteRefused, SeedFile, SigningSeed, TokenId, TokenTls,
 };
-use domain::{AgentId, SignedDuration, Timestamp, Uuid};
+use domain::{AgentId, Offset, SignedDuration, TimeZone, TimeZoneDatabase, Timestamp, Uuid};
 
 use super::Agent;
 
@@ -102,12 +102,14 @@ impl Hub {
     }
 }
 
-/// One machine: its key files, its agent ID and its hostname.
+/// One machine: its key files, its agent ID, its hostname and the machine
+/// zone it reports.
 #[derive(Clone)]
 struct Machine {
     identity: Arc<InMemoryIdentity>,
     agent_id: AgentId,
     hostname: Hostname,
+    zone: Option<MachineZone>,
     seed: u64,
 }
 
@@ -117,6 +119,7 @@ impl Machine {
             identity: Arc::default(),
             agent_id: AgentId::from_uuid(Uuid::from_u128(u128::from(n))),
             hostname: Hostname::parse(hostname).unwrap(),
+            zone: None,
             seed: n * 1_000_000,
         }
     }
@@ -225,7 +228,12 @@ impl PairingWorld {
         let token = self.token.clone().expect("a token");
         let agent = machine.pairing();
         let (connect, handshake) = match agent
-            .connect(token, machine.agent_id, machine.hostname.clone())
+            .connect(
+                token,
+                machine.agent_id,
+                machine.hostname.clone(),
+                machine.zone.clone(),
+            )
             .await
         {
             Ok(started) => started,
@@ -292,10 +300,26 @@ impl PairingWorld {
     /// A first agent pairs with `token` over a connection from `connector`,
     /// as `ladderback pair` does.
     async fn pair_over(&mut self, token: PairingToken, connector: LoopbackHubConnector) {
-        let machine = Machine::new(1, "laptop");
+        self.pair_machine_over(Machine::new(1, "laptop"), token, connector)
+            .await;
+    }
+
+    /// `machine`, the first agent, pairs with `token` over a connection
+    /// from `connector`, as `ladderback pair` does.
+    async fn pair_machine_over(
+        &mut self,
+        machine: Machine,
+        token: PairingToken,
+        connector: LoopbackHubConnector,
+    ) {
         let connector = Arc::new(connector);
         let outcome = PairWithHub::new(machine.pairing(), connector.clone())
-            .pair(token, machine.agent_id, machine.hostname.clone())
+            .pair(
+                token,
+                machine.agent_id,
+                machine.hostname.clone(),
+                machine.zone.clone(),
+            )
             .await;
         (self.outcome, self.failure) = match outcome {
             Ok(paired) => (Some(Ok(paired)), None),
@@ -330,7 +354,11 @@ impl PairingWorld {
         let connector = self.connector_to(hub);
         let outcome = machine
             .connecting(connector.clone())
-            .connect(machine.agent_id, machine.hostname.clone())
+            .connect(
+                machine.agent_id,
+                machine.hostname.clone(),
+                machine.zone.clone(),
+            )
             .await;
         self.record(outcome, connector).await;
     }
@@ -345,6 +373,7 @@ impl PairingWorld {
             .connect_at(
                 machine.agent_id,
                 machine.hostname.clone(),
+                machine.zone.clone(),
                 HubAddress::parse(address).unwrap(),
             )
             .await;
@@ -408,6 +437,100 @@ impl PairingWorld {
             })
             .collect()
     }
+
+    /// A first machine reporting `zone` pairs with the world's token over
+    /// its connection, and the pairing goes through.
+    async fn pair_in_zone(&mut self, zone: Option<MachineZone>) {
+        let machine = Machine {
+            zone,
+            ..Machine::new(1, "laptop")
+        };
+        let token = self.token.clone().expect("a token");
+        let connector = self.hub_link();
+        self.pair_machine_over(machine, token, connector).await;
+        assert!(matches!(self.outcome, Some(Ok(_))), "{:?}", self.outcome);
+    }
+
+    /// The first machine, now reporting `zone`, connects to its hub.
+    async fn connect_in_zone(&mut self, zone: Option<MachineZone>) {
+        let machine = Machine {
+            zone,
+            ..self.first().clone()
+        };
+        self.connect(&machine, None).await;
+        self.connected();
+        self.first = Some(machine);
+    }
+
+    /// The machine zone the hub holds for the first machine.
+    async fn held_zone(&self) -> Option<MachineZone> {
+        let first = self.first().agent_id;
+        let record = self.hub().registry.agent(first).await.unwrap();
+        record.expect("the hub holds the machine").zone
+    }
+}
+
+/// The machine zone a machine whose system zone is `name` reports, as
+/// `ladderback` makes it from the system zone.
+fn reported_from(name: &str) -> Option<MachineZone> {
+    let zone = TimeZoneDatabase::bundled()
+        .get(name)
+        .expect("a zone the bundled database knows");
+    MachineZone::of(&zone)
+}
+
+#[when(expr = "a machine in the time zone {string} pairs with the token")]
+async fn machine_in_zone_pairs(agent: &mut Agent, zone: String) {
+    agent.pairing.pair_in_zone(reported_from(&zone)).await;
+}
+
+#[when(
+    expr = "a machine in a time zone named {string} that the hub's zone database doesn't know pairs with the token"
+)]
+async fn machine_in_newer_zone_pairs(agent: &mut Agent, zone: String) {
+    assert!(TimeZoneDatabase::bundled().get(&zone).is_err(), "{zone}");
+    let reported = MachineZone::parse(&zone).expect("an IANA-shaped name");
+    agent.pairing.pair_in_zone(Some(reported)).await;
+}
+
+#[given(expr = "a machine paired with its hub from the time zone {string}")]
+async fn machine_paired_in_zone(agent: &mut Agent, zone: String) {
+    let world = &mut agent.pairing;
+    world.new_token().await;
+    world.pair_in_zone(reported_from(&zone)).await;
+}
+
+#[when(expr = "the machine moves to the time zone {string} and connects to its hub")]
+async fn machine_moves(agent: &mut Agent, zone: String) {
+    agent.pairing.connect_in_zone(reported_from(&zone)).await;
+}
+
+#[when(
+    expr = "the machine moves to a time zone named {string} that the hub's zone database doesn't know and connects to its hub"
+)]
+async fn machine_moves_to_newer_zone(agent: &mut Agent, zone: String) {
+    assert!(TimeZoneDatabase::bundled().get(&zone).is_err(), "{zone}");
+    let reported = MachineZone::parse(&zone).expect("an IANA-shaped name");
+    agent.pairing.connect_in_zone(Some(reported)).await;
+}
+
+#[when(
+    expr = "the machine's zone becomes a fixed offset of {int} hours and it connects to its hub"
+)]
+async fn machine_on_fixed_offset(agent: &mut Agent, hours: i8) {
+    let fixed = TimeZone::fixed(Offset::constant(hours));
+    agent.pairing.connect_in_zone(MachineZone::of(&fixed)).await;
+}
+
+#[then(expr = "the hub holds the machine's time zone as {string}")]
+async fn hub_holds_zone(agent: &mut Agent, zone: String) {
+    let held = agent.pairing.held_zone().await;
+    assert_eq!(held.as_ref().map(MachineZone::as_str), Some(zone.as_str()));
+}
+
+#[then("the hub holds the machine's time zone as unknown")]
+async fn hub_holds_unknown_zone(agent: &mut Agent) {
+    assert_eq!(agent.pairing.held_zone().await, None);
 }
 
 #[given(regex = r"^(?:a hub with )?a pairing token$")]

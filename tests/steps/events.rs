@@ -732,6 +732,40 @@ fn runs_a_backup(agent: &mut Agent, plan: String) {
     );
 }
 
+/// The hook's warning comes as it ends, ahead of the operation's end, with
+/// the phase it ran in as its first argument (#369).
+#[then(
+    expr = "the connected page learns of a hook warning from the {word} phase before the operation finished"
+)]
+async fn learns_hook_warning(agent: &mut Agent, phase: String) {
+    let event = agent
+        .events
+        .learn(
+            0,
+            &[
+                "operation-warning",
+                "operation-succeeded",
+                "operation-failed",
+            ],
+        )
+        .await;
+    assert_eq!(
+        event.get("type").and_then(serde_json::Value::as_str),
+        Some("operation-warning"),
+        "the warning comes before the operation's end: {event}"
+    );
+    assert_eq!(
+        event.get("code").and_then(serde_json::Value::as_str),
+        Some("hook-warning"),
+        "a hook's warning: {event}"
+    );
+    assert_eq!(
+        event.pointer("/args/0"),
+        Some(&serde_json::json!({ "type": "text", "value": phase })),
+        "the warning names its phase: {event}"
+    );
+}
+
 #[then("the connected page learns the operation started")]
 async fn learns_started(agent: &mut Agent) {
     let event = agent.events.learn(0, &["operation-started"]).await;

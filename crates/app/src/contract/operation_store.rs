@@ -4,8 +4,9 @@ mod serialization;
 use domain::execution::logged_entry::LoggedEntry;
 use domain::execution::refusal::SettingRefusal;
 use domain::execution::{
-    FailureReason, LifecycleError, MAX_STORED_WARNINGS, Operation, OperationKind, OperationStatus,
-    RepositoryHalf, Target, Transition, Trigger, Warning, WarningKind,
+    FailureReason, HookEnd, HookLevel, HookPlace, LifecycleError, MAX_STORED_WARNINGS, Operation,
+    OperationKind, OperationStatus, RepositoryHalf, Target, Transition, Trigger, Warning,
+    WarningKind,
 };
 use domain::{OperationId, PlanId, RepositoryAlias, RepositoryId, SnapshotId, Timestamp, Uuid};
 
@@ -383,6 +384,44 @@ async fn every_status_and_failure_reason_reads_back(store: &dyn OperationStore) 
             limit: 262_144,
         },
         FailureReason::DaemonStopped,
+        // A before-hook that stopped the run, at each level and ended each
+        // way, and one an earlier version kept, of no known hook (#480).
+        FailureReason::HookFailed {
+            hook: Some(HookPlace {
+                level: HookLevel::Agent,
+                position: std::num::NonZeroU32::MIN,
+            }),
+            ended: Some(HookEnd::Exited { code: -1 }),
+        },
+        FailureReason::HookFailed {
+            hook: Some(HookPlace {
+                level: HookLevel::Repository,
+                position: std::num::NonZeroU32::MAX,
+            }),
+            ended: Some(HookEnd::Signalled),
+        },
+        FailureReason::HookFailed {
+            hook: Some(HookPlace {
+                level: HookLevel::Plan,
+                position: std::num::NonZeroU32::MIN.saturating_add(1),
+            }),
+            ended: Some(HookEnd::TimedOut),
+        },
+        FailureReason::HookFailed {
+            hook: Some(HookPlace {
+                level: HookLevel::Plan,
+                position: std::num::NonZeroU32::MIN,
+            }),
+            ended: Some(HookEnd::NotStarted),
+        },
+        FailureReason::HookFailed {
+            hook: None,
+            ended: Some(HookEnd::Exited { code: 3 }),
+        },
+        FailureReason::HookFailed {
+            hook: None,
+            ended: None,
+        },
         // No repository config at the location, in rustic's words as awkward
         // as they get, and a refused login with and without the half named.
         FailureReason::RepositoryConfigNotFound {

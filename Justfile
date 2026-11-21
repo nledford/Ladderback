@@ -146,14 +146,15 @@ clippy:
 # tests (`scripts/*.test.ts`, under Node's built-in runner), the journey lint,
 # the check that every path AGENTS.md and CLAUDE.md name exists, the check that
 # no paragraph in docs/ runs over 150 words, the user docs site's build and
-# link check (`docs-site`), the check that the §16 decision
-# index matches the decision files, and rustdoc on every crate, private items
+# link check (`docs-site`), the checks that the §16 decision index matches
+# the decision files and §4.5's index the component contract files, and
+# rustdoc on every crate, private items
 # included, with warnings as errors, so a doc comment's broken link or
 # malformed markup fails. Rustdoc sees only the items built for the host and,
 # for `web`, not its wasm32-only ones. CI runs `lint` on Linux alone, so a doc
 # comment on macOS-only code is checked only by a local run on a Mac; macOS CI
 # runs `clippy` (see `clippy`).
-[doc('Clippy on the host and the web UI, each also as a release is built, and on the web UI with its component gallery, the TypeScript type check, the Biome format and lint check, shellcheck on the shell scripts, the tooling tests, the journey lint, the AGENTS.md path check, the docs paragraph-length check, the user docs site build and link check, the decision-index and component-index checks, and rustdoc with warnings as errors.')]
+[doc('The static checks: clippy (host, web UI, gallery, release flags), TypeScript, shellcheck, the tooling tests, the docs checks and rustdoc.')]
 [group('quality')]
 lint: _ui-deps _shellcheck-pinned clippy docs-site
     cargo clippy --package web --all-targets --target wasm32-unknown-unknown -- -D warnings
@@ -437,7 +438,7 @@ serve: build
 # `just try --demo` uses a second scratch folder, `try-demo`, holding a
 # repository with months of history, for screenshots and demos: the first run
 # builds the rich history fixture (`tests/fixtures/history/rich.toml`,
-# development.md §13.9) into it, as this agent's backups, and writes a
+# development.md §13.9) into it, as this machine's backups, and writes a
 # configuration with its plans, a keep policy and the canary password
 # `demo-password` in a file; later runs reuse it. A build that stopped
 # part-way is started again. The fixture's failed run is a missing night and
@@ -470,7 +471,7 @@ try *args: build
             fi
             rm -rf "$scratch/repo.partial" "$scratch/sources"
             # The ID the daemon would choose, chosen first, so the history is
-            # this agent's own; an ID kept from an earlier run stays.
+            # this machine's own; an ID kept from an earlier run stays.
             if [ ! -s "$scratch/data/agent-id" ]; then
                 echo 0190a1b2-c3d4-7e5f-8a6b-7c8d9e0f1a2b > "$scratch/data/agent-id"
             fi
@@ -479,7 +480,7 @@ try *args: build
                 "{{ root }}/tests/fixtures/history/rich.toml" "$scratch/repo.partial" "$scratch/sources" "$(cat "$scratch/data/agent-id")")"
             # The canary the builder sets, in a file: a password written in
             # config.toml would show the daemon's warning on every page. The
-            # agent's host name is the one the declaration's snapshots carry.
+            # machine's host name is the one the declaration's snapshots carry.
             printf %s demo-password > "$scratch/password"
             {
                 printf "schema = 1\n\n[agent]\nhostname = \"demo-host\"\n\n[repositories.demo]\nrepository = '%s'\npassword-file = '%s'\nmaintenance = \"local\"\n" "$scratch/repo" "$scratch/password"
@@ -797,7 +798,7 @@ image version +args:
 
 # Runs scripts/smoke-image.ts on a Docker image `just image` built: its
 # version and labels, its user, no hub, the refusal to listen beyond loopback
-# without `--allowed-host`, then an agent in a container with sign-in on,
+# without `--allowed-host`, then the daemon in a container with sign-in on,
 # backing up a read-only mounted folder into a repository on a volume, and a
 # new container on the same volumes keeping the data; last, that the install
 # guide's Compose file parses (`docker compose config`). It creates its own

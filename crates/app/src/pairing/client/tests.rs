@@ -137,7 +137,7 @@ async fn a_token_pairs_through_the_frames_and_pins_the_hub() {
         let token = setup.hub.token(tls).await;
         let paired = setup
             .client
-            .pair(token, agent_id(), laptop())
+            .pair(token, agent_id(), laptop(), None)
             .await
             .unwrap();
         assert_eq!(
@@ -161,7 +161,7 @@ async fn a_token_pairs_through_the_frames_and_pins_the_hub() {
 async fn a_plain_address_off_this_computer_is_never_connected_to() {
     let setup = setup(None);
     let token = at(setup.hub.token(TokenTls::Ca).await, "http://192.0.2.7:9898");
-    let failure = setup.client.pair(token, agent_id(), laptop()).await;
+    let failure = setup.client.pair(token, agent_id(), laptop(), None).await;
     assert_eq!(
         failure,
         Err(PairFailure::Route(RouteRefused::PlainOffLoopback))
@@ -170,7 +170,7 @@ async fn a_plain_address_off_this_computer_is_never_connected_to() {
     let loopback = at(setup.hub.token(TokenTls::Ca).await, "http://127.0.0.1:9898");
     setup
         .client
-        .pair(loopback, agent_id(), laptop())
+        .pair(loopback, agent_id(), laptop(), None)
         .await
         .unwrap();
     let routes = setup.tap.routes.lock().unwrap().clone();
@@ -185,7 +185,7 @@ async fn a_hub_without_the_binding_closes_before_anything_of_the_token() {
     let setup = setup(None);
     let token = setup.hub.token(pinned()).await;
     let seed = URL_SAFE_NO_PAD.encode(token.pairing_seed().expose());
-    let failure = setup.client.pair(token, agent_id(), laptop()).await;
+    let failure = setup.client.pair(token, agent_id(), laptop(), None).await;
     assert_eq!(
         failure,
         Err(PairFailure::Link(LinkError::Closed {
@@ -241,7 +241,7 @@ async fn a_hub_answering_out_of_turn_is_a_dropped_connection() {
             Arc::new(Scripted(Mutex::new(Some(frame)))),
         );
         let token = hub.token(TokenTls::Ca).await;
-        let failure = client.pair(token, agent_id(), laptop()).await;
+        let failure = client.pair(token, agent_id(), laptop(), None).await;
         assert_eq!(failure, Err(PairFailure::OutOfTurn));
         assert_eq!(identity.pin().await.unwrap(), None);
     }
@@ -255,13 +255,13 @@ async fn a_machine_pinned_to_another_hub_never_connects() {
     let token = setup.hub.token(TokenTls::Ca).await;
     setup
         .client
-        .pair(token, agent_id(), laptop())
+        .pair(token, agent_id(), laptop(), None)
         .await
         .unwrap();
     let routes_before = setup.tap.routes.lock().unwrap().len();
     let failure = setup
         .client
-        .pair(other.token(TokenTls::Ca).await, agent_id(), laptop())
+        .pair(other.token(TokenTls::Ca).await, agent_id(), laptop(), None)
         .await;
     assert!(
         matches!(

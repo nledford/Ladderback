@@ -380,6 +380,17 @@ cli-mcp-token-file-unreadable = cannot use the token file { $file }: { $detail }
 # `ladderback mcp --connect` has an API token but its address is plain HTTP to another machine, where anyone on the way could read the token, so it did not start.
 cli-mcp-token-over-plain-http = an { -api-token } is sent only to an { "https" } address or one on this computer, never over plain { "http" } to another machine: connect to the daemon through { "https" }, or without a token
 
+## The pairing guide (components §4.6): the MCP resource `ladderback://pairing`, which an AI agent reads to walk a person through pairing a machine with its hub. Each step's refusals follow it in their codes' own words.
+
+# The first step of pairing, taken on the hub: make a pairing token. "Machines" is the name of the hub's Settings tab that makes one. `ladderback pairing-token` needs the hub's daemon stopped, so the terminal way ends by starting it again.
+cli-mcp-pairing-make-token = On the { -hub }, make a pairing token: in the web UI's Settings, on the Machines tab, or at the { -hub }'s terminal by stopping its daemon, running { "ladderback pairing-token" }, then starting it again with { "ladderback serve --hub" }. The token works once, and lapses if no { -machine } uses it in time. Note the { -hub } key's fingerprint it shows beside the token.
+
+# The second step of pairing, taken on the machine: paste the token into `ladderback pair`. The token is a secret until it is used, so the AI agent must never be given it.
+cli-mcp-pairing-pair = On the { -machine }, run { "ladderback pair" } and paste the token when it asks. Paste it only there, never into a chat with an AI agent: until it is used or lapses, whoever holds it can pair a { -machine } with the { -hub }. Compare the { -hub } key it shows with the fingerprint the { -hub } showed, then confirm.
+
+# The third step of pairing: a person approves the machine on the hub, at its terminal with `ladderback pairing-token --approve`, which needs the hub's daemon stopped. Until then the machine waits; `ladderback hub-status` on the machine says whether it waits or is approved.
+cli-mcp-pairing-approve = The { -hub } holds the { -machine } waiting until a person approves it there: at the { -hub }'s terminal, stop its daemon, run { "ladderback pairing-token --approve" } with the { -machine }'s name, compare the key it shows with the { -machine }'s own, then start the daemon again with { "ladderback serve --hub" }. Until then the { -machine } goes on backing up on its own. Run { "ladderback hub-status" } on the { -machine } to see whether the { -hub } holds it waiting or has approved it.
+
 ## One-shot calls (components §4.6): `ladderback mcp call`.
 
 # `ladderback mcp call` was given the name of a tool that doesn't exist, so it called nothing.

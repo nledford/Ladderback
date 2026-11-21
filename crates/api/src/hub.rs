@@ -1,6 +1,7 @@
 //! The hub's own routes under `/api/v1/hub` (§16, decisions 120 and 121):
 //! its key, and the pairing tokens its page makes and cancels. Only a build
-//! with the hub serves them (decision 122).
+//! with the hub serves them (decision 122). Every daemon also answers which
+//! hub it is paired with, at [`PAIRING_PATH`].
 
 use serde::{Deserialize, Serialize};
 
@@ -11,10 +12,15 @@ pub const HUB_PATH: &str = "/api/v1/hub";
 /// Where the page makes a pairing token: `POST` a [`MakePairingTokenDto`].
 pub const PAIRING_TOKENS_PATH: &str = "/api/v1/hub/pairing-tokens";
 
+/// Where a machine says whether it is paired with a hub, and with which:
+/// `GET`, answering a [`PairingDto`] (components §4.6, `pairing_state`).
+pub const PAIRING_PATH: &str = "/api/v1/pairing";
+
 /// The certificate a pairing token's address shows: the hub's own, which
 /// the token pins, or one a certificate authority signed, as a proxy's in
 /// front of the hub is (decision 120, "Binding to the TLS session").
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "schemars", derive(schemars::JsonSchema))]
 #[serde(rename_all = "kebab-case")]
 pub enum TokenCertificateDto {
     Pinned,
@@ -36,6 +42,32 @@ pub struct HubDto {
     pub certificate: TokenCertificateDto,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub own_certificate: Option<String>,
+}
+
+/// Whether this machine is paired with a hub: true once the hub accepted
+/// its pairing, whether or not a person has approved it there yet. A paired
+/// machine names its hub.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "schemars", derive(schemars::JsonSchema))]
+#[serde(rename_all = "kebab-case", deny_unknown_fields)]
+pub struct PairingDto {
+    pub paired: bool,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub hub: Option<PairedHubDto>,
+}
+
+/// The hub a machine is paired with, as the machine pinned it: the address
+/// it reaches the hub at, the fingerprint of the hub's key in full (as
+/// [`HubDto`] has it, for a person to compare with the hub's page), and the
+/// certificate the machine trusts there. All of it is public: the pin holds
+/// no secret, and no token is kept once used (I4).
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "schemars", derive(schemars::JsonSchema))]
+#[serde(rename_all = "kebab-case", deny_unknown_fields)]
+pub struct PairedHubDto {
+    pub address: String,
+    pub fingerprint: String,
+    pub certificate: TokenCertificateDto,
 }
 
 /// A pairing token asked for: the address agents will use, the certificate

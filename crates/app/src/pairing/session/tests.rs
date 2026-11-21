@@ -25,7 +25,10 @@ async fn a_connect_is_challenged_and_a_pair_answered() {
     let hub = Hub::new(1);
     let token = hub.token(TokenTls::Ca).await;
     let agent = agent(Arc::new(InMemoryIdentity::default()));
-    let (connect, handshake) = agent.connect(token, agent_id(), laptop()).await.unwrap();
+    let (connect, handshake) = agent
+        .connect(token, agent_id(), laptop(), None)
+        .await
+        .unwrap();
     let mut session = hub.pairing.session(None).await.unwrap();
     let step = hub
         .pairing
@@ -56,7 +59,10 @@ async fn a_message_out_of_turn_closes_the_connection() {
     let hub = Hub::new(1);
     let token = hub.token(TokenTls::Ca).await;
     let agent = agent(Arc::new(InMemoryIdentity::default()));
-    let (connect, handshake) = agent.connect(token, agent_id(), laptop()).await.unwrap();
+    let (connect, handshake) = agent
+        .connect(token, agent_id(), laptop(), None)
+        .await
+        .unwrap();
     let keys = hub.pairing.keys().await.unwrap();
     let (challenge, _) = hub.pairing.challenge(&keys, &connect, None).unwrap();
     let (pair, _) = agent

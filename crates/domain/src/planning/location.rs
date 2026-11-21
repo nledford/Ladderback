@@ -1154,6 +1154,22 @@ mod tests {
         assert_eq!(moved.repeated_location(), Some(0));
     }
 
+    /// A further location at the first one's folder, written with `local:`
+    /// and a trailing `/`, is the same location; so is another entry's
+    /// (decisions 49 and 80, #493).
+    #[test]
+    fn a_folder_written_two_ways_is_one_location_of_an_entry_and_between_entries() {
+        assert_eq!(
+            entry("/srv/a", &["local:/srv/a/"], None).repeated_location(),
+            Some(0)
+        );
+        assert!(entry("/srv/lan", &["/srv/public"], None).is_entry(&entry(
+            "local:/srv/public/",
+            &[],
+            None
+        )));
+    }
+
     #[test]
     fn two_entries_with_no_known_id_are_one_repository_at_any_shared_location() {
         let laptop = entry("/srv/lan", &["/srv/public"], None);

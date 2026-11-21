@@ -122,6 +122,38 @@ error-engine-start-timed-out = The engine did not start the operation in time, s
 # The engine stopped reporting, but its process stayed alive.
 error-engine-exit-timed-out = The engine stopped reporting, so { -brand-name } ended its process. Check the repository, then run the operation again.
 
+# A before-hook whose `on-failure` is `error` failed, so the operation stopped before it began. What the hook wrote is never shown.
+# $level (text): whose run-before list holds the hook: agent (this machine's), repository or plan. The sender leaves it out for a failure an earlier version kept, and the program then supplies the text none.
+# $position (text): the hook's place in that list, counted from 1. Left out with $level.
+# $ended (text): how it ended: exit, signal, timeout or not-started. The sender leaves it out for a failure an earlier version kept without it, and the program then supplies the text none.
+# $exit_code (text): its exit status, for an exit; otherwise none.
+# `run-before` and `on-failure` are configuration keys and `warn` a value of one, typed as they are: keep them string literals.
+error-hook-failed =
+    { $level ->
+        [agent] { $position ->
+            [none] A hook of this { -machine }'s { "run-before" } list failed, so { -brand-name } stopped the operation before it began.
+           *[other] Hook { $position } of this { -machine }'s { "run-before" } list failed, so { -brand-name } stopped the operation before it began.
+        }
+        [repository] { $position ->
+            [none] A hook of the repository's { "run-before" } list failed, so { -brand-name } stopped the operation before it began.
+           *[other] Hook { $position } of the repository's { "run-before" } list failed, so { -brand-name } stopped the operation before it began.
+        }
+        [none] A before-hook failed, so { -brand-name } stopped the operation before it began.
+       *[plan] { $position ->
+            [none] A hook of the plan's { "run-before" } list failed, so { -brand-name } stopped the operation before it began.
+           *[other] Hook { $position } of the plan's { "run-before" } list failed, so { -brand-name } stopped the operation before it began.
+        }
+    } { $ended ->
+        [signal] A signal ended it.
+        [timeout] It ran past its time limit, or couldn't start within it, and was stopped.
+        [not-started] It could not be started.
+        [none] It ended with no exit status.
+       *[exit] { $exit_code ->
+            [none] It exited with no status.
+           *[other] It exited with status { $exit_code }.
+        }
+    } Check the hook's command, or set its { "on-failure" } to { "warn" } to go on when it fails.
+
 # The daemon stopped while the operation was queued or running: a crash, a kill or a power cut.
 error-daemon-stopped = { -brand-name } stopped before this operation ended, so the outcome of the operation is unknown. Check the repository, then run the operation again.
 

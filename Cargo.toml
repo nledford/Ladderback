@@ -69,10 +69,10 @@ hooks = { path = "crates/adapters/hooks" }
 notify-adapter = { path = "crates/adapters/notify" }
 releases-adapter = { path = "crates/adapters/releases" }
 interop = { path = "crates/adapters/interop" }
-mcp = { path = "crates/adapters/mcp" }
 # `hub` is on by default for each crate's own tests; `ladderback` turns it on
 # for its default build, and a release build leaves it out (§16, decision 122).
 http-adapter = { path = "crates/adapters/http", default-features = false }
+mcp = { path = "crates/adapters/mcp", default-features = false }
 platform = { path = "crates/adapters/platform", default-features = false }
 store = { path = "crates/adapters/store", default-features = false }
 # The hub's own crates, which only a build with `hub` has (decision 122).
@@ -384,6 +384,7 @@ pseudo = ["l10n/pseudo"]
 # it out until M8, and `just architecture` checks that it does.
 hub = [
     "http-adapter/hub",
+    "mcp/hub",
     "platform/hub",
     "store/hub",
     "dep:signing-adapter",

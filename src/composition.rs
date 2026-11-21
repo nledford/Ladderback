@@ -694,9 +694,13 @@ fn failure_refusal(reason: FailureReason) -> FailureRefusal {
         F::EngineStartTimedOut => unavailable(ErrorCode::EngineStartTimedOut, Vec::new(), None),
         F::EngineExitTimedOut => unavailable(ErrorCode::EngineExitTimedOut, Vec::new(), None),
         // Only a backup's before-hook stops a job this way: a repository job
-        // and a read of the repository run no hooks. It is still a failure,
-        // in the catalog's plainest words.
-        F::HookFailed { .. } => unavailable(ErrorCode::OperationFailed, Vec::new(), None),
+        // and a read of the repository run no hooks. It is told as a page
+        // tells it, naming the hook.
+        F::HookFailed { hook, ended } => unavailable(
+            ErrorCode::HookFailed,
+            app::announce::hook_failed_args(hook, ended),
+            None,
+        ),
         F::RepositoryExists => FailureRefusal::RepositoryExists,
         F::RepositoryReplaced => unavailable(ErrorCode::RepositoryReplaced, Vec::new(), None),
         F::RepositoryNotFound => FailureRefusal::RepositoryNotFound,

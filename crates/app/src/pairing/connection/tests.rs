@@ -78,7 +78,7 @@ async fn paired(hub: &Hub, n: u128) -> Arc<InMemoryIdentity> {
     );
     let connector = LoopbackHubConnector::to(hub.pairing.clone());
     PairWithHub::new(pairing, Arc::new(connector))
-        .pair(token, agent_id(n), hostname(n))
+        .pair(token, agent_id(n), hostname(n), None)
         .await
         .unwrap();
     identity
@@ -127,7 +127,7 @@ async fn a_paired_agent_is_welcomed_pending_and_its_counter_kept() {
     hub.clock.advance(SignedDuration::from_secs(60));
     let connector = Arc::new(LoopbackHubConnector::to(hub.pairing.clone()));
     let connected = connecting(identity.clone(), connector.clone())
-        .connect(agent_id(1), hostname(1))
+        .connect(agent_id(1), hostname(1), None)
         .await
         .unwrap();
     let seed = identity.seed(SeedFile::AgentKey).await.unwrap().unwrap();
@@ -167,7 +167,7 @@ async fn an_approved_agent_is_welcomed_approved() {
     hub.pairing.approve(&waiting).await.unwrap().unwrap();
     let connector = Arc::new(LoopbackHubConnector::to(hub.pairing.clone()));
     let connected = connecting(identity, connector)
-        .connect(agent_id(1), hostname(1))
+        .connect(agent_id(1), hostname(1), None)
         .await
         .unwrap();
     assert_eq!(connected.approval, Approval::Approved);
@@ -195,7 +195,7 @@ async fn a_machine_never_paired_connects_to_nothing() {
     for identity in [Arc::new(InMemoryIdentity::default()), pin_only] {
         let connector = Arc::new(LoopbackHubConnector::to(hub.pairing.clone()));
         let failure = connecting(identity, connector.clone())
-            .connect(agent_id(2), hostname(2))
+            .connect(agent_id(2), hostname(2), None)
             .await;
         assert_eq!(failure, Err(ConnectFailure::NotPaired));
         assert!(connector.routes().is_empty());
@@ -211,7 +211,7 @@ async fn another_hub_gets_no_proof() {
     let other = hub(2);
     let connector = Arc::new(LoopbackHubConnector::to(other.pairing.clone()));
     let failure = connecting(identity, connector.clone())
-        .connect(agent_id(1), hostname(1))
+        .connect(agent_id(1), hostname(1), None)
         .await;
     assert_eq!(
         failure,
@@ -232,7 +232,7 @@ async fn an_unknown_agent_and_another_key_get_one_signed_refusal() {
     for id in [agent_id(9), agent_id(1)] {
         let connector = Arc::new(LoopbackHubConnector::to(hub.pairing.clone()));
         let failure = connecting(stranger.clone(), connector)
-            .connect(id, hostname(9))
+            .connect(id, hostname(9), None)
             .await;
         let Err(ConnectFailure::Refused(refused)) = failure else {
             panic!("{failure:?}");
@@ -365,7 +365,7 @@ async fn connect_rewritten(
         rewrite,
     };
     connecting(identity, Arc::new(connector))
-        .connect(id, hostname(1))
+        .connect(id, hostname(1), None)
         .await
 }
 
@@ -481,7 +481,7 @@ async fn a_welcome_is_checked_before_it_is_acted_on() {
         identity.clone(),
         Arc::new(LoopbackHubConnector::to(hub.pairing.clone())),
     )
-    .connect(agent_id(1), hostname(1))
+    .connect(agent_id(1), hostname(1), None)
     .await;
     assert_eq!(
         failure,
@@ -569,10 +569,10 @@ async fn a_welcome_that_arrives_after_its_life_is_not_acted_on() {
             "0.5.0-agent".to_owned(),
         )
     };
-    let late = connect(life).connect(agent_id(1), hostname(1)).await;
+    let late = connect(life).connect(agent_id(1), hostname(1), None).await;
     assert_eq!(late, Err(ConnectFailure::Welcome(WelcomeRefused::Expiry)));
     let in_time = connect(life - SignedDuration::from_secs(1))
-        .connect(agent_id(1), hostname(1))
+        .connect(agent_id(1), hostname(1), None)
         .await;
     assert!(in_time.is_ok(), "{in_time:?}");
 }
@@ -630,6 +630,7 @@ async fn the_hub_welcomes_only_a_proved_agents_first_hello() {
             hostname: hostname(1),
             protocols: domain::fleet::PROTOCOLS,
             clock: EpochSeconds::from_seconds(1_800_000_000),
+            zone: None,
         });
         let signed = SignedMessage::AgentMessage {
             hub_key: *keys.key(),
@@ -666,6 +667,7 @@ async fn the_hub_welcomes_only_a_proved_agents_first_hello() {
         assert_eq!(
             hub.pairing
                 .welcome(&keys, &handshake, &agent, &sent)
+                .await
                 .unwrap(),
             Err(refusal)
         );
@@ -678,6 +680,7 @@ async fn the_hub_welcomes_only_a_proved_agents_first_hello() {
             &agent,
             &hello(1, hello_kind(), &agent_seed),
         )
+        .await
         .unwrap()
         .unwrap();
     assert_eq!(welcome.seq, 1);
@@ -738,7 +741,7 @@ async fn an_address_the_person_gave_is_kept_once_the_hub_proves_itself_there() {
         || Arc::new(LoopbackHubConnector::to(hub.pairing.clone()).only_at("hub-new.example", 9443));
     let given = moved();
     let connected = connecting(identity.clone(), given.clone())
-        .connect_at(agent_id(1), hostname(1), new_address())
+        .connect_at(agent_id(1), hostname(1), None, new_address())
         .await
         .unwrap();
     assert_eq!(connected.approval, Approval::Pending);
@@ -748,13 +751,13 @@ async fn an_address_the_person_gave_is_kept_once_the_hub_proves_itself_there() {
     assert_eq!(hosts(&given), ["hub-new.example:9443"]);
     let again = moved();
     connecting(identity.clone(), again.clone())
-        .connect(agent_id(1), hostname(1))
+        .connect(agent_id(1), hostname(1), None)
         .await
         .unwrap();
     assert_eq!(hosts(&again), ["hub-new.example:9443"]);
     let back = Arc::new(LoopbackHubConnector::to(hub.pairing.clone()).only_at("hub.example", 9443));
     connecting(identity, back.clone())
-        .connect(agent_id(1), hostname(1))
+        .connect(agent_id(1), hostname(1), None)
         .await
         .unwrap();
     assert_eq!(hosts(&back), ["hub-new.example:9443", "hub.example:9443"]);
@@ -774,7 +777,7 @@ async fn an_address_where_the_pinned_hub_doesnt_prove_itself_is_not_kept() {
         identity.clone(),
         Arc::new(LoopbackHubConnector::to(other.pairing.clone())),
     )
-    .connect_at(agent_id(1), hostname(1), new_address())
+    .connect_at(agent_id(1), hostname(1), None, new_address())
     .await;
     assert_eq!(
         failure,
@@ -782,7 +785,7 @@ async fn an_address_where_the_pinned_hub_doesnt_prove_itself_is_not_kept() {
     );
     let unanswered = Arc::new(LoopbackHubConnector::unanswered());
     let failure = connecting(identity.clone(), unanswered.clone())
-        .connect_at(agent_id(1), hostname(1), new_address())
+        .connect_at(agent_id(1), hostname(1), None, new_address())
         .await;
     assert!(
         matches!(
@@ -805,13 +808,13 @@ async fn once_the_pinned_hub_proves_itself_no_other_address_is_tried() {
         identity.clone(),
         Arc::new(LoopbackHubConnector::to(hub.pairing.clone())),
     )
-    .connect_at(agent_id(1), hostname(1), new_address())
+    .connect_at(agent_id(1), hostname(1), None, new_address())
     .await
     .unwrap();
     let stranger = with_pin_of(&identity).await;
     let connector = Arc::new(LoopbackHubConnector::to(hub.pairing.clone()));
     let failure = connecting(stranger, connector.clone())
-        .connect(agent_id(9), hostname(9))
+        .connect(agent_id(9), hostname(9), None)
         .await;
     assert!(
         matches!(failure, Err(ConnectFailure::Refused(_))),
@@ -830,14 +833,14 @@ async fn when_no_address_reaches_the_hub_the_first_failure_is_said() {
         identity.clone(),
         Arc::new(LoopbackHubConnector::to(pinned.pairing.clone())),
     )
-    .connect_at(agent_id(1), hostname(1), new_address())
+    .connect_at(agent_id(1), hostname(1), None, new_address())
     .await
     .unwrap();
     let other = hub(2);
     let connector =
         Arc::new(LoopbackHubConnector::to(other.pairing.clone()).only_at("hub.example", 9443));
     let failure = connecting(identity, connector.clone())
-        .connect(agent_id(1), hostname(1))
+        .connect(agent_id(1), hostname(1), None)
         .await;
     assert!(
         matches!(
@@ -866,7 +869,7 @@ async fn an_address_where_the_hub_refuses_the_proof_is_not_kept() {
         stranger.clone(),
         Arc::new(LoopbackHubConnector::to(hub.pairing.clone())),
     )
-    .connect_at(agent_id(9), hostname(9), new_address())
+    .connect_at(agent_id(9), hostname(9), None, new_address())
     .await;
     assert!(
         matches!(failure, Err(ConnectFailure::Refused(_))),

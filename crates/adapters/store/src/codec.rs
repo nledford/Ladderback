@@ -16,10 +16,13 @@
 //! the maintenance kinds again (`sql.rs`, the `one_maintenance_per_repo`
 //! index; §9).
 
+use std::num::NonZeroU32;
+
 use api::MsgArg;
 use domain::execution::refusal::SettingRefusal;
 use domain::execution::{
-    FailureReason, OperationKind, OperationStatus, RepositoryHalf, Transition, Trigger, WarningKind,
+    FailureReason, HookEnd, HookLevel, HookPlace, OperationKind, OperationStatus, RepositoryHalf,
+    Transition, Trigger, WarningKind,
 };
 
 use crate::error_args;
@@ -215,11 +218,9 @@ pub(crate) fn encode_failure(
         ),
         FailureReason::EngineStartTimedOut => ("engine-start-timed-out", Vec::new(), None),
         FailureReason::EngineExitTimedOut => ("engine-exit-timed-out", Vec::new(), None),
-        FailureReason::HookFailed { exit_code } => (
-            "hook-failed",
-            exit_code.map_or_default(|code| text_arg("exit_code", code.to_string())),
-            None,
-        ),
+        FailureReason::HookFailed { hook, ended } => {
+            ("hook-failed", hook_failed_args(*hook, *ended), None)
+        }
         FailureReason::SecretsTooLargeToMask { field, limit } => (
             "secrets-too-large-to-mask",
             std::iter::once((
@@ -363,7 +364,8 @@ pub(crate) fn decode_failure(
         "no-location-rule-holds" => Ok(FailureReason::NoLocationRuleHolds),
         "password-not-accepted" => Ok(FailureReason::PasswordNotAccepted),
         "hook-failed" => Ok(FailureReason::HookFailed {
-            exit_code: exit_code(&args)?,
+            hook: hook_place(&args)?,
+            ended: hook_end(&args)?,
         }),
         "secrets-too-large-to-mask" => Ok(FailureReason::SecretsTooLargeToMask {
             field: field(&args)?,
@@ -457,6 +459,87 @@ fn half(args: &[(String, MsgArg)]) -> Result<Option<RepositoryHalf>, BadColumn> 
             .map(Some)
             .ok_or_else(|| bad("error_args", format!("half {} is no half", shown(half)))),
         Some(_) => Err(bad("error_args", "half is not text")),
+    }
+}
+
+/// A before-hook's failure as the store spells it: `level` and `position`
+/// when the hook is known, `ended` when how it ended is, and `exit_code` for
+/// an exit. [`hook_place`] and [`hook_end`] read it back.
+fn hook_failed_args(
+    hook: Option<HookPlace>,
+    ended: Option<HookEnd>,
+) -> Vec<(&'static str, MsgArg)> {
+    let text = |name, value: String| (name, MsgArg::Text(value));
+    let mut args = Vec::with_capacity(4);
+    if let Some(hook) = hook {
+        args.push(text("level", hook.level.code().to_owned()));
+        args.push(text("position", hook.position.to_string()));
+    }
+    if let Some(ended) = ended {
+        args.push(text("ended", ended.code().to_owned()));
+        if let Some(code) = ended.exit_code() {
+            args.push(text("exit_code", code.to_string()));
+        }
+    }
+    args
+}
+
+/// Which hook stopped the operation: its level and its place in that
+/// level's list, both or neither. A failure an earlier version kept has
+/// neither.
+fn hook_place(args: &[(String, MsgArg)]) -> Result<Option<HookPlace>, BadColumn> {
+    let level = match argument(args, "level") {
+        None => None,
+        Some(MsgArg::Text(level)) => Some(HookLevel::parse(level).ok_or_else(|| {
+            bad(
+                "error_args",
+                format!("level {} is no hook level", shown(level)),
+            )
+        })?),
+        Some(_) => return Err(bad("error_args", "level is not text")),
+    };
+    let position = match argument(args, "position") {
+        None => None,
+        Some(MsgArg::Text(position)) => Some(
+            position
+                .parse::<NonZeroU32>()
+                .ok()
+                // Written as plain digits: a sign or a leading zero is no
+                // row this version wrote.
+                .filter(|place| place.to_string() == *position)
+                .ok_or_else(|| {
+                    bad(
+                        "error_args",
+                        format!("position {} is no place in a list", shown(position)),
+                    )
+                })?,
+        ),
+        Some(_) => return Err(bad("error_args", "position is not text")),
+    };
+    match (level, position) {
+        (Some(level), Some(position)) => Ok(Some(HookPlace { level, position })),
+        (None, None) => Ok(None),
+        (Some(_), None) => Err(bad("error_args", "has a hook level without its place")),
+        (None, Some(_)) => Err(bad("error_args", "has a hook place without its level")),
+    }
+}
+
+/// How the hook ended. A failure an earlier version kept says no more than
+/// its exit status, if it had one.
+fn hook_end(args: &[(String, MsgArg)]) -> Result<Option<HookEnd>, BadColumn> {
+    let exit_code = exit_code(args)?;
+    match argument(args, "ended") {
+        None => Ok(exit_code.map(|code| HookEnd::Exited { code })),
+        Some(MsgArg::Text(ended)) => HookEnd::parse(ended, exit_code).map(Some).ok_or_else(|| {
+            bad(
+                "error_args",
+                format!(
+                    "ended {} is no hook end with exit_code {exit_code:?}",
+                    shown(ended)
+                ),
+            )
+        }),
+        Some(_) => Err(bad("error_args", "ended is not text")),
     }
 }
 

@@ -653,6 +653,63 @@ Feature: Secret references in a repository's settings
       And the location is refused because it is not a full path on this machine
       And the failure doesn't mention "CANARY-relative"
 
+  Rule: An option a job resolves is judged by the backend its resolved location names
+    The configuration refuses an option that names a file on this machine, or
+    runs a program, by a relative path, judged by the backend its location
+    names. It can't judge what a reference holds in the option, nor any option
+    while a reference decides the backend, so the job judges the resolved
+    options by the backends the resolved locations name, by the same rule. The
+    refusal names the option, never what it held (I4).
+
+    Scenario: A reference that makes an option a relative path is refused
+      Given the environment variable "DEMO_ROOT" is "CANARY-relative/repo"
+      And the repository is "opendal:fs"
+      And the option "root" is "${DEMO_ROOT}"
+      When the repository is resolved
+      Then the resolution fails for the field "options.root"
+      And the setting is refused because it is not a full path on this machine
+      And the failure doesn't mention "CANARY-relative"
+
+    Scenario Outline: A relative option is refused once a reference names the backend that reads it: <what>
+      Given the environment variable "DEMO_REPO" is "<value>"
+      And the repository is "<location>"
+      And the option "<option>" is "<written>"
+      When the repository is resolved
+      Then the resolution fails for the field "options.<option>"
+      And the setting is refused because it is not a full path on this machine
+
+      Examples:
+        | what                           | value      | location          | option              | written      |
+        | OpenDAL's folder on this disk  | opendal:fs | ${DEMO_REPO}      | root                | backups/repo |
+        | a local repository's command   | /srv/demo  | ${DEMO_REPO}/repo | post-create-command | ./notify     |
+
+    Scenario: A relative hot option is refused once a reference names the hot backend
+      Given the environment variable "DEMO_HOT" is "opendal:fs"
+      And the repository is "/srv/demo-cold"
+      And the hot repository is "${DEMO_HOT}"
+      And the hot option "root" is "backups/hot"
+      When the repository is resolved
+      Then the resolution fails for the field "options-hot.root"
+      And the setting is refused because it is not a full path on this machine
+
+    Scenario: A relative cold option is refused once a reference names the cold backend
+      Given the environment variable "DEMO_REPO" is "opendal:fs"
+      And the repository is "${DEMO_REPO}"
+      And the hot repository is "/srv/demo-hot"
+      And the cold option "root" is "backups/cold"
+      When the repository is resolved
+      Then the resolution fails for the field "options-cold.root"
+      And the setting is refused because it is not a full path on this machine
+
+    Scenario: A relative option is reported before a later option that can't be resolved
+      Given the environment variable "DEMO_ROOT" is "backups"
+      And the repository is "opendal:fs"
+      And the option "root" is "${DEMO_ROOT}"
+      And the cold option "region" is "${DEMO_MISSING}"
+      When the repository is resolved
+      Then the resolution fails for the field "options.root"
+      And the setting is refused because it is not a full path on this machine
+
   Rule: The first field that fails is the one reported
 
     Scenario Outline: Fields are tried in a fixed order

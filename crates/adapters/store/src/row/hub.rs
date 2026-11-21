@@ -1,11 +1,12 @@
 //! Rows of the hub's registry, `pairing_tokens` and `agents` (§16, decision
-//! 120). A key, an ID, a kind or a counter this version couldn't have
-//! written is [`StoreError::Corrupt`], never a record that lets anyone pair
-//! or prove more than it was given.
+//! 120). A key, an ID, a kind, a counter or a machine zone this version
+//! couldn't have written is [`StoreError::Corrupt`], never a record that
+//! lets anyone pair or prove more than it was given.
 
 use app::ports::StoreError;
 use domain::fleet::{
-    AgentRecord, AgentStatus, BindingKind, Hostname, KEY_BYTES, PublicKey, TokenRecord, TokenUse,
+    AgentRecord, AgentStatus, BindingKind, Hostname, KEY_BYTES, MachineZone, PublicKey,
+    TokenRecord, TokenUse,
 };
 use domain::{AgentId, Uuid};
 use sqlx::sqlite::SqliteRow;
@@ -156,6 +157,13 @@ pub(crate) fn agent(row: &SqliteRow) -> Result<AgentRecord, StoreError> {
             format!("{} is not a counter", shown(&counter_text)),
         )
     })?;
+    let zone = reader
+        .text("zone")?
+        .map(|text| {
+            MachineZone::parse(&text)
+                .map_err(|_| reader.corrupt("zone", format!("{} is not a zone name", shown(&text))))
+        })
+        .transpose()?;
     Ok(AgentRecord {
         agent_id,
         key: reader.required_key("pubkey")?,
@@ -163,5 +171,6 @@ pub(crate) fn agent(row: &SqliteRow) -> Result<AgentRecord, StoreError> {
         status,
         counter,
         last_seen: reader.required_time("last_seen")?,
+        zone,
     })
 }

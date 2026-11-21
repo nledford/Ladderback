@@ -318,6 +318,7 @@ pub(super) fn translate(event: WorkerEvent, redactor: &Redactor) -> Option<Engin
                 | ErrorCode::ProtocolViolated
                 | ErrorCode::EngineStartTimedOut
                 | ErrorCode::EngineExitTimedOut
+                | ErrorCode::HookFailed
                 | ErrorCode::RepositoryTimedOut
                 | ErrorCode::DaemonStopped
                 | ErrorCode::DaemonShutDown

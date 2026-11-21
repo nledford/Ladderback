@@ -4,7 +4,8 @@
 //! held in one signal only while its dialog shows it: a cancel, a lapse or
 //! leaving the dialog clears it from the page (I4). Leaving the dialog, by
 //! Close or Escape, cancels a token no agent has used, and the section says
-//! so. `pairing.rs` decides for it.
+//! so. With sign-in off it warns that a hub behind a reverse proxy must turn
+//! sign-in on (decision 120). `pairing.rs` decides for it.
 
 use std::str::FromStr;
 use std::sync::Arc;
@@ -23,9 +24,10 @@ use crate::announcer::Clock;
 use crate::components::ACTIONS;
 use crate::components::alert::rules::AlertTone;
 use crate::components::button::Content;
+use crate::components::link::rules::{Destination, LinkTone};
 use crate::components::text_field::{Access, Kind};
 use crate::components::{
-    Alert, Button, Fingerprint, RadioGroup, ReviewDialog, StepUp, StepUpField, TextField,
+    Alert, Button, Fingerprint, Link, RadioGroup, ReviewDialog, StepUp, StepUpField, TextField,
     focus_element, holds_focus, refusal_alert, say_refusals,
 };
 use crate::live::PageClock;
@@ -73,6 +75,14 @@ const DEFAULT_LIFE: &str = "15";
 /// How long the page waits for the hub's key: Settings is drawn without its
 /// Machines tab once it has waited this long.
 const READ_PATIENCE: Duration = Duration::from_secs(5);
+
+/// Where the guide says a hub reached through a reverse proxy must turn
+/// sign-in on: on `main`, since only a build that isn't a release has a hub
+/// (§16, decision 122), and its release's tag predates the section.
+const PROXY_GUIDE_URL: &str = concat!(
+    env!("CARGO_PKG_REPOSITORY"),
+    "/blob/main/docs/guide/remote-access.md#a-hub-behind-a-reverse-proxy"
+);
 
 /// The hub's key as the page read it, which `App` provides, with the
 /// standing it was read in: a key on a daemon serving as a hub, read with
@@ -311,7 +321,11 @@ fn said_once_closed(localizer: &Localizer, answer: Option<&Posted>) -> Option<St
 
 /// The Agents section: what pairing is, the form that makes a token, and
 /// the dialog that shows it. `on` is sign-in: the step-up asks for the
-/// admin password then, and for the hub key's ID with sign-in off.
+/// admin password then, and for the hub key's ID with sign-in off, which
+/// anyone can read. So with sign-in off the section warns that a hub
+/// reached through a reverse proxy, which makes a request from anywhere
+/// look local, must turn sign-in on (decision 120, "Who may make a token,
+/// approve or re-key").
 #[component]
 pub(crate) fn Agents(localizer: Arc<Localizer>, on: bool) -> impl IntoView {
     let t = {
@@ -331,14 +345,16 @@ pub(crate) fn Agents(localizer: Arc<Localizer>, on: bool) -> impl IntoView {
         _ => CA,
     });
     let key_id = hub.map(|key| key.key_id).unwrap_or_default();
-    let step_up = if on {
-        StepUp::Password
+    let (step_up, proxy_warning) = if on {
+        (StepUp::Password, None)
     } else {
-        StepUp::ShortId {
+        let step_up = StepUp::ShortId {
             label: t(msg::UI_PAIRING_KEY_ID_LABEL),
             hint: t(msg::UI_PAIRING_KEY_ID_HINT),
             short: key_id,
-        }
+        };
+        let warning = view! { <ProxyWarning localizer=Arc::clone(&localizer) /> };
+        (step_up, Some(warning))
     };
     let address = RwSignal::new(ws::origin());
     // The hub's own certificate is served over TLS: choosing it makes a
@@ -459,6 +475,7 @@ pub(crate) fn Agents(localizer: Arc<Localizer>, on: bool) -> impl IntoView {
                 {t(msg::UI_AGENTS_HEADING)}
             </h2>
             <p>{t(msg::UI_AGENTS_INTRO)}</p>
+            {proxy_warning}
             <p role="status">{move || token.page_said.get()}</p>
             <p role="status">{move || token.earlier_said.get()}</p>
             <machines::Machines localizer=Arc::clone(&localizer) step_up=step_up.clone() />
@@ -539,6 +556,30 @@ pub(crate) fn Agents(localizer: Arc<Localizer>, on: bool) -> impl IntoView {
             </p>
             <PairingDialog localizer=Arc::clone(&localizer) token=token />
         </section>
+    }
+}
+
+/// The warning that a hub reached through a reverse proxy must turn
+/// sign-in on, with the way to the guide's section that says why, in the
+/// alert's own text color (§4.5, "Alert").
+#[component]
+fn ProxyWarning(localizer: Arc<Localizer>) -> impl IntoView {
+    let words = text(&localizer, msg::UI_AGENTS_PROXY_SIGN_IN);
+    let link = text(&localizer, msg::UI_AGENTS_PROXY_LINK);
+    let link_localizer = Arc::clone(&localizer);
+    view! {
+        <Alert localizer=localizer tone=AlertTone::Warning>
+            {words}
+            " "
+            {Destination::outside(PROXY_GUIDE_URL)
+                .map(|to| {
+                    view! {
+                        <Link to=to localizer=link_localizer tone=LinkTone::Inherit>
+                            {link}
+                        </Link>
+                    }
+                })}
+        </Alert>
     }
 }
 

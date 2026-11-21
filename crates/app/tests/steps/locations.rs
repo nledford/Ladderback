@@ -582,15 +582,16 @@ impl NormalizeSources for AsWritten {
     }
 }
 
-/// Runs a backup of the plan "home" on `repository`, started by `trigger`.
-async fn run_backup(agent: &mut Agent, repository: &str, trigger: Trigger) {
+/// A backup job of the plan "home" on `repository`, as the plan runner
+/// hands it to the engine.
+async fn backup_job(agent: &Agent, repository: &str) -> Job {
     let world = &agent.locations;
     let entry = named(&world.entries, repository).clone();
     let resolved = ResolveRepository::new(world.secrets.clone())
         .resolve_saved(&alias(repository), &entry)
         .await
         .expect("the repository's password resolves");
-    let job = Job::Backup(BackupJob {
+    Job::Backup(BackupJob {
         repository: resolved.access,
         sources: vec!["/home/demo".to_owned()],
         tags: PlanTags::new(plan_id(PLAN), agent_id()),
@@ -600,7 +601,13 @@ async fn run_backup(agent: &mut Agent, repository: &str, trigger: Trigger) {
         filter: SourceFilter::default(),
         left_out: Vec::new(),
         deadline_budget: SignedDuration::from_hours(1),
-    });
+    })
+}
+
+/// Runs a backup of the plan "home" on `repository`, started by `trigger`.
+async fn run_backup(agent: &mut Agent, repository: &str, trigger: Trigger) {
+    let job = backup_job(agent, repository).await;
+    let world = &agent.locations;
     // The run's own clock moves only when everything in the run waits on
     // it, to the next deadline, so probes that run at once take the time of
     // the slowest, not the sum.
@@ -938,6 +945,32 @@ async fn plan_runs(agent: &mut Agent, plan: String) {
     run_backup(agent, NAS, Trigger::Schedule).await;
 }
 
+/// The run is stopped while the location `name` is the only one probed,
+/// and what it reports afterwards is read to its end, as the engine port
+/// allows a stopped job's events to be (§4.1).
+#[when(expr = "the plan {string} is cancelled while the location {string} is tried")]
+async fn plan_cancelled_while_tried(agent: &mut Agent, plan: String, name: String) {
+    assert_eq!(plan, PLAN);
+    let job = backup_job(agent, NAS).await;
+    let world = &agent.locations;
+    let clock = Arc::new(FakeClock::new(agent.clock.now()));
+    let engine = world.engine(Arc::clone(&clock));
+    let RunningJob {
+        mut events,
+        mut control,
+    } = engine
+        .run(OperationId::from_uuid(Uuid::from_u128(0x0500)), job)
+        .await
+        .expect("the engine takes the job");
+    assert!(
+        futures::poll!(events.next()).is_pending(),
+        "the choice waits on the location {name}"
+    );
+    assert_eq!(world.probed_at(&name), vec![SignedDuration::ZERO]);
+    control.stop().await;
+    until_done(&clock, events.collect::<Vec<EngineEvent>>());
+}
+
 #[when(expr = "the plan {string} runs as a scheduled run")]
 async fn plan_runs_scheduled(agent: &mut Agent, plan: String) {
     assert_eq!(plan, PLAN);
@@ -1239,6 +1272,14 @@ fn retention_applied_at(agent: &mut Agent, name: String) {
         .map(|access| access.repository.clone())
         .collect();
     assert_eq!(applied, vec![named(&world.addresses, &name).clone()]);
+}
+
+#[then(expr = "the location {string} was never tried")]
+fn never_tried(agent: &mut Agent, name: String) {
+    assert_eq!(
+        agent.locations.probed_at(&name),
+        Vec::<SignedDuration>::new()
+    );
 }
 
 #[then(expr = "the location {string} was never opened")]

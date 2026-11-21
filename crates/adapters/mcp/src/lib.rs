@@ -26,7 +26,7 @@ use std::sync::Arc;
 
 use api::{
     BuildDto, ErrorCode, ErrorDto, ExposureDto, FindDto, FolderDto, LocationsTestDto,
-    MaintenancePreviewDto, OperationDetailDto, OperationSummaryDto, OperationsPageDto,
+    MaintenancePreviewDto, OperationDetailDto, OperationSummaryDto, OperationsPageDto, PairingDto,
     PermissionLevelDto, PermissionsDto, PlanDryRunDto, PlansDto, ProfileExportDto,
     ProfileImportDto, ProposalDto, RepositoriesDto, SnapshotsDto, StatusDto,
 };
@@ -58,6 +58,7 @@ mod contents;
 mod log;
 mod one_shot;
 mod pages;
+mod pairing;
 mod proposals;
 
 pub use actions::{CANCELLABLE_KIND, DEFAULT_WAIT, MAX_WAIT, WAIT_STEP, not_cancellable};
@@ -107,6 +108,7 @@ const FIND_IN_SNAPSHOTS: &str = "find_in_snapshots";
 const LIST_OPERATIONS: &str = "list_operations";
 const GET_OPERATION: &str = "get_operation";
 const READ_LOG: &str = "read_log";
+const PAIRING_STATE: &str = "pairing_state";
 const RUN_PLAN: &str = "run_plan";
 const WAIT_OPERATION: &str = "wait_operation";
 const CANCEL_OPERATION: &str = "cancel_operation";
@@ -131,6 +133,7 @@ pub(crate) enum ToolName {
     ListOperations,
     GetOperation,
     ReadLog,
+    PairingState,
     RunPlan,
     WaitOperation,
     CancelOperation,
@@ -146,7 +149,7 @@ pub(crate) enum ToolName {
 
 impl ToolName {
     /// Every tool.
-    const ALL: [Self; 20] = [
+    const ALL: [Self; 21] = [
         Self::Status,
         Self::ListPlans,
         Self::ListRepositories,
@@ -156,6 +159,7 @@ impl ToolName {
         Self::ListOperations,
         Self::GetOperation,
         Self::ReadLog,
+        Self::PairingState,
         Self::RunPlan,
         Self::WaitOperation,
         Self::CancelOperation,
@@ -169,9 +173,17 @@ impl ToolName {
         Self::DryRunPlan,
     ];
 
-    /// The tool named `name`, if there is one.
+    /// The tool named `name`, if this build has one.
     pub(crate) fn named(name: &str) -> Option<Self> {
-        Self::ALL.into_iter().find(|tool| tool.name() == name)
+        Self::ALL
+            .into_iter()
+            .find(|tool| tool.built() && tool.name() == name)
+    }
+
+    /// Whether this build has the tool: `pairing_state` reads a pairing
+    /// only a build with the hub can make (§16, decision 122).
+    const fn built(self) -> bool {
+        !matches!(self, Self::PairingState) || cfg!(feature = "hub")
     }
 
     /// The tool's name, as `tools/list` gives it.
@@ -186,6 +198,7 @@ impl ToolName {
             Self::ListOperations => LIST_OPERATIONS,
             Self::GetOperation => GET_OPERATION,
             Self::ReadLog => READ_LOG,
+            Self::PairingState => PAIRING_STATE,
             Self::RunPlan => RUN_PLAN,
             Self::WaitOperation => WAIT_OPERATION,
             Self::CancelOperation => CANCEL_OPERATION,
@@ -221,7 +234,9 @@ impl ToolName {
             | Self::ListOperations
             | Self::GetOperation
             | Self::WaitOperation
-            | Self::ExportProfile => &[Permission::Backups],
+            | Self::ExportProfile
+            // The hub's address and key's fingerprint, both public (§4.6).
+            | Self::PairingState => &[Permission::Backups],
             Self::RunPlan | Self::TestRepository => &[Permission::BackupRuns],
             Self::CancelOperation => &[Permission::Backups, Permission::BackupRuns],
             Self::PreviewForget | Self::PreviewImport => &[Permission::Previews],
@@ -394,6 +409,12 @@ pub trait Backend: Send + Sync + 'static {
     /// token; in a session of its own the `[without-token]` setting. The
     /// tools listed are those these open.
     async fn permissions(&self) -> Result<PermissionsDto, ErrorDto>;
+
+    /// Whether this machine is paired with a hub, and with which, as its
+    /// pin says (`pairing_state`): the hub's address and the fingerprint of
+    /// its key, never a token or a secret (I4). It never connects to the
+    /// hub.
+    async fn pairing(&self) -> Result<api::PairingDto, ErrorDto>;
 }
 
 /// What a [`Backend`] tells `status`.
@@ -603,6 +624,10 @@ impl Server {
             ToolName::ListOperations => answered(self.list_operations(given).await),
             ToolName::GetOperation => answered(self.get_operation(given).await),
             ToolName::ReadLog => answered(self.read_log(given).await),
+            ToolName::PairingState => match read::<NoArguments>(given) {
+                Ok(NoArguments {}) => answered(self.backend.pairing().await),
+                Err(error) => Answer::Refused(error),
+            },
             ToolName::RunPlan => answered(self.run_plan(given).await),
             ToolName::WaitOperation => answered(self.wait_operation(given, context).await),
             ToolName::CancelOperation => answered(self.cancel_operation(given).await),
@@ -1110,6 +1135,18 @@ fn tools() -> Vec<Tool> {
         .with_raw_output_schema(output_schema::<log::LogPage>())
         .with_annotations(read_only()),
         Tool::new(
+            PAIRING_STATE,
+            "Whether this machine is paired with a hub, as its pin says: the hub's address, the \
+             fingerprint of the hub's key and how its certificate is checked. Never a token or a \
+             secret. It doesn't connect to the hub, so it can't say whether the hub has approved \
+             the machine: `ladderback hub-status` on the machine says that. The resource \
+             ladderback://pairing holds the steps of pairing.",
+            no_arguments(),
+        )
+        .with_title("Pairing state")
+        .with_raw_output_schema(output_schema::<PairingDto>())
+        .with_annotations(read_only()),
+        Tool::new(
             RUN_PLAN,
             "Queues a backup of a plan now, under the plan's overlap policy, and returns its \
              operation's ID. Its hooks and secret sources run as for any other run.",
@@ -1272,29 +1309,48 @@ impl ServerHandler for Server {
         Ok(ListToolsResult::with_all_items(self.offered().await))
     }
 
-    /// The one resource: the status summary (§4.6).
+    /// The resources: the status summary and, in a build with the hub, the
+    /// pairing guide (§4.6; §16, decision 122).
     async fn list_resources(
         &self,
         _request: Option<PaginatedRequestParams>,
         _context: RequestContext<RoleServer>,
     ) -> Result<ListResourcesResult, McpError> {
-        Ok(ListResourcesResult::with_all_items(vec![
+        let mut resources = vec![
             Resource::new(STATUS_RESOURCE, "status")
                 .with_title("Status summary")
                 .with_description(STATUS_RESOURCE_DESCRIPTION)
                 .with_mime_type("application/json"),
-        ]))
+        ];
+        if cfg!(feature = "hub") {
+            resources.push(
+                Resource::new(pairing::PAIRING_RESOURCE, "pairing")
+                    .with_title("Pairing a machine with its hub")
+                    .with_description(pairing::PAIRING_RESOURCE_DESCRIPTION)
+                    .with_mime_type("application/json"),
+            );
+        }
+        Ok(ListResourcesResult::with_all_items(resources))
     }
 
     /// Reads the status summary as the `status` tool answers it, as JSON
     /// text. A refusal is an internal error whose data is its `{code, args}`
-    /// and whose message is its [`Server::sentence`]; any other URI names no
-    /// resource.
+    /// and whose message is its [`Server::sentence`]. The pairing guide is
+    /// said in the server's locale and asks the backend nothing. Any other
+    /// URI names no resource.
     async fn read_resource(
         &self,
         request: ReadResourceRequestParams,
         _context: RequestContext<RoleServer>,
     ) -> Result<ReadResourceResponse, McpError> {
+        if cfg!(feature = "hub") && request.uri == pairing::PAIRING_RESOURCE {
+            let guide = pairing::guide(&self.localizer);
+            return Ok(ReadResourceResult::new(vec![
+                ResourceContents::text(guide.to_string(), request.uri)
+                    .with_mime_type("application/json"),
+            ])
+            .into());
+        }
         if request.uri != STATUS_RESOURCE {
             return Err(McpError::resource_not_found(
                 format!("no resource is named {:?}", request.uri),
