@@ -76,18 +76,20 @@ impl Section {
     /// restart, which has a button only where a service manager runs
     /// Ladderback; and the dry-run allowlist's, whose controls show only once
     /// the daemon has read what it holds, so a read refused or unanswered
-    /// leaves words alone. The AI agents' panel is taller than a window, so
-    /// it can't be a stop in sight: its first choice is, and a refused read
-    /// is said in its alert.
-    pub(crate) fn holds(self, signed_in: bool) -> Holds {
+    /// leaves words alone. The AI agents' panel holds its choices once the
+    /// daemon has read them (`ai_agents_read`), and its first choice is then
+    /// the stop, since the panel is taller than a window; until then, and
+    /// after a read refused or unanswered, it holds only words.
+    pub(crate) fn holds(self, signed_in: bool, ai_agents_read: bool) -> Holds {
         match self {
-            Self::Language | Self::PageWidth | Self::AdminPassword | Self::AiAgents => {
-                Holds::Controls
-            }
+            Self::Language | Self::PageWidth | Self::AdminPassword => Holds::Controls,
+            Self::AiAgents if ai_agents_read => Holds::Controls,
             Self::SigningIn | Self::ApiTokens if signed_in => Holds::Controls,
-            Self::SigningIn | Self::ApiTokens | Self::DryRunAllowlist | Self::Restart => {
-                Holds::Text
-            }
+            Self::SigningIn
+            | Self::ApiTokens
+            | Self::AiAgents
+            | Self::DryRunAllowlist
+            | Self::Restart => Holds::Text,
         }
     }
 }
@@ -193,7 +195,7 @@ mod tests {
 
     #[test]
     fn signed_in_every_section_but_the_dry_run_allowlist_and_the_restart_holds_a_control() {
-        let held: Vec<_> = Section::ALL.map(|section| section.holds(true)).into();
+        let held: Vec<_> = Section::ALL.map(|section| section.holds(true, true)).into();
         assert_eq!(
             held,
             [
@@ -212,7 +214,9 @@ mod tests {
     #[test]
     fn with_sign_in_off_signing_in_the_api_tokens_the_dry_run_allowlist_and_the_restart_may_hold_only_words()
      {
-        let held: Vec<_> = Section::ALL.map(|section| section.holds(false)).into();
+        let held: Vec<_> = Section::ALL
+            .map(|section| section.holds(false, true))
+            .into();
         assert_eq!(
             held,
             [
@@ -226,5 +230,20 @@ mod tests {
                 Holds::Text
             ]
         );
+    }
+
+    #[test]
+    fn the_ai_agents_panel_holds_words_alone_until_the_daemon_has_read_its_permissions() {
+        for signed_in in [true, false] {
+            assert_eq!(Section::AiAgents.holds(signed_in, false), Holds::Text);
+            assert_eq!(Section::AiAgents.holds(signed_in, true), Holds::Controls);
+            for section in Section::ALL.into_iter().filter(|s| *s != Section::AiAgents) {
+                assert_eq!(
+                    section.holds(signed_in, false),
+                    section.holds(signed_in, true),
+                    "{section:?}"
+                );
+            }
+        }
     }
 }

@@ -157,7 +157,11 @@ pub(crate) fn Settings(localizer: Arc<Localizer>) -> impl IntoView {
         msg::UI_API_TOKENS_HEADING,
         tokens.into_any(),
     ));
-    let ai_agents = view! { <AiAgentsSection localizer=Arc::clone(&localizer) on=!off /> };
+    // Whether the daemon has read what AI agents may do, so the AI agents'
+    // panel holds its choices and its first choice is the stop after its tab.
+    let ai_agents_read = RwSignal::new(false);
+    let ai_agents =
+        view! { <AiAgentsSection localizer=Arc::clone(&localizer) on=!off read=ai_agents_read /> };
     sections.push((
         Section::AiAgents,
         msg::UI_AI_AGENTS_TAB,
@@ -178,8 +182,8 @@ pub(crate) fn Settings(localizer: Arc<Localizer>) -> impl IntoView {
 
     let named = Section::named(&page::address_fragment());
     let tab = |section: Section, words: MessageId, panel: AnyView| {
-        Tab::new(text(&localizer, words), section.holds(signed_in), panel)
-            .selected_at_start(named == Some(section))
+        let holds = Signal::derive(move || section.holds(signed_in, ai_agents_read.get()));
+        Tab::new(text(&localizer, words), holds, panel).selected_at_start(named == Some(section))
     };
     let language = view! { <LanguageSection localizer=Arc::clone(&localizer) /> };
     let first = tab(

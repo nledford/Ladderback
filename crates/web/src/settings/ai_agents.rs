@@ -41,17 +41,19 @@ const SAVE_ID: &str = "ai-agents-save";
 
 /// The AI agents' section: what its permissions limit, with sign-in off
 /// that they limit only `ladderback mcp`, and, once the daemon has read
-/// them, a group per permission and the button that saves them, with the
-/// admin password's field before it while sign-in is on (`on`). A read or
-/// a save the daemon refuses is an alert; a wrong password is the field's
-/// error.
+/// them (`read`, which Settings' tabs follow too), a group per permission
+/// and the button that saves them, with the admin password's field before
+/// it while sign-in is on (`on`). A read or a save the daemon refuses is an
+/// alert; a wrong password is the field's error.
 #[component]
-pub(super) fn AiAgentsSection(localizer: Arc<Localizer>, on: bool) -> impl IntoView {
+pub(super) fn AiAgentsSection(
+    localizer: Arc<Localizer>,
+    on: bool,
+    read: RwSignal<bool>,
+) -> impl IntoView {
     let url = StoredValue::new(format!("{}{WITHOUT_TOKEN_PATH}", ws::origin()));
     let phase = RwSignal::new(Phase::Loading);
     let chosen = Chosen::new(&PermissionsDto::default());
-    // Whether the daemon has read the permissions, so the form can hold them.
-    let read = RwSignal::new(false);
     // A read or a save the daemon refused, or a save it didn't answer.
     let refused = RwSignal::<Option<Sentence>>::new(None);
     say_refusals(refused);
