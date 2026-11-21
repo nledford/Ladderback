@@ -5,6 +5,26 @@
 //! a browser's on the hub's own machine is.
 
 use std::net::SocketAddr;
+use std::sync::Arc;
+use std::time::Duration;
+
+use domain::fleet::Binding;
+use http_adapter::{BuiltInTls, GatedListener, Handed, HandedListener, HandedPeer};
+use tls_adapter::{HubListener, SessionBinding as _};
+use tokio::net::TcpStream;
+use tokio::sync::mpsc;
+
+/// The first byte of a TLS record that carries a handshake, as a
+/// `ClientHello` opens a connection with.
+const HANDSHAKE: u8 = 0x16;
+
+/// How long a connection has to send its first byte, and then to finish
+/// the TLS handshake, before it is closed.
+const FIRST_BYTE_WITHIN: Duration = Duration::from_secs(10);
+const HANDSHAKE_WITHIN: Duration = Duration::from_secs(10);
+
+/// How many connections let in may wait for the server to take them.
+const WAITING: usize = 64;
 
 /// What the front door does with a connection, by the first byte it sent
 /// and the address it came from.
@@ -21,8 +41,85 @@ pub(crate) enum Door {
 
 /// The door for a connection from `peer` whose first byte is `first`.
 pub(crate) fn door(first: u8, peer: SocketAddr) -> Door {
-    let _ = (first, peer);
-    todo!()
+    if first == HANDSHAKE {
+        Door::Tls
+    } else if peer.ip().to_canonical().is_loopback() {
+        Door::Plain
+    } else {
+        Door::Closed
+    }
+}
+
+/// The front door on `listener`, bound to `local`, serving `tls`: each
+/// connection is taken through its door on a task of its own, so a slow one
+/// holds up no other, and handed to the server once it is let in.
+pub(crate) fn open(listener: GatedListener, local: SocketAddr, tls: HubListener) -> HandedListener {
+    let (hand, connections) = mpsc::channel(WAITING);
+    let tls = Arc::new(tls);
+    let accepting = tokio::spawn(async move {
+        let mut listener = listener;
+        loop {
+            let (stream, peer) = axum::serve::Listener::accept(&mut listener).await;
+            let hand = hand.clone();
+            let tls = Arc::clone(&tls);
+            tokio::spawn(async move {
+                if let Some(handed) = let_in(stream, peer, &tls).await {
+                    // The server is gone when this fails, and the
+                    // connection closes with it.
+                    let _ = hand.send(handed).await;
+                }
+            });
+        }
+    });
+    HandedListener::new(connections, local, accepting)
+}
+
+/// The connection from `peer`, let in through its door, or `None` once it
+/// is closed: it sent nothing in time, plain HTTP from beyond loopback, or
+/// a TLS handshake that failed or took too long.
+async fn let_in(stream: TcpStream, peer: SocketAddr, tls: &HubListener) -> Option<Handed> {
+    let mut first = [0; 1];
+    let peeked = tokio::time::timeout(FIRST_BYTE_WITHIN, stream.peek(&mut first)).await;
+    if !matches!(peeked, Ok(Ok(1))) {
+        return None;
+    }
+    match door(first[0], peer) {
+        Door::Closed => {
+            log::debug!("closed a plain HTTP connection from {peer}, beyond loopback");
+            None
+        }
+        Door::Plain => Some(Handed {
+            io: Box::new(stream),
+            peer: HandedPeer {
+                addr: peer,
+                tls: None,
+            },
+        }),
+        Door::Tls => {
+            let session = match tokio::time::timeout(HANDSHAKE_WITHIN, tls.accept(stream)).await {
+                Ok(Ok(session)) => session,
+                Ok(Err(error)) => {
+                    log::debug!("a TLS handshake from {peer} failed: {error}");
+                    return None;
+                }
+                Err(_) => return None,
+            };
+            // The binding only a hybrid session carries: a kind-1
+            // `Connect` on any other is closed with `binding-unavailable`
+            // (decision 120, "Post-quantum key exchange").
+            let exporter = match session.binding() {
+                Ok(Binding::TlsExporter(value)) if session.is_post_quantum() => Some(value),
+                _ => None,
+            };
+            Some(Handed {
+                io: Box::new(session),
+                peer: HandedPeer {
+                    addr: peer,
+                    tls: Some(BuiltInTls { exporter }),
+                },
+            })
+        }
+    }
 }
 
 #[cfg(test)]

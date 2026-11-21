@@ -256,6 +256,25 @@ async fn a_token_pins_the_hubs_certificate_when_asked_to() {
     }
 }
 
+/// A pinned certificate is served over TLS, so a pinned ask for a plain
+/// `http://` address is refused as an address no machine could use.
+#[tokio::test]
+async fn a_pinned_ask_for_a_plain_address_is_refused() {
+    let daemon = Daemon::hub_on_tls();
+    let key_id = daemon.key_id().await;
+    let body = serde_json::json!({
+        "address": "http://127.0.0.1:9",
+        "certificate": "pinned",
+        "confirmation": key_id,
+    })
+    .to_string();
+    let response = daemon.send(make(LOOPBACK, &[], &body)).await;
+    assert_eq!(
+        refusal(response).await,
+        (StatusCode::BAD_REQUEST, "hub-address-invalid".to_owned())
+    );
+}
+
 #[tokio::test]
 async fn a_daemon_not_serving_as_a_hub_answers_its_routes_as_unknown() {
     let daemon = Daemon::not_a_hub();

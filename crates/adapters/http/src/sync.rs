@@ -120,10 +120,13 @@ mod served {
     use api::sync::{AgentFrame, MAX_FRAME_BYTES, PATH};
     use app::pairing::{HubPairing, HubStep, PROTOCOL_ERROR};
     use axum::Router;
+    use axum::extract::Extension;
     use axum::extract::ws::{CloseFrame, Message, WebSocket, WebSocketUpgrade, close_code};
     use axum::routing::get;
-    use domain::fleet::Fingerprint;
+    use domain::fleet::{Fingerprint, KEY_BYTES};
     use tokio::sync::Notify;
+
+    use crate::BuiltInTls;
 
     /// How long the hub waits to send its close frame to a peer that doesn't
     /// read, once the handshake is over or abandoned.
@@ -149,10 +152,12 @@ mod served {
     }
 
     /// What `/sync/` serves: the handshake, under `serve --hub`, or
-    /// nothing.
+    /// nothing; and the fingerprint of the certificate the hub's built-in
+    /// TLS serves, when it serves one.
     #[derive(Clone, Debug, Default)]
     pub struct SyncHub {
         served: Option<Arc<Served>>,
+        certificate: Option<Fingerprint>,
     }
 
     impl SyncHub {
@@ -168,6 +173,7 @@ mod served {
                     bounds,
                     waiting: Mutex::default(),
                 })),
+                certificate: None,
             }
         }
 
@@ -180,14 +186,16 @@ mod served {
         /// `fingerprint`, which a pinned token names (decision 120).
         #[must_use]
         pub fn with_certificate(self, fingerprint: Fingerprint) -> Self {
-            let _ = fingerprint;
-            todo!()
+            Self {
+                certificate: Some(fingerprint),
+                ..self
+            }
         }
 
         /// The fingerprint of the certificate the hub's built-in TLS
         /// serves, when it serves one.
         pub(crate) fn certificate(&self) -> Option<Fingerprint> {
-            None
+            self.certificate
         }
     }
 
@@ -198,16 +206,22 @@ mod served {
         let served = hub.served.clone()?;
         Some(Router::new().route(
             PATH,
-            get(move |upgrade: WebSocketUpgrade| async move {
-                upgrade
-                    .max_message_size(MAX_FRAME_BYTES)
-                    .max_frame_size(MAX_FRAME_BYTES)
-                    // Writes go out at once, and what a peer that doesn't
-                    // read leaves queued, its pongs among it, stays bounded.
-                    .write_buffer_size(0)
-                    .max_write_buffer_size(2 * MAX_FRAME_BYTES)
-                    .on_upgrade(move |socket| served.run(socket))
-            }),
+            // A connection over the hub's built-in TLS carries its session's
+            // exporter value when it negotiated the hybrid key exchange; a
+            // kind-1 `Connect` on any other is `binding-unavailable`.
+            get(
+                move |upgrade: WebSocketUpgrade, tls: Option<Extension<BuiltInTls>>| async move {
+                    let exporter = tls.and_then(|Extension(tls)| tls.exporter);
+                    upgrade
+                        .max_message_size(MAX_FRAME_BYTES)
+                        .max_frame_size(MAX_FRAME_BYTES)
+                        // Writes go out at once, and what a peer that doesn't
+                        // read leaves queued, its pongs among it, stays bounded.
+                        .write_buffer_size(0)
+                        .max_write_buffer_size(2 * MAX_FRAME_BYTES)
+                        .on_upgrade(move |socket| served.run(socket, exporter))
+                },
+            ),
         ))
     }
 
@@ -252,12 +266,12 @@ mod served {
     }
 
     impl Served {
-        async fn run(self: Arc<Self>, mut socket: WebSocket) {
+        async fn run(self: Arc<Self>, mut socket: WebSocket, exporter: Option<[u8; KEY_BYTES]>) {
             let (id, evicted) = self.admit();
             let end = tokio::select! {
                 end = tokio::time::timeout(
                     self.bounds.handshake_within,
-                    self.converse(&mut socket),
+                    self.converse(&mut socket, exporter),
                 ) => end.unwrap_or(End::Dropped),
                 () = evicted.notified() => End::Dropped,
             };
@@ -302,12 +316,12 @@ mod served {
                 .retain(|(open, _)| *open != id);
         }
 
-        async fn converse(&self, socket: &mut WebSocket) -> End {
+        async fn converse(&self, socket: &mut WebSocket, exporter: Option<[u8; KEY_BYTES]>) -> End {
             // The first bound counts from the connection's admission, so
             // reading the hub's keys is within it.
             let first_by = tokio::time::Instant::now() + self.bounds.connect_within;
             let mut session =
-                match tokio::time::timeout_at(first_by, self.pairing.session(None)).await {
+                match tokio::time::timeout_at(first_by, self.pairing.session(exporter)).await {
                     Ok(Ok(session)) => session,
                     Ok(Err(error)) => {
                         log::warn!("/sync/v1: the hub's keys couldn't be read: {error:?}");

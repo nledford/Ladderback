@@ -61,7 +61,7 @@ pub use downloads::{DownloadRefusal, DownloadStart, Downloads, HandOff};
 pub use dry_runs::{DryRuns, DryRunsError};
 pub use full_disk_access::{FullDiskAccessRoute, SettingsOpener, SettingsUnopened};
 #[cfg(feature = "hub")]
-pub use handed::BuiltInTls;
+pub use handed::{BuiltInTls, Handed, HandedIo, HandedListener, HandedPeer, handed};
 pub use listener::{GatedListener, PeerAddr};
 pub use maintenance::{MaintenanceRefusal, MaintenanceRequest};
 pub use plans::{Plans, PlansError};

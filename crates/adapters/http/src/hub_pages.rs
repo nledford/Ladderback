@@ -18,7 +18,7 @@ use axum::http::{HeaderMap, StatusCode};
 use axum::response::{IntoResponse, Response};
 use domain::SignedDuration;
 use domain::access::step_up::StepUpConfirmation;
-use domain::fleet::{Fingerprint, HubAddress, KeyId, TokenId, TokenTls};
+use domain::fleet::{Fingerprint, HubAddress, HubRoute, KeyId, RouteRefused, TokenId, TokenTls};
 
 use crate::AppState;
 
@@ -63,7 +63,7 @@ async fn hub(State(state): State<AppState>, request: Request) -> Response {
             fingerprint: Fingerprint::of_key(&key).to_string(),
             key_id: KeyId::of_key(&key).to_string(),
             certificate,
-            own_certificate: own.map(|fingerprint| fingerprint.full_hex()),
+            own_certificate: own.map(|fingerprint| fingerprint.to_string()),
         })
         .into_response(),
         Err(error) => hub_refusal(&error),
@@ -112,9 +112,16 @@ async fn make_token(State(state): State<AppState>, request: Request) -> Response
             None => return crate::refused(StatusCode::BAD_REQUEST, ErrorCode::InvalidBody),
         },
     };
+    // A pinned certificate is served over TLS: an `http://` address has
+    // none to pin.
     let Ok(address) = HubAddress::parse(&address) else {
         return crate::refused(StatusCode::BAD_REQUEST, ErrorCode::HubAddressInvalid);
     };
+    if matches!(tls, TokenTls::Pinned(_))
+        && HubRoute::of(&address, tls) == Err(RouteRefused::Malformed)
+    {
+        return crate::refused(StatusCode::BAD_REQUEST, ErrorCode::HubAddressInvalid);
+    }
     let ask = TokenAsk {
         address,
         tls,
