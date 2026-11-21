@@ -5,7 +5,9 @@ use domain::secrets::{
     SecretRef, SecretValue, SecretWarning, SourceName,
 };
 
-use crate::ports::{Kept, Keyring, KeyringActivation, KeyringError, Resolved, SecretResolver};
+use crate::ports::{
+    Kept, Keyring, KeyringActivation, KeyringError, KeyringLock, Resolved, SecretResolver,
+};
 
 /// Sets up the places secrets are read from, in memory for a fake and for
 /// real in a scratch directory for the real resolver, so the same checks run
@@ -124,6 +126,7 @@ async fn keyrings(harness: &dyn SecretsHarness) {
     a_keyring_with_no_service_is_told_apart_from_one_that_refuses(harness).await;
     a_locked_keyring_keeps_nothing_and_says_it_is_locked(harness).await;
     a_keyring_says_how_its_service_is_started(harness).await;
+    a_keyring_says_whether_it_is_locked(harness).await;
 }
 
 async fn resolve(
@@ -616,6 +619,24 @@ async fn a_keyring_says_how_its_service_is_started(harness: &dyn SecretsHarness)
             activation
         );
     }
+}
+
+/// Whether the keyring is locked is what the store said, each answer as it
+/// is: a run that waits for the keyring to be unlocked asks this, and only
+/// its answer says the entry can be read again (#1221).
+async fn a_keyring_says_whether_it_is_locked(harness: &dyn SecretsHarness) {
+    assert_eq!(
+        harness.resolver().keyring_lock().await,
+        KeyringLock::Unlocked
+    );
+    assert_eq!(
+        harness.with_locked_keyring().keyring_lock().await,
+        KeyringLock::Locked
+    );
+    assert_eq!(
+        harness.without_keyring_service().keyring_lock().await,
+        KeyringLock::Unknown
+    );
 }
 
 /// A password kept in an entry that wasn't there is the entry's secret, and

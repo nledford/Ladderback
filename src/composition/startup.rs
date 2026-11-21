@@ -231,6 +231,7 @@ impl Background {
                 self.queued,
                 self.config.as_ref(),
                 self.store,
+                Arc::clone(&self.schedules),
                 Arc::clone(&events),
                 runs.as_ref(),
             )
@@ -335,6 +336,7 @@ pub(super) async fn resume_queued(
     queued: Vec<OperationRecord>,
     config: &dyn ConfigStore,
     store: Arc<dyn OperationStore>,
+    schedules: Arc<dyn ScheduleStore>,
     events: Arc<dyn EventBus>,
     runs: &dyn PlanRuns,
 ) {
@@ -347,9 +349,30 @@ pub(super) async fn resume_queued(
             None
         }
     };
+    // The bound a queued run waits for its keyring within is the next run
+    // its plan's planner kept, handed to the run as the scheduler hands
+    // one it starts its own bound (#1221). None kept, or none readable, is
+    // no bound: such a run is refused at once, as it always was.
+    let unlock_of = match schedules.planned_runs().await {
+        Ok(planned) => planned
+            .into_iter()
+            .map(|run| {
+                (
+                    run.plan,
+                    app::secrets::UnlockWait::new(Arc::new(SystemClock), run.at),
+                )
+            })
+            .collect(),
+        Err(error) => {
+            log::warn!(
+                "the planned runs can't be read, so a queued backup of a locked keyring is refused at once: {error}"
+            );
+            std::collections::BTreeMap::new()
+        }
+    };
     RecoverOperations::new(store)
         .with_events(events)
-        .resume(queued, config.as_ref(), runs, SystemClock.now())
+        .resume(queued, config.as_ref(), &unlock_of, runs, SystemClock.now())
         .await;
 }
 

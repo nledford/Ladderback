@@ -10,7 +10,9 @@ use app::keyring_check::{KeyringCheck, KeyringRead, KeyringUser, check_keyring_e
 use app::ports::Clock;
 use app::retry::{RunEnd, RunOutcome};
 use app::secrets::ResolvedRepository;
-use app::secrets::{Cause, Field, KeyringWait, ResolveError, ResolveRepository};
+use app::secrets::{
+    Cause, Field, KeyringWait, KeyringWaitsFor, ResolveError, ResolveRepository, UnlockWait,
+};
 use cucumber::{given, then, when};
 use domain::execution::refusal::SettingRefusal;
 use domain::execution::{FailureReason, OperationStatus, Target, Trigger};
@@ -39,6 +41,8 @@ pub struct SecretsWorld {
     waited: Arc<Mutex<Vec<SourceName>>>,
     /// When the wait of a run whose daemon stopped meanwhile ended.
     stopped_at: Option<Timestamp>,
+    /// When the plan's next run is due, by the world's clock.
+    next_run_due: Option<Timestamp>,
     /// The repositories whose keyring entries a check reads, by alias.
     checked_repositories: std::collections::BTreeMap<RepositoryAlias, RepositoryConfig>,
     /// The notification channels whose keyring entries a check reads.
@@ -65,6 +69,7 @@ impl Default for SecretsWorld {
             up_from: None,
             waited: Arc::default(),
             stopped_at: None,
+            next_run_due: None,
             checked_repositories: Default::default(),
             checked_channels: Default::default(),
             keyring_check: None,
@@ -917,10 +922,15 @@ impl SecretsWorld {
     }
 
     /// A resolution that waits for the keyring by `clock`, on which the
-    /// daemon started at the monotonic time `up_from`.
+    /// daemon started at the monotonic time `up_from`, giving up waiting
+    /// for the keyring to be unlocked when the plan's next run is due.
     fn waits(&self, clock: Arc<dyn Clock>, up_from: SignedDuration) -> ResolveRepository {
-        ResolveRepository::new(self.store.clone())
-            .waiting_for_keyring(KeyringWait::new(clock, up_from))
+        let resolving = ResolveRepository::new(self.store.clone())
+            .waiting_for_keyring(KeyringWait::new(clock.clone(), up_from));
+        match self.next_run_due {
+            Some(until) => resolving.waiting_for_unlock(UnlockWait::new(clock, until)),
+            None => resolving,
+        }
     }
 
     fn waited(&self) -> Vec<SourceName> {
@@ -957,11 +967,52 @@ fn keyring_service_starts(agent: &mut Agent, seconds: i64) {
         .start_keyring_service_at(agent.clock.clone(), at);
 }
 
+#[given(expr = "the keyring unlocks {int} seconds after the daemon started")]
+fn keyring_unlocks(agent: &mut Agent, seconds: i64) {
+    let at = agent.secrets.after_start(seconds);
+    agent
+        .secrets
+        .store
+        .lock_keyring_until(agent.clock.clone(), at);
+}
+
+#[given(expr = "the keyring service goes away {int} seconds after the daemon started")]
+fn keyring_service_goes_away(agent: &mut Agent, seconds: i64) {
+    let at = agent.secrets.after_start(seconds);
+    agent
+        .secrets
+        .store
+        .end_keyring_service_at(agent.clock.clone(), at);
+}
+
+#[given(expr = "the daemon takes {int} seconds to say whether the keyring is locked")]
+fn lock_answers_are_slow(agent: &mut Agent, seconds: i64) {
+    agent
+        .secrets
+        .store
+        .answer_lock_questions_after(agent.clock.clone(), SignedDuration::from_secs(seconds));
+}
+
+#[given("the keyring says it is unlocked, but its entries stay locked")]
+fn entries_stay_locked(agent: &mut Agent) {
+    agent.secrets.store.keep_entries_locked();
+}
+
+#[given(expr = "the plan's next run is due {int} seconds after the daemon started")]
+fn next_run_due_at(agent: &mut Agent, seconds: i64) {
+    agent.secrets.next_run_due = Some(agent.secrets.after_start(seconds));
+}
+
+#[then(expr = "the daemon asked whether the keyring is locked {int} time(s)")]
+fn asked_whether_locked(agent: &mut Agent, times: usize) {
+    assert_eq!(agent.secrets.store.lock_query_count(), times);
+}
+
 #[when(expr = "the schedule starts a backup {int} seconds after the daemon started")]
 async fn schedule_starts_after_start(agent: &mut Agent, seconds: i64) {
     agent.clock.advance(SignedDuration::from_secs(seconds));
     let waited = Arc::clone(&agent.secrets.waited);
-    let waiting = move |source: &SourceName| {
+    let waiting = move |source: &SourceName, _why: KeyringWaitsFor| {
         waited
             .lock()
             .unwrap_or_else(PoisonError::into_inner)
@@ -981,7 +1032,8 @@ async fn schedule_starts_after_start(agent: &mut Agent, seconds: i64) {
 async fn schedule_starts_and_clock_set_back(agent: &mut Agent, seconds: i64) {
     agent.clock.advance(SignedDuration::from_secs(seconds));
     let clock = agent.clock.clone();
-    let waiting = move |_: &SourceName| clock.set_back(SignedDuration::from_hours(1));
+    let waiting =
+        move |_: &SourceName, _: KeyringWaitsFor| clock.set_back(SignedDuration::from_hours(1));
     let outcome = agent
         .secrets
         .waits(agent.clock.clone(), agent.secrets.up_from())
@@ -1016,7 +1068,9 @@ async fn schedule_starts_and_daemon_stops(agent: &mut Agent, seconds: i64) {
     let told = Arc::new(Mutex::new(false));
     let waiting = {
         let told = Arc::clone(&told);
-        move |_: &SourceName| *told.lock().unwrap_or_else(PoisonError::into_inner) = true
+        move |_: &SourceName, _: KeyringWaitsFor| {
+            *told.lock().unwrap_or_else(PoisonError::into_inner) = true
+        }
     };
     // This clock's monotonic time starts at zero, `seconds` after the
     // daemon started.

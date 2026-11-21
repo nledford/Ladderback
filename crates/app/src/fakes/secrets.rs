@@ -9,7 +9,7 @@ use domain::secrets::{
 };
 
 use crate::ports::{
-    Clock, Kept, Keyring, KeyringActivation, KeyringError, Resolved, SecretResolver,
+    Clock, Kept, Keyring, KeyringActivation, KeyringError, KeyringLock, Resolved, SecretResolver,
 };
 
 /// What the fake does when told to run a command.
@@ -64,14 +64,32 @@ struct State {
     /// The session's keyring service starts when this clock reaches this
     /// time: until then there is none to ask, as with `no_keyring_service`.
     service_starts: Option<(Arc<dyn Clock>, Timestamp)>,
+    /// The session's keyring service goes away when this clock reaches this
+    /// time: from then there is none to ask, locked or not.
+    service_ends: Option<(Arc<dyn Clock>, Timestamp)>,
+    /// Asking whether the keyring is locked takes this long on this clock:
+    /// the answer is the one it was when asked, and arrives that much later.
+    lock_answer_takes: Option<(Arc<dyn Clock>, domain::SignedDuration)>,
     /// How the keyring service is started, when a test said; otherwise on
     /// demand, or absent with `no_keyring_service`.
     activation: Option<KeyringActivation>,
     /// The keyring is locked: every keyring read fails, entry or not.
     keyring_locked: bool,
+    /// The keyring is locked until this clock reaches this time, as a login
+    /// keyring nobody has unlocked yet; from then it is unlocked.
+    unlock_at: Option<(Arc<dyn Clock>, Timestamp)>,
+    /// The keyring is locked until it has been read this many times, as one
+    /// a person unlocks right after the first look; from the next read it
+    /// is unlocked.
+    unlocks_after_reads: Option<usize>,
     /// The keyring's unlock prompt was dismissed: every keyring read fails,
     /// entry or not.
     unlock_prompt_dismissed: bool,
+    /// The keyring answers that it is unlocked, but its entries are in a
+    /// collection that stays locked, as one the default alias doesn't name:
+    /// every keyring read fails as locked while asking whether the keyring
+    /// is locked says unlocked.
+    entries_stay_locked: bool,
     commands: BTreeMap<(String, Vec<String>), Script>,
     /// The keyring doesn't answer, as a macOS keychain waiting on a prompt
     /// nobody answered: every keyring read outlives the time limit.
@@ -81,6 +99,8 @@ struct State {
     /// Link path to what it leads to.
     links: BTreeMap<String, String>,
     reads: Vec<SecretRef>,
+    /// How many times the resolver was asked whether the keyring is locked.
+    lock_queries: usize,
 }
 
 /// More links than a path is followed through: a cycle never ends.
@@ -159,10 +179,34 @@ impl FakeSecrets {
         self.lock().keyring_locked = true;
     }
 
+    /// A keyring that is locked until `clock` reaches `at`, as a login
+    /// keyring nobody has unlocked while the machine waits at a login
+    /// screen: until then every keyring entry fails as `KeyringUnavailable`
+    /// locked, and asking whether the keyring is locked says locked (#1221).
+    pub fn lock_keyring_until(&self, clock: Arc<dyn Clock>, at: Timestamp) {
+        self.lock().unlock_at = Some((clock, at));
+    }
+
+    /// A keyring that is locked for the first `reads` reads and unlocked
+    /// from the next, as one a person unlocks just after the daemon first
+    /// found it locked: no clock decides when, so a test can have the
+    /// unlock fall between two reads that follow each other at once.
+    pub fn lock_keyring_for_reads(&self, reads: usize) {
+        self.lock().unlocks_after_reads = Some(reads);
+    }
+
     /// A keyring whose unlock prompt the person dismissed: every keyring
     /// entry, there or not, fails as `KeyringUnavailable`, refused.
     pub fn dismiss_unlock_prompt(&self) {
         self.lock().unlock_prompt_dismissed = true;
+    }
+
+    /// A keyring that answers it is unlocked while its entries stay locked,
+    /// as one whose default collection is unlocked while the entry sits in
+    /// another that isn't: every keyring entry fails as `KeyringUnavailable`
+    /// locked, and asking whether the keyring is locked says unlocked.
+    pub fn keep_entries_locked(&self) {
+        self.lock().entries_stay_locked = true;
     }
 
     /// A session whose keyring service starts when `clock` reaches `at`, as
@@ -170,6 +214,21 @@ impl FakeSecrets {
     /// entry fails as `KeyringUnavailable` with no service to ask.
     pub fn start_keyring_service_at(&self, clock: Arc<dyn Clock>, at: Timestamp) {
         self.lock().service_starts = Some((clock, at));
+    }
+
+    /// A session whose keyring service goes away when `clock` reaches `at`,
+    /// as one that stops under a run: from then every keyring entry fails as
+    /// `KeyringUnavailable` with no service to ask.
+    pub fn end_keyring_service_at(&self, clock: Arc<dyn Clock>, at: Timestamp) {
+        self.lock().service_ends = Some((clock, at));
+    }
+
+    /// A service that is slow to say whether the keyring is locked: its
+    /// answer is the one it was when asked, and arrives `by` later on
+    /// `clock`, as one from a service that answers within the limit but not
+    /// at once.
+    pub fn answer_lock_questions_after(&self, clock: Arc<dyn Clock>, by: domain::SignedDuration) {
+        self.lock().lock_answer_takes = Some((clock, by));
     }
 
     /// A keyring that doesn't answer, as a macOS keychain waiting on a
@@ -209,6 +268,12 @@ impl FakeSecrets {
             .iter()
             .filter(|read| *read == secret)
             .count()
+    }
+
+    /// How many times the resolver was asked whether the keyring is locked,
+    /// as a run waiting for the keyring to be unlocked asks (#1221).
+    pub fn lock_query_count(&self) -> usize {
+        self.lock().lock_queries
     }
 
     fn lock(&self) -> MutexGuard<'_, State> {
@@ -321,7 +386,11 @@ impl SecretResolver for FakeSecrets {
                         },
                     });
                 }
-                let unavailable = keyring_unavailable(&state);
+                let unavailable = keyring_unavailable(&state).or_else(|| {
+                    state
+                        .entries_stay_locked
+                        .then_some(("the item is locked", KeyringCause::Locked))
+                });
                 if let Some((detail, cause)) = unavailable {
                     // A run that spins on a keyring it can't ask would hang
                     // its test: past the cap, the read fails otherwise, so
@@ -354,6 +423,25 @@ impl SecretResolver for FakeSecrets {
                 })
             }
         }
+    }
+
+    async fn keyring_lock(&self) -> KeyringLock {
+        let (answer, slow) = {
+            let mut state = self.lock();
+            state.lock_queries += 1;
+            let answer = match keyring_unavailable(&state) {
+                Some((_, KeyringCause::NoService)) => KeyringLock::Unknown,
+                // A dismissed unlock prompt leaves the collection locked, and a
+                // run refused that way never waits to ask.
+                Some((_, KeyringCause::Locked | KeyringCause::Refused)) => KeyringLock::Locked,
+                None => KeyringLock::Unlocked,
+            };
+            (answer, state.lock_answer_takes.clone())
+        };
+        if let Some((clock, by)) = slow {
+            clock.sleep(by).await;
+        }
+        answer
     }
 }
 
@@ -418,9 +506,21 @@ fn keyring_unavailable(state: &State) -> Option<(&'static str, KeyringCause)> {
         .service_starts
         .as_ref()
         .is_some_and(|(clock, at)| clock.now() < *at);
-    if state.no_keyring_service || not_started {
+    let ended = state
+        .service_ends
+        .as_ref()
+        .is_some_and(|(clock, at)| clock.now() >= *at);
+    if state.no_keyring_service || not_started || ended {
         Some(("no session bus", KeyringCause::NoService))
-    } else if state.keyring_locked {
+    } else if state.keyring_locked
+        || state
+            .unlock_at
+            .as_ref()
+            .is_some_and(|(clock, at)| clock.now() < *at)
+        || state
+            .unlocks_after_reads
+            .is_some_and(|reads| state.reads.len() <= reads)
+    {
         Some(("the keyring is locked", KeyringCause::Locked))
     } else if state.unlock_prompt_dismissed {
         Some(("the unlock prompt was dismissed", KeyringCause::Refused))

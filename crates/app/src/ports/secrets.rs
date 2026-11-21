@@ -32,9 +32,32 @@ use domain::secrets::{SecretError, SecretRef, SecretValue, SecretWarning};
 ///   directory where a container runtime or systemd sets permissions
 ///   (`domain::secrets::file_warning`).
 /// - An error names its source and never holds a secret's value.
+/// - `keyring_lock` says whether the keyring's collection is locked. It
+///   reads no entry, so it raises no unlock prompt; where there is no
+///   keyring service to ask, it can't be said (#1221).
 #[async_trait]
 pub trait SecretResolver: Send + Sync {
     async fn resolve(&self, secret: &SecretRef) -> Result<Resolved, SecretError>;
+
+    /// Whether the keyring this resolver reads is locked: a run nobody
+    /// waits on that was refused with the keyring locked asks this until it
+    /// is unlocked or the run gives up, and reads the entry again only once
+    /// the answer is `Unlocked` (#1221).
+    async fn keyring_lock(&self) -> KeyringLock;
+}
+
+/// Whether the keyring's collection is locked, as the resolver's store
+/// answers. Asked without reading an entry, so it raises no unlock prompt;
+/// where there is no keyring service to ask, it can't be said.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum KeyringLock {
+    /// The collection is unlocked: an entry can be read.
+    Unlocked,
+    /// The collection is locked: nobody has unlocked it yet.
+    Locked,
+    /// The question got no answer: there is no keyring service to ask, the
+    /// answer came too late, or a question asked before is still out.
+    Unknown,
 }
 
 /// A secret that was read, and what the user should know about how.

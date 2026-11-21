@@ -20,9 +20,12 @@ use std::collections::BTreeMap;
 use std::ffi::OsString;
 use std::os::unix::ffi::OsStrExt;
 use std::sync::Arc;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::Duration;
 
-use app::ports::{Kept, Keyring, KeyringActivation, KeyringError, Resolved, SecretResolver};
+use app::ports::{
+    Kept, Keyring, KeyringActivation, KeyringError, KeyringLock, Resolved, SecretResolver,
+};
 use async_trait::async_trait;
 use domain::secrets::{
     FileRead, KeyringCause, KeyringEntry, Problem, SecretError, SecretRef, SecretValue, SourceName,
@@ -48,6 +51,13 @@ pub struct SystemSecrets {
     keyring: Arc<dyn KeyringStore>,
     file_reader: FileReader,
     activation: ActivationProbe,
+    /// Whether the keyring is locked, as a run waiting for it to be
+    /// unlocked asks (#1221).
+    lock_probe: LockProbe,
+    /// Whether a `lock_probe` question is out, so a service that never
+    /// answers is asked one question at a time, never one per poll of a
+    /// wait that can outlast it by hours (#1221).
+    lock_asking: Arc<AtomicBool>,
 }
 
 impl SystemSecrets {
@@ -60,7 +70,20 @@ impl SystemSecrets {
             keyring: keyring_store::os_store(),
             file_reader: Arc::new(file::read),
             activation: Arc::new(keyring_store::os_activation),
+            lock_probe: Arc::new(keyring_store::os_lock),
+            lock_asking: Arc::new(AtomicBool::new(false)),
         }
+    }
+
+    /// Asks `probe` whether the keyring is locked, which a test makes
+    /// answer as it likes.
+    #[cfg(test)]
+    pub(crate) fn with_lock_probe(
+        mut self,
+        probe: impl Fn() -> keyring_store::Lock + Send + Sync + 'static,
+    ) -> Self {
+        self.lock_probe = Arc::new(probe);
+        self
     }
 
     /// Reads `vars` instead of the process environment, for `Env` secrets and
@@ -117,6 +140,10 @@ pub(crate) type FileReader =
 /// Asks the platform how the keyring service is started. It may block, on
 /// D-Bus.
 pub(crate) type ActivationProbe = Arc<dyn Fn() -> KeyringActivation + Send + Sync>;
+
+/// Whether the keyring is locked, asked of the platform without reading an
+/// entry, so it raises no unlock prompt (#1221).
+pub(crate) type LockProbe = Arc<dyn Fn() -> keyring_store::Lock + Send + Sync>;
 
 impl Default for SystemSecrets {
     fn default() -> Self {
@@ -268,6 +295,17 @@ enum Unfinished {
     Lost(String),
 }
 
+/// The flag of a lock question that is out, cleared when the question
+/// ends, however it ends: answered, panicked, or dropped unrun as the
+/// runtime shuts down.
+struct Asked(Arc<AtomicBool>);
+
+impl Drop for Asked {
+    fn drop(&mut self) {
+        self.0.store(false, Ordering::Release);
+    }
+}
+
 #[async_trait]
 impl SecretResolver for SystemSecrets {
     async fn resolve(&self, secret: &SecretRef) -> Result<Resolved, SecretError> {
@@ -279,6 +317,34 @@ impl SecretResolver for SystemSecrets {
                 .await
                 .map(resolved),
             SecretRef::Keyring(entry) => self.keyring(entry).await,
+        }
+    }
+
+    /// Asks the platform within `ACTIVATION_LIMIT`, as `activation` does;
+    /// an answer that comes later, or a question that was lost, is unknown.
+    async fn keyring_lock(&self) -> KeyringLock {
+        // One question at a time: a service that accepts connections and
+        // never answers would else leave a blocked call of its own on
+        // every ask, for as long as the run waits. While one is out, the
+        // answer is unknown.
+        if self.lock_asking.swap(true, Ordering::AcqRel) {
+            return KeyringLock::Unknown;
+        }
+        let probe = Arc::clone(&self.lock_probe);
+        let asked = Asked(Arc::clone(&self.lock_asking));
+        let asking = tokio::task::spawn_blocking(move || {
+            // Cleared however the question ends, answered or lost.
+            let _asked = asked;
+            probe()
+        });
+        match tokio::time::timeout(ACTIVATION_LIMIT, asking).await {
+            Ok(Ok(keyring_store::Lock::Unlocked)) => KeyringLock::Unlocked,
+            Ok(Ok(keyring_store::Lock::Locked(_))) => KeyringLock::Locked,
+            // It can't be said — there is no service to ask — or the
+            // question was lost or late: the blocked call is left to end
+            // on its own, as `activation`'s is, and until it does, every
+            // ask answers unknown.
+            _ => KeyringLock::Unknown,
         }
     }
 }

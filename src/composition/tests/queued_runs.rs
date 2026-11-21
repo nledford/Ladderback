@@ -106,7 +106,7 @@ async fn a_resumed_backup_says_how_it_ended() {
         .save(&queued, None)
         .await
         .expect("the queued backup is saved");
-    PlanRuns::resume(&runner, queued).await;
+    PlanRuns::resume(&runner, queued, None).await;
     entered.changed().await.expect("the run reaches its hooks");
     open_gate.send(true).expect("the gate opens");
     runner
@@ -181,7 +181,7 @@ async fn a_queued_backup_ends_as_daemon_stopped_when_the_configuration_cannot_be
     let (runner, queued, _scratch) = a_queued_backup_over_a_spoiled_configuration(id).await;
     let mut page = runner.events.subscribe().await;
 
-    PlanRuns::resume(&runner, queued).await;
+    PlanRuns::resume(&runner, queued, None).await;
 
     assert_eq!(
         status_of(&runner, id).await,
@@ -225,6 +225,7 @@ async fn the_queue_ends_as_daemon_stopped_when_the_background_task_cannot_read_t
         vec![OperationRecord::of(&queued, None)],
         runner.config.as_ref(),
         Arc::clone(&runner.store),
+        Arc::new(app::fakes::InMemoryScheduleStore::new()),
         Arc::clone(&runner.events),
         &runner,
     )
@@ -284,7 +285,7 @@ async fn a_queued_backup_whose_plan_moved_to_another_repository_ends_as_daemon_s
         .await
         .expect("the queued backup is saved");
 
-    PlanRuns::resume(&runner, queued).await;
+    PlanRuns::resume(&runner, queued, None).await;
 
     assert_eq!(
         status_of(&runner, id).await,

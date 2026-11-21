@@ -19,6 +19,7 @@ use app::ports::{Clock, ConfigStore, EventBus, PendingRetry, PlannedRun, Schedul
 use app::queue::{Place, RunQueue};
 use app::retry::{RunEnd, RunEndSender, RunEnds, RunOutcome, run_ends};
 use app::schedule::{PlanRuns, ScheduleReport, Scheduler};
+use app::secrets::UnlockWait;
 use async_trait::async_trait;
 use cucumber::{given, then, when};
 use domain::execution::conditions::{PowerSource, UnmetCondition};
@@ -313,11 +314,17 @@ impl RecordingRuns {
 
 #[async_trait]
 impl PlanRuns for RecordingRuns {
-    async fn start(&self, plan: &PlanId, trigger: Trigger, place: Place) {
+    async fn start(
+        &self,
+        plan: &PlanId,
+        trigger: Trigger,
+        place: Place,
+        _unlock: Option<UnlockWait>,
+    ) {
         self.run(plan, trigger, place, None);
     }
 
-    async fn resume(&self, operation: Operation) {
+    async fn resume(&self, operation: Operation, _unlock: Option<UnlockWait>) {
         self.resumed
             .lock()
             .unwrap_or_else(PoisonError::into_inner)

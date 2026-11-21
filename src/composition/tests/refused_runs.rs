@@ -4,7 +4,7 @@ use super::captured_log::{self, capture};
 use std::sync::PoisonError;
 
 use api::ErrorCode;
-use app::fakes::{FakeSecrets, InMemoryConfigStore};
+use app::fakes::{FakeClock, FakeSecrets, InMemoryConfigStore};
 use domain::RepositoryId;
 
 use super::service_support::*;
@@ -117,7 +117,7 @@ async fn a_scheduled_run_refused_for_a_secret_ends_as_one_failed_operation_that_
     let place = runner
         .queue
         .push(&plan, domain::planning::Concurrency::default());
-    PlanRuns::start(&runner, &plan, Trigger::Schedule, place).await;
+    PlanRuns::start(&runner, &plan, Trigger::Schedule, place, None).await;
 
     assert_eq!(jobs(&scripted), 0, "the engine was asked");
     let history = store
@@ -239,7 +239,7 @@ async fn a_scheduled_run_while_the_daemon_starts_waits_for_the_keyring_service_a
     let place = runner
         .queue
         .push(&plan, domain::planning::Concurrency::default());
-    PlanRuns::start(&runner, &plan, Trigger::Schedule, place).await;
+    PlanRuns::start(&runner, &plan, Trigger::Schedule, place, None).await;
 
     tokio::time::timeout(std::time::Duration::from_secs(5), heard.next())
         .await
@@ -289,8 +289,1196 @@ async fn a_run_by_hand_while_the_daemon_starts_never_waits_for_the_keyring_servi
     assert_eq!(waits, Vec::<String>::new());
 }
 
+/// A run that waits for the keyring to be unlocked doesn't hold the
+/// scheduler with it: another plan's run starts and reaches the engine
+/// while the first waits, no run is refused while the keyring is locked,
+/// and once the keyring is unlocked the waiting run backs up with the
+/// password the keyring holds (#1221).
+#[tokio::test]
+async fn another_plan_runs_while_a_run_waits_for_the_keyring_to_be_unlocked() {
+    capture();
+    let started = domain::Timestamp::from_second(1_800_000_000).expect("a timestamp");
+    // A clock that moves only when told, so the run is still waiting when
+    // the other plan's run starts.
+    let clock = Arc::new(FakeClock::new(started));
+    let secrets = Arc::new(FakeSecrets::new());
+    let entry = domain::secrets::KeyringEntry::parse("ladderback/demo").expect("an entry");
+    secrets.set_keyring_entry(&entry, KEYRING_PASSWORD);
+    secrets.lock_keyring_until(
+        clock.clone(),
+        started + domain::SignedDuration::from_secs(60),
+    );
+    let demo = domain::RepositoryAlias::parse("demo").expect("a repository alias");
+    let plain = domain::RepositoryAlias::parse("plain").expect("a repository alias");
+    let config = domain::planning::AgentConfig::new(
+        domain::planning::AgentSettings::default(),
+        Default::default(),
+        std::collections::BTreeMap::from([
+            (
+                demo.clone(),
+                domain::planning::RepositoryConfig {
+                    locations: Default::default(),
+                    id: None,
+                    settings: RepositorySettings {
+                        repository: "/srv/demo-repo".to_owned(),
+                        repo_hot: None,
+                        password: SecretRef::Keyring(entry),
+                        options: Default::default(),
+                        options_hot: Default::default(),
+                        options_cold: Default::default(),
+                    },
+                    maintenance: domain::planning::Maintenance::Local,
+                    group_by: Default::default(),
+                    hooks: Default::default(),
+                },
+            ),
+            (
+                plain.clone(),
+                domain::planning::RepositoryConfig {
+                    locations: Default::default(),
+                    id: None,
+                    settings: RepositorySettings {
+                        repository: "/srv/plain-repo".to_owned(),
+                        repo_hot: None,
+                        password: SecretRef::Inline(domain::secrets::SecretValue::new(
+                            "plain-password",
+                        )),
+                        options: Default::default(),
+                        options_hot: Default::default(),
+                        options_cold: Default::default(),
+                    },
+                    maintenance: domain::planning::Maintenance::Local,
+                    group_by: Default::default(),
+                    hooks: Default::default(),
+                },
+            ),
+        ]),
+        vec![
+            domain::planning::Plan::new(
+                domain::PlanId::parse("home").expect("a plan ID"),
+                demo,
+                vec![domain::planning::Source::parse("/home/demo").expect("a source")],
+            ),
+            domain::planning::Plan::new(
+                domain::PlanId::parse("other").expect("a plan ID"),
+                plain,
+                vec![domain::planning::Source::parse("/home/other").expect("a source")],
+            ),
+        ],
+    )
+    .expect("a valid configuration");
+    let config_store = Arc::new(InMemoryConfigStore::new());
+    app::ports::ConfigStore::save(&*config_store, &config)
+        .await
+        .expect("the config saves");
+    let scripted = engine();
+    let (ends, heard) = app::retry::run_ends();
+    let store = Arc::new(app::fakes::InMemoryOperationStore::new());
+    let runner = PlanRunner {
+        config: config_store,
+        resolve: Arc::new(daemon_resolve(
+            secrets,
+            clock.clone(),
+            domain::SignedDuration::ZERO,
+        )),
+        agent_id: AgentId::from_uuid(Uuid::from_u128(1)),
+        engine: scripted.clone(),
+        locations: None,
+        retention: Arc::new(engine::RusticRetention),
+        store: store.clone(),
+        registry: Arc::new(CancelRegistry::new()),
+        hooks: Arc::new(ProcessHookRunner::new()),
+        events: Arc::new(BroadcastEventBus::new()),
+        queue: Arc::new(RunQueue::new()),
+        ends,
+        runs: crate::composition::runs::Runs::default(),
+        readings: Arc::new(app::fakes::InMemoryStatsStore::new()),
+        full_disk_access: None,
+        left_out: KeyFilesLeftOut::default(),
+        writes: Arc::default(),
+    };
+    let home = domain::PlanId::parse("home").expect("a plan ID");
+    let other = domain::PlanId::parse("other").expect("a plan ID");
+
+    let waiting = runner
+        .queue
+        .push(&home, domain::planning::Concurrency::default());
+    // The plan's next run is due 10 minutes in: the waiting run never
+    // waits past it (#1221).
+    let unlock = app::secrets::UnlockWait::new(
+        clock.clone(),
+        started + domain::SignedDuration::from_secs(600),
+    );
+    PlanRuns::start(&runner, &home, Trigger::Schedule, waiting, Some(unlock)).await;
+
+    // While the first run waits for the keyring, the other plan's run
+    // starts, reaches the engine and ends, and nothing is refused.
+    let place = runner
+        .queue
+        .push(&other, domain::planning::Concurrency::default());
+    PlanRuns::start(&runner, &other, Trigger::Schedule, place, None).await;
+    let other_end = tokio::time::timeout(std::time::Duration::from_secs(5), heard.next())
+        .await
+        .expect("the other run ends")
+        .expect("an end");
+    assert_eq!(other_end.plan, other, "{other_end:?}");
+    assert_eq!(jobs(&scripted), 1, "only the plan that isn't waiting ran");
+    let history = store
+        .list(&app::ports::HistoryQuery::default())
+        .await
+        .expect("the log reads");
+    let refused: Vec<_> = history
+        .operations
+        .iter()
+        .filter(|row| {
+            matches!(
+                row.status,
+                domain::execution::OperationStatus::Failed {
+                    reason: domain::execution::FailureReason::SecretRefused { .. },
+                }
+            )
+        })
+        .collect();
+    assert!(
+        refused.is_empty(),
+        "no run is refused for its secret while the keyring is locked: {history:?}"
+    );
+
+    // The keyring unlocks, and the waiting run backs up.
+    clock.advance(domain::SignedDuration::from_secs(60));
+    let home_end = tokio::time::timeout(std::time::Duration::from_secs(5), heard.next())
+        .await
+        .expect("the waiting run ends")
+        .expect("an end");
+    assert_eq!(home_end.plan, home, "{home_end:?}");
+    let seen = scripted.seen.lock().unwrap_or_else(PoisonError::into_inner);
+    let passwords: Vec<&str> = seen
+        .iter()
+        .filter_map(|job| match job {
+            Job::Backup(backup) => Some(backup.repository.password.expose()),
+            _ => None,
+        })
+        .collect();
+    assert!(
+        passwords.contains(&KEYRING_PASSWORD),
+        "the waiting run backed up with the keyring's password: {passwords:?}"
+    );
+}
+
 /// The password the keyring holds for the repository `demo`.
 const KEYRING_PASSWORD: &str = "canary-keyring-password";
+
+/// A runner for the plan `home` on the repository `demo`, its password in
+/// a keyring `secrets` answers, on a clock that moves only when told, so
+/// a run of it can be held waiting for the keyring to be unlocked
+/// (#1221).
+async fn keyring_parked_runner(
+    secrets: Arc<FakeSecrets>,
+    clock: Arc<FakeClock>,
+    store: Arc<app::fakes::InMemoryOperationStore>,
+) -> (
+    PlanRunner,
+    app::retry::RunEnds,
+    Arc<Scripted>,
+    domain::PlanId,
+) {
+    let entry = domain::secrets::KeyringEntry::parse("ladderback/demo").expect("an entry");
+    let settings = domain::planning::RepositorySettings {
+        repository: "/srv/demo-repo".to_owned(),
+        repo_hot: None,
+        password: SecretRef::Keyring(entry),
+        options: Default::default(),
+        options_hot: Default::default(),
+        options_cold: Default::default(),
+    };
+    let (mut runner, heard, scripted, plan) =
+        refused_runner(settings, store, Arc::new(BroadcastEventBus::new())).await;
+    runner.resolve = Arc::new(daemon_resolve(secrets, clock, domain::SignedDuration::ZERO));
+    (runner, heard, scripted, plan)
+}
+
+/// A locked keyring over the entry the repository `demo`'s password sits
+/// in, until `clock` reaches `unlock_at`.
+fn keyring_locked_until(
+    secrets: &Arc<FakeSecrets>,
+    clock: &Arc<FakeClock>,
+    unlock_at: domain::Timestamp,
+) {
+    let entry = domain::secrets::KeyringEntry::parse("ladderback/demo").expect("an entry");
+    secrets.set_keyring_entry(&entry, KEYRING_PASSWORD);
+    secrets.lock_keyring_until(clock.clone(), unlock_at);
+}
+
+/// A queued backup the daemon takes up again whose repository password is
+/// in a locked keyring waits for the keyring to be unlocked — its
+/// operation shows as queued while it waits — and runs once it is, never
+/// past the next run its plan's planner kept, which is its bound
+/// (#1221, decision 135).
+#[tokio::test]
+async fn a_resumed_run_waits_for_the_keyring_to_be_unlocked() {
+    capture();
+    let started = domain::Timestamp::from_second(1_800_000_000).expect("a timestamp");
+    let clock = Arc::new(FakeClock::new(started));
+    let secrets = Arc::new(FakeSecrets::new());
+    keyring_locked_until(
+        &secrets,
+        &clock,
+        started + domain::SignedDuration::from_secs(60),
+    );
+    let store = Arc::new(app::fakes::InMemoryOperationStore::new());
+    let (runner, heard, scripted, home) =
+        keyring_parked_runner(secrets, clock.clone(), store.clone()).await;
+    let queued = queued_home_backup(0x1221, None);
+    store
+        .save(&queued, None)
+        .await
+        .expect("the queued backup is saved");
+
+    let unlock = app::secrets::UnlockWait::new(
+        clock.clone(),
+        started + domain::SignedDuration::from_secs(600),
+    );
+    tokio::time::timeout(
+        std::time::Duration::from_secs(5),
+        PlanRuns::resume(&runner, queued.clone(), Some(unlock)),
+    )
+    .await
+    .expect("resume returns without waiting for the keyring");
+    let history = store
+        .list(&app::ports::HistoryQuery::default())
+        .await
+        .expect("the log reads");
+    let [record] = history.operations.as_slice() else {
+        panic!("the queued backup is kept while its run waits: {history:?}")
+    };
+    assert_eq!(
+        record.status,
+        domain::execution::OperationStatus::Queued,
+        "the operation shows as queued while its run waits: {history:?}"
+    );
+
+    clock.advance(domain::SignedDuration::from_secs(60));
+    let end = tokio::time::timeout(std::time::Duration::from_secs(5), heard.next())
+        .await
+        .expect("the resumed run ends")
+        .expect("an end");
+    assert_eq!(end.plan, home, "{end:?}");
+    assert_eq!(jobs(&scripted), 1, "the resumed run reached the engine");
+    let seen = scripted.seen.lock().unwrap_or_else(PoisonError::into_inner);
+    let passwords: Vec<&str> = seen
+        .iter()
+        .filter_map(|job| match job {
+            Job::Backup(backup) => Some(backup.repository.password.expose()),
+            _ => None,
+        })
+        .collect();
+    assert!(
+        passwords.contains(&KEYRING_PASSWORD),
+        "the resumed run backed up with the keyring's password: {passwords:?}"
+    );
+}
+
+/// A queued backup of a plan whose planner kept no next run — the plan
+/// left the schedule while it sat queued — is refused at once when its
+/// keyring is locked: there is no run to wait within (#1221, decision
+/// 135).
+#[tokio::test]
+async fn a_resumed_run_of_a_plan_with_no_next_run_is_refused_at_once() {
+    capture();
+    let started = domain::Timestamp::from_second(1_800_000_000).expect("a timestamp");
+    let clock = Arc::new(FakeClock::new(started));
+    let secrets = Arc::new(FakeSecrets::new());
+    keyring_locked_until(
+        &secrets,
+        &clock,
+        started + domain::SignedDuration::from_secs(3600),
+    );
+    let store = Arc::new(app::fakes::InMemoryOperationStore::new());
+    let (runner, heard, scripted, home) =
+        keyring_parked_runner(secrets, clock, store.clone()).await;
+    let queued = queued_home_backup(0x1222, None);
+    store
+        .save(&queued, None)
+        .await
+        .expect("the queued backup is saved");
+
+    PlanRuns::resume(&runner, queued.clone(), None).await;
+    let end = tokio::time::timeout(std::time::Duration::from_secs(5), heard.next())
+        .await
+        .expect("the schedule hears how the run ended")
+        .expect("an end");
+    assert_eq!(end.plan, home, "{end:?}");
+    assert_eq!(end.outcome, app::retry::RunOutcome::Failed, "{end:?}");
+    assert_eq!(jobs(&scripted), 0, "the engine was never asked");
+    let history = store
+        .list(&app::ports::HistoryQuery::default())
+        .await
+        .expect("the log reads");
+    let [record] = history.operations.as_slice() else {
+        panic!("one operation is recorded: {history:?}")
+    };
+    assert!(
+        matches!(
+            &record.status,
+            domain::execution::OperationStatus::Failed {
+                reason: domain::execution::FailureReason::SecretRefused {
+                    refusal: domain::execution::refusal::SettingRefusal::SecretKeyringLocked { .. },
+                    ..
+                },
+            }
+        ),
+        "refused as locked, at once: {record:?}"
+    );
+}
+
+/// A run parked waiting for its keyring gives way to a newer run of its
+/// plan that is going when the keyring is unlocked: one backup runs, not
+/// two behind each other (#1221, decision 135).
+#[tokio::test]
+async fn a_waiting_run_gives_way_to_a_newer_run_of_its_plan() {
+    capture();
+    let started = domain::Timestamp::from_second(1_800_000_000).expect("a timestamp");
+    let clock = Arc::new(FakeClock::new(started));
+    let secrets = Arc::new(FakeSecrets::new());
+    keyring_locked_until(
+        &secrets,
+        &clock,
+        started + domain::SignedDuration::from_secs(55),
+    );
+    let store = Arc::new(app::fakes::InMemoryOperationStore::new());
+    let (runner, _heard, scripted, home) =
+        keyring_parked_runner(secrets, clock.clone(), store).await;
+
+    let waiting = runner
+        .queue
+        .push(&home, domain::planning::Concurrency::default());
+    let unlock = app::secrets::UnlockWait::new(
+        clock.clone(),
+        started + domain::SignedDuration::from_secs(600),
+    );
+    PlanRuns::start(&runner, &home, Trigger::Schedule, waiting, Some(unlock)).await;
+
+    // The run waits, asking every 10 s while the keyring is locked, until
+    // it sleeps from 50 s to 60 s.
+    for _ in 0..5 {
+        until_it_waits(&clock).await;
+        clock.advance(domain::SignedDuration::from_secs(10));
+    }
+    until_it_waits(&clock).await;
+
+    // The keyring unlocks at 55 s, and a newer run of the plan starts and
+    // reaches the engine; its job never answers, so it is going.
+    clock.advance(domain::SignedDuration::from_secs(5));
+    *scripted
+        .hangs
+        .lock()
+        .unwrap_or_else(PoisonError::into_inner) = 1;
+    let newer = runner
+        .queue
+        .push(&home, domain::planning::Concurrency::default());
+    PlanRuns::start(&runner, &home, Trigger::Schedule, newer, None).await;
+
+    // The waiting run asks at its next tick, finds the keyring unlocked,
+    // and gives way to the newer run.
+    clock.advance(domain::SignedDuration::from_secs(5));
+    until_logged(&[
+        "the scheduled run of plan home didn't start",
+        "plan-run-waiting",
+    ])
+    .await;
+    assert_eq!(jobs(&scripted), 1, "only the newer run reached the engine");
+}
+
+/// A queued backup recorded on a repository its plan no longer backs up to
+/// isn't parked to wait for the keyring of the one it backs up to now: it
+/// ends at once, as it would with the keyring unlocked (#1221).
+#[tokio::test]
+async fn a_resumed_run_whose_plan_moved_is_not_parked_for_the_keyring() {
+    capture();
+    let started = domain::Timestamp::from_second(1_800_000_000).expect("a timestamp");
+    let clock = Arc::new(FakeClock::new(started));
+    let secrets = Arc::new(FakeSecrets::new());
+    keyring_locked_until(
+        &secrets,
+        &clock,
+        started + domain::SignedDuration::from_secs(3600),
+    );
+    let store = Arc::new(app::fakes::InMemoryOperationStore::new());
+    let (runner, _heard, scripted, _home) =
+        keyring_parked_runner(secrets, clock.clone(), store.clone()).await;
+    let queued = queued_home_backup(0x1225, Some(repository_id()));
+    store
+        .save(&queued, None)
+        .await
+        .expect("the queued backup is saved");
+    let unlock = app::secrets::UnlockWait::new(
+        clock.clone(),
+        started + domain::SignedDuration::from_secs(600),
+    );
+    PlanRuns::resume(&runner, queued, Some(unlock)).await;
+
+    tokio::time::timeout(std::time::Duration::from_secs(5), async {
+        loop {
+            let history = store
+                .list(&app::ports::HistoryQuery::default())
+                .await
+                .expect("the log reads");
+            if history
+                .operations
+                .iter()
+                .all(|record| record.status.is_finished())
+            {
+                break;
+            }
+            tokio::time::sleep(std::time::Duration::from_millis(10)).await;
+        }
+    })
+    .await
+    .expect("the queued backup ends at once, never waiting for the keyring");
+    assert_eq!(clock.sleepers(), 0, "nothing waits for the keyring");
+    assert_eq!(jobs(&scripted), 0, "the engine was never asked");
+}
+
+/// Waits until a run parked on `clock` sleeps there: time moved before it
+/// does would skip its wake.
+async fn until_it_waits(clock: &FakeClock) {
+    tokio::time::timeout(std::time::Duration::from_secs(5), async {
+        while clock.sleepers() == 0 {
+            tokio::time::sleep(std::time::Duration::from_millis(10)).await;
+        }
+    })
+    .await
+    .expect("the run waits for the keyring");
+}
+
+/// Waits until the daemon's log has a line that holds every one of `words`.
+async fn until_logged(words: &[&str]) {
+    tokio::time::timeout(std::time::Duration::from_secs(5), async {
+        loop {
+            let said = captured_log::lines();
+            if said
+                .iter()
+                .any(|(_, line)| words.iter().all(|word| line.contains(word)))
+            {
+                break;
+            }
+            tokio::time::sleep(std::time::Duration::from_millis(10)).await;
+        }
+    })
+    .await
+    .unwrap_or_else(|_| panic!("the daemon logs a line with {words:?}"));
+}
+
+/// Waits until the operation log holds `id` with a status that is final,
+/// and returns it: the daemon's log can say a run ended before the log
+/// has its end.
+async fn until_ended(
+    store: &app::fakes::InMemoryOperationStore,
+    id: OperationId,
+) -> domain::execution::OperationStatus {
+    tokio::time::timeout(std::time::Duration::from_secs(5), async {
+        loop {
+            let history = store
+                .list(&app::ports::HistoryQuery::default())
+                .await
+                .expect("the log reads");
+            if let Some(record) = history
+                .operations
+                .iter()
+                .find(|record| record.id == id && record.status.is_finished())
+            {
+                break record.status.clone();
+            }
+            tokio::time::sleep(std::time::Duration::from_millis(10)).await;
+        }
+    })
+    .await
+    .unwrap_or_else(|_| panic!("the operation log ends operation {id:?}"))
+}
+
+/// The plan `home` of `runner`'s configuration, rewritten by `change`, is
+/// saved in its place.
+async fn change_home(runner: &PlanRunner, change: impl FnOnce(&mut domain::planning::Plan)) {
+    let home = domain::PlanId::parse("home").expect("a plan ID");
+    let config = runner.config.load().await.expect("the configuration reads");
+    let mut plan = config.plan(&home).expect("the plan").clone();
+    change(&mut plan);
+    let changed = config.change_plan(plan).expect("a valid change");
+    app::ports::ConfigStore::save(&*runner.config, &changed)
+        .await
+        .expect("the configuration saves");
+}
+
+/// A run that waited for its keyring backs up its plan as the
+/// configuration stands once the keyring is unlocked, not as it stood
+/// when the run began to wait: the wait can last hours (#1221, decision
+/// 135).
+#[tokio::test]
+async fn a_run_that_waited_backs_up_its_plan_as_it_stands_once_the_keyring_is_unlocked() {
+    capture();
+    let started = domain::Timestamp::from_second(1_800_000_000).expect("a timestamp");
+    let clock = Arc::new(FakeClock::new(started));
+    let secrets = Arc::new(FakeSecrets::new());
+    keyring_locked_until(
+        &secrets,
+        &clock,
+        started + domain::SignedDuration::from_secs(60),
+    );
+    let store = Arc::new(app::fakes::InMemoryOperationStore::new());
+    let (runner, heard, scripted, home) =
+        keyring_parked_runner(secrets, clock.clone(), store).await;
+    let place = runner
+        .queue
+        .push(&home, domain::planning::Concurrency::default());
+    let unlock = app::secrets::UnlockWait::new(
+        clock.clone(),
+        started + domain::SignedDuration::from_secs(600),
+    );
+    PlanRuns::start(&runner, &home, Trigger::Schedule, place, Some(unlock)).await;
+    until_it_waits(&clock).await;
+
+    change_home(&runner, |plan| {
+        plan.sources =
+            vec![domain::planning::Source::parse("/home/demo/photos").expect("a source")];
+    })
+    .await;
+    clock.advance(domain::SignedDuration::from_secs(60));
+    let end = tokio::time::timeout(std::time::Duration::from_secs(5), heard.next())
+        .await
+        .expect("the run ends")
+        .expect("an end");
+    assert_eq!(end.plan, home, "{end:?}");
+    let seen = scripted.seen.lock().unwrap_or_else(PoisonError::into_inner);
+    let sources: Vec<&[String]> = seen
+        .iter()
+        .filter_map(|job| match job {
+            Job::Backup(backup) => Some(backup.sources.as_slice()),
+            _ => None,
+        })
+        .collect();
+    assert_eq!(
+        sources,
+        [["/home/demo/photos".to_owned()].as_slice()],
+        "the run backed up the plan's sources as they stand now"
+    );
+}
+
+/// A run that waited for its keyring whose plan was deleted while it
+/// waited doesn't start once the keyring is unlocked (#1221).
+#[tokio::test]
+async fn a_run_whose_plan_was_deleted_while_it_waited_does_not_start() {
+    capture();
+    let started = domain::Timestamp::from_second(1_800_000_000).expect("a timestamp");
+    let clock = Arc::new(FakeClock::new(started));
+    let secrets = Arc::new(FakeSecrets::new());
+    keyring_locked_until(
+        &secrets,
+        &clock,
+        started + domain::SignedDuration::from_secs(60),
+    );
+    let store = Arc::new(app::fakes::InMemoryOperationStore::new());
+    let (runner, _heard, scripted, home) =
+        keyring_parked_runner(secrets, clock.clone(), store).await;
+    let place = runner
+        .queue
+        .push(&home, domain::planning::Concurrency::default());
+    let unlock = app::secrets::UnlockWait::new(
+        clock.clone(),
+        started + domain::SignedDuration::from_secs(600),
+    );
+    PlanRuns::start(&runner, &home, Trigger::Schedule, place, Some(unlock)).await;
+    until_it_waits(&clock).await;
+
+    let config = runner.config.load().await.expect("the configuration reads");
+    let without = config.remove_plan(&home).expect("a valid change");
+    app::ports::ConfigStore::save(&*runner.config, &without)
+        .await
+        .expect("the configuration saves");
+    clock.advance(domain::SignedDuration::from_secs(60));
+    until_logged(&["home", "didn't start", "isn't configured"]).await;
+    assert_eq!(jobs(&scripted), 0, "the engine was never asked");
+}
+
+/// The keyring entry of the repository `other`, where [`move_home_to_other`]
+/// moves the plan `home`.
+fn other_entry() -> domain::secrets::KeyringEntry {
+    domain::secrets::KeyringEntry::parse("ladderback/other").expect("an entry")
+}
+
+/// The ID of the repository `other`, once the daemon has opened it.
+fn other_id() -> RepositoryId {
+    RepositoryId::parse(&"b".repeat(64)).expect("a repository ID")
+}
+
+/// `config` with the repository `demo` rewritten by `change`.
+fn with_demo(
+    config: &domain::planning::AgentConfig,
+    change: impl FnOnce(&mut domain::planning::RepositoryConfig),
+) -> domain::planning::AgentConfig {
+    let demo = domain::RepositoryAlias::parse("demo").expect("an alias");
+    let mut repositories = config.repositories().clone();
+    change(repositories.get_mut(&demo).expect("the repository"));
+    let home = PlanId::parse("home").expect("a plan id");
+    let plan = config.plan(&home).expect("the plan").clone();
+    config
+        .replacing(
+            config.agent().clone(),
+            config.hooks().clone(),
+            repositories,
+            vec![plan],
+        )
+        .expect("a valid configuration")
+}
+
+/// `config` saved in place of the runner's.
+async fn save_config(runner: &PlanRunner, config: &domain::planning::AgentConfig) {
+    app::ports::ConfigStore::save(&*runner.config, config)
+        .await
+        .expect("the configuration saves");
+}
+
+/// The repository `demo` as the daemon found it once it opened it: it
+/// records its ID.
+fn demo_opened(entry: &mut domain::planning::RepositoryConfig) {
+    entry.id = Some(repository_id());
+}
+
+/// The repository `demo` as the person rewrote it to name the repository
+/// `other`, under the same alias: another ID, another password.
+fn demo_now_other(entry: &mut domain::planning::RepositoryConfig) {
+    entry.id = Some(other_id());
+    entry.settings.repository = "/srv/other".to_owned();
+    entry.settings.password = SecretRef::Keyring(other_entry());
+}
+
+/// A configuration store that answers its first load with `first` and
+/// every later one with `later`: the person changed the configuration
+/// between a run's first look and its next.
+struct ChangesAfterFirstLoad {
+    first: domain::planning::AgentConfig,
+    later: domain::planning::AgentConfig,
+    loads: std::sync::atomic::AtomicUsize,
+}
+
+impl ChangesAfterFirstLoad {
+    fn new(first: domain::planning::AgentConfig, later: domain::planning::AgentConfig) -> Self {
+        Self {
+            first,
+            later,
+            loads: std::sync::atomic::AtomicUsize::new(0),
+        }
+    }
+}
+
+#[async_trait]
+impl app::ports::ConfigStore for ChangesAfterFirstLoad {
+    async fn load(&self) -> Result<domain::planning::AgentConfig, app::ports::ConfigError> {
+        let loads = self.loads.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+        Ok(if loads == 0 {
+            self.first.clone()
+        } else {
+            self.later.clone()
+        })
+    }
+
+    async fn save(
+        &self,
+        _config: &domain::planning::AgentConfig,
+    ) -> Result<(), app::ports::ConfigError> {
+        Ok(())
+    }
+
+    async fn record_id(
+        &self,
+        _alias: &domain::RepositoryAlias,
+        _read: &domain::planning::RepositoryConfig,
+        _id: &RepositoryId,
+    ) -> Result<(), app::ports::RecordError> {
+        Ok(())
+    }
+}
+
+/// `config` with the plan `home` moved to the repository `other`, whose
+/// password is in the keyring under [`other_entry`].
+fn home_on_other(config: &domain::planning::AgentConfig) -> domain::planning::AgentConfig {
+    let other = domain::RepositoryAlias::parse("other").expect("an alias");
+    let mut repositories = config.repositories().clone();
+    repositories.insert(
+        other.clone(),
+        domain::planning::RepositoryConfig {
+            locations: Default::default(),
+            id: None,
+            settings: domain::planning::RepositorySettings {
+                repository: "/srv/other".to_owned(),
+                repo_hot: None,
+                password: SecretRef::Keyring(other_entry()),
+                options: Default::default(),
+                options_hot: Default::default(),
+                options_cold: Default::default(),
+            },
+            maintenance: domain::planning::Maintenance::Local,
+            group_by: Default::default(),
+            hooks: Default::default(),
+        },
+    );
+    let home = PlanId::parse("home").expect("a plan id");
+    let mut plan = config.plan(&home).expect("the plan").clone();
+    plan.repository = other;
+    config
+        .replacing(
+            config.agent().clone(),
+            config.hooks().clone(),
+            repositories,
+            vec![plan],
+        )
+        .expect("a valid configuration")
+}
+
+/// The person adds the repository `other`, whose password is in the
+/// keyring under [`other_entry`], and moves the plan `home` there.
+async fn move_home_to_other(runner: &PlanRunner, secrets: &FakeSecrets) {
+    secrets.set_keyring_entry(&other_entry(), "canary-other");
+    let config = runner.config.load().await.expect("the configuration reads");
+    save_config(runner, &home_on_other(&config)).await;
+}
+
+/// A scheduled run that waited for its keyring, and whose plan moved to
+/// another repository while it waited, doesn't start: the engine is never
+/// asked, and the new repository's password isn't read for a run that
+/// won't run there (#1221).
+#[tokio::test]
+async fn a_run_whose_plan_moved_while_it_waited_does_not_start() {
+    capture();
+    let started = domain::Timestamp::from_second(1_800_000_000).expect("a timestamp");
+    let clock = Arc::new(FakeClock::new(started));
+    let secrets = Arc::new(FakeSecrets::new());
+    keyring_locked_until(
+        &secrets,
+        &clock,
+        started + domain::SignedDuration::from_secs(60),
+    );
+    let store = Arc::new(app::fakes::InMemoryOperationStore::new());
+    let (runner, _heard, scripted, home) =
+        keyring_parked_runner(secrets.clone(), clock.clone(), store).await;
+    let place = runner
+        .queue
+        .push(&home, domain::planning::Concurrency::default());
+    let unlock = app::secrets::UnlockWait::new(
+        clock.clone(),
+        started + domain::SignedDuration::from_secs(600),
+    );
+    PlanRuns::start(&runner, &home, Trigger::Schedule, place, Some(unlock)).await;
+    until_it_waits(&clock).await;
+
+    move_home_to_other(&runner, &secrets).await;
+    clock.advance(domain::SignedDuration::from_secs(60));
+    until_logged(&["home", "didn't start", "another repository"]).await;
+    assert_eq!(jobs(&scripted), 0, "the engine was never asked");
+    assert_eq!(
+        secrets.read_count(&SecretRef::Keyring(other_entry())),
+        0,
+        "the new repository's password isn't read"
+    );
+}
+
+/// A queued backup whose run waited for its keyring, and whose plan moved
+/// to another repository while it waited, isn't run there under a record
+/// of the old: it ends once the keyring is unlocked, the engine is never
+/// asked, and the new repository's password isn't read (#1221).
+#[tokio::test]
+async fn a_resumed_run_whose_plan_moved_while_it_waited_ends_unrun() {
+    capture();
+    let started = domain::Timestamp::from_second(1_800_000_000).expect("a timestamp");
+    let clock = Arc::new(FakeClock::new(started));
+    let secrets = Arc::new(FakeSecrets::new());
+    keyring_locked_until(
+        &secrets,
+        &clock,
+        started + domain::SignedDuration::from_secs(60),
+    );
+    let store = Arc::new(app::fakes::InMemoryOperationStore::new());
+    let (runner, _heard, scripted, _home) =
+        keyring_parked_runner(secrets.clone(), clock.clone(), store.clone()).await;
+    let queued = queued_home_backup(0x1223, None);
+    store
+        .save(&queued, None)
+        .await
+        .expect("the queued backup is saved");
+    let unlock = app::secrets::UnlockWait::new(
+        clock.clone(),
+        started + domain::SignedDuration::from_secs(600),
+    );
+    PlanRuns::resume(&runner, queued.clone(), Some(unlock)).await;
+    until_it_waits(&clock).await;
+
+    move_home_to_other(&runner, &secrets).await;
+    clock.advance(domain::SignedDuration::from_secs(60));
+    until_logged(&["can't run again", "another repository"]).await;
+    // The log line comes before the status is saved: the operation itself
+    // ends, and ends as failed, not left queued.
+    let status = until_ended(&store, queued.id()).await;
+    assert!(
+        matches!(
+            status,
+            domain::execution::OperationStatus::Failed {
+                reason: domain::execution::FailureReason::DaemonStopped,
+            }
+        ),
+        "the queued backup ends failed: {status:?}"
+    );
+    assert_eq!(jobs(&scripted), 0, "the engine was never asked");
+    assert_eq!(
+        secrets.read_count(&SecretRef::Keyring(other_entry())),
+        0,
+        "the new repository's password isn't read"
+    );
+}
+
+/// A scheduled run that waited for its keyring, whose plan kept its alias
+/// while the repository behind the alias changed — another recorded ID —
+/// doesn't start, and the other repository's password isn't read for it:
+/// the comparison of the recorded IDs comes before the build that
+/// resolves it (#1221, decision 135).
+#[tokio::test]
+async fn a_run_whose_alias_now_names_another_repository_reads_no_new_password() {
+    capture();
+    let started = domain::Timestamp::from_second(1_800_000_000).expect("a timestamp");
+    let clock = Arc::new(FakeClock::new(started));
+    let secrets = Arc::new(FakeSecrets::new());
+    keyring_locked_until(
+        &secrets,
+        &clock,
+        started + domain::SignedDuration::from_secs(60),
+    );
+    let store = Arc::new(app::fakes::InMemoryOperationStore::new());
+    let (runner, _heard, scripted, home) =
+        keyring_parked_runner(secrets.clone(), clock.clone(), store).await;
+    let config = runner.config.load().await.expect("the configuration reads");
+    save_config(&runner, &with_demo(&config, demo_opened)).await;
+    let place = runner
+        .queue
+        .push(&home, domain::planning::Concurrency::default());
+    let unlock = app::secrets::UnlockWait::new(
+        clock.clone(),
+        started + domain::SignedDuration::from_secs(600),
+    );
+    PlanRuns::start(&runner, &home, Trigger::Schedule, place, Some(unlock)).await;
+    until_it_waits(&clock).await;
+
+    secrets.set_keyring_entry(&other_entry(), "canary-other");
+    let config = runner.config.load().await.expect("the configuration reads");
+    save_config(&runner, &with_demo(&config, demo_now_other)).await;
+    clock.advance(domain::SignedDuration::from_secs(60));
+    until_logged(&["home", "didn't start", "another repository"]).await;
+    assert_eq!(jobs(&scripted), 0, "the engine was never asked");
+    assert_eq!(
+        secrets.read_count(&SecretRef::Keyring(other_entry())),
+        0,
+        "the other repository's password isn't read"
+    );
+}
+
+/// A queued backup whose run waited for its keyring, whose plan kept its
+/// alias while the repository behind the alias changed, ends unrun, and
+/// the other repository's password isn't read for it (#1221, decision
+/// 135).
+#[tokio::test]
+async fn a_resumed_run_whose_alias_now_names_another_repository_reads_no_new_password() {
+    capture();
+    let started = domain::Timestamp::from_second(1_800_000_000).expect("a timestamp");
+    let clock = Arc::new(FakeClock::new(started));
+    let secrets = Arc::new(FakeSecrets::new());
+    keyring_locked_until(
+        &secrets,
+        &clock,
+        started + domain::SignedDuration::from_secs(60),
+    );
+    let store = Arc::new(app::fakes::InMemoryOperationStore::new());
+    let (runner, _heard, scripted, _home) =
+        keyring_parked_runner(secrets.clone(), clock.clone(), store.clone()).await;
+    let config = runner.config.load().await.expect("the configuration reads");
+    save_config(&runner, &with_demo(&config, demo_opened)).await;
+    let queued = queued_home_backup(0x1226, Some(repository_id()));
+    store
+        .save(&queued, None)
+        .await
+        .expect("the queued backup is saved");
+    let unlock = app::secrets::UnlockWait::new(
+        clock.clone(),
+        started + domain::SignedDuration::from_secs(600),
+    );
+    PlanRuns::resume(&runner, queued.clone(), Some(unlock)).await;
+    until_it_waits(&clock).await;
+
+    secrets.set_keyring_entry(&other_entry(), "canary-other");
+    let config = runner.config.load().await.expect("the configuration reads");
+    save_config(&runner, &with_demo(&config, demo_now_other)).await;
+    clock.advance(domain::SignedDuration::from_secs(60));
+    let status = until_ended(&store, queued.id()).await;
+    assert!(
+        matches!(
+            status,
+            domain::execution::OperationStatus::Failed {
+                reason: domain::execution::FailureReason::DaemonStopped,
+            }
+        ),
+        "the queued backup ends failed: {status:?}"
+    );
+    assert_eq!(jobs(&scripted), 0, "the engine was never asked");
+    assert_eq!(
+        secrets.read_count(&SecretRef::Keyring(other_entry())),
+        0,
+        "the other repository's password isn't read"
+    );
+}
+
+/// A scheduled run refused as locked for one repository, whose plan moved
+/// to another before the parked run looked at the configuration again,
+/// resolves no secret of the other: the repository it was refused for
+/// is compared with the plan's before anything is read (#1221, decision
+/// 135). Whether it then runs on the new repository is open (#1247).
+#[tokio::test]
+async fn a_parked_run_whose_plan_moved_before_it_waited_reads_no_new_password() {
+    capture();
+    let started = domain::Timestamp::from_second(1_800_000_000).expect("a timestamp");
+    let clock = Arc::new(FakeClock::new(started));
+    let secrets = Arc::new(FakeSecrets::new());
+    keyring_locked_until(
+        &secrets,
+        &clock,
+        started + domain::SignedDuration::from_secs(3600),
+    );
+    secrets.set_keyring_entry(&other_entry(), "canary-other");
+    let store = Arc::new(app::fakes::InMemoryOperationStore::new());
+    let (mut runner, _heard, scripted, home) =
+        keyring_parked_runner(secrets.clone(), clock.clone(), store).await;
+    let config = runner.config.load().await.expect("the configuration reads");
+    runner.config = Arc::new(ChangesAfterFirstLoad::new(
+        config.clone(),
+        home_on_other(&config),
+    ));
+    let place = runner
+        .queue
+        .push(&home, domain::planning::Concurrency::default());
+    let unlock = app::secrets::UnlockWait::new(
+        clock.clone(),
+        started + domain::SignedDuration::from_secs(600),
+    );
+    PlanRuns::start(&runner, &home, Trigger::Schedule, place, Some(unlock)).await;
+
+    until_logged(&["home", "didn't start", "another repository"]).await;
+    assert_eq!(jobs(&scripted), 0, "the engine was never asked");
+    assert_eq!(
+        secrets.read_count(&SecretRef::Keyring(other_entry())),
+        0,
+        "the new repository's password isn't read"
+    );
+}
+
+/// A queued backup refused as locked on the repository it was recorded
+/// on, whose plan moved before the parked run looked at the configuration
+/// again, ends unrun and resolves no secret of the other repository: its
+/// recorded repository is compared with the plan's before anything is
+/// read (#1221, decision 135).
+#[tokio::test]
+async fn a_parked_resumed_run_whose_plan_moved_before_it_waited_reads_no_new_password() {
+    capture();
+    let started = domain::Timestamp::from_second(1_800_000_000).expect("a timestamp");
+    let clock = Arc::new(FakeClock::new(started));
+    let secrets = Arc::new(FakeSecrets::new());
+    keyring_locked_until(
+        &secrets,
+        &clock,
+        started + domain::SignedDuration::from_secs(3600),
+    );
+    secrets.set_keyring_entry(&other_entry(), "canary-other");
+    let store = Arc::new(app::fakes::InMemoryOperationStore::new());
+    let (mut runner, _heard, scripted, _home) =
+        keyring_parked_runner(secrets.clone(), clock.clone(), store.clone()).await;
+    let config = with_demo(
+        &runner.config.load().await.expect("the configuration reads"),
+        demo_opened,
+    );
+    runner.config = Arc::new(ChangesAfterFirstLoad::new(
+        config.clone(),
+        home_on_other(&config),
+    ));
+    let queued = queued_home_backup(0x1227, Some(repository_id()));
+    store
+        .save(&queued, None)
+        .await
+        .expect("the queued backup is saved");
+    let unlock = app::secrets::UnlockWait::new(
+        clock.clone(),
+        started + domain::SignedDuration::from_secs(600),
+    );
+    PlanRuns::resume(&runner, queued.clone(), Some(unlock)).await;
+
+    let status = until_ended(&store, queued.id()).await;
+    assert!(
+        matches!(
+            status,
+            domain::execution::OperationStatus::Failed {
+                reason: domain::execution::FailureReason::DaemonStopped,
+            }
+        ),
+        "the queued backup ends failed: {status:?}"
+    );
+    assert_eq!(jobs(&scripted), 0, "the engine was never asked");
+    assert_eq!(
+        secrets.read_count(&SecretRef::Keyring(other_entry())),
+        0,
+        "the new repository's password isn't read"
+    );
+}
+
+/// A scheduled run whose plan's next run came due before its parked
+/// task began is refused as locked, as the schedule's run is at the
+/// bound, even when the keyring was unlocked in between: a read taken
+/// after the bound isn't one the run goes on (#1221, decision 135).
+#[tokio::test]
+async fn a_parked_run_whose_bound_passed_stays_refused_as_locked() {
+    capture();
+    let started = domain::Timestamp::from_second(1_800_000_000).expect("a timestamp");
+    let clock = Arc::new(FakeClock::new(started));
+    let secrets = Arc::new(FakeSecrets::new());
+    let entry = domain::secrets::KeyringEntry::parse("ladderback/demo").expect("an entry");
+    secrets.set_keyring_entry(&entry, KEYRING_PASSWORD);
+    // Locked for the first read, the schedule's own; unlocked after it.
+    secrets.lock_keyring_for_reads(1);
+    let store = Arc::new(app::fakes::InMemoryOperationStore::new());
+    let (runner, heard, scripted, home) =
+        keyring_parked_runner(secrets.clone(), clock.clone(), store.clone()).await;
+    let place = runner
+        .queue
+        .push(&home, domain::planning::Concurrency::default());
+    // The plan's next run is due already.
+    let unlock = app::secrets::UnlockWait::new(clock.clone(), started);
+    PlanRuns::start(&runner, &home, Trigger::Schedule, place, Some(unlock)).await;
+
+    let end = tokio::time::timeout(std::time::Duration::from_secs(5), heard.next())
+        .await
+        .expect("the schedule hears how the run ended")
+        .expect("an end");
+    assert_eq!(end.outcome, app::retry::RunOutcome::Failed, "{end:?}");
+    assert_eq!(jobs(&scripted), 0, "the engine was never asked");
+    let history = store
+        .list(&app::ports::HistoryQuery::default())
+        .await
+        .expect("the log reads");
+    let [record] = history.operations.as_slice() else {
+        panic!("one operation is recorded: {history:?}")
+    };
+    assert!(
+        matches!(
+            &record.status,
+            domain::execution::OperationStatus::Failed {
+                reason: domain::execution::FailureReason::SecretRefused {
+                    refusal: domain::execution::refusal::SettingRefusal::SecretKeyringLocked { .. },
+                    ..
+                },
+            }
+        ),
+        "refused as locked: {record:?}"
+    );
+}
+
+/// A queued backup whose plan's next run came due before its parked task
+/// began ends refused as locked, even when the keyring was unlocked in
+/// between (#1221, decision 135).
+#[tokio::test]
+async fn a_parked_resumed_run_whose_bound_passed_stays_refused_as_locked() {
+    capture();
+    let started = domain::Timestamp::from_second(1_800_000_000).expect("a timestamp");
+    let clock = Arc::new(FakeClock::new(started));
+    let secrets = Arc::new(FakeSecrets::new());
+    let entry = domain::secrets::KeyringEntry::parse("ladderback/demo").expect("an entry");
+    secrets.set_keyring_entry(&entry, KEYRING_PASSWORD);
+    secrets.lock_keyring_for_reads(1);
+    let store = Arc::new(app::fakes::InMemoryOperationStore::new());
+    let (runner, _heard, scripted, _home) =
+        keyring_parked_runner(secrets.clone(), clock.clone(), store.clone()).await;
+    let queued = queued_home_backup(0x1228, None);
+    store
+        .save(&queued, None)
+        .await
+        .expect("the queued backup is saved");
+    let unlock = app::secrets::UnlockWait::new(clock.clone(), started);
+    PlanRuns::resume(&runner, queued.clone(), Some(unlock)).await;
+
+    let status = until_ended(&store, queued.id()).await;
+    assert!(
+        matches!(
+            &status,
+            domain::execution::OperationStatus::Failed {
+                reason: domain::execution::FailureReason::SecretRefused {
+                    refusal: domain::execution::refusal::SettingRefusal::SecretKeyringLocked { .. },
+                    ..
+                },
+            }
+        ),
+        "refused as locked: {status:?}"
+    );
+    assert_eq!(jobs(&scripted), 0, "the engine was never asked");
+}
+
+/// A queued backup whose run waits for its keyring can be cancelled while
+/// it waits, as any queued backup can: it ends cancelled, and the engine
+/// is never asked (#1221, §4.2).
+#[tokio::test]
+async fn a_resumed_run_waiting_for_its_keyring_can_be_cancelled() {
+    capture();
+    let started = domain::Timestamp::from_second(1_800_000_000).expect("a timestamp");
+    let clock = Arc::new(FakeClock::new(started));
+    let secrets = Arc::new(FakeSecrets::new());
+    keyring_locked_until(
+        &secrets,
+        &clock,
+        started + domain::SignedDuration::from_secs(3600),
+    );
+    let store = Arc::new(app::fakes::InMemoryOperationStore::new());
+    let (runner, _heard, scripted, _home) =
+        keyring_parked_runner(secrets, clock.clone(), store.clone()).await;
+    let queued = queued_home_backup(0x1224, None);
+    store
+        .save(&queued, None)
+        .await
+        .expect("the queued backup is saved");
+    let unlock = app::secrets::UnlockWait::new(
+        clock.clone(),
+        started + domain::SignedDuration::from_secs(600),
+    );
+    PlanRuns::resume(&runner, queued.clone(), Some(unlock)).await;
+    until_it_waits(&clock).await;
+
+    let cancel = runner
+        .cancel(
+            queued.id().as_uuid().hyphenated().to_string(),
+            http_adapter::Canceller::Session,
+        )
+        .await;
+    assert_eq!(cancel, Ok(()), "the waiting run can be cancelled");
+    tokio::time::timeout(std::time::Duration::from_secs(5), async {
+        loop {
+            let history = store
+                .list(&app::ports::HistoryQuery::default())
+                .await
+                .expect("the log reads");
+            if history
+                .operations
+                .iter()
+                .any(|record| record.status == domain::execution::OperationStatus::Cancelled)
+            {
+                break;
+            }
+            tokio::time::sleep(std::time::Duration::from_millis(10)).await;
+        }
+    })
+    .await
+    .expect("the queued backup ends cancelled");
+    assert_eq!(clock.sleepers(), 0, "the wait for the keyring stopped");
+    assert_eq!(jobs(&scripted), 0, "the engine was never asked");
+}
 
 /// A runner for the plan `home` on the repository `demo`, as the daemon
 /// builds it, a moment after it started: the repository's password is
@@ -395,7 +1583,7 @@ async fn a_refused_runs_history_row_says_what_the_command_said_masked_as_its_ref
     let place = runner
         .queue
         .push(&plan, domain::planning::Concurrency::default());
-    PlanRuns::start(&runner, &plan, Trigger::Schedule, place).await;
+    PlanRuns::start(&runner, &plan, Trigger::Schedule, place, None).await;
 
     let page = Operations::history(&runner, None, None, None)
         .await
@@ -494,7 +1682,7 @@ async fn a_refused_retry_is_heard_as_a_failed_retry() {
     let place = runner
         .queue
         .push(&plan, domain::planning::Concurrency::default());
-    PlanRuns::start(&runner, &plan, Trigger::Retry, place).await;
+    PlanRuns::start(&runner, &plan, Trigger::Retry, place, None).await;
 
     let history = store
         .list(&app::ports::HistoryQuery::default())
@@ -541,7 +1729,7 @@ async fn a_refused_run_the_log_cannot_keep_still_ends_and_is_announced() {
     let place = runner
         .queue
         .push(&plan, domain::planning::Concurrency::default());
-    PlanRuns::start(&runner, &plan, Trigger::Schedule, place).await;
+    PlanRuns::start(&runner, &plan, Trigger::Schedule, place, None).await;
 
     assert_eq!(jobs(&scripted), 0, "the engine was asked");
     assert_eq!(refused.load(std::sync::atomic::Ordering::SeqCst), 1);
@@ -613,7 +1801,7 @@ async fn a_resumed_backup_refused_for_its_secret_ends_with_the_refusal() {
         .await
         .expect("the queued backup is saved");
 
-    PlanRuns::resume(&runner, queued.clone()).await;
+    PlanRuns::resume(&runner, queued.clone(), None).await;
 
     assert_eq!(jobs(&scripted), 0, "the engine was asked");
     let history = store
@@ -706,7 +1894,7 @@ async fn a_resumed_backups_refusal_is_kept_masked_of_the_repositorys_secrets() {
         .await
         .expect("the queued backup is saved");
 
-    PlanRuns::resume(&runner, queued).await;
+    PlanRuns::resume(&runner, queued, None).await;
 
     let page = Operations::history(&runner, None, None, None)
         .await
@@ -767,14 +1955,14 @@ async fn started_and_resumed_backups_carry_the_warnings_their_secrets_gave() {
     let place = runner
         .queue
         .push(&plan, domain::planning::Concurrency::default());
-    PlanRuns::start(&runner, &plan, Trigger::Schedule, place).await;
+    PlanRuns::start(&runner, &plan, Trigger::Schedule, place, None).await;
     let started = next_end().await.operation;
     let queued = queued_home_backup(0x0539, None);
     store
         .save(&queued, None)
         .await
         .expect("the queued backup is saved");
-    PlanRuns::resume(&runner, queued.clone()).await;
+    PlanRuns::resume(&runner, queued.clone(), None).await;
     let resumed = next_end().await.operation;
     assert_eq!(resumed, queued.id());
 
@@ -818,7 +2006,7 @@ async fn a_resumed_backup_whose_plan_moved_ends_as_daemon_stopped_though_its_sec
         .await
         .expect("the queued backup is saved");
 
-    PlanRuns::resume(&runner, queued.clone()).await;
+    PlanRuns::resume(&runner, queued.clone(), None).await;
 
     let record = store
         .get(queued.id())

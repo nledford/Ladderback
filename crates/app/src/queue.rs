@@ -92,6 +92,22 @@ impl RunQueue {
         }
     }
 
+    /// A place for a run of `plan` that waited with none, under `limit`,
+    /// or `RunWaiting` while a run of `plan` is going, running or waiting
+    /// for its turn: it gives way to it (#1221). One step under the
+    /// queue's lock, so two runs of a plan whose waits end at once can't
+    /// both take one. `limit` applies from then on, refused or not.
+    pub fn unless_going(&self, plan: &PlanId, limit: Concurrency) -> Result<Place, RunWaiting> {
+        self.admit(|queue| {
+            queue.set_limit(limit);
+            if queue.is_going(plan) {
+                Err(RunWaiting)
+            } else {
+                Ok(queue.push(plan))
+            }
+        })
+    }
+
     /// Whether a run of `plan` is going: it holds a place, running or
     /// waiting for its turn.
     pub fn is_going(&self, plan: &PlanId) -> bool {
@@ -398,5 +414,21 @@ mod tests {
         drop(home);
         assert!(!queue.is_going(&plan("docs")));
         assert!(!queue.is_going(&plan("home")));
+    }
+
+    #[test]
+    fn a_run_that_waited_takes_a_place_only_while_its_plan_has_none() {
+        let queue = RunQueue::new();
+        let running = queue.push(&plan("home"), limit(1));
+        assert!(matches!(
+            queue.unless_going(&plan("home"), limit(2)),
+            Err(RunWaiting)
+        ));
+        let mut docs = queue
+            .unless_going(&plan("docs"), limit(2))
+            .expect("docs has no run going");
+        assert!(has_turn(&mut docs), "under the limit it asked with");
+        drop(running);
+        assert!(queue.unless_going(&plan("home"), limit(2)).is_ok());
     }
 }

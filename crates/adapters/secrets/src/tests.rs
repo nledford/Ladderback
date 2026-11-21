@@ -26,7 +26,7 @@ use nix::unistd::Pid;
 use tempfile::TempDir;
 
 use crate::command::{Stop, run_with};
-use crate::keyring_store::{Failure, KeyringStore, Memory};
+use crate::keyring_store::{Failure, KeyringStore, Lock, Memory};
 use crate::{FileReader, SystemSecrets};
 
 // ---------------------------------------------------------------- helpers
@@ -78,7 +78,9 @@ impl RealHarness {
 
 impl SecretsHarness for RealHarness {
     fn resolver(&self) -> Arc<dyn SecretResolver> {
-        Arc::new(self.system())
+        // The collection's lock stands in, as the activation probe does:
+        // the machine's own keyring can't be asked what a check needs.
+        Arc::new(self.system().with_lock_probe(|| Lock::Unlocked))
     }
 
     fn keyring(&self) -> Arc<dyn app::ports::Keyring> {
@@ -86,7 +88,11 @@ impl SecretsHarness for RealHarness {
     }
 
     fn without_keyring_service(&self) -> Arc<dyn SecretResolver> {
-        Arc::new(self.system().with_keyring(Arc::new(NoService)))
+        Arc::new(
+            self.system()
+                .with_keyring(Arc::new(NoService))
+                .with_lock_probe(|| Lock::Unknown("no session bus".to_owned())),
+        )
     }
 
     fn with_refusing_keyring(&self) -> Arc<dyn SecretResolver> {
@@ -94,7 +100,11 @@ impl SecretsHarness for RealHarness {
     }
 
     fn with_locked_keyring(&self) -> Arc<dyn SecretResolver> {
-        Arc::new(self.system().with_keyring(Arc::new(LockedSecretService)))
+        Arc::new(
+            self.system()
+                .with_keyring(Arc::new(LockedSecretService))
+                .with_lock_probe(|| Lock::Locked("the keyring is locked".to_owned())),
+        )
     }
 
     fn keyring_that_cannot_be_asked(&self, cause: KeyringCause) -> Arc<dyn Keyring> {
@@ -2398,4 +2408,75 @@ async fn a_link_out_of_the_credentials_directory_is_warned_about() {
             "{name}"
         );
     }
+}
+
+/// While a question whether the keyring is locked is out, a second ask
+/// asks nothing and answers unknown: a service that never answers leaves
+/// one blocked call, not one per ask (#1221). Once the first is answered,
+/// the keyring is asked again.
+#[tokio::test]
+async fn a_lock_question_still_out_answers_a_second_ask_as_unknown() {
+    let (asked, heard) = std::sync::mpsc::channel::<()>();
+    let (release, released) = std::sync::mpsc::channel::<()>();
+    let asked = Mutex::new(asked);
+    let released = Mutex::new(released);
+    let asks = Arc::new(AtomicUsize::new(0));
+    let counted = Arc::clone(&asks);
+    let secrets = Arc::new(SystemSecrets::default().with_lock_probe(move || {
+        counted.fetch_add(1, Ordering::SeqCst);
+        asked.lock().unwrap().send(()).unwrap();
+        released.lock().unwrap().recv().unwrap();
+        Lock::Unlocked
+    }));
+    let first = tokio::spawn({
+        let secrets = Arc::clone(&secrets);
+        async move { secrets.keyring_lock().await }
+    });
+    let _heard = tokio::task::spawn_blocking(move || heard.recv().map(|()| heard))
+        .await
+        .unwrap()
+        .unwrap();
+
+    assert_eq!(
+        secrets.keyring_lock().await,
+        app::ports::KeyringLock::Unknown
+    );
+    assert_eq!(
+        asks.load(Ordering::SeqCst),
+        1,
+        "the second ask asked nothing"
+    );
+    release.send(()).unwrap();
+    assert_eq!(first.await.unwrap(), app::ports::KeyringLock::Unlocked);
+    release.send(()).unwrap();
+    assert_eq!(
+        secrets.keyring_lock().await,
+        app::ports::KeyringLock::Unlocked,
+        "asked again once the first was answered"
+    );
+}
+
+/// A question whether the keyring is locked that panicked is lost, and
+/// the next ask asks again: one lost question never leaves every later
+/// one unknown until the daemon restarts (#1221).
+#[tokio::test]
+async fn a_lock_question_that_panicked_lets_the_next_ask_ask() {
+    let asks = Arc::new(AtomicUsize::new(0));
+    let counted = Arc::clone(&asks);
+    let secrets = SystemSecrets::default().with_lock_probe(move || {
+        if counted.fetch_add(1, Ordering::SeqCst) == 0 {
+            panic!("the first question is lost");
+        }
+        Lock::Unlocked
+    });
+
+    assert_eq!(
+        secrets.keyring_lock().await,
+        app::ports::KeyringLock::Unknown
+    );
+    assert_eq!(
+        secrets.keyring_lock().await,
+        app::ports::KeyringLock::Unlocked
+    );
+    assert_eq!(asks.load(Ordering::SeqCst), 2);
 }
