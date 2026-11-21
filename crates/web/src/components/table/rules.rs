@@ -385,11 +385,33 @@ pub enum Step {
     Down,
 }
 
+/// The most entries a kept layout is read with: more than any table has
+/// columns, so a longer value is no layout Ladderback kept.
+const KEPT_ENTRIES_MAX: usize = 64;
+
+/// The longest id a kept layout may name, in bytes.
+const ID_BYTES_MAX: usize = 64;
+
+/// What marks a hidden column's id in a kept layout.
+const HIDDEN_MARK: char = '!';
+
+/// Whether `id` is one a column could have: lower-case ASCII letters,
+/// digits and hyphens, at most [`ID_BYTES_MAX`] of them.
+fn is_id(id: &str) -> bool {
+    !id.is_empty()
+        && id.len() <= ID_BYTES_MAX
+        && id
+            .bytes()
+            .all(|byte| byte.is_ascii_lowercase() || byte.is_ascii_digit() || byte == b'-')
+}
+
 impl Layout {
     /// The caller's order of its `count` columns, every one shown.
     pub fn given(count: usize) -> Self {
-        let _ = count;
-        todo!()
+        Self {
+            order: (0..count).collect(),
+            hidden: vec![false; count],
+        }
     }
 
     /// The layout this browser `kept` for a table whose columns' ids are
@@ -400,8 +422,44 @@ impl Layout {
     /// named twice, words that are no id, more than the cap) is the given
     /// layout.
     pub fn from_kept(kept: Option<&str>, ids: &[&str]) -> Self {
-        let _ = (kept, ids);
-        todo!()
+        Self::read(kept, ids).unwrap_or_else(|| Self::given(ids.len()))
+    }
+
+    /// The layout `kept` holds, or `None` where it holds none.
+    fn read(kept: Option<&str>, ids: &[&str]) -> Option<Self> {
+        let kept = kept?;
+        let mut layout = Self {
+            order: Vec::with_capacity(ids.len()),
+            hidden: vec![false; ids.len()],
+        };
+        for (read, entry) in kept.split(',').enumerate() {
+            if read >= KEPT_ENTRIES_MAX {
+                return None;
+            }
+            let (hidden, id) = match entry.strip_prefix(HIDDEN_MARK) {
+                Some(id) => (true, id),
+                None => (false, entry),
+            };
+            if !is_id(id) {
+                return None;
+            }
+            let Some(column) = ids.iter().position(|known| *known == id) else {
+                continue;
+            };
+            if layout.order.contains(&column) {
+                return None;
+            }
+            layout.order.push(column);
+            if let Some(slot) = layout.hidden.get_mut(column) {
+                *slot = hidden;
+            }
+        }
+        for column in 0..ids.len() {
+            if !layout.order.contains(&column) {
+                layout.order.push(column);
+            }
+        }
+        Some(layout)
     }
 
     /// What the browser keeps for the layout of a table whose columns' ids
@@ -409,59 +467,92 @@ impl Layout {
     /// commas (`size,!changed,files`), or nothing for the given layout,
     /// which forgets the one kept.
     pub fn to_keep(&self, ids: &[&str]) -> Option<String> {
-        let _ = ids;
-        todo!()
+        if *self == Self::given(ids.len()) {
+            return None;
+        }
+        let entries: Vec<String> = self
+            .order
+            .iter()
+            .filter_map(|&column| {
+                let id = ids.get(column)?;
+                Some(if self.is_shown(column) {
+                    (*id).to_owned()
+                } else {
+                    format!("{HIDDEN_MARK}{id}")
+                })
+            })
+            .collect();
+        Some(entries.join(","))
     }
 
     /// Every column, shown or hidden, in its order: the Columns panel's
     /// list.
     pub fn order(&self) -> &[usize] {
-        todo!()
+        &self.order
     }
 
     /// The columns the table shows, in their order.
     pub fn shown(&self) -> Vec<usize> {
-        todo!()
+        self.order
+            .iter()
+            .copied()
+            .filter(|&column| self.is_shown(column))
+            .collect()
     }
 
     /// Whether the table shows `column`; one it doesn't have isn't.
     pub fn is_shown(&self, column: usize) -> bool {
-        let _ = column;
-        todo!()
+        self.hidden.get(column).is_some_and(|hidden| !hidden)
     }
 
     /// Where `column` stands in the order, from 0.
     pub fn position(&self, column: usize) -> Option<usize> {
-        let _ = column;
-        todo!()
+        self.order.iter().position(|&at| at == column)
     }
 
     /// The layout with `column` shown or hidden. Every column but the row
     /// header's may be hidden; the row header always shows.
     pub fn showing(&self, column: usize, shown: bool) -> Self {
-        let _ = (column, shown);
-        todo!()
+        let mut next = self.clone();
+        if let Some(hidden) = next.hidden.get_mut(column) {
+            *hidden = !shown;
+        }
+        next
     }
 
     /// Whether `column` can move a `step`: not up from the first place, nor
     /// down from the last.
     pub fn can_move(&self, column: usize, step: Step) -> bool {
-        let _ = (column, step);
-        todo!()
+        self.position(column).is_some_and(|at| match step {
+            Step::Up => at > 0,
+            Step::Down => at + 1 < self.order.len(),
+        })
     }
 
     /// The layout with `column` moved one place a `step`; the same where it
     /// can't move so.
     pub fn moved(&self, column: usize, step: Step) -> Self {
-        let _ = (column, step);
-        todo!()
+        match self.position(column) {
+            Some(at) if self.can_move(column, step) => {
+                let to = match step {
+                    Step::Up => at - 1,
+                    Step::Down => at + 1,
+                };
+                self.moved_to(column, to)
+            }
+            _ => self.clone(),
+        }
     }
 
     /// The layout with `column` moved to the place `to`, from 0, or the
     /// last place where `to` is past it.
     pub fn moved_to(&self, column: usize, to: usize) -> Self {
-        let _ = (column, to);
-        todo!()
+        let mut next = self.clone();
+        if let Some(at) = self.position(column) {
+            next.order.remove(at);
+            next.order.insert(to.min(next.order.len()), column);
+        }
+        next
     }
 }
 
@@ -469,16 +560,14 @@ impl Layout {
 /// the first item's middle, one more past each item's middle, `middles`
 /// the items' middles from the top.
 pub fn gap_at(middles: &[f64], y: f64) -> usize {
-    let _ = (middles, y);
-    todo!()
+    middles.iter().filter(|&&middle| middle < y).count()
 }
 
 /// The place a column dragged from the place `from` takes, dropped at the
 /// gap `gap` ([`gap_at`]): the gap counts the column itself, which leaves
 /// its place as it moves.
 pub fn drop_place(from: usize, gap: usize) -> usize {
-    let _ = (from, gap);
-    todo!()
+    if gap > from { gap - 1 } else { gap }
 }
 
 /// The sort the table keeps once its columns are laid out as `layout`:
@@ -486,16 +575,19 @@ pub fn drop_place(from: usize, gap: usize) -> usize {
 /// counts the row header's as 0) is hidden, so no row is ordered by a
 /// value the table no longer shows or says (decision 140).
 pub fn sort_kept(sorted: Option<Sorted>, layout: &Layout) -> Option<Sorted> {
-    let _ = (sorted, layout);
-    todo!()
+    sorted.filter(|sorted| {
+        sorted
+            .column
+            .checked_sub(1)
+            .is_none_or(|column| layout.is_shown(column))
+    })
 }
 
 /// Whether a change to the cued column of a row is seen as it comes, and
 /// so marks nothing: focus is in the row (`focused`), or the column is
 /// hidden (`!cue_shown`), where no cell could say the mark (decision 140).
 pub fn seen_as_it_comes(focused: bool, cue_shown: bool) -> bool {
-    let _ = (focused, cue_shown);
-    todo!()
+    focused || !cue_shown
 }
 
 #[cfg(test)]
