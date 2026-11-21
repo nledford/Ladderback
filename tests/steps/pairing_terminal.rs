@@ -196,7 +196,17 @@ async fn hub_moves(agent: &mut Agent) {
     // Dropping the daemon ends it and waits for it, so nothing answers at
     // the address the machine paired at.
     agent.pairing_terminal.hub = None;
-    let (child, moved, log) = serve_hub(agent, hub_root(agent), "127.0.0.1:0").await;
+    // The OS may hand back the port just released; start again until it
+    // doesn't (dropping a daemon ends it), so the move is a real one.
+    let mut started = serve_hub(agent, hub_root(agent), "127.0.0.1:0").await;
+    for _ in 0..3 {
+        if started.1 != before {
+            break;
+        }
+        drop(started);
+        started = serve_hub(agent, hub_root(agent), "127.0.0.1:0").await;
+    }
+    let (child, moved, log) = started;
     assert_ne!(moved, before);
     agent.pairing_terminal.hub = Some(child);
     agent.pairing_terminal.address = Some(moved);
