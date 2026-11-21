@@ -436,6 +436,14 @@ pub(crate) mod hub {
     pub(crate) const REVOKE_UNUSED_TOKENS: &str =
         "UPDATE pairing_tokens SET state = 'revoked' WHERE state = 'unused'";
 
+    /// The recorded fingerprint of the hub's TLS key.
+    pub(crate) const TLS_KEY: &str = "SELECT fingerprint FROM hub_tls_key WHERE id = 1";
+
+    /// Records the fingerprint of the hub's TLS key unless one is recorded.
+    /// Parameter: the fingerprint.
+    pub(crate) const RECORD_TLS_KEY: &str =
+        "INSERT INTO hub_tls_key (id, fingerprint) VALUES (1, ?) ON CONFLICT (id) DO NOTHING";
+
     /// Spends a token on a pairing. Parameters: the agent ID, the agent
     /// key, the token's pairing key.
     pub(crate) const SPEND_TOKEN: &str = concat!(

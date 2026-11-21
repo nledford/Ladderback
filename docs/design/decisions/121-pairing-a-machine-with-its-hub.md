@@ -55,7 +55,9 @@ A cancel still on its way when the dialog is left answers for it. A lapse replac
 
 The tab is named Machines; the sections above, written before it was built, call it Agents. A token the hub makes once Settings is left, which no one has seen, is canceled. Once a later token is shown, an earlier token's cancel is said only if it failed, as a cancel of an earlier unused pairing token.
 
-The address's kind is a certificate authority's only. The daemon doesn't serve the hub's built-in TLS yet (its TLS key has no caller), so there is no certificate fingerprint for a pinned token to carry, and the page says no token can pin one. The QR code and Share, the used token's status line and the agent's row, approval, the list of unused tokens, "Show all", the refusal on a page that isn't a secure context, and the agent's pairing page are not built yet. Nor is the warning that a hub behind a proxy that rewrites `Host` must turn sign-in on, which Settings and the docs give ([120, "Who may make a token, approve or re-key"](120-agent-hub-connection-security.md)).
+The address's kind follows the hub's built-in TLS (#1210). When it serves its certificate, the dialog offers both kinds in a radio group, the hub's own certificate and a certificate authority's, and chooses the hub's own first on a page that came over the built-in TLS and a certificate authority's on one that came in plain, as through a proxy. Choosing the hub's own makes a token pinned to its certificate, rewrites an `http://` address to `https://` and says the token is pinned. When the hub serves no certificate (its TLS key can't serve, [120, "The hub key"](120-agent-hub-connection-security.md)), the kind is a certificate authority's only, and the page says no token can pin one.
+
+The QR code and Share, the used token's status line and the agent's row, approval, the list of unused tokens, "Show all", the refusal on a page that isn't a secure context, and the agent's pairing page are not built yet. Nor is the warning that a hub behind a proxy that rewrites `Host` must turn sign-in on, which Settings and the docs give ([120, "Who may make a token, approve or re-key"](120-agent-hub-connection-security.md)).
 
 ## Waiting for approval
 
@@ -118,9 +120,11 @@ The token still travels from the hub to the agent, and a phone may be either end
 
 A headless machine reached over SSH has no browser. The token still goes from the hub to the agent, and a phone can be the other end. Both commands run as the operating-system user that owns the data folder, and need no sign-in and no step-up, as `set-password` doesn't (decision 99, decision 70; [120, "Who may make a token, approve or re-key"](120-agent-hub-connection-security.md)).
 
-**What is built so far (#567).** `pairing-token` writes the hub's store from its own process, so it runs only while the daemon is stopped, and refuses while the daemon holds the data folder (§9: one process per data folder); a control channel to the running daemon, or the web dialog, lifts that later. It always behaves as `--no-wait`, prints the expiry in UTC, and makes only tokens of a CA-checked address until `serve` serves the hub's built-in TLS. `pair` reads the token at the prompt or as standard input and, once the hub accepts it, says the hub holds the machine pending and returns. Waiting for approval in the terminal, the QR code, `--token-file`, `--replace-pin`, a local-time expiry and the refusal of a token on argv are not built yet. `hub-status` is built as described below.
+**What is built so far (#567).** `pairing-token` writes the hub's store from its own process, so it runs only while the daemon is stopped, and refuses while the daemon holds the data folder (§9: one process per data folder); a control channel to the running daemon, or the web dialog, lifts that later. It always behaves as `--no-wait` and prints the expiry in UTC. For an `https://` address it makes a token pinned to the certificate of the hub's built-in TLS, taking the TLS key as `serve --hub` does (making it at the first start), and with `--certificate-authority` a token of a CA-checked address; a loopback `http://` address pins nothing. A hub whose TLS key can't serve makes no pinned token and says how to restore the key.
 
-Until `serve` serves the hub's built-in TLS, the messages for `hub-untrusted`, `plain-address`, `binding-unavailable` and `hub-tls-refused` offer only the CA-checked way: a proxy that serves https with a certificate an authority signed. The table's built-in-TLS alternatives are for when it does.
+`pair` reads the token at the prompt or as standard input and, once the hub accepts it, says the hub holds the machine pending and returns. Waiting for approval in the terminal, the QR code, `--token-file`, `--replace-pin`, a local-time expiry and the refusal of a token on argv are not built yet. `hub-status` is built as described below.
+
+`serve --hub` serves its built-in TLS (#1210), but the messages for `hub-untrusted`, `plain-address`, `binding-unavailable` and `hub-tls-refused` still offer only the CA-checked way: a proxy that serves https with a certificate an authority signed. The table's built-in-TLS alternatives join them in a later change.
 
 ### `ladderback pairing-token` (on the hub)
 
@@ -589,7 +593,7 @@ Feature: Pairing a machine with its hub
     When the person edits the address in the dialog to the proxy's and chooses a certificate authority's certificate
     Then the token is for a CA address
     And an agent that pairs through the proxy is never told not to pair
-    When the person runs the hub's pairing-token command with that address and --kind ca
+    When the person runs the hub's pairing-token command with that address and --certificate-authority
     Then it makes the same kind of token
 ```
 
