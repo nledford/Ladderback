@@ -976,6 +976,23 @@ fn keyring_unlocks(agent: &mut Agent, seconds: i64) {
         .lock_keyring_until(agent.clock.clone(), at);
 }
 
+#[given(expr = "the keyring service goes away {int} seconds after the daemon started")]
+fn keyring_service_goes_away(agent: &mut Agent, seconds: i64) {
+    let at = agent.secrets.after_start(seconds);
+    agent
+        .secrets
+        .store
+        .end_keyring_service_at(agent.clock.clone(), at);
+}
+
+#[given(expr = "the daemon takes {int} seconds to say whether the keyring is locked")]
+fn lock_answers_are_slow(agent: &mut Agent, seconds: i64) {
+    agent
+        .secrets
+        .store
+        .answer_lock_questions_after(agent.clock.clone(), SignedDuration::from_secs(seconds));
+}
+
 #[given("the keyring says it is unlocked, but its entries stay locked")]
 fn entries_stay_locked(agent: &mut Agent) {
     agent.secrets.store.keep_entries_locked();
