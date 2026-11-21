@@ -40,7 +40,7 @@ The other recipes:
 | `just translations [tags]` | Each translation's missing, unreviewed and stale messages |
 | `just accept-translations <tag> <ids>` | Records the English of messages accepted after review (`scripts/translations.ts`) |
 | `just serve` | The daemon on `127.0.0.1:9898` with your real configuration |
-| `just try [args]` | The daemon on scratch folders and a free port; arguments replace `serve`, as in `just try import-profile demo.toml` |
+| `just try [--demo] [args]` | The daemon on scratch folders and a free port; arguments replace `serve`, as in `just try import-profile demo.toml`. `--demo`: on folders of their own, with a repository holding months of history, for screenshots and demos ([development.md §13.9](docs/design/development.md#139-dependencies-license-and-fixtures)) |
 | `just install [args]` | Installs the release binary, with the release web UI, from this checkout; arguments go to `cargo install` |
 | `just install-restart [args]` | `install` into a staging folder, then, once the service has nothing running or queued, moves the new binary into place, restarts the service and checks it runs the new build; `--now`, `--wait <minutes>`. `INSTALL_RESTART_ADDRESS`, `INSTALL_RESTART_JUST` and `INSTALL_RESTART_LADDERBACK` try it against a `just try` daemon (`scripts/install-restart.ts`) |
 | `just release-preview` | The next release's bump and changelog entry (§12.1) |
