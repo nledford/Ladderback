@@ -346,6 +346,55 @@ fn cases() -> Vec<Case> {
             ),
         ),
         broken(
+            "a hook level nobody knows",
+            "error_args",
+            error_of(
+                "hook-failed",
+                text(
+                    r#"[["level",{"type":"text","value":"machine"}],["position",{"type":"text","value":"1"}]]"#,
+                ),
+                Cell::Null,
+            ),
+        ),
+        broken(
+            "a hook level without its place",
+            "error_args",
+            error_of(
+                "hook-failed",
+                text(r#"[["level",{"type":"text","value":"plan"}]]"#),
+                Cell::Null,
+            ),
+        ),
+        broken(
+            "a hook place counted from 0",
+            "error_args",
+            error_of(
+                "hook-failed",
+                text(
+                    r#"[["level",{"type":"text","value":"plan"}],["position",{"type":"text","value":"0"}]]"#,
+                ),
+                Cell::Null,
+            ),
+        ),
+        broken(
+            "a hook end nobody knows",
+            "error_args",
+            error_of(
+                "hook-failed",
+                text(r#"[["ended",{"type":"text","value":"crashed"}]]"#),
+                Cell::Null,
+            ),
+        ),
+        broken(
+            "a hook exit without its status",
+            "error_args",
+            error_of(
+                "hook-failed",
+                text(r#"[["ended",{"type":"text","value":"exit"}]]"#),
+                Cell::Null,
+            ),
+        ),
+        broken(
             "an engine failure without its message",
             "error_detail",
             error_of("operation-failed", text("[]"), Cell::Null),

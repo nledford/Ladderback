@@ -6,8 +6,11 @@ mod support;
 
 use app::ports::{BackupSummary, CheckSummary, EngineResult, PrunePlanSummary, PruneSummary};
 use domain::Timestamp;
+use std::num::NonZeroU32;
+
 use domain::execution::{
-    FailureReason, Operation, OperationKind, Target, Transition, Trigger, Warning, WarningKind,
+    FailureReason, HookEnd, HookLevel, HookPlace, Operation, OperationKind, Target, Transition,
+    Trigger, Warning, WarningKind,
 };
 use serde_json::{Value, json};
 use support::*;
@@ -332,13 +335,46 @@ fn failures() -> Vec<(
             None,
         ),
         (
-            FailureReason::HookFailed { exit_code: Some(3) },
+            FailureReason::HookFailed {
+                hook: Some(HookPlace {
+                    level: HookLevel::Plan,
+                    position: NonZeroU32::new(2).expect("a place"),
+                }),
+                ended: Some(HookEnd::Exited { code: 3 }),
+            },
             "hook-failed",
-            r#"[["exit_code",{"type":"text","value":"3"}]]"#,
+            r#"[["level",{"type":"text","value":"plan"}],["position",{"type":"text","value":"2"}],["ended",{"type":"text","value":"exit"}],["exit_code",{"type":"text","value":"3"}]]"#,
             None,
         ),
         (
-            FailureReason::HookFailed { exit_code: None },
+            FailureReason::HookFailed {
+                hook: Some(HookPlace {
+                    level: HookLevel::Agent,
+                    position: NonZeroU32::new(1).expect("a place"),
+                }),
+                ended: Some(HookEnd::Signalled),
+            },
+            "hook-failed",
+            r#"[["level",{"type":"text","value":"agent"}],["position",{"type":"text","value":"1"}],["ended",{"type":"text","value":"signal"}]]"#,
+            None,
+        ),
+        (
+            FailureReason::HookFailed {
+                hook: Some(HookPlace {
+                    level: HookLevel::Repository,
+                    position: NonZeroU32::new(3).expect("a place"),
+                }),
+                ended: Some(HookEnd::NotStarted),
+            },
+            "hook-failed",
+            r#"[["level",{"type":"text","value":"repository"}],["position",{"type":"text","value":"3"}],["ended",{"type":"text","value":"not-started"}]]"#,
+            None,
+        ),
+        (
+            FailureReason::HookFailed {
+                hook: None,
+                ended: None,
+            },
             "hook-failed",
             "[]",
             None,

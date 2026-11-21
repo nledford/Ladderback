@@ -19,7 +19,8 @@
 use api::MsgArg;
 use domain::execution::refusal::SettingRefusal;
 use domain::execution::{
-    FailureReason, OperationKind, OperationStatus, RepositoryHalf, Transition, Trigger, WarningKind,
+    FailureReason, HookEnd, OperationKind, OperationStatus, RepositoryHalf, Transition, Trigger,
+    WarningKind,
 };
 
 use crate::error_args;
@@ -215,9 +216,12 @@ pub(crate) fn encode_failure(
         ),
         FailureReason::EngineStartTimedOut => ("engine-start-timed-out", Vec::new(), None),
         FailureReason::EngineExitTimedOut => ("engine-exit-timed-out", Vec::new(), None),
-        FailureReason::HookFailed { exit_code } => (
+        FailureReason::HookFailed { ended, .. } => (
             "hook-failed",
-            exit_code.map_or_default(|code| text_arg("exit_code", code.to_string())),
+            match ended {
+                Some(HookEnd::Exited { code }) => text_arg("exit_code", code.to_string()),
+                _ => Vec::new(),
+            },
             None,
         ),
         FailureReason::SecretsTooLargeToMask { field, limit } => (
@@ -363,7 +367,8 @@ pub(crate) fn decode_failure(
         "no-location-rule-holds" => Ok(FailureReason::NoLocationRuleHolds),
         "password-not-accepted" => Ok(FailureReason::PasswordNotAccepted),
         "hook-failed" => Ok(FailureReason::HookFailed {
-            exit_code: exit_code(&args)?,
+            hook: None,
+            ended: exit_code(&args)?.map(|code| HookEnd::Exited { code }),
         }),
         "secrets-too-large-to-mask" => Ok(FailureReason::SecretsTooLargeToMask {
             field: field(&args)?,

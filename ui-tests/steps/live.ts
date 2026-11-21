@@ -6,7 +6,7 @@
 
 import assert from "node:assert/strict";
 import { once } from "node:events";
-import { cp, mkdir, mkdtemp, writeFile } from "node:fs/promises";
+import { cp, mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 
@@ -207,6 +207,93 @@ Given(
     await serveDemoPlans(this, [plan], "tiny", {}, {}, {}, after);
   },
 );
+
+/** The `[plans.hooks]` lines for the last plan written: one before-hook that
+ *  runs `script` under `/bin/sh` with that `on-failure`. */
+function beforeHook(script: string, onFailure: string): string[] {
+  return [
+    "[plans.hooks]",
+    `run-before = [{ command = "/bin/sh", args = ["-c", ${JSON.stringify(script)}], on-failure = ${JSON.stringify(onFailure)} }]`,
+    "",
+  ];
+}
+
+/** The scratch folder of a scenario's waiting before-hooks, where the file
+ *  that lets them go arrives. */
+const goFolders = new WeakMap<BrowserWorld, string>();
+
+After(async function (this: BrowserWorld) {
+  const folder = goFolders.get(this);
+  if (folder) await rm(folder, { recursive: true, force: true });
+});
+
+// A before-hook whose words go to both of its outputs, so that a page that
+// showed either would show them.
+Given(
+  "a demo plan {string} whose before-hook says {string} and exits {int}, with on-failure {word}",
+  async function (this: BrowserWorld, plan: string, said: string, status: number, onFailure: string) {
+    const script = `echo '${said}'; echo '${said}' >&2; exit ${status}`;
+    await serveDemoPlans(this, [plan], "tiny", {}, {}, {}, beforeHook(script, onFailure));
+  },
+);
+
+// The hook waits for a file in a scratch folder of its own, so the backup
+// stays before its start until a step lets it go, for a minute at most so
+// that a scenario that never does leaves no hook behind; then it fails, and
+// its `on-failure` says to go on with a warning.
+Given(
+  "a demo plan {string} whose before-hooks wait until they are let go, then warn",
+  async function (this: BrowserWorld, plan: string) {
+    const folder = await mkdtemp(path.join(tmpdir(), "ladderback-ui-go-"));
+    goFolders.set(this, folder);
+    const go = JSON.stringify(path.join(folder, "go"));
+    const script = `n=0; while [ ! -e ${go} ] && [ $n -lt 600 ]; do sleep 0.1; n=$((n + 1)); done; exit 3`;
+    await serveDemoPlans(this, [plan], "tiny", {}, {}, {}, beforeHook(script, "warn"));
+  },
+);
+
+When("the before-hooks of the plan {string} are let go", async function (this: BrowserWorld, _plan: string) {
+  const folder = goFolders.get(this);
+  assert.ok(folder, "no Given made the plan's before-hooks wait");
+  await writeFile(path.join(folder, "go"), "");
+});
+
+Given("a backup of the plan {string} has been asked for", async function (this: BrowserWorld, plan: string) {
+  assert.ok(this.baseUrl, "this scenario's daemon was never started");
+  const response = await fetch(new URL("/api/v1/operations", this.baseUrl), {
+    method: "POST",
+    headers: { Origin: new URL(this.baseUrl).origin, "Content-Type": "application/json" },
+    body: JSON.stringify({ plan }),
+  });
+  assert.equal(response.status, 202, `the backup of ${plan} was refused: ${await response.text()}`);
+});
+
+/** The page's readings of the history held back, by scenario: none of them
+ *  is ever answered. */
+const heldReads = new WeakMap<BrowserWorld, { held: number }>();
+
+// From here on, every reading of the history the page asks for waits
+// unanswered, so what the page shows next it can only have heard live.
+When("the daemon's next answer to a reading of the history is held back", async function (this: BrowserWorld) {
+  const state = { held: 0 };
+  heldReads.set(this, state);
+  await this.page.route(
+    (url) => url.pathname === "/api/v1/operations",
+    async (route) => {
+      if (route.request().method() !== "GET") {
+        await route.continue();
+        return;
+      }
+      state.held += 1;
+    },
+  );
+});
+
+Then("the page's reading of the history is still held back", function (this: BrowserWorld) {
+  const state = heldReads.get(this);
+  assert.ok(state, "no step held back the page's readings of the history");
+  assert.ok(state.held > 0, "the page never read the history again, so nothing was held back");
+});
 
 // The scripted daemon (support/scripted-daemon.ts): a Given says what its
 // history holds, and its Whens say what its events stream tells the page and

@@ -245,9 +245,11 @@ pub fn refused(
 
 #[cfg(test)]
 mod tests {
+    use std::num::NonZeroU32;
+
     use domain::execution::{
-        FailureReason, Operation, OperationKind, OperationStatus, RepositoryHalf, Target,
-        Transition, Trigger, Warning, WarningKind,
+        FailureReason, HookEnd, HookLevel, HookPlace, Operation, OperationKind, OperationStatus,
+        RepositoryHalf, Target, Transition, Trigger, Warning, WarningKind,
     };
     use domain::{OperationId, Timestamp, Uuid};
 
@@ -463,8 +465,33 @@ mod tests {
                 vec![text("repository not found")],
             ),
             (
-                F::HookFailed { exit_code: Some(3) },
-                C::OperationFailed,
+                F::HookFailed {
+                    hook: Some(HookPlace {
+                        level: HookLevel::Plan,
+                        position: NonZeroU32::new(2).unwrap(),
+                    }),
+                    ended: Some(HookEnd::Exited { code: 3 }),
+                },
+                C::HookFailed,
+                vec![text("plan"), text("2"), text("exit"), text("3")],
+            ),
+            (
+                F::HookFailed {
+                    hook: Some(HookPlace {
+                        level: HookLevel::Agent,
+                        position: NonZeroU32::new(1).unwrap(),
+                    }),
+                    ended: Some(HookEnd::Signalled),
+                },
+                C::HookFailed,
+                vec![text("agent"), text("1"), text("signal")],
+            ),
+            (
+                F::HookFailed {
+                    hook: None,
+                    ended: None,
+                },
+                C::HookFailed,
                 vec![],
             ),
             (
@@ -590,8 +617,52 @@ mod tests {
                 ErrorDto::new(C::OperationFailed, [], said("no key opens the repository")),
             ),
             (
-                F::HookFailed { exit_code: Some(3) },
-                ErrorDto::new(C::OperationFailed, [], None),
+                F::HookFailed {
+                    hook: Some(HookPlace {
+                        level: HookLevel::Plan,
+                        position: NonZeroU32::new(2).unwrap(),
+                    }),
+                    ended: Some(HookEnd::Exited { code: 3 }),
+                },
+                ErrorDto::new(
+                    C::HookFailed,
+                    [
+                        ("level", text("plan")),
+                        ("position", text("2")),
+                        ("ended", text("exit")),
+                        ("exit_code", text("3")),
+                    ],
+                    None,
+                ),
+            ),
+            (
+                F::HookFailed {
+                    hook: Some(HookPlace {
+                        level: HookLevel::Repository,
+                        position: NonZeroU32::new(1).unwrap(),
+                    }),
+                    ended: Some(HookEnd::TimedOut),
+                },
+                ErrorDto::new(
+                    C::HookFailed,
+                    [
+                        ("level", text("repository")),
+                        ("position", text("1")),
+                        ("ended", text("timeout")),
+                    ],
+                    None,
+                ),
+            ),
+            (
+                F::HookFailed {
+                    hook: None,
+                    ended: Some(HookEnd::Exited { code: 3 }),
+                },
+                ErrorDto::new(
+                    C::HookFailed,
+                    [("ended", text("exit")), ("exit_code", text("3"))],
+                    None,
+                ),
             ),
             (
                 F::EngineExited { exit_code: Some(3) },

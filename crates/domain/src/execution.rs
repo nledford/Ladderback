@@ -170,9 +170,13 @@ pub enum FailureReason {
     /// exit in time; it was killed.
     EngineExitTimedOut,
     /// A `run-before` hook with `on-failure = "error"` stopped the operation
-    /// before the engine started (I4, §6.1). `exit_code` is the hook's exit
-    /// status, or `None` when it timed out or could not be started.
-    HookFailed { exit_code: Option<i32> },
+    /// before the engine started (I4, §6.1): which hook it was and how it
+    /// ended, never what it wrote. Either is `None` only for a failure an
+    /// earlier version kept, which recorded no more than the exit status.
+    HookFailed {
+        hook: Option<HookPlace>,
+        ended: Option<HookEnd>,
+    },
     /// The engine refused to start the job: its secrets, with the proxy
     /// credentials of the engine's environment, come to more than `limit`
     /// bytes ([`MAX_MASKED_BYTES`](crate::secrets::MAX_MASKED_BYTES)), more
@@ -274,6 +278,67 @@ impl RepositoryHalf {
         [Self::Cold, Self::Hot]
             .into_iter()
             .find(|half| half.code() == code)
+    }
+}
+
+/// Which hook of a run's lists it is (§6.1): the level whose list holds it
+/// and its place in that list, counted from 1, so a person finds it in their
+/// configuration.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct HookPlace {
+    pub level: HookLevel,
+    pub position: std::num::NonZeroU32,
+}
+
+/// Whose hooks a hook is one of (§6.1): the agent's, the repository's or the
+/// plan's.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub enum HookLevel {
+    Agent,
+    Repository,
+    Plan,
+}
+
+impl HookLevel {
+    /// The level's name on the wire and in the operation log: `agent`,
+    /// `repository` or `plan`.
+    pub fn code(self) -> &'static str {
+        todo!()
+    }
+
+    /// The level [`code`](Self::code) names, or `None` for any other text.
+    pub fn parse(_code: &str) -> Option<Self> {
+        todo!()
+    }
+}
+
+/// How a failing hook ended: it exited with a status other than zero, a
+/// signal ended it, it ran out of time, or it could not be started.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub enum HookEnd {
+    Exited { code: i32 },
+    Signalled,
+    TimedOut,
+    NotStarted,
+}
+
+impl HookEnd {
+    /// How it ended, as the wire and the operation log name it: `exit`,
+    /// `signal`, `timeout` or `not-started`. An exit's status is
+    /// [`exit_code`](Self::exit_code).
+    pub fn code(self) -> &'static str {
+        todo!()
+    }
+
+    /// The exit status, for a hook that exited.
+    pub fn exit_code(self) -> Option<i32> {
+        todo!()
+    }
+
+    /// The end [`code`](Self::code) names, with `exit_code` for an exit, or
+    /// `None` for any other text or an exit without its status.
+    pub fn parse(_code: &str, _exit_code: Option<i32>) -> Option<Self> {
+        todo!()
     }
 }
 

@@ -6,7 +6,8 @@ use std::sync::Arc;
 use domain::execution::deadline::Deadline;
 use domain::execution::full_disk_access::FullDiskAccess;
 use domain::execution::{
-    FailureReason, Operation, OperationKind, OperationStatus, Target, Trigger, Warning, WarningKind,
+    FailureReason, HookEnd, Operation, OperationKind, OperationStatus, Target, Trigger, Warning,
+    WarningKind,
 };
 use domain::planning::{HookEntry, OnFailure};
 use domain::{OperationId, RepositoryId, SignedDuration, SnapshotId};
@@ -645,7 +646,8 @@ impl RunOperation {
                 self.fail(
                     run,
                     FailureReason::HookFailed {
-                        exit_code: exit_code_of(&outcome),
+                        hook: None,
+                        ended: exit_code_of(&outcome).map(|code| HookEnd::Exited { code }),
                     },
                 );
                 run.stopped_by_hook = true;

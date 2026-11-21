@@ -1204,8 +1204,30 @@ mod tests {
                 unavailable_with(ErrorCode::EngineExitTimedOut, Vec::new(), None),
             ),
             (
-                FailureReason::HookFailed { exit_code: Some(1) },
-                unavailable_with(ErrorCode::OperationFailed, Vec::new(), None),
+                FailureReason::HookFailed {
+                    hook: Some(domain::execution::HookPlace {
+                        level: domain::execution::HookLevel::Repository,
+                        position: std::num::NonZeroU32::new(2).unwrap(),
+                    }),
+                    ended: Some(domain::execution::HookEnd::Exited { code: 1 }),
+                },
+                unavailable_with(
+                    ErrorCode::HookFailed,
+                    vec![
+                        ("level", text("repository")),
+                        ("position", text("2")),
+                        ("ended", text("exit")),
+                        ("exit_code", text("1")),
+                    ],
+                    None,
+                ),
+            ),
+            (
+                FailureReason::HookFailed {
+                    hook: None,
+                    ended: None,
+                },
+                unavailable_with(ErrorCode::HookFailed, Vec::new(), None),
             ),
             (
                 FailureReason::RepositoryExists,
