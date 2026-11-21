@@ -104,7 +104,7 @@ fn rustic_dir(env: &impl Fn(&str) -> Option<OsString>) -> Option<PathBuf> {
 
 #[cfg(all(unix, not(target_os = "macos")))]
 fn rustic_dir(env: &impl Fn(&str) -> Option<OsString>) -> Option<PathBuf> {
-    if let Some(dir) = env_dir(env, "XDG_CONFIG_HOME") {
+    if let Some(dir) = xdg_dir(env, "XDG_CONFIG_HOME") {
         return Some(dir.join("rustic"));
     }
     home(env).map(|home| home.join(".config/rustic"))
@@ -121,6 +121,15 @@ fn env_dir(env: &impl Fn(&str) -> Option<OsString>, var: &str) -> Option<PathBuf
     env(var)
         .filter(|value| !value.is_empty())
         .map(PathBuf::from)
+}
+
+/// An XDG base directory variable's value, when it is a full path. The
+/// specification: a relative path in one is invalid and ignored. It would
+/// name a folder under the daemon's working directory, which depends on how
+/// the daemon was started.
+#[cfg(all(unix, not(target_os = "macos")))]
+fn xdg_dir(env: &impl Fn(&str) -> Option<OsString>, var: &str) -> Option<PathBuf> {
+    env_dir(env, var).filter(|dir| dir.is_absolute())
 }
 
 #[derive(Clone, Copy)]
@@ -151,11 +160,7 @@ fn platform_dir(env: &impl Fn(&str) -> Option<OsString>, folder: Folder) -> Opti
         Folder::Data => ("XDG_DATA_HOME", ".local/share"),
         Folder::Cache => ("XDG_CACHE_HOME", ".cache"),
     };
-    // The specification: a relative path in these variables is invalid and
-    // ignored. Config and data take one as it is (an older choice, kept
-    // here); the cache folder follows the specification.
-    let set = env_dir(env, var).filter(|dir| !matches!(folder, Folder::Cache) || dir.is_absolute());
-    if let Some(dir) = set {
+    if let Some(dir) = xdg_dir(env, var) {
         return Some(dir.join("ladderback"));
     }
     home(env).map(|home| home.join(fallback).join("ladderback"))

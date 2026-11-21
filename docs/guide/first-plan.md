@@ -3,7 +3,7 @@
 A plan says what to back up, into which repository, when, and how long to keep its snapshots. A plan backs up to a repository by its name, so make one in this order:
 
 1. **Connect a repository** on the Repositories page (the link at the top of every page): fill in its location and password, test it, give it a name such as `nas`, and connect it, or create a new one there. To have this machine forget old snapshots by your plans' keep policies, turn on "Maintain this repository from this machine", unless another machine already maintains it.
-2. **Add a plan to `config.toml`**, in Ladderback's config folder: `~/.config/ladderback` on Linux, `~/Library/Application Support/ladderback` on macOS (`$XDG_CONFIG_HOME/ladderback` on Linux when that is set, and `$LADDERBACK_CONFIG_DIR` on either when that is set). The Repositories page wrote the repository there; add a `[[plans]]` table after it. Ladderback reads the file again by itself, with no restart, and its start page lists the plan with its next run.
+2. **Add a plan to `config.toml`**, in Ladderback's config folder: `~/.config/ladderback` on Linux, `~/Library/Application Support/ladderback` on macOS (`$XDG_CONFIG_HOME/ladderback` on Linux when that is set to a full path, and `$LADDERBACK_CONFIG_DIR` on either when that is set). The Repositories page wrote the repository there; add a `[[plans]]` table after it. Ladderback reads the file again by itself, with no restart, and its start page lists the plan with its next run.
 
 This is a whole `config.toml` with one plan, which backs up a home folder every hour and leaves out caches and game libraries; on macOS, change `/home/demo` to `/Users/demo` in `iglobs` too:
 
