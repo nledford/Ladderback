@@ -1124,12 +1124,15 @@ mod tests {
     /// A hub serving its built-in TLS beyond loopback says its address over
     /// `https://`, the only way another machine reaches it; on loopback,
     /// where plain HTTP is served too, and without the TLS, over `http://`.
+    /// An unspecified address is no address another machine can use, and
+    /// on this one it reaches loopback.
     #[test]
     fn a_hub_beyond_loopback_says_its_address_over_tls() {
         for (bound, built_in_tls, url) in [
             ("192.0.2.10:9898", true, "https://192.0.2.10:9898"),
             ("[2001:db8::1]:9898", true, "https://[2001:db8::1]:9898"),
-            ("0.0.0.0:9898", true, "https://0.0.0.0:9898"),
+            ("0.0.0.0:9898", true, "http://0.0.0.0:9898"),
+            ("[::]:9898", true, "http://[::]:9898"),
             ("127.0.0.1:9898", true, "http://127.0.0.1:9898"),
             ("[::1]:9898", true, "http://[::1]:9898"),
             ("192.0.2.10:9898", false, "http://192.0.2.10:9898"),
