@@ -310,11 +310,28 @@ impl PlanRunner {
     /// its own so the schedule and the queue went on: it resolves again
     /// with that wait armed, is built again from the configuration as it
     /// stands once the keyring is unlocked, runs in a place it takes then,
-    /// or is refused as any run of the schedule is (#1221).
-    async fn start_parked(&self, plan: PlanId, trigger: Trigger, unlock: UnlockWait) {
+    /// or is refused as any run of the schedule is (#1221). `refused_on` is
+    /// the repository the run was refused for, as the configuration it
+    /// started under named it: a plan that backs up to another by now
+    /// doesn't start, and none of its secrets is resolved to find out
+    /// (#1247 is whether it should run on the new one).
+    async fn start_parked(
+        &self,
+        plan: PlanId,
+        trigger: Trigger,
+        unlock: UnlockWait,
+        refused_on: Option<PlanRepository>,
+    ) {
         let Some(config) = self.config_for_a_run(&plan, &trigger).await else {
             return;
         };
+        let on = PlanRepository::of(&config, &plan);
+        if let (Some(now), Some(then)) = (&on, &refused_on)
+            && now.is_other_than(then)
+        {
+            log_moved(&plan, &trigger);
+            return;
+        }
         // The place it waited in was given up, and nothing is taken while
         // it waits: one of its own may have run meanwhile.
         let rebuilt = match self.backup_of(&config, &plan, &trigger, Some(unlock)).await {
@@ -336,12 +353,7 @@ impl PlanRunner {
                     Err(RunWaiting) => log_not_started(&plan, &trigger, &StartError::RunWaiting),
                 }
             }
-            Ok(None) => log::warn!(
-                "{} of plan {} didn't start: the plan now backs up to another repository than \
-                 the one whose keyring it waited for",
-                run_named(&trigger),
-                plan.as_str()
-            ),
+            Ok(None) => log_moved(&plan, &trigger),
             Err(Unbuilt::Secret(secret)) => {
                 self.refused_for_secret(&plan, &trigger, *secret).await;
             }
@@ -370,11 +382,14 @@ impl PlanRunner {
                 StartError::Unavailable { code, args, detail }
             }))
         })?;
-        let on = |config: &domain::planning::AgentConfig| {
-            config.plan(plan).map(|plan| plan.repository.clone())
-        };
+        // The recorded IDs say whether the repository behind the plan's
+        // alias is another: an alias can stay while what it names changes.
         // A deleted plan is left to the build, which refuses it.
-        if on(&fresh).is_some_and(|now| Some(now) != on(waited_config)) {
+        if let Some(now) = PlanRepository::of(&fresh, plan)
+            && PlanRepository::of(waited_config, plan)
+                .as_ref()
+                .is_none_or(|then| now.is_other_than(then))
+        {
             return Ok(None);
         }
         let built = self.backup_of(&fresh, plan, trigger, None).await?;
@@ -464,6 +479,14 @@ impl PlanRunner {
                 )));
             }
         };
+        // A plan that backs up to another repository than the one the
+        // backup was queued on isn't run there under a record of the old,
+        // and none of its secrets is resolved to find that out.
+        if let Some(now) = PlanRepository::of(&config, plan)
+            && !operation.target().is_on(now.id.as_ref())
+        {
+            return Waited::Unrunnable("its plan now backs up to another repository".to_owned());
+        }
         let rebuilt = match self.backup_of(&config, plan, trigger, Some(unlock)).await {
             Ok(waited) => {
                 self.rebuilt_after_wait(&config, &waited, plan, trigger)
@@ -633,6 +656,45 @@ enum Waited {
     Unrunnable(String),
 }
 
+/// The repository a plan backs up to, as a configuration names it: the
+/// alias, and the ID its entry records once the daemon opened it.
+struct PlanRepository {
+    alias: domain::RepositoryAlias,
+    id: Option<domain::RepositoryId>,
+}
+
+impl PlanRepository {
+    /// The repository `plan` backs up to in `config`; `None` when the
+    /// plan, or the repository it names, isn't there.
+    fn of(config: &domain::planning::AgentConfig, plan: &PlanId) -> Option<Self> {
+        let alias = config.plan(plan)?.repository.clone();
+        let id = config.repository(&alias)?.id.clone();
+        Some(Self { alias, id })
+    }
+
+    /// Whether this is another repository than `then` was. Entries that
+    /// both record an ID are told apart by it, since an alias can stay
+    /// while the repository behind it changes, and change while it
+    /// doesn't; otherwise the alias is all there is to go by.
+    fn is_other_than(&self, then: &Self) -> bool {
+        match (&self.id, &then.id) {
+            (Some(now), Some(then)) => now != then,
+            _ => self.alias != then.alias,
+        }
+    }
+}
+
+/// Logs that plan `plan`'s parked run didn't start: the plan backs up to
+/// another repository than the one whose keyring it waited for.
+fn log_moved(plan: &PlanId, trigger: &Trigger) {
+    log::warn!(
+        "{} of plan {} didn't start: the plan now backs up to another repository than \
+         the one whose keyring it waited for",
+        run_named(trigger),
+        plan.as_str()
+    );
+}
+
 /// Why a plan's backup couldn't be built, so its run doesn't start.
 pub(super) enum Unbuilt {
     /// Refused as a request to start it is, and nothing is recorded.
@@ -780,9 +842,12 @@ impl PlanRuns for PlanRunner {
                     drop(place);
                     let runner = self.clone();
                     let plan = plan.clone();
+                    let refused_on = PlanRepository::of(&config, &plan);
                     let frozen = self.runs.clone();
                     tokio::spawn(frozen.until_frozen(async move {
-                        runner.start_parked(plan, trigger, unlock).await;
+                        runner
+                            .start_parked(plan, trigger, unlock, refused_on)
+                            .await;
                     }));
                 }
                 _ => {
