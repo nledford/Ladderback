@@ -5,7 +5,8 @@
 
 use std::sync::Arc;
 
-use api::{PairedHubDto, PairingDto};
+use api::{PairedHubDto, PairingDto, TokenCertificateDto};
+use domain::fleet::{Fingerprint, TokenTls};
 
 use crate::ports::{Identity, IdentityError};
 
@@ -21,10 +22,28 @@ impl PairingState {
     }
 
     /// Paired, and with which hub, when the machine holds a pin; not paired
-    /// otherwise. A pin that can't be read is the port's error.
+    /// otherwise. A pin that can't be read is the port's error. Only what
+    /// the pin holds in public is named: the address, the hub key's
+    /// fingerprint and how the certificate is checked (I4).
     pub async fn read(&self) -> Result<PairingDto, IdentityError> {
-        let _ = (&self.identity, PairedHubDto::clone);
-        todo!("read the pin")
+        let Some(pin) = self.identity.pin().await? else {
+            return Ok(PairingDto {
+                paired: false,
+                hub: None,
+            });
+        };
+        let certificate = match pin.tls {
+            TokenTls::Ca => TokenCertificateDto::Ca,
+            TokenTls::Pinned(_) => TokenCertificateDto::Pinned,
+        };
+        Ok(PairingDto {
+            paired: true,
+            hub: Some(PairedHubDto {
+                address: pin.address.as_str().to_owned(),
+                fingerprint: Fingerprint::of_key(&pin.hub_key).to_string(),
+                certificate,
+            }),
+        })
     }
 }
 

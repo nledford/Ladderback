@@ -2879,6 +2879,74 @@
   {
     "annotations": {
       "destructiveHint": false,
+      "idempotentHint": true,
+      "openWorldHint": false,
+      "readOnlyHint": true
+    },
+    "description": "Whether this machine is paired with a hub, as its pin says: the hub's address, the fingerprint of the hub's key and how its certificate is checked. Never a token or a secret. It doesn't connect to the hub, so it can't say whether the hub has approved the machine: `ladderback hub-status` on the machine says that. The resource ladderback://pairing holds the steps of pairing.",
+    "inputSchema": {
+      "additionalProperties": false,
+      "properties": {},
+      "type": "object"
+    },
+    "name": "pairing_state",
+    "outputSchema": {
+      "$defs": {
+        "PairedHubDto": {
+          "additionalProperties": false,
+          "properties": {
+            "address": {
+              "type": "string"
+            },
+            "certificate": {
+              "$ref": "#/$defs/TokenCertificateDto"
+            },
+            "fingerprint": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "address",
+            "fingerprint",
+            "certificate"
+          ],
+          "type": "object"
+        },
+        "TokenCertificateDto": {
+          "enum": [
+            "pinned",
+            "ca"
+          ],
+          "type": "string"
+        }
+      },
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "additionalProperties": false,
+      "properties": {
+        "hub": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/PairedHubDto"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "paired": {
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "paired"
+      ],
+      "type": "object"
+    },
+    "title": "Pairing state"
+  },
+  {
+    "annotations": {
+      "destructiveHint": false,
       "idempotentHint": false,
       "openWorldHint": false,
       "readOnlyHint": false

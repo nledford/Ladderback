@@ -628,8 +628,9 @@ impl Backend for Connect {
         self.get("api/v1/permissions", &[], &[]).await
     }
 
+    /// The route asks for Backups of a token, as the status does.
     async fn pairing(&self) -> Result<api::PairingDto, ErrorDto> {
-        todo!("read GET /api/v1/pairing")
+        self.get("api/v1/pairing", &[], &[]).await
     }
 }
 

@@ -361,6 +361,7 @@ async fn both_backends_refuse_alike_what_needs_backups_without_it() {
             connect.export_profile("home".to_owned()).await.map(drop),
             in_process.export_profile("home".to_owned()).await.map(drop),
         ),
+        #[cfg(feature = "hub")]
         (
             "pairing",
             connect.pairing().await.map(drop),

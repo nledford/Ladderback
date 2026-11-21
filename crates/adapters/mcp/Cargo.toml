@@ -7,6 +7,14 @@ rust-version.workspace = true
 license.workspace = true
 publish.workspace = true
 
+[features]
+# Pairing with a hub (§16, decision 122): the tool `pairing_state` and the
+# resource `ladderback://pairing`. On by default for this crate's own tests;
+# the workspace dependency turns it off, `ladderback`'s `hub` on, and a
+# release build leaves it out, as it has no `pair` to explain.
+default = ["hub"]
+hub = []
+
 [dependencies]
 # The wire types, with their JSON schemas for the tools' output schemas.
 api = { workspace = true, features = ["schemars"] }

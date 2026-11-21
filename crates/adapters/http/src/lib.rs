@@ -140,7 +140,9 @@ pub struct AppState {
     /// nothing otherwise (§16, decision 122).
     pub sync: SyncHub,
     /// Whether this machine is paired with a hub, and with which, which
-    /// `GET /api/v1/pairing` and `pairing_state` read (components §4.6).
+    /// `GET /api/v1/pairing` and `pairing_state` read (components §4.6), in
+    /// a build with the hub, the only one that can pair (decision 122).
+    #[cfg(feature = "hub")]
     pub pairing: Arc<app::pairing::PairingState>,
 }
 
@@ -756,9 +758,11 @@ pub fn router(assets: Arc<dyn AssetSource>, checks: RequestChecks, state: AppSta
     #[cfg(not(feature = "hub"))]
     let routes = routes.merge(sync::routes(&state.sync));
     // With it, the hub's own routes under `/api/v1/hub` are the page's,
-    // behind every check the others are.
+    // behind every check the others are, and so is this machine's own
+    // pairing state, which only a build that can pair answers.
     #[cfg(feature = "hub")]
-    let routes = hub_pages::routes(routes);
+    let routes =
+        hub_pages::routes(routes).route(api::PAIRING_PATH, axum::routing::get(read_pairing));
     let app = routes
         .with_state(state)
         .fallback(move |method: Method, uri: Uri| {
@@ -987,6 +991,21 @@ async fn list_operations(
 async fn recent_log(State(state): State<AppState>) -> Response {
     let answer = app::recent_log::answer(state.recent_log.as_ref());
     (StatusCode::OK, axum::Json(answer)).into_response()
+}
+
+/// Whether this machine is paired with a hub, and with which, as its pin
+/// says (components §4.6), in a build with the hub, the only one that can
+/// pair (§16, decision 122). A pin that can't be read is `unknown`, told in
+/// the daemon's log; the error names the key file, never its text (I4).
+#[cfg(feature = "hub")]
+async fn read_pairing(State(state): State<AppState>) -> Response {
+    match state.pairing.read().await {
+        Ok(answer) => (StatusCode::OK, axum::Json(answer)).into_response(),
+        Err(error) => {
+            log::error!("could not read this machine's pin of its hub: {error:?}");
+            unavailable(api::ErrorCode::Unknown, Vec::new(), None)
+        }
+    }
 }
 
 /// One operation's detail: what happened, with its warnings, each as the
