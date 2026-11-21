@@ -26,6 +26,9 @@ import { folders } from "./sign_in.ts";
  *  scenario. */
 const shownKeys = new WeakMap<BrowserWorld, Map<string, string>>();
 
+/** What each table read when a step noted it, by its name, per scenario. */
+const noted = new WeakMap<BrowserWorld, Map<string, string>>();
+
 /** The folders of the machine named `hostname`, inside the scenario's own
  *  scratch folder, which the After hook of live.ts removes. */
 function machineScratch(world: BrowserWorld, hostname: string): string {
@@ -167,6 +170,20 @@ Then("the dialog {string} shows the key fingerprint the machine showed", async f
 // a reader doesn't hear.
 Then("the table {string} says {string}", async function (this: BrowserWorld, name: string, words: string) {
   await expect.poll(async () => ((await table(this, name).textContent()) ?? "").replace(ISOLATION_MARKS, "")).toContain(words);
+});
+
+When("I note what the table {string} shows", async function (this: BrowserWorld, name: string) {
+  const tables = noted.get(this) ?? new Map<string, string>();
+  tables.set(name, (await table(this, name).textContent()) ?? "");
+  noted.set(this, tables);
+});
+
+// Every row and every cell, how long each machine has waited too, as the
+// table read when it was noted.
+Then("the table {string} shows what it showed when I noted it", async function (this: BrowserWorld, name: string) {
+  const before = noted.get(this)?.get(name);
+  assert.ok(before !== undefined, `no step noted the table ${name}`);
+  assert.equal((await table(this, name).textContent()) ?? "", before);
 });
 
 // The page reads the list again every few seconds: one read, answered in
