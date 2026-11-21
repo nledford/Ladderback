@@ -151,11 +151,82 @@ mod tests {
         }
     }
 
+    /// Characters that show as nothing though they aren't format
+    /// characters, the assigned default-ignorable ones (the Hangul fillers,
+    /// the variation selectors, the combining grapheme joiner and the
+    /// Khmer inherent vowels), and the line and paragraph separators, are
+    /// refused anywhere in a name.
+    #[test]
+    fn fillers_variation_selectors_and_separators_are_refused() {
+        for hidden in [
+            '\u{34f}',
+            '\u{115f}',
+            '\u{1160}',
+            '\u{3164}',
+            '\u{ffa0}',
+            '\u{17b4}',
+            '\u{17b5}',
+            '\u{180b}',
+            '\u{180f}',
+            '\u{fe00}',
+            '\u{fe0f}',
+            '\u{e0100}',
+            '\u{e01ef}',
+            '\u{2028}',
+            '\u{2029}',
+        ] {
+            assert_eq!(
+                Hostname::parse(&format!("lap{hidden}top")),
+                Err(InvalidHostname::Hidden(hidden)),
+                "U+{:04X}",
+                u32::from(hidden)
+            );
+        }
+    }
+
+    /// A name that begins or ends with a space of any kind is refused,
+    /// naming the space; spaces inside a name are kept.
+    #[test]
+    fn a_space_at_either_end_is_refused() {
+        for space in [' ', '\u{a0}', '\u{3000}', '\u{2003}'] {
+            for text in [format!("{space}laptop"), format!("laptop{space}")] {
+                assert_eq!(
+                    Hostname::parse(&text),
+                    Err(InvalidHostname::Hidden(space)),
+                    "{text:?}"
+                );
+            }
+        }
+        assert!(Hostname::parse("Nick's MacBook Pro").is_ok());
+    }
+
     /// The characters at each range's edges are outside it.
     #[test]
     fn characters_beside_the_format_ranges_are_kept() {
         for kept in [
-            '\u{ac}', '\u{ae}', '\u{200a}', '\u{2010}', '\u{2065}', '\u{2070}',
+            '\u{ac}',
+            '\u{ae}',
+            '\u{200a}',
+            '\u{2010}',
+            '\u{2065}',
+            '\u{2070}',
+            '\u{34e}',
+            '\u{350}',
+            '\u{115e}',
+            '\u{1161}',
+            '\u{17b3}',
+            '\u{17b6}',
+            '\u{3163}',
+            '\u{3165}',
+            '\u{ff9f}',
+            '\u{ffa1}',
+            '\u{180a}',
+            '\u{1810}',
+            '\u{fdff}',
+            '\u{fe10}',
+            '\u{e00ff}',
+            '\u{e01f0}',
+            '\u{2027}',
         ] {
             assert!(Hostname::parse(&format!("lap{kept}top")).is_ok(), "{kept}");
         }

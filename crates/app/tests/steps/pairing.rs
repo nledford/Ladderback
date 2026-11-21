@@ -18,8 +18,8 @@ use app::pairing::{
 use app::ports::{AgentRegistry, Clock, Identity, LinkError, Signing};
 use cucumber::{given, then, when};
 use domain::fleet::{
-    AgentStatus, Approval, Fingerprint, Hostname, HubAddress, PairingToken, RouteRefused, SeedFile,
-    SigningSeed, TokenId, TokenTls,
+    AgentStatus, Approval, Fingerprint, Hostname, HubAddress, ListedAgent, PairingToken,
+    RouteRefused, SeedFile, SigningSeed, TokenId, TokenTls,
 };
 use domain::{AgentId, SignedDuration, Timestamp, Uuid};
 
@@ -261,6 +261,17 @@ impl PairingWorld {
         self.hub().registry.agents().await.expect("the agents")
     }
 
+    /// The second agent as the hub lists it.
+    async fn second_listed(&self) -> ListedAgent {
+        let second = self.second.as_ref().expect("the second agent");
+        let hub = self.hub();
+        let agents = hub.pairing.agents().await.expect("the agents");
+        agents
+            .into_iter()
+            .find(|listed| listed.record.agent_id == second.agent_id)
+            .expect("the second agent listed")
+    }
+
     /// The world's token as a person pastes it: between quotes, with
     /// spaces and a line break around it.
     fn pasted_token(&self) -> PairingToken {
@@ -484,6 +495,16 @@ async fn second_pairs(agent: &mut Agent, hostname: String, other_form: String) {
     world.second = Some(machine);
 }
 
+#[when(regex = r#"^another agent pairs as "([^"]+)"(?: with a Cyrillic letter)?$"#)]
+async fn another_pairs_as(agent: &mut Agent, hostname: String) {
+    let world = &mut agent.pairing;
+    world.new_token().await;
+    let machine = Machine::new(99, &hostname);
+    world.pair_and_keep(&machine).await;
+    assert!(matches!(world.outcome, Some(Ok(_))), "{:?}", world.outcome);
+    world.second = Some(machine);
+}
+
 #[when(regex = r#"^the second agent is renamed "([^"]+)" and pairs with the same token$"#)]
 async fn renamed_pairs(agent: &mut Agent, hostname: String) {
     let world = &mut agent.pairing;
@@ -590,6 +611,27 @@ fn names_the_holder(agent: &mut Agent) {
 #[then("the hub lists both agents")]
 async fn both_listed(agent: &mut Agent) {
     assert_eq!(agent.pairing.agents().await.len(), 2);
+}
+
+#[then("the hub lists it as waiting for approval")]
+async fn second_listed_pending(agent: &mut Agent) {
+    let listed = agent.pairing.second_listed().await;
+    assert!(matches!(listed.record.status, AgentStatus::Pending { .. }));
+}
+
+#[then(expr = "the hub says the name looks like {string}")]
+async fn looks_like(agent: &mut Agent, hostname: String) {
+    let world = &agent.pairing;
+    let first = world.first.as_ref().expect("the first agent");
+    let looks_like = world.second_listed().await.looks_like.expect("a lookalike");
+    assert_eq!(looks_like.hostname.as_str(), hostname);
+    assert_eq!(looks_like.agent_id, first.agent_id);
+}
+
+#[then("the hub says the name looks like no other")]
+async fn looks_like_no_other(agent: &mut Agent) {
+    let listed = agent.pairing.second_listed().await;
+    assert_eq!(listed.looks_like, None);
 }
 
 #[then("the agent stops because the hub's key isn't the token's")]

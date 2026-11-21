@@ -85,6 +85,23 @@ impl HostnameKey {
     }
 }
 
+/// What the hub tells lookalike hostnames by: the UTS #39 skeleton of a
+/// name's [`HostnameKey`], `skeleton(casefold(NFC(name)))` (decision 120,
+/// "Hostnames"). Two names with one skeleton look alike, as "lаptop" with a
+/// Cyrillic а looks like "Laptop", though their keys differ.
+#[derive(Clone, Debug, PartialEq, Eq, Hash)]
+pub struct HostnameSkeleton(String);
+
+impl HostnameSkeleton {
+    pub fn of(_name: &Hostname) -> Self {
+        todo!("the skeleton of a hostname's key")
+    }
+
+    pub fn as_str(&self) -> &str {
+        &self.0
+    }
+}
+
 /// Where an agent stands with the hub.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum AgentStatus {
@@ -119,6 +136,33 @@ impl AgentRecord {
     pub const fn is_pending(&self) -> bool {
         matches!(self.status, AgentStatus::Pending { .. })
     }
+}
+
+/// The agent a pending agent's hostname looks like, which the hub flags on
+/// the pending row (decision 120, "Hostnames"; decision 121): its ID, its
+/// hostname as registered and when it was last seen.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct Lookalike {
+    pub agent_id: AgentId,
+    pub hostname: Hostname,
+    pub last_seen: Timestamp,
+}
+
+/// A registered agent as the hub lists it: its record, and, while it is
+/// pending, the agent its hostname looks like, if one does.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct ListedAgent {
+    pub record: AgentRecord,
+    pub looks_like: Option<Lookalike>,
+}
+
+/// The hub's agents, in the order given, each pending one flagged with the
+/// first other agent, pending or approved, whose hostname has its
+/// [`HostnameSkeleton`]. A lookalike isn't refused at pairing, since a false
+/// match would lock out an honest name; the person sees the flag and
+/// compares keys before approving (decision 120, "Hostnames").
+pub fn list_agents(_agents: Vec<AgentRecord>) -> Vec<ListedAgent> {
+    todo!("flag each pending agent's lookalike")
 }
 
 /// What has become of a pairing token.
