@@ -2,6 +2,8 @@
 
 **Not in a release before M8.** The hub this section describes is built behind the `hub` Cargo feature, which development and test builds have and release builds leave out until M8's release candidate: `serve --hub`, pairing, the sync protocol, the `[hub]` table, and their pages and commands. A release refuses `serve --hub`, the pairing commands and a `[hub]` table, has the agent ID but makes no agent key, and its database holds the hub's tables empty. Without a hub, an agent maintains a repository as §7.3 says for that case, in every build. Decision 88 applies from M8's release, the first to ship protocol 1 ([decision 122](decisions/122-hub-out-of-releases-until-m8.md)).
 
+**Becoming the hub** ([decision 136](decisions/136-an-installed-machine-becomes-the-hub.md)). Any installed machine becomes the hub in place, by the command line or, after M8, a form in Settings; a hub can also run beside a machine, as a second Ladderback it pairs with. From M8's first release, hub mode is a setting in `config.toml`, with the listening address and the allowed host names, and a command-line flag (`serve --hub`) overrides it: Settings then shows the value read-only and says the command line sets it. Turning hub mode off is refused while any machine is paired, naming them. Moving a machine's data into a container is not supported until #1050.
+
 ### 7.1 Pairing and identity
 
 1. On the hub: **Settings → Agents → New pairing token**. The token is single-use, with a TTL of 15 min by default (5 min to 24 h). It holds the hub's key, whether the hub serves TLS itself and the certificate's fingerprint, and a one-time pairing key; the hub keeps only that key's public half, and shows the token once. An unused token can be revoked, and a rotation of the hub key voids it.

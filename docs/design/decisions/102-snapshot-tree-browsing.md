@@ -21,3 +21,5 @@ Known limits: Restore and Download of the selected entry, and the details pane t
 Measured (2026-11-15, release build, Apple M1, local repository of one snapshot of 306,000 files and 1 GiB): one worker reading the first or the last page of a folder of 300,000 entries took 0.9 s and peaked at 350 MiB, since rustic reads a folder's whole tree before the page is cut from it; a page of a folder of 5,000 entries ten levels down took 0.3 s and 148 MiB, and the top folder 0.3 s and 142 MiB. The worker ends with its page, so the daemon holds none of it.
 
 **Amended by decision 127** (2026-11-20, #962): the folder route has a permission of its own, Snapshot contents, so a token may list snapshots without seeing the names inside them. A token that had `read` has it.
+
+**Amended by decision 112** (2026-11-16 and 2026-11-21, #637, #836): a folder read the engine ran and failed is told by the code of its failure, as decision 112 item 6 says, and one in the engine's own words is `operation-failed` (422) with those words, masked. Only an engine that can't run stays `engine-unavailable` (503).

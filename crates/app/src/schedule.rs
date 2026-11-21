@@ -47,6 +47,7 @@ use crate::ports::{
 use crate::queue::{Place, RunQueue};
 use crate::recovery::QueuedEnd;
 use crate::retry::{RunEnd, RunEnds, RunOutcome};
+use crate::secrets::UnlockWait;
 
 /// What starts the runs the scheduler and the queue decide on: the
 /// composition root's backups of a plan, each on a task of its own. Not a
@@ -56,18 +57,34 @@ use crate::retry::{RunEnd, RunEnds, RunOutcome};
 pub trait PlanRuns: Send + Sync {
     /// Starts a backup of `plan`, started by `trigger`, as a new operation,
     /// and returns once the operation log has it queued. It runs once
-    /// `place`'s turn comes, and holds the place until it ends. A run
+    /// `place`'s turn comes, and holds the place until it ends — unless it
+    /// parks waiting for its keyring to be unlocked, when it gives the
+    /// place up and takes another once the keyring is (#1221). `unlock` is
+    /// the plan's next due run: one whose repository password is in a
+    /// locked keyring waits for the keyring to be unlocked in a task of its
+    /// own, never past it (#1221); `None`, it is refused at once. A run
     /// refused for a setting of its repository that can't be resolved (a
     /// secret missing or unreadable, §10.2) drops its place and is recorded
     /// as a failed backup that never started, with the refusal as its reason
     /// (§5), whose end the scheduler hears as any failed run's. Any other
     /// run that can't start (the configuration can't be read) is the
     /// implementation's to say in the daemon's log, and drops its place.
-    async fn start(&self, plan: &PlanId, trigger: Trigger, place: Place);
+    async fn start(
+        &self,
+        plan: &PlanId,
+        trigger: Trigger,
+        place: Place,
+        unlock: Option<UnlockWait>,
+    );
 
     /// Runs `operation`, a backup the log holds as queued from before the
     /// daemon started, under its own ID, and returns once it is on its way.
-    async fn resume(&self, operation: domain::execution::Operation);
+    /// `unlock` is the plan's next due run, as the planner kept it: a
+    /// queued run nobody waited on whose repository password is in a locked
+    /// keyring waits for the keyring to be unlocked in a task of its own —
+    /// its operation shows as queued while it waits — never past that run,
+    /// and is refused at once at it, or with no bound (#1221).
+    async fn resume(&self, operation: domain::execution::Operation, unlock: Option<UnlockWait>);
 
     /// Says what the scheduler did that no operation records.
     fn report(&self, report: ScheduleReport);
@@ -506,13 +523,6 @@ impl Scheduler {
                     .map(|()| unknown),
                 Err(unmet) => Err(unmet),
             };
-            match checked {
-                Ok(unknown) => self.start(plan, held, next.trigger, unknown).await,
-                Err(unmet) => self.runs.report(ScheduleReport::Skipped {
-                    plan: plan.clone(),
-                    unmet,
-                }),
-            }
             let started = self.clock.now();
             let following = NextRun::after(
                 &held.schedule,
@@ -520,6 +530,36 @@ impl Scheduler {
                 started,
                 self.random.draw(),
             );
+            match checked {
+                Ok(unknown) => {
+                    // The following run is planned before this one starts,
+                    // so the run can be told it: one that waits for its
+                    // keyring to be unlocked never waits past it (#1221).
+                    let unlock = following
+                        .as_ref()
+                        .ok()
+                        .map(|next| UnlockWait::new(Arc::clone(&self.clock), next.at));
+                    self.start(plan, held, next.trigger, unknown, unlock).await;
+                }
+                Err(unmet) => self.runs.report(ScheduleReport::Skipped {
+                    plan: plan.clone(),
+                    unmet,
+                }),
+            }
+            // A start that outlasted the following run — one that waited
+            // for the keyring service at startup — plans it again from now,
+            // as it was planned before runs were told their bound, so it
+            // isn't due the moment it is kept.
+            let now = self.clock.now();
+            let following = match following {
+                Ok(next) if next.at <= now => NextRun::after(
+                    &held.schedule,
+                    self.zone_of(&held.schedule),
+                    now,
+                    self.random.draw(),
+                ),
+                other => other,
+            };
             held.next = self.keep(plan, following).await;
         }
         due
@@ -567,7 +607,10 @@ impl Scheduler {
             match place {
                 Ok(place) => {
                     retries.insert(plan.clone(), Retrying::Started(retry));
-                    self.runs.start(&plan, Trigger::Retry, place).await;
+                    // A retry's next try is planned once this one ends, so
+                    // there is no bound to wait within: it is refused at
+                    // once, and its retry comes (#1221).
+                    self.runs.start(&plan, Trigger::Retry, place, None).await;
                     self.drop_retry(&plan).await;
                 }
                 Err(why) => {
@@ -680,6 +723,7 @@ impl Scheduler {
         held: &Planned,
         trigger: Trigger,
         unknown: Option<PlatformError>,
+        unlock: Option<UnlockWait>,
     ) {
         match self.queue.due(plan, held.overlap) {
             Ok(place) => {
@@ -689,7 +733,7 @@ impl Scheduler {
                         error,
                     });
                 }
-                self.runs.start(plan, trigger, place).await;
+                self.runs.start(plan, trigger, place, unlock).await;
             }
             Err(overlapping) => self.runs.report(ScheduleReport::Overlapped {
                 plan: plan.clone(),
@@ -811,7 +855,8 @@ mod tests {
     use futures::FutureExt;
 
     use super::{
-        PlanRuns, Planned, Plans, Retrying, ScheduleReport, Scheduler, same_runs, zone_of,
+        PlanRuns, Planned, Plans, Retrying, ScheduleReport, Scheduler, UnlockWait, same_runs,
+        zone_of,
     };
     use crate::fakes::{
         FakeClock, FakeNetwork, FakePower, InMemoryConfigStore, InMemoryScheduleStore, SeededRandom,
@@ -825,6 +870,7 @@ mod tests {
     #[derive(Default)]
     struct Started {
         runs: Mutex<Vec<(PlanId, Trigger)>>,
+        unlocks: Mutex<Vec<Option<Timestamp>>>,
         places: Mutex<Vec<Place>>,
         reports: Mutex<Vec<ScheduleReport>>,
     }
@@ -837,6 +883,12 @@ mod tests {
                 .clone()
         }
 
+        fn unlocks(&self) -> Vec<Option<Timestamp>> {
+            self.unlocks
+                .lock()
+                .unwrap_or_else(PoisonError::into_inner)
+                .clone()
+        }
         fn reports(&self) -> Vec<ScheduleReport> {
             self.reports
                 .lock()
@@ -847,18 +899,28 @@ mod tests {
 
     #[async_trait]
     impl PlanRuns for Started {
-        async fn start(&self, plan: &PlanId, trigger: Trigger, place: Place) {
+        async fn start(
+            &self,
+            plan: &PlanId,
+            trigger: Trigger,
+            place: Place,
+            unlock: Option<UnlockWait>,
+        ) {
             self.runs
                 .lock()
                 .unwrap_or_else(PoisonError::into_inner)
                 .push((plan.clone(), trigger));
+            self.unlocks
+                .lock()
+                .unwrap_or_else(PoisonError::into_inner)
+                .push(unlock.as_ref().map(UnlockWait::until));
             self.places
                 .lock()
                 .unwrap_or_else(PoisonError::into_inner)
                 .push(place);
         }
 
-        async fn resume(&self, _: Operation) {}
+        async fn resume(&self, _: Operation, _: Option<UnlockWait>) {}
 
         fn report(&self, report: ScheduleReport) {
             self.reports
@@ -934,6 +996,48 @@ mod tests {
         assert_eq!(
             planned[&home()].next.as_ref().map(|next| next.at),
             Some(at("2026-06-11T03:00:00Z"))
+        );
+    }
+
+    #[tokio::test]
+    async fn a_run_the_schedule_starts_is_told_its_plan_s_next_run() {
+        let runs = Arc::new(Started::default());
+        let scheduler = scheduler("2026-06-10T03:00:00Z", runs.clone());
+        let mut planned = home_planned_for("2026-06-10T03:00:00Z");
+        scheduler.start_due(&mut planned).await;
+        // A run that waits for its keyring to be unlocked never waits past
+        // the plan's following run (#1221).
+        assert_eq!(runs.unlocks(), vec![Some(at("2026-06-11T03:00:00Z"))]);
+    }
+
+    /// A start that takes `.1` on the clock, as one waiting for the
+    /// keyring service at startup does.
+    struct SlowStart(Arc<FakeClock>, SignedDuration);
+
+    #[async_trait]
+    impl PlanRuns for SlowStart {
+        async fn start(&self, _: &PlanId, _: Trigger, _: Place, _: Option<UnlockWait>) {
+            self.0.advance(self.1);
+        }
+
+        async fn resume(&self, _: Operation, _: Option<UnlockWait>) {}
+
+        fn report(&self, _: ScheduleReport) {}
+    }
+
+    #[tokio::test]
+    async fn a_start_that_outlasts_the_following_run_plans_it_from_when_it_ended() {
+        let clock = Arc::new(FakeClock::new(at("2026-06-10T03:00:00Z")));
+        let mut scheduler = scheduler("2026-06-10T03:00:00Z", Arc::new(Started::default()));
+        scheduler.clock = clock.clone();
+        scheduler.runs = Arc::new(SlowStart(clock, SignedDuration::from_hours(24)));
+        let mut planned = home_planned_for("2026-06-10T03:00:00Z");
+        scheduler.start_due(&mut planned).await;
+        // The following run, due at 03:00 the next day, came due as the
+        // run started: it isn't kept due at once (#1221).
+        assert_eq!(
+            planned[&home()].next.as_ref().map(|next| next.at),
+            Some(at("2026-06-12T03:00:00Z"))
         );
     }
 
@@ -1389,11 +1493,11 @@ mod tests {
 
     #[async_trait]
     impl PlanRuns for NeverRecorded {
-        async fn start(&self, _: &PlanId, _: Trigger, _: Place) {
+        async fn start(&self, _: &PlanId, _: Trigger, _: Place, _: Option<UnlockWait>) {
             std::future::pending::<()>().await;
         }
 
-        async fn resume(&self, _: Operation) {}
+        async fn resume(&self, _: Operation, _: Option<UnlockWait>) {}
 
         fn report(&self, _: ScheduleReport) {}
     }

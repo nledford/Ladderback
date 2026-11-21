@@ -17,13 +17,14 @@ use domain::secrets::{
 };
 
 use crate::conditions::NETWORK_WAIT;
-use crate::ports::{Clock, RepositoryAccess, Resolved, SavedEntry, SecretResolver};
+use crate::ports::{Clock, KeyringLock, RepositoryAccess, Resolved, SavedEntry, SecretResolver};
 
 /// How long after the daemon starts a run nobody waits on holds for the
 /// session's keyring service: the network wait's bound (§5, decision 116).
 pub const KEYRING_WAIT: domain::SignedDuration = NETWORK_WAIT;
 
-/// How often a held run reads again the keyring entry it couldn't read.
+/// How often a held run reads again the keyring entry it couldn't read, and
+/// how often one waiting for the keyring to be unlocked asks whether it is.
 pub const KEYRING_POLL: domain::SignedDuration = domain::SignedDuration::from_secs(10);
 
 /// When the daemon started, in its clock's monotonic time: a run nobody
@@ -41,6 +42,24 @@ impl KeyringWait {
     /// `started` is `clock.monotonic()` when the daemon started.
     pub fn new(clock: Arc<dyn Clock>, started: domain::SignedDuration) -> Self {
         Self { clock, started }
+    }
+}
+
+/// When a run nobody waits on gives up waiting for its keyring to be
+/// unlocked: the plan's next due run, which a run never waits past. While
+/// it waits, the keyring is asked whether it is locked — a question that
+/// reads no entry and raises no unlock prompt — and the entry is read
+/// again the moment it is unlocked (#1221, amending decision 116).
+#[derive(Clone)]
+pub struct UnlockWait {
+    clock: Arc<dyn Clock>,
+    until: domain::Timestamp,
+}
+
+impl UnlockWait {
+    /// `until` is when the plan's next run is due.
+    pub fn new(clock: Arc<dyn Clock>, until: domain::Timestamp) -> Self {
+        Self { clock, until }
     }
 }
 
@@ -275,12 +294,25 @@ pub struct ResolveRepository {
     told: Option<SecretWarnings>,
     /// The daemon's start, for runs nobody waits on; none, no run waits.
     wait: Option<KeyringWait>,
+    /// When a run nobody waits on gives up waiting for its locked keyring
+    /// to be unlocked; none, a locked keyring fails at once (decision 116).
+    unlock: Option<UnlockWait>,
 }
 
-/// Told, once, that a run nobody waits on holds for the session's keyring
-/// service to read the entry `source` names: the keyring's entry, never a
+/// Why a run nobody waits on holds for the keyring.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum KeyringWaitsFor {
+    /// The session's keyring service isn't there to ask while the daemon
+    /// starts (decision 116).
+    Service,
+    /// The keyring is locked; the run waits for it to be unlocked (#1221).
+    Unlock,
+}
+
+/// Told, once, that a run nobody waits on holds for the keyring to read
+/// the entry `source` names, and why: the keyring's entry, never a
 /// secret (I4).
-pub type KeyringWaiting<'a> = &'a (dyn Fn(&SourceName) + Send + Sync);
+pub type KeyringWaiting<'a> = &'a (dyn Fn(&SourceName, KeyringWaitsFor) + Send + Sync);
 
 /// Told each warning that reading a set of secrets gave, once the set is
 /// read, with its path masked of those secrets (I4): the daemon says it in
@@ -293,6 +325,7 @@ impl ResolveRepository {
             resolver,
             told: None,
             wait: None,
+            unlock: None,
         }
     }
 
@@ -302,6 +335,17 @@ impl ResolveRepository {
     pub fn waiting_for_keyring(self, wait: KeyringWait) -> Self {
         Self {
             wait: Some(wait),
+            ..self
+        }
+    }
+
+    /// Lets a run nobody waits on wait for its locked keyring to be
+    /// unlocked until the plan's next run is due, by `wait`
+    /// ([`Self::resolve_saved_unattended`], #1221).
+    #[must_use]
+    pub fn waiting_for_unlock(self, wait: UnlockWait) -> Self {
+        Self {
+            unlock: Some(wait),
             ..self
         }
     }
@@ -440,17 +484,25 @@ impl ResolveRepository {
     /// schedule started. When the keyring that holds the password has no
     /// service to ask and the daemon has been up for less than
     /// [`KEYRING_WAIT`], the run holds, reading that entry again every
-    /// [`KEYRING_POLL`] until the service answers or the bound comes, and
-    /// `waiting` is told once. Nothing else is read again; a keyring that is
-    /// locked or whose prompt was dismissed fails at once. Dropping the
-    /// future ends the wait.
+    /// [`KEYRING_POLL`] until the service answers or the bound comes; when
+    /// the keyring answered that it is locked and
+    /// [`Self::waiting_for_unlock`] armed a bound, the run waits for it to
+    /// be unlocked — asking whether it is, which reads no entry and
+    /// raises no unlock prompt — and reads the entry again the
+    /// moment it is. `waiting` is told once of either wait. Nothing else
+    /// is read again; a locked keyring with no bound, and one whose prompt
+    /// was dismissed, fail at once. Dropping the future ends the wait.
     pub async fn resolve_saved_unattended(
         &self,
         alias: &RepositoryAlias,
         entry: &RepositoryConfig,
         waiting: KeyringWaiting<'_>,
     ) -> Result<ResolvedRepository, ResolveError> {
-        let hold = self.wait.as_ref().map(|wait| Hold { wait, waiting });
+        let hold = self.wait.as_ref().map(|wait| Hold {
+            wait,
+            unlock: self.unlock.as_ref(),
+            waiting,
+        });
         self.resolve_saved_holding(alias, entry, hold).await
     }
 
@@ -475,11 +527,12 @@ impl ResolveRepository {
     }
 }
 
-/// What a run nobody waits on holds for the keyring by: the daemon's start,
-/// and whom to tell it waits.
+/// What a run nobody waits on holds for the keyring by: the daemon's start
+/// and its keyring's unlock bound, and whom to tell it waits.
 #[derive(Clone, Copy)]
 struct Hold<'a> {
     wait: &'a KeyringWait,
+    unlock: Option<&'a UnlockWait>,
     waiting: KeyringWaiting<'a>,
 }
 
@@ -490,6 +543,24 @@ impl KeyringWait {
         let up = self.clock.monotonic().saturating_sub(self.started);
         let left = KEYRING_WAIT.saturating_sub(up);
         left.is_positive().then_some(left)
+    }
+}
+
+impl UnlockWait {
+    /// How long until the plan's next run is due; `None` once it has.
+    fn left(&self) -> Option<domain::SignedDuration> {
+        let left = self.clock.now().duration_until(self.until);
+        left.is_positive().then_some(left)
+    }
+
+    /// Whether the plan's next run is due already.
+    pub fn has_passed(&self) -> bool {
+        self.left().is_none()
+    }
+
+    /// When the plan's next run is due.
+    pub fn until(&self) -> domain::Timestamp {
+        self.until
     }
 }
 
@@ -693,12 +764,22 @@ impl<'a> Run<'a> {
         Ok(resolved.value)
     }
 
-    /// What `secret` resolves to. Under a hold, a keyring with no service to
-    /// ask is read again every [`KEYRING_POLL`] while the daemon is in its
-    /// first [`KEYRING_WAIT`], and the hold's `waiting` is told once; every
-    /// other answer, and the last, is as the resolver gave it.
+    /// What `secret` resolves to. Under a hold, a keyring with no service
+    /// to ask is read again every [`KEYRING_POLL`] while the daemon is in
+    /// its first [`KEYRING_WAIT`], and one that answered that it is locked
+    /// waits to be unlocked until the plan's next run is due; the hold's
+    /// `waiting` is told once of either wait. A service that is gone after
+    /// the keyring answered that it is locked is waited for only until that
+    /// bound too, not until the daemon's start bound. An entry still
+    /// refused as locked after the keyring answered that it is unlocked —
+    /// it can sit in a collection other than the one the keyring is asked
+    /// about — is read again no sooner than a [`KEYRING_POLL`] later, and
+    /// never past that bound. Every other answer, and the last, is as the
+    /// resolver gave it.
     async fn read(&self, secret: &SecretRef) -> Result<Resolved, SecretError> {
         let mut told = false;
+        let mut read_unlocked = false;
+        let mut locked_until: Option<&UnlockWait> = None;
         loop {
             let read = self.resolver.resolve(secret).await;
             let Some(hold) = self.hold else {
@@ -706,23 +787,90 @@ impl<'a> Run<'a> {
             };
             let Err(SecretError {
                 source,
-                problem:
-                    Problem::KeyringUnavailable {
-                        cause: KeyringCause::NoService,
-                        ..
-                    },
+                problem: Problem::KeyringUnavailable { cause, .. },
             }) = &read
             else {
                 return read;
             };
-            let Some(left) = hold.wait.left() else {
-                return read;
-            };
-            if !told {
-                (hold.waiting)(source);
-                told = true;
+            match *cause {
+                KeyringCause::NoService => {
+                    let Some(mut left) = hold.wait.left() else {
+                        return read;
+                    };
+                    // A run that met a locked keyring waits for it by its
+                    // own bound, which the loss of the service after that
+                    // doesn't stretch to the daemon's start bound.
+                    if let Some(unlock) = locked_until {
+                        let Some(until_due) = unlock.left() else {
+                            return read;
+                        };
+                        left = left.min(until_due);
+                    }
+                    if !told {
+                        (hold.waiting)(source, KeyringWaitsFor::Service);
+                        told = true;
+                    }
+                    hold.wait.clock.sleep(left.min(KEYRING_POLL)).await;
+                    // The entry isn't read at the bound, where a service
+                    // that came back could be acted on past it.
+                    if locked_until.is_some_and(UnlockWait::has_passed) {
+                        return read;
+                    }
+                }
+                KeyringCause::Locked => {
+                    let Some(unlock) = hold.unlock else {
+                        return read;
+                    };
+                    locked_until = Some(unlock);
+                    if !told {
+                        (hold.waiting)(source, KeyringWaitsFor::Unlock);
+                        told = true;
+                    }
+                    if read_unlocked {
+                        let Some(left) = unlock.left() else {
+                            return read;
+                        };
+                        unlock.clock.sleep(left.min(KEYRING_POLL)).await;
+                    }
+                    if !self.waits_to_unlock(unlock).await {
+                        return read;
+                    }
+                    read_unlocked = true;
+                }
+                // An unlock prompt the person dismissed is a no: the run
+                // fails at once and never asks again.
+                KeyringCause::Refused => return read,
             }
-            hold.wait.clock.sleep(left.min(KEYRING_POLL)).await;
+        }
+    }
+
+    /// Waits for the keyring to be unlocked until `unlock`'s bound, asking
+    /// whether it is locked every [`KEYRING_POLL`] — reading no entry, so
+    /// waiting can raise no unlock prompt (#1221) — and never once the
+    /// bound has come. `true` once it is unlocked; `false` at the bound,
+    /// the refusal standing.
+    async fn waits_to_unlock(&self, unlock: &UnlockWait) -> bool {
+        loop {
+            if unlock.left().is_none() {
+                return false;
+            }
+            let answer = self.resolver.keyring_lock().await;
+            // An answer that came after the bound is too late: the entry
+            // isn't read again past it, and the refusal stands.
+            if unlock.left().is_none() {
+                return false;
+            }
+            match answer {
+                KeyringLock::Unlocked => return true,
+                // Where there is no service to ask it can't be said: the
+                // hold for the service is the one that answers that
+                // (decision 116), so this wait keeps waiting, to its bound.
+                KeyringLock::Locked | KeyringLock::Unknown => {}
+            }
+            let Some(left) = unlock.left() else {
+                return false;
+            };
+            unlock.clock.sleep(left.min(KEYRING_POLL)).await;
         }
     }
 

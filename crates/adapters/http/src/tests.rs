@@ -318,6 +318,14 @@ fn no_repository(alias: &str) -> SnapshotsError {
     }
 }
 
+/// What the fake catalog says of the repository `rustic-said`: the engine
+/// failed the read in its own words, masked.
+fn rustic_said() -> SnapshotsError {
+    SnapshotsError::OperationFailed {
+        detail: "error sending request for url (http://demo:***@127.0.0.1:9/config)".to_owned(),
+    }
+}
+
 #[async_trait]
 impl Catalog for DemoCatalog {
     async fn status(
@@ -368,6 +376,7 @@ impl Catalog for DemoCatalog {
                 detail: None,
             }),
             "empty" | "no-config" => Err(no_repository(&alias)),
+            "rustic-said" => Err(rustic_said()),
             "slow" => Err(SnapshotsError::TimedOut),
             _ => Ok(api::SnapshotsDto {
                 snapshots: vec![demo_snapshot()],
@@ -392,6 +401,7 @@ impl Catalog for DemoCatalog {
             "empty" | "no-config" => {
                 return Err(FolderError::Repository(no_repository(&alias)));
             }
+            "rustic-said" => return Err(FolderError::Repository(rustic_said())),
             "engine-down" => {
                 return Err(FolderError::Repository(SnapshotsError::Unavailable {
                     code: api::ErrorCode::EngineUnavailable,
@@ -1744,6 +1754,29 @@ async fn a_listing_or_folder_read_of_no_repository_is_refused_as_not_found() {
             assert_eq!(response.status(), StatusCode::NOT_FOUND, "{route}");
             assert_eq!(body(response).await, expected, "{route}");
         }
+    }
+}
+
+/// A read the engine failed in its own words is told as the maintenance
+/// routes tell it, a failed operation with those words, not an engine that
+/// couldn't be reached: a listing and a folder read alike (#836).
+#[tokio::test]
+async fn a_listing_or_folder_read_the_engine_failed_in_its_own_words_is_a_failed_operation() {
+    for route in [
+        "/api/v1/repositories/rustic-said/snapshots".to_owned(),
+        folder_route("rustic-said", ""),
+    ] {
+        let response = get(&route).await;
+        assert_eq!(
+            response.status(),
+            StatusCode::UNPROCESSABLE_ENTITY,
+            "{route}"
+        );
+        assert_eq!(
+            body(response).await,
+            r#"{"code":"operation-failed","detail":"error sending request for url (http://demo:***@127.0.0.1:9/config)"}"#,
+            "{route}"
+        );
     }
 }
 

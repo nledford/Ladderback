@@ -97,6 +97,8 @@ pub struct SnapshotsSetup {
     /// The real path of the folder the snapshot's top stands for, when its
     /// source was backed up at its own path.
     backed_up_from: Option<PathBuf>,
+    /// The status and body of the daemon's answer to a listing over HTTP.
+    answered: Option<(u16, String)>,
 }
 
 impl Agent {
@@ -347,6 +349,51 @@ fn fails_as_no_config(agent: &mut Agent) {
         panic!("the listing was {listed:?}");
     };
     assert!(detail.contains(&cold), "{detail} names no {cold}");
+}
+
+/// The daemon on the folders `the daemon's config file holds:` writes the
+/// file into.
+#[given("Ladderback is serving on loopback on that configuration")]
+async fn serving_on_that_configuration(agent: &mut Agent) {
+    agent.web.home = Some(agent.scratch().join("daemon"));
+    super::request_checks_steps::serve_on_loopback(agent).await;
+}
+
+#[when(expr = "the snapshots of the repository {string} are listed over HTTP")]
+async fn listed_over_http(agent: &mut Agent, alias: String) {
+    let addr = agent.web.server().addr;
+    let path = format!("/api/v1/repositories/{alias}/snapshots");
+    let answer =
+        blocking(move || super::operations_steps::exchange_at(addr, "GET", &path, "")).await;
+    agent.snapshots.answered = Some(answer);
+}
+
+/// The engine's words name where it looked: an address that held a
+/// password, so words without it were masked, not silent (I4).
+#[then(
+    expr = "the listing is refused as {string} with status {int}, in the engine's own words naming {string}"
+)]
+fn refused_in_the_engines_words(agent: &mut Agent, code: String, status: u16, named: String) {
+    let (got, body) = agent.snapshots.answered.as_ref().expect("the listing ran");
+    assert_eq!(*got, status, "{body}");
+    let refusal: serde_json::Value = serde_json::from_str(body).expect("a JSON refusal");
+    assert_eq!(refusal["code"], code.as_str(), "{refusal}");
+    let detail = refusal["detail"].as_str().unwrap_or_default();
+    assert!(detail.contains(named.as_str()), "{refusal}");
+}
+
+#[then(expr = "neither the refusal nor Ladderback's log shows {string} or {string}")]
+fn neither_shows(agent: &mut Agent, one: String, other: String) {
+    let (_, body) = agent.snapshots.answered.as_ref().expect("the listing ran");
+    let log = fs::read_to_string(agent.web.log()).expect("the daemon's log");
+    for (name, text) in [("the refusal", body), ("the daemon's log", &log)] {
+        for secret in [&one, &other] {
+            assert!(
+                !text.contains(secret.as_str()),
+                "{secret:?} in {name}: {text}"
+            );
+        }
+    }
 }
 
 /// The source the browse scenarios back up, under `source`: `docs` with two

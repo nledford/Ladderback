@@ -447,6 +447,7 @@ async fn daemon_starts_again(agent: &mut Agent) {
             .resume(
                 recovered.queued,
                 (!world.unreadable).then_some(&config),
+                &std::collections::BTreeMap::new(),
                 runs.as_ref(),
                 agent.clock.now(),
             )

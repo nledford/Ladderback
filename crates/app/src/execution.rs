@@ -335,7 +335,28 @@ impl RunOperation {
     /// Ends `queued` cancelled before its turn came: it records the end and
     /// announces it, as a run does, and nothing else.
     async fn cancel_waiting(&self, queued: Queued) -> Finished {
-        let Queued { mut run, .. } = queued;
+        let Queued { run, .. } = queued;
+        self.end_cancelled(run).await
+    }
+
+    /// Ends `operation`, a backup the log held as queued when the daemon
+    /// stopped, cancelled before it ran: its start waited for its keyring
+    /// to be unlocked, and a cancel came first (#1221). One write, of the
+    /// end, then the news, as [`Self::refuse_resumed`]. No hook runs and
+    /// the engine is never asked.
+    pub async fn cancel_resumed(&self, operation: Operation) -> Finished {
+        self.end_cancelled(Run {
+            operation,
+            result: None,
+            recording_errors: Vec::new(),
+            stopped_by_hook: false,
+        })
+        .await
+    }
+
+    /// Ends `run` cancelled before anything of it ran: records the end and
+    /// announces it.
+    async fn end_cancelled(&self, mut run: Run) -> Finished {
         self.cancel(&mut run);
         self.record(&mut run).await;
         announce_end(self.events.as_deref(), &run.operation).await;

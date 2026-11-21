@@ -31,12 +31,27 @@ A new token starts with Backups, Backup runs, Previews and Configuration. Snapsh
 - **An AI agent that helps you set up plans:** the defaults. It proposes plans and tries them in a dry run, and you approve each change in the web UI.
 - **A scheduler that only starts backups:** Backup runs alone. It starts a plan's backup by the plan's ID and reads nothing, so a leaked token tells nobody what you back up.
 - **A monitoring script:** Backups, to read status and follow operations as they run. Add Daemon log only if it collects the log.
+- **Troubleshooting with an AI agent:** Backups and Daemon log. It reads status, plans and operations to find what failed, and the log for what Ladderback recorded around it. Without Snapshot contents, a failure shows its code but not the file names in it. The log can name your files and folders, so turn Daemon log off again when you're done.
+- **A read-only dashboard:** Backups alone, the same as a monitoring script: a page that shows your plans, snapshots and status can't start, change or propose anything, so a leaked token shows what you back up but changes none of it.
 
-`ladderback mcp` offers an AI agent only the tools its permissions open, so an agent doesn't try what it can't do, and Ladderback refuses anything else it asks for all the same.
+`ladderback mcp` offers an AI agent only the tools its permissions open, so an AI agent doesn't try what it can't do, and Ladderback refuses anything else it asks for all the same.
 
 ## Changing what a token may do
 
 Select **Change permissions of token** and the token's label on its row, choose again, and save with the admin password. A program using the token gets the new permissions from its next request. A token can never change its own permissions, and setting a new admin password revokes every token.
+
+## Revoking a token
+
+On the "API tokens" tab of Settings, select **Revoke token** and the token's label on its row, then **Revoke the token**. A program using the token is refused from its next request with `401 api-token-invalid`, and a live-updates stream it holds ends within a few seconds. The token can't be brought back: to let the program in again, create a new token and give it to the program. Setting a new admin password revokes every token at once.
+
+Stop the program or give it a new token: each refused request counts as a failed sign-in from its address, so it soon gets `429 sign-in-wait`, and signing in from that address, in a browser too, has to wait as well.
+
+## When a program is refused
+
+A program asking for something its permissions don't open is refused with one of two codes. Over HTTP the answer is `403 Forbidden` with the code and the permission it needs, such as `{"code": "api-token-permission", "args": {"permission": {"type": "text", "value": "backups"}}}`. Through `ladderback mcp` the tool call fails with the same code, then a sentence that says what to do.
+
+- **`api-token-permission`:** the program's token lacks the permission named. On the "API tokens" tab of Settings, select **Change permissions of token** and the label on that token's row, and add the permission. When it names `session`, no token can do it: only a person signed in through a browser can. An AI agent without a token that tries to cancel anything but a backup gets this code too, naming `session`.
+- **`without-token-permission`:** an AI agent without a token asked for something the "AI agents" tab doesn't allow. Turn the permission named on there, in Settings (it saves to the `[without-token]` table of the configuration file), or, after turning sign-in on, give the AI agent a token that has it. When it names `session`, only a person using Ladderback in a browser can do it.
 
 ## AI agents without a token
 

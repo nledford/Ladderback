@@ -206,8 +206,8 @@ mod tests {
     use crate::fakes::{FakeClock, FakeSecrets};
     use crate::maintenance::{MaintenanceError, READ_TIMEOUT};
     use crate::ports::{
-        Engine, EngineError, EngineEvent, EngineResult, FolderAnswer, Job, JobControl, Resolved,
-        RunningJob, SecretResolver,
+        Engine, EngineError, EngineEvent, EngineResult, FolderAnswer, Job, JobControl, KeyringLock,
+        Resolved, RunningJob, SecretResolver,
     };
     use crate::secrets::ResolveRepository;
 
@@ -568,6 +568,10 @@ mod tests {
     #[async_trait]
     impl SecretResolver for Unanswered {
         async fn resolve(&self, _secret: &SecretRef) -> Result<Resolved, SecretError> {
+            std::future::pending().await
+        }
+
+        async fn keyring_lock(&self) -> KeyringLock {
             std::future::pending().await
         }
     }
