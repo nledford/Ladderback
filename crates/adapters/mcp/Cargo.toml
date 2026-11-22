@@ -12,8 +12,12 @@ publish.workspace = true
 # resource `ladderback://pairing`. On by default for this crate's own tests;
 # the workspace dependency turns it off, `ladderback`'s `hub` on, and a
 # release build leaves it out, as it has no `pair` to explain.
-default = ["hub"]
+default = ["hub", "pseudo"]
 hub = []
+# The development pseudolocales (technical design §8.4), so a test can tell a
+# sentence in another locale apart. On by default for this crate's own tests;
+# a release build leaves them out, and `just test-release` with them.
+pseudo = ["l10n/pseudo"]
 
 [dependencies]
 # The wire types, with their JSON schemas for the tools' output schemas.
@@ -44,8 +48,6 @@ uuid.workspace = true
 # `adapters/http` (§3.2).
 axum.workspace = true
 tokio = { workspace = true, features = ["io-util", "macros", "net", "rt-multi-thread", "test-util"] }
-# The pseudolocales, so a test can tell a sentence in another locale apart.
-l10n = { workspace = true, features = ["pseudo"] }
 
 [lints]
 workspace = true

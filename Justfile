@@ -336,17 +336,52 @@ test-e2e *args:
 # features, so the tests that exist only without them never run there: the
 # release lane of `l10n`'s tests (`tests/lanes/release.rs`), the no-pseudo test
 # in `tests/cli_locale.rs` and the hub's refusals in `tests/hub_gate.rs`.
-# This runs the tests of `l10n`
-# and `ladderback` built that way, so those run, and so does any test whose
-# result depends on the feature. The packages are named because only these two
-# have tests that read the feature; `web`'s wasm tests run in `test-wasm`. The
-# cucumber runners are left out, as in `test` (nextest's default filter), and
-# the tests run in a scratch home, as in `test`. Arguments go to nextest.
-[doc('Run the l10n and daemon tests as a release build is made (no default features).')]
+# This runs, built that way, the tests of every package with default features
+# (`l10n`, `ladderback` and the crates with a `hub` feature), so those run, and
+# so does any test whose result depends on a feature. Each package gets the
+# features the release build itself turns on in it (`l10n`'s `icu`), and none
+# of the development ones: `scripts/release-test-packages.ts` reads both from
+# `cargo metadata` and `cargo tree`, so a package's first default feature is
+# picked up with no edit here, and it fails before any test runs if a
+# package's tests (their dev-dependencies too) would turn a workspace crate's
+# `hub` or `pseudo` back on, naming the path. Each package is built and tested
+# on its own: in one run Cargo would unify features across them. `web`'s wasm
+# tests run in `test-wasm`. The cucumber runners are left out, as in `test`
+# (nextest's default filter), and the tests run in a scratch home, as in
+# `test`. Arguments go to nextest (never `--package`, which would bring the
+# unified build back); with any, a package in which they select no test only
+# warns. A failed package doesn't stop the others, and the recipe names each
+# one at the end; an interrupt stops the run, as in `test`.
+[doc('Run the tests of every package with default features as a release build is made (no default features).')]
 [group('test')]
 [positional-arguments]
 test-release *args:
-    scripts/with-skip-log.sh scripts/with-test-home.sh cargo nextest run --package l10n --package ladderback {{ release_flags }} "$@"
+    scripts/with-skip-log.sh scripts/with-test-home.sh '{{ just_executable() }}' _test-release-packages "$@"
+
+# The packages `test-release` runs, under its one skip log and scratch home.
+[positional-arguments]
+[private]
+_test-release-packages *args:
+    #!/usr/bin/env bash
+    set -uo pipefail
+    trap 'exit 130' INT
+    trap 'exit 143' TERM
+    plan=$(node scripts/release-test-packages.ts {{ release_flags }}) || exit 1
+    failed=()
+    while IFS=$'\t' read -r -u 3 name features; do
+        echo "test-release: $name${features:+ (features: $features)}"
+        cargo nextest run --package "$name" {{ release_flags }} ${features:+--features "$features"} ${1:+--no-tests=warn} "$@"
+        status=$?
+        if [[ $status -gt 128 ]]; then
+            exit "$status"
+        elif [[ $status -ne 0 ]]; then
+            failed+=("$name (exit $status)")
+        fi
+    done 3<<<"$plan"
+    if [[ ${#failed[@]} -gt 0 ]]; then
+        echo "test-release: failed in ${failed[*]}" >&2
+        exit 1
+    fi
 
 # The runner is `wasm-bindgen-test-runner` from wasm-bindgen-cli, whose version
 # must equal the `wasm-bindgen` in Cargo.lock; `just setup` installs it. It is

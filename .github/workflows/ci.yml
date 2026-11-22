@@ -747,9 +747,10 @@ jobs:
         run: rm -rf target
 
   # The tests of the build a release is: `--no-default-features`, which leaves
-  # out the development pseudolocales (technical design §8.4). `just test`
-  # builds with the defaults, so the tests that exist only without them run
-  # here alone. A job of its own, so that the `Check` jobs stay as they are and
+  # out the development pseudolocales (technical design §8.4) and the hub (§16,
+  # decision 122), on every package with default features. `just test` builds
+  # with the defaults, so the tests that exist only without them run here
+  # alone. A job of its own, so that the `Check` jobs stay as they are and
   # this one builds beside them. A required check (ruleset "Protect main"):
   # don't rename it. In MVP mode (decision 124) its `if` skips it, which GitHub
   # counts as passing.
@@ -769,6 +770,13 @@ jobs:
       # The rustic CLI an e2e scenario compares against (§6.2), as in `check`:
       # without it that scenario skips, and the skip list would differ.
       - run: scripts/install-rustic.sh
+      # `just test-release` asks scripts/release-test-packages.ts for the
+      # packages, their features and the leak check, with the Node every job
+      # sets up (ui-tests/.nvmrc).
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version-file: ui-tests/.nvmrc
+          package-manager-cache: false
       # The ci profile (.config/nextest.toml) retries and reports flaky tests.
       - run: just test-release
         env:
