@@ -266,8 +266,8 @@ cli-check-keyring-none = no { -repository } or notification channel takes a secr
 # $entry (text): the keyring entry, as the configuration names it (service/name). It is shown as it is.
 # $minutes (count): how many minutes the read waits for the answer.
 cli-check-keyring-notice = { $minutes ->
-    [one] reading the keyring entry { $entry }: the keychain may ask now whether this program may use it, in a window that can be behind other windows. Choose Always Allow, so that the service is not asked again. The read waits { $minutes } minute for your answer.
-   *[other] reading the keyring entry { $entry }: the keychain may ask now whether this program may use it, in a window that can be behind other windows. Choose Always Allow, so that the service is not asked again. The read waits { $minutes } minutes for your answer.
+    [one] reading the keyring entry { $entry }: the keychain may ask now whether this program may use it, in a window that can be behind other windows. Choose Always Allow, so that later reads by this build are not asked again. The read waits { $minutes } minute for your answer.
+   *[other] reading the keyring entry { $entry }: the keychain may ask now whether this program may use it, in a window that can be behind other windows. Choose Always Allow, so that later reads by this build are not asked again. The read waits { $minutes } minutes for your answer.
   }
 
 # The service file was written and the service manager started the service.
