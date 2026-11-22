@@ -24,11 +24,9 @@ On Linux, a user's services stop when the user logs out: unless yours may alread
 
 Apart from the program itself, Ladderback keeps everything in your home folder:
 
-| What | Linux | macOS |
-|---|---|---|
-| Settings: repositories, plans and notifications | `~/.config/ladderback` | `~/Library/Application Support/ladderback` |
-| Data: the operation history, the admin password and this machine's ID | `~/.local/share/ladderback` | `~/Library/Application Support/ladderback` |
-| Cache, which holds nothing Ladderback needs | `~/.cache/ladderback` | `~/Library/Caches/ladderback` |
+- **Settings** (repositories, plans and notifications): `~/.config/ladderback` on Linux, `~/Library/Application Support/ladderback` on macOS.
+- **Data** (the operation history, the admin password and this machine's ID): `~/.local/share/ladderback` on Linux, `~/Library/Application Support/ladderback` on macOS.
+- **Cache**, which holds nothing Ladderback needs: `~/.cache/ladderback` on Linux, `~/Library/Caches/ladderback` on macOS.
 
 On Linux, the settings folder appears once you first save a setting. On macOS the service logs to `~/Library/Logs/ladderback.log`.
 
