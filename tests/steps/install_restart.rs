@@ -65,6 +65,8 @@ pub(super) struct InstallRestartE2e {
     session: Arc<Mutex<String>>,
     /// The service's process when the command ran.
     process_before: Option<u32>,
+    /// What the script showed on the terminal it ran at, when it ran at one.
+    terminal: Option<String>,
 }
 
 /// The checkout's build as `--version` and the script show it.
@@ -99,8 +101,9 @@ fn installed_program(agent: &Agent) -> PathBuf {
 /// A stand-in for the `build` of the program in `folder`. `--version` names
 /// `version`; each call's first argument and the path it was called by go
 /// to `calls`; `check-keyring` fails as the real program fails for an entry
-/// it can't read when a scenario has written `keyring-fails`. Everything else
-/// goes to the real program.
+/// it can't read when a scenario has written `keyring-fails`, or once when
+/// it has written `keyring-fails-once`. Everything else goes to the real
+/// program.
 fn stand_in(folder: &Path, build: &str) -> String {
     format!(
         "#!/bin/sh\n\
@@ -108,6 +111,11 @@ fn stand_in(folder: &Path, build: &str) -> String {
          d='{}'\n\
          printf '%s\\t%s\\n' \"$1\" \"$0\" >> \"$d/calls\"\n\
          if [ \"$1\" = --version ]; then exec /bin/cat \"$d/version\"; fi\n\
+         if [ \"$1\" = check-keyring ] && [ -e \"$d/keyring-fails-once\" ]; then\n\
+         /bin/rm -f \"$d/keyring-fails-once\"\n\
+         echo 'ladderback: nas: could not read the keyring entry ladderback/nas (secret-keyring-timed-out)' >&2\n\
+         exit 1\n\
+         fi\n\
          if [ \"$1\" = check-keyring ] && [ -e \"$d/keyring-fails\" ]; then\n\
          echo 'ladderback: nas: could not read the keyring entry ladderback/nas (secret-keyring-unavailable)' >&2\n\
          exit 1\n\
@@ -280,6 +288,12 @@ fn keyring_fails(agent: &mut Agent) {
         .expect("the stand-in is told to fail its keyring check");
 }
 
+#[given("the new program can't read a keyring entry until it checks again")]
+fn keyring_fails_once(agent: &mut Agent) {
+    fs::write(installed(agent).join("keyring-fails-once"), "")
+        .expect("the stand-in is told to fail its first keyring check");
+}
+
 #[given("the new program's build fails")]
 fn build_fails(agent: &mut Agent) {
     fs::write(installed(agent).join("build-fails"), "")
@@ -317,6 +331,16 @@ fn keyring_read(agent: &mut Agent) {
         first(&calls, "check-keyring").is_some(),
         "the programs ran {calls:?}"
     );
+}
+
+#[then(expr = "the new program read the keyring entries {int} time(s)")]
+fn keyring_read_times(agent: &mut Agent, times: usize) {
+    let calls = calls(agent);
+    let read = calls
+        .iter()
+        .filter(|(call, _)| call == "check-keyring")
+        .count();
+    assert_eq!(read, times, "the programs ran {calls:?}");
 }
 
 #[then("the new program read the keyring entries before the service was restarted")]
@@ -552,6 +576,71 @@ async fn run_script(agent: &mut Agent, args: &[&str]) {
     agent.interop.program = Some(node);
     run(agent, &all).await;
     agent.interop.program = None;
+}
+
+/// Runs the script as `run_script` does, but with a terminal as its
+/// standard input and standard error, as a person runs it, and presses
+/// Enter once when it asks for it. What it showed on the terminal is kept
+/// apart from its standard output.
+#[when("the owner runs install-restart at a terminal and presses Enter when asked")]
+async fn runs_at_terminal(agent: &mut Agent) {
+    agent.install_restart.process_before = managers(agent).process(NAME);
+    let pty = match nix::pty::openpty(None, None) {
+        Ok(pty) => pty,
+        Err(error) => testkit::skip!("no pseudo-terminal can be opened here: {error}"),
+    };
+    let mut command = Command::new(node());
+    command.arg(SCRIPT);
+    environment(agent, &mut command);
+    command
+        .stdin(Stdio::from(
+            pty.slave.try_clone().expect("the terminal's other end"),
+        ))
+        .stderr(Stdio::from(pty.slave))
+        .stdout(Stdio::piped());
+    let (ran, shown) = blocking(move || {
+        use std::io::{Read, Write};
+        let child = spawn_gate::hold(|| command.spawn()).expect("the script runs");
+        // The script and its children now hold the terminal's other end
+        // alone, so the reads below end once they have all ended.
+        drop(command);
+        let mut screen = fs::File::from(pty.master);
+        let (mut shown, mut pressed) = (String::new(), false);
+        let mut chunk = [0_u8; 4096];
+        loop {
+            match screen.read(&mut chunk) {
+                Ok(0) | Err(_) => break,
+                Ok(read) => {
+                    shown.push_str(&String::from_utf8_lossy(
+                        chunk.get(..read).unwrap_or_default(),
+                    ));
+                }
+            }
+            if !pressed && shown.contains("press Enter") {
+                screen.write_all(b"\n").expect("Enter is pressed");
+                pressed = true;
+            }
+        }
+        let output = child.wait_with_output().expect("the script ended");
+        let ran = Ran {
+            success: output.status.success(),
+            code: output.status.code(),
+            stdout: String::from_utf8_lossy_owned(output.stdout),
+            stderr: shown.clone(),
+        };
+        (ran, shown)
+    })
+    .await;
+    agent.interop.ran = Some(ran);
+    agent.install_restart.terminal = Some(shown);
+}
+
+#[then(expr = "the terminal said {string}")]
+fn terminal_said(agent: &mut Agent, said: String) {
+    let Some(shown) = &agent.install_restart.terminal else {
+        testkit::skip!("no pseudo-terminal could be opened");
+    };
+    assert!(shown.contains(&said), "the terminal showed {shown:?}");
 }
 
 /// Runs the script as `run_script` does, with a minute's wait, and sends it

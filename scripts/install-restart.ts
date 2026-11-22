@@ -407,6 +407,23 @@ export function stagingArgs(args: readonly string[], staging: string): string[] 
   return ["--root", staging, ...kept];
 }
 
+/** What step 2a needs of the world, so that a test can stand in for each part. */
+export interface KeyringCheck {
+  /** Runs the new program's `check-keyring`: whether it read every entry. */
+  check: () => boolean;
+  /** Whether a person can answer here: standard input and standard error are a terminal. */
+  attended: boolean;
+  /** Says `line` and waits for Enter: true when it was pressed, false when the input ended first. */
+  ask: (line: string) => Promise<boolean>;
+  /** Says `line` on standard error. */
+  say: (line: string) => void;
+}
+
+/** Step 2a: whether the new program read every keyring entry, at its check or, at a terminal, at one more once the person has answered. */
+export async function keyringRead(_world: KeyringCheck): Promise<boolean> {
+  throw new Error("not yet");
+}
+
 /** What one run does, read from its arguments and environment. */
 interface Options {
   now: boolean;

@@ -7,11 +7,14 @@
 //! configuration the daemon reads (`LADDERBACK_CONFIG_DIR`, or the
 //! platform's folder), only reads it, and prints no secret: what an entry
 //! holds is dropped as soon as it is read (I4). What was read goes to
-//! stdout; what couldn't be, to stderr, and it then ends with 1.
+//! stdout; what couldn't be, to stderr, and it then ends with 1. On macOS,
+//! before each read, it says on stderr that the keychain may ask now, and
+//! at a terminal it waits five minutes for each answer (#1375).
 
 use std::io::{self, Read as _, Write};
 use std::path::Path;
 use std::process::ExitCode;
+use std::time::Duration;
 
 use api::MsgArg;
 use app::keyring_check::{KeyringCheck, KeyringUser, check_keyring_entries};
@@ -19,6 +22,7 @@ use app::ports::ConfigError;
 use config_adapter::{MAX_CONFIG_BYTES, Schemas, parse};
 use domain::execution::refusal::SettingRefusal;
 use domain::planning::AgentConfig;
+use domain::secrets::KeyringEntry;
 use l10n::{Localizer, msg};
 use platform::dirs;
 
@@ -61,6 +65,7 @@ fn run(localizer: &Localizer) -> io::Result<ExitCode> {
     let checked = runtime.block_on(check_keyring_entries(
         &config,
         &secrets::SystemSecrets::new(),
+        |_| {},
     ));
     report(
         localizer,
@@ -107,6 +112,21 @@ pub(crate) fn read_config(file: &Path) -> Result<AgentConfig, ConfigError> {
         });
     }
     parse(file, &contents, &Schemas::production()).map(|parsed| parsed.config)
+}
+
+/// Says on `err`, just before `entry` is read, that the keychain may ask
+/// now, in a window that can be behind others, and to choose Always Allow;
+/// `wait` is how long the read waits for the answer. Only where the
+/// keyring `asks` before it lets a new build read an entry: macOS.
+fn notice(
+    localizer: &Localizer,
+    entry: &KeyringEntry,
+    wait: Duration,
+    asks: bool,
+    err: &mut impl Write,
+) -> io::Result<()> {
+    let _ = (localizer, entry, wait, asks, err);
+    todo!()
 }
 
 /// Says what `checked` came to: each entry read on `out`, each refused on
@@ -361,12 +381,56 @@ mod tests {
             Vec::new(),
         )
         .expect("a configuration");
-        let checked = check_keyring_entries(&config, secrets.as_ref()).await;
+        let checked = check_keyring_entries(&config, secrets.as_ref(), |_| {}).await;
         let (out, err, status) = reported(&checked);
         assert!(out.contains("nas: read the keyring entry"), "{out:?}");
         assert!(!out.contains("CANARY"), "{out:?}");
         assert!(!err.contains("CANARY"), "{err:?}");
         assert!(!format!("{checked:?}").contains("CANARY"));
         assert_eq!(status, ExitCode::SUCCESS);
+    }
+
+    /// What `notice` said of `entry`, where the keyring asks or doesn't.
+    fn noticed(entry_text: &str, wait: Duration, asks: bool) -> String {
+        let mut err = Vec::new();
+        notice(
+            &Localizer::new(&[]),
+            &entry(entry_text),
+            wait,
+            asks,
+            &mut err,
+        )
+        .expect("the notice is written");
+        String::from_utf8(err).expect("text")
+    }
+
+    /// On macOS the keychain may ask before the read: the notice names the
+    /// entry, says where the question may be and what to answer, and how
+    /// long the read waits, on one line (#1375).
+    #[test]
+    fn where_the_keyring_asks_the_notice_names_the_entry_and_the_answer() {
+        let said = noticed("ladderback/nas", Duration::from_secs(300), true);
+        assert!(said.starts_with("ladderback: "), "{said:?}");
+        assert!(said.contains("ladderback/nas"), "{said:?}");
+        assert!(said.contains("behind other windows"), "{said:?}");
+        assert!(said.contains("Always Allow"), "{said:?}");
+        assert!(said.contains("5 minutes"), "{said:?}");
+        assert_eq!(said.lines().count(), 1, "{said:?}");
+    }
+
+    /// A wait of a minute is said as one.
+    #[test]
+    fn a_wait_of_a_minute_is_said_as_one() {
+        let said = noticed("ladderback/nas", Duration::from_secs(60), true);
+        assert!(said.contains("1 minute "), "{said:?}");
+    }
+
+    /// Elsewhere the keyring doesn't ask a new build, so nothing is said.
+    #[test]
+    fn where_the_keyring_does_not_ask_nothing_is_said() {
+        assert_eq!(
+            noticed("ladderback/nas", Duration::from_secs(300), false),
+            ""
+        );
     }
 }
