@@ -230,6 +230,7 @@ Decisions 1–6 recorded 2026-11-08. Decisions 7–12 recorded 2026-11-08 after 
 | [141](decisions/141-the-header-stands-in-the-page-frame.md) | The header's content stands in the page's frame, and the pages' links take the text's color |
 | [142](decisions/142-the-running-version-in-the-footer.md) | The running version stands in a footer at the foot of every page |
 | [143](decisions/143-a-hamburger-menu-holds-the-pages-links-below-41rem.md) | Below 41rem a hamburger menu holds the pages' links and Sign out |
+| [144](decisions/144-a-copied-data-folder-stops-maintaining.md) | What a machine does when its data folder was copied from another computer |
 
 ## 17. Open questions
 
