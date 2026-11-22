@@ -32,10 +32,10 @@ impl PairingState {
                 hub: None,
             });
         };
-        let certificate = match pin.tls {
+        let certificate = Some(match pin.tls {
             TokenTls::Ca => TokenCertificateDto::Ca,
             TokenTls::Pinned(_) => TokenCertificateDto::Pinned,
-        };
+        });
         Ok(PairingDto {
             paired: true,
             hub: Some(PairedHubDto {

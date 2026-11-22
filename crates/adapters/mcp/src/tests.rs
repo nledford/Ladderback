@@ -3409,30 +3409,47 @@ fn the_guide_is_said_in_the_locale_the_server_was_given() {
 #[cfg(feature = "hub")]
 #[tokio::test(start_paused = true)]
 async fn pairing_state_answers_the_hub_the_backend_names() {
-    let paired = api::PairingDto {
-        paired: true,
-        hub: Some(api::PairedHubDto {
-            address: "https://hub.example".to_owned(),
-            fingerprint: "ABCD-EFGH-JKMN-PQRS-TVWX".to_owned(),
-            certificate: api::TokenCertificateDto::Pinned,
-        }),
+    let pinned = api::PairedHubDto {
+        address: "https://hub.example".to_owned(),
+        fingerprint: "ABCD-EFGH-JKMN-PQRS-TVWX".to_owned(),
+        certificate: Some(api::TokenCertificateDto::Pinned),
     };
-    let asked = Arc::new(Mutex::new(Vec::new()));
-    let mut client = proposing(Lists {
-        pairing: Some(paired),
-        asked: Arc::clone(&asked),
-        ..Lists::default()
-    });
-    let content = client.listed("pairing_state", json!({})).await;
-    assert_eq!(
-        content,
-        json!({"paired": true, "hub": {
-            "address": "https://hub.example",
-            "fingerprint": "ABCD-EFGH-JKMN-PQRS-TVWX",
-            "certificate": "pinned",
-        }})
-    );
-    assert_eq!(*asked.lock().unwrap(), ["pairing"]);
+    // A plain http address shows no certificate, so none is named (#1372).
+    let plain = api::PairedHubDto {
+        address: "http://hub.example".to_owned(),
+        certificate: None,
+        ..pinned.clone()
+    };
+    for (hub, expected) in [
+        (
+            pinned,
+            json!({
+                "address": "https://hub.example",
+                "fingerprint": "ABCD-EFGH-JKMN-PQRS-TVWX",
+                "certificate": "pinned",
+            }),
+        ),
+        (
+            plain,
+            json!({
+                "address": "http://hub.example",
+                "fingerprint": "ABCD-EFGH-JKMN-PQRS-TVWX",
+            }),
+        ),
+    ] {
+        let asked = Arc::new(Mutex::new(Vec::new()));
+        let mut client = proposing(Lists {
+            pairing: Some(api::PairingDto {
+                paired: true,
+                hub: Some(hub),
+            }),
+            asked: Arc::clone(&asked),
+            ..Lists::default()
+        });
+        let content = client.listed("pairing_state", json!({})).await;
+        assert_eq!(content, json!({"paired": true, "hub": expected}));
+        assert_eq!(*asked.lock().unwrap(), ["pairing"]);
+    }
 }
 
 #[cfg(feature = "hub")]

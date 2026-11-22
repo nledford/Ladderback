@@ -3009,7 +3009,7 @@
       "openWorldHint": false,
       "readOnlyHint": true
     },
-    "description": "Whether this machine is paired with a hub, as its pin says: the hub's address, the fingerprint of the hub's key and how its certificate is checked. Never a token or a secret. It doesn't connect to the hub, so it can't say whether the hub has approved the machine: `ladderback hub-status` on the machine says that. The resource ladderback://pairing holds the steps of pairing.",
+    "description": "Whether this machine is paired with a hub, as its pin says: the hub's address, the fingerprint of the hub's key and how its certificate is checked. A plain http:// address names no certificate: it isn't encrypted and shows none, and the hub key still proves the hub. Never a token or a secret. It doesn't connect to the hub, so it can't say whether the hub has approved the machine: `ladderback hub-status` on the machine says that. The resource ladderback://pairing holds the steps of pairing.",
     "inputSchema": {
       "additionalProperties": false,
       "properties": {},
@@ -3025,7 +3025,14 @@
               "type": "string"
             },
             "certificate": {
-              "$ref": "#/$defs/TokenCertificateDto"
+              "anyOf": [
+                {
+                  "$ref": "#/$defs/TokenCertificateDto"
+                },
+                {
+                  "type": "null"
+                }
+              ]
             },
             "fingerprint": {
               "type": "string"
@@ -3033,8 +3040,7 @@
           },
           "required": [
             "address",
-            "fingerprint",
-            "certificate"
+            "fingerprint"
           ],
           "type": "object"
         },

@@ -141,7 +141,9 @@ fn not_paired(agent: &mut Agent) {
     assert_eq!(*content(agent), json!({"paired": false}));
 }
 
-#[then("the pairing state names the hub's address and its key's fingerprint")]
+#[then(
+    "the pairing state names the hub's address and its key's fingerprint, and no certificate, since the address isn't encrypted"
+)]
 fn names_the_hub(agent: &mut Agent) {
     let token = PairingToken::parse_pasted(token(agent)).expect("the scenario's token");
     let address =
@@ -153,7 +155,6 @@ fn names_the_hub(agent: &mut Agent) {
             "hub": {
                 "address": address.as_str(),
                 "fingerprint": Fingerprint::of_key(token.hub_key()).to_string(),
-                "certificate": "ca",
             },
         })
     );
