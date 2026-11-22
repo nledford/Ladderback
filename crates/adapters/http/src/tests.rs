@@ -557,7 +557,7 @@ async fn serving() -> (std::net::SocketAddr, Arc<app::fakes::InMemoryEventBus>) 
     };
     let app = router(ui(), RequestChecks::default(), state);
     tokio::spawn(async move {
-        let serving = axum::serve(listener, app);
+        let serving = crate::serve_connections(listener, app, std::future::pending());
         let _ = serving.await;
     });
     (addr, events)

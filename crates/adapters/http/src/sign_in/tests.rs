@@ -956,11 +956,7 @@ async fn an_events_stream_ends_once_the_session_that_opened_it_does() {
     state.sign_in = on.clone();
     let app = router(Arc::new(NoUi), RequestChecks::default(), state);
     tokio::spawn(async move {
-        let _ = axum::serve(
-            listener,
-            app.into_make_service_with_connect_info::<crate::PeerAddr>(),
-        )
-        .await;
+        let _ = crate::serve_connections(listener, app, std::future::pending()).await;
     });
     let mut request = format!("ws://{addr}/api/v1/events")
         .into_client_request()

@@ -2535,6 +2535,8 @@ dependencies = [
  "domain",
  "futures",
  "http-body-util",
+ "hyper",
+ "hyper-util",
  "log",
  "mime_guess",
  "nix 0.31.3",

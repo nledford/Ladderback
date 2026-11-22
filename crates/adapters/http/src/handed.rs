@@ -51,7 +51,7 @@ pub struct Handed {
     pub peer: HandedPeer,
 }
 
-/// The server's end of the front door, for `axum::serve`: the connections
+/// The server's end of the front door, for `serve_connections`: the connections
 /// it lets in, in the order it lets them in. Dropped, it stops the door.
 pub struct HandedListener {
     connections: mpsc::Receiver<Handed>,
@@ -107,14 +107,6 @@ impl axum::serve::Listener for HandedListener {
             addr: self.local,
             tls: None,
         })
-    }
-}
-
-impl axum::extract::connect_info::Connected<axum::serve::IncomingStream<'_, HandedListener>>
-    for HandedPeer
-{
-    fn connect_info(stream: axum::serve::IncomingStream<'_, HandedListener>) -> Self {
-        *stream.remote_addr()
     }
 }
 
