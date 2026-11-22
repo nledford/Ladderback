@@ -233,3 +233,77 @@ test(`${engine}: a link focused while the page's timers are busy is in sight onc
     await context.close();
   }
 });
+
+// A scroll region taller than the scenarios' 320 by 256 viewport, as a table's
+// frame is at 200 % text, its top already in view below a button: Tab from
+// the button focuses it while part of it shows, so Chromium and WebKit, like
+// Firefox, scroll only until its top edge shows, and the center of its box
+// lies below the viewport (#1292).
+const TALL_REGION = `<!doctype html>
+<html lang="en">
+  <head>
+    <title>Focus check</title>
+    <style>
+      body { margin: 0; background: white; color: black; }
+      button { margin: 1rem; }
+      button:focus-visible, [role="region"]:focus-visible { outline: 2px solid black; outline-offset: -2px; }
+      .spacer { block-size: 120px; }
+      [role="region"] { block-size: 700px; }
+      .cover { position: fixed; inset: 0; background: gray; }
+    </style>
+  </head>
+  <body>
+    <button type="button">Columns</button>
+    <div class="spacer"></div>
+    <div role="region" aria-label="Repositories" tabindex="0">Rows</div>
+    <div class="spacer"></div>
+  </body>
+</html>`;
+
+/** Opens `TALL_REGION` at the scenarios' viewport and presses Tab onto the
+ *  button, then onto the region, through the walks' check. Given `covered`,
+ *  a fixed box over the whole viewport appears as the region takes focus.
+ *  What the check said: `null` when it passed. */
+async function tabOntoTheTallRegion(covered: boolean): Promise<string | null> {
+  assert.ok(browser !== undefined, "the browser is not running: `before` failed");
+  const context = await browser.newContext({ viewport: { width: 320, height: 256 } });
+  try {
+    const page = await context.newPage();
+    await page.setContent(TALL_REGION);
+    await page.evaluate((covered) => {
+      const region = document.querySelector('[role="region"]');
+      if (covered && region !== null) {
+        region.addEventListener("focus", () => {
+          const cover = document.createElement("div");
+          cover.className = "cover";
+          document.body.append(cover);
+        });
+      }
+    }, covered);
+    const walk = journey(page);
+    await walk.press("Tab");
+    try {
+      await walk.press("Tab");
+    } catch (error) {
+      if (!(error instanceof assert.AssertionError)) throw error;
+      return error.message;
+    }
+    const top = await page.evaluate(() => document.activeElement?.getBoundingClientRect().top ?? Number.NaN);
+    assert.ok(top < 256, `the region's top is in view, at ${top}`);
+    return null;
+  } finally {
+    await context.close();
+  }
+}
+
+test(`${engine}: a region taller than the viewport, focused as its top shows, is in sight`, { timeout: LIMIT_MS }, async () => {
+  const verdict = await tabOntoTheTallRegion(false);
+  assert.equal(verdict, null, `the check reported: ${verdict}`);
+});
+
+test(`${engine}: a region taller than the viewport with a box over all of it in view is reported covered`, {
+  timeout: LIMIT_MS,
+}, async () => {
+  const verdict = await tabOntoTheTallRegion(true);
+  assert.match(verdict ?? "the check passed", /^focused element is covered: <div role="region".*\(its lines' centers find <div>\)$/);
+});
