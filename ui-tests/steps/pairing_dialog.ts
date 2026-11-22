@@ -5,9 +5,11 @@
 // accessible name, as in every journey.
 
 import assert from "node:assert/strict";
+import { execFile } from "node:child_process";
 import { cp, mkdtemp } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
+import { promisify } from "node:util";
 
 import { Given, Then, When } from "@cucumber/cucumber";
 import type { BrowserContext, Locator, Request } from "playwright";
@@ -15,7 +17,7 @@ import type { BrowserContext, Locator, Request } from "playwright";
 import { expect } from "../support/expect.ts";
 import { journey, namePattern, pressUntilFocused } from "../support/keyboard.ts";
 import { patienceMs, untilSettled } from "../support/patience.ts";
-import { type BrowserWorld, fixtureRepo, startServer } from "../support/world.ts";
+import { type BrowserWorld, binary, binaryEnv, fixtureRepo, startServer } from "../support/world.ts";
 import { pressUntilFocusIsOn } from "./accessibility.ts";
 import { ownBase } from "./api_tokens.ts";
 import { folders, setPassword } from "./sign_in.ts";
@@ -54,16 +56,18 @@ function field(answer: unknown, name: string): string | undefined {
   return typeof value === "string" ? value : undefined;
 }
 
-/** The hub's key as the page reads it: its fingerprint and key ID. */
-async function hubKey(world: BrowserWorld): Promise<{ fingerprint: string; keyId: string }> {
+/** The hub key's fingerprint as the page reads it. */
+async function hubFingerprint(world: BrowserWorld): Promise<string> {
   const answer = await world.context.request.get(`${ownBase(world)}/api/v1/hub`);
   assert.equal(answer.status(), 200, `the hub's key could not be read: ${await answer.text()}`);
   const read: unknown = await answer.json();
   const fingerprint = field(read, "fingerprint");
-  const keyId = field(read, "key-id");
-  assert.ok(fingerprint && keyId, `the hub's key reads ${JSON.stringify(read)}`);
-  return { fingerprint, keyId };
+  assert.ok(fingerprint, `the hub's key reads ${JSON.stringify(read)}`);
+  return fingerprint;
 }
+
+/** The hub key's fingerprint the hub's terminal printed, per scenario. */
+const printedHubKeys = new WeakMap<BrowserWorld, string>();
 
 /** The cancels the page sent, per scenario, each as its answer's status and
  *  the token's ID. */
@@ -121,6 +125,20 @@ Given("a hub with sign-in off", async function (this: BrowserWorld) {
   await startHub(this, await mkdtemp(path.join(tmpdir(), "ladderback-ui-hub-")));
 });
 
+// `ladderback pairing-token` at the hub's terminal before its daemon starts,
+// as a person makes a token without the page: it prints the hub key's
+// fingerprint, which the page must show as the same string.
+Given("a hub with sign-in off whose terminal printed its key's fingerprint", async function (this: BrowserWorld) {
+  const scratch = await mkdtemp(path.join(tmpdir(), "ladderback-ui-hub-"));
+  const { stderr } = await promisify(execFile)(binary, ["pairing-token", "--address", "http://127.0.0.1:9"], {
+    env: binaryEnv(scratch, folders(scratch)),
+  });
+  const printed = /The hub key: (\S+)/.exec(stderr.replace(ISOLATION_MARKS, ""))?.[1];
+  assert.ok(printed, `the terminal printed no hub key:\n${stderr}`);
+  printedHubKeys.set(this, printed);
+  await startHub(this, scratch);
+});
+
 Given("a hub with sign-in on and the admin password {string}", async function (this: BrowserWorld, password: string) {
   const scratch = await mkdtemp(path.join(tmpdir(), "ladderback-ui-hub-"));
   await cp(fixtureRepo, path.join(scratch, "repo"), { recursive: true });
@@ -137,18 +155,35 @@ Given("the browser's clock is a day ahead", function (this: BrowserWorld) {
   });
 });
 
-When("I type the hub's key ID", async function (this: BrowserWorld) {
-  const { keyId } = await hubKey(this);
-  await this.page.keyboard.type(keyId);
+When("I type the hub key's fingerprint", async function (this: BrowserWorld) {
+  await this.page.keyboard.type(await hubFingerprint(this));
 });
 
-/** Asks for a token as a keyboard walk does, in short: the key ID typed in
- *  its field, then the form sent from its button. */
+// A paste of what the page's own Copy button put on the clipboard, by the
+// keyboard, as a person's paste lands.
+When("I paste what the page copied", async function (this: BrowserWorld) {
+  await journey(this.page).press("ControlOrMeta+V");
+});
+
+// The step-up's description holds the value to type, as the terminal
+// printed it: one string for the hub key on every screen (#1344).
+Then(
+  "the textbox {string} is described by the fingerprint the hub's terminal printed",
+  async function (this: BrowserWorld, name: string) {
+    const printed = printedHubKeys.get(this);
+    assert.ok(printed, "no step had the hub's terminal print its key");
+    const field = this.page.getByRole("textbox", { name: namePattern(name) });
+    await expect(field).toHaveAccessibleDescription(new RegExp(printed));
+  },
+);
+
+/** Asks for a token as a keyboard walk does, in short: the fingerprint typed
+ *  in its field, then the form sent from its button. */
 async function askForToken(world: BrowserWorld): Promise<void> {
   await world.open("/settings#agents");
-  const { keyId } = await hubKey(world);
-  await tabTo(world, "textbox", "Hub key ID");
-  await world.page.keyboard.type(keyId);
+  const fingerprint = await hubFingerprint(world);
+  await tabTo(world, "textbox", "Hub key fingerprint");
+  await world.page.keyboard.type(fingerprint);
   await tabTo(world, "button", "Make a pairing token");
   await world.page.keyboard.press("Enter");
 }
@@ -165,12 +200,12 @@ When("I make a pairing token on the Machines tab", async function (this: Browser
 });
 
 // Back on the form once a dialog closed, without opening the page again:
-// the key ID typed in its field, which is before the button, then the form
-// sent again.
+// the fingerprint typed in its field, which is before the button, then the
+// form sent again.
 When("I make another pairing token", async function (this: BrowserWorld) {
-  const { keyId } = await hubKey(this);
-  await pressUntilFocusIsOn(this, "Shift+Tab", "textbox", "Hub key ID");
-  await this.page.keyboard.type(keyId);
+  const fingerprint = await hubFingerprint(this);
+  await pressUntilFocusIsOn(this, "Shift+Tab", "textbox", "Hub key fingerprint");
+  await this.page.keyboard.type(fingerprint);
   await pressUntilFocusIsOn(this, "Tab", "button", "Make a pairing token");
   await this.page.keyboard.press("Enter");
   await dialog(this).waitFor({ state: "visible", timeout: patienceMs() });
@@ -203,7 +238,7 @@ When("the page is printed", async function (this: BrowserWorld) {
 // locator.ariaSnapshot(), since toMatchAriaSnapshot() only works inside a
 // Playwright test; the marks isolating the group's name aren't heard.
 Then("the dialog {string} shows the hub key's fingerprint in full", async function (this: BrowserWorld, name: string) {
-  const { fingerprint } = await hubKey(this);
+  const fingerprint = await hubFingerprint(this);
   const spoken = [...fingerprint.replaceAll("-", "")].map((character) => `  - img "${character}"`).join("\n");
   const group = this.page
     .getByRole("dialog", { name: namePattern(name) })

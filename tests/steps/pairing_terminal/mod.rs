@@ -37,6 +37,8 @@ pub struct PairingTerminal {
     other_address: Option<SocketAddr>,
     /// The key fingerprint the machine showed when it paired.
     machine_key: Option<String>,
+    /// The hub key's fingerprint the hub's terminal printed with its token.
+    hub_key: Option<String>,
     /// The time zone the machine's commands run in, through `TZ`; this
     /// computer's when none.
     machine_zone: Option<String>,
@@ -149,4 +151,13 @@ fn machine_key(agent: &Agent) -> &str {
         .machine_key
         .as_deref()
         .expect("the machine showed its key")
+}
+
+/// The hub key's fingerprint the hub's terminal printed with its token.
+fn hub_key_printed(agent: &Agent) -> String {
+    agent
+        .pairing_terminal
+        .hub_key
+        .clone()
+        .expect("the hub's terminal printed its key")
 }

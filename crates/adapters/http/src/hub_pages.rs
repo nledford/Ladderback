@@ -23,8 +23,8 @@ use axum::http::{HeaderMap, StatusCode};
 use axum::response::{IntoResponse, Response};
 use domain::access::step_up::StepUpConfirmation;
 use domain::fleet::{
-    AgentRecord, AgentStatus, ApprovalRefused, Fingerprint, HubAddress, HubRoute, KeyId,
-    ListedAgent, PublicKey, RouteRefused, TokenId, TokenTls,
+    AgentRecord, AgentStatus, ApprovalRefused, Fingerprint, HubAddress, HubRoute, ListedAgent,
+    PublicKey, RouteRefused, TokenId, TokenTls,
 };
 use domain::{AgentId, SignedDuration, Timestamp, Uuid};
 
@@ -58,7 +58,7 @@ fn not_a_hub() -> Response {
     crate::refused(StatusCode::NOT_FOUND, ErrorCode::RouteUnknown)
 }
 
-/// The hub key's fingerprint and key ID, and the certificate a token is
+/// The hub key's fingerprint, and the certificate a token is
 /// offered first: the hub's own when the page came over its built-in TLS,
 /// a certificate authority's when it came in plain, as through a proxy.
 async fn hub(State(state): State<AppState>, request: Request) -> Response {
@@ -75,7 +75,6 @@ async fn hub(State(state): State<AppState>, request: Request) -> Response {
     match pairing.hub_key().await {
         Ok(key) => axum::Json(api::HubDto {
             fingerprint: Fingerprint::of_key(&key).to_string(),
-            key_id: KeyId::of_key(&key).to_string(),
             certificate,
             own_certificate: own.map(|fingerprint| fingerprint.to_string()),
         })
