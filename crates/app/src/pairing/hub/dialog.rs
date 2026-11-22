@@ -160,11 +160,7 @@ impl HubPairing {
     ) -> Result<Result<AgentRecord, ApprovalRefused>, TokenAskRefused> {
         self.stepped_up(ask.beyond_loopback, ask.peer, ask.confirmation)
             .await?;
-        Ok(self
-            .registry
-            .approve(ask.agent_id, ask.agent_key, self.clock.now())
-            .await
-            .map_err(HubPairingError::from)?)
+        Ok(self.approve_now(ask.agent_id, ask.agent_key).await?)
     }
 
     /// [`HubPairing::agents`], with the time they were read.

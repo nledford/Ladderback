@@ -155,9 +155,14 @@ impl AgentRecord {
 
     /// Whether the agent is approved and the hub hasn't heard from it since
     /// the approval: its next proof is its first connection as an approved
-    /// agent, which the hub's log records once (#1342).
+    /// agent, which the hub's log records once (#1342). A proof or a
+    /// pairing sets `last_seen` after the approval, and an approval keeps
+    /// it, so this needs no state of its own.
     pub fn unseen_since_approval(&self) -> bool {
-        todo!()
+        match self.status {
+            AgentStatus::Approved { at } => self.last_seen <= at,
+            AgentStatus::Pending { .. } => false,
+        }
     }
 }
 
@@ -465,8 +470,10 @@ pub struct ProofView<'a> {
 }
 
 /// The decision a proof gets at `now` (decision 120, "The handshake"): the
-/// agent's record as it now is, seen now and keeping the greater counter.
-/// Telling a copy of the agent by its counter is #296's.
+/// agent's record as it now is, seen now and keeping the greater counter,
+/// and whether the proof is its first since its approval, as the record in
+/// `view` says before this one is kept (#1342). Telling a copy of the agent
+/// by its counter is #296's.
 pub fn decide_proof(
     view: &ProofView<'_>,
     request: &ProofRequest,
@@ -487,7 +494,7 @@ pub fn decide_proof(
             last_seen: now,
             ..record.clone()
         },
-        first_since_approval: false,
+        first_since_approval: record.unseen_since_approval(),
     })
 }
 
