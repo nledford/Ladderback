@@ -185,7 +185,9 @@ use repositories_page::Repositories;
 use routes::NotFound;
 use session::{SignInOffNotice, Standing, Title};
 use settings::Settings;
-use sign_in::{IdleWarning, SessionEnded, SignInPage, SignOut, SignOutFailure};
+use sign_in::{
+    IdleWarning, SessionEnded, SignInPage, SignOut, SignOutFailure, admin_password_link,
+};
 use snapshot_page::Snapshot;
 use snapshots::Snapshots;
 use start_page::Start;
@@ -726,6 +728,7 @@ fn App(localizer: Arc<Localizer>) -> impl IntoView {
                         (notice.get() == SignInOffNotice::EveryPage)
                             .then(|| {
                                 let words = on_the_network.clone();
+                                let link = admin_password_link(&network_banner);
                                 view! {
                                     <Banner
                                         localizer=Arc::clone(&network_banner)
@@ -733,6 +736,8 @@ fn App(localizer: Arc<Localizer>) -> impl IntoView {
                                         tone=BannerTone::Warning
                                     >
                                         {words}
+                                        " "
+                                        {link}
                                     </Banner>
                                 }
                             })

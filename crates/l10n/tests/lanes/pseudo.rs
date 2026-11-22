@@ -171,7 +171,6 @@ fn what_a_person_types_stays_as_it_is_in_a_transformed_message() {
             msg::CLI_WARN_SIGN_IN_OFF_BEHIND_PROXY,
             &["ladderback set-password"],
         ),
-        (msg::UI_SIGN_IN_OFF_NETWORK, &["ladderback set-password"]),
         (
             msg::CLI_REFUSE_NO_ALLOWED_HOST,
             &["--allowed-host", "--allowed-host nas.example.com"],
@@ -182,7 +181,6 @@ fn what_a_person_types_stays_as_it_is_in_a_transformed_message() {
         ),
         (msg::CLI_SET_PASSWORD_MISMATCH, &["ladderback set-password"]),
         (msg::UI_SIGN_IN_PASSWORD_HINT, &["ladderback set-password"]),
-        (msg::UI_SIGN_IN_OFF, &["ladderback set-password"]),
         (
             msg::CLI_INVALID_ALLOWED_HOST,
             &[
