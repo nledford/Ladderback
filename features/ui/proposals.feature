@@ -22,7 +22,7 @@ Feature: Pending changes page
     And I press Enter
     Then focus is on the main heading "Pending changes"
     And the page is titled "Pending changes – Ladderback"
-    And the page says "Sign-in is off, so approving here is a convenience, not a safety boundary: a program that can reach Ladderback could approve its own proposal. To make approval yours alone, turn sign-in on with ladderback set-password and start Ladderback again."
+    And the page says "Sign-in is off, so approving here is a convenience, not a safety boundary: a program that can reach Ladderback could approve its own proposal. To make approval yours alone, set an admin password in the Admin password tab of Settings and restart Ladderback."
     When I press Tab until focus is on the proposal's Review button
     And I press Enter
     Then focus is on the proposal's heading
