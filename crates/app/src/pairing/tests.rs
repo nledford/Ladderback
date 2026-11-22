@@ -9,7 +9,7 @@ use domain::{AgentId, SignedDuration, Timestamp, Uuid};
 
 use super::*;
 use crate::fakes::{FakeClock, FakeSigning, InMemoryAgentRegistry, InMemoryIdentity, SeededRandom};
-use crate::ports::{AgentRegistry, Clock, Identity, Signing};
+use crate::ports::{AgentRegistry, Clock, Identity, IdentityError, Signing};
 
 pub(super) const EXPORTER: [u8; 32] = [0xee; 32];
 
@@ -126,6 +126,112 @@ async fn a_confirmed_kit_leaves_the_recovery_key_enough() {
     hub.identity.forget_recovery_seed().await.unwrap();
     let again = hub.pairing.keys().await.unwrap();
     assert_eq!(first.recovery_key(), again.recovery_key());
+}
+
+/// A hub's first start makes its keys, before anything asks for one: the
+/// hub key, the recovery key and the recovery seed. A later start reads the
+/// same ones.
+#[tokio::test]
+async fn a_first_start_makes_the_hubs_keys() {
+    let hub = Hub::new(1);
+    assert!(hub.identity.seed(SeedFile::HubKey).await.unwrap().is_none());
+
+    let HubStart::Keys(first) = hub.pairing.start().await.unwrap() else {
+        panic!("a first start makes keys");
+    };
+    assert!(hub.identity.seed(SeedFile::HubKey).await.unwrap().is_some());
+    assert!(
+        hub.identity
+            .seed(SeedFile::RecoverySeed)
+            .await
+            .unwrap()
+            .is_some()
+    );
+    assert_eq!(
+        hub.identity.recovery_key().await.unwrap(),
+        Some(*first.recovery_key())
+    );
+
+    let HubStart::Keys(again) = hub.pairing.start().await.unwrap() else {
+        panic!("a later start reads the keys");
+    };
+    assert_eq!(first.key(), again.key());
+    assert_eq!(first.recovery_key(), again.recovery_key());
+}
+
+/// A hub that starts with a key file gone while agents are registered
+/// runs, with no new key made, so that it refuses every agent's session
+/// until the file is restored.
+#[tokio::test]
+async fn a_start_with_a_key_gone_and_agents_registered_makes_no_key() {
+    let hub = Hub::new(1);
+    let token = hub.token(pinned()).await;
+    pair(&hub, &agent(Arc::default()), token).await.unwrap();
+
+    let no_key_files = Arc::new(InMemoryIdentity::default());
+    let without_keys = HubPairing::new(
+        hub.registry.clone(),
+        no_key_files.clone(),
+        Arc::new(FakeSigning),
+        Arc::new(SeededRandom::new(2)),
+        hub.clock.clone(),
+        "0.0.0-test".to_owned(),
+    );
+    assert!(matches!(
+        without_keys.start().await.unwrap(),
+        HubStart::Unserved(KeyFile::HubKey)
+    ));
+    assert!(no_key_files.seed(SeedFile::HubKey).await.unwrap().is_none());
+    assert!(
+        no_key_files
+            .seed(SeedFile::RecoverySeed)
+            .await
+            .unwrap()
+            .is_none()
+    );
+
+    let only_hub_key = Arc::new(InMemoryIdentity::default());
+    let hub_seed = hub.identity.seed(SeedFile::HubKey).await.unwrap().unwrap();
+    only_hub_key
+        .keep_seed(SeedFile::HubKey, hub_seed)
+        .await
+        .unwrap();
+    let without_recovery = HubPairing::new(
+        hub.registry.clone(),
+        only_hub_key.clone(),
+        Arc::new(FakeSigning),
+        Arc::new(SeededRandom::new(2)),
+        hub.clock.clone(),
+        "0.0.0-test".to_owned(),
+    );
+    assert!(matches!(
+        without_recovery.start().await.unwrap(),
+        HubStart::Unserved(KeyFile::RecoveryKey)
+    ));
+    assert_eq!(only_hub_key.recovery_key().await.unwrap(), None);
+}
+
+/// A key file the hub can't read fails its start with the error that says
+/// so, rather than being found out at the first session or token.
+#[tokio::test]
+async fn a_start_that_cant_read_a_key_file_fails() {
+    let damaged = IdentityError::Damaged {
+        file: KeyFile::HubKey,
+    };
+    let pairing = HubPairing::new(
+        Arc::new(InMemoryAgentRegistry::new()),
+        Arc::new(InMemoryIdentity::unreadable(damaged.clone())),
+        Arc::new(FakeSigning),
+        Arc::new(SeededRandom::new(1)),
+        Arc::new(FakeClock::new(
+            Timestamp::from_second(1_800_000_000).unwrap(),
+        )),
+        "0.0.0-test".to_owned(),
+    );
+    assert_eq!(
+        pairing.start().await.unwrap_err(),
+        HubPairingError::Identity(damaged)
+    );
 }
 
 /// A hub whose key files are gone while agents are registered makes no new

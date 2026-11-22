@@ -11,7 +11,7 @@ use api::{ErrorCode, MsgArg};
 use app::hub_tls::{HubTlsKey, TlsKeyRefusal};
 use app::pairing::{
     AgentPairing, AgentPairingError, ChallengeRefused, ConnectFailure, ConnectToHub, Connected,
-    HubPairing, HubPairingError, PairFailure, PairWithHub,
+    HubPairing, HubPairingError, HubStart, PairFailure, PairWithHub,
 };
 use app::ports::{AgentRegistry as _, Identity as _, IdentityError, LinkError, Signing as _};
 use domain::fleet::{
@@ -30,7 +30,7 @@ use store::SqliteStore;
 use tls_adapter::{RcgenTlsKeys, WebSocketHubConnector};
 
 use crate::confirm::{Question, confirmed};
-use crate::output::{refusal_line, to_stderr, to_stdout};
+use crate::output::{escaped, refusal_line, to_stderr, to_stdout};
 use crate::{finish, say, text};
 
 /// The database's file in the data folder.
@@ -103,6 +103,63 @@ pub(crate) fn tls_key_unserved(refusal: &TlsKeyRefusal) -> String {
             "its key file `{file}` can be read or changed by other users (mode {mode:04o}); make it its owner's only, as `chmod 600` does, then restart the hub"
         ),
         other => format!("{other:?}; fix what this names, then restart the hub"),
+    }
+}
+
+/// The hub's keys at its start: made on a first start and read after that,
+/// so a key file the hub can't read stops the start here, not at the first
+/// machine or token that asks (decision 120, "The key's life"). The hub
+/// key's fingerprint is logged, the one every machine pins; a key file
+/// gone while machines are registered is logged as the reason `/sync/v1`
+/// refuses every machine, and the hub runs without it ("The hub key").
+pub(crate) async fn keys_at_start(pairing: &HubPairing) -> Result<(), HubPairingError> {
+    match pairing.start().await? {
+        HubStart::Keys(keys) => log::info!("the hub's key {}", Fingerprint::of_key(keys.key())),
+        HubStart::Unserved(file) => log::error!("{}", keys_unserved(file)),
+    }
+    Ok(())
+}
+
+/// Why the hub serves no machine with its key file gone, and how to fix it,
+/// for the daemon's log, which is in English. It names the key file and
+/// none of the key (I4).
+fn keys_unserved(file: domain::fleet::KeyFile) -> String {
+    format!(
+        "the hub's key file `{file}` in the data folder is missing while machines are registered, so the hub made no new key and refuses every machine at {} until the file is restored; restore it from your backup of the data folder, then restart the hub. This machine's own backups go on",
+        api::sync::PATH
+    )
+}
+
+/// Says why the hub's keys stopped its start, and the exit status of that.
+pub(crate) fn start_refused(
+    localizer: &Localizer,
+    error: &HubPairingError,
+) -> io::Result<ExitCode> {
+    let (id, args) = start_refusal(error);
+    say(localizer, id, &args)?;
+    Ok(ExitCode::FAILURE)
+}
+
+/// The message that says why `error` stopped the hub's start, and its
+/// arguments. A text that came from the system is [`escaped`], and none
+/// carries a key (I4).
+fn start_refusal(error: &HubPairingError) -> (MessageId, Vec<(&'static str, MsgArg)>) {
+    match error {
+        HubPairingError::Identity(identity @ IdentityError::Exposed { .. }) => (
+            msg::CLI_KEY_FILE_EXPOSED,
+            exposed(identity).unwrap_or_default(),
+        ),
+        HubPairingError::Identity(IdentityError::Damaged { file }) => {
+            (msg::CLI_HUB_KEY_FILE_DAMAGED, vec![("file", text(file))])
+        }
+        HubPairingError::Identity(IdentityError::Unavailable { file, detail }) => (
+            msg::CLI_HUB_KEY_FILE_UNAVAILABLE,
+            vec![("file", text(file)), ("detail", text(escaped(detail)))],
+        ),
+        other => (
+            msg::CLI_HUB_KEYS_FAILED,
+            vec![("detail", text(format!("{other:?}")))],
+        ),
     }
 }
 
@@ -241,8 +298,9 @@ async fn make(
         Err(error) => return hub_refused(localizer, &error),
     };
     // The hub's built-in TLS serves an `https://` address unless it is a
-    // proxy's: its key is taken (made on the first token) and its
-    // certificate pinned, so no certificate authority is needed.
+    // proxy's: its key is taken (made at the hub's first start, or here when
+    // the hub never started) and its certificate pinned, so no certificate
+    // authority is needed.
     let certificate = match (&route, tls) {
         (Some(route), Some(tls)) if route.session == RouteSession::Ca => {
             match tls.start(store).await {
@@ -1302,6 +1360,36 @@ mod tests {
             }),
             None
         );
+    }
+
+    /// Each way a key file stops the hub's start is said by the message
+    /// that names it, and a system's text is escaped.
+    #[test]
+    fn each_way_the_keys_stop_the_start_has_its_own_message() {
+        use domain::fleet::KeyFile;
+        let file = KeyFile::HubKey;
+        let (id, args) = start_refusal(&HubPairingError::Identity(IdentityError::Damaged { file }));
+        assert_eq!(id, msg::CLI_HUB_KEY_FILE_DAMAGED);
+        assert_eq!(args, vec![("file", MsgArg::Text("hub-key".to_owned()))]);
+        let (id, _) = start_refusal(&HubPairingError::Identity(IdentityError::Exposed {
+            file,
+            mode: 0o644,
+        }));
+        assert_eq!(id, msg::CLI_KEY_FILE_EXPOSED);
+        let (id, args) = start_refusal(&HubPairingError::Identity(IdentityError::Unavailable {
+            file,
+            detail: "denied\u{1b}[31m".to_owned(),
+        }));
+        assert_eq!(id, msg::CLI_HUB_KEY_FILE_UNAVAILABLE);
+        assert_eq!(
+            args,
+            vec![
+                ("file", MsgArg::Text("hub-key".to_owned())),
+                ("detail", MsgArg::Text("denied\\u{1b}[31m".to_owned())),
+            ]
+        );
+        let (id, _) = start_refusal(&HubPairingError::TokenLife);
+        assert_eq!(id, msg::CLI_HUB_KEYS_FAILED);
     }
 
     #[test]

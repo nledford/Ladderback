@@ -696,6 +696,18 @@ fn run_daemon(
     #[cfg(feature = "hub")]
     if hub && let Some(data_dir) = platform::dirs::data_dir() {
         let pairing = hub::hub_pairing(&data_dir, Arc::clone(&operation_log.store));
+        // The hub's keys are made now, on its first start, and read after
+        // that, so a key file it can't read stops the start here rather than
+        // the first machine or token that needs it (decision 120). A start
+        // that stops closes the log and lets go of the lock, as a refusal to
+        // listen does.
+        if let Err(error) = runtime.block_on(hub::keys_at_start(&pairing)) {
+            let said = hub::start_refused(localizer, &error);
+            runtime.block_on(operation_log.close());
+            drop(runtime);
+            drop(lock);
+            return said;
+        }
         let pairing = match &state.sign_in {
             http_adapter::SignIn::On(access) => pairing.with_access(Arc::clone(access)),
             http_adapter::SignIn::Off { .. } => pairing,
