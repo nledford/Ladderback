@@ -140,29 +140,12 @@ export async function runningBuild(): Promise<string> {
   return build === undefined ? await workspaceVersion() : shown(build);
 }
 
-// The version is the header's last part, after the navigation in reading
-// order, and plain text rather than a focus stop (#502). It names the build
-// the daemon runs (#516).
-Then("the header shows the running version after the navigation", async function (this: BrowserWorld) {
+// The version is in the footer, not the header (decision 142): the banner
+// holds no text naming the build the daemon runs.
+Then("the banner doesn't show the running version", async function (this: BrowserWorld) {
   const banner = this.page.getByRole("banner");
-  const version = banner.getByText(namePattern(`Version ${await runningBuild()}`));
-  await expect(version).toBeVisible();
-  const navigation = banner.getByRole("navigation");
-  await expect(navigation).toBeVisible();
-  const follows = await navigation.evaluate(
-    (nav, shown) => (nav.compareDocumentPosition(shown) & Node.DOCUMENT_POSITION_FOLLOWING) !== 0,
-    await version.elementHandle(),
-  );
-  assert.ok(follows, "the version comes before the navigation in reading order");
-  assert.equal(await version.evaluate((shown) => shown.matches(":is(a, button, input, [tabindex])")), false);
-  const [shownBox, navigationBox] = [await version.boundingBox(), await navigation.boundingBox()];
-  assert.ok(shownBox && navigationBox);
-  const overlaps =
-    shownBox.x < navigationBox.x + navigationBox.width &&
-    navigationBox.x < shownBox.x + shownBox.width &&
-    shownBox.y < navigationBox.y + navigationBox.height &&
-    navigationBox.y < shownBox.y + shownBox.height;
-  assert.equal(overlaps, false, "the version overlaps the navigation");
+  await expect(banner).toBeVisible();
+  await expect(banner.getByText(namePattern(`Version ${await runningBuild()}`))).toHaveCount(0);
 });
 
 Then("the page doesn't show the running version", async function (this: BrowserWorld) {
@@ -188,15 +171,16 @@ Given("the daemon has found that version {string} is available", function (this:
   });
 });
 
-// The notice follows the running version in reading order, and is no live
-// region of its own: only the announcer talks (A3). Its link opens the
-// release's notes without telling GitHub the page it came from, and its name
-// says it goes to another site, as every outside link's does (§4.5).
+// The notice is the header's last line, under the pages' links and outside
+// their navigation, and no live region of its own: only the announcer talks
+// (A3). Its link opens the release's notes without telling GitHub the page it
+// came from, and its name says it goes to another site, as every outside
+// link's does (§4.5).
 Then(
-  "the header links to the notes of version {string} after the running version",
+  "the header links to the notes of version {string} on a line of its own under the pages' links",
   async function (this: BrowserWorld, version: string) {
     const banner = this.page.getByRole("banner");
-    const running = banner.getByText(namePattern(`Version ${await runningBuild()}`));
+    const navigation = banner.getByRole("navigation");
     const link = banner.getByRole("link", { name: namePattern(`Version ${version} is available (goes to another site)`) });
     await expect(link).toHaveCount(1);
     await expect(banner.getByRole("status")).toHaveCount(0);
@@ -204,19 +188,14 @@ Then(
     await expect(link).toHaveAttribute("href", `https://github.com/nledford/Ladderback/releases/tag/v${version}`);
     const rel = ((await link.getAttribute("rel")) ?? "").split(/\s+/);
     assert.ok(rel.includes("noreferrer"), `the link's rel is "${rel.join(" ")}"`);
-    const follows = await running.evaluate(
-      (shown, notice) => (shown.compareDocumentPosition(notice) & Node.DOCUMENT_POSITION_FOLLOWING) !== 0,
-      await link.elementHandle(),
+    const inside = await navigation.evaluate((nav, notice) => notice !== null && nav.contains(notice), await link.elementHandle());
+    assert.equal(inside, false, "the notice is in the navigation");
+    const [linkBox, navigationBox] = [await link.boundingBox(), await navigation.boundingBox()];
+    assert.ok(linkBox && navigationBox);
+    assert.ok(
+      linkBox.y >= navigationBox.y + navigationBox.height - 1,
+      `the notice starts ${Math.round(navigationBox.y + navigationBox.height - linkBox.y)}px above the foot of the pages' links`,
     );
-    assert.ok(follows, "the notice comes before the running version in reading order");
-    const [linkBox, runningBox] = [await link.boundingBox(), await running.boundingBox()];
-    assert.ok(linkBox && runningBox);
-    const overlaps =
-      linkBox.x < runningBox.x + runningBox.width &&
-      runningBox.x < linkBox.x + linkBox.width &&
-      linkBox.y < runningBox.y + runningBox.height &&
-      runningBox.y < linkBox.y + linkBox.height;
-    assert.equal(overlaps, false, "the notice overlaps the running version");
   },
 );
 

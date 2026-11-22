@@ -2,21 +2,22 @@
 Feature: The available update in the header
   When the agent's release check has found a newer release
   (`features/updates/release_check.feature`), the header says so on a line
-  of its own after the running version, and links to that
-  release's notes. The page yet to sign in shows no version, so it shows no
-  update either.
+  of its own under the pages' links, and links to that release's notes. It
+  asks the reader to act, so it stays in the header while the running
+  version is in the footer (decision 142). The page yet to sign in shows no
+  version, so it shows no update either.
 
   Scenario: The header says which version is available and links to its notes
     Given the daemon has found that version "99.0.0" is available
     When I open the web UI
-    Then the header links to the notes of version "99.0.0" after the running version
+    Then the header links to the notes of version "99.0.0" on a line of its own under the pages' links
     And the page has no accessibility violations
 
   Scenario: The link to the notes is reached by keyboard
     Given the daemon has found that version "99.0.0" is available
     When I open the web UI
     And I press Tab until focus is on the link "Version 99.0.0 is available (goes to another site)"
-    Then the header links to the notes of version "99.0.0" after the running version
+    Then the header links to the notes of version "99.0.0" on a line of its own under the pages' links
 
   # The notes are on GitHub, so the link says it leaves the app, as every
   # outside link does (§4.5), and its words are still the sentence a sighted
@@ -33,7 +34,7 @@ Feature: The available update in the header
     And the reader sets the text size to 200 percent
     And the daemon has found that version "99.0.0" is available
     When I open the web UI
-    Then the header links to the notes of version "99.0.0" after the running version
+    Then the header links to the notes of version "99.0.0" on a line of its own under the pages' links
     And the page doesn't scroll sideways
     And the page has no accessibility violations
 
@@ -41,5 +42,5 @@ Feature: The available update in the header
     Given the daemon has found that version "99.0.0" is available
     When I open the web UI
     Then the page shows an information banner that says "Version 99.0.0 is available"
-    And the header links to the notes of version "99.0.0" after the running version
+    And the header links to the notes of version "99.0.0" on a line of its own under the pages' links
     And the page has no accessibility violations

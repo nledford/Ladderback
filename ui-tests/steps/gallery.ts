@@ -622,4 +622,7 @@ const SNAPSHOTS: Record<string, string> = {
     - img "W"
     - img "5"
     - img "N"`,
+  Footer: `- heading "Footer" [level=2]
+- paragraph: Version ⁨0.4.0⁩
+- paragraph: Version ⁨0.4.0+4444444.dirty⁩`,
 };
