@@ -452,17 +452,25 @@ jobs:
           retention-days: 14
 
   # The same journeys in Firefox and WebKit run as `ui-engines` below; this
-  # job stays Chromium alone, under the name the ruleset requires (a matrix
-  # job that its own `if` skips never creates that check; see `check` above).
+  # job stays Chromium alone. It runs the scenarios in two shards
+  # (cucumber-js's `--shard`), because one runner took 16 to 26 minutes for
+  # all of them in November 2026, and WebKit's run reached its step limit
+  # once. The shards' names are not the required one: the `ui` job below is,
+  # and reports for both (a matrix job that its own `if`
+  # skips never creates the check the ruleset names; see `check` above).
   # In MVP mode (decision 124) a pull request runs it only when `changes`
   # says its paths reach the UI (the `ui` output, which an empty value from a
   # failed `changes` also counts as); main runs it after every merge.
-  ui:
-    name: UI journeys (Chromium, axe-core, keyboard)
+  ui-shard:
+    name: UI journeys (Chromium ${{ matrix.shard }}/2, axe-core, keyboard)
     needs: changes
     if: ${{ !cancelled() && github.event_name != 'schedule' && needs.changes.outputs.docs-only != 'true' && (needs.changes.outputs.mvp != 'true' || needs.changes.outputs.ui != 'false') }}
     runs-on: ubuntu-26.04
     timeout-minutes: 45
+    strategy:
+      fail-fast: false
+      matrix:
+        shard: [1, 2]
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -487,15 +495,31 @@ jobs:
       - uses: $/.github/actions/npm-ci
         with:
           save: "false"
+      # Only shard 1 saves the caches on main, so the two don't race for a key.
       - uses: $/.github/actions/browser
         with:
           engines: chromium
+          save: ${{ matrix.shard == 1 && 'true' || 'false' }}
       # A step limit of its own, 10 minutes below the job's 45 (as `just test`
       # in `Check` has a limit of its own, #638): a hang fails this step, and
       # the steps that run after a failure still run, where a job cancelled at
       # its limit skips them (#1016). The step starts up to about 4 minutes in,
-      # so 35 leaves about 6 for the upload. Passing runs take 13 to 20 minutes.
-      - run: just test-ui
+      # so 35 leaves about 6 for the upload. A step that ends after more than
+      # 26 minutes (75% of 35, 1575 seconds) warns, so a slowing suite shows
+      # before it times out; a step that is cut off at 35 reports no warning,
+      # as the timeout is the report. The recipe passes `--shard` on to
+      # cucumber-js.
+      - run: |
+          start=$SECONDS
+          status=0
+          just test-ui --shard "$SHARD/2" || status=$?
+          elapsed=$((SECONDS - start))
+          if [ "$elapsed" -gt 1575 ]; then
+            echo "::warning title=Slow UI journeys::just test-ui took $((elapsed / 60)) minutes, over 75% of its 35-minute limit (26 minutes). Shard $SHARD of 2 is close to timing out."
+          fi
+          exit "$status"
+        env:
+          SHARD: ${{ matrix.shard }}
         timeout-minutes: 35
       # The JUnit report and each failed scenario's trace and screenshot
       # (ui-tests/support/world.ts), only when the run failed, kept 14 days as
@@ -504,13 +528,13 @@ jobs:
       - if: failure()
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
-          name: ui-reports-chromium-attempt-${{ github.run_attempt }}
+          name: ui-reports-chromium-shard-${{ matrix.shard }}-attempt-${{ github.run_attempt }}
           path: ui-tests/reports/
           retention-days: 14
       # Saved here, not as the job starts, so that a build that failed leaves
       # nothing behind, and only from main: a pull request's entry would be
       # one no other pull request reads.
-      - if: github.event_name == 'push' && steps.trunk.outputs.cache-hit != 'true'
+      - if: github.event_name == 'push' && matrix.shard == 1 && steps.trunk.outputs.cache-hit != 'true'
         uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
           path: ~/.cache/trunk
@@ -519,22 +543,45 @@ jobs:
       - if: github.event_name == 'push'
         run: rm -rf target
 
-  # The `ui` job's journeys in Gecko (Firefox, Zen, LibreWolf) and WebKit
-  # (Safari's engine, the closest stand-in for Safari that runs on Linux).
+  # The check the ruleset requires, by this name: it passes only when both
+  # shards passed. `always()`, not `!cancelled()`: it must run, and so fail,
+  # whenever a shard failed, timed out (a timeout ends a job as cancelled) or
+  # was cancelled, since GitHub counts a skipped required check as passing.
+  # A matrix job its own `if` skips creates no check of the name the ruleset
+  # requires, only an unexpanded one, so this job, which is not a matrix, is
+  # the one skipped then: a docs-only pull request skips it with the shards,
+  # and so does MVP mode (decision 124), as `mutants` does. Keep the rest of
+  # this `if` the same as the shards'. `cache-prune` waits for it, and so for
+  # both shards.
+  ui:
+    name: UI journeys (Chromium, axe-core, keyboard)
+    needs: [changes, ui-shard]
+    if: ${{ always() && github.event_name != 'schedule' && needs.changes.outputs.docs-only != 'true' && (needs.changes.outputs.mvp != 'true' || needs.changes.outputs.ui != 'false') }}
+    runs-on: ubuntu-26.04
+    timeout-minutes: 5
+    steps:
+      - run: test "$SHARDS" = success || { echo "a Chromium shard ended $SHARDS"; exit 1; }
+        env:
+          SHARDS: ${{ needs.ui-shard.result }}
+
+  # The `ui-shard` jobs' journeys in Gecko (Firefox, Zen, LibreWolf) and WebKit
+  # (Safari's engine, the closest stand-in for Safari that runs on Linux),
+  # each engine in two shards.
   # Not required checks: the maintainer adds them to the ruleset once they have
-  # a clean record. Its steps are the `ui` job's, through the same actions, but
-  # restore-only: the `ui` job saves trunk's cache; change both together.
+  # a clean record. Their steps are the shards', through the same actions, but
+  # restore-only: the `ui-shard` jobs save trunk's cache; change both together.
   #
   # A pull request runs them only when `changes` doesn't say its paths are out
   # of the UI's reach (the `ui` output), as the `service` jobs do: each job
   # waited a median of 22 (Firefox) and 39 (WebKit) minutes for a runner in
-  # November 2026, and ran about 30. The jobs also run when `changes` failed or was skipped (a
-  # push to main), so main keeps all three engines. A job its `if` skips
+  # November 2026, and ran about 30 each, before they were sharded. The jobs
+  # also run when `changes` failed or was skipped (a push to main), so main
+  # keeps all three engines. A job its `if` skips
   # can't expand its matrix, so a pull request that skips them shows one
-  # skipped check named `UI journeys (${{ matrix.name }}, axe-core, keyboard)`,
-  # not one per engine; neither is a required check.
+  # skipped check named `UI journeys (${{ matrix.name }} ${{ matrix.shard }}/2, axe-core, keyboard)`,
+  # not one per engine and shard; neither is a required check.
   ui-engines:
-    name: UI journeys (${{ matrix.name }}, axe-core, keyboard)
+    name: UI journeys (${{ matrix.name }} ${{ matrix.shard }}/2, axe-core, keyboard)
     needs: changes
     # Not in MVP mode (decision 124).
     if: ${{ !cancelled() && github.event_name != 'schedule' && needs.changes.outputs.docs-only != 'true' && needs.changes.outputs.ui != 'false' && needs.changes.outputs.mvp != 'true' }}
@@ -544,8 +591,16 @@ jobs:
         include:
           - name: Firefox
             engine: firefox
+            shard: 1
+          - name: Firefox
+            engine: firefox
+            shard: 2
           - name: WebKit
             engine: webkit
+            shard: 1
+          - name: WebKit
+            engine: webkit
+            shard: 2
     runs-on: ubuntu-26.04
     timeout-minutes: 45
     env:
@@ -569,18 +624,31 @@ jobs:
       - uses: $/.github/actions/npm-ci
         with:
           save: "false"
+      # Only shard 1 saves the caches on main, so the two don't race for a key.
       - uses: $/.github/actions/browser
         with:
           engines: ${{ matrix.engine }}
-      # `LADDERBACK_UI_BROWSER` (above) picks the engine. The step limit is the
-      # `ui` job's.
-      - run: just test-ui
+          save: ${{ matrix.shard == 1 && 'true' || 'false' }}
+      # `LADDERBACK_UI_BROWSER` (above) picks the engine. The step, its limit
+      # and its warning are the `ui-shard` jobs'.
+      - run: |
+          start=$SECONDS
+          status=0
+          just test-ui --shard "$SHARD/2" || status=$?
+          elapsed=$((SECONDS - start))
+          if [ "$elapsed" -gt 1575 ]; then
+            echo "::warning title=Slow UI journeys::just test-ui took $((elapsed / 60)) minutes, over 75% of its 35-minute limit (26 minutes). $ENGINE shard $SHARD of 2 is close to timing out."
+          fi
+          exit "$status"
+        env:
+          SHARD: ${{ matrix.shard }}
+          ENGINE: ${{ matrix.name }}
         timeout-minutes: 35
-      # As in the `ui` job.
+      # As in the `ui-shard` jobs.
       - if: failure()
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
-          name: ui-reports-${{ matrix.engine }}-attempt-${{ github.run_attempt }}
+          name: ui-reports-${{ matrix.engine }}-shard-${{ matrix.shard }}-attempt-${{ github.run_attempt }}
           path: ui-tests/reports/
           retention-days: 14
       # Also after a failed run: these jobs are expected to fail more often, and
