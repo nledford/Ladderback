@@ -57,8 +57,7 @@ pub fn service_data_dir() -> Option<PathBuf> {
 
 /// [`service_data_dir`] with the environment supplied, for tests.
 pub fn service_data_dir_from(env: impl Fn(&str) -> Option<OsString>) -> Option<PathBuf> {
-    let _ = env;
-    todo!()
+    platform_dir(&env, Folder::Data)
 }
 
 /// Where the workers keep rustic's caches, one folder per repository and

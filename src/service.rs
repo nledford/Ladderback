@@ -94,38 +94,38 @@ struct Held {
     holder: Option<u32>,
 }
 
-/// The data folder, when a process other than the installed service's holds
-/// it, as a `serve` started by hand does: the service's every start is
-/// refused until that process stops (#459). Nothing when no process holds
-/// it, or the lock can't be checked, which the service says itself when it
-/// starts. The manager is asked for the service's process only when the
-/// lock file names a holder: the service being replaced holds the folder
-/// at every reinstall, and is not another Ladderback.
+/// The data folder the service runs on, when a process other than the
+/// installed service's holds it, as a `serve` started by hand does: the
+/// service's every start is refused until that process stops (#459). It is
+/// the platform's folder, not one the shell's `LADDERBACK_DATA_DIR` names,
+/// which the service file doesn't carry.
 fn data_folder_held(runtime: &tokio::runtime::Runtime, service: &UserService) -> Option<Held> {
-    let folder = dirs::data_dir()?;
-    let holder = match DataDirLock::check(&folder) {
-        Err(LockError::InUse { holder }) => holder,
-        Ok(()) | Err(LockError::Unavailable { .. }) => return None,
-    };
-    if let Some(pid) = holder
-        && runtime.block_on(service.process()) == Some(pid)
-    {
-        return None;
-    }
-    Some(Held { folder, holder })
+    let folder = dirs::service_data_dir()?;
+    let checked = DataDirLock::check(&folder);
+    held_by_another(folder, checked, || runtime.block_on(service.process()))
 }
 
 /// The data folder `folder` as held by another process, from what the
-/// check of its lock found: nothing when it is free or couldn't be checked,
-/// nor when the lock file names the service's own process, which
-/// `service_process` gives and is asked for only then.
+/// check of its lock found: nothing when it is free or couldn't be checked
+/// (the service says why itself when it starts), nor when the lock file
+/// names the service's own process, which `service_process` gives and is
+/// asked for only then: the service being replaced holds the folder at
+/// every reinstall, and is not another Ladderback.
 fn held_by_another(
     folder: PathBuf,
     checked: Result<(), LockError>,
     service_process: impl FnOnce() -> Option<u32>,
 ) -> Option<Held> {
-    let _ = (folder, checked, service_process);
-    todo!()
+    let holder = match checked {
+        Err(LockError::InUse { holder }) => holder,
+        Ok(()) | Err(LockError::Unavailable { .. }) => return None,
+    };
+    if let Some(pid) = holder
+        && service_process() == Some(pid)
+    {
+        return None;
+    }
+    Some(Held { folder, holder })
 }
 
 /// The note that says another Ladderback holds the data folder and must stop

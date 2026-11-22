@@ -57,8 +57,8 @@ impl DataDirLock {
     /// Whether another process holds `data_dir`, found without keeping the
     /// lock or writing anything: `Ok` when nothing holds it, or when no
     /// process ever has (no lock file, which this never makes). It takes the
-    /// lock for the moment it looks, so a daemon starting in that moment is
-    /// refused, as by any other holder.
+    /// lock for the moment it looks, so a process taking it in that moment (a
+    /// daemon, `set-password`) is refused once, as by any other holder.
     ///
     /// # Errors
     ///
