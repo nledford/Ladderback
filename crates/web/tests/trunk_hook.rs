@@ -46,10 +46,16 @@ fn hook() -> (String, Vec<String>) {
     let text = fs::read_to_string(Path::new(PACKAGE).join("Trunk.toml")).unwrap();
     let config: toml::Table = toml::from_str(&text).unwrap();
     let hooks = config.get("hooks").and_then(toml::Value::as_array).unwrap();
-    let [hook] = hooks.as_slice() else {
-        panic!("Trunk.toml has {} hooks; this test runs one", hooks.len());
+    let pre_build: Vec<_> = hooks
+        .iter()
+        .filter(|hook| hook["stage"].as_str() == Some("pre_build"))
+        .collect();
+    let [hook] = pre_build.as_slice() else {
+        panic!(
+            "Trunk.toml has {} pre-build hooks; this test runs one",
+            pre_build.len()
+        );
     };
-    assert_eq!(hook["stage"].as_str(), Some("pre_build"));
     let command = hook["command"].as_str().unwrap().to_owned();
     let arguments = hook["command_arguments"]
         .as_array()

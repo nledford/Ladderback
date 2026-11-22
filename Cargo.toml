@@ -252,6 +252,9 @@ toml = { version = "1.2.1", features = ["preserve_order"] }
 # tree through `proc-macro-crate`.
 toml_edit = "0.25.19"
 tower = "0.5.3"
+# The HTTP adapter answers a handler's panic with the API's error envelope
+# (`catch-panic`, #1367); approved 2026-11-22.
+tower-http = { version = "0.7.1", features = ["catch-panic"] }
 unic-langid = { version = "0.9.6", features = ["macros"] }
 # The hub compares hostnames as casefold(NFC(name)) (§16, decision 120,
 # "Hostnames"); already in the tree through `idna`.

@@ -40,6 +40,9 @@ spawn-gate.workspace = true
 tokio = { workspace = true, features = ["macros", "net", "rt", "sync", "time"] }
 # `util`: the serve loop hands each request its peer (`map_request`).
 tower = { workspace = true, features = ["util"] }
+# `CatchPanicLayer`: a handler's panic is answered 500, not a dropped
+# connection.
+tower-http.workspace = true
 
 [dev-dependencies]
 app = { workspace = true, features = ["fakes"] }

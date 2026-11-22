@@ -159,6 +159,7 @@ code_messages!(ERRORS, error_message, ErrorCode {
     EntryUnknown => msg::ERROR_ENTRY_UNKNOWN,
     DownloadUnknown => msg::ERROR_DOWNLOAD_UNKNOWN,
     RouteUnknown => msg::ERROR_ROUTE_UNKNOWN,
+    InternalError => msg::ERROR_INTERNAL_ERROR,
     TokenUsed => msg::ERROR_TOKEN_USED,
     TokenExpired => msg::ERROR_TOKEN_EXPIRED,
     TokenRevoked => msg::ERROR_TOKEN_REVOKED,

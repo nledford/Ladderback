@@ -428,6 +428,7 @@ pub(super) fn translate(event: WorkerEvent, redactor: &Redactor) -> Option<Engin
                 | ErrorCode::EntryUnknown
                 | ErrorCode::DownloadUnknown
                 | ErrorCode::RouteUnknown
+                | ErrorCode::InternalError
                 | ErrorCode::TokenUsed
                 | ErrorCode::TokenExpired
                 | ErrorCode::TokenRevoked
