@@ -202,14 +202,19 @@ impl Event {
     /// The event `subject` makes when it ends with `outcome`, at `at`. A
     /// failure's code is the one the operation's status records, and a
     /// failure the log hasn't recorded has none; a success with warnings
-    /// tells the code of each kind of warning, each once. A backup that gave
-    /// way to a newer run of its plan never ran and makes no event: the newer
-    /// run tells its own end (#1245).
+    /// tells the code of each kind of warning, each once. A backup that never
+    /// ran makes no event when nothing is for the person to do: one that gave
+    /// way to a newer run of its plan, whose newer run tells its own end
+    /// (#1245), and one whose plan was deleted, or now backs up to another
+    /// repository, while it waited for its keyring, the person's own change
+    /// (#1293).
     pub fn ended(subject: Subject<'_>, outcome: Outcome, at: Timestamp) -> Option<Self> {
         if matches!(
             subject.status,
             OperationStatus::Failed {
                 reason: FailureReason::Superseded
+                    | FailureReason::PlanRemoved
+                    | FailureReason::PlanMoved
             }
         ) {
             return None;

@@ -107,14 +107,14 @@ impl RecoverOperations {
         for record in queued {
             // Recovery hands back queued rows only; one that isn't is the
             // log's fault, said and left as it is rather than run or ended.
-            let Some(mut operation) = record.queued_operation() else {
+            let Some(operation) = record.queued_operation() else {
                 runs.report(ScheduleReport::Store(StoreError::Corrupt {
                     detail: format!("operation {:?} came back as queued and isn't", record.id),
                 }));
                 continue;
             };
             let why = match (record.kind, config) {
-                (OperationKind::Backup, Some(config)) => match ended_why(&record.target, config) {
+                (OperationKind::Backup, Some(config)) => match plan_lost(&record.target, config) {
                     // The oldest that can run is the one kept: a backup whose
                     // repository changed takes no later one with it.
                     None if resumed.insert(record.target.plan.clone()) => {
@@ -128,7 +128,8 @@ impl RecoverOperations {
                         continue;
                     }
                     None => QueuedEnd::PlanRunsAgain,
-                    Some(why) => why,
+                    Some(PlanLost::Gone) => QueuedEnd::PlanGone,
+                    Some(PlanLost::Moved) => QueuedEnd::RepositoryChanged,
                 },
                 (OperationKind::Backup, None) => QueuedEnd::ConfigUnreadable,
                 _ => QueuedEnd::JobNotKept,
@@ -138,14 +139,13 @@ impl RecoverOperations {
                 kind: record.kind,
                 why,
             });
-            // A queued operation never ends otherwise: fail is allowed. Its
-            // end is announced once the log has it, and only then: a start
-            // whose write is refused leaves it queued for the next start.
-            if operation.fail(FailureReason::DaemonStopped, now).is_ok() {
-                match self.store.save(&operation, None).await {
-                    Ok(()) => announce_end(self.events.as_deref(), &operation).await,
-                    Err(error) => runs.report(ScheduleReport::Store(error)),
-                }
+            // A queued operation never ends otherwise: fail is allowed. A
+            // start whose write is refused leaves it queued for the next.
+            if let Err(error) = self
+                .end_queued(operation, FailureReason::DaemonStopped, now)
+                .await
+            {
+                runs.report(ScheduleReport::Store(error));
             }
         }
     }
@@ -156,38 +156,56 @@ impl RecoverOperations {
     /// announces nothing, leaves the operation queued and is the error.
     pub async fn end_queued(
         &self,
-        operation: Operation,
+        mut operation: Operation,
         reason: FailureReason,
         now: Timestamp,
     ) -> Result<(), StoreError> {
-        let _ = (operation, reason, now);
-        todo!("end the queued operation")
+        if operation.fail(reason, now).is_err() {
+            return Ok(());
+        }
+        self.store.save(&operation, None).await?;
+        announce_end(self.events.as_deref(), &operation).await;
+        Ok(())
     }
 }
 
-/// Why a queued backup on `target` can't run again under `config`, or
-/// `None` when it can: its plan is configured, and backs up to the
-/// repository the backup was queued for.
-fn ended_why(target: &Target, config: &AgentConfig) -> Option<QueuedEnd> {
+/// How a queued backup's plan was lost to it since it was queued.
+enum PlanLost {
+    /// The plan is no longer configured.
+    Gone,
+    /// The plan now backs up to another repository than the one the backup
+    /// was queued for.
+    Moved,
+}
+
+/// How the plan of a queued backup on `target` is lost to it under
+/// `config`, or `None` when the backup can run: its plan is configured, and
+/// backs up to the repository the backup was queued for.
+fn plan_lost(target: &Target, config: &AgentConfig) -> Option<PlanLost> {
     let Some(plan) = target.plan.as_ref().and_then(|plan| config.plan(plan)) else {
-        return Some(QueuedEnd::PlanGone);
+        return Some(PlanLost::Gone);
     };
     let repository = config
         .repository(&plan.repository)
         .and_then(|repository| repository.id.as_ref());
-    (!target.is_on(repository)).then_some(QueuedEnd::RepositoryChanged)
+    (!target.is_on(repository)).then_some(PlanLost::Moved)
 }
 
 /// The reason a queued backup on `target`, which a start took up again and
-/// which waited for its keyring, ends with once the wait is over and it
-/// can't run under `config` (`None`: the configuration can't be read or
-/// used), or `None` when it can: its plan was deleted, or now backs up to
-/// another repository than the one the backup was queued for. Never
-/// `daemon-stopped`, which would say the daemon stopped during it (decision
-/// 135, #1293).
+/// which waited for its keyring, ends with once the wait is over, or `None`
+/// when it can run under `config`: `config-unusable` when the configuration
+/// can't be read or used (`None`), `plan-removed` when its plan was deleted
+/// and `plan-moved` when the plan now backs up to another repository than
+/// the one the backup was queued for. Never `daemon-stopped`, which would
+/// say the daemon stopped during it (decision 135, #1293).
 pub fn waited_end(target: &Target, config: Option<&AgentConfig>) -> Option<FailureReason> {
-    let _ = (target, config);
-    todo!("why a waited backup can't run")
+    let Some(config) = config else {
+        return Some(FailureReason::ConfigUnusable);
+    };
+    plan_lost(target, config).map(|lost| match lost {
+        PlanLost::Gone => FailureReason::PlanRemoved,
+        PlanLost::Moved => FailureReason::PlanMoved,
+    })
 }
 
 #[cfg(test)]

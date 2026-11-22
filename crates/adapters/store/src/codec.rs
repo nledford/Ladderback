@@ -238,10 +238,10 @@ pub(crate) fn encode_failure(
         FailureReason::DaemonStopped => ("daemon-stopped", Vec::new(), None),
         FailureReason::DaemonShutDown => ("daemon-shut-down", Vec::new(), None),
         FailureReason::Superseded => ("superseded", Vec::new(), None),
-        FailureReason::PlanRemoved
-        | FailureReason::PlanMoved
-        | FailureReason::ConfigUnusable
-        | FailureReason::KeyFilesNotLeftOut => todo!("encode the never-ran reasons"),
+        FailureReason::PlanRemoved => ("plan-removed", Vec::new(), None),
+        FailureReason::PlanMoved => ("plan-moved", Vec::new(), None),
+        FailureReason::ConfigUnusable => ("config-unusable", Vec::new(), None),
+        FailureReason::KeyFilesNotLeftOut => ("key-files-not-left-out", Vec::new(), None),
         FailureReason::NoLocationUsable => ("no-location-usable", Vec::new(), None),
         FailureReason::RestoreTargetUnwritable => ("restore-target-unwritable", Vec::new(), None),
         FailureReason::NoLocationRuleHolds => ("no-location-rule-holds", Vec::new(), None),
@@ -365,6 +365,10 @@ pub(crate) fn decode_failure(
         "daemon-stopped" => Ok(FailureReason::DaemonStopped),
         "daemon-shut-down" => Ok(FailureReason::DaemonShutDown),
         "superseded" => Ok(FailureReason::Superseded),
+        "plan-removed" => Ok(FailureReason::PlanRemoved),
+        "plan-moved" => Ok(FailureReason::PlanMoved),
+        "config-unusable" => Ok(FailureReason::ConfigUnusable),
+        "key-files-not-left-out" => Ok(FailureReason::KeyFilesNotLeftOut),
         "no-location-usable" => Ok(FailureReason::NoLocationUsable),
         "restore-target-unwritable" => Ok(FailureReason::RestoreTargetUnwritable),
         "no-location-rule-holds" => Ok(FailureReason::NoLocationRuleHolds),

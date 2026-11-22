@@ -272,10 +272,10 @@ impl FailureReason {
             Self::DaemonStopped => "daemon-stopped",
             Self::DaemonShutDown => "daemon-shut-down",
             Self::Superseded => "superseded",
-            Self::PlanRemoved
-            | Self::PlanMoved
-            | Self::ConfigUnusable
-            | Self::KeyFilesNotLeftOut => todo!("the never-ran reasons' codes"),
+            Self::PlanRemoved => "plan-removed",
+            Self::PlanMoved => "plan-moved",
+            Self::ConfigUnusable => "config-unusable",
+            Self::KeyFilesNotLeftOut => "key-files-not-left-out",
             Self::NoLocationUsable => "no-location-usable",
             Self::RestoreTargetUnwritable => "restore-target-unwritable",
             Self::NoLocationRuleHolds => "no-location-rule-holds",
