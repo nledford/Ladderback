@@ -29,6 +29,9 @@ mod ai_agents;
 pub(crate) mod agents;
 mod dry_run_allowlist;
 mod language;
+// The Machines tab's waiting and approved machines, on a hub.
+#[cfg(feature = "hub")]
+mod machines;
 mod page_width;
 mod password;
 mod sign_in;
