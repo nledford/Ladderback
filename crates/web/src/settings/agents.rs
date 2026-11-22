@@ -20,7 +20,7 @@ use leptos::prelude::*;
 use leptos::task::spawn_local;
 
 use super::machines;
-use crate::announcer::Clock;
+use crate::announcer::{Clock, Politeness};
 use crate::components::ACTIONS;
 use crate::components::alert::rules::AlertTone;
 use crate::components::button::Content;
@@ -30,7 +30,7 @@ use crate::components::{
     Alert, Button, Fingerprint, Link, RadioGroup, ReviewDialog, StepUp, StepUpField, TextField,
     focus_element, holds_focus, refusal_alert, say_refusals,
 };
-use crate::live::PageClock;
+use crate::live::{PageClock, reply};
 use crate::pairing::{AddressWarning, Countdown, life, minutes};
 use crate::repositories::Sentence;
 use crate::routes::{instant, refused_sentence, text_with};
@@ -181,13 +181,26 @@ impl Token {
 
     /// Says what the cancel of the closed token `id` came to: in full for
     /// the last token the dialog showed; for an earlier one, only that it
-    /// still works, so its answer is never read as the later token's.
+    /// still works, so its answer is never read as the later token's. The
+    /// section shows it, and the announcer says it (§4.5): the section is
+    /// no live region of its own.
     fn say_closed(self, localizer: &Localizer, id: &str, answer: Option<&Posted>) {
-        if self.last_shown(id) {
-            self.page_said.try_set(said_once_closed(localizer, answer));
+        let (said, shown) = if self.last_shown(id) {
+            (said_once_closed(localizer, answer), self.page_said)
         } else if still_works(answer) {
-            self.earlier_said
-                .try_set(Some(text(localizer, msg::UI_PAIRING_EARLIER_NOT_CANCELED)));
+            (
+                Some(text(localizer, msg::UI_PAIRING_EARLIER_NOT_CANCELED)),
+                self.earlier_said,
+            )
+        } else {
+            return;
+        };
+        // A section gone with Settings meanwhile has nobody to tell.
+        if shown.try_set(said.clone()).is_some() {
+            return;
+        }
+        if let Some(said) = said {
+            reply(Politeness::Polite, &said);
         }
     }
 
@@ -476,8 +489,8 @@ pub(crate) fn Agents(localizer: Arc<Localizer>, on: bool) -> impl IntoView {
             </h2>
             <p>{t(msg::UI_AGENTS_INTRO)}</p>
             {proxy_warning}
-            <p role="status">{move || token.page_said.get()}</p>
-            <p role="status">{move || token.earlier_said.get()}</p>
+            <p>{move || token.page_said.get()}</p>
+            <p>{move || token.earlier_said.get()}</p>
             <machines::Machines localizer=Arc::clone(&localizer) step_up=step_up.clone() />
             <h3>{t(msg::UI_PAIRING_NEW_HEADING)}</h3>
             {move || problem.get().map(|sentence| refusal_alert(&problem_localizer, sentence))}

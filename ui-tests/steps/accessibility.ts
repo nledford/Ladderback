@@ -4,6 +4,7 @@ import { Then, When } from "@cucumber/cucumber";
 import { errors, type Locator } from "playwright";
 
 import { expect } from "../support/expect.ts";
+import { LIVE_REGION } from "../support/gallery.ts";
 import { journey, namePattern, pressUntilFocused, whereFocusIs } from "../support/keyboard.ts";
 import { patienceMs } from "../support/patience.ts";
 import type { BrowserWorld } from "../support/world.ts";
@@ -293,6 +294,24 @@ Then("the {word} region comes to contain {string}", async function (this: Browse
 
 Then("the {word} region is empty", async function (this: BrowserWorld, politeness: string) {
   assert.equal(await textOf(await region(this, politeness)), "", `the ${politeness} region`);
+});
+
+// One place talks to a screen reader (§4.5): the announcer's two regions,
+// which stand outside the page's mount point. A live region of the page's
+// own would read its sentence a second time or race the announcer. A modal
+// dialog keeps its own, since its modal page silences the announcer (the
+// Dialog contract), so what stands inside a dialog isn't counted.
+Then("the page has no live region but the announcer's", async function (this: BrowserWorld) {
+  const others = await this.page.evaluate(
+    (live) =>
+      [...document.querySelectorAll(live)]
+        .filter((found) => !found.matches("#live-polite, #live-assertive") && found.closest("dialog") === null)
+        .map(
+          (found) => `${found.tagName.toLowerCase()} role=${found.getAttribute("role")} aria-live=${found.getAttribute("aria-live")}`,
+        ),
+    LIVE_REGION,
+  );
+  assert.deepEqual(others, [], "live regions of the page's own");
 });
 
 // What a region keeps saying: the text is there now and stays, unchanged and
