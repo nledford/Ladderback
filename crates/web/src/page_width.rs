@@ -53,18 +53,18 @@ impl PageWidth {
         }
     }
 
-    /// The Tailwind utilities `<main>` takes. Narrow centers it at 60rem
-    /// (240 steps of Tailwind's 0.25rem spacing), today's frame. Full width
-    /// leaves the frame to the window and holds each paragraph and form in it
-    /// to 70 characters of its own font, a readable line however wide the
-    /// window is; tables and the rest take the whole width. Tailwind 4.1 has
-    /// no named logical width bound, only `max-w-*` (`max-width`) or an
-    /// arbitrary `[max-inline-size:…]`; the page runs only horizontally,
-    /// where `max-width` is the inline size in either direction, so the named
-    /// utility on Tailwind's scale is the one used.
+    /// The Tailwind utilities `<main>` takes, and the footer's frame
+    /// (`components::Footer`), so the two line up. Narrow centers it at
+    /// 60rem (240 steps of Tailwind's 0.25rem spacing), today's frame, and
+    /// fills the line up to that (`inline-full`): in the app's column
+    /// (`main.rs`) a box with auto inline margins would otherwise shrink to
+    /// what it holds. Full width leaves the frame to the window and holds
+    /// each paragraph and form in it to 70 characters of its own font, a
+    /// readable line however wide the window is; tables and the rest take
+    /// the whole width.
     pub(crate) const fn main_class(self) -> &'static str {
         match self {
-            Self::Narrow => "mx-auto max-w-240",
+            Self::Narrow => "mx-auto max-w-240 inline-full",
             Self::Full => "[&_p]:max-w-[70ch] [&_form]:max-w-[70ch]",
         }
     }

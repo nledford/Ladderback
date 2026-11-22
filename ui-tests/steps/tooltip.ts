@@ -183,6 +183,21 @@ When("I rest the pointer on the button {string}", async function (this: BrowserW
   restedAt.set(this.page, Date.now());
 });
 
+// "No room below" is the window's edge, not the page's: the footer stands
+// under the gallery's last control, so the page scrolls until the control's
+// foot meets the window's, as a reader scrolling down would see it. Focus
+// then reaches it without scrolling, since it is wholly in view.
+When("the button {string} stands at the foot of the window", async function (this: BrowserWorld, name: string) {
+  const found = await button(this.page, name);
+  await found.evaluate((element) => {
+    const box = element.getBoundingClientRect();
+    window.scrollBy(0, box.bottom - window.innerHeight + 2);
+  });
+  const box = await found.boundingBox();
+  const height = this.page.viewportSize()?.height ?? 0;
+  assert.ok(box !== null && height - (box.y + box.height) <= 4, `the button doesn't reach the window's foot: ${JSON.stringify(box)}`);
+});
+
 // A pointer passing over the page doesn't flash every tooltip on its way:
 // nothing shows until the pointer has rested a moment.
 Then("the tooltip {string} shows only once the pointer has rested a moment", async function (this: BrowserWorld, text: string) {

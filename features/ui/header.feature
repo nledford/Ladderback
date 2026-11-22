@@ -1,16 +1,16 @@
 @ui
 Feature: The header bar
   Every page's header shows the product's name, which leads to the start page,
-  then the pages' links on one line with, at that line's end, the running
-  version and, while signed in, Sign out. Sign out isn't a page, so it stands
-  apart from the pages' links, after them in the order of Tab, and no taller
-  than they are, so where the line fits, Sign out doesn't make the header
-  taller. A sign-out that fails says so in the page, not in the header, which
-  keeps its height, and isn't said again once the session has ended. On a
-  narrow screen the version and Sign out wrap under the links, together where
-  they fit, and stay at the line's end.
+  then the pages' links on one line with, while signed in, Sign out at that
+  line's end. The running version is in the footer, not here (decision 142).
+  Sign out isn't a page, so it stands apart from the pages' links, after them
+  in the order of Tab, and no taller than they are, so where the line fits,
+  Sign out doesn't make the header taller. A sign-out that fails says so in
+  the page, not in the header, which keeps its height, and isn't said again
+  once the session has ended. On a narrow screen Sign out wraps under the
+  links and stays at the line's end.
 
-  Scenario: Signed in, the pages' links, the running version and Sign out share one line, and Sign out comes after the pages
+  Scenario: Signed in, the pages' links and Sign out share one line, Sign out comes after the pages, and the version is not in the header
     Given a viewport of 1280 by 720 pixels
     And a daemon with sign-in on and the admin password "demo-admin-pass"
     When I open the address "/repositories"
@@ -19,7 +19,8 @@ Feature: The header bar
     And I type "demo-admin-pass"
     And I press Enter
     Then focus is on the heading "Repositories"
-    And the pages' links, the running version and the button "Sign out" share the header's last line
+    And the pages' links and the button "Sign out" share the header's last line
+    And the banner doesn't show the running version
     When I press Shift+Tab until focus is on the link "Settings"
     And I press Tab
     Then focus is on the button "Sign out"
@@ -78,31 +79,27 @@ Feature: The header bar
     Then focus is on the heading "Settings"
     And the page shows no error alert containing "did not answer"
 
-  # The version's width depends on the build's commit, whose digits differ in
-  # width, so the scenario measures the widest and the narrowest version a
-  # build between releases can show, never this build's own commit.
-  Scenario Outline: On a narrow screen the running version and Sign out end the header's line, at <size> percent text, with the <width> version
+  Scenario Outline: On a narrow screen Sign out ends the header's line, at <size> percent text, and the version is not in the header
     Given a viewport of 320 by <height> pixels
     And the reader sets the text size to <size> percent
     And a daemon with sign-in on and the admin password "demo-admin-pass"
     When I open the address "/repositories"
-    And the running version is the <width> one a build between releases can show
     And I skip to the content
     And I press Tab until focus is on the textbox "Admin password"
     And I type "demo-admin-pass"
     And I press Enter
     Then focus is on the heading "Repositories"
-    And the running version and the button "Sign out" share a line where they fit, at the header's inline end
+    And the button "Sign out" ends its line, at the header's inline end
+    And the banner doesn't show the running version
     And the button "Sign out" is at least 2rem tall, the size of the reader's text
     And the page doesn't scroll sideways
     And no text is clipped
     And the page has no accessibility violations
 
     Examples:
-      | height | size | width     |
-      | 640    | 100  | widest    |
-      | 640    | 100  | narrowest |
-      | 256    | 200  | widest    |
+      | height | size |
+      | 640    | 100  |
+      | 256    | 200  |
 
   # The header's links are the shared link (§4.5): underlined, the product's
   # name in the color of the text around it, the pages' links in Ladder Blue.

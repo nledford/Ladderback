@@ -64,7 +64,7 @@ Feature: Pseudolocales
     And the page has no accessibility violations
 
   # A scenario of its own, not a row of the one above: WebKit alone showed it,
-  # the version in the header kept its unbroken run's width and stuck out of
+  # the version, then in the header, kept its unbroken run's width and stuck out of
   # the page right to left (1.4.10), and red-first needs every row of a
   # scenario to fail in the engine.
   Scenario: The transformed text of a page that runs right to left copes with larger text and wider spacing together

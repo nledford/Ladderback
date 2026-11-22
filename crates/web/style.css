@@ -156,10 +156,11 @@ a {
 }
 
 /* The brand on its own line, then the pages' links and, at that line's end,
-   the running version and Sign out (`.site-account`), which wrap under the
-   links on a narrow screen. Every part of the line stands on one baseline,
-   no part is taller than the links and nothing lies under them, so where
-   the line fits, the header is as tall signed in as with sign-in off. */
+   Sign out (`.site-account`), which wraps under the links on a narrow
+   screen. Every part of the line stands on one baseline, no part is taller
+   than the links and nothing lies under them, so where the line fits, the
+   header is as tall signed in as with sign-in off. The running version is
+   the footer's (`components/footer.rs`). */
 .site-header {
   display: flex;
   flex-wrap: wrap;
@@ -214,24 +215,16 @@ a {
   }
 }
 
-/* The version and Sign out, at the end of the links' line. On a narrow
-   screen they wrap under the links, together where they fit; where they
-   don't, the version ends one line and Sign out the next, both at the line's
-   end, so Sign out never stands alone at the line's start.
+/* Sign out, at the end of the links' line. On a narrow screen it wraps under
+   the links and stays at the line's end, never alone at the line's start.
+   It may be narrower than its longest unbreakable run, as a flex item is
+   not unless told, so with larger text it never pushes the page sideways
+   (1.4.10).
 
-   A flex item is no narrower than its longest unbreakable run unless told
-   otherwise. WebKit measured the version's run (`0.3.1+cedec1f`) unbroken
-   although `overflow-wrap: anywhere` breaks it, so on a narrow screen with
-   larger text, right to left, the line stuck out and the page scrolled
-   sideways (1.4.10): the group and the version may both be narrower than
-   that run.
-
-   The version and Sign out stand on their last baseline, which for Sign out
-   is its words': a button's first baseline is its first part's, its icon's
-   foot, which stands lower in the button than its words' baseline, so on
-   the line's first baseline Sign out rose 2 px over the links and the
-   header's line grew. The group's own baseline, on which it stands beside
-   the links, is still the version's. */
+   Sign out stands on its last baseline, its words': a button's first
+   baseline is its first part's, its icon's foot, which stands lower in the
+   button than its words' baseline, so on the line's first baseline Sign out
+   rose 2 px over the links and the header's line grew. */
 .site-account {
   display: flex;
   flex-wrap: wrap;
@@ -243,17 +236,8 @@ a {
   min-inline-size: 0;
 }
 
-/* A version too long for its line wraps, its lines at the line's end. */
-.site-version {
-  margin: 0;
-  padding-block: 0.25rem;
-  color: var(--muted);
-  min-inline-size: 0;
-  text-align: end;
-}
-
 /* The available update's link, in its banner on a line of its own under the
-   running version (`basis-full`); its padding is the link's. */
+   pages' links and Sign out (`basis-full`); its padding is the link's. */
 .site-update a {
   display: inline-block;
   padding-block: 0.25rem;
