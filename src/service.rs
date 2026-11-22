@@ -11,6 +11,7 @@ use api::MsgArg;
 use app::ports::{Installed, Removed, ServiceError, ServiceManager, ServiceProblem};
 use domain::service::{ServicePath, ServicePathProblem};
 use l10n::{Localizer, MessageId, PosixEnv, msg};
+use platform::data_dir_lock::{DataDirLock, LockError};
 use platform::dirs;
 use platform::service::{Unavailable, UserService, program_path};
 
@@ -94,18 +95,41 @@ struct Held {
 }
 
 /// The data folder, when a process other than the installed service's holds
-/// it: the service's every start is refused until that process stops
-/// (#459).
+/// it, as a `serve` started by hand does: the service's every start is
+/// refused until that process stops (#459). Nothing when no process holds
+/// it, or the lock can't be checked, which the service says itself when it
+/// starts. The manager is asked for the service's process only when the
+/// lock file names a holder: the service being replaced holds the folder
+/// at every reinstall, and is not another Ladderback.
 fn data_folder_held(runtime: &tokio::runtime::Runtime, service: &UserService) -> Option<Held> {
-    let _ = (runtime, service);
-    todo!()
+    let folder = dirs::data_dir()?;
+    let holder = match DataDirLock::check(&folder) {
+        Err(LockError::InUse { holder }) => holder,
+        Ok(()) | Err(LockError::Unavailable { .. }) => return None,
+    };
+    if let Some(pid) = holder
+        && runtime.block_on(service.process()) == Some(pid)
+    {
+        return None;
+    }
+    Some(Held { folder, holder })
 }
 
 /// The note that says another Ladderback holds the data folder and must stop
 /// for the service to take over; nothing when none does.
 fn held_said(localizer: &Localizer, held: Option<&Held>) -> String {
-    let _ = (localizer, held);
-    todo!()
+    let Some(Held { folder, holder }) = held else {
+        return String::new();
+    };
+    let path = ("path", MsgArg::Text(shown(folder)));
+    match holder {
+        Some(pid) => line(
+            localizer,
+            msg::CLI_SERVICE_DATA_DIR_IN_USE,
+            &[path, ("pid", MsgArg::Text(pid.to_string()))],
+        ),
+        None => line(localizer, msg::CLI_SERVICE_DATA_DIR_IN_USE_UNNAMED, &[path]),
+    }
 }
 
 fn remove(localizer: &Localizer) -> io::Result<ExitCode> {

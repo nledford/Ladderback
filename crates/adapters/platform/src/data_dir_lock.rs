@@ -66,8 +66,18 @@ impl DataDirLock {
     /// process when the file does; [`LockError::Unavailable`] when the lock
     /// file can't be opened or locked.
     pub fn check(data_dir: &Path) -> Result<(), LockError> {
-        let _ = data_dir;
-        todo!()
+        let mut file = match File::open(data_dir.join(LOCK_FILE)) {
+            Ok(file) => file,
+            Err(error) if error.kind() == io::ErrorKind::NotFound => return Ok(()),
+            Err(error) => return Err(unavailable(error)),
+        };
+        match file.try_lock_shared() {
+            Ok(()) => Ok(()),
+            Err(TryLockError::WouldBlock) => Err(LockError::InUse {
+                holder: holder_named_in(&mut file),
+            }),
+            Err(TryLockError::Error(error)) => Err(unavailable(error)),
+        }
     }
 }
 
