@@ -72,14 +72,14 @@ impl StepUpConfirmation {
 
     /// Whether it names `what`: its short ID or its whole ID, in either
     /// case, with the spaces around it dropped, as a paste brings them; for
-    /// the hub key, its fingerprint as every screen shows it, in either case,
-    /// with or without the hyphens between its groups.
+    /// the hub key, its fingerprint as every screen shows it, read as a typed
+    /// fingerprint is ([`Fingerprint::is_typed_as`]).
     pub fn names(&self, what: StepUpFor<'_>) -> bool {
         let typed = self.0.expose().trim();
         let (short, whole) = match what {
             StepUpFor::Snapshot(snapshot) => (short_id(snapshot), snapshot.as_str()),
             StepUpFor::Proposal(id) => (short_proposal_id(id), id.as_str()),
-            StepUpFor::HubKey(_) => todo!(),
+            StepUpFor::HubKey(fingerprint) => return fingerprint.is_typed_as(typed),
         };
         typed.eq_ignore_ascii_case(short) || typed.eq_ignore_ascii_case(whole)
     }

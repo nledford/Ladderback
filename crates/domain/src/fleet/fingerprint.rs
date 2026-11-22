@@ -1,8 +1,9 @@
 //! How a key is shown to a person (§16, decisions 120, "The hub key", and
-//! 121, "The fingerprint"): its fingerprint, the one thing a person compares,
-//! and the key ID and token ID, labels that never verify anything.
+//! 121, "The fingerprint"): its fingerprint, the one thing a person compares
+//! and the one ID a screen shows for a key, and a pairing token's token ID,
+//! a label that never verifies anything.
 
-use std::fmt;
+use std::fmt::{self, Write as _};
 
 use sha2::{Digest as _, Sha256};
 
@@ -45,26 +46,46 @@ impl Fingerprint {
     pub fn full_hex(&self) -> String {
         lower_hex(&self.0)
     }
+
+    /// Whether `text` is this fingerprint as a person types or pastes it:
+    /// its 20 characters in any case, with or without hyphens and
+    /// whitespace, with Crockford's aliases (O for 0, I and L for 1).
+    pub fn is_typed_as(&self, text: &str) -> bool {
+        text.chars()
+            .filter(|c| *c != '-' && !c.is_whitespace())
+            .map(|c| match c.to_ascii_uppercase() {
+                'O' => '0',
+                'I' | 'L' => '1',
+                c => c,
+            })
+            .eq(self.symbols())
+    }
+
+    /// The first 100 bits as 20 Crockford base32 characters.
+    fn symbols(&self) -> impl Iterator<Item = char> {
+        let mut first = [0; 16];
+        first.copy_from_slice(self.0.first_chunk::<16>().unwrap_or(&[0; 16]));
+        let bits = u128::from_be_bytes(first) >> 28;
+        (0..20u32).map(move |i| {
+            let index = (bits >> (5 * (19 - i))) & 0x1f;
+            usize::try_from(index)
+                .ok()
+                .and_then(|index| CROCKFORD.get(index))
+                .copied()
+                .map_or('0', char::from)
+        })
+    }
 }
 
 impl fmt::Display for Fingerprint {
     /// The first 100 bits: 20 characters, a hyphen after each four but the
     /// last.
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        let mut first = [0; 16];
-        first.copy_from_slice(self.0.first_chunk::<16>().unwrap_or(&[0; 16]));
-        let bits = u128::from_be_bytes(first) >> 28;
-        for i in 0..20u32 {
+        for (i, symbol) in self.symbols().enumerate() {
             if i > 0 && i % 4 == 0 {
-                f.write_str("-")?;
+                f.write_char('-')?;
             }
-            let index = (bits >> (5 * (19 - i))) & 0x1f;
-            let digit = usize::try_from(index)
-                .ok()
-                .and_then(|index| CROCKFORD.get(index))
-                .copied()
-                .unwrap_or(b'0');
-            write!(f, "{}", char::from(digit))?;
+            f.write_char(symbol)?;
         }
         Ok(())
     }
@@ -76,10 +97,11 @@ impl fmt::Debug for Fingerprint {
     }
 }
 
-/// The first 8 hex digits, upper case, of a key's SHA-256 (`3F9A8B21`): a
-/// label beside a name, never a way to verify a key.
+/// The first 8 hex digits, upper case, of a key's SHA-256 (`3F9A8B21`): how
+/// a [`TokenId`] is held. No screen shows a key by it; the fingerprint is
+/// the one ID a person reads for a key (#1344).
 #[derive(Clone, Copy, PartialEq, Eq, Hash)]
-pub struct KeyId([u8; 4]);
+struct KeyId([u8; 4]);
 
 impl KeyId {
     pub fn of_key(key: &PublicKey) -> Self {
@@ -103,7 +125,7 @@ impl fmt::Debug for KeyId {
     }
 }
 
-/// A pairing token's key ID: the first 8 hex digits of its pairing key's
+/// A pairing token's token ID: the first 8 hex digits of its pairing key's
 /// SHA-256, by which the hub lists and revokes unused tokens.
 #[derive(Clone, Copy, PartialEq, Eq, Hash)]
 pub struct TokenId(KeyId);

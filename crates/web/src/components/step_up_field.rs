@@ -11,8 +11,9 @@ use crate::live::reply;
 use crate::text;
 
 /// What a step-up confirmation asks for (§10.4): the admin password with
-/// sign-in on, and with sign-in off the short ID of what is confirmed, shown
-/// beside the field, which `label` and `hint` name ("Snapshot ID").
+/// sign-in on, and with sign-in off the short ID of what is confirmed, or
+/// the hub key's fingerprint, shown beside the field, which `label` and
+/// `hint` name ("Snapshot ID", "Hub key fingerprint").
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum StepUp {
     Password,
@@ -20,6 +21,14 @@ pub enum StepUp {
         label: String,
         hint: String,
         short: String,
+    },
+    /// A key's fingerprint as every screen shows it (decision 121, "The
+    /// fingerprint"): code text in the description, copied with "Copy the
+    /// fingerprint".
+    Fingerprint {
+        label: String,
+        hint: String,
+        fingerprint: String,
     },
 }
 
@@ -55,70 +64,88 @@ pub fn StepUpField(
     error: RwSignal<Option<String>>,
     #[prop(optional)] on_page: bool,
 ) -> impl IntoView {
-    match step_up {
-        StepUp::Password => view! {
-            <TextField
-                id=id
-                localizer=Arc::clone(&localizer)
-                label=text(&localizer, msg::UI_STEP_UP_PASSWORD_LABEL)
-                description=text(&localizer, msg::UI_STEP_UP_PASSWORD_HINT)
-                error=error
-                alert=!on_page
-                value=value
-                kind=Kind::Password
-                autocomplete="current-password"
-            />
-        }
-        .into_any(),
-        StepUp::ShortId { label, hint, short } => {
-            let said = RwSignal::new(None::<String>);
-            let copied = text(&localizer, msg::UI_STEP_UP_COPIED);
-            let refused = text(&localizer, msg::UI_STEP_UP_COPY_FAILED);
-            let copy_label = text(&localizer, msg::UI_STEP_UP_COPY);
-            let shown = short.clone();
-            view! {
+    let (label, hint, short, copy, copy_failed) = match step_up {
+        StepUp::Password => {
+            return view! {
                 <TextField
                     id=id
-                    localizer=localizer
-                    label=label
-                    description=hint
-                    description_code=shown
+                    localizer=Arc::clone(&localizer)
+                    label=text(&localizer, msg::UI_STEP_UP_PASSWORD_LABEL)
+                    description=text(&localizer, msg::UI_STEP_UP_PASSWORD_HINT)
                     error=error
                     alert=!on_page
                     value=value
-                    kind=Kind::Code
-                >
-                    <p>
-                        <Button
-                            content=Content::Text(copy_label.into())
-                            on_press=Callback::new(move |()| {
-                                said.set(None);
-                                let (copied, refused) = (copied.clone(), refused.clone());
-                                write_clipboard(
-                                    &short,
-                                    move |done| {
-                                        let words = if done { &copied } else { &refused };
-                                        said.try_set(Some(words.clone()));
-                                        if on_page {
-                                            reply(Politeness::Polite, words);
-                                        }
-                                    },
-                                );
-                            })
-                        />
-                        " "
-                        <span
-                            aria-live=(!on_page).then_some("polite")
-                            aria-atomic=(!on_page).then_some("true")
-                        >
-                            {move || said.get()}
-                        </span>
-                    </p>
-                </TextField>
+                    kind=Kind::Password
+                    autocomplete="current-password"
+                />
             }
-            .into_any()
+            .into_any();
         }
+        StepUp::ShortId { label, hint, short } => (
+            label,
+            hint,
+            short,
+            msg::UI_STEP_UP_COPY,
+            msg::UI_STEP_UP_COPY_FAILED,
+        ),
+        StepUp::Fingerprint {
+            label,
+            hint,
+            fingerprint,
+        } => (
+            label,
+            hint,
+            fingerprint,
+            msg::UI_STEP_UP_COPY_FINGERPRINT,
+            msg::UI_STEP_UP_COPY_FINGERPRINT_FAILED,
+        ),
+    };
+    let said = RwSignal::new(None::<String>);
+    let copied = text(&localizer, msg::UI_STEP_UP_COPIED);
+    let refused = text(&localizer, copy_failed);
+    let copy_label = text(&localizer, copy);
+    let shown = short.clone();
+    view! {
+        <TextField
+            id=id
+            localizer=localizer
+            label=label
+            description=hint
+            description_code=shown
+            error=error
+            alert=!on_page
+            value=value
+            kind=Kind::Code
+        >
+            <p>
+                <Button
+                    content=Content::Text(copy_label.into())
+                    on_press=Callback::new(move |()| {
+                        said.set(None);
+                        let (copied, refused) = (copied.clone(), refused.clone());
+                        write_clipboard(
+                            &short,
+                            move |done| {
+                                let words = if done { &copied } else { &refused };
+                                said.try_set(Some(words.clone()));
+                                if on_page {
+                                    reply(Politeness::Polite, words);
+                                }
+                            },
+                        );
+                    })
+                />
+                " "
+                <span
+                    aria-live=(!on_page).then_some("polite")
+                    aria-atomic=(!on_page).then_some("true")
+                >
+                    {move || said.get()}
+                </span>
+            </p>
+        </TextField>
     }
+    .into_any()
 }
 
 /// Tells the reader that the step-up field `id`, on a page, was refused with
