@@ -236,7 +236,7 @@ The badge's own pairs, for the tones that tell no result: Loading (dark blue on 
 
 ## Layout
 
-One column, `main` with 1rem padding, as wide as Settings' Page width chooses in this browser: Narrow, the default, centers it at up to 60rem; Full width lets it use the window's width, while each paragraph and form in it stays at up to 70 characters (`70ch`), a readable line however wide the screen. The width is Tailwind utilities on `main` (`page_width.rs`), never a `style.css` rule. The site header spans the page: the brand on its own line, then the navigation, with the running version and, while signed in, Sign out at the end of the line. On a narrow screen they wrap under the navigation toward the line's end, together where they fit.
+One column, `main` with 1rem padding, as wide as Settings' Page width chooses in this browser: Narrow, the default, centers it at up to 60rem; Full width lets it use the window's width, while each paragraph and form in it stays at up to 70 characters (`70ch`), a readable line however wide the screen. The width is Tailwind utilities on `main` (`page_width.rs`), never a `style.css` rule. The site header spans the page: the brand on its own line, then the navigation, with Sign out at the end of the line while signed in; on a narrow screen it wraps under the navigation and ends its line. The footer, with the running version, closes every page that shows the navigation, at the window's foot on a short page.
 
 Spacing steps are 0.25, 0.5, 0.75 and 1rem; forms stack fields 1rem apart, and an `.actions` row puts its buttons 0.5rem apart, wrapping. Inputs fill their line up to 32rem (40rem for a token).
 
@@ -326,8 +326,14 @@ Every shared component takes the same choices, defined once in `crates/web/src/v
 - **Style:** a wrapping row of `Link`s, underlined in Ladder Blue on the Ledger Gray header, 1rem apart.
 - **Current page:** bold, with `aria-current="page"`; a page below a section (a snapshot's) marks its section.
 - **Brand:** a `Link` to the start page in the color of the text around it, current there only without a query (not on `/?locale=fr`); the product's mark before its name, as tall as the name's letters, hidden from screen readers; under forced colors the mark takes `CanvasText` and `Canvas`.
-- **Sign out:** a Ghost button with the LogOut icon after the running version, outside the navigation's list, since it isn't a page, its words on the links' baseline and no taller than the links; busy while the daemon signs out. A failed sign-out is said once at the top of `main`, never in the header, so the header keeps its height.
+- **Sign out:** a Ghost button with the LogOut icon at the end of the links' line, outside the navigation's list, since it isn't a page, its words on the links' baseline and no taller than the links; busy while the daemon signs out. A failed sign-out is said once at the top of `main`, never in the header, so the header keeps its height.
 - A skip link is the first focusable element and appears at the top of the page on focus.
+
+### Footer
+
+- **Style:** the running version ("Version 0.4.0+3f937cf") in Slate Note on the page's background, under a 1px Slate Note rule across the window, with no fill and no shadow. Its words stand in `main`'s frame, 1rem in, where the page's text starts.
+- **Place:** after `main`, the page's `contentinfo` landmark, on every page that shows the navigation; the sign-in page has none. On a short page it stands at the window's foot.
+- Plain text: no Tab stop, never announced. The update notice stays in the header, since it asks the reader to act (decision 142).
 
 ### Tables
 

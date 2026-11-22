@@ -1,0 +1,7 @@
+# The footer
+
+- **The footer** is `Footer` (`components/footer.rs`), the foot of every page that shows the navigation, holding the running version ([decision 142](../../decisions/142-the-running-version-in-the-footer.md)). The app places it as `<main>`'s next sibling, so it is the page's one `contentinfo` landmark; a `<footer>` inside a section, as in the gallery's demo, is none. Its caller passes the build as people read it (`BuildDto::display`), worded "Version 0.4.0+3f937cf" (`ui-version`); given none, as on the sign-in page, it draws nothing, not an empty landmark.
+
+  The version is plain text: nothing in the footer is a tab stop, and it is no live region, so a screen reader reads it where it stands, by the landmarks list or at the page's end (A3). It is Slate Note on the page's background (4.5:1 or more in both themes), under a 1px Slate Note rule across the window, with no fill and no shadow. Its words stand in `<main>`'s frame (`PageWidth::main_class`), 1rem in, at the line's start in either direction, and wrap inside the footer at 320 CSS px with 200 % text (1.4.10). On a short page it stands at the window's foot.
+
+  The gallery's "Footer" demo shows a release's version, the longest a build between releases shows, and none; `features/ui/components/footer.feature` checks that Tab passes through it, that it holds no live region, the landmark's place, its colors in both themes, its frame in Narrow, Full width and right to left, and its place at a short page's foot. `features/ui/version.feature` checks the version it shows and its wrap.
