@@ -127,6 +127,22 @@ pub struct Finished {
     pub stats_failed: Option<crate::stats::StatsError>,
 }
 
+/// How many times the end of a backup the log held as queued is written
+/// again when the log refuses it ([`RunOperation::end_resumed`]).
+pub const END_WRITE_RETRIES: u32 = 3;
+
+/// How long [`RunOperation::end_resumed`] waits before it writes a refused
+/// end again.
+pub const END_WRITE_SPACING: SignedDuration = SignedDuration::from_secs(15);
+
+/// How [`RunOperation::end_resumed`] ended a backup the log held as queued:
+/// the operation as it ended, and whether the log took the end.
+#[derive(Debug)]
+pub struct ResumedEnd {
+    pub finished: Finished,
+    pub written: bool,
+}
+
 /// A run in progress.
 struct Run {
     operation: Operation,
@@ -281,6 +297,12 @@ impl RunOperation {
             recording_errors: run.recording_errors,
             stats_failed: None,
         }
+    }
+
+    /// Ends `operation`, a backup the log held as queued, failed with
+    /// `reason`.
+    pub async fn end_resumed(&self, _operation: Operation, _reason: FailureReason) -> ResumedEnd {
+        todo!()
     }
 
     /// Runs the job of an operation [`Self::queue`] recorded, as

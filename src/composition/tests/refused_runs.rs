@@ -1391,6 +1391,49 @@ async fn a_parked_resumed_run_whose_plan_was_deleted_ends_plan_removed_past_its_
     assert_eq!(jobs(&scripted), 0, "the engine was never asked");
 }
 
+/// A scheduled run parked for its keyring whose plan was deleted before
+/// its task looked doesn't start, even when its bound has already
+/// passed: the plan is looked for before the bound, as a queued backup's
+/// is, so nothing is recorded of a refusal for a secret of a plan nobody
+/// has (#1317).
+#[tokio::test]
+async fn a_parked_run_whose_plan_was_deleted_does_not_start_past_its_bound() {
+    capture();
+    let started = domain::Timestamp::from_second(1_800_000_000).expect("a timestamp");
+    let clock = Arc::new(FakeClock::new(started));
+    let secrets = Arc::new(FakeSecrets::new());
+    keyring_locked_until(
+        &secrets,
+        &clock,
+        started + domain::SignedDuration::from_secs(3600),
+    );
+    let store = Arc::new(app::fakes::InMemoryOperationStore::new());
+    let (mut runner, _heard, scripted, home) =
+        keyring_parked_runner(secrets, clock.clone(), store.clone()).await;
+    let config = runner.config.load().await.expect("the configuration reads");
+    runner.config = Arc::new(ChangesAfterFirstLoad::new(
+        config.clone(),
+        config.remove_plan(&home).expect("a valid change"),
+    ));
+    let place = runner
+        .queue
+        .push(&home, domain::planning::Concurrency::default());
+    // The bound is the start's own time: it has passed when the task looks.
+    let unlock = app::secrets::UnlockWait::new(clock.clone(), started);
+    PlanRuns::start(&runner, &home, Trigger::Schedule, place, Some(unlock)).await;
+
+    until_logged(&["home", "didn't start", "isn't configured"]).await;
+    let history = store
+        .list(&app::ports::HistoryQuery::default())
+        .await
+        .expect("the log reads");
+    assert!(
+        history.operations.is_empty(),
+        "nothing is recorded: {history:?}"
+    );
+    assert_eq!(jobs(&scripted), 0, "the engine was never asked");
+}
+
 /// Each refusal a queued backup's job can be built again with, once its
 /// wait for its keyring is over, ends it with its own reason, never as a
 /// stopped daemon (#1293).
@@ -1865,6 +1908,104 @@ async fn a_resumed_run_waiting_for_its_keyring_can_be_cancelled() {
     .expect("the queued backup ends cancelled");
     assert_eq!(clock.sleepers(), 0, "the wait for the keyring stopped");
     assert_eq!(jobs(&scripted), 0, "the engine was never asked");
+}
+
+/// A cancel the route answers `Ok` in the instant a queued backup's wait
+/// for its keyring ends, before the run gives up its cancel switch, ends
+/// the backup cancelled, whatever the wait answered (#1248).
+#[tokio::test]
+async fn a_cancel_as_a_resumed_runs_wait_ends_ends_it_cancelled() {
+    let store = Arc::new(app::fakes::InMemoryOperationStore::new());
+    let (runner, _heard, scripted, home) = refused_password_runner(
+        "LADDERBACK_TEST_CANCEL_AS_THE_WAIT_ENDS_UNSET",
+        store.clone(),
+        Arc::new(BroadcastEventBus::new()),
+    )
+    .await;
+    let queued = queued_home_backup(0x1248, None);
+    store
+        .save(&queued, None)
+        .await
+        .expect("the queued backup is saved");
+    let switch = runner.registry.register(queued.id());
+
+    let cancel = runner
+        .cancel(
+            queued.id().as_uuid().hyphenated().to_string(),
+            http_adapter::Canceller::Session,
+        )
+        .await;
+    assert_eq!(cancel, Ok(()), "the waiting run can be cancelled");
+    runner
+        .after_wait(
+            queued.clone(),
+            &home,
+            crate::composition::plan_runner::Waited::Unrunnable(
+                FailureReason::PlanRemoved,
+                "its plan was deleted".to_owned(),
+            ),
+            async move {
+                let _ = switch.await;
+            },
+        )
+        .await;
+
+    let status = until_ended(&store, queued.id()).await;
+    assert_eq!(status, OperationStatus::Cancelled, "the cancel it was told");
+    assert_eq!(jobs(&scripted), 0, "the engine was never asked");
+}
+
+/// A queued backup whose wait for its keyring ended with no cancel ends
+/// as the wait answered, and a cancel after that is refused: nothing of
+/// it is running (#1248).
+#[tokio::test]
+async fn a_resumed_run_whose_wait_ended_unrun_ends_as_it_answered_and_refuses_a_later_cancel() {
+    let store = Arc::new(app::fakes::InMemoryOperationStore::new());
+    let (runner, _heard, _scripted, home) = refused_password_runner(
+        "LADDERBACK_TEST_WAIT_ENDED_UNRUN_UNSET",
+        store.clone(),
+        Arc::new(BroadcastEventBus::new()),
+    )
+    .await;
+    let queued = queued_home_backup(0x1249, None);
+    store
+        .save(&queued, None)
+        .await
+        .expect("the queued backup is saved");
+    let switch = runner.registry.register(queued.id());
+
+    runner
+        .after_wait(
+            queued.clone(),
+            &home,
+            crate::composition::plan_runner::Waited::Unrunnable(
+                FailureReason::PlanRemoved,
+                "its plan was deleted".to_owned(),
+            ),
+            async move {
+                let _ = switch.await;
+            },
+        )
+        .await;
+
+    let status = until_ended(&store, queued.id()).await;
+    assert_eq!(
+        status,
+        OperationStatus::Failed {
+            reason: FailureReason::PlanRemoved
+        }
+    );
+    assert!(
+        !runner.registry.cancel(&queued.id()),
+        "the run gave up its cancel switch"
+    );
+    let cancel = runner
+        .cancel(
+            queued.id().as_uuid().hyphenated().to_string(),
+            http_adapter::Canceller::Session,
+        )
+        .await;
+    assert_eq!(cancel, Err(http_adapter::CancelError::NotRunning));
 }
 
 /// A runner for the plan `home` on the repository `demo`, as the daemon

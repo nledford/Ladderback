@@ -477,6 +477,18 @@ impl PlanRunner {
         }
     }
 
+    /// Acts on how the wait of `operation`, a queued backup of `plan`, for
+    /// its keyring ended.
+    pub(super) async fn after_wait(
+        &self,
+        _operation: domain::execution::Operation,
+        _plan: &PlanId,
+        _waited: Waited,
+        _cancel: impl Future<Output = ()> + Send + 'static,
+    ) {
+        todo!()
+    }
+
     /// How the wait of `operation`, a queued backup of `plan`, for its
     /// keyring ended, as [`Self::resume_parked`] acts on it.
     async fn resumed_after_wait(
@@ -675,7 +687,7 @@ pub(super) struct BuiltBackup {
 
 /// How a queued backup's wait for its keyring ended, before anything is
 /// recorded of it ([`PlanRunner::resume_parked`]).
-enum Waited {
+pub(super) enum Waited {
     /// It runs, built from the configuration as it stands now, under the
     /// queue's limit it says. Boxed: a built backup is large beside the
     /// other answers.
