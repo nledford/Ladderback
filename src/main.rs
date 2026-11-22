@@ -837,6 +837,16 @@ fn run_daemon(
         let runs = background.runs();
         let restart = state.restart.clone();
         let scheduled = tokio::spawn(background.run(random));
+        // A paired machine's reports to its hub run beside the scheduler
+        // and never hold it up (§7.2).
+        #[cfg(feature = "hub")]
+        let reporting = platform::dirs::data_dir().map(|data_dir| {
+            tokio::spawn(hub::reporting(
+                data_dir,
+                Arc::clone(&state.events),
+                Arc::clone(&operation_log.store),
+            ))
+        });
         let app = http_adapter::router(
             Arc::new(http_adapter::EmbeddedUi),
             http_adapter::RequestChecks::new(hosts),
@@ -875,6 +885,10 @@ fn run_daemon(
         // queue do from now on; a worker it lets go of still gets its SIGTERM
         // and its grace, since the stop was asked for first (decision 92).
         scheduled.abort();
+        #[cfg(feature = "hub")]
+        if let Some(reporting) = &reporting {
+            reporting.abort();
+        }
         let workers_stopped = workers.stop();
         runs.freeze();
         log::info!("stopping ({})", cause.said());

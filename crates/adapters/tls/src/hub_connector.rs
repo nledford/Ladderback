@@ -347,4 +347,24 @@ mod tests {
             "the write gave no error within its deadline: {sent:?}"
         );
     }
+
+    /// A hub that keeps the connection open and answers nothing, as a hub
+    /// that hangs while the agent waits for an acknowledgement: the read
+    /// gives up within its deadline, so the agent's sync loop drops the
+    /// link and tries again after its back-off.
+    #[tokio::test]
+    async fn a_hub_that_never_answers_is_given_up_on_within_its_deadline() {
+        let (agent, _silent_hub) = tokio::io::duplex(4096);
+        let socket = WebSocketStream::from_raw_socket(agent, Role::Client, Some(config())).await;
+        let mut link = WebSocketLink {
+            socket,
+            exporter: None,
+            within: Duration::from_millis(200),
+        };
+        let received = tokio::time::timeout(Duration::from_secs(2), link.receive()).await;
+        assert!(
+            matches!(received, Ok(Err(LinkError::Unreachable { .. }))),
+            "the read gave no error within its deadline: {received:?}"
+        );
+    }
 }

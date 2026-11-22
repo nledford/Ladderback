@@ -3,7 +3,7 @@
 //! Only a build with the `hub` feature has them.
 
 use std::io;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::process::ExitCode;
 use std::sync::Arc;
 
@@ -13,13 +13,17 @@ use app::pairing::{
     AgentPairing, AgentPairingError, ChallengeRefused, ConnectFailure, ConnectToHub, Connected,
     HubPairing, HubPairingError, HubStart, PairFailure, PairWithHub,
 };
-use app::ports::{AgentRegistry as _, Identity as _, IdentityError, LinkError, Signing as _};
+use app::ports::{
+    AgentRegistry as _, EventBus, Identity as _, IdentityError, LinkError, Signing as _,
+};
+use app::sync::{RecordReports, SyncWithHub};
 use domain::fleet::{
     AgentStatus, Approval, ApprovalRefused, Fingerprint, Hostname, HubAddress, HubRoute, HubScheme,
     MachineZone, PairingToken, RouteRefused, RouteSession, TokenId, TokenTls, WelcomeRefused,
     is_loopback,
 };
 use domain::{SignedDuration, Timestamp};
+use futures::StreamExt as _;
 use l10n::{Localizer, MessageId, PosixEnv, msg};
 use platform::data_dir_lock::{DataDirLock, LockError};
 use platform::identity::FileIdentity;
@@ -61,16 +65,18 @@ pub(crate) enum TokenAsk {
     },
 }
 
-/// The hub's pairing over `store` and the key files in `data_dir`.
+/// The hub's pairing over `store` and the key files in `data_dir`, taking
+/// its approved agents' reports into `store` (§7.2).
 pub(crate) fn hub_pairing(data_dir: &Path, store: Arc<SqliteStore>) -> HubPairing {
     HubPairing::new(
-        store,
+        store.clone(),
         Arc::new(FileIdentity::in_data_dir(data_dir)),
         Arc::new(AwsLcSigning),
         Arc::new(OsRandom),
         Arc::new(SystemClock),
         crate::build_info::SHOWN.as_str().to_owned(),
     )
+    .with_inbox(store)
 }
 
 /// The hub's TLS key in `data_dir`, from which its built-in TLS serves a
@@ -849,6 +855,56 @@ fn connecting(identity: Arc<FileIdentity>) -> ConnectToHub {
         Arc::new(WebSocketHubConnector::new()),
         crate::build_info::SHOWN.as_str().to_owned(),
     )
+}
+
+/// How often a daemon on a machine that hasn't paired looks for its pairing.
+const PAIRING_POLL: std::time::Duration = std::time::Duration::from_secs(30);
+
+/// This machine's reports to its hub (§7.2): once it paired, a recorder
+/// keeps each operation's start and end in the outbox in `store`, and a
+/// session replays them to the hub whenever it holds one the hub hasn't
+/// acknowledged. Neither touches the machine's operations, so a machine
+/// that can't reach its hub backs up on schedule all the same. A machine
+/// that hasn't paired looks for its pairing every [`PAIRING_POLL`] and
+/// keeps no report until then. Runs until aborted.
+pub(crate) async fn reporting(
+    data_dir: PathBuf,
+    events: Arc<dyn EventBus>,
+    store: Arc<SqliteStore>,
+) {
+    let identity = Arc::new(FileIdentity::in_data_dir(&data_dir));
+    let agent_id = loop {
+        if let Ok(Some(agent_id)) = platform::agent_id::load(&data_dir)
+            && matches!(identity.pin().await, Ok(Some(_)))
+        {
+            break agent_id;
+        }
+        tokio::time::sleep(PAIRING_POLL).await;
+    };
+    let Ok(hostname) = Hostname::parse(&platform::hostname()) else {
+        log::warn!(
+            "this machine's name isn't one a hub takes, so its reports aren't sent to its hub"
+        );
+        return;
+    };
+    let recorder = RecordReports::new(store.clone());
+    let mut happened = events.subscribe().await;
+    let recording = async {
+        while let Some(event) = happened.next().await {
+            if let Err(error) = recorder.record(&event).await {
+                log::warn!("a report for the hub couldn't be kept in the outbox: {error:?}");
+            }
+        }
+    };
+    let syncing = SyncWithHub::new(
+        connecting(identity),
+        store,
+        Arc::new(SystemClock),
+        agent_id,
+        hostname,
+        machine_zone(),
+    );
+    tokio::join!(recording, syncing.run());
 }
 
 /// Says where the hub holds this machine.
