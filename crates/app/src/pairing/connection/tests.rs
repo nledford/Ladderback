@@ -182,6 +182,34 @@ async fn an_approved_agent_is_welcomed_approved() {
     ));
 }
 
+/// The hub logs an approved agent's first connection since its approval
+/// once, even when the approval lands while the hub checks that
+/// connection's proof, after it read the agent and before it kept the
+/// proof (#1342).
+#[tokio::test]
+async fn an_approval_during_a_proof_logs_the_first_connection_once() {
+    let hub = hub(1);
+    let identity = paired(&hub, 1).await;
+    hub.clock.advance(SignedDuration::from_secs(30));
+    hub.registry.approves_before_next_proof(hub.clock.now());
+    let connector = Arc::new(LoopbackHubConnector::to(hub.pairing.clone()));
+    crate::test_log::capture_the_log();
+    for _ in 0..2 {
+        hub.clock.advance(SignedDuration::from_secs(30));
+        let connected = connecting(identity.clone(), connector.clone())
+            .connect(agent_id(1), hostname(1), None)
+            .await
+            .unwrap();
+        assert_eq!(connected.approval, Approval::Approved);
+    }
+    let logged = crate::test_log::logged_by("app::pairing");
+    let first: Vec<_> = logged
+        .iter()
+        .filter(|(_, line)| line.contains("its first connection since it was approved"))
+        .collect();
+    assert_eq!(first.len(), 1, "{logged:?}");
+}
+
 /// A machine with no pin, or no agent key, never connects.
 #[tokio::test]
 async fn a_machine_never_paired_connects_to_nothing() {

@@ -3,9 +3,9 @@ use std::sync::Arc;
 
 use domain::AgentId;
 use domain::fleet::{
-    Binding, BindingKind, Challenge, Connect, HANDSHAKES, Hostname, HubPin, KEY_BYTES, MachineZone,
-    Nonce, Pair, PairAnswer, PairingToken, PublicKey, Refused, SeedFile, SignedMessage,
-    SigningSeed,
+    Approval, Binding, BindingKind, Challenge, Connect, HANDSHAKES, Hostname, HubPin, KEY_BYTES,
+    MachineZone, Nonce, Pair, PairAnswer, PairingToken, PublicKey, Refused, SeedFile,
+    SignedMessage, SigningSeed,
 };
 
 use crate::ports::{
@@ -65,6 +65,10 @@ pub struct PairedHub {
     /// first paired under. `None` when they are the same, and from a hub
     /// that doesn't say.
     pub held_as: Option<Hostname>,
+    /// Whether the hub holds this machine approved already, as a machine
+    /// that pairs again may be (#1341). `false` from a hub that doesn't
+    /// say, so the machine says it is pending, as it did before hubs said.
+    pub approved: bool,
 }
 
 /// Why the agent stopped a pairing. None carries a seed or the token's text
@@ -400,6 +404,7 @@ impl AgentPairing {
             pin,
             agent_key,
             held_as,
+            approved: paired.approval == Some(Approval::Approved),
         })
     }
 

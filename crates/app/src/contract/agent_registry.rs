@@ -46,6 +46,7 @@ pub async fn run(harness: &dyn AgentRegistryHarness) {
     racing_pairings_on_one_token_pair_one(harness).await;
     a_proof_keeps_the_greater_counter_and_when_it_was_seen(harness).await;
     a_proof_of_another_id_key_or_kind_changes_nothing(harness).await;
+    the_first_proof_after_an_approval_says_so_once(harness).await;
     an_approval_approves_a_pending_agent_once_and_outlives_the_hub(harness).await;
     an_approval_of_an_unknown_agent_or_another_key_changes_nothing(harness).await;
     racing_approvals_approve_once(harness).await;
@@ -250,7 +251,10 @@ async fn no_token_is_voided_while_an_agent_is_registered(harness: &dyn AgentRegi
     assert_eq!(agents(registry.as_ref()).await, before);
     assert_eq!(
         pair(registry.as_ref(), &request, at(12)).await,
-        Some(Ok(Pairing::Repeated(request.hostname.clone()))),
+        before
+            .first()
+            .cloned()
+            .map(|agent| Ok(Pairing::Repeated(agent))),
         "the spent token still answers its own pairing"
     );
 }
@@ -297,7 +301,10 @@ async fn a_lost_answer_is_answered_again(harness: &dyn AgentRegistryHarness) {
     let before = agents(registry.as_ref()).await;
     assert_eq!(
         pair(registry.as_ref(), &request, at(2000)).await,
-        Some(Ok(Pairing::Repeated(request.hostname.clone())))
+        before
+            .first()
+            .cloned()
+            .map(|agent| Ok(Pairing::Repeated(agent)))
     );
     assert_eq!(agents(registry.as_ref()).await, before, "nothing changed");
 }
@@ -326,7 +333,10 @@ async fn a_pairing_again_keeps_the_first_hostname_and_names_it(harness: &dyn Age
 
     assert_eq!(
         pair(registry.as_ref(), &other, at(20)).await,
-        Some(Ok(Pairing::Repeated(held.clone()))),
+        before
+            .first()
+            .cloned()
+            .map(|agent| Ok(Pairing::Repeated(agent))),
         "on the spent token"
     );
     assert_eq!(agents(registry.as_ref()).await, before, "nothing changed");
@@ -522,7 +532,8 @@ async fn a_proof_keeps_the_greater_counter_and_when_it_was_seen(
         ..record
     };
     assert_eq!(
-        ok(registry.take_proof(&lower, at(20)).await, "proving"),
+        ok(registry.take_proof(&lower, at(20)).await, "proving")
+            .map(|answer| answer.map(|proved| proved.agent)),
         Some(Ok(seen.clone())),
         "a lower counter is never kept"
     );
@@ -534,7 +545,8 @@ async fn a_proof_keeps_the_greater_counter_and_when_it_was_seen(
         ..seen
     };
     assert_eq!(
-        ok(reopened.take_proof(&highest, at(30)).await, "proving"),
+        ok(reopened.take_proof(&highest, at(30)).await, "proving")
+            .map(|answer| answer.map(|proved| proved.agent)),
         Some(Ok(raised.clone()))
     );
     assert_eq!(agents(reopened.as_ref()).await, vec![raised]);
@@ -574,6 +586,50 @@ async fn a_proof_of_another_id_key_or_kind_changes_nothing(harness: &dyn AgentRe
     assert_eq!(agents(registry.as_ref()).await, before);
 }
 
+/// Whether `proving` at `now` is the agent's first proof since a person
+/// approved it, as the registry answers it.
+async fn first_since_approval(
+    registry: &dyn AgentRegistry,
+    proving: &ProofRequest,
+    now: Timestamp,
+) -> Option<Result<bool, ProofRefusal>> {
+    ok(registry.take_proof(proving, now).await, "proving")
+        .map(|answer| answer.map(|proved| proved.first_since_approval))
+}
+
+/// A proof is the agent's first since a person approved it once: not while
+/// the agent waits, the first after the approval, and none after that,
+/// across a restart too (#1342).
+async fn the_first_proof_after_an_approval_says_so_once(harness: &dyn AgentRegistryHarness) {
+    let (Some(spent), Some(request), Some(proving)) =
+        (token(1, 0), request(1, 1, "laptop"), proof(1, 5))
+    else {
+        return;
+    };
+    let registry = harness.empty().await;
+    add(registry.as_ref(), &spent).await;
+    let paired = pair(registry.as_ref(), &request, at(10)).await;
+    assert!(matches!(paired, Some(Ok(Pairing::New(_)))), "{paired:?}");
+    assert_eq!(
+        first_since_approval(registry.as_ref(), &proving, at(15)).await,
+        Some(Ok(false)),
+        "while it waits"
+    );
+    let approved = approve(registry.as_ref(), &request, at(20)).await;
+    assert!(matches!(approved, Some(Ok(_))), "{approved:?}");
+    let reopened = harness.reopened().await;
+    assert_eq!(
+        first_since_approval(reopened.as_ref(), &proving, at(30)).await,
+        Some(Ok(true)),
+        "the first after the approval"
+    );
+    assert_eq!(
+        first_since_approval(reopened.as_ref(), &proving, at(40)).await,
+        Some(Ok(false)),
+        "the next one"
+    );
+}
+
 async fn records_outlive_the_hub(harness: &dyn AgentRegistryHarness) {
     let (Some(spent), Some(unspent), Some(request)) =
         (token(1, 0), token(2, 0), request(1, 1, "laptop"))
@@ -591,7 +647,10 @@ async fn records_outlive_the_hub(harness: &dyn AgentRegistryHarness) {
     assert_eq!(unused(reopened.as_ref(), at(11)).await, vec![unspent]);
     assert_eq!(
         pair(reopened.as_ref(), &request, at(12)).await,
-        Some(Ok(Pairing::Repeated(request.hostname.clone()))),
+        before
+            .first()
+            .cloned()
+            .map(|agent| Ok(Pairing::Repeated(agent))),
         "the spent token remembers whom it paired"
     );
 }

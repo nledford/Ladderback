@@ -349,10 +349,24 @@ impl HubPairing {
         &self,
         agent: &AgentRecord,
     ) -> Result<Result<AgentRecord, ApprovalRefused>, HubPairingError> {
-        Ok(self
+        self.approve_now(agent.agent_id, agent.key).await
+    }
+
+    /// Approves the agent `agent_id` registered with `agent_key`, now, and
+    /// logs the approval, whichever way the person approved it (#1342).
+    async fn approve_now(
+        &self,
+        agent_id: AgentId,
+        agent_key: PublicKey,
+    ) -> Result<Result<AgentRecord, ApprovalRefused>, HubPairingError> {
+        let approved = self
             .registry
-            .approve(agent.agent_id, agent.key, self.clock.now())
-            .await?)
+            .approve(agent_id, agent_key, self.clock.now())
+            .await?;
+        if let Ok(agent) = &approved {
+            log::info!("{}", logged::approved(agent));
+        }
+        Ok(approved)
     }
 
     /// The hub's answer to `connect` on a session whose `tls-exporter`
@@ -450,7 +464,8 @@ impl HubPairing {
                 Ok(PairAnswer::Paired(Paired {
                     recovery_key: keys.recovery_key,
                     signature: self.signing.sign(&keys.seed, &paired.to_bytes())?,
-                    hostname: Some(pairing.hostname().clone()),
+                    hostname: Some(pairing.record().hostname.clone()),
+                    approval: Some(Approval::of(pairing.record().status)),
                 }))
             }
             Err(refusal) => self
@@ -506,7 +521,17 @@ impl HubPairing {
             counter: proof.counter,
         };
         match self.registry.take_proof(&request, self.clock.now()).await? {
-            Ok(agent) => Ok(ProofAnswer::Proved(agent)),
+            Ok(proved) => {
+                // Once per approval, not per connection: an agent that
+                // reconnects all day logs nothing more. The answer says so
+                // from the record the proof's step decided on, not the one
+                // read above, which an approval may have changed since
+                // (#1342).
+                if proved.first_since_approval {
+                    log::info!("{}", logged::connected(&proved.agent));
+                }
+                Ok(ProofAnswer::Proved(proved.agent))
+            }
             Err(ProofRefusal::ProofRefused) => refused(),
         }
     }

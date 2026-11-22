@@ -183,6 +183,61 @@ fn log_holds_no_token(agent: &mut Agent) {
     assert!(!text.contains("ladderback_pair_"), "{text}");
 }
 
+/// The one line of the hub's log that names `hostname`'s agent ID and says
+/// `what`: at INFO, with the hostname in quotes and the key the machine
+/// showed, as the person matches it against the machine's screen.
+async fn one_line_saying(agent: &Agent, hostname: &str, what: &str) {
+    let listed = listed_machines(agent).await;
+    let machine = listed
+        .agents
+        .into_iter()
+        .find(|machine| machine.hostname == hostname)
+        .unwrap_or_else(|| panic!("the page lists {hostname}"));
+    assert_eq!(machine.fingerprint, machine_key(agent));
+    let text = hub_log_text(agent);
+    let lines: Vec<&str> = text
+        .lines()
+        .filter(|line| line.contains(&machine.agent_id) && line.contains(what))
+        .collect();
+    let [line] = lines.as_slice() else {
+        panic!(
+            "one line names the agent {} and {what:?}: {text}",
+            machine.agent_id
+        );
+    };
+    assert_eq!(level_of(line), Some("INFO"), "{line}");
+    for expected in [format!("machine \"{hostname}\""), machine.fingerprint] {
+        assert!(line.contains(&expected), "{expected}: {line}");
+    }
+}
+
+#[then(
+    expr = "the hub's log says in one line that {string} was approved, naming its agent ID and the key the machine showed"
+)]
+async fn log_says_approved(agent: &mut Agent, hostname: String) {
+    one_line_saying(agent, &hostname, " approved as agent ").await;
+}
+
+#[then(
+    expr = "the hub's log says in one line that {string} connected for the first time since it was approved, naming its agent ID and the key the machine showed"
+)]
+async fn log_says_first_connection(agent: &mut Agent, hostname: String) {
+    one_line_saying(
+        agent,
+        &hostname,
+        "its first connection since it was approved",
+    )
+    .await;
+}
+
+#[then(
+    expr = "the hub's log names the machine by the hostname {string} it holds and the hostname {string} it asked for"
+)]
+async fn log_names_held_hostname(agent: &mut Agent, held: String, asked: String) {
+    let expected = format!("machine \"{held}\" (asked as \"{asked}\")");
+    one_line_saying(agent, &held, &expected).await;
+}
+
 #[given("the hub has stopped")]
 fn hub_stopped(agent: &mut Agent) {
     // Dropping the daemon ends it and waits for it.

@@ -605,6 +605,16 @@ cli-pair-pending = Paired. The { -hub } holds this machine pending until someone
 # $fingerprint (text): this machine's own key's fingerprint, to compare on the { -hub }.
 cli-pair-pending-held = Paired. The { -hub } holds this { -machine } pending until someone approves it there, under the hostname { $held } and not { $asked }: the { -hub } keeps the hostname a { -machine } first paired under. This { -machine }'s key: { $fingerprint }. Compare it with the { -hub }'s screen.
 
+# `ladderback pair` paired again a machine the { -hub } holds approved already, as when the machine lost its pin: it needs no approval.
+# $fingerprint (text): this machine's own key's fingerprint.
+cli-pair-approved = Paired. The { -hub } approved this { -machine } already, so it needs no approval there. This { -machine }'s key: { $fingerprint }.
+
+# `ladderback pair` paired again a machine the { -hub } holds approved already, under another hostname than the one asked for this time. The { -hub } keeps the first hostname.
+# $held (text): the hostname the { -hub } holds this machine under. It came from the { -hub }, so it is shown escaped.
+# $asked (text): the hostname this pairing asked for.
+# $fingerprint (text): this machine's own key's fingerprint.
+cli-pair-approved-held = Paired. The { -hub } approved this { -machine } already, so it needs no approval there, and holds it under the hostname { $held } and not { $asked }: the { -hub } keeps the hostname a { -machine } first paired under. This { -machine }'s key: { $fingerprint }.
+
 # `ladderback pair <address>` on a machine that paired: the hub proved the
 # key the machine pinned at the address the person gave, so the machine
 # keeps it. The hub's own answer follows on its own line.
