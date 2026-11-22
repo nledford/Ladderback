@@ -54,7 +54,7 @@ pub(crate) trait AtDoor {
 }
 
 /// The connections at the door, oldest first, by the address each came
-/// from.
+/// from. Dropped, as when the door stops, it closes every one still there.
 pub(crate) struct AtTheDoor<C: AtDoor> {
     open: VecDeque<(IpAddr, C)>,
 }
@@ -66,10 +66,51 @@ impl<C: AtDoor> AtTheDoor<C> {
         }
     }
 
-    /// Takes in `connection` from `from`.
+    /// Takes in `connection` from `from`, closing first the oldest of that
+    /// address when it holds [`PER_ADDRESS`] and isn't loopback, then the
+    /// oldest of all when the door holds [`AT_THE_DOOR`].
     pub(crate) fn admit(&mut self, from: IpAddr, connection: C) {
-        let _ = (from, connection, &mut self.open);
-        todo!()
+        self.open.retain(|(_, at)| !at.is_gone());
+        // A mapped IPv4 address is that address, loopback's included.
+        let from = from.to_canonical();
+        // Each admission keeps the share, so it is at most full here.
+        if !from.is_loopback()
+            && self.open.iter().filter(|(at, _)| *at == from).count() >= PER_ADDRESS
+            && let Some(oldest) = self.open.iter().position(|(at, _)| *at == from)
+            && let Some((_, oldest)) = self.open.remove(oldest)
+        {
+            oldest.close();
+            log::debug!(
+                "closed the oldest connection at the hub's door from {from}: an address may hold {PER_ADDRESS} there"
+            );
+        }
+        if self.open.len() >= AT_THE_DOOR
+            && let Some((at, oldest)) = self.open.pop_front()
+        {
+            oldest.close();
+            log::debug!(
+                "closed the oldest connection at the hub's door, from {at}: it holds {AT_THE_DOOR}"
+            );
+        }
+        self.open.push_back((from, connection));
+    }
+}
+
+impl<C: AtDoor> Drop for AtTheDoor<C> {
+    fn drop(&mut self) {
+        for (_, connection) in &self.open {
+            connection.close();
+        }
+    }
+}
+
+impl AtDoor for AbortHandle {
+    fn close(&self) {
+        self.abort();
+    }
+
+    fn is_gone(&self) -> bool {
+        self.is_finished()
     }
 }
 
@@ -101,7 +142,10 @@ pub(crate) fn door(first: u8, peer: SocketAddr) -> Door {
 /// hub's key serves one: each connection is taken through its door on a
 /// task of its own, so a slow one holds up no other, and handed to the
 /// server once it is let in. At most [`AT_THE_DOOR`] are at the door at
-/// once; a newcomer past it closes the oldest still there.
+/// once, and [`PER_ADDRESS`] from one address beyond loopback; a newcomer
+/// past either closes the oldest it counts. Once the server drops its end,
+/// as at shutdown, the door closes its listener and every connection still
+/// at it.
 pub(crate) fn open(
     listener: GatedListener,
     local: SocketAddr,
@@ -112,16 +156,9 @@ pub(crate) fn open(
     let said = Arc::new(AtomicBool::new(false));
     let accepting = tokio::spawn(async move {
         let mut listener = listener;
-        // The tasks of the connections at the door, oldest first.
-        let mut at_the_door: VecDeque<AbortHandle> = VecDeque::with_capacity(AT_THE_DOOR);
+        let mut at_the_door = AtTheDoor::new();
         loop {
             let (stream, peer) = axum::serve::Listener::accept(&mut listener).await;
-            at_the_door.retain(|task| !task.is_finished());
-            if at_the_door.len() >= AT_THE_DOOR
-                && let Some(oldest) = at_the_door.pop_front()
-            {
-                oldest.abort();
-            }
             let hand = hand.clone();
             let tls = tls.clone();
             let said = Arc::clone(&said);
@@ -132,7 +169,7 @@ pub(crate) fn open(
                     let _ = hand.send(handed).await;
                 }
             });
-            at_the_door.push_back(task.abort_handle());
+            at_the_door.admit(peer.ip(), task.abort_handle());
         }
     });
     HandedListener::new(connections, local, accepting)
