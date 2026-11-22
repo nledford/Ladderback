@@ -948,6 +948,14 @@ impl CancelRegistry {
     fn finish(&self, id: &OperationId) {
         let _ = self.running().remove(id);
     }
+
+    /// The operation ends without running: its handle is dropped, as
+    /// [`Self::finish`] drops it. `true` when it was still held, `false`
+    /// when a cancel took it first, so that cancel was answered `Ok` and
+    /// the operation ends cancelled (#1248).
+    fn release(&self, id: &OperationId) -> bool {
+        self.running().remove(id).is_some()
+    }
 }
 
 /// What the daemon logs, for the tests that look at the log: the warnings it

@@ -435,58 +435,83 @@ impl PlanRunner {
             () = &mut cancel => None,
             waited = self.resumed_after_wait(&operation, &plan, &trigger, unlock, refused) => Some(waited),
         };
-        let Some(waited) = waited else {
-            self.registry.finish(&id);
-            let finished = RunOperation::new(
-                Arc::clone(&self.engine),
-                Arc::new(SystemClock),
-                Arc::clone(&self.store),
-            )
-            .with_events(Arc::clone(&self.events))
-            .cancel_resumed(operation)
-            .await;
-            log_ended(&finished);
-            say_how_it_ended(&self.ends, &finished);
-            return;
-        };
         match waited {
-            Waited::Runs(built, limit) => {
-                // A newer run of the plan may be going — running, or
-                // waiting for its turn — since this run waited with no
-                // place: it gives way to it.
-                let Ok(place) = self.queue.unless_going(&plan, limit) else {
-                    self.registry.finish(&id);
-                    self.end_unrunnable(
-                        operation,
-                        FailureReason::Superseded,
-                        "a newer run of its plan is going",
-                    )
-                    .await;
-                    return;
-                };
-                self.spawn_resumed(operation, *built, place, cancel);
-            }
-            Waited::Refused(secret) => {
+            Some(waited) => self.after_wait(operation, &plan, waited, cancel).await,
+            None => {
                 self.registry.finish(&id);
-                self.refuse_resumed(operation, secret).await;
-            }
-            Waited::Unrunnable(reason, why) => {
-                self.registry.finish(&id);
-                self.end_unrunnable(operation, reason, &why).await;
+                self.end_cancelled(operation).await;
             }
         }
     }
 
     /// Acts on how the wait of `operation`, a queued backup of `plan`, for
-    /// its keyring ended.
+    /// its keyring ended, as [`Self::resume_parked`] says. `cancel` is its
+    /// cancel switch, still parked: a cancel the route answered `Ok` after
+    /// the wait ended, before the switch is given up, ends it cancelled
+    /// whatever the wait answered (#1248). A run keeps the switch, which
+    /// ends it cancelled before its turn.
     pub(super) async fn after_wait(
         &self,
-        _operation: domain::execution::Operation,
-        _plan: &PlanId,
-        _waited: Waited,
-        _cancel: impl Future<Output = ()> + Send + 'static,
+        operation: domain::execution::Operation,
+        plan: &PlanId,
+        waited: Waited,
+        cancel: impl Future<Output = ()> + Send + 'static,
     ) {
-        todo!()
+        match waited {
+            Waited::Runs(built, limit) => {
+                // A newer run of the plan may be going — running, or
+                // waiting for its turn — since this run waited with no
+                // place: it gives way to it.
+                let Ok(place) = self.queue.unless_going(plan, limit) else {
+                    if let Some(operation) = self.unless_cancelled(operation).await {
+                        self.end_unrunnable(
+                            operation,
+                            FailureReason::Superseded,
+                            "a newer run of its plan is going",
+                        )
+                        .await;
+                    }
+                    return;
+                };
+                self.spawn_resumed(operation, *built, place, cancel);
+            }
+            Waited::Refused(secret) => {
+                if let Some(operation) = self.unless_cancelled(operation).await {
+                    self.refuse_resumed(operation, secret).await;
+                }
+            }
+            Waited::Unrunnable(reason, why) => {
+                if let Some(operation) = self.unless_cancelled(operation).await {
+                    self.end_unrunnable(operation, reason, &why).await;
+                }
+            }
+        }
+    }
+
+    /// Gives up the cancel switch of `operation`, a queued backup that
+    /// won't run, and hands the backup back to be ended as its wait
+    /// answered; or ends it cancelled, and `None`, when a cancel took the
+    /// switch first: the route answered that cancel `Ok` (#1248). The
+    /// registry is the one place both look, so either the cancel is
+    /// answered `Ok` and the backup ends cancelled, or it is refused.
+    async fn unless_cancelled(
+        &self,
+        operation: domain::execution::Operation,
+    ) -> Option<domain::execution::Operation> {
+        if self.registry.release(&operation.id()) {
+            Some(operation)
+        } else {
+            self.end_cancelled(operation).await;
+            None
+        }
+    }
+
+    /// Ends `operation`, a queued backup that waited for its keyring,
+    /// cancelled before it ran, and says how it ended.
+    async fn end_cancelled(&self, operation: domain::execution::Operation) {
+        let finished = self.queued_ends().cancel_resumed(operation).await;
+        log_ended(&finished);
+        say_how_it_ended(&self.ends, &finished);
     }
 
     /// How the wait of `operation`, a queued backup of `plan`, for its
