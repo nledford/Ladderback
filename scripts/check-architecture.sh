@@ -253,7 +253,9 @@ history_fixture lacks normal,build "${release_flags[@]}"
 # tree lists each package with the features it is built with, so each
 # workspace crate (a path package) whose `hub` is on is found;
 # dev-dependencies are in it on purpose, so no test support turns the hub on
-# in `ladderback`'s build that `just test-release` runs either. A release build must also lack every crate
+# in `ladderback`'s test build either (`just test-release` checks the test
+# build of every package it runs the same way, `pseudo` too, but not the
+# hub-only crates below or the wasm32 build). A release build must also lack every crate
 # only the hub uses, which a plain dependency added by mistake would bring in:
 # the QR crates, and the built-in TLS's `tls-adapter` with its `rcgen`
 # (`rustls` and `tokio-rustls` are in every release already, for the

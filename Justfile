@@ -338,17 +338,20 @@ test-e2e *args:
 # in `tests/cli_locale.rs` and the hub's refusals in `tests/hub_gate.rs`.
 # This runs, built that way, the tests of every package with default features
 # (`l10n`, `ladderback` and the crates with a `hub` feature), so those run, and
-# so does any test whose result depends on a feature. The packages are the
-# ones `scripts/release-test-packages.ts` finds from `cargo metadata`, so a
-# package's first default feature is picked up with no edit here. Each package
-# is built and tested on its own: in one run Cargo would unify features across
-# them, and `mcp`'s dev-dependency on `l10n` with `pseudo` would turn the
-# release lane off. `web`'s wasm tests run in `test-wasm`. The cucumber runners
-# are left out, as in `test` (nextest's default filter), and the tests run in a
-# scratch home, as in `test`. Arguments go to nextest (never `--package`, which
-# would bring the unified build back); with any, a package in which they
-# select no test only warns. A failed package doesn't stop the others, and the
-# recipe names each one at the end; an interrupt stops the run, as in `test`.
+# so does any test whose result depends on a feature. Each package gets the
+# features the release build itself turns on in it (`l10n`'s `icu`), and none
+# of the development ones: `scripts/release-test-packages.ts` reads both from
+# `cargo metadata` and `cargo tree`, so a package's first default feature is
+# picked up with no edit here, and it fails before any test runs if a
+# package's tests (their dev-dependencies too) would turn a workspace crate's
+# `hub` or `pseudo` back on, naming the path. Each package is built and tested
+# on its own: in one run Cargo would unify features across them. `web`'s wasm
+# tests run in `test-wasm`. The cucumber runners are left out, as in `test`
+# (nextest's default filter), and the tests run in a scratch home, as in
+# `test`. Arguments go to nextest (never `--package`, which would bring the
+# unified build back); with any, a package in which they select no test only
+# warns. A failed package doesn't stop the others, and the recipe names each
+# one at the end; an interrupt stops the run, as in `test`.
 [doc('Run the tests of every package with default features as a release build is made (no default features).')]
 [group('test')]
 [positional-arguments]
@@ -363,18 +366,18 @@ _test-release-packages *args:
     set -uo pipefail
     trap 'exit 130' INT
     trap 'exit 143' TERM
-    names=$(cargo metadata --no-deps --format-version 1 | node scripts/release-test-packages.ts) || exit 1
+    plan=$(node scripts/release-test-packages.ts {{ release_flags }}) || exit 1
     failed=()
-    for name in $names; do
-        echo "test-release: $name"
-        cargo nextest run --package "$name" {{ release_flags }} ${1:+--no-tests=warn} "$@"
+    while IFS=$'\t' read -r -u 3 name features; do
+        echo "test-release: $name${features:+ (features: $features)}"
+        cargo nextest run --package "$name" {{ release_flags }} ${features:+--features "$features"} ${1:+--no-tests=warn} "$@"
         status=$?
         if [[ $status -gt 128 ]]; then
             exit "$status"
         elif [[ $status -ne 0 ]]; then
             failed+=("$name (exit $status)")
         fi
-    done
+    done 3<<<"$plan"
     if [[ ${#failed[@]} -gt 0 ]]; then
         echo "test-release: failed in ${failed[*]}" >&2
         exit 1
