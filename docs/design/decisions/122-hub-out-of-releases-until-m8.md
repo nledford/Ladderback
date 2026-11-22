@@ -2,6 +2,8 @@
 
 **The hub's code merges to `main` behind a Cargo feature, `hub`, which every default and test build has and a release build leaves out, as `just architecture` and the release smoke test check. One pull request deletes the feature just before M8's first release candidate is tagged. Until then no release can pair, sync or serve as a hub, and the hub's place in the public contract (§12.1) and decision 88 start at M8's full release, the first to ship protocol 1** (recorded 2026-11-18, §7, §9, §12.1, §14; #1043, for the maintainer's approval).
 
+**Amended 2026-11-22 (the maintainer, #1366):** the gate comes off for the MVP's release, not M8's. The pull request that deletes the feature merges just before the MVP's release (or its first candidate) is tagged, so testers pair machines from a release build. From that release the hub is in the public contract (§12.1), and it is "the first hub release" of decision 88, item 5, the first to ship protocol 1. Where the items below say M8's candidate or M8's release, read the MVP's; the file keeps its name.
+
 ## Why
 
 Decision 119 starts the hub now, beside M3b and M4, and every release is cut from `main` (§12.1). Without a gate, 0.5.0 (M3b) and 0.6.0 (M4) would ship half-built pairing and sync code: security code still under review, reachable from the network on `/sync/`. That first release would also start decision 88's six-month promise for protocol 1 and put the hub's commands, flags and routes in the public contract, so a flaw found later in M8 would cost a new protocol or a breaking release.

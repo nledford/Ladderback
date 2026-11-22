@@ -82,3 +82,15 @@ Feature: Approving a machine on the running hub's page
     And the hub is serving on loopback
     When the person reads the hub's key on the hub's page
     Then the page shows the hub key as the fingerprint the hub's terminal printed, and no other ID for it
+
+  @e2e
+  Scenario: The hub's log says when a person approves a machine and when it first connects approved
+    Given a hub with a pairing token made at its terminal
+    And the hub is serving on loopback
+    And a machine named "e2e-laptop" paired with the token from its terminal
+    When the person approves "e2e-laptop" on the hub's page, confirming with the hub key's fingerprint
+    And the machine checks its link to the hub from its terminal
+    And the machine checks its link to the hub from its terminal
+    Then the hub's log says in one line that "e2e-laptop" was approved, naming its agent ID and the key the machine showed
+    And the hub's log says in one line that "e2e-laptop" connected for the first time since it was approved, naming its agent ID and the key the machine showed
+    And the hub's log holds nothing of the token

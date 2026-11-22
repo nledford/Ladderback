@@ -29,6 +29,11 @@ async fn tls_token_made(agent: &mut Agent) {
     make_token(agent, TLS_TOKEN_ADDRESS).await;
 }
 
+#[given("the person made another pairing token at the hub's terminal")]
+async fn another_token_made(agent: &mut Agent) {
+    make_token(agent, TOKEN_ADDRESS).await;
+}
+
 async fn make_token(agent: &mut Agent, address: &str) {
     let said = ladderback(
         hub_root(agent),

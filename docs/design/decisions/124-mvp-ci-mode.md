@@ -1,6 +1,8 @@
 # Decision 124: How CI runs on pull requests until the MVP
 
-**Until every milestone except M7 (Japanese) is implemented, a pull request runs a minimal CI when the repository variable `CI_MODE` is `mvp`: the pull request title check and `Check (ubuntu-latest)` always, the Chromium UI journeys when its paths reach the UI, the workflow lint and the dependency check only when what they read changed. Pushes to `main`, the nightly run and manual runs always run everything, and the maintainer's merge train, which pauses merging when a required job fails on `main`, is the safety net. Setting `CI_MODE` to anything else, or deleting it, restores today's full run. The ruleset doesn't change** (recorded 2026-11-18, §13.8; the maintainer's decision).
+**Until the MVP milestone (§14) is done, a pull request runs a minimal CI when the repository variable `CI_MODE` is `mvp`: the pull request title check and `Check (ubuntu-latest)` always, the Chromium UI journeys when its paths reach the UI, the workflow lint and the dependency check only when what they read changed. Pushes to `main`, the nightly run and manual runs always run everything, and the maintainer's merge train, which pauses merging when a required job fails on `main`, is the safety net. Setting `CI_MODE` to anything else, or deleting it, restores today's full run. The ruleset doesn't change** (recorded 2026-11-18, §13.8; the maintainer's decision).
+
+**Amended 2026-11-22 (the maintainer, #1097):** MVP mode ends when the milestone "MVP: Ready for real-world testing" is done, not when every milestone except M7 (Japanese) is implemented, as first decided. The goal is now an MVP that works and can start real-world testing before a proper `1.0.0`; M4, M5 and M8 to M10 follow it, before `1.0.0`, with full CI on pull requests again (§14). Turning full CI back on (#1097) is one of that milestone's issues.
 
 ## Why
 
@@ -32,7 +34,7 @@ The maintainer accepts the cost: a breakage that only macOS, the release build, 
 
 ## Exit condition
 
-MVP mode is turned off when every milestone except M7 has been implemented (§14; M10 "Polish" is the last of them). The maintainer then sets `CI_MODE` to `full` or deletes it. No file changes: the jobs and conditions stay, and with the variable gone they behave as before.
+MVP mode is turned off when the milestone "MVP: Ready for real-world testing" is done (§14; amended 2026-11-22, the maintainer's decision, #1097: it was when every milestone except M7 had been implemented). The maintainer then sets `CI_MODE` to `full` or deletes it. No file changes: the jobs and conditions stay, and with the variable gone they behave as before.
 
 ## Not decided here
 
