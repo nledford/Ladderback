@@ -35,13 +35,21 @@ fn a_cli_message_shows_each_argument_exactly_as_given() {
             .and_then(|message| message.value.as_ref())
             .unwrap_or_else(|| panic!("`{}` has a value", id.as_str()));
         // Text no formatter may change: digits a locale would group, braces,
-        // quotes, a path.
+        // quotes, a path. An instant is no text: `DATETIME` writes only a
+        // timestamp, and its own tests say how.
         let args: Vec<(String, MsgArg)> = value
             .variables
             .iter()
             .map(|name| {
-                let text = format!("{name}: /home/demo/it's \"1,000\" {{ 9898 }}");
-                (name.clone(), MsgArg::Text(text))
+                let arg = if value.datetimes.contains(name) {
+                    MsgArg::Timestamp {
+                        utc_ms: 1_762_700_000_000,
+                        zone: None,
+                    }
+                } else {
+                    MsgArg::Text(format!("{name}: /home/demo/it's \"1,000\" {{ 9898 }}"))
+                };
+                (name.clone(), arg)
             })
             .collect();
         let shown = localizer.message(id, &borrowed(&args));
@@ -53,7 +61,8 @@ fn a_cli_message_shows_each_argument_exactly_as_given() {
         );
         for (name, arg) in &args {
             let MsgArg::Text(text) = arg else {
-                panic!("a text argument");
+                assert!(value.datetimes.contains(name), "a text argument");
+                continue;
             };
             assert!(
                 shown.text().contains(text.as_str()),

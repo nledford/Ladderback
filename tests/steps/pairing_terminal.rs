@@ -15,6 +15,7 @@ use std::process::{Command, Stdio};
 
 use app::ports::AgentRegistry as _;
 use cucumber::{given, then, when};
+use domain::Timestamp;
 use domain::fleet::AgentStatus;
 use store::SqliteStore;
 use testkit::children::Owned;
@@ -48,6 +49,9 @@ pub struct PairingTerminal {
     /// The time zone the machine's commands run in, through `TZ`; this
     /// computer's when none.
     machine_zone: Option<String>,
+    /// The time zone the hub's terminal commands run in, through `TZ`; this
+    /// computer's when none.
+    hub_zone: Option<String>,
     said: Option<Said>,
     /// The status and body of the hub's answer to the page's last request.
     page_answer: Option<(u16, String)>,
@@ -99,6 +103,13 @@ async fn on_machine(agent: &Agent, args: &[&str], stdin: Option<String>) -> Said
     );
     let args: Vec<String> = args.iter().map(|arg| (*arg).to_owned()).collect();
     blocking(move || run(&root, &args, stdin, zone.as_deref())).await
+}
+
+/// [`ladderback`] on the hub's folders, in the hub's terminal's time zone.
+async fn on_hub(agent: &Agent, args: &[&str]) -> Said {
+    let (root, zone) = (hub_root(agent), agent.pairing_terminal.hub_zone.clone());
+    let args: Vec<String> = args.iter().map(|arg| (*arg).to_owned()).collect();
+    blocking(move || run(&root, &args, None, zone.as_deref())).await
 }
 
 fn run(root: &Path, args: &[String], stdin: Option<String>, zone: Option<&str>) -> Said {
@@ -503,8 +514,120 @@ async fn approves_without_terminal(agent: &mut Agent, hostname: String) {
 
 #[when("the person lists the machines waiting at the hub's terminal")]
 async fn lists_waiting(agent: &mut Agent) {
-    let said = ladderback(hub_root(agent), &["pairing-token", "--pending"], None).await;
+    let said = on_hub(agent, &["pairing-token", "--pending"]).await;
     agent.pairing_terminal.said = Some(said);
+}
+
+#[given(expr = "the hub's terminal runs in the time zone {string}")]
+fn hub_terminal_zone(agent: &mut Agent, zone: String) {
+    agent.pairing_terminal.hub_zone = Some(zone);
+}
+
+#[when("the person lists the unused tokens at the hub's terminal")]
+async fn lists_unused(agent: &mut Agent) {
+    let said = on_hub(agent, &["pairing-token", "--list"]).await;
+    agent.pairing_terminal.said = Some(said);
+}
+
+/// `at` as English writes a time in words in `zone`, the narrow no-break
+/// space before `AM` folded to a plain one: the person's own clock, read
+/// by `jiff` and not by the catalog's formatter.
+fn in_words(at: Timestamp, zone: &str) -> String {
+    let local = at.in_tz(zone).expect("a time zone the database knows");
+    local.strftime("%B %-d, %Y at %-I:%M %p").to_string()
+}
+
+fn folded(text: &str) -> String {
+    text.replace(['\u{202f}', '\u{a0}'], " ")
+}
+
+fn hub_terminal_zone_name(agent: &Agent) -> String {
+    agent
+        .pairing_terminal
+        .hub_zone
+        .clone()
+        .expect("the hub's terminal runs in a time zone")
+}
+
+/// The hub's store, read while no daemon runs on it.
+async fn hub_store(agent: &Agent) -> SqliteStore {
+    let database = testkit::daemon::data_dir(&hub_root(agent)).join("ladderback.db");
+    SqliteStore::open(&database).await.expect("the hub's store")
+}
+
+#[then(
+    expr = "the terminal says the token is usable until its lapse time in that zone, in words, with the offset {string}"
+)]
+async fn says_lapse_in_zone(agent: &mut Agent, offset: String) {
+    let said = said(agent);
+    assert!(said.success, "{said:?}");
+    let store = hub_store(agent).await;
+    let tokens = store.unused_tokens(Timestamp::now()).await.expect("tokens");
+    store.close().await;
+    let [token] = tokens.as_slice() else {
+        panic!("one unused token: {tokens:?}");
+    };
+    let zone = hub_terminal_zone_name(agent);
+    let expected = format!(
+        "usable until {} ({offset})",
+        in_words(token.expires_at, &zone)
+    );
+    assert!(
+        folded(&said.stderr).contains(&expected),
+        "{expected}: {said:?}"
+    );
+    assert!(
+        !said.stderr.contains(&token.expires_at.to_string()),
+        "no UTC timestamp: {said:?}"
+    );
+}
+
+#[then(
+    expr = "the terminal lists the token with its lapse time in that zone, in words, with the offset {string}"
+)]
+async fn lists_lapse_in_zone(agent: &mut Agent, offset: String) {
+    let said = said(agent);
+    assert!(said.success, "{said:?}");
+    let store = hub_store(agent).await;
+    let tokens = store.unused_tokens(Timestamp::now()).await.expect("tokens");
+    store.close().await;
+    let [token] = tokens.as_slice() else {
+        panic!("one unused token: {tokens:?}");
+    };
+    let zone = hub_terminal_zone_name(agent);
+    let expected = format!(
+        "{}  usable until {} ({offset})\n",
+        token.id(),
+        in_words(token.expires_at, &zone)
+    );
+    assert_eq!(folded(&said.stdout), expected, "{said:?}");
+}
+
+#[then(
+    expr = "the terminal lists {string} as waiting since it paired, in that zone, in words, with the offset {string}"
+)]
+async fn lists_since_in_zone(agent: &mut Agent, hostname: String, offset: String) {
+    let said = said(agent);
+    assert!(said.success, "{said:?}");
+    let store = hub_store(agent).await;
+    let agents = store.agents().await.expect("the hub's agents");
+    store.close().await;
+    let [listed] = agents.as_slice() else {
+        panic!("one agent: {agents:?}");
+    };
+    let AgentStatus::Pending { since } = listed.status else {
+        panic!("a machine waiting: {listed:?}");
+    };
+    let zone = hub_terminal_zone_name(agent);
+    // The agent ID, the key the machine showed and when it paired, then the
+    // hostname, which alone may hold spaces.
+    let expected = format!(
+        "{}  {}  waiting since {} ({offset})  {hostname}\n",
+        listed.agent_id.as_uuid(),
+        machine_key(agent),
+        in_words(since, &zone)
+    );
+    assert_eq!(folded(&said.stdout), expected, "{said:?}");
 }
 
 #[then(expr = "the terminal named {string} with the key the machine showed, and approved it")]
@@ -675,7 +798,7 @@ async fn token_asked_lasting(agent: &mut Agent, minutes: String) {
 }
 
 async fn ask_for_token(agent: &mut Agent, args: &[&str]) {
-    let said = ladderback(hub_root(agent), args, None).await;
+    let said = on_hub(agent, args).await;
     agent.pairing_terminal.said = Some(said);
 }
 
