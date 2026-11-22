@@ -302,6 +302,13 @@ impl UserService {
     pub fn needs_full_disk_access(&self) -> bool {
         matches!(self.kind, Kind::Launchd { .. })
     }
+
+    /// The process the manager runs the service in, as `systemctl --user
+    /// show -p MainPID` or `launchctl print` names it: `None` when it runs
+    /// none, or the manager can't say (#459).
+    pub async fn process(&self) -> Option<u32> {
+        todo!()
+    }
 }
 
 #[async_trait]

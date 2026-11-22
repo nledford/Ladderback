@@ -9,6 +9,7 @@ use std::assert_matches;
 use std::path::PathBuf;
 
 use cucumber::{given, then, when};
+use platform::data_dir_lock::DataDirLock;
 use testkit::service_manager::FakeServiceManagers;
 
 use super::interop_steps::{ran, run};
@@ -19,6 +20,9 @@ pub(super) struct ServiceE2e {
     managers: Option<FakeServiceManagers>,
     /// How many calls the managers had when the scenario's command ran.
     calls_before: usize,
+    /// The data folder's lock, held by the test's own process as a daemon
+    /// holds it, until the scenario ends.
+    holder: Option<DataDirLock>,
 }
 
 /// The service's name: the systemd unit or the launchd label.
@@ -396,5 +400,54 @@ fn stdout_never_says_keyring_waits_for_login(agent: &mut Agent) {
     assert!(
         !stdout.contains(KEYRING_NOTE),
         "standard output {stdout:?} says {KEYRING_NOTE:?}"
+    );
+}
+
+/// Holds the data folder `install-service` runs with
+/// (`interop_steps::environment`) as a daemon does: the lock file names the
+/// test's own process.
+fn hold_the_data_folder(agent: &mut Agent) {
+    let folder = agent.scratch().join("data");
+    std::fs::create_dir_all(&folder).expect("the data folder");
+    agent.service.holder = Some(DataDirLock::acquire(&folder).expect("the data folder is free"));
+}
+
+#[given("another Ladderback holds the data folder")]
+fn another_holds_the_data_folder(agent: &mut Agent) {
+    hold_the_data_folder(agent);
+}
+
+#[given("the service's own process holds the data folder")]
+fn the_service_holds_the_data_folder(agent: &mut Agent) {
+    hold_the_data_folder(agent);
+    managers(agent).runs_as(NAME, std::process::id());
+}
+
+/// What `install-service` says of a data folder another Ladderback holds,
+/// in every case.
+const HELD_NOTE: &str = "is using the data folder";
+
+#[then(
+    "standard output names the process that holds the data folder and says to stop it for the service to take over"
+)]
+fn stdout_names_the_holder(agent: &mut Agent) {
+    let stdout = &ran(agent).stdout;
+    let named = format!(
+        "another Ladderback, process {}, {HELD_NOTE}",
+        std::process::id()
+    );
+    let stop = "stop that process for the service to take over";
+    assert!(
+        stdout.contains(&named) && stdout.contains(stop),
+        "standard output {stdout:?} doesn't say {named:?} and {stop:?}"
+    );
+}
+
+#[then("standard output never says that another Ladderback holds the data folder")]
+fn stdout_never_names_a_holder(agent: &mut Agent) {
+    let stdout = &ran(agent).stdout;
+    assert!(
+        !stdout.contains(HELD_NOTE),
+        "standard output {stdout:?} says {HELD_NOTE:?}"
     );
 }

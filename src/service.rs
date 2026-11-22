@@ -4,7 +4,7 @@
 //! stdout; why it did nothing, or stopped, goes to stderr, and it ends with 1.
 
 use std::io;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::process::ExitCode;
 
 use api::MsgArg;
@@ -40,6 +40,7 @@ fn install(localizer: &Localizer) -> io::Result<ExitCode> {
         return Ok(ExitCode::FAILURE);
     };
     let keyring = keyring_passwords();
+    let held = data_folder_held(&runtime, &service);
     match runtime.block_on(service.install(&program)) {
         Ok(Installed { file, replaced }) => {
             let id = if replaced {
@@ -59,6 +60,7 @@ fn install(localizer: &Localizer) -> io::Result<ExitCode> {
                 service.needs_full_disk_access(),
                 &program,
             ));
+            told.push_str(&held_said(localizer, held.as_ref()));
             to_stdout(&told)?;
             Ok(ExitCode::SUCCESS)
         }
@@ -81,6 +83,29 @@ fn full_disk_access_said(localizer: &Localizer, needed: bool, program: &ServiceP
         msg::CLI_SERVICE_FULL_DISK_ACCESS,
         &[("program", MsgArg::Text(shown(Path::new(program.as_str()))))],
     )
+}
+
+/// A data folder another process holds: the folder, and that process when
+/// the lock file names it.
+#[derive(Debug)]
+struct Held {
+    folder: PathBuf,
+    holder: Option<u32>,
+}
+
+/// The data folder, when a process other than the installed service's holds
+/// it: the service's every start is refused until that process stops
+/// (#459).
+fn data_folder_held(runtime: &tokio::runtime::Runtime, service: &UserService) -> Option<Held> {
+    let _ = (runtime, service);
+    todo!()
+}
+
+/// The note that says another Ladderback holds the data folder and must stop
+/// for the service to take over; nothing when none does.
+fn held_said(localizer: &Localizer, held: Option<&Held>) -> String {
+    let _ = (localizer, held);
+    todo!()
 }
 
 fn remove(localizer: &Localizer) -> io::Result<ExitCode> {
@@ -298,7 +323,7 @@ mod tests {
 
     use domain::service::ServicePath;
 
-    use super::{error_said, full_disk_access_said, shown};
+    use super::{Held, error_said, full_disk_access_said, held_said, shown};
 
     /// After installing a launchd agent, the note names the program to grant
     /// Full Disk Access to, and where; a service that needs no grant gets
@@ -312,6 +337,40 @@ mod tests {
         assert!(said.contains("Full Disk Access"), "{said}");
         assert!(said.contains("System Settings"), "{said}");
         assert_eq!(full_disk_access_said(&localizer, false, &program), "");
+    }
+
+    /// Another Ladderback that holds the data folder is named by its process
+    /// when the lock file names one, and the folder always (#459); a folder
+    /// nobody else holds gets no note.
+    #[test]
+    fn the_note_on_a_held_data_folder_names_its_holder_when_it_can() {
+        let localizer = Localizer::new(&[]);
+        let folder = PathBuf::from("/home/demo/.local/share/ladderback");
+        let named = held_said(
+            &localizer,
+            Some(&Held {
+                folder: folder.clone(),
+                holder: Some(4321),
+            }),
+        );
+        assert!(named.contains("process 4321"), "{named}");
+        assert!(
+            named.contains("/home/demo/.local/share/ladderback"),
+            "{named}"
+        );
+        let unnamed = held_said(
+            &localizer,
+            Some(&Held {
+                folder,
+                holder: None,
+            }),
+        );
+        assert!(!unnamed.contains("process"), "{unnamed}");
+        assert!(
+            unnamed.contains("/home/demo/.local/share/ladderback"),
+            "{unnamed}"
+        );
+        assert_eq!(held_said(&localizer, None), "");
     }
 
     #[test]
