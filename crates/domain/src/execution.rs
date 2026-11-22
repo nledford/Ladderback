@@ -101,6 +101,10 @@ impl OperationStatus {
                 | Why::DaemonStopped
                 | Why::DaemonShutDown
                 | Why::Superseded
+                | Why::PlanRemoved
+                | Why::PlanMoved
+                | Why::ConfigUnusable
+                | Why::KeyFilesNotLeftOut
                 | Why::RestoreTargetUnwritable => None,
             },
             Self::Queued | Self::Running | Self::Cancelled => None,
@@ -201,6 +205,22 @@ pub enum FailureReason {
     /// running or waiting for its turn, so it gave way to that run rather
     /// than back up the plan twice (decision 135, #1245): it never ran.
     Superseded,
+    /// A queued backup's plan was deleted while the backup waited for its
+    /// keyring, so it didn't run (decision 135, #1293).
+    PlanRemoved,
+    /// A queued backup's plan now backs up to another repository than the
+    /// one the backup was queued for, found once its wait for its keyring
+    /// was over, so it didn't run there (decision 135, #1293).
+    PlanMoved,
+    /// The configuration couldn't be read or used once a queued backup's
+    /// wait for its keyring was over, so the backup didn't run (decision
+    /// 135, #1293).
+    ConfigUnusable,
+    /// Once a queued backup's wait for its keyring was over, its plan's
+    /// sources held the data folder, whose secret key files no glob can
+    /// leave out as its path isn't UTF-8, so the backup didn't run rather
+    /// than back the keys up (decisions 120 and 135, #1293).
+    KeyFilesNotLeftOut,
     /// The repository is reached at several locations and none could be
     /// used (decision 80): each was silent, refused, held no repository or
     /// another one, or a secret of it was unavailable. The operation's
@@ -252,6 +272,10 @@ impl FailureReason {
             Self::DaemonStopped => "daemon-stopped",
             Self::DaemonShutDown => "daemon-shut-down",
             Self::Superseded => "superseded",
+            Self::PlanRemoved => "plan-removed",
+            Self::PlanMoved => "plan-moved",
+            Self::ConfigUnusable => "config-unusable",
+            Self::KeyFilesNotLeftOut => "key-files-not-left-out",
             Self::NoLocationUsable => "no-location-usable",
             Self::RestoreTargetUnwritable => "restore-target-unwritable",
             Self::NoLocationRuleHolds => "no-location-rule-holds",

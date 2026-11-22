@@ -238,6 +238,10 @@ pub(crate) fn encode_failure(
         FailureReason::DaemonStopped => ("daemon-stopped", Vec::new(), None),
         FailureReason::DaemonShutDown => ("daemon-shut-down", Vec::new(), None),
         FailureReason::Superseded => ("superseded", Vec::new(), None),
+        FailureReason::PlanRemoved => ("plan-removed", Vec::new(), None),
+        FailureReason::PlanMoved => ("plan-moved", Vec::new(), None),
+        FailureReason::ConfigUnusable => ("config-unusable", Vec::new(), None),
+        FailureReason::KeyFilesNotLeftOut => ("key-files-not-left-out", Vec::new(), None),
         FailureReason::NoLocationUsable => ("no-location-usable", Vec::new(), None),
         FailureReason::RestoreTargetUnwritable => ("restore-target-unwritable", Vec::new(), None),
         FailureReason::NoLocationRuleHolds => ("no-location-rule-holds", Vec::new(), None),
@@ -361,6 +365,10 @@ pub(crate) fn decode_failure(
         "daemon-stopped" => Ok(FailureReason::DaemonStopped),
         "daemon-shut-down" => Ok(FailureReason::DaemonShutDown),
         "superseded" => Ok(FailureReason::Superseded),
+        "plan-removed" => Ok(FailureReason::PlanRemoved),
+        "plan-moved" => Ok(FailureReason::PlanMoved),
+        "config-unusable" => Ok(FailureReason::ConfigUnusable),
+        "key-files-not-left-out" => Ok(FailureReason::KeyFilesNotLeftOut),
         "no-location-usable" => Ok(FailureReason::NoLocationUsable),
         "restore-target-unwritable" => Ok(FailureReason::RestoreTargetUnwritable),
         "no-location-rule-holds" => Ok(FailureReason::NoLocationRuleHolds),
@@ -919,6 +927,29 @@ mod tests {
             Err(bad) => panic!("the written columns decode: {} {}", bad.column, bad.why),
         };
         assert_eq!(back, FailureReason::Superseded);
+    }
+
+    /// A queued backup that waited for its keyring and never ran reads
+    /// back with its own reason, not as a stopped daemon (#1293).
+    #[test]
+    fn the_reasons_a_waited_backup_never_ran_for_round_trip() {
+        for (reason, code) in [
+            (FailureReason::PlanRemoved, "plan-removed"),
+            (FailureReason::PlanMoved, "plan-moved"),
+            (FailureReason::ConfigUnusable, "config-unusable"),
+            (FailureReason::KeyFilesNotLeftOut, "key-files-not-left-out"),
+        ] {
+            let columns = encode_failure(&reason).expect("a failure with no arguments encodes");
+            assert_eq!(columns.code, code);
+            assert_eq!(columns.args, "[]");
+            assert_eq!(columns.detail, None);
+            let back = match decode_failure(Some(columns.code), Some(&columns.args), columns.detail)
+            {
+                Ok(reason) => reason,
+                Err(bad) => panic!("the written columns decode: {} {}", bad.column, bad.why),
+            };
+            assert_eq!(back, reason);
+        }
     }
 
     /// A run the schedule started that was refused for a setting, for each

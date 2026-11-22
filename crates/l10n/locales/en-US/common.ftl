@@ -163,6 +163,15 @@ error-daemon-shut-down = { -brand-name } was shut down while this operation was 
 # A queued backup's turn came while a newer run of its plan was already going, so it gave way to that run and never ran.
 error-superseded = A newer run of this plan was already going when this backup's turn came, so this backup didn't run. Nothing was written.
 
+# A queued backup's plan was deleted while the backup waited for its keyring to be unlocked, so it never ran.
+error-plan-removed = This backup's plan was deleted while the backup waited for the keyring to be unlocked, so the backup didn't run. Nothing was written.
+
+# A queued backup's plan now backs up to another repository than the one the backup was queued for, so it never ran.
+error-plan-moved = This backup's plan now backs up to another { -repository } than the one this backup was queued for, so this backup didn't run. Nothing was written.
+
+# The configuration couldn't be read or used when a queued backup that waited for its keyring was to run, so the backup never ran.
+error-config-unusable = { -brand-name } couldn't read or use its configuration file when this backup, which waited for the keyring to be unlocked, was to run, so the backup didn't run. Nothing was written. { -brand-name }'s log says what was wrong with the file: fix it, then run the backup again.
+
 # The request named a host the daemon does not answer for.
 # `localhost`, `127.0.0.1` and `--allowed-host` are typed as they are: keep them string literals.
 error-host-not-allowed = { -brand-name } refused this request because it names a host that { -brand-name } does not answer for. Open { -brand-name } at { "localhost" } or { "127.0.0.1" }, or allow the host with { "--allowed-host" }.

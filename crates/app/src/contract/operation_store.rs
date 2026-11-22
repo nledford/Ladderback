@@ -424,6 +424,10 @@ async fn every_status_and_failure_reason_reads_back(store: &dyn OperationStore) 
             ended: None,
         },
         FailureReason::Superseded,
+        FailureReason::PlanRemoved,
+        FailureReason::PlanMoved,
+        FailureReason::ConfigUnusable,
+        FailureReason::KeyFilesNotLeftOut,
         // No repository config at the location, in rustic's words as awkward
         // as they get, and a refused login with and without the half named.
         FailureReason::RepositoryConfigNotFound {
