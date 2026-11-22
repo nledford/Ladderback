@@ -154,6 +154,23 @@ When("I press Tab until focus is on the {word} {string}", async function (this: 
   await pressUntilFocusIsOn(this, "Tab", role, name);
 });
 
+// A control of the open dialog: the page beneath it may hold one of the same
+// role and name, as a row's Approve button beside the review's, which the
+// dialog makes inert.
+When(
+  "I press Tab until focus is on the {word} {string} in the dialog",
+  async function (this: BrowserWorld, role: string, name: string) {
+    await tabInDialog(this, role, name);
+  },
+);
+
+/** Presses Tab until focus is on the open dialog's one `role` named `name`. */
+export async function tabInDialog(world: BrowserWorld, role: string, name: string): Promise<void> {
+  const target = world.page.getByRole("dialog").getByRole(role as Parameters<Locator["getByRole"]>[0], { name: namePattern(name) });
+  await target.waitFor({ state: "visible", timeout: patienceMs() });
+  await pressUntilFocused(world.page, "Tab", target, `the ${role} "${name}" in the dialog`);
+}
+
 When("I press Shift+Tab until focus is on the {word} {string}", async function (this: BrowserWorld, role: string, name: string) {
   await pressUntilFocusIsOn(this, "Shift+Tab", role, name);
 });

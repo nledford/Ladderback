@@ -29,7 +29,7 @@ const TOKEN_GONE_MS = 10_000;
 
 // A page's words isolate each name they hold (§4.5), as `\u2068…\u2069`;
 // what a reader hears has no such marks.
-const ISOLATION_MARKS = /[\u2066-\u2069]/g;
+export const ISOLATION_MARKS = /[\u2066-\u2069]/g;
 
 /** A pairing token as the hub answered the page that made it. */
 interface Made {
@@ -103,7 +103,7 @@ async function startHub(world: BrowserWorld, scratch: string): Promise<void> {
 /** Moves focus to the one element with this role and name by keyboard
  *  alone: past the header by the skip link when focus isn't in the content
  *  yet, then Tab until it is there. No press when it is there already. */
-async function tabTo(world: BrowserWorld, role: string, name: string): Promise<void> {
+export async function tabTo(world: BrowserWorld, role: string, name: string): Promise<void> {
   const inContent = await world.page.evaluate(() => document.querySelector("main")?.contains(document.activeElement) ?? false);
   if (!inContent) {
     const keys = journey(world.page);
