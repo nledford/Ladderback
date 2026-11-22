@@ -267,7 +267,7 @@ async fn a_token_pins_the_hubs_certificate_when_asked_to() {
         let response = daemon.send(make(LOOPBACK, &[], &body)).await;
         assert_eq!(response.status(), StatusCode::CREATED, "{kind}");
         let made: api::PairingTokenDto = serde_json::from_value(json(response).await).unwrap();
-        assert_eq!(made.certificate, said);
+        assert_eq!(made.certificate, Some(said));
         let token = domain::fleet::PairingToken::parse(&made.token).unwrap();
         assert_eq!(token.tls(), tls);
     }
@@ -290,6 +290,24 @@ async fn a_pinned_ask_for_a_plain_address_is_refused() {
         refusal(response).await,
         (StatusCode::BAD_REQUEST, "hub-address-invalid".to_owned())
     );
+}
+
+/// A plain `http://` address shows no certificate, so the token made for
+/// it names none, even on a hub serving its built-in TLS (#1343).
+#[tokio::test]
+async fn a_token_for_a_plain_address_names_no_certificate() {
+    let daemon = Daemon::hub_on_tls();
+    let fingerprint = daemon.fingerprint().await;
+    let body = serde_json::json!({
+        "address": "http://127.0.0.1:9",
+        "confirmation": fingerprint,
+    })
+    .to_string();
+    let response = daemon.send(make(LOOPBACK, &[], &body)).await;
+    assert_eq!(response.status(), StatusCode::CREATED);
+    let made = json(response).await;
+    assert_eq!(made.get("certificate"), None, "{made}");
+    assert_eq!(made["address"], "http://127.0.0.1:9");
 }
 
 #[tokio::test]

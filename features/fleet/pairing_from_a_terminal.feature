@@ -92,6 +92,14 @@ Feature: Pairing a machine from a terminal
     Then the machine is paired and waits for approval
 
   @e2e
+  Scenario: A machine reading a token for a plain http address says it isn't encrypted and names no certificate
+    Given a hub with a pairing token made at its terminal
+    And the hub is serving on loopback
+    When a machine named "e2e-laptop" pairs with the token from its terminal
+    Then the machine read a token for an address that isn't encrypted, naming no certificate
+    And the machine is paired and waits for approval
+
+  @e2e
   Scenario: The hub's terminal makes no token for an address a machine would refuse
     When the person asks the hub's terminal for a pairing token for "https://hub.example/ladderback"
     Then the terminal refuses because the address isn't a hub address

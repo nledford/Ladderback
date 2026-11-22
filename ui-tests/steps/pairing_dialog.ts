@@ -229,6 +229,15 @@ When("I set the address machines will use to {string}", async function (this: Br
   await this.page.keyboard.type(address);
 });
 
+// The hub serves its built-in TLS on the port its page came in on, so its
+// https address is the page's own over TLS.
+When("I set the address machines will use to the hub's https address", async function (this: BrowserWorld) {
+  const page = new URL(this.baseUrl ?? "");
+  await tabTo(this, "textbox", "Address machines will use");
+  await this.page.keyboard.press("ControlOrMeta+A");
+  await this.page.keyboard.type(`https://${page.host}`);
+});
+
 When("the page is printed", async function (this: BrowserWorld) {
   await this.page.emulateMedia({ media: "print" });
 });

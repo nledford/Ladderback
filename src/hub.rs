@@ -15,7 +15,7 @@ use app::pairing::{
 };
 use app::ports::{AgentRegistry as _, Identity as _, IdentityError, LinkError, Signing as _};
 use domain::fleet::{
-    AgentStatus, Approval, ApprovalRefused, Fingerprint, Hostname, HubAddress, HubRoute,
+    AgentStatus, Approval, ApprovalRefused, Fingerprint, Hostname, HubAddress, HubRoute, HubScheme,
     MachineZone, PairingToken, RouteRefused, RouteSession, TokenId, TokenTls, WelcomeRefused,
     is_loopback,
 };
@@ -649,10 +649,11 @@ fn run_pair(localizer: &Localizer, ask: PairAsk) -> io::Result<ExitCode> {
         return Ok(ExitCode::from(2));
     };
     // Each kind of address has its own whole sentence, not a phrase put into
-    // one.
-    let read = match token.tls() {
-        TokenTls::Ca => msg::CLI_PAIR_READ_CA,
-        TokenTls::Pinned(_) => msg::CLI_PAIR_READ_PINNED,
+    // one. A plain address shows no certificate, so its sentence names none.
+    let read = match (token.address().scheme(), token.tls()) {
+        (HubScheme::Http, _) => msg::CLI_PAIR_READ_PLAIN,
+        (HubScheme::Https, TokenTls::Ca) => msg::CLI_PAIR_READ_CA,
+        (HubScheme::Https, TokenTls::Pinned(_)) => msg::CLI_PAIR_READ_PINNED,
     };
     say(
         localizer,

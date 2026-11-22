@@ -97,9 +97,10 @@ impl std::fmt::Debug for MakePairingTokenDto {
 }
 
 /// A pairing token made, shown once: its text, its token ID, the hub key's
-/// fingerprint it carries, its address, when it lapses (RFC 3339) and how
+/// fingerprint it carries, its address, when it lapses (RFC 3339), how
 /// many seconds it has left by the hub's clock, which the page counts down
-/// on its own monotonic clock. Its `Debug` hides the text (I4).
+/// on its own monotonic clock, and the certificate its address shows. Its
+/// `Debug` hides the text (I4).
 #[derive(Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "kebab-case", deny_unknown_fields)]
 pub struct PairingTokenDto {
@@ -109,8 +110,10 @@ pub struct PairingTokenDto {
     pub address: String,
     pub expires_at: String,
     pub seconds_left: u64,
-    /// The certificate the token's address shows, as it was made.
-    pub certificate: TokenCertificateDto,
+    /// The certificate the token's address shows, as it was made: none for
+    /// a plain `http://` address, which shows no certificate.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub certificate: Option<TokenCertificateDto>,
 }
 
 impl std::fmt::Debug for PairingTokenDto {
