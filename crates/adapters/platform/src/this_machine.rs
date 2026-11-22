@@ -219,11 +219,9 @@ fn system_identifier() -> Result<String, MachineError> {
     })
 }
 
-/// The value of `"IOPlatformUUID" = "…"` in an `ioreg` report.
-#[cfg_attr(
-    not(target_os = "macos"),
-    allow(dead_code, reason = "macOS's report, tested on every system")
-)]
+/// The value of `"IOPlatformUUID" = "…"` in an `ioreg` report. Built on
+/// macOS, which reads it, and in tests everywhere, which check the parsing.
+#[cfg(any(target_os = "macos", test))]
 fn platform_uuid(report: &str) -> Option<String> {
     report.lines().find_map(|line| {
         let (key, value) = line.split_once('=')?;
