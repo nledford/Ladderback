@@ -1,11 +1,19 @@
 # Ladderback
 
-Ladderback runs [rustic](https://rustic.cli.rs) backups as a service on each machine you back up, with a web UI built in. You write plans: what to back up, into which repository, how often, and how long to keep its snapshots. Ladderback runs them on their schedule, catches up on a run the machine slept through, and shows each backup's progress and result.
+Ladderback runs [rustic](https://rustic.cli.rs) backups as a service on each machine you back up, with a web UI built in. In the web UI you make plans: what to back up, into which repository, how often, and how long to keep its snapshots. Ladderback runs them on their schedule, catches up on a run the machine slept through, and shows each backup's progress and result. You restore a file or a folder from the same web UI.
 
-These guides are for running it. The [README](https://github.com/nledford/Ladderback/blob/main/README.md) has the short version and what Ladderback does today, and the [technical design](https://github.com/nledford/Ladderback/blob/main/docs/design/README.md) says how it works.
+This guide is in two parts. **Using Ladderback** is for everyone: install it, then do everything else in the web UI.
 
-- [Install](install.md): the recommended way for each system (the Linux packages, the install script, signing on macOS), the other ways, updating, running it as a service, and what macOS asks for.
-- [A first plan](first-plan.md): connect a repository, add a plan to `config.toml`, and read its keep policy.
-- [Moving a repository's password out of `config.toml`](secrets.md): the system keyring, a password file or an environment variable.
+- [Install](install.md): the recommended way for each system, starting Ladderback, and updating it.
+- [Getting started](getting-started.md): from a fresh install to a first scheduled backup, and a test restore that proves it works.
+
+**Advanced** is for people at home in a terminal, and for those who already use rustic. It links to the technical design for how each part works.
+
+- [Other ways to install](other-ways-to-install.md): what the install script does, the release's archive by hand, cargo-binstall, building from source, and the Docker image.
+- [Running as a service](running-as-a-service.md): running Ladderback in a terminal, the service, updating without interrupting a backup, and what macOS's keychain and code signing ask.
+- [Plans in config.toml](first-plan.md): the configuration file, a whole example plan, and importing a rustic profile.
+- [Moving a repository's password out of config.toml](secrets.md): the system keyring, a password file or an environment variable.
 - [Sign-in and remote access](remote-access.md): setting an admin password, `--listen` and `--allowed-host`, and TLS behind a reverse proxy.
 - [API tokens and AI agents](api-tokens.md): which permissions to give a program or an AI agent, and what AI agents may do without a token.
+
+The [README](https://github.com/nledford/Ladderback/blob/main/README.md) has what Ladderback does today and what comes next.

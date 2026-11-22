@@ -1,0 +1,149 @@
+# Other ways to install
+
+[Install](install.md) names one recommended way for each system ([decision 126](https://github.com/nledford/Ladderback/blob/main/docs/design/decisions/126-primary-install-channels.md)): the release's `.deb` or `.rpm` package where there is one, and the install script elsewhere. This page has the rest, for contributors, for installing the release's archive by hand, and for people who already use cargo-binstall: what the install script does and its options, moving to the package, the archive by hand, cargo-binstall, a build by hand, and the Docker image, which isn't a supported way to run Ladderback yet. Ladderback isn't published to crates.io, and has no Homebrew tap until a macOS build can be signed and notarized ([#344](https://github.com/nledford/Ladderback/issues/344)).
+
+[Decision 123](https://github.com/nledford/Ladderback/blob/main/docs/design/decisions/123-deb-and-rpm-packages.md) says why the packages aren't signed, and what checks them instead.
+
+## The install script in detail
+
+To read the script before it runs, download it, read it, then run it:
+
+```sh
+curl -fsSL https://raw.githubusercontent.com/nledford/Ladderback/main/scripts/install.sh -o install.sh
+less install.sh
+bash install.sh
+```
+
+On 64-bit Linux with glibc 2.35 or newer, the script downloads the newest release's archive and `SHA256SUMS`, as [Download a release](#download-a-release-linux) does, checks the archive against it, and installs the binary into `~/.cargo/bin`, where a build from source goes too, so an update either way replaces the same binary. It needs none of the build's tools and asks nothing. An archive that doesn't match its checksum stops it, naming the file, with nothing installed and nothing built instead; a download that stalls or fails stops it too, and it suggests `--from-source`. Where the release has no archive for the system (macOS, 32-bit or musl systems, a glibc older than 2.35, or a release whose archives aren't attached yet, in the hour after it is published), or with `--from-source`, it builds from source and says why.
+
+To build, it checks the tools the build needs, listed under [By hand](#by-hand), and installs those that need no administrator rights (rustup, just and trunk) after asking you once. trunk comes from its prebuilt release, checked against the SHA-256 the script pins; only on a system trunk publishes no release for is it built from source, with one build job per 2 GB of free memory.
+
+A download that stalls, finding no connection within 30 s or averaging under 1 KiB/s for 60 s, stops it, after three retries, with a message that says so; a slow one that still moves is left to finish.
+
+Those that need them, a C compiler, git and Node.js 26 or newer, it never installs: it names the missing ones with the command that installs them and stops, and it never runs `sudo`.
+
+It keeps Ladderback's source in `~/.local/share/ladderback/source`, checks out the newest release, and installs it with `just install` into `~/.cargo/bin`. The command runs the script on `main`, and the script installs the newest release, not `main` ([decision 79](https://github.com/nledford/Ladderback/blob/main/docs/design/decisions/79-a-from-source-install-script.md)).
+
+Options go after `bash -s --`:
+
+- `--from-source` builds from source on Linux too,
+- `--yes` installs the missing tools without asking,
+- `--dir <folder>` keeps the source elsewhere,
+- and what follows `--` goes to `just install`, so `bash -s -- -- --root ~/.local` installs into `~/.local/bin`; from the archive only `--root` applies.
+
+`--help` lists them.
+
+## Moving an existing install to the package
+
+If `ladderback` came from the archive, the install script or a build from source, it is in `~/.local/bin` or `~/.cargo/bin`, and the service names that path:
+
+1. remove that binary: `rm ~/.cargo/bin/ladderback` (or `cargo uninstall ladderback`, or `rm ~/.local/bin/ladderback`), so the shell finds the package's;
+2. install the package as [Install](install.md#install-a-package-debian-ubuntu-fedora) says;
+3. run `ladderback install-service` again, so the unit names `/usr/bin/ladderback`, not the binary you removed.
+
+## Download a release (Linux)
+
+Each release from 0.3.1 on has an archive for `x86_64` and one for `aarch64` Linux, each holding the `ladderback` binary with the web UI built in, and a `SHA256SUMS` file with their checksums. macOS has no archive until it can be signed and notarized ([decision 71](https://github.com/nledford/Ladderback/blob/main/docs/design/decisions/71-signing-macos-builds-without-a-developer-id.md)). Download the archive for your machine and the checksums, check the archive, and install the binary into `~/.local/bin`:
+
+```sh
+target="$(uname -m)-unknown-linux-gnu"
+base=https://github.com/nledford/Ladderback/releases/latest/download
+curl -fL -O "$base/ladderback-$target.tar.xz" -O "$base/SHA256SUMS"
+sha256sum -c --ignore-missing SHA256SUMS
+tar -xJf "ladderback-$target.tar.xz"
+mkdir -p ~/.local/bin && install -m 755 "ladderback-$target/ladderback" ~/.local/bin/
+```
+
+`sha256sum` must print `ladderback-…tar.xz: OK`; anything else means the download is damaged or isn't the release's, so don't install it. On a Raspberry Pi, `uname -m` says `aarch64` under 32-bit Raspberry Pi OS too, whose 64-bit kernel runs 32-bit programs, and the binary then doesn't start: `getconf LONG_BIT` must print `64`. `~/.local/bin` must be on your `PATH`; if you built Ladderback from source before, `cargo uninstall ladderback` removes that one, so the shell doesn't find the old binary first. To update, run the same commands again, which replace the binary, then `ladderback install-service` again if it runs as a [service](running-as-a-service.md).
+
+Releases after 0.3.1 list inside the binary the crates the daemon was built from, so [cargo-audit](https://crates.io/crates/cargo-audit) can check an installed one against the security advisories published since, without its source: `cargo audit bin "$(command -v ladderback)"`. The list leaves out the crates of the web UI built into it, and a binary you built from source has none; `cargo audit` in a checkout of the release's tag checks both. An advisory the project has found doesn't affect Ladderback is in the `ignore` list of [`deny.toml`](https://github.com/nledford/Ladderback/blob/main/deny.toml), with the reason.
+
+## cargo-binstall
+
+For people who already use [cargo-binstall](https://github.com/cargo-bins/cargo-binstall), on 64-bit Linux:
+
+```sh
+cargo binstall --strategies crate-meta-data --git https://github.com/nledford/Ladderback ladderback
+```
+
+It reads the version in `main`'s `Cargo.toml`, downloads that release's archive for your machine and installs `ladderback` into `~/.cargo/bin`, as the install script does. It doesn't check the archive against `SHA256SUMS` ([#357](https://github.com/nledford/Ladderback/issues/357)); the install script and [Download a release](#download-a-release-linux) do. `--strategies crate-meta-data` keeps it to the release's archive: where there is none (macOS, or a release whose archives aren't attached yet), it would otherwise build with `cargo install`, which doesn't build the web UI, so the binary it installs has none. To update, run the same command again.
+
+## By hand
+
+You need:
+
+- **Rust**, through [rustup](https://rustup.rs). In the checkout, rustup installs the exact Rust version `rust-toolchain.toml` pins, with the `wasm32-unknown-unknown` target, on the first build, so you build with the compiler CI tested ([decision 78](https://github.com/nledford/Ladderback/blob/main/docs/design/decisions/78-the-rust-toolchain-is-pinned.md)). Without rustup, use Rust 1.100.0 or newer, the [MSRV](https://github.com/nledford/Ladderback/blob/main/Cargo.toml), with that target, and take trunk and just from their prebuilt releases.
+- **git and a C compiler**: Xcode's Command Line Tools on macOS, `git` and `build-essential` or your distribution's equivalents on Linux.
+- **Node.js** 26 or newer, with npm, ideally the newest 26 release: the web UI's build runs Tailwind's CLI, and `just install-restart` is TypeScript, which Node runs as it is. Debian's and Ubuntu's own packages are older: take it from [nodejs.org](https://nodejs.org) or [NodeSource's signed apt repository](https://github.com/nodesource/distributions).
+- **[trunk](https://trunkrs.dev)**, which builds the web UI, and **[just](https://just.systems)** 1.40 or newer: `cargo +stable install --locked trunk just`, or your package manager's. trunk's newest release can need a newer Rust than the one the checkout pins, hence `+stable`. Building trunk from source takes more memory than a small machine has (with cargo's default jobs it ran a 4 GB Raspberry Pi out of memory), so prefer trunk's [prebuilt release](https://github.com/trunk-rs/trunk/releases), on Linux the `musl` archive, which runs whatever the system's glibc; where there is none for your system, bound the build to about one job per 2 GB of free memory with `-j`. trunk downloads the `wasm-bindgen` and `wasm-opt` the build needs.
+
+On 64-bit ARM Linux with a glibc older than 2.38 (Debian 12, Ubuntu 22.04), the `wasm-bindgen` trunk downloads doesn't run. There, between the `git checkout` and `just install` below, and again after each update, build the version the checkout pins, which trunk then finds on the `PATH`: `cargo install --locked wasm-bindgen-cli --version "$(just _wasm-bindgen-version)"`.
+
+Clone the repository, check out the newest release, and install it:
+
+```sh
+git clone https://github.com/nledford/Ladderback.git
+cd Ladderback
+# The newest release tag, leaving out release candidates (vX.Y.Z-rc.N).
+git checkout "$(git tag --list 'v*' --sort=-v:refname | grep -v -- - | head -n 1)" && just install
+```
+
+`just install` builds the web UI, then `ladderback` with the UI built in, as the release archives are built (the `dist` profile, with thin LTO), and installs it with `cargo install` into `~/.cargo/bin`. Arguments go to `cargo install`: `just install --root ~/.local` installs into `~/.local/bin`. If `just` answers that there is no recipe `install`, that release predates it; run this instead, which builds with the `release` profile (older releases have no `dist` profile):
+
+```sh
+(cd crates/web && trunk build --release --no-default-features) && cargo install --locked --path . --no-default-features
+```
+
+On macOS, name your certificate in `LADDERBACK_SIGN_IDENTITY` for `just install` too, as [Signing your build](install.md#signing-your-build) says; [Running as a service](running-as-a-service.md#macos-signing-and-the-keychain) has what `just install` checks.
+
+To update by hand, `git fetch --tags`, the same `git checkout` line, and `just install`. After the install script installed the archive, run `just install --force`: cargo won't overwrite a binary it didn't install. Releases up to 0.2.0 track the web UI's stylesheet, which their build can rewrite: coming from one of them by hand, first put it back with `git checkout -- crates/web/tw-out.css`, or git refuses to check out the new release.
+
+## Docker image (not supported yet)
+
+Each release after 0.5.0 publishes a Docker image for x86_64 and aarch64 Linux, as `ghcr.io/nledford/ladderback` and `docker.io/nledford/ladderback`: the same image, tagged with the release's version. Only GitHub's latest release also gets `latest`, so a pre-release never moves it; to try a pre-release, pull it by its version. For 0.5.0, or a build of your own, `just image <version> <archive>... --tag ghcr.io/nledford/ladderback --load`, in a checkout, builds it from a release archive, as a release does. Docker Hub limits how often you may pull without an account; GitHub's registry doesn't.
+
+The image is there to try: it isn't yet a supported way to install and run Ladderback, and the package or the install script is. Its container is a machine of its own, which backs up the folders mounted into it. From the MVP's release it runs the hub too, and becomes the recommended way to run one on a machine whose only job is the hub; an installed machine becomes the hub in place instead, since moving its data into a container isn't supported yet ([decision 136](https://github.com/nledford/Ladderback/blob/main/docs/design/decisions/136-an-installed-machine-becomes-the-hub.md)). Until then it has no hub, and refuses `serve --hub`.
+
+The image runs `ladderback` as user and group 10001 and listens on port 9898. It keeps its configuration in the volume at `/var/lib/ladderback/config`, its data (the operation history and the admin password among them) in the volume at `/var/lib/ladderback/data`, and its cache in `/var/cache/ladderback`. Turn sign-in on first: `set-password` asks twice for an admin password of at least 8 characters, without showing it, and keeps it in the data volume. With `-i` alone in place of `-it`, it reads one line from a pipe instead.
+
+```sh
+docker run --rm -it -v ladderback-data:/var/lib/ladderback/data ghcr.io/nledford/ladderback set-password
+```
+
+Then start the container, here on a computer that browsers reach as `nas.example.com`, backing up `/srv/photos`:
+
+```sh
+docker run --detach --name ladderback \
+  --hostname nas --init --restart unless-stopped --stop-timeout 75 \
+  --env TZ=Europe/Berlin --publish 9898:9898 \
+  -v ladderback-config:/var/lib/ladderback/config \
+  -v ladderback-data:/var/lib/ladderback/data \
+  -v ladderback-cache:/var/cache/ladderback \
+  -v /srv/photos:/srv/photos:ro \
+  ghcr.io/nledford/ladderback \
+  serve --listen 0.0.0.0:9898 --allowed-host nas.example.com --service-managed
+```
+
+The same container as a Compose file, with its port on loopback for a reverse proxy on the same computer, is [`examples/compose.yaml`](examples/compose.yaml): turn sign-in on with `docker compose run --rm ladderback set-password`, then start it with `docker compose up --detach`.
+
+What each part is for:
+
+- **`--allowed-host`** names the host name browsers reach Ladderback by. Listening beyond the container's loopback, Ladderback refuses to start without one, so the image's own command, `serve --listen 0.0.0.0:9898`, doesn't start until you give it ([Remote access](remote-access.md#listening-beyond-loopback)). Over plain HTTP the password crosses the network unencrypted, so put a reverse proxy that adds TLS in front. With the proxy on the same machine, publish the port on loopback only, `--publish 127.0.0.1:9898:9898`: Docker's own firewall rules pass by ufw and firewalld.
+- **`--hostname`** stays the same from one container to the next. Ladderback names the machine, and its snapshots' host, by the container's hostname, which Docker makes up anew for each container unless you give one.
+- **Each folder to back up is mounted read-only, at the path it has on the host.** The snapshots record the paths inside the container, so the same path keeps them meaningful to a restore and to `rustic`. A restore into a mounted folder needs it mounted without `:ro`, and writes files as the container's user, or with their original owners when it runs as root.
+- **`--init`** runs a small init as process 1, which hands on `docker stop`'s signal and reaps the processes hooks leave behind. **`--stop-timeout 75`** gives Ladderback the 65 seconds it may take to stop cleanly, where Docker kills it after 10; in Compose, `stop_grace_period: 75s`.
+- **`--restart unless-stopped`** stands in for `install-service`, which a container can't use, and `--service-managed` lets **Restart Ladderback** in Settings restart it: Ladderback exits, and Docker starts it again.
+- **`TZ`** sets the time zone the schedules run in; without it, a container's is UTC.
+- **The cache volume** is optional: it keeps the repositories' cache from one container to the next.
+
+The container's user reads only what user 10001 or everyone may read. To back up a whole machine, run as root with `--user 0`: root reads every file mounted into the container, and the volumes need no change. To run as one of the host's users instead, with `--user <uid>:<gid>`, keep the configuration, data and cache in folders on the host that this user owns, made as that user:
+
+```sh
+install -d -m 0700 ~/ladderback/config ~/ladderback/data ~/ladderback/cache
+```
+
+Mount them in place of the volumes, as in `-v ~/ladderback/data:/var/lib/ladderback/data`, and give the same `--user`, in every `docker run`, `set-password`'s included. A named volume won't do: while it is empty, each mount gives it back to user 10001, so a `chown` of one doesn't last. Keep to one user, since the files root writes stay root's.
+
+A container has no keyring, so keep a repository's password in a file, such as a Docker secret under `/run/secrets`, in an environment variable or behind a command ([Secrets](secrets.md)). A repository on a local path needs a volume or a folder on the host mounted at that path, as `/srv/photos` is above: one written anywhere else lives in the container and goes when the container is removed. To update, pull the image, remove the container and run the same `docker run` again, with the same mounts: the volumes keep the configuration, the history and the password, and the repositories mounted into it stay where they are.
+
+On macOS, Docker runs Linux in a virtual machine, so Ladderback there sees only the folders shared with it and gets no Full Disk Access, Photos library or keychain: use the install script. From the MVP's release, the same image runs the hub with `serve --hub --listen 0.0.0.0:9898 --allowed-host <name>` in place of the command above; this guide will say how to pair machines with it then.
