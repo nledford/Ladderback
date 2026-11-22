@@ -1,7 +1,7 @@
 //! Steps for `features/automation/mcp_pairing.feature`: the pairing guide,
 //! the resource `ladderback://pairing`, and `pairing_state`, called on the
 //! scenario's MCP server through the steps of `mcp.rs`, on a machine the
-//! steps of `pairing_terminal.rs` paired.
+//! steps of `pairing_terminal/` paired.
 
 use api::{ErrorCode, MsgArg};
 use cucumber::{given, then, when};
