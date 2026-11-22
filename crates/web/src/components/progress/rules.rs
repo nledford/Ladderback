@@ -677,6 +677,17 @@ mod tests {
         );
     }
 
+    // A count past its total is all of it in the amounts too, as it is in
+    // the share: never "12 of 10" beside 100% (#138).
+    #[test]
+    fn the_amounts_never_say_more_done_than_the_total() {
+        let mut teller = Teller::default();
+        assert_eq!(
+            teller.report(backing_up(12, 10), at(100)),
+            measured(backing_up(10, 10), 100, None)
+        );
+    }
+
     /// While the step stays the same, a change waits until 30 s after the
     /// value last told, and then the latest report is told.
     #[test]

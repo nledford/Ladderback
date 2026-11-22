@@ -5,7 +5,7 @@
 //! cell is aligned and how wide the columns are. `components/table.rs`'s
 //! `Table` is the glue that draws it.
 
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 use std::hash::Hash;
 
 use lepticons_data::LucideGlyph;
@@ -98,14 +98,16 @@ pub fn sentence<'a>(direction: Direction, ascending: &'a str, descending: &'a st
     }
 }
 
-/// What a column is sorted by in a row: a number (a size in bytes, an
-/// instant in milliseconds, a count) or a text, compared as its bytes are,
-/// so its caller passes a text that orders as the reader expects (a name in
-/// lower case, an instant as RFC 3339 in UTC).
+/// What a column is sorted by in a row: a number (a size in bytes, a
+/// count), a text, compared as its bytes are, so its caller passes a text
+/// that orders as the reader expects (a name in lower case), or an instant,
+/// compared as the time it is, whatever precision and offset it was written
+/// with (#138).
 #[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord)]
 pub enum SortKey {
     Number(i64),
     Text(String),
+    Instant(jiff::Timestamp),
 }
 
 /// A sort: which way, and a column's sort key.
@@ -136,6 +138,14 @@ pub fn order<R, K>(rows: &[R], key: impl Fn(&R) -> K, by: Option<SortBy<'_, R>>)
         .into_iter()
         .filter_map(|(_, at)| rows.get(at).map(&key))
         .collect()
+}
+
+/// Where each key of `rows` first stands in them: a key given twice is the
+/// first row's, the row the table shows ([`order`]), so its cells read that
+/// row (#138).
+pub fn positions<R, K: Eq + Hash>(rows: &[R], key: impl Fn(&R) -> K) -> HashMap<K, usize> {
+    let _ = (rows, key);
+    todo!()
 }
 
 /// Where the rows a table shows stand, as its caller knows it.
@@ -800,6 +810,41 @@ mod tests {
             order(&rows, |row| row.0, Some((Direction::Ascending, &by_count))),
             ["minus", "nine", "ten"]
         );
+    }
+
+    // The rows come from the daemon, and a keyed list given one key twice
+    // panics in the browser: a key given again is dropped, the first row of
+    // it kept, sorted or not (#138).
+    #[test]
+    fn a_key_given_twice_shows_once_as_its_first_row_sorted_or_not() {
+        let rows = [
+            Row("music", 12),
+            Row("photos", 1204),
+            Row("music", 3),
+            Row("notes", 7),
+        ];
+        assert_eq!(
+            order(&rows, |row| row.0, None),
+            ["music", "photos", "notes"]
+        );
+        assert_eq!(
+            order(&rows, |row| row.0, Some((Direction::Ascending, &by_count))),
+            ["notes", "music", "photos"],
+            "the second music's 3 sorts nothing"
+        );
+        assert_eq!(
+            order(&rows, |row| row.0, Some((Direction::Descending, &by_count))),
+            ["photos", "music", "notes"]
+        );
+    }
+
+    #[test]
+    fn each_key_stands_where_its_first_row_does() {
+        let rows = [Row("music", 12), Row("photos", 1204), Row("music", 3)];
+        let at = positions(&rows, |row| row.0);
+        assert_eq!(at.len(), 2);
+        assert_eq!(at.get("music"), Some(&0), "the first music, not the last");
+        assert_eq!(at.get("photos"), Some(&1));
     }
 
     #[test]

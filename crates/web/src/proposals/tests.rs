@@ -48,6 +48,22 @@ fn the_page_lists_only_the_pending_proposals_in_the_daemons_order() {
     assert_eq!(ids, ["newest", "oldest"]);
 }
 
+// The list is keyed by proposal: one the daemon names twice is listed once,
+// as first named (#138).
+#[test]
+fn a_proposal_named_twice_is_listed_once() {
+    let listed = pending(vec![
+        proposal("newest", ProposalStatusDto::Pending, None),
+        proposal("oldest", ProposalStatusDto::Pending, None),
+        proposal("newest", ProposalStatusDto::Pending, Some("assistant")),
+    ]);
+    let listed: Vec<(&str, Option<&str>)> = listed
+        .iter()
+        .map(|one| (one.id.as_str(), one.proposed_by.as_deref()))
+        .collect();
+    assert_eq!(listed, [("newest", None), ("oldest", None)]);
+}
+
 #[test]
 fn a_proposals_button_names_it_and_who_proposed_it() {
     assert_eq!(
