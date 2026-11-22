@@ -12,7 +12,7 @@
 - **Refused before the build:** a name that `security find-identity -v -p codesigning` doesn't list as a valid identity's whole name or hash, or lists more than once, so a mistyped or untrusted certificate installs nothing. After the install it signs with that identity's hash, as `codesign` would also take a name as part of a longer one, then runs `codesign --verify` (scripts/install-signing.ts). A signing that fails then leaves the new binary installed, says how it is signed, and fails the recipe.
 - **The note:** after a restart, `install-restart` warns that the keychain, Photos and Full Disk Access ask again for a build signed ad hoc, and says for a signed one that those grants carry over.
 
-Making the certificate is in the [install guide](../../guide/install.md#signing-your-build).
+Making the certificate is in the [install guide](../../guide/install-macos.md#signing-your-build).
 
 **Tested on a Mac, 2026-11-16 (macOS 27.3; #281):** with a self-signed certificate, a rebuild of an empty commit had a new code hash and the same designated requirement, and macOS asked for nothing on it:
 
