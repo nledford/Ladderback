@@ -172,9 +172,9 @@ function isAboveTheContent(target: Locator): Promise<boolean> {
 
 // WCAG 2.4.7 and 2.4.13: the focused element shows an indicator that is at
 // least 2 px thick, differs from the unfocused look and has 3:1 contrast
-// against what it sits on (1.4.11). WCAG 2.4.11: it is at least partly in
-// sight, checked at the center of each line it stands on (`focusProbes`):
-// what lies over every one of them covers it.
+// against what it sits on (1.4.11). WCAG 2.4.11: it is not entirely hidden,
+// checked at the center of the part in view of each line it stands on
+// (`focusProbes`): what lies over every one of them covers it.
 async function assertFocusVisibleAndUnobscured(page: Page, key: string): Promise<void> {
   const state = await lookAtFocus(page, key);
   assert.ok(state.restored, `could not restore focus to ${state.name}`);
@@ -237,12 +237,6 @@ async function lookAtFocus(page: Page, key: string) {
   // after the press runs after that scroll; the check waits for one, then for
   // two frames, to see the page as its reader does.
   const revealsFocusFromATimer = engine === "webkit";
-  // Firefox scrolls a focused element only until part of it shows, Chromium
-  // and WebKit until all of it does: on a small screen with larger text the
-  // element's center can lie past the viewport's edge, where nothing covers
-  // it. There the check looks at the part of it in view; an element wholly
-  // out of view still fails it.
-  const revealsFocusInPart = engine === "firefox";
   const stopped = revealsFocusFromATimer && stoppedClocks.has(page);
   if (stopped) {
     // Its failure is only the end of the wait: the measure below is the check.
@@ -268,7 +262,7 @@ async function lookAtFocus(page: Page, key: string) {
         `after ${key} the focused element kept moving while the check looked at it, ${LOOKS} times: ${read.name}`,
       );
       const { fragments, whole, viewport } = read.measure;
-      const probes = focusProbes(fragments, whole, viewport, revealsFocusInPart);
+      const probes = focusProbes(fragments, whole, viewport);
       read = await focused.evaluate(readFocus, { probes, measure: read.measure });
     }
     assert.ok(read.focus !== "none", `after ${key} focus is on the page body or nowhere, so a keyboard user has no focus to see`);
