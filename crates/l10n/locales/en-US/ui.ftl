@@ -3408,8 +3408,110 @@ ui-pairing-closed-not-canceled = The { -hub } couldn't cancel the unused pairing
 # Said on the page when the hub refused or didn't answer the cancel of a closed dialog's token after the dialog showed a later one.
 ui-pairing-earlier-not-canceled = The { -hub } couldn't cancel an earlier unused pairing token, so it still works until it lapses.
 
-# Said when the hub didn't answer the page's request about a pairing token, or answered with what isn't one.
+# Said when the hub didn't answer the page's request about a pairing token or the approval of a waiting machine, or answered with what isn't one.
 ui-pairing-unanswered = The { -hub } didn't answer. Try again.
+
+## Settings' "Machines" tab, only on a hub (decision 121): the machines
+## waiting for approval, approved there after a review and a step-up, and the
+## machines approved.
+
+# The heading of the table of the machines waiting for approval, which names that table.
+ui-machines-waiting-heading = Waiting for approval
+
+# The heading of the table of the approved machines, which names that table.
+ui-machines-approved-heading = Approved machines
+
+# The header of the column of each machine's hostname.
+ui-machines-hostname = Hostname
+
+# The header of the column of each machine's agent ID, which the hub gave it when it paired.
+ui-machines-agent-id = Agent ID
+
+# The header of the column of each machine's key fingerprint, in full.
+ui-machines-key = Key fingerprint
+
+# The header of the column of how long each machine has waited for approval.
+ui-machines-waited = Waiting
+
+# The header of the column of a note on a waiting machine, as when its hostname looks like another machine's.
+ui-machines-note = Note
+
+# The header of the column of each waiting machine's Approve button.
+ui-machines-action = Action
+
+# The header of the column of how long ago each machine was approved.
+ui-machines-approved-since = Approved
+
+# How long a machine has waited for approval.
+# $duration (duration): that length of time, such as 1 min 5 s.
+ui-machines-waited-for = for { $duration }
+
+# How long ago a machine was approved.
+# $duration (duration): that length of time, such as 1 min 5 s.
+ui-machines-approved-ago = { $duration } ago
+
+# The name of a machine's key fingerprint, as its row and the review show it.
+# $hostname (text): the machine's hostname.
+ui-machines-fingerprint = { $hostname }'s key fingerprint
+
+# The note on a waiting machine whose hostname looks like another machine's, as "demo-rnacbook" looks like "demo-macbook".
+# $hostname (text): the other machine's hostname.
+ui-machines-looks-like = Looks like { $hostname }
+
+# The button that opens the review of approving a waiting machine, and the review's button that approves it.
+# $hostname (text): the machine's hostname.
+ui-machines-approve = Approve { $hostname }
+
+# The title of the review of approving a waiting machine.
+# $hostname (text): the machine's hostname.
+ui-machines-review-title = Approve { $hostname }?
+
+# What the review says first.
+# $hostname (text): the machine's hostname.
+ui-machines-review-body = Approve only a { -machine } you paired. Compare this fingerprint with the one { "ladderback pair" } shows on { $hostname }: once approved, it can sync with this { -hub }.
+
+# The warning in the review when the machine's hostname looks like another machine's.
+# $hostname (text): the other machine's hostname.
+ui-machines-review-lookalike = This hostname looks like { $hostname }, another { -machine } of this { -hub }. Check that it is the { -machine } you paired.
+
+# Said on the page once a machine is approved.
+# $hostname (text): the machine's hostname.
+ui-machines-approved = { $hostname } is approved.
+
+# Said in the review while the hub approves the machine, which holds the review still.
+# $hostname (text): the machine's hostname.
+ui-machines-approving = Approving { $hostname }…
+
+# Said in the review when the step-up is wrong: the machine wasn't approved.
+ui-machines-step-up-failed = That isn't right, so the { -machine } wasn't approved. Try again.
+
+# Shown in place of the tables while the page reads the machines.
+ui-machines-loading = Loading the { -machine(form: "other") }…
+
+# Shown in place of the waiting machines' table when none is waiting.
+ui-machines-none-waiting = No { -machine } is waiting for approval.
+
+# Shown in place of the approved machines' table when none is approved.
+ui-machines-none-approved = No { -machine } is approved yet.
+
+# Shown in place of the tables when the hub didn't answer the page's request for its machines.
+ui-machines-unreachable = The { -hub } didn't answer, so its { -machine(form: "other") } can't be listed. The page asks again in a few seconds.
+
+# Said politely when live updates on the Machines tab are on again, in place
+# of the generic sentence that counts the runs that ended.
+# $count (number): how many machines started to wait for approval while the
+# updates were paused, which the tab now lists.
+ui-machines-resumed =
+    { $count ->
+        [0] Live updates are on again. No { -machine } started waiting while they were paused.
+        [one] Live updates are on again. One { -machine } started waiting while they were paused.
+       *[other] Live updates are on again. { $count } { -machine(form: "other") } started waiting while they were paused.
+    }
+
+# Said politely when live updates on the Machines tab are on again after a
+# pause taken before the tab had listed any machine, so none can be counted
+# as having started to wait meanwhile.
+ui-machines-resumed-unlisted = Live updates are on again.
 
 ## Settings' "Dry-run allowlist" tab (decision 89): the folders a plan dry
 ## run an AI agent asks for may read, which only a person sets.
