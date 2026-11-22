@@ -19,6 +19,8 @@ The pages' buttons (§4.5, #780) turn on `arrows`, `multimedia` and `files` (713
 
 The header's hamburger Menu button (decision 143) draws Lucide's `Menu`, which turns on `layout`: 136 icons, 98 of them in no category already on. That category alone adds 29,560 B (0.49 %) to the release `web` wasm built with `--no-default-features`, 5,986,103 B before and 6,015,663 B after, and 4,220 B (0.37 %) to its brotli, 1,151,933 B before and 1,156,153 B after. Measured as above, at `74524c76` and after (the category turned on in a copy of it).
 
+The web UI's files go out precompressed (§10.1, #1367): a release build's post-build hook writes a Brotli copy at quality 11 and a gzip copy at level 9 beside each file they make smaller, with Node's own `zlib`, so neither the build nor the daemon gains a crate for it. The release `web` wasm built with `--no-default-features` is 6,016,499 B; its Brotli copy is 1,158,221 B (19.3 %) and its gzip copy 1,907,958 B (31.7 %), and a browser downloads one of those in its place: over plain HTTP on loopback, Chromium and Firefox took the Brotli copy and WebKit the gzip one. The copies add 11 to 15 s to a release build of the UI. The release binary embeds them beside the files, so it grows 3,137,312 B (4.6 %), 67,796,480 B before and 70,933,792 B after. Measured with `just install` at `f1a274515` and on this change.
+
 ### 8.2 Backend crates
 
 | Concern | Crate |

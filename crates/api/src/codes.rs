@@ -589,6 +589,10 @@ pub enum ErrorCode {
     /// No route of the API serves the path asked for under `/api`: a typo,
     /// or a route of a newer or older Ladderback (§4.2). Nothing ran.
     RouteUnknown,
+    /// A handler of the daemon's panicked while it answered (§13.5): a
+    /// fault of Ladderback's own, so what was asked may be done in part.
+    /// The daemon goes on serving.
+    InternalError,
     /// The pairing token was already spent on another pairing (§16,
     /// decision 121, "Errors and their next step").
     TokenUsed,
@@ -1658,6 +1662,7 @@ impl ErrorCode {
             | Self::DownloadsUnavailable
             | Self::DownloadUnknown
             | Self::RouteUnknown
+            | Self::InternalError
             | Self::TokenUsed
             | Self::TokenExpired
             | Self::TokenRevoked

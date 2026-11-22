@@ -14,3 +14,17 @@ command_arguments = [
   "-c",
   "sh ../../scripts/web-packages.sh && npx --no-install tailwindcss -i tailwind.css -o tw-out.css --minify",
 ]
+
+# Precompression (technical design §10.1): after a release build, before trunk
+# moves its staging folder to dist, scripts/precompress.ts writes a Brotli and
+# a gzip copy of each file compression makes smaller, which the daemon sends
+# to a browser that reads them. Every recipe builds with `--release`; a debug
+# build (a bare `trunk serve`) skips it, so a rebuild on each edit doesn't wait
+# for Brotli's slowest quality.
+[[hooks]]
+stage = "post_build"
+command = "sh"
+command_arguments = [
+  "-c",
+  "[ \"$TRUNK_PROFILE\" != release ] || node ../../scripts/precompress.ts \"$TRUNK_STAGING_DIR\"",
+]
