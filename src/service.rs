@@ -88,7 +88,7 @@ fn full_disk_access_said(localizer: &Localizer, needed: bool, program: &ServiceP
 
 /// A data folder another process holds: the folder, and that process when
 /// the lock file names it.
-#[derive(Debug)]
+#[derive(Debug, PartialEq, Eq)]
 struct Held {
     folder: PathBuf,
     holder: Option<u32>,
@@ -113,6 +113,19 @@ fn data_folder_held(runtime: &tokio::runtime::Runtime, service: &UserService) ->
         return None;
     }
     Some(Held { folder, holder })
+}
+
+/// The data folder `folder` as held by another process, from what the
+/// check of its lock found: nothing when it is free or couldn't be checked,
+/// nor when the lock file names the service's own process, which
+/// `service_process` gives and is asked for only then.
+fn held_by_another(
+    folder: PathBuf,
+    checked: Result<(), LockError>,
+    service_process: impl FnOnce() -> Option<u32>,
+) -> Option<Held> {
+    let _ = (folder, checked, service_process);
+    todo!()
 }
 
 /// The note that says another Ladderback holds the data folder and must stop
@@ -347,7 +360,49 @@ mod tests {
 
     use domain::service::ServicePath;
 
-    use super::{Held, error_said, full_disk_access_said, held_said, shown};
+    use platform::data_dir_lock::LockError;
+
+    use super::{Held, error_said, full_disk_access_said, held_by_another, held_said, shown};
+
+    /// The manager is never asked for the service's process here.
+    fn not_asked() -> Option<u32> {
+        panic!("the manager was asked for the service's process")
+    }
+
+    /// Only a process other than the service's is named; a folder that is
+    /// free, or whose lock can't be checked, is said nothing of, and the
+    /// manager is asked for the service's process only when the lock file
+    /// names one (#459).
+    #[test]
+    fn only_a_holder_other_than_the_service_is_named() {
+        let folder = || PathBuf::from("/home/demo/.local/share/ladderback");
+        let held = |holder| {
+            Some(Held {
+                folder: folder(),
+                holder,
+            })
+        };
+        assert_eq!(held_by_another(folder(), Ok(()), not_asked), None);
+        let unavailable = LockError::Unavailable {
+            detail: "Operation not supported".to_owned(),
+        };
+        assert_eq!(held_by_another(folder(), Err(unavailable), not_asked), None);
+        let unnamed = LockError::InUse { holder: None };
+        assert_eq!(
+            held_by_another(folder(), Err(unnamed), not_asked),
+            held(None)
+        );
+        let named = || LockError::InUse { holder: Some(4321) };
+        assert_eq!(held_by_another(folder(), Err(named()), || Some(4321)), None);
+        assert_eq!(
+            held_by_another(folder(), Err(named()), || Some(4400)),
+            held(Some(4321))
+        );
+        assert_eq!(
+            held_by_another(folder(), Err(named()), || None),
+            held(Some(4321))
+        );
+    }
 
     /// After installing a launchd agent, the note names the program to grant
     /// Full Disk Access to, and where; a service that needs no grant gets

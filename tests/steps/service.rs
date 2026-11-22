@@ -403,23 +403,42 @@ fn stdout_never_says_keyring_waits_for_login(agent: &mut Agent) {
     );
 }
 
-/// Holds the data folder `install-service` runs with
-/// (`interop_steps::environment`) as a daemon does: the lock file names the
-/// test's own process.
-fn hold_the_data_folder(agent: &mut Agent) {
-    let folder = agent.scratch().join("data");
-    std::fs::create_dir_all(&folder).expect("the data folder");
-    agent.service.holder = Some(DataDirLock::acquire(&folder).expect("the data folder is free"));
+/// The data folder the service runs on: the platform's, under the scenario's
+/// home. The service file carries none of the shell's environment, so it is
+/// never the one `LADDERBACK_DATA_DIR` names there
+/// (`interop_steps::environment`).
+fn service_data_folder(agent: &Agent) -> PathBuf {
+    let home = agent.scratch().join("home");
+    if cfg!(target_os = "macos") {
+        home.join("Library/Application Support/ladderback")
+    } else {
+        home.join(".local/share/ladderback")
+    }
+}
+
+/// Holds `folder` as a daemon does: the lock file names the test's own
+/// process.
+fn hold(agent: &mut Agent, folder: &std::path::Path) {
+    std::fs::create_dir_all(folder).expect("the data folder");
+    agent.service.holder = Some(DataDirLock::acquire(folder).expect("the data folder is free"));
 }
 
 #[given("another Ladderback holds the data folder")]
 fn another_holds_the_data_folder(agent: &mut Agent) {
-    hold_the_data_folder(agent);
+    let folder = service_data_folder(agent);
+    hold(agent, &folder);
+}
+
+#[given("another Ladderback holds the data folder the shell names")]
+fn another_holds_the_shells_data_folder(agent: &mut Agent) {
+    let folder = agent.scratch().join("data");
+    hold(agent, &folder);
 }
 
 #[given("the service's own process holds the data folder")]
 fn the_service_holds_the_data_folder(agent: &mut Agent) {
-    hold_the_data_folder(agent);
+    let folder = service_data_folder(agent);
+    hold(agent, &folder);
     managers(agent).runs_as(NAME, std::process::id());
 }
 

@@ -164,7 +164,10 @@ Feature: Install the agent as a service
     `install-service` still installs and starts the service, and ends with
     status 0, but names the process that holds the folder and says the
     service takes over once it stops. The installed service holding the
-    folder is the one being replaced, and nothing is said of it.
+    folder is the one being replaced, and nothing is said of it. The service
+    runs on the platform's data folder: its file carries none of the shell's
+    environment, so a daemon on the folder `LADDERBACK_DATA_DIR` names in the
+    shell isn't in its way, and nothing is said of that one either.
 
     Scenario: Another Ladderback that holds the data folder is named
       Given another Ladderback holds the data folder
@@ -179,6 +182,13 @@ Feature: Install the agent as a service
       When the owner runs "install-service"
       Then the command exits with status 0
       And standard output says "replaced the service"
+      And standard output never says that another Ladderback holds the data folder
+
+    Scenario: A Ladderback on a data folder the service doesn't use is not named
+      Given another Ladderback holds the data folder the shell names
+      When the owner runs "install-service"
+      Then the command exits with status 0
+      And the service runs
       And standard output never says that another Ladderback holds the data folder
 
   Rule: Removing has the manager stop the service and removes its file
