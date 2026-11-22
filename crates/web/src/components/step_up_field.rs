@@ -10,6 +10,10 @@ use crate::announcer::Politeness;
 use crate::live::reply;
 use crate::text;
 
+// What the field's error goes through once a try is answered, decided on
+// the host.
+mod rules;
+
 /// What a step-up confirmation asks for (§10.4): the admin password with
 /// sign-in on, and with sign-in off the short ID of what is confirmed, or
 /// the hub key's fingerprint, shown beside the field, which `label` and

@@ -62,6 +62,23 @@ Then("the field {string} is not marked invalid", async function (this: BrowserWo
   await expect(this.page.getByRole("textbox", { name })).not.toHaveAttribute("aria-invalid", "true");
 });
 
+// An error an earlier try left is gone from what the field points at; the
+// announcer may still hold the words it said then, so the page as a whole
+// isn't searched.
+Then("the field {string} no longer shows the error {string}", async function (this: BrowserWorld, name: string, error: string) {
+  const input = this.page.getByRole("textbox", { name });
+  await expect
+    .poll(
+      async () => {
+        const ids = ((await input.getAttribute("aria-describedby")) ?? "").split(/\s+/).filter(Boolean);
+        const shown = await Promise.all(ids.map((id) => this.page.locator(`#${id}`).allTextContents()));
+        return shown.flat().some((text) => text.includes(error));
+      },
+      { message: `the field "${name}" still shows the error "${error}"` },
+    )
+    .toBe(false);
+});
+
 Then("the field {string} shows no error", async function (this: BrowserWorld, name: string) {
   const describedBy = await this.page.getByRole("textbox", { name }).getAttribute("aria-describedby");
   const shown = await Promise.all(
