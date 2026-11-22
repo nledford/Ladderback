@@ -66,6 +66,7 @@ pub(crate) fn test_state() -> AppState {
         recent_log: Arc::new(app::recent_log::RecentLogRing::new()),
         without_token: without_token_over(Arc::new(app::fakes::InMemoryConfigStore::new())),
         full_disk_access: crate::FullDiskAccessRoute::default(),
+        machine: crate::MachineRoute::default(),
         sync: crate::SyncHub::default(),
         #[cfg(feature = "hub")]
         pairing: unpaired(),

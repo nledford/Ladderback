@@ -82,6 +82,9 @@ pub(super) struct PlanRunner {
     /// What keeps the secret key files in the data folder out of every
     /// backup (§16, decisions 120 and 122).
     pub(super) left_out: KeyFilesLeftOut,
+    /// Where this machine stands: a data folder copied from another computer
+    /// runs no forget, prune or adoption (§7.1, §16 decision 144).
+    pub(super) machine: Arc<app::machine::MachineStanding>,
 }
 
 impl PlanRunner {

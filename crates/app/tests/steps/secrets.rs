@@ -6,7 +6,9 @@ use std::sync::{Arc, Mutex, PoisonError};
 
 use app::execution::RunOperation;
 use app::fakes::{FakeClock, FakeSecrets, Script};
-use app::keyring_check::{KeyringCheck, KeyringRead, KeyringUser, check_keyring_entries};
+use app::keyring_check::{
+    KeyringCheck, KeyringRead, KeyringUser, answer_wait, check_keyring_entries,
+};
 use app::ports::Clock;
 use app::retry::{RunEnd, RunOutcome};
 use app::secrets::ResolvedRepository;
@@ -49,6 +51,11 @@ pub struct SecretsWorld {
     checked_channels: std::collections::BTreeMap<ChannelName, Channel>,
     /// What the check of the keyring entries came to.
     keyring_check: Option<KeyringCheck>,
+    /// Each keyring entry the check told of before it read it, with how
+    /// many times it had been read when it was told of.
+    told_of: Vec<(KeyringEntry, usize)>,
+    /// Whether the check ran at a terminal, when a scenario says.
+    at_terminal: Option<bool>,
 }
 
 impl Default for SecretsWorld {
@@ -73,6 +80,8 @@ impl Default for SecretsWorld {
             checked_repositories: Default::default(),
             checked_channels: Default::default(),
             keyring_check: None,
+            told_of: Vec::new(),
+            at_terminal: None,
         }
     }
 }
@@ -1329,8 +1338,50 @@ async fn check_entries(agent: &mut Agent) {
     )
     .and_then(|config| config.with_notifications(notifications))
     .expect("the scenario's configuration is valid");
-    agent.secrets.keyring_check =
-        Some(check_keyring_entries(&config, agent.secrets.store.as_ref()).await);
+    let store = Arc::clone(&agent.secrets.store);
+    let mut told_of = Vec::new();
+    let checked = check_keyring_entries(&config, store.as_ref(), |entry| {
+        let reads = store.read_count(&SecretRef::Keyring(entry.clone()));
+        told_of.push((entry.clone(), reads));
+    })
+    .await;
+    agent.secrets.keyring_check = Some(checked);
+    agent.secrets.told_of = told_of;
+}
+
+#[when(regex = r"^the keyring entries are checked (at a terminal|with no terminal)$")]
+async fn check_entries_where(agent: &mut Agent, place: String) {
+    agent.secrets.at_terminal = Some(place == "at a terminal");
+    check_entries(agent).await;
+}
+
+#[then(expr = "the check waits {int} seconds for the keyring to answer each read")]
+fn check_waits(agent: &mut Agent, seconds: u64) {
+    let at_terminal = agent
+        .secrets
+        .at_terminal
+        .expect("the scenario says where the check ran");
+    assert_eq!(answer_wait(at_terminal).as_secs(), seconds);
+}
+
+#[then(expr = "the person was told of the keyring entry {string} before it was read")]
+fn told_before_read(agent: &mut Agent, entry: String) {
+    let told = &agent.secrets.told_of;
+    let Some((told_entry, reads)) = told.iter().find(|(told, _)| told.to_string() == entry) else {
+        panic!("the person was told of {told:?}");
+    };
+    assert_eq!(*reads, 0, "told of {entry} after {reads} read(s)");
+    let read = agent
+        .secrets
+        .store
+        .read_count(&SecretRef::Keyring(told_entry.clone()));
+    assert_eq!(read, 1, "{entry} was read {read} time(s) in all");
+}
+
+#[then(expr = "the person was told of {int} keyring entry/entries")]
+fn told_of_count(agent: &mut Agent, count: usize) {
+    let told = &agent.secrets.told_of;
+    assert_eq!(told.len(), count, "the person was told of {told:?}");
 }
 
 #[then(expr = "the check reports the repository {string} and its keyring entry {string} read")]

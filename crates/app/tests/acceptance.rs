@@ -29,6 +29,8 @@ mod locations_steps;
 #[path = "steps/maintenance.rs"]
 mod maintenance_steps;
 
+#[path = "steps/machine.rs"]
+mod machine_steps;
 #[path = "steps/maintainer.rs"]
 mod maintainer_steps;
 #[path = "steps/operation.rs"]
@@ -122,6 +124,7 @@ struct Agent {
     restore: restore_steps::RestoreWorld,
     recent_log: recent_log_steps::RecentLogWorld,
     maintainer: maintainer_steps::MaintainerWorld,
+    machine: machine_steps::MachineWorld,
     full_disk_access: full_disk_access_steps::FullDiskAccessWorld,
     download: download_steps::DownloadWorld,
     status: status_steps::StatusWorld,
@@ -180,6 +183,7 @@ impl Agent {
             updates: Default::default(),
             recent_log: Default::default(),
             maintainer: Default::default(),
+            machine: Default::default(),
             full_disk_access: Default::default(),
             status: Default::default(),
         }

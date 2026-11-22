@@ -38,6 +38,8 @@ mod announcer;
     )
 )]
 mod components;
+// The start page's notice of a data folder copied from another computer.
+mod copied_data_folder;
 // What the Log page lists and copies, decided on the host;
 // `daemon_log_page.rs` is its glue.
 mod daemon_log;

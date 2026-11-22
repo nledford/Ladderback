@@ -57,6 +57,10 @@ pub enum MaintenanceRefusal {
     /// What the run would act on is not what the selection it carried
     /// names: the repository changed after the preview. Nothing was done.
     SelectionChanged,
+    /// This machine's data folder was copied from another computer, or it
+    /// took a new machine ID since it started: it runs no forget, prune or
+    /// adoption (I1, I6).
+    DataFolderCopied,
     /// A secret of the repository's settings couldn't be resolved, or a
     /// setting with a reference isn't valid: the refusal says which, as the
     /// repository routes and the snapshot listing tell it.
@@ -302,6 +306,12 @@ fn answer(alias: &str, error: MaintenanceRefusal) -> (StatusCode, api::ErrorDto)
         MaintenanceRefusal::SelectionChanged => (
             StatusCode::CONFLICT,
             ErrorCode::MaintenanceSelectionChanged,
+            Vec::new(),
+            None,
+        ),
+        MaintenanceRefusal::DataFolderCopied => (
+            StatusCode::CONFLICT,
+            ErrorCode::MaintenanceDataFolderCopied,
             Vec::new(),
             None,
         ),

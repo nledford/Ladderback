@@ -7,20 +7,24 @@
 //! configuration the daemon reads (`LADDERBACK_CONFIG_DIR`, or the
 //! platform's folder), only reads it, and prints no secret: what an entry
 //! holds is dropped as soon as it is read (I4). What was read goes to
-//! stdout; what couldn't be, to stderr, and it then ends with 1.
+//! stdout; what couldn't be, to stderr, and it then ends with 1. On macOS,
+//! before each read, it says on stderr that the keychain may ask now, and
+//! at a terminal it waits five minutes for each answer (#1375).
 
 use std::io::{self, Read as _, Write};
 use std::path::Path;
 use std::process::ExitCode;
+use std::time::Duration;
 
 use api::MsgArg;
-use app::keyring_check::{KeyringCheck, KeyringUser, check_keyring_entries};
+use app::keyring_check::{KeyringCheck, KeyringUser, answer_wait, check_keyring_entries};
 use app::ports::ConfigError;
 use config_adapter::{MAX_CONFIG_BYTES, Schemas, parse};
 use domain::execution::refusal::SettingRefusal;
 use domain::planning::AgentConfig;
+use domain::secrets::KeyringEntry;
 use l10n::{Localizer, msg};
-use platform::dirs;
+use platform::{dirs, terminal};
 
 use crate::{finish, said, say, text};
 
@@ -58,16 +62,54 @@ fn run(localizer: &Localizer) -> io::Result<ExitCode> {
             return Ok(ExitCode::FAILURE);
         }
     };
-    let checked = runtime.block_on(check_keyring_entries(
-        &config,
-        &secrets::SystemSecrets::new(),
-    ));
+    let wait = keyring_wait(
+        terminal::stdin_is_terminal(),
+        terminal::stderr_is_terminal(),
+    );
+    let mut told = Ok(());
+    let checked = block_on_and_leave(
+        runtime,
+        check_keyring_entries(
+            &config,
+            &secrets::SystemSecrets::new().with_command_timeout(wait),
+            |entry| {
+                if told.is_ok() {
+                    told = notice(
+                        localizer,
+                        entry,
+                        wait,
+                        keyring_asks(std::env::consts::OS),
+                        &mut io::stderr().lock(),
+                    );
+                }
+            },
+        ),
+    );
+    told?;
     report(
         localizer,
         &checked,
         &mut io::stdout().lock(),
         &mut io::stderr().lock(),
     )
+}
+
+/// Runs `future` on `runtime`, then leaves without waiting for what it
+/// started and can't cancel: a keyring read that outlived its limit still
+/// waits for the keychain's answer on a thread of its own, and the command
+/// ends at the limit it said rather than when someone answers (#1375).
+fn block_on_and_leave<F: Future>(runtime: tokio::runtime::Runtime, future: F) -> F::Output {
+    let output = runtime.block_on(future);
+    runtime.shutdown_background();
+    output
+}
+
+/// How long each keyring read waits: as long as a person at a terminal
+/// may take, when standard input and standard error are both one, since
+/// the person reads the notice there and answers; otherwise as long as a
+/// run's read.
+fn keyring_wait(stdin_is_terminal: bool, stderr_is_terminal: bool) -> Duration {
+    answer_wait(stdin_is_terminal && stderr_is_terminal)
 }
 
 /// The configuration in `file`, only read, never migrated: a daemon may be
@@ -107,6 +149,33 @@ pub(crate) fn read_config(file: &Path) -> Result<AgentConfig, ConfigError> {
         });
     }
     parse(file, &contents, &Schemas::production()).map(|parsed| parsed.config)
+}
+
+/// Whether the keyring of the system `os` (as `std::env::consts::OS` names
+/// it) asks before it lets a new build read an entry: the macOS keychain
+/// does (#892); the others don't.
+fn keyring_asks(os: &str) -> bool {
+    os == "macos"
+}
+
+/// Says on `err`, just before `entry` is read, that the keychain may ask
+/// now, in a window that can be behind others, and to choose Always Allow;
+/// `wait` is how long the read waits for the answer. Only where the
+/// keyring `asks` before it lets a new build read an entry: macOS.
+fn notice(
+    localizer: &Localizer,
+    entry: &KeyringEntry,
+    wait: Duration,
+    asks: bool,
+    err: &mut impl Write,
+) -> io::Result<()> {
+    if !asks {
+        return Ok(());
+    }
+    let minutes = wait.as_secs().div_ceil(60);
+    let args = [("entry", text(entry)), ("minutes", MsgArg::Count(minutes))];
+    err.write_all(said(localizer, msg::CLI_CHECK_KEYRING_NOTICE, &args).as_bytes())?;
+    err.flush()
 }
 
 /// Says what `checked` came to: each entry read on `out`, each refused on
@@ -361,12 +430,106 @@ mod tests {
             Vec::new(),
         )
         .expect("a configuration");
-        let checked = check_keyring_entries(&config, secrets.as_ref()).await;
+        let checked = check_keyring_entries(&config, secrets.as_ref(), |_| {}).await;
         let (out, err, status) = reported(&checked);
         assert!(out.contains("nas: read the keyring entry"), "{out:?}");
         assert!(!out.contains("CANARY"), "{out:?}");
         assert!(!err.contains("CANARY"), "{err:?}");
         assert!(!format!("{checked:?}").contains("CANARY"));
         assert_eq!(status, ExitCode::SUCCESS);
+    }
+
+    /// What `notice` said of `entry`, where the keyring asks or doesn't.
+    fn noticed(entry_text: &str, wait: Duration, asks: bool) -> String {
+        let mut err = Vec::new();
+        notice(
+            &Localizer::new(&[]),
+            &entry(entry_text),
+            wait,
+            asks,
+            &mut err,
+        )
+        .expect("the notice is written");
+        String::from_utf8(err).expect("text")
+    }
+
+    /// On macOS the keychain may ask before the read: the notice names the
+    /// entry, says where the question may be and what to answer, and how
+    /// long the read waits, on one line (#1375).
+    #[test]
+    fn where_the_keyring_asks_the_notice_names_the_entry_and_the_answer() {
+        let said = noticed("ladderback/nas", Duration::from_secs(300), true);
+        assert!(said.starts_with("ladderback: "), "{said:?}");
+        assert!(said.contains("ladderback/nas"), "{said:?}");
+        assert!(said.contains("behind other windows"), "{said:?}");
+        assert!(said.contains("Always Allow"), "{said:?}");
+        assert!(said.contains("5 minutes"), "{said:?}");
+        assert_eq!(said.lines().count(), 1, "{said:?}");
+    }
+
+    /// A wait of a minute is said as one.
+    #[test]
+    fn a_wait_of_a_minute_is_said_as_one() {
+        let said = noticed("ladderback/nas", Duration::from_secs(60), true);
+        assert!(said.contains("1 minute "), "{said:?}");
+    }
+
+    /// Elsewhere the keyring doesn't ask a new build, so nothing is said.
+    #[test]
+    fn where_the_keyring_does_not_ask_nothing_is_said() {
+        assert_eq!(
+            noticed("ladderback/nas", Duration::from_secs(300), false),
+            ""
+        );
+    }
+
+    /// A keyring read that outlived its limit can't be cancelled: it waits
+    /// on for the keychain's answer. The command ends at the limit all the
+    /// same, not when someone answers (#1375).
+    #[test]
+    fn a_read_that_outlived_its_limit_does_not_hold_the_command() {
+        let (_never_answered, answer) = std::sync::mpsc::channel::<()>();
+        let (ended, end) = std::sync::mpsc::channel();
+        std::thread::spawn(move || {
+            let runtime = tokio::runtime::Builder::new_current_thread()
+                .enable_all()
+                .build()
+                .expect("a runtime");
+            block_on_and_leave(runtime, async {
+                let reading = tokio::task::spawn_blocking(move || answer.recv());
+                // As the secrets adapter waits for a read: to its limit.
+                let waited = tokio::time::timeout(Duration::from_millis(10), reading).await;
+                assert!(waited.is_err(), "the read was answered");
+            });
+            ended.send(()).expect("the test waits for the end");
+        });
+        assert!(
+            end.recv_timeout(Duration::from_secs(5)).is_ok(),
+            "the command waited for the read it gave up on"
+        );
+    }
+
+    /// Only standard input and standard error both at a terminal get a
+    /// person's wait: the notice is read on one and answered from the other.
+    #[test]
+    fn only_a_terminal_on_both_sides_gets_a_persons_wait() {
+        assert_eq!(keyring_wait(true, true), Duration::from_secs(300));
+        for (stdin, stderr) in [(true, false), (false, true), (false, false)] {
+            assert_eq!(
+                keyring_wait(stdin, stderr),
+                Duration::from_secs(60),
+                "stdin {stdin}, stderr {stderr}"
+            );
+        }
+    }
+
+    /// The macOS keychain asks a new build before it reads; the notice is
+    /// said there, and nowhere else.
+    #[test]
+    fn the_notice_is_said_on_macos_alone() {
+        assert!(keyring_asks("macos"), "macOS's keychain asks");
+        for os in ["linux", "freebsd", "windows"] {
+            assert!(!keyring_asks(os), "{os}'s keyring doesn't ask");
+        }
     }
 }

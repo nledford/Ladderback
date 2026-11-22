@@ -569,6 +569,10 @@ error-download-unknown = This download is no longer waiting: it was already fetc
 # path, or a program newer or older than the daemon. Nothing was done.
 error-route-unknown = This version of { -brand-name } has no such route, so nothing was done. Check the path the program asked for; if the program is newer or older than this { -brand-name }, update the older one.
 
+# A fault of Ladderback's own stopped it while it answered: a handler of the
+# daemon panicked. What was asked may be done in part; the daemon goes on.
+error-internal-error = { -brand-name } stopped answering through a fault of its own, so what you asked may be done only in part. Look at the page again before you try once more, and report the fault if it comes back.
+
 # The pairing token was already spent. The hub answers the same machine with
 # the same key as before, so a pairing whose answer was lost can be repeated.
 # `pair` is typed as it is: keep it a string literal.
@@ -724,6 +728,16 @@ error-adoption-ambiguous = Plans { $plans } all match that history, and which on
 # A forget or an adoption was started with the selection its preview named,
 # and the snapshots it would act on have changed since, so nothing was done.
 error-maintenance-selection-changed = The repository changed after you reviewed this, so nothing was done. Review it again to see what it would do now.
+
+# The data folder was copied from another computer (the identifier the
+# system gives this one isn't the one recorded with the machine ID), or a new
+# machine ID was taken that is used from the next start, so this machine
+# runs no forget, prune or adoption. Backups and checks still run.
+error-maintenance-data-folder-copied = This computer's data folder came from another computer, so it doesn't forget, prune or adopt snapshots: it could remove the other computer's. Backups and checks still run. If this is a new computer, take a new machine ID from the start page and restart { -brand-name }.
+
+# A new machine ID was asked for, and the data folder wasn't copied from
+# another computer, or a new ID was taken for it already, so nothing changed.
+error-machine-not-copied = No new machine ID was taken: this computer's data folder wasn't copied from another computer, or it took a new ID already. Nothing changed.
 
 # The repository did not answer a read in time, so there was nothing to show
 # or to review.

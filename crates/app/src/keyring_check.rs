@@ -7,6 +7,10 @@
 //! are read, a repository's password and a notification channel's address,
 //! token or password: no other source asks, and a command is never run.
 //! What an entry holds is dropped as soon as it is read, and never reported.
+//! The person is told before each read, as the question can open behind
+//! other windows, and at a terminal is given time to find it (#1375).
+
+use std::time::Duration;
 
 use domain::RepositoryAlias;
 use domain::execution::refusal::SettingRefusal;
@@ -53,12 +57,23 @@ impl KeyringCheck {
     }
 }
 
+/// How long a check waits for the keyring to answer each read. At a
+/// terminal a person is there to answer the keychain's question, which can
+/// open behind other windows and be found late: five minutes, over twice
+/// the 142 s a person took to find and answer one (#1375). Anywhere else
+/// nobody answers it, so a check waits as long as a run does: a minute.
+pub fn answer_wait(at_terminal: bool) -> Duration {
+    Duration::from_secs(if at_terminal { 5 * 60 } else { 60 })
+}
+
 /// Reads, through `secrets`, each keyring entry a repository or a
 /// notification channel of `config` takes a secret from, once, however
-/// many of them share it.
+/// many of them share it. `before_read` is told of each entry just before
+/// it is read, once.
 pub async fn check_keyring_entries(
     config: &AgentConfig,
     secrets: &dyn SecretResolver,
+    mut before_read: impl FnMut(&KeyringEntry),
 ) -> KeyringCheck {
     // Nothing was read, so there is no secret to mask.
     let redactor = Redactor::new([]);
@@ -91,6 +106,7 @@ pub async fn check_keyring_entries(
         let refused = match read.iter().find(|(seen, _)| seen == entry) {
             Some((_, refused)) => refused.clone(),
             None => {
+                before_read(entry);
                 // The value is dropped here, unread by anything.
                 let refused = secrets
                     .resolve(secret)

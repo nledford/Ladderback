@@ -407,6 +407,8 @@ pub(super) fn translate(event: WorkerEvent, redactor: &Redactor) -> Option<Engin
                 | ErrorCode::ProfileExportUrlPassword
                 | ErrorCode::ProfileExportTagComma
                 | ErrorCode::MaintenanceSelectionChanged
+                | ErrorCode::MaintenanceDataFolderCopied
+                | ErrorCode::MachineNotCopied
                 | ErrorCode::RepositoryReadTimedOut
                 | ErrorCode::OperationUnknown
                 | ErrorCode::OperationNotRunning
@@ -428,6 +430,7 @@ pub(super) fn translate(event: WorkerEvent, redactor: &Redactor) -> Option<Engin
                 | ErrorCode::EntryUnknown
                 | ErrorCode::DownloadUnknown
                 | ErrorCode::RouteUnknown
+                | ErrorCode::InternalError
                 | ErrorCode::TokenUsed
                 | ErrorCode::TokenExpired
                 | ErrorCode::TokenRevoked

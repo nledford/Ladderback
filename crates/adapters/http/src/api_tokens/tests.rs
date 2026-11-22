@@ -407,6 +407,8 @@ fn the_permission_table_names_each_route_a_token_may_use_and_no_other() {
         (Method::GET, "/api/v1/full-disk-access", None),
         (Method::POST, "/api/v1/full-disk-access/check", None),
         (Method::POST, "/api/v1/full-disk-access/settings", None),
+        (Method::GET, "/api/v1/machine", None),
+        (Method::POST, "/api/v1/machine/new-id", None),
         (Method::DELETE, "/api/v1/tokens/abcdefghijkl", None),
         (Method::POST, "/api/v1/repositories", None),
         (Method::POST, "/api/v1/repositories/_test", None),

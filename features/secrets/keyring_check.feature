@@ -73,6 +73,34 @@ Feature: Reading each keyring entry once, while someone is there
       And the keyring entry "ladderback/alerts" was read 1 time
       And the check fails
 
+  Rule: The person is told before each read, and given time to answer
+
+    The keychain's question can open behind other windows, and a person
+    who is told nothing doesn't look for it (#1375). So, on macOS, the
+    command says before each read which keyring entry it reads, that the
+    keychain may ask now, perhaps behind other windows, and to choose
+    Always Allow; on other systems it says nothing, as their keyrings
+    don't ask. At a terminal, where a person answers, it waits five
+    minutes for each answer; anywhere else it waits the minute a run
+    waits, as the daemon does.
+
+    Scenario: The person is told of each keyring entry before it is read, once
+      Given the repository "nas" takes its password from the keyring entry "ladderback/nas"
+      And the keyring holds "CANARY-nas-password" under "ladderback/nas"
+      And the repository "usb" takes its password from the keyring entry "ladderback/nas"
+      When the keyring entries are checked
+      Then the person was told of the keyring entry "ladderback/nas" before it was read
+      And the person was told of 1 keyring entry
+
+    Scenario Outline: A check <where> waits <seconds> seconds for each answer
+      When the keyring entries are checked <where>
+      Then the check waits <seconds> seconds for the keyring to answer each read
+
+      Examples:
+        | where            | seconds |
+        | at a terminal    | 300     |
+        | with no terminal | 60      |
+
   Rule: The command reads the configuration the daemon reads
 
     The examples name no keyring entry: one would ask the real keyring of

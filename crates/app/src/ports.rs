@@ -30,6 +30,7 @@ mod session_store;
 mod signing;
 mod sources;
 mod stats_store;
+mod this_machine;
 mod tls_keys;
 mod walk;
 
@@ -84,5 +85,6 @@ pub use session_store::SessionStore;
 pub use signing::{Signing, SigningError};
 pub use sources::{NormalizeSources, SourcesError};
 pub use stats_store::StatsStore;
+pub use this_machine::{MachineError, ThisMachine};
 pub use tls_keys::{TlsKeyError, TlsKeys};
 pub use walk::{GiveWay, WalkError, WalkLimits, WalkSources, WalkStop, Walked};

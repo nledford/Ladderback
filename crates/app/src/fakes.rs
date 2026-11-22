@@ -29,6 +29,7 @@ mod session_store;
 mod signing;
 mod sources;
 mod stats_store;
+mod this_machine;
 mod tls_keys;
 mod walk;
 
@@ -60,5 +61,6 @@ pub use session_store::InMemorySessionStore;
 pub use signing::FakeSigning;
 pub use sources::FakeSources;
 pub use stats_store::InMemoryStatsStore;
+pub use this_machine::FakeThisMachine;
 pub use tls_keys::FakeTlsKeys;
 pub use walk::InMemoryTree;

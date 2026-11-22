@@ -29,6 +29,29 @@ pub enum FullDiskAccessStateDto {
     NotApplicable,
 }
 
+/// What `GET /api/v1/machine` answers, and `POST /api/v1/machine/new-id`
+/// once the new ID is taken (§7.1, §16 decision 144): where this machine
+/// stands, as the check at start found it.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "kebab-case")]
+pub struct MachineDto {
+    pub standing: MachineStandingDto,
+}
+
+/// Where this machine stands: `copied` when its data folder came from
+/// another computer, so it runs no forget, prune or adoption;
+/// `new-id-taken` once the person took a new machine ID, used from the next
+/// start; `unread` when this computer's identifier couldn't be read, so a
+/// copy can't be told and the machine runs as usual.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "kebab-case")]
+pub enum MachineStandingDto {
+    Same,
+    Copied,
+    NewIdTaken,
+    Unread,
+}
+
 /// What `GET /api/v1/status` answers: the status summary (§3.1, §4.6). Each
 /// plan, in the order the configuration writes them; the operations queued
 /// or running among the newest 200, newest first; the repositories

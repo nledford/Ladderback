@@ -13,7 +13,8 @@ use domain::{AgentId, OperationId, PlanId, RepositoryAlias, Uuid};
 use super::Agent;
 use super::forget_steps::{assess_and_start, use_case};
 use app::maintenance::{Adoption, AdoptionSource, MaintenanceError, MaintenanceKind};
-use app::ports::{HistoryQuery, OperationStore};
+use app::ports::{ConfigStore, HistoryQuery, OperationStore};
+use app::reads::ReadTurns;
 use app::repositories::ChangeMaintainer;
 
 fn alias() -> RepositoryAlias {
@@ -59,11 +60,31 @@ async fn maintained_by(agent: &mut Agent, maintenance: String) {
 
 #[when(regex = r"^this agent is asked for (.+) of the repository$")]
 async fn asked_for(agent: &mut Agent, what: String) {
-    let (kind, preview) = asked(&what);
     let use_case = use_case(agent);
     // A run that isn't refused would wait for the scripted engine's release,
     // which no step here gives: it is cut off, and the scenario fails.
     let answered = tokio::time::timeout(Duration::from_secs(5), async {
+        if what == "a proposal's forget preview" {
+            // A proposal that changes nothing of the repository: the forget
+            // its approval would run is the one the configuration runs now.
+            let config = agent
+                .forget
+                .config()
+                .load()
+                .await
+                .expect("the configuration loads");
+            return use_case
+                .compare_forget(
+                    operation(),
+                    &config,
+                    &config,
+                    &alias(),
+                    &ReadTurns::default(),
+                )
+                .await
+                .map(drop);
+        }
+        let (kind, preview) = asked(&what);
         if preview {
             use_case
                 .preview(operation(), &alias(), &kind)

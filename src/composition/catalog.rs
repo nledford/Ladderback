@@ -445,6 +445,7 @@ fn told_failure(reason: &FailureReason) -> Option<SnapshotsError> {
         | M::AdoptionAmbiguous { .. }
         | M::InvalidBody
         | M::SelectionChanged
+        | M::DataFolderCopied
         | M::TimedOut => None,
     }
 }

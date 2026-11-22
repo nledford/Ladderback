@@ -171,7 +171,10 @@ Feature: Update the service from a checkout without interrupting an operation
     build read a keyring entry. The new program reads each entry once
     (`ladderback check-keyring`), in the terminal, before the wait and the
     restart, so the keychain asks while someone is there and not at the
-    next scheduled backup or notification.
+    next scheduled backup or notification. The question can come behind
+    other windows and be answered late (#1375): at a terminal, a read that
+    fails keeps the new build and offers one more check, once the person
+    has answered; without a terminal nobody can answer, and it stops.
 
     Scenario: The new program reads the keyring entries before the service restarts
       When the owner runs install-restart
@@ -196,6 +199,27 @@ Feature: Update the service from a checkout without interrupting an operation
       And standard error says "could not read the keyring entry ladderback/nas"
       And standard error says "the new program couldn't read every keyring entry"
       And standard error says "--ignore-keyring-failure restarts all the same"
+      And the new program read the keyring entries 1 time
+      And no staging folder is left
+
+    Scenario: At a terminal, the keyring entries are checked again once the person has answered
+      Given the new program can't read a keyring entry until it checks again
+      When the owner runs install-restart at a terminal and presses Enter when asked
+      Then the command exits with status 0
+      And the new program read the keyring entries 2 times
+      And the service runs a new process
+      And the terminal said "the new build is kept"
+      And the terminal said "then press Enter to check again"
+
+    Scenario: At a terminal, a keyring entry still unreadable on the second check stops it, saying what to do next
+      Given the new program can't read a keyring entry
+      When the owner runs install-restart at a terminal and presses Enter when asked
+      Then the command exits with status 1
+      And the new program read the keyring entries 2 times
+      And the new program never restarted the service
+      And the installed program is still the one from before
+      And no staging folder is left
+      And the terminal said "run just install-restart again"
 
     Scenario: --ignore-keyring-failure restarts despite a keyring entry the new program can't read
       Given the new program can't read a keyring entry

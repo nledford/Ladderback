@@ -580,6 +580,13 @@ async fn state_over(
     }
     let agent_id = agent_id::load_or_create(data_dir)
         .map_err(|detail| store_refused(data_dir, &detail.to_string()))?;
+    // Before anything maintains: a data folder copied from another computer
+    // runs no forget, prune or adoption (§7.1, §16 decision 144).
+    let this_machine: Arc<dyn app::ports::ThisMachine> =
+        Arc::new(platform::this_machine::SystemMachine::in_data_dir(data_dir));
+    let standing = Arc::new(app::machine::MachineStanding::new(machine_checked(
+        this_machine.as_ref(),
+    )));
     // Workers are this program: `ladderback worker` (§4.1).
     let program = std::env::current_exe().map_err(|detail| Refused {
         message: msg::CLI_CANNOT_FIND_OWN_PATH,
@@ -597,6 +604,15 @@ async fn state_over(
     // connection, a creation, the record of an opened repository's ID and a
     // plan's change (§6.1, decisions 57 and 96).
     let writes = Arc::new(ConfigWrites::default());
+    // A new machine ID gives up maintenance under the same lock, and not
+    // while a maintenance operation the log holds still runs (I1).
+    let machine_route = http_adapter::MachineRoute::new(Arc::new(app::machine::TakeNewId::new(
+        this_machine,
+        Arc::clone(&standing),
+        Arc::clone(&config),
+        Arc::clone(&store),
+        Arc::clone(&writes),
+    )));
     // What AI agents may do without a token: the configuration's
     // `[without-token]` table, changed under the same lock (§10.5).
     let without_token = Arc::new(app::without_token::WithoutToken::new(
@@ -649,6 +665,7 @@ async fn state_over(
         // kept in the operation log's database (§16, decision 104).
         readings: Arc::<SqliteStore>::clone(&log.store),
         full_disk_access,
+        machine: standing,
     });
     // `~/ladderback-restore`. With no home folder, or one that isn't
     // UTF-8, there is none: a restore to a new folder then needs
@@ -813,6 +830,7 @@ async fn state_over(
             recent_log: Arc::new(app::recent_log::RecentLogRing::new()),
             without_token,
             full_disk_access: full_disk_access_route,
+            machine: machine_route,
             sync: http_adapter::SyncHub::default(),
             #[cfg(feature = "hub")]
             pairing: Arc::new(app::pairing::PairingState::new(Arc::new(
@@ -822,6 +840,32 @@ async fn state_over(
         background,
         stopping,
     ))
+}
+
+/// Where this machine stands, from the check at start of whether its data
+/// folder was copied from another computer (§7.1, §16 decision 144), each
+/// finding said in the log. A check that can't tell refuses nothing.
+fn machine_checked(machine: &dyn app::ports::ThisMachine) -> app::machine::Standing {
+    use app::machine::Found;
+    let found = app::machine::check_at_start(machine);
+    match &found {
+        Found::Same => {}
+        Found::Recorded => log::info!(
+            "recorded this computer's machine identifier beside the machine ID, so a copy of this data folder on another computer can be told"
+        ),
+        Found::RecordFailed(error) => log::warn!(
+            "this computer's machine identifier couldn't be recorded beside the machine ID, so a copy of this data folder on another computer can't be told yet; the next start tries again: {}",
+            error.detail
+        ),
+        Found::Copied => log::warn!(
+            "this data folder was copied from another computer: backups run as usual, and forget, prune and adoption are stopped so this computer can't remove the other's snapshots; if this is a new computer, take a new machine ID on the start page"
+        ),
+        Found::Unread(error) => log::warn!(
+            "this computer's machine identifier couldn't be read, so a copy of this data folder from another computer can't be told, and maintenance runs as usual: {}",
+            error.detail
+        ),
+    }
+    found.standing()
 }
 
 /// The agent's Full Disk Access check and its routes (§16, decision 115): on

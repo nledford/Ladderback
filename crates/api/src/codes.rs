@@ -445,6 +445,15 @@ pub enum ErrorCode {
     /// ones its preview named: the repository changed after the review, so
     /// nothing was done (I6).
     MaintenanceSelectionChanged,
+    /// This machine's data folder was copied from another computer, or it
+    /// took a new machine ID it uses from its next start, so it runs no
+    /// forget, prune or adoption: they could take the other computer's
+    /// snapshots for its own (I1, I6). Backups and checks still run.
+    MaintenanceDataFolderCopied,
+    /// A new machine ID was asked for on a machine whose data folder was
+    /// not copied from another computer, or that took one already, so
+    /// nothing changed.
+    MachineNotCopied,
     /// The repository did not answer a read in time, so its history, or a
     /// preview of a maintenance run, could not be shown.
     RepositoryReadTimedOut,
@@ -580,6 +589,10 @@ pub enum ErrorCode {
     /// No route of the API serves the path asked for under `/api`: a typo,
     /// or a route of a newer or older Ladderback (§4.2). Nothing ran.
     RouteUnknown,
+    /// A handler of the daemon's panicked while it answered (§13.5): a
+    /// fault of Ladderback's own, so what was asked may be done in part.
+    /// The daemon goes on serving.
+    InternalError,
     /// The pairing token was already spent on another pairing (§16,
     /// decision 121, "Errors and their next step").
     TokenUsed,
@@ -1514,6 +1527,8 @@ impl ErrorCode {
             }],
             Self::AdoptionNoMatch => &[],
             Self::MaintenanceSelectionChanged
+            | Self::MaintenanceDataFolderCopied
+            | Self::MachineNotCopied
             | Self::RepositoryReadTimedOut
             | Self::ProfileCommandsUnconfirmed => &[],
             Self::AdoptionAmbiguous => &[ArgSpec {
@@ -1647,6 +1662,7 @@ impl ErrorCode {
             | Self::DownloadsUnavailable
             | Self::DownloadUnknown
             | Self::RouteUnknown
+            | Self::InternalError
             | Self::TokenUsed
             | Self::TokenExpired
             | Self::TokenRevoked
