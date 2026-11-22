@@ -113,6 +113,39 @@ ui-full-disk-access-unknown = { -brand-name } can't tell whether it has { -full-
 # Said when a button of the warning got no answer from the daemon, so nothing changed.
 ui-full-disk-access-unreachable = The daemon that serves this page did not answer, so nothing changed. Try again in a moment.
 
+# The heading of the start page's notice, shown when the machine identifier the operating system gives this computer isn't the one recorded beside its machine ID: its data folder was made on another computer. It names the notice's region.
+ui-copied-data-folder-heading = This data folder came from another computer
+
+# What the notice says under its heading while the data folder is a copy. Forget, prune and adoption are the maintenance a copy doesn't run.
+ui-copied-data-folder-body = { -brand-name } found that this computer isn't the one its data folder was made on: the folder was restored from a backup, or copied with a disk or a virtual machine. Backups run as usual. Forget, prune and adoption are stopped, so this computer can't remove the other computer's snapshots as if they were its own.
+
+# The notice's button, which asks first, in a dialog, before taking a new machine ID.
+ui-copied-data-folder-new-id = This is a new computer: take a new ID
+
+# The title of the dialog that asks before taking a new machine ID.
+ui-copied-data-folder-review-title = Take a new machine ID?
+
+# What that dialog says: what happens to this computer's plans, its maintenance and the snapshots taken under the old machine ID.
+ui-copied-data-folder-review-body = This computer keeps its plans, and its backups carry the new ID once { -brand-name } restarts. It stops maintaining every repository it maintained: turn maintenance back on for each repository this computer should maintain. The snapshots under the old ID stay the other computer's.
+
+# The dialog's button that takes the new machine ID.
+ui-copied-data-folder-review-confirm = Take a new ID
+
+# Said in the dialog while the new machine ID is being taken.
+ui-copied-data-folder-review-taking = Taking a new machine ID…
+
+# What the notice says once the new machine ID is taken: it is used from the next start, and until then maintenance stays stopped.
+ui-copied-data-folder-taken = New machine ID taken. Restart { -brand-name } to start using it: until then, forget, prune and adoption stay stopped.
+
+# Said under that: taking the new ID turned maintenance off on each repository this computer maintained.
+ui-copied-data-folder-maintenance-off = Maintenance is off on every repository this computer maintained. Once { -brand-name } has restarted, turn it back on for each repository this computer should maintain.
+
+# The notice's link to the Settings page's restart, once the new machine ID is taken.
+ui-copied-data-folder-restart = Restart { -brand-name }
+
+# Said in the dialog when the request for a new machine ID got no answer from the daemon, so nothing changed.
+ui-copied-data-folder-unreachable = The daemon that serves this page did not answer, so no new machine ID was taken. Try again in a moment.
+
 # The title of the page shown for an address nothing serves: the browser's tab
 # and history show it.
 ui-not-found-title = Page not found – { -brand-name }

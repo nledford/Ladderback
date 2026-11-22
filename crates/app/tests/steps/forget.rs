@@ -781,7 +781,8 @@ pub fn use_case_on(agent: &Agent, clock: Arc<dyn Clock>) -> Arc<RunMaintenance> 
                     recorded_folder: agent.forget.recorded_folder.clone(),
                     reads: Arc::clone(&agent.forget.source_reads),
                 }),
-            )),
+            ))
+            .with_machine(agent.machine.standing()),
     )
 }
 

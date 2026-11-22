@@ -28,6 +28,7 @@ pub mod scratch;
 pub mod service;
 mod source;
 pub mod terminal;
+pub mod this_machine;
 pub mod token_file;
 
 use app::ports::Clock;

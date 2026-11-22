@@ -87,6 +87,7 @@ fn refusal_of(repository: &str) -> Option<MaintenanceRefusal> {
         },
         "bad-token" => MaintenanceRefusal::InvalidBody,
         "stale" => MaintenanceRefusal::SelectionChanged,
+        "copied" => MaintenanceRefusal::DataFolderCopied,
         "no-secret" => MaintenanceRefusal::SecretRefused(SecretRefusal {
             code: api::ErrorCode::SecretMissing,
             args: vec![
@@ -504,6 +505,7 @@ fn state() -> AppState {
             app::fakes::InMemoryConfigStore::new(),
         )),
         full_disk_access: FullDiskAccessRoute::default(),
+        machine: crate::MachineRoute::default(),
         sync: SyncHub::default(),
         #[cfg(feature = "hub")]
         pairing: crate::request_checks::tests::unpaired(),
@@ -553,6 +555,7 @@ async fn serving() -> (std::net::SocketAddr, Arc<app::fakes::InMemoryEventBus>) 
             app::fakes::InMemoryConfigStore::new(),
         )),
         full_disk_access: FullDiskAccessRoute::default(),
+        machine: crate::MachineRoute::default(),
         sync: SyncHub::default(),
         #[cfg(feature = "hub")]
         pairing: crate::request_checks::tests::unpaired(),
@@ -1161,6 +1164,27 @@ async fn maintenance_of_a_repository_this_agent_does_not_maintain_is_a_conflict_
             let (status, answer) = json_of(response).await;
             assert_eq!(status.as_u16(), 409, "{kind} on {route}");
             assert_eq!(answer, expected, "{kind} on {route}");
+        }
+    }
+}
+
+#[tokio::test]
+async fn maintenance_in_a_copied_data_folder_is_a_conflict_saying_so() {
+    use serde_json::json;
+    for route in [
+        "/api/v1/repositories/copied/maintenance/preview",
+        "/api/v1/repositories/copied/maintenance",
+    ] {
+        for kind in ["forget", "prune"] {
+            let body = format!(r#"{{"kind":"{kind}"}}"#);
+            let response = request(ui(), Method::POST, route, &body).await;
+            let (status, answer) = json_of(response).await;
+            assert_eq!(status.as_u16(), 409, "{kind} on {route}");
+            assert_eq!(
+                answer,
+                json!({"code": "maintenance-data-folder-copied"}),
+                "{kind} on {route}"
+            );
         }
     }
 }
@@ -2255,6 +2279,7 @@ async fn send_counted(method: Method, path: &str, body: String) -> (Response, us
             app::fakes::InMemoryConfigStore::new(),
         )),
         full_disk_access: FullDiskAccessRoute::default(),
+        machine: crate::MachineRoute::default(),
         sync: SyncHub::default(),
         #[cfg(feature = "hub")]
         pairing: crate::request_checks::tests::unpaired(),

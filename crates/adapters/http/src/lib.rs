@@ -21,6 +21,7 @@ mod handed;
 #[cfg(feature = "hub")]
 mod hub_pages;
 mod listener;
+mod machine;
 mod maintenance;
 mod plans;
 mod precompressed;
@@ -66,6 +67,7 @@ pub use full_disk_access::{FullDiskAccessRoute, SettingsOpener, SettingsUnopened
 #[cfg(feature = "hub")]
 pub use handed::{BuiltInTls, Handed, HandedIo, HandedListener, HandedPeer, handed};
 pub use listener::{GatedListener, PeerAddr};
+pub use machine::MachineRoute;
 pub use maintenance::{MaintenanceRefusal, MaintenanceRequest};
 pub use plans::{Plans, PlansError};
 pub use profiles::{Profiles, ProfilesError};
@@ -140,6 +142,9 @@ pub struct AppState {
     /// What the Full Disk Access probe found, and what opens System
     /// Settings' pane for it: neither off macOS (§16, decision 115).
     pub full_disk_access: FullDiskAccessRoute,
+    /// Where this machine stands, and what takes a new machine ID for a data
+    /// folder copied from another computer (§7.1, §16 decision 144).
+    pub machine: MachineRoute,
     /// What `/sync/` serves: the hub's handshake under `serve --hub`, and
     /// nothing otherwise (§16, decision 122).
     pub sync: SyncHub,
@@ -608,6 +613,11 @@ pub fn router(assets: Arc<dyn AssetSource>, checks: RequestChecks, state: AppSta
         .route(
             full_disk_access::SETTINGS_PATH,
             axum::routing::post(full_disk_access::open_settings),
+        )
+        .route(machine::MACHINE_PATH, axum::routing::get(machine::read))
+        .route(
+            machine::NEW_ID_PATH,
+            axum::routing::post(machine::take_new_id),
         )
         .route("/api/v1/operations/{id}", axum::routing::get(get_operation))
         .route(

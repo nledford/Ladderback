@@ -30,6 +30,7 @@ pub mod interop;
 pub mod keyring_check;
 pub mod locations;
 pub mod log_write;
+pub mod machine;
 pub mod maintenance;
 pub mod notifications;
 pub mod pairing;
