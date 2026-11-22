@@ -3,7 +3,9 @@ Feature: Making a pairing token on the hub's page
   On a hub, Settings has a Machines tab where a person makes a pairing token
   for another machine, confirmed by a step-up each time. The dialog shows the
   token once, with the hub key's fingerprint in full, the certificate it
-  trusts and when it lapses, counted down on the page's own clock. Closing
+  trusts when its address shows one, and when it lapses, counted down on the
+  page's own clock. A plain http address shows no certificate, so the form
+  offers no choice of one for it and the dialog names none. Closing
   the dialog, by Close or Escape, cancels a token no machine has used, and the
   dialog says so beside Close (§16, decision 121, "The hub's dialog").
   With sign-in off, the tab warns that a hub reached through a reverse proxy
