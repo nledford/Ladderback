@@ -332,6 +332,156 @@ async fn reports_far_behind_the_last_taken_are_warned_of_once() {
     assert!(!warned.concat().contains(&operation.to_string()));
 }
 
+/// An outbox the agent's database can't read.
+struct UnreadableOutbox;
+
+#[async_trait]
+impl crate::ports::Outbox for UnreadableOutbox {
+    async fn append(
+        &self,
+        _: &domain::fleet::AgentReport,
+    ) -> Result<crate::ports::Appended, crate::ports::StoreError> {
+        Err(unreadable())
+    }
+
+    async fn unacknowledged(
+        &self,
+        _: Option<domain::fleet::ReportSeq>,
+        _: usize,
+    ) -> Result<Vec<crate::ports::OutboxEntry>, crate::ports::StoreError> {
+        Err(unreadable())
+    }
+
+    async fn acknowledge(
+        &self,
+        _: domain::fleet::OutboxEpoch,
+        _: domain::fleet::ReportSeq,
+    ) -> Result<(), crate::ports::StoreError> {
+        Err(unreadable())
+    }
+}
+
+fn unreadable() -> crate::ports::StoreError {
+    crate::ports::StoreError::Unavailable {
+        detail: "disk I/O error".to_owned(),
+    }
+}
+
+/// Runs the agent's sync loop through `waits` of its waits on `clock`, and
+/// returns the warnings it logged. The loop runs on a thread of its own, so
+/// a loop that never waits fails the test within a second rather than
+/// holding it up forever.
+async fn warned_by_the_sync_loop(
+    sync: crate::sync::SyncWithHub,
+    clock: &FakeClock,
+    waits: usize,
+) -> Vec<String> {
+    let (stop, stopped) = tokio::sync::oneshot::channel::<()>();
+    let (logged, logs) = tokio::sync::oneshot::channel();
+    std::thread::spawn(move || {
+        let runtime = tokio::runtime::Builder::new_current_thread()
+            .build()
+            .unwrap();
+        let lines = runtime.block_on(async {
+            crate::test_log::capture_the_log();
+            tokio::select! {
+                () = sync.run() => unreachable!("the sync loop runs until it is stopped"),
+                _ = stopped => {}
+            }
+            crate::test_log::logged_by("app::sync")
+        });
+        let _ = logged.send(lines);
+    });
+    for _ in 0..waits {
+        let mut slept = false;
+        for _ in 0..1_000 {
+            if let Some(next) = clock.until_next_sleeper() {
+                clock.advance(next);
+                slept = true;
+                break;
+            }
+            tokio::time::sleep(std::time::Duration::from_millis(1)).await;
+        }
+        assert!(slept, "the sync loop stopped waiting");
+    }
+    stop.send(()).unwrap();
+    tokio::time::timeout(std::time::Duration::from_secs(5), logs)
+        .await
+        .expect("the sync loop stops when told")
+        .unwrap()
+        .into_iter()
+        .filter(|(level, _)| *level == log::Level::Warn)
+        .map(|(_, line)| line)
+        .collect()
+}
+
+/// The agent's sync loop logs a streak of failures once, at its first: a hub
+/// it can't reach, and an outbox it can't read, aren't logged at every retry.
+#[tokio::test]
+async fn the_sync_loop_logs_a_streak_of_failures_once() {
+    use crate::ports::Outbox as _;
+    use crate::sync::SyncWithHub;
+    use domain::fleet::{AgentReport, Happening, OutboxEpoch};
+
+    let hub = hub_with(1, |pairing| pairing);
+    let identity = paired(&hub, 1).await;
+    let outbox = Arc::new(crate::fakes::InMemoryOutbox::new(OutboxEpoch::from_uuid(
+        Uuid::from_u128(0xe1),
+    )));
+    outbox
+        .append(&AgentReport {
+            op_id: domain::OperationId::from_uuid(Uuid::from_u128(0x0c)),
+            happening: Happening::Started,
+            at: EpochSeconds::from_seconds(1_800_000_000),
+        })
+        .await
+        .unwrap();
+    let connector = Arc::new(LoopbackHubConnector::to(hub.pairing.clone()));
+    connector.set_down(true);
+    let clock = Arc::new(FakeClock::new(
+        Timestamp::from_second(1_800_000_030).unwrap(),
+    ));
+    let sync = SyncWithHub::new(
+        connecting(identity.clone(), connector.clone()),
+        outbox,
+        clock.clone(),
+        agent_id(1),
+        hostname(1),
+        None,
+    );
+    let warned = warned_by_the_sync_loop(sync, &clock, 3).await;
+    assert_eq!(warned.len(), 1, "{warned:?}");
+    assert!(warned[0].starts_with("the agent's reports didn't reach its hub"));
+
+    let sync = SyncWithHub::new(
+        connecting(identity, connector),
+        Arc::new(UnreadableOutbox),
+        clock.clone(),
+        agent_id(1),
+        hostname(1),
+        None,
+    );
+    let warned = warned_by_the_sync_loop(sync, &clock, 3).await;
+    assert_eq!(warned.len(), 1, "{warned:?}");
+    assert!(warned[0].starts_with("the outbox couldn't be read"));
+}
+
+/// A channel shows its sequence numbers in a log and leaves out its keys.
+#[tokio::test]
+async fn a_channel_shows_its_sequence_numbers_and_no_key() {
+    let hub = hub_with(1, |pairing| pairing);
+    let identity = paired(&hub, 1).await;
+    let connector = Arc::new(LoopbackHubConnector::to(hub.pairing.clone()));
+    let (_, channel) = connecting(identity, connector)
+        .connect_channel(agent_id(1), hostname(1), None)
+        .await
+        .unwrap();
+    let shown = format!("{channel:?}");
+    assert!(shown.starts_with("AgentChannel { next_sent: "), "{shown}");
+    assert!(shown.contains("next_received: "), "{shown}");
+    assert!(!shown.contains("seed"), "{shown}");
+}
+
 /// The hub logs an approved agent's first connection since its approval
 /// once, even when the approval lands while the hub checks that
 /// connection's proof, after it read the agent and before it kept the
@@ -1054,4 +1204,249 @@ async fn an_address_where_the_hub_refuses_the_proof_is_not_kept() {
         "{failure:?}"
     );
     assert_eq!(stranger.pin().await.unwrap().unwrap(), before);
+}
+
+/// The `Ack` in `frame`, sent as `sent` and signed as `signed` change it;
+/// any other frame as it is.
+fn rewrite_ack(
+    forge: &Forge,
+    frame: HubFrame,
+    signed: fn(&mut HubEnvelope),
+    sent: fn(&mut HubEnvelope),
+) -> HubFrame {
+    let Ok(HubMessage::Signed(mut envelope)) = hub_message(&frame) else {
+        return frame;
+    };
+    if envelope.kind != domain::fleet::ack_kind() {
+        return frame;
+    }
+    signed(&mut envelope);
+    let Ok(HubMessage::Signed(mut envelope)) = hub_message(&forge.sign(envelope)) else {
+        panic!("a signed frame");
+    };
+    sent(&mut envelope);
+    hub_envelope_frame(&envelope)
+}
+
+/// One report, of place 1 in a new epoch.
+fn one_report() -> crate::ports::OutboxEntry {
+    use domain::fleet::{AgentReport, Happening, OutboxEpoch, ReportSeq};
+    crate::ports::OutboxEntry {
+        epoch: OutboxEpoch::from_uuid(Uuid::from_u128(0xe1)),
+        seq: ReportSeq::new(1).unwrap(),
+        report: AgentReport {
+            op_id: domain::OperationId::from_uuid(Uuid::from_u128(0x0d)),
+            happening: Happening::Started,
+            at: EpochSeconds::from_seconds(1_800_000_000),
+        },
+    }
+}
+
+/// Agent 1, paired with `hub` and approved there.
+async fn approved(hub: &Hub) -> Arc<InMemoryIdentity> {
+    let identity = paired(hub, 1).await;
+    let waiting = hub.registry.agent(agent_id(1)).await.unwrap().unwrap();
+    hub.pairing.approve(&waiting).await.unwrap().unwrap();
+    identity
+}
+
+fn keeping_reports(seed: u64) -> Hub {
+    hub_with(seed, |pairing| {
+        pairing.with_inbox(Arc::new(crate::fakes::InMemoryReportInbox::default()))
+    })
+}
+
+/// An acknowledgement signed on this connection but out of sequence, or in
+/// sequence but not signed for it, is a dropped connection and never acted
+/// on (decision 120, "Signed messages after the handshake").
+#[tokio::test]
+async fn an_ack_out_of_sequence_or_not_signed_for_it_is_not_acted_on() {
+    use crate::pairing::ChannelError;
+
+    let hub = keeping_reports(1);
+    let identity = approved(&hub).await;
+    let entry = one_report();
+    let as_sent: Rewrite = |forge, frame| rewrite_ack(forge, frame, |_| {}, |_| {});
+    let out_of_sequence: Rewrite = |forge, frame| {
+        rewrite_ack(
+            forge,
+            frame,
+            |ack| ack.seq = ack.seq.saturating_add(1),
+            |_| {},
+        )
+    };
+    let not_signed_for_it: Rewrite = |forge, frame| {
+        rewrite_ack(
+            forge,
+            frame,
+            |ack| ack.seq = ack.seq.saturating_add(1),
+            |ack| ack.seq = ack.seq.saturating_sub(1),
+        )
+    };
+    for (rewrite, acted_on) in [
+        (as_sent, true),
+        (out_of_sequence, false),
+        (not_signed_for_it, false),
+    ] {
+        let connector = Rewriting {
+            hub: hub.pairing.clone(),
+            hub_identity: hub.identity.clone(),
+            rewrite,
+        };
+        let (_, mut channel) = connecting(identity.clone(), Arc::new(connector))
+            .connect_channel(agent_id(1), hostname(1), None)
+            .await
+            .unwrap();
+        channel.send_report(&entry).await.unwrap();
+        let ack = channel.receive_ack().await;
+        if acted_on {
+            assert!(ack.is_ok(), "{ack:?}");
+        } else {
+            assert_eq!(ack, Err(ChannelError::Unsigned));
+        }
+    }
+}
+
+/// A connector to `hub` that notes, after each frame the agent sends,
+/// whether the hub's session then takes the agent's signed messages, and
+/// each reason the hub closes with. When `twice`, each report reaches the
+/// hub twice, as a replayed frame would.
+#[derive(Default)]
+struct Watching {
+    hub: Option<Arc<HubPairing>>,
+    syncing: Arc<std::sync::Mutex<Vec<bool>>>,
+    closes: Arc<std::sync::Mutex<Vec<&'static str>>>,
+    twice: bool,
+}
+
+struct WatchingLink {
+    hub: Arc<HubPairing>,
+    session: crate::pairing::HubSession,
+    answers: std::collections::VecDeque<HubFrame>,
+    syncing: Arc<std::sync::Mutex<Vec<bool>>>,
+    closes: Arc<std::sync::Mutex<Vec<&'static str>>>,
+    twice: bool,
+}
+
+#[async_trait]
+impl HubConnector for Watching {
+    async fn connect(&self, _: &HubRoute) -> Result<Box<dyn HubLink>, LinkError> {
+        let hub = self.hub.clone().expect("a hub to watch");
+        Ok(Box::new(WatchingLink {
+            session: hub.session(Some(LOOPBACK_EXPORTER)).await.unwrap(),
+            hub,
+            answers: std::collections::VecDeque::new(),
+            syncing: self.syncing.clone(),
+            closes: self.closes.clone(),
+            twice: self.twice,
+        }))
+    }
+}
+
+#[async_trait]
+impl HubLink for WatchingLink {
+    fn exporter(&self) -> Option<[u8; KEY_BYTES]> {
+        Some(LOOPBACK_EXPORTER)
+    }
+
+    async fn send(&mut self, frame: &AgentFrame) -> Result<(), LinkError> {
+        use crate::pairing::HubStep;
+        let report = matches!(
+            agent_message(frame),
+            Ok(AgentMessage::Signed(envelope)) if envelope.kind == domain::fleet::report_kind()
+        );
+        let times = if self.twice && report { 2 } else { 1 };
+        for _ in 0..times {
+            match self.hub.step(&mut self.session, frame).await {
+                HubStep::Reply(answer) | HubStep::Last(answer) => self.answers.push_back(answer),
+                HubStep::Close(reason) => self.closes.lock().unwrap().push(reason),
+                HubStep::Wait | HubStep::Fail(_) => {}
+            }
+        }
+        self.syncing.lock().unwrap().push(self.session.is_syncing());
+        Ok(())
+    }
+
+    async fn receive(&mut self) -> Result<HubFrame, LinkError> {
+        self.answers
+            .pop_front()
+            .ok_or(LinkError::Closed { reason: None })
+    }
+}
+
+/// Whether the hub's session took the agent's signed messages after each
+/// frame of agent 1's connection to `hub`.
+async fn syncing_after(hub: &Hub, identity: Arc<InMemoryIdentity>) -> Vec<bool> {
+    let connector = Arc::new(Watching {
+        hub: Some(hub.pairing.clone()),
+        ..Watching::default()
+    });
+    connecting(identity, connector.clone())
+        .connect(agent_id(1), hostname(1), None)
+        .await
+        .unwrap();
+    connector.syncing.lock().unwrap().clone()
+}
+
+/// A report the hub gets again on its connection, with the sequence number
+/// it was signed with, closes the connection as a sequence error (decision
+/// 120, "Signed messages after the handshake").
+#[tokio::test]
+async fn a_report_sent_again_on_its_connection_closes_it_as_a_sequence_error() {
+    let hub = keeping_reports(1);
+    let identity = approved(&hub).await;
+    let connector = Arc::new(Watching {
+        hub: Some(hub.pairing.clone()),
+        twice: true,
+        ..Watching::default()
+    });
+    let (_, mut channel) = connecting(identity, connector.clone())
+        .connect_channel(agent_id(1), hostname(1), None)
+        .await
+        .unwrap();
+    channel.send_report(&one_report()).await.unwrap();
+    assert_eq!(
+        *connector.closes.lock().unwrap(),
+        [crate::pairing::SEQUENCE_ERROR]
+    );
+}
+
+/// A connection goes on past the `Welcome`, taking the agent's reports,
+/// only for an agent a person approved and on a hub that keeps reports;
+/// only then does the transport hold it open past the handshake (§7.2).
+#[tokio::test]
+async fn a_connection_syncs_only_for_an_approved_agent_on_a_hub_that_keeps_reports() {
+    let keeping = hub_with(1, |pairing| {
+        pairing.with_inbox(Arc::new(crate::fakes::InMemoryReportInbox::default()))
+    });
+    let identity = paired(&keeping, 1).await;
+    assert_eq!(
+        syncing_after(&keeping, identity.clone()).await,
+        [false, false, false]
+    );
+    let waiting = keeping.registry.agent(agent_id(1)).await.unwrap().unwrap();
+    keeping.pairing.approve(&waiting).await.unwrap().unwrap();
+    assert_eq!(
+        syncing_after(&keeping, identity).await,
+        [false, false, true]
+    );
+
+    let keeping_none = hub(2);
+    let identity = paired(&keeping_none, 1).await;
+    let waiting = keeping_none
+        .registry
+        .agent(agent_id(1))
+        .await
+        .unwrap()
+        .unwrap();
+    keeping_none
+        .pairing
+        .approve(&waiting)
+        .await
+        .unwrap()
+        .unwrap();
+    assert_eq!(
+        syncing_after(&keeping_none, identity).await,
+        [false, false, false]
+    );
 }

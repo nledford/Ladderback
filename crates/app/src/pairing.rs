@@ -15,7 +15,7 @@ mod wire;
 pub use agent::{
     AgentHandshake, AgentPairing, AgentPairingError, AwaitingPaired, ChallengeRefused, PairedHub,
 };
-pub use channel::ChannelError;
+pub use channel::{AgentChannel, ChannelError};
 pub use client::{PairFailure, PairWithHub};
 pub use connection::{ConnectFailure, ConnectToHub, Connected};
 pub use hub::{

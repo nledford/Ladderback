@@ -1,18 +1,19 @@
+use std::collections::HashSet;
 use std::fmt;
-use std::sync::Arc;
+use std::sync::{Arc, Mutex, PoisonError};
 
 use domain::fleet::{
-    AgentEnvelope, AgentRecord, Approval, ApprovalRefused, Binding, BindingKind, Challenge,
+    Ack, AgentEnvelope, AgentRecord, Approval, ApprovalRefused, Binding, BindingKind, Challenge,
     Connect, EpochSeconds, FIRST_SEQUENCE, HANDSHAKES, Holder, Hostname, HostnameKey, HubAddress,
-    HubEnvelope, KEY_BYTES, KeyFile, ListedAgent, MachineZone, Nonce, Pair, PairAnswer,
-    PairRefusal, PairRequest, Paired, PairingToken, PayloadDigest, Proof, ProofRefusal,
-    ProofRequest, PublicKey, Refused, SeedFile, SignedMessage, SigningSeed, TokenId, TokenRecord,
-    TokenTls, TokenUse, UNUSED_TOKEN_LIMIT, Welcome, hello_kind, list_agents, token_life,
-    welcome_kind,
+    HubEnvelope, Ingest, KEY_BYTES, KeyFile, ListedAgent, MESSAGE_LIFE, MachineZone, Nonce, Pair,
+    PairAnswer, PairRefusal, PairRequest, Paired, PairingToken, PayloadDigest, Proof, ProofRefusal,
+    ProofRequest, PublicKey, Refused, ReportSeq, SeedFile, SignedMessage, SigningSeed, TokenId,
+    TokenRecord, TokenTls, TokenUse, UNUSED_TOKEN_LIMIT, Welcome, ack_kind, hello_kind,
+    list_agents, report_kind, token_life, welcome_kind,
 };
 use domain::{AgentId, SignedDuration, TimeZoneDatabase};
 
-use super::wire::{read_hello, welcome_payload};
+use super::wire::{ack_payload, read_hello, read_report, welcome_payload};
 use crate::access::Access;
 use crate::ports::{
     Added, AgentRegistry, Clock, Identity, IdentityError, Random, RandomUnavailable, ReportInbox,
@@ -40,6 +41,12 @@ pub struct HubPairing {
     /// Where the hub keeps its agents' reports, when it takes them: with
     /// none, it closes each connection after `Welcome`.
     inbox: Option<Arc<dyn ReportInbox>>,
+    /// The agents whose oldest reports the hub let go of past the cap since
+    /// it started: it warns of each once.
+    warned_full: Mutex<HashSet<AgentId>>,
+    /// The agents that sent a report far behind the last the hub took of
+    /// them since it started: it warns of each once (#1387).
+    warned_behind: Mutex<HashSet<AgentId>>,
 }
 
 /// The hub's answer to an agent's proof.
@@ -180,6 +187,8 @@ impl HubPairing {
             version,
             access: None,
             inbox: None,
+            warned_full: Mutex::default(),
+            warned_behind: Mutex::default(),
         }
     }
 
@@ -624,6 +633,135 @@ impl HubPairing {
         }))
     }
 
+    /// The connection's state after the `Welcome` to `agent`, when the hub
+    /// takes its reports: none for a pending agent, whose reports wait in
+    /// its outbox, nor on a hub that keeps no reports, which closes after
+    /// the `Welcome` (§7.2).
+    pub(super) fn syncing(&self, handshake: HubHandshake, agent: &AgentRecord) -> Option<Syncing> {
+        let approved = Approval::of(agent.status) == Approval::Approved;
+        (approved && self.inbox.is_some()).then(|| {
+            let next = FIRST_SEQUENCE.saturating_add(1);
+            Syncing {
+                handshake,
+                agent_id: agent.agent_id,
+                agent_key: agent.key,
+                next_received: next,
+                next_sent: next,
+            }
+        })
+    }
+
+    /// The hub's answer to `message`, the agent's next after its `Hello`,
+    /// when it holds: signed by the agent's key on this connection with the
+    /// next sequence number. A report is kept unless the hub took it
+    /// before, and acknowledged either way; a message of another kind is
+    /// counted and acted on in no way.
+    pub(super) async fn take_message(
+        &self,
+        keys: &HubKeys,
+        syncing: &mut Syncing,
+        message: &AgentEnvelope,
+    ) -> Result<Result<Option<HubEnvelope>, MessageRefused>, HubPairingError> {
+        let handshake = &syncing.handshake;
+        let signed = SignedMessage::AgentMessage {
+            hub_key: keys.key,
+            agent_id: handshake.agent_id,
+            agent_nonce: handshake.agent_nonce,
+            hub_nonce: handshake.hub_nonce,
+            binding: handshake.binding,
+            sequence: message.seq,
+            kind: &message.kind,
+            payload: PayloadDigest::of(&message.payload),
+        };
+        if !self
+            .signing
+            .verify(&syncing.agent_key, &signed.to_bytes(), &message.signature)
+        {
+            return Ok(Err(MessageRefused::Unsigned));
+        }
+        if message.seq != syncing.next_received {
+            return Ok(Err(MessageRefused::OutOfSequence));
+        }
+        syncing.next_received = syncing.next_received.saturating_add(1);
+        if message.kind != report_kind() {
+            return Ok(Ok(None));
+        }
+        let (Some(inbox), Ok(entry)) = (&self.inbox, read_report(&message.payload)) else {
+            return Ok(Err(MessageRefused::Unexpected));
+        };
+        let now = self.clock.now();
+        let taken = inbox.ingest(syncing.agent_id, &entry, now).await?;
+        if taken.dropped > 0 {
+            self.warn_full(inbox.as_ref(), syncing.agent_id, taken.dropped)
+                .await;
+        }
+        if taken.ingest == Ingest::Behind {
+            self.warn_behind(syncing.agent_id, entry.seq);
+        }
+        let payload = ack_payload(Ack {
+            epoch: entry.epoch,
+            seq: entry.seq,
+        });
+        let kind = ack_kind();
+        let sequence = syncing.next_sent;
+        let expires_at = EpochSeconds::from_seconds(
+            EpochSeconds::from_timestamp(now)
+                .unwrap_or(EpochSeconds::from_seconds(0))
+                .seconds()
+                .saturating_add(MESSAGE_LIFE),
+        );
+        let answer = SignedMessage::HubMessage {
+            hub_key: keys.key,
+            agent_id: handshake.agent_id,
+            agent_nonce: handshake.agent_nonce,
+            hub_nonce: handshake.hub_nonce,
+            binding: handshake.binding,
+            sequence,
+            expires_at,
+            kind: &kind,
+            payload: PayloadDigest::of(&payload),
+        };
+        let signature = self.signing.sign(&keys.seed, &answer.to_bytes())?;
+        syncing.next_sent = sequence.saturating_add(1);
+        Ok(Ok(Some(HubEnvelope {
+            kind,
+            seq: sequence,
+            expires_at,
+            payload,
+            signature,
+        })))
+    }
+
+    /// Warns, once per agent while the hub runs, that it lets go of the
+    /// agent's oldest reports past the cap, with how many it let go of so
+    /// far (`just_now` when the count doesn't read); the ones after are
+    /// counted ([`ReportInbox::dropped`]) and not logged.
+    async fn warn_full(&self, inbox: &dyn ReportInbox, agent: AgentId, just_now: u64) {
+        let first = self
+            .warned_full
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .insert(agent);
+        if first {
+            let dropped = inbox.dropped(agent).await.unwrap_or(just_now);
+            log::warn!("{}", logged::reports_dropped(agent, dropped));
+        }
+    }
+
+    /// Warns, once per agent while the hub runs, that `agent` sent a report
+    /// at `seq` far behind the last the hub took of its epoch; the ones
+    /// after are acknowledged as held and not logged (#1387).
+    fn warn_behind(&self, agent: AgentId, seq: ReportSeq) {
+        let first = self
+            .warned_behind
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .insert(agent);
+        if first {
+            log::warn!("{}", logged::reports_behind(agent, seq));
+        }
+    }
+
     /// `refusal`, signed over its code and the connection. A taken
     /// hostname names its holder beside the signed code.
     fn refuse(
@@ -662,4 +800,17 @@ impl HubPairing {
 /// it doesn't know, which the hub holds as unknown rather than guess.
 fn known(zone: Option<&MachineZone>) -> Option<MachineZone> {
     zone.and_then(|zone| zone.known_in(&TimeZoneDatabase::bundled()))
+}
+
+/// What the hub holds of a connection that carries an approved agent's
+/// signed messages after its `Welcome`.
+#[derive(Debug)]
+pub(super) struct Syncing {
+    handshake: HubHandshake,
+    agent_id: AgentId,
+    agent_key: PublicKey,
+    /// The sequence number the agent's next message must carry.
+    next_received: u64,
+    /// The sequence number of the hub's next message.
+    next_sent: u64,
 }

@@ -1,7 +1,9 @@
 use api::sync::{AgentFrame, HubFrame};
 use domain::fleet::{AgentRecord, KEY_BYTES};
 
-use super::hub::{HubHandshake, HubKeys, HubPairing, HubPairingError, MessageRefused, ProofAnswer};
+use super::hub::{
+    HubHandshake, HubKeys, HubPairing, HubPairingError, MessageRefused, ProofAnswer, Syncing,
+};
 use super::wire::{AgentMessage, agent_message, answer_frame, challenge_frame, hub_envelope_frame};
 use domain::fleet::PairAnswer;
 
@@ -20,12 +22,21 @@ pub const SEQUENCE_ERROR: &str = "sequence-error";
 
 /// One connection on the hub's `/sync/v1`, from the agent's `Connect` to
 /// the hub's answer to its `Pair`, or to its `Welcome` once the agent
-/// proved itself.
+/// proved itself, and on through an approved agent's reports.
 #[derive(Debug)]
 pub struct HubSession {
     keys: HubKeys,
     exporter: Option<[u8; KEY_BYTES]>,
     stage: Stage,
+}
+
+impl HubSession {
+    /// Whether the hub welcomed an approved agent on this connection and
+    /// takes its signed messages: the transport then holds it open past
+    /// the handshake's bounds, as long as the agent isn't idle.
+    pub fn is_syncing(&self) -> bool {
+        matches!(self.stage, Stage::Syncing(_))
+    }
 }
 
 /// How far a connection has come.
@@ -37,6 +48,8 @@ enum Stage {
     Challenged(HubHandshake),
     /// The agent proved itself as `AgentRecord`: the hub waits for `Hello`.
     Proved(HubHandshake, AgentRecord),
+    /// The hub welcomed an approved agent and takes its signed messages.
+    Syncing(Box<Syncing>),
     /// The hub answered the last message it takes.
     Done,
 }
@@ -114,16 +127,42 @@ impl HubPairing {
                     .welcome(&session.keys, &handshake, &agent, &hello)
                     .await
                 {
-                    Ok(Ok(welcome)) => HubStep::Last(hub_envelope_frame(&welcome)),
-                    Ok(Err(MessageRefused::Unexpected)) => HubStep::Close(PROTOCOL_ERROR),
-                    Ok(Err(MessageRefused::Unsigned | MessageRefused::OutOfSequence)) => {
-                        HubStep::Close(SEQUENCE_ERROR)
+                    Ok(Ok(welcome)) => match self.syncing(handshake, &agent) {
+                        Some(syncing) => {
+                            session.stage = Stage::Syncing(Box::new(syncing));
+                            HubStep::Reply(hub_envelope_frame(&welcome))
+                        }
+                        None => HubStep::Last(hub_envelope_frame(&welcome)),
+                    },
+                    Ok(Err(refused)) => HubStep::Close(close_reason(refused)),
+                    Err(error) => HubStep::Fail(error),
+                }
+            }
+            (AgentMessage::Signed(message), Stage::Syncing(mut syncing)) => {
+                match self
+                    .take_message(&session.keys, &mut syncing, &message)
+                    .await
+                {
+                    Ok(Ok(answer)) => {
+                        session.stage = Stage::Syncing(syncing);
+                        answer.map_or(HubStep::Wait, |answer| {
+                            HubStep::Reply(hub_envelope_frame(&answer))
+                        })
                     }
+                    Ok(Err(refused)) => HubStep::Close(close_reason(refused)),
                     Err(error) => HubStep::Fail(error),
                 }
             }
             _ => HubStep::Close(PROTOCOL_ERROR),
         }
+    }
+}
+
+/// How the hub closes on a signed message it refuses.
+const fn close_reason(refused: MessageRefused) -> &'static str {
+    match refused {
+        MessageRefused::Unexpected => PROTOCOL_ERROR,
+        MessageRefused::Unsigned | MessageRefused::OutOfSequence => SEQUENCE_ERROR,
     }
 }
 

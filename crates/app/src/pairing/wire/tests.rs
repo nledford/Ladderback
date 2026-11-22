@@ -417,6 +417,47 @@ fn a_payload_out_of_shape_is_refused() {
     assert_eq!(read_welcome(welcome.as_bytes()), Err(WireRefused));
 }
 
+fn report_entry(happening: Happening) -> OutboxEntry {
+    OutboxEntry {
+        epoch: OutboxEpoch::from_uuid(Uuid::from_u128(0xe0)),
+        seq: ReportSeq::new(3).unwrap(),
+        report: AgentReport {
+            op_id: OperationId::from_uuid(Uuid::from_u128(0x0b)),
+            happening,
+            at: EpochSeconds::from_seconds(1_800_000_000),
+        },
+    }
+}
+
+/// A report of each event reads back from its payload, a failure with its
+/// code; an event with a code it can't have, or without one it needs, is
+/// refused.
+#[test]
+fn a_report_of_each_event_reads_back_from_its_payload() {
+    let code = WireName::parse("repo-locked").unwrap();
+    for happening in [
+        Happening::Started,
+        Happening::Succeeded,
+        Happening::Failed { code },
+    ] {
+        let entry = report_entry(happening);
+        assert_eq!(read_report(&report_payload(&entry)), Ok(entry));
+    }
+    let started = String::from_utf8(report_payload(&report_entry(Happening::Started))).unwrap();
+    for changed in [
+        started.replace(r#""started""#, r#""failed""#),
+        started.replace(r#""started""#, r#""cancelled""#),
+        started.replace(r#""at""#, r#""code":"repo-locked","at""#),
+        started.replace(r#""seq":3"#, r#""seq":0"#),
+    ] {
+        assert_eq!(
+            read_report(changed.as_bytes()),
+            Err(WireRefused),
+            "{changed}"
+        );
+    }
+}
+
 /// The machine zone travels in `Pair` and in `Hello`, and is left out of
 /// both when there is none, so a frame without one reads as before (#114).
 #[test]
