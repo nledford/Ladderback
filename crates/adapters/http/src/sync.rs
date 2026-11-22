@@ -14,7 +14,10 @@
 //! for its newcomer; behind a proxy only the total applies. A session's
 //! exporter is there only when it came over the built-in TLS with the
 //! hybrid key exchange, and a `Connect` naming one on any other closes
-//! `binding-unavailable`.
+//! `binding-unavailable`. Once the hub welcomed an approved agent, which
+//! then sends its reports (§7.2), the connection leaves the
+//! unauthenticated and stays open until the agent closes it or sends
+//! nothing for 10 minutes; its frames keep the same cap.
 //!
 //! In a build with the hub, every path under `/sync/` is these routes',
 //! behind a check of their own in place of the browser's request checks
@@ -122,7 +125,7 @@ mod served {
     use std::time::Duration;
 
     use api::sync::{AgentFrame, MAX_FRAME_BYTES, PATH};
-    use app::pairing::{HubPairing, HubStep, PROTOCOL_ERROR};
+    use app::pairing::{HubPairing, HubSession, HubStep, PROTOCOL_ERROR};
     use axum::Router;
     use axum::extract::ws::{CloseFrame, Message, WebSocket, WebSocketUpgrade, close_code};
     use axum::extract::{ConnectInfo, Extension};
@@ -136,7 +139,8 @@ mod served {
     /// read, once the handshake is over or abandoned.
     const CLOSE_WITHIN: Duration = Duration::from_secs(1);
 
-    /// The handshake's bounds before the proofs (decision 120).
+    /// The handshake's bounds before the proofs (decision 120), and the
+    /// idle bound of an approved agent's connection after them.
     #[derive(Clone, Copy, Debug)]
     pub(crate) struct Bounds {
         /// How long a connection has to send its first frame.
@@ -147,6 +151,9 @@ mod served {
         pub(crate) unauthenticated: usize,
         /// How many of them one address may hold over the built-in TLS.
         pub(crate) per_address: usize,
+        /// How long an approved agent's connection may go without a frame
+        /// once the hub takes its reports.
+        pub(crate) idle_within: Duration,
     }
 
     impl Bounds {
@@ -155,6 +162,7 @@ mod served {
             handshake_within: Duration::from_secs(15),
             unauthenticated: 32,
             per_address: 4,
+            idle_within: Duration::from_secs(600),
         };
     }
 
@@ -305,6 +313,13 @@ mod served {
         Dropped,
     }
 
+    /// Where a handshake came to: an end, or an approved agent's session
+    /// whose reports the hub now takes.
+    enum Handshake {
+        Ended(End),
+        Syncing(Box<HubSession>),
+    }
+
     /// What the agent sent next.
     enum Next {
         Frame(AgentFrame),
@@ -320,14 +335,18 @@ mod served {
             from: Option<IpAddr>,
         ) {
             let (id, evicted) = self.admit(from);
-            let end = tokio::select! {
-                end = tokio::time::timeout(
+            let handshake = tokio::select! {
+                handshake = tokio::time::timeout(
                     self.bounds.handshake_within,
                     self.converse(&mut socket, exporter),
-                ) => end.unwrap_or(End::Dropped),
-                () = evicted.notified() => End::Dropped,
+                ) => handshake.unwrap_or(Handshake::Ended(End::Dropped)),
+                () = evicted.notified() => Handshake::Ended(End::Dropped),
             };
             self.leave(id);
+            let end = match handshake {
+                Handshake::Ended(end) => end,
+                Handshake::Syncing(mut session) => self.sync(&mut socket, &mut session).await,
+            };
             let (code, reason) = match end {
                 End::Answered => (close_code::NORMAL, ""),
                 End::Refused(reason) => (close_code::POLICY, reason),
@@ -386,7 +405,11 @@ mod served {
                 .retain(|open| open.id != id);
         }
 
-        async fn converse(&self, socket: &mut WebSocket, exporter: Option<[u8; KEY_BYTES]>) -> End {
+        async fn converse(
+            &self,
+            socket: &mut WebSocket,
+            exporter: Option<[u8; KEY_BYTES]>,
+        ) -> Handshake {
             // The first bound counts from the connection's admission, so
             // reading the hub's keys is within it.
             let first_by = tokio::time::Instant::now() + self.bounds.connect_within;
@@ -395,36 +418,70 @@ mod served {
                     Ok(Ok(session)) => session,
                     Ok(Err(error)) => {
                         log::warn!("/sync/v1: the hub's keys couldn't be read: {error:?}");
-                        return End::Dropped;
+                        return Handshake::Ended(End::Dropped);
                     }
-                    Err(_) => return End::Dropped,
+                    Err(_) => return Handshake::Ended(End::Dropped),
                 };
             let first = tokio::time::timeout_at(first_by, next(socket)).await;
             let mut read = first.unwrap_or(Next::Gone);
             loop {
-                let frame = match read {
-                    Next::Frame(frame) => frame,
-                    Next::Unreadable => return End::Refused(PROTOCOL_ERROR),
-                    Next::Gone => return End::Dropped,
-                };
-                match self.pairing.step(&mut session, &frame).await {
-                    HubStep::Reply(answer) => {
-                        if socket.send(Message::text(answer.to_text())).await.is_err() {
-                            return End::Dropped;
-                        }
-                    }
-                    HubStep::Wait => {}
-                    HubStep::Last(answer) => {
-                        let _ = socket.send(Message::text(answer.to_text())).await;
-                        return End::Answered;
-                    }
-                    HubStep::Close(reason) => return End::Refused(reason),
-                    HubStep::Fail(error) => {
-                        log::warn!("/sync/v1: the hub couldn't take a handshake step: {error:?}");
-                        return End::Dropped;
-                    }
+                if let Some(end) = self.take(socket, &mut session, read).await {
+                    return Handshake::Ended(end);
+                }
+                if session.is_syncing() {
+                    return Handshake::Syncing(Box::new(session));
                 }
                 read = next(socket).await;
+            }
+        }
+
+        /// An approved agent's reports after its handshake, under no bound
+        /// but the idle one, which covers reading each frame and answering
+        /// it, so an agent that stops reading is let go of too. The agent
+        /// closes the connection once the hub acknowledged what it sent.
+        async fn sync(&self, socket: &mut WebSocket, session: &mut HubSession) -> End {
+            loop {
+                let frame = async {
+                    let read = next(socket).await;
+                    self.take(socket, session, read).await
+                };
+                match tokio::time::timeout(self.bounds.idle_within, frame).await {
+                    Ok(None) => {}
+                    Ok(Some(end)) => return end,
+                    Err(_) => return End::Dropped,
+                }
+            }
+        }
+
+        /// Takes what the agent sent and sends the hub's answer, if any:
+        /// the end it comes to, none while the connection goes on.
+        async fn take(
+            &self,
+            socket: &mut WebSocket,
+            session: &mut HubSession,
+            read: Next,
+        ) -> Option<End> {
+            let frame = match read {
+                Next::Frame(frame) => frame,
+                Next::Unreadable => return Some(End::Refused(PROTOCOL_ERROR)),
+                Next::Gone => return Some(End::Dropped),
+            };
+            match self.pairing.step(session, &frame).await {
+                HubStep::Reply(answer) => socket
+                    .send(Message::text(answer.to_text()))
+                    .await
+                    .is_err()
+                    .then_some(End::Dropped),
+                HubStep::Wait => None,
+                HubStep::Last(answer) => {
+                    let _ = socket.send(Message::text(answer.to_text())).await;
+                    Some(End::Answered)
+                }
+                HubStep::Close(reason) => Some(End::Refused(reason)),
+                HubStep::Fail(error) => {
+                    log::warn!("/sync/v1: the hub couldn't take a step: {error:?}");
+                    Some(End::Dropped)
+                }
             }
         }
     }
