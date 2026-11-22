@@ -515,7 +515,7 @@ jobs:
           just test-ui --shard "$SHARD/2" || status=$?
           elapsed=$((SECONDS - start))
           if [ "$elapsed" -gt 1575 ]; then
-            echo "::warning title=Slow UI journeys::just test-ui took $((elapsed / 60)) minutes, over 75% of its 35-minute limit (26 minutes). Shard $SHARD of 2 is close to timing out."
+            echo "::warning title=Slow UI journeys::just test-ui took $((elapsed / 60)) min $((elapsed % 60)) s, over 75% of its 35-minute limit (26 min 15 s). Chromium shard $SHARD of 2 is close to timing out."
           fi
           exit "$status"
         env:
@@ -637,7 +637,7 @@ jobs:
           just test-ui --shard "$SHARD/2" || status=$?
           elapsed=$((SECONDS - start))
           if [ "$elapsed" -gt 1575 ]; then
-            echo "::warning title=Slow UI journeys::just test-ui took $((elapsed / 60)) minutes, over 75% of its 35-minute limit (26 minutes). $ENGINE shard $SHARD of 2 is close to timing out."
+            echo "::warning title=Slow UI journeys::just test-ui took $((elapsed / 60)) min $((elapsed % 60)) s, over 75% of its 35-minute limit (26 min 15 s). $ENGINE shard $SHARD of 2 is close to timing out."
           fi
           exit "$status"
         env:
