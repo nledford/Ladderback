@@ -30,8 +30,9 @@ Feature: The header bar
     And the page has no accessibility violations
 
   # Inside the page's frame the pseudolocale's longer words leave the line
-  # little room: the seven links and Sign out take about 900 px of the
-  # frame's 928.
+  # little room: in DejaVu Sans, the widest font a Linux machine falls back
+  # on, the seven links and Sign out take 903 px of the frame's 928, in the
+  # macOS system font about 820.
   Scenario: Signed in with the longer words of a pseudolocale, the pages' links and Sign out still share one line
     Given a viewport of 1280 by 720 pixels
     And the language chosen in this browser is "en-XA"

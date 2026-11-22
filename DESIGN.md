@@ -329,10 +329,10 @@ Every shared component takes the same choices, defined once in `crates/web/src/v
 
 ### Navigation
 
-- **Style:** a wrapping row of `Link`s in the color of the text around them, underlined, 1rem apart, on the header's Ledger Gray band (decision 141).
+- **Style:** a wrapping row of `Link`s in the color of the text around them, underlined, 0.5rem apart, on the header's Ledger Gray band (decision 141).
 - **Current page:** bold, with `aria-current="page"`; a page below a section (a snapshot's) marks its section.
 - **Brand:** a `Link` to the start page in the color of the text around it, current there only without a query (not on `/?locale=fr`); the product's mark before its name, as tall as the name's letters, hidden from screen readers; under forced colors the mark takes `CanvasText` and `Canvas`.
-- **Sign out:** a Ghost button with the LogOut icon at the end of the links' line, outside the navigation's list, since it isn't a page, its words on the links' baseline and no taller than the links; busy while the daemon signs out. A failed sign-out is said once at the top of `main`, never in the header, so the header keeps its height.
+- **Sign out:** a Ghost button with the LogOut icon at the end of the links' line, outside the navigation's list, since it isn't a page, its words on the links' baseline (the line stands on last baselines) and no taller than the links; busy while the daemon signs out. A failed sign-out is said once at the top of `main`, never in the header, so the header keeps its height.
 - A skip link is the first focusable element and appears at the top of the page on focus.
 
 ### Footer
