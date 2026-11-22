@@ -99,9 +99,10 @@ fn read_line_from(input: &mut impl BufRead, max: usize) -> io::Result<String> {
 
 /// The terminal's echo turned off until this is dropped; the line ending a
 /// person types is still shown, so the next line starts on its own. A drop
-/// never runs when a signal ends the process, so Ctrl-C and `SIGTERM` put
-/// the terminal's settings back first (#399, [`ending`]). One prompt is
-/// open at a time, as the process has one standard input.
+/// never runs when a signal ends the process, so Ctrl-C, Ctrl-\ and
+/// `SIGTERM` put the terminal's settings back first (#399, #1256,
+/// [`ending`]). One prompt is open at a time, as the process has one
+/// standard input.
 struct EchoOff {
     #[cfg(unix)]
     tty: Tty,
@@ -140,12 +141,15 @@ impl Drop for EchoOff {
     }
 }
 
-/// Ctrl-C (`SIGINT`) and `SIGTERM` at the prompt (#399): their default
-/// action ends the process at once, with no drop run, which would leave the
-/// terminal silent until `reset` or `stty echo`. A thread of their own takes
-/// them instead, puts the prompt's terminal settings back, and then ends the
-/// process by the signal's own default action, so the shell sees the same
-/// end as before.
+/// Ctrl-C (`SIGINT`), Ctrl-\ (`SIGQUIT`) and `SIGTERM` at the prompt (#399,
+/// #1256): their default action ends the process at once, with no drop run,
+/// which would leave the terminal silent until `reset` or `stty echo`. A
+/// thread of their own takes them instead, puts the prompt's terminal
+/// settings back, and then ends the process by the signal's own default
+/// action, so the shell sees the same end as before. `SIGQUIT`'s action
+/// also writes a core dump where the limit allows one, so every command
+/// that prompts turns its core dumps off before it does (decision 98):
+/// otherwise the dump would hold what was typed.
 ///
 /// The thread stays for the rest of the process once a prompt has started
 /// it: no safe code can give a signal back to its default action, and the
@@ -160,7 +164,7 @@ mod ending {
     use std::sync::{Mutex, PoisonError};
 
     use nix::sys::termios::{FlushArg, SetArg, Termios, tcdrain, tcflush, tcsetattr};
-    use signal_hook::consts::{SIGINT, SIGTERM};
+    use signal_hook::consts::{SIGINT, SIGQUIT, SIGTERM};
 
     /// The terminal a prompt has changed, and its settings from before.
     static CHANGED: Mutex<Option<(OwnedFd, Termios)>> = Mutex::new(None);
@@ -168,8 +172,8 @@ mod ending {
     /// Whether the thread that takes the signals runs.
     static WATCHING: Mutex<bool> = Mutex::new(false);
 
-    /// Sets `quiet` on `tty`, whose settings were `saved`, and has Ctrl-C or
-    /// `SIGTERM` put `saved` back before it ends the process, until
+    /// Sets `quiet` on `tty`, whose settings were `saved`, and has Ctrl-C,
+    /// Ctrl-\ or `SIGTERM` put `saved` back before it ends the process, until
     /// [`put_back_now`]. Both happen under the lock the signal's thread
     /// takes, so it finds either echo still on or `saved` to put back.
     pub(super) fn quiet(tty: &OwnedFd, saved: Termios, quiet: &Termios) -> io::Result<()> {
@@ -209,7 +213,7 @@ mod ending {
         if *watching {
             return Ok(());
         }
-        let mut signals = signal_hook::iterator::Signals::new([SIGINT, SIGTERM])?;
+        let mut signals = signal_hook::iterator::Signals::new([SIGINT, SIGQUIT, SIGTERM])?;
         std::thread::Builder::new()
             .name("prompt-signals".to_owned())
             .spawn(move || {
@@ -396,5 +400,71 @@ mod tty_tests {
             Some(Ok(Signal::SIGTERM)),
             "{status:?}"
         );
+    }
+
+    /// Set in the copy of this test binary that
+    /// [`ctrl_backslash_at_the_prompt_puts_echo_back_and_ends_the_process`]
+    /// runs.
+    const AT_PROMPT: &str = "LADDERBACK_TEST_QUIT_AT_PROMPT";
+
+    /// Ctrl-\ (`SIGQUIT`) at the prompt does what Ctrl-C does (#1256): the
+    /// terminal's echo comes back and the process ends by the signal. The
+    /// copy turns its core dumps off first, as every command that prompts
+    /// does, so the signal's default action leaves no dump either.
+    #[test]
+    fn ctrl_backslash_at_the_prompt_puts_echo_back_and_ends_the_process() {
+        use std::os::unix::process::ExitStatusExt;
+        use std::process::{Command, Stdio};
+        use std::time::Instant;
+
+        use nix::sys::signal::{Signal, kill};
+        use nix::unistd::Pid;
+        if std::env::var_os(AT_PROMPT).is_some() {
+            let unprotected = crate::dumps::refuse();
+            assert!(unprotected.is_empty(), "{unprotected:?}");
+            // Nothing is ever typed: only the signal ends this read.
+            let _ = read_secret_line(64);
+            return;
+        }
+        let pty = openpty(None, None).unwrap();
+        let tty = pty.slave;
+        let echoes = |tty: &std::os::fd::OwnedFd| {
+            tcgetattr(tty)
+                .unwrap()
+                .local_flags
+                .contains(LocalFlags::ECHO)
+        };
+        assert!(echoes(&tty), "the terminal starts without echo");
+        let mut copy = Command::new(std::env::current_exe().unwrap())
+            .args([
+                "--exact",
+                "terminal::tty_tests::ctrl_backslash_at_the_prompt_puts_echo_back_and_ends_the_process",
+            ])
+            .env(AT_PROMPT, "1")
+            .stdin(Stdio::from(tty.try_clone().unwrap()))
+            .stdout(Stdio::null())
+            // A copy that fails says why in this test's output.
+            .stderr(Stdio::inherit())
+            .spawn()
+            .unwrap();
+        let until = Instant::now() + Duration::from_secs(10);
+        while echoes(&tty) {
+            assert!(Instant::now() < until, "the prompt never turned echo off");
+            let ended = copy.try_wait().unwrap();
+            assert_eq!(ended, None, "the copy ended before it prompted");
+            std::thread::sleep(Duration::from_millis(10));
+        }
+        let pid = Pid::from_raw(i32::try_from(copy.id()).unwrap());
+        kill(pid, Signal::SIGQUIT).unwrap();
+        let status = copy.wait().unwrap();
+
+        assert_eq!(
+            status.signal().map(Signal::try_from),
+            Some(Ok(Signal::SIGQUIT)),
+            "{status:?}"
+        );
+        assert!(!status.core_dumped(), "{status:?}");
+        assert!(echoes(&tty), "echo stayed off after Ctrl-\\");
+        drop(pty.master);
     }
 }

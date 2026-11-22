@@ -56,6 +56,18 @@ pub struct HubAddress(String);
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct InvalidHubAddress;
 
+/// How a hub address is reached, as its scheme says: over TLS, or plain,
+/// which shows no certificate at all.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum HubScheme {
+    /// `https://`: TLS, with a certificate the token pins or a certificate
+    /// authority signed.
+    Https,
+    /// `http://`: no TLS, so no certificate; only the hub key proves the
+    /// hub.
+    Http,
+}
+
 impl HubAddress {
     pub fn parse(text: &str) -> Result<Self, InvalidHubAddress> {
         let rest = text
@@ -73,6 +85,15 @@ impl HubAddress {
 
     pub fn as_str(&self) -> &str {
         &self.0
+    }
+
+    /// The address's scheme: `parse` took only `https://` and `http://`.
+    pub fn scheme(&self) -> HubScheme {
+        if self.0.starts_with("https://") {
+            HubScheme::Https
+        } else {
+            HubScheme::Http
+        }
     }
 }
 

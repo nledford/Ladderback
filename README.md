@@ -70,74 +70,25 @@ The [technical design](docs/design/README.md#relationship-to-backrest) has the f
 
 ## Install
 
-Ladderback runs on each machine it backs up, and each system has one recommended way to install it ([decision 126](docs/design/decisions/126-primary-install-channels.md)). The [install guide](docs/guide/install.md) has the details: what each way checks and installs, how to update, how to run Ladderback as a service and what macOS asks for.
+Ladderback runs on each machine it backs up. Install it the recommended way for your system, then start it with `ladderback install-service`, run as yourself; the [install guide](docs/guide/install.md) has each step, updating, and what macOS asks for.
 
-### Debian, Ubuntu, Raspberry Pi OS and Fedora: the package
+- **Debian 12 or newer, Ubuntu 22.04 or newer, 64-bit Raspberry Pi OS and Fedora:** the release's `.deb` or `.rpm` [package](docs/guide/install.md#install-a-package-debian-ubuntu-fedora), checked against the release's `SHA256SUMS`.
+- **Any other 64-bit Linux:** `curl -fsSL https://raw.githubusercontent.com/nledford/Ladderback/main/scripts/install.sh | bash`
+- **macOS:** the same script, which builds the release from source, [signed with your own certificate](docs/guide/install.md#signing-your-build): `curl -fsSL https://raw.githubusercontent.com/nledford/Ladderback/main/scripts/install.sh | LADDERBACK_SIGN_IDENTITY="Ladderback Code Signing" bash`, then [grant Full Disk Access](docs/guide/install.md#macos-full-disk-access).
 
-From 0.5.0, each release has a `.deb` for Debian 12 or newer, Ubuntu 22.04 or newer and 64-bit Raspberry Pi OS, and an `.rpm` for Fedora, for x86_64 and aarch64. The package puts `ladderback` in `/usr/bin` and starts nothing. Download yours from the [release](https://github.com/nledford/Ladderback/releases/latest) with its `SHA256SUMS`, check it, install it, then install the service as yourself:
-
-```sh
-sha256sum -c --ignore-missing SHA256SUMS
-sudo apt install ./ladderback_<version>_arm64.deb          # amd64 on x86_64
-sudo dnf install ./ladderback-<version>-1.x86_64.rpm       # aarch64 on ARM
-ladderback install-service
-```
-
-The packages are unsigned and have no apt or dnf repository yet, so to update, install the next release's package and run `ladderback install-service` again. To move an earlier install, remove its binary first (`~/.cargo/bin/ladderback` from the script or a build, `~/.local/bin/ladderback` from the archive by hand), install the package, then run `ladderback install-service` again, so the service runs `/usr/bin/ladderback`. The [install guide](docs/guide/install.md#install-a-package-debian-ubuntu-fedora) has the details.
-
-### Other 64-bit Linux: the install script
-
-On any other 64-bit Linux (x86_64 or aarch64) with glibc 2.35 or newer, one command downloads the newest release's archive, checks it against the release's checksums and installs `ladderback` into `~/.cargo/bin`:
-
-```sh
-curl -fsSL https://raw.githubusercontent.com/nledford/Ladderback/main/scripts/install.sh | bash
-```
-
-To read the script before it runs, download it, read it, then run it:
-
-```sh
-curl -fsSL https://raw.githubusercontent.com/nledford/Ladderback/main/scripts/install.sh -o install.sh
-less install.sh
-bash install.sh
-```
-
-Then `ladderback install-service` runs it in the background, from each login on.
-
-### macOS: the install script, signed with your own certificate
-
-macOS has no download yet ([#344](https://github.com/nledford/Ladderback/issues/344)), so on a Mac the same script builds the newest release from source, and asks before it installs any tool the build needs. Make a self-signed code-signing certificate in your keychain once, as the install guide's [Signing your build](docs/guide/install.md#signing-your-build) says, and name it in `LADDERBACK_SIGN_IDENTITY`, so that the build's Full Disk Access and Photos grants carry over to the next update:
-
-```sh
-curl -fsSL https://raw.githubusercontent.com/nledford/Ladderback/main/scripts/install.sh | LADDERBACK_SIGN_IDENTITY="Ladderback Code Signing" bash
-```
-
-Without the certificate the build is signed ad hoc, and after each update macOS asks again for Full Disk Access and Photos: until you grant them again, backups can't read the folders they protect. Then run `ladderback install-service` and [grant Full Disk Access](docs/guide/install.md#macos-full-disk-access).
-
-### Other ways
-
-For contributors, for installing the release's archive by hand, and for people who already use cargo-binstall:
-
-- **From a checkout:** `just install`, or the install guide's steps [by hand](docs/guide/install.md#by-hand), to build a release or a branch yourself. On Linux, `bash install.sh --from-source` has the script build from source too.
-- **The release's archive by hand,** on 64-bit Linux: [download a release](docs/guide/install.md#download-a-release-linux).
-- **cargo-binstall,** on 64-bit Linux: `cargo binstall --strategies crate-meta-data --git https://github.com/nledford/Ladderback ladderback` installs the release's archive, without checking it against `SHA256SUMS` ([details](docs/guide/install.md#cargo-binstall)).
-
-Ladderback isn't published to crates.io, and has no Homebrew tap until a macOS build can be signed and notarized ([#344](https://github.com/nledford/Ladderback/issues/344)).
-
-Each release after 0.5.0 publishes a Docker image too, for x86_64 and aarch64 Linux, as `ghcr.io/nledford/ladderback` and `docker.io/nledford/ladderback`, tagged with its version, to try Ladderback in a container; only GitHub's latest release also gets `latest`, so a pre-release never does. It isn't yet a supported way to install and run Ladderback: the [install guide](docs/guide/install.md#docker-image-not-supported-yet) says how to run it and what Ladderback in a container can't do.
+Building from source, the release's archive by hand, cargo-binstall and the Docker image, which isn't a supported way to run Ladderback yet, are in [Other ways to install](docs/guide/other-ways-to-install.md).
 
 ## Quick start
 
-```sh
-ladderback serve
-```
+Open the web UI at `http://127.0.0.1:9898`, then:
 
-Open the address it prints, `http://127.0.0.1:9898`, then:
+1. **Create a repository** on the Repositories page, or connect one you already have.
+2. **Add a plan** on the Plans page: what to back up, a schedule, and which snapshots to keep.
+3. **Run it now** from the Operations page, and see its next run on the Plans page.
+4. **Restore a file** from the Snapshots page into a new folder, to see that the backup works.
+5. **Turn sign-in on** in Settings, on the Admin password tab.
 
-1. **Connect a repository** on the Repositories page.
-2. **Add a plan** to `config.toml` in Ladderback's config folder.
-3. **Watch it run.** The start page lists the plan with its next run.
-
-[A first plan](docs/guide/first-plan.md) walks through it with a whole `config.toml`. [Secrets](docs/guide/secrets.md) moves the repository's password out of that file, and [sign-in and remote access](docs/guide/remote-access.md) says how to set a password and reach Ladderback from another machine.
+[Getting started](docs/guide/getting-started.md) walks through each step. For people at home in a terminal and for rustic users, the [user guide](docs/guide/README.md)'s Advanced part covers `config.toml`, importing rustic profiles, secrets, sign-in and remote access.
 
 ## Roadmap
 
@@ -165,7 +116,7 @@ Not planned for v1: Windows, multiple users, and rustic's `copy`, `merge`, `rewr
 
 ## Documentation
 
-- [The user guide](https://nledford.github.io/Ladderback/) ([source](docs/guide/README.md)): install, a first plan, secrets, sign-in and remote access, and API tokens and AI agents.
+- [The user guide](https://nledford.github.io/Ladderback/) ([source](docs/guide/README.md)): installing and a first backup in the web UI, for everyone; then an Advanced part with the other ways to install, the service, `config.toml`, secrets, sign-in and remote access, and API tokens and AI agents.
 - [PRODUCT.md](PRODUCT.md): who Ladderback is for, what it does and doesn't do.
 - [docs/design/](docs/design/README.md): architecture, safety invariants, data model, milestones and decisions.
 

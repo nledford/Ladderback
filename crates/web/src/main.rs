@@ -80,6 +80,9 @@ mod dry_run_allowlist;
 // browser journeys.
 mod backend;
 mod maintenance;
+// What the header's menu decides on a narrow screen, host-tested;
+// `MenuButton` and `Navigation` below are its glue.
+mod navigation;
 // What a row of the Operations page says, decided on the host.
 mod operations;
 // The Operations page: its DOM glue, and the decisions not yet moved out of
@@ -168,11 +171,10 @@ mod wording;
 )]
 mod variants;
 
-use components::Banner;
-use components::Footer;
-use components::Link;
 use components::banner::rules::BannerTone;
+use components::button::{Appearance, Content};
 use components::link::rules::{Destination, LinkTone, Matching};
+use components::{Banner, Button, Footer, Link, Tip, Tooltip, focus_element};
 use daemon_log_page::DaemonLog;
 use full_disk_access_warning::{FullDiskAccessBanner, FullDiskAccessFound};
 use operations_page::Operations;
@@ -189,6 +191,7 @@ use sign_in::{
 use snapshot_page::Snapshot;
 use snapshots::Snapshots;
 use start_page::Start;
+use variants::{Side, Size};
 
 /// The text of message `id` in the page's language.
 fn text(localizer: &Localizer, id: MessageId) -> String {
@@ -292,12 +295,23 @@ const PAGES: [(&str, MessageId); 7] = [
 ];
 
 /// The pages' links, shown wherever the pages are, in the color of the text
-/// around them: the header leaves Ladder Blue to the focus ring, so a page's
-/// own action is the first blue on the screen, and the current page is told
-/// by its weight (decision 141).
+/// around them: they leave Ladder Blue to the focus ring, the brand's mark
+/// and an update's notice, so a page's own action is the first blue of its
+/// own, and the current page is told by its weight (decision 141). Below
+/// 41rem they sit in the menu's panel, behind the menu button, a disclosure
+/// `navigation` decides for (decision 143). `open` is the button's state: a
+/// page chosen from the links shows the panel closed, so the header is as
+/// tall again as it was.
 #[component]
-fn Navigation(localizer: Arc<Localizer>) -> impl IntoView {
+fn Navigation(localizer: Arc<Localizer>, open: RwSignal<bool>) -> impl IntoView {
     let label = text(&localizer, msg::UI_NAV_LABEL);
+    let pathname = use_location().pathname;
+    Effect::new(move |previous: Option<()>| {
+        pathname.track();
+        if previous.is_some() {
+            open.set(false);
+        }
+    });
     let links = PAGES
         .into_iter()
         .filter_map(|(path, name)| {
@@ -320,11 +334,58 @@ fn Navigation(localizer: Arc<Localizer>) -> impl IntoView {
     }
 }
 
+/// The header's menu button, the hamburger that below 41rem ends the brand's
+/// line and shows the menu's panel, and is drawn only there (`style.css`).
+/// Icon-only, so its name ("Menu", the same in both states) is its label and
+/// its tooltip, as every icon-only button's is; the icon is a hamburger
+/// while the panel is hidden and an X while it shows. A disclosure:
+/// `aria-expanded` says whether the panel shows, and `aria-controls` names
+/// it. XLarge, 3em, so it is a finger's target (44 px) at the page's own text
+/// size. The tooltip stands at the button's inline start, where it covers
+/// neither the panel nor the page's content under the header.
+#[component]
+fn MenuButton(localizer: Arc<Localizer>, open: RwSignal<bool>) -> impl IntoView {
+    let menu = text(&localizer, msg::UI_MENU_BUTTON);
+    view! {
+        <div class="site-menu-button">
+            <Tooltip tip=Tip::Names(menu.clone()) side=Side::Start>
+                <Button
+                    id=navigation::MENU_BUTTON_ID.to_owned()
+                    content=Content::IconOnly {
+                        glyph: Signal::derive(move || navigation::glyph(open.get())),
+                        label: Signal::stored(menu),
+                    }
+                    appearance=Appearance::Ghost
+                    size=Size::XLarge
+                    expanded=open
+                    controls=navigation::MENU_ID.to_owned()
+                    on_press=Callback::new(move |()| {
+                        open.update(|open| *open = navigation::toggled(*open))
+                    })
+                />
+            </Tooltip>
+        </div>
+    }
+}
+
+/// Whether the menu button is drawn now: below 41rem, where `style.css`
+/// draws it, and only there (a `display: none` box has no size). Read from
+/// the box, not from the breakpoint, so the glue never repeats the CSS.
+fn menu_button_is_drawn() -> bool {
+    web_sys::window()
+        .and_then(|window| window.document())
+        .and_then(|document| document.get_element_by_id(navigation::MENU_BUTTON_ID))
+        .is_some_and(|button| {
+            let drawn = button.get_bounding_client_rect();
+            navigation::is_drawn(drawn.width(), drawn.height())
+        })
+}
+
 /// The end of the header's line, after the pages' links: while the page has a
 /// session, Sign out, which is not a page and so stands apart from their
-/// list. With no session there is nothing at the line's end, not an empty
-/// box that still takes the line's gap. The running version is the footer's
-/// (decision 142).
+/// list, and below 41rem under them in the menu's panel. With no session
+/// there is nothing at the line's end, not an empty box that still takes the
+/// line's gap. The running version is the footer's (decision 142).
 #[component]
 fn Account(
     localizer: Arc<Localizer>,
@@ -459,6 +520,54 @@ fn App(localizer: Arc<Localizer>) -> impl IntoView {
     });
     let navigation = Arc::clone(&localizer);
     let account = Arc::clone(&localizer);
+    let menu_button = Arc::clone(&localizer);
+    // Whether the menu button shows the menu's panel (the pages' links and
+    // Sign out) below 41rem (decision 143). Any key pressed in the header
+    // can hide it: Escape, which then returns focus to the button, while the
+    // button is drawn.
+    let menu_open = RwSignal::new(false);
+    let hide_menu = move |event: web_sys::KeyboardEvent| {
+        if !navigation::escape_closes(
+            menu_open.get_untracked(),
+            &event.key(),
+            menu_button_is_drawn(),
+        ) {
+            return;
+        }
+        // An Escape that hides a tooltip has done its job (the tooltip's own
+        // rule, WCAG 1.4.13): it leaves the panel, and focus, where they are.
+        let tooltip_shown = web_sys::window()
+            .and_then(|window| window.document())
+            .and_then(|document| {
+                document
+                    .query_selector(".tooltip:popover-open")
+                    .ok()
+                    .flatten()
+            })
+            .is_some();
+        if !tooltip_shown {
+            menu_open.set(false);
+            focus_element(navigation::MENU_BUTTON_ID);
+        }
+    };
+    // A link chosen in the panel hides it, the current page's too, which
+    // changes no route for the router to close it on.
+    let hide_menu_on_link = move |event: web_sys::MouseEvent| {
+        let on_link = event
+            .target()
+            .and_then(|target| target.dyn_into::<web_sys::Element>().ok())
+            .is_some_and(|target| target.closest("a").ok().flatten().is_some());
+        if on_link {
+            menu_open.set(false);
+        }
+    };
+    // The header's pages go with a sign-out, and the button's state with
+    // them: the next sign-in finds the panel hidden, whatever it was.
+    Effect::new(move |_| {
+        if navigation::hidden_without_pages(shown.with(|shown| shown.shows_pages())) {
+            menu_open.set(false);
+        }
+    });
     // Sign out is in the header and says in the page when it fails, so the
     // header keeps its height (`sign_in::SignOutFailure`). The failure is
     // the session's: once the page has none, from Sign out everywhere or a
@@ -543,38 +652,71 @@ fn App(localizer: Arc<Localizer>) -> impl IntoView {
                 // `<main>` and 1rem from its inline edges, so the product's
                 // name starts where each page's heading does (decision 141).
                 <div class="py-3 bg-surface">
-                    <header class=move || format!("site-header {}", width.get().frame_class())>
-                        // The product's mark and name lead back to the start page,
-                        // marked as the current page there and only there, in the
-                        // color of the text around it, so it still looks like the
-                        // brand.
-                        <p class="brand">
-                            {Destination::route("/", Matching::Exact)
-                                .map(|to| {
-                                    view! {
-                                        <Link
-                                            to=to
-                                            localizer=Arc::clone(&localizer)
-                                            tone=LinkTone::Inherit
-                                        >
-                                            <BrandMark />
-                                            {text(&localizer, msg::UI_BRAND)}
-                                        </Link>
-                                    }
-                                })}
-                        </p>
+                    <header
+                        class=move || format!("site-header {}", width.get().frame_class())
+                        on:keydown=hide_menu
+                    >
+                        // The brand's line: the product's mark and name lead
+                        // back to the start page, marked as the current page
+                        // there and only there, in the color of the text
+                        // around it, so it still looks like the brand. Below
+                        // 41rem the menu button ends it, level with it
+                        // (decision 143).
+                        <div class="flex flex-wrap items-center gap-x-4 basis-full">
+                            <p class="brand">
+                                {Destination::route("/", Matching::Exact)
+                                    .map(|to| {
+                                        view! {
+                                            <Link
+                                                to=to
+                                                localizer=Arc::clone(&localizer)
+                                                tone=LinkTone::Inherit
+                                            >
+                                                <BrandMark />
+                                                {text(&localizer, msg::UI_BRAND)}
+                                            </Link>
+                                        }
+                                    })}
+                            </p>
+                            {move || {
+                                shown
+                                    .get()
+                                    .shows_pages()
+                                    .then(|| {
+                                        view! {
+                                            <MenuButton
+                                                localizer=Arc::clone(&menu_button)
+                                                open=menu_open
+                                            />
+                                        }
+                                    })
+                            }}
+                        </div>
                         {move || {
                             shown
                                 .get()
                                 .shows_pages()
                                 .then(|| {
                                     view! {
-                                        <Navigation localizer=Arc::clone(&navigation) />
-                                        <Account
-                                            localizer=Arc::clone(&account)
-                                            standing=standing
-                                            sign_out_failed=sign_out_failed
-                                        />
+                                        // The pages' links and Sign out: in the
+                                        // header's line wherever they fit, and
+                                        // below 41rem the menu's panel, which
+                                        // the menu button shows and hides.
+                                        <div
+                                            id=navigation::MENU_ID
+                                            class=move || navigation::menu_class(menu_open.get())
+                                            on:click=hide_menu_on_link
+                                        >
+                                            <Navigation
+                                                localizer=Arc::clone(&navigation)
+                                                open=menu_open
+                                            />
+                                            <Account
+                                                localizer=Arc::clone(&account)
+                                                standing=standing
+                                                sign_out_failed=sign_out_failed
+                                            />
+                                        </div>
                                         {update.clone()}
                                     }
                                 })

@@ -185,7 +185,7 @@ Decisions 1–6 recorded 2026-11-08. Decisions 7–12 recorded 2026-11-08 after 
 | [95](decisions/95-the-mcp-server-build.md) | The MCP server as built |
 | [96](decisions/96-plans-edited-in-the-ui.md) | Creating, changing and deleting plans in the UI |
 | [97](decisions/97-red-first-in-every-engine.md) | Red-first in every engine |
-| [98](decisions/98-no-core-dumps-or-debugger-attach.md) | No core dumps or debugger attach for the daemon, its workers and the MCP server |
+| [98](decisions/98-no-core-dumps-or-debugger-attach.md) | No core dumps or debugger attach for the processes that hold secrets |
 | [99](decisions/99-who-is-trusted.md) | Who is trusted with Ladderback's local data |
 | [101](decisions/101-japanese-and-the-translation-workflow.md) | Japanese, and how a translation is kept |
 | [102](decisions/102-snapshot-tree-browsing.md) | Browsing a snapshot's tree |
@@ -229,6 +229,7 @@ Decisions 1–6 recorded 2026-11-08. Decisions 7–12 recorded 2026-11-08 after 
 | [140](decisions/140-a-reader-chooses-a-tables-columns.md) | A reader chooses which of a table's columns show, and in what order |
 | [141](decisions/141-the-header-stands-in-the-page-frame.md) | The header's content stands in the page's frame, and the pages' links take the text's color |
 | [142](decisions/142-the-running-version-in-the-footer.md) | The running version stands in a footer at the foot of every page |
+| [143](decisions/143-a-hamburger-menu-holds-the-pages-links-below-41rem.md) | Below 41rem a hamburger menu holds the pages' links and Sign out |
 
 ## 17. Open questions
 

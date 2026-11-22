@@ -171,6 +171,7 @@ Feature: Sign-in
       Examples:
         | how     |
         | Ctrl-C  |
+        | Ctrl-\\ |
         | SIGTERM |
 
   @e2e

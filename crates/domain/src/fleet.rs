@@ -52,7 +52,7 @@ pub use signed::{
     PayloadDigest, SignedBytes, SignedMessage, WireName,
 };
 pub use token::{
-    HubAddress, InvalidHubAddress, MAX_ADDRESS_BYTES, PairingToken, TOKEN_PREFIX, TOKEN_VERSION,
-    TokenRefused, TokenTls,
+    HubAddress, HubScheme, InvalidHubAddress, MAX_ADDRESS_BYTES, PairingToken, TOKEN_PREFIX,
+    TOKEN_VERSION, TokenRefused, TokenTls,
 };
 pub use zone::{InvalidZoneName, MAX_ZONE_BYTES, MachineZone};

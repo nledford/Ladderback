@@ -4,10 +4,11 @@
 
 import assert from "node:assert/strict";
 
-import { Then, When } from "@cucumber/cucumber";
+import { type DataTable, Then, When } from "@cucumber/cucumber";
 import type { Locator } from "playwright";
 
-import { journey, namePattern } from "../support/keyboard.ts";
+import { expect } from "../support/expect.ts";
+import { composite, contrastRatio, journey, namePattern } from "../support/keyboard.ts";
 import type { BrowserWorld } from "../support/world.ts";
 
 // Layout rounds to fractions of a pixel; anything within this is one place.
@@ -135,31 +136,251 @@ Then("the header keeps the height noted", async function (this: BrowserWorld) {
   assert.ok(Math.abs(now - noted) <= ROUNDING_PX, `the header was ${Math.round(noted)}px tall, now ${Math.round(now)}px`);
 });
 
-// On a narrow screen Sign out wraps under the pages' links and ends its line
-// at the header's inline end, the right in English and the left right to
-// left, so it never stands alone at the line's start.
-Then("the button {string} ends its line, at the header's inline end", async function (this: BrowserWorld, name: string) {
-  const banner = this.page.getByRole("banner");
-  const button = await banner.getByRole("button", { name: namePattern(name) }).elementHandle();
-  assert.ok(button, `the banner has no button "${name}"`);
-  const end = await banner.evaluate((header, control) => {
-    const style = getComputedStyle(header);
-    const box = header.getBoundingClientRect();
-    const left = box.left + Number.parseFloat(style.borderLeftWidth) + Number.parseFloat(style.paddingLeft);
-    const right = box.right - Number.parseFloat(style.borderRightWidth) - Number.parseFloat(style.paddingRight);
-    const drawn = control.getBoundingClientRect();
-    return style.direction === "rtl" ? left - drawn.left : drawn.right - right;
-  }, button);
-  assert.ok(Math.abs(end) <= ROUNDING_PX, `the button "${name}" ends ${Math.round(-end)}px before the header's inline end`);
-});
-
-// A button that people press with a finger or a pointer: 2rem at least, so it
-// grows with the reader's text size (2.5.8, DESIGN.md's Buttons).
-Then("the button {string} is at least 2rem tall, the size of the reader's text", async function (this: BrowserWorld, name: string) {
-  const button = this.page.getByRole("banner").getByRole("button", { name: namePattern(name) });
-  const { height, rem } = await button.evaluate((control) => ({
-    height: control.getBoundingClientRect().height,
+// A screen narrower than 41rem (decision 143): the pages' links and Sign out
+// sit in a panel behind a hamburger button. The header as the reader sees it
+// is the band behind the banner, its parent, padding included.
+Then("the header is under {int} rem tall", async function (this: BrowserWorld, limit: number) {
+  const { height, rem } = await this.page.getByRole("banner").evaluate((header) => ({
+    height: (header.parentElement ?? header).getBoundingClientRect().height,
     rem: Number.parseFloat(getComputedStyle(document.documentElement).fontSize),
   }));
-  assert.ok(height >= 2 * rem - 0.5, `the button "${name}" is ${height.toFixed(1)}px tall, under 2rem (${2 * rem}px)`);
+  assert.ok(height < limit * rem - 0.5, `the header is ${height.toFixed(1)}px tall, not under ${limit}rem (${limit * rem}px)`);
 });
+
+Then("the banner shows no button {string}", async function (this: BrowserWorld, name: string) {
+  await expect(this.page.getByRole("banner").getByRole("button", { name: namePattern(name) })).toHaveCount(0);
+});
+
+// The button that shows the menu is a disclosure: `aria-expanded` says
+// whether the panel shows, and `aria-controls` names it.
+Then("the button {string} is collapsed", async function (this: BrowserWorld, name: string) {
+  const button = this.page.getByRole("banner").getByRole("button", { name: namePattern(name) });
+  await expect(button).toHaveAttribute("aria-expanded", "false");
+});
+
+Then("the button {string} is expanded", async function (this: BrowserWorld, name: string) {
+  const button = this.page.getByRole("banner").getByRole("button", { name: namePattern(name) });
+  await expect(button).toHaveAttribute("aria-expanded", "true");
+});
+
+Then("the button {string} names the menu panel", async function (this: BrowserWorld, name: string) {
+  const button = this.page.getByRole("banner").getByRole("button", { name: namePattern(name) });
+  const controls = await button.getAttribute("aria-controls");
+  assert.ok(controls, `the button "${name}" controls nothing`);
+  const panel = this.page.locator(`[id="${controls}"]`);
+  await expect(panel).toHaveCount(1);
+  await expect(panel.getByRole("navigation")).toHaveCount(1);
+  await expect(panel.getByRole("button", { name: namePattern("Sign out") })).toHaveCount(1);
+});
+
+// An icon-only button: its icon, and no words written in it (its name is on
+// the button, not in it).
+Then("the button {string} shows an icon and no words", async function (this: BrowserWorld, name: string) {
+  const button = this.page.getByRole("banner").getByRole("button", { name: namePattern(name) });
+  await expect(button).toBeVisible();
+  const found = await button.evaluate((control) => ({
+    icons: control.querySelectorAll("svg").length,
+    words: (control.textContent ?? "").trim(),
+  }));
+  assert.equal(found.icons, 1, `the button "${name}" shows ${found.icons} icons`);
+  assert.equal(found.words, "", `the button "${name}" writes "${found.words}"`);
+});
+
+// A target a finger finds: 44 CSS pixels a side at least, 3em at the page's
+// text size, so it grows with the reader's text.
+Then("the button {string} is at least {int} pixels square", async function (this: BrowserWorld, name: string, side: number) {
+  const button = this.page.getByRole("banner").getByRole("button", { name: namePattern(name) });
+  await expect(button).toBeVisible();
+  const box = await button.evaluate((control) => {
+    const rect = control.getBoundingClientRect();
+    return { width: rect.width, height: rect.height };
+  });
+  assert.ok(box.width >= side - 0.5, `the button "${name}" is ${box.width.toFixed(1)}px wide, under ${side}px`);
+  assert.ok(box.height >= side - 0.5, `the button "${name}" is ${box.height.toFixed(1)}px tall, under ${side}px`);
+  assert.ok(Math.abs(box.width - box.height) <= 0.5, `the button "${name}" is ${box.width}px by ${box.height}px`);
+});
+
+// Closed, Sign out is not drawn below 41rem.
+Then("the button {string} is hidden", async function (this: BrowserWorld, name: string) {
+  await expect(this.page.getByRole("banner").getByRole("button", { name: namePattern(name) })).toBeHidden();
+});
+
+Then("the pages' links are hidden", async function (this: BrowserWorld) {
+  await expect(this.page.getByRole("banner").getByRole("navigation")).toBeHidden();
+});
+
+// Shown, the links stand under the brand's line, each tall enough for a
+// finger.
+Then(
+  "the pages' links are shown below the brand's line, each at least {int} rem tall",
+  async function (this: BrowserWorld, least: number) {
+    const banner = this.page.getByRole("banner");
+    const navigation = banner.getByRole("navigation");
+    await expect(navigation).toBeVisible();
+    const brandBottom = await banner
+      .getByRole("link", { name: namePattern("Ladderback") })
+      .evaluate((link) => link.getBoundingClientRect().bottom);
+    const drawn = await navigation.getByRole("link").evaluateAll((links) =>
+      links.map((link) => {
+        const box = link.getBoundingClientRect();
+        return { name: (link.textContent ?? "").trim(), top: box.top, height: box.height };
+      }),
+    );
+    assert.ok(drawn.length > 0, "the navigation has no links");
+    const rem = await this.page.evaluate(() => Number.parseFloat(getComputedStyle(document.documentElement).fontSize));
+    const beside = drawn.filter((link) => link.top < brandBottom - ROUNDING_PX).map((link) => link.name);
+    assert.deepEqual(beside, [], "links on the brand's line");
+    const short = drawn.filter((link) => link.height < least * rem - 0.5).map((link) => `${link.name}: ${link.height.toFixed(1)}px`);
+    assert.deepEqual(short, [], `links under ${least}rem`);
+  },
+);
+
+// The brand's link and the menu button stand on one line, level: the button
+// has no words of its own, so their middles meet.
+Then(
+  "the link {string} and the button {string} share a line",
+  async function (this: BrowserWorld, linkName: string, buttonName: string) {
+    const banner = this.page.getByRole("banner");
+    const link = banner.getByRole("link", { name: namePattern(linkName) });
+    const button = banner.getByRole("button", { name: namePattern(buttonName) });
+    await Promise.all([expect(link).toBeVisible(), expect(button).toBeVisible()]);
+    const middle = (box: { top: number; box: number }) => (box.top + box.box) / 2;
+    const apart = Math.abs(middle(await extent(link)) - middle(await extent(button)));
+    assert.ok(apart <= ROUNDING_PX, `the link "${linkName}" and the button "${buttonName}" stand ${apart.toFixed(1)}px apart`);
+  },
+);
+
+/** The panel the Menu button controls. */
+function menuPanel(world: BrowserWorld): Locator {
+  return world.page.locator("#menu");
+}
+
+// The panel is a box, not loose rows: an edge all round and rounded corners,
+// the width of the header's content, under the brand's line.
+Then("the menu panel is a bordered box with rounded corners, under the brand's line", async function (this: BrowserWorld) {
+  const panel = menuPanel(this);
+  await expect(panel).toBeVisible();
+  const brandBottom = await this.page
+    .getByRole("banner")
+    .getByRole("link", { name: namePattern("Ladderback") })
+    .evaluate((link) => link.getBoundingClientRect().bottom);
+  const drawn = await panel.evaluate((box) => {
+    const style = getComputedStyle(box);
+    const header = box.closest("header");
+    const rect = box.getBoundingClientRect();
+    const inner = header ? header.getBoundingClientRect() : rect;
+    const edges = [style.borderTopWidth, style.borderRightWidth, style.borderBottomWidth, style.borderLeftWidth].map(
+      Number.parseFloat,
+    );
+    return {
+      edges,
+      styles: [style.borderTopStyle, style.borderRightStyle, style.borderBottomStyle, style.borderLeftStyle],
+      radius: Number.parseFloat(style.borderTopLeftRadius),
+      top: rect.top,
+      width: rect.width,
+      headerWidth: inner.width - Number.parseFloat(getComputedStyle(header ?? box).paddingInlineStart) * 2,
+    };
+  });
+  assert.ok(
+    drawn.edges.every((edge) => edge >= 1) && drawn.styles.every((style) => style === "solid"),
+    `the panel's edges are ${drawn.edges.join("/")}px, ${drawn.styles.join("/")}`,
+  );
+  assert.ok(drawn.radius > 0, "the panel's corners are square");
+  assert.ok(
+    drawn.top >= brandBottom - ROUNDING_PX,
+    `the panel starts ${Math.round(brandBottom - drawn.top)}px above the foot of the brand's line`,
+  );
+  assert.ok(
+    Math.abs(drawn.width - drawn.headerWidth) <= ROUNDING_PX,
+    `the panel is ${drawn.width}px wide in a header ${drawn.headerWidth}px wide`,
+  );
+});
+
+// One row for each page and one for Sign out, in the order of Tab, each a
+// block as wide as the panel's inside and tall enough for a finger.
+Then(
+  "the menu panel's rows are these, in order, each at least {int} rem tall and as wide as the panel:",
+  async function (this: BrowserWorld, least: number, table: DataTable) {
+    const wanted = (table.hashes() as { row: string }[]).map(({ row }) => row);
+    const rem = await this.page.evaluate(() => Number.parseFloat(getComputedStyle(document.documentElement).fontSize));
+    const rows = await menuPanel(this).evaluate((panel) => {
+      const inside = panel.clientWidth;
+      return Array.from(panel.querySelectorAll("nav a, .site-account button")).map((row) => {
+        const rect = row.getBoundingClientRect();
+        return { name: (row.textContent ?? "").trim(), height: rect.height, width: rect.width, inside };
+      });
+    });
+    assert.deepEqual(
+      rows.map((row) => row.name),
+      wanted,
+      "the panel's rows",
+    );
+    const short = rows.filter((row) => row.height < least * rem - 0.5).map((row) => `${row.name}: ${row.height.toFixed(1)}px`);
+    assert.deepEqual(short, [], `rows under ${least}rem`);
+    const narrow = rows
+      .filter((row) => row.width < row.inside - 1)
+      .map((row) => `${row.name}: ${row.width.toFixed(1)}px of ${row.inside}px`);
+    assert.deepEqual(narrow, [], "rows narrower than the panel");
+  },
+);
+
+// The current page is told by its weight and by a bar at its inline start,
+// which no other row has, so the rows' words stay aligned.
+Then(
+  "the link {string} is marked by a bar at its inline start that no other row has",
+  async function (this: BrowserWorld, name: string) {
+    const bars = await menuPanel(this)
+      .locator("nav a")
+      .evaluateAll((links) =>
+        links.map((link) => ({
+          name: (link.textContent ?? "").trim(),
+          width: Number.parseFloat(getComputedStyle(link).borderInlineStartWidth),
+          paddingStart: Number.parseFloat(getComputedStyle(link).paddingInlineStart),
+        })),
+      );
+    const current = bars.find((bar) => bar.name === name);
+    assert.ok(current, `the panel has no link "${name}"`);
+    assert.ok(current.width >= 3, `the bar of the link "${name}" is ${current.width}px wide`);
+    assert.deepEqual(
+      bars.filter((bar) => bar.name !== name && bar.width > 0).map((bar) => bar.name),
+      [],
+      "other links with a bar",
+    );
+    const others = bars.filter((bar) => bar.name !== name);
+    assert.ok(
+      others.every((bar) => Math.abs(bar.paddingStart - (current.paddingStart + current.width)) <= 0.5),
+      "the bar moves the words of the current page",
+    );
+  },
+);
+
+// What the panel's edge and the current page's bar lie on is the colors
+// under them, layer on layer: each is 3:1 at least against it (1.4.11).
+Then(
+  "the menu panel's border and the bar of the link {string} show, at least {int} to 1 against what they lie on",
+  async function (this: BrowserWorld, name: string, least: number) {
+    const link = menuPanel(this).locator("nav a", { hasText: name });
+    await expect(link).toHaveCount(1);
+    const colors = await menuPanel(this).evaluate(
+      (panel, barred) => {
+        // The backgrounds from an element out to the page, nearest first.
+        const behind = (start: Element | null) => {
+          const layers: string[] = [];
+          for (let el = start; el !== null; el = el.parentElement) layers.push(getComputedStyle(el).backgroundColor);
+          return layers;
+        };
+        return {
+          edge: getComputedStyle(panel).borderTopColor,
+          edgeOn: behind(panel),
+          bar: getComputedStyle(barred).borderInlineStartColor,
+          barOn: behind(barred),
+        };
+      },
+      await link.elementHandle(),
+    );
+    const edge = contrastRatio(composite([colors.edge]), composite(colors.edgeOn));
+    assert.ok(edge >= least, `the panel's edge is ${edge.toFixed(2)}:1 against what it lies on`);
+    const bar = contrastRatio(composite([colors.bar]), composite(colors.barOn));
+    assert.ok(bar >= least, `the bar of the link "${name}" is ${bar.toFixed(2)}:1 against what it lies on`);
+  },
+);

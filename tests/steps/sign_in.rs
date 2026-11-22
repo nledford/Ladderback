@@ -83,10 +83,12 @@ fn ran(agent: &Agent) -> &Ran {
     agent.sign_in.ran.as_ref().expect("set-password ran")
 }
 
-/// The signal `how` sends: Ctrl-C at a terminal sends `SIGINT`.
+/// The signal `how` sends: Ctrl-C at a terminal sends `SIGINT`, and Ctrl-\
+/// `SIGQUIT`.
 fn signal_of(how: &str) -> nix::sys::signal::Signal {
     match how {
         "Ctrl-C" => nix::sys::signal::Signal::SIGINT,
+        "Ctrl-\\" => nix::sys::signal::Signal::SIGQUIT,
         "SIGTERM" => nix::sys::signal::Signal::SIGTERM,
         other => panic!("no signal for {other:?}"),
     }

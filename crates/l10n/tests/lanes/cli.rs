@@ -96,3 +96,27 @@ fn what_pair_read_is_said_as_one_whole_sentence_for_each_kind_of_address() {
     assert!(say("cli-pair-read-pinned", 1).starts_with("Read 1 character. "));
     assert!(say("cli-pair-read-pinned", 120).contains("pinned"));
 }
+
+/// A plain `http://` address shows no certificate: what `pair` read says
+/// the address isn't encrypted and that the hub key still proves the hub,
+/// and names no certificate (#1343).
+#[test]
+fn what_pair_read_says_of_a_plain_address_names_no_certificate() {
+    let shown = english().message(
+        MessageId::new("cli-pair-read-plain"),
+        &[
+            ("count", MsgArg::Count(120)),
+            ("address", MsgArg::Text("http://127.0.0.1:9898".to_owned())),
+            (
+                "fingerprint",
+                MsgArg::Text("7K3Q-M9XD-2RTV-8HFA-QW5N".to_owned()),
+            ),
+        ],
+    );
+    assert!(shown.problems().is_empty(), "{:?}", shown.problems());
+    let text = shown.text();
+    assert!(text.starts_with("Read 120 characters. "), "{text}");
+    assert!(text.contains("isn't encrypted"), "{text}");
+    assert!(text.contains("7K3Q-M9XD-2RTV-8HFA-QW5N"), "{text}");
+    assert!(!text.contains("certificate"), "{text}");
+}
