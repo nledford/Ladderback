@@ -50,7 +50,7 @@ Ladderback borrows Backrest's user-facing model: repositories, plans, schedules,
 **Ladderback may suit you better if you:**
 
 - back up **several machines into one shared repository**. In Backrest, each plan runs `restic forget` after its backup, which takes an exclusive lock and blocks other hosts' backups ([backrest#244](https://github.com/garethgeorge/backrest/issues/244)). In Ladderback, backups never wait for a lock, and with the hub (M9) one owner per repository runs maintenance;
-- don't want repository **passwords and backend keys copied to other machines**. Backrest's multi-host sync pushes shared repositories to clients, credentials included. With Ladderback's hub (M8), the hub keeps its own secrets, and paired machines never send theirs;
+- don't want repository **passwords and backend keys copied to other machines**. Backrest's multi-host sync pushes shared repositories to clients, credentials included. With Ladderback's hub (from the MVP's release), the hub keeps its own secrets, and paired machines never send theirs;
 - back up **laptops**. Missed runs catch up by default, and the scheduler notices sleep and wake;
 - want an **AI agent** to check on and run backups. Ladderback has an MCP server built in, `ladderback mcp`, which takes a token scoped to reading, running or previewing, and can't restore or delete. An AI agent can also propose plans, over the API or through MCP, which change nothing until a person approves them in the web UI;
 - want **secrets out of the config file**: a password command, the system keyring, a file or an environment variable. A missing secret fails the job instead of silently becoming an empty string;
