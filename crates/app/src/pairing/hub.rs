@@ -90,6 +90,18 @@ impl fmt::Debug for HubKeys {
     }
 }
 
+/// What the hub's keys came to at its start.
+#[derive(Debug)]
+pub enum HubStart {
+    /// The keys are read from the data folder, or made on a first start.
+    Keys(HubKeys),
+    /// A key file is gone while agents are registered. No new key is made,
+    /// which would lock every agent out; the hub runs, and every agent's
+    /// session is refused, until the file is restored (§16, decision 120,
+    /// "The hub key").
+    Unserved(KeyFile),
+}
+
 /// What the hub keeps of one connection between its `Challenge` and the
 /// agent's next message.
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -239,6 +251,20 @@ impl HubPairing {
             key,
             recovery_key,
         })
+    }
+
+    /// The hub's start: its keys made on a first start and read after
+    /// that, so a key file that can't be read is found here, and not by
+    /// the first agent or token that asks (§16, decision 120, "The key's
+    /// life"). A key file gone while agents are registered isn't a failed
+    /// start: the hub runs without a key, makes none, and refuses every
+    /// agent's session ([`HubStart::Unserved`], "The hub key").
+    pub async fn start(&self) -> Result<HubStart, HubPairingError> {
+        match self.keys().await {
+            Ok(keys) => Ok(HubStart::Keys(keys)),
+            Err(HubPairingError::KeyMissing { file }) => Ok(HubStart::Unserved(file)),
+            Err(error) => Err(error),
+        }
     }
 
     /// A pairing token for `address`, of `tls`'s kind, living `life` or 15

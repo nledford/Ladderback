@@ -542,6 +542,19 @@ cli-hub-command-failed = the command failed: { $detail }
 # The command is typed as it is: keep it a string literal.
 cli-key-file-exposed = the key file { $file } in the data folder was not used, because other users of this machine can read or change it (permissions { $mode }). If you copied or restored it yourself, run { "chmod 600" } on it and try again; if you didn't, someone else may hold this key.
 
+# The { -hub } didn't start because a key file in its data folder holds no key it can use. The file was left as it is, and no new key was made in its place.
+# $file (text): the file's name in the data folder, such as hub-key.
+cli-hub-key-file-damaged = the { -hub } didn't start: its key file { $file } in the data folder holds no key it can use. Restore the file from your backup of the data folder, then start the { -hub } again.
+
+# The { -hub } didn't start because the system refused it a key file in its data folder.
+# $file (text): the file's name in the data folder, such as hub-key.
+# $detail (text): the system's message. It is shown as it came.
+cli-hub-key-file-unavailable = the { -hub } didn't start: its key file { $file } in the data folder couldn't be read or written ({ $detail }). Fix what this says, then start the { -hub } again.
+
+# The { -hub } didn't start because its keys couldn't be made or read, for a reason other than a key file the system refused or one that holds no key.
+# $detail (text): the reason, as the program names it. It is shown as it came.
+cli-hub-keys-failed = the { -hub } didn't start: its keys couldn't be made or read ({ $detail }). Start it again, and report this if it is said again.
+
 # `ladderback pair` asks for the token at a terminal; what is pasted is not shown. Printed without the program's name, and the paste follows on the same line.
 cli-pair-prompt = Paste the pairing token:
 

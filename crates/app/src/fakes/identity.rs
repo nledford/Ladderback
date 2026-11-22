@@ -14,6 +14,9 @@ pub struct InMemoryIdentity {
     kept: Mutex<Kept>,
     /// Whether an attempt holds the counter's lock.
     attempting: Arc<AtomicBool>,
+    /// Why every read of a seed fails, for a data folder that can't be
+    /// read.
+    unreadable: Option<IdentityError>,
 }
 
 #[derive(Debug, Default)]
@@ -43,6 +46,14 @@ impl InMemoryIdentity {
         identity
     }
 
+    /// Key files that can't be read: every seed's read fails with `error`.
+    pub fn unreadable(error: IdentityError) -> Self {
+        Self {
+            unreadable: Some(error),
+            ..Self::default()
+        }
+    }
+
     fn kept(&self) -> std::sync::MutexGuard<'_, Kept> {
         self.kept.lock().unwrap_or_else(PoisonError::into_inner)
     }
@@ -51,6 +62,9 @@ impl InMemoryIdentity {
 #[async_trait]
 impl Identity for InMemoryIdentity {
     async fn seed(&self, file: SeedFile) -> Result<Option<SigningSeed>, IdentityError> {
+        if let Some(error) = &self.unreadable {
+            return Err(error.clone());
+        }
         Ok(self.kept().seeds.get(&file).cloned())
     }
 
