@@ -124,9 +124,13 @@ components:
     height: "2em"
     width: "32rem"
     padding: "0 0.75em"
-  site-header:
+  site-header-band:
+    # The band behind the header's content, spanning the window.
     backgroundColor: "{colors.ledger-gray}"
-    padding: "0.75rem 1rem"
+    padding: "0.75rem 0"
+  site-header:
+    # The header's content, in the page's frame: as wide as `main` is.
+    padding: "0 1rem"
   toast:
     # Information's; a status tone's lies on its status pair. Edged 1 px in
     # its tone.
@@ -164,7 +168,7 @@ Accessibility shapes the layout rather than decorating it: every layout holds at
 **Key Characteristics:**
 
 - Native controls underneath, buttons, fields and choices drawn from the tokens, flat surfaces, no shadows.
-- One accent, Ladder Blue, for action: links, the focus ring, progress and a row's one Filled button. Three status hues beside it, never alone.
+- One accent, Ladder Blue, for action: links in the page's text, the focus ring, progress and a row's one Filled button. Three status hues beside it, never alone.
 - State is a labeled badge with an icon, never color alone.
 - Tables with one muted rule per row and columns that don't move as rows change.
 - Logical properties only; layouts follow the page's writing direction.
@@ -175,7 +179,7 @@ A white page (dark: near-black), graphite text, one blue, three status hues, a s
 
 ### Primary
 
-- **Ladder Blue** (`--accent`, `--focus`): links, the 3 px focus ring, a progress bar's fill, a spinner's arc, the skip link's border, a toast's edge, an information alert's and an information banner's icon and edge (the Primary tone, which covers Info), the selected tab's bar and a chosen checkbox's or radio's edge and fill, under a mark in Paper. It is also the field of the logo's mark (`crates/web/assets/brand/`). In dark mode it lightens to Ladder Blue Dark so it keeps its contrast.
+- **Ladder Blue** (`--accent`, `--focus`): links in the page's text (the header's own take the color of the text around them, decision 141), the 3 px focus ring, a progress bar's fill, a spinner's arc, the skip link's border, a toast's edge, an information alert's and an information banner's icon and edge (the Primary tone, which covers Info), the selected tab's bar and a chosen checkbox's or radio's edge and fill, under a mark in Paper. It is also the field of the logo's mark (`crates/web/assets/brand/`). In dark mode it lightens to Ladder Blue Dark so it keeps its contrast.
 
 ### Neutral
 
@@ -236,7 +240,9 @@ The badge's own pairs, for the tones that tell no result: Loading (dark blue on 
 
 ## Layout
 
-One column, `main` with 1rem padding, as wide as Settings' Page width chooses in this browser: Narrow, the default, centers it at up to 60rem; Full width lets it use the window's width, while each paragraph and form in it stays at up to 70 characters (`70ch`), a readable line however wide the screen. The width is Tailwind utilities on `main` (`page_width.rs`), never a `style.css` rule. The site header spans the page: the brand on its own line, then the navigation, with Sign out at the end of the line while signed in; on a narrow screen it wraps under the navigation and ends its line. The footer, with the running version, closes every page that shows the navigation, at the window's foot on a short page.
+One column, `main` with 1rem padding, as wide as Settings' Page width chooses in this browser: Narrow, the default, centers it at up to 60rem; Full width lets it use the window's width, while each paragraph and form in it stays at up to 70 characters (`70ch`), a readable line however wide the screen. The width is Tailwind utilities on `main`, the header and the footer (`page_width.rs`), never a `style.css` rule.
+
+A Ledger Gray band behind the site header spans the window, and the header's content stands in the page's frame, 1rem from its inline edges as `main`'s content is, so the brand starts where each page's heading does (decision 141): the brand on its own line, then the navigation, with Sign out at the end of the line while signed in; on a narrow screen it wraps under the navigation and ends its line. The footer, with the running version, closes every page that shows the navigation, at the window's foot on a short page (decision 142).
 
 Spacing steps are 0.25, 0.5, 0.75 and 1rem; forms stack fields 1rem apart, and an `.actions` row puts its buttons 0.5rem apart, wrapping. Inputs fill their line up to 32rem (40rem for a token).
 
@@ -315,7 +321,7 @@ Every shared component takes the same choices, defined once in `crates/web/src/v
 
 - **The component:** `Link`, a native `<a>` to a page of the app or to another site; every link of the pages but the skip link and the error summary's.
 - **Style:** Ladder Blue (`--accent`), always underlined, the underline a token's thickness, drawn below the descenders, thicker under the pointer. No hover-only underline, no visited color, no link drawn as a button.
-- **Tone:** Primary, the default, or Inherit, the color of the text around it, for a link inside a status sentence and for the brand; still underlined. No status tones and no size: a link is the text around it.
+- **Tone:** Primary, the default, or Inherit, the color of the text around it, for a link inside a status sentence, for the brand and for the pages' links in the header (decision 141); still underlined. No status tones and no size: a link is the text around it.
 - **Current page:** bold, with `aria-current="page"`, from where the reader is.
 - **Another site:** opens where the reader is, never a new tab of its own; "(goes to another site)" after its words for a screen reader, and the ExternalLink icon after its words.
 - **Forced colors:** `LinkText`, the underline kept.
@@ -323,10 +329,10 @@ Every shared component takes the same choices, defined once in `crates/web/src/v
 
 ### Navigation
 
-- **Style:** a wrapping row of `Link`s, underlined in Ladder Blue on the Ledger Gray header, 1rem apart.
+- **Style:** a wrapping row of `Link`s in the color of the text around them, underlined, 0.5rem apart, on the header's Ledger Gray band (decision 141).
 - **Current page:** bold, with `aria-current="page"`; a page below a section (a snapshot's) marks its section.
 - **Brand:** a `Link` to the start page in the color of the text around it, current there only without a query (not on `/?locale=fr`); the product's mark before its name, as tall as the name's letters, hidden from screen readers; under forced colors the mark takes `CanvasText` and `Canvas`.
-- **Sign out:** a Ghost button with the LogOut icon at the end of the links' line, outside the navigation's list, since it isn't a page, its words on the links' baseline and no taller than the links; busy while the daemon signs out. A failed sign-out is said once at the top of `main`, never in the header, so the header keeps its height.
+- **Sign out:** a Ghost button with the LogOut icon at the end of the links' line, outside the navigation's list, since it isn't a page, its words on the links' baseline (the line stands on last baselines) and no taller than the links; busy while the daemon signs out. A failed sign-out is said once at the top of `main`, never in the header, so the header keeps its height.
 - A skip link is the first focusable element and appears at the top of the page on focus.
 
 ### Footer

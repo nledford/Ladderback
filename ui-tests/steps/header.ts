@@ -39,14 +39,11 @@ async function extent(part: Locator): Promise<{ top: number; box: number; words:
 // and a part on its own baseline would sit off the line. Nor does Sign out
 // reach above or below the links' boxes, so the line is as tall as the links
 // make it, as with sign-in off, when there is no Sign out.
-Then("the pages' links and the button {string} share the header's last line", async function (this: BrowserWorld, name: string) {
-  const banner = this.page.getByRole("banner");
+async function assertLastLineShared(world: BrowserWorld, signOut: [string, Locator]): Promise<void> {
+  const banner = world.page.getByRole("banner");
   const links = await banner.getByRole("navigation").getByRole("link").all();
   assert.ok(links.length > 0, "the navigation has no links");
-  const parts: [string, Locator][] = [
-    ...links.map((link, at): [string, Locator] => [`link ${at + 1}`, link]),
-    [`the button "${name}"`, banner.getByRole("button", { name: namePattern(name) })],
-  ];
+  const parts: [string, Locator][] = [...links.map((link, at): [string, Locator] => [`link ${at + 1}`, link]), signOut];
   const measured = await Promise.all(parts.map(async ([part, locator]) => ({ part, ...(await extent(locator)) })));
   const baseline = measured[0]?.words ?? 0;
   const off = measured.filter(({ words }) => Math.abs(words - baseline) > ROUNDING_PX);
@@ -73,6 +70,19 @@ Then("the pages' links and the button {string} share the header's last line", as
   });
   const lowest = Math.max(...measured.map(({ box }) => box));
   assert.ok(inner - lowest <= ROUNDING_PX, `the header holds ${Math.round(inner - lowest)}px under its last line`);
+}
+
+Then("the pages' links and the button {string} share the header's last line", async function (this: BrowserWorld, name: string) {
+  const button = this.page.getByRole("banner").getByRole("button", { name: namePattern(name) });
+  await assertLastLineShared(this, [`the button "${name}"`, button]);
+});
+
+// A pseudolocale words Sign out in letters of its own, so the button is the
+// banner's one button, found by its role alone.
+Then("the pages' links and the banner's one button share the header's last line", async function (this: BrowserWorld) {
+  const button = this.page.getByRole("banner").getByRole("button");
+  assert.equal(await button.count(), 1, "the banner has not one button");
+  await assertLastLineShared(this, ["the banner's button", button]);
 });
 
 // Sign out isn't a page, so it stands outside the navigation landmark, and
