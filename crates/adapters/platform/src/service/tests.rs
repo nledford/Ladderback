@@ -696,6 +696,37 @@ fn only_a_launchd_agent_needs_full_disk_access() {
     assert!(!Faked::new(Which::Systemd).service.needs_full_disk_access());
 }
 
+/// The process the manager runs the service in is the one it names, and
+/// none once the service stops or when the manager can't say (#459).
+#[tokio::test]
+async fn the_services_process_is_the_one_its_manager_names() {
+    for which in [Which::Systemd, Which::Launchd] {
+        let faked = Faked::new(which);
+        assert_eq!(
+            faked.service.process().await,
+            None,
+            "{which:?} not installed"
+        );
+        faked.service.install(&faked.program("bin")).await.unwrap();
+        let runs = faked.fakes.process(faked.name).expect("the service runs");
+        assert_eq!(faked.service.process().await, Some(runs), "{which:?}");
+        faked
+            .fakes
+            .refuse("Failed to connect to bus: No medium found");
+        assert_eq!(faked.service.process().await, None, "{which:?} refused");
+    }
+}
+
+#[tokio::test]
+async fn a_removed_service_runs_no_process() {
+    for which in [Which::Systemd, Which::Launchd] {
+        let faked = Faked::new(which);
+        faked.service.install(&faked.program("bin")).await.unwrap();
+        faked.service.remove().await.unwrap();
+        assert_eq!(faked.service.process().await, None, "{which:?}");
+    }
+}
+
 /// `systemctl restart` and `disable --now` return only once the unit has
 /// stopped, which systemd gives up to its `TimeoutStopSec`: they are waited
 /// for while it stops, not given up at one call's limit (#543).
