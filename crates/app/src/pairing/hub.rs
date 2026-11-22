@@ -20,6 +20,7 @@ use crate::ports::{
 };
 
 mod dialog;
+mod logged;
 
 pub use dialog::{AgentsListed, ApprovalAsk, MadeToken, TokenAsk, TokenAskRefused};
 

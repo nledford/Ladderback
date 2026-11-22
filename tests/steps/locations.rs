@@ -359,7 +359,7 @@ fn position(agent: &Agent, name: &str) -> usize {
 
 /// The level a line of the daemon's log was written at, as env_logger
 /// writes it: `[<time> <LEVEL> <target>] <message>`.
-fn level_of(line: &str) -> Option<&str> {
+pub(super) fn level_of(line: &str) -> Option<&str> {
     line.strip_prefix('[')?.split_whitespace().nth(1)
 }
 
