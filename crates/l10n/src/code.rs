@@ -182,6 +182,8 @@ code_messages!(ERRORS, error_message, ErrorCode {
     PairingTokenLife => msg::ERROR_PAIRING_TOKEN_LIFE,
     PairingTokenLimit => msg::ERROR_PAIRING_TOKEN_LIMIT,
     PairingTokenUnknown => msg::ERROR_PAIRING_TOKEN_UNKNOWN,
+    AgentUnknown => msg::ERROR_AGENT_UNKNOWN,
+    AgentApprovedAlready => msg::ERROR_AGENT_APPROVED_ALREADY,
     HubUnavailable => msg::ERROR_HUB_UNAVAILABLE,
     MaintenanceNotOwner => msg::ERROR_MAINTENANCE_NOT_OWNER,
     RetentionKeepsNothing => msg::ERROR_RETENTION_KEEPS_NOTHING,

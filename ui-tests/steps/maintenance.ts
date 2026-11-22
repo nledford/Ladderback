@@ -497,12 +497,18 @@ Then("the dialog {string} stays open with focus inside it", async function (this
   }
 });
 
+// What the dialog says after a request, such as a refused step-up, lands once
+// the daemon answers, so the step waits for it rather than reading the dialog
+// while it still says "Approving…".
 Then("the dialog {string} says {string}", async function (this: BrowserWorld, name: string, text: string) {
-  const read = await textOfDialog(this, name);
-  assert.ok(
-    read.toLowerCase().includes(text.toLowerCase()),
-    `the dialog "${name}" does not say "${text}" (it reads ${JSON.stringify(read)})`,
-  );
+  const wanted = text.toLowerCase();
+  const end = Date.now() + patienceMs();
+  let read = await textOfDialog(this, name);
+  while (!read.toLowerCase().includes(wanted) && Date.now() < end) {
+    await sleep(100);
+    read = await textOfDialog(this, name);
+  }
+  assert.ok(read.toLowerCase().includes(wanted), `the dialog "${name}" does not say "${text}" (it reads ${JSON.stringify(read)})`);
 });
 
 // What a screen reader reads as the dialog opens, after its name: the text of

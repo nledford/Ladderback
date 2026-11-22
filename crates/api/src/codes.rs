@@ -647,6 +647,11 @@ pub enum ErrorCode {
     /// No unused pairing token has the ID asked for: it was used, lapsed or
     /// canceled already.
     PairingTokenUnknown,
+    /// No machine waits for approval under the agent ID and the key asked
+    /// for: it never paired, it was dropped, or it holds another key now.
+    AgentUnknown,
+    /// The machine asked to be approved is approved already.
+    AgentApprovedAlready,
     /// The hub couldn't read or keep its key or its tokens.
     HubUnavailable,
     #[serde(other)]
@@ -1649,6 +1654,8 @@ impl ErrorCode {
             | Self::PairingTokenLife
             | Self::PairingTokenLimit
             | Self::PairingTokenUnknown
+            | Self::AgentUnknown
+            | Self::AgentApprovedAlready
             | Self::HubUnavailable
             | Self::Unknown => &[],
         }

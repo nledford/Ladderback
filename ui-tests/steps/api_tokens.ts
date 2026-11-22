@@ -249,13 +249,26 @@ When("I press Tab until focus is in the group {string}", async function (this: B
 });
 
 // Every permission's group has a "No access" choice, and several a "Read":
-// the group names the one meant.
+// the group names the one meant. WebKit's arrow keys stop at a group's first
+// and last radio rather than wrapping, so a walk to a choice before the focused
+// one presses the up arrow.
+async function pressToChoice(page: Page, key: "ArrowDown" | "ArrowUp", choice: string, name: string): Promise<void> {
+  const group = await permissionGroup(page, name);
+  const radio = group.getByRole("radio", { name: namePattern(choice) });
+  await pressUntilFocused(page, key, radio, `the choice "${choice}" of the group "${name}"`);
+}
+
 When(
   "I press the down arrow until focus is on the choice {string} of the group {string}",
   async function (this: BrowserWorld, choice: string, name: string) {
-    const group = await permissionGroup(this.page, name);
-    const radio = group.getByRole("radio", { name: namePattern(choice) });
-    await pressUntilFocused(this.page, "ArrowDown", radio, `the choice "${choice}" of the group "${name}"`);
+    await pressToChoice(this.page, "ArrowDown", choice, name);
+  },
+);
+
+When(
+  "I press the up arrow until focus is on the choice {string} of the group {string}",
+  async function (this: BrowserWorld, choice: string, name: string) {
+    await pressToChoice(this.page, "ArrowUp", choice, name);
   },
 );
 
