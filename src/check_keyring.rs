@@ -17,14 +17,14 @@ use std::process::ExitCode;
 use std::time::Duration;
 
 use api::MsgArg;
-use app::keyring_check::{KeyringCheck, KeyringUser, check_keyring_entries};
+use app::keyring_check::{KeyringCheck, KeyringUser, answer_wait, check_keyring_entries};
 use app::ports::ConfigError;
 use config_adapter::{MAX_CONFIG_BYTES, Schemas, parse};
 use domain::execution::refusal::SettingRefusal;
 use domain::planning::AgentConfig;
 use domain::secrets::KeyringEntry;
 use l10n::{Localizer, msg};
-use platform::dirs;
+use platform::{dirs, terminal};
 
 use crate::{finish, said, say, text};
 
@@ -62,11 +62,21 @@ fn run(localizer: &Localizer) -> io::Result<ExitCode> {
             return Ok(ExitCode::FAILURE);
         }
     };
+    // At a terminal a person answers the keychain's question, and may find
+    // it late; anywhere else a read waits as long as a run's.
+    let at_terminal = terminal::stdin_is_terminal() && terminal::stderr_is_terminal();
+    let wait = answer_wait(at_terminal);
+    let mut told = Ok(());
     let checked = runtime.block_on(check_keyring_entries(
         &config,
-        &secrets::SystemSecrets::new(),
-        |_| {},
+        &secrets::SystemSecrets::new().with_command_timeout(wait),
+        |entry| {
+            if told.is_ok() {
+                told = notice(localizer, entry, wait, ASKS, &mut io::stderr().lock());
+            }
+        },
     ));
+    told?;
     report(
         localizer,
         &checked,
@@ -114,6 +124,10 @@ pub(crate) fn read_config(file: &Path) -> Result<AgentConfig, ConfigError> {
     parse(file, &contents, &Schemas::production()).map(|parsed| parsed.config)
 }
 
+/// Whether the keyring asks before it lets a new build read an entry: the
+/// macOS keychain does (#892); the others don't.
+const ASKS: bool = cfg!(target_os = "macos");
+
 /// Says on `err`, just before `entry` is read, that the keychain may ask
 /// now, in a window that can be behind others, and to choose Always Allow;
 /// `wait` is how long the read waits for the answer. Only where the
@@ -125,8 +139,13 @@ fn notice(
     asks: bool,
     err: &mut impl Write,
 ) -> io::Result<()> {
-    let _ = (localizer, entry, wait, asks, err);
-    todo!()
+    if !asks {
+        return Ok(());
+    }
+    let minutes = wait.as_secs().div_ceil(60);
+    let args = [("entry", text(entry)), ("minutes", MsgArg::Count(minutes))];
+    err.write_all(said(localizer, msg::CLI_CHECK_KEYRING_NOTICE, &args).as_bytes())?;
+    err.flush()
 }
 
 /// Says what `checked` came to: each entry read on `out`, each refused on

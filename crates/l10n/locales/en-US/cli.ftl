@@ -261,6 +261,15 @@ cli-check-keyring-channel-refused = notification channel { $channel }: could not
 # No repository or notification channel of the configuration takes a secret from the keyring, so there was nothing to read.
 cli-check-keyring-none = no { -repository } or notification channel takes a secret from the keyring: there is nothing to read
 
+# Said on macOS just before the command reads a keyring entry: the keychain may now ask whether this program may use the entry, in a window that can open behind the other windows. The read waits for the answer, then gives up.
+# "Always Allow" is the label of the button in the macOS keychain prompt: use the label macOS shows in your language.
+# $entry (text): the keyring entry, as the configuration names it (service/name). It is shown as it is.
+# $minutes (count): how many minutes the read waits for the answer.
+cli-check-keyring-notice = { $minutes ->
+    [one] reading the keyring entry { $entry }: the keychain may ask now whether this program may use it, in a window that can be behind other windows. Choose Always Allow, so that the service is not asked again. The read waits { $minutes } minute for your answer.
+   *[other] reading the keyring entry { $entry }: the keychain may ask now whether this program may use it, in a window that can be behind other windows. Choose Always Allow, so that the service is not asked again. The read waits { $minutes } minutes for your answer.
+  }
+
 # The service file was written and the service manager started the service.
 # $file (text): the service file's path.
 cli-service-installed = installed the service { $file }: it runs now, and from each login on

@@ -14,6 +14,11 @@ pub fn stdin_is_terminal() -> bool {
     io::stdin().is_terminal()
 }
 
+/// Whether standard error is a terminal a person reads.
+pub fn stderr_is_terminal() -> bool {
+    io::stderr().is_terminal()
+}
+
 /// Reads one line of standard input, of at most `max` bytes, without its
 /// line ending. At a terminal, what is typed is not shown. A longer line is
 /// an `InvalidData` error and is never kept whole, and so is a line that is

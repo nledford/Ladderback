@@ -63,7 +63,7 @@ impl KeyringCheck {
 /// the 142 s a person took to find and answer one (#1375). Anywhere else
 /// nobody answers it, so a check waits as long as a run does: a minute.
 pub fn answer_wait(at_terminal: bool) -> Duration {
-    todo!("{at_terminal}")
+    Duration::from_secs(if at_terminal { 5 * 60 } else { 60 })
 }
 
 /// Reads, through `secrets`, each keyring entry a repository or a
@@ -73,7 +73,7 @@ pub fn answer_wait(at_terminal: bool) -> Duration {
 pub async fn check_keyring_entries(
     config: &AgentConfig,
     secrets: &dyn SecretResolver,
-    _before_read: impl FnMut(&KeyringEntry),
+    mut before_read: impl FnMut(&KeyringEntry),
 ) -> KeyringCheck {
     // Nothing was read, so there is no secret to mask.
     let redactor = Redactor::new([]);
@@ -106,6 +106,7 @@ pub async fn check_keyring_entries(
         let refused = match read.iter().find(|(seen, _)| seen == entry) {
             Some((_, refused)) => refused.clone(),
             None => {
+                before_read(entry);
                 // The value is dropped here, unread by anything.
                 let refused = secrets
                     .resolve(secret)
