@@ -23,6 +23,7 @@ mod hub_pages;
 mod listener;
 mod maintenance;
 mod plans;
+mod precompressed;
 mod profiles;
 mod proposals;
 mod repositories;
@@ -776,6 +777,12 @@ pub fn router(assets: Arc<dyn AssetSource>, checks: RequestChecks, state: AppSta
     // With it, they are the agents', behind a check of their own.
     #[cfg(feature = "hub")]
     let app = sync::in_front_of(app, &hub);
+    outer_layers(app)
+}
+
+/// What wraps every route, the hub's included: the security headers on every
+/// response.
+fn outer_layers(app: Router) -> Router {
     app.layer(from_fn(response_headers::add))
 }
 

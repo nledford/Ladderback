@@ -1,4 +1,6 @@
+mod compression;
 mod hardening;
+mod panics;
 
 use std::collections::HashMap;
 
