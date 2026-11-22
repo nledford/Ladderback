@@ -614,7 +614,9 @@ impl PlanRunner {
     /// Ends `operation`, a queued backup refused for a secret of the
     /// repository its plan still backs up to, failed with the refusal, as
     /// a refused scheduled run does (§5, #490), and is heard as any run's
-    /// end, so retries follow it.
+    /// end, so retries follow it, once the log has the end: one the log
+    /// never takes stays queued, and the next start ends it and is heard
+    /// then, so its retries count it once (#522).
     async fn refuse_resumed(&self, operation: domain::execution::Operation, secret: SecretUnbuilt) {
         let SecretUnbuilt {
             refusal, failure, ..
@@ -626,7 +628,9 @@ impl PlanRunner {
         );
         let ended = self.queued_ends().end_resumed(operation, failure).await;
         log_queued_end(&ended);
-        say_how_it_ended(&self.ends, &ended.finished);
+        if ended.written {
+            say_how_it_ended(&self.ends, &ended.finished);
+        }
     }
 
     /// The use case that ends a queued backup that never runs.

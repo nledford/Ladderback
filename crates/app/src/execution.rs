@@ -283,8 +283,10 @@ impl RunOperation {
     /// [`END_WRITE_RETRIES`] times, [`END_WRITE_SPACING`] apart, while the
     /// log refuses it: left unwritten, the backup would show as queued with
     /// nothing to run or cancel it until the next start (#1250). Then the
-    /// news that it failed, as [`Self::refused`]. No hook runs and the
-    /// engine is never asked.
+    /// news that it failed, as [`Self::refused`], once the log took the
+    /// end: one it never takes stays queued, and the next start ends and
+    /// announces it then, so it is announced once (#522). No hook runs and
+    /// the engine is never asked.
     pub async fn end_resumed(&self, operation: Operation, reason: FailureReason) -> ResumedEnd {
         let mut run = Run {
             operation,
@@ -294,7 +296,9 @@ impl RunOperation {
         };
         self.fail(&mut run, reason);
         let written = self.record_end(&mut run).await;
-        announce_end(self.events.as_deref(), &run.operation).await;
+        if written {
+            announce_end(self.events.as_deref(), &run.operation).await;
+        }
         ResumedEnd {
             finished: Finished {
                 operation: run.operation,
