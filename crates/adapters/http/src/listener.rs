@@ -163,20 +163,9 @@ impl axum::serve::Listener for GatedListener {
 const AFTER_FAILURE: Duration = Duration::from_secs(1);
 
 /// The client's address as the daemon's server hands it to a request
-/// (`axum::extract::ConnectInfo<PeerAddr>`). axum gives a `SocketAddr` only
-/// from its own `TcpListener`, so the daemon's [`GatedListener`] needs a type
-/// of its own. (One impl for every listener whose address is a `SocketAddr`
-/// would overlap axum's own impl for its tapped listeners.)
+/// (`axum::extract::ConnectInfo<PeerAddr>`, [`crate::serve_connections`]).
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct PeerAddr(pub SocketAddr);
-
-impl axum::extract::connect_info::Connected<axum::serve::IncomingStream<'_, GatedListener>>
-    for PeerAddr
-{
-    fn connect_info(stream: axum::serve::IncomingStream<'_, GatedListener>) -> Self {
-        Self(*stream.remote_addr())
-    }
-}
 
 /// Whether an accept failed for a connection its client gave up on, not for
 /// a reason of the daemon's own.
@@ -227,11 +216,7 @@ mod tests {
             }),
         );
         tokio::spawn(async move {
-            let _ = axum::serve(
-                listener,
-                app.into_make_service_with_connect_info::<PeerAddr>(),
-            )
-            .await;
+            let _ = crate::serve_connections(listener, app, std::future::pending()).await;
         });
         let mut client = TcpStream::connect(address).await.unwrap();
         let client_address = client.local_addr().unwrap();

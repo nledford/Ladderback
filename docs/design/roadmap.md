@@ -229,6 +229,7 @@ Decisions 1–6 recorded 2026-11-08. Decisions 7–12 recorded 2026-11-08 after 
 | [140](decisions/140-a-reader-chooses-a-tables-columns.md) | A reader chooses which of a table's columns show, and in what order |
 | [141](decisions/141-the-header-stands-in-the-page-frame.md) | The header's content stands in the page's frame, and the pages' links take the text's color |
 | [142](decisions/142-the-running-version-in-the-footer.md) | The running version stands in a footer at the foot of every page |
+| [143](decisions/143-a-hamburger-menu-holds-the-pages-links-below-41rem.md) | Below 41rem a hamburger menu holds the pages' links and Sign out |
 
 ## 17. Open questions
 

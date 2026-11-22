@@ -57,7 +57,9 @@ const MAIN_HEADING = /^the main heading\b/;
 
 // The header's own stops, by their messages in the English catalog: the
 // skip link, the product's name, the pages' links (every `ui-nav-` message
-// but the navigation's own name), the available update's notes and Sign out.
+// but the navigation's own name), the available update's notes, the menu
+// button, which shows those links and Sign out below 41rem (decision 143),
+// and Sign out.
 // The notes are on another site, so their link's name ends with the words
 // every outside link adds (`ui-link-outside`, §4.5). A walk to one of them
 // crosses the header on purpose (§4.4), as the run-time guard allows.
@@ -65,7 +67,7 @@ const HEADER_LINKS = ["ui-skip-link", "ui-brand"];
 const HEADER_OUTSIDE_LINKS = ["ui-update-available"];
 const OUTSIDE_NOTE = "ui-link-outside";
 const HEADER_NAV_LINK = /^ui-nav-(?!label$)/;
-const HEADER_BUTTONS = ["ui-sign-out"];
+const HEADER_BUTTONS = ["ui-menu-button", "ui-sign-out"];
 
 /** How a walk step names a stop in the header, from the English catalog's
  *  text (`crates/l10n/locales/en-US/*.ftl`, the files joined): `the link
@@ -207,15 +209,22 @@ function scenarios(feature: string): Scenario[] {
   return found;
 }
 
-/** Where one press of `key` leaves focus that was at `focus`. Enter on the
- *  skip link moves focus to `<main>`; on a header link or Sign out, to the
- *  heading of the page it leads to. */
-function afterPress(focus: Focus, key: string): Focus {
+/** The header's stop whose press keeps focus in the header, as a walk step
+ *  names it: the menu button, which shows the pages' links and Sign out where
+ *  it stands (decision 143). The catalog's `ui-menu-button` spells it; the
+ *  test proves the two agree. */
+export const KEEPS_FOCUS = 'the button "Menu"';
+
+/** Where one press of `key` leaves focus that was at `focus`, on the
+ *  header's stop `on` when it is in the header. Enter on the skip link
+ *  moves focus to `<main>`; on a header link or Sign out, to the heading of
+ *  the page it leads to; on the menu button, nowhere. */
+function afterPress(focus: Focus, key: string, on = ""): Focus {
   switch (focus) {
     case "top":
       return key === "Tab" ? "header" : key === "Shift+Tab" ? "elsewhere" : focus;
     case "header":
-      return key === "Enter" ? "content's start" : focus;
+      return key === "Enter" ? (on === KEEPS_FOCUS ? focus : "content's start") : focus;
     case "content's start":
       return key === "Tab" ? "elsewhere" : key === "Shift+Tab" ? "header" : focus;
     case "elsewhere":
@@ -243,27 +252,33 @@ export function walksWithoutSkip(feature: string, header: RegExp): Finding[] {
   for (const scenario of scenarios(feature)) {
     if (!scenario.tags.includes("@ui")) continue;
     let focus: Focus = "elsewhere";
+    // The header's stop focus is on, as a step names it.
+    let on = "";
     // Whether the page's address names a section (Settings' Language
     // section or a demo of the gallery), so that a load leaves focus on its
     // heading.
     let atSection = false;
-    let firstTab: { focus: Focus; atSection: boolean } | undefined;
+    let firstTab: { focus: Focus; atSection: boolean; on: string } | undefined;
     for (const { line, text } of scenario.steps) {
       const opened = OPEN.test(text) || RELOAD.test(text) || RELOAD_AT_LANGUAGE.test(text);
-      if (SECOND_TAB.test(text)) firstTab = { focus, atSection };
+      if (SECOND_TAB.test(text)) firstTab = { focus, atSection, on };
       if (FIRST_TAB.test(text)) {
-        ({ focus, atSection } = firstTab ?? { focus, atSection });
+        ({ focus, atSection, on } = firstTab ?? { focus, atSection, on });
       } else if (opened) {
         if (OPEN.test(text)) atSection = OPEN_DEMO.test(text) || AT_SECTION.test(OPEN_ADDRESS.exec(text)?.[1] ?? "");
         if (RELOAD_AT_LANGUAGE.test(text)) atSection = true;
         focus = atSection ? "elsewhere" : "top";
+        on = "";
       } else if (SKIP.test(text)) {
         focus = "content's start";
+        on = "";
       } else if (PRESS.test(text)) {
-        focus = afterPress(focus, PRESS.exec(text)?.[1] ?? "");
+        focus = afterPress(focus, PRESS.exec(text)?.[1] ?? "", on);
+        if (focus !== "header") on = "";
       } else if (FOCUS_IS.test(text)) {
         const target = FOCUS_IS.exec(text)?.[1] ?? "";
         focus = header.test(target) ? "header" : MAIN_HEADING.test(target) ? "content's start" : "elsewhere";
+        on = focus === "header" ? target : "";
       } else {
         const walk = WALK.exec(text);
         const [key, target = ""] =
@@ -277,10 +292,12 @@ export function walksWithoutSkip(feature: string, header: RegExp): Finding[] {
         if (key === undefined) continue;
         if (header.test(target)) {
           focus = "header";
+          on = target;
         } else {
           const from = crossing(focus, key);
           if (from !== undefined && !findings.has(line)) findings.set(line, { line, step: text, from });
           focus = "elsewhere";
+          on = "";
         }
       }
     }

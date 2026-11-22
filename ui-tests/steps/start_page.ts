@@ -172,15 +172,17 @@ Given("the daemon has found that version {string} is available", function (this:
 });
 
 // The notice is the header's last line, under the pages' links and outside
-// their navigation, and no live region of its own: only the announcer talks
-// (A3). Its link opens the release's notes without telling GitHub the page it
-// came from, and its name says it goes to another site, as every outside
-// link's does (§4.5).
+// their navigation, or, below 41rem where the menu button holds the links
+// (decision 143), under the line that ends with the button. It is no live
+// region of its own: only the announcer talks (A3). Its link opens the
+// release's notes without telling GitHub the page it came from, and its name
+// says it goes to another site, as every outside link's does (§4.5).
 Then(
   "the header links to the notes of version {string} on a line of its own under the pages' links",
   async function (this: BrowserWorld, version: string) {
     const banner = this.page.getByRole("banner");
-    const navigation = banner.getByRole("navigation");
+    // By its tag: below 41rem the closed navigation is undrawn, so no role finds it.
+    const navigation = banner.locator("nav");
     const link = banner.getByRole("link", { name: namePattern(`Version ${version} is available (goes to another site)`) });
     await expect(link).toHaveCount(1);
     await expect(banner.getByRole("status")).toHaveCount(0);
@@ -190,11 +192,15 @@ Then(
     assert.ok(rel.includes("noreferrer"), `the link's rel is "${rel.join(" ")}"`);
     const inside = await navigation.evaluate((nav, notice) => notice !== null && nav.contains(notice), await link.elementHandle());
     assert.equal(inside, false, "the notice is in the navigation");
-    const [linkBox, navigationBox] = [await link.boundingBox(), await navigation.boundingBox()];
-    assert.ok(linkBox && navigationBox);
+    // What the notice stands under: the pages' links, or the menu button
+    // that holds them where they are hidden.
+    const above = (await navigation.isVisible()) ? navigation : banner.getByRole("button", { name: namePattern("Menu") });
+    await expect(above).toBeVisible();
+    const [linkBox, aboveBox] = [await link.boundingBox(), await above.boundingBox()];
+    assert.ok(linkBox && aboveBox);
     assert.ok(
-      linkBox.y >= navigationBox.y + navigationBox.height - 1,
-      `the notice starts ${Math.round(navigationBox.y + navigationBox.height - linkBox.y)}px above the foot of the pages' links`,
+      linkBox.y >= aboveBox.y + aboveBox.height - 1,
+      `the notice starts ${Math.round(aboveBox.y + aboveBox.height - linkBox.y)}px above the foot of the pages' links`,
     );
   },
 );

@@ -30,6 +30,7 @@ mod request_checks;
 mod response_headers;
 mod restart;
 mod restores;
+mod serving;
 mod sign_in;
 mod sync;
 
@@ -74,6 +75,7 @@ pub use request_checks::{
 };
 pub use restart::{Restart, RestartAsker, Work, asked_by};
 pub use restores::{RestoreRefusal, RestoreStart, Restores};
+pub use serving::{ServedListener, serve_connections};
 pub use sign_in::{COOKIE_NAME, CSRF_HEADER, SignIn};
 pub use sync::SyncHub;
 
@@ -536,9 +538,8 @@ fn read_ui_file(folder: &Path, path: &str) -> Option<Asset> {
 /// session, or a changed one without its CSRF token; and neither does one
 /// whose body is over the limit of its class of route (§10.1). Every
 /// response, a refusal included, carries the security headers. Serve it
-/// with `into_make_service_with_connect_info::<PeerAddr>()`
-/// through a [`GatedListener`]: with sign-in on, a sign-in without its
-/// connection's address is refused.
+/// with [`serve_connections`] through a [`GatedListener`]: with sign-in on,
+/// a sign-in without its connection's address is refused.
 pub fn router(assets: Arc<dyn AssetSource>, checks: RequestChecks, state: AppState) -> Router {
     let gate = sign_in::Gate {
         sign_in: state.sign_in.clone(),

@@ -226,7 +226,10 @@ Then(
     await this.page.locator(".button:visible").first().waitFor({ timeout: patienceMs() });
     const found = await this.page.evaluate(() => ({
       rtl: getComputedStyle(document.documentElement).direction === "rtl",
+      // A drawn one only: the header's menu button waits, undrawn, for a
+      // screen narrower than 41rem.
       buttons: Array.from(document.querySelectorAll(".button")).flatMap((button) => {
+        if (button.getClientRects().length === 0) return [];
         const icon = button.querySelector(":scope > .icon")?.getBoundingClientRect();
         const label = button.querySelector(":scope > .button-label")?.getBoundingClientRect();
         if (!icon || !label) return [];
