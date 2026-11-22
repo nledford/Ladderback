@@ -292,6 +292,24 @@ async fn a_pinned_ask_for_a_plain_address_is_refused() {
     );
 }
 
+/// A plain `http://` address shows no certificate, so the token made for
+/// it names none, even on a hub serving its built-in TLS (#1343).
+#[tokio::test]
+async fn a_token_for_a_plain_address_names_no_certificate() {
+    let daemon = Daemon::hub_on_tls();
+    let fingerprint = daemon.fingerprint().await;
+    let body = serde_json::json!({
+        "address": "http://127.0.0.1:9",
+        "confirmation": fingerprint,
+    })
+    .to_string();
+    let response = daemon.send(make(LOOPBACK, &[], &body)).await;
+    assert_eq!(response.status(), StatusCode::CREATED);
+    let made = json(response).await;
+    assert_eq!(made.get("certificate"), None, "{made}");
+    assert_eq!(made["address"], "http://127.0.0.1:9");
+}
+
 #[tokio::test]
 async fn a_daemon_not_serving_as_a_hub_answers_its_routes_as_unknown() {
     let daemon = Daemon::not_a_hub();

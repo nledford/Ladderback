@@ -6,6 +6,25 @@
 use std::net::{Ipv4Addr, Ipv6Addr};
 use std::time::Duration;
 
+/// The scheme of the address agents will use, as typed: a plain `http://`
+/// address shows no certificate, so the form offers no choice of one and
+/// the token names none (#1343).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum Scheme {
+    Https,
+    Http,
+}
+
+impl Scheme {
+    /// The scheme of `address`, as typed, in any case and with spaces
+    /// around it, or `None` for one that is neither `http://` nor
+    /// `https://`, which the hub refuses in its own words.
+    pub(crate) fn of(address: &str) -> Option<Self> {
+        let _ = address;
+        todo!()
+    }
+}
+
 /// Why the address agents will use is warned of. Making a token for it
 /// stays possible, for an agent on this machine.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]

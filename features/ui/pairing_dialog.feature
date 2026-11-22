@@ -16,6 +16,7 @@ Feature: Making a pairing token on the hub's page
     And the page may use the clipboard
     When I open the address "/settings#agents"
     And I skip to the content
+    And I set the address machines will use to "https://hub.example:9443"
     And I press Tab until focus is on the textbox "Hub key fingerprint"
     And I type the hub key's fingerprint
     And I press Tab until focus is on the button "Make a pairing token"
@@ -290,6 +291,7 @@ Feature: Making a pairing token on the hub's page
     Given a hub with sign-in off
     When I open the address "/settings#agents"
     And I skip to the content
+    And I set the address machines will use to the hub's https address
     And I press Tab until focus is on the radio "A certificate authority's certificate"
     And I press the up arrow until focus is on the radio "The hub's own certificate"
     And I press Tab until focus is on the textbox "Hub key fingerprint"
@@ -297,4 +299,15 @@ Feature: Making a pairing token on the hub's page
     And I press Tab until focus is on the button "Make a pairing token"
     And I press Enter
     Then the dialog "Copy the pairing token" says "pinned to the hub's own certificate"
+    And the page has no accessibility violations
+
+  Scenario: A plain http address is offered no certificate, and the dialog names none
+    Given a hub with sign-in off
+    When I open the address "/settings#agents"
+    Then the textbox "Address machines will use" warns "This address is loopback"
+    And the page offers no radio group "Certificate the token trusts"
+    When I make a pairing token on the Machines tab
+    Then the dialog "Copy the pairing token" shows the hub key's fingerprint in full
+    And the dialog "Copy the pairing token" doesn't say "Certificate"
+    And the dialog "Copy the pairing token" doesn't say "certificate"
     And the page has no accessibility violations

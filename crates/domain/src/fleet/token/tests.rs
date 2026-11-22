@@ -300,6 +300,24 @@ fn a_hub_address_is_https_or_http_and_a_host() {
     }
 }
 
+/// An `http://` address is plain and shows no certificate; an `https://`
+/// one is reached over TLS (#1343).
+#[test]
+fn a_hub_addresss_scheme_is_https_or_http() {
+    for (address, scheme) in [
+        ("https://hub.example:9899", HubScheme::Https),
+        ("https://[::1]:9899", HubScheme::Https),
+        ("http://127.0.0.1:9898", HubScheme::Http),
+        ("http://localhost", HubScheme::Http),
+    ] {
+        assert_eq!(
+            HubAddress::parse(address).unwrap().scheme(),
+            scheme,
+            "{address}"
+        );
+    }
+}
+
 /// A token wrapped across lines, quoted, with a trailing newline, with
 /// zero-width characters a chat app added, or with its prefix's case and
 /// underscores changed is read as the token it is (decision 121, "`pair`").
