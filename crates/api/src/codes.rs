@@ -445,6 +445,15 @@ pub enum ErrorCode {
     /// ones its preview named: the repository changed after the review, so
     /// nothing was done (I6).
     MaintenanceSelectionChanged,
+    /// This machine's data folder was copied from another computer, or it
+    /// took a new machine ID it uses from its next start, so it runs no
+    /// forget, prune or adoption: they could take the other computer's
+    /// snapshots for its own (I1, I6). Backups and checks still run.
+    MaintenanceDataFolderCopied,
+    /// A new machine ID was asked for on a machine whose data folder was
+    /// not copied from another computer, or that took one already, so
+    /// nothing changed.
+    MachineNotCopied,
     /// The repository did not answer a read in time, so its history, or a
     /// preview of a maintenance run, could not be shown.
     RepositoryReadTimedOut,
@@ -1514,6 +1523,8 @@ impl ErrorCode {
             }],
             Self::AdoptionNoMatch => &[],
             Self::MaintenanceSelectionChanged
+            | Self::MaintenanceDataFolderCopied
+            | Self::MachineNotCopied
             | Self::RepositoryReadTimedOut
             | Self::ProfileCommandsUnconfirmed => &[],
             Self::AdoptionAmbiguous => &[ArgSpec {

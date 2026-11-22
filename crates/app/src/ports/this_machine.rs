@@ -1,5 +1,5 @@
 //! This machine's identity as the operating system and the data folder hold
-//! it (technical design §7.1; §16, decision NN; #296): the machine
+//! it (technical design §7.1; §16, decision 144; #296): the machine
 //! identifier the system gives the computer, the one recorded beside the
 //! machine ID, and a new machine ID for a copied data folder.
 

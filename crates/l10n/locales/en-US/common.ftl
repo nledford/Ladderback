@@ -725,6 +725,16 @@ error-adoption-ambiguous = Plans { $plans } all match that history, and which on
 # and the snapshots it would act on have changed since, so nothing was done.
 error-maintenance-selection-changed = The repository changed after you reviewed this, so nothing was done. Review it again to see what it would do now.
 
+# The data folder was copied from another computer (the identifier the
+# system gives this one isn't the one recorded with the machine ID), or a new
+# machine ID was taken that is used from the next start, so this machine
+# runs no forget, prune or adoption. Backups and checks still run.
+error-maintenance-data-folder-copied = This computer's data folder came from another computer, so it doesn't forget, prune or adopt snapshots: it could remove the other computer's. Backups and checks still run. If this is a new computer, take a new machine ID from the start page and restart { -brand-name }.
+
+# A new machine ID was asked for, and the data folder wasn't copied from
+# another computer, or a new ID was taken for it already, so nothing changed.
+error-machine-not-copied = No new machine ID was taken: this computer's data folder wasn't copied from another computer, or it took a new ID already. Nothing changed.
+
 # The repository did not answer a read in time, so there was nothing to show
 # or to review.
 error-repository-read-timed-out = The repository did not answer in time, so what was asked of it could not be read. Check that it can be reached, then try again.

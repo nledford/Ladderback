@@ -362,7 +362,7 @@ pub struct RunMaintenance {
     /// Reads the stats after a check, when set.
     stats: Option<Arc<crate::stats::ReadStats>>,
     /// Where this machine stands: a copied data folder runs no maintenance
-    /// but a check (§16, decision NN).
+    /// but a check (§16, decision 144).
     machine: Arc<crate::machine::MachineStanding>,
 }
 
@@ -454,7 +454,7 @@ impl RunMaintenance {
     }
 
     /// Reads where this machine stands before each run and preview: a
-    /// copied data folder's are refused (§16, decision NN).
+    /// copied data folder's are refused (§16, decision 144).
     pub fn with_machine(mut self, machine: Arc<crate::machine::MachineStanding>) -> Self {
         self.machine = machine;
         self
@@ -505,6 +505,7 @@ impl RunMaintenance {
         kind: MaintenanceKind,
         held: Option<&SelectionToken>,
     ) -> Result<MaintenanceAssessment, MaintenanceError> {
+        self.machine_maintains(&kind)?;
         // Only reads run before the slot is taken, and none before this
         // agent is found to maintain the repository.
         let config = self.maintained(alias).await?;
@@ -647,6 +648,18 @@ impl RunMaintenance {
         }
     }
 
+    /// Refuses anything but a check on a machine whose data folder was
+    /// copied from another computer, or that took a new machine ID since it
+    /// started: its forget would take the other computer's snapshots for its
+    /// own (I1, I6; decision 144). A check only reads, and still runs.
+    fn machine_maintains(&self, kind: &MaintenanceKind) -> Result<(), MaintenanceError> {
+        if matches!(kind, MaintenanceKind::Check) || self.machine.maintains() {
+            Ok(())
+        } else {
+            Err(MaintenanceError::DataFolderCopied)
+        }
+    }
+
     /// What `kind` would do, decided from a read of the repository and told
     /// before anything runs: a read like a snapshot listing, so it takes no
     /// I7 slot and writes nothing to the operation log. A forget and an
@@ -660,6 +673,7 @@ impl RunMaintenance {
         alias: &RepositoryAlias,
         kind: &MaintenanceKind,
     ) -> Result<Previewed, MaintenanceError> {
+        self.machine_maintains(kind)?;
         let (preview, other_hosts) = match kind {
             MaintenanceKind::Check => {
                 // A check needs nothing of the repository to say what it
@@ -768,6 +782,10 @@ impl RunMaintenance {
             (_, Some(_)) => after,
             (Some(_), None) => before,
         };
+        // A copied data folder's forget would take the other computer's
+        // snapshots for its own: told as its forget preview is (decision
+        // 144), before the repository is opened.
+        self.machine_maintains(&MaintenanceKind::Forget)?;
         let access = self.open(config, alias).await?;
         // The listing holds one of the daemon's turns to list, as the
         // snapshot list's does (#710): the wait counts against the read

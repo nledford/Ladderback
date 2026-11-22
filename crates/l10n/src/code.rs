@@ -206,6 +206,8 @@ code_messages!(ERRORS, error_message, ErrorCode {
     ConfigFolderUnknown => msg::ERROR_CONFIG_FOLDER_UNKNOWN,
     RuntimeUnavailable => msg::ERROR_RUNTIME_UNAVAILABLE,
     MaintenanceSelectionChanged => msg::ERROR_MAINTENANCE_SELECTION_CHANGED,
+    MaintenanceDataFolderCopied => msg::ERROR_MAINTENANCE_DATA_FOLDER_COPIED,
+    MachineNotCopied => msg::ERROR_MACHINE_NOT_COPIED,
     RepositoryReadTimedOut => msg::ERROR_REPOSITORY_READ_TIMED_OUT,
     NoLocationUsable => msg::ERROR_NO_LOCATION_USABLE,
     NoLocationRuleHolds => msg::ERROR_NO_LOCATION_RULE_HOLDS,

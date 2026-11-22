@@ -407,6 +407,8 @@ pub(super) fn translate(event: WorkerEvent, redactor: &Redactor) -> Option<Engin
                 | ErrorCode::ProfileExportUrlPassword
                 | ErrorCode::ProfileExportTagComma
                 | ErrorCode::MaintenanceSelectionChanged
+                | ErrorCode::MaintenanceDataFolderCopied
+                | ErrorCode::MachineNotCopied
                 | ErrorCode::RepositoryReadTimedOut
                 | ErrorCode::OperationUnknown
                 | ErrorCode::OperationNotRunning

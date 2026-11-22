@@ -1,5 +1,5 @@
 //! Whether this machine's data folder was copied from another computer
-//! (technical design §7.1; §16, decision NN; #296). The machine ID lives in
+//! (technical design §7.1; §16, decision 144; #296). The machine ID lives in
 //! the data folder, so a copy of the folder on another computer (a restored
 //! backup of a home folder, a cloned disk or virtual machine) runs under the
 //! same ID, and its forget would take the first machine's snapshots for its
@@ -10,7 +10,7 @@
 use std::sync::{Arc, Mutex, PoisonError};
 
 use domain::fleet::IdentifierMatch;
-use domain::planning::Maintenance;
+use domain::maintenance::Ownership;
 use domain::{AgentId, OperationId};
 
 use crate::ports::{
@@ -41,7 +41,7 @@ pub enum Standing {
 impl Standing {
     /// Whether the machine runs the maintenance its configuration asks for.
     pub fn maintains(self) -> bool {
-        todo!()
+        matches!(self, Self::Same | Self::Unread)
     }
 }
 
@@ -89,7 +89,11 @@ pub enum Found {
 impl Found {
     /// Where the machine stands after the check.
     pub fn standing(&self) -> Standing {
-        todo!()
+        match self {
+            Self::Same | Self::Recorded | Self::RecordFailed(_) => Standing::Same,
+            Self::Copied => Standing::Copied,
+            Self::Unread(_) => Standing::Unread,
+        }
     }
 }
 
@@ -98,8 +102,22 @@ impl Found {
 /// never a copy). Never refuses the start: a check that can't tell
 /// leaves the machine running as usual.
 pub fn check_at_start(machine: &dyn ThisMachine) -> Found {
-    let _ = (machine, IdentifierMatch::Same);
-    todo!()
+    let current = match machine.identifier() {
+        Ok(current) => current,
+        Err(error) => return Found::Unread(error),
+    };
+    let recorded = match machine.recorded() {
+        Ok(recorded) => recorded,
+        Err(error) => return Found::Unread(error),
+    };
+    match IdentifierMatch::of(recorded.as_ref(), Some(&current)) {
+        IdentifierMatch::Same | IdentifierMatch::Unread => Found::Same,
+        IdentifierMatch::Differs => Found::Copied,
+        IdentifierMatch::Unrecorded => match machine.record(&current) {
+            Ok(()) => Found::Recorded,
+            Err(error) => Found::RecordFailed(error),
+        },
+    }
 }
 
 /// Why a new machine ID wasn't taken. A typed code, never a sentence.
@@ -117,8 +135,10 @@ pub enum NewIdError {
     /// The operation log, which says what maintenance runs, couldn't be
     /// read: nothing changed.
     Log(StoreError),
-    /// This computer's identifier couldn't be read, or the new ID couldn't
-    /// be written: maintenance was given up and the ID stays.
+    /// This computer's identifier couldn't be read, and nothing changed; or
+    /// the new ID couldn't be written whole, once maintenance was given up:
+    /// the ID stays, or a new one was written without this computer's
+    /// identifier beside it, which the next start finds a copy still.
     Machine(MachineError),
 }
 
@@ -158,17 +178,69 @@ impl TakeNewId {
         self.standing.get()
     }
 
-    /// Takes the new ID, answering it.
+    /// Takes the new ID, answering it. Under the configuration's write lock,
+    /// so two requests can't both take one and no change of who maintains a
+    /// repository runs between the two writes. A maintenance operation still
+    /// running on a repository it maintains refuses the whole take, as
+    /// turning that maintenance off would be ([`Ownership::give_up`], I1).
+    #[expect(
+        clippy::result_large_err,
+        reason = "the configuration store's own error, which the route maps to its code"
+    )]
     pub async fn take(&self) -> Result<AgentId, NewIdError> {
-        let _ = (
-            &self.machine,
-            &self.config,
-            &self.operations,
-            &self.writes,
-            Maintenance::None,
-            Problem::Violation,
-        );
-        self.standing.set(Standing::Same);
-        todo!()
+        let _writing = self.writes.lock().await;
+        if self.standing.get() != Standing::Copied {
+            return Err(NewIdError::NotCopied);
+        }
+        // Read before anything is written: a computer whose identifier can't
+        // be read now keeps its ID and its maintenance as they are.
+        let identifier = self.machine.identifier().map_err(NewIdError::Machine)?;
+        let loaded = self.config.load().await.map_err(NewIdError::Config)?;
+        let mut repositories = loaded.repositories().clone();
+        let mut gave_up = false;
+        for entry in repositories.values_mut() {
+            if Ownership::owned_here(entry.maintenance) {
+                // An entry that records no ID can't tell its maintenance
+                // apart from another repository's: any running here keeps it.
+                let running = self
+                    .operations
+                    .running_maintenance(entry.id.as_ref())
+                    .await
+                    .map_err(NewIdError::Log)?;
+                entry.maintenance =
+                    Ownership::give_up(running).map_err(|running| NewIdError::Busy { running })?;
+                gave_up = true;
+            }
+        }
+        // Maintenance is given up first: a new ID that then can't be written
+        // leaves the copy maintaining nothing, the safe direction (I1).
+        if gave_up {
+            let changed = loaded
+                .replacing(
+                    loaded.agent().clone(),
+                    loaded.hooks().clone(),
+                    repositories,
+                    loaded.plans().to_vec(),
+                )
+                .map_err(|violation| {
+                    NewIdError::Config(ConfigError::Invalid {
+                        file: String::new(),
+                        key: None,
+                        at: None,
+                        problem: Problem::Violation(violation),
+                        detail: String::new(),
+                    })
+                })?;
+            self.config
+                .save(&changed)
+                .await
+                .map_err(NewIdError::Config)?;
+        }
+        let id = self
+            .machine
+            .renew(&identifier)
+            .map_err(NewIdError::Machine)?;
+        self.standing.set(Standing::NewIdTaken);
+        Ok(id)
     }
 }

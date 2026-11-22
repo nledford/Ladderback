@@ -1,5 +1,5 @@
 //! The machine identifier and how a start compares it (technical design
-//! §7.1; §16, decision NN; #296): the identifier the operating system gives
+//! §7.1; §16, decision 144; #296): the identifier the operating system gives
 //! the computer, recorded in the data folder beside the machine ID. A data
 //! folder copied to another computer brings that computer's machine ID with
 //! it, but not its identifier, so the two disagree there.
@@ -29,8 +29,17 @@ pub enum InvalidMachineIdentifier {
 
 impl MachineIdentifier {
     pub fn parse(text: &str) -> Result<Self, InvalidMachineIdentifier> {
-        let _ = text;
-        todo!()
+        let text = text.trim();
+        if text.is_empty() {
+            return Err(InvalidMachineIdentifier::Empty);
+        }
+        if text.len() > MAX_MACHINE_IDENTIFIER_BYTES {
+            return Err(InvalidMachineIdentifier::TooLong);
+        }
+        if let Some(unexpected) = text.chars().find(|c| !c.is_ascii_graphic()) {
+            return Err(InvalidMachineIdentifier::Unexpected(unexpected));
+        }
+        Ok(Self(text.to_owned()))
     }
 
     pub fn as_str(&self) -> &str {
@@ -67,14 +76,18 @@ impl IdentifierMatch {
     /// `current`, the one the operating system gives now (`None` when it
     /// couldn't be read).
     pub fn of(recorded: Option<&MachineIdentifier>, current: Option<&MachineIdentifier>) -> Self {
-        let _ = (recorded, current);
-        todo!()
+        match (recorded, current) {
+            (_, None) => Self::Unread,
+            (None, Some(_)) => Self::Unrecorded,
+            (Some(recorded), Some(current)) if recorded == current => Self::Same,
+            (Some(_), Some(_)) => Self::Differs,
+        }
     }
 
     /// Whether the machine maintains the repositories its configuration
     /// asks it to: everywhere but in a copied data folder (I1, I6).
     pub fn maintains(self) -> bool {
-        todo!()
+        self != Self::Differs
     }
 }
 
