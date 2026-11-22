@@ -1,29 +1,41 @@
 //! The hub's own routes under `/api/v1/hub` (§16, decisions 120 and 121):
-//! the key its page shows, and the pairing tokens the page makes and
-//! cancels. Only a build with the hub has them (decision 122), and a daemon
-//! not serving as a hub answers them as it does any unknown path.
+//! the key its page shows, the pairing tokens the page makes and cancels,
+//! and the agents it lists and approves. Only a build with the hub has them
+//! (decision 122), and a daemon not serving as a hub answers them as it does
+//! any unknown path.
 //!
-//! Making a token is a high-impact action: a session's only (no API token
-//! permission opens it, so a token is refused before it gets here), confirmed
-//! by a fresh step-up each time, and refused from beyond loopback while
-//! sign-in is off (decision 120, "Who may make a token, approve or re-key").
+//! Making a token and approving an agent are high-impact actions: a
+//! session's only (no API token permission opens them, so a token is refused
+//! before it gets here), confirmed by a fresh step-up each time, and refused
+//! from beyond loopback while sign-in is off (decision 120, "Who may make a
+//! token, approve or re-key").
 
+use std::net::IpAddr;
 use std::sync::Arc;
 
 use api::ErrorCode;
-use app::pairing::{HubPairing, HubPairingError, MadeToken, TokenAsk, TokenAskRefused};
+use app::pairing::{
+    ApprovalAsk, HubPairing, HubPairingError, MadeToken, TokenAsk, TokenAskRefused,
+};
 use axum::Router;
 use axum::extract::{ConnectInfo, Path, Request, State};
 use axum::http::{HeaderMap, StatusCode};
 use axum::response::{IntoResponse, Response};
-use domain::SignedDuration;
 use domain::access::step_up::StepUpConfirmation;
-use domain::fleet::{Fingerprint, HubAddress, HubRoute, KeyId, RouteRefused, TokenId, TokenTls};
+use domain::fleet::{
+    AgentRecord, AgentStatus, ApprovalRefused, Fingerprint, HubAddress, HubRoute, KeyId,
+    ListedAgent, PublicKey, RouteRefused, TokenId, TokenTls,
+};
+use domain::{AgentId, SignedDuration, Timestamp, Uuid};
 
 use crate::AppState;
 
 /// The path of one pairing token the page cancels: `DELETE`.
 const PAIRING_TOKEN_PATH: &str = "/api/v1/hub/pairing-tokens/{id}";
+
+/// The path the page approves one waiting agent at: `POST`, as
+/// [`api::agent_approval_path`] names it.
+const AGENT_APPROVAL_PATH: &str = "/api/v1/hub/agents/{id}/approval";
 
 /// `routes` with the hub's own.
 pub(crate) fn routes(routes: Router<AppState>) -> Router<AppState> {
@@ -31,6 +43,8 @@ pub(crate) fn routes(routes: Router<AppState>) -> Router<AppState> {
         .route(api::HUB_PATH, axum::routing::get(hub))
         .route(api::PAIRING_TOKENS_PATH, axum::routing::post(make_token))
         .route(PAIRING_TOKEN_PATH, axum::routing::delete(cancel_token))
+        .route(api::HUB_AGENTS_PATH, axum::routing::get(agents))
+        .route(AGENT_APPROVAL_PATH, axum::routing::post(approve))
 }
 
 /// The hub's pairing, or none when this daemon doesn't serve as a hub.
@@ -76,19 +90,11 @@ async fn make_token(State(state): State<AppState>, request: Request) -> Response
     let Some(pairing) = pairing_of(&state) else {
         return not_a_hub();
     };
-    // A wrong password counts in the waits of the connection's address, as
-    // a sign-in does; without it, refuse as a sign-in does.
-    let Some(ConnectInfo(crate::PeerAddr(peer))) = request
-        .extensions()
-        .get::<ConnectInfo<crate::PeerAddr>>()
-        .copied()
-    else {
-        log::error!(
-            "a pairing token was asked for without its connection's address; the server must be served with its connect info"
-        );
-        return crate::unavailable(ErrorCode::SignInUnavailable, Vec::new(), None);
+    let peer = match peer_of(&request) {
+        Ok(peer) => peer,
+        Err(refused) => return *refused,
     };
-    let beyond = beyond_loopback(request.headers(), peer.ip());
+    let beyond = beyond_loopback(request.headers(), peer);
     // The body limit has already read the body, bounded by the API's limit
     // (`body_limit`), so this only takes the bytes it holds.
     let Ok(body) = axum::body::to_bytes(request.into_body(), usize::MAX).await else {
@@ -126,7 +132,7 @@ async fn make_token(State(state): State<AppState>, request: Request) -> Response
         address,
         tls,
         life: life_minutes.map(|minutes| SignedDuration::from_mins(i64::from(minutes))),
-        peer: peer.ip(),
+        peer,
         beyond_loopback: beyond,
         // Checked after the sign-in rule: beyond loopback with sign-in off,
         // no confirmation helps.
@@ -134,20 +140,158 @@ async fn make_token(State(state): State<AppState>, request: Request) -> Response
     };
     match pairing.make_token_asked(ask).await {
         Ok(made) => (StatusCode::CREATED, axum::Json(token_dto(&made))).into_response(),
-        Err(TokenAskRefused::NeedsSignIn) => {
+        Err(refused) => ask_refusal(refused),
+    }
+}
+
+/// The connection's address: a wrong password counts in its waits, as a
+/// sign-in's does. Without it, refused as a sign-in is.
+fn peer_of(request: &Request) -> Result<IpAddr, Box<Response>> {
+    match request
+        .extensions()
+        .get::<ConnectInfo<crate::PeerAddr>>()
+        .copied()
+    {
+        Some(ConnectInfo(crate::PeerAddr(peer))) => Ok(peer.ip()),
+        None => {
+            log::error!(
+                "a step-up was asked for without its connection's address; the server must be served with its connect info"
+            );
+            Err(Box::new(crate::unavailable(
+                ErrorCode::SignInUnavailable,
+                Vec::new(),
+                None,
+            )))
+        }
+    }
+}
+
+/// The answer to an ask the hub refused before doing it.
+fn ask_refusal(refused: TokenAskRefused) -> Response {
+    match refused {
+        TokenAskRefused::NeedsSignIn => {
             crate::refused(StatusCode::FORBIDDEN, ErrorCode::PairingNeedsSignIn)
         }
-        Err(TokenAskRefused::StepUpFailed) => {
+        TokenAskRefused::StepUpFailed => {
             crate::refused(StatusCode::FORBIDDEN, ErrorCode::StepUpFailed)
         }
-        Err(TokenAskRefused::StepUpWait { seconds }) => crate::sign_in::wait_refused(seconds),
-        Err(TokenAskRefused::StepUpUnavailable(detail)) => {
+        TokenAskRefused::StepUpWait { seconds } => crate::sign_in::wait_refused(seconds),
+        TokenAskRefused::StepUpUnavailable(detail) => {
             // The platform's words name files of the data folder: the log
             // keeps them for whoever runs the daemon, not for whoever asked.
             log::warn!("the admin password could not be checked: {detail}");
             crate::unavailable(ErrorCode::SignInUnavailable, Vec::new(), None)
         }
-        Err(TokenAskRefused::Hub(error)) => hub_refusal(&error),
+        TokenAskRefused::Hub(error) => hub_refusal(&error),
+    }
+}
+
+/// Every agent the hub has registered, oldest first, as a
+/// [`api::HubAgentsDto`]: the page's Machines tab lists them.
+async fn agents(State(state): State<AppState>) -> Response {
+    let Some(pairing) = pairing_of(&state) else {
+        return not_a_hub();
+    };
+    match pairing.agents_listed().await {
+        Ok(listed) => axum::Json(api::HubAgentsDto {
+            agents: listed
+                .agents
+                .iter()
+                .map(|agent| agent_dto(agent, listed.at))
+                .collect(),
+        })
+        .into_response(),
+        Err(error) => hub_refusal(&error),
+    }
+}
+
+/// The waiting agent the path names approved, under the key the
+/// [`api::ApproveAgentDto`] holds: the one the person compared. Answered
+/// with the agent as a [`api::HubAgentDto`].
+async fn approve(
+    State(state): State<AppState>,
+    Path(id): Path<String>,
+    request: Request,
+) -> Response {
+    let Some(pairing) = pairing_of(&state) else {
+        return not_a_hub();
+    };
+    let peer = match peer_of(&request) {
+        Ok(peer) => peer,
+        Err(refused) => return *refused,
+    };
+    let beyond = beyond_loopback(request.headers(), peer);
+    // No agent ID was ever made from a path that isn't one.
+    let Ok(agent_id) = Uuid::parse_str(&id).map(AgentId::from_uuid) else {
+        return crate::refused(StatusCode::NOT_FOUND, ErrorCode::AgentUnknown);
+    };
+    // Bounded by the API's body limit, as a token's ask is.
+    let Ok(body) = axum::body::to_bytes(request.into_body(), usize::MAX).await else {
+        return crate::refused(StatusCode::BAD_REQUEST, ErrorCode::InvalidBody);
+    };
+    let Ok(api::ApproveAgentDto { key, confirmation }) = serde_json::from_slice(&body) else {
+        return crate::refused(StatusCode::BAD_REQUEST, ErrorCode::InvalidBody);
+    };
+    let Ok(agent_key) = PublicKey::from_hex(&key) else {
+        return crate::refused(StatusCode::BAD_REQUEST, ErrorCode::InvalidBody);
+    };
+    let ask = ApprovalAsk {
+        agent_id,
+        agent_key,
+        peer,
+        beyond_loopback: beyond,
+        confirmation: StepUpConfirmation::parse(confirmation).ok(),
+    };
+    match pairing.approve_asked(ask).await {
+        Ok(Ok(record)) => {
+            let listed = ListedAgent {
+                record,
+                looks_like: None,
+            };
+            let at = approved_at(&listed.record);
+            axum::Json(agent_dto(&listed, at)).into_response()
+        }
+        Ok(Err(ApprovalRefused::Unknown)) => {
+            crate::refused(StatusCode::NOT_FOUND, ErrorCode::AgentUnknown)
+        }
+        Ok(Err(ApprovalRefused::AlreadyApproved)) => {
+            crate::refused(StatusCode::CONFLICT, ErrorCode::AgentApprovedAlready)
+        }
+        Err(refused) => ask_refusal(refused),
+    }
+}
+
+/// When the agent's status began: approved just now, for one the hub
+/// approved this moment.
+fn approved_at(record: &AgentRecord) -> Timestamp {
+    match record.status {
+        AgentStatus::Pending { since } => since,
+        AgentStatus::Approved { at } => at,
+    }
+}
+
+/// The agent as the page lists it, `now` the time the list was read.
+fn agent_dto(listed: &ListedAgent, now: Timestamp) -> api::HubAgentDto {
+    let record = &listed.record;
+    let (status, since) = match record.status {
+        AgentStatus::Pending { since } => (api::AgentStatusDto::Pending, since),
+        AgentStatus::Approved { at } => (api::AgentStatusDto::Approved, at),
+    };
+    // A clock set back shows no wait rather than a negative one.
+    let seconds_ago = u64::try_from(since.duration_until(now).as_secs()).unwrap_or(0);
+    api::HubAgentDto {
+        agent_id: record.agent_id.as_uuid().to_string(),
+        hostname: record.hostname.as_str().to_owned(),
+        key: record.key.to_hex(),
+        fingerprint: Fingerprint::of_key(&record.key).to_string(),
+        status,
+        since: since.to_string(),
+        seconds_ago,
+        looks_like: listed.looks_like.as_ref().map(|like| api::LookalikeDto {
+            agent_id: like.agent_id.as_uuid().to_string(),
+            hostname: like.hostname.as_str().to_owned(),
+            last_seen: like.last_seen.to_string(),
+        }),
     }
 }
 

@@ -421,13 +421,13 @@ Feature: API tokens
       When I open the address "/settings#api-tokens"
       And I skip to the content
       And I press Tab until focus is in the group "Backups"
-      And I press the down arrow until focus is on the choice "No access" of the group "Backups"
+      And I press the up arrow until focus is on the choice "No access" of the group "Backups"
       And I press Tab until focus is in the group "Backup runs"
-      And I press the down arrow until focus is on the choice "No access" of the group "Backup runs"
+      And I press the up arrow until focus is on the choice "No access" of the group "Backup runs"
       And I press Tab until focus is in the group "Previews"
-      And I press the down arrow until focus is on the choice "No access" of the group "Previews"
+      And I press the up arrow until focus is on the choice "No access" of the group "Previews"
       And I press Tab until focus is in the group "Configuration"
-      And I press the down arrow until focus is on the choice "No access" of the group "Configuration"
+      And I press the up arrow until focus is on the choice "No access" of the group "Configuration"
       And I press Tab until focus is on the button "Create the token"
       And I press Enter
       Then focus is on the heading "There are 2 problems with the form"

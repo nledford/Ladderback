@@ -96,6 +96,11 @@ mod repositories;
 mod repositories_page;
 // What a paused live page shows, counts and says, decided on the host.
 mod pause;
+// What the Machines tab's lists show while paused, count and say, decided on
+// the host; `settings/machines.rs` is their glue. Only a build with the hub
+// has it (decision 122).
+#[cfg(feature = "hub")]
+mod machines_list;
 // What the hub's pairing dialog decides, on the host; `settings/agents.rs`
 // is its glue. Only a build with the hub has it (decision 122).
 #[cfg(feature = "hub")]
