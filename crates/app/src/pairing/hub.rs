@@ -20,6 +20,7 @@ use crate::ports::{
 };
 
 mod dialog;
+mod logged;
 
 pub use dialog::{AgentsListed, ApprovalAsk, MadeToken, TokenAsk, TokenAskRefused};
 
@@ -409,7 +410,8 @@ impl HubPairing {
             hub_key: keys.key,
         };
         match self.registry.pair(&request, self.clock.now()).await? {
-            Ok(_) => {
+            Ok(outcome) => {
+                log::info!("{}", logged::paired(&request, &outcome));
                 let paired = SignedMessage::Paired {
                     hub_key: keys.key,
                     agent_id: handshake.agent_id,

@@ -31,6 +31,14 @@ Feature: Pairing a machine from a terminal
     Then the terminal lists the token with its lapse time in that zone, in words, with the offset "+05:30"
 
   @e2e
+  Scenario: The hub's log says that a machine paired, and what to match against the machine's screen
+    Given a hub with a pairing token made at its terminal
+    And the hub is serving on loopback
+    And a machine named "e2e-laptop" paired with the token from its terminal
+    Then the hub's log says in one line that "e2e-laptop" paired and waits for approval, naming its agent ID and the key the machine showed
+    And the hub's log holds nothing of the token
+
+  @e2e
   Scenario: A token revoked at the hub's terminal can't pair a machine
     Given a hub with a pairing token made at its terminal
     And the person revoked the token at the hub's terminal

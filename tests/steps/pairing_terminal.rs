@@ -20,6 +20,7 @@ use domain::fleet::AgentStatus;
 use store::SqliteStore;
 use testkit::children::Owned;
 
+use super::locations_steps::level_of;
 use super::request_checks_steps::{Outcome, Request, exchange, start};
 use super::{Agent, LADDERBACK, blocking};
 
@@ -360,6 +361,53 @@ fn log_says_tls_missing(agent: &mut Agent) {
         text.contains("hub-tls-key") && text.contains("restore it from your backup"),
         "{text}"
     );
+}
+
+/// What the hub's daemon has written to its standard error so far.
+fn hub_log_text(agent: &Agent) -> String {
+    let log = agent
+        .pairing_terminal
+        .hub_log
+        .as_ref()
+        .expect("a hub's log");
+    std::fs::read_to_string(log).expect("the hub's log")
+}
+
+#[then(
+    expr = "the hub's log says in one line that {string} paired and waits for approval, naming its agent ID and the key the machine showed"
+)]
+async fn log_says_paired(agent: &mut Agent, hostname: String) {
+    let listed = listed_machines(agent).await;
+    let machine = listed
+        .agents
+        .into_iter()
+        .find(|machine| machine.hostname == hostname)
+        .unwrap_or_else(|| panic!("the page lists {hostname}"));
+    assert_eq!(machine.fingerprint, machine_key(agent));
+    let text = hub_log_text(agent);
+    let lines: Vec<&str> = text
+        .lines()
+        .filter(|line| line.contains(&machine.agent_id))
+        .collect();
+    let [line] = lines.as_slice() else {
+        panic!("one line names the agent {}: {text}", machine.agent_id);
+    };
+    assert_eq!(level_of(line), Some("INFO"), "{line}");
+    for expected in [
+        format!("\"{hostname}\""),
+        machine.fingerprint,
+        "waits for approval".to_owned(),
+    ] {
+        assert!(line.contains(&expected), "{expected}: {line}");
+    }
+}
+
+#[then("the hub's log holds nothing of the token")]
+fn log_holds_no_token(agent: &mut Agent) {
+    let token = token(agent);
+    let text = hub_log_text(agent);
+    assert!(!text.contains(token), "{text}");
+    assert!(!text.contains("ladderback_pair_"), "{text}");
 }
 
 #[when(expr = "a machine named {string} pairs with the token from its terminal")]
