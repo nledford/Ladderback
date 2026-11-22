@@ -178,6 +178,11 @@ pub fn failure(reason: &FailureReason) -> ErrorDto {
         ),
         F::DaemonStopped => ErrorDto::new(ErrorCode::DaemonStopped, [], None),
         F::DaemonShutDown => ErrorDto::new(ErrorCode::DaemonShutDown, [], None),
+        F::Superseded => ErrorDto::new(ErrorCode::Superseded, [], None),
+        F::PlanRemoved => ErrorDto::new(ErrorCode::PlanRemoved, [], None),
+        F::PlanMoved => ErrorDto::new(ErrorCode::PlanMoved, [], None),
+        F::ConfigUnusable => ErrorDto::new(ErrorCode::ConfigUnusable, [], None),
+        F::KeyFilesNotLeftOut => ErrorDto::new(ErrorCode::KeyFilesNotLeftOut, [], None),
         F::NoLocationUsable => ErrorDto::new(ErrorCode::NoLocationUsable, [], None),
         F::NoLocationRuleHolds => ErrorDto::new(ErrorCode::NoLocationRuleHolds, [], None),
         F::PasswordNotAccepted => ErrorDto::new(ErrorCode::PasswordNotAccepted, [], None),
@@ -586,6 +591,11 @@ mod tests {
             ),
             (F::DaemonStopped, C::DaemonStopped, vec![]),
             (F::DaemonShutDown, C::DaemonShutDown, vec![]),
+            (F::Superseded, C::Superseded, vec![]),
+            (F::PlanRemoved, C::PlanRemoved, vec![]),
+            (F::PlanMoved, C::PlanMoved, vec![]),
+            (F::ConfigUnusable, C::ConfigUnusable, vec![]),
+            (F::KeyFilesNotLeftOut, C::KeyFilesNotLeftOut, vec![]),
             (
                 F::SecretsTooLargeToMask {
                     field: Some("HTTPS_PROXY".to_owned()),
@@ -766,6 +776,17 @@ mod tests {
             (
                 F::DaemonShutDown,
                 ErrorDto::new(C::DaemonShutDown, [], None),
+            ),
+            (F::Superseded, ErrorDto::new(C::Superseded, [], None)),
+            (F::PlanRemoved, ErrorDto::new(C::PlanRemoved, [], None)),
+            (F::PlanMoved, ErrorDto::new(C::PlanMoved, [], None)),
+            (
+                F::ConfigUnusable,
+                ErrorDto::new(C::ConfigUnusable, [], None),
+            ),
+            (
+                F::KeyFilesNotLeftOut,
+                ErrorDto::new(C::KeyFilesNotLeftOut, [], None),
             ),
             (
                 F::NoLocationUsable,

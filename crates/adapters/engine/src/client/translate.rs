@@ -322,6 +322,10 @@ pub(super) fn translate(event: WorkerEvent, redactor: &Redactor) -> Option<Engin
                 | ErrorCode::RepositoryTimedOut
                 | ErrorCode::DaemonStopped
                 | ErrorCode::DaemonShutDown
+                | ErrorCode::Superseded
+                | ErrorCode::PlanRemoved
+                | ErrorCode::PlanMoved
+                | ErrorCode::ConfigUnusable
                 | ErrorCode::NoLocationUsable
                 | ErrorCode::NoLocationRuleHolds
                 | ErrorCode::HostNotAllowed
@@ -707,6 +711,10 @@ mod tests {
             ErrorCode::EngineExitTimedOut,
             ErrorCode::DaemonStopped,
             ErrorCode::DaemonShutDown,
+            ErrorCode::Superseded,
+            ErrorCode::PlanRemoved,
+            ErrorCode::PlanMoved,
+            ErrorCode::ConfigUnusable,
             ErrorCode::Unknown,
         ] {
             assert_eq!(
@@ -815,6 +823,10 @@ mod tests {
             ErrorCode::EngineExitTimedOut,
             ErrorCode::DaemonStopped,
             ErrorCode::DaemonShutDown,
+            ErrorCode::Superseded,
+            ErrorCode::PlanRemoved,
+            ErrorCode::PlanMoved,
+            ErrorCode::ConfigUnusable,
             ErrorCode::Unknown,
         ] {
             assert_eq!(

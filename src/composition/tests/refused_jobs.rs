@@ -71,6 +71,26 @@ async fn a_failed_job_is_refused_by_the_kind_of_its_failure() {
             unavailable(ErrorCode::DaemonShutDown, vec![], None),
         ),
         (
+            F::Superseded,
+            unavailable(ErrorCode::Superseded, vec![], None),
+        ),
+        (
+            F::PlanRemoved,
+            unavailable(ErrorCode::PlanRemoved, vec![], None),
+        ),
+        (
+            F::PlanMoved,
+            unavailable(ErrorCode::PlanMoved, vec![], None),
+        ),
+        (
+            F::ConfigUnusable,
+            unavailable(ErrorCode::ConfigUnusable, vec![], None),
+        ),
+        (
+            F::KeyFilesNotLeftOut,
+            unavailable(ErrorCode::KeyFilesNotLeftOut, vec![], None),
+        ),
+        (
             F::SecretsTooLargeToMask {
                 field: Some("HTTPS_PROXY".to_owned()),
                 limit: 262_144,

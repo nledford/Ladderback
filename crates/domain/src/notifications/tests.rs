@@ -216,6 +216,52 @@ fn a_failed_operation_tells_its_stored_code_and_never_its_detail() {
     assert!(!format!("{event:?}").contains("canary-detail-text"));
 }
 
+/// A backup that gave way to a newer run of its plan tells nothing: the
+/// newer run tells its own end, and a healthchecks check isn't failed for a
+/// run that never started (#1245).
+#[test]
+fn a_backup_that_gave_way_to_a_newer_run_is_no_event() {
+    let mut superseded = operation(OperationKind::Backup, Some("home"));
+    superseded.fail(FailureReason::Superseded, at()).unwrap();
+    assert_eq!(
+        Event::ended(subject(&superseded), Outcome::Failed, at()),
+        None
+    );
+}
+
+/// A backup whose plan was deleted, or now backs up to another repository,
+/// while it waited for its keyring tells nothing: it never ran, and the
+/// person made the change that stopped it (#1293).
+#[test]
+fn a_backup_whose_plan_was_deleted_or_moved_while_it_waited_is_no_event() {
+    for reason in [FailureReason::PlanRemoved, FailureReason::PlanMoved] {
+        let mut unrun = operation(OperationKind::Backup, Some("home"));
+        unrun.fail(reason.clone(), at()).unwrap();
+        assert_eq!(
+            Event::ended(subject(&unrun), Outcome::Failed, at()),
+            None,
+            "{reason:?}"
+        );
+    }
+}
+
+/// A backup that couldn't run once it waited, for a configuration that
+/// can't be read or for key files no glob leaves out, tells its failure
+/// with its code: the person has to act (#1293).
+#[test]
+fn a_backup_that_waited_and_needs_the_person_to_act_tells_its_failure() {
+    for (reason, code) in [
+        (FailureReason::ConfigUnusable, "config-unusable"),
+        (FailureReason::KeyFilesNotLeftOut, "key-files-not-left-out"),
+    ] {
+        let mut unrun = operation(OperationKind::Backup, Some("home"));
+        unrun.fail(reason, at()).unwrap();
+        let event = Event::ended(subject(&unrun), Outcome::Failed, at()).unwrap();
+        assert_eq!(event.kind, EventKind::BackupFailed);
+        assert_eq!(event.codes, [code]);
+    }
+}
+
 #[test]
 fn a_started_backup_tells_its_plan_and_a_maintenance_start_is_no_event() {
     let backup = operation(OperationKind::Backup, Some("home"));

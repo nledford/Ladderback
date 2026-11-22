@@ -361,12 +361,14 @@ fn folders_table(
     ask_remove: Callback<String>,
 ) -> impl IntoView + use<> {
     let folder = Column::new(
+        "folder",
         text(localizer, msg::UI_DRY_RUN_ALLOWLIST_COLUMN_FOLDER),
         Rem::tenths(240),
         |row: Signal<String>| view! { <bdi>{move || row.get()}</bdi> }.into_any(),
     );
     let buttons = Arc::clone(localizer);
     let actions = Column::new(
+        "actions",
         text(localizer, msg::UI_COLUMN_ACTIONS),
         Rem::tenths(160),
         move |row: Signal<String>| {

@@ -1286,6 +1286,26 @@ mod tests {
                 unavailable_with(ErrorCode::DaemonShutDown, Vec::new(), None),
             ),
             (
+                FailureReason::Superseded,
+                unavailable_with(ErrorCode::Superseded, Vec::new(), None),
+            ),
+            (
+                FailureReason::PlanRemoved,
+                unavailable_with(ErrorCode::PlanRemoved, Vec::new(), None),
+            ),
+            (
+                FailureReason::PlanMoved,
+                unavailable_with(ErrorCode::PlanMoved, Vec::new(), None),
+            ),
+            (
+                FailureReason::ConfigUnusable,
+                unavailable_with(ErrorCode::ConfigUnusable, Vec::new(), None),
+            ),
+            (
+                FailureReason::KeyFilesNotLeftOut,
+                unavailable_with(ErrorCode::KeyFilesNotLeftOut, Vec::new(), None),
+            ),
+            (
                 FailureReason::RestoreTargetUnwritable,
                 unavailable_with(ErrorCode::RestoreTargetUnwritable, Vec::new(), None),
             ),

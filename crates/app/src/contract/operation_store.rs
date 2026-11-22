@@ -1,7 +1,7 @@
 mod recovery;
 mod serialization;
 
-use domain::execution::logged_entry::LoggedEntry;
+use domain::execution::logged_entry::{LoggedEntry, RestoredTo};
 use domain::execution::refusal::SettingRefusal;
 use domain::execution::{
     FailureReason, HookEnd, HookLevel, HookPlace, LifecycleError, MAX_STORED_WARNINGS, Operation,
@@ -35,6 +35,7 @@ pub async fn run(store: &dyn OperationStore) {
     every_result_reads_back(store, &fx).await;
     a_maintenance_operation_keeps_the_alias_it_ran_under(store, &fx).await;
     an_operation_keeps_the_entry_it_read(store, &fx).await;
+    a_restore_keeps_where_it_went(store, &fx).await;
     an_operation_keeps_the_locations_its_choice_saw(store, &fx).await;
     warnings_read_back_whole_and_in_order(store).await;
     a_later_save_replaces_the_warnings_too(store).await;
@@ -422,6 +423,11 @@ async fn every_status_and_failure_reason_reads_back(store: &dyn OperationStore) 
             hook: None,
             ended: None,
         },
+        FailureReason::Superseded,
+        FailureReason::PlanRemoved,
+        FailureReason::PlanMoved,
+        FailureReason::ConfigUnusable,
+        FailureReason::KeyFilesNotLeftOut,
         // No repository config at the location, in rustic's words as awkward
         // as they get, and a refused login with and without the half named.
         FailureReason::RepositoryConfigNotFound {
@@ -703,6 +709,61 @@ async fn an_operation_keeps_the_entry_it_read(store: &dyn OperationStore, fx: &F
     save(store, &backup, None).await;
     let found = read(store, id(0xd3)).await.map(|found| found.record);
     assert_eq!(found.map(|record| record.entry), Some(None));
+}
+
+/// A restore names where it wrote, a new folder or in place, as the log was
+/// given it (#813), and a queued one hands it back; every other operation
+/// names nowhere.
+async fn a_restore_keeps_where_it_went(store: &dyn OperationStore, fx: &Fixtures) {
+    let places = [
+        (0xd8, RestoredTo::InPlace),
+        (
+            0xd9,
+            RestoredTo::Folder("/home/demo/ladderback-restore/laptop-3f2a1b4c".to_owned()),
+        ),
+        (
+            0xda,
+            RestoredTo::Folder("…restore/ünïcode ␊ [U+202E]".to_owned()),
+        ),
+    ];
+    for (n, place) in places {
+        let target = Target {
+            plan: None,
+            repository: Some(fx.repository.clone()),
+        };
+        let op = Operation::queue(
+            id(n),
+            OperationKind::Restore,
+            Trigger::Manual,
+            target,
+            at(0),
+        )
+        .with_entry(LoggedEntry::kept("/home/docs".to_owned()))
+        .with_restored_to(place.clone());
+        save(store, &op, None).await;
+        let found = read(store, id(n)).await.map(|found| found.record);
+        assert_eq!(
+            found
+                .as_ref()
+                .and_then(|record| record.restored_to.as_ref()),
+            Some(&place),
+            "the log names where the restore went"
+        );
+        assert_eq!(
+            found
+                .as_ref()
+                .and_then(OperationRecord::queued_operation)
+                .as_ref()
+                .and_then(Operation::restored_to),
+            Some(&place),
+            "the operation a queued record hands back names where it goes"
+        );
+    }
+
+    let backup = queued(0xdb, Some(&fx.home));
+    save(store, &backup, None).await;
+    let found = read(store, id(0xdb)).await.map(|found| found.record);
+    assert_eq!(found.map(|record| record.restored_to), Some(None));
 }
 
 /// The choice of a repository reached at several locations is kept with the

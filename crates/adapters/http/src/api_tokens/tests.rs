@@ -2010,6 +2010,9 @@ fn failed_on_a_file() -> api::OperationSummaryDto {
         )),
         result: None,
         entry: Some("/home/demo/tax-2026.pdf".to_owned()),
+        restored_to: Some(api::RestoredToDto::Folder {
+            path: "/home/demo/ladderback-restore/laptop-3f2a1b4c".to_owned(),
+        }),
         ..crate::tests::canned_summary()
     }
 }
@@ -2047,6 +2050,7 @@ async fn an_operations_failure_is_only_its_code_to_a_token_without_snapshot_cont
         );
         assert_eq!(hidden["failure-code"], "entry-unknown", "{path}: {hidden}");
         assert_eq!(hidden.get("entry"), None, "{path}: {hidden}");
+        assert_eq!(hidden.get("restored-to"), None, "{path}: {hidden}");
         for shown in [
             operation_shown_to(&daemon, get(path, &[("authorization", &with)])).await,
             operation_shown_to(&daemon, get(path, &[("cookie", &cookie)])).await,
@@ -2060,6 +2064,10 @@ async fn an_operations_failure_is_only_its_code_to_a_token_without_snapshot_cont
                 "{path}: {shown}"
             );
             assert_eq!(shown["entry"], "/home/demo/tax-2026.pdf", "{path}: {shown}");
+            assert_eq!(
+                shown["restored-to"]["path"], "/home/demo/ladderback-restore/laptop-3f2a1b4c",
+                "{path}: {shown}"
+            );
         }
     }
 }
@@ -2129,6 +2137,7 @@ fn the_status_shows_each_operation_in_it_as_the_operation_itself_is_shown() {
         Some(api::ErrorDto::new(api::ErrorCode::EntryUnknown, [], None))
     );
     assert_eq!(code_only.entry, None);
+    assert_eq!(code_only.restored_to, None);
     let hidden = status_shown(granting(&[Permission::Backups]), status.clone());
     assert_eq!(hidden.plans[0].last.as_ref(), Some(&code_only));
     assert_eq!(hidden.running, std::slice::from_ref(&code_only));

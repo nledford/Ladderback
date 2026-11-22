@@ -19,6 +19,7 @@
   - **A label that says what the button does,** an icon-only one's above all, since it is its only name; the type can't stop an empty one (4.1.2).
   - **Never a tone alone (1.4.1, A2).** An Error button still says "Delete"; the tone only tints it.
   - **A toggle keeps one name,** its state in `aria-pressed`, as the icon's toggle does.
+  - **A disclosure's button keeps one name,** whether its panel shows in `aria-expanded` and the panel it opens in `aria-controls` (`expanded`, `controls`), as a table's Columns button does.
 
   Not taken from Flowbite, the reference: gradients, colored shadows, pills, social and brand buttons, its "Dark" color, and links drawn as buttons, which the Link component doesn't take either (below). A button group is #783's, around this one. Every page's and shared component's button is a `Button` (#780), none the browser's own, which closes #775 (axe-core reading Linux WebKit's `ButtonFace` behind a native button). Where a page needs the element itself it passes `id`, `node_ref`, `described_by` (a pause banner, a held review's reason) or `fuller_name`, a row's action named with its row ("Cancel demo-home"), which begins with the words it shows (2.5.3).
 

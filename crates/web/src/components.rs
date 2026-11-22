@@ -66,11 +66,12 @@ pub use review_dialog::{Confirmation, ReviewDialog, Working};
 pub use skeleton::Skeleton;
 pub use spinner::Spinner;
 pub use status_badge::StatusBadge;
+pub(crate) use step_up_field::point_at_refusal;
 pub use step_up_field::{StepUp, StepUpField};
 pub use steps::{Reached, Steps, StepsName};
 pub use table::{
-    Align, ChangeMarks, Column, Cue, Footer, MarkAllSeen, Name, Sentences, Sort, SortKey, State,
-    Table,
+    Align, ChangeMarks, Column, ColumnsChoice, Cue, Footer, MarkAllSeen, Name, Sentences, Sort,
+    SortKey, State, Table,
 };
 pub use tabs::{Tab, Tabs};
 pub use text_field::TextField;

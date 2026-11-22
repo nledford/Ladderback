@@ -4,7 +4,7 @@
 //! the run's end. Which message, and with which values, is decided here, on
 //! the host; `operations_page.rs` renders it.
 
-use api::{MsgArg, OperationResultDto, OperationSummaryDto};
+use api::{MsgArg, OperationResultDto, OperationSummaryDto, RestoredToDto};
 use l10n::{Localizer, MessageId, msg};
 
 use crate::announcer::Politeness;
@@ -23,31 +23,37 @@ pub(crate) enum Name {
     Words(Words),
 }
 
-/// The name of `operation`'s row: a backup by its plan, and a maintenance
-/// run, a restore or a download by what ran and the alias of its repository,
-/// or by what ran alone when the log has no alias for it (a run an earlier
-/// version logged).
+/// The name of `operation`'s row: a backup by its plan; a restore the log
+/// kept the entry and the target of by that entry, its repository and where
+/// it went (#813); and a maintenance run, any other restore or a download by
+/// what ran and the alias of its repository, or by what ran alone when the
+/// log has no alias for it (a run an earlier version logged).
 pub(crate) fn name(operation: &OperationSummaryDto) -> Name {
-    match plan_of(operation) {
-        Some(plan) => Name::Plan(plan.to_owned()),
-        None => Name::Words(by_kind(operation, msg::UI_OPERATION_OF, msg::UI_OPERATION)),
+    if let Some(plan) = plan_of(operation) {
+        return Name::Plan(plan.to_owned());
     }
+    Name::Words(
+        restore_from(operation, msg::UI_OPERATION_RESTORE_OF)
+            .unwrap_or_else(|| by_kind(operation, msg::UI_OPERATION_OF, msg::UI_OPERATION)),
+    )
 }
 
 /// The label of the button that cancels `operation`, named as its row is, so
 /// each Cancel on the page says which run it stops (WCAG 2.4.6).
 pub(crate) fn cancel_label(operation: &OperationSummaryDto) -> Words {
-    match plan_of(operation) {
-        Some(plan) => Words {
+    if let Some(plan) = plan_of(operation) {
+        return Words {
             id: msg::UI_CANCEL_PLAN,
             args: vec![("plan", text(plan))],
-        },
-        None => by_kind(
+        };
+    }
+    restore_from(operation, msg::UI_CANCEL_OPERATION_RESTORE_OF).unwrap_or_else(|| {
+        by_kind(
             operation,
             msg::UI_CANCEL_OPERATION_OF,
             msg::UI_CANCEL_OPERATION,
-        ),
-    }
+        )
+    })
 }
 
 /// The name of `operation`'s progress bar: what it measures, a backup's, a
@@ -55,14 +61,16 @@ pub(crate) fn cancel_label(operation: &OperationSummaryDto) -> Words {
 /// Cancel button are, so a screen reader that reaches one of two running
 /// backups' bars hears which (WCAG 2.4.6; §4.5; §16, decision 83).
 pub(crate) fn progress_label(operation: &OperationSummaryDto) -> Words {
-    match plan_of(operation) {
-        Some(plan) => fact(msg::UI_PLAN_PROGRESS, "plan", text(plan)),
-        None => by_kind(
+    if let Some(plan) = plan_of(operation) {
+        return fact(msg::UI_PLAN_PROGRESS, "plan", text(plan));
+    }
+    restore_from(operation, msg::UI_OPERATION_PROGRESS_RESTORE_OF).unwrap_or_else(|| {
+        by_kind(
             operation,
             msg::UI_OPERATION_PROGRESS_OF,
             msg::UI_OPERATION_PROGRESS,
-        ),
-    }
+        )
+    })
 }
 
 /// The facts of `operation` its Result cell lists, in order: the entry of a
@@ -254,16 +262,60 @@ fn produced(result: &OperationResultDto) -> Vec<Words> {
 }
 
 /// How the end of `operation`, which the page saw still going, is announced:
-/// as what ran, so the end of a check is not told as a backup's. A failure is
-/// said assertively; a cancellation and a finish (warnings included: they are
-/// the row's own story) politely.
+/// as what ran, so the end of a check is not told as a backup's, and a
+/// restore the log kept the entry and the target of by both (#813). A
+/// failure is said assertively; a cancellation and a finish (warnings
+/// included: they are the row's own story) politely.
 pub(crate) fn end(operation: &OperationSummaryDto) -> (Politeness, Words) {
-    let (politeness, id) = match operation.status.as_str() {
-        "failed" => (Politeness::Assertive, msg::UI_OPERATION_FAILED),
-        "cancelled" => (Politeness::Polite, msg::UI_OPERATION_CANCELLED),
-        _ => (Politeness::Polite, msg::UI_OPERATION_FINISHED),
+    let (politeness, id, restore_id) = match operation.status.as_str() {
+        "failed" => (
+            Politeness::Assertive,
+            msg::UI_OPERATION_FAILED,
+            msg::UI_OPERATION_RESTORE_FAILED,
+        ),
+        "cancelled" => (
+            Politeness::Polite,
+            msg::UI_OPERATION_CANCELLED,
+            msg::UI_OPERATION_RESTORE_CANCELLED,
+        ),
+        _ => (
+            Politeness::Polite,
+            msg::UI_OPERATION_FINISHED,
+            msg::UI_OPERATION_RESTORE_FINISHED,
+        ),
     };
-    (politeness, fact(id, "kind", text(&operation.kind)))
+    let words = restore_to(operation, restore_id)
+        .unwrap_or_else(|| fact(id, "kind", text(&operation.kind)));
+    (politeness, words)
+}
+
+/// Message `id` with a restore's entry and where it went (`to`: `in-place`,
+/// or `folder` with the `folder`), when `operation` is a restore the log
+/// kept both of (#813); none otherwise, as for a restore an earlier version
+/// logged.
+fn restore_to(operation: &OperationSummaryDto, id: MessageId) -> Option<Words> {
+    if operation.kind != "restore" {
+        return None;
+    }
+    let entry = operation.entry.as_deref()?;
+    let mut args = vec![("entry", text(entry))];
+    match operation.restored_to.as_ref()? {
+        RestoredToDto::InPlace => args.push(("to", text("in-place"))),
+        RestoredToDto::Folder { path } => {
+            args.push(("to", text("folder")));
+            args.push(("folder", text(path)));
+        }
+    }
+    Some(Words { id, args })
+}
+
+/// [`restore_to`] with the alias of the repository the restore read too,
+/// when the log kept it.
+fn restore_from(operation: &OperationSummaryDto, id: MessageId) -> Option<Words> {
+    let repository = operation.repository.as_deref()?;
+    let mut words = restore_to(operation, id)?;
+    words.args.push(("repository", text(repository)));
+    Some(words)
 }
 
 /// The plan a backup's row is named by; none for any other run, or for a
@@ -334,6 +386,7 @@ mod tests {
             repository: repository.map(str::to_owned),
             locations: Vec::new(),
             entry: None,
+            restored_to: None,
         }
     }
 
@@ -893,6 +946,91 @@ mod tests {
             let mut run = summary(kind, "", Some("demo"), None);
             status.clone_into(&mut run.status);
             assert_eq!(english(&end(&run).1), english_end, "{kind} {status}");
+        }
+    }
+
+    /// A restore the log kept the entry and the target of: one into a new
+    /// folder, or one in place.
+    fn restore_of(restored_to: api::RestoredToDto) -> OperationSummaryDto {
+        summary("restore", "", Some("demo"), None)
+            .with_entry("/home/docs".to_owned())
+            .with_restored_to(restored_to)
+    }
+
+    fn into_folder() -> api::RestoredToDto {
+        api::RestoredToDto::Folder {
+            path: "/srv/restore/laptop-3f2a1b4c".to_owned(),
+        }
+    }
+
+    /// A restore's row, its Cancel button and its progress bar name the
+    /// entry it restored, the repository it read and the new folder it went
+    /// into, or say it went in place (#813).
+    #[test]
+    fn a_restore_is_named_for_its_entry_and_where_it_went() {
+        for (restored_to, row, cancel, progress) in [
+            (
+                into_folder(),
+                "Restore of /home/docs from demo to /srv/restore/laptop-3f2a1b4c",
+                "Cancel the restore of /home/docs from demo to /srv/restore/laptop-3f2a1b4c",
+                "Restore progress of /home/docs from demo to /srv/restore/laptop-3f2a1b4c",
+            ),
+            (
+                api::RestoredToDto::InPlace,
+                "In-place restore of /home/docs from demo",
+                "Cancel the in-place restore of /home/docs from demo",
+                "In-place restore progress of /home/docs from demo",
+            ),
+        ] {
+            let run = restore_of(restored_to);
+            let Name::Words(named) = name(&run) else {
+                panic!("a restore is named in words");
+            };
+            assert_eq!(english(&named), row);
+            assert_eq!(english(&cancel_label(&run)), cancel);
+            assert_eq!(english(&progress_label(&run)), progress);
+        }
+    }
+
+    /// The end of a restore the page watched names the entry and where it
+    /// went (#813).
+    #[test]
+    fn the_end_of_a_restore_names_its_entry_and_where_it_went() {
+        for (restored_to, status, english_end) in [
+            (
+                into_folder(),
+                "succeeded",
+                "Restore of /home/docs to /srv/restore/laptop-3f2a1b4c finished.",
+            ),
+            (
+                into_folder(),
+                "cancelled",
+                "Restore of /home/docs to /srv/restore/laptop-3f2a1b4c cancelled.",
+            ),
+            (
+                into_folder(),
+                "failed",
+                "Restore of /home/docs to /srv/restore/laptop-3f2a1b4c failed.",
+            ),
+            (
+                api::RestoredToDto::InPlace,
+                "succeeded",
+                "In-place restore of /home/docs finished.",
+            ),
+            (
+                api::RestoredToDto::InPlace,
+                "cancelled",
+                "In-place restore of /home/docs cancelled.",
+            ),
+            (
+                api::RestoredToDto::InPlace,
+                "failed",
+                "In-place restore of /home/docs failed.",
+            ),
+        ] {
+            let mut run = restore_of(restored_to);
+            status.clone_into(&mut run.status);
+            assert_eq!(english(&end(&run).1), english_end, "{status}");
         }
     }
 }

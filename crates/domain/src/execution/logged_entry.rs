@@ -1,6 +1,7 @@
-//! The entry of a snapshot a restore or a download read, as the operation
-//! log names it (§9, #847): so a person looking back at the history can tell
-//! which file or folder was restored or downloaded.
+//! The entry of a snapshot a restore or a download read, and where a restore
+//! wrote it, as the operation log names them (§9, #847, #813): so a person
+//! looking back at the history can tell which file or folder was restored or
+//! downloaded, and where a restore put it.
 
 use serde::{Deserialize, Serialize};
 
@@ -41,17 +42,7 @@ impl LoggedEntry {
         }
         let visible = DisplayName::new(&redactor.redact(&written));
         let shown = redactor.redact(visible.as_str());
-        if shown.len() <= MAX_LOGGED_ENTRY_BYTES {
-            return Self(shown);
-        }
-        let room = MAX_LOGGED_ENTRY_BYTES.saturating_sub(CUT_MARK.len());
-        let start = (shown.len().saturating_sub(room)..shown.len())
-            .find(|at| shown.is_char_boundary(*at))
-            .unwrap_or(shown.len());
-        Self(format!(
-            "{CUT_MARK}{}",
-            shown.get(start..).unwrap_or_default()
-        ))
+        Self(cut_to_end(shown))
     }
 
     /// The entry as the log kept it, read back.
@@ -61,6 +52,47 @@ impl LoggedEntry {
 
     pub fn as_str(&self) -> &str {
         &self.0
+    }
+}
+
+/// `shown` as the log keeps it: whole when it is at most
+/// [`MAX_LOGGED_ENTRY_BYTES`] long, else cut to its end, on a character
+/// boundary, after `…`.
+fn cut_to_end(shown: String) -> String {
+    if shown.len() <= MAX_LOGGED_ENTRY_BYTES {
+        return shown;
+    }
+    let room = MAX_LOGGED_ENTRY_BYTES.saturating_sub(CUT_MARK.len());
+    let start = (shown.len().saturating_sub(room)..shown.len())
+        .find(|at| shown.is_char_boundary(*at))
+        .unwrap_or(shown.len());
+    format!("{CUT_MARK}{}", shown.get(start..).unwrap_or_default())
+}
+
+/// Where a restore wrote what it restored, as the operation log names it
+/// (#813): over the entry's own path, or into a new folder on the agent's
+/// machine.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub enum RestoredTo {
+    /// Over the entry's original path, adding and overwriting.
+    InPlace,
+    /// Into a new folder, by its path as the log keeps it
+    /// ([`Self::folder`]).
+    Folder(String),
+}
+
+impl RestoredTo {
+    /// The new folder at `path` as the log names it, as [`LoggedEntry::of`]
+    /// names an entry: masked with the repository's own secrets, since the
+    /// folder's name holds the snapshot's host, which the repository wrote
+    /// (I4); every character that would break the line or reorder it made
+    /// visible, as the snapshot's tree shows a name ([`DisplayName`]), and
+    /// masked again in that shown form; and a path longer than
+    /// [`MAX_LOGGED_ENTRY_BYTES`] cut to its end, on a character boundary,
+    /// after `…`.
+    pub fn folder(path: &str, redactor: &Redactor) -> Self {
+        let visible = DisplayName::new(&redactor.redact(path));
+        Self::Folder(cut_to_end(redactor.redact(visible.as_str())))
     }
 }
 
@@ -205,5 +237,48 @@ mod tests {
         // The most whole characters that fit after the mark are kept.
         let room = MAX_LOGGED_ENTRY_BYTES - '…'.len_utf8();
         assert_eq!(entry.as_str().chars().count() - 1, room / 2);
+    }
+
+    #[test]
+    fn a_restores_new_folder_is_named_by_its_path() {
+        assert_eq!(
+            RestoredTo::folder(
+                "/home/demo/ladderback-restore/laptop-3f2a1b4c",
+                &Redactor::new(&[])
+            ),
+            RestoredTo::Folder("/home/demo/ladderback-restore/laptop-3f2a1b4c".to_owned())
+        );
+    }
+
+    // The new folder's name holds the snapshot's host, which the repository
+    // wrote, so a host that spells one of its secrets is masked (I4).
+    #[test]
+    fn a_secret_in_the_folder_is_masked() {
+        assert_eq!(
+            RestoredTo::folder(
+                "/home/demo/ladderback-restore/canary-pass-3f2a1b4c",
+                &masking("canary-pass")
+            ),
+            RestoredTo::Folder(format!("/home/demo/ladderback-restore/{REDACTED}-3f2a1b4c"))
+        );
+    }
+
+    #[test]
+    fn a_character_in_the_folder_that_would_break_the_line_is_made_visible() {
+        assert_eq!(
+            RestoredTo::folder("/srv/a\nb\u{202e}c", &Redactor::new(&[])),
+            RestoredTo::Folder("/srv/a\u{240a}b[U+202E]c".to_owned())
+        );
+    }
+
+    #[test]
+    fn a_folder_past_the_limit_keeps_its_end() {
+        let long = format!("/{}/end", "a".repeat(MAX_LOGGED_ENTRY_BYTES));
+        let RestoredTo::Folder(kept) = RestoredTo::folder(&long, &Redactor::new(&[])) else {
+            panic!("a folder");
+        };
+        assert_eq!(kept.len(), MAX_LOGGED_ENTRY_BYTES);
+        assert!(kept.starts_with(CUT_MARK), "{kept}");
+        assert!(kept.ends_with("aaa/end"), "{kept}");
     }
 }

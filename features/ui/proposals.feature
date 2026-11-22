@@ -196,6 +196,50 @@ Feature: Pending changes page
     And the page offers no button "Approve the proposal"
     And the page has no accessibility violations
 
+  Scenario: With sign-in off, the open proposal has no live region but the announcer's, and Copy the ID is answered through it
+    Given a demo plan "demo-home" with a scratch repository, and a proposal to add the plan "demo-docs"
+    And the page may use the clipboard
+    When I open the address "/proposals"
+    And I skip to the content
+    And I press Tab until focus is on the proposal's Review button
+    And I press Enter
+    And I press Tab until focus is on the button "Copy the ID"
+    Then the page has no live region but the announcer's
+    When I press Enter
+    Then the polite region reads "Copied."
+    And the page has no live region but the announcer's
+
+  Scenario: A wrong proposal ID is the field's own error, which focus reads once, and the page has no live region of its own
+    Given a demo plan "demo-home" with a scratch repository, and a proposal to add the plan "demo-docs"
+    When I open the address "/proposals"
+    And I skip to the content
+    And I press Tab until focus is on the proposal's Review button
+    And I press Enter
+    And I press Tab until focus is on the textbox "Proposal ID"
+    And I type "not-the-id"
+    And I press Tab until focus is on the button "Approve the proposal"
+    And I press Enter
+    Then focus is on the textbox "Proposal ID"
+    And the field "Proposal ID" shows the error "That is not this proposal's ID, so nothing was applied."
+    And the field "Proposal ID" is marked invalid
+    And the page has no live region but the announcer's
+    And the assertive region stays empty
+    And the page has no accessibility violations
+
+  Scenario: A wrong proposal ID sent with Enter from the field is said through the announcer, since focus is there already
+    Given a demo plan "demo-home" with a scratch repository, and a proposal to add the plan "demo-docs"
+    When I open the address "/proposals"
+    And I skip to the content
+    And I press Tab until focus is on the proposal's Review button
+    And I press Enter
+    And I press Tab until focus is on the textbox "Proposal ID"
+    And I type "not-the-id"
+    And I press Enter
+    Then the assertive region comes to contain "That is not this proposal's ID, so nothing was applied."
+    And focus is on the textbox "Proposal ID"
+    And the field "Proposal ID" shows the error "That is not this proposal's ID, so nothing was applied."
+    And the page has no live region but the announcer's
+
   Scenario: A refusal in the open proposal takes the place of the one before it, so one failure shows one error alert
     Given a demo plan "demo-home" with a scratch repository, and a proposal to add the plan "demo-docs"
     When I open the address "/proposals"

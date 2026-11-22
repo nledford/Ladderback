@@ -171,12 +171,14 @@ fn start_plans_table(
 ) -> impl IntoView + use<> {
     let noted = plans.iter().any(|plan| !plan.warnings.is_empty());
     let plan = Column::new(
+        "plan",
         text(localizer, msg::UI_COLUMN_PLAN),
         Rem::tenths(120),
         |row: Signal<PlanSummaryDto>| (move || row.with(|plan| plan.id.clone())).into_any(),
     );
     let next_localizer = Arc::clone(localizer);
     let mut columns = vec![Column::new(
+        "next-run",
         text(localizer, msg::UI_COLUMN_NEXT_RUN),
         Rem::tenths(120),
         move |row: Signal<PlanSummaryDto>| {
@@ -188,6 +190,7 @@ fn start_plans_table(
     if noted {
         let notes_localizer = Arc::clone(localizer);
         columns.push(Column::new(
+            "notes",
             text(localizer, msg::UI_COLUMN_NOTES),
             Rem::tenths(240),
             move |row: Signal<PlanSummaryDto>| {

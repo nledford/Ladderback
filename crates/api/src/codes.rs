@@ -50,6 +50,20 @@ pub enum ErrorCode {
     /// service stop, a restart, the computer shutting down), and its orderly
     /// stop ended it. No notification is sent of it.
     DaemonShutDown,
+    /// A queued backup's turn came while a newer run of its plan was already
+    /// going, so it gave way to that run and never ran (decision 135).
+    Superseded,
+    /// A queued backup's plan was deleted while the backup waited for its
+    /// keyring, so it never ran (decision 135, #1293).
+    PlanRemoved,
+    /// A queued backup's plan now backs up to another repository than the
+    /// one the backup was queued for, found once its wait for its keyring
+    /// was over, so it never ran (decision 135, #1293).
+    PlanMoved,
+    /// The configuration couldn't be read or used once a queued backup's
+    /// wait for its keyring was over, so the backup never ran (decision
+    /// 135, #1293).
+    ConfigUnusable,
     /// The request's `Host` header names neither a loopback address nor a
     /// configured host name (a DNS-rebinding defense, §10.1).
     HostNotAllowed,
@@ -1589,6 +1603,10 @@ impl ErrorCode {
             | Self::RepositoryReplaced
             | Self::DaemonStopped
             | Self::DaemonShutDown
+            | Self::Superseded
+            | Self::PlanRemoved
+            | Self::PlanMoved
+            | Self::ConfigUnusable
             | Self::HostNotAllowed
             | Self::OriginNotAllowed
             | Self::JsonRequired

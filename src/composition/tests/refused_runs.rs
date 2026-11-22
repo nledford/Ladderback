@@ -689,6 +689,66 @@ async fn a_waiting_run_gives_way_to_a_newer_run_of_its_plan() {
     assert_eq!(jobs(&scripted), 1, "only the newer run reached the engine");
 }
 
+/// A queued backup a restart resumed, parked waiting for its keyring, gives
+/// way to a newer run of its plan that is going when the keyring is
+/// unlocked, and ends failed as superseded: it never ran, and the daemon
+/// didn't stop (#1245, decision 135).
+#[tokio::test]
+async fn a_resumed_run_that_gives_way_to_a_newer_run_ends_superseded() {
+    capture();
+    let started = domain::Timestamp::from_second(1_800_000_000).expect("a timestamp");
+    let clock = Arc::new(FakeClock::new(started));
+    let secrets = Arc::new(FakeSecrets::new());
+    keyring_locked_until(
+        &secrets,
+        &clock,
+        started + domain::SignedDuration::from_secs(55),
+    );
+    let store = Arc::new(app::fakes::InMemoryOperationStore::new());
+    let (runner, _heard, scripted, home) =
+        keyring_parked_runner(secrets, clock.clone(), store.clone()).await;
+    let queued = queued_home_backup(0x1245, None);
+    store
+        .save(&queued, None)
+        .await
+        .expect("the queued backup is saved");
+    let unlock = app::secrets::UnlockWait::new(
+        clock.clone(),
+        started + domain::SignedDuration::from_secs(600),
+    );
+    PlanRuns::resume(&runner, queued.clone(), Some(unlock)).await;
+    for _ in 0..5 {
+        until_it_waits(&clock).await;
+        clock.advance(domain::SignedDuration::from_secs(10));
+    }
+    until_it_waits(&clock).await;
+
+    // The keyring unlocks at 55 s, and a newer run of the plan starts and
+    // reaches the engine; its job never answers, so it is going.
+    clock.advance(domain::SignedDuration::from_secs(5));
+    *scripted
+        .hangs
+        .lock()
+        .unwrap_or_else(PoisonError::into_inner) = 1;
+    let newer = runner
+        .queue
+        .push(&home, domain::planning::Concurrency::default());
+    PlanRuns::start(&runner, &home, Trigger::Schedule, newer, None).await;
+
+    clock.advance(domain::SignedDuration::from_secs(5));
+    let status = until_ended(&store, queued.id()).await;
+    assert!(
+        matches!(
+            status,
+            domain::execution::OperationStatus::Failed {
+                reason: domain::execution::FailureReason::Superseded,
+            }
+        ),
+        "the queued backup ends superseded: {status:?}"
+    );
+    assert_eq!(jobs(&scripted), 1, "only the newer run reached the engine");
+}
+
 /// A queued backup recorded on a repository its plan no longer backs up to
 /// isn't parked to wait for the keyring of the one it backs up to now: it
 /// ends at once, as it would with the keyring unlocked (#1221).
@@ -998,6 +1058,45 @@ impl app::ports::ConfigStore for ChangesAfterFirstLoad {
     }
 }
 
+/// A configuration store that reads `config` the first `readable` times
+/// it is loaded, and then can't be read.
+struct UnreadableAfter {
+    config: domain::planning::AgentConfig,
+    readable: usize,
+    loads: std::sync::atomic::AtomicUsize,
+}
+
+#[async_trait]
+impl app::ports::ConfigStore for UnreadableAfter {
+    async fn load(&self) -> Result<domain::planning::AgentConfig, app::ports::ConfigError> {
+        let loads = self.loads.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+        if loads < self.readable {
+            Ok(self.config.clone())
+        } else {
+            Err(app::ports::ConfigError::Unavailable {
+                file: "config.toml".to_owned(),
+                detail: "disk I/O error".to_owned(),
+            })
+        }
+    }
+
+    async fn save(
+        &self,
+        _config: &domain::planning::AgentConfig,
+    ) -> Result<(), app::ports::ConfigError> {
+        Ok(())
+    }
+
+    async fn record_id(
+        &self,
+        _alias: &domain::RepositoryAlias,
+        _read: &domain::planning::RepositoryConfig,
+        _id: &RepositoryId,
+    ) -> Result<(), app::ports::RecordError> {
+        Ok(())
+    }
+}
+
 /// `config` with the plan `home` moved to the repository `other`, whose
 /// password is in the keyring under [`other_entry`].
 fn home_on_other(config: &domain::planning::AgentConfig) -> domain::planning::AgentConfig {
@@ -1121,7 +1220,7 @@ async fn a_resumed_run_whose_plan_moved_while_it_waited_ends_unrun() {
         matches!(
             status,
             domain::execution::OperationStatus::Failed {
-                reason: domain::execution::FailureReason::DaemonStopped,
+                reason: domain::execution::FailureReason::PlanMoved,
             }
         ),
         "the queued backup ends failed: {status:?}"
@@ -1132,6 +1231,187 @@ async fn a_resumed_run_whose_plan_moved_while_it_waited_ends_unrun() {
         0,
         "the new repository's password isn't read"
     );
+}
+
+/// A queued backup whose run waited for its keyring, and whose plan was
+/// deleted while it waited, ends once the keyring is unlocked as
+/// `plan-removed`, not as a stopped daemon, and the engine is never asked
+/// (#1293).
+#[tokio::test]
+async fn a_resumed_run_whose_plan_was_deleted_while_it_waited_ends_plan_removed() {
+    capture();
+    let started = domain::Timestamp::from_second(1_800_000_000).expect("a timestamp");
+    let clock = Arc::new(FakeClock::new(started));
+    let secrets = Arc::new(FakeSecrets::new());
+    keyring_locked_until(
+        &secrets,
+        &clock,
+        started + domain::SignedDuration::from_secs(60),
+    );
+    let store = Arc::new(app::fakes::InMemoryOperationStore::new());
+    let (runner, _heard, scripted, home) =
+        keyring_parked_runner(secrets, clock.clone(), store.clone()).await;
+    let queued = queued_home_backup(0x1293, None);
+    store
+        .save(&queued, None)
+        .await
+        .expect("the queued backup is saved");
+    let unlock = app::secrets::UnlockWait::new(
+        clock.clone(),
+        started + domain::SignedDuration::from_secs(600),
+    );
+    PlanRuns::resume(&runner, queued.clone(), Some(unlock)).await;
+    until_it_waits(&clock).await;
+
+    let config = runner.config.load().await.expect("the configuration reads");
+    save_config(&runner, &config.remove_plan(&home).expect("a valid change")).await;
+    clock.advance(domain::SignedDuration::from_secs(60));
+    let status = until_ended(&store, queued.id()).await;
+    assert!(
+        matches!(
+            status,
+            domain::execution::OperationStatus::Failed {
+                reason: domain::execution::FailureReason::PlanRemoved,
+            }
+        ),
+        "the queued backup ends plan-removed: {status:?}"
+    );
+    assert_eq!(jobs(&scripted), 0, "the engine was never asked");
+}
+
+/// A queued backup whose run waited for its keyring, whose configuration
+/// can't be read once the keyring is unlocked, ends as `config-unusable`,
+/// not as a stopped daemon, and the engine is never asked (#1293).
+#[tokio::test]
+async fn a_resumed_run_whose_configuration_cannot_be_read_once_it_waited_ends_config_unusable() {
+    // The start's build and the parked task's first read find it; the read
+    // once the keyring is unlocked doesn't.
+    ends_config_unusable_when_readable(2, 0x1294).await;
+}
+
+/// A queued backup parked for its keyring whose configuration can't be
+/// read when its task first looks ends as `config-unusable` without
+/// waiting (#1293).
+#[tokio::test]
+async fn a_parked_resumed_run_whose_configuration_cannot_be_read_ends_config_unusable() {
+    // The start's build finds it; the parked task's first read doesn't.
+    ends_config_unusable_when_readable(1, 0x1295).await;
+}
+
+/// Takes up a queued backup parked for its keyring under a configuration
+/// that reads `readable` times and then can't be read, and asserts that it
+/// ends as `config-unusable` with the engine never asked.
+async fn ends_config_unusable_when_readable(readable: usize, id: u128) {
+    capture();
+    let started = domain::Timestamp::from_second(1_800_000_000).expect("a timestamp");
+    let clock = Arc::new(FakeClock::new(started));
+    let secrets = Arc::new(FakeSecrets::new());
+    keyring_locked_until(
+        &secrets,
+        &clock,
+        started + domain::SignedDuration::from_secs(60),
+    );
+    let store = Arc::new(app::fakes::InMemoryOperationStore::new());
+    let (mut runner, _heard, scripted, _home) =
+        keyring_parked_runner(secrets, clock.clone(), store.clone()).await;
+    runner.config = Arc::new(UnreadableAfter {
+        config: runner.config.load().await.expect("the configuration reads"),
+        readable,
+        loads: std::sync::atomic::AtomicUsize::new(0),
+    });
+    let queued = queued_home_backup(id, None);
+    store
+        .save(&queued, None)
+        .await
+        .expect("the queued backup is saved");
+    let unlock = app::secrets::UnlockWait::new(
+        clock.clone(),
+        started + domain::SignedDuration::from_secs(600),
+    );
+    PlanRuns::resume(&runner, queued.clone(), Some(unlock)).await;
+    if readable > 1 {
+        until_it_waits(&clock).await;
+        clock.advance(domain::SignedDuration::from_secs(60));
+    }
+    let status = until_ended(&store, queued.id()).await;
+    assert!(
+        matches!(
+            status,
+            domain::execution::OperationStatus::Failed {
+                reason: domain::execution::FailureReason::ConfigUnusable,
+            }
+        ),
+        "the queued backup ends config-unusable: {status:?}"
+    );
+    assert_eq!(jobs(&scripted), 0, "the engine was never asked");
+}
+
+/// A queued backup parked for its keyring whose plan was deleted before
+/// its task looked ends as `plan-removed` even when its bound has already
+/// passed: the plan is looked for before the bound, so it isn't refused
+/// for a secret of a plan nobody has (#1293).
+#[tokio::test]
+async fn a_parked_resumed_run_whose_plan_was_deleted_ends_plan_removed_past_its_bound() {
+    capture();
+    let started = domain::Timestamp::from_second(1_800_000_000).expect("a timestamp");
+    let clock = Arc::new(FakeClock::new(started));
+    let secrets = Arc::new(FakeSecrets::new());
+    keyring_locked_until(
+        &secrets,
+        &clock,
+        started + domain::SignedDuration::from_secs(3600),
+    );
+    let store = Arc::new(app::fakes::InMemoryOperationStore::new());
+    let (mut runner, _heard, scripted, home) =
+        keyring_parked_runner(secrets, clock.clone(), store.clone()).await;
+    let config = runner.config.load().await.expect("the configuration reads");
+    runner.config = Arc::new(ChangesAfterFirstLoad::new(
+        config.clone(),
+        config.remove_plan(&home).expect("a valid change"),
+    ));
+    let queued = queued_home_backup(0x1296, None);
+    store
+        .save(&queued, None)
+        .await
+        .expect("the queued backup is saved");
+    // The bound is the start's own time: it has passed when the task looks.
+    let unlock = app::secrets::UnlockWait::new(clock.clone(), started);
+    PlanRuns::resume(&runner, queued.clone(), Some(unlock)).await;
+
+    let status = until_ended(&store, queued.id()).await;
+    assert!(
+        matches!(
+            status,
+            domain::execution::OperationStatus::Failed {
+                reason: domain::execution::FailureReason::PlanRemoved,
+            }
+        ),
+        "the queued backup ends plan-removed: {status:?}"
+    );
+    assert_eq!(jobs(&scripted), 0, "the engine was never asked");
+}
+
+/// Each refusal a queued backup's job can be built again with, once its
+/// wait for its keyring is over, ends it with its own reason, never as a
+/// stopped daemon (#1293).
+#[test]
+fn a_refused_build_after_the_wait_ends_with_its_own_reason() {
+    use crate::composition::plan_runner::never_ran;
+    use domain::execution::FailureReason as F;
+    assert_eq!(never_ran(&StartError::UnknownPlan), F::PlanRemoved);
+    assert_eq!(
+        never_ran(&StartError::Unavailable {
+            code: ErrorCode::ConfigUnavailable,
+            args: Vec::new(),
+            detail: None,
+        }),
+        F::ConfigUnusable
+    );
+    assert_eq!(
+        never_ran(&StartError::KeyFilesNotLeftOut),
+        F::KeyFilesNotLeftOut
+    );
+    assert_eq!(never_ran(&StartError::RunWaiting), F::Superseded);
 }
 
 /// A scheduled run that waited for its keyring, whose plan kept its alias
@@ -1219,7 +1499,7 @@ async fn a_resumed_run_whose_alias_now_names_another_repository_reads_no_new_pas
         matches!(
             status,
             domain::execution::OperationStatus::Failed {
-                reason: domain::execution::FailureReason::DaemonStopped,
+                reason: domain::execution::FailureReason::PlanMoved,
             }
         ),
         "the queued backup ends failed: {status:?}"
@@ -1319,7 +1599,7 @@ async fn a_parked_resumed_run_whose_plan_moved_before_it_waited_reads_no_new_pas
         matches!(
             status,
             domain::execution::OperationStatus::Failed {
-                reason: domain::execution::FailureReason::DaemonStopped,
+                reason: domain::execution::FailureReason::PlanMoved,
             }
         ),
         "the queued backup ends failed: {status:?}"

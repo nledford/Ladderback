@@ -404,6 +404,16 @@ fn failures() -> Vec<(
             "[]",
             None,
         ),
+        (FailureReason::Superseded, "superseded", "[]", None),
+        (FailureReason::PlanRemoved, "plan-removed", "[]", None),
+        (FailureReason::PlanMoved, "plan-moved", "[]", None),
+        (FailureReason::ConfigUnusable, "config-unusable", "[]", None),
+        (
+            FailureReason::KeyFilesNotLeftOut,
+            "key-files-not-left-out",
+            "[]",
+            None,
+        ),
     ]
 }
 

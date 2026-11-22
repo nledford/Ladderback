@@ -25,7 +25,7 @@ Feature: Each row of the Operations page names its operation and says what it di
     And the row "Check of demo" of the table "Operations" lists "found nothing wrong" in its "Result" column
     And the page has no accessibility violations
 
-  Scenario: A restore's row is named for the restore and the repository it read
+  Scenario: A restore's row is named for the entry it restored, the repository it read and the folder it went into
     Given a demo plan "home" with a tiny scratch repository
     And the plan "home" has been backed up 1 times
     When I open the newest snapshot of the plan "home"
@@ -40,8 +40,44 @@ Feature: Each row of the Operations page names its operation and says what it di
     And I press Enter
     Then the polite region comes to contain "Restore of demo-1.txt finished."
     When I open the address "/operations"
-    Then the table "Operations" has the row "Restore from demo"
-    And the row "Restore from demo" of the table "Operations" shows "Succeeded" in its "Status" column
+    Then the table "Operations" has the row of a restore of "demo-1.txt" from "demo" into a new folder in the agent's restore folder
+    And the table "Operations" has a row "demo-1.txt from demo to " that shows "Succeeded"
+    And the page has no accessibility violations
+
+  # A running restore's row, its Cancel button and its progress bar name what
+  # it restores, the repository it reads and where it writes, so a reader can
+  # tell two restores of the same repository apart; its end is announced with
+  # the same names (#813).
+  Scenario: A running restore into a new folder is named for its entry and its folder
+    Given the daemon reports a running restore of "/home/docs" from "demo" into the folder "/srv/restore/laptop-3f2a1b4c"
+    When I open the address "/operations"
+    Then the table "Operations" has a row "Restore of /home/docs from demo to /srv/restore/laptop-3f2a1b4c" that shows "Running"
+    And the page shows the button "Cancel the restore of /home/docs from demo to /srv/restore/laptop-3f2a1b4c"
+    When the daemon reports that the restore of "/home/docs" is 2 of 10 done
+    Then the progress bar "Restore progress of /home/docs from demo to /srv/restore/laptop-3f2a1b4c" shows 20 percent
+    When the daemon reports that the restore of "/home/docs" has failed
+    Then the assertive region comes to contain "Restore of /home/docs to /srv/restore/laptop-3f2a1b4c failed."
+    And the page has no accessibility violations
+
+  Scenario: A running restore over the original files is named as a restore in place
+    Given the daemon reports a running restore of "/home/docs" from "demo" in place
+    When I open the address "/operations"
+    Then the table "Operations" has a row "In-place restore of /home/docs from demo" that shows "Running"
+    And the page shows the button "Cancel the in-place restore of /home/docs from demo"
+    When the daemon reports that the restore of "/home/docs" is 2 of 10 done
+    Then the progress bar "In-place restore progress of /home/docs from demo" shows 20 percent
+    When the daemon reports that the restore of "/home/docs" has succeeded
+    Then the polite region comes to contain "In-place restore of /home/docs finished."
+    And the page has no accessibility violations
+
+  # A queued backup that waited, and found a newer run of its plan going
+  # when its wait ended, gave way to it rather than run twice; its row says
+  # so rather than blame a stopped daemon (#1245).
+  Scenario: A backup that gave way to a newer run of its plan says so in its row
+    Given the daemon reports a backup of "demo-home" that gave way to a newer run of its plan
+    When I open the address "/operations"
+    Then the row "demo-home" of the table "Operations" shows "Failed" in its "Status" column
+    And the row "demo-home" of the table "Operations" shows "A newer run of this plan was already going" in its "Result" column
     And the page has no accessibility violations
 
   Scenario: A download's row is named for the download and the repository it read

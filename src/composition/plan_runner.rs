@@ -456,8 +456,12 @@ impl PlanRunner {
                 // place: it gives way to it.
                 let Ok(place) = self.queue.unless_going(&plan, limit) else {
                     self.registry.finish(&id);
-                    self.end_unrunnable(operation, "a newer run of its plan is going")
-                        .await;
+                    self.end_unrunnable(
+                        operation,
+                        FailureReason::Superseded,
+                        "a newer run of its plan is going",
+                    )
+                    .await;
                     return;
                 };
                 self.spawn_resumed(operation, *built, place, cancel);
@@ -466,9 +470,9 @@ impl PlanRunner {
                 self.registry.finish(&id);
                 self.refuse_resumed(operation, secret).await;
             }
-            Waited::Unrunnable(why) => {
+            Waited::Unrunnable(reason, why) => {
                 self.registry.finish(&id);
-                self.end_unrunnable(operation, &why).await;
+                self.end_unrunnable(operation, reason, &why).await;
             }
         }
     }
@@ -486,19 +490,23 @@ impl PlanRunner {
         let config = match self.config.load().await {
             Ok(config) => config,
             Err(error) => {
-                return Waited::Unrunnable(start_refused(&config_unusable(
-                    error,
-                    |code, args, detail| StartError::Unavailable { code, args, detail },
-                )));
+                return Waited::Unrunnable(
+                    FailureReason::ConfigUnusable,
+                    start_refused(&config_unusable(error, |code, args, detail| {
+                        StartError::Unavailable { code, args, detail }
+                    })),
+                );
             }
         };
-        // A plan that backs up to another repository than the one the
-        // backup was queued on isn't run there under a record of the old,
-        // and none of its secrets is resolved to find that out.
-        if let Some(now) = PlanRepository::of(&config, plan)
-            && !operation.target().is_on(now.id.as_ref())
-        {
-            return Waited::Unrunnable("its plan now backs up to another repository".to_owned());
+        // A plan deleted, or one that backs up to another repository than
+        // the one the backup was queued on, doesn't run it there under a
+        // record of the old, and none of its secrets is resolved to find
+        // that out (#1293).
+        if let Some(reason) = app::recovery::waited_end(operation.target(), Some(&config)) {
+            return Waited::Unrunnable(
+                reason,
+                "the configuration as it stands now doesn't run it".to_owned(),
+            );
         }
         if unlock.has_passed() {
             return Waited::Refused(refused);
@@ -529,10 +537,13 @@ impl PlanRunner {
             }
             // The plan moved to another repository while the run waited:
             // it isn't run there under a record of the old.
-            Ok(_) | Err(Unbuilt::Secret(_)) => {
-                Waited::Unrunnable("its plan now backs up to another repository".to_owned())
+            Ok(_) | Err(Unbuilt::Secret(_)) => Waited::Unrunnable(
+                FailureReason::PlanMoved,
+                "its plan now backs up to another repository".to_owned(),
+            ),
+            Err(Unbuilt::Refused(error)) => {
+                Waited::Unrunnable(never_ran(&error), start_refused(&error))
             }
-            Err(Unbuilt::Refused(error)) => Waited::Unrunnable(start_refused(&error)),
         }
     }
 
@@ -565,30 +576,33 @@ impl PlanRunner {
         }));
     }
 
-    /// Ends a queued backup that can't run again as failed
-    /// `daemon-stopped`, as decision 40 ended every queued operation, with
-    /// `why` in the log: left queued, it would show as queued with nothing
-    /// to run it until the next start (decision 73). An end the log takes
-    /// is announced, as every end a start makes is (decision 91).
-    async fn end_unrunnable(&self, mut operation: domain::execution::Operation, why: &str) {
+    /// Ends a queued backup that can't run again as failed with `reason`,
+    /// with `why` in the log: `daemon-stopped`, as decision 40 ended every
+    /// queued operation, `superseded` when it gave way to a newer run of
+    /// its plan, or the reason it never ran once it waited for its keyring
+    /// (decision 135, #1293). Left queued, it would show as queued with
+    /// nothing to run it until the next start (decision 73). An end the log
+    /// takes is announced, as every end a start makes is (decision 91).
+    async fn end_unrunnable(
+        &self,
+        operation: domain::execution::Operation,
+        reason: FailureReason,
+        why: &str,
+    ) {
         let hyphenated = operation.id().as_uuid().hyphenated();
-        log::warn!("the queued backup {hyphenated} can't run again, and ends as failed: {why}");
-        if operation
-            .fail(FailureReason::DaemonStopped, SystemClock.now())
-            .is_err()
+        log::warn!(
+            "the queued backup {hyphenated} can't run again, and ends as failed ({}): {why}",
+            reason.code()
+        );
+        if let Err(refused) = app::recovery::RecoverOperations::new(Arc::clone(&self.store))
+            .with_events(Arc::clone(&self.events))
+            .end_queued(operation, reason, SystemClock.now())
+            .await
         {
-            return;
-        }
-        match self.store.save(&operation, None).await {
-            Ok(()) => {
-                if let Some(news) = app::announce::end_of(&operation) {
-                    self.events.publish(news).await;
-                }
-            }
-            Err(refused) => log::warn!(
+            log::warn!(
                 "operation {hyphenated}: a write to the operation log failed ({}); it stays queued",
                 refused.code()
-            ),
+            );
         }
     }
 
@@ -669,8 +683,9 @@ enum Waited {
     /// Refused for a secret of the repository it was queued on: it ends
     /// failed with that refusal.
     Refused(SecretUnbuilt),
-    /// It can't run again, for this reason.
-    Unrunnable(String),
+    /// It can't run again: it ends failed with this reason, and the log
+    /// says this of why.
+    Unrunnable(FailureReason, String),
 }
 
 /// The repository a plan backs up to, as a configuration names it: the
@@ -825,6 +840,24 @@ fn start_refused(error: &StartError) -> String {
     }
 }
 
+/// The reason a queued backup that waited for its keyring ends with when,
+/// once the wait is over, its job is refused with `error` as it is built
+/// again: never `daemon-stopped`, which would say the daemon stopped during
+/// it (decision 135, #1293).
+pub(super) fn never_ran(error: &StartError) -> FailureReason {
+    match error {
+        StartError::UnknownPlan => FailureReason::PlanRemoved,
+        // A build refuses a configuration it can't read this way.
+        StartError::Unavailable { .. } => FailureReason::ConfigUnusable,
+        StartError::KeyFilesNotLeftOut => FailureReason::KeyFilesNotLeftOut,
+        StartError::RunWaiting => FailureReason::Superseded,
+        // A build hands a refused secret back as `Unbuilt::Secret`, never
+        // this way; were it to, a setting the configuration names couldn't
+        // be used.
+        StartError::SecretRefused(_) => FailureReason::ConfigUnusable,
+    }
+}
+
 #[async_trait]
 impl PlanRuns for PlanRunner {
     async fn start(
@@ -956,7 +989,8 @@ impl PlanRuns for PlanRunner {
             // the next start (decision 73). An end the log took is announced,
             // as every end a start makes is (decision 91).
             Err(why) => {
-                self.end_unrunnable(operation, &why).await;
+                self.end_unrunnable(operation, FailureReason::DaemonStopped, &why)
+                    .await;
             }
         }
     }

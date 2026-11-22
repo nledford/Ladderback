@@ -69,10 +69,10 @@ use crate::components::button::{Appearance, Content, Kind};
 use crate::components::skeleton::rules::Awaited;
 use crate::components::tabs::{Orientation, TabSet, TabsName};
 use crate::components::{
-    Banner, Button, Column, Confirmation, ErrorSummary, Name, RadioGroup, ReviewDialog, Sentences,
-    State, StepUp, StepUpField, SummaryItem, Tab, Table, Tabs, TextField, Toast, ToastTone, Toasts,
-    Working, copy_text, dialog_refusal_alert, hand_focus_when_gone, refusal_alert, say_refusals,
-    text_field,
+    Banner, Button, Column, ColumnsChoice, Confirmation, ErrorSummary, Name, RadioGroup,
+    ReviewDialog, Sentences, State, StepUp, StepUpField, SummaryItem, Tab, Table, Tabs, TextField,
+    Toast, ToastTone, Toasts, Working, copy_text, dialog_refusal_alert, hand_focus_when_gone,
+    refusal_alert, say_refusals, text_field,
 };
 use crate::components::{first_load, paced};
 use crate::live::reply;
@@ -782,12 +782,14 @@ fn tokens_table(
 ) -> impl IntoView + use<> {
     let now_ms = ws::now_ms();
     let label = Column::new(
+        "label",
         text(localizer, msg::UI_API_TOKENS_COLUMN_LABEL),
         Rem::tenths(80),
         |row: Signal<ApiTokenDto>| (move || row.with(|token| token.label.clone())).into_any(),
     );
     let permissions_localizer = Arc::clone(localizer);
     let permissions = Column::new(
+        "permissions",
         text(localizer, msg::UI_API_TOKENS_COLUMN_PERMISSIONS),
         // Wide enough for "Configuration" on one line; the label's column gave
         // up the 2 rem, so the table still fits its panel.
@@ -799,6 +801,7 @@ fn tokens_table(
     let created_localizer = Arc::clone(localizer);
     let zone = viewer.cloned();
     let created = Column::new(
+        "created",
         text(localizer, msg::UI_API_TOKENS_COLUMN_CREATED),
         Rem::tenths(90),
         move |row: Signal<ApiTokenDto>| {
@@ -809,6 +812,7 @@ fn tokens_table(
     );
     let used_localizer = Arc::clone(localizer);
     let last_used = Column::new(
+        "last-used",
         text(localizer, msg::UI_API_TOKENS_COLUMN_LAST_USED),
         Rem::tenths(80),
         move |row: Signal<ApiTokenDto>| {
@@ -825,6 +829,7 @@ fn tokens_table(
     );
     let actions_localizer = Arc::clone(localizer);
     let actions = Column::new(
+        "actions",
         text(localizer, msg::UI_COLUMN_ACTIONS),
         Rem::tenths(90),
         move |row: Signal<ApiTokenDto>| {
@@ -844,6 +849,7 @@ fn tokens_table(
     view! {
         <Table
             name=Name::Heading(HEADING_ID.to_owned())
+            columns_choice=ColumnsChoice::new("api-tokens", Arc::clone(localizer))
             row_header=label
             columns=vec![permissions, created, last_used, actions]
             rows=Signal::stored(tokens)
