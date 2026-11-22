@@ -26,13 +26,13 @@ Ladderback backs up your computers on a schedule, shows your backups in one web 
 
 ## Install
 
-Ladderback runs on each machine it backs up. Install it the recommended way for your system, then start it with `ladderback install-service`, run as yourself; the [install guide](docs/guide/install.md) has each step, updating, and what macOS asks for.
+Ladderback runs on each machine it backs up. Install it the recommended way for your system, then start it with `ladderback install-service`, run as yourself; the [install guide](docs/guide/install.md) has each step, updating, removing, and what macOS asks for.
 
-- **Debian 12 or newer, Ubuntu 22.04 or newer, 64-bit Raspberry Pi OS and Fedora:** the release's `.deb` or `.rpm` [package](docs/guide/install.md#install-a-package-debian-ubuntu-fedora), checked against the release's `SHA256SUMS`.
-- **Any other 64-bit Linux:** `curl -fsSL https://raw.githubusercontent.com/nledford/Ladderback/main/scripts/install.sh | bash`
-- **macOS:** the same script, which builds the release from source, [signed with your own certificate](docs/guide/install.md#signing-your-build): `curl -fsSL https://raw.githubusercontent.com/nledford/Ladderback/main/scripts/install.sh | LADDERBACK_SIGN_IDENTITY="Ladderback Code Signing" bash`, then [grant Full Disk Access](docs/guide/install.md#macos-full-disk-access).
+- **Debian 12 or newer, Ubuntu 22.04 or newer, 64-bit Raspberry Pi OS and Fedora:** the release's `.deb` or `.rpm` [package](docs/guide/install-linux-package.md), checked against the release's `SHA256SUMS`.
+- **Any other 64-bit Linux:** the [install script](docs/guide/install-linux.md), `curl -fsSL https://raw.githubusercontent.com/nledford/Ladderback/main/scripts/install.sh | bash`
+- **macOS:** the same script, which builds the release from source, [signed with your own certificate](docs/guide/install-macos.md#signing-your-build); then [grant Full Disk Access](docs/guide/install-macos.md#full-disk-access-and-photos).
 
-Building from source, the release's archive by hand, cargo-binstall and the Docker image, which isn't a supported way to run Ladderback yet, are in [Other ways to install](docs/guide/other-ways-to-install.md).
+Building from source, the release's archive by hand and cargo-binstall are in [Other ways to install](docs/guide/other-ways-to-install.md), and the [Docker image](docs/guide/docker.md) isn't a supported way to run Ladderback yet.
 
 ## Quick start
 
@@ -81,7 +81,7 @@ Without one, each machine runs rustic from its own cron job or timer. Failures s
 
 ### Platforms
 
-Ladderback supports Linux and macOS. Linux means 64-bit (x86_64 or aarch64) with glibc 2.35 or newer: 32-bit ARM and musl distributions such as Alpine aren't supported ([Install](docs/guide/install.md)). Windows is out of scope. Ladderback runs inside WSL2 as a Linux install, for files inside WSL, but it isn't a way to back up Windows: WSL stops when idle, so scheduled backups don't run unless something keeps it running, and files under `/mnt/c` are read without shadow copies or Windows metadata (ACLs, attributes, alternate data streams), so open files may fail and a restore to Windows loses that metadata.
+Ladderback supports Linux and macOS. Linux means 64-bit (x86_64 or aarch64) with glibc 2.35 or newer: 32-bit ARM and musl distributions such as Alpine aren't supported ([Install](docs/guide/install.md)). Windows is out of scope; Ladderback runs inside WSL2 as a Linux install, for files inside WSL, but [it isn't a way to back up Windows](docs/guide/install.md#windows-and-wsl2).
 
 ### One program, with its web UI
 

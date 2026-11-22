@@ -1,5 +1,5 @@
-# Ladderback in Docker Compose: the `docker run` of the install guide
-# (docs/guide/install.md, "Docker image (not supported yet)"), written as a
+# Ladderback in Docker Compose: the `docker run` of the user guide's Docker
+# image page (docs/guide/docker.md), written as a
 # Compose file. The image isn't yet a supported way to install and run
 # Ladderback: the package or the install script is.
 #
