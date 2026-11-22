@@ -128,6 +128,45 @@ async fn an_agent_pairing_again_under_another_hostname_is_told_the_one_held() {
     assert_eq!(on_a_new_token.held_as, Some(laptop()));
 }
 
+/// A machine that pairs again under the hostname it first used is told
+/// nothing more, and neither is one whose hub sends no hostname, as a hub
+/// that predates it doesn't.
+#[tokio::test]
+async fn a_hostname_the_hub_holds_that_is_the_one_asked_for_or_unsent_says_nothing() {
+    let hub = Hub::new(1);
+    let machine = agent(Arc::default());
+    let token = hub.token(pinned()).await;
+    pair(&hub, &machine, token.clone()).await.unwrap();
+    let again = pair(&hub, &machine, token).await.unwrap();
+    assert_eq!(again.held_as, None);
+
+    let keys = hub.pairing.keys().await.unwrap();
+    let token = hub.token(pinned()).await;
+    let (connect, handshake) = machine
+        .connect(token, agent_id(), Hostname::parse("desktop").unwrap(), None)
+        .await
+        .unwrap();
+    let (challenge, hub_side) = hub
+        .pairing
+        .challenge(&keys, &connect, Some(EXPORTER))
+        .unwrap();
+    let (pair, awaiting) = machine
+        .answer_challenge(handshake, &challenge, Some(EXPORTER))
+        .await
+        .unwrap();
+    let PairAnswer::Paired(mut paired) = hub.pairing.pair(&keys, &hub_side, &pair).await.unwrap()
+    else {
+        panic!("the hub refused");
+    };
+    assert_eq!(paired.hostname, Some(laptop()));
+    paired.hostname = None;
+    let told = machine
+        .take_answer(awaiting, &PairAnswer::Paired(paired))
+        .await
+        .unwrap();
+    assert_eq!(told.held_as, None);
+}
+
 /// The hub's keys are made once and read back the same after that; the
 /// recovery seed is kept and its public half is the recovery key.
 #[tokio::test]
