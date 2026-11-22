@@ -715,7 +715,9 @@ mod tests {
     fn a_host_writes_the_reading_and_the_offset_only_when_the_viewer_lacks_it() {
         let localizer = Localizer::new(&[]);
         if !localizer.writes_instants() {
-            testkit::skip!("this build's l10n has no host that writes instants");
+            testkit::skip!(
+                "this build's l10n has no host that writes instants: no `icu`, which a release builds the web UI without"
+            );
         }
         let raw = "2026-11-11T05:30:00Z";
         let reading = instant(&localizer, "2026-11-10T23:30:00Z", None);

@@ -727,6 +727,7 @@ fn english() -> Localizer {
 
 /// The localizer of a server whose environment asks for the pseudolocale
 /// `en-XA` (§8.4, "Checking your text").
+#[cfg(feature = "pseudo")]
 fn pseudo() -> Localizer {
     let environment = l10n::PosixEnv::from_lookup(|name| match name {
         "LANG" => Some("en_US.UTF-8".to_owned()),
@@ -785,6 +786,7 @@ async fn a_refusals_sentence_holds_its_detail() {
 /// The sentence is in the server's locale, which the environment it runs in
 /// chose, never fixed English.
 #[test]
+#[cfg(feature = "pseudo")]
 fn a_refusal_is_said_in_the_locale_the_server_was_given() {
     let plan = [("plan", api::MsgArg::Text("home".to_owned()))];
     let error = ErrorDto::new(ErrorCode::PlanUnknown, plan.clone(), None);
@@ -3287,6 +3289,7 @@ async fn the_guide(client: &mut Client) -> Value {
 }
 
 /// The codes the guide names at each step, in its order.
+#[cfg(any(feature = "hub", feature = "pseudo"))]
 fn codes(guide: &Value) -> Vec<(String, Vec<String>)> {
     guide["steps"]
         .as_array()
@@ -3382,6 +3385,7 @@ fn each_refusal_in_the_guide_says_the_catalogs_sentence() {
 
 /// The guide is said in the server's locale, its steps as its refusals.
 #[test]
+#[cfg(feature = "pseudo")]
 fn the_guide_is_said_in_the_locale_the_server_was_given() {
     let english = pairing::guide(&english());
     let pseudo = pairing::guide(&pseudo());
