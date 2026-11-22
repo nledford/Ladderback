@@ -10,8 +10,8 @@ use std::num::NonZeroU64;
 
 use uuid::Uuid;
 
-use super::{EpochSeconds, WireName};
-use crate::OperationId;
+use super::{EpochSeconds, MAX_EXPIRY_AHEAD, WireName};
+use crate::{OperationId, SignedDuration};
 
 /// The most reports an agent's outbox holds. A start makes room by giving
 /// up the oldest start; an end is never given up ([`admit`]).
@@ -25,8 +25,28 @@ pub const MAX_REPORTS_HELD: u64 = 10_000;
 pub const MAX_EPOCHS_HELD: u64 = 8;
 
 /// The most reports the agent sends before it waits for the hub's
-/// acknowledgement of the first of them.
+/// acknowledgements of them.
 pub const SEND_WINDOW: usize = 32;
+
+/// Whether a hub's message that expires at `expires_at` holds when it
+/// arrives `since` after the agent sent the `Hello` the hub answered with a
+/// `Welcome` signed at `signed_at`, on the agent's monotonic clock. The
+/// hub's time is then at most `signed_at` plus `since`: a message that
+/// expired by then, or that expires further ahead of it than a hub signs,
+/// is refused, whatever the agent's wall clock says (decision 120, "Expiry
+/// is judged on the hub's time").
+pub fn fresh_on_hub_time(
+    signed_at: EpochSeconds,
+    since: SignedDuration,
+    expires_at: EpochSeconds,
+) -> bool {
+    let hub_now_ms = i128::from(signed_at.seconds())
+        .saturating_mul(1_000)
+        .saturating_add(since.as_millis().max(0));
+    let expires_ms = i128::from(expires_at.seconds()).saturating_mul(1_000);
+    let furthest_ms = hub_now_ms.saturating_add(i128::from(MAX_EXPIRY_AHEAD) * 1_000);
+    hub_now_ms < expires_ms && expires_ms <= furthest_ms
+}
 
 /// The kind of the agent's message that carries one report.
 pub fn report_kind() -> WireName {
@@ -78,7 +98,7 @@ impl ReportSeq {
     /// an outbox that ran out of numbers refuses a report rather than reuse
     /// one.
     pub fn next(self) -> Option<Self> {
-        todo!()
+        self.0.checked_add(1).map(Self)
     }
 }
 
@@ -108,7 +128,7 @@ impl AgentReport {
     /// which says how an operation came out, unlike a start, which the end
     /// that follows makes up for.
     pub const fn kept(&self) -> bool {
-        todo!()
+        !matches!(self.happening, Happening::Started)
     }
 }
 
@@ -126,17 +146,25 @@ pub enum OutboxAdmission {
 }
 
 /// What an outbox that holds `held` reports, the oldest start among them at
-/// `oldest_start`, does with `report`, the next of which would take `next`
-/// (none when the numbers ran out). Under [`MAX_OUTBOX_REPORTS`] it is
-/// appended; at it, the oldest start gives way; full of ends, the report is
-/// refused, so no end is ever given up for anything.
+/// `oldest_start`, does with a new report, which would take `next` (none
+/// when the numbers ran out). Under [`MAX_OUTBOX_REPORTS`] it is appended;
+/// at it, the oldest start gives way, whatever the new report is; full of
+/// ends, the report is refused, so no end is ever given up for anything.
 pub fn admit(
     held: u64,
     oldest_start: Option<ReportSeq>,
     next: Option<ReportSeq>,
-    report: &AgentReport,
 ) -> OutboxAdmission {
-    todo!()
+    if next.is_none() {
+        return OutboxAdmission::Refuse;
+    }
+    if held < MAX_OUTBOX_REPORTS {
+        return OutboxAdmission::Append;
+    }
+    match oldest_start {
+        Some(oldest) => OutboxAdmission::EvictThenAppend(oldest),
+        None => OutboxAdmission::Refuse,
+    }
 }
 
 /// The hub's acknowledgement of every report through `seq` of `epoch`.
@@ -162,7 +190,13 @@ pub fn check_ack(
     sent_through: Option<ReportSeq>,
     ack: Ack,
 ) -> Result<(), AckRefused> {
-    todo!()
+    if ack.epoch != epoch {
+        return Err(AckRefused::OtherEpoch);
+    }
+    match sent_through {
+        Some(sent) if ack.seq <= sent => Ok(()),
+        _ => Err(AckRefused::NotSent),
+    }
 }
 
 /// What the hub does with a report.
@@ -183,9 +217,21 @@ pub enum Ingest {
 /// What the hub does with the report at `seq` of an epoch whose reports it
 /// took through `held`, none when it took none of that epoch. A report the
 /// agent let go of to make room leaves a gap, which is no reason to refuse
-/// the next.
+/// the next. One taken before is [`Ingest::Behind`] when it lies a
+/// [`SEND_WINDOW`] or more behind `held`: the agent sends at most that many
+/// before their acknowledgements, so no report sent again lies that far.
 pub fn ingest(held: Option<ReportSeq>, seq: ReportSeq) -> Ingest {
-    todo!()
+    match held {
+        Some(held) if seq <= held => {
+            let behind = held.get().saturating_sub(seq.get());
+            if u64::try_from(SEND_WINDOW).is_ok_and(|window| behind >= window) {
+                Ingest::Behind
+            } else {
+                Ingest::Duplicate
+            }
+        }
+        _ => Ingest::New,
+    }
 }
 
 #[cfg(test)]

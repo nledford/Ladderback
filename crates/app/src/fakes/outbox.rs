@@ -54,7 +54,7 @@ impl Outbox for InMemoryOutbox {
         let Some(next) = next else {
             return Ok(Appended::Refused);
         };
-        let gave_up = match admit(count, oldest_start, Some(next), report) {
+        let gave_up = match admit(count, oldest_start, Some(next)) {
             OutboxAdmission::Append => None,
             OutboxAdmission::EvictThenAppend(seq) => {
                 held.reports.remove(&seq);

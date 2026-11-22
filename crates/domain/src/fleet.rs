@@ -45,7 +45,7 @@ pub use machine::{
 pub use outbox::{
     Ack, AckRefused, AgentReport, Happening, Ingest, MAX_EPOCHS_HELD, MAX_OUTBOX_REPORTS,
     MAX_REPORTS_HELD, OutboxAdmission, OutboxEpoch, ReportSeq, SEND_WINDOW, ack_kind, admit,
-    check_ack, ingest, report_kind,
+    check_ack, fresh_on_hub_time, ingest, report_kind,
 };
 pub use pin::{HubPin, MAX_PIN_BYTES, PinRefused};
 pub use registry::{
