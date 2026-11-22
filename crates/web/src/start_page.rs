@@ -18,6 +18,7 @@ use crate::components::{
     Column, Link, Name as TableName, Sentences, State, Table, refusal_alert, say_refusals,
 };
 use crate::components::{first_load, paced};
+use crate::copied_data_folder::CopiedDataFolder;
 use crate::full_disk_access_warning::FullDiskAccessSteps;
 use crate::repositories::{Sentence, repository_notes};
 use crate::routes::{PageHeading, next_run_cell, refused_sentence, time_view};
@@ -94,6 +95,7 @@ pub(crate) fn Start(localizer: Arc<Localizer>) -> impl IntoView {
     let viewer = l10n::viewer_zone();
     let notice = Arc::clone(&localizer);
     let full_disk_access = Arc::clone(&localizer);
+    let copied_data_folder = Arc::clone(&localizer);
     let links = Arc::clone(&localizer);
     let operations_localizer = Arc::clone(&localizer);
     let (phase, pace) = paced(move || phase.get(), |phase| *phase == Phase::Loading);
@@ -109,6 +111,7 @@ pub(crate) fn Start(localizer: Arc<Localizer>) -> impl IntoView {
         </PageHeading>
         <SignInOff localizer=notice />
         <FullDiskAccessSteps localizer=full_disk_access />
+        <CopiedDataFolder localizer=copied_data_folder />
         <p>{body}</p>
         {move || match phase.get() {
             Phase::Loading => first_load(loading.clone(), Awaited::table(2), pace).into_any(),
