@@ -60,6 +60,11 @@ pub struct AwaitingPaired {
 pub struct PairedHub {
     pub pin: HubPin,
     pub agent_key: PublicKey,
+    /// The hostname the hub holds this machine under, when that isn't the
+    /// one the pairing asked for: a pending machine keeps the hostname it
+    /// first paired under. `None` when they are the same, and from a hub
+    /// that doesn't say.
+    pub held_as: Option<Hostname>,
 }
 
 /// Why the agent stopped a pairing. None carries a seed or the token's text
@@ -386,7 +391,11 @@ impl AgentPairing {
             }
         };
         drop(attempt);
-        Ok(PairedHub { pin, agent_key })
+        Ok(PairedHub {
+            pin,
+            agent_key,
+            held_as: None,
+        })
     }
 
     /// The agent key's seed, made the first time the agent pairs.

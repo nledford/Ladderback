@@ -424,6 +424,7 @@ impl HubPairing {
                 Ok(PairAnswer::Paired(Paired {
                     recovery_key: keys.recovery_key,
                     signature: self.signing.sign(&keys.seed, &paired.to_bytes())?,
+                    hostname: None,
                 }))
             }
             Err(refusal) => self

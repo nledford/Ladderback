@@ -1076,3 +1076,17 @@ fn refuses_with_code(agent: &mut Agent, code: String) {
         "{status} {body}"
     );
 }
+
+#[then(expr = "the machine says the hub holds it under the hostname {string}, not {string}")]
+fn says_held_hostname(agent: &mut Agent, held: String, asked: String) {
+    let said = said(agent);
+    assert!(said.success, "{said:?}");
+    let expected = format!("under the hostname {held} and not {asked}");
+    assert!(said.stderr.contains(&expected), "{expected}: {said:?}");
+}
+
+#[given("the machine lost the hub's reply, so it holds no pin")]
+fn machine_holds_no_pin(agent: &mut Agent) {
+    let pin = testkit::daemon::data_dir(&machine_root(agent)).join("hub-pin");
+    std::fs::remove_file(&pin).unwrap_or_else(|error| panic!("{}: {error}", pin.display()));
+}

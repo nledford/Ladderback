@@ -336,8 +336,9 @@ pub enum Pairing {
     /// status kept, and the token spent on it.
     Again(AgentRecord),
     /// The same pairing again on the token it spent, as when `Paired` was
-    /// lost: answered as before, and nothing changes.
-    Repeated,
+    /// lost: answered as before, and nothing changes. It carries the
+    /// hostname the hub holds the agent under, which the agent is told.
+    Repeated(Hostname),
 }
 
 /// The decision a `Pair` gets at `now` (decision 120, "Pairing").
@@ -362,7 +363,7 @@ pub fn decide_pairing(
             let same = agent_id == request.agent_id && agent_key == request.agent_key;
             let registered = view.by_id.is_some_and(|record| record.key == agent_key);
             return if same && registered {
-                Ok(Pairing::Repeated)
+                Ok(Pairing::Repeated(request.hostname.clone()))
             } else {
                 Err(PairRefusal::TokenUsed)
             };

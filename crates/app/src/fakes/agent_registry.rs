@@ -205,7 +205,7 @@ impl AgentRegistry for InMemoryAgentRegistry {
                 }
                 kept.spend(request);
             }
-            Ok(Pairing::Repeated) | Err(_) => {}
+            Ok(Pairing::Repeated(_)) | Err(_) => {}
         }
         Ok(decided)
     }

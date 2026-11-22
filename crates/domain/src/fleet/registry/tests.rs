@@ -358,7 +358,7 @@ fn a_spent_token_answers_only_its_own_pairing_again() {
     };
     assert_eq!(
         decide_pairing(&again, &request(), at(5000)),
-        Ok(Pairing::Repeated)
+        Ok(Pairing::Repeated(name("laptop")))
     );
     let other_key = PairRequest {
         agent_key: key(5),
@@ -380,6 +380,30 @@ fn a_spent_token_answers_only_its_own_pairing_again() {
         decide_pairing(&view(&spent), &request(), at(10)),
         Err(PairRefusal::TokenUsed),
         "an agent no longer registered with the key is no repeat"
+    );
+}
+
+/// The same pairing asked again under another hostname is answered with the
+/// hostname the hub holds the agent under: a pending agent can't rename
+/// itself (decision 120), and the agent is told which one it has.
+#[test]
+fn a_repeated_pairing_names_the_hostname_the_hub_holds() {
+    let spent = token(TokenUse::Used {
+        agent_id: id(1),
+        agent_key: key(4),
+    });
+    let registered = record(1, key(4), "laptop");
+    let again = PairingView {
+        by_id: Some(&registered),
+        ..view(&spent)
+    };
+    let under_another_name = PairRequest {
+        hostname: name("desktop"),
+        ..request()
+    };
+    assert_eq!(
+        decide_pairing(&again, &under_another_name, at(10)),
+        Ok(Pairing::Repeated(name("laptop")))
     );
 }
 

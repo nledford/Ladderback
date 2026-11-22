@@ -38,6 +38,7 @@ fn every_frame_reads_back_as_written() {
         HubFrame::Paired {
             recovery_key: "r".into(),
             signature: "s".into(),
+            hostname: None,
         },
         HubFrame::Refused {
             code: "token-used".into(),

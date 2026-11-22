@@ -85,7 +85,7 @@ fn a_machine_known_already_says_whether_it_waits_or_is_approved() {
 #[test]
 fn a_pairing_repeated_on_its_spent_token_says_nothing_changed() {
     let request = request("e2e-laptop");
-    let line = paired(&request, &Pairing::Repeated);
+    let line = paired(&request, &Pairing::Repeated(request.hostname.clone()));
     assert!(
         line.contains("repeated its pairing") && line.contains("nothing changed"),
         "{line}"
