@@ -24,20 +24,25 @@ ui-start-title = { -brand-name }
 ui-start-heading = Welcome to { -brand-name }
 
 # The start page's text above its list of plans.
-ui-start-plans-body = These are the plans in { "config.toml" }, with when each one runs next.
+ui-start-plans-body = These are the plans, with when each one runs next.
 
-# What the start page says when config.toml has no plan: the order a first
-# plan is made in. A plan backs up to a repository, so it can't be added
-# before one is connected.
-ui-start-no-plans = There are no plans yet. To add one, connect a { -repository } on the Repositories page first, then add a plan for it to { "config.toml" }. Each plan is listed here with its next run.
+# What the start page says when there is no plan: the order a first plan is
+# made in, in the web UI's own pages. A plan backs up to a repository, so it
+# can't be added before one is connected.
+ui-start-no-plans = There are no plans yet. To add one, connect a { -repository } on the Repositories page first, then add a plan for it on the Plans page. Each plan is listed here with its next run.
 
 # The link from the start page, while it has no plans, to the repositories
 # page, where the repository a first plan backs up to is connected.
 ui-start-repositories-link = Connect a { -repository } on the Repositories page
 
+# The link from the start page, while it has no plans, to the Plans page,
+# where a plan is added.
+ui-start-plans-link = Add a plan on the Plans page
+
 # The link from the start page to where the format of a plan in config.toml is
-# described: the project's technical design, on GitHub, outside this app.
-ui-start-plan-format-link = How to write a plan in { "config.toml" }, on GitHub
+# described: the project's technical design, on GitHub, outside this app. It is
+# for an advanced user who writes the file instead of using the Plans page.
+ui-start-plan-format-link = How to write a plan in { "config.toml" } by hand, on GitHub
 
 # The start page's table of plans: its caption.
 ui-start-caption = Plans
@@ -2853,8 +2858,8 @@ ui-sign-in-heading = Sign in to { -brand-name }
 # The label of the one field of the sign-in form, on the page and in the dialog.
 ui-sign-in-password-label = Admin password
 
-# The hint under that field. `ladderback set-password` is typed as it is: keep it a string literal.
-ui-sign-in-password-hint = The password set with { "ladderback set-password" }. Paste and password managers work here.
+# The hint under that field: the two ways the admin password is set, the Admin password tab of Settings first. "Admin password" is that tab's name, as `ui-admin-password-heading` words it. `ladderback set-password` is typed as it is: keep it a string literal.
+ui-sign-in-password-hint = The password set in the Admin password tab of Settings, or with { "ladderback set-password" }. Paste and password managers work here.
 
 # The button that sends the admin password.
 ui-sign-in-submit = Sign in
@@ -2881,11 +2886,14 @@ ui-session-ended-title = Sign in again
 # What that dialog says. The page under it stays as it was, so nothing typed there is lost; the request that found the session ended is sent again once signed in.
 ui-session-ended-body = Your session has ended. Sign in again to go on: what you typed on this page is kept, and what you asked for is done once you are signed in.
 
-# The start page's notice when no admin password is set and Ladderback listens on loopback only, so anyone with an account on this machine can use it. `ladderback set-password` is typed as it is: keep it a string literal.
-ui-sign-in-off = Sign-in is off: anyone on this machine can use { -brand-name }. To turn sign-in on, run { "ladderback set-password" } and start { -brand-name } again.
+# The start page's notice when no admin password is set and Ladderback listens on loopback only, so anyone with an account on this machine can use it. Sign-in is decided only when Ladderback starts, so a password set takes a restart. The notice's link to Settings, `ui-sign-in-off-link`, follows it.
+ui-sign-in-off = Sign-in is off: anyone on this machine can use { -brand-name }. To turn sign-in on, set an admin password, then restart { -brand-name }.
 
-# The notice on every page when no admin password is set and Ladderback listens on the network (an address beyond loopback), so anyone who can reach that address can use it. `ladderback set-password` is typed as it is: keep it a string literal.
-ui-sign-in-off-network = Sign-in is off, and { -brand-name } answers on the network: anyone who can reach it can run and change backups. To turn sign-in on, run { "ladderback set-password" } and start { -brand-name } again.
+# The notice on every page when no admin password is set and Ladderback listens on the network (an address beyond loopback), so anyone who can reach that address can use it. Sign-in is decided only when Ladderback starts, so a password set takes a restart. The notice's link to Settings, `ui-sign-in-off-link`, follows it.
+ui-sign-in-off-network = Sign-in is off, and { -brand-name } answers on the network: anyone who can reach it can run and change backups. To turn sign-in on, set an admin password, then restart { -brand-name }.
+
+# The link after either notice that sign-in is off, to the Admin password tab of Settings, where the admin password is set.
+ui-sign-in-off-link = Set an admin password in Settings
 
 # The name and heading of the warning shown 2 minutes before a session would end because the page has not used it for 12 hours (WCAG 2.2.1). It is not shown when the session's 30-day lifetime ends it first.
 ui-idle-warning-title = You will be signed out soon
