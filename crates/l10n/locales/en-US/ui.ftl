@@ -3426,6 +3426,12 @@ ui-pairing-warning-plain = This address is plain { "http://" }, which a { -machi
 # Says which certificate a token tells the other machine to trust, on a hub that serves no certificate of its own, as when its TLS key couldn't be served.
 ui-pairing-certificate = The token trusts a certificate authority's certificate for this address, as the system of the other { -machine } does. This { -hub } serves no certificate of its own, so no token can pin one.
 
+# Said in place of the certificate choice when the address starts with http://, which shows no certificate, so the token names none, on a hub that serves a certificate of its own. `http://` and `https://` are typed as they are: keep them string literals.
+ui-pairing-certificate-none = This address starts with { "http://" }, so the connection isn't encrypted and the token names no certificate. The { -hub } key in the token still proves that what answers there is the { -hub }. To choose a certificate, type the { -hub }'s { "https://" } address.
+
+# The same on a hub that serves no certificate of its own, as when its TLS key couldn't be served, so an https:// address offers no choice either. `http://` is typed as it is: keep it a string literal.
+ui-pairing-certificate-none-unserved = This address starts with { "http://" }, so the connection isn't encrypted and the token names no certificate. The { -hub } key in the token still proves that what answers there is the { -hub }.
+
 # The legend of the choice of the certificate a token tells the other machine to trust.
 ui-pairing-certificate-legend = Certificate the token trusts
 

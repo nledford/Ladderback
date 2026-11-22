@@ -20,9 +20,21 @@ impl Scheme {
     /// around it, or `None` for one that is neither `http://` nor
     /// `https://`, which the hub refuses in its own words.
     pub(crate) fn of(address: &str) -> Option<Self> {
-        let _ = address;
-        todo!()
+        split(address).map(|(scheme, _)| scheme)
     }
+}
+
+/// The scheme of `address`, as typed, and what follows its `://`.
+fn split(address: &str) -> Option<(Scheme, &str)> {
+    let (scheme, rest) = address.trim().split_once("://")?;
+    let scheme = if scheme.eq_ignore_ascii_case("http") {
+        Scheme::Http
+    } else if scheme.eq_ignore_ascii_case("https") {
+        Scheme::Https
+    } else {
+        return None;
+    };
+    Some((scheme, rest))
 }
 
 /// Why the address agents will use is warned of. Making a token for it
@@ -41,19 +53,12 @@ impl AddressWarning {
     /// address beyond loopback, and for one that is neither `http://` nor
     /// `https://`, which the hub refuses in its own words.
     pub(crate) fn of(address: &str) -> Option<Self> {
-        let address = address.trim();
-        let scheme_end = address.find("://")?;
-        let plain = match address.get(..scheme_end)?.to_ascii_lowercase().as_str() {
-            "http" => true,
-            "https" => false,
-            _ => return None,
-        };
-        let rest = address.get(scheme_end.saturating_add(3)..)?;
+        let (scheme, rest) = split(address)?;
         let authority = rest.split(['/', '?', '#']).next().unwrap_or_default();
         if is_loopback(host_of(authority)) {
             Some(Self::Loopback)
         } else {
-            plain.then_some(Self::Plain)
+            (scheme == Scheme::Http).then_some(Self::Plain)
         }
     }
 }

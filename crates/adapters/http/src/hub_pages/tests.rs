@@ -267,7 +267,7 @@ async fn a_token_pins_the_hubs_certificate_when_asked_to() {
         let response = daemon.send(make(LOOPBACK, &[], &body)).await;
         assert_eq!(response.status(), StatusCode::CREATED, "{kind}");
         let made: api::PairingTokenDto = serde_json::from_value(json(response).await).unwrap();
-        assert_eq!(made.certificate, said);
+        assert_eq!(made.certificate, Some(said));
         let token = domain::fleet::PairingToken::parse(&made.token).unwrap();
         assert_eq!(token.tls(), tls);
     }
