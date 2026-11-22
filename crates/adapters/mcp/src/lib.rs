@@ -1137,8 +1137,10 @@ fn tools() -> Vec<Tool> {
         Tool::new(
             PAIRING_STATE,
             "Whether this machine is paired with a hub, as its pin says: the hub's address, the \
-             fingerprint of the hub's key and how its certificate is checked. Never a token or a \
-             secret. It doesn't connect to the hub, so it can't say whether the hub has approved \
+             fingerprint of the hub's key and how its certificate is checked. A plain http:// \
+             address names no certificate: it isn't encrypted and shows none, and the hub key \
+             still proves the hub. Never a token or a secret. It doesn't connect to the hub, so \
+             it can't say whether the hub has approved \
              the machine: `ladderback hub-status` on the machine says that. The resource \
              ladderback://pairing holds the steps of pairing.",
             no_arguments(),

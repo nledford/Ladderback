@@ -6,7 +6,7 @@
 use std::sync::Arc;
 
 use api::{PairedHubDto, PairingDto, TokenCertificateDto};
-use domain::fleet::{Fingerprint, TokenTls};
+use domain::fleet::{Fingerprint, HubScheme, TokenTls};
 
 use crate::ports::{Identity, IdentityError};
 
@@ -24,7 +24,8 @@ impl PairingState {
     /// Paired, and with which hub, when the machine holds a pin; not paired
     /// otherwise. A pin that can't be read is the port's error. Only what
     /// the pin holds in public is named: the address, the hub key's
-    /// fingerprint and how the certificate is checked (I4).
+    /// fingerprint and how the certificate is checked, none at a
+    /// plain `http://` address (I4).
     pub async fn read(&self) -> Result<PairingDto, IdentityError> {
         let Some(pin) = self.identity.pin().await? else {
             return Ok(PairingDto {
@@ -32,9 +33,12 @@ impl PairingState {
                 hub: None,
             });
         };
-        let certificate = match pin.tls {
-            TokenTls::Ca => TokenCertificateDto::Ca,
-            TokenTls::Pinned(_) => TokenCertificateDto::Pinned,
+        // A plain http address isn't encrypted and shows no certificate,
+        // whatever the token's TLS said (#1343).
+        let certificate = match (pin.address.scheme(), pin.tls) {
+            (HubScheme::Http, _) => None,
+            (HubScheme::Https, TokenTls::Ca) => Some(TokenCertificateDto::Ca),
+            (HubScheme::Https, TokenTls::Pinned(_)) => Some(TokenCertificateDto::Pinned),
         };
         Ok(PairingDto {
             paired: true,

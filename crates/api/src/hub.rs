@@ -59,15 +59,20 @@ pub struct PairingDto {
 /// The hub a machine is paired with, as the machine pinned it: the address
 /// it reaches the hub at, the fingerprint of the hub's key in full (as
 /// [`HubDto`] has it, for a person to compare with the hub's page), and the
-/// certificate the machine trusts there. All of it is public: the pin holds
-/// no secret, and no token is kept once used (I4).
+/// certificate the machine trusts there, none for a plain `http://` address.
+/// All of it is public: the pin holds no secret, and no token is kept once
+/// used (I4).
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[cfg_attr(feature = "schemars", derive(schemars::JsonSchema))]
 #[serde(rename_all = "kebab-case", deny_unknown_fields)]
 pub struct PairedHubDto {
     pub address: String,
     pub fingerprint: String,
-    pub certificate: TokenCertificateDto,
+    /// How the hub's certificate is checked: absent for a plain `http://`
+    /// address, which isn't encrypted and shows no certificate; the hub key
+    /// still proves the hub.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub certificate: Option<TokenCertificateDto>,
 }
 
 /// A pairing token asked for: the address agents will use, the certificate
