@@ -569,6 +569,10 @@ error-download-unknown = This download is no longer waiting: it was already fetc
 # path, or a program newer or older than the daemon. Nothing was done.
 error-route-unknown = This version of { -brand-name } has no such route, so nothing was done. Check the path the program asked for; if the program is newer or older than this { -brand-name }, update the older one.
 
+# A fault of Ladderback's own stopped it while it answered: a handler of the
+# daemon panicked. What was asked may be done in part; the daemon goes on.
+error-internal-error = { -brand-name } stopped answering through a fault of its own, so what you asked may be done only in part. Look at the page again before you try once more, and report the fault if it comes back.
+
 # The pairing token was already spent. The hub answers the same machine with
 # the same key as before, so a pairing whose answer was lost can be repeated.
 # `pair` is typed as it is: keep it a string literal.

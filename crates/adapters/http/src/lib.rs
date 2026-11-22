@@ -781,10 +781,24 @@ pub fn router(assets: Arc<dyn AssetSource>, checks: RequestChecks, state: AppSta
     outer_layers(app)
 }
 
-/// What wraps every route, the hub's included: the security headers on every
-/// response.
+/// What wraps every route, the hub's included: a handler's panic answered
+/// `500` rather than a dropped connection, inside the security headers on
+/// every response, that answer's included.
 fn outer_layers(app: Router) -> Router {
-    app.layer(from_fn(response_headers::add))
+    app.layer(tower_http::catch_panic::CatchPanicLayer::custom(panicked))
+        .layer(from_fn(response_headers::add))
+}
+
+/// The answer to a request whose handler panicked (§13.5): `500` with the
+/// API's error envelope, and one ERROR line in the log. Neither shows what
+/// the panic carried or anything of the request: a panic's message holds
+/// whatever the code had in hand, a secret included (I4).
+fn panicked(_payload: Box<dyn std::any::Any + Send + 'static>) -> Response {
+    log::error!("a request's handler panicked; it was answered 500 internal-error");
+    refused(
+        StatusCode::INTERNAL_SERVER_ERROR,
+        api::ErrorCode::InternalError,
+    )
 }
 
 /// The most one message from an events client may hold. The UI sends pings,
