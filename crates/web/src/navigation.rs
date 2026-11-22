@@ -17,20 +17,28 @@ pub(crate) const MENU_BUTTON_ID: &str = "menu-button";
 /// Whether the panel shows once the button is pressed, given whether it
 /// showed before.
 pub(crate) fn toggled(open: bool) -> bool {
-    todo!()
+    !open
 }
 
 /// The button's icon: the hamburger while the panel is hidden, an X while it
 /// shows, the one that closes it. Its name never changes: `aria-expanded`
 /// says which.
 pub(crate) fn glyph(open: bool) -> LucideGlyph {
-    todo!()
+    if open {
+        LucideGlyph::X
+    } else {
+        LucideGlyph::Menu
+    }
 }
 
 /// The panel's classes: its own, and the one that says whether it is open,
 /// which `style.css` reads below 41rem alone.
 pub(crate) fn menu_class(open: bool) -> &'static str {
-    todo!()
+    if open {
+        "site-menu site-menu-open"
+    } else {
+        "site-menu site-menu-closed"
+    }
 }
 
 /// Whether a key pressed in the header hides the panel and returns focus to
@@ -38,21 +46,21 @@ pub(crate) fn menu_class(open: bool) -> &'static str {
 /// button is drawn, which is below 41rem alone. Where it isn't drawn there is
 /// nothing to close and nowhere for focus to return to.
 pub(crate) fn escape_closes(open: bool, key: &str, button_drawn: bool) -> bool {
-    todo!()
+    open && button_drawn && key == "Escape"
 }
 
 /// Whether the page itself hides the panel: whenever it shows no pages, as
 /// the sign-in page doesn't, whatever the button was pressed to do, so a
 /// sign-in finds it hidden.
 pub(crate) fn hidden_without_pages(shows_pages: bool) -> bool {
-    todo!()
+    !shows_pages
 }
 
 /// Whether a box of this size is drawn: a `display: none` box has none. The
 /// glue reads the menu button's box and asks this, so the decision is the
 /// host's and the glue only reads the DOM.
 pub(crate) fn is_drawn(width: f64, height: f64) -> bool {
-    todo!()
+    width > 0.0 && height > 0.0
 }
 
 #[cfg(test)]

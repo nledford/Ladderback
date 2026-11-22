@@ -4,7 +4,7 @@
 
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { headerTargets, walksWithoutSkip } from "../ui-tests/scripts/skip-to-content.ts";
+import { KEEPS_FOCUS, headerTargets, walksWithoutSkip } from "../ui-tests/scripts/skip-to-content.ts";
 
 const catalog = [
   "-brand-name = Ladderback",
@@ -15,6 +15,7 @@ const catalog = [
   "ui-nav-label = Pages",
   "ui-nav-plans = Plans",
   "ui-nav-settings = Settings",
+  "ui-menu-button = Menu",
   "ui-sign-out = Sign out",
 ].join("\n");
 // Built in each test, so a catalog it can't read fails that test alone.
@@ -249,6 +250,28 @@ test("a walk on from a stop in the header crosses the rest of it, unless Enter h
   );
 });
 
+test("Enter on the menu button keeps focus in the header, so a walk on from it crosses the header", () => {
+  assert.deepEqual(
+    found([
+      "  Scenario: From the menu button",
+      "    When I open the web UI",
+      '    And I press Tab until focus is on the button "Menu"',
+      "    And I press Enter",
+      '    And I press Tab until focus is on the button "Run now"',
+      "  Scenario: To the page a link leads to",
+      "    When I open the web UI",
+      '    And I press Tab until focus is on the link "Plans"',
+      "    And I press Enter",
+      '    And I press Tab until focus is on the button "Run now"',
+    ]),
+    ["8 header"],
+  );
+});
+
+test("the stop whose press keeps focus in the header is spelled as the catalog spells it", () => {
+  assert.match(KEEPS_FOCUS, header());
+});
+
 test("one Tab from the top is on the skip link, which Enter follows to the content", () => {
   assert.deepEqual(
     found([
@@ -399,6 +422,8 @@ test("the header's stops come from the English catalog, the navigation's own nam
   assert.match('the link "Version 1.2.3 is available (goes to another site)"', stops, "the notes are on another site");
   assert.doesNotMatch('the link "Version 1.2.3 is available"', stops, "an outside link's name says it leaves");
   assert.match('the button "Sign out"', stops);
+  assert.match('the button "Menu"', stops, "the button that shows the pages' links and Sign out on a narrow screen");
+  assert.doesNotMatch('the button "Pending changes"', stops);
   assert.doesNotMatch('the link "Pages"', stops);
   assert.doesNotMatch('the button "Plans"', stops);
   assert.doesNotMatch('the link "Sign out"', stops);
@@ -409,5 +434,6 @@ test("the header's stops come from the English catalog, the navigation's own nam
 
 test("a header message the catalog lacks is an error", () => {
   assert.throws(() => headerTargets(catalog.replace("ui-sign-out = Sign out", "")), /no message ui-sign-out/);
+  assert.throws(() => headerTargets(catalog.replace("ui-menu-button = Menu", "")), /no message ui-menu-button/);
   assert.throws(() => headerTargets(catalog.replace("-brand-name = Ladderback", "")), /no message -brand-name/);
 });

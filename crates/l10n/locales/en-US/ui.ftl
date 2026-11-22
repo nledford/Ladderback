@@ -2570,6 +2570,9 @@ ui-live-resumed =
 # The accessible name of the navigation in the header, the list of links to the pages.
 ui-nav-label = Pages
 
+# The accessible name of the header's icon-only hamburger button, on a screen narrower than 41rem, that shows and hides the menu: the pages' links and Sign out. The same name whether the menu shows or not.
+ui-menu-button = Menu
+
 # The navigation's link to the operations page.
 ui-nav-operations = Operations
 

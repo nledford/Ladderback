@@ -175,7 +175,6 @@ a {
 }
 
 .brand {
-  flex-basis: 100%;
   margin: 0;
   font-weight: 600;
 }
@@ -260,6 +259,96 @@ a {
 .site-nav a {
   display: inline-block;
   padding-block: 0.25rem;
+}
+
+/* Below 41rem the seven pages' links no longer fit on one line, so they and
+   Sign out sit in a panel (`.site-menu`) behind the menu button
+   (`.site-menu-button`, a hamburger), which ends the brand's line: the
+   header is that line and, shown, the panel under it, in the page's flow
+   (no overlay, no focus trap). The panel is a bordered box in the page's own
+   color on the header's Ledger Gray band, its corners the small radius; its
+   rows are full-width blocks at least 3rem tall, a finger's target, with
+   1rem of inline padding. A row tints to Ledger Gray under the pointer; the
+   current page is told by its weight and a 3px bar at its inline start in
+   the text's own color, a border so it stays under forced colors (which
+   draw it in the system's text color), and is the only row with one, so the
+   rows' words stay aligned. Sign out ends the panel under a hairline, a row
+   as tall as the links. The focus ring is drawn inside a row, where the
+   panel's clipping can't cut it. The rules stay here
+   rather than as Tailwind utilities: the navigation's and the header's base
+   rules live outside Tailwind's layers (#931), where a utility could not
+   override them, so the narrow screen's rules lie beside them, in one block
+   with one breakpoint. Wider than 41rem none of this applies: the button
+   isn't drawn and the panel, which draws no box of its own (`display:
+   contents`), leaves the links and Sign out on the header's line, always
+   shown, whatever the button was last pressed to do. */
+.site-menu {
+  display: contents;
+}
+
+.site-menu-button {
+  display: none;
+}
+
+@media (width < 41rem) {
+  .site-menu-button {
+    display: flex;
+    margin-inline-start: auto;
+  }
+
+  .site-menu {
+    display: block;
+    flex-basis: 100%;
+    min-inline-size: 0;
+    margin-block-start: 0.25rem;
+    border: 1px solid var(--field-edge);
+    border-radius: var(--radius-small);
+    background: var(--bg);
+    overflow: clip;
+  }
+
+  .site-menu.site-menu-closed {
+    display: none;
+  }
+
+  .site-menu :focus-visible {
+    outline-offset: -3px;
+  }
+
+  .site-nav ul {
+    display: block;
+  }
+
+  .site-nav a {
+    display: block;
+    padding: 0.75rem 1rem;
+  }
+
+  .site-nav a:hover {
+    background: var(--surface);
+  }
+
+  .site-nav a[aria-current="page"] {
+    border-inline-start: 3px solid var(--fg);
+    padding-inline-start: calc(1rem - 3px);
+  }
+
+  .site-account {
+    display: block;
+    margin-inline-start: 0;
+    border-block-start: 1px solid var(--field-edge);
+  }
+
+  /* Sign out is a row of the panel, as tall as the links, its icon where
+     their words start. The button's own look is `Button`'s; only the size it
+     takes and where its content starts are set here, through the properties
+     it reads. */
+  .site-account .button {
+    inline-size: 100%;
+    justify-content: flex-start;
+    --control-height: max(3rem, 2em);
+    --control-padding: calc(1rem - 1px);
+  }
 }
 
 /* The frame's width is the Tailwind utilities `page_width.rs` gives `<main>`
