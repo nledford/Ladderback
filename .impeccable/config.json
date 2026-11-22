@@ -1,0 +1,58 @@
+{
+  "detector": {
+    "ignoreRules": [],
+    "ignoreFiles": [
+      "crates/web/tw-out*.css",
+      "crates/web/dist/**"
+    ],
+    "ignoreValues": [
+      {
+        "rule": "side-tab",
+        "value": "*",
+        "files": [
+          "crates/web/src/components/alert.rs",
+          "crates/web/src/components/alert/**"
+        ],
+        "createdAt": "2026-11-22T12:41:27.662Z",
+        "reason": "DESIGN.md: the start-edge bar is this component's designed edge"
+      },
+      {
+        "rule": "side-tab",
+        "value": "*",
+        "files": [
+          "crates/web/src/components/banner.rs",
+          "crates/web/src/components/banner/**"
+        ],
+        "createdAt": "2026-11-22T12:41:27.709Z",
+        "reason": "DESIGN.md: the start-edge bar is this component's designed edge"
+      },
+      {
+        "rule": "side-tab",
+        "value": "*",
+        "files": [
+          "crates/web/src/components/toast.rs",
+          "crates/web/src/components/toast/**"
+        ],
+        "createdAt": "2026-11-22T12:41:27.761Z",
+        "reason": "DESIGN.md: the start-edge bar is this component's designed edge"
+      },
+      {
+        "rule": "side-tab",
+        "value": "*",
+        "files": [
+          "crates/web/src/components/tabs.rs",
+          "crates/web/src/components/tabs/**"
+        ],
+        "createdAt": "2026-11-22T12:41:27.806Z",
+        "reason": "DESIGN.md: the start-edge bar is this component's designed edge"
+      }
+    ]
+  },
+  "hook": {
+    "enabled": false,
+    "limits": {
+      "maxFindings": 5,
+      "maxChars": 8000
+    }
+  }
+}

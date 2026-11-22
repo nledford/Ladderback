@@ -21,7 +21,7 @@ import { Signal } from "./patience.ts";
 interface Operation {
   id: string;
   plan: string;
-  kind: "backup" | "check";
+  kind: "backup" | "check" | "restore";
   status: string;
   "queued-at": string;
   "started-at": string | null;
@@ -31,6 +31,8 @@ interface Operation {
   failure?: { code: string; args?: Record<string, unknown>; detail?: string };
   result: Record<string, unknown> | null;
   repository?: string;
+  entry?: string;
+  "restored-to"?: { type: "in-place" } | { type: "folder"; path: string };
 }
 
 /** What a progress bar counts, as the wire names it (decision 83). */
@@ -163,6 +165,66 @@ export class ScriptedDaemon {
     const found = this.#operations.find((operation) => operation.kind === "check" && operation.repository === repository);
     if (found === undefined) throw new Error(`the scripted daemon has no check of ${repository}`);
     return found;
+  }
+
+  /** Adds a restore of `entry` from the repository `repository` (its alias
+   *  on this agent) to the history, running since `startedAt`, writing into
+   *  the new folder `folder`, or in place when `folder` is null (#813). */
+  addRunningRestore(entry: string, repository: string, folder: string | null, startedAt: string): void {
+    this.#operations.unshift({
+      id: `018f0000-0000-7000-8000-${String(this.#operations.length + 1).padStart(12, "0")}`,
+      plan: "",
+      kind: "restore",
+      status: "running",
+      "queued-at": startedAt,
+      "started-at": startedAt,
+      "finished-at": null,
+      "warning-codes": [],
+      "failure-code": null,
+      result: null,
+      repository,
+      entry,
+      "restored-to": folder === null ? { type: "in-place" } : { type: "folder", path: folder },
+    });
+  }
+
+  /** The newest restore of `entry` in the history. */
+  #restoreOf(entry: string): Operation {
+    const found = this.#operations.find((operation) => operation.kind === "restore" && operation.entry === entry);
+    if (found === undefined) throw new Error(`the scripted daemon has no restore of ${entry}`);
+    return found;
+  }
+
+  /** The restore of `entry` reports `current` of `total` files restored. */
+  async restoreProgresses(entry: string, current: number, total: number): Promise<void> {
+    await this.#tell({ type: "operation-progress", operation: this.#restoreOf(entry).id, unit: "count", current, total });
+  }
+
+  /** The restore of `entry` succeeds, its log ending before the page is
+   *  told, as with `succeeds`. */
+  async restoreSucceeds(entry: string, finishedAt: string): Promise<void> {
+    const restore = this.#restoreOf(entry);
+    restore.status = "succeeded";
+    restore["finished-at"] = finishedAt;
+    restore.result = { type: "restore", files: 10, bytes: 4096, "duration-ms": 1000 };
+    await this.#tell({ type: "operation-succeeded", operation: restore.id, finished_at: finishedAt });
+  }
+
+  /** The restore of `entry` fails, the engine's own failure, its log ending
+   *  before the page is told, as with `fails`. */
+  async restoreFails(entry: string, finishedAt: string): Promise<void> {
+    const restore = this.#restoreOf(entry);
+    restore.status = "failed";
+    restore["finished-at"] = finishedAt;
+    restore["failure-code"] = "operation-failed";
+    restore.failure = { code: "operation-failed" };
+    await this.#tell({
+      type: "operation-failed",
+      operation: restore.id,
+      code: "operation-failed",
+      args: [],
+      finished_at: finishedAt,
+    });
   }
 
   /** Adds `warning` to the row of `alias` in the repositories list, as the

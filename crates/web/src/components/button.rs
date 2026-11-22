@@ -65,7 +65,9 @@ impl Content {
 /// A busy button shows a spinner in its icon's place, or before a label
 /// that has none, which a screen reader skips: the button keeps its name.
 /// `pressed` makes it a toggle (`aria-pressed`), drawn bolder with an inset
-/// edge while pressed, so the state is never color alone.
+/// edge while pressed, so the state is never color alone. `expanded` makes
+/// it a disclosure's button (`aria-expanded`), which says whether what it
+/// `controls` (`aria-controls`, that element's `id`) shows.
 ///
 /// What the page needs of the element itself it passes as props, never as
 /// attributes spread over it: an `id` (a dialog's `returns_to`, a link from
@@ -102,6 +104,8 @@ pub fn Button(
     #[prop(optional)] node_ref: NodeRef<leptos::html::Button>,
     #[prop(optional, into)] described_by: Signal<Option<String>>,
     #[prop(optional, into)] fuller_name: Option<Signal<String>>,
+    #[prop(optional, into)] expanded: Option<Signal<bool>>,
+    #[prop(optional, into)] controls: Option<String>,
 ) -> impl IntoView {
     let (shape, glyph, label) = content.parts();
     let press = move |event: web_sys::MouseEvent| {
@@ -138,6 +142,10 @@ pub fn Button(
             aria-describedby=move || described_by.get()
             aria-disabled=move || rules::unavailable(disabled.get(), busy.get())
             aria-pressed=move || rules::pressed(pressed.map(|pressed| pressed.get()))
+            aria-expanded=move || {
+                expanded.map(|expanded| if expanded.get() { "true" } else { "false" })
+            }
+            aria-controls=controls
             on:click=press
         >
             {leading}

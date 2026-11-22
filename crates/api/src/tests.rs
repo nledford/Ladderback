@@ -304,6 +304,7 @@ fn a_code_declares_the_arguments_its_producers_send() {
         ErrorCode::RepositoryConfigNotFound,
         ErrorCode::DaemonStopped,
         ErrorCode::DaemonShutDown,
+        ErrorCode::Superseded,
         ErrorCode::HostNotAllowed,
         ErrorCode::OriginNotAllowed,
         ErrorCode::JsonRequired,

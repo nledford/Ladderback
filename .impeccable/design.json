@@ -1,0 +1,1016 @@
+{
+  "schemaVersion": 2,
+  "generatedAt": "2026-11-22T12:45:53+00:00",
+  "title": "Design System: Ladderback",
+  "extensions": {
+    "colorMeta": {
+      "paper": {
+        "role": "neutral",
+        "displayName": "Paper",
+        "cssVar": "--bg",
+        "canonical": "#ffffff",
+        "tonalRamp": [
+          "oklch(15% 0 90)",
+          "oklch(26% 0 90)",
+          "oklch(38% 0 90)",
+          "oklch(49% 0 90)",
+          "oklch(61% 0 90)",
+          "oklch(72% 0 90)",
+          "oklch(84% 0 90)",
+          "oklch(95% 0 90)"
+        ]
+      },
+      "paper-dark": {
+        "role": "neutral",
+        "displayName": "Paper (dark)",
+        "cssVar": "--bg",
+        "canonical": "#111418",
+        "tonalRamp": [
+          "oklch(15% 0.009 256)",
+          "oklch(26% 0.009 256)",
+          "oklch(38% 0.008 256)",
+          "oklch(49% 0.007 256)",
+          "oklch(61% 0.006 256)",
+          "oklch(72% 0.005 256)",
+          "oklch(84% 0.005 256)",
+          "oklch(95% 0.004 256)"
+        ]
+      },
+      "graphite-ink": {
+        "role": "neutral",
+        "displayName": "Graphite Ink",
+        "cssVar": "--fg",
+        "canonical": "#1b1f24",
+        "tonalRamp": [
+          "oklch(15% 0.01 254)",
+          "oklch(26% 0.011 254)",
+          "oklch(38% 0.01 254)",
+          "oklch(49% 0.009 254)",
+          "oklch(61% 0.008 254)",
+          "oklch(72% 0.007 254)",
+          "oklch(84% 0.006 254)",
+          "oklch(95% 0.004 254)"
+        ]
+      },
+      "graphite-ink-dark": {
+        "role": "neutral",
+        "displayName": "Graphite Ink (dark)",
+        "cssVar": "--fg",
+        "canonical": "#e8eaed",
+        "tonalRamp": [
+          "oklch(15% 0.002 258)",
+          "oklch(26% 0.002 258)",
+          "oklch(38% 0.003 258)",
+          "oklch(49% 0.003 258)",
+          "oklch(61% 0.004 258)",
+          "oklch(72% 0.004 258)",
+          "oklch(84% 0.004 258)",
+          "oklch(95% 0.005 258)"
+        ]
+      },
+      "slate-note": {
+        "role": "neutral",
+        "displayName": "Slate Note",
+        "cssVar": "--muted",
+        "canonical": "#4b5563",
+        "tonalRamp": [
+          "oklch(15% 0.017 257)",
+          "oklch(26% 0.021 257)",
+          "oklch(38% 0.024 257)",
+          "oklch(49% 0.025 257)",
+          "oklch(61% 0.021 257)",
+          "oklch(72% 0.018 257)",
+          "oklch(84% 0.014 257)",
+          "oklch(95% 0.011 257)"
+        ]
+      },
+      "slate-note-dark": {
+        "role": "neutral",
+        "displayName": "Slate Note (dark)",
+        "cssVar": "--muted",
+        "canonical": "#a7b0bc",
+        "tonalRamp": [
+          "oklch(15% 0.01 256)",
+          "oklch(26% 0.012 256)",
+          "oklch(38% 0.014 256)",
+          "oklch(49% 0.015 256)",
+          "oklch(61% 0.017 256)",
+          "oklch(72% 0.019 256)",
+          "oklch(84% 0.019 256)",
+          "oklch(95% 0.017 256)"
+        ]
+      },
+      "ledger-gray": {
+        "role": "neutral",
+        "displayName": "Ledger Gray",
+        "cssVar": "--surface",
+        "canonical": "#f3f4f6",
+        "tonalRamp": [
+          "oklch(15% 0.001 265)",
+          "oklch(26% 0.002 265)",
+          "oklch(38% 0.002 265)",
+          "oklch(49% 0.002 265)",
+          "oklch(61% 0.002 265)",
+          "oklch(72% 0.002 265)",
+          "oklch(84% 0.003 265)",
+          "oklch(95% 0.003 265)"
+        ]
+      },
+      "ledger-gray-dark": {
+        "role": "neutral",
+        "displayName": "Ledger Gray (dark)",
+        "cssVar": "--surface",
+        "canonical": "#1d2229",
+        "tonalRamp": [
+          "oklch(15% 0.014 257)",
+          "oklch(26% 0.015 257)",
+          "oklch(38% 0.014 257)",
+          "oklch(49% 0.012 257)",
+          "oklch(61% 0.01 257)",
+          "oklch(72% 0.009 257)",
+          "oklch(84% 0.007 257)",
+          "oklch(95% 0.006 257)"
+        ]
+      },
+      "ladder-blue": {
+        "role": "primary",
+        "displayName": "Ladder Blue",
+        "cssVar": "--accent",
+        "canonical": "#1d4ed8",
+        "tonalRamp": [
+          "oklch(15% 0.124 264)",
+          "oklch(26% 0.155 264)",
+          "oklch(38% 0.187 264)",
+          "oklch(49% 0.216 264)",
+          "oklch(61% 0.184 264)",
+          "oklch(72% 0.153 264)",
+          "oklch(84% 0.121 264)",
+          "oklch(95% 0.09 264)"
+        ],
+        "alsoCssVar": "--focus"
+      },
+      "ladder-blue-dark": {
+        "role": "primary",
+        "displayName": "Ladder Blue (dark)",
+        "cssVar": "--accent",
+        "canonical": "#8ab4f8",
+        "tonalRamp": [
+          "oklch(15% 0.052 260)",
+          "oklch(26% 0.062 260)",
+          "oklch(38% 0.073 260)",
+          "oklch(49% 0.083 260)",
+          "oklch(61% 0.094 260)",
+          "oklch(72% 0.104 260)",
+          "oklch(84% 0.102 260)",
+          "oklch(95% 0.091 260)"
+        ],
+        "alsoCssVar": "--focus"
+      },
+      "loading-fg": {
+        "role": "status",
+        "displayName": "Loading text",
+        "cssVar": "--badge-loading-fg",
+        "canonical": "#172554",
+        "tonalRamp": [
+          "oklch(15% 0.077 268)",
+          "oklch(26% 0.086 268)",
+          "oklch(38% 0.08 268)",
+          "oklch(49% 0.071 268)",
+          "oklch(61% 0.062 268)",
+          "oklch(72% 0.053 268)",
+          "oklch(84% 0.044 268)",
+          "oklch(95% 0.035 268)"
+        ]
+      },
+      "loading-bg": {
+        "role": "status",
+        "displayName": "Loading fill",
+        "cssVar": "--badge-loading-bg",
+        "canonical": "#dbeafe",
+        "tonalRamp": [
+          "oklch(15% 0.014 256)",
+          "oklch(26% 0.017 256)",
+          "oklch(38% 0.019 256)",
+          "oklch(49% 0.022 256)",
+          "oklch(61% 0.024 256)",
+          "oklch(72% 0.027 256)",
+          "oklch(84% 0.029 256)",
+          "oklch(95% 0.031 256)"
+        ]
+      },
+      "empty-fg": {
+        "role": "status",
+        "displayName": "Empty text",
+        "cssVar": "--badge-empty-fg",
+        "canonical": "#111827",
+        "tonalRamp": [
+          "oklch(15% 0.03 265)",
+          "oklch(26% 0.03 265)",
+          "oklch(38% 0.027 265)",
+          "oklch(49% 0.024 265)",
+          "oklch(61% 0.021 265)",
+          "oklch(72% 0.018 265)",
+          "oklch(84% 0.015 265)",
+          "oklch(95% 0.012 265)"
+        ]
+      },
+      "empty-bg": {
+        "role": "status",
+        "displayName": "Empty fill",
+        "cssVar": "--badge-empty-bg",
+        "canonical": "#e5e7eb",
+        "tonalRamp": [
+          "oklch(15% 0.003 265)",
+          "oklch(26% 0.003 265)",
+          "oklch(38% 0.004 265)",
+          "oklch(49% 0.004 265)",
+          "oklch(61% 0.005 265)",
+          "oklch(72% 0.005 265)",
+          "oklch(84% 0.005 265)",
+          "oklch(95% 0.006 265)"
+        ]
+      },
+      "empty-bg-dark": {
+        "role": "status",
+        "displayName": "Empty fill (dark)",
+        "cssVar": "--badge-empty-bg",
+        "canonical": "#26303f",
+        "tonalRamp": [
+          "oklch(15% 0.026 258)",
+          "oklch(26% 0.029 258)",
+          "oklch(38% 0.028 258)",
+          "oklch(49% 0.025 258)",
+          "oklch(61% 0.022 258)",
+          "oklch(72% 0.019 258)",
+          "oklch(84% 0.015 258)",
+          "oklch(95% 0.012 258)"
+        ]
+      },
+      "success-fg": {
+        "role": "status",
+        "displayName": "Success text",
+        "cssVar": "--success-fg",
+        "canonical": "#052e16",
+        "tonalRamp": [
+          "oklch(15% 0.056 153)",
+          "oklch(26% 0.063 153)",
+          "oklch(38% 0.057 153)",
+          "oklch(49% 0.05 153)",
+          "oklch(61% 0.044 153)",
+          "oklch(72% 0.038 153)",
+          "oklch(84% 0.031 153)",
+          "oklch(95% 0.025 153)"
+        ]
+      },
+      "success-fg-dark": {
+        "role": "status",
+        "displayName": "Success text (dark)",
+        "cssVar": "--success-fg",
+        "canonical": "#dcfce7",
+        "tonalRamp": [
+          "oklch(15% 0.02 157)",
+          "oklch(26% 0.023 157)",
+          "oklch(38% 0.026 157)",
+          "oklch(49% 0.03 157)",
+          "oklch(61% 0.033 157)",
+          "oklch(72% 0.036 157)",
+          "oklch(84% 0.04 157)",
+          "oklch(95% 0.043 157)"
+        ]
+      },
+      "success-bg": {
+        "role": "status",
+        "displayName": "Success fill",
+        "cssVar": "--success-bg",
+        "canonical": "#dcfce7",
+        "tonalRamp": [
+          "oklch(15% 0.02 157)",
+          "oklch(26% 0.023 157)",
+          "oklch(38% 0.026 157)",
+          "oklch(49% 0.03 157)",
+          "oklch(61% 0.033 157)",
+          "oklch(72% 0.036 157)",
+          "oklch(84% 0.04 157)",
+          "oklch(95% 0.043 157)"
+        ]
+      },
+      "success-bg-dark": {
+        "role": "status",
+        "displayName": "Success fill (dark)",
+        "cssVar": "--success-bg",
+        "canonical": "#052e16",
+        "tonalRamp": [
+          "oklch(15% 0.056 153)",
+          "oklch(26% 0.063 153)",
+          "oklch(38% 0.057 153)",
+          "oklch(49% 0.05 153)",
+          "oklch(61% 0.044 153)",
+          "oklch(72% 0.038 153)",
+          "oklch(84% 0.031 153)",
+          "oklch(95% 0.025 153)"
+        ]
+      },
+      "warning-fg": {
+        "role": "status",
+        "displayName": "Warning text",
+        "cssVar": "--warning-fg",
+        "canonical": "#451a03",
+        "tonalRamp": [
+          "oklch(15% 0.066 46)",
+          "oklch(26% 0.073 46)",
+          "oklch(38% 0.068 46)",
+          "oklch(49% 0.06 46)",
+          "oklch(61% 0.052 46)",
+          "oklch(72% 0.045 46)",
+          "oklch(84% 0.037 46)",
+          "oklch(95% 0.029 46)"
+        ]
+      },
+      "warning-fg-dark": {
+        "role": "status",
+        "displayName": "Warning text (dark)",
+        "cssVar": "--warning-fg",
+        "canonical": "#fef3c7",
+        "tonalRamp": [
+          "oklch(15% 0.026 96)",
+          "oklch(26% 0.031 96)",
+          "oklch(38% 0.035 96)",
+          "oklch(49% 0.04 96)",
+          "oklch(61% 0.044 96)",
+          "oklch(72% 0.049 96)",
+          "oklch(84% 0.053 96)",
+          "oklch(95% 0.058 96)"
+        ]
+      },
+      "warning-bg": {
+        "role": "status",
+        "displayName": "Warning fill",
+        "cssVar": "--warning-bg",
+        "canonical": "#fde68a",
+        "tonalRamp": [
+          "oklch(15% 0.052 96)",
+          "oklch(26% 0.062 96)",
+          "oklch(38% 0.071 96)",
+          "oklch(49% 0.08 96)",
+          "oklch(61% 0.089 96)",
+          "oklch(72% 0.099 96)",
+          "oklch(84% 0.108 96)",
+          "oklch(95% 0.113 96)"
+        ]
+      },
+      "warning-bg-dark": {
+        "role": "status",
+        "displayName": "Warning fill (dark)",
+        "cssVar": "--warning-bg",
+        "canonical": "#481d05",
+        "tonalRamp": [
+          "oklch(15% 0.065 46)",
+          "oklch(26% 0.072 46)",
+          "oklch(38% 0.068 46)",
+          "oklch(49% 0.06 46)",
+          "oklch(61% 0.053 46)",
+          "oklch(72% 0.045 46)",
+          "oklch(84% 0.037 46)",
+          "oklch(95% 0.029 46)"
+        ]
+      },
+      "error-fg": {
+        "role": "status",
+        "displayName": "Error text",
+        "cssVar": "--error-fg",
+        "canonical": "#691717",
+        "tonalRamp": [
+          "oklch(15% 0.093 26)",
+          "oklch(26% 0.106 26)",
+          "oklch(38% 0.112 26)",
+          "oklch(49% 0.099 26)",
+          "oklch(61% 0.085 26)",
+          "oklch(72% 0.072 26)",
+          "oklch(84% 0.059 26)",
+          "oklch(95% 0.046 26)"
+        ]
+      },
+      "error-fg-dark": {
+        "role": "status",
+        "displayName": "Error text (dark)",
+        "cssVar": "--error-fg",
+        "canonical": "#fee2e2",
+        "tonalRamp": [
+          "oklch(15% 0.014 18)",
+          "oklch(26% 0.016 18)",
+          "oklch(38% 0.019 18)",
+          "oklch(49% 0.021 18)",
+          "oklch(61% 0.024 18)",
+          "oklch(72% 0.026 18)",
+          "oklch(84% 0.029 18)",
+          "oklch(95% 0.031 18)"
+        ]
+      },
+      "error-bg": {
+        "role": "status",
+        "displayName": "Error fill",
+        "cssVar": "--error-bg",
+        "canonical": "#fca5a5",
+        "tonalRamp": [
+          "oklch(15% 0.049 20)",
+          "oklch(26% 0.058 20)",
+          "oklch(38% 0.068 20)",
+          "oklch(49% 0.077 20)",
+          "oklch(61% 0.087 20)",
+          "oklch(72% 0.096 20)",
+          "oklch(84% 0.101 20)",
+          "oklch(95% 0.092 20)"
+        ]
+      },
+      "error-bg-dark": {
+        "role": "status",
+        "displayName": "Error fill (dark)",
+        "cssVar": "--error-bg",
+        "canonical": "#7f1d1d",
+        "tonalRamp": [
+          "oklch(15% 0.098 26)",
+          "oklch(26% 0.114 26)",
+          "oklch(38% 0.131 26)",
+          "oklch(49% 0.119 26)",
+          "oklch(61% 0.103 26)",
+          "oklch(72% 0.086 26)",
+          "oklch(84% 0.07 26)",
+          "oklch(95% 0.054 26)"
+        ]
+      },
+      "tick-green": {
+        "role": "status",
+        "displayName": "Tick Green",
+        "cssVar": "--success",
+        "canonical": "#15803d",
+        "tonalRamp": [
+          "oklch(15% 0.073 150)",
+          "oklch(26% 0.093 150)",
+          "oklch(38% 0.112 150)",
+          "oklch(49% 0.131 150)",
+          "oklch(61% 0.124 150)",
+          "oklch(72% 0.104 150)",
+          "oklch(84% 0.085 150)",
+          "oklch(95% 0.066 150)"
+        ]
+      },
+      "tick-green-dark": {
+        "role": "status",
+        "displayName": "Tick Green (dark)",
+        "cssVar": "--success",
+        "canonical": "#4ade80",
+        "tonalRamp": [
+          "oklch(15% 0.086 152)",
+          "oklch(26% 0.103 152)",
+          "oklch(38% 0.12 152)",
+          "oklch(49% 0.137 152)",
+          "oklch(61% 0.153 152)",
+          "oklch(72% 0.17 152)",
+          "oklch(84% 0.177 152)",
+          "oklch(95% 0.16 152)"
+        ]
+      },
+      "flag-amber": {
+        "role": "status",
+        "displayName": "Flag Amber",
+        "cssVar": "--warning",
+        "canonical": "#b45309",
+        "tonalRamp": [
+          "oklch(15% 0.076 49)",
+          "oklch(26% 0.096 49)",
+          "oklch(38% 0.115 49)",
+          "oklch(49% 0.135 49)",
+          "oklch(61% 0.137 49)",
+          "oklch(72% 0.117 49)",
+          "oklch(84% 0.098 49)",
+          "oklch(95% 0.078 49)"
+        ]
+      },
+      "flag-amber-dark": {
+        "role": "status",
+        "displayName": "Flag Amber (dark)",
+        "cssVar": "--warning",
+        "canonical": "#fbbf24",
+        "tonalRamp": [
+          "oklch(15% 0.077 84)",
+          "oklch(26% 0.091 84)",
+          "oklch(38% 0.106 84)",
+          "oklch(49% 0.12 84)",
+          "oklch(61% 0.135 84)",
+          "oklch(72% 0.15 84)",
+          "oklch(84% 0.164 84)",
+          "oklch(95% 0.15 84)"
+        ]
+      },
+      "red-ink": {
+        "role": "status",
+        "displayName": "Red Ink",
+        "cssVar": "--error",
+        "canonical": "#b91c1c",
+        "tonalRamp": [
+          "oklch(15% 0.103 28)",
+          "oklch(26% 0.131 28)",
+          "oklch(38% 0.159 28)",
+          "oklch(49% 0.187 28)",
+          "oklch(61% 0.166 28)",
+          "oklch(72% 0.138 28)",
+          "oklch(84% 0.11 28)",
+          "oklch(95% 0.082 28)"
+        ]
+      },
+      "red-ink-dark": {
+        "role": "status",
+        "displayName": "Red Ink (dark)",
+        "cssVar": "--error",
+        "canonical": "#f87171",
+        "tonalRamp": [
+          "oklch(15% 0.081 22)",
+          "oklch(26% 0.098 22)",
+          "oklch(38% 0.116 22)",
+          "oklch(49% 0.133 22)",
+          "oklch(61% 0.15 22)",
+          "oklch(72% 0.165 22)",
+          "oklch(84% 0.147 22)",
+          "oklch(95% 0.13 22)"
+        ]
+      },
+      "field-edge": {
+        "role": "neutral",
+        "displayName": "Field Edge",
+        "cssVar": "--field-edge",
+        "canonical": "#6b7280",
+        "tonalRamp": [
+          "oklch(15% 0.012 264)",
+          "oklch(26% 0.015 264)",
+          "oklch(38% 0.019 264)",
+          "oklch(49% 0.022 264)",
+          "oklch(61% 0.022 264)",
+          "oklch(72% 0.019 264)",
+          "oklch(84% 0.016 264)",
+          "oklch(95% 0.012 264)"
+        ]
+      },
+      "field-edge-dark": {
+        "role": "neutral",
+        "displayName": "Field Edge (dark)",
+        "cssVar": "--field-edge",
+        "canonical": "#7b8594",
+        "tonalRamp": [
+          "oklch(15% 0.013 258)",
+          "oklch(26% 0.016 258)",
+          "oklch(38% 0.019 258)",
+          "oklch(49% 0.022 258)",
+          "oklch(61% 0.025 258)",
+          "oklch(72% 0.023 258)",
+          "oklch(84% 0.02 258)",
+          "oklch(95% 0.016 258)"
+        ]
+      },
+      "pencil-gray": {
+        "role": "neutral",
+        "displayName": "Pencil Gray",
+        "cssVar": "--skeleton",
+        "canonical": "#c8ccd2",
+        "tonalRamp": [
+          "oklch(15% 0.004 258)",
+          "oklch(26% 0.005 258)",
+          "oklch(38% 0.006 258)",
+          "oklch(49% 0.007 258)",
+          "oklch(61% 0.008 258)",
+          "oklch(72% 0.009 258)",
+          "oklch(84% 0.009 258)",
+          "oklch(95% 0.009 258)"
+        ]
+      },
+      "pencil-gray-dark": {
+        "role": "neutral",
+        "displayName": "Pencil Gray (dark)",
+        "cssVar": "--skeleton",
+        "canonical": "#353d4a",
+        "tonalRamp": [
+          "oklch(15% 0.02 260)",
+          "oklch(26% 0.023 260)",
+          "oklch(38% 0.025 260)",
+          "oklch(49% 0.022 260)",
+          "oklch(61% 0.019 260)",
+          "oklch(72% 0.016 260)",
+          "oklch(84% 0.013 260)",
+          "oklch(95% 0.01 260)"
+        ]
+      },
+      "margin-slate": {
+        "role": "neutral",
+        "displayName": "Margin Slate",
+        "cssVar": "--cue",
+        "canonical": "#475569",
+        "tonalRamp": [
+          "oklch(15% 0.024 257)",
+          "oklch(26% 0.029 257)",
+          "oklch(38% 0.035 257)",
+          "oklch(49% 0.035 257)",
+          "oklch(61% 0.03 257)",
+          "oklch(72% 0.025 257)",
+          "oklch(84% 0.02 257)",
+          "oklch(95% 0.015 257)"
+        ]
+      },
+      "margin-slate-dark": {
+        "role": "neutral",
+        "displayName": "Margin Slate (dark)",
+        "cssVar": "--cue",
+        "canonical": "#94a3b8",
+        "tonalRamp": [
+          "oklch(15% 0.017 257)",
+          "oklch(26% 0.021 257)",
+          "oklch(38% 0.024 257)",
+          "oklch(49% 0.028 257)",
+          "oklch(61% 0.032 257)",
+          "oklch(72% 0.035 257)",
+          "oklch(84% 0.031 257)",
+          "oklch(95% 0.027 257)"
+        ]
+      },
+      "margin-wash": {
+        "role": "neutral",
+        "displayName": "Margin Wash",
+        "cssVar": "--cue-fill",
+        "canonical": "#dae0e7",
+        "tonalRamp": [
+          "oklch(15% 0.005 252)",
+          "oklch(26% 0.006 252)",
+          "oklch(38% 0.007 252)",
+          "oklch(49% 0.008 252)",
+          "oklch(61% 0.009 252)",
+          "oklch(72% 0.01 252)",
+          "oklch(84% 0.011 252)",
+          "oklch(95% 0.011 252)"
+        ]
+      },
+      "margin-wash-dark": {
+        "role": "neutral",
+        "displayName": "Margin Wash (dark)",
+        "cssVar": "--cue-fill",
+        "canonical": "#282f38",
+        "tonalRamp": [
+          "oklch(15% 0.016 255)",
+          "oklch(26% 0.018 255)",
+          "oklch(38% 0.018 255)",
+          "oklch(49% 0.016 255)",
+          "oklch(61% 0.014 255)",
+          "oklch(72% 0.012 255)",
+          "oklch(84% 0.01 255)",
+          "oklch(95% 0.008 255)"
+        ]
+      }
+    },
+    "typographyMeta": {
+      "body": {
+        "displayName": "Body",
+        "purpose": "Sentences, table cells, notes: 400, 1rem, line-height 1.5."
+      },
+      "label": {
+        "displayName": "Label",
+        "purpose": "Form labels, a group's legend, the brand, the pressed pause button and form errors: 600, 1rem."
+      },
+      "mono": {
+        "displayName": "Mono",
+        "purpose": "Only for text a person copies into a terminal, such as a new API token."
+      }
+    },
+    "shadows": [],
+    "focus": [
+      {
+        "name": "focus-ring",
+        "value": "outline: 3px solid var(--focus); outline-offset: 2px",
+        "purpose": "Every focusable element; CanvasText under forced colors."
+      }
+    ],
+    "motion": [
+      {
+        "name": "progress-fill-ease",
+        "value": "transform 0.4s ease-out",
+        "purpose": "A progress fill slides in from the track's start to each report, its round end leading, never resizing; under reduced motion it jumps."
+      },
+      {
+        "name": "change-mark-settle",
+        "value": "background-color 600ms ease-out",
+        "purpose": "A live table row's change mark arrives lit in Margin Wash and settles back to the cells' own fill; a color fade, so it stays under reduced motion, and 600 ms is the longest any kept fade runs."
+      },
+      {
+        "name": "tooltip-fade-in",
+        "value": "opacity 100ms ease",
+        "purpose": "A tooltip fades in; kept under reduced motion, since a fade moves nothing."
+      },
+      {
+        "name": "tooltip-fade-out",
+        "value": "opacity 60ms ease",
+        "purpose": "A tooltip fades out; kept under reduced motion."
+      },
+      {
+        "name": "spinner-turn",
+        "value": "spinner-turn 0.9s linear infinite",
+        "purpose": "The spinner's arc turns once in 0.9 s; under reduced motion it is not drawn and three still dots stand in."
+      },
+      {
+        "name": "reduced-motion",
+        "value": "animation: none; transition-property: opacity, color, background-color, border-color, outline-color, text-decoration-color, fill, stroke, display, overlay, visibility; scroll-behavior: auto",
+        "purpose": "Decision 130: under prefers-reduced-motion nothing moves, resizes, rotates, scales or loops; only a fade of a color or the opacity stays, 600 ms at most. The rule sits in the first cascade layer, as important, so no component can turn it off."
+      }
+    ],
+    "breakpoints": [
+      {
+        "name": "repositories-container",
+        "value": "26rem",
+        "purpose": "Container query on the repositories table's frame: column widths switch from fixed shares to what each column holds."
+      },
+      {
+        "name": "operations-container",
+        "value": "48rem",
+        "purpose": "Container query on the operations table's frame: column widths switch from fixed shares to what each column holds."
+      },
+      {
+        "name": "tabs-responsive-container",
+        "value": "42rem",
+        "purpose": "Container query on a responsive tab list's own space: a column beside the panel above it, a wrapping row below."
+      },
+      {
+        "name": "steps-container",
+        "value": "42rem",
+        "purpose": "Container query on the steps' own container: a row above it, a column below."
+      },
+      {
+        "name": "page-width-narrow",
+        "value": "60rem",
+        "purpose": "Settings' Narrow page width, the default, centers main at up to 60rem; Full width uses the window's width. Each paragraph and form stays at up to 70ch."
+      },
+      {
+        "name": "dialog-max",
+        "value": "48rem",
+        "purpose": "A native dialog is as wide as its content up to 48rem."
+      }
+    ]
+  },
+  "components": [
+    {
+      "name": "Filled Button",
+      "kind": "button",
+      "description": "A row's one main action: Ladder Blue fill, label in the page's own background color (--on-fill), one small corner, flat.",
+      "html": "<button class=\"ds-btn ds-btn-filled\" type=\"button\"><svg class=\"ds-icon\" viewBox=\"0 0 24 24\" aria-hidden=\"true\"><path d=\"M5 12h14\"/><path d=\"M12 5v14\"/></svg><span>Add plan</span></button>",
+      "css": ".ds-btn { display: inline-flex; align-items: center; justify-content: center; gap: 0.5em; box-sizing: border-box; min-block-size: 2em; padding-block: 0; padding-inline: 0.75em; border: 1px solid var(--tone); border-radius: var(--radius-small, 0.25rem); text-align: center; vertical-align: middle; cursor: pointer; font: 1rem/1.5 system-ui, sans-serif; } .ds-btn:focus-visible { outline: 3px solid var(--focus, #1d4ed8); outline-offset: 2px; } .ds-icon { flex: none; inline-size: 1em; block-size: 1em; fill: none; stroke: currentColor; stroke-width: 2; stroke-linecap: round; stroke-linejoin: round; } .ds-btn-filled { --tone: var(--accent, #1d4ed8); --tone-hover: var(--accent-hover, #1e40af); background-color: var(--tone); color: var(--on-fill, #ffffff); } .ds-btn-filled:hover { background-color: var(--tone-hover); border-color: var(--tone-hover); }",
+      "refersTo": "button-filled"
+    },
+    {
+      "name": "Outlined Button",
+      "kind": "button",
+      "description": "The default button, Secondary (Slate Note): an edge and a label in its tone, a Ledger Gray wash and a darker tone under the pointer.",
+      "html": "<button class=\"ds-btn ds-btn-outlined\" type=\"button\"><span>Cancel</span></button>",
+      "css": ".ds-btn { display: inline-flex; align-items: center; justify-content: center; gap: 0.5em; box-sizing: border-box; min-block-size: 2em; padding-block: 0; padding-inline: 0.75em; border: 1px solid var(--tone); border-radius: var(--radius-small, 0.25rem); text-align: center; vertical-align: middle; cursor: pointer; font: 1rem/1.5 system-ui, sans-serif; } .ds-btn:focus-visible { outline: 3px solid var(--focus, #1d4ed8); outline-offset: 2px; } .ds-icon { flex: none; inline-size: 1em; block-size: 1em; fill: none; stroke: currentColor; stroke-width: 2; stroke-linecap: round; stroke-linejoin: round; } .ds-btn-outlined { --tone: var(--muted, #4b5563); --tone-hover: var(--muted-hover, #374151); background-color: transparent; color: var(--tone); } .ds-btn-outlined:hover { background-color: var(--surface, #f3f4f6); border-color: var(--tone-hover); color: var(--tone-hover); }",
+      "refersTo": "button-outlined"
+    },
+    {
+      "name": "Ghost Button",
+      "kind": "button",
+      "description": "The label alone, for a row with many actions, a table header's sort control and Sign out; the pause button's pressed state is bold with an inset edge.",
+      "html": "<button class=\"ds-btn ds-btn-ghost\" type=\"button\"><svg class=\"ds-icon\" viewBox=\"0 0 24 24\" aria-hidden=\"true\"><path d=\"M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4\"/><path d=\"m16 17 5-5-5-5\"/><path d=\"M21 12H9\"/></svg><span>Sign out</span></button>",
+      "css": ".ds-btn { display: inline-flex; align-items: center; justify-content: center; gap: 0.5em; box-sizing: border-box; min-block-size: 2em; padding-block: 0; padding-inline: 0.75em; border: 1px solid var(--tone); border-radius: var(--radius-small, 0.25rem); text-align: center; vertical-align: middle; cursor: pointer; font: 1rem/1.5 system-ui, sans-serif; } .ds-btn:focus-visible { outline: 3px solid var(--focus, #1d4ed8); outline-offset: 2px; } .ds-icon { flex: none; inline-size: 1em; block-size: 1em; fill: none; stroke: currentColor; stroke-width: 2; stroke-linecap: round; stroke-linejoin: round; } .ds-btn-ghost { --tone: var(--muted, #4b5563); --tone-hover: var(--muted-hover, #374151); background-color: transparent; border-color: transparent; color: var(--tone); } .ds-btn-ghost:hover { background-color: var(--surface, #f3f4f6); color: var(--tone-hover); } .ds-btn-ghost[aria-pressed=\"true\"] { border: 2px inset var(--tone); padding-inline: calc(0.75em - 1px); font-weight: 600; }",
+      "refersTo": "button-ghost"
+    },
+    {
+      "name": "Unavailable Button",
+      "kind": "button",
+      "description": "Stays focusable (aria-disabled, never disabled) at 60 % opacity with a not-allowed cursor; a busy button looks the same but its spinner takes its icon's place.",
+      "html": "<button class=\"ds-btn ds-btn-outlined\" type=\"button\" aria-disabled=\"true\"><span>Run backup</span></button>",
+      "css": ".ds-btn { display: inline-flex; align-items: center; justify-content: center; gap: 0.5em; box-sizing: border-box; min-block-size: 2em; padding-block: 0; padding-inline: 0.75em; border: 1px solid var(--tone); border-radius: var(--radius-small, 0.25rem); text-align: center; vertical-align: middle; cursor: pointer; font: 1rem/1.5 system-ui, sans-serif; } .ds-btn:focus-visible { outline: 3px solid var(--focus, #1d4ed8); outline-offset: 2px; } .ds-icon { flex: none; inline-size: 1em; block-size: 1em; fill: none; stroke: currentColor; stroke-width: 2; stroke-linecap: round; stroke-linejoin: round; } .ds-btn-outlined { --tone: var(--muted, #4b5563); background-color: transparent; color: var(--tone); } .ds-btn[aria-disabled=\"true\"] { cursor: not-allowed; opacity: 0.6; }",
+      "refersTo": "button-outlined"
+    },
+    {
+      "name": "Error Button",
+      "kind": "button",
+      "description": "Error tone for an action that deletes or takes away; Filled only as a dialog's confirm.",
+      "html": "<button class=\"ds-btn ds-btn-error\" type=\"button\"><span>Forget snapshot</span></button>",
+      "css": ".ds-btn { display: inline-flex; align-items: center; justify-content: center; gap: 0.5em; box-sizing: border-box; min-block-size: 2em; padding-block: 0; padding-inline: 0.75em; border: 1px solid var(--tone); border-radius: var(--radius-small, 0.25rem); text-align: center; vertical-align: middle; cursor: pointer; font: 1rem/1.5 system-ui, sans-serif; } .ds-btn:focus-visible { outline: 3px solid var(--focus, #1d4ed8); outline-offset: 2px; } .ds-icon { flex: none; inline-size: 1em; block-size: 1em; fill: none; stroke: currentColor; stroke-width: 2; stroke-linecap: round; stroke-linejoin: round; } .ds-btn-error { --tone: var(--error, #b91c1c); --tone-hover: var(--error-hover, #991b1b); background-color: transparent; color: var(--tone); } .ds-btn-error:hover { background-color: var(--surface, #f3f4f6); border-color: var(--tone-hover); color: var(--tone-hover); }"
+    },
+    {
+      "name": "Link",
+      "kind": "nav",
+      "description": "A native link: Ladder Blue, always underlined (thicker under the pointer), no visited color; the current page is bold; a link to another site says so in words and ends in the ExternalLink icon.",
+      "html": "<p class=\"ds-text\">See the <a class=\"ds-link\" href=\"#\">restore guide</a>, the <a class=\"ds-link\" href=\"#\" aria-current=\"page\">current page</a> or <a class=\"ds-link\" href=\"#\">the rustic manual<svg class=\"ds-icon\" viewBox=\"0 0 24 24\" aria-hidden=\"true\"><path d=\"M15 3h6v6\"/><path d=\"M10 14 21 3\"/><path d=\"M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6\"/></svg><span class=\"ds-sr\"> (goes to another site)</span></a>.</p>",
+      "css": ".ds-text { margin: 0; font: 1rem/1.5 system-ui, sans-serif; color: var(--fg, #1b1f24); } .ds-link { color: var(--accent, #1d4ed8); text-decoration: underline; text-decoration-thickness: max(1px, 0.0625em); text-underline-offset: 0.25em; text-decoration-skip-ink: auto; } .ds-link:hover { text-decoration-thickness: max(2px, 0.125em); } .ds-link[aria-current=\"page\"] { font-weight: 700; } .ds-link > .ds-icon { margin-inline-start: 0.25em; vertical-align: -0.125em; } :focus-visible { outline: 3px solid var(--focus, #1d4ed8); outline-offset: 2px; } .ds-icon { flex: none; inline-size: 1em; block-size: 1em; fill: none; stroke: currentColor; stroke-width: 2; stroke-linecap: round; stroke-linejoin: round; } .ds-sr { position: absolute; inline-size: 1px; block-size: 1px; margin: -1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }"
+    },
+    {
+      "name": "Alert",
+      "kind": "custom",
+      "description": "An inline message about a page's state on Ledger Gray: the tone is the icon and a 0.25rem edge at the line's start, never a colored fill. Primary (information), Success, Warning and Error, each with its own icon and a word naming it for a screen reader.",
+      "html": "<div class=\"ds-alert ds-alert-error\"><span class=\"ds-alert-icon\"><svg class=\"ds-icon\" viewBox=\"0 0 24 24\" aria-hidden=\"true\"><circle cx=\"12\" cy=\"12\" r=\"10\"/><path d=\"m15 9-6 6\"/><path d=\"m9 9 6 6\"/></svg></span><div class=\"ds-alert-words\"><span class=\"ds-sr\">Error: </span>The repository could not be reached. Check the address and try again.</div></div>",
+      "css": ".ds-alert { border-radius: var(--radius-small, 0.25rem); display: flex; align-items: flex-start; gap: 0.5rem; margin-block: 0.5rem; padding-block: 0.5rem; padding-inline: 0.75rem; background-color: var(--surface, #f3f4f6); color: var(--fg, #1b1f24); border: 0; border-inline-start: 0.25rem solid var(--tone); font: 1rem/1.5 system-ui, sans-serif; } .ds-alert-icon { display: flex; flex: none; align-items: center; min-block-size: 1lh; color: var(--tone); } .ds-alert-words { flex: 1 1 min-content; min-inline-size: 0; overflow-wrap: anywhere; } .ds-alert-error { --tone: var(--error, #b91c1c); } .ds-dismiss { flex: none; margin-inline-start: auto; display: inline-flex; align-items: center; justify-content: center; inline-size: 1.75em; block-size: 1.75em; padding: 0; border: 1px solid transparent; border-radius: var(--radius-small, 0.25rem); background: transparent; color: var(--muted, #4b5563); cursor: pointer; font: inherit; } .ds-dismiss:hover { background-color: var(--surface, #f3f4f6); color: var(--muted-hover, #374151); } :focus-visible { outline: 3px solid var(--focus, #1d4ed8); outline-offset: 2px; } .ds-icon { flex: none; inline-size: 1em; block-size: 1em; fill: none; stroke: currentColor; stroke-width: 2; stroke-linecap: round; stroke-linejoin: round; } .ds-sr { position: absolute; inline-size: 1px; block-size: 1px; margin: -1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }"
+    },
+    {
+      "name": "Banner",
+      "kind": "custom",
+      "description": "A page-wide notice above a page's content: a square Ledger Gray strip, tone in its icon and a 0.25rem start edge. Primary (information) or Warning only; never a red banner. Dismiss is an optional Ghost Small X.",
+      "html": "<div class=\"ds-banner ds-banner-warning\"><span class=\"ds-banner-icon\"><svg class=\"ds-icon\" viewBox=\"0 0 24 24\" aria-hidden=\"true\"><path d=\"m21.73 18-8-14a2 2 0 0 0-3.48 0l-8 14A2 2 0 0 0 4 21h16a2 2 0 0 0 1.73-3\"/><path d=\"M12 9v4\"/><path d=\"M12 17h.01\"/></svg></span><div class=\"ds-banner-words\"><span class=\"ds-sr\">Warning: </span>Ladderback needs Full Disk Access to back up this machine's folders.</div><button class=\"ds-dismiss\" type=\"button\" aria-label=\"Dismiss\"><svg class=\"ds-icon\" viewBox=\"0 0 24 24\" aria-hidden=\"true\"><path d=\"M18 6 6 18\"/><path d=\"m6 6 12 12\"/></svg></button></div>",
+      "css": ".ds-banner { display: flex; align-items: flex-start; gap: 0.5rem; margin-block: 0.5rem; padding-block: 0.5rem; padding-inline: 0.75rem; background-color: var(--surface, #f3f4f6); color: var(--fg, #1b1f24); border: 0; border-inline-start: 0.25rem solid var(--tone); font: 1rem/1.5 system-ui, sans-serif; } .ds-banner-icon { display: flex; flex: none; align-items: center; min-block-size: 1lh; color: var(--tone); } .ds-banner-words { flex: 1 1 min-content; min-inline-size: 0; overflow-wrap: anywhere; } .ds-banner-warning { --tone: var(--warning, #b45309); } .ds-dismiss { flex: none; margin-inline-start: auto; display: inline-flex; align-items: center; justify-content: center; inline-size: 1.75em; block-size: 1.75em; padding: 0; border: 1px solid transparent; border-radius: var(--radius-small, 0.25rem); background: transparent; color: var(--muted, #4b5563); cursor: pointer; font: inherit; } .ds-dismiss:hover { background-color: var(--surface, #f3f4f6); color: var(--muted-hover, #374151); } :focus-visible { outline: 3px solid var(--focus, #1d4ed8); outline-offset: 2px; } .ds-icon { flex: none; inline-size: 1em; block-size: 1em; fill: none; stroke: currentColor; stroke-width: 2; stroke-linecap: round; stroke-linejoin: round; } .ds-sr { position: absolute; inline-size: 1px; block-size: 1px; margin: -1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }"
+    },
+    {
+      "name": "Badge",
+      "kind": "chip",
+      "refersTo": "badge-secondary",
+      "description": "A count or tag beside what it describes, the words saying what it counts; Secondary (the badge's own gray pair) is the default.",
+      "html": "<span class=\"ds-badge ds-badge-secondary\"><span class=\"ds-badge-words\">Pending changes 3</span></span>",
+      "css": ".ds-badge { display: inline-flex; flex-wrap: wrap; align-items: baseline; column-gap: 0.25em; max-inline-size: 100%; padding-block: 0.125rem; padding-inline: 0.5rem; border-radius: calc(0.5lh + 0.125rem); font: 1rem/1.5 system-ui, sans-serif; } .ds-badge-icon { display: flex; flex: none; align-self: flex-start; align-items: center; min-block-size: 1lh; } .ds-badge-words { flex: 1 1 min-content; min-inline-size: 0; overflow-wrap: break-word; } @media (forced-colors: active) { .ds-badge { color: inherit; outline: 1px solid currentColor; outline-offset: -1px; } } .ds-icon { flex: none; inline-size: 1em; block-size: 1em; fill: none; stroke: currentColor; stroke-width: 2; stroke-linecap: round; stroke-linejoin: round; } .ds-badge-secondary { color: var(--badge-empty-fg, #111827); background-color: var(--badge-empty-bg, #e5e7eb); }"
+    },
+    {
+      "name": "Status Badge: Succeeded",
+      "kind": "chip",
+      "refersTo": "badge-success",
+      "description": "A finished run: icon, then label, on the Success status pair.",
+      "html": "<span class=\"ds-badge ds-badge-success\"><span class=\"ds-badge-icon\"><svg class=\"ds-icon\" viewBox=\"0 0 24 24\" aria-hidden=\"true\"><circle cx=\"12\" cy=\"12\" r=\"10\"/><path d=\"m9 12 2 2 4-4\"/></svg></span><span class=\"ds-badge-words\">Succeeded</span></span>",
+      "css": ".ds-badge { display: inline-flex; flex-wrap: wrap; align-items: baseline; column-gap: 0.25em; max-inline-size: 100%; padding-block: 0.125rem; padding-inline: 0.5rem; border-radius: calc(0.5lh + 0.125rem); font: 1rem/1.5 system-ui, sans-serif; } .ds-badge-icon { display: flex; flex: none; align-self: flex-start; align-items: center; min-block-size: 1lh; } .ds-badge-words { flex: 1 1 min-content; min-inline-size: 0; overflow-wrap: break-word; } @media (forced-colors: active) { .ds-badge { color: inherit; outline: 1px solid currentColor; outline-offset: -1px; } } .ds-icon { flex: none; inline-size: 1em; block-size: 1em; fill: none; stroke: currentColor; stroke-width: 2; stroke-linecap: round; stroke-linejoin: round; } .ds-badge-success { color: var(--success-fg, #052e16); background-color: var(--success-bg, #dcfce7); }"
+    },
+    {
+      "name": "Status Badge: Succeeded with warnings",
+      "kind": "chip",
+      "refersTo": "badge-warning",
+      "description": "A run that succeeded with something to read, on the Warning status pair, never a clean run's green.",
+      "html": "<span class=\"ds-badge ds-badge-warning\"><span class=\"ds-badge-icon\"><svg class=\"ds-icon\" viewBox=\"0 0 24 24\" aria-hidden=\"true\"><path d=\"m21.73 18-8-14a2 2 0 0 0-3.48 0l-8 14A2 2 0 0 0 4 21h16a2 2 0 0 0 1.73-3\"/><path d=\"M12 9v4\"/><path d=\"M12 17h.01\"/></svg></span><span class=\"ds-badge-words\">Succeeded with warnings</span></span>",
+      "css": ".ds-badge { display: inline-flex; flex-wrap: wrap; align-items: baseline; column-gap: 0.25em; max-inline-size: 100%; padding-block: 0.125rem; padding-inline: 0.5rem; border-radius: calc(0.5lh + 0.125rem); font: 1rem/1.5 system-ui, sans-serif; } .ds-badge-icon { display: flex; flex: none; align-self: flex-start; align-items: center; min-block-size: 1lh; } .ds-badge-words { flex: 1 1 min-content; min-inline-size: 0; overflow-wrap: break-word; } @media (forced-colors: active) { .ds-badge { color: inherit; outline: 1px solid currentColor; outline-offset: -1px; } } .ds-icon { flex: none; inline-size: 1em; block-size: 1em; fill: none; stroke: currentColor; stroke-width: 2; stroke-linecap: round; stroke-linejoin: round; } .ds-badge-warning { color: var(--warning-fg, #451a03); background-color: var(--warning-bg, #fde68a); }"
+    },
+    {
+      "name": "Status Badge: Failed",
+      "kind": "chip",
+      "refersTo": "badge-error",
+      "description": "A failure, stated once, on the Error status pair.",
+      "html": "<span class=\"ds-badge ds-badge-error\"><span class=\"ds-badge-icon\"><svg class=\"ds-icon\" viewBox=\"0 0 24 24\" aria-hidden=\"true\"><circle cx=\"12\" cy=\"12\" r=\"10\"/><path d=\"m15 9-6 6\"/><path d=\"m9 9 6 6\"/></svg></span><span class=\"ds-badge-words\">Failed</span></span>",
+      "css": ".ds-badge { display: inline-flex; flex-wrap: wrap; align-items: baseline; column-gap: 0.25em; max-inline-size: 100%; padding-block: 0.125rem; padding-inline: 0.5rem; border-radius: calc(0.5lh + 0.125rem); font: 1rem/1.5 system-ui, sans-serif; } .ds-badge-icon { display: flex; flex: none; align-self: flex-start; align-items: center; min-block-size: 1lh; } .ds-badge-words { flex: 1 1 min-content; min-inline-size: 0; overflow-wrap: break-word; } @media (forced-colors: active) { .ds-badge { color: inherit; outline: 1px solid currentColor; outline-offset: -1px; } } .ds-icon { flex: none; inline-size: 1em; block-size: 1em; fill: none; stroke: currentColor; stroke-width: 2; stroke-linecap: round; stroke-linejoin: round; } .ds-badge-error { color: var(--error-fg, #691717); background-color: var(--error-bg, #fca5a5); }"
+    },
+    {
+      "name": "Status Badge: Running",
+      "kind": "chip",
+      "refersTo": "badge-primary",
+      "description": "A run under way, on the badge's own Loading (blue) pair; queued and cancelled runs take the gray Empty pair.",
+      "html": "<span class=\"ds-badge ds-badge-primary\"><span class=\"ds-badge-icon\"><svg class=\"ds-icon\" viewBox=\"0 0 24 24\" aria-hidden=\"true\"><path d=\"M21 12a9 9 0 1 1-6.219-8.56\"/></svg></span><span class=\"ds-badge-words\">Running</span></span>",
+      "css": ".ds-badge { display: inline-flex; flex-wrap: wrap; align-items: baseline; column-gap: 0.25em; max-inline-size: 100%; padding-block: 0.125rem; padding-inline: 0.5rem; border-radius: calc(0.5lh + 0.125rem); font: 1rem/1.5 system-ui, sans-serif; } .ds-badge-icon { display: flex; flex: none; align-self: flex-start; align-items: center; min-block-size: 1lh; } .ds-badge-words { flex: 1 1 min-content; min-inline-size: 0; overflow-wrap: break-word; } @media (forced-colors: active) { .ds-badge { color: inherit; outline: 1px solid currentColor; outline-offset: -1px; } } .ds-icon { flex: none; inline-size: 1em; block-size: 1em; fill: none; stroke: currentColor; stroke-width: 2; stroke-linecap: round; stroke-linejoin: round; } .ds-badge-primary { color: var(--badge-loading-fg, #172554); background-color: var(--badge-loading-bg, #dbeafe); }"
+    },
+    {
+      "name": "Tabs",
+      "kind": "nav",
+      "description": "Views within one page, horizontal: tabs on one Slate Note rule, no fill or box; the selected tab is bold with a 3 px Ladder Blue bar on the rule, a hovered one shows a Slate Note line as thick as the bar. A hidden bold copy keeps each tab as wide selected as not.",
+      "html": "<div class=\"ds-tabs\"><div class=\"ds-tab-list\" role=\"tablist\" aria-label=\"Settings\"><button class=\"ds-tab\" role=\"tab\" aria-selected=\"true\" type=\"button\"><span class=\"ds-tab-label\" data-label=\"General\">General</span></button><button class=\"ds-tab\" role=\"tab\" aria-selected=\"false\" type=\"button\"><span class=\"ds-tab-label\" data-label=\"Sign-in\">Sign-in</span></button><button class=\"ds-tab\" role=\"tab\" aria-selected=\"false\" type=\"button\"><span class=\"ds-tab-label\" data-label=\"API tokens\">API tokens</span></button></div><div class=\"ds-tab-panel\" role=\"tabpanel\"><p>Choose how wide pages are in this browser.</p></div></div>",
+      "css": ".ds-tabs { color: var(--fg, #1b1f24); font: 1rem/1.5 system-ui, sans-serif; } .ds-tab-list { display: flex; flex-wrap: wrap; row-gap: 0.25rem; border-block-end: 1px solid var(--muted, #4b5563); } .ds-tab { min-block-size: 1.5rem; margin-block-end: -1px; padding-block: 0.25rem; padding-inline: 0.75rem; border: 0; border-block-end: 1px solid var(--muted, #4b5563); background: transparent; color: var(--fg, #1b1f24); font: inherit; font-weight: 400; cursor: pointer; } .ds-tab[aria-selected=\"true\"] { padding-block-end: calc(0.25rem - 2px); border-block-end: 3px solid var(--accent, #1d4ed8); font-weight: 700; } .ds-tab:hover { padding-block-end: calc(0.25rem - 2px); border-block-end-width: 3px; } .ds-tab[aria-selected=\"true\"]:hover { border-block-end-color: var(--accent, #1d4ed8); } .ds-tab-label { display: inline-flex; flex-direction: column; align-items: center; } .ds-tab-label::after { content: attr(data-label); block-size: 0; overflow: hidden; visibility: hidden; font-weight: 700; } .ds-tab-panel { padding-block: 0.75rem; } .ds-tab-panel > p { margin: 0; } :focus-visible { outline: 3px solid var(--focus, #1d4ed8); outline-offset: 2px; }"
+    },
+    {
+      "name": "Text Field",
+      "kind": "input",
+      "refersTo": "field-input",
+      "description": "A native input drawn from the tokens: 1 px Field Edge, one small corner, flat on the page's background, a Medium button's height, full line width up to 32rem; label above in Label weight with \"(required)\" in words, its description under it. Invalid takes a 2 px Red Ink edge.",
+      "html": "<div class=\"ds-field\"><label for=\"ds-alias\">Name (required)</label><p class=\"ds-field-note\">What this machine is called in Ladderback.</p><input id=\"ds-alias\" class=\"ds-input\" value=\"nas\"></div>",
+      "css": ".ds-field { margin-block: 1rem; color: var(--fg, #1b1f24); font: 1rem/1.5 system-ui, sans-serif; } .ds-field label { display: block; font-weight: 600; } .ds-field-note { margin-block: 0.25rem; } .ds-input { display: block; box-sizing: border-box; inline-size: 100%; max-inline-size: 32rem; min-block-size: 2em; margin: 0; margin-block-start: 0.25rem; padding-block: 0; padding-inline: 0.75em; border: 1px solid var(--field-edge, #6b7280); border-radius: var(--radius-small, 0.25rem); background-color: var(--bg, #ffffff); color: var(--fg, #1b1f24); font: inherit; } .ds-input[aria-invalid=\"true\"] { border-width: 2px; border-color: var(--error, #b91c1c); padding-inline: calc(0.75em - 1px); } .ds-input[readonly] { border-style: dashed; } .ds-input:disabled { background-color: var(--surface, #f3f4f6); color: var(--muted, #4b5563); cursor: not-allowed; } :focus-visible { outline: 3px solid var(--focus, #1d4ed8); outline-offset: 2px; }"
+    },
+    {
+      "name": "Checkbox",
+      "kind": "input",
+      "description": "A native checkbox drawn from the tokens: a box never under 24 px and 1.5 times the text, a 1 px Field Edge round Paper with the small corner; chosen, edge and fill in Ladder Blue under a check in Paper. Its label is Label weight, its description under it.",
+      "html": "<div class=\"ds-choice\"><span class=\"ds-cell\"><input id=\"ds-cb\" class=\"ds-box ds-box-square\" type=\"checkbox\" checked><svg class=\"ds-icon ds-mark\" viewBox=\"0 0 24 24\" aria-hidden=\"true\"><path d=\"M20 6 9 17l-5-5\"/></svg></span><label for=\"ds-cb\">Back up on battery</label><p>Runs even when the laptop is unplugged.</p></div>",
+      "css": ".ds-choice { display: grid; grid-template-columns: auto 1fr; column-gap: 0.5rem; align-items: start; margin-block: 1rem; color: var(--fg, #1b1f24); font: 1rem/1.5 system-ui, sans-serif; } .ds-cell { display: grid; place-items: center; } .ds-box { grid-column: 1; grid-row: 1; appearance: none; margin: 0; padding: 0; inline-size: max(24px, 1.5em); block-size: max(24px, 1.5em); border: 1px solid var(--field-edge, #6b7280); background-color: var(--bg, #ffffff); cursor: pointer; } .ds-box:checked { border-color: var(--accent, #1d4ed8); background-color: var(--accent, #1d4ed8); } .ds-box:focus-visible { outline: 3px solid var(--focus, #1d4ed8); outline-offset: 2px; } .ds-choice label { justify-self: start; font-weight: 600; } .ds-choice p { grid-column: 2; margin-block: 0.25rem; } .ds-box-square { border-radius: var(--radius-small, 0.25rem); } .ds-mark { grid-column: 1; grid-row: 1; display: none; pointer-events: none; color: var(--bg, #ffffff); } .ds-box:checked + .ds-mark { display: block; } .ds-icon { flex: none; inline-size: 1em; block-size: 1em; fill: none; stroke: currentColor; stroke-width: 2; stroke-linecap: round; stroke-linejoin: round; }"
+    },
+    {
+      "name": "Radio Group",
+      "kind": "input",
+      "description": "A group of native radios named by its legend: round, a 1 px Field Edge round Paper; chosen, edge and fill in Ladder Blue under a dot in Paper (max(10px, 0.625em)).",
+      "html": "<fieldset class=\"ds-group\"><legend>Page width</legend><div class=\"ds-choice\"><span class=\"ds-cell\"><input id=\"ds-r1\" class=\"ds-box ds-box-round\" type=\"radio\" name=\"ds-width\" checked><span class=\"ds-dot\"></span></span><label for=\"ds-r1\">Narrow</label></div><div class=\"ds-choice\"><span class=\"ds-cell\"><input id=\"ds-r2\" class=\"ds-box ds-box-round\" type=\"radio\" name=\"ds-width\"><span class=\"ds-dot\"></span></span><label for=\"ds-r2\">Full width</label></div></fieldset>",
+      "css": ".ds-choice { display: grid; grid-template-columns: auto 1fr; column-gap: 0.5rem; align-items: start; margin-block: 1rem; color: var(--fg, #1b1f24); font: 1rem/1.5 system-ui, sans-serif; } .ds-cell { display: grid; place-items: center; } .ds-box { grid-column: 1; grid-row: 1; appearance: none; margin: 0; padding: 0; inline-size: max(24px, 1.5em); block-size: max(24px, 1.5em); border: 1px solid var(--field-edge, #6b7280); background-color: var(--bg, #ffffff); cursor: pointer; } .ds-box:checked { border-color: var(--accent, #1d4ed8); background-color: var(--accent, #1d4ed8); } .ds-box:focus-visible { outline: 3px solid var(--focus, #1d4ed8); outline-offset: 2px; } .ds-choice label { justify-self: start; font-weight: 600; } .ds-choice p { grid-column: 2; margin-block: 0.25rem; } .ds-group { margin: 0; padding: 0; border: 0; } .ds-group legend { padding: 0; font-weight: 600; color: var(--fg, #1b1f24); font: 1rem/1.5 system-ui, sans-serif; } .ds-group .ds-choice { margin-block: 0.5rem; } .ds-box-round { border-radius: 9999px; } .ds-dot { grid-column: 1; grid-row: 1; display: none; pointer-events: none; border-radius: 9999px; inline-size: max(10px, 0.625em); block-size: max(10px, 0.625em); background-color: var(--bg, #ffffff); } .ds-box:checked + .ds-dot { display: block; }"
+    },
+    {
+      "name": "Toast",
+      "kind": "card",
+      "refersTo": "toast",
+      "description": "The answer to what the reader just did, in the page's flow (never fixed over it): information on Ledger Gray in Graphite Ink, edged 1 px in Ladder Blue, with the small corner. Flat: fill and edge set it off, never a lift.",
+      "html": "<div class=\"ds-toast ds-toast-info\" role=\"status\"><span class=\"ds-toast-icon\"><svg class=\"ds-icon\" viewBox=\"0 0 24 24\" aria-hidden=\"true\"><circle cx=\"12\" cy=\"12\" r=\"10\"/><path d=\"M12 16v-4\"/><path d=\"M12 8h.01\"/></svg></span><span class=\"ds-toast-words\"><span class=\"ds-sr\">Information: </span>Snapshot ba5cc73e saved.</span><button class=\"ds-dismiss\" type=\"button\" aria-label=\"Dismiss\"><svg class=\"ds-icon\" viewBox=\"0 0 24 24\" aria-hidden=\"true\"><path d=\"M18 6 6 18\"/><path d=\"m6 6 12 12\"/></svg></button></div>",
+      "css": ".ds-toast { display: flex; align-items: flex-start; gap: 0.5rem; margin-block: 0.5rem; padding-block: 0.5rem; padding-inline: 0.75rem; border: 1px solid var(--tone); border-radius: var(--radius-small, 0.25rem); font: 1rem/1.5 system-ui, sans-serif; } .ds-toast-icon { display: flex; flex: none; align-items: center; min-block-size: 1lh; } .ds-toast-words { flex: 1 1 min-content; min-inline-size: 0; overflow-wrap: anywhere; } .ds-toast .ds-dismiss { flex: none; display: inline-flex; align-items: center; justify-content: center; inline-size: 1.75em; block-size: 1.75em; padding: 0; border: 1px solid transparent; border-radius: var(--radius-small, 0.25rem); background: transparent; color: inherit; cursor: pointer; font: inherit; } .ds-toast .ds-dismiss:hover { text-decoration: underline; } :focus-visible { outline: 3px solid var(--focus, #1d4ed8); outline-offset: 2px; } .ds-icon { flex: none; inline-size: 1em; block-size: 1em; fill: none; stroke: currentColor; stroke-width: 2; stroke-linecap: round; stroke-linejoin: round; } .ds-sr { position: absolute; inline-size: 1px; block-size: 1px; margin: -1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }.ds-toast-info { --tone: var(--accent, #1d4ed8); background-color: var(--surface, #f3f4f6); color: var(--fg, #1b1f24); } .ds-toast-info .ds-toast-icon { color: var(--accent, #1d4ed8); }"
+    },
+    {
+      "name": "Success Toast",
+      "kind": "card",
+      "description": "A status tone's toast lies on its status pair: words, icon and Dismiss in the pair's words on its fill, edged 1 px in the tone. Information and success leave after 6 s; a warning or failure stays until dismissed.",
+      "html": "<div class=\"ds-toast ds-toast-success\" role=\"status\"><span class=\"ds-toast-icon\"><svg class=\"ds-icon\" viewBox=\"0 0 24 24\" aria-hidden=\"true\"><circle cx=\"12\" cy=\"12\" r=\"10\"/><path d=\"m9 12 2 2 4-4\"/></svg></span><span class=\"ds-toast-words\"><span class=\"ds-sr\">Success: </span>Plan saved.</span><button class=\"ds-dismiss\" type=\"button\" aria-label=\"Dismiss\"><svg class=\"ds-icon\" viewBox=\"0 0 24 24\" aria-hidden=\"true\"><path d=\"M18 6 6 18\"/><path d=\"m6 6 12 12\"/></svg></button></div>",
+      "css": ".ds-toast { display: flex; align-items: flex-start; gap: 0.5rem; margin-block: 0.5rem; padding-block: 0.5rem; padding-inline: 0.75rem; border: 1px solid var(--tone); border-radius: var(--radius-small, 0.25rem); font: 1rem/1.5 system-ui, sans-serif; } .ds-toast-icon { display: flex; flex: none; align-items: center; min-block-size: 1lh; } .ds-toast-words { flex: 1 1 min-content; min-inline-size: 0; overflow-wrap: anywhere; } .ds-toast .ds-dismiss { flex: none; display: inline-flex; align-items: center; justify-content: center; inline-size: 1.75em; block-size: 1.75em; padding: 0; border: 1px solid transparent; border-radius: var(--radius-small, 0.25rem); background: transparent; color: inherit; cursor: pointer; font: inherit; } .ds-toast .ds-dismiss:hover { text-decoration: underline; } :focus-visible { outline: 3px solid var(--focus, #1d4ed8); outline-offset: 2px; } .ds-icon { flex: none; inline-size: 1em; block-size: 1em; fill: none; stroke: currentColor; stroke-width: 2; stroke-linecap: round; stroke-linejoin: round; } .ds-sr { position: absolute; inline-size: 1px; block-size: 1px; margin: -1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }.ds-toast-success { --tone: var(--success, #15803d); background-color: var(--success-bg, #dcfce7); color: var(--success-fg, #052e16); }"
+    },
+    {
+      "name": "Tooltip",
+      "kind": "custom",
+      "description": "A short note beside one control, the page's colors swapped (Graphite Ink fill, Paper words), a step smaller than its control (0.875em), the small corner, flat, no shadow, no arrow. Keyboard focus shows it at once, a resting pointer after 300 ms; it fades in over 100 ms and out over 60 ms, reduced motion too.",
+      "html": "<span class=\"ds-tip-host\"><button class=\"ds-btn ds-btn-outlined\" type=\"button\"><span>Restore</span></button><span class=\"ds-tooltip\" role=\"tooltip\">Restores the snapshot to a folder you choose.</span></span>",
+      "css": ".ds-btn { display: inline-flex; align-items: center; justify-content: center; gap: 0.5em; box-sizing: border-box; min-block-size: 2em; padding-block: 0; padding-inline: 0.75em; border: 1px solid var(--tone); border-radius: var(--radius-small, 0.25rem); text-align: center; vertical-align: middle; cursor: pointer; font: 1rem/1.5 system-ui, sans-serif; } .ds-btn:focus-visible { outline: 3px solid var(--focus, #1d4ed8); outline-offset: 2px; } .ds-icon { flex: none; inline-size: 1em; block-size: 1em; fill: none; stroke: currentColor; stroke-width: 2; stroke-linecap: round; stroke-linejoin: round; } .ds-btn-outlined { --tone: var(--muted, #4b5563); --tone-hover: var(--muted-hover, #374151); background-color: transparent; color: var(--tone); } .ds-btn-outlined:hover { background-color: var(--surface, #f3f4f6); border-color: var(--tone-hover); color: var(--tone-hover); } .ds-tip-host { position: relative; display: inline-block; margin-block-start: 3rem; } .ds-tooltip { position: absolute; inset-block-end: calc(100% + 0.25rem); inset-inline-start: 0; inline-size: max-content; max-inline-size: min(20em, 90vw); padding-block: 0.25em; padding-inline: 0.5em; border-radius: var(--radius-small, 0.25rem); background-color: var(--fg, #1b1f24); color: var(--bg, #ffffff); font-size: 0.875em; line-height: 1.4; overflow-wrap: anywhere; opacity: 0; pointer-events: none; transition: opacity 60ms ease; } .ds-tip-host:hover .ds-tooltip, .ds-tip-host:focus-within .ds-tooltip { opacity: 1; transition-duration: 100ms; } @media (forced-colors: active) { .ds-tooltip { border: 1px solid CanvasText; background-color: Canvas; color: CanvasText; } }"
+    },
+    {
+      "name": "Progress Bar",
+      "kind": "custom",
+      "refersTo": "progress-track",
+      "description": "A Ledger Gray pill track, half the shared scale's length thick (Small, 0.5em), up to 16rem, with a pill fill in its tone (Ladder Blue by default) slid in from the track's start by a transform: it eases to each report over 0.4 s and jumps under reduced motion. The step is on its own line above, the percentage below.",
+      "html": "<div class=\"ds-progress\"><span class=\"ds-progress-step\">Backing up /home</span><div class=\"ds-track\" role=\"progressbar\" aria-label=\"Backup progress\" aria-valuemin=\"0\" aria-valuemax=\"100\" aria-valuenow=\"62\"><div class=\"ds-fill\" style=\"transform: translateX(-38%)\"></div></div><span class=\"ds-progress-words\">62%</span></div>",
+      "css": ".ds-progress { color: var(--fg, #1b1f24); font: 1rem/1.5 system-ui, sans-serif; } .ds-progress-step, .ds-progress-words { display: block; } .ds-track { --tone: var(--accent, #1d4ed8); block-size: 0.5em; inline-size: 100%; max-inline-size: 16rem; overflow: clip; border-radius: 9999px; background-color: var(--surface, #f3f4f6); margin-block: 0.25rem; } .ds-fill { block-size: 100%; border-radius: 9999px; background-color: var(--tone); transition: transform 0.4s ease-out; } @media (prefers-reduced-motion: reduce) { .ds-fill { transition: none; } } @media (forced-colors: active) { .ds-track { forced-color-adjust: none; background-color: GrayText; } .ds-fill { forced-color-adjust: none; background-color: CanvasText; } }"
+    },
+    {
+      "name": "Spinner",
+      "kind": "custom",
+      "refersTo": "spinner",
+      "description": "A wait the page can't show yet: a faint full-circle track and a quarter arc with round ends turning once in 0.9 s, 1em tall by default, in Ladder Blue; the label keeps the text's color. Under reduced motion it is three still dots, since a still arc reads as an amount.",
+      "html": "<span class=\"ds-spinner\"><svg class=\"ds-spinner-graphic\" viewBox=\"0 0 24 24\" aria-hidden=\"true\"><g class=\"ds-spinner-turn\"><circle class=\"ds-spinner-track\" cx=\"12\" cy=\"12\" r=\"10\"/><path class=\"ds-spinner-arc\" d=\"M12 2a10 10 0 0 1 10 10\"/></g><g class=\"ds-spinner-still\"><circle cx=\"5\" cy=\"12\" r=\"2\"/><circle cx=\"12\" cy=\"12\" r=\"2\"/><circle cx=\"19\" cy=\"12\" r=\"2\"/></g></svg><span>Loading repositories…</span></span>",
+      "css": ".ds-spinner { --tone: var(--accent, #1d4ed8); display: inline-flex; align-items: baseline; color: var(--fg, #1b1f24); font: 1rem/1.5 system-ui, sans-serif; } .ds-spinner-graphic { flex: none; inline-size: 1em; block-size: 1em; align-self: center; margin-inline-end: 0.5em; color: var(--tone); } .ds-spinner-turn { transform-origin: center; transform-box: view-box; animation: ds-spinner-turn 0.9s linear infinite; } .ds-spinner-track { fill: none; stroke: currentColor; stroke-width: 3; stroke-opacity: 0.25; } .ds-spinner-arc { fill: none; stroke: currentColor; stroke-width: 3; stroke-linecap: round; } .ds-spinner-still { display: none; fill: currentColor; } @keyframes ds-spinner-turn { to { transform: rotate(1turn); } } @media (prefers-reduced-motion: reduce) { .ds-spinner-turn { display: none; animation: none; } .ds-spinner-still { display: inline; } }"
+    },
+    {
+      "name": "Skeleton",
+      "kind": "custom",
+      "refersTo": "skeleton-bar",
+      "description": "The still shape of content on its way: lines of text each 1em tall, the last shorter, flat Pencil Gray with the small corner; no shimmer or pulse in any motion setting, hidden from screen readers, shown only after a 200 ms wait.",
+      "html": "<div class=\"ds-skeleton-wrap\"><div class=\"ds-skeleton-lines\" aria-hidden=\"true\"><span class=\"ds-skeleton-bar\"></span><span class=\"ds-skeleton-bar\"></span><span class=\"ds-skeleton-bar ds-skeleton-short\"></span></div><p class=\"ds-skeleton-words\">Loading…</p></div>",
+      "css": ".ds-skeleton-wrap { max-inline-size: 20rem; color: var(--fg, #1b1f24); font: 1rem/1.5 system-ui, sans-serif; } .ds-skeleton-lines { display: flex; flex-direction: column; } .ds-skeleton-bar { display: block; max-inline-size: 100%; block-size: 1em; margin-block: calc((1lh - 1em) / 2); border-radius: var(--radius-small, 0.25rem); background-color: var(--skeleton, #c8ccd2); } .ds-skeleton-short { inline-size: 60%; } .ds-skeleton-words { margin: 0.25rem 0 0; color: var(--muted, #4b5563); } @media (forced-colors: active) { .ds-skeleton-bar { background: none; border: 1px solid GrayText; } }"
+    },
+    {
+      "name": "Table",
+      "kind": "custom",
+      "description": "The shared table: fixed column widths in rem so a changing cell never moves a column, one Slate Note rule under each row (no cell borders, stripes, hover or header band), start-aligned, numbers at the end in tabular figures, a Ghost Small sort button after a sortable header's text. A live row whose status changed by itself is marked until seen: its status bold and a flat 3 px Margin Slate edge at the row's start, arriving lit in Margin Wash and settling back over 600 ms, easing out.",
+      "html": "<div class=\"ds-table-frame\"><table class=\"ds-table\"><caption>Machines</caption><colgroup><col style=\"inline-size: 9rem\"><col style=\"inline-size: 10rem\"><col style=\"inline-size: 8rem\"></colgroup><thead><tr><th scope=\"col\">Machine</th><th scope=\"col\"><span class=\"ds-sort\"><span>Last backup</span><button class=\"ds-sort-btn\" type=\"button\" aria-label=\"Sort by last backup\"><svg class=\"ds-icon\" viewBox=\"0 0 24 24\" aria-hidden=\"true\"><path d=\"m5 12 7-7 7 7\"/><path d=\"M12 19V5\"/></svg></button></span></th><th scope=\"col\" class=\"ds-end\">Snapshots</th></tr></thead><tbody><tr><th scope=\"row\">nas</th><td>Today, 02:00</td><td class=\"ds-end\">128</td></tr><tr data-unseen=\"\" data-cue=\"settling\"><th scope=\"row\">laptop</th><td data-cued=\"\">Failed</td><td class=\"ds-end\">64</td></tr><tr><th scope=\"row\">desktop</th><td>Yesterday, 23:30</td><td class=\"ds-end\">212</td></tr></tbody></table></div>",
+      "css": ".ds-table-frame { container-type: inline-size; overflow-x: auto; color: var(--fg, #1b1f24); font: 1rem/1.5 system-ui, sans-serif; } .ds-table { inline-size: 100%; table-layout: fixed; border-collapse: separate; border-spacing: 0; } .ds-table caption { text-align: start; color: var(--muted, #4b5563); } .ds-table th, .ds-table td { text-align: start; vertical-align: top; padding-block: 0.25rem; padding-inline: min(0.5rem, 1.25vw); border-block-end: 1px solid var(--muted, #4b5563); overflow-wrap: anywhere; } .ds-table thead th { font-weight: 700; } .ds-table th[scope=\"row\"] { position: sticky; inset-inline-start: 0; z-index: 1; font-weight: 400; background-color: var(--bg, #ffffff); } .ds-table thead th:first-child { position: sticky; inset-inline-start: 0; z-index: 1; background-color: var(--bg, #ffffff); } .ds-end { text-align: end; font-variant-numeric: tabular-nums; } .ds-sort { display: flex; flex-wrap: wrap; align-items: center; gap: 0.25rem 0.5rem; } .ds-sort-btn { display: inline-flex; align-items: center; justify-content: center; box-sizing: border-box; inline-size: 1.75em; block-size: 1.75em; padding: 0; border: 1px solid transparent; border-radius: var(--radius-small, 0.25rem); background: transparent; color: var(--muted, #4b5563); cursor: pointer; font: inherit; } .ds-sort-btn:hover { background-color: var(--surface, #f3f4f6); color: var(--muted-hover, #374151); } tr[data-cue=\"lit\"] > :is(th, td) { background-color: var(--cue-fill, #dae0e7); } tr[data-cue=\"settling\"] > :is(th, td) { transition: background-color 600ms ease-out; } tr[data-unseen] > [data-cued] { font-weight: 700; } tr[data-unseen] > th[scope=\"row\"]::before { content: \"\"; position: absolute; inset-block: 0; inset-inline-start: 0; inline-size: 3px; background-color: var(--cue, #475569); } @media (forced-colors: active) { .ds-table th[scope=\"row\"], .ds-table thead th:first-child { background-color: Canvas; } tr[data-unseen] > th[scope=\"row\"]::before { forced-color-adjust: none; background-color: CanvasText; } } :focus-visible { outline: 3px solid var(--focus, #1d4ed8); outline-offset: 2px; } .ds-icon { flex: none; inline-size: 1em; block-size: 1em; fill: none; stroke: currentColor; stroke-width: 2; stroke-linecap: round; stroke-linejoin: round; }"
+    },
+    {
+      "name": "Steps",
+      "kind": "custom",
+      "description": "A process's steps in order, each with an icon whose shape is its state's own (check, dot, circle, X for failed), its name and its state in words under it; the current step is bold with aria-current=\"step\". A column below 42rem of its own container, a row above; a connector joins each step to the next, Ladder Blue as far as the process has gone, Slate Note after. No tone, size or placement.",
+      "html": "<div class=\"ds-steps-frame\"><ol class=\"ds-steps\" aria-label=\"Backup steps\"><li class=\"ds-step ds-step-done\"><span class=\"ds-step-track\"><span class=\"ds-connector ds-first\"></span><svg class=\"ds-icon ds-step-icon ds-step-icon-accent\" viewBox=\"0 0 24 24\" aria-hidden=\"true\"><circle cx=\"12\" cy=\"12\" r=\"10\"/><path d=\"m9 12 2 2 4-4\"/></svg><span class=\"ds-connector ds-done\"></span></span><span class=\"ds-step-text\"><span class=\"ds-step-name\">Snapshot</span> <span class=\"ds-step-state\">Done</span></span></li><li class=\"ds-step ds-step-current\" aria-current=\"step\"><span class=\"ds-step-track\"><span class=\"ds-connector ds-done\"></span><svg class=\"ds-icon ds-step-icon ds-step-icon-accent\" viewBox=\"0 0 24 24\" aria-hidden=\"true\"><circle cx=\"12\" cy=\"12\" r=\"10\"/><circle cx=\"12\" cy=\"12\" r=\"1\"/></svg><span class=\"ds-connector ds-todo\"></span></span><span class=\"ds-step-text\"><span class=\"ds-step-name\">Upload</span> <span class=\"ds-step-state\">Current</span></span></li><li class=\"ds-step ds-step-todo\"><span class=\"ds-step-track\"><span class=\"ds-connector ds-todo\"></span><svg class=\"ds-icon ds-step-icon ds-step-icon-muted\" viewBox=\"0 0 24 24\" aria-hidden=\"true\"><circle cx=\"12\" cy=\"12\" r=\"10\"/></svg><span class=\"ds-connector ds-last\"></span></span><span class=\"ds-step-text\"><span class=\"ds-step-name\">Prune</span> <span class=\"ds-step-state\">To do</span></span></li></ol></div>",
+      "css": ".ds-steps-frame { container-type: inline-size; color: var(--fg, #1b1f24); font: 1rem/1.5 system-ui, sans-serif; } .ds-steps { display: flex; flex-direction: column; margin: 0; padding: 0; list-style: none; } .ds-step { display: flex; column-gap: 0.75rem; min-inline-size: 0; } .ds-step-track { display: flex; flex: none; flex-direction: column; align-items: center; } .ds-connector { display: none; flex: 1; border-block-start: 2px solid var(--muted, #4b5563); } .ds-step-track > .ds-connector:last-child { display: block; border-block-start: 0; border-inline-start: 2px solid var(--muted, #4b5563); } .ds-connector.ds-done { border-color: var(--accent, #1d4ed8); } .ds-connector.ds-first, .ds-connector.ds-last { visibility: hidden; } .ds-step-icon { inline-size: 1.5em; block-size: 1.5em; } .ds-step-icon-accent { color: var(--accent, #1d4ed8); } .ds-step-icon-muted { color: var(--muted, #4b5563); } .ds-step-text { display: flex; flex-direction: column; min-inline-size: 0; padding-block-end: 1rem; overflow-wrap: anywhere; } .ds-step-current .ds-step-name { font-weight: 600; } .ds-step-state { font-size: 0.875rem; color: var(--muted, #4b5563); } @container (min-width: 42rem) { .ds-steps { flex-direction: row; } .ds-step { flex: 1; flex-direction: column; align-items: center; column-gap: 0; text-align: center; } .ds-step-track { flex-direction: row; align-self: stretch; } .ds-step-track > .ds-connector { display: block; border-inline-start: 0; border-block-start: 2px solid var(--muted, #4b5563); } .ds-step-track > .ds-connector.ds-done { border-color: var(--accent, #1d4ed8); } .ds-step-text { padding-block: 0.25rem 0; padding-inline: 0.5rem; } } .ds-icon { flex: none; inline-size: 1em; block-size: 1em; fill: none; stroke: currentColor; stroke-width: 2; stroke-linecap: round; stroke-linejoin: round; }"
+    },
+    {
+      "name": "Site Header and Navigation",
+      "kind": "nav",
+      "refersTo": "site-header",
+      "description": "A Ledger Gray strip: the brand (the mark, then the name, in the text's color) on its own line, then a wrapping row of underlined Ladder Blue links, the current page bold, with the running version and a Ghost Sign out at the line's end.",
+      "html": "<header class=\"ds-header\"><p class=\"ds-brand\"><a class=\"ds-link ds-link-inherit\" href=\"#\"><svg class=\"ds-brand-mark\" viewBox=\"0 0 512 512\" width=\"1em\" height=\"1em\" aria-hidden=\"true\"><rect class=\"ds-brand-tile\" width=\"512\" height=\"512\" rx=\"112\"/><g class=\"ds-brand-slats\"><rect x=\"156.8\" y=\"96\" width=\"44\" height=\"320\" rx=\"22\"/><rect x=\"311.2\" y=\"96\" width=\"44\" height=\"320\" rx=\"22\"/><rect x=\"178.8\" y=\"140.8\" width=\"154.4\" height=\"40\" rx=\"20\"/><rect x=\"178.8\" y=\"236.8\" width=\"154.4\" height=\"40\" rx=\"20\"/><rect x=\"178.8\" y=\"332.8\" width=\"154.4\" height=\"40\" rx=\"20\"/></g></svg>Ladderback</a></p><nav><ul class=\"ds-nav\"><li><a class=\"ds-link\" href=\"#\" aria-current=\"page\">Operations</a></li><li><a class=\"ds-link\" href=\"#\">Plans</a></li><li><a class=\"ds-link\" href=\"#\">Repositories</a></li><li><a class=\"ds-link\" href=\"#\">Settings</a></li></ul></nav><div class=\"ds-account\"><p class=\"ds-version\">0.3.1</p><button class=\"ds-btn ds-btn-ghost\" type=\"button\"><svg class=\"ds-icon\" viewBox=\"0 0 24 24\" aria-hidden=\"true\"><path d=\"M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4\"/><path d=\"m16 17 5-5-5-5\"/><path d=\"M21 12H9\"/></svg><span>Sign out</span></button></div></header>",
+      "css": ".ds-header { display: flex; flex-wrap: wrap; align-items: baseline; gap: 0 1rem; padding-block: 0.75rem; padding-inline: 1rem; background-color: var(--surface, #f3f4f6); color: var(--fg, #1b1f24); font: 1rem/1.5 system-ui, sans-serif; } .ds-brand { flex-basis: 100%; margin: 0; font-weight: 600; } .ds-brand a { display: inline-block; padding-block: 0.25rem; } .ds-brand-mark { vertical-align: text-bottom; margin-inline-end: 0.5rem; } .ds-brand-tile { fill: var(--accent, #1d4ed8); } .ds-brand-slats { fill: var(--bg, #ffffff); } .ds-nav { display: flex; flex-wrap: wrap; gap: 0.25rem 1rem; margin: 0; padding: 0; list-style: none; } .ds-nav a { display: inline-block; padding-block: 0.25rem; } .ds-link { color: var(--accent, #1d4ed8); text-decoration: underline; text-decoration-thickness: max(1px, 0.0625em); text-underline-offset: 0.25em; text-decoration-skip-ink: auto; } .ds-link:hover { text-decoration-thickness: max(2px, 0.125em); } .ds-link[aria-current=\"page\"] { font-weight: 700; } .ds-link-inherit { color: inherit; } .ds-account { display: flex; flex-wrap: wrap; justify-content: flex-end; align-items: baseline; gap: 0.25rem 1rem; margin-inline-start: auto; min-inline-size: 0; } .ds-version { margin: 0; padding-block: 0.25rem; color: var(--muted, #4b5563); text-align: end; overflow-wrap: anywhere; } .ds-btn { --tone: var(--muted, #4b5563); display: inline-flex; align-items: center; justify-content: center; gap: 0.5em; box-sizing: border-box; min-block-size: 2em; padding-inline: 0.75em; border: 1px solid transparent; border-radius: var(--radius-small, 0.25rem); background: transparent; color: var(--tone); font: inherit; cursor: pointer; } .ds-btn:hover { background-color: var(--bg, #ffffff); color: var(--muted-hover, #374151); } :focus-visible { outline: 3px solid var(--focus, #1d4ed8); outline-offset: 2px; } .ds-icon { flex: none; inline-size: 1em; block-size: 1em; fill: none; stroke: currentColor; stroke-width: 2; stroke-linecap: round; stroke-linejoin: round; }"
+    }
+  ],
+  "narrative": {
+    "northStar": "The Ledger",
+    "overview": "Ladderback's web UI is a ledger of backups: ruled rows of facts, each with its unit, read top to bottom. A page is a heading, a sentence that says where things stand, and a table or a form. The person comes to check that every machine is backed up, notice the one that isn't, and act; nothing on the page competes with that.\n\nThe look is plain, on purpose. Headings and dialogs are the browser's native controls, and a button, a text field, a checkbox and a radio are native elements drawn from the tokens, so they look the same in every browser while they behave the way the reader's browser, zoom, high-contrast mode and screen reader expect. All are sized to the text around them. Surfaces are flat. One blue carries links, focus, progress, a chosen checkbox or radio and a row's main action, three status hues tell what went well, what needs a look and what failed, always beside words, and quiet pairs, dark words on a pale fill (pale on deep in dark mode), say what a run is doing. Everything else is text.\n\nAccessibility shapes the layout rather than decorating it: every layout holds at 320 px wide with text at 200 %, in both directions of writing, in light, dark and forced colors.",
+    "keyCharacteristics": [
+      "Native controls underneath, buttons, fields and choices drawn from the tokens, flat surfaces, no shadows.",
+      "One accent, Ladder Blue, for action: links, the focus ring, progress and a row's one Filled button. Three status hues beside it, never alone.",
+      "State is a labeled badge with an icon, never color alone.",
+      "Tables with one muted rule per row and columns that don't move as rows change.",
+      "Logical properties only; layouts follow the page's writing direction."
+    ],
+    "rules": [
+      {
+        "name": "The One Blue Rule",
+        "body": "Ladder Blue is the one accent for action. Beside it stand three status hues, Tick Green, Flag Amber and Red Ink, which never carry a meaning alone: a part drawn in one says it in words or an icon too. Any other new meaning gets words, weight or an icon, not a new hue.",
+        "section": "colors"
+      },
+      {
+        "name": "The Pair Rule",
+        "body": "A color is added as a text-and-background pair with a contrast check in `scripts/check-contrast.ts`, never as a lone value.",
+        "section": "colors"
+      },
+      {
+        "name": "The Weight Not Color Rule",
+        "body": "Current, selected and pressed are said by weight (and an inset edge on a pressed button, a bar beside a selected tab), never by color alone.",
+        "section": "typography"
+      },
+      {
+        "name": "The Reader's Size Rule",
+        "body": "Form controls inherit the page's font (`font: inherit`), so a button's label doubles when the reader doubles their text.",
+        "section": "typography"
+      },
+      {
+        "name": "The 320 Rule",
+        "body": "Every page fits 320 px wide with 200 % text without scrolling sideways. Long words break (`overflow-wrap: anywhere`); a path, address or ID moves to the next line whole before it breaks inside. A data table wider than the page scrolls inside its own frame, never the page.",
+        "section": "layout"
+      },
+      {
+        "name": "The Logical Rule",
+        "body": "Margins, padding, sizes and insets use logical properties (`inline-size`, `margin-block`, `inset-inline-start`), never left, right, width or height.",
+        "section": "layout"
+      },
+      {
+        "name": "The Flat Ledger Rule",
+        "body": "Surfaces never cast shadows. Separation is a fill, a rule or a heading.",
+        "section": "elevation"
+      }
+    ],
+    "dos": [
+      "**Do** use the shared components in `crates/web/src/components/` and add new ones to `/_gallery`, each taking its color, size and placement from the shared vocabulary.",
+      "**Do** style with Tailwind utilities first, and write custom CSS in `style.css` only for what they can't reasonably express, with a comment saying why (decision 117).",
+      "**Do** take colors only from the custom properties in `style.css`, through their Tailwind names (`text-muted`, `bg-surface`), or `var()` in the custom CSS that remains.",
+      "**Do** give every state words and an icon or weight as well as its color.",
+      "**Do** keep a changing table's columns still: fixed shares, or widths that don't depend on a cell's changing content.",
+      "**Do** check a new layout at 320 px with 200 % text, right to left, in dark mode and under forced colors."
+    ],
+    "donts": [
+      "**Don't** add dashboard chrome: cards, gradients, glows, shadows or big hero numbers.",
+      "**Don't** repeat a failure in red across the page. It is stated once, as an error badge or one alert or error message; no red banners, red rows or red headings.",
+      "**Don't** restyle a native control with custom fills, radii or borders outside its shared component: a button's look is `Button`'s.",
+      "**Don't** introduce a second accent color, a fourth status hue, or a color without a contrast-checked pair.",
+      "**Don't** set text or control sizes in pixels, or use physical properties (`left`, `width`, `margin-top`).",
+      "**Don't** animate anything that the reduced-motion rule can't turn off: under reduced motion nothing moves, resizes, rotates, scales or loops, and only a fade of a color or the opacity, 600 ms at most, stays (decision 130)."
+    ]
+  }
+}

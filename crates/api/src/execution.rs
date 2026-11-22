@@ -102,6 +102,24 @@ pub struct OperationSummaryDto {
     /// Snapshot contents.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub entry: Option<String>,
+    /// Where a restore wrote what it restored, as the log kept it (#813).
+    /// Left out for every other operation, for a restore an earlier version
+    /// logged, and for a program without the permission Snapshot contents.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub restored_to: Option<RestoredToDto>,
+}
+
+/// Where a restore wrote what it restored (#813).
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "schemars", derive(schemars::JsonSchema))]
+#[serde(tag = "type", rename_all = "kebab-case")]
+pub enum RestoredToDto {
+    /// Over the entry's original path.
+    InPlace,
+    /// Into a new folder on the agent's machine: its path, with every
+    /// character that would break the line or reorder it made visible, and
+    /// a path past 1 KiB cut to its end after `…`.
+    Folder { path: String },
 }
 
 impl OperationSummaryDto {
@@ -117,6 +135,16 @@ impl OperationSummaryDto {
     pub fn with_entry(self, entry: String) -> Self {
         Self {
             entry: Some(entry),
+            ..self
+        }
+    }
+
+    /// The same summary, naming where a restore wrote what it restored, as
+    /// the log kept it (#813).
+    #[must_use]
+    pub fn with_restored_to(self, restored_to: RestoredToDto) -> Self {
+        Self {
+            restored_to: Some(restored_to),
             ..self
         }
     }
@@ -196,6 +224,7 @@ impl OperationSummaryDto {
             repository,
             locations: Vec::new(),
             entry: None,
+            restored_to: None,
         })
     }
 }

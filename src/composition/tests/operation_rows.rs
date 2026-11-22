@@ -65,6 +65,7 @@ fn logged(
         repository_alias: alias.map(|alias| RepositoryAlias::parse(alias).expect("an alias")),
         locations: None,
         entry: None,
+        restored_to: None,
     }
 }
 
@@ -109,6 +110,30 @@ fn a_restores_row_names_the_entry_it_read() {
     let old = logged(OperationKind::Restore, None, None);
     let wire = serde_json::to_value(summary(&old).expect("a row")).expect("a summary is JSON");
     assert_eq!(wire.get("entry"), None);
+}
+
+/// A restore's row names where it went, a new folder or in place, as the
+/// log kept it; one logged before that was kept names neither, and its JSON
+/// has no `restored-to` (#813).
+#[test]
+fn a_restores_row_names_where_it_went() {
+    use domain::execution::logged_entry::RestoredTo;
+    let mut restore = logged(OperationKind::Restore, None, None);
+    restore.restored_to = Some(RestoredTo::Folder("/srv/restore/laptop".to_owned()));
+    let wire = serde_json::to_value(summary(&restore).expect("a row the page can show"))
+        .expect("a summary is JSON");
+    assert_eq!(
+        wire["restored-to"],
+        serde_json::json!({"type": "folder", "path": "/srv/restore/laptop"})
+    );
+
+    restore.restored_to = Some(RestoredTo::InPlace);
+    let wire = serde_json::to_value(summary(&restore).expect("a row")).expect("a summary is JSON");
+    assert_eq!(wire["restored-to"], serde_json::json!({"type": "in-place"}));
+
+    let old = logged(OperationKind::Restore, None, None);
+    let wire = serde_json::to_value(summary(&old).expect("a row")).expect("a summary is JSON");
+    assert_eq!(wire.get("restored-to"), None);
 }
 
 /// The page names an operation's warnings by their codes, each once,
