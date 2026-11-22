@@ -15,7 +15,7 @@ use app::access::{
 };
 use app::ports::StoreError;
 use domain::access::{PASSWORD_MAX_BYTES, PASSWORD_MIN_CHARS};
-use l10n::{Localizer, MessageId, PosixEnv, msg};
+use l10n::{Localizer, MessageId, msg};
 use platform::admin_password::{FILE, FileAdminPassword};
 use platform::data_dir_lock::{DataDirLock, LockError};
 use platform::{dirs, terminal};
@@ -24,8 +24,10 @@ use store::SqliteStore;
 use crate::output::to_stderr;
 use crate::{finish, say, text};
 
-pub(crate) fn set_password(_plain: bool) -> ExitCode {
-    let localizer = Localizer::new(&PosixEnv::from_process().preferences());
+pub(crate) fn set_password(plain: bool) -> ExitCode {
+    // Core dumps and debugger attach are off before the password is read
+    // (decision 98): a Ctrl-\ at the prompt dumps nothing.
+    let localizer = crate::start_protected(plain, None);
     finish(&localizer, run(&localizer))
 }
 
