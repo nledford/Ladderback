@@ -4,7 +4,7 @@ Guidance for coding agents working on Ladderback, a self-hosted backup manager f
 
 ## Status
 
-Early development, working through the milestones in [docs/design/roadmap.md §14](docs/design/roadmap.md#14-milestones). What has merged is in the git history, and follow-up work is tracked as GitHub issues.
+Working toward the MVP: a build people can install and test for real before 1.0.0. The [MVP milestone](https://github.com/nledford/Ladderback/milestone/12) holds what that needs, and [docs/design/roadmap.md §14](docs/design/roadmap.md#14-milestones) names the phases after it. Common real-user paths come first: a rare edge case becomes a known limit written in the pull request, and a review's minor finding is fixed when it is quick and filed as an issue otherwise. What has merged is in the git history, and follow-up work is tracked as GitHub issues.
 
 ## Commands
 
@@ -75,6 +75,7 @@ Keyed by what you see. Each line points at where the full reason lives.
 - **A mutant "survives" in `web` DOM glue or in wasm32-only code:** that code never runs on the host (§13.1). Exclude the file in `.cargo/mutants.toml` only when `just test-wasm` or the `@ui` scenarios test it, with its reason, and say so in the pull request; code that decides anything moves out of the glue into a host-tested module instead.
 - **"Temporary failure resolving 'security.ubuntu.com'", then "install-browser: apt failed; trying once more in 30 s"** in a `UI journeys` job or the red-first job: the runner couldn't reach Ubuntu's package servers. The browsers' system packages come from a cache (`.github/actions/browser`), so this happens only when the cache misses, after a new runner image or Playwright version, and after Quad9 and one retry have failed too. Nothing in the change causes it; rerun the failed jobs once it clears (`gh run rerun <run-id> --failed`).
 - **Version scenarios expect `Version …+<sha>` of a commit made during the run** (`version.feature`, `update_notice.feature`, `daemon_log.feature`; some wait out the whole 30 s step limit): the binary carries the commit it was built from, but the steps read the checkout's live git state (#590). Don't commit or edit tracked files while `just test-ui` runs; rerun without.
+- **A layout scenario passes on macOS and fails on CI by a few pixels, or a line wraps** (the header's one-line and height checks): CI's Linux fonts are wider than macOS's. Leave real margin, measured with the text about 5% wider (or in a Linux container with DejaVu Sans, CI's font); never raise the scenario's limit.
 
 ## Read first
 
@@ -170,7 +171,7 @@ If you think a check is wrong, name it, say why, and stop for the maintainer.
 
 | Lane | What it runs | Use it |
 |---|---|---|
-| Quick, local | `just quick-ci`, the scenarios the change touches (`just test-e2e --name`, `just test-ui --name` for UI work), and `just red-first` on a `behaviour` branch | Before every push, and while iterating |
+| Quick, local | `just quick-ci`, the scenarios the change touches (`just test-e2e --name`, `just test-ui --name` for UI work), and `just red-first` on a `behaviour` branch. A change to what every page shows (the header, the footer, the page frame, `style.css`'s base rules) runs the whole `@ui` suite, since it reaches scenarios the change never names; while `CI_MODE` is `mvp`, it runs the scenarios it touches in WebKit too (`just test-ui webkit --name`), which CI then runs only after the merge | Before every push, and while iterating |
 | Full, CI | CI's checks on the pull request: `just test` (doc tests and `@e2e` too) on Linux and macOS, `just test-release`, `just mutants`, the whole `@ui` suite in Chromium, and in Firefox and WebKit when the pull request touches the UI, red-first on Linux. While the variable `CI_MODE` is `mvp`, a pull request runs a reduced set ([decision 124](docs/design/decisions/124-mvp-ci-mode.md)) | Defer to it for everything the quick lane leaves out. A pull request is done when its required checks pass on its current head commit: quote that run |
 | Full, local | `just verify`, or one full recipe | Only to reproduce a CI failure, or for evidence CI can't give yet (Linux behaviour on a Mac: a container run) |
 
