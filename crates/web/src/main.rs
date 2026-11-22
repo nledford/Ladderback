@@ -80,6 +80,9 @@ mod dry_run_allowlist;
 // browser journeys.
 mod backend;
 mod maintenance;
+// What the header's menu decides on a narrow screen, host-tested;
+// `MenuButton` and `Navigation` below are its glue.
+mod navigation;
 // What a row of the Operations page says, decided on the host.
 mod operations;
 // The Operations page: its DOM glue, and the decisions not yet moved out of

@@ -164,9 +164,10 @@ keyring = { version = "3.6.3", default-features = false }
 # (circle-dashed) and `math` (circle-x, circle-slash); for the buttons, which
 # add plus (`math`) and pencil (`cursors`), `arrows` (arrow-up, arrow-down,
 # play, rotate-ccw, log-out), `multimedia` (pause) and `files` (trash),
-# turned on by the maintainer and measured in technical design §8.1; and
-# `accessibility` (eye, eye-off) for the text field's Show password button.
-lepticons-data = { version = "0.1.2", default-features = false, features = ["notifications", "time", "cursors", "shapes", "math", "accessibility", "arrows", "multimedia", "files"] }
+# turned on by the maintainer and measured in technical design §8.1;
+# `accessibility` (eye, eye-off) for the text field's Show password button;
+# and `layout` (menu) for the header's hamburger button (decision 143).
+lepticons-data = { version = "0.1.2", default-features = false, features = ["notifications", "time", "cursors", "shapes", "math", "accessibility", "arrows", "multimedia", "files", "layout"] }
 leptos = { version = "0.8.23", features = ["csr"] }
 leptos_router = "0.8"
 log = "0.4.35"

@@ -7,8 +7,11 @@ Feature: The header bar
   in the order of Tab, and no taller than they are, so where the line fits,
   Sign out doesn't make the header taller. A sign-out that fails says so in
   the page, not in the header, which keeps its height, and isn't said again
-  once the session has ended. On a narrow screen Sign out wraps under the
-  links and stays at the line's end.
+  once the session has ended. On a screen narrower than 41rem the links no
+  longer fit on one line, so they and Sign out sit in a menu behind a
+  hamburger button, an icon-only one named "Menu": the header is then the
+  brand's line, with the button at its end, and, shown, a panel of one row
+  for each page and for Sign out (decision 143).
 
   Scenario: Signed in, the pages' links and Sign out share one line, Sign out comes after the pages, and the version is not in the header
     Given a viewport of 1280 by 720 pixels
@@ -25,6 +28,7 @@ Feature: The header bar
     And I press Tab
     Then focus is on the button "Sign out"
     And the button "Sign out" is in the banner, outside the navigation
+    And the banner shows no button "Menu"
     When I press Tab
     Then focus is on a control in the main content
     And the page has no accessibility violations
@@ -66,7 +70,35 @@ Feature: The header bar
     Examples:
       | width | height | size | colors       |
       | 1280  | 720    | 100  | light colors |
-      | 320   | 256    | 200  | dark colors  |
+
+  # Below 41rem Sign out is a row of the menu's panel, so the button shows the
+  # panel first; the failed sign-out leaves the panel open, where focus is.
+  Scenario: A sign-out that reaches no daemon from the menu below 41rem is an error alert said assertively, and leaves the menu open and the header's height as it was, at 320 pixels with 200 percent text in dark colors
+    Given a viewport of 320 by 256 pixels
+    And the reader sets the text size to 200 percent
+    And the browser asks for "dark colors"
+    And a daemon with sign-in on and the admin password "demo-admin-pass"
+    When I open the address "/repositories"
+    And I skip to the content
+    And I press Tab until focus is on the textbox "Admin password"
+    And I type "demo-admin-pass"
+    And I press Enter
+    Then focus is on the heading "Repositories"
+    When I press Shift+Tab until focus is on the button "Menu"
+    And I press Enter
+    Then the button "Menu" is expanded
+    When the height of the header is noted
+    And the daemon has stopped
+    And I press Tab until focus is on the button "Sign out"
+    And I press Enter
+    Then the page shows an error alert containing "did not answer"
+    And the assertive region comes to contain "did not answer"
+    And the header keeps the height noted
+    And the button "Menu" is expanded
+    And focus is on the button "Sign out"
+    And the page doesn't scroll sideways
+    And no text is clipped
+    And the page has no accessibility violations
 
   Scenario: A failed sign-out's error alert isn't shown again once the session has ended another way and the admin signs in again
     Given a daemon with sign-in on and the admin password "demo-admin-pass"
@@ -91,8 +123,12 @@ Feature: The header bar
     Then focus is on the heading "Settings"
     And the page shows no error alert containing "did not answer"
 
-  Scenario Outline: On a narrow screen Sign out ends the header's line, at <size> percent text, and the version is not in the header
-    Given a viewport of 320 by <height> pixels
+  # Below 41rem the seven links no longer fit on one line, so they and Sign
+  # out sit in a panel behind a hamburger button, as on most small screens
+  # (decision 143): the brand's line ends with the icon-only button, a
+  # finger's target, and the panel stands under it when shown.
+  Scenario Outline: On a screen narrower than 41rem the pages' links and Sign out sit behind an icon-only Menu button, at <size> percent text
+    Given a viewport of <width> by <height> pixels
     And the reader sets the text size to <size> percent
     And a daemon with sign-in on and the admin password "demo-admin-pass"
     When I open the address "/repositories"
@@ -101,17 +137,167 @@ Feature: The header bar
     And I type "demo-admin-pass"
     And I press Enter
     Then focus is on the heading "Repositories"
-    And the button "Sign out" ends its line, at the header's inline end
+    And the header is under 9 rem tall
+    And the button "Menu" is collapsed
+    And the button "Menu" shows an icon and no words
+    And the button "Menu" is at least 44 pixels square
+    And the pages' links are hidden
+    And the button "Sign out" is hidden
     And the banner doesn't show the running version
-    And the button "Sign out" is at least 2rem tall, the size of the reader's text
     And the page doesn't scroll sideways
     And no text is clipped
     And the page has no accessibility violations
 
     Examples:
-      | height | size |
-      | 640    | 100  |
-      | 256    | 200  |
+      | width | height | size |
+      | 390   | 844    | 100  |
+      | 320   | 640    | 100  |
+      | 320   | 256    | 200  |
+
+  Scenario: The Menu button shows the pages' links and Sign out as rows of a panel, Tab reaches each in order, and Escape hides them and returns focus to the button
+    Given a viewport of 390 by 844 pixels
+    And a daemon with sign-in on and the admin password "demo-admin-pass"
+    When I open the address "/repositories"
+    And I skip to the content
+    And I press Tab until focus is on the textbox "Admin password"
+    And I type "demo-admin-pass"
+    And I press Enter
+    Then focus is on the heading "Repositories"
+    When I press Shift+Tab until focus is on the button "Menu"
+    And I press Enter
+    Then the button "Menu" is expanded
+    And the button "Menu" names the menu panel
+    And the link "Ladderback" and the button "Menu" share a line
+    And the menu panel is a bordered box with rounded corners, under the brand's line
+    And the menu panel's rows are these, in order, each at least 3 rem tall and as wide as the panel:
+      | row             |
+      | Operations      |
+      | Plans           |
+      | Pending changes |
+      | Snapshots       |
+      | Repositories    |
+      | Log             |
+      | Settings        |
+      | Sign out        |
+    And the link "Repositories" is the current page, drawn bold
+    And the link "Repositories" is marked by a bar at its inline start that no other row has
+    When I press Tab
+    Then focus is on the link "Operations"
+    When I press Tab until focus is on the link "Settings"
+    And I press Tab
+    Then focus is on the button "Sign out"
+    When I press Escape
+    Then the button "Menu" is collapsed
+    And the pages' links are hidden
+    And focus is on the button "Menu"
+    And the header is under 9 rem tall
+    And the page has no accessibility violations
+
+  # The panel's box and the current page's bar are what tell the reader where
+  # the menu is and where they are, so they stay in the reader's colors.
+  Scenario Outline: The menu panel's border and the current page's bar stand apart from what they lie on, in <colors>
+    Given a viewport of 390 by 844 pixels
+    And the browser asks for "<colors>"
+    And a daemon with sign-in on and the admin password "demo-admin-pass"
+    When I open the address "/repositories"
+    And I skip to the content
+    And I press Tab until focus is on the textbox "Admin password"
+    And I type "demo-admin-pass"
+    And I press Enter
+    Then focus is on the heading "Repositories"
+    When I press Shift+Tab until focus is on the button "Menu"
+    And I press Enter
+    Then the menu panel's border and the bar of the link "Repositories" show, at least 3 to 1 against what they lie on
+    And the page has no accessibility violations
+
+    Examples:
+      | colors        |
+      | light colors  |
+      | dark colors   |
+      | forced colors |
+
+  # The button is drawn below 41rem alone. Where it isn't, Escape has nothing
+  # to close and nowhere to return focus to, so it changes nothing.
+  Scenario: Escape in the header with the window widened past 41rem leaves the Menu button as it was
+    Given a viewport of 390 by 844 pixels
+    And a daemon with sign-in on and the admin password "demo-admin-pass"
+    When I open the address "/repositories"
+    And I skip to the content
+    And I press Tab until focus is on the textbox "Admin password"
+    And I type "demo-admin-pass"
+    And I press Enter
+    Then focus is on the heading "Repositories"
+    When I press Shift+Tab until focus is on the button "Menu"
+    And I press Enter
+    Then the button "Menu" is expanded
+    When the window widens to 1280 pixels
+    And I press Tab until focus is on the link "Settings"
+    And I press Escape
+    Then focus is on the link "Settings"
+    When the window narrows to 390 pixels
+    Then the button "Menu" is expanded
+    And the pages' links are shown below the brand's line, each at least 3 rem tall
+    And the page has no accessibility violations
+
+  Scenario: Choosing a page from the menu closes it again
+    Given a viewport of 390 by 844 pixels
+    And a daemon with sign-in on and the admin password "demo-admin-pass"
+    When I open the address "/repositories"
+    And I skip to the content
+    And I press Tab until focus is on the textbox "Admin password"
+    And I type "demo-admin-pass"
+    And I press Enter
+    Then focus is on the heading "Repositories"
+    When I press Shift+Tab until focus is on the button "Menu"
+    And I press Enter
+    Then the button "Menu" is expanded
+    When I press Tab
+    And I press Enter
+    Then focus is on the heading "Operations"
+    And the button "Menu" is collapsed
+    And the pages' links are hidden
+    And the page has no accessibility violations
+
+  Scenario: Choosing the current page from the menu closes it too
+    Given a viewport of 390 by 844 pixels
+    And a daemon with sign-in on and the admin password "demo-admin-pass"
+    When I open the address "/repositories"
+    And I skip to the content
+    And I press Tab until focus is on the textbox "Admin password"
+    And I type "demo-admin-pass"
+    And I press Enter
+    Then focus is on the heading "Repositories"
+    When I press Shift+Tab until focus is on the button "Menu"
+    And I press Enter
+    Then the button "Menu" is expanded
+    When I press Tab until focus is on the link "Repositories"
+    And I press Enter
+    Then the button "Menu" is collapsed
+    And the pages' links are hidden
+    And the page has no accessibility violations
+
+  Scenario: Signing out from the menu and in again finds the menu closed, whatever the Menu button showed
+    Given a viewport of 390 by 844 pixels
+    And a daemon with sign-in on and the admin password "demo-admin-pass"
+    When I open the address "/repositories"
+    And I skip to the content
+    And I press Tab until focus is on the textbox "Admin password"
+    And I type "demo-admin-pass"
+    And I press Enter
+    Then focus is on the heading "Repositories"
+    When I press Shift+Tab until focus is on the button "Menu"
+    And I press Enter
+    Then the button "Menu" is expanded
+    When I press Tab until focus is on the button "Sign out"
+    And I press Enter
+    Then the main heading reads "Sign in to Ladderback"
+    And I press Tab until focus is on the textbox "Admin password"
+    And I type "demo-admin-pass"
+    And I press Enter
+    Then focus is on the heading "Repositories"
+    And the button "Menu" is collapsed
+    And the pages' links are hidden
+    And the page has no accessibility violations
 
   # The header's links are the shared link (§4.5), underlined and in the
   # color of the text around them, the product's name and the pages' links
