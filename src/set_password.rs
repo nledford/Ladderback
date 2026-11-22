@@ -24,7 +24,7 @@ use store::SqliteStore;
 use crate::output::to_stderr;
 use crate::{finish, say, text};
 
-pub(crate) fn set_password() -> ExitCode {
+pub(crate) fn set_password(_plain: bool) -> ExitCode {
     let localizer = Localizer::new(&PosixEnv::from_process().preferences());
     finish(&localizer, run(&localizer))
 }

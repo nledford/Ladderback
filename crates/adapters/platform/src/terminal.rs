@@ -397,4 +397,70 @@ mod tty_tests {
             "{status:?}"
         );
     }
+
+    /// Set in the copy of this test binary that
+    /// [`ctrl_backslash_at_the_prompt_puts_echo_back_and_ends_the_process`]
+    /// runs.
+    const AT_PROMPT: &str = "LADDERBACK_TEST_QUIT_AT_PROMPT";
+
+    /// Ctrl-\ (`SIGQUIT`) at the prompt does what Ctrl-C does (#1256): the
+    /// terminal's echo comes back and the process ends by the signal. The
+    /// copy turns its core dumps off first, as every command that prompts
+    /// does, so the signal's default action leaves no dump either.
+    #[test]
+    fn ctrl_backslash_at_the_prompt_puts_echo_back_and_ends_the_process() {
+        use std::os::unix::process::ExitStatusExt;
+        use std::process::{Command, Stdio};
+        use std::time::Instant;
+
+        use nix::sys::signal::{Signal, kill};
+        use nix::unistd::Pid;
+        if std::env::var_os(AT_PROMPT).is_some() {
+            let unprotected = crate::dumps::refuse();
+            assert!(unprotected.is_empty(), "{unprotected:?}");
+            // Nothing is ever typed: only the signal ends this read.
+            let _ = read_secret_line(64);
+            return;
+        }
+        let pty = openpty(None, None).unwrap();
+        let tty = pty.slave;
+        let echoes = |tty: &std::os::fd::OwnedFd| {
+            tcgetattr(tty)
+                .unwrap()
+                .local_flags
+                .contains(LocalFlags::ECHO)
+        };
+        assert!(echoes(&tty), "the terminal starts without echo");
+        let mut copy = Command::new(std::env::current_exe().unwrap())
+            .args([
+                "--exact",
+                "terminal::tty_tests::ctrl_backslash_at_the_prompt_puts_echo_back_and_ends_the_process",
+            ])
+            .env(AT_PROMPT, "1")
+            .stdin(Stdio::from(tty.try_clone().unwrap()))
+            .stdout(Stdio::null())
+            // A copy that fails says why in this test's output.
+            .stderr(Stdio::inherit())
+            .spawn()
+            .unwrap();
+        let until = Instant::now() + Duration::from_secs(10);
+        while echoes(&tty) {
+            assert!(Instant::now() < until, "the prompt never turned echo off");
+            let ended = copy.try_wait().unwrap();
+            assert_eq!(ended, None, "the copy ended before it prompted");
+            std::thread::sleep(Duration::from_millis(10));
+        }
+        let pid = Pid::from_raw(i32::try_from(copy.id()).unwrap());
+        kill(pid, Signal::SIGQUIT).unwrap();
+        let status = copy.wait().unwrap();
+
+        assert_eq!(
+            status.signal().map(Signal::try_from),
+            Some(Ok(Signal::SIGQUIT)),
+            "{status:?}"
+        );
+        assert!(!status.core_dumped(), "{status:?}");
+        assert!(echoes(&tty), "echo stayed off after Ctrl-\\");
+        drop(pty.master);
+    }
 }

@@ -593,7 +593,7 @@ pub(crate) struct PairAsk {
 /// `ladderback pair`: reads a token at the terminal without echo, or as
 /// standard input, says what it read, and once the person confirms pairs
 /// this machine with the hub, which holds it pending.
-pub(crate) fn pair(ask: PairAsk) -> ExitCode {
+pub(crate) fn pair(ask: PairAsk, _plain: bool) -> ExitCode {
     let localizer = Localizer::new(&PosixEnv::from_process().preferences());
     finish(&localizer, run_pair(&localizer, ask))
 }
