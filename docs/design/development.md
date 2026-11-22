@@ -56,7 +56,7 @@ A bug fix starts with a test that reproduces the bug.
    - **Where 590 comes from.** Of the last 460 merged pull requests (those with fewer than 1,000 mutants), 186 changed gated source. Their mutants per changed line had a median of 0.05 and a 90th percentile of 0.12, and 97 in 100 were at most 0.17: a shard of 100 mutants is 590 lines. A shard tests a mutant in 14 to 22 seconds (the slowest are `web`'s) after a baseline build of one to two minutes, so 100 take 25 to 40 of the 60 minutes. Of those 186, five had more than 100 mutants and were sized by this rule; they got two to four shards, and none a shard of more than 93 mutants. Recompute the ratio when the gate or its exclusions change a lot.
    - **The required check.** The check the ruleset requires, `Mutation testing (changed code)`, is a job that passes only when every shard passed, whether there is one or four.
    - **In MVP mode** (§13.8) the shards and the required check are skipped on pull requests; the nightly run still runs every mutant.
-   - **Nightly.** A full run happens nightly.
+   - **Nightly.** A full run happens nightly, round-robin over 32 shards, `Mutation testing (full, shard k of 32)`, at most 12 at once, each with `--jobs 2` on its own runner: on one runner the 8,551 mutants of 2026-11-21 outran its 180 minutes every night, and a 32nd of the 8,910 of 2026-11-22 is about 279, 65 to 102 minutes at the rate above. The step's limit (165 minutes) is under the job's, so a shard that runs out of time fails rather than ends as cancelled, and on a scheduled run `mutants-nightly-report` opens an issue for it, or comments on the open one.
 3. **Squash merge.** The check runs on the pull request before merge, and pull requests are squash-merged, so the failing `test:` commit never lands on `main` and `git bisect` stays clean.
 
 There is deliberately **no coverage percentage gate**. Coverage counts executed lines, not asserted behaviour; mutation testing measures the latter.
@@ -383,6 +383,7 @@ Renaming one of those jobs blocks every merge, so don't, unless the maintainer u
 
 - **Required checks still report.** A job the mode skips is skipped by its own `if`, which GitHub counts as passing, so each required name above still reports. `Check (macos-latest)` is a leg of the `Check` matrix and can't be skipped as a job: in MVP mode it stays, runs on a Linux runner and runs no step.
 - **Where it is read.** The `mvp` output of the `Changed paths` job in ci.yml, and `vars.CI_MODE` in red-first.yml's `if`. A job added to either keeps to the same rule: skipped by its own `if`, never renamed.
+- **A change to CI runs in full.** A pull request that changes `.github/workflows/`, `.github/actions/`, `scripts/` or the `Justfile` runs every job whatever `CI_MODE` says, so a change to a job the mode skips is tested before the merge (decision 124, item 7). Red-first still follows the variable.
 
 **The `Check` jobs' test step.** The `just test` step has a `timeout-minutes` of its own (30), below the job's 45: a run that hangs fails the step, whose log survives, where GitHub discards the log of a job it cancels at its limit (#638).
 

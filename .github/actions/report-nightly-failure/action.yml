@@ -1,5 +1,5 @@
 # Opens an issue for a failed nightly run, or comments on the open one, for
-# ci.yml's `deny-report` and `mutants-nightly` and release-builds.yml's
+# ci.yml's `deny-report` and `mutants-nightly-report` and release-builds.yml's
 # `report`: a scheduled run notifies no one, so without it a failure would go
 # unseen. Use it as `uses: $/.github/actions/report-nightly-failure`: GitHub
 # fetches the action from the commit the workflow runs, so the job needs no
