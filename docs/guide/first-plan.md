@@ -1,9 +1,8 @@
-# A first plan
+# Plans in config.toml
 
-A plan says what to back up, into which repository, when, and how long to keep its snapshots. A plan backs up to a repository by its name, so make one in this order:
+Ladderback keeps its repositories and plans in one file, `config.toml`, in its config folder: `~/.config/ladderback` on Linux, `~/Library/Application Support/ladderback` on macOS (`$XDG_CONFIG_HOME/ladderback` on Linux when that is set to a full path, and `$LADDERBACK_CONFIG_DIR` on either when that is set). The Repositories and Plans pages write it for you, as [Getting started](getting-started.md) shows, and keep its comments. You can write it by hand too: Ladderback reads the file again by itself, with no restart, and its start page lists each plan with its next run.
 
-1. **Connect a repository** on the Repositories page (the link at the top of every page): fill in its location and password, test it, give it a name such as `nas`, and connect it, or create a new one there. To have this machine forget old snapshots by your plans' keep policies, turn on "Maintain this repository from this machine", unless another machine already maintains it.
-2. **Add a plan to `config.toml`**, in Ladderback's config folder: `~/.config/ladderback` on Linux, `~/Library/Application Support/ladderback` on macOS (`$XDG_CONFIG_HOME/ladderback` on Linux when that is set to a full path, and `$LADDERBACK_CONFIG_DIR` on either when that is set). The Repositories page wrote the repository there; add a `[[plans]]` table after it. Ladderback reads the file again by itself, with no restart, and its start page lists the plan with its next run.
+By hand, a plan takes keys the Plans page doesn't offer yet, such as a schedule of `every = "6h"`, tags, a time zone, retries, and a keep policy by length of time. A plan backs up to a repository by its name, so connect the repository on the Repositories page first, which writes its `[repositories.<name>]` table, then add a `[[plans]]` table after it.
 
 This is a whole `config.toml` with one plan, which backs up a home folder every hour and leaves out caches and game libraries; on macOS, change `/home/demo` to `/Users/demo` in `iglobs` too:
 
@@ -43,4 +42,8 @@ keep-within-weekly = "1 month"
 keep-within-monthly = "1 year"
 ```
 
-A run the machine slept through runs when it wakes. Ladderback doesn't forget on a schedule yet: the keep policy takes effect when you press "Forget snapshots" on the Snapshots page, on a repository this machine maintains. Every key a plan takes, among them tags, a time zone, retries and hooks, is in [technical design §6.1](https://github.com/nledford/Ladderback/blob/main/docs/design/scheduling-and-config.md#61-source-of-truth); the filter and `keep-*` keys are rustic's own.
+The keep policy takes effect when you press **Forget snapshots** on the Snapshots page, as [Getting started](getting-started.md#known-limits) says. Every key a plan takes, among them tags, a time zone, retries and hooks, is in [technical design §6.1](https://github.com/nledford/Ladderback/blob/main/docs/design/scheduling-and-config.md#61-source-of-truth); the filter and `keep-*` keys are rustic's own.
+
+## Importing a rustic profile
+
+`ladderback import-profile <profile.toml>` adds a rustic profile's repository and its snapshot entries, as plans, to the configuration. When the profile runs commands (hooks, a `password-command`, an `rclone-command`), the import lists each one in full and asks `Import them? [y/N]` before it writes anything, since Ladderback then runs them on its jobs. Read them, and answer `y` only if you know what each does. In a script there is nobody to ask, so pass `--yes` once you have read them; without it nothing is imported. A profile's global hooks are imported only into an empty configuration: once you have a plan or a repository, add them to `[hooks]` yourself ([technical design §6.2](https://github.com/nledford/Ladderback/blob/main/docs/design/scheduling-and-config.md#62-importing-rustic-profiles)).

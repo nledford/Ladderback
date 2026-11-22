@@ -45,6 +45,22 @@ fn an_https_address_beyond_loopback_or_one_the_hub_refuses_is_not_warned_of() {
 }
 
 #[test]
+fn an_addresss_scheme_is_read_in_any_case_and_none_for_another() {
+    for (address, scheme) in [
+        ("http://127.0.0.1:9898", Some(Scheme::Http)),
+        (" HTTP://LOCALHOST:9898/ ", Some(Scheme::Http)),
+        ("http://hub.example:8080", Some(Scheme::Http)),
+        ("https://hub.example:9443", Some(Scheme::Https)),
+        ("HTTPS://127.1:9443", Some(Scheme::Https)),
+        ("ftp://127.0.0.1:21", None),
+        ("hub.example:9443", None),
+        ("", None),
+    ] {
+        assert_eq!(Scheme::of(address), scheme, "{address:?}");
+    }
+}
+
+#[test]
 fn a_token_counts_down_whole_seconds_from_the_hub_s_answer() {
     let at = |millis| Duration::from_millis(millis);
     let countdown = Countdown::new(900, at(10_000));

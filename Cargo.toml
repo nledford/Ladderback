@@ -443,8 +443,9 @@ domain.workspace = true
 engine = { workspace = true, features = ["history-fixture"] }
 futures.workspace = true
 log.workspace = true
-# `term`: a pseudo-terminal for `set-password`'s prompt.
-nix = { workspace = true, features = ["fs", "term"] }
+# `term`: a pseudo-terminal for `set-password`'s prompt. `resource` and
+# `process`: a command's core-dump limit and dumpable flag at its prompt.
+nix = { workspace = true, features = ["fs", "process", "resource", "term"] }
 platform.workspace = true
 rustic_backend.workspace = true
 hooks.workspace = true

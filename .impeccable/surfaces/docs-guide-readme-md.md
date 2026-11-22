@@ -7,7 +7,7 @@ related_targets: ["docs/guide"]
 
 ## Scope and mode
 
-The user guide site built from `docs/guide/` with mdBook and published on GitHub Pages: install, a first plan, secrets, sign-in and remote access, API tokens and AI agents. Mode: **Read**. The visitor understands something, then goes and does it in a terminal or the web UI.
+The user guide site built from `docs/guide/` with mdBook and published on GitHub Pages, in two parts: Using Ladderback (install, Getting started in the web UI) for everyone, then Advanced (other ways to install, the service, plans in `config.toml`, secrets, sign-in and remote access, API tokens and AI agents). Mode: **Read**. The visitor understands something, then goes and does it in a terminal or the web UI.
 
 ## Audience, job, task
 

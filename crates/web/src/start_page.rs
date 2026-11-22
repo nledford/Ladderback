@@ -1,6 +1,7 @@
 //! The start page, the route `/` (§4.4): the configured plans and when each
-//! runs next, where the format of a plan is described, and the ways to the
-//! Operations and Repositories pages. A plan's "Next run" cell is
+//! runs next, the ways to the Repositories and Plans pages while there are
+//! none, the way to the Operations page, and where the format of a plan in
+//! `config.toml` is described. A plan's "Next run" cell is
 //! `routes::next_run_cell`'s, host-tested; this is the DOM glue, which the
 //! `@ui` scenarios of `features/ui/start_page.feature` run.
 
@@ -36,11 +37,12 @@ pub(crate) const PLAN_FORMAT_URL: &str = concat!(
 );
 
 /// The start page, the route `/`: the configured plans, each with when it
-/// runs next on its schedule (§5), where the format of a plan is described,
-/// and the way to the operations page, where a backup is started by hand.
-/// Without plans it says to connect a repository first, with the way to the
-/// repositories page (#477). With sign-in off it says so, and how to turn it
-/// on (security §10.1).
+/// runs next on its schedule (§5), the way to the operations page, where a
+/// backup is started by hand, and, last, for whoever writes `config.toml` by
+/// hand, where the format of a plan is described. Without plans it says to
+/// connect a repository first and add the plan on the Plans page, with the
+/// way to each (#477, #1373). With sign-in off it says so, and how to turn
+/// it on (security §10.1).
 #[component]
 pub(crate) fn Start(localizer: Arc<Localizer>) -> impl IntoView {
     let heading = text(&localizer, msg::UI_START_HEADING);
@@ -51,6 +53,7 @@ pub(crate) fn Start(localizer: Arc<Localizer>) -> impl IntoView {
     let empty = text(&localizer, msg::UI_START_NO_PLANS);
     let operations_link = text(&localizer, msg::UI_START_OPERATIONS_LINK);
     let repositories_link = text(&localizer, msg::UI_START_REPOSITORIES_LINK);
+    let plans_link = text(&localizer, msg::UI_START_PLANS_LINK);
     let plan_format_link = text(&localizer, msg::UI_START_PLAN_FORMAT_LINK);
     let phase = RwSignal::new(Phase::Loading);
     // The configured plans; `None` until the read answers.
@@ -118,8 +121,11 @@ pub(crate) fn Start(localizer: Arc<Localizer>) -> impl IntoView {
                     }
                     _ => {
                         let repositories_link = repositories_link.clone();
+                        let plans_link = plans_link.clone();
                         let to = Destination::route("/repositories", Matching::Exact);
+                        let to_plans = Destination::route("/plans", Matching::Exact);
                         let localizer = Arc::clone(&localizer);
+                        let plans_localizer = Arc::clone(&localizer);
                         view! {
                             <p>{empty.clone()}</p>
                             <p>
@@ -132,6 +138,16 @@ pub(crate) fn Start(localizer: Arc<Localizer>) -> impl IntoView {
                                         }
                                     })}
                             </p>
+                            <p>
+                                {to_plans
+                                    .map(|to| {
+                                        view! {
+                                            <Link to=to localizer=plans_localizer>
+                                                {plans_link}
+                                            </Link>
+                                        }
+                                    })}
+                            </p>
                         }
                             .into_any()
                     }
@@ -139,21 +155,23 @@ pub(crate) fn Start(localizer: Arc<Localizer>) -> impl IntoView {
             }
         }}
         <p>
-            {Destination::outside(PLAN_FORMAT_URL)
-                .map(|to| {
-                    view! {
-                        <Link to=to localizer=links>
-                            {plan_format_link}
-                        </Link>
-                    }
-                })}
-        </p>
-        <p>
             {Destination::route("/operations", Matching::Exact)
                 .map(|to| {
                     view! {
                         <Link to=to localizer=operations_localizer>
                             {operations_link}
+                        </Link>
+                    }
+                })}
+        </p>
+        // The format of a plan in `config.toml` comes last: the Plans page
+        // adds and changes plans, and the file is for an advanced user.
+        <p>
+            {Destination::outside(PLAN_FORMAT_URL)
+                .map(|to| {
+                    view! {
+                        <Link to=to localizer=links>
+                            {plan_format_link}
                         </Link>
                     }
                 })}

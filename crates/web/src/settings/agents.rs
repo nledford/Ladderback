@@ -31,7 +31,7 @@ use crate::components::{
     focus_element, holds_focus, point_at_refusal, refusal_alert, say_refusals,
 };
 use crate::live::{PageClock, reply};
-use crate::pairing::{AddressWarning, Countdown, life, minutes};
+use crate::pairing::{AddressWarning, Countdown, Scheme, life, minutes};
 use crate::repositories::Sentence;
 use crate::routes::{instant, refused_sentence, text_with};
 use crate::session::Standing;
@@ -123,9 +123,9 @@ struct Shown {
     fingerprint: String,
     address: String,
     expires_at: String,
-    /// The token pins the hub's own certificate, rather than trusting a
-    /// certificate authority's.
-    pinned: bool,
+    /// The certificate the token's address shows: none for a plain
+    /// `http://` address.
+    certificate: Option<TokenCertificateDto>,
 }
 
 /// How a token the dialog showed ended while it was open.
@@ -250,7 +250,7 @@ impl Token {
             fingerprint: made.fingerprint,
             address: made.address,
             expires_at: made.expires_at,
-            pinned: made.certificate == TokenCertificateDto::Pinned,
+            certificate: made.certificate,
         }));
         self.open.set(true);
         self.count_down(id, countdown);
@@ -370,15 +370,10 @@ pub(crate) fn Agents(localizer: Arc<Localizer>, on: bool) -> impl IntoView {
         (step_up, Some(warning))
     };
     let address = RwSignal::new(ws::origin());
-    // The hub's own certificate is served over TLS: choosing it makes a
-    // plain address the same one over `https://`, as the hub serves both.
-    Effect::new(move |_| {
-        if certificate.get() == PINNED
-            && let Some(over_tls) = over_tls(address.get_untracked().trim())
-        {
-            address.set(over_tls);
-        }
-    });
+    // A plain address shows no certificate, so it is offered no choice of
+    // one (#1343).
+    let plain = Memo::new(move |_| Scheme::of(&address.get()) == Some(Scheme::Http));
+    let choice_t = t.clone();
     let life_typed = RwSignal::new(DEFAULT_LIFE.to_owned());
     let life_error = RwSignal::new(None::<String>);
     let confirmation = RwSignal::new(String::new());
@@ -402,13 +397,11 @@ pub(crate) fn Agents(localizer: Arc<Localizer>, on: bool) -> impl IntoView {
             return;
         };
         life_error.set(None);
+        let (asked_address, asked_certificate) =
+            asked(&address.get_untracked(), certificate.get_untracked());
         let ask = MakePairingTokenDto {
-            address: asked_address(&address.get_untracked(), certificate.get_untracked()),
-            certificate: if certificate.get_untracked() == PINNED {
-                TokenCertificateDto::Pinned
-            } else {
-                TokenCertificateDto::Ca
-            },
+            address: asked_address,
+            certificate: asked_certificate,
             life_minutes: Some(life_minutes),
             confirmation: confirmation.get_untracked(),
         };
@@ -528,22 +521,31 @@ pub(crate) fn Agents(localizer: Arc<Localizer>, on: bool) -> impl IntoView {
                         }
                     })
             }}
-            {if serves_own {
-                view! {
-                    <RadioGroup
-                        name=CERTIFICATE_GROUP
-                        legend=t(msg::UI_PAIRING_CERTIFICATE_LEGEND)
-                        description=t(msg::UI_PAIRING_CERTIFICATE_HINT)
-                        options=vec![
-                            (PINNED, t(msg::UI_PAIRING_CERTIFICATE_OWN)),
-                            (CA, t(msg::UI_PAIRING_CERTIFICATE_CA)),
-                        ]
-                        chosen=certificate
-                    />
+            {move || {
+                if plain.get() {
+                    let words = if serves_own {
+                        msg::UI_PAIRING_CERTIFICATE_NONE
+                    } else {
+                        msg::UI_PAIRING_CERTIFICATE_NONE_UNSERVED
+                    };
+                    view! { <p>{choice_t(words)}</p> }.into_any()
+                } else if serves_own {
+                    view! {
+                        <RadioGroup
+                            name=CERTIFICATE_GROUP
+                            legend=choice_t(msg::UI_PAIRING_CERTIFICATE_LEGEND)
+                            description=choice_t(msg::UI_PAIRING_CERTIFICATE_HINT)
+                            options=vec![
+                                (PINNED, choice_t(msg::UI_PAIRING_CERTIFICATE_OWN)),
+                                (CA, choice_t(msg::UI_PAIRING_CERTIFICATE_CA)),
+                            ]
+                            chosen=certificate
+                        />
+                    }
+                        .into_any()
+                } else {
+                    view! { <p>{choice_t(msg::UI_PAIRING_CERTIFICATE)}</p> }.into_any()
                 }
-                    .into_any()
-            } else {
-                view! { <p>{t(msg::UI_PAIRING_CERTIFICATE)}</p> }.into_any()
             }}
             <TextField
                 id=LIFE_ID
@@ -698,17 +700,25 @@ fn PairingDialog(localizer: Arc<Localizer>, token: Token) -> impl IntoView {
                                 </dd>
                                 <dt>{text(&localizer, msg::UI_PAIRING_ADDRESS)}</dt>
                                 <dd>{shown.address}</dd>
-                                <dt>{text(&localizer, msg::UI_PAIRING_CERTIFICATE_LABEL)}</dt>
-                                <dd>
-                                    {text(
-                                        &localizer,
-                                        if shown.pinned {
-                                            msg::UI_PAIRING_CERTIFICATE_PINNED
-                                        } else {
-                                            msg::UI_PAIRING_CERTIFICATE_CA
-                                        },
-                                    )}
-                                </dd>
+                                {shown
+                                    .certificate
+                                    .map(|certificate| {
+                                        let said = text(
+                                            &localizer,
+                                            match certificate {
+                                                TokenCertificateDto::Pinned => {
+                                                    msg::UI_PAIRING_CERTIFICATE_PINNED
+                                                }
+                                                TokenCertificateDto::Ca => msg::UI_PAIRING_CERTIFICATE_CA,
+                                            },
+                                        );
+                                        view! {
+                                            <dt>
+                                                {text(&localizer, msg::UI_PAIRING_CERTIFICATE_LABEL)}
+                                            </dt>
+                                            <dd>{said}</dd>
+                                        }
+                                    })}
                                 <dt>{text(&localizer, msg::UI_PAIRING_LAPSES_LABEL)}</dt>
                                 <dd>
                                     {move || lapses(
@@ -834,37 +844,24 @@ pub(crate) fn lapsed(
     )
 }
 
-/// The plain `address` as the same one over `https://`, its port kept: the
-/// hub serves both on one port, so `http://hub` is `https://hub:80`.
-/// `None` for an address that isn't plain.
-fn over_tls(address: &str) -> Option<String> {
-    let rest = address.strip_prefix("http://")?;
-    let end = rest.find(['/', '?', '#']).unwrap_or(rest.len());
-    let (authority, path) = rest.split_at(end);
-    // A port follows the last colon, outside an IPv6 address's brackets.
-    let has_port = authority
-        .rsplit_once(':')
-        .is_some_and(|(host, _)| host.ends_with(']') || !host.contains('['));
-    Some(if has_port {
-        format!("https://{rest}")
-    } else {
-        format!("https://{authority}:80{path}")
-    })
-}
-
-/// The address a token is asked for at: the one typed, over `https://`
-/// when it is to pin the hub's own certificate, whenever it was typed.
-fn asked_address(typed: &str, certificate: &str) -> String {
+/// What a token is asked for: the address as typed, without the spaces
+/// around it, and the certificate chosen; but a plain `http://` address
+/// shows no certificate, so its token pins none, even when the hub's own was
+/// chosen before the address was typed (#1343).
+fn asked(typed: &str, chosen: &str) -> (String, TokenCertificateDto) {
     let typed = typed.trim();
-    match over_tls(typed) {
-        Some(over_tls) if certificate == PINNED => over_tls,
-        _ => typed.to_owned(),
-    }
+    let certificate = match Scheme::of(typed) {
+        Some(Scheme::Http) => TokenCertificateDto::Ca,
+        _ if chosen == PINNED => TokenCertificateDto::Pinned,
+        _ => TokenCertificateDto::Ca,
+    };
+    (typed.to_owned(), certificate)
 }
 
 #[cfg(test)]
 mod tests {
-    use super::{CA, PINNED, asked_address, instant, lapsed, lapses, over_tls};
+    use super::{CA, PINNED, asked, instant, lapsed, lapses};
+    use api::TokenCertificateDto;
     use l10n::Localizer;
 
     /// Without the viewer's zone the dialog writes the lapse time in UTC,
@@ -886,43 +883,47 @@ mod tests {
         );
     }
 
+    /// The choice is asked for at the address as typed, but a plain
+    /// address shows no certificate, so its token pins none, even when the
+    /// hub's own was chosen before it was typed (#1343).
     #[test]
-    fn a_plain_address_goes_over_tls_on_the_same_port() {
-        for (plain, over) in [
-            ("http://hub.example:9898", "https://hub.example:9898"),
-            ("http://hub.example", "https://hub.example:80"),
-            ("http://hub.example/", "https://hub.example:80/"),
-            ("http://[::1]", "https://[::1]:80"),
-            ("http://[::1]:9898/x", "https://[::1]:9898/x"),
-        ] {
-            assert_eq!(over_tls(plain).as_deref(), Some(over), "{plain}");
-        }
-        assert_eq!(over_tls("https://hub.example"), None);
-    }
-
-    /// An address typed after the hub's own certificate was chosen is
-    /// asked for over TLS too, its port kept; a certificate authority's
-    /// token is asked for at the address as typed.
-    #[test]
-    fn a_pinned_token_is_asked_for_over_tls_whenever_its_address_was_typed() {
-        for (typed, certificate, asked) in [
+    fn a_token_is_asked_for_at_the_address_typed_and_a_plain_one_pins_nothing() {
+        for (typed, chosen, address, certificate) in [
             (
                 " http://hub.example:9898 ",
                 PINNED,
-                "https://hub.example:9898",
+                "http://hub.example:9898",
+                TokenCertificateDto::Ca,
+            ),
+            (
+                "HTTP://127.0.0.1:9898",
+                PINNED,
+                "HTTP://127.0.0.1:9898",
+                TokenCertificateDto::Ca,
+            ),
+            (
+                "http://hub.example:9898",
+                CA,
+                "http://hub.example:9898",
+                TokenCertificateDto::Ca,
             ),
             (
                 "https://hub.example:9443",
                 PINNED,
                 "https://hub.example:9443",
+                TokenCertificateDto::Pinned,
             ),
-            ("http://hub.example:9898", CA, "http://hub.example:9898"),
-            ("https://proxy.example", CA, "https://proxy.example"),
+            (
+                "https://proxy.example",
+                CA,
+                "https://proxy.example",
+                TokenCertificateDto::Ca,
+            ),
         ] {
             assert_eq!(
-                asked_address(typed, certificate),
-                asked,
-                "{typed}, {certificate}"
+                asked(typed, chosen),
+                (address.to_owned(), certificate),
+                "{typed}, {chosen}"
             );
         }
     }

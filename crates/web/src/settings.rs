@@ -55,6 +55,7 @@ use lepticons_data::LucideGlyph;
 use leptos::ev;
 use leptos::prelude::*;
 use leptos::task::{spawn_local, tick};
+use leptos_router::hooks::use_url;
 
 use crate::announcer::Politeness;
 use crate::api_tokens::{
@@ -245,6 +246,23 @@ fn SettingsTabs(localizer: Arc<Localizer>, hub: bool) -> impl IntoView {
         }
     });
     on_cleanup(move || fragment_changed.remove());
+    // A link on Settings to a tab of Settings, such as the network's notice
+    // that sign-in is off (#1373), changes the address through the router,
+    // which fires no `hashchange` and keeps the page as it is: the router's
+    // address says so, and the tab it names is chosen as above. Only while
+    // the address is still Settings': a link away leaves the tabs alone.
+    let url = use_url();
+    let settings_path = url.with_untracked(|url| url.path().to_owned());
+    let tabs_linked = Rc::clone(&shown);
+    Effect::new(move |seen: Option<()>| {
+        let here = url.with(|url| url.path() == settings_path);
+        if seen.is_some()
+            && here
+            && let Some(index) = tab_named(&page::address_fragment(), &tabs_linked)
+        {
+            selected.set(index);
+        }
+    });
     // A tab chosen names its section in the address; the tab the page
     // starts on is named there already, or is the first, which the address
     // needn't name. A tab the address chose is named there already too, and

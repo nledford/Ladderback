@@ -15,7 +15,7 @@ use app::pairing::{
 };
 use app::ports::{AgentRegistry as _, Identity as _, IdentityError, LinkError, Signing as _};
 use domain::fleet::{
-    AgentStatus, Approval, ApprovalRefused, Fingerprint, Hostname, HubAddress, HubRoute,
+    AgentStatus, Approval, ApprovalRefused, Fingerprint, Hostname, HubAddress, HubRoute, HubScheme,
     MachineZone, PairingToken, RouteRefused, RouteSession, TokenId, TokenTls, WelcomeRefused,
     is_loopback,
 };
@@ -593,8 +593,10 @@ pub(crate) struct PairAsk {
 /// `ladderback pair`: reads a token at the terminal without echo, or as
 /// standard input, says what it read, and once the person confirms pairs
 /// this machine with the hub, which holds it pending.
-pub(crate) fn pair(ask: PairAsk) -> ExitCode {
-    let localizer = Localizer::new(&PosixEnv::from_process().preferences());
+pub(crate) fn pair(ask: PairAsk, plain: bool) -> ExitCode {
+    // Core dumps and debugger attach are off before the token is read
+    // (decision 98): a Ctrl-\ at the prompt dumps nothing.
+    let localizer = crate::start_protected(plain, None);
     finish(&localizer, run_pair(&localizer, ask))
 }
 
@@ -647,10 +649,11 @@ fn run_pair(localizer: &Localizer, ask: PairAsk) -> io::Result<ExitCode> {
         return Ok(ExitCode::from(2));
     };
     // Each kind of address has its own whole sentence, not a phrase put into
-    // one.
-    let read = match token.tls() {
-        TokenTls::Ca => msg::CLI_PAIR_READ_CA,
-        TokenTls::Pinned(_) => msg::CLI_PAIR_READ_PINNED,
+    // one. A plain address shows no certificate, so its sentence names none.
+    let read = match (token.address().scheme(), token.tls()) {
+        (HubScheme::Http, _) => msg::CLI_PAIR_READ_PLAIN,
+        (HubScheme::Https, TokenTls::Ca) => msg::CLI_PAIR_READ_CA,
+        (HubScheme::Https, TokenTls::Pinned(_)) => msg::CLI_PAIR_READ_PINNED,
     };
     say(
         localizer,

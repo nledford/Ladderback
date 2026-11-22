@@ -480,7 +480,7 @@ Build settings live in the root `Cargo.toml`'s profiles, so a local build, CI an
 - **What it fixes.** That pull request's CI shows what the release breaks, and only it has to fix it: new Clippy lints arrive through it, never through a pull request about something else.
 - **A fix a user would notice** is the exception, because the pull request is squash-merged under its `chore:` title and the changelog leaves `chore:` out. When the fix builds with both compilers, it lands first, in a `fix:` pull request of its own with its failing test (§13.1), as #407 did for 1.100.0; when it needs the new one, the bump pull request takes the `fix:` title.
 - **No `cargo update`.** The bump doesn't run `cargo update`: refreshing the dependencies is a change of its own.
-- **What follows stable.** Only the tools installed with `cargo +stable install` (trunk and just, in the [install guide](../guide/install.md)) follow stable.
+- **What follows stable.** Only the tools installed with `cargo +stable install` (trunk and just, in the [install guide](../guide/other-ways-to-install.md#by-hand)) follow stable.
 
 ### 13.13 Formatting
 

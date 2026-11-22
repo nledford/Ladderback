@@ -329,11 +329,14 @@ fn main() -> ExitCode {
             address,
             hostname,
             yes,
-        } => hub::pair(hub::PairAsk {
-            address,
-            hostname,
-            yes,
-        }),
+        } => hub::pair(
+            hub::PairAsk {
+                address,
+                hostname,
+                yes,
+            },
+            plain,
+        ),
         #[cfg(feature = "hub")]
         Command::HubStatus { hostname } => hub::hub_status(hostname),
         Command::ImportProfile {
@@ -343,7 +346,7 @@ fn main() -> ExitCode {
             yes,
         } => profiles::import_profile(file, repo_name, output::Report::asked(json), yes),
         Command::ExportProfile { plan } => profiles::export_profile(plan),
-        Command::SetPassword => set_password::set_password(),
+        Command::SetPassword => set_password::set_password(plain),
         Command::InstallService => service::install_service(),
         Command::RemoveService => service::remove_service(),
         Command::CheckKeyring => check_keyring::check_keyring(plain),
