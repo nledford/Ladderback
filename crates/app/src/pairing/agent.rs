@@ -3,9 +3,9 @@ use std::sync::Arc;
 
 use domain::AgentId;
 use domain::fleet::{
-    Binding, BindingKind, Challenge, Connect, HANDSHAKES, Hostname, HubPin, KEY_BYTES, MachineZone,
-    Nonce, Pair, PairAnswer, PairingToken, PublicKey, Refused, SeedFile, SignedMessage,
-    SigningSeed,
+    Approval, Binding, BindingKind, Challenge, Connect, HANDSHAKES, Hostname, HubPin, KEY_BYTES,
+    MachineZone, Nonce, Pair, PairAnswer, PairingToken, PublicKey, Refused, SeedFile,
+    SignedMessage, SigningSeed,
 };
 
 use crate::ports::{
@@ -404,7 +404,7 @@ impl AgentPairing {
             pin,
             agent_key,
             held_as,
-            approved: false,
+            approved: paired.approval == Some(Approval::Approved),
         })
     }
 

@@ -451,7 +451,7 @@ impl HubPairing {
                     recovery_key: keys.recovery_key,
                     signature: self.signing.sign(&keys.seed, &paired.to_bytes())?,
                     hostname: Some(pairing.record().hostname.clone()),
-                    approval: None,
+                    approval: Some(Approval::of(pairing.record().status)),
                 }))
             }
             Err(refusal) => self

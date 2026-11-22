@@ -705,17 +705,22 @@ async fn on_the_agent(
     {
         Ok(paired) => {
             let fingerprint = ("fingerprint", text(Fingerprint::of_key(&paired.agent_key)));
+            let (one_name, held_name) = if paired.approved {
+                (msg::CLI_PAIR_APPROVED, msg::CLI_PAIR_APPROVED_HELD)
+            } else {
+                (msg::CLI_PAIR_PENDING, msg::CLI_PAIR_PENDING_HELD)
+            };
             match &paired.held_as {
                 Some(held) => say(
                     localizer,
-                    msg::CLI_PAIR_PENDING_HELD,
+                    held_name,
                     &[
                         ("held", text(escaped(held.as_str()))),
                         ("asked", text(escaped(asked.as_str()))),
                         fingerprint,
                     ],
                 )?,
-                None => say(localizer, msg::CLI_PAIR_PENDING, &[fingerprint])?,
+                None => say(localizer, one_name, &[fingerprint])?,
             }
             Ok(ExitCode::SUCCESS)
         }

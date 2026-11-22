@@ -77,7 +77,7 @@ pub fn answer_frame(answer: &PairAnswer) -> HubFrame {
                 .hostname
                 .as_ref()
                 .map(|hostname| hostname.as_str().to_owned()),
-            status: None,
+            status: paired.approval.map(status_of),
         },
         PairAnswer::Refused(refused) => HubFrame::Refused {
             code: refused.code.as_str().to_owned(),
@@ -150,10 +150,7 @@ pub fn welcome_payload(welcome: &Welcome) -> Vec<u8> {
         hub_handshakes: welcome.hub_handshakes.bits(),
         hub_version: welcome.hub_version.clone(),
         signed_at: welcome.signed_at.seconds(),
-        status: match welcome.approval {
-            Approval::Pending => AgentApproval::Pending,
-            Approval::Approved => AgentApproval::Approved,
-        },
+        status: status_of(welcome.approval),
     }
     .to_bytes()
 }
@@ -169,11 +166,23 @@ pub fn read_welcome(bytes: &[u8]) -> Result<Welcome, WireRefused> {
         hub_handshakes: Handshakes::from_bits(payload.hub_handshakes),
         hub_version: payload.hub_version,
         signed_at: EpochSeconds::from_seconds(payload.signed_at),
-        approval: match payload.status {
-            AgentApproval::Pending => Approval::Pending,
-            AgentApproval::Approved => Approval::Approved,
-        },
+        approval: approval_of(payload.status),
     })
+}
+
+/// How `Welcome` and `Paired` say an agent's approval on the wire.
+const fn status_of(approval: Approval) -> AgentApproval {
+    match approval {
+        Approval::Pending => AgentApproval::Pending,
+        Approval::Approved => AgentApproval::Approved,
+    }
+}
+
+const fn approval_of(status: AgentApproval) -> Approval {
+    match status {
+        AgentApproval::Pending => Approval::Pending,
+        AgentApproval::Approved => Approval::Approved,
+    }
 }
 
 /// The message an agent's frame holds.
@@ -244,7 +253,7 @@ pub fn hub_message(frame: &HubFrame) -> Result<HubMessage, WireRefused> {
             recovery_key,
             signature: signed,
             hostname,
-            status: _,
+            status,
         } => Ok(HubMessage::Answer(PairAnswer::Paired(Paired {
             recovery_key: key(recovery_key)?,
             signature: signature(signed)?,
@@ -252,7 +261,7 @@ pub fn hub_message(frame: &HubFrame) -> Result<HubMessage, WireRefused> {
                 Some(hostname) => Some(Hostname::parse(hostname).map_err(|_| WireRefused)?),
                 None => None,
             },
-            approval: None,
+            approval: status.map(approval_of),
         }))),
         HubFrame::Refused {
             code,
