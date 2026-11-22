@@ -27,6 +27,8 @@ base64.workspace = true
 domain.workspace = true
 futures.workspace = true
 http-body-util.workspace = true
+hyper.workspace = true
+hyper-util.workspace = true
 log.workspace = true
 serde_json.workspace = true
 mime_guess.workspace = true
@@ -35,7 +37,9 @@ serde.workspace = true
 sha2.workspace = true
 # Every accept holds the spawn gate (decision 66).
 spawn-gate.workspace = true
-tokio = { workspace = true, features = ["macros", "net", "sync", "time"] }
+tokio = { workspace = true, features = ["macros", "net", "rt", "sync", "time"] }
+# `util`: the serve loop hands each request its peer (`map_request`).
+tower = { workspace = true, features = ["util"] }
 
 [dev-dependencies]
 app = { workspace = true, features = ["fakes"] }
@@ -44,7 +48,6 @@ tempfile.workspace = true
 testkit.workspace = true
 tokio = { workspace = true, features = ["macros", "net", "rt-multi-thread", "time"] }
 tokio-tungstenite = { workspace = true }
-tower.workspace = true
 uuid.workspace = true
 
 [target.'cfg(unix)'.dev-dependencies]

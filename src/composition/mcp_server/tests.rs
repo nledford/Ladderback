@@ -114,11 +114,7 @@ async fn served(state: http_adapter::AppState) -> mcp::DaemonUrl {
         state,
     );
     tokio::spawn(async move {
-        axum::serve(
-            listener,
-            app.into_make_service_with_connect_info::<http_adapter::PeerAddr>(),
-        )
-        .await
+        http_adapter::serve_connections(listener, app, std::future::pending()).await
     });
     mcp::DaemonUrl::parse(&format!("http://{addr}")).expect("a daemon URL")
 }

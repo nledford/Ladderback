@@ -15,7 +15,6 @@
 )]
 
 use std::ffi::OsString;
-use std::future::IntoFuture as _;
 use std::io::{self, Write as _};
 use std::net::SocketAddr;
 use std::process::ExitCode;
@@ -841,15 +840,11 @@ fn run_daemon(
         };
         #[cfg(feature = "hub")]
         let serving = match listener {
-            Listening::Door(listener) => Box::pin(
-                axum::serve(
-                    listener,
-                    http_adapter::handed(app)
-                        .into_make_service_with_connect_info::<http_adapter::HandedPeer>(),
-                )
-                .with_graceful_shutdown(shutdown)
-                .into_future(),
-            ) as Serving,
+            Listening::Door(listener) => Box::pin(http_adapter::serve_connections(
+                listener,
+                http_adapter::handed(app),
+                shutdown,
+            )) as Serving,
             Listening::Gated(listener) => served_gated(listener, app, shutdown),
         };
         #[cfg(not(feature = "hub"))]
@@ -948,14 +943,7 @@ fn served_gated(
     app: axum::Router,
     shutdown: impl Future<Output = ()> + Send + 'static,
 ) -> Serving {
-    Box::pin(
-        axum::serve(
-            listener,
-            app.into_make_service_with_connect_info::<http_adapter::PeerAddr>(),
-        )
-        .with_graceful_shutdown(shutdown)
-        .into_future(),
-    )
+    Box::pin(http_adapter::serve_connections(listener, app, shutdown))
 }
 
 /// The names the hub's certificate carries: loopback's, the address it

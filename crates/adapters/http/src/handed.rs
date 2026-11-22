@@ -110,14 +110,6 @@ impl axum::serve::Listener for HandedListener {
     }
 }
 
-impl axum::extract::connect_info::Connected<axum::serve::IncomingStream<'_, HandedListener>>
-    for HandedPeer
-{
-    fn connect_info(stream: axum::serve::IncomingStream<'_, HandedListener>) -> Self {
-        *stream.remote_addr()
-    }
-}
-
 /// `router` served through [`HandedListener`]: each request carries its
 /// peer as every route reads it, `ConnectInfo<PeerAddr>`, and a
 /// [`BuiltInTls`] extension when it came over the built-in TLS. The layer

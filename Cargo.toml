@@ -129,6 +129,12 @@ futures = "0.3.34"
 # The web UI's REST client (§4.4): `fetch` with typed JSON bodies, on wasm.
 gloo-net = { version = "0.6", default-features = false, features = ["http", "json"] }
 http-body-util = "0.1.5"
+# The daemon's own serve loop (security §10.1, "Connections"): axum 0.8's
+# `serve` sets hyper no timer and takes no configuration, so it can't bound
+# how long a request's head takes. The versions and features axum already
+# builds, so neither adds a crate.
+hyper = { version = "1.12.0", features = ["http1", "server"] }
+hyper-util = { version = "0.1.21", features = ["service", "tokio"] }
 # The web UI's `sleep` (§4.4): the reconnect backoff and the settle-poll wait
 # in the browser's own time.
 gloo-timers = { version = "0.3", default-features = false, features = ["futures"] }

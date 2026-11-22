@@ -2,9 +2,12 @@ use std::net::{Ipv4Addr, SocketAddr};
 use std::time::Duration;
 
 use axum::Router;
+use axum::extract::ws::{Message, WebSocketUpgrade};
 use axum::routing::get;
+use futures::{SinkExt as _, StreamExt as _};
 use tokio::io::{AsyncReadExt as _, AsyncWriteExt as _};
 use tokio::net::TcpStream;
+use tokio::task::JoinHandle;
 
 use super::{Bounds, serve_within};
 use crate::GatedListener;
@@ -21,13 +24,43 @@ const BODY: &str = "served";
 
 /// A server on a loopback port within `bounds`, and where it listens.
 async fn serving(bounds: Bounds) -> SocketAddr {
+    served(bounds, std::future::pending()).await.0
+}
+
+/// A server on a loopback port within `bounds` until `shutdown`: where it
+/// listens, and its run. Besides `/`, it answers `/slow` well past the head
+/// bound, and echoes on a WebSocket at `/echo`.
+async fn served(
+    bounds: Bounds,
+    shutdown: impl Future<Output = ()> + Send + 'static,
+) -> (SocketAddr, JoinHandle<std::io::Result<()>>) {
     let listener = GatedListener::bind(SocketAddr::from((Ipv4Addr::LOCALHOST, 0)))
         .await
         .unwrap();
     let at = listener.local_addr().unwrap();
-    let app = Router::new().route("/", get(|| async { BODY }));
-    tokio::spawn(serve_within(bounds, listener, app, std::future::pending()));
-    at
+    let app = Router::new()
+        .route("/", get(|| async { BODY }))
+        .route(
+            "/slow",
+            get(|| async {
+                tokio::time::sleep(HEAD_WITHIN * 4).await;
+                BODY
+            }),
+        )
+        .route(
+            "/echo",
+            get(|upgrade: WebSocketUpgrade| async move {
+                upgrade.on_upgrade(|mut socket| async move {
+                    while let Some(Ok(Message::Text(text))) = socket.recv().await {
+                        if socket.send(Message::Text(text)).await.is_err() {
+                            break;
+                        }
+                    }
+                })
+            }),
+        );
+    let run = tokio::spawn(serve_within(bounds, listener, app, shutdown));
+    (at, run)
 }
 
 fn within(connections: usize) -> Bounds {
@@ -130,4 +163,71 @@ async fn a_connection_past_the_bound_waits_for_a_place() {
         answered_within(&mut third, WELL_PAST).await,
         "still waiting once a place was free"
     );
+}
+
+/// The bound is on the head only: a response that takes longer than it
+/// still arrives.
+#[tokio::test]
+async fn a_response_slower_than_the_head_bound_still_arrives() {
+    let at = serving(within(8)).await;
+    let mut stream = TcpStream::connect(at).await.unwrap();
+    stream
+        .write_all(b"GET /slow HTTP/1.1\r\nHost: localhost\r\n\r\n")
+        .await
+        .unwrap();
+    assert!(answered_within(&mut stream, WELL_PAST).await, "unanswered");
+}
+
+/// A WebSocket, as the events stream and the sync channel are, outlives
+/// the head bound, and keeps its place among those served while it is
+/// open.
+#[tokio::test]
+async fn a_websocket_outlives_the_head_bound_and_keeps_its_place() {
+    let at = serving(within(1)).await;
+    let (mut socket, _) = tokio_tungstenite::connect_async(format!("ws://{at}/echo"))
+        .await
+        .unwrap();
+    tokio::time::sleep(HEAD_WITHIN * 3).await;
+    socket
+        .send(tokio_tungstenite::tungstenite::Message::text("still here"))
+        .await
+        .unwrap();
+    let echo = tokio::time::timeout(WELL_PAST, socket.next())
+        .await
+        .unwrap();
+    assert_eq!(echo.unwrap().unwrap().into_text().unwrap(), "still here");
+    let mut newcomer = TcpStream::connect(at).await.unwrap();
+    newcomer.write_all(REQUEST).await.unwrap();
+    assert!(
+        !answered_within(&mut newcomer, Duration::from_millis(300)).await,
+        "served past the bound while the WebSocket was open"
+    );
+    drop(socket);
+    assert!(
+        answered_within(&mut newcomer, WELL_PAST).await,
+        "still waiting once the WebSocket closed"
+    );
+}
+
+/// At its signal the server ends, though a connection it serves has sent
+/// nothing and another waits for a place.
+#[tokio::test]
+async fn the_server_ends_at_its_signal_with_connections_waiting() {
+    let (stop, stopped) = tokio::sync::oneshot::channel::<()>();
+    let (at, run) = served(
+        Bounds {
+            head_within: Duration::from_secs(30),
+            connections: 1,
+        },
+        async move {
+            let _ = stopped.await;
+        },
+    )
+    .await;
+    let mut served = TcpStream::connect(at).await.unwrap();
+    let _waiting = TcpStream::connect(at).await.unwrap();
+    stop.send(()).unwrap();
+    let ended = tokio::time::timeout(WELL_PAST, run).await;
+    assert!(matches!(ended, Ok(Ok(Ok(())))), "still serving: {ended:?}");
+    assert!(closed_within(&mut served, WELL_PAST).await, "still open");
 }
