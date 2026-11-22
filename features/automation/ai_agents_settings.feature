@@ -35,7 +35,7 @@ Feature: Choosing in Settings what AI agents may do without a token
     Then the page shows a message containing "while sign-in is off"
     When I skip to the content
     And I press Tab until focus is in the group "Backup runs"
-    And I press the down arrow until focus is on the choice "No access" of the group "Backup runs"
+    And I press the up arrow until focus is on the choice "No access" of the group "Backup runs"
     And I press Tab until focus is on the textbox "Admin password"
     And I type "demo-admin-pass"
     And I press Tab until focus is on the button "Save what AI agents may do"
