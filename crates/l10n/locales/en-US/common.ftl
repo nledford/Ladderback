@@ -661,9 +661,10 @@ error-generation-lower = The { -hub } offered an older state than this machine h
 # than the other can use.
 error-protocol-out-of-date = The { -hub } is on an older release than this machine can use, or a newer one. This machine keeps backing up. Update whichever side is older.
 
-# A pairing token was asked for on the hub's page from another computer
-# while sign-in is off, so there is no password to confirm it with.
-error-pairing-needs-sign-in = Pairing a machine from another computer needs sign-in to be on, so nothing was made. Set an admin password under Settings, start { -brand-name } again, then sign in and try again.
+# A pairing token or an approval was asked for on the hub's page from
+# another computer while sign-in is off, so there is no password to confirm
+# it with.
+error-pairing-needs-sign-in = Pairing a machine from another computer needs sign-in to be on, so the { -hub } did nothing. Set an admin password under Settings, start { -brand-name } again, then sign in and try again.
 
 # The address for a pairing token isn't one a machine can use.
 error-hub-address-invalid = That address isn't one a { -machine } can use. Type it as { "https://" }, then the host name and the port, such as { "https://hub.example:9443" }.
@@ -676,6 +677,12 @@ error-pairing-token-limit = The { -hub } has as many unused pairing tokens as it
 
 # No unused pairing token has the ID asked for.
 error-pairing-token-unknown = That pairing token isn't waiting any more: it was used, it lapsed or it was canceled already.
+
+# No machine waits for approval under the agent ID and the key asked for.
+error-agent-unknown = No { -machine } with that key is waiting for approval: it never paired, it was dropped, or it holds another key now. Read the list again and compare the key with the one on the { -machine }'s own screen.
+
+# The machine asked to be approved is approved already.
+error-agent-approved-already = That { -machine } is approved already.
 
 # The hub couldn't read or keep its key or its tokens.
 error-hub-unavailable = The { -hub } couldn't read or keep its key or its pairing tokens. Its log says why.
