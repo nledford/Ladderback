@@ -51,7 +51,7 @@ pub struct Handed {
     pub peer: HandedPeer,
 }
 
-/// The server's end of the front door, for `axum::serve`: the connections
+/// The server's end of the front door, for `serve_connections`: the connections
 /// it lets in, in the order it lets them in. Dropped, it stops the door.
 pub struct HandedListener {
     connections: mpsc::Receiver<Handed>,

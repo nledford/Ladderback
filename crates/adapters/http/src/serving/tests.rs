@@ -231,3 +231,24 @@ async fn the_server_ends_at_its_signal_with_connections_waiting() {
     assert!(matches!(ended, Ok(Ok(Ok(())))), "still serving: {ended:?}");
     assert!(closed_within(&mut served, WELL_PAST).await, "still open");
 }
+
+/// A request in flight at the signal is answered before the server ends.
+#[tokio::test]
+async fn a_request_in_flight_at_the_signal_is_answered() {
+    let (stop, stopped) = tokio::sync::oneshot::channel::<()>();
+    let (at, run) = served(within(8), async move {
+        let _ = stopped.await;
+    })
+    .await;
+    let mut stream = TcpStream::connect(at).await.unwrap();
+    stream
+        .write_all(b"GET /slow HTTP/1.1\r\nHost: localhost\r\n\r\n")
+        .await
+        .unwrap();
+    // Long enough for the server to read the head, short of the answer.
+    tokio::time::sleep(HEAD_WITHIN).await;
+    stop.send(()).unwrap();
+    assert!(answered_within(&mut stream, WELL_PAST).await, "unanswered");
+    let ended = tokio::time::timeout(WELL_PAST, run).await;
+    assert!(matches!(ended, Ok(Ok(Ok(())))), "still serving: {ended:?}");
+}
