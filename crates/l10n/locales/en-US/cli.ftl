@@ -468,6 +468,12 @@ cli-pairing-token-made = This token works once. Token ID { $id }, usable until {
 # `ladderback pairing-token --list` found no unused token.
 cli-pairing-token-none = no unused pairing tokens
 
+# `ladderback pairing-token --list` names an unused token and when it lapses. The two spaces between the token ID and the rest are part of the line.
+# $id (text): the token ID, 8 hex digits.
+# $expires (instant): when the token lapses, in the zone this computer is in.
+# $offset (text): that zone's offset from UTC at that time, as -05:00.
+cli-pairing-token-listed = { $id }  usable until { DATETIME($expires, dateStyle: "long", timeStyle: "short") } ({ $offset })
+
 # `ladderback pairing-token --revoke` revoked the token.
 # $id (text): the token ID.
 cli-pairing-token-revoked = token { $id } is revoked: it can't pair any machine now.
@@ -487,6 +493,14 @@ cli-pairing-token-too-many = there are too many unused tokens. Use one, wait for
 
 # `ladderback pairing-token --pending` found no machine waiting for approval.
 cli-pairing-token-none-waiting = no { -machine(form: "other") } waiting for approval
+
+# `ladderback pairing-token --pending` names one machine waiting for approval, on a line of its own. The columns are separated by two spaces, and the hostname comes last because it alone may hold spaces.
+# $agent_id (text): the machine's agent ID.
+# $fingerprint (text): the machine's key fingerprint, in groups of four characters.
+# $since (instant): when the machine paired, in the zone this computer is in.
+# $offset (text): that zone's offset from UTC at that time, as -05:00.
+# $hostname (text): the machine's hostname as it paired. It is shown as it came.
+cli-pairing-token-waiting = { $agent_id }  { $fingerprint }  waiting since { DATETIME($since, dateStyle: "long", timeStyle: "short") } ({ $offset })  { $hostname }
 
 # `ladderback pairing-token --approve` names the machine before it asks, so the person compares its key with that machine's own screen, where `ladderback pair` and `ladderback hub-status` show it.
 # $hostname (text): the machine's hostname as it paired. It is shown as it came.

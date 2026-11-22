@@ -30,6 +30,16 @@ Feature: Approving a machine from the hub's terminal
     Then the terminal lists "e2e-laptop" with the key the machine showed
 
   @e2e
+  Scenario: The hub's terminal writes when each machine paired in the person's own time zone
+    Given a hub with a pairing token made at its terminal
+    And the hub is serving on loopback
+    And a machine named "e2e-laptop" paired with the token from its terminal
+    And the hub has stopped
+    And the hub's terminal runs in the time zone "Asia/Kolkata"
+    When the person lists the machines waiting at the hub's terminal
+    Then the terminal lists "e2e-laptop" as waiting since it paired, in that zone, in words, with the offset "+05:30"
+
+  @e2e
   Scenario: The hub's terminal says when no machine waits for approval
     Given a hub with a pairing token made at its terminal
     When the person lists the machines waiting at the hub's terminal

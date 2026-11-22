@@ -977,6 +977,13 @@ fn when(seconds: u64) -> String {
         )
 }
 
+/// A time as the person at this terminal reads it: the instant, which the
+/// catalog writes in `zone`, and that zone's offset from UTC at the
+/// instant. A zone with no IANA name is read as UTC, with UTC's offset.
+fn written_at(_at: Timestamp, _zone: &domain::TimeZone) -> (MsgArg, MsgArg) {
+    todo!("#1309")
+}
+
 /// The token as pasted, read until it reads as a token, a blank line comes
 /// or it grows past what a token takes, so a token wrapped across lines
 /// reads whole and none of it is left for the shell (decision 121). Echo
@@ -1004,6 +1011,82 @@ mod tests {
     #[test]
     fn a_moment_shows_as_its_date_and_minute_in_utc() {
         assert_eq!(when(1_795_000_000), "2026-11-18 11:06 UTC");
+    }
+
+    /// A line of the three that carry a time, rendered in English with the
+    /// narrow no-break space before `AM` folded to a plain one.
+    fn said_in_english(id: MessageId, args: &[(&str, MsgArg)]) -> String {
+        let localizer = Localizer::new(&["en-US".parse().expect("a locale")]);
+        localizer
+            .message(id, args)
+            .into_text()
+            .replace(['\u{202f}', '\u{a0}'], " ")
+    }
+
+    fn at(text: &str) -> Timestamp {
+        text.parse().expect("an instant")
+    }
+
+    /// `--list` writes a token's lapse time in the person's zone, in
+    /// words, with the zone's offset beside it (#1309).
+    #[test]
+    fn a_token_listed_lapses_at_the_time_in_the_persons_zone_with_its_offset() {
+        let zone = domain::TimeZone::get("America/New_York").expect("a zone");
+        let (expires, offset) = written_at(at("2026-11-22T11:59:26.17Z"), &zone);
+        let args = [
+            ("id", text("01a20320")),
+            ("expires", expires),
+            ("offset", offset),
+        ];
+        assert_eq!(
+            said_in_english(msg::CLI_PAIRING_TOKEN_LISTED, &args),
+            "01a20320  usable until November 22, 2026 at 6:59 AM (-05:00)"
+        );
+    }
+
+    /// The offset beside a time is the zone's at that instant, so one zone
+    /// reads -05:00 in winter and -04:00 in summer, and a half-hour zone
+    /// keeps its half hour.
+    #[test]
+    fn the_offset_beside_a_time_is_the_zones_at_that_instant() {
+        let read = |zone: &str, instant: &str| {
+            let zone = domain::TimeZone::get(zone).expect("a zone");
+            let (since, offset) = written_at(at(instant), &zone);
+            let args = [
+                ("agent_id", text("0190")),
+                ("fingerprint", text("FP2F-TBBW-YJDQ-3NF8-A15V")),
+                ("since", since),
+                ("offset", offset),
+                ("hostname", text("e2e laptop")),
+            ];
+            said_in_english(msg::CLI_PAIRING_TOKEN_WAITING, &args)
+        };
+        assert_eq!(
+            read("America/New_York", "2026-07-04T16:00:00Z"),
+            "0190  FP2F-TBBW-YJDQ-3NF8-A15V  waiting since July 4, 2026 at 12:00 PM (-04:00)  e2e laptop"
+        );
+        assert_eq!(
+            read("Asia/Kolkata", "2026-11-22T11:59:26Z"),
+            "0190  FP2F-TBBW-YJDQ-3NF8-A15V  waiting since November 22, 2026 at 5:29 PM (+05:30)  e2e laptop"
+        );
+    }
+
+    /// A zone with no IANA name can't be passed to the formatter, which
+    /// then writes UTC's time, so the offset beside it is UTC's too: the
+    /// time and its label never disagree.
+    #[test]
+    fn a_zone_with_no_name_is_read_in_utc_with_utcs_offset() {
+        let zone = domain::TimeZone::fixed(domain::Offset::constant(2));
+        let (expires, offset) = written_at(at("2026-11-22T11:59:26Z"), &zone);
+        let args = [
+            ("id", text("01a20320")),
+            ("expires", expires),
+            ("offset", offset),
+        ];
+        assert_eq!(
+            said_in_english(msg::CLI_PAIRING_TOKEN_LISTED, &args),
+            "01a20320  usable until November 22, 2026 at 11:59 AM (+00:00)"
+        );
     }
 
     /// Each way `hub-status` can fail is said with the code that names it;
