@@ -27,9 +27,10 @@ export interface Point {
  *  point: it is out of sight. WCAG 2.4.11 fails a focused element only when
  *  it is entirely hidden, so the part in view is what counts, however the
  *  engine scrolled: Firefox scrolls a focused element only until part of it
- *  shows, and Chromium and WebKit do too when part of it already shows, which
- *  leaves the center of an element taller than the viewport out of it
- *  (#1292). The element is in sight where any point finds it. */
+ *  shows, and Chromium and WebKit, when part of it already shows, only until
+ *  its nearest edge does, which leaves the center of an element taller than
+ *  the viewport out of it (#1292). The element is in sight where any point
+ *  finds it. */
 export function focusProbes(fragments: Box[], whole: Box, viewport: { width: number; height: number }): Point[] {
   const hasArea = (b: Box): boolean => b.left < b.right && b.top < b.bottom;
   const own = fragments.filter(hasArea);

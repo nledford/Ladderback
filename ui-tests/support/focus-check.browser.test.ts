@@ -261,9 +261,11 @@ const TALL_REGION = `<!doctype html>
 </html>`;
 
 /** Opens `TALL_REGION` at the scenarios' viewport and presses Tab onto the
- *  button, then onto the region, through the walks' check. Given `covered`,
- *  a fixed box over the whole viewport appears as the region takes focus.
- *  What the check said: `null` when it passed. */
+ *  button, then onto the region, through the walks' check, and makes sure
+ *  the engine left the region's top in view and the center of its box below
+ *  the viewport, the case the check is for. Given `covered`, a fixed box (an
+ *  `<aside>`, the page's one) over the whole viewport appears as the region
+ *  takes focus. What the check said: `null` when it passed. */
 async function tabOntoTheTallRegion(covered: boolean): Promise<string | null> {
   assert.ok(browser !== undefined, "the browser is not running: `before` failed");
   const context = await browser.newContext({ viewport: { width: 320, height: 256 } });
@@ -274,7 +276,7 @@ async function tabOntoTheTallRegion(covered: boolean): Promise<string | null> {
       const region = document.querySelector('[role="region"]');
       if (covered && region !== null) {
         region.addEventListener("focus", () => {
-          const cover = document.createElement("div");
+          const cover = document.createElement("aside");
           cover.className = "cover";
           document.body.append(cover);
         });
@@ -282,15 +284,20 @@ async function tabOntoTheTallRegion(covered: boolean): Promise<string | null> {
     }, covered);
     const walk = journey(page);
     await walk.press("Tab");
+    let verdict: string | null = null;
     try {
       await walk.press("Tab");
     } catch (error) {
       if (!(error instanceof assert.AssertionError)) throw error;
-      return error.message;
+      verdict = error.message;
     }
-    const top = await page.evaluate(() => document.activeElement?.getBoundingClientRect().top ?? Number.NaN);
+    const { top, bottom } = await page.evaluate(() => {
+      const box = document.querySelector('[role="region"]')?.getBoundingClientRect();
+      return { top: box?.top ?? Number.NaN, bottom: box?.bottom ?? Number.NaN };
+    });
     assert.ok(top < 256, `the region's top is in view, at ${top}`);
-    return null;
+    assert.ok((top + bottom) / 2 > 256, `the center of the region's box lies below the viewport, at ${(top + bottom) / 2}`);
+    return verdict;
   } finally {
     await context.close();
   }
@@ -305,5 +312,5 @@ test(`${engine}: a region taller than the viewport with a box over all of it in 
   timeout: LIMIT_MS,
 }, async () => {
   const verdict = await tabOntoTheTallRegion(true);
-  assert.match(verdict ?? "the check passed", /^focused element is covered: <div role="region".*\(its lines' centers find <div>\)$/);
+  assert.match(verdict ?? "the check passed", /^focused element is covered: <div role="region".*\(its lines' centers find <aside>\)$/);
 });
