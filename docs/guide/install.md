@@ -82,7 +82,7 @@ Install the new release the way you installed the first, then run `ladderback in
 - **A package:** there is no apt or dnf repository yet, so download, check and install the next release's package as [above](#install-a-package-debian-ubuntu-fedora).
 - **The install script:** run the same command again, on macOS with `LADDERBACK_SIGN_IDENTITY` again.
 
-On macOS, a repository whose password is in the keychain needs one more answer after an update: run `ladderback check-keyring`, and when macOS asks whether `ladderback` may use the keychain item, choose Always Allow. Do it before the next scheduled backup, which otherwise fails while the question waits for an answer. [Running as a service](running-as-a-service.md#macos-signing-and-the-keychain) says why.
+On macOS, a repository whose password is in the keychain needs one more answer after an update: run `ladderback check-keyring` in a terminal. Before each read it says which keychain item it reads; macOS may then ask whether `ladderback` may use that item, in a window that can open behind your other windows. Choose Always Allow. The command waits 5 minutes for your answer. Do it before the next scheduled backup, which otherwise fails while the question waits for an answer. [Running as a service](running-as-a-service.md#macos-signing-and-the-keychain) says why.
 
 To remove a package, run `ladderback remove-service` first, which stops Ladderback and removes its service, then `sudo apt remove ladderback` or `sudo dnf remove ladderback`. Its configuration and data stay where they are, and so do your backups.
 
