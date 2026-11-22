@@ -87,9 +87,13 @@ impl HubAddress {
         &self.0
     }
 
-    /// The address's scheme.
+    /// The address's scheme: `parse` took only `https://` and `http://`.
     pub fn scheme(&self) -> HubScheme {
-        todo!()
+        if self.0.starts_with("https://") {
+            HubScheme::Https
+        } else {
+            HubScheme::Http
+        }
     }
 }
 

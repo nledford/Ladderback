@@ -566,7 +566,7 @@ cli-pair-unreadable-token = this isn't a pairing token, or it was changed on the
 # `--hostname` is typed as it is: keep it a string literal.
 cli-pair-bad-hostname = { $name } can't name this machine to the { -hub }. Give another with { "--hostname" }.
 
-# What `pair` read from a token whose address is checked against this machine's trust store, before it asks; nothing is sent yet.
+# What `pair` read from a token whose https:// address is checked against this machine's trust store, before it asks; nothing is sent yet.
 # $count (count): how many characters were read.
 # $address (text): the hub's address.
 # $fingerprint (text): the hub key's fingerprint.
@@ -583,6 +583,15 @@ cli-pair-read-pinned = { $count ->
     [one] Read { $count } character.
    *[other] Read { $count } characters.
 } The { -hub } is at { $address }, its key is { $fingerprint }, and its certificate is pinned by the token. Compare the fingerprint with the one the { -hub } shows.
+
+# What `pair` read from a token whose address is plain http://, which shows no certificate, before it asks; nothing is sent yet. Name no certificate: the hub key alone proves the hub.
+# $count (count): how many characters were read.
+# $address (text): the hub's address.
+# $fingerprint (text): the hub key's fingerprint.
+cli-pair-read-plain = { $count ->
+    [one] Read { $count } character.
+   *[other] Read { $count } characters.
+} The { -hub } is at { $address } and its key is { $fingerprint }. The address isn't encrypted, but the { -hub } key still proves that what answers there is the { -hub }. Compare the fingerprint with the one the { -hub } shows.
 
 # `pair` asks before it sends anything. Printed without the program's name, and the answer follows on the same line.
 # `[y/N]` is what the person types to answer, and only `y` or `Y` says yes: keep it a string literal.
