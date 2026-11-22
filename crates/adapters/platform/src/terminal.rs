@@ -99,9 +99,10 @@ fn read_line_from(input: &mut impl BufRead, max: usize) -> io::Result<String> {
 
 /// The terminal's echo turned off until this is dropped; the line ending a
 /// person types is still shown, so the next line starts on its own. A drop
-/// never runs when a signal ends the process, so Ctrl-C and `SIGTERM` put
-/// the terminal's settings back first (#399, [`ending`]). One prompt is
-/// open at a time, as the process has one standard input.
+/// never runs when a signal ends the process, so Ctrl-C, Ctrl-\ and
+/// `SIGTERM` put the terminal's settings back first (#399, #1256,
+/// [`ending`]). One prompt is open at a time, as the process has one
+/// standard input.
 struct EchoOff {
     #[cfg(unix)]
     tty: Tty,
@@ -140,12 +141,15 @@ impl Drop for EchoOff {
     }
 }
 
-/// Ctrl-C (`SIGINT`) and `SIGTERM` at the prompt (#399): their default
-/// action ends the process at once, with no drop run, which would leave the
-/// terminal silent until `reset` or `stty echo`. A thread of their own takes
-/// them instead, puts the prompt's terminal settings back, and then ends the
-/// process by the signal's own default action, so the shell sees the same
-/// end as before.
+/// Ctrl-C (`SIGINT`), Ctrl-\ (`SIGQUIT`) and `SIGTERM` at the prompt (#399,
+/// #1256): their default action ends the process at once, with no drop run,
+/// which would leave the terminal silent until `reset` or `stty echo`. A
+/// thread of their own takes them instead, puts the prompt's terminal
+/// settings back, and then ends the process by the signal's own default
+/// action, so the shell sees the same end as before. `SIGQUIT`'s action
+/// also writes a core dump where the limit allows one, so every command
+/// that prompts turns its core dumps off before it does (decision 98):
+/// otherwise the dump would hold what was typed.
 ///
 /// The thread stays for the rest of the process once a prompt has started
 /// it: no safe code can give a signal back to its default action, and the
@@ -160,7 +164,7 @@ mod ending {
     use std::sync::{Mutex, PoisonError};
 
     use nix::sys::termios::{FlushArg, SetArg, Termios, tcdrain, tcflush, tcsetattr};
-    use signal_hook::consts::{SIGINT, SIGTERM};
+    use signal_hook::consts::{SIGINT, SIGQUIT, SIGTERM};
 
     /// The terminal a prompt has changed, and its settings from before.
     static CHANGED: Mutex<Option<(OwnedFd, Termios)>> = Mutex::new(None);
@@ -168,8 +172,8 @@ mod ending {
     /// Whether the thread that takes the signals runs.
     static WATCHING: Mutex<bool> = Mutex::new(false);
 
-    /// Sets `quiet` on `tty`, whose settings were `saved`, and has Ctrl-C or
-    /// `SIGTERM` put `saved` back before it ends the process, until
+    /// Sets `quiet` on `tty`, whose settings were `saved`, and has Ctrl-C,
+    /// Ctrl-\ or `SIGTERM` put `saved` back before it ends the process, until
     /// [`put_back_now`]. Both happen under the lock the signal's thread
     /// takes, so it finds either echo still on or `saved` to put back.
     pub(super) fn quiet(tty: &OwnedFd, saved: Termios, quiet: &Termios) -> io::Result<()> {
@@ -209,7 +213,7 @@ mod ending {
         if *watching {
             return Ok(());
         }
-        let mut signals = signal_hook::iterator::Signals::new([SIGINT, SIGTERM])?;
+        let mut signals = signal_hook::iterator::Signals::new([SIGINT, SIGQUIT, SIGTERM])?;
         std::thread::Builder::new()
             .name("prompt-signals".to_owned())
             .spawn(move || {
