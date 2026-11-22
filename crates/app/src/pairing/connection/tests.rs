@@ -30,19 +30,24 @@ struct Hub {
 }
 
 fn hub(seed: u64) -> Hub {
+    hub_with(seed, |pairing| pairing)
+}
+
+/// One hub on fakes, its pairing as `shaped` makes it.
+fn hub_with(seed: u64, shaped: impl FnOnce(HubPairing) -> HubPairing) -> Hub {
     let registry = Arc::new(InMemoryAgentRegistry::new());
     let identity = Arc::new(InMemoryIdentity::default());
     let clock = Arc::new(FakeClock::new(
         Timestamp::from_second(1_800_000_000).unwrap(),
     ));
-    let pairing = Arc::new(HubPairing::new(
+    let pairing = Arc::new(shaped(HubPairing::new(
         registry.clone(),
         identity.clone(),
         Arc::new(FakeSigning),
         Arc::new(SeededRandom::new(seed)),
         clock.clone(),
         "0.5.0-hub".to_owned(),
-    ));
+    )));
     Hub {
         registry,
         identity,
@@ -180,6 +185,151 @@ async fn an_approved_agent_is_welcomed_approved() {
             .status,
         AgentStatus::Approved { .. }
     ));
+}
+
+/// Past the cap of reports the hub keeps of one agent, it lets go of the
+/// oldest and warns once for that agent while it runs, with the count let
+/// go of so far and nothing a report says (I4); the ones after are counted
+/// and not logged (§7.2).
+#[tokio::test]
+async fn reports_past_the_cap_are_let_go_of_counted_and_warned_of_once() {
+    use crate::ports::{Outbox as _, OutboxEntry, ReportInbox as _};
+    use crate::sync::{SyncWithHub, Synced};
+    use domain::fleet::{AgentReport, Happening, MAX_REPORTS_HELD, OutboxEpoch, ReportSeq};
+
+    let inbox = Arc::new(crate::fakes::InMemoryReportInbox::default());
+    let hub = hub_with(1, |pairing| pairing.with_inbox(inbox.clone()));
+    let identity = paired(&hub, 1).await;
+    let waiting = hub.registry.agent(agent_id(1)).await.unwrap().unwrap();
+    hub.pairing.approve(&waiting).await.unwrap().unwrap();
+    let operation = Uuid::from_u128(0x0b);
+    let report = AgentReport {
+        op_id: domain::OperationId::from_uuid(operation),
+        happening: Happening::Started,
+        at: EpochSeconds::from_seconds(1_800_000_000),
+    };
+    let earlier = OutboxEpoch::from_uuid(Uuid::from_u128(0xe0));
+    for place in 1..=MAX_REPORTS_HELD {
+        let entry = OutboxEntry {
+            epoch: earlier,
+            seq: ReportSeq::new(place).unwrap(),
+            report: report.clone(),
+        };
+        inbox
+            .ingest(agent_id(1), &entry, hub.clock.now())
+            .await
+            .unwrap();
+    }
+    let outbox = Arc::new(crate::fakes::InMemoryOutbox::new(OutboxEpoch::from_uuid(
+        Uuid::from_u128(0xe1),
+    )));
+    let connector = Arc::new(LoopbackHubConnector::to(hub.pairing.clone()));
+    let sync = SyncWithHub::new(
+        connecting(identity, connector),
+        outbox.clone(),
+        Arc::new(FakeClock::new(
+            Timestamp::from_second(1_800_000_030).unwrap(),
+        )),
+        agent_id(1),
+        hostname(1),
+        None,
+    );
+    crate::test_log::capture_the_log();
+    for round in [2, 1] {
+        for _ in 0..round {
+            outbox.append(&report).await.unwrap();
+        }
+        assert_eq!(sync.sync_once().await, Ok(Synced::Replayed { sent: round }));
+    }
+    assert_eq!(inbox.dropped(agent_id(1)).await.unwrap(), 3);
+    let warned: Vec<String> = crate::test_log::logged_by("app::pairing::hub")
+        .into_iter()
+        .filter(|(level, _)| *level == log::Level::Warn)
+        .map(|(_, line)| line)
+        .collect();
+    assert_eq!(
+        warned,
+        [format!(
+            "agent {} has more reports than the 10000 the hub keeps of one machine: its \
+             oldest 1 were let go of; the hub counts the next ones without logging each",
+            agent_id(1).as_uuid()
+        )]
+    );
+    assert!(!warned.concat().contains(&operation.to_string()));
+}
+
+/// An agent restored from an older database numbers its new reports again
+/// from places of its epoch the hub took before, further behind than a
+/// resend: the hub acknowledges them as taken, keeps none, and warns once
+/// for that agent while it runs, naming nothing a report says (I4; #1387).
+#[tokio::test]
+async fn reports_far_behind_the_last_taken_are_warned_of_once() {
+    use crate::ports::{Outbox as _, OutboxEntry, ReportInbox as _};
+    use crate::sync::{SyncWithHub, Synced};
+    use domain::fleet::{AgentReport, Happening, OutboxEpoch, ReportSeq, SEND_WINDOW};
+
+    let inbox = Arc::new(crate::fakes::InMemoryReportInbox::default());
+    let hub = hub_with(1, |pairing| pairing.with_inbox(inbox.clone()));
+    let identity = paired(&hub, 1).await;
+    let waiting = hub.registry.agent(agent_id(1)).await.unwrap().unwrap();
+    hub.pairing.approve(&waiting).await.unwrap().unwrap();
+    let operation = Uuid::from_u128(0x0c);
+    let report = AgentReport {
+        op_id: domain::OperationId::from_uuid(operation),
+        happening: Happening::Succeeded,
+        at: EpochSeconds::from_seconds(1_800_000_000),
+    };
+    let epoch = OutboxEpoch::from_uuid(Uuid::from_u128(0xe1));
+    let taken_before = u64::try_from(SEND_WINDOW).unwrap() + 8;
+    for place in 1..=taken_before {
+        let entry = OutboxEntry {
+            epoch,
+            seq: ReportSeq::new(place).unwrap(),
+            report: report.clone(),
+        };
+        inbox
+            .ingest(agent_id(1), &entry, hub.clock.now())
+            .await
+            .unwrap();
+    }
+    // The restored outbox: the same epoch, numbering from its first place.
+    let outbox = Arc::new(crate::fakes::InMemoryOutbox::new(epoch));
+    let connector = Arc::new(LoopbackHubConnector::to(hub.pairing.clone()));
+    let sync = SyncWithHub::new(
+        connecting(identity, connector),
+        outbox.clone(),
+        Arc::new(FakeClock::new(
+            Timestamp::from_second(1_800_000_030).unwrap(),
+        )),
+        agent_id(1),
+        hostname(1),
+        None,
+    );
+    crate::test_log::capture_the_log();
+    for round in [1, 2] {
+        for _ in 0..round {
+            outbox.append(&report).await.unwrap();
+        }
+        assert_eq!(sync.sync_once().await, Ok(Synced::Replayed { sent: round }));
+    }
+    let held = inbox.reports(agent_id(1)).await.unwrap();
+    assert_eq!(u64::try_from(held.len()).unwrap(), taken_before);
+    let warned: Vec<String> = crate::test_log::logged_by("app::pairing::hub")
+        .into_iter()
+        .filter(|(level, _)| *level == log::Level::Warn)
+        .map(|(_, line)| line)
+        .collect();
+    assert_eq!(
+        warned,
+        [format!(
+            "agent {} sent a report at place 1 of its outbox, far behind the last the hub \
+             took of it: its database may have been restored from an older copy; the hub \
+             takes such reports as held already, keeps none of them, and doesn't log the \
+             next ones",
+            agent_id(1).as_uuid()
+        )]
+    );
+    assert!(!warned.concat().contains(&operation.to_string()));
 }
 
 /// The hub logs an approved agent's first connection since its approval

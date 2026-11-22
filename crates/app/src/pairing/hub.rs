@@ -15,8 +15,8 @@ use domain::{AgentId, SignedDuration, TimeZoneDatabase};
 use super::wire::{read_hello, welcome_payload};
 use crate::access::Access;
 use crate::ports::{
-    Added, AgentRegistry, Clock, Identity, IdentityError, Random, RandomUnavailable, Signing,
-    SigningError, StoreError,
+    Added, AgentRegistry, Clock, Identity, IdentityError, Random, RandomUnavailable, ReportInbox,
+    Signing, SigningError, StoreError,
 };
 
 mod dialog;
@@ -37,6 +37,9 @@ pub struct HubPairing {
     /// The sign-in by the admin password, when it is on: a token asked for
     /// on the web is confirmed by that password, entered again.
     access: Option<Arc<Access>>,
+    /// Where the hub keeps its agents' reports, when it takes them: with
+    /// none, it closes each connection after `Welcome`.
+    inbox: Option<Arc<dyn ReportInbox>>,
 }
 
 /// The hub's answer to an agent's proof.
@@ -176,6 +179,7 @@ impl HubPairing {
             clock,
             version,
             access: None,
+            inbox: None,
         }
     }
 
@@ -184,6 +188,14 @@ impl HubPairing {
     #[must_use]
     pub fn with_access(mut self, access: Arc<Access>) -> Self {
         self.access = Some(access);
+        self
+    }
+
+    /// This pairing taking an approved agent's reports into `inbox` after
+    /// `Welcome`, on the same connection (§7.2).
+    #[must_use]
+    pub fn with_inbox(mut self, inbox: Arc<dyn ReportInbox>) -> Self {
+        self.inbox = Some(inbox);
         self
     }
 

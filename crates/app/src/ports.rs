@@ -16,6 +16,7 @@ mod identity;
 mod keyring;
 mod notifier;
 mod operation_store;
+mod outbox;
 mod platform;
 mod profiles;
 mod proposal_store;
@@ -68,6 +69,7 @@ pub use operation_store::{
     DEFAULT_PAGE_SIZE, HistoryPage, HistoryQuery, MAX_PAGE_SIZE, OperationDetail, OperationRecord,
     OperationStore, PageSize, Recovered, Start, StoreError, maintained_repository,
 };
+pub use outbox::{Appended, Ingested, Outbox, OutboxEntry, ReportInbox};
 pub use platform::{Network, NetworkLink, PlatformError, PowerSupply};
 pub use profiles::{
     ExportCommands, ExportRefusal, ImportedProfile, PlanExport, ProfileError, ProfileNotice,

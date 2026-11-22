@@ -17,6 +17,8 @@ mod api_tokens;
 mod codec;
 mod error_args;
 mod locations;
+#[cfg(feature = "hub")]
+mod outbox;
 mod proposals;
 mod report;
 mod row;
