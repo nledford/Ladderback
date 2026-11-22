@@ -1029,8 +1029,15 @@ async fn tidy_workers_cache(dir: &std::path::Path, recorded: Recorded) {
 /// The log line for a tidying task that ended without a result: how it
 /// ended, never a panic's message (I4).
 fn untidied_line(dir: &std::path::Path, ended: &tokio::task::JoinError) -> String {
-    let _ = (dir, ended);
-    todo!()
+    let how = if ended.is_panic() {
+        "panicked"
+    } else {
+        "was cancelled"
+    };
+    format!(
+        "the cache folder {} was not tidied: the tidying {how}",
+        dir.display()
+    )
 }
 
 /// Says in the log what tidying the cache removed, and what it couldn't.

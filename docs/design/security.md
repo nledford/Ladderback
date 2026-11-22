@@ -330,7 +330,7 @@ A needle longer than `u32::MAX` bytes, which the cap doesn't let through, masks 
 **Where masking runs.**
 
 - The worker masks every `Log`, `Warning` and failure detail, and its panic report, before it cuts them to size (§4.1).
-- The panic hook of the daemon and every other command writes only the panic's place and thread, never its message (§4.2, #1384). A task's panic caught as a `JoinError` and logged with its text still carries the message: the cache tidying at the start does, with no secret in reach.
+- The panic hook of the daemon and every other command writes only the panic's place and thread, never its message (§4.2, #1384). A task's panic caught as a `JoinError` is logged as "panicked" or "was cancelled", never with the error's text, which carries the message.
 - The daemon masks what the worker writes to stderr, because the programs a worker starts (rclone, ssh, a post command) write there too.
 - It also masks every text in the worker's events (failure details, warnings, progress text, log lines), because a worker rejects a job spec before it has the job's secrets and a parse error can quote the value it choked on, and because the worker doesn't know the proxy credentials below.
 - **A hook's output is masked with its run's redactor** (#853). A hook can print any secret it can read: the configuration file, a password file, a variable of its environment. So the daemon builds one redactor per run, once the run's secrets are resolved and before its first hook (`RepositoryAccess::hooks_redactor`), and hands it to every hook of the run, the agent's, the repository's and the plan's, in every phase (`HookSetup::redactor`). It holds:
