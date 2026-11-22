@@ -31,7 +31,7 @@ pub struct TokenAsk {
     /// Whether the request came from beyond loopback: its `Host` isn't a
     /// loopback name, or its peer isn't a loopback address.
     pub beyond_loopback: bool,
-    /// The admin password with sign-in on, the hub key's key ID otherwise;
+    /// The admin password with sign-in on, the hub key's fingerprint otherwise;
     /// `None` when nothing was typed, or more than any password. Never shown
     /// (I4).
     pub confirmation: Option<StepUpConfirmation>,
@@ -66,7 +66,7 @@ pub enum TokenAskRefused {
     /// The request came from beyond loopback while sign-in is off: the
     /// person sets an admin password first (`pairing-needs-sign-in`).
     NeedsSignIn,
-    /// The confirmation wasn't the admin password, or the hub key's key ID
+    /// The confirmation wasn't the admin password, or the hub key's fingerprint
     /// with sign-in off.
     StepUpFailed,
     /// The address's wait after failed sign-ins has `seconds` left: the
@@ -126,7 +126,7 @@ impl HubPairing {
 
     /// A token for `ask`, made only once its step-up is confirmed: the
     /// admin password, in the peer's sign-in waits, with sign-in on; with it
-    /// off, the hub key's key ID, and only on loopback. Beyond loopback with
+    /// off, the hub key's fingerprint, and only on loopback. Beyond loopback with
     /// sign-in off, no confirmation helps, so none is read. Of the token the
     /// hub keeps only its pairing key's public half.
     pub async fn make_token_asked(&self, ask: TokenAsk) -> Result<MadeToken, TokenAskRefused> {
