@@ -225,6 +225,54 @@ mod tests {
         }
     }
 
+    /// Every character the lookalike skeleton drops is refused: the
+    /// registry can't tell a name holding one from the name without it, so
+    /// the parser must. These are the default-ignorable code points, which
+    /// a renderer shows as nothing, the unassigned ones too: Unicode
+    /// reserves them so a character assigned there later shows as nothing
+    /// as well.
+    #[test]
+    fn every_character_the_lookalike_skeleton_drops_is_refused() {
+        let mut buffer = [0; 4];
+        for c in char::MIN..=char::MAX {
+            if unicode_security::skeleton(c.encode_utf8(&mut buffer))
+                .next()
+                .is_none()
+            {
+                assert_eq!(
+                    Hostname::parse(&format!("lap{c}top")),
+                    Err(InvalidHostname::Hidden(c)),
+                    "U+{:04X}",
+                    u32::from(c)
+                );
+            }
+        }
+    }
+
+    /// A space hidden behind a character that shows as nothing would pass
+    /// the check on a name's ends, and "laptop " shows as "laptop".
+    #[test]
+    fn a_space_behind_a_character_that_shows_as_nothing_is_refused() {
+        for text in ["laptop \u{e0080}", "\u{e0080} laptop"] {
+            assert_eq!(
+                Hostname::parse(text),
+                Err(InvalidHostname::Hidden('\u{e0080}')),
+                "{text:?}"
+            );
+        }
+    }
+
+    /// The musical null notehead is drawn as a blank, though it is neither
+    /// a space nor default-ignorable, and the skeleton keeps it, so a name
+    /// ending in it would show as the name without it and not be flagged.
+    #[test]
+    fn the_musical_null_notehead_is_refused() {
+        assert_eq!(
+            Hostname::parse("laptop\u{1d159}"),
+            Err(InvalidHostname::Hidden('\u{1d159}'))
+        );
+    }
+
     /// A name that begins or ends with a space of any kind is refused,
     /// naming the space; spaces inside a name are kept.
     #[test]
@@ -249,7 +297,6 @@ mod tests {
             '\u{ae}',
             '\u{200a}',
             '\u{2010}',
-            '\u{2065}',
             '\u{2070}',
             '\u{34e}',
             '\u{350}',
@@ -265,8 +312,11 @@ mod tests {
             '\u{1810}',
             '\u{fdff}',
             '\u{fe10}',
-            '\u{e00ff}',
-            '\u{e01f0}',
+            '\u{dffff}',
+            '\u{e1000}',
+            '\u{ffef}',
+            '\u{1d158}',
+            '\u{1d15a}',
             '\u{2027}',
             '\u{27ff}',
             '\u{2801}',
