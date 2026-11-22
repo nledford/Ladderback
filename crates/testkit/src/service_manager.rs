@@ -207,6 +207,20 @@ impl FakeServiceManagers {
             .ok()
     }
 
+    /// The service `name` runs, in process `pid`: as when the manager has it
+    /// run in a process the test knows, such as the test's own.
+    ///
+    /// # Panics
+    ///
+    /// When the state folder can't be written.
+    pub fn runs_as(&self, name: &str, pid: u32) {
+        fs::write(
+            self.state().join(format!("runs-{name}")),
+            format!("{pid}\n"),
+        )
+        .expect("the service's process");
+    }
+
     /// Ends the service `name`'s process, as when it crashed and its manager
     /// gave up starting it again.
     ///

@@ -47,6 +47,19 @@ pub fn data_dir_from(env: impl Fn(&str) -> Option<OsString>) -> Option<PathBuf> 
     platform_dir(&env, Folder::Data)
 }
 
+/// The data folder of the installed service (operations §12): the
+/// platform's, as [`data_dir`] finds it without `LADDERBACK_DATA_DIR`, which
+/// the service file doesn't carry, so a folder the shell names isn't the
+/// service's.
+pub fn service_data_dir() -> Option<PathBuf> {
+    service_data_dir_from(|var| std::env::var_os(var))
+}
+
+/// [`service_data_dir`] with the environment supplied, for tests.
+pub fn service_data_dir_from(env: impl Fn(&str) -> Option<OsString>) -> Option<PathBuf> {
+    platform_dir(&env, Folder::Data)
+}
+
 /// Where the workers keep rustic's caches, one folder per repository and
 /// worker (§4.1): `LADDERBACK_CACHE_DIR` when set to a non-empty value, else
 /// the platform's cache folder, or `None` when there is no home directory.
@@ -321,6 +334,18 @@ mod tests {
         let from = env(&[]);
         assert_eq!(config_dir_from(&from), None);
         assert_eq!(data_dir_from(&from), None);
+    }
+
+    #[test]
+    fn the_services_data_folder_is_the_platforms_whatever_the_shell_names() {
+        let shell = env(&[
+            ("HOME", "/home/demo"),
+            ("LADDERBACK_DATA_DIR", "/home/demo/test-data"),
+        ]);
+        let platforms = data_dir_from(env(&[("HOME", "/home/demo")]));
+        assert!(platforms.is_some());
+        assert_eq!(service_data_dir_from(&shell), platforms);
+        assert_eq!(service_data_dir_from(env(&[])), None, "no home");
     }
 
     #[cfg(target_os = "macos")]

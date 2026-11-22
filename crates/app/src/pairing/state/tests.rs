@@ -11,11 +11,15 @@ fn key(byte: u8) -> PublicKey {
 }
 
 fn pin(tls: TokenTls) -> HubPin {
+    pin_at("https://hub.example:9898", tls)
+}
+
+fn pin_at(address: &str, tls: TokenTls) -> HubPin {
     HubPin::new(
         key(7),
         tls,
         key(9),
-        HubAddress::parse("https://hub.example:9898").expect("an address"),
+        HubAddress::parse(address).expect("an address"),
     )
 }
 
@@ -53,7 +57,7 @@ async fn a_pinned_hub_is_named_by_its_address_and_the_fingerprint_of_its_key() {
             hub: Some(PairedHubDto {
                 address: "https://hub.example:9898".to_owned(),
                 fingerprint: Fingerprint::of_key(&key(7)).to_string(),
-                certificate: TokenCertificateDto::Ca,
+                certificate: Some(TokenCertificateDto::Ca),
             }),
         }
     );
@@ -68,5 +72,21 @@ async fn a_hub_whose_own_certificate_is_pinned_says_so() {
         .await
         .expect("an answer");
     let hub = read.hub.expect("a hub");
-    assert_eq!(hub.certificate, TokenCertificateDto::Pinned);
+    assert_eq!(hub.certificate, Some(TokenCertificateDto::Pinned));
+}
+
+/// A plain `http://` address isn't encrypted and shows no certificate, so
+/// none is named, whatever the pin's TLS says (#1372).
+#[tokio::test]
+async fn a_hub_at_a_plain_http_address_names_no_certificate() {
+    for tls in [TokenTls::Ca, TokenTls::Pinned(Fingerprint::of_key(&key(3)))] {
+        let read = state_of(Some(pin_at("http://hub.example:9898", tls)))
+            .await
+            .read()
+            .await
+            .expect("an answer");
+        let hub = read.hub.expect("a hub");
+        assert_eq!(hub.address, "http://hub.example:9898");
+        assert_eq!(hub.certificate, None);
+    }
 }

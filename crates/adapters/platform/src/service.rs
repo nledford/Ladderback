@@ -302,6 +302,37 @@ impl UserService {
     pub fn needs_full_disk_access(&self) -> bool {
         matches!(self.kind, Kind::Launchd { .. })
     }
+
+    /// The process the manager runs the service in, as `systemctl --user
+    /// show -p MainPID` or `launchctl print` names it: `None` when it runs
+    /// none, or the manager can't say (#459).
+    pub async fn process(&self) -> Option<u32> {
+        let (program, args): (_, Vec<OsString>) = match &self.kind {
+            Kind::Systemd => (
+                "systemctl",
+                Vec::from(
+                    ["--user", "show", "-p", "MainPID", "--value", &self.name].map(OsString::from),
+                ),
+            ),
+            Kind::Launchd { uid, .. } => (
+                "launchctl",
+                vec!["print".into(), format!("gui/{uid}/{}", self.name).into()],
+            ),
+        };
+        let Ok(manager::Ended::Succeeded { out }) =
+            manager::run(program, &args, &self.environment, self.limit).await
+        else {
+            return None;
+        };
+        let named = match self.kind {
+            // systemd names 0 for a unit that runs no process.
+            Kind::Systemd => Some(out.trim()),
+            // The agent's own `pid`, at the top level of what `print` says,
+            // one tab in; an agent launchd has loaded but not running has none.
+            Kind::Launchd { .. } => out.lines().find_map(|line| line.strip_prefix("\tpid = ")),
+        };
+        named?.parse().ok().filter(|pid| *pid != 0)
+    }
 }
 
 #[async_trait]

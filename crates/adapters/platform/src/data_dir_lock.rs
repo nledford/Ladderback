@@ -53,6 +53,32 @@ impl DataDirLock {
         record_this_process(&mut file).map_err(unavailable)?;
         Ok(Self { _file: file })
     }
+
+    /// Whether another process holds `data_dir`, found without keeping the
+    /// lock or writing anything: `Ok` when nothing holds it, or when no
+    /// process ever has (no lock file, which this never makes). It takes the
+    /// lock for the moment it looks, so a process taking it in that moment (a
+    /// daemon, `set-password`) is refused once, as by any other holder.
+    ///
+    /// # Errors
+    ///
+    /// [`LockError::InUse`] when another process holds it, naming that
+    /// process when the file does; [`LockError::Unavailable`] when the lock
+    /// file can't be opened or locked.
+    pub fn check(data_dir: &Path) -> Result<(), LockError> {
+        let mut file = match File::open(data_dir.join(LOCK_FILE)) {
+            Ok(file) => file,
+            Err(error) if error.kind() == io::ErrorKind::NotFound => return Ok(()),
+            Err(error) => return Err(unavailable(error)),
+        };
+        match file.try_lock_shared() {
+            Ok(()) => Ok(()),
+            Err(TryLockError::WouldBlock) => Err(LockError::InUse {
+                holder: holder_named_in(&mut file),
+            }),
+            Err(TryLockError::Error(error)) => Err(unavailable(error)),
+        }
+    }
 }
 
 /// The most of the lock file that is read for a process ID: an ID is a short
@@ -200,5 +226,56 @@ mod tests {
             .permissions()
             .mode();
         assert_eq!(mode & 0o777, 0o600, "the mode is {mode:o}");
+    }
+
+    #[test]
+    fn a_check_names_the_process_that_holds_the_data_dir() {
+        let dir = tempfile::tempdir().unwrap();
+        let _held = DataDirLock::acquire(dir.path()).unwrap();
+        assert_eq!(
+            DataDirLock::check(dir.path()),
+            Err(LockError::InUse {
+                holder: Some(std::process::id())
+            })
+        );
+        let named = fs::read_to_string(lock_file(dir.path())).unwrap();
+        assert_eq!(named.trim(), std::process::id().to_string());
+    }
+
+    #[test]
+    fn a_check_of_a_holder_that_named_no_process_names_nobody() {
+        let dir = tempfile::tempdir().unwrap();
+        let holder = File::options()
+            .create(true)
+            .write(true)
+            .truncate(false)
+            .open(lock_file(dir.path()))
+            .unwrap();
+        holder.try_lock().unwrap();
+        assert_eq!(
+            DataDirLock::check(dir.path()),
+            Err(LockError::InUse { holder: None })
+        );
+    }
+
+    #[test]
+    fn a_check_of_a_free_data_dir_leaves_it_free_and_its_file_as_it_was() {
+        let dir = tempfile::tempdir().unwrap();
+        // A holder that has exited leaves its ID behind.
+        fs::write(lock_file(dir.path()), "4194999\n").unwrap();
+        assert_eq!(DataDirLock::check(dir.path()), Ok(()));
+        let named = fs::read_to_string(lock_file(dir.path())).unwrap();
+        assert_eq!(named, "4194999\n", "the check wrote nothing");
+        DataDirLock::acquire(dir.path()).expect("the check kept no lock");
+    }
+
+    #[test]
+    fn a_check_of_a_data_dir_never_locked_makes_no_lock_file() {
+        let dir = tempfile::tempdir().unwrap();
+        assert_eq!(DataDirLock::check(dir.path()), Ok(()));
+        assert!(!lock_file(dir.path()).exists());
+        let missing = dir.path().join("missing");
+        assert_eq!(DataDirLock::check(&missing), Ok(()));
+        assert!(!missing.exists(), "a check doesn't make the data dir");
     }
 }

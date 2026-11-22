@@ -286,6 +286,15 @@ cli-service-linger = to keep it running while you are logged out, run { "loginct
 # $program (text): the path of the program the service runs.
 cli-service-full-disk-access = to back up Mail, Messages, Safari and other apps' data, turn on { -full-disk-access } for { $program } in System Settings, under Privacy & Security; without it, backups read less. The start page says whether it is missing
 
+# After an install, when another process holds the data folder the service uses, as a `ladderback serve` started by hand and still running does: the service stops at each start, and its manager starts it again, until that process stops.
+# $path (text): the data folder.
+# $pid (text): the ID of the process that holds it.
+cli-service-data-dir-in-use = another { -brand-name }, process { $pid }, is using the data folder { $path }, so the service stops each time it starts: stop that process for the service to take over, as its service manager keeps starting it
+
+# As cli-service-data-dir-in-use, when the lock file names no process.
+# $path (text): the data folder.
+cli-service-data-dir-in-use-unnamed = another { -brand-name } is using the data folder { $path }, so the service stops each time it starts: stop it for the service to take over, as its service manager keeps starting it
+
 # Linux only, after an install, when repositories read their password from the keyring: a service that lingers starts at boot, before the login that starts the Secret Service, so it can't read the password until someone logs in.
 # $count (number): how many repositories read their password from the keyring.
 # `password-file` is a setting and `chmod 600` a command, typed as they are: keep them string literals.

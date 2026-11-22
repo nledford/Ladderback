@@ -38,7 +38,7 @@ Feature: AI agents explain pairing a machine with its hub through MCP
     And a machine named "e2e-laptop" paired with the token from its terminal
     And an MCP server running headless on the machine's folders
     When the MCP client calls the tool "pairing_state"
-    Then the pairing state names the hub's address and its key's fingerprint
+    Then the pairing state names the hub's address and its key's fingerprint, and no certificate, since the address isn't encrypted
     And nothing the MCP server wrote shows the pairing token
 
   Scenario: A token without Backups can't read the pairing state
