@@ -1763,8 +1763,9 @@ async fn a_resumed_backup_refused_before_it_runs_is_written_once_as_failed_and_a
         store.clone(),
     )
     .with_events(bus)
-    .refuse_resumed(queued, reason.clone())
-    .await;
+    .end_resumed(queued, reason.clone())
+    .await
+    .finished;
 
     let failed = OperationStatus::Failed { reason };
     assert_eq!(finished.operation.id(), id());

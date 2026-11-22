@@ -2330,6 +2330,7 @@ async fn a_resumed_backup_refused_for_its_secret_ends_with_the_refusal() {
         .expect("the queued backup is saved");
 
     PlanRuns::resume(&runner, queued.clone(), None).await;
+    until_ended(&store, queued.id()).await;
 
     assert_eq!(jobs(&scripted), 0, "the engine was asked");
     let history = store
@@ -2422,7 +2423,9 @@ async fn a_resumed_backups_refusal_is_kept_masked_of_the_repositorys_secrets() {
         .await
         .expect("the queued backup is saved");
 
+    let id = queued.id();
     PlanRuns::resume(&runner, queued, None).await;
+    until_ended(&store, id).await;
 
     let page = Operations::history(&runner, None, None, None)
         .await
@@ -2535,6 +2538,7 @@ async fn a_resumed_backup_whose_plan_moved_ends_as_daemon_stopped_though_its_sec
         .expect("the queued backup is saved");
 
     PlanRuns::resume(&runner, queued.clone(), None).await;
+    until_ended(&store, queued.id()).await;
 
     let record = store
         .get(queued.id())

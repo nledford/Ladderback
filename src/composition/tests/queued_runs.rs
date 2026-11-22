@@ -168,6 +168,22 @@ async fn status_of(runner: &PlanRunner, id: OperationId) -> OperationStatus {
         .status
 }
 
+/// How operation `id` ended, once the log has its end: a leftover that
+/// won't run is ended on a task of its own (#1250).
+async fn until_ended(runner: &PlanRunner, id: OperationId) -> OperationStatus {
+    tokio::time::timeout(std::time::Duration::from_secs(5), async {
+        loop {
+            let status = status_of(runner, id).await;
+            if status.is_finished() {
+                break status;
+            }
+            tokio::time::sleep(std::time::Duration::from_millis(10)).await;
+        }
+    })
+    .await
+    .unwrap_or_else(|_| panic!("the operation log ends operation {id:?}"))
+}
+
 /// A queued backup whose job can't be built at the restart ends as
 /// failed, the log says why (decision 73), and the end is announced as
 /// every end a start makes is (#547): left queued, it would show as
@@ -182,6 +198,11 @@ async fn a_queued_backup_ends_as_daemon_stopped_when_the_configuration_cannot_be
     let mut page = runner.events.subscribe().await;
 
     PlanRuns::resume(&runner, queued, None).await;
+    // The end is on a task of its own (#1250): its news says it is done.
+    let told = tokio::time::timeout(std::time::Duration::from_secs(5), page.next())
+        .await
+        .ok()
+        .flatten();
 
     assert_eq!(
         status_of(&runner, id).await,
@@ -198,7 +219,6 @@ async fn a_queued_backup_ends_as_daemon_stopped_when_the_configuration_cannot_be
             && line.contains("(config-invalid)")),
         "the log says why the backup ended: {said:?}"
     );
-    let told = futures::FutureExt::now_or_never(page.next()).flatten();
     assert_matches!(
         &told,
         Some(UiEvent::OperationFailed { operation, code: ErrorCode::DaemonStopped, .. })
@@ -288,7 +308,7 @@ async fn a_queued_backup_whose_plan_moved_to_another_repository_ends_as_daemon_s
     PlanRuns::resume(&runner, queued, None).await;
 
     assert_eq!(
-        status_of(&runner, id).await,
+        until_ended(&runner, id).await,
         OperationStatus::Failed {
             reason: FailureReason::DaemonStopped
         }
