@@ -3,9 +3,10 @@
 use domain::fleet::{AgentStatus, Fingerprint, PairRequest, Pairing};
 
 /// What a person at the hub's terminal or in its log matches against the
-/// machine's own screen: the machine's hostname, escaped as the log escapes
-/// outside text, its agent ID and key fingerprint, and whether it waits for
-/// approval. The token, the pairing key and every seed stay out (I4).
+/// machine's own screen: the machine's hostname, between double quotes and
+/// escaped with `escape_debug` as the other-hosts warning escapes a host
+/// name from outside, its agent ID and key fingerprint, and whether it waits
+/// for approval. The token, the pairing key and every seed stay out (I4).
 pub(super) fn paired(request: &PairRequest, outcome: &Pairing) -> String {
     let (what, then) = match outcome {
         Pairing::New(_) => ("paired", "it waits for approval"),
