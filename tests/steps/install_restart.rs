@@ -600,10 +600,29 @@ async fn runs_at_terminal(agent: &mut Agent) {
         .stdout(Stdio::piped());
     let (ran, shown) = blocking(move || {
         use std::io::{Read, Write};
-        let child = spawn_gate::hold(|| command.spawn()).expect("the script runs");
+        use std::time::Duration;
+        let mut child = spawn_gate::hold(|| command.spawn()).expect("the script runs");
         // The script and its children now hold the terminal's other end
         // alone, so the reads below end once they have all ended.
         drop(command);
+        // Its standard output is read meanwhile, so a full pipe can't hold
+        // it, and it is stopped if it outlasts the bound, so a script that
+        // never ends fails the step rather than hanging it.
+        let mut stdout = child.stdout.take().expect("its standard output");
+        let printed = std::thread::spawn(move || {
+            let mut printed = Vec::new();
+            let _ = stdout.read_to_end(&mut printed);
+            String::from_utf8_lossy_owned(printed)
+        });
+        let pid = nix::unistd::Pid::from_raw(i32::try_from(child.id()).expect("a process ID"));
+        let (ended, end) = std::sync::mpsc::channel::<()>();
+        let watch = std::thread::spawn(move || {
+            let outlasted = end.recv_timeout(Duration::from_secs(60)).is_err();
+            if outlasted {
+                let _ = nix::sys::signal::kill(pid, nix::sys::signal::Signal::SIGKILL);
+            }
+            outlasted
+        });
         let mut screen = fs::File::from(pty.master);
         let (mut shown, mut pressed) = (String::new(), false);
         let mut chunk = [0_u8; 4096];
@@ -621,11 +640,16 @@ async fn runs_at_terminal(agent: &mut Agent) {
                 pressed = true;
             }
         }
-        let output = child.wait_with_output().expect("the script ended");
+        let status = child.wait().expect("the script ended");
+        let _ = ended.send(());
+        assert!(
+            !watch.join().expect("the watch ends"),
+            "the script didn't end within a minute: {shown:?}"
+        );
         let ran = Ran {
-            success: output.status.success(),
-            code: output.status.code(),
-            stdout: String::from_utf8_lossy_owned(output.stdout),
+            success: status.success(),
+            code: status.code(),
+            stdout: printed.join().expect("its output was read"),
             stderr: shown.clone(),
         };
         (ran, shown)
