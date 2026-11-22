@@ -391,10 +391,15 @@ impl AgentPairing {
             }
         };
         drop(attempt);
+        let held_as = paired
+            .hostname
+            .as_ref()
+            .filter(|held| **held != handshake.hostname)
+            .cloned();
         Ok(PairedHub {
             pin,
             agent_key,
-            held_as: None,
+            held_as,
         })
     }
 
