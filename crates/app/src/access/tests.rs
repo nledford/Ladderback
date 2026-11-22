@@ -530,48 +530,11 @@ impl SessionStore for Flaky {
     }
 }
 
-thread_local! {
-    /// The lines this module logged on this thread, with their levels.
-    static LOGGED: std::cell::RefCell<Vec<(log::Level, String)>> =
-        const { std::cell::RefCell::new(Vec::new()) };
-}
+pub(super) use crate::test_log::capture_the_log;
 
-/// Keeps each line `access` logs on the thread that logged it: each test
-/// runs its use cases on its own thread (`now_or_never`, or a
-/// `#[tokio::test]`'s runtime on the test's thread), so tests running at
-/// once in one process never see each other's lines.
-struct CapturingLogger;
-
-impl log::Log for CapturingLogger {
-    fn enabled(&self, metadata: &log::Metadata<'_>) -> bool {
-        metadata
-            .target()
-            .starts_with(module_path!().trim_end_matches("::tests"))
-    }
-
-    fn log(&self, record: &log::Record<'_>) {
-        if self.enabled(record.metadata()) {
-            LOGGED.with_borrow_mut(|lines| lines.push((record.level(), record.args().to_string())));
-        }
-    }
-
-    fn flush(&self) {}
-}
-
-/// Captures the log from here on, and forgets what this thread logged
-/// before.
-pub(super) fn capture_the_log() {
-    static ONCE: std::sync::Once = std::sync::Once::new();
-    ONCE.call_once(|| {
-        log::set_logger(&CapturingLogger).expect("no other logger in app's tests");
-        log::set_max_level(log::LevelFilter::Trace);
-    });
-    logged();
-}
-
-/// What this thread has logged since this was last asked.
+/// What `access` has logged on this thread since this was last asked.
 pub(super) fn logged() -> Vec<(log::Level, String)> {
-    LOGGED.with_borrow_mut(std::mem::take)
+    crate::test_log::logged_by(module_path!().trim_end_matches("::tests"))
 }
 
 /// Uses the session of `token` once the store is due to keep its last use

@@ -56,3 +56,5 @@ pub mod without_token;
 pub mod contract;
 #[cfg(feature = "fakes")]
 pub mod fakes;
+#[cfg(test)]
+mod test_log;

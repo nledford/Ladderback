@@ -358,7 +358,7 @@ fn a_spent_token_answers_only_its_own_pairing_again() {
     };
     assert_eq!(
         decide_pairing(&again, &request(), at(5000)),
-        Ok(Pairing::Repeated(name("laptop")))
+        Ok(Pairing::Repeated(registered.clone()))
     );
     let other_key = PairRequest {
         agent_key: key(5),
@@ -403,7 +403,7 @@ fn a_repeated_pairing_names_the_hostname_the_hub_holds() {
     };
     assert_eq!(
         decide_pairing(&again, &under_another_name, at(10)),
-        Ok(Pairing::Repeated(name("laptop")))
+        Ok(Pairing::Repeated(registered.clone()))
     );
 }
 
@@ -545,7 +545,7 @@ fn a_proof_of_a_registered_agent_keeps_the_greater_counter_and_now() {
     };
     let higher = decide_proof(&view, &proof(12, BindingKind::TlsExporter), at(10));
     assert_eq!(
-        higher,
+        higher.map(|proved| proved.agent),
         Ok(AgentRecord {
             counter: 12,
             last_seen: at(10),
@@ -554,10 +554,41 @@ fn a_proof_of_a_registered_agent_keeps_the_greater_counter_and_now() {
     );
     let lower = decide_proof(&view, &proof(3, BindingKind::TlsExporter), at(20));
     assert_eq!(
-        lower.map(|kept| (kept.counter, kept.last_seen, kept.status)),
+        lower.map(|proved| (
+            proved.agent.counter,
+            proved.agent.last_seen,
+            proved.agent.status
+        )),
         Ok((9, at(20), agent.status)),
         "a lower counter is never kept, and the status stays"
     );
+}
+
+/// A proof says whether it is the agent's first connection since a person
+/// approved it, from the record it is decided on: it is when the approval
+/// came after the hub last heard from the agent, and isn't once the hub has
+/// heard from it since, nor for a pending agent (#1342).
+#[test]
+fn a_proof_says_whether_it_is_the_first_since_the_approval() {
+    let kinds = [BindingKind::TlsExporter];
+    let request = proof(12, BindingKind::TlsExporter);
+    let first = |agent: &AgentRecord| {
+        let view = ProofView {
+            record: Some(agent),
+            kinds: &kinds,
+        };
+        decide_proof(&view, &request, at(30)).map(|proved| proved.first_since_approval)
+    };
+    let approved_at = |at_approval: i64, seen: i64| AgentRecord {
+        status: AgentStatus::Approved {
+            at: at(at_approval),
+        },
+        last_seen: at(seen),
+        ..record(1, key(4), "laptop")
+    };
+    assert_eq!(first(&approved_at(20, 10)), Ok(true));
+    assert_eq!(first(&approved_at(20, 25)), Ok(false));
+    assert_eq!(first(&waiting_with(1, key(4), "laptop")), Ok(false));
 }
 
 #[test]
@@ -653,4 +684,25 @@ fn an_approval_of_an_approved_unknown_or_rekeyed_agent_is_refused() {
         decide_approval(Some(&waiting), &key(5), at(10)),
         Err(ApprovalRefused::Unknown)
     );
+}
+
+/// An approved agent the hub hasn't heard from since its approval is
+/// unseen until its first connection after it, which sets `last_seen`
+/// after the approval; a pending agent is never.
+#[test]
+fn an_approved_agent_is_unseen_since_approval_until_the_hub_hears_from_it() {
+    let approved_at = |at_approval: i64, seen: i64| AgentRecord {
+        status: AgentStatus::Approved {
+            at: at(at_approval),
+        },
+        last_seen: at(seen),
+        ..record(1, key(4), "laptop")
+    };
+    assert!(approved_at(10, 5).unseen_since_approval());
+    assert!(
+        approved_at(10, 10).unseen_since_approval(),
+        "seen at the approval's instant is seen before it"
+    );
+    assert!(!approved_at(10, 11).unseen_since_approval());
+    assert!(!waiting_with(1, key(4), "laptop").unseen_since_approval());
 }

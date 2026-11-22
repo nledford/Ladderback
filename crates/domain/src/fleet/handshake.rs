@@ -3,6 +3,7 @@
 //! each other before either trusts the other. Their wire form, and the caps
 //! on what is read from the network, are the transport's.
 
+use super::greeting::Approval;
 use super::hostname::Hostname;
 use super::keys::{KEY_BYTES, PublicKey, Signature};
 use super::signed::{Binding, EpochSeconds, Handshakes, Nonce, WireName};
@@ -109,13 +110,15 @@ pub struct Proof {
 
 /// The hub's acceptance of a pairing: its recovery key, signed with the hub
 /// key over the connection (`paired`), and the hostname the hub holds the
-/// agent under. Only the recovery key is signed, so the agent shows the
-/// hostname and acts on nothing in it; `None` from a hub that doesn't say.
+/// agent under and whether a person has approved it. Only the recovery key
+/// is signed, so the agent shows the hostname and the approval and acts on
+/// nothing in them; each is `None` from a hub that doesn't say.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Paired {
     pub recovery_key: PublicKey,
     pub signature: Signature,
     pub hostname: Option<Hostname>,
+    pub approval: Option<Approval>,
 }
 
 /// Which agent holds a hostname another asked for, as the hub shows it so

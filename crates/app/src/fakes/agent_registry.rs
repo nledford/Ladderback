@@ -4,7 +4,7 @@ use std::sync::{Arc, Mutex, MutexGuard, PoisonError};
 use async_trait::async_trait;
 use domain::fleet::{
     AgentRecord, AgentStatus, ApprovalRefused, BindingKind, Fingerprint, HostnameKey, MachineZone,
-    PairRefusal, PairRequest, Pairing, PairingView, ProofRefusal, ProofRequest, ProofView,
+    PairRefusal, PairRequest, Pairing, PairingView, ProofRefusal, ProofRequest, ProofView, Proved,
     PublicKey, TokenId, TokenRecord, TokenUse, admits_unused_token, decide_approval,
     decide_pairing, decide_proof, voids_tokens_for_new_key,
 };
@@ -19,6 +19,7 @@ use crate::ports::{Added, AgentRegistry, StoreError};
 pub struct InMemoryAgentRegistry {
     kept: Mutex<Kept>,
     keeping: Mutex<Option<Keeping>>,
+    approving: Mutex<Option<Timestamp>>,
 }
 
 /// How long keeping a token takes: `clock` moves on by `by` as one is kept,
@@ -60,6 +61,16 @@ impl InMemoryAgentRegistry {
     /// by that much as each one is kept.
     pub fn takes_to_keep(&self, clock: Arc<FakeClock>, by: SignedDuration) {
         *self.keeping.lock().unwrap_or_else(PoisonError::into_inner) = Some(Keeping { clock, by });
+    }
+
+    /// A person approves the agent the next proof names at `at`, in that
+    /// proof's step before it is decided on: as an approval that lands after
+    /// the hub read the agent to check its proof and before it kept it.
+    pub fn approves_before_next_proof(&self, at: Timestamp) {
+        *self
+            .approving
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner) = Some(at);
     }
 }
 
@@ -227,9 +238,23 @@ impl AgentRegistry for InMemoryAgentRegistry {
         &self,
         request: &ProofRequest,
         now: Timestamp,
-    ) -> Result<Result<AgentRecord, ProofRefusal>, StoreError> {
+    ) -> Result<Result<Proved, ProofRefusal>, StoreError> {
         let now = to_the_millisecond(now);
         let mut kept = self.kept();
+        let approving = self
+            .approving
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .take();
+        if let Some(at) = approving {
+            for kept_one in &mut kept.agents {
+                if kept_one.agent_id == request.agent_id {
+                    kept_one.status = AgentStatus::Approved {
+                        at: to_the_millisecond(at),
+                    };
+                }
+            }
+        }
         let kinds: Vec<BindingKind> = kept
             .tokens
             .iter()
@@ -250,10 +275,10 @@ impl AgentRegistry for InMemoryAgentRegistry {
             request,
             now,
         );
-        if let Ok(agent) = &decided {
+        if let Ok(proved) = &decided {
             for kept_one in &mut kept.agents {
-                if kept_one.agent_id == agent.agent_id {
-                    *kept_one = kept_agent(agent.clone());
+                if kept_one.agent_id == proved.agent.agent_id {
+                    *kept_one = kept_agent(proved.agent.clone());
                 }
             }
         }

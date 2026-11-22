@@ -46,7 +46,22 @@ Feature: Pairing a machine from a terminal
     And the machine lost the hub's reply, so it holds no pin
     When a machine named "other" pairs with the token from its terminal
     Then the machine says the hub holds it under the hostname "first", not "other"
+    And the hub's log names the machine by the hostname "first" it holds and the hostname "other" it asked for
     And once the hub stops, it lists "first" as waiting for approval
+
+  @e2e
+  Scenario: An approved machine that pairs again under another hostname is told it is approved, under the hostname the hub holds
+    Given a hub with a pairing token made at its terminal
+    And the hub is serving on loopback
+    And a machine named "first" paired with the token from its terminal
+    And the person approved "first" on the hub's page
+    And the machine lost the hub's reply, so it holds no pin
+    And the hub has stopped
+    And the person made another pairing token at the hub's terminal
+    When the hub serves again on the same address
+    And a machine named "other" pairs with the token from its terminal
+    Then the machine says the hub approved it already, under the hostname "first", not "other"
+    And the hub's log names the machine by the hostname "first" it holds and the hostname "other" it asked for
 
   @e2e
   Scenario: A token revoked at the hub's terminal can't pair a machine
