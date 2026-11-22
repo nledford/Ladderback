@@ -23,8 +23,8 @@ use axum::http::{HeaderMap, StatusCode};
 use axum::response::{IntoResponse, Response};
 use domain::access::step_up::StepUpConfirmation;
 use domain::fleet::{
-    AgentRecord, AgentStatus, ApprovalRefused, Fingerprint, HubAddress, HubRoute, ListedAgent,
-    PublicKey, RouteRefused, TokenId, TokenTls,
+    AgentRecord, AgentStatus, ApprovalRefused, Fingerprint, HubAddress, HubRoute, HubScheme,
+    ListedAgent, PublicKey, RouteRefused, TokenId, TokenTls,
 };
 use domain::{AgentId, SignedDuration, Timestamp, Uuid};
 
@@ -296,7 +296,8 @@ fn agent_dto(listed: &ListedAgent, now: Timestamp) -> api::HubAgentDto {
 
 /// The token as the page shows it, once. Its life left is the hub's own
 /// count, which the page counts down on its monotonic clock, so a browser
-/// whose clock is wrong still shows it right.
+/// whose clock is wrong still shows it right. A plain address shows no
+/// certificate, so its token names none (#1343).
 fn token_dto(made: &MadeToken) -> api::PairingTokenDto {
     api::PairingTokenDto {
         token: made.token.to_text().expose().to_owned(),
@@ -305,9 +306,10 @@ fn token_dto(made: &MadeToken) -> api::PairingTokenDto {
         address: made.token.address().as_str().to_owned(),
         expires_at: made.expires_at.to_string(),
         seconds_left: u64::try_from(made.left.as_secs()).unwrap_or(0),
-        certificate: match made.token.tls() {
-            TokenTls::Pinned(_) => api::TokenCertificateDto::Pinned,
-            TokenTls::Ca => api::TokenCertificateDto::Ca,
+        certificate: match (made.token.address().scheme(), made.token.tls()) {
+            (HubScheme::Http, _) => None,
+            (HubScheme::Https, TokenTls::Pinned(_)) => Some(api::TokenCertificateDto::Pinned),
+            (HubScheme::Https, TokenTls::Ca) => Some(api::TokenCertificateDto::Ca),
         },
     }
 }

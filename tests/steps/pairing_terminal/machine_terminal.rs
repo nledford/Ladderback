@@ -154,6 +154,16 @@ fn read_pinned(agent: &mut Agent) {
     );
 }
 
+#[then("the machine read a token for an address that isn't encrypted, naming no certificate")]
+fn read_plain(agent: &mut Agent) {
+    let said = said(agent);
+    assert!(
+        said.stderr.contains("The address isn't encrypted"),
+        "{said:?}"
+    );
+    assert!(!said.stderr.contains("certificate"), "{said:?}");
+}
+
 #[when("the machine checks its link to the hub from its terminal")]
 async fn machine_checks(agent: &mut Agent) {
     let said = on_machine(agent, &["hub-status"], None).await;
