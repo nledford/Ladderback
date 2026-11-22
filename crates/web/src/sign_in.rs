@@ -1,7 +1,7 @@
 //! The sign-in page, the warning shown before a session would end unused,
 //! the dialog that asks to sign in again when a session ends while the page
-//! is in use, the navigation's Sign out control, and the start page's notice
-//! that sign-in is off (security §10.1, components §4.5). This is DOM glue:
+//! is in use, the navigation's Sign out control, and the notices that sign-in
+//! is off, with their way to Settings (security §10.1, components §4.5). This is DOM glue:
 //! what the daemon's answers mean, when to warn, and what the form lacks, is
 //! decided in `session.rs` on the host; the `@ui` scenarios of
 //! `features/security/sign_in.feature` run this in Chromium.
@@ -18,8 +18,10 @@ use crate::announcer::Politeness;
 use crate::components::ACTIONS;
 use crate::components::alert::rules::AlertTone;
 use crate::components::button::{Appearance, Content, Kind};
+use crate::components::link::rules::{Destination, Matching};
 use crate::components::{
-    Alert, Banner, Button, Checkbox, ErrorSummary, ModalDialog, SummaryItem, TextField, text_field,
+    Alert, Banner, Button, Checkbox, ErrorSummary, Link, ModalDialog, SummaryItem, TextField,
+    text_field,
 };
 use crate::live::reply;
 use crate::repositories::Sentence;
@@ -27,6 +29,7 @@ use crate::routes::{PageHeading, refusal, text_with};
 use crate::session::{
     Answer, SignInOffNotice, Signed, Standing, about_the_password, asks_to_keep, lacking,
 };
+use crate::settings_tabs::Section;
 use crate::variants::Tone;
 use crate::{text, ws};
 
@@ -443,9 +446,10 @@ pub(crate) fn SignOutFailure(localizer: Arc<Localizer>, failed: RwSignal<bool>) 
 }
 
 /// The start page's notice that sign-in is off, an information banner:
-/// anyone on this machine can use Ladderback, and how to turn sign-in on.
-/// Shown only while it is off on loopback; on the network every page has a
-/// warning of its own (`App`).
+/// anyone on this machine can use Ladderback, and how to turn sign-in on,
+/// with the way to the Admin password tab of Settings. Shown only while it
+/// is off on loopback; on the network every page has a warning of its own
+/// (`App`).
 #[component]
 pub(crate) fn SignInOff(localizer: Arc<Localizer>) -> impl IntoView {
     let notice = use_context::<RwSignal<SignInOffNotice>>();
@@ -453,7 +457,23 @@ pub(crate) fn SignInOff(localizer: Arc<Localizer>) -> impl IntoView {
     move || {
         (notice.map(|notice| notice.get()) == Some(SignInOffNotice::StartPage)).then(|| {
             let words = words.clone();
-            view! { <Banner localizer=Arc::clone(&localizer)>{words}</Banner> }
+            let link = admin_password_link(&localizer);
+            view! { <Banner localizer=Arc::clone(&localizer)>{words} " " {link}</Banner> }
         })
     }
+}
+
+/// The link after a notice that sign-in is off, to the Admin password tab of
+/// Settings, where the admin password that turns it on is set (#1373).
+pub(crate) fn admin_password_link(localizer: &Arc<Localizer>) -> impl IntoView + use<> {
+    let words = text(localizer, msg::UI_SIGN_IN_OFF_LINK);
+    let localizer = Arc::clone(localizer);
+    let href = format!("/settings#{}", Section::AdminPassword.fragment());
+    Destination::route(&href, Matching::Exact).map(|to| {
+        view! {
+            <Link to=to localizer=localizer>
+                {words}
+            </Link>
+        }
+    })
 }

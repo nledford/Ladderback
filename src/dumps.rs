@@ -74,4 +74,127 @@ mod tests {
             format!("ladderback worker: DebuggerAttachAllowed: {}", refused())
         );
     }
+
+    /// `set-password` has turned off its core dumps, and on Linux its
+    /// dumpable flag, while it still waits for the password (#1256): a
+    /// Ctrl-\ at its prompt leaves no dump of what was typed.
+    #[cfg(unix)]
+    #[test]
+    fn set_password_refuses_core_dumps_before_it_reads_the_password() {
+        at_prompt::refused_while_waiting(
+            "dumps::tests::set_password_refuses_core_dumps_before_it_reads_the_password",
+            || crate::set_password::set_password(false),
+        );
+    }
+
+    /// `pair` has turned off its core dumps, and on Linux its dumpable
+    /// flag, while it still waits for the pairing token (#1256).
+    #[cfg(all(unix, feature = "hub"))]
+    #[test]
+    fn pair_refuses_core_dumps_before_it_reads_the_token() {
+        at_prompt::refused_while_waiting(
+            "dumps::tests::pair_refuses_core_dumps_before_it_reads_the_token",
+            || {
+                crate::hub::pair(
+                    crate::hub::PairAsk {
+                        address: None,
+                        hostname: None,
+                        yes: false,
+                    },
+                    false,
+                )
+            },
+        );
+    }
+
+    /// A command run in a copy of this test binary, with standard input
+    /// held open and empty, so that it waits at its prompt for good: the
+    /// copy watches its own core-dump limit, and on Linux its dumpable flag,
+    /// for the refusal (decision 98), which a refusal after the prompt never
+    /// reaches.
+    #[cfg(unix)]
+    mod at_prompt {
+        use std::process::{Command, ExitCode, Stdio};
+        use std::time::{Duration, Instant};
+
+        use nix::sys::resource::{Resource, getrlimit};
+
+        /// Set in the copy that runs the command.
+        const COPY: &str = "LADDERBACK_TEST_DUMPS_AT_PROMPT";
+
+        /// How the copy ends: what it saw while the command waited.
+        const REFUSED: i32 = 0;
+        const NOT_REFUSED: i32 = 3;
+        const DID_NOT_WAIT: i32 = 4;
+        const REFUSED_ALREADY: i32 = 5;
+
+        /// How long the copy watches for the refusal.
+        const WATCH: Duration = Duration::from_secs(5);
+
+        /// How long the command must go on waiting once the refusal shows,
+        /// so that a command that refused and then ended without its prompt
+        /// ends the copy as [`DID_NOT_WAIT`] first.
+        const STILL_WAITING: Duration = Duration::from_millis(300);
+
+        pub(super) fn refused_while_waiting(test: &str, command: fn() -> ExitCode) {
+            if std::env::var_os(COPY).is_some() {
+                in_the_copy(command);
+            }
+            let data = tempfile::tempdir().unwrap();
+            let mut copy = Command::new(std::env::current_exe().unwrap())
+                .args(["--exact", test])
+                .env(COPY, "1")
+                .env("LADDERBACK_DATA_DIR", data.path())
+                .stdin(Stdio::piped())
+                .stdout(Stdio::null())
+                .stderr(Stdio::piped())
+                .spawn()
+                .unwrap();
+            // Open and empty until the copy has ended.
+            let input = copy.stdin.take();
+            let output = copy.wait_with_output().unwrap();
+            drop(input);
+            let said = String::from_utf8_lossy(&output.stderr);
+            match output.status.code() {
+                Some(REFUSED) => {}
+                Some(REFUSED_ALREADY) => {
+                    testkit::skip!("the core-dump limit is 0 already, so no refusal can show")
+                }
+                Some(NOT_REFUSED) => {
+                    panic!("core dumps were still on while the command waited: {said}")
+                }
+                Some(DID_NOT_WAIT) => panic!("the command ended without waiting: {said}"),
+                _ => panic!("the copy ended {:?}: {said}", output.status),
+            }
+        }
+
+        fn in_the_copy(command: fn() -> ExitCode) -> ! {
+            // On Linux the dumpable flag can still show a refusal where the
+            // limit is 0 already.
+            if refused() {
+                std::process::exit(REFUSED_ALREADY);
+            }
+            std::thread::spawn(|| {
+                let until = Instant::now() + WATCH;
+                while Instant::now() < until {
+                    if refused() {
+                        std::thread::sleep(STILL_WAITING);
+                        std::process::exit(REFUSED);
+                    }
+                    std::thread::sleep(Duration::from_millis(10));
+                }
+                std::process::exit(NOT_REFUSED);
+            });
+            let _ = command();
+            std::process::exit(DID_NOT_WAIT);
+        }
+
+        /// Both limits 0, and on Linux the dumpable flag cleared.
+        fn refused() -> bool {
+            let limit = getrlimit(Resource::RLIMIT_CORE).ok() == Some((0, 0));
+            #[cfg(target_os = "linux")]
+            let limit = limit && nix::sys::prctl::get_dumpable().ok() == Some(false);
+            limit
+        }
+    }
 }

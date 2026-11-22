@@ -171,6 +171,7 @@ Feature: Sign-in
       Examples:
         | how     |
         | Ctrl-C  |
+        | Ctrl-\\ |
         | SIGTERM |
 
   @e2e
@@ -397,6 +398,13 @@ Feature: Sign-in
       And the main heading reads "Sign in to Ladderback"
       And the textbox "Admin password" has the autocomplete token "current-password"
       And the page has no accessibility violations
+
+    # The admin password is set in Settings or at a terminal (#1373): the
+    # field's hint names both, Settings first.
+    Scenario: The sign-in field's hint names both ways the admin password is set
+      Given a daemon with sign-in on and the admin password "demo-admin-pass"
+      When I open the web UI
+      Then the field "Admin password" is described by "The password set in the Admin password tab of Settings, or with ladderback set-password."
 
     Scenario: Signing in by keyboard alone opens the page that was asked for
       Given a daemon with sign-in on and the admin password "demo-admin-pass"
@@ -658,16 +666,29 @@ Feature: Sign-in
     Scenario: The start page warns that sign-in is off and says how to turn it on
       When I open the web UI
       Then the page shows a message containing "Sign-in is off"
-      And the page shows a message containing "ladderback set-password"
+      And the page shows a message containing "To turn sign-in on, set an admin password, then restart Ladderback."
+      And the page doesn't show "ladderback set-password"
       And the page has no accessibility violations
       And the page doesn't show "answers on the network"
+
+    # Settings sets the admin password (#1373): the notice sends a reader
+    # there, never to a terminal.
+    Scenario: The start page's notice that sign-in is off leads to the Admin password tab of Settings, by keyboard
+      When I open the web UI
+      And I skip to the content
+      And I press Tab until focus is on the link "Set an admin password in Settings"
+      And I press Enter
+      Then focus is on the main heading "Settings"
+      And the tab "Admin password" is selected and the one Tab stop of its list
+      And the page has no accessibility violations
 
     Scenario: Listening on the network with sign-in off, every page warns that anyone who can reach Ladderback can use it
       Given a daemon with sign-in off listening on every address for the host name "backup.example"
       When I open the web UI
       Then the page shows a message containing "Sign-in is off, and Ladderback answers on the network"
       And the page's heading is described by "Sign-in is off, and Ladderback answers on the network"
-      And the page shows a message containing "ladderback set-password"
+      And the page shows a message containing "To turn sign-in on, set an admin password, then restart Ladderback."
+      And the page doesn't show "ladderback set-password"
       And the page doesn't show "anyone on this machine"
       And the page has no accessibility violations
       When I open the Repositories page
@@ -676,6 +697,29 @@ Feature: Sign-in
       When I open the Operations page
       Then the page shows a message containing "Sign-in is off, and Ladderback answers on the network"
       And the page's heading is described by "Sign-in is off, and Ladderback answers on the network"
+
+    Scenario: Listening on the network, every page's notice that sign-in is off leads to the Admin password tab of Settings, by keyboard
+      Given a daemon with sign-in off listening on every address for the host name "backup.example"
+      When I open the Repositories page
+      And I skip to the content
+      And I press Tab until focus is on the link "Set an admin password in Settings"
+      And I press Enter
+      Then focus is on the main heading "Settings"
+      And the tab "Admin password" is selected and the one Tab stop of its list
+      And the page shows a warning banner that says "Sign-in is off, and Ladderback answers on the network"
+      And the page has no accessibility violations
+
+    # On Settings, the link changes only the address's fragment, which the
+    # router does without a `hashchange`: the tab it names is chosen all the
+    # same.
+    Scenario: On Settings, the network's notice that sign-in is off chooses the Admin password tab, by keyboard
+      Given a daemon with sign-in off listening on every address for the host name "backup.example"
+      When I open the address "/settings"
+      And I skip to the content
+      And I press Tab until focus is on the link "Set an admin password in Settings"
+      And I press Enter
+      Then the tab "Admin password" is selected and the one Tab stop of its list
+      And the page has no accessibility violations
 
     Scenario: The start page's notice that sign-in is off is an information banner
       When I open the web UI
