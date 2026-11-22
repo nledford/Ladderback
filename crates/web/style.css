@@ -155,20 +155,23 @@ a {
   inset-block-start: 0.5rem;
 }
 
-/* The brand on its own line, then the pages' links and, at that line's end,
-   Sign out (`.site-account`), which wraps under the links on a narrow
-   screen. Every part of the line stands on one baseline, no part is taller
-   than the links and nothing lies under them, so where the line fits, the
-   header is as tall signed in as with sign-in off. The running version is
-   the footer's (`components/footer.rs`). */
+/* A Ledger Gray band (`py-3 bg-surface`, in `main.rs`) spans the window. The
+   header's content stands in the page's frame (`.site-header`, whose width
+   class is the frame's own, `page_width.rs`, as `<main>`'s is), 1rem from the
+   frame's inline edges as `<main>`'s content is, so the product's name
+   starts where each page's heading does. In the frame, the brand on its own
+   line, then the pages' links and, at that line's end, Sign out
+   (`.site-account`), which wraps under the links on a narrow screen. Every
+   part of the line stands on one baseline, no part is taller than the links
+   and nothing lies under them, so where the line fits, the header is as tall
+   signed in as with sign-in off. The running version is the footer's
+   (`components/footer.rs`). */
 .site-header {
   display: flex;
   flex-wrap: wrap;
   align-items: baseline;
   gap: 0 1rem;
-  padding-block: 0.75rem;
   padding-inline: 1rem;
-  background: var(--surface);
 }
 
 .brand {
@@ -259,9 +262,9 @@ a {
   padding-block: 0.25rem;
 }
 
-/* The frame's width is `<main>`'s own Tailwind utilities, which Settings'
-   Page width chooses (`page_width.rs`): a width here, unlayered, would beat
-   them. */
+/* The frame's width is the Tailwind utilities `page_width.rs` gives `<main>`
+   and the header's content, which Settings' Page width chooses: a width
+   here, unlayered, would beat them. */
 main {
   padding: 1rem;
 }

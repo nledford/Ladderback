@@ -54,28 +54,30 @@ impl PageWidth {
     }
 
     /// The Tailwind utilities `<main>` takes, and the footer's frame
-    /// (`components::Footer`), so the two line up. Narrow centers it at
-    /// 60rem (240 steps of Tailwind's 0.25rem spacing), today's frame, and
-    /// fills the line up to that (`inline-full`): in the app's column
-    /// (`main.rs`) a box with auto inline margins would otherwise shrink to
-    /// what it holds. Full width leaves the frame to the window and holds
-    /// each paragraph and form in it to 70 characters of its own font, a
-    /// readable line however wide the window is; tables and the rest take
+    /// (`components::Footer`), so the three line up: the page's frame
+    /// ([`frame_class`](Self::frame_class)) and, in Full width, a bound that
+    /// holds each paragraph and form in it to 70 characters of its own font,
+    /// a readable line however wide the window is; tables and the rest take
     /// the whole width.
     pub(crate) const fn main_class(self) -> &'static str {
         match self {
-            Self::Narrow => "mx-auto max-w-240 inline-full",
+            Self::Narrow => self.frame_class(),
             Self::Full => "[&_p]:max-w-[70ch] [&_form]:max-w-[70ch]",
         }
     }
 
-    /// The Tailwind utilities of the page's frame, which the header's content
-    /// takes as `<main>` does: as wide as the choice lays the page. Narrow
-    /// centers it at 60rem; Full width leaves it to the window. What
-    /// `<main>` alone needs, its paragraphs and forms at a readable length,
-    /// [`main_class`](Self::main_class) adds.
+    /// The Tailwind utilities of the page's frame, which `<main>`, the
+    /// header's content and the footer's take: as wide as the choice lays the
+    /// page. Narrow centers it at 60rem (240 steps of Tailwind's 0.25rem
+    /// spacing), today's frame, and fills the line up to that
+    /// (`inline-full`): in the app's column (`main.rs`) a box with auto
+    /// inline margins would otherwise shrink to what it holds. Full width
+    /// leaves it to the window.
     pub(crate) const fn frame_class(self) -> &'static str {
-        todo!()
+        match self {
+            Self::Narrow => "mx-auto max-w-240 inline-full",
+            Self::Full => "",
+        }
     }
 }
 

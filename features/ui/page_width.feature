@@ -99,3 +99,5 @@ Feature: Choosing the width of the pages
     Examples:
       | window | width      |
       | 1600   | Narrow     |
+      | 1600   | Full width |
+      | 320    | Narrow     |

@@ -289,7 +289,10 @@ const PAGES: [(&str, MessageId); 7] = [
     ("/settings", msg::UI_NAV_SETTINGS),
 ];
 
-/// The pages' links, shown wherever the pages are.
+/// The pages' links, shown wherever the pages are, in the color of the text
+/// around them: the header leaves Ladder Blue to the focus ring, so a page's
+/// own action is the first blue on the screen, and the current page is told
+/// by its weight (decision 141).
 #[component]
 fn Navigation(localizer: Arc<Localizer>) -> impl IntoView {
     let label = text(&localizer, msg::UI_NAV_LABEL);
@@ -300,7 +303,7 @@ fn Navigation(localizer: Arc<Localizer>) -> impl IntoView {
             Destination::route(path, Matching::Section).map(|to| {
                 view! {
                     <li>
-                        <Link to=to localizer=Arc::clone(&localizer)>
+                        <Link to=to localizer=Arc::clone(&localizer) tone=LinkTone::Inherit>
                             {words}
                         </Link>
                     </li>
@@ -317,28 +320,27 @@ fn Navigation(localizer: Arc<Localizer>) -> impl IntoView {
 
 /// The end of the header's line, after the pages' links: while the page has a
 /// session, Sign out, which is not a page and so stands apart from their
-/// list. The running version is the footer's (decision 142).
+/// list. With no session there is nothing at the line's end, not an empty
+/// box that still takes the line's gap. The running version is the footer's
+/// (decision 142).
 #[component]
 fn Account(
     localizer: Arc<Localizer>,
     standing: RwSignal<Standing>,
     sign_out_failed: RwSignal<bool>,
 ) -> impl IntoView {
-    view! {
-        <div class="site-account">
-            {move || {
-                (standing.get() == Standing::SignedIn)
-                    .then(|| {
-                        view! {
-                            <SignOut
-                                localizer=Arc::clone(&localizer)
-                                standing=standing
-                                failed=sign_out_failed
-                            />
-                        }
-                    })
-            }}
-        </div>
+    move || {
+        (standing.get() == Standing::SignedIn).then(|| {
+            view! {
+                <div class="site-account">
+                    <SignOut
+                        localizer=Arc::clone(&localizer)
+                        standing=standing
+                        failed=sign_out_failed
+                    />
+                </div>
+            }
+        })
     }
 }
 
@@ -534,43 +536,49 @@ fn App(localizer: Arc<Localizer>) -> impl IntoView {
             // top margin takes the room a short page leaves, stands at its
             // foot (`Footer`).
             <div class="flex flex-col min-block-dvh">
-                <header class="site-header">
-                    // The product's mark and name lead back to the start page,
-                    // marked as the current page there and only there, in the
-                    // color of the text around it, so it still looks like the
-                    // brand.
-                    <p class="brand">
-                        {Destination::route("/", Matching::Exact)
-                            .map(|to| {
-                                view! {
-                                    <Link
-                                        to=to
-                                        localizer=Arc::clone(&localizer)
-                                        tone=LinkTone::Inherit
-                                    >
-                                        <BrandMark />
-                                        {text(&localizer, msg::UI_BRAND)}
-                                    </Link>
-                                }
-                            })}
-                    </p>
-                    {move || {
-                        shown
-                            .get()
-                            .shows_pages()
-                            .then(|| {
-                                view! {
-                                    <Navigation localizer=Arc::clone(&navigation) />
-                                    <Account
-                                        localizer=Arc::clone(&account)
-                                        standing=standing
-                                        sign_out_failed=sign_out_failed
-                                    />
-                                    {update.clone()}
-                                }
-                            })
-                    }}
-                </header>
+                // The band spans the window, and the header's content stands
+                // in the page's frame, as wide as Settings' Page width lays
+                // `<main>` and 1rem from its inline edges, so the product's
+                // name starts where each page's heading does (decision 141).
+                <div class="py-3 bg-surface">
+                    <header class=move || format!("site-header {}", width.get().frame_class())>
+                        // The product's mark and name lead back to the start page,
+                        // marked as the current page there and only there, in the
+                        // color of the text around it, so it still looks like the
+                        // brand.
+                        <p class="brand">
+                            {Destination::route("/", Matching::Exact)
+                                .map(|to| {
+                                    view! {
+                                        <Link
+                                            to=to
+                                            localizer=Arc::clone(&localizer)
+                                            tone=LinkTone::Inherit
+                                        >
+                                            <BrandMark />
+                                            {text(&localizer, msg::UI_BRAND)}
+                                        </Link>
+                                    }
+                                })}
+                        </p>
+                        {move || {
+                            shown
+                                .get()
+                                .shows_pages()
+                                .then(|| {
+                                    view! {
+                                        <Navigation localizer=Arc::clone(&navigation) />
+                                        <Account
+                                            localizer=Arc::clone(&account)
+                                            standing=standing
+                                            sign_out_failed=sign_out_failed
+                                        />
+                                        {update.clone()}
+                                    }
+                                })
+                        }}
+                    </header>
+                </div>
                 <main id="main" tabindex="-1" node_ref=main class=move || width.get().main_class()>
                     {move || {
                         (notice.get() == SignInOffNotice::EveryPage)

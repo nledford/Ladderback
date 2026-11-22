@@ -29,6 +29,18 @@ Feature: The header bar
     Then focus is on a control in the main content
     And the page has no accessibility violations
 
+  # Inside the page's frame the pseudolocale's longer words leave the line
+  # little room: the seven links and Sign out take about 900 px of the
+  # frame's 928.
+  Scenario: Signed in with the longer words of a pseudolocale, the pages' links and Sign out still share one line
+    Given a viewport of 1280 by 720 pixels
+    And the language chosen in this browser is "en-XA"
+    And a daemon with sign-in on and the admin password "demo-admin-pass"
+    And the admin is signed in with "demo-admin-pass"
+    When I open the address "/repositories"
+    Then the pages' links and the banner's one button share the header's last line
+    And the page doesn't scroll sideways
+
   Scenario Outline: A sign-out that reaches no daemon is an error alert said assertively, and leaves the header's height as it was, at <width> pixels with <size> percent text in <colors>
     Given a viewport of <width> by <height> pixels
     And the reader sets the text size to <size> percent
