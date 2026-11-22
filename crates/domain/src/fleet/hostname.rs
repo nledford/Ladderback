@@ -97,14 +97,16 @@ fn is_format(c: char) -> bool {
 }
 
 /// Characters outside Cf that show as nothing, as a blank or as a break in
-/// a name (#1065): the assigned default-ignorable characters that aren't
-/// format characters (the combining grapheme joiner, the Hangul fillers,
-/// the Khmer inherent vowels and the variation selectors), checked against
-/// `unicode-security`'s Unicode 18.0 table; the line and paragraph
-/// separators; and the braille blank, which shows as a space without being
-/// one. Unassigned default-ignorable code points are kept, as other
-/// unassigned code points are, since a name holding one is flagged beside
-/// the name without it: the skeleton drops them.
+/// a name (#1065): the default-ignorable code points that aren't format
+/// characters (the combining grapheme joiner, the Hangul fillers, the Khmer
+/// inherent vowels, the variation selectors, and the unassigned ones, which
+/// Unicode reserves so a character assigned there later shows as nothing
+/// too), checked against `unicode-security`'s Unicode 18.0 table; the line
+/// and paragraph separators; and the braille blank and the musical null
+/// notehead, which show as a blank without being spaces. The skeleton the
+/// registry compares names by drops every default-ignorable code point, so
+/// refusing them is what keeps a space hidden behind one from slipping past
+/// the check on a name's ends.
 const INVISIBLE: &[(char, char)] = &[
     ('\u{034F}', '\u{034F}'),
     ('\u{115F}', '\u{1160}'),
@@ -112,11 +114,16 @@ const INVISIBLE: &[(char, char)] = &[
     ('\u{180B}', '\u{180D}'),
     ('\u{180F}', '\u{180F}'),
     ('\u{2028}', '\u{2029}'),
+    ('\u{2065}', '\u{2065}'),
     ('\u{2800}', '\u{2800}'),
     ('\u{3164}', '\u{3164}'),
     ('\u{FE00}', '\u{FE0F}'),
     ('\u{FFA0}', '\u{FFA0}'),
-    ('\u{E0100}', '\u{E01EF}'),
+    ('\u{FFF0}', '\u{FFF8}'),
+    ('\u{1D159}', '\u{1D159}'),
+    ('\u{E0000}', '\u{E0000}'),
+    ('\u{E0002}', '\u{E001F}'),
+    ('\u{E0080}', '\u{E0FFF}'),
 ];
 
 fn is_invisible(c: char) -> bool {
