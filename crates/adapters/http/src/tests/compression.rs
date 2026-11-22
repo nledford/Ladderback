@@ -128,3 +128,52 @@ async fn a_head_request_gets_the_copy_s_headers() {
         Some("brotli copy of the module".len().to_string().as_str())
     );
 }
+
+#[tokio::test]
+async fn a_file_the_build_kept_no_copy_of_is_sent_as_it_is_without_a_vary() {
+    let response = fetched(Method::GET, "/icon-1a2b3c4d.png", Some("br, gzip")).await;
+    assert_eq!(response.status(), StatusCode::OK);
+    assert_eq!(header_of(&response, header::CONTENT_ENCODING), None);
+    assert_eq!(header_of(&response, header::VARY), None);
+    assert_eq!(body(response).await, "\u{89}PNG");
+}
+
+#[tokio::test]
+async fn no_answer_of_the_api_is_compressed_whatever_the_request_accepts() {
+    for path in ["/api/v1/plans", "/api/v1/session", "/api/v1/nope", "/api"] {
+        let response = fetched(Method::GET, path, Some("br, gzip, *")).await;
+        assert_eq!(
+            header_of(&response, header::CONTENT_ENCODING),
+            None,
+            "{path}"
+        );
+    }
+}
+
+#[tokio::test]
+async fn the_events_stream_is_never_compressed() {
+    use tokio_tungstenite::tungstenite::client::IntoClientRequest;
+    use tokio_tungstenite::tungstenite::http::header::{
+        ACCEPT_ENCODING, ORIGIN, SEC_WEBSOCKET_EXTENSIONS,
+    };
+
+    let (addr, _events) = serving().await;
+    let mut request = format!("ws://{addr}/api/v1/events")
+        .into_client_request()
+        .unwrap();
+    let headers = request.headers_mut();
+    headers.insert(ORIGIN, format!("http://{addr}").parse().unwrap());
+    headers.insert(ACCEPT_ENCODING, "br, gzip".parse().unwrap());
+    headers.insert(
+        SEC_WEBSOCKET_EXTENSIONS,
+        "permessage-deflate; client_max_window_bits"
+            .parse()
+            .unwrap(),
+    );
+    let (_socket, handshake) = tokio_tungstenite::connect_async(request).await.unwrap();
+    assert_eq!(handshake.status(), StatusCode::SWITCHING_PROTOCOLS);
+    assert_eq!(handshake.headers().get(header::CONTENT_ENCODING), None);
+    // Nor are its messages: the daemon takes up no compression the client
+    // offers for them.
+    assert_eq!(handshake.headers().get(SEC_WEBSOCKET_EXTENSIONS), None);
+}

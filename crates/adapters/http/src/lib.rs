@@ -44,9 +44,10 @@ use axum::Router;
 use axum::body::Body;
 use axum::extract::State;
 use axum::extract::ws::{Message, WebSocket, WebSocketUpgrade};
-use axum::http::{HeaderValue, Method, StatusCode, Uri, header};
+use axum::http::{HeaderMap, HeaderValue, Method, StatusCode, Uri, header};
 use axum::middleware::{from_fn, from_fn_with_state};
 use axum::response::{IntoResponse, Response};
+use precompressed::Encoding;
 #[cfg(not(debug_assertions))]
 use rust_embed::RustEmbed;
 // The release build embeds `crates/web/dist` through rust-embed (`ReleaseUi`);
@@ -767,9 +768,9 @@ pub fn router(assets: Arc<dyn AssetSource>, checks: RequestChecks, state: AppSta
         hub_pages::routes(routes).route(api::PAIRING_PATH, axum::routing::get(read_pairing));
     let app = routes
         .with_state(state)
-        .fallback(move |method: Method, uri: Uri| {
+        .fallback(move |method: Method, uri: Uri, headers: HeaderMap| {
             let assets = Arc::clone(&assets);
-            async move { serve(assets.as_ref(), &method, &uri) }
+            async move { serve(assets.as_ref(), &method, &uri, &headers) }
         })
         .layer(from_fn(body_limit::enforce))
         .layer(from_fn_with_state(gate, sign_in::enforce))
@@ -1351,11 +1352,12 @@ fn refused_detailed(
 }
 
 /// The router's fallback: the UI's files, and its page for every client-side
-/// route. A path whose first segment is the API's is never the UI's, so one no
+/// route, each as the copy the request's `headers` accept when the build kept
+/// one. A path whose first segment is the API's is never the UI's, so one no
 /// route serves is `route-unknown` (404) whatever its method: a program that
 /// asks for a route this daemon lacks gets an error it can read, never the
 /// page as a success (#1063).
-fn serve(assets: &dyn AssetSource, method: &Method, uri: &Uri) -> Response {
+fn serve(assets: &dyn AssetSource, method: &Method, uri: &Uri, headers: &HeaderMap) -> Response {
     let path = uri.path().trim_start_matches('/');
     let first = path.split_once('/').map_or(path, |(first, _)| first);
     if first == API_SEGMENT {
@@ -1383,7 +1385,7 @@ fn serve(assets: &dyn AssetSource, method: &Method, uri: &Uri) -> Response {
     if !path.is_empty()
         && let Some(asset) = assets.get(path)
     {
-        return file(path, asset);
+        return file(assets, path, asset, headers);
     }
     // A missing UI file is a 404; any other path is a client-side route, and
     // routes can contain dots (hostnames such as `nas.example.com`).
@@ -1394,7 +1396,7 @@ fn serve(assets: &dyn AssetSource, method: &Method, uri: &Uri) -> Response {
         return StatusCode::NOT_FOUND.into_response();
     }
     match assets.get(INDEX) {
-        Some(index) => file(INDEX, index),
+        Some(index) => file(assets, INDEX, index, headers),
         None => (
             StatusCode::SERVICE_UNAVAILABLE,
             "This build of Ladderback has no web UI. Build crates/web with trunk, then rebuild Ladderback.",
@@ -1424,7 +1426,12 @@ const UI_FILE_EXTENSIONS: &[&str] = &[
     "woff2",
 ];
 
-fn file(path: &str, asset: Asset) -> Response {
+/// The answer for the UI's file at `path`, whose bytes are `asset`: the copy
+/// of it the request's `accepts` prefers, when the build kept one, or the
+/// file itself, each with its own length. Every other header is the file's:
+/// its type, its caching and, for the page, the policy that names its script
+/// by the hash of the page itself.
+fn file(assets: &dyn AssetSource, path: &str, asset: Asset, accepts: &HeaderMap) -> Response {
     let content_type = if path == INDEX {
         HeaderValue::from_static("text/html; charset=utf-8")
     } else {
@@ -1448,20 +1455,71 @@ fn file(path: &str, asset: Asset) -> Response {
     // The entry page starts the application with a script of its own, so its
     // policy names that script by its hash (§10.1).
     let policy = (path == INDEX).then(|| response_headers::page_policy(&asset.bytes));
+    let chosen = negotiate(assets, path, asset, accepts);
     let mut response = (
         [
             (header::CONTENT_TYPE, content_type),
             (header::CACHE_CONTROL, cache_control),
+            (
+                header::CONTENT_LENGTH,
+                HeaderValue::from(chosen.bytes.len()),
+            ),
         ],
-        Body::from(asset.bytes),
+        Body::from(chosen.bytes),
     )
         .into_response();
+    let headers = response.headers_mut();
+    if let Some(encoding) = chosen.encoding {
+        headers.insert(
+            header::CONTENT_ENCODING,
+            HeaderValue::from_static(encoding.token()),
+        );
+    }
+    // A file the build kept a copy of answers each request by its
+    // Accept-Encoding, so a cache keeps one answer per value of it, whichever
+    // this one is: a cache that kept the Brotli copy as the file would hand
+    // it to a client that can't read it.
+    if chosen.has_copies {
+        headers.insert(header::VARY, HeaderValue::from_static("accept-encoding"));
+    }
     if let Some(policy) = policy {
-        response
-            .headers_mut()
-            .insert(header::CONTENT_SECURITY_POLICY, policy);
+        headers.insert(header::CONTENT_SECURITY_POLICY, policy);
     }
     response
+}
+
+/// What a request gets of a UI file: its bytes, and their coding.
+struct Chosen {
+    bytes: Cow<'static, [u8]>,
+    /// `None` for the file itself.
+    encoding: Option<Encoding>,
+    /// Whether the build kept any copy of the file, the one sent or not.
+    has_copies: bool,
+}
+
+/// The copy of the file at `path` the request's `accepts` prefers, when the
+/// build kept one, and the file's own `asset` otherwise.
+fn negotiate(assets: &dyn AssetSource, path: &str, asset: Asset, accepts: &HeaderMap) -> Chosen {
+    let copy = |encoding: Encoding| assets.get(&format!("{path}{}", encoding.suffix()));
+    let preferred = precompressed::preferred(accepts);
+    for encoding in preferred.into_iter().flatten() {
+        if let Some(copy) = copy(encoding) {
+            return Chosen {
+                bytes: copy.bytes,
+                encoding: Some(encoding),
+                has_copies: true,
+            };
+        }
+    }
+    let has_copies = [Encoding::Brotli, Encoding::Gzip]
+        .into_iter()
+        .filter(|encoding| !preferred.contains(&Some(*encoding)))
+        .any(|encoding| copy(encoding).is_some());
+    Chosen {
+        bytes: asset.bytes,
+        encoding: None,
+        has_copies,
+    }
 }
 
 /// Whether `path` names a file by its content, as `trunk build` names each
