@@ -12,8 +12,8 @@ use crate::components::ACTIONS;
 use crate::components::button::Content;
 use crate::components::link::rules::Destination;
 use crate::components::{
-    Align, Button, ChangeMarks, Column, Cue, Footer, MarkAllSeen, Name, RadioGroup, Sentences,
-    Sort, SortKey, State, Table,
+    Align, Button, ChangeMarks, Column, ColumnsChoice, Cue, Footer, MarkAllSeen, Name, RadioGroup,
+    Sentences, Sort, SortKey, State, Table,
 };
 use crate::routes::text_with;
 use crate::text;
@@ -144,6 +144,7 @@ fn demo_table(localizer: Arc<Localizer>) -> impl IntoView {
         />
         <Table
             name=Name::Caption(t(msg::UI_GALLERY_TABLE_CAPTION))
+            columns_choice=ColumnsChoice::new("gallery-folders", Arc::clone(&localizer))
             row_header=row_header
             columns=columns
             rows=rows
@@ -203,6 +204,7 @@ fn folder_columns(
     };
     let name = sort(
         Column::new(
+            "name",
             t(msg::UI_GALLERY_TABLE_NAME),
             Rem::tenths(80),
             |row: Signal<DemoFolder>| (move || row.with(|row| row.name.clone())).into_any(),
@@ -215,6 +217,7 @@ fn folder_columns(
     let sizes = Arc::clone(localizer);
     let size = sort(
         Column::new(
+            "size",
             t(msg::UI_GALLERY_TABLE_SIZE_COLUMN),
             Rem::tenths(70),
             move |row: Signal<DemoFolder>| {
@@ -243,6 +246,7 @@ fn folder_columns(
     let dates = Arc::clone(localizer);
     let changed = sort(
         Column::new(
+            "changed",
             t(msg::UI_GALLERY_TABLE_CHANGED),
             Rem::tenths(90),
             move |row: Signal<DemoFolder>| {
@@ -278,6 +282,7 @@ fn folder_columns(
     let counts = Arc::clone(localizer);
     let files = sort(
         Column::new(
+            "files",
             t(msg::UI_GALLERY_TABLE_FILES_COLUMN),
             // Wide enough for "Files" and its sort button on one line at
             // 1280 px; at 6rem the button wrapped under the word.
@@ -311,6 +316,7 @@ fn folder_columns(
         // which changes the row and, sorted by files, moves it.
         let labels = Arc::clone(localizer);
         columns.push(Column::new(
+            "actions",
             t(msg::UI_GALLERY_TABLE_ACTIONS),
             Rem::tenths(90),
             move |row: Signal<DemoFolder>| {
@@ -382,11 +388,13 @@ pub(super) fn LiveTableDemo(localizer: Arc<Localizer>) -> impl IntoView {
         t(msg::UI_GALLERY_LIVE_TABLE_DONE),
     ]);
     let job = Column::new(
+        "job",
         t(msg::UI_GALLERY_LIVE_TABLE_JOB),
         Rem::tenths(100),
         |row: Signal<DemoJob>| row.with_untracked(|row| row.name.clone()).into_any(),
     );
     let status = Column::new(
+        "status",
         t(msg::UI_GALLERY_LIVE_TABLE_STATUS),
         Rem::tenths(100),
         move |row: Signal<DemoJob>| {
@@ -409,6 +417,7 @@ pub(super) fn LiveTableDemo(localizer: Arc<Localizer>) -> impl IntoView {
     });
     let star_localizer = Arc::clone(&localizer);
     let star = Column::new(
+        "star",
         t(msg::UI_GALLERY_TABLE_ACTIONS),
         Rem::tenths(140),
         move |row: Signal<DemoJob>| {
@@ -430,6 +439,7 @@ pub(super) fn LiveTableDemo(localizer: Arc<Localizer>) -> impl IntoView {
     // mark's word is, and both stay inside the table's frame.
     let guide_localizer = Arc::clone(&localizer);
     let guide = Column::new(
+        "guide",
         t(msg::UI_GALLERY_LIVE_TABLE_GUIDE),
         Rem::tenths(140),
         move |row: Signal<DemoJob>| {

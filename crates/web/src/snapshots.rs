@@ -895,11 +895,13 @@ fn stats_view(page: Page, heading: String) -> impl IntoView {
 fn stats_table(page: Page, reading: StatsReadingDto) -> impl IntoView {
     let localizer = page.localizer.get_value();
     let figure = Column::new(
+        "figure",
         page.plain(msg::UI_STATS_COLUMN_FIGURE),
         Rem::tenths(120),
         move |row: Signal<stats::Row>| row.with_untracked(|row| page.plain(row.header)).into_any(),
     );
     let value = Column::new(
+        "value",
         page.plain(msg::UI_STATS_COLUMN_VALUE),
         Rem::tenths(200),
         move |row: Signal<stats::Row>| row.with_untracked(|row| page.words(&row.figure)).into_any(),
@@ -1011,6 +1013,7 @@ pub(crate) fn snapshots_table(
 ) -> AnyView {
     let id_localizer = Arc::clone(localizer);
     let snapshot = Column::new(
+        "snapshot",
         text(localizer, msg::UI_COLUMN_SNAPSHOT),
         Rem::tenths(100),
         move |row: Signal<SnapshotDto>| {
@@ -1034,6 +1037,7 @@ pub(crate) fn snapshots_table(
     let writes_instants = localizer.writes_instants();
     let time_localizer = Arc::clone(localizer);
     let time = Column::new(
+        "time",
         text(localizer, msg::UI_COLUMN_TIME),
         Rem::tenths(200),
         move |row: Signal<SnapshotDto>| {

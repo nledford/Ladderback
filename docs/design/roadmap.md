@@ -221,6 +221,7 @@ Decisions 1–6 recorded 2026-11-08. Decisions 7–12 recorded 2026-11-08 after 
 | [137](decisions/137-a-hub-moves-by-handover-never-by-copy.md) | A hub moves by handover, never by copy, and a hub that finds itself rewound recovers before it grants |
 | [138](decisions/138-the-storage-protects-an-offsite-copy.md) | The storage, not Ladderback, keeps an offsite copy that a machine that backs up can't delete |
 | [139](decisions/139-no-graphql-api.md) | No GraphQL API |
+| [140](decisions/140-a-reader-chooses-a-tables-columns.md) | A reader chooses which of a table's columns show, and in what order |
 
 ## 17. Open questions
 

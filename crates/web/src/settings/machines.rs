@@ -345,6 +345,7 @@ fn review(localizer: &Arc<Localizer>, agent: HubAgentDto, review: Review) -> imp
 /// A cell of the row's hostname.
 fn hostname_column(localizer: &Localizer) -> Column<HubAgentDto> {
     Column::new(
+        "hostname",
         text(localizer, msg::UI_MACHINES_HOSTNAME),
         Rem::tenths(80),
         |row: Signal<HubAgentDto>| {
@@ -356,6 +357,7 @@ fn hostname_column(localizer: &Localizer) -> Column<HubAgentDto> {
 /// A cell of the row's agent ID.
 fn agent_id_column(localizer: &Localizer) -> Column<HubAgentDto> {
     Column::new(
+        "agent-id",
         text(localizer, msg::UI_MACHINES_AGENT_ID),
         Rem::tenths(80),
         |row: Signal<HubAgentDto>| {
@@ -368,6 +370,7 @@ fn agent_id_column(localizer: &Localizer) -> Column<HubAgentDto> {
 fn fingerprint_column(localizer: &Arc<Localizer>) -> Column<HubAgentDto> {
     let names = Arc::clone(localizer);
     Column::new(
+        "key",
         text(localizer, msg::UI_MACHINES_KEY),
         Rem::tenths(90),
         move |row: Signal<HubAgentDto>| {
@@ -381,14 +384,16 @@ fn fingerprint_column(localizer: &Arc<Localizer>) -> Column<HubAgentDto> {
     )
 }
 
-/// A cell of how long ago the row's status began, in `id`'s words.
+/// A column `column` of how long ago the row's status began, in `id`'s words.
 fn ago_column(
     localizer: &Arc<Localizer>,
+    column: &'static str,
     header: l10n::MessageId,
     id: l10n::MessageId,
 ) -> Column<HubAgentDto> {
     let words = Arc::clone(localizer);
     Column::new(
+        column,
         text(localizer, header),
         Rem::tenths(60),
         move |row: Signal<HubAgentDto>| {
@@ -415,6 +420,7 @@ fn waiting_columns(
 ) -> (Column<HubAgentDto>, Vec<Column<HubAgentDto>>) {
     let notes = Arc::clone(localizer);
     let note = Column::new(
+        "note",
         text(localizer, msg::UI_MACHINES_NOTE),
         Rem::tenths(70),
         move |row: Signal<HubAgentDto>| {
@@ -431,6 +437,7 @@ fn waiting_columns(
     );
     let labels = Arc::clone(localizer);
     let action = Column::new(
+        "action",
         text(localizer, msg::UI_MACHINES_ACTION),
         Rem::tenths(70),
         move |row: Signal<HubAgentDto>| {
@@ -461,6 +468,7 @@ fn waiting_columns(
             fingerprint_column(localizer),
             ago_column(
                 localizer,
+                "waited",
                 msg::UI_MACHINES_WAITED,
                 msg::UI_MACHINES_WAITED_FOR,
             ),
@@ -480,6 +488,7 @@ fn approved_columns(localizer: &Arc<Localizer>) -> (Column<HubAgentDto>, Vec<Col
             fingerprint_column(localizer),
             ago_column(
                 localizer,
+                "approved",
                 msg::UI_MACHINES_APPROVED_SINCE,
                 msg::UI_MACHINES_APPROVED_AGO,
             ),

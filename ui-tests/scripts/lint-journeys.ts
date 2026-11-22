@@ -1,11 +1,12 @@
 // Fails if a step file uses a pointer action. Journeys must work by
 // keyboard alone (A1), so they may only use support/keyboard.ts. The one
 // exception is support/pointer.ts, which the maintainer approved for the
-// tooltip's hover contract (WCAG 1.4.13 is pointer behaviour) and a link's
-// underline under the pointer: it only moves the pointer and never presses,
-// and every control is still reached and
-// pressed by keyboard alone. Steps call its moves by name; a new pointer
-// action there needs the maintainer's word too, and never a press.
+// tooltip's hover contract (WCAG 1.4.13 is pointer behaviour), a link's
+// underline under the pointer, and the one drag of a table's Columns panel
+// (decision 140), whose Move buttons do the same by keyboard: it presses
+// only for that drag, and every control is still reached and pressed by
+// keyboard alone. Steps call its moves by name; a new pointer action there
+// needs the maintainer's word too.
 //
 // Fails too if an `@ui` scenario's keyboard walk crosses the header to reach
 // the page's content (§4.4, skip-to-content.ts), which the walk's run-time
