@@ -38,6 +38,12 @@ fn every_frame_reads_back_as_written() {
         HubFrame::Paired {
             recovery_key: "r".into(),
             signature: "s".into(),
+            hostname: None,
+        },
+        HubFrame::Paired {
+            recovery_key: "r".into(),
+            signature: "s".into(),
+            hostname: Some("laptop".into()),
         },
         HubFrame::Refused {
             code: "token-used".into(),
@@ -113,4 +119,38 @@ fn a_refusal_names_its_error_code() {
     ] {
         assert_eq!(refusal_code(code), expected, "{code}");
     }
+}
+
+/// A `paired` frame from a hub that predates the hostname has none, and one
+/// from a later hub with a field this build doesn't know still reads (decision
+/// 120: optional fields stay within a protocol).
+#[test]
+fn a_paired_frame_reads_with_or_without_the_hostname_and_unknown_fields() {
+    let without = r#"{"type":"paired","recovery_key":"r","signature":"s"}"#;
+    assert_eq!(
+        HubFrame::from_text(without),
+        Ok(HubFrame::Paired {
+            recovery_key: "r".into(),
+            signature: "s".into(),
+            hostname: None,
+        })
+    );
+    assert!(
+        !HubFrame::Paired {
+            recovery_key: "r".into(),
+            signature: "s".into(),
+            hostname: None,
+        }
+        .to_text()
+        .contains("hostname")
+    );
+    let later = r#"{"type":"paired","recovery_key":"r","signature":"s","hostname":"laptop","a_later_field":1}"#;
+    assert_eq!(
+        HubFrame::from_text(later),
+        Ok(HubFrame::Paired {
+            recovery_key: "r".into(),
+            signature: "s".into(),
+            hostname: Some("laptop".into()),
+        })
+    );
 }

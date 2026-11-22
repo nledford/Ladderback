@@ -436,8 +436,8 @@ impl HubPairing {
             hub_key: keys.key,
         };
         match self.registry.pair(&request, self.clock.now()).await? {
-            Ok(outcome) => {
-                log::info!("{}", logged::paired(&request, &outcome));
+            Ok(pairing) => {
+                log::info!("{}", logged::paired(&request, &pairing));
                 let paired = SignedMessage::Paired {
                     hub_key: keys.key,
                     agent_id: handshake.agent_id,
@@ -450,6 +450,7 @@ impl HubPairing {
                 Ok(PairAnswer::Paired(Paired {
                     recovery_key: keys.recovery_key,
                     signature: self.signing.sign(&keys.seed, &paired.to_bytes())?,
+                    hostname: Some(pairing.hostname().clone()),
                 }))
             }
             Err(refusal) => self

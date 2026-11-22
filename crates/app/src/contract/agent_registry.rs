@@ -37,6 +37,7 @@ pub async fn run(harness: &dyn AgentRegistryHarness) {
     no_token_is_voided_while_an_agent_is_registered(harness).await;
     a_pairing_keeps_a_pending_agent_and_spends_the_token(harness).await;
     a_lost_answer_is_answered_again(harness).await;
+    a_pairing_again_keeps_the_first_hostname_and_names_it(harness).await;
     a_taken_hostname_leaves_the_token_unused(harness).await;
     a_twenty_first_pending_agent_is_refused(harness).await;
     the_same_identity_keeps_its_record_and_the_greater_counter(harness).await;
@@ -249,7 +250,7 @@ async fn no_token_is_voided_while_an_agent_is_registered(harness: &dyn AgentRegi
     assert_eq!(agents(registry.as_ref()).await, before);
     assert_eq!(
         pair(registry.as_ref(), &request, at(12)).await,
-        Some(Ok(Pairing::Repeated)),
+        Some(Ok(Pairing::Repeated(request.hostname.clone()))),
         "the spent token still answers its own pairing"
     );
 }
@@ -296,9 +297,58 @@ async fn a_lost_answer_is_answered_again(harness: &dyn AgentRegistryHarness) {
     let before = agents(registry.as_ref()).await;
     assert_eq!(
         pair(registry.as_ref(), &request, at(2000)).await,
-        Some(Ok(Pairing::Repeated))
+        Some(Ok(Pairing::Repeated(request.hostname.clone())))
     );
     assert_eq!(agents(registry.as_ref()).await, before, "nothing changed");
+}
+
+/// An agent that pairs again under another hostname, on the token it spent
+/// or on a new one, is registered under the hostname it first had, and the
+/// answer names that one (decision 120: a pending agent can't rename
+/// itself).
+async fn a_pairing_again_keeps_the_first_hostname_and_names_it(harness: &dyn AgentRegistryHarness) {
+    let (Some(first_token), Some(second_token)) = (token(1, 0), token(2, 0)) else {
+        return;
+    };
+    let (Some(first), Some(other), Some(held)) = (
+        request(1, 1, "laptop"),
+        request(1, 1, "desktop"),
+        hostname("laptop"),
+    ) else {
+        return;
+    };
+    let registry = harness.empty().await;
+    add(registry.as_ref(), &first_token).await;
+    add(registry.as_ref(), &second_token).await;
+    let paired = pair(registry.as_ref(), &first, at(10)).await;
+    assert!(matches!(paired, Some(Ok(Pairing::New(_)))), "{paired:?}");
+    let before = agents(registry.as_ref()).await;
+
+    assert_eq!(
+        pair(registry.as_ref(), &other, at(20)).await,
+        Some(Ok(Pairing::Repeated(held.clone()))),
+        "on the spent token"
+    );
+    assert_eq!(agents(registry.as_ref()).await, before, "nothing changed");
+
+    let on_a_new_token = PairRequest {
+        pairing_key: second_token.pairing_key,
+        ..other
+    };
+    let again = pair(registry.as_ref(), &on_a_new_token, at(30)).await;
+    assert!(matches!(again, Some(Ok(Pairing::Again(_)))), "{again:?}");
+    let Some(Ok(Pairing::Again(record))) = again else {
+        return;
+    };
+    assert_eq!(record.hostname, held, "on a new token");
+    let after = agents(registry.as_ref()).await;
+    assert_eq!(
+        after
+            .iter()
+            .map(|agent| &agent.hostname)
+            .collect::<Vec<_>>(),
+        vec![&held]
+    );
 }
 
 async fn a_taken_hostname_leaves_the_token_unused(harness: &dyn AgentRegistryHarness) {
@@ -541,7 +591,7 @@ async fn records_outlive_the_hub(harness: &dyn AgentRegistryHarness) {
     assert_eq!(unused(reopened.as_ref(), at(11)).await, vec![unspent]);
     assert_eq!(
         pair(reopened.as_ref(), &request, at(12)).await,
-        Some(Ok(Pairing::Repeated)),
+        Some(Ok(Pairing::Repeated(request.hostname.clone()))),
         "the spent token remembers whom it paired"
     );
 }

@@ -1092,3 +1092,34 @@ fn tried_new_then_token(agent: &mut Agent) {
         ["hub-new.example:9443", "hub.example:9443"]
     );
 }
+
+#[when(expr = "the same agent pairs with the token under the hostname {string}")]
+async fn pairs_under_another_hostname(agent: &mut Agent, hostname: String) {
+    let world = &mut agent.pairing;
+    let first = world.first.clone().expect("the first agent");
+    let machine = Machine {
+        hostname: Hostname::parse(&hostname).unwrap(),
+        ..first
+    };
+    world.pair_and_keep(&machine).await;
+}
+
+#[then(expr = "the agent is told the hub holds it under {string}")]
+fn told_the_held_hostname(agent: &mut Agent, hostname: String) {
+    let Some(Ok(paired)) = &agent.pairing.outcome else {
+        panic!("{:?}", agent.pairing.outcome);
+    };
+    assert_eq!(
+        paired.held_as.as_ref().map(Hostname::as_str),
+        Some(hostname.as_str())
+    );
+}
+
+#[then(expr = "the hub lists one agent, under the hostname {string}")]
+async fn lists_one_under(agent: &mut Agent, hostname: String) {
+    let agents = agent.pairing.agents().await;
+    let [listed] = agents.as_slice() else {
+        panic!("one agent: {agents:?}");
+    };
+    assert_eq!(listed.hostname.as_str(), hostname);
+}

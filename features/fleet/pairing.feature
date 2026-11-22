@@ -58,6 +58,13 @@ Feature: Pairing an agent with its hub
     When it pairs again with the same token
     Then the hub answers it as before and lists one agent
 
+  Scenario: An agent that pairs again under another hostname is told which one the hub holds
+    Given an agent paired under the hostname "laptop"
+    And a pairing token
+    When the same agent pairs with the token under the hostname "desktop"
+    Then the agent is told the hub holds it under "laptop"
+    And the hub lists one agent, under the hostname "laptop"
+
   Scenario: A hostname that is taken is refused and the token stays good
     Given an agent paired under the hostname "laptop"
     And a pairing token

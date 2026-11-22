@@ -698,16 +698,25 @@ async fn on_the_agent(
         Arc::new(OsRandom),
     );
     let address = token.address().as_str().to_owned();
+    let asked = hostname.clone();
     match PairWithHub::new(pairing, Arc::new(connector))
         .pair(token, agent_id, hostname, machine_zone())
         .await
     {
         Ok(paired) => {
-            say(
-                localizer,
-                msg::CLI_PAIR_PENDING,
-                &[("fingerprint", text(Fingerprint::of_key(&paired.agent_key)))],
-            )?;
+            let fingerprint = ("fingerprint", text(Fingerprint::of_key(&paired.agent_key)));
+            match &paired.held_as {
+                Some(held) => say(
+                    localizer,
+                    msg::CLI_PAIR_PENDING_HELD,
+                    &[
+                        ("held", text(escaped(held.as_str()))),
+                        ("asked", text(escaped(asked.as_str()))),
+                        fingerprint,
+                    ],
+                )?,
+                None => say(localizer, msg::CLI_PAIR_PENDING, &[fingerprint])?,
+            }
             Ok(ExitCode::SUCCESS)
         }
         Err(failure) => {

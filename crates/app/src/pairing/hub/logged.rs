@@ -17,7 +17,7 @@ pub(super) fn paired(request: &PairRequest, outcome: &Pairing) -> String {
                 AgentStatus::Approved { .. } => "it is approved already",
             },
         ),
-        Pairing::Repeated => ("repeated its pairing", "nothing changed"),
+        Pairing::Repeated(_) => ("repeated its pairing", "nothing changed"),
     };
     format!(
         "machine \"{}\" {what} as agent {} with key {}; {then}",

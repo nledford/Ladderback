@@ -80,8 +80,18 @@ async fn pair(
     agent: &AgentPairing,
     token: PairingToken,
 ) -> Result<PairedHub, AgentPairingError> {
+    pair_as(hub, agent, token, laptop()).await
+}
+
+/// [`pair`], asking to be held under `hostname`.
+async fn pair_as(
+    hub: &Hub,
+    agent: &AgentPairing,
+    token: PairingToken,
+    hostname: Hostname,
+) -> Result<PairedHub, AgentPairingError> {
     let keys = hub.pairing.keys().await.unwrap();
-    let (connect, handshake) = agent.connect(token, agent_id(), laptop(), None).await?;
+    let (connect, handshake) = agent.connect(token, agent_id(), hostname, None).await?;
     let (challenge, hub_side) = hub
         .pairing
         .challenge(&keys, &connect, Some(EXPORTER))
@@ -91,6 +101,70 @@ async fn pair(
         .await?;
     let answer = hub.pairing.pair(&keys, &hub_side, &pair).await.unwrap();
     agent.take_answer(awaiting, &answer).await
+}
+
+/// A machine that pairs again under another hostname, on the token it spent
+/// or on a new one, is told the hostname the hub holds it under: a pending
+/// machine can't rename itself (decision 120).
+#[tokio::test]
+async fn an_agent_pairing_again_under_another_hostname_is_told_the_one_held() {
+    let hub = Hub::new(1);
+    let machine = agent(Arc::default());
+    let token = hub.token(pinned()).await;
+    let first = pair(&hub, &machine, token.clone()).await.unwrap();
+    assert_eq!(
+        first.held_as, None,
+        "the hostname asked for is the one held"
+    );
+
+    let desktop = Hostname::parse("desktop").unwrap();
+    let on_the_spent_token = pair_as(&hub, &machine, token, desktop.clone())
+        .await
+        .unwrap();
+    assert_eq!(on_the_spent_token.held_as, Some(laptop()));
+
+    let new_token = hub.token(pinned()).await;
+    let on_a_new_token = pair_as(&hub, &machine, new_token, desktop).await.unwrap();
+    assert_eq!(on_a_new_token.held_as, Some(laptop()));
+}
+
+/// A machine that pairs again under the hostname it first used is told
+/// nothing more, and neither is one whose hub sends no hostname, as a hub
+/// that predates it doesn't.
+#[tokio::test]
+async fn a_hostname_the_hub_holds_that_is_the_one_asked_for_or_unsent_says_nothing() {
+    let hub = Hub::new(1);
+    let machine = agent(Arc::default());
+    let token = hub.token(pinned()).await;
+    pair(&hub, &machine, token.clone()).await.unwrap();
+    let again = pair(&hub, &machine, token).await.unwrap();
+    assert_eq!(again.held_as, None);
+
+    let keys = hub.pairing.keys().await.unwrap();
+    let token = hub.token(pinned()).await;
+    let (connect, handshake) = machine
+        .connect(token, agent_id(), Hostname::parse("desktop").unwrap(), None)
+        .await
+        .unwrap();
+    let (challenge, hub_side) = hub
+        .pairing
+        .challenge(&keys, &connect, Some(EXPORTER))
+        .unwrap();
+    let (pair, awaiting) = machine
+        .answer_challenge(handshake, &challenge, Some(EXPORTER))
+        .await
+        .unwrap();
+    let PairAnswer::Paired(mut paired) = hub.pairing.pair(&keys, &hub_side, &pair).await.unwrap()
+    else {
+        panic!("the hub refused");
+    };
+    assert_eq!(paired.hostname, Some(laptop()));
+    paired.hostname = None;
+    let told = machine
+        .take_answer(awaiting, &PairAnswer::Paired(paired))
+        .await
+        .unwrap();
+    assert_eq!(told.held_as, None);
 }
 
 /// The hub's keys are made once and read back the same after that; the
@@ -710,6 +784,7 @@ async fn an_unsigned_answer_is_a_dropped_connection() {
         PairAnswer::Paired(domain::fleet::Paired {
             recovery_key: *keys.recovery_key(),
             signature: unsigned,
+            hostname: None,
         }),
     ];
     for answer in answers {

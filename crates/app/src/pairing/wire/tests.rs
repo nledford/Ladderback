@@ -72,6 +72,7 @@ fn each_message_reads_back_from_its_frame() {
     let paired = PairAnswer::Paired(Paired {
         recovery_key: key(0x99),
         signature: signature(0xaa),
+        hostname: None,
     });
     for (frame, message) in [
         (
@@ -83,6 +84,50 @@ fn each_message_reads_back_from_its_frame() {
     ] {
         let read = HubFrame::from_text(&frame.to_text()).unwrap();
         assert_eq!(hub_message(&read), Ok(message));
+    }
+}
+
+/// The hostname the hub holds the agent under goes in `Paired`'s frame and
+/// comes back from it.
+#[test]
+fn a_paired_answer_carries_the_hostname_the_hub_holds() {
+    let paired = PairAnswer::Paired(Paired {
+        recovery_key: key(0x99),
+        signature: signature(0xaa),
+        hostname: Some(Hostname::parse("laptop").unwrap()),
+    });
+    let frame = answer_frame(&paired);
+    let HubFrame::Paired { hostname, .. } = &frame else {
+        panic!("not a Paired");
+    };
+    assert_eq!(hostname.as_deref(), Some("laptop"));
+    let read = HubFrame::from_text(&frame.to_text()).unwrap();
+    assert_eq!(hub_message(&read), Ok(HubMessage::Answer(paired)));
+}
+
+/// A hostname in `Paired` that isn't one refuses the hub's frame, as a
+/// holder's does.
+#[test]
+fn a_paired_answer_with_a_hostname_out_of_shape_is_refused() {
+    let HubFrame::Paired {
+        recovery_key,
+        signature,
+        ..
+    } = answer_frame(&PairAnswer::Paired(Paired {
+        recovery_key: key(0x99),
+        signature: signature(0xaa),
+        hostname: None,
+    }))
+    else {
+        panic!("not a Paired");
+    };
+    for hostname in ["", " padded ", "gone\u{202e}wrong"] {
+        let frame = HubFrame::Paired {
+            recovery_key: recovery_key.clone(),
+            signature: signature.clone(),
+            hostname: Some(hostname.to_owned()),
+        };
+        assert_eq!(hub_message(&frame), Err(WireRefused), "{hostname:?}");
     }
 }
 

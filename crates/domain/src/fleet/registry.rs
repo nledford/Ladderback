@@ -336,8 +336,21 @@ pub enum Pairing {
     /// status kept, and the token spent on it.
     Again(AgentRecord),
     /// The same pairing again on the token it spent, as when `Paired` was
-    /// lost: answered as before, and nothing changes.
-    Repeated,
+    /// lost: answered as before, and nothing changes. It carries the
+    /// hostname the hub holds the agent under, which the agent is told.
+    Repeated(Hostname),
+}
+
+impl Pairing {
+    /// The hostname the hub holds the agent under after this pairing: the
+    /// one asked for on a new agent, and the first one on an agent that
+    /// pairs again (decision 120: a pending agent can't rename itself).
+    pub const fn hostname(&self) -> &Hostname {
+        match self {
+            Self::New(record) | Self::Again(record) => &record.hostname,
+            Self::Repeated(hostname) => hostname,
+        }
+    }
 }
 
 /// The decision a `Pair` gets at `now` (decision 120, "Pairing").
@@ -360,11 +373,11 @@ pub fn decide_pairing(
             agent_key,
         } => {
             let same = agent_id == request.agent_id && agent_key == request.agent_key;
-            let registered = view.by_id.is_some_and(|record| record.key == agent_key);
-            return if same && registered {
-                Ok(Pairing::Repeated)
-            } else {
-                Err(PairRefusal::TokenUsed)
+            return match view.by_id {
+                Some(record) if same && record.key == agent_key => {
+                    Ok(Pairing::Repeated(record.hostname.clone()))
+                }
+                _ => Err(PairRefusal::TokenUsed),
             };
         }
         TokenUse::Unused if now >= token.expires_at => return Err(PairRefusal::TokenExpired),

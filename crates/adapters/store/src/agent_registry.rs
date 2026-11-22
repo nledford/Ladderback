@@ -297,7 +297,7 @@ impl AgentRegistry for SqliteStore {
                 write_agent(&mut tx, agent, false).await?;
                 spend(&mut tx, request).await?;
             }
-            Ok(Pairing::Repeated) | Err(_) => {
+            Ok(Pairing::Repeated(_)) | Err(_) => {
                 tx.rollback().await.map_err(unavailable)?;
                 return Ok(decided);
             }
