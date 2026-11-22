@@ -41,6 +41,7 @@ mod hub;
 mod logging;
 mod mcp_call;
 mod output;
+mod panic_report;
 mod profiles;
 mod service;
 mod set_password;
