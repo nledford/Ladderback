@@ -4,7 +4,7 @@
 
 use crate::SnapshotId;
 use crate::access::{Password, PasswordProblem};
-use crate::fleet::KeyId;
+use crate::fleet::Fingerprint;
 use crate::planning::{ProposalId, short_proposal_id};
 
 /// How long a snapshot's short ID is: the first 8 hex digits of its ID, as
@@ -16,8 +16,9 @@ pub const SHORT_ID_LEN: usize = 8;
 pub enum StepUpMethod {
     /// The admin password, entered again even with a live session.
     Password,
-    /// The snapshot's short ID, typed or pasted: it guards against a
-    /// misclick, not against someone at the keyboard.
+    /// What the confirmed thing is named by, typed or pasted: a snapshot's or
+    /// a proposal's short ID, or the hub key's fingerprint. It guards against
+    /// a misclick, not against someone at the keyboard.
     ShortId,
 }
 
@@ -43,9 +44,9 @@ pub enum StepUpFor<'a> {
     /// The approval of the proposal.
     Proposal(&'a ProposalId),
     /// A pairing token made, or an agent approved, on the hub whose key
-    /// has this key ID (§16, decision 120, "Who may make a token, approve
-    /// or re-key").
-    HubKey(&'a KeyId),
+    /// has this fingerprint (§16, decision 120, "Who may make a token,
+    /// approve or re-key").
+    HubKey(&'a Fingerprint),
 }
 
 /// A step-up confirmation as the person typed it: the admin password with
@@ -70,14 +71,15 @@ impl StepUpConfirmation {
     }
 
     /// Whether it names `what`: its short ID or its whole ID, in either
-    /// case, with the spaces around it dropped, as a paste brings them.
+    /// case, with the spaces around it dropped, as a paste brings them; for
+    /// the hub key, its fingerprint as every screen shows it, in either case,
+    /// with or without the hyphens between its groups.
     pub fn names(&self, what: StepUpFor<'_>) -> bool {
         let typed = self.0.expose().trim();
         let (short, whole) = match what {
             StepUpFor::Snapshot(snapshot) => (short_id(snapshot), snapshot.as_str()),
             StepUpFor::Proposal(id) => (short_proposal_id(id), id.as_str()),
-            // A key ID is short and whole at once: its 8 hex digits.
-            StepUpFor::HubKey(key) => return typed.eq_ignore_ascii_case(&key.to_string()),
+            StepUpFor::HubKey(_) => todo!(),
         };
         typed.eq_ignore_ascii_case(short) || typed.eq_ignore_ascii_case(whole)
     }
@@ -201,20 +203,72 @@ mod tests {
     }
 
     #[test]
-    fn a_hub_key_is_confirmed_by_its_key_id_in_either_case_not_another_s() {
+    fn a_hub_key_is_confirmed_by_its_fingerprint_in_either_case_with_or_without_hyphens() {
         let key = |byte| {
             crate::fleet::PublicKey::from_bytes([byte; crate::fleet::KEY_BYTES]).expect("a key")
         };
-        let id = KeyId::of_key(&key(3));
-        let shown = id.to_string();
-        assert_eq!(shown.len(), 8);
-        for text in [shown.clone(), format!(" {} ", shown.to_lowercase())] {
-            assert!(typed(&text).names(StepUpFor::HubKey(&id)), "{text:?}");
+        let fingerprint = Fingerprint::of_key(&key(3));
+        let shown = fingerprint.to_string();
+        assert_eq!(shown.len(), 24);
+        for text in [
+            shown.clone(),
+            format!(" {} ", shown.to_lowercase()),
+            shown.replace('-', ""),
+            shown.replace('-', " "),
+        ] {
+            assert!(
+                typed(&text).names(StepUpFor::HubKey(&fingerprint)),
+                "{text:?}"
+            );
         }
-        let other = KeyId::of_key(&key(4));
-        let first_seven = shown.get(..7).expect("7 characters");
-        for text in [other.to_string().as_str(), first_seven, "3F9A8B21"] {
-            assert!(!typed(text).names(StepUpFor::HubKey(&id)), "{text:?}");
+    }
+
+    #[test]
+    fn a_hub_key_is_confirmed_by_its_fingerprint_typed_with_crockfords_aliases() {
+        let mut digest = [0; crate::fleet::KEY_BYTES];
+        digest[0] = 0x08;
+        let fingerprint = Fingerprint::from_digest(digest);
+        assert_eq!(fingerprint.to_string(), "1000-0000-0000-0000-0000");
+        for text in ["LOOO-OOOO-OOOO-OOOO-OOOO", "i0o0 0000 0000 0000 0000"] {
+            assert!(
+                typed(text).names(StepUpFor::HubKey(&fingerprint)),
+                "{text:?}"
+            );
+        }
+        for text in ["U000-0000-0000-0000-0000", "1000-0000-0000-0000-000O0"] {
+            assert!(
+                !typed(text).names(StepUpFor::HubKey(&fingerprint)),
+                "{text:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn a_hub_key_is_not_confirmed_by_its_key_id_part_of_its_fingerprint_or_another_s() {
+        let key = |byte| {
+            crate::fleet::PublicKey::from_bytes([byte; crate::fleet::KEY_BYTES]).expect("a key")
+        };
+        let fingerprint = Fingerprint::of_key(&key(3));
+        let shown = fingerprint.to_string();
+        // The 8 hex digits the step-up asked for before (#1344).
+        let key_id = fingerprint
+            .full_hex()
+            .get(..8)
+            .expect("8 digits")
+            .to_uppercase();
+        let other = Fingerprint::of_key(&key(4)).to_string();
+        for text in [
+            key_id.as_str(),
+            other.as_str(),
+            shown.get(..23).expect("all but its last character"),
+            shown.get(20..).expect("its last group"),
+            &format!("{shown}0"),
+            &fingerprint.full_hex(),
+        ] {
+            assert!(
+                !typed(text).names(StepUpFor::HubKey(&fingerprint)),
+                "{text:?}"
+            );
         }
     }
 

@@ -23,8 +23,8 @@ Feature: Approving a waiting machine on the hub's page
     Then focus is on the button "Cancel"
     And the dialog "Approve demo-laptop?" shows the key fingerprint the machine showed
     And the page has no accessibility violations
-    When I press Tab until focus is on the textbox "Hub key ID" in the dialog
-    And I type the hub's key ID
+    When I press Tab until focus is on the textbox "Hub key fingerprint" in the dialog
+    And I type the hub key's fingerprint
     And I press Tab until focus is on the button "Approve demo-laptop" in the dialog
     And I press Enter
     Then the dialog "Approve demo-laptop?" is closed
@@ -33,11 +33,11 @@ Feature: Approving a waiting machine on the hub's page
     And the page lists no machine waiting for approval
     And the machine "demo-laptop" is told the hub approved it
 
-  Scenario: A wrong key ID approves nothing, and the review says so
+  Scenario: A wrong fingerprint approves nothing, and the review says so
     Given a hub with sign-in off
     And a machine named "demo-laptop" waits for approval on the hub
     When I open the address "/settings#agents"
-    And I approve "demo-laptop" on the Machines tab, typing a key ID that doesn't match
+    And I approve "demo-laptop" on the Machines tab, typing a fingerprint that doesn't match
     Then the dialog "Approve demo-laptop?" says "That isn't right, so the machine wasn't approved."
     And the table "Waiting for approval" lists "demo-laptop" with the key fingerprint the machine showed
 

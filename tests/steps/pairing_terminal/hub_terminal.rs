@@ -40,6 +40,15 @@ async fn make_token(agent: &mut Agent, address: &str) {
     let token = said.stdout.trim();
     assert!(token.starts_with("ladderback_pair_"), "{said:?}");
     agent.pairing_terminal.token = Some(token.to_owned());
+    let hub_key = said
+        .stderr
+        .split("The hub key: ")
+        .nth(1)
+        .and_then(|rest| rest.lines().next())
+        .unwrap_or_else(|| panic!("the terminal printed the hub key: {said:?}"))
+        .trim()
+        .to_owned();
+    agent.pairing_terminal.hub_key = Some(hub_key);
 }
 
 #[given("the person revoked the token at the hub's terminal")]

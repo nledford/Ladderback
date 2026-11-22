@@ -13,7 +13,7 @@ use axum::http::header::{HOST, SET_COOKIE};
 use axum::http::{Method, StatusCode};
 use domain::access::api_token::{ApiTokenLabel, TokenPermissions};
 use domain::access::permissions::{Permission, Permissions};
-use domain::fleet::{AgentRecord, AgentStatus, Fingerprint, Hostname, KeyId, SigningSeed};
+use domain::fleet::{AgentRecord, AgentStatus, Fingerprint, Hostname, SigningSeed};
 use domain::{AgentId, Timestamp, Uuid};
 use http_body_util::BodyExt;
 use tower::ServiceExt;
@@ -114,9 +114,18 @@ impl Daemon {
         .unwrap()
     }
 
-    async fn key_id(&self) -> String {
+    /// The hub key's fingerprint, which confirms with sign-in off.
+    async fn fingerprint(&self) -> String {
         let key = self.pairing.as_ref().unwrap().hub_key().await.unwrap();
-        KeyId::of_key(&key).to_string()
+        Fingerprint::of_key(&key).to_string()
+    }
+
+    /// The hub key's key ID, which confirmed with sign-in off before the
+    /// fingerprint did (#1344): the first 8 hex digits of its SHA-256.
+    async fn former_key_id(&self) -> String {
+        let key = self.pairing.as_ref().unwrap().hub_key().await.unwrap();
+        let digest = Fingerprint::of_key(&key).full_hex();
+        digest.get(..8).unwrap().to_uppercase()
     }
 
     /// A session's `Cookie` header and its CSRF token.
@@ -189,18 +198,21 @@ async fn refusal(response: Response) -> (StatusCode, String) {
 }
 
 #[tokio::test]
-async fn the_hub_answers_its_keys_fingerprint_in_full_and_its_key_id() {
+async fn the_hub_answers_its_keys_fingerprint_in_full_and_no_other_id() {
     let daemon = Daemon::hub(false);
     let response = daemon
         .send(build(Method::GET, api::HUB_PATH, LOOPBACK, &[], ""))
         .await;
     assert_eq!(response.status(), StatusCode::OK);
     let key = daemon.pairing.as_ref().unwrap().hub_key().await.unwrap();
-    let hub: api::HubDto = serde_json::from_value(json(response).await).unwrap();
-    assert_eq!(hub.fingerprint, Fingerprint::of_key(&key).to_string());
-    assert_eq!(hub.key_id, KeyId::of_key(&key).to_string());
-    assert_eq!(hub.certificate, api::TokenCertificateDto::Ca);
-    assert_eq!(hub.own_certificate, None);
+    let read = json(response).await;
+    assert_eq!(
+        read,
+        serde_json::json!({
+            "fingerprint": Fingerprint::of_key(&key).to_string(),
+            "certificate": "ca",
+        })
+    );
 }
 
 /// A page that came over the hub's built-in TLS is offered the hub's own
@@ -233,7 +245,7 @@ async fn the_page_is_offered_first_the_certificate_it_came_in_by() {
 #[tokio::test]
 async fn a_token_pins_the_hubs_certificate_when_asked_to() {
     let daemon = Daemon::hub_on_tls();
-    let key_id = daemon.key_id().await;
+    let fingerprint = daemon.fingerprint().await;
     for (kind, tls, said) in [
         (
             "pinned",
@@ -249,7 +261,7 @@ async fn a_token_pins_the_hubs_certificate_when_asked_to() {
         let body = serde_json::json!({
             "address": ADDRESS,
             "certificate": kind,
-            "confirmation": key_id,
+            "confirmation": fingerprint,
         })
         .to_string();
         let response = daemon.send(make(LOOPBACK, &[], &body)).await;
@@ -266,11 +278,11 @@ async fn a_token_pins_the_hubs_certificate_when_asked_to() {
 #[tokio::test]
 async fn a_pinned_ask_for_a_plain_address_is_refused() {
     let daemon = Daemon::hub_on_tls();
-    let key_id = daemon.key_id().await;
+    let fingerprint = daemon.fingerprint().await;
     let body = serde_json::json!({
         "address": "http://127.0.0.1:9",
         "certificate": "pinned",
-        "confirmation": key_id,
+        "confirmation": fingerprint,
     })
     .to_string();
     let response = daemon.send(make(LOOPBACK, &[], &body)).await;
@@ -303,10 +315,10 @@ async fn a_daemon_not_serving_as_a_hub_answers_its_routes_as_unknown() {
 }
 
 #[tokio::test]
-async fn on_loopback_the_key_id_makes_a_token_shown_once_and_cancelled_once() {
+async fn on_loopback_the_fingerprint_makes_a_token_shown_once_and_cancelled_once() {
     let daemon = Daemon::hub(false);
-    let key_id = daemon.key_id().await.to_lowercase();
-    let response = daemon.send(make(LOOPBACK, &[], &ask(&key_id))).await;
+    let fingerprint = daemon.fingerprint().await.to_lowercase();
+    let response = daemon.send(make(LOOPBACK, &[], &ask(&fingerprint))).await;
     assert_eq!(response.status(), StatusCode::CREATED);
     let made: api::PairingTokenDto = serde_json::from_value(json(response).await).unwrap();
     let key = daemon.pairing.as_ref().unwrap().hub_key().await.unwrap();
@@ -339,9 +351,9 @@ async fn on_loopback_the_key_id_makes_a_token_shown_once_and_cancelled_once() {
 #[tokio::test]
 async fn beyond_loopback_with_sign_in_off_no_token_is_made() {
     let daemon = Daemon::hub(false);
-    let key_id = daemon.key_id().await;
-    let remote_peer = make(REMOTE, &[], &ask(&key_id));
-    let mut remote_host = make(LOOPBACK, &[], &ask(&key_id));
+    let fingerprint = daemon.fingerprint().await;
+    let remote_peer = make(REMOTE, &[], &ask(&fingerprint));
+    let mut remote_host = make(LOOPBACK, &[], &ask(&fingerprint));
     remote_host
         .headers_mut()
         .insert(HOST, "hub.example:8080".parse().unwrap());
@@ -371,17 +383,20 @@ async fn beyond_loopback_with_sign_in_off_any_confirmation_needs_sign_in() {
 }
 
 #[tokio::test]
-async fn a_wrong_key_id_is_a_step_up_that_failed() {
+async fn a_wrong_fingerprint_or_the_key_id_is_a_step_up_that_failed() {
     let daemon = Daemon::hub(false);
-    let wrong = if daemon.key_id().await == "00000000" {
-        "11111111"
+    let wrong = if daemon.fingerprint().await == "0000-0000-0000-0000-0000" {
+        "1111-1111-1111-1111-1111"
     } else {
-        "00000000"
+        "0000-0000-0000-0000-0000"
     };
-    assert_eq!(
-        refusal(daemon.send(make(LOOPBACK, &[], &ask(wrong))).await).await,
-        (StatusCode::FORBIDDEN, "step-up-failed".to_owned())
-    );
+    for confirmation in [wrong.to_owned(), daemon.former_key_id().await] {
+        assert_eq!(
+            refusal(daemon.send(make(LOOPBACK, &[], &ask(&confirmation))).await).await,
+            (StatusCode::FORBIDDEN, "step-up-failed".to_owned()),
+            "{confirmation}"
+        );
+    }
 }
 
 // Nothing typed, or more than any password, is no confirmation: refused as
@@ -426,14 +441,14 @@ async fn an_empty_or_oversized_confirmation_is_a_step_up_that_failed_in_no_wait(
 #[tokio::test]
 async fn with_sign_in_off_an_ai_agent_opens_no_hub_route() {
     let daemon = Daemon::hub(false);
-    let key_id = daemon.key_id().await;
-    let made = daemon.send(make(LOOPBACK, &[], &ask(&key_id))).await;
+    let fingerprint = daemon.fingerprint().await;
+    let made = daemon.send(make(LOOPBACK, &[], &ask(&fingerprint))).await;
     assert_eq!(made.status(), StatusCode::CREATED);
     let made: api::PairingTokenDto = serde_json::from_value(json(made).await).unwrap();
     let agent = [(api::AI_AGENT_HEADER, "1".to_owned())];
     let cancel_path = format!("{}/{}", api::PAIRING_TOKENS_PATH, made.token_id);
     for request in [
-        make(LOOPBACK, &agent, &ask(&key_id)),
+        make(LOOPBACK, &agent, &ask(&fingerprint)),
         build(Method::DELETE, &cancel_path, LOOPBACK, &agent, ""),
         build(Method::GET, api::HUB_PATH, LOOPBACK, &agent, ""),
     ] {
@@ -472,10 +487,12 @@ async fn with_sign_in_on_a_session_confirms_with_the_password_from_anywhere() {
         refusal(again).await,
         (StatusCode::TOO_MANY_REQUESTS, "sign-in-wait".to_owned())
     );
-    let key_id = daemon.key_id().await;
-    let by_key_id = daemon.send(make(peer(12), &session, &ask(&key_id))).await;
+    let fingerprint = daemon.fingerprint().await;
+    let by_fingerprint = daemon
+        .send(make(peer(12), &session, &ask(&fingerprint)))
+        .await;
     assert_eq!(
-        refusal(by_key_id).await,
+        refusal(by_fingerprint).await,
         (StatusCode::FORBIDDEN, "step-up-failed".to_owned())
     );
     let made = daemon.send(make(REMOTE, &session, &ask(PASSWORD))).await;
@@ -522,7 +539,7 @@ async fn an_api_token_with_every_permission_cant_make_or_cancel_a_token() {
 #[tokio::test]
 async fn an_ask_the_hub_cant_read_is_refused_by_its_kind() {
     let daemon = Daemon::hub(false);
-    let key_id = daemon.key_id().await;
+    let fingerprint = daemon.fingerprint().await;
     let cases = [
         (
             r#"{"address":1}"#.to_owned(),
@@ -530,12 +547,12 @@ async fn an_ask_the_hub_cant_read_is_refused_by_its_kind() {
             "invalid-body",
         ),
         (
-            serde_json::json!({ "address": "ftp://hub", "confirmation": key_id }).to_string(),
+            serde_json::json!({ "address": "ftp://hub", "confirmation": fingerprint }).to_string(),
             StatusCode::BAD_REQUEST,
             "hub-address-invalid",
         ),
         (
-            serde_json::json!({ "address": ADDRESS, "life-minutes": 4, "confirmation": key_id })
+            serde_json::json!({ "address": ADDRESS, "life-minutes": 4, "confirmation": fingerprint })
                 .to_string(),
             StatusCode::BAD_REQUEST,
             "pairing-token-life",
@@ -543,7 +560,7 @@ async fn an_ask_the_hub_cant_read_is_refused_by_its_kind() {
         // The certificate's kind isn't the page's to choose while the hub
         // serves no certificate of its own: a pinned one is no ask it reads.
         (
-            serde_json::json!({ "address": ADDRESS, "certificate": "pinned", "confirmation": key_id })
+            serde_json::json!({ "address": ADDRESS, "certificate": "pinned", "confirmation": fingerprint })
                 .to_string(),
             StatusCode::BAD_REQUEST,
             "invalid-body",
@@ -652,13 +669,15 @@ async fn the_page_lists_each_agent_with_its_key_its_wait_and_its_lookalike() {
 }
 
 #[tokio::test]
-async fn on_loopback_the_key_id_approves_the_agent_under_the_key_compared_once() {
+async fn on_loopback_the_fingerprint_approves_the_agent_under_the_key_compared_once() {
     let daemon = Daemon::hub(false);
     let waiting = agent(2, "laptop", false, now());
     // The hub key is made while no agent is registered, as on a real hub.
-    let key_id = daemon.key_id().await;
+    let fingerprint = daemon.fingerprint().await;
     daemon.registry.hold(waiting.clone());
-    let response = daemon.send(approve(LOOPBACK, &[], &waiting, &key_id)).await;
+    let response = daemon
+        .send(approve(LOOPBACK, &[], &waiting, &fingerprint))
+        .await;
     assert_eq!(response.status(), StatusCode::OK);
     let answered: api::HubAgentDto = serde_json::from_value(json(response).await).unwrap();
     assert_eq!(answered.status, api::AgentStatusDto::Approved);
@@ -666,7 +685,9 @@ async fn on_loopback_the_key_id_approves_the_agent_under_the_key_compared_once()
     assert_eq!(answered.key, waiting.key.to_hex());
     let kept = daemon.registry.agent(waiting.agent_id).await.unwrap();
     assert!(kept.is_some_and(|kept| !kept.is_pending()));
-    let again = daemon.send(approve(LOOPBACK, &[], &waiting, &key_id)).await;
+    let again = daemon
+        .send(approve(LOOPBACK, &[], &waiting, &fingerprint))
+        .await;
     assert_eq!(
         refusal(again).await,
         (StatusCode::CONFLICT, "agent-approved-already".to_owned())
@@ -678,7 +699,7 @@ async fn an_agent_or_key_that_never_paired_is_unknown_and_approves_nothing() {
     let daemon = Daemon::hub(false);
     let waiting = agent(2, "laptop", false, now());
     // The hub key is made while no agent is registered, as on a real hub.
-    let key_id = daemon.key_id().await;
+    let fingerprint = daemon.fingerprint().await;
     daemon.registry.hold(waiting.clone());
     let other_key = AgentRecord {
         key: agent(3, "laptop", false, now()).key,
@@ -687,11 +708,16 @@ async fn an_agent_or_key_that_never_paired_is_unknown_and_approves_nothing() {
     let never = agent(4, "desktop", false, now());
     for asked in [&other_key, &never] {
         assert_eq!(
-            refusal(daemon.send(approve(LOOPBACK, &[], asked, &key_id)).await).await,
+            refusal(
+                daemon
+                    .send(approve(LOOPBACK, &[], asked, &fingerprint))
+                    .await
+            )
+            .await,
             (StatusCode::NOT_FOUND, "agent-unknown".to_owned())
         );
     }
-    let body = serde_json::json!({ "key": waiting.key.to_hex(), "confirmation": key_id });
+    let body = serde_json::json!({ "key": waiting.key.to_hex(), "confirmation": fingerprint });
     let not_an_id = api::agent_approval_path("laptop");
     let not_an_id = build(Method::POST, &not_an_id, LOOPBACK, &[], &body.to_string());
     assert_eq!(
@@ -699,7 +725,7 @@ async fn an_agent_or_key_that_never_paired_is_unknown_and_approves_nothing() {
         (StatusCode::NOT_FOUND, "agent-unknown".to_owned())
     );
     let path = api::agent_approval_path(&waiting.agent_id.as_uuid().to_string());
-    let not_a_key = serde_json::json!({ "key": "laptop", "confirmation": key_id }).to_string();
+    let not_a_key = serde_json::json!({ "key": "laptop", "confirmation": fingerprint }).to_string();
     let not_a_key = build(Method::POST, &path, LOOPBACK, &[], &not_a_key);
     assert_eq!(
         refusal(daemon.send(not_a_key).await).await,
@@ -714,21 +740,30 @@ async fn an_approval_is_confirmed_as_a_token_is() {
     let daemon = Daemon::hub(false);
     let waiting = agent(2, "laptop", false, now());
     // The hub key is made while no agent is registered, as on a real hub.
-    let key_id = daemon.key_id().await;
+    let fingerprint = daemon.fingerprint().await;
     daemon.registry.hold(waiting.clone());
     assert_eq!(
-        refusal(daemon.send(approve(REMOTE, &[], &waiting, &key_id)).await).await,
+        refusal(
+            daemon
+                .send(approve(REMOTE, &[], &waiting, &fingerprint))
+                .await
+        )
+        .await,
         (StatusCode::FORBIDDEN, "pairing-needs-sign-in".to_owned())
     );
-    let wrong = if key_id == "00000000" {
-        "11111111"
+    let wrong = if fingerprint == "0000-0000-0000-0000-0000" {
+        "1111-1111-1111-1111-1111"
     } else {
-        "00000000"
+        "0000-0000-0000-0000-0000"
     };
-    assert_eq!(
-        refusal(daemon.send(approve(LOOPBACK, &[], &waiting, wrong)).await).await,
-        (StatusCode::FORBIDDEN, "step-up-failed".to_owned())
-    );
+    let former_key_id = daemon.former_key_id().await;
+    for wrong in [wrong, former_key_id.as_str()] {
+        assert_eq!(
+            refusal(daemon.send(approve(LOOPBACK, &[], &waiting, wrong)).await).await,
+            (StatusCode::FORBIDDEN, "step-up-failed".to_owned()),
+            "{wrong}"
+        );
+    }
     let kept = daemon.registry.agent(waiting.agent_id).await.unwrap();
     assert!(kept.is_some_and(|kept| kept.is_pending()));
 }

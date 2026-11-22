@@ -9,8 +9,8 @@ use std::net::IpAddr;
 
 use domain::access::step_up::{StepUpConfirmation, StepUpFor};
 use domain::fleet::{
-    AgentRecord, ApprovalRefused, HubAddress, KeyId, ListedAgent, PairingToken, PublicKey, TokenId,
-    TokenTls, needs_sign_in,
+    AgentRecord, ApprovalRefused, Fingerprint, HubAddress, ListedAgent, PairingToken, PublicKey,
+    TokenId, TokenTls, needs_sign_in,
 };
 use domain::{AgentId, SignedDuration, Timestamp};
 
@@ -178,7 +178,7 @@ impl HubPairing {
 
     /// The hub's keys, once the step-up `confirmation` holds: the admin
     /// password, in the peer's sign-in waits, with sign-in on; with it off,
-    /// the hub key's key ID, and only on loopback. Beyond loopback with
+    /// the hub key's fingerprint, and only on loopback. Beyond loopback with
     /// sign-in off, no confirmation helps, so none is read.
     async fn stepped_up(
         &self,
@@ -195,12 +195,12 @@ impl HubPairing {
             return Err(TokenAskRefused::StepUpFailed);
         };
         let keys = self.keys().await?;
-        let key_id = KeyId::of_key(keys.key());
+        let fingerprint = Fingerprint::of_key(keys.key());
         confirm_step_up(
             self.access.as_deref(),
             peer,
             &confirmation,
-            StepUpFor::HubKey(&key_id),
+            StepUpFor::HubKey(&fingerprint),
         )
         .await
         .map_err(|refused| match refused {

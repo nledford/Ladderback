@@ -17,7 +17,7 @@ use cucumber::{given, then, when};
 use domain::SignedDuration;
 use domain::access::step_up::StepUpConfirmation;
 use domain::fleet::{
-    AgentStatus, ApprovalRefused, Fingerprint, HubAddress, KeyId, PublicKey, SigningSeed, TokenId,
+    AgentStatus, ApprovalRefused, Fingerprint, HubAddress, PublicKey, SigningSeed, TokenId,
     TokenTls,
 };
 
@@ -59,8 +59,16 @@ impl PairingWorld {
         self.asked = Some(asked);
     }
 
-    fn key_id(&self) -> String {
-        KeyId::of_key(self.hub().keys.key()).to_string()
+    /// The hub key's fingerprint, as every screen shows it.
+    fn fingerprint(&self) -> String {
+        Fingerprint::of_key(self.hub().keys.key()).to_string()
+    }
+
+    /// The hub key's key ID, which a step-up with sign-in off asked for
+    /// before the fingerprint (#1344): the first 8 hex digits of its SHA-256.
+    fn former_key_id(&self) -> String {
+        let digest = Fingerprint::of_key(self.hub().keys.key()).full_hex();
+        digest.get(..8).expect("8 hex digits").to_uppercase()
     }
 
     fn ask_refusal(&self) -> &TokenAskRefused {
@@ -138,8 +146,8 @@ async fn sign_in_off(agent: &mut Agent) {
 #[given("the person has made a pairing token on this machine")]
 async fn made_on_this_machine(agent: &mut Agent) {
     let world = &mut agent.pairing;
-    let key_id = world.key_id();
-    world.ask_for_token(false, &key_id).await;
+    let fingerprint = world.fingerprint();
+    world.ask_for_token(false, &fingerprint).await;
     assert!(matches!(world.asked, Some(Ok(_))), "{:?}", world.asked);
 }
 
@@ -164,32 +172,43 @@ async fn asks_pinned_with_password(agent: &mut Agent) {
 }
 
 #[when(
-    "the person asks for a new pairing token from another computer, confirming with the hub's key ID"
+    "the person asks for a new pairing token from another computer, confirming with the hub key's fingerprint"
 )]
 async fn asks_from_afar(agent: &mut Agent) {
     let world = &mut agent.pairing;
-    let key_id = world.key_id();
-    world.ask_for_token(true, &key_id).await;
+    let fingerprint = world.fingerprint();
+    world.ask_for_token(true, &fingerprint).await;
 }
 
 #[when(
-    "the person asks for a new pairing token on this machine and types a key ID that doesn't match"
+    "the person asks for a new pairing token on this machine and types a fingerprint that doesn't match"
 )]
-async fn asks_with_wrong_key_id(agent: &mut Agent) {
+async fn asks_with_wrong_fingerprint(agent: &mut Agent) {
     let world = &mut agent.pairing;
-    let wrong = if world.key_id() == "00000000" {
-        "11111111"
+    let wrong = if world.fingerprint() == "0000-0000-0000-0000-0000" {
+        "1111-1111-1111-1111-1111"
     } else {
-        "00000000"
+        "0000-0000-0000-0000-0000"
     };
     world.ask_for_token(false, wrong).await;
 }
 
-#[when("the person asks for a new pairing token on this machine and types the hub's key ID")]
-async fn asks_with_key_id(agent: &mut Agent) {
+#[when(
+    "the person asks for a new pairing token on this machine and types the key ID it asked for before"
+)]
+async fn asks_with_former_key_id(agent: &mut Agent) {
     let world = &mut agent.pairing;
-    let key_id = world.key_id().to_lowercase();
+    let key_id = world.former_key_id();
     world.ask_for_token(false, &key_id).await;
+}
+
+#[when(
+    "the person asks for a new pairing token on this machine and types the hub key's fingerprint"
+)]
+async fn asks_with_fingerprint(agent: &mut Agent) {
+    let world = &mut agent.pairing;
+    let fingerprint = world.fingerprint().to_lowercase();
+    world.ask_for_token(false, &fingerprint).await;
 }
 
 #[when("the person closes the dialog")]
@@ -264,7 +283,7 @@ async fn unused_tokens(agent: &mut Agent, count: usize) {
 }
 
 #[when(
-    regex = r#"^the person approves "([^"]+)" (on the hub's page|from another computer) with (the key it showed|another key), confirming with (the admin password|a wrong password|the hub's key ID)$"#
+    regex = r#"^the person approves "([^"]+)" (on the hub's page|from another computer) with (the key it showed|another key), confirming with (the admin password|a wrong password|the hub key's fingerprint)$"#
 )]
 async fn approves_on_the_page(
     agent: &mut Agent,
@@ -282,7 +301,7 @@ async fn approves_on_the_page(
     let confirmation = match confirmation.as_str() {
         "the admin password" => PASSWORD.to_owned(),
         "a wrong password" => "not-the-password".to_owned(),
-        _ => world.key_id(),
+        _ => world.fingerprint(),
     };
     world
         .ask_to_approve(&hostname, from != "on the hub's page", key, &confirmation)
@@ -292,8 +311,10 @@ async fn approves_on_the_page(
 #[given(expr = "the person approved {string} on the hub's page")]
 async fn approved_before(agent: &mut Agent, hostname: String) {
     let world = &mut agent.pairing;
-    let key_id = world.key_id();
-    world.ask_to_approve(&hostname, false, None, &key_id).await;
+    let fingerprint = world.fingerprint();
+    world
+        .ask_to_approve(&hostname, false, None, &fingerprint)
+        .await;
     assert!(
         matches!(world.approval(), Ok(Ok(_))),
         "{:?}",

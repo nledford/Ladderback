@@ -25,20 +25,20 @@ Feature: Approving a machine on the running hub's page
   Scenario: A remote page can't approve a machine while sign-in is off
     Given a hub with sign-in off
     And an agent paired under the hostname "laptop"
-    When the person approves "laptop" from another computer with the key it showed, confirming with the hub's key ID
+    When the person approves "laptop" from another computer with the key it showed, confirming with the hub key's fingerprint
     Then the hub refuses the approval and says to set an admin password
     And the hub lists "laptop" as waiting for approval
 
-  Scenario: With sign-in off, the hub's key ID confirms an approval on this machine
+  Scenario: With sign-in off, the hub key's fingerprint confirms an approval on this machine
     Given a hub with sign-in off
     And an agent paired under the hostname "laptop"
-    When the person approves "laptop" on the hub's page with the key it showed, confirming with the hub's key ID
+    When the person approves "laptop" on the hub's page with the key it showed, confirming with the hub key's fingerprint
     Then the hub lists "laptop" as approved
 
   Scenario: A key the machine doesn't hold approves nothing
     Given a hub with sign-in off
     And an agent paired under the hostname "laptop"
-    When the person approves "laptop" on the hub's page with another key, confirming with the hub's key ID
+    When the person approves "laptop" on the hub's page with another key, confirming with the hub key's fingerprint
     Then the hub refuses the approval because no such machine waits
     And the hub lists "laptop" as waiting for approval
 
@@ -46,7 +46,7 @@ Feature: Approving a machine on the running hub's page
     Given a hub with sign-in off
     And an agent paired under the hostname "laptop"
     And the person approved "laptop" on the hub's page
-    When the person approves "laptop" on the hub's page with the key it showed, confirming with the hub's key ID
+    When the person approves "laptop" on the hub's page with the key it showed, confirming with the hub key's fingerprint
     Then the hub refuses the approval because "laptop" is approved already
 
   @e2e
@@ -56,7 +56,7 @@ Feature: Approving a machine on the running hub's page
     And a machine named "e2e-laptop" paired with the token from its terminal
     When the person reads the machines on the hub's page
     Then the page lists "e2e-laptop" as waiting with the key the machine showed
-    When the person approves "e2e-laptop" on the hub's page, confirming with the hub's key ID
+    When the person approves "e2e-laptop" on the hub's page, confirming with the fingerprint the hub's terminal printed
     Then the hub answers that "e2e-laptop" is approved
     When the machine checks its link to the hub from its terminal
     Then the machine says the hub approved it
@@ -67,11 +67,18 @@ Feature: Approving a machine on the running hub's page
     And the hub is serving on loopback
     And a machine named "e2e-laptop" paired with the token from its terminal
     And the person approved "e2e-laptop" on the hub's page
-    When the person approves "e2e-laptop" on the hub's page, confirming with the hub's key ID
+    When the person approves "e2e-laptop" on the hub's page, confirming with the hub key's fingerprint
     Then the hub refuses with the code "agent-approved-already"
 
   @e2e
   Scenario: The hub's page approves no machine that never paired
     Given the hub is serving on loopback
-    When the person approves an agent ID that never paired on the hub's page, confirming with the hub's key ID
+    When the person approves an agent ID that never paired on the hub's page, confirming with the hub key's fingerprint
     Then the hub refuses with the code "agent-unknown"
+
+  @e2e
+  Scenario: The hub's page shows the hub key as the fingerprint its terminal printed, and no other ID
+    Given a hub with a pairing token made at its terminal
+    And the hub is serving on loopback
+    When the person reads the hub's key on the hub's page
+    Then the page shows the hub key as the fingerprint the hub's terminal printed, and no other ID for it

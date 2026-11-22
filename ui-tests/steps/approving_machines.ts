@@ -70,21 +70,21 @@ async function askHub(world: BrowserWorld, route: string, body?: unknown): Promi
   return { status: answer.status, text: await answer.text() };
 }
 
-/** The hub key's ID, which a step-up with sign-in off asks for. */
-async function hubKeyId(world: BrowserWorld): Promise<string> {
+/** The hub key's fingerprint, which a step-up with sign-in off asks for. */
+async function hubFingerprint(world: BrowserWorld): Promise<string> {
   const answer = await askHub(world, "/api/v1/hub");
   assert.equal(answer.status, 200, `the hub's key could not be read: ${answer.text}`);
-  const { "key-id": keyId } = JSON.parse(answer.text) as { "key-id"?: string };
-  assert.ok(keyId, "the hub's key has no ID");
-  return keyId;
+  const { fingerprint } = JSON.parse(answer.text) as { fingerprint?: string };
+  assert.ok(fingerprint, "the hub's key has no fingerprint");
+  return fingerprint;
 }
 
 /** A machine named `hostname` pairs with a token the hub's page made, and
  *  waits for approval: the key it showed is kept. */
 async function pairMachine(world: BrowserWorld, hostname: string): Promise<void> {
   const base = ownBase(world);
-  const keyId = await hubKeyId(world);
-  const made = await askHub(world, "/api/v1/hub/pairing-tokens", { address: base, confirmation: keyId });
+  const fingerprint = await hubFingerprint(world);
+  const made = await askHub(world, "/api/v1/hub/pairing-tokens", { address: base, confirmation: fingerprint });
   assert.equal(made.status, 201, `the hub made no token: ${made.text}`);
   const { token } = JSON.parse(made.text) as { token: string };
   const said = await onMachine(world, hostname, ["pair", base, "--hostname", hostname, "--yes"], `${token}\n`);
@@ -132,19 +132,20 @@ Given("a machine named {string} is approved on the hub", async function (this: B
   assert.ok(machine, `the hub lists no ${hostname}`);
   const approved = await askHub(this, `/api/v1/hub/agents/${machine["agent-id"]}/approval`, {
     key: machine.key,
-    confirmation: await hubKeyId(this),
+    confirmation: await hubFingerprint(this),
   });
   assert.equal(approved.status, 200, `the hub approved nothing: ${approved.text}`);
 });
 
 When(
-  "I approve {string} on the Machines tab, typing a key ID that doesn't match",
+  "I approve {string} on the Machines tab, typing a fingerprint that doesn't match",
   async function (this: BrowserWorld, hostname: string) {
-    const keyId = await hubKeyId(this);
+    const fingerprint = await hubFingerprint(this);
+    const zeros = "0000-0000-0000-0000-0000";
     await tabTo(this, "button", `Approve ${hostname}`);
     await this.page.keyboard.press("Enter");
-    await tabInDialog(this, "textbox", "Hub key ID");
-    await this.page.keyboard.type(keyId === "00000000" ? "11111111" : "00000000");
+    await tabInDialog(this, "textbox", "Hub key fingerprint");
+    await this.page.keyboard.type(fingerprint === zeros ? "1111-1111-1111-1111-1111" : zeros);
     await tabInDialog(this, "button", `Approve ${hostname}`);
     await this.page.keyboard.press("Enter");
   },
