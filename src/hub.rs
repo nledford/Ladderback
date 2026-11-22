@@ -165,6 +165,8 @@ async fn on_the_hub(localizer: &Localizer, data_dir: &Path, ask: TokenAsk) -> io
         Err(error) => return refused(localizer, &error.to_string()),
     };
     let pairing = hub_pairing(data_dir, Arc::clone(&store));
+    // The zone this computer is in, which the person reads times in.
+    let zone = domain::TimeZone::system();
     let said = match ask {
         TokenAsk::Make {
             address,
@@ -172,11 +174,20 @@ async fn on_the_hub(localizer: &Localizer, data_dir: &Path, ask: TokenAsk) -> io
             certificate_authority,
         } => {
             let tls = (!certificate_authority).then(|| hub_tls_key(data_dir));
-            make(localizer, &pairing, &store, &address, ttl_minutes, tls).await
+            make(
+                localizer,
+                &pairing,
+                &store,
+                &address,
+                ttl_minutes,
+                tls,
+                &zone,
+            )
+            .await
         }
-        TokenAsk::List => list(localizer, &store).await,
+        TokenAsk::List => list(localizer, &store, &zone).await,
         TokenAsk::Revoke(id) => revoke(localizer, &pairing, &id).await,
-        TokenAsk::Pending => pending(localizer, &pairing).await,
+        TokenAsk::Pending => pending(localizer, &pairing, &zone).await,
         TokenAsk::Approve { hostname, yes } => approve(localizer, &pairing, &hostname, yes).await,
     };
     store.close().await;
@@ -193,6 +204,7 @@ async fn make(
     address: &str,
     ttl_minutes: Option<i64>,
     tls: Option<HubTlsKey>,
+    zone: &domain::TimeZone,
 ) -> io::Result<ExitCode> {
     let Ok(address) = HubAddress::parse(address) else {
         say(
@@ -275,19 +287,26 @@ async fn make(
         Ok(tokens) => tokens
             .iter()
             .find(|record| record.id() == id)
-            .map(|record| record.expires_at.to_string())
-            .unwrap_or_default(),
+            .map(|record| record.expires_at),
         Err(error) => return refused(localizer, &format!("{error:?}")),
     };
+    let Some(expires) = expires else {
+        return refused(localizer, "the token just made isn't among the unused ones");
+    };
+    let (expires, offset) = written_at(expires, zone);
     say(
         localizer,
         msg::CLI_PAIRING_TOKEN_MADE,
-        &[("id", text(id)), ("expires", text(expires))],
+        &[("id", text(id)), ("expires", expires), ("offset", offset)],
     )?;
     Ok(ExitCode::SUCCESS)
 }
 
-async fn list(localizer: &Localizer, store: &SqliteStore) -> io::Result<ExitCode> {
+async fn list(
+    localizer: &Localizer,
+    store: &SqliteStore,
+    zone: &domain::TimeZone,
+) -> io::Result<ExitCode> {
     let tokens = match store.unused_tokens(Timestamp::now()).await {
         Ok(tokens) => tokens,
         Err(error) => return refused(localizer, &format!("{error:?}")),
@@ -296,7 +315,16 @@ async fn list(localizer: &Localizer, store: &SqliteStore) -> io::Result<ExitCode
         say(localizer, msg::CLI_PAIRING_TOKEN_NONE, &[])?;
     }
     for token in tokens {
-        to_stdout(&format!("{}  {}\n", token.id(), token.expires_at))?;
+        let (expires, offset) = written_at(token.expires_at, zone);
+        let args = [
+            ("id", text(token.id())),
+            ("expires", expires),
+            ("offset", offset),
+        ];
+        to_stdout(&format!(
+            "{}\n",
+            localizer.message(msg::CLI_PAIRING_TOKEN_LISTED, &args)
+        ))?;
     }
     Ok(ExitCode::SUCCESS)
 }
@@ -332,9 +360,14 @@ async fn revoke(localizer: &Localizer, pairing: &HubPairing, id: &str) -> io::Re
 }
 
 /// `pairing-token --pending`: one line per machine waiting for approval,
-/// its agent ID, key fingerprint, since when it waits and, last, since it
-/// alone may hold spaces, its hostname.
-async fn pending(localizer: &Localizer, pairing: &HubPairing) -> io::Result<ExitCode> {
+/// its agent ID, key fingerprint, since when it waits in the person's
+/// `zone` and, last, since it alone may hold spaces, its hostname. The
+/// columns are separated by two spaces.
+async fn pending(
+    localizer: &Localizer,
+    pairing: &HubPairing,
+    zone: &domain::TimeZone,
+) -> io::Result<ExitCode> {
     let agents = match pairing.pending().await {
         Ok(agents) => agents,
         Err(error) => return hub_refused(localizer, &error),
@@ -347,11 +380,17 @@ async fn pending(localizer: &Localizer, pairing: &HubPairing) -> io::Result<Exit
             AgentStatus::Pending { since } => since,
             AgentStatus::Approved { at } => at,
         };
+        let (since, offset) = written_at(since, zone);
+        let args = [
+            ("agent_id", text(agent.agent_id.as_uuid())),
+            ("fingerprint", text(Fingerprint::of_key(&agent.key))),
+            ("since", since),
+            ("offset", offset),
+            ("hostname", text(agent.hostname)),
+        ];
         to_stdout(&format!(
-            "{}  {}  {since}  {}\n",
-            agent.agent_id.as_uuid(),
-            Fingerprint::of_key(&agent.key),
-            agent.hostname,
+            "{}\n",
+            localizer.message(msg::CLI_PAIRING_TOKEN_WAITING, &args)
         ))?;
     }
     Ok(ExitCode::SUCCESS)
@@ -979,9 +1018,22 @@ fn when(seconds: u64) -> String {
 
 /// A time as the person at this terminal reads it: the instant, which the
 /// catalog writes in `zone`, and that zone's offset from UTC at the
-/// instant. A zone with no IANA name is read as UTC, with UTC's offset.
-fn written_at(_at: Timestamp, _zone: &domain::TimeZone) -> (MsgArg, MsgArg) {
-    todo!("#1309")
+/// instant. A zone with no IANA name is read as UTC, with UTC's offset, so
+/// the time and the offset beside it never disagree.
+fn written_at(at: Timestamp, zone: &domain::TimeZone) -> (MsgArg, MsgArg) {
+    let named = MachineZone::of(zone).and_then(|name| api::IanaZone::new(name.as_str()).ok());
+    let offset = if named.is_some() {
+        zone.to_offset(at)
+    } else {
+        domain::Offset::UTC
+    };
+    (
+        MsgArg::Timestamp {
+            utc_ms: at.as_millisecond(),
+            zone: named,
+        },
+        text(api::ClockOffset::new(offset)),
+    )
 }
 
 /// The token as pasted, read until it reads as a token, a blank line comes

@@ -461,9 +461,10 @@ cli-pairing-token-no-tls-key = The { -hub }'s TLS key in { "hub-tls-key" } is mi
 
 # Printed after the token: it is one-time, its token ID, and when it lapses.
 # $id (text): the token ID, 8 hex digits.
-# $expires (text): when the token lapses, as an RFC 3339 instant in UTC.
+# $expires (instant): when the token lapses, in the zone this computer is in.
+# $offset (text): that zone's offset from UTC at that time, as -05:00.
 # `ladderback pairing-token --revoke` is typed as it is: keep it a string literal.
-cli-pairing-token-made = This token works once. Token ID { $id }, usable until { $expires }. Revoke it with { "ladderback pairing-token --revoke" } { $id }.
+cli-pairing-token-made = This token works once. Token ID { $id }, usable until { DATETIME($expires, dateStyle: "long", timeStyle: "short") } ({ $offset }). Revoke it with { "ladderback pairing-token --revoke" } { $id }.
 
 # `ladderback pairing-token --list` found no unused token.
 cli-pairing-token-none = no unused pairing tokens
