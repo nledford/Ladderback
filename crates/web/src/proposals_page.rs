@@ -16,7 +16,7 @@ use api::{
 };
 use l10n::{Localizer, msg};
 use leptos::prelude::*;
-use leptos::task::{spawn_local, tick};
+use leptos::task::spawn_local;
 
 use crate::announcer::Politeness;
 use crate::components::ACTIONS;
@@ -25,7 +25,7 @@ use crate::components::button::{Appearance, Content, Kind};
 use crate::components::skeleton::rules::Awaited;
 use crate::components::{
     Banner, Button, StepUp, StepUpField, TextField, Toast, ToastTone, Toasts, focus_element,
-    hand_focus_when_gone, point_at_refusal, refusal_alert, say_refusals, text_field,
+    hand_focus_when_gone, point_at_refusal, refusal_alert, say_refusals, show_answer, text_field,
 };
 use crate::components::{first_load, paced};
 use crate::live::reply;
@@ -408,30 +408,25 @@ fn Review(
             if working.try_set(None).is_some() {
                 return;
             }
+            let wrong = match &answer {
+                Some(Posted::Refused(code, ..)) => {
+                    field_error(*code, asks, &short_id).map(|said| say(&localizer, said))
+                }
+                _ => None,
+            };
+            show_answer(error, wrong.clone()).await;
+            if let Some(words) = wrong {
+                point_at_refusal(STEP_UP_ID, &words);
+                return;
+            }
             match answer {
                 Some(Posted::Done(_)) => {
                     value.set(String::new());
-                    error.set(None);
                     decided(localizer, applied(&id)).await;
                 }
-                Some(Posted::Refused(code, args, detail)) => {
-                    match field_error(code, asks, &short_id) {
-                        // Cleared first, so a second wrong try is said again.
-                        Some(said) => {
-                            error.set(None);
-                            tick().await;
-                            let words = say(&localizer, said);
-                            error.try_set(Some(words.clone()));
-                            point_at_refusal(STEP_UP_ID, &words);
-                        }
-                        None => approve_alert.set(Some(refused_sentence(
-                            &localizer,
-                            code,
-                            &args,
-                            detail.as_deref(),
-                        ))),
-                    }
-                }
+                Some(Posted::Refused(code, args, detail)) => approve_alert.set(Some(
+                    refused_sentence(&localizer, code, &args, detail.as_deref()),
+                )),
                 None => approve_alert.set(Some(unanswered(&localizer))),
             }
         });

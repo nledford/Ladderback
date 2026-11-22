@@ -21,7 +21,7 @@ use api::{
 use l10n::{Localizer, msg};
 use lepticons_data::LucideGlyph;
 use leptos::prelude::*;
-use leptos::task::{spawn_local, tick};
+use leptos::task::spawn_local;
 use leptos_router::hooks::use_params_map;
 
 use crate::components::ACTIONS;
@@ -30,7 +30,7 @@ use crate::components::link::rules::{Destination, Matching};
 use crate::components::tree::rules::{Selection, folder_url};
 use crate::components::{
     Button, Confirmation, FolderLoader, FolderPage, Link, RadioGroup, ReviewDialog, StepUp,
-    StepUpField, Toast, ToastTone, Toasts, Tree, Working, dialog_refusal_alert,
+    StepUpField, Toast, ToastTone, Toasts, Tree, Working, dialog_refusal_alert, show_answer,
 };
 use crate::download;
 use crate::live::say;
@@ -414,11 +414,21 @@ fn restore_dialog(
                 return;
             }
             state.update(Dialog::answered);
+            let wrong = match &answer {
+                Some(Posted::Refused(code, ..)) => {
+                    restore::field_error(*code, asks).map(|said| words(&said))
+                }
+                _ => None,
+            };
+            let refused = wrong.is_some();
+            show_answer(error, wrong).await;
+            if refused {
+                return;
+            }
             match answer {
                 Some(Posted::Done(body)) => {
                     match serde_json::from_str::<RestoreStartedDto>(&body) {
                         Ok(RestoreStartedDto { operation, folder }) => {
-                            error.set(None);
                             value.set(String::new());
                             open.set(false);
                             started.show(RESTORE_BUTTON, words(&restore::running(&name)));
@@ -432,22 +442,12 @@ fn restore_dialog(
                         Err(_) => alert.set(Some(unreachable)),
                     }
                 }
-                Some(Posted::Refused(code, args, detail)) => {
-                    match restore::field_error(code, asks) {
-                        // Cleared first, so a second wrong try is said again.
-                        Some(said) => {
-                            error.set(None);
-                            tick().await;
-                            error.try_set(Some(words(&said)));
-                        }
-                        None => alert.set(Some(refused_sentence(
-                            &localizer,
-                            code,
-                            &args,
-                            detail.as_deref(),
-                        ))),
-                    }
-                }
+                Some(Posted::Refused(code, args, detail)) => alert.set(Some(refused_sentence(
+                    &localizer,
+                    code,
+                    &args,
+                    detail.as_deref(),
+                ))),
                 None => alert.set(Some(unreachable)),
             }
         });
@@ -586,6 +586,17 @@ fn download_dialog(
                 return;
             }
             state.update(download::Dialog::answered);
+            let wrong = match &answer {
+                Some(Posted::Refused(code, ..)) => {
+                    download::field_error(*code, asks).map(|said| words(&said))
+                }
+                _ => None,
+            };
+            let refused = wrong.is_some();
+            show_answer(error, wrong).await;
+            if refused {
+                return;
+            }
             match answer {
                 Some(Posted::Done(body)) => match serde_json::from_str::<DownloadStartedDto>(&body)
                 {
@@ -594,7 +605,6 @@ fn download_dialog(
                         let handed = web_sys::window()
                             .is_some_and(|window| window.location().assign(&saved).is_ok());
                         if handed {
-                            error.set(None);
                             value.set(String::new());
                             open.set(false);
                             started.show(DOWNLOAD_BUTTON, words(&download::handed(&name)));
@@ -604,22 +614,12 @@ fn download_dialog(
                     }
                     Err(_) => alert.set(Some(unreachable)),
                 },
-                Some(Posted::Refused(code, args, detail)) => {
-                    match download::field_error(code, asks) {
-                        // Cleared first, so a second wrong try is said again.
-                        Some(said) => {
-                            error.set(None);
-                            tick().await;
-                            error.try_set(Some(words(&said)));
-                        }
-                        None => alert.set(Some(refused_sentence(
-                            &localizer,
-                            code,
-                            &args,
-                            detail.as_deref(),
-                        ))),
-                    }
-                }
+                Some(Posted::Refused(code, args, detail)) => alert.set(Some(refused_sentence(
+                    &localizer,
+                    code,
+                    &args,
+                    detail.as_deref(),
+                ))),
                 None => alert.set(Some(unreachable)),
             }
         });

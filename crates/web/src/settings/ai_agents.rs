@@ -11,7 +11,7 @@ use std::sync::Arc;
 use api::{ErrorCode, PermissionsDto};
 use l10n::{Localizer, msg};
 use leptos::prelude::*;
-use leptos::task::{spawn_local, tick};
+use leptos::task::spawn_local;
 
 use super::{Chosen, PermissionGroups};
 use crate::announcer::Politeness;
@@ -21,7 +21,7 @@ use crate::components::button::{Appearance, Content, Kind};
 use crate::components::skeleton::rules::Awaited;
 use crate::components::{
     Button, StepUp, StepUpField, Toast, ToastTone, Toasts, first_load, paced, point_at_refusal,
-    refusal_alert, say_refusals,
+    refusal_alert, say_refusals, show_answer,
 };
 use crate::live::reply;
 use crate::repositories::Sentence;
@@ -108,23 +108,19 @@ pub(super) fn AiAgentsSection(
                 return;
             }
             busy.set(false);
+            let wrong = match &answer {
+                Some(Posted::Refused(code @ ErrorCode::CurrentPasswordWrong, args, detail)) => {
+                    Some(refused_sentence(&localizer, *code, args, detail.as_deref()).plain())
+                }
+                _ => None,
+            };
+            show_answer(password_error, wrong.clone()).await;
+            if let Some(words) = wrong {
+                point_at_refusal(PASSWORD_ID, &words);
+                return;
+            }
             let kept = match answer {
                 Some(Posted::Done(answer)) => serde_json::from_str::<PermissionsDto>(&answer).ok(),
-                Some(Posted::Refused(ErrorCode::CurrentPasswordWrong, args, detail)) => {
-                    // Cleared first, so a second wrong try is said again.
-                    password_error.set(None);
-                    tick().await;
-                    let words = refused_sentence(
-                        &localizer,
-                        ErrorCode::CurrentPasswordWrong,
-                        &args,
-                        detail.as_deref(),
-                    )
-                    .plain();
-                    password_error.try_set(Some(words.clone()));
-                    point_at_refusal(PASSWORD_ID, &words);
-                    return;
-                }
                 Some(Posted::Refused(code, args, detail)) => {
                     refused.set(Some(refused_sentence(
                         &localizer,
@@ -140,7 +136,6 @@ pub(super) fn AiAgentsSection(
                 Some(kept) => {
                     chosen.set(&kept);
                     password.set(String::new());
-                    password_error.set(None);
                     toasts.show(
                         ToastTone::Success,
                         text(&localizer, msg::UI_AI_AGENTS_SAVED),

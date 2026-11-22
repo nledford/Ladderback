@@ -2,6 +2,7 @@ use std::sync::Arc;
 
 use l10n::{Localizer, msg};
 use leptos::prelude::*;
+use leptos::task::tick;
 
 use super::button::Content;
 use super::text_field::Kind;
@@ -13,6 +14,8 @@ use crate::text;
 // What the field's error goes through once a try is answered, decided on
 // the host.
 mod rules;
+
+use rules::Change;
 
 /// What a step-up confirmation asks for (§10.4): the admin password with
 /// sign-in on, and with sign-in off the short ID of what is confirmed, or
@@ -43,9 +46,9 @@ pub enum StepUp {
 /// is shown in its description as text that can be selected, with a button
 /// that copies it, and the field takes a paste. Nothing here blocks a
 /// paste. The field marks the input invalid when `error` holds a sentence;
-/// the caller sets it, and clears it before setting it again so a second
-/// wrong try is heard. `value` holds what is typed, so the caller reads and
-/// clears it.
+/// the caller hands each answer to a try to [`show_answer`], which sets it
+/// for a wrong confirmation and clears it for any other answer. `value`
+/// holds what is typed, so the caller reads and clears it.
 ///
 /// Where the field stands decides how it speaks, since the announcer waits
 /// while a modal is open and works everywhere else:
@@ -150,6 +153,27 @@ pub fn StepUpField(
         </TextField>
     }
     .into_any()
+}
+
+/// Shows on the step-up field whose error is `error` what the daemon's
+/// answer to a try leaves there (§4.5, "Step-up field"; [`rules::changes`]):
+/// `wrong`, the words of a refusal of what was typed in the field, cleared
+/// first so a second wrong try is heard again, or, for any other answer, no
+/// error, so the field never keeps a wrong confirmation's error beside a
+/// refusal for another reason. A caller on a page follows a wrong one with
+/// [`point_at_refusal`].
+pub(crate) async fn show_answer(error: RwSignal<Option<String>>, wrong: Option<String>) {
+    for change in rules::changes(wrong) {
+        match change {
+            Change::Clear => {
+                error.try_set(None);
+            }
+            Change::Draw => tick().await,
+            Change::Show(words) => {
+                error.try_set(Some(words));
+            }
+        }
+    }
 }
 
 /// Tells the reader that the step-up field `id`, on a page, was refused with

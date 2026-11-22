@@ -22,8 +22,10 @@ pub(crate) enum Change<W> {
 /// the field with no error, so it never shows a wrong confirmation beside a
 /// refusal that isn't one.
 pub(crate) fn changes<W>(wrong: Option<W>) -> impl Iterator<Item = Change<W>> {
-    let _ = wrong;
-    std::iter::from_fn(|| todo!())
+    let draw = wrong.is_some().then_some(Change::Draw);
+    [Some(Change::Clear), draw, wrong.map(Change::Show)]
+        .into_iter()
+        .flatten()
 }
 
 #[cfg(test)]
