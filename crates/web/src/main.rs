@@ -169,6 +169,7 @@ mod wording;
 mod variants;
 
 use components::Banner;
+use components::Footer;
 use components::Link;
 use components::banner::rules::BannerTone;
 use components::link::rules::{Destination, LinkTone, Matching};
@@ -314,32 +315,17 @@ fn Navigation(localizer: Arc<Localizer>) -> impl IntoView {
     }
 }
 
-/// The end of the header's line, after the pages' links: the build the
-/// daemon runs, then, while the page has a session, Sign out, which is not a
-/// page and so stands apart from their list. The web UI is built into the
-/// daemon, so its build is the page's too; until the daemon has said which it
-/// is, no version is shown.
+/// The end of the header's line, after the pages' links: while the page has a
+/// session, Sign out, which is not a page and so stands apart from their
+/// list. The running version is the footer's (decision 142).
 #[component]
 fn Account(
     localizer: Arc<Localizer>,
     standing: RwSignal<Standing>,
-    told: RwSignal<Option<session::Told>>,
     sign_out_failed: RwSignal<bool>,
 ) -> impl IntoView {
-    let versions = Arc::clone(&localizer);
-    let version = move || {
-        told.get().map(|told| {
-            let version = routes::text_with(
-                &versions,
-                msg::UI_VERSION,
-                &[("version", api::MsgArg::Text(told.build.display()))],
-            );
-            view! { <p class="site-version">{version}</p> }
-        })
-    };
     view! {
         <div class="site-account">
-            {version}
             {move || {
                 (standing.get() == Standing::SignedIn)
                     .then(|| {
@@ -480,11 +466,12 @@ fn App(localizer: Arc<Localizer>) -> impl IntoView {
     });
     let failure = Arc::clone(&localizer);
     // The update the daemon's release check found, an information banner on
-    // a line of its own under the running version and Sign out, whose whole
+    // a line of its own under the pages' links and Sign out, whose whole
     // sentence links to the release's notes without telling GitHub the page
-    // it came from. Not a live region: only the announcer talks to screen
-    // readers (A3), and the header is read in order like the version before
-    // it.
+    // it came from. It asks the reader to act, so it stays in the header
+    // while the running version is in the footer (decision 142). Not a live
+    // region: only the announcer talks to screen readers (A3), and the
+    // header is read in order.
     let updates = Arc::clone(&localizer);
     let update = move || {
         told.get().and_then(|told| told.update).map(|update| {
@@ -512,6 +499,18 @@ fn App(localizer: Arc<Localizer>) -> impl IntoView {
     let on_the_network = text(&localizer, msg::UI_SIGN_IN_OFF_NETWORK);
     let full_disk_access = Arc::clone(&localizer);
     let network_banner = Arc::clone(&localizer);
+    let footer = Arc::clone(&localizer);
+    // The build the daemon runs, as people read it, wherever the header shows
+    // the pages; the web UI is built into the daemon, so its build is the
+    // page's too. Until the daemon has said which it is, and on the sign-in
+    // page, there is none (decision 107).
+    let version = Signal::derive(move || {
+        if shown.get().shows_pages() {
+            told.get().map(|told| told.build.display())
+        } else {
+            None
+        }
+    });
     view! {
         // The skip link moves focus into `<main>` itself and stops the click
         // there. The router takes any click on a same-origin link it was not
@@ -531,81 +530,90 @@ fn App(localizer: Arc<Localizer>) -> impl IntoView {
             {text(&localizer, msg::UI_SKIP_LINK)}
         </a>
         <Router>
-            <header class="site-header">
-                // The product's mark and name lead back to the start page,
-                // marked as the current page there and only there, in the
-                // color of the text around it, so it still looks like the
-                // brand.
-                <p class="brand">
-                    {Destination::route("/", Matching::Exact)
-                        .map(|to| {
-                            view! {
-                                <Link to=to localizer=Arc::clone(&localizer) tone=LinkTone::Inherit>
-                                    <BrandMark />
-                                    {text(&localizer, msg::UI_BRAND)}
-                                </Link>
-                            }
-                        })}
-                </p>
-                {move || {
-                    shown
-                        .get()
-                        .shows_pages()
-                        .then(|| {
-                            view! {
-                                <Navigation localizer=Arc::clone(&navigation) />
-                                <Account
-                                    localizer=Arc::clone(&account)
-                                    standing=standing
-                                    told=told
-                                    sign_out_failed=sign_out_failed
-                                />
-                                {update.clone()}
-                            }
-                        })
-                }}
-            </header>
-            <main id="main" tabindex="-1" node_ref=main class=move || width.get().main_class()>
-                {move || {
-                    (notice.get() == SignInOffNotice::EveryPage)
-                        .then(|| {
-                            let words = on_the_network.clone();
-                            view! {
-                                <Banner
-                                    localizer=Arc::clone(&network_banner)
-                                    id=routes::SIGN_IN_OFF_NETWORK_ID
-                                    tone=BannerTone::Warning
-                                >
-                                    {words}
-                                </Banner>
-                            }
-                        })
-                }}
-                // On every page while the agent found the grant missing,
-                // after the network's notice: neither can be dismissed.
-                <FullDiskAccessBanner localizer=full_disk_access shown=shown />
-                {move || {
-                    (shown.get() == Standing::SignedIn)
-                        .then(|| {
-                            view! {
-                                <SignOutFailure
-                                    localizer=Arc::clone(&failure)
-                                    failed=sign_out_failed
-                                />
-                            }
-                        })
-                }}
-                {move || match shown.get() {
-                    Standing::Asking => ().into_any(),
-                    Standing::SignedOut => {
-                        view! { <SignInPage localizer=Arc::clone(&pages) standing=standing /> }
-                            .into_any()
-                    }
-                    Standing::Off | Standing::SignedIn | Standing::Unread => {
-                        view! { <Pages localizer=Arc::clone(&pages) /> }.into_any()
-                    }
-                }}
-            </main>
+            // A column at least as tall as the window, so the footer, whose
+            // top margin takes the room a short page leaves, stands at its
+            // foot (`Footer`).
+            <div class="flex flex-col min-block-dvh">
+                <header class="site-header">
+                    // The product's mark and name lead back to the start page,
+                    // marked as the current page there and only there, in the
+                    // color of the text around it, so it still looks like the
+                    // brand.
+                    <p class="brand">
+                        {Destination::route("/", Matching::Exact)
+                            .map(|to| {
+                                view! {
+                                    <Link
+                                        to=to
+                                        localizer=Arc::clone(&localizer)
+                                        tone=LinkTone::Inherit
+                                    >
+                                        <BrandMark />
+                                        {text(&localizer, msg::UI_BRAND)}
+                                    </Link>
+                                }
+                            })}
+                    </p>
+                    {move || {
+                        shown
+                            .get()
+                            .shows_pages()
+                            .then(|| {
+                                view! {
+                                    <Navigation localizer=Arc::clone(&navigation) />
+                                    <Account
+                                        localizer=Arc::clone(&account)
+                                        standing=standing
+                                        sign_out_failed=sign_out_failed
+                                    />
+                                    {update.clone()}
+                                }
+                            })
+                    }}
+                </header>
+                <main id="main" tabindex="-1" node_ref=main class=move || width.get().main_class()>
+                    {move || {
+                        (notice.get() == SignInOffNotice::EveryPage)
+                            .then(|| {
+                                let words = on_the_network.clone();
+                                view! {
+                                    <Banner
+                                        localizer=Arc::clone(&network_banner)
+                                        id=routes::SIGN_IN_OFF_NETWORK_ID
+                                        tone=BannerTone::Warning
+                                    >
+                                        {words}
+                                    </Banner>
+                                }
+                            })
+                    }}
+                    // On every page while the agent found the grant missing,
+                    // after the network's notice: neither can be dismissed.
+                    <FullDiskAccessBanner localizer=full_disk_access shown=shown />
+                    {move || {
+                        (shown.get() == Standing::SignedIn)
+                            .then(|| {
+                                view! {
+                                    <SignOutFailure
+                                        localizer=Arc::clone(&failure)
+                                        failed=sign_out_failed
+                                    />
+                                }
+                            })
+                    }}
+                    {move || match shown.get() {
+                        Standing::Asking => ().into_any(),
+                        Standing::SignedOut => {
+                            view! { <SignInPage localizer=Arc::clone(&pages) standing=standing /> }
+                                .into_any()
+                        }
+                        Standing::Off | Standing::SignedIn | Standing::Unread => {
+                            view! { <Pages localizer=Arc::clone(&pages) /> }.into_any()
+                        }
+                    }}
+                </main>
+                <Footer localizer=footer version=version width=width />
+            </div>
             {move || {
                 asking
                     .get()

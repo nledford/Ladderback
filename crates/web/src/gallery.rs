@@ -23,6 +23,7 @@ mod banner;
 mod button;
 mod checkbox;
 mod fingerprint;
+mod footer;
 mod icon;
 mod link;
 mod modal_dialog;
@@ -100,6 +101,9 @@ pub(crate) fn Gallery(localizer: Arc<Localizer>) -> impl IntoView {
         <table::LiveTableDemo localizer=Arc::clone(&localizer) />
         // After the live table's demo: it has no Tab stop, so it lengthens no walk.
         <fingerprint::FingerprintDemo localizer=Arc::clone(&localizer) />
+        // After the fingerprint's demo: no part of a footer is a Tab stop,
+        // so it lengthens no walk either.
+        <footer::FooterDemo localizer=Arc::clone(&localizer) />
         // Before the tooltip's, so a journey reaches its controls by
         // Shift+Tab from the page's start, past the tooltip's few.
         <table::TableDemo localizer=Arc::clone(&localizer) />

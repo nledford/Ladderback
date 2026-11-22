@@ -7,14 +7,14 @@ ui-skip-link = Skip to content
 # The product's name, in the header of every page.
 ui-brand = { -brand-name }
 
-# The running version, at the right of the header wherever it shows the
+# The running version, in the footer of every page that shows the
 # navigation. $version is the release's number, such as 0.3.0.
 ui-version = Version { $version }
 
-# The available update, under the running version wherever the header shows
-# it, when the daemon's release check found a newer release. The whole
-# sentence is the link to that release's notes. $version is the release's
-# number, such as 0.4.0.
+# The available update, on a line of its own in the header wherever it
+# shows the navigation, when the daemon's release check found a newer
+# release. The whole sentence is the link to that release's notes. $version
+# is the release's number, such as 0.4.0.
 ui-update-available = Version { $version } is available
 
 # The start page's title, as the browser's tab and history show it.
@@ -815,6 +815,10 @@ ui-gallery-fingerprint-heading = Fingerprint
 
 # The name of the demo's fingerprint, the shape of a hub key's.
 ui-gallery-fingerprint-name = Demo { -hub } key fingerprint
+
+# The heading of the gallery's footer demo (§4.5): the running version at
+# the foot of every page.
+ui-gallery-footer-heading = Footer
 
 # The heading of the gallery's steps demo (§4.5): a process's steps in
 # order, each with its state, and where the process has reached.
