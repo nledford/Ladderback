@@ -30,3 +30,5 @@ The CI listing and the release check are CI changes, so each lands in its own pu
 - **Which build offers what.** The `pseudo` feature is what makes a development build: with it, a build offers every catalog as well as the pseudolocales; without it, only the languages `offered-locales.txt` lists. The list names `en-US`, which every chain ends in, and `build.rs` refuses a list without it, a tag with no catalog and a tag listed twice.
 
 **Amended 2026-11-16 (#860, decided by the maintainer's delegation):** `--all` accepts only the messages not reviewed yet, with no line in `sources.txt`. A stale message is accepted only by naming its ID, so one command can't mark a stale translation current without anyone reading it; `--all` names the stale messages it left out and says how many. Terms the language has of its own are unchanged.
+
+**Amended 2026-11-22 (the maintainer):** Japanese, split out of the hub's milestone into M7 on 2026-11-17, comes after `1.0.0`, released on its own once its review is done (§14).
