@@ -175,7 +175,7 @@ A white page (dark: near-black), graphite text, one blue, three status hues, a s
 
 ### Primary
 
-- **Ladder Blue** (`--accent`, `--focus`): links, the 3 px focus ring, a progress bar's fill, a spinner's arc, the skip link's border, a toast's edge, an information alert's and an information banner's icon and edge (the Primary tone, which covers Info), the selected tab's bar and a chosen checkbox's or radio's edge and fill, under a mark in Paper. It is also the field of the logo's mark (`assets/brand/`). In dark mode it lightens to Ladder Blue Dark so it keeps its contrast.
+- **Ladder Blue** (`--accent`, `--focus`): links, the 3 px focus ring, a progress bar's fill, a spinner's arc, the skip link's border, a toast's edge, an information alert's and an information banner's icon and edge (the Primary tone, which covers Info), the selected tab's bar and a chosen checkbox's or radio's edge and fill, under a mark in Paper. It is also the field of the logo's mark (`crates/web/assets/brand/`). In dark mode it lightens to Ladder Blue Dark so it keeps its contrast.
 
 ### Neutral
 
