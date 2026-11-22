@@ -450,7 +450,8 @@ impl HubPairing {
                 Ok(PairAnswer::Paired(Paired {
                     recovery_key: keys.recovery_key,
                     signature: self.signing.sign(&keys.seed, &paired.to_bytes())?,
-                    hostname: Some(pairing.hostname().clone()),
+                    hostname: Some(pairing.record().hostname.clone()),
+                    approval: None,
                 }))
             }
             Err(refusal) => self
@@ -506,7 +507,7 @@ impl HubPairing {
             counter: proof.counter,
         };
         match self.registry.take_proof(&request, self.clock.now()).await? {
-            Ok(agent) => Ok(ProofAnswer::Proved(agent)),
+            Ok(proved) => Ok(ProofAnswer::Proved(proved.agent)),
             Err(ProofRefusal::ProofRefused) => refused(),
         }
     }

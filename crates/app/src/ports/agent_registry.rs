@@ -1,7 +1,7 @@
 use async_trait::async_trait;
 use domain::fleet::{
     AgentRecord, ApprovalRefused, Fingerprint, MachineZone, PairRefusal, PairRequest, Pairing,
-    ProofRefusal, ProofRequest, PublicKey, TokenId, TokenRecord,
+    ProofRefusal, ProofRequest, Proved, PublicKey, TokenId, TokenRecord,
 };
 use domain::{AgentId, Timestamp};
 
@@ -68,12 +68,14 @@ pub trait AgentRegistry: Send + Sync {
     /// Decides `request` with [`domain::fleet::decide_proof`] on the
     /// records it holds at `now`, the binding kinds being those of the
     /// tokens spent on the request's agent ID and key, and keeps the record
-    /// it answers, in one step. A refusal changes nothing.
+    /// it answers, in one step: whether the proof is the agent's first
+    /// since its approval is read from the record that step decided on. A
+    /// refusal changes nothing.
     async fn take_proof(
         &self,
         request: &ProofRequest,
         now: Timestamp,
-    ) -> Result<Result<AgentRecord, ProofRefusal>, StoreError>;
+    ) -> Result<Result<Proved, ProofRefusal>, StoreError>;
 
     /// Keeps `zone` as the machine zone of the agent registered under
     /// `agent_id`, none included, over the one it held: the agent's last

@@ -73,6 +73,7 @@ fn each_message_reads_back_from_its_frame() {
         recovery_key: key(0x99),
         signature: signature(0xaa),
         hostname: None,
+        approval: None,
     });
     for (frame, message) in [
         (
@@ -95,6 +96,7 @@ fn a_paired_answer_carries_the_hostname_the_hub_holds() {
         recovery_key: key(0x99),
         signature: signature(0xaa),
         hostname: Some(Hostname::parse("laptop").unwrap()),
+        approval: None,
     });
     let frame = answer_frame(&paired);
     let HubFrame::Paired { hostname, .. } = &frame else {
@@ -103,6 +105,53 @@ fn a_paired_answer_carries_the_hostname_the_hub_holds() {
     assert_eq!(hostname.as_deref(), Some("laptop"));
     let read = HubFrame::from_text(&frame.to_text()).unwrap();
     assert_eq!(hub_message(&read), Ok(HubMessage::Answer(paired)));
+}
+
+/// Whether a person has approved the agent goes in `Paired`'s frame and
+/// comes back from it; a hub that predates it says nothing, which reads as
+/// no word on it (#1341), and so does a status this build doesn't know.
+#[test]
+fn a_paired_answer_carries_whether_the_hub_approved_the_agent() {
+    for (approval, status) in [
+        (Approval::Approved, AgentApproval::Approved),
+        (Approval::Pending, AgentApproval::Pending),
+    ] {
+        let paired = PairAnswer::Paired(Paired {
+            recovery_key: key(0x99),
+            signature: signature(0xaa),
+            hostname: Some(Hostname::parse("laptop").unwrap()),
+            approval: Some(approval),
+        });
+        let frame = answer_frame(&paired);
+        let HubFrame::Paired { status: sent, .. } = &frame else {
+            panic!("not a Paired");
+        };
+        assert_eq!(*sent, Some(status));
+        let read = HubFrame::from_text(&frame.to_text()).unwrap();
+        assert_eq!(hub_message(&read), Ok(HubMessage::Answer(paired)));
+    }
+    let older = HubFrame::Paired {
+        recovery_key: encoded(key(0x99).as_bytes()),
+        signature: encoded(signature(0xaa).as_bytes()),
+        hostname: None,
+        status: None,
+    };
+    let later = HubFrame::from_text(&format!(
+        r#"{{"type":"paired","recovery_key":"{}","signature":"{}","status":"suspended"}}"#,
+        encoded(key(0x99).as_bytes()),
+        encoded(signature(0xaa).as_bytes()),
+    ));
+    for frame in [Ok(older), later] {
+        assert_eq!(
+            frame.map(|frame| hub_message(&frame)),
+            Ok(Ok(HubMessage::Answer(PairAnswer::Paired(Paired {
+                recovery_key: key(0x99),
+                signature: signature(0xaa),
+                hostname: None,
+                approval: None,
+            }))))
+        );
+    }
 }
 
 /// A hostname in `Paired` that isn't one refuses the hub's frame, as a
@@ -117,6 +166,7 @@ fn a_paired_answer_with_a_hostname_out_of_shape_is_refused() {
         recovery_key: key(0x99),
         signature: signature(0xaa),
         hostname: None,
+        approval: None,
     }))
     else {
         panic!("not a Paired");
@@ -126,6 +176,7 @@ fn a_paired_answer_with_a_hostname_out_of_shape_is_refused() {
             recovery_key: recovery_key.clone(),
             signature: signature.clone(),
             hostname: Some(hostname.to_owned()),
+            status: None,
         };
         assert_eq!(hub_message(&frame), Err(WireRefused), "{hostname:?}");
     }

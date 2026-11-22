@@ -1,6 +1,7 @@
-//! The line the hub logs when a machine pairs (#1307).
+//! The lines the hub logs when a machine pairs (#1307), when a person
+//! approves one, and when an approved one first connects (#1342).
 
-use domain::fleet::{AgentStatus, Fingerprint, PairRequest, Pairing};
+use domain::fleet::{AgentRecord, AgentStatus, Fingerprint, PairRequest, Pairing};
 
 /// What a person at the hub's terminal or in its log matches against the
 /// machine's own screen: the machine's hostname, between double quotes and
@@ -25,6 +26,18 @@ pub(super) fn paired(request: &PairRequest, outcome: &Pairing) -> String {
         request.agent_id.as_uuid(),
         Fingerprint::of_key(&request.agent_key),
     )
+}
+
+/// The line for `agent`, which a person has just approved.
+pub(super) fn approved(agent: &AgentRecord) -> String {
+    let _ = agent;
+    todo!()
+}
+
+/// The line for `agent`'s first connection since a person approved it.
+pub(super) fn connected(agent: &AgentRecord) -> String {
+    let _ = agent;
+    todo!()
 }
 
 #[cfg(test)]

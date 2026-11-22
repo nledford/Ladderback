@@ -68,13 +68,16 @@ pub enum HubFrame {
     },
     /// The pairing was accepted: the hub's recovery key, signed. `hostname`
     /// is the hostname the hub holds the agent under, which may not be the
-    /// one the agent asked for; it isn't signed, as `holder` isn't, and a
-    /// hub that predates it sends none.
+    /// one the agent asked for, and `status` whether a person has approved
+    /// it, which an agent that pairs again may be (#1341). Neither is
+    /// signed, as `holder` isn't, and a hub that predates one sends none.
     Paired {
         recovery_key: String,
         signature: String,
         #[serde(default, skip_serializing_if = "Option::is_none")]
         hostname: Option<String>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        status: Option<AgentApproval>,
     },
     /// The pairing or the proof was refused, with the code signed; `holder`
     /// names the agent that holds a taken hostname, and isn't signed.

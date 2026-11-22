@@ -228,6 +228,7 @@ async fn a_hub_answering_out_of_turn_is_a_dropped_connection() {
         recovery_key: "A".repeat(43),
         signature: "A".repeat(86),
         hostname: None,
+        status: None,
     };
     let unreadable = HubFrame::Challenge {
         hub_nonce: "short".to_owned(),

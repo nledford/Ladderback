@@ -77,6 +77,7 @@ pub fn answer_frame(answer: &PairAnswer) -> HubFrame {
                 .hostname
                 .as_ref()
                 .map(|hostname| hostname.as_str().to_owned()),
+            status: None,
         },
         PairAnswer::Refused(refused) => HubFrame::Refused {
             code: refused.code.as_str().to_owned(),
@@ -243,6 +244,7 @@ pub fn hub_message(frame: &HubFrame) -> Result<HubMessage, WireRefused> {
             recovery_key,
             signature: signed,
             hostname,
+            status: _,
         } => Ok(HubMessage::Answer(PairAnswer::Paired(Paired {
             recovery_key: key(recovery_key)?,
             signature: signature(signed)?,
@@ -250,6 +252,7 @@ pub fn hub_message(frame: &HubFrame) -> Result<HubMessage, WireRefused> {
                 Some(hostname) => Some(Hostname::parse(hostname).map_err(|_| WireRefused)?),
                 None => None,
             },
+            approval: None,
         }))),
         HubFrame::Refused {
             code,
