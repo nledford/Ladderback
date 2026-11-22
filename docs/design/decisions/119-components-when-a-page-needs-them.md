@@ -2,6 +2,8 @@
 
 **A shared component that no page uses yet is built in the milestone of the first page that needs it, in its own pull request just before that page, rather than all in M3b ahead of every page; the hub starts now, beside the AI agents milestone and what remains of M3b** (recorded 2026-11-18, §14; decided by the maintainer).
 
+**Amended 2026-11-22 (the maintainer):** the order of the work changed. The milestone "MVP: Ready for real-world testing", what real-world testers need, comes before every track; then M4, M5 and M8 to M10, before `1.0.0`. Notification channels and Japanese (M6, M7) move after `1.0.0`, with the menu bar and tray icon (M11). The rule for components stands, and so does the table below as a forecast: a component goes with its page into whichever milestone now holds that page (§14).
+
 ## The rule
 
 - **M3b keeps the moves.** It finishes the components the pages already use, moves the pages onto them (#929, #930, #886, #840, #942, #989), the narrow or full-width page (#933), Settings as tabs (#935), the gallery and docs split (#975, #977) and the move to Tailwind (#931). Then it is released, as `0.5.0` (operations.md §12.1).

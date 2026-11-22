@@ -35,10 +35,11 @@ Without a manager, each machine runs rustic from its own cron job or timer. Fail
 
 - **The rest of AI agents (M4).** The MCP tools people ask AI agents for most, such as comparing snapshots and reading the log; an AI agents tab in Settings that limits what AI agents may do; proposals for repositories, hooks and maintenance.
 - **Prune and check on a schedule (M5).** Forget, prune and check run on their own, each check's result kept and shown.
-- **More notification channels (M6).** Gotify, Discord, Slack, email, Telegram, Pushover, Pushbullet and web push.
-- **Japanese (M7).** The first language after English.
+- **More notification channels (M6, after 1.0.0).** Gotify, Discord, Slack, email, Telegram, Pushover, Pushbullet and web push.
+- **Japanese (M7, after 1.0.0).** The first language after English.
 - **One dashboard for every machine (M8).** Status, live progress, history, warnings and errors for every connected computer.
 - **One owner for each repository (M9).** Exactly one place runs forget, prune and check for each repository, whichever machines back up to it.
+- **A menu bar and tray icon (M11, after 1.0.0).** Backup status at a glance in the macOS menu bar or the Linux tray.
 
 Ladderback supports **Linux and macOS**. Linux means 64-bit (x86_64 or aarch64) with glibc 2.35 or newer: 32-bit ARM and musl distributions such as Alpine aren't supported. Windows is out of scope. It runs inside WSL2 as a Linux install, for files inside WSL, but it isn't a way to back up Windows: WSL stops when idle, so scheduled backups don't run unless something keeps it running, and files under `/mnt/c` are read without shadow copies or Windows metadata (ACLs, attributes, alternate data streams), so open files may fail and a restore to Windows loses that metadata.
 
@@ -142,19 +143,23 @@ Open the address it prints, `http://127.0.0.1:9898`, then:
 
 The skeleton (M0), the backup engine (M1a), the single-machine MVP (M1b, released as [0.1.0](https://github.com/nledford/Ladderback/releases/tag/v0.1.0)), schedules and errors (M2, released as [0.2.0](https://github.com/nledford/Ladderback/releases/tag/v0.2.0), with fixes from running it on real machines in [0.3.0](https://github.com/nledford/Ladderback/releases/tag/v0.3.0)), browsing, restoring and automation (M3, released as [0.4.0](https://github.com/nledford/Ladderback/releases/tag/v0.4.0)) and the shared UI components (M3b, released as [0.5.0](https://github.com/nledford/Ladderback/releases/tag/v0.5.0)) are in place: backups run on their schedules, and snapshots can be browsed, restored and downloaded in the web UI. Each milestone is done when its acceptance scenarios pass, including keyboard-only and screen-reader checks for the UI. M2 is the first release worth using on your own machines; M3 adds restores, so it is the first that can bring files back without the `rustic` CLI.
 
+Since 2026-11-22 the work comes in three phases. First the milestone [MVP: Ready for real-world testing](https://github.com/nledford/Ladderback/milestone/12), what you need to use Ladderback for real and start testing it, taken from M8, M9 and M10: pairing a machine with the hub and its dashboard, offline alerts, one owner for each shared repository, and the install and hub docs. Then the rest of M4, M5 and M8 to M10, before 1.0.0. After 1.0.0: M6, M7, M11, and smaller improvements and rare edge cases.
+
 - [x] **M0: Skeleton.** Workspace, CI, test tooling (acceptance scenarios, mutation testing, browser tests with accessibility checks), and an embedded web UI shell.
 - [x] **M1a: Engine.** Backups through `rustic_core` in an isolated worker process, with live progress, warnings, cancellation and deadlines.
 - [x] **M1b: Single-machine MVP.** Connect or create repositories; secrets; plans and hooks in `config.toml`; rustic profile import and export; manual backups with live progress; snapshot list; operation history; manual forget, prune and check.
 - [x] **M2: Schedules and errors.** Scheduler with catch-up after sleep, time zones and retries; notifications to webhooks, ntfy and healthchecks; systemd and launchd service install; optional sign-in. **First usable release.**
 - [x] **M3: Browse, restore and automation.** Snapshot browser; restore into a new folder or in place; downloads as tar or zip; repository stats; scoped API tokens; an MCP server for AI agents; on macOS, builds from source that keep their Full Disk Access across upgrades. **First release with restores in the web UI.** Open after M3: small restore fixes ([#814](https://github.com/nledford/Ladderback/issues/814), [#818](https://github.com/nledford/Ladderback/issues/818)), updating in place from the web UI ([#1080](https://github.com/nledford/Ladderback/issues/1080), M8) and reading listings through the repository's cache ([#163](https://github.com/nledford/Ladderback/issues/163), M8). The MCP tools for proposals, a dry run of a draft plan and a forget preview for proposals followed in 0.5.0.
 - [x] **M3b: Shared UI components.** One accessible component set for every widget the pages use, the pages moved onto it, a full-width page option, and Settings in tabs. Released as 0.5.0, with parts of later milestones that were ready: the MCP tools for proposals, a dry run of a draft plan and approving a proposal that could delete snapshots from its forget preview (M4), and `.deb` and `.rpm` packages (M10). Open after M3b: moving the rest of the custom CSS onto Tailwind utilities ([#931](https://github.com/nledford/Ladderback/issues/931)) and option cards for the checkbox and the radio group ([#1019](https://github.com/nledford/Ladderback/issues/1019)).
+- [ ] **MVP: Ready for real-world testing.** Pairing machines with a hub and seeing them on its dashboard; offline alerts; one owner for each shared repository, with the owner prune guard; the install, getting-started and hub docs.
 - [ ] **M4: AI agents.** MCP tools for what people ask AI agents most, proposals for repositories, hooks and maintenance, and an AI agents tab in Settings.
 - [ ] **M5: Scheduled maintenance.** Forget, prune and check on their schedules, one at a time by default, each check's result kept and shown.
-- [ ] **M6: Notification channels.** Gotify, Discord, Slack, email, Telegram, Pushover, Pushbullet, web push and a webhook you template.
-- [ ] **M7: Japanese.** Japanese, with a language choice in the web UI; released once its review is done.
+- [ ] **M6: Notification channels.** Gotify, Discord, Slack, email, Telegram, Pushover, Pushbullet, web push and a webhook you template. After 1.0.0.
+- [ ] **M7: Japanese.** Japanese, with a language choice in the web UI. After 1.0.0, released once its review is done.
 - [ ] **M8: Hub, visibility.** Pair machines with a hub; one dashboard for all of them; offline alerts; any installed machine can become the hub, and the Docker image runs one on a machine of its own.
 - [ ] **M9: Hub, control and maintenance.** Repository ownership; forget, prune and check managed from the hub; remote run and cancel; opt-in restores from the hub.
 - [ ] **M10: Polish.** A run condition for metered networks (running only on AC power, and waiting for the network after a wake, came in 0.2.0), charts, database rebuild, user docs (the `.deb` and `.rpm` packages came in 0.5.0).
+- [ ] **M11: Menu bar and tray icon.** Backup status at a glance in the macOS menu bar and the Linux tray, for a machine and for the hub. After 1.0.0.
 
 Not planned for v1: Windows, multiple users, and rustic's `copy`, `merge`, `rewrite`, `repair`, `webdav` and `mount` commands (use the CLI).
 
