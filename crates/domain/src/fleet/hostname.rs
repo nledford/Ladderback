@@ -97,14 +97,16 @@ fn is_format(c: char) -> bool {
 }
 
 /// Characters outside Cf that show as nothing, as a blank or as a break in
-/// a name (#1065): the assigned default-ignorable characters that aren't
-/// format characters (the combining grapheme joiner, the Hangul fillers,
-/// the Khmer inherent vowels and the variation selectors), checked against
-/// `unicode-security`'s Unicode 18.0 table; the line and paragraph
-/// separators; and the braille blank, which shows as a space without being
-/// one. Unassigned default-ignorable code points are kept, as other
-/// unassigned code points are, since a name holding one is flagged beside
-/// the name without it: the skeleton drops them.
+/// a name (#1065): the default-ignorable code points that aren't format
+/// characters (the combining grapheme joiner, the Hangul fillers, the Khmer
+/// inherent vowels, the variation selectors, and the unassigned ones, which
+/// Unicode reserves so a character assigned there later shows as nothing
+/// too), checked against `unicode-security`'s Unicode 18.0 table; the line
+/// and paragraph separators; and the braille blank and the musical null
+/// notehead, which show as a blank without being spaces. The skeleton the
+/// registry compares names by drops every default-ignorable code point, so
+/// refusing them is what keeps a space hidden behind one from slipping past
+/// the check on a name's ends.
 const INVISIBLE: &[(char, char)] = &[
     ('\u{034F}', '\u{034F}'),
     ('\u{115F}', '\u{1160}'),
@@ -112,11 +114,16 @@ const INVISIBLE: &[(char, char)] = &[
     ('\u{180B}', '\u{180D}'),
     ('\u{180F}', '\u{180F}'),
     ('\u{2028}', '\u{2029}'),
+    ('\u{2065}', '\u{2065}'),
     ('\u{2800}', '\u{2800}'),
     ('\u{3164}', '\u{3164}'),
     ('\u{FE00}', '\u{FE0F}'),
     ('\u{FFA0}', '\u{FFA0}'),
-    ('\u{E0100}', '\u{E01EF}'),
+    ('\u{FFF0}', '\u{FFF8}'),
+    ('\u{1D159}', '\u{1D159}'),
+    ('\u{E0000}', '\u{E0000}'),
+    ('\u{E0002}', '\u{E001F}'),
+    ('\u{E0080}', '\u{E0FFF}'),
 ];
 
 fn is_invisible(c: char) -> bool {
@@ -225,6 +232,54 @@ mod tests {
         }
     }
 
+    /// Every character the lookalike skeleton drops is refused: the
+    /// registry can't tell a name holding one from the name without it, so
+    /// the parser must. These are the default-ignorable code points, which
+    /// a renderer shows as nothing, the unassigned ones too: Unicode
+    /// reserves them so a character assigned there later shows as nothing
+    /// as well.
+    #[test]
+    fn every_character_the_lookalike_skeleton_drops_is_refused() {
+        let mut buffer = [0; 4];
+        for c in char::MIN..=char::MAX {
+            if unicode_security::skeleton(c.encode_utf8(&mut buffer))
+                .next()
+                .is_none()
+            {
+                assert_eq!(
+                    Hostname::parse(&format!("lap{c}top")),
+                    Err(InvalidHostname::Hidden(c)),
+                    "U+{:04X}",
+                    u32::from(c)
+                );
+            }
+        }
+    }
+
+    /// A space hidden behind a character that shows as nothing would pass
+    /// the check on a name's ends, and "laptop " shows as "laptop".
+    #[test]
+    fn a_space_behind_a_character_that_shows_as_nothing_is_refused() {
+        for text in ["laptop \u{e0080}", "\u{e0080} laptop"] {
+            assert_eq!(
+                Hostname::parse(text),
+                Err(InvalidHostname::Hidden('\u{e0080}')),
+                "{text:?}"
+            );
+        }
+    }
+
+    /// The musical null notehead is drawn as a blank, though it is neither
+    /// a space nor default-ignorable, and the skeleton keeps it, so a name
+    /// ending in it would show as the name without it and not be flagged.
+    #[test]
+    fn the_musical_null_notehead_is_refused() {
+        assert_eq!(
+            Hostname::parse("laptop\u{1d159}"),
+            Err(InvalidHostname::Hidden('\u{1d159}'))
+        );
+    }
+
     /// A name that begins or ends with a space of any kind is refused,
     /// naming the space; spaces inside a name are kept.
     #[test]
@@ -249,7 +304,6 @@ mod tests {
             '\u{ae}',
             '\u{200a}',
             '\u{2010}',
-            '\u{2065}',
             '\u{2070}',
             '\u{34e}',
             '\u{350}',
@@ -265,8 +319,11 @@ mod tests {
             '\u{1810}',
             '\u{fdff}',
             '\u{fe10}',
-            '\u{e00ff}',
-            '\u{e01f0}',
+            '\u{dffff}',
+            '\u{e1000}',
+            '\u{ffef}',
+            '\u{1d158}',
+            '\u{1d15a}',
             '\u{2027}',
             '\u{27ff}',
             '\u{2801}',

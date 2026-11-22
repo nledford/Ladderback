@@ -89,7 +89,7 @@ mod mcp_steps;
 #[path = "steps/notifications.rs"]
 mod notifications_steps;
 #[cfg(feature = "hub")]
-#[path = "steps/pairing_terminal.rs"]
+#[path = "steps/pairing_terminal/mod.rs"]
 mod pairing_terminal_steps;
 #[path = "steps/plan_dry_run.rs"]
 mod plan_dry_run_steps;

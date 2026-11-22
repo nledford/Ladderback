@@ -53,8 +53,9 @@ Feature: The tooltip
       | Demo note at the start, right to left | to the right of |
       | Demo note at the end, right to left   | to the left of  |
 
-  Scenario: At the foot of the page, a tooltip asked to stand below its control has no room there and stands above it
+  Scenario: At the foot of the window, a tooltip asked to stand below its control has no room there and stands above it
     When I open the component gallery
+    And the button "Demo note at the foot of the page" stands at the foot of the window
     And I press Shift+Tab until focus is on the button "Demo note at the foot of the page"
     Then the tooltip of the button "Demo note at the foot of the page" stands above it
 
