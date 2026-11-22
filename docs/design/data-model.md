@@ -275,6 +275,10 @@ Recovery runs no hooks, which belonged to the process that is gone, but it annou
 
 A queued operation never reached the engine, so recovery leaves it queued: it is the persistent queue's, which runs it once the daemon listens (§5, decision 73), and announces one it can't run again once the log has its end; a queued row this build can't read stays queued and is said in the daemon's log, by its code, and so is a running row whose ID it can't read, which ends all the same but can't be announced. A log that can't be changed refuses the start (`cli-cannot-recover-operations`), because serving over it would keep a repository held for good.
 
+A queued backup the queue took up to run and then can't run (for example refused for a secret, its plan gone or moved, or its configuration unusable by the time it is built, or giving way to a newer run of its plan) has its end written up to three times more, 15 s apart, while the log refuses it, so a short refusal doesn't leave it showing as queued with nothing to run or cancel it (#1250). Each such end is written on a task of its own, so the queue's other leftovers and the schedule go on meanwhile.
+
+Its end is announced, and a refused one told to the schedule, only once the log has it: an end the log never takes is said in the daemon's log, and the backup stays queued for the next start, which ends and announces it then, once (#522). An operation recovery itself ends at the start is written once; one the log refuses stays as it was for the next start.
+
 The order of a start is the data folder, its lock, the configuration, the log, the event bus and the notifier, recovery, the agent ID, the engine, the listener and the `listening on` line, and then the queued backups and the scheduler.
 
 Recovery ends rows, not processes. A worker the dead daemon left behind ends by itself: on Linux the kernel signals it when its parent dies, and elsewhere it ends at its next event, when the pipe is broken (§4.1). Until then a worker in a long silent phase on macOS, or an `rclone` it started, can still be writing to the repository, and a repository lock a killed worker left behind is not recovery's to clear.
