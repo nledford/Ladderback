@@ -44,7 +44,8 @@ impl PlanRunner {
             Arc::new(engine::RusticSources),
         )
         .with_events(Arc::clone(&self.events))
-        .with_stats(Arc::new(self.stats_reader()));
+        .with_stats(Arc::new(self.stats_reader()))
+        .with_machine(Arc::clone(&self.machine));
         match &self.locations {
             Some(locations) => maintenance.with_locations(Arc::clone(locations)),
             None => maintenance,
