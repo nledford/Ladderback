@@ -2992,13 +2992,13 @@ ui-settings-heading = Settings
 ui-admin-password-waiting = Admin password set. Restart { -brand-name } to turn sign-in on. The Restart { -brand-name } tab does it where a service manager runs { -brand-name }.
 
 # Settings, while sign-in is off: an admin password file has appeared that Ladderback can't read or check, so it would refuse to start with it. The password can be set again in the Admin password tab of the same page, named as `ui-admin-password-heading` words it, or at a terminal. `ladderback set-password` is typed as it is: keep it a string literal.
-ui-admin-password-damaged = The admin password file is damaged, so { -brand-name } would not start with it. Set the password again in the Admin password tab, or with { "ladderback set-password" }.
+ui-admin-password-damaged = The admin password file is damaged, so { -brand-name } would not start with it. Set the password again in the Admin password tab, or at a terminal with { "ladderback set-password" }.
 
 # The heading of the section of Settings that restarts Ladderback.
 ui-restart-heading = Restart { -brand-name }
 
-# What that section says when a restart is offered: what a restart is for.
-ui-restart-body = A restart applies what { -brand-name } reads only when it starts, such as an admin password set with { "ladderback set-password" }. { -brand-name } stops in order, and its service manager starts it again.
+# What that section says when a restart is offered: what a restart is for. The Admin password tab is the tab of the same page, named as `ui-admin-password-heading` words it.
+ui-restart-body = A restart applies what { -brand-name } reads only when it starts, such as an admin password set in the Admin password tab. { -brand-name } stops in order, and its service manager starts it again.
 
 # What that section says in place of the button when no service manager runs Ladderback.
 ui-restart-unavailable = No service manager runs { -brand-name }, so nothing would start it again after a restart. To restart it from here, install it as a service with { "ladderback install-service" }.
@@ -3751,8 +3751,8 @@ ui-proposals-heading = Pending changes
 # What the "Pending changes" page is for, under its heading.
 ui-proposals-body = An AI agent, or another program with an API token, can propose changes to the configuration. Nothing changes until you approve a proposal as a whole here. Reject one to tell the AI agent why, change by change.
 
-# Said under the heading while sign-in is off, as decision 89 requires: nothing then tells a person's browser from a program's request.
-ui-proposals-sign-in-off = Sign-in is off, so approving here is a convenience, not a safety boundary: a program that can reach { -brand-name } could approve its own proposal. To make approval yours alone, turn sign-in on with { "ladderback set-password" } and start { -brand-name } again.
+# Said under the heading while sign-in is off, as decision 89 requires: nothing then tells a person's browser from a program's request. The Admin password tab is the tab of Settings named as `ui-admin-password-heading` words it; a password set there turns sign-in on only after a restart.
+ui-proposals-sign-in-off = Sign-in is off, so approving here is a convenience, not a safety boundary: a program that can reach { -brand-name } could approve its own proposal. To make approval yours alone, set an admin password in the Admin password tab of Settings and restart { -brand-name }.
 
 # Said in the list's place when no proposal is pending.
 ui-proposals-none = No proposal is pending.
