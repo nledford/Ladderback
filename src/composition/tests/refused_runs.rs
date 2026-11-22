@@ -689,6 +689,66 @@ async fn a_waiting_run_gives_way_to_a_newer_run_of_its_plan() {
     assert_eq!(jobs(&scripted), 1, "only the newer run reached the engine");
 }
 
+/// A queued backup a restart resumed, parked waiting for its keyring, gives
+/// way to a newer run of its plan that is going when the keyring is
+/// unlocked, and ends failed as superseded: it never ran, and the daemon
+/// didn't stop (#1245, decision 135).
+#[tokio::test]
+async fn a_resumed_run_that_gives_way_to_a_newer_run_ends_superseded() {
+    capture();
+    let started = domain::Timestamp::from_second(1_800_000_000).expect("a timestamp");
+    let clock = Arc::new(FakeClock::new(started));
+    let secrets = Arc::new(FakeSecrets::new());
+    keyring_locked_until(
+        &secrets,
+        &clock,
+        started + domain::SignedDuration::from_secs(55),
+    );
+    let store = Arc::new(app::fakes::InMemoryOperationStore::new());
+    let (runner, _heard, scripted, home) =
+        keyring_parked_runner(secrets, clock.clone(), store.clone()).await;
+    let queued = queued_home_backup(0x1245, None);
+    store
+        .save(&queued, None)
+        .await
+        .expect("the queued backup is saved");
+    let unlock = app::secrets::UnlockWait::new(
+        clock.clone(),
+        started + domain::SignedDuration::from_secs(600),
+    );
+    PlanRuns::resume(&runner, queued.clone(), Some(unlock)).await;
+    for _ in 0..5 {
+        until_it_waits(&clock).await;
+        clock.advance(domain::SignedDuration::from_secs(10));
+    }
+    until_it_waits(&clock).await;
+
+    // The keyring unlocks at 55 s, and a newer run of the plan starts and
+    // reaches the engine; its job never answers, so it is going.
+    clock.advance(domain::SignedDuration::from_secs(5));
+    *scripted
+        .hangs
+        .lock()
+        .unwrap_or_else(PoisonError::into_inner) = 1;
+    let newer = runner
+        .queue
+        .push(&home, domain::planning::Concurrency::default());
+    PlanRuns::start(&runner, &home, Trigger::Schedule, newer, None).await;
+
+    clock.advance(domain::SignedDuration::from_secs(5));
+    let status = until_ended(&store, queued.id()).await;
+    assert!(
+        matches!(
+            status,
+            domain::execution::OperationStatus::Failed {
+                reason: domain::execution::FailureReason::Superseded,
+            }
+        ),
+        "the queued backup ends superseded: {status:?}"
+    );
+    assert_eq!(jobs(&scripted), 1, "only the newer run reached the engine");
+}
+
 /// A queued backup recorded on a repository its plan no longer backs up to
 /// isn't parked to wait for the keyring of the one it backs up to now: it
 /// ends at once, as it would with the keyring unlocked (#1221).

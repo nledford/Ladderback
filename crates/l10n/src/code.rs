@@ -42,6 +42,7 @@ code_messages!(ERRORS, error_message, ErrorCode {
     HookFailed => msg::ERROR_HOOK_FAILED,
     DaemonStopped => msg::ERROR_DAEMON_STOPPED,
     DaemonShutDown => msg::ERROR_DAEMON_SHUT_DOWN,
+    Superseded => msg::ERROR_SUPERSEDED,
     HostNotAllowed => msg::ERROR_HOST_NOT_ALLOWED,
     OriginNotAllowed => msg::ERROR_ORIGIN_NOT_ALLOWED,
     JsonRequired => msg::ERROR_JSON_REQUIRED,

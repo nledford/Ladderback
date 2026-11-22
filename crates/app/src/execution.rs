@@ -203,6 +203,10 @@ impl RunOperation {
             Some(entry) => operation.with_entry(entry),
             None => operation,
         };
+        let operation = match job.restored_to() {
+            Some(restored_to) => operation.with_restored_to(restored_to),
+            None => operation,
+        };
         let operation = match job.logged_alias() {
             Some(alias) => operation.with_repository_alias(alias),
             None => operation,

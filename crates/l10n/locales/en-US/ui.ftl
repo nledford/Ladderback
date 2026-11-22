@@ -1374,6 +1374,64 @@ ui-operation-failed =
        *[other] Operation failed.
     }
 
+# The row header of a restore the log kept the entry and the target of: the
+# entry it restored, the repository it read and where it went (#813).
+# $entry (text): the entry's path in the snapshot, such as /home/docs. It is shown as it came.
+# $repository (text): the repository's alias. It is shown as it came.
+# $to (text): in-place when the restore wrote over the entry's original path, or folder when it wrote into a new folder.
+# $folder (text): the new folder's path, for folder only. It is shown as it came.
+ui-operation-restore-of =
+    { $to ->
+        [in-place] In-place restore of { $entry } from { $repository }
+       *[folder] Restore of { $entry } from { $repository } to { $folder }
+    }
+
+# The button that cancels a running or queued restore the log kept the entry
+# and the target of, named as its row is (ui-operation-restore-of). It begins
+# with ui-cancel.
+# $entry (text): the entry's path in the snapshot. It is shown as it came.
+# $repository (text): the repository's alias. It is shown as it came.
+# $to (text): in-place or folder, as for ui-operation-restore-of.
+# $folder (text): the new folder's path, for folder only. It is shown as it came.
+ui-cancel-operation-restore-of =
+    { $to ->
+        [in-place] Cancel the in-place restore of { $entry } from { $repository }
+       *[folder] Cancel the restore of { $entry } from { $repository } to { $folder }
+    }
+
+# Announced politely on the Operations page when a restore it watched, which
+# the log kept the entry and the target of, ended well, warnings or not.
+# $entry (text): the entry's path in the snapshot. It is shown as it came.
+# $to (text): in-place or folder, as for ui-operation-restore-of.
+# $folder (text): the new folder's path, for folder only. It is shown as it came.
+ui-operation-restore-finished =
+    { $to ->
+        [in-place] In-place restore of { $entry } finished.
+       *[folder] Restore of { $entry } to { $folder } finished.
+    }
+
+# Announced politely on the Operations page when a restore it watched, which
+# the log kept the entry and the target of, was cancelled.
+# $entry (text): the entry's path in the snapshot. It is shown as it came.
+# $to (text): in-place or folder, as for ui-operation-restore-of.
+# $folder (text): the new folder's path, for folder only. It is shown as it came.
+ui-operation-restore-cancelled =
+    { $to ->
+        [in-place] In-place restore of { $entry } cancelled.
+       *[folder] Restore of { $entry } to { $folder } cancelled.
+    }
+
+# Announced assertively on the Operations page when a restore it watched,
+# which the log kept the entry and the target of, ended badly.
+# $entry (text): the entry's path in the snapshot. It is shown as it came.
+# $to (text): in-place or folder, as for ui-operation-restore-of.
+# $folder (text): the new folder's path, for folder only. It is shown as it came.
+ui-operation-restore-failed =
+    { $to ->
+        [in-place] In-place restore of { $entry } failed.
+       *[folder] Restore of { $entry } to { $folder } failed.
+    }
+
 # One fact of a finished backup's result: the snapshot it wrote, by the first
 # 8 hex digits of its ID, as rustic names a snapshot.
 # $snapshot (text): those digits. They are shown as they came.
@@ -1554,6 +1612,18 @@ ui-operation-progress =
         [restore] Restore progress
         [download] Download progress
        *[other] Operation progress
+    }
+
+# The name of a running restore's progress bar when the log kept its entry
+# and its target, as its row is named (ui-operation-restore-of).
+# $entry (text): the entry's path in the snapshot. It is shown as it came.
+# $repository (text): the repository's alias. It is shown as it came.
+# $to (text): in-place or folder, as for ui-operation-restore-of.
+# $folder (text): the new folder's path, for folder only. It is shown as it came.
+ui-operation-progress-restore-of =
+    { $to ->
+        [in-place] In-place restore progress of { $entry } from { $repository }
+       *[folder] Restore progress of { $entry } from { $repository } to { $folder }
     }
 
 # What a screen reader reads as the value of a progress bar that shows a

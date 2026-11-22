@@ -93,8 +93,9 @@ pub fn warning_shown(
 
 /// What `permissions` may see of an operation's `summary`: a program
 /// without Snapshot contents gets its failure's code only, neither the
-/// failure's arguments nor the engine's own words, and not the snapshot
-/// entry a restore read, any of which can name a file (decision 127).
+/// failure's arguments nor the engine's own words, and neither the snapshot
+/// entry a restore read nor the folder it wrote into, any of which can name
+/// a file (decision 127).
 pub fn summary_shown(
     permissions: Permissions,
     summary: api::OperationSummaryDto,
@@ -107,6 +108,7 @@ pub fn summary_shown(
             .failure
             .map(|failure| api::ErrorDto::new(failure.code, [], None)),
         entry: None,
+        restored_to: None,
         ..summary
     }
 }

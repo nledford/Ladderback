@@ -100,6 +100,7 @@ impl OperationStatus {
                 | Why::SecretsTooLargeToMask { .. }
                 | Why::DaemonStopped
                 | Why::DaemonShutDown
+                | Why::Superseded
                 | Why::RestoreTargetUnwritable => None,
             },
             Self::Queued | Self::Running | Self::Cancelled => None,
@@ -196,6 +197,10 @@ pub enum FailureReason {
     /// stop ended it once the workers had stopped (§4.2, decision 92). It is
     /// recorded, not announced: whoever stopped the daemon knows why.
     DaemonShutDown,
+    /// A queued backup's wait ended while a newer run of its plan was going,
+    /// running or waiting for its turn, so it gave way to that run rather
+    /// than back up the plan twice (decision 135, #1245): it never ran.
+    Superseded,
     /// The repository is reached at several locations and none could be
     /// used (decision 80): each was silent, refused, held no repository or
     /// another one, or a secret of it was unavailable. The operation's
@@ -246,6 +251,7 @@ impl FailureReason {
             Self::CredentialsRefused { .. } => "credentials-refused",
             Self::DaemonStopped => "daemon-stopped",
             Self::DaemonShutDown => "daemon-shut-down",
+            Self::Superseded => "superseded",
             Self::NoLocationUsable => "no-location-usable",
             Self::RestoreTargetUnwritable => "restore-target-unwritable",
             Self::NoLocationRuleHolds => "no-location-rule-holds",
@@ -618,6 +624,10 @@ pub struct Operation {
     /// earlier build logged.
     #[serde(default)]
     entry: Option<logged_entry::LoggedEntry>,
+    /// Where a restore wrote what it restored (#813). `None` for every
+    /// other operation, and for a restore an earlier build logged.
+    #[serde(default)]
+    restored_to: Option<logged_entry::RestoredTo>,
 }
 
 impl Operation {
@@ -642,6 +652,7 @@ impl Operation {
             repository_alias: None,
             locations: None,
             entry: None,
+            restored_to: None,
         }
     }
 
@@ -686,6 +697,20 @@ impl Operation {
     /// ([`Self::with_entry`]).
     pub fn entry(&self) -> Option<&logged_entry::LoggedEntry> {
         self.entry.as_ref()
+    }
+
+    /// The operation, naming where the restore it is writes.
+    pub fn with_restored_to(self, restored_to: logged_entry::RestoredTo) -> Self {
+        Self {
+            restored_to: Some(restored_to),
+            ..self
+        }
+    }
+
+    /// Where the restore it is writes, when it was given
+    /// ([`Self::with_restored_to`]).
+    pub fn restored_to(&self) -> Option<&logged_entry::RestoredTo> {
+        self.restored_to.as_ref()
     }
 
     /// Which location the run used and why each earlier one was skipped,

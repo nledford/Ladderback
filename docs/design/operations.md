@@ -12,6 +12,8 @@ Configured on the hub (or on a standalone agent). Each **notification rule** is 
 
 An operation the daemon stopped during (a crash, a kill, a power cut), and a queued one it can't run again after a start, sends its kind's `.failed` event with `daemon-stopped` when the daemon starts again, at most once per start, with the time of that start (decision 91). One an orderly stop interrupted (a service stop or restart, the computer shutting down) sends nothing: the stop records it as `daemon-shut-down` and announces it to no rule, since whoever stopped the daemon knows why; a stop killed or cut off before it recorded them leaves them to the next start, which announces them as `daemon-stopped` (decision 92).
 
+A queued backup that waited for its keyring and found a newer run of its plan going gives way to it, ends failed with `superseded` and sends nothing: it never ran, and the newer run sends its own end, so a rule or a healthchecks check hears one outcome per run that ran (decision 135, #1245).
+
 A plan whose runs a stopped computer keeps missing is the overdue event's (#415). A run whose end was already sent though the log refused its last write (decision 41) still shows as running, so the next start sends it again as `daemon-stopped`; a start refused after recovery stops before the notifier can deliver; and while the configuration can't be read, no rule hears the end.
 
 Channels are `webhook`, `ntfy` and `healthchecks`; Gotify, Discord/Slack and SMTP are not built.

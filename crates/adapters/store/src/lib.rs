@@ -38,7 +38,7 @@ use app::ports::{
 };
 use async_trait::async_trait;
 use domain::execution::locations::LocationsRecord;
-use domain::execution::logged_entry::LoggedEntry;
+use domain::execution::logged_entry::{LoggedEntry, RestoredTo};
 use domain::execution::retry::RetryScheduled;
 use domain::execution::{
     FailureReason, MAX_STORED_WARNINGS, Operation, OperationStatus, Trigger, warning_kinds,
@@ -335,6 +335,14 @@ async fn write(
             _ => None,
         })
         .bind(operation.entry().map(LoggedEntry::as_str))
+        .bind(
+            operation
+                .restored_to()
+                .map(|restored_to| match restored_to {
+                    RestoredTo::InPlace => "",
+                    RestoredTo::Folder(path) => path.as_str(),
+                }),
+        )
         .execute(&mut *conn)
         .await
         .map_err(unavailable)?;

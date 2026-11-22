@@ -517,6 +517,16 @@
                 "null"
               ]
             },
+            "restored-to": {
+              "anyOf": [
+                {
+                  "$ref": "#/$defs/RestoredToDto"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
             "result": {
               "anyOf": [
                 {
@@ -612,6 +622,38 @@
             "overdue"
           ],
           "type": "object"
+        },
+        "RestoredToDto": {
+          "oneOf": [
+            {
+              "properties": {
+                "type": {
+                  "const": "in-place",
+                  "type": "string"
+                }
+              },
+              "required": [
+                "type"
+              ],
+              "type": "object"
+            },
+            {
+              "properties": {
+                "path": {
+                  "type": "string"
+                },
+                "type": {
+                  "const": "folder",
+                  "type": "string"
+                }
+              },
+              "required": [
+                "type",
+                "path"
+              ],
+              "type": "object"
+            }
+          ]
         },
         "UnreadableRepositoryDto": {
           "properties": {
@@ -2161,6 +2203,16 @@
                 "null"
               ]
             },
+            "restored-to": {
+              "anyOf": [
+                {
+                  "$ref": "#/$defs/RestoredToDto"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
             "result": {
               "anyOf": [
                 {
@@ -2200,6 +2252,38 @@
             "result"
           ],
           "type": "object"
+        },
+        "RestoredToDto": {
+          "oneOf": [
+            {
+              "properties": {
+                "type": {
+                  "const": "in-place",
+                  "type": "string"
+                }
+              },
+              "required": [
+                "type"
+              ],
+              "type": "object"
+            },
+            {
+              "properties": {
+                "path": {
+                  "type": "string"
+                },
+                "type": {
+                  "const": "folder",
+                  "type": "string"
+                }
+              },
+              "required": [
+                "type",
+                "path"
+              ],
+              "type": "object"
+            }
+          ]
         }
       },
       "$schema": "https://json-schema.org/draft/2020-12/schema",
@@ -2647,6 +2731,16 @@
                 "null"
               ]
             },
+            "restored-to": {
+              "anyOf": [
+                {
+                  "$ref": "#/$defs/RestoredToDto"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
             "result": {
               "anyOf": [
                 {
@@ -2712,6 +2806,38 @@
             "detail"
           ],
           "type": "object"
+        },
+        "RestoredToDto": {
+          "oneOf": [
+            {
+              "properties": {
+                "type": {
+                  "const": "in-place",
+                  "type": "string"
+                }
+              },
+              "required": [
+                "type"
+              ],
+              "type": "object"
+            },
+            {
+              "properties": {
+                "path": {
+                  "type": "string"
+                },
+                "type": {
+                  "const": "folder",
+                  "type": "string"
+                }
+              },
+              "required": [
+                "type",
+                "path"
+              ],
+              "type": "object"
+            }
+          ]
         }
       },
       "$schema": "https://json-schema.org/draft/2020-12/schema",
@@ -3407,6 +3533,16 @@
                 "null"
               ]
             },
+            "restored-to": {
+              "anyOf": [
+                {
+                  "$ref": "#/$defs/RestoredToDto"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
             "result": {
               "anyOf": [
                 {
@@ -3472,6 +3608,38 @@
             "detail"
           ],
           "type": "object"
+        },
+        "RestoredToDto": {
+          "oneOf": [
+            {
+              "properties": {
+                "type": {
+                  "const": "in-place",
+                  "type": "string"
+                }
+              },
+              "required": [
+                "type"
+              ],
+              "type": "object"
+            },
+            {
+              "properties": {
+                "path": {
+                  "type": "string"
+                },
+                "type": {
+                  "const": "folder",
+                  "type": "string"
+                }
+              },
+              "required": [
+                "type",
+                "path"
+              ],
+              "type": "object"
+            }
+          ]
         }
       },
       "$schema": "https://json-schema.org/draft/2020-12/schema",

@@ -50,6 +50,9 @@ pub enum ErrorCode {
     /// service stop, a restart, the computer shutting down), and its orderly
     /// stop ended it. No notification is sent of it.
     DaemonShutDown,
+    /// A queued backup's turn came while a newer run of its plan was already
+    /// going, so it gave way to that run and never ran (decision 135).
+    Superseded,
     /// The request's `Host` header names neither a loopback address nor a
     /// configured host name (a DNS-rebinding defense, §10.1).
     HostNotAllowed,
@@ -1589,6 +1592,7 @@ impl ErrorCode {
             | Self::RepositoryReplaced
             | Self::DaemonStopped
             | Self::DaemonShutDown
+            | Self::Superseded
             | Self::HostNotAllowed
             | Self::OriginNotAllowed
             | Self::JsonRequired
