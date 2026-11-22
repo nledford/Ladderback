@@ -110,6 +110,8 @@ mod machines_list;
 // is its glue. Only a build with the hub has it (decision 122).
 #[cfg(feature = "hub")]
 mod pairing;
+// What a panic writes to the console: its place, never its message (#1411).
+mod panic_report;
 // What the Plans page shows, sends and says, decided on the host;
 // `plans_page.rs` is its glue.
 mod plans;
@@ -782,7 +784,7 @@ fn App(localizer: Arc<Localizer>) -> impl IntoView {
 }
 
 fn main() {
-    console_error_panic_hook::set_once();
+    panic_report::install();
     let localizer = Arc::new(page::localizer());
     page::declare(&localizer);
     // The app mounts into `#app`, beside the live regions of `index.html`, so
