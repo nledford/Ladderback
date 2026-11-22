@@ -160,7 +160,7 @@ Not planned for v1: Windows, multiple users, and rustic's `copy`, `merge`, `rewr
 
 ## Documentation
 
-- [docs/guide/](docs/guide/README.md): install, a first plan, secrets, and sign-in and remote access.
+- [The user guide](https://nledford.github.io/Ladderback/) ([source](docs/guide/README.md)): install, a first plan, secrets, sign-in and remote access, and API tokens and AI agents.
 - [PRODUCT.md](PRODUCT.md): who Ladderback is for, what it does and doesn't do.
 - [docs/design/](docs/design/README.md): architecture, safety invariants, data model, milestones and decisions.
 
