@@ -19,7 +19,7 @@ mod signed;
 mod token;
 mod zone;
 
-pub use fingerprint::{Fingerprint, KeyId, TokenId};
+pub use fingerprint::{Fingerprint, TokenId};
 pub use greeting::{
     AgentEnvelope, Approval, FIRST_SEQUENCE, GENERATION, Hello, HubEnvelope, MAX_EXPIRY_AHEAD,
     MESSAGE_LIFE, PROTOCOLS, Protocols, Welcome, WelcomeRefused, hello_kind, welcome_kind,

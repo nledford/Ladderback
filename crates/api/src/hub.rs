@@ -28,16 +28,16 @@ pub enum TokenCertificateDto {
     Ca,
 }
 
-/// The hub's key as a person compares it: its fingerprint in full (20
-/// Crockford base32 characters in groups of four) and its key ID, the 8 hex
-/// digits a step-up with sign-in off asks for; the certificate a token is
-/// offered first, the hub's own when the page came over the hub's built-in
-/// TLS; and the fingerprint of that certificate, when the hub serves one.
+/// The hub's key as a person compares it and, with sign-in off, types it
+/// for a step-up: its fingerprint in full (20 Crockford base32 characters
+/// in groups of four), the one ID a screen shows for it; the certificate a
+/// token is offered first, the hub's own when the page came over the hub's
+/// built-in TLS; and the fingerprint of that certificate, when the hub
+/// serves one.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "kebab-case", deny_unknown_fields)]
 pub struct HubDto {
     pub fingerprint: String,
-    pub key_id: String,
     #[serde(default)]
     pub certificate: TokenCertificateDto,
     #[serde(default, skip_serializing_if = "Option::is_none")]

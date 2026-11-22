@@ -2268,6 +2268,12 @@ ui-step-up-copied = Copied.
 # Said beside that button when the browser would not let the page write to the clipboard, as on a page not served over HTTPS or from this computer.
 ui-step-up-copy-failed = The browser would not let the page copy it. Select the ID and copy it yourself.
 
+# The button beside a key's fingerprint in the step-up field that copies it to the clipboard.
+ui-step-up-copy-fingerprint = Copy the fingerprint
+
+# Said beside that button when the browser would not let the page write to the clipboard, as on a page not served over HTTPS or from this computer.
+ui-step-up-copy-fingerprint-failed = The browser would not let the page copy it. Select the fingerprint and copy it yourself.
+
 ## Restoring an entry of a snapshot from its page (§10.4): the Restore
 ## button beside the tree, its dialog and what is said as it runs.
 
@@ -3444,11 +3450,11 @@ ui-pairing-life-hint = From 5 to 1440 minutes. A token no { -machine } has used 
 # Said under the life field when what is typed isn't a whole number of minutes.
 ui-pairing-life-invalid = Type the life as a whole number of minutes, from 5 to 1440.
 
-# The label of the field a step-up with sign-in off asks for: the hub key's ID, which the section shows.
-ui-pairing-key-id-label = Hub key ID
+# The label of the field a step-up with sign-in off asks for: the hub key's fingerprint, which the section shows, as the hub's terminal and the pairing token's dialog show it.
+ui-pairing-key-fingerprint-label = Hub key fingerprint
 
-# The hint under that field, which shows the key ID to type.
-ui-pairing-key-id-hint = To confirm, type this { -hub } key's ID:
+# The hint under that field, which shows the fingerprint to type or paste.
+ui-pairing-key-fingerprint-hint = To confirm, type or paste this { -hub } key's fingerprint:
 
 # Said when the step-up is wrong: no token was made.
 ui-pairing-step-up-failed = That isn't right, so no token was made. Try again.
