@@ -89,7 +89,24 @@ if (process.argv[1] && import.meta.url === pathToFileURL(realpathSync(process.ar
   const metadata = parseMetadata<Metadata>(cargo(["metadata", "--no-deps", "--format-version", "1"]));
   const tree = (pkg: string, edges: string, features: string[]) => {
     const select = features.length > 0 ? ["--features", features.join(",")] : [];
-    const output = cargo(["tree", "--package", pkg, ...flags, ...select, "--edges", edges, "--prefix", "none", "--format", "{p}|{f}"]);
+    // `--color never`: CI sets CARGO_TERM_COLOR=always, which wraps the ` (*)`
+    // marker of a repeated crate in escape codes that `parseTree` would read
+    // as a feature.
+    const output = cargo([
+      "tree",
+      "--package",
+      pkg,
+      ...flags,
+      ...select,
+      "--edges",
+      edges,
+      "--prefix",
+      "none",
+      "--format",
+      "{p}|{f}",
+      "--color",
+      "never",
+    ]);
     const crates = parseTree(output, metadata.workspace_root);
     // A tree that doesn't list the package itself was misread: fail rather than find nothing.
     if (!crates.has(pkg)) throw new Error(`cargo tree of ${pkg} lists no ${pkg} under ${metadata.workspace_root}`);
