@@ -45,6 +45,35 @@ Feature: Choosing in Settings what AI agents may do without a token
     When I reload the page
     Then the group "Backup runs" has "No access" chosen
 
+  Scenario: With sign-in on, a wrong admin password is the field's own error, which focus reads once, and the tab has no live region of its own
+    Given a daemon with sign-in on and the admin password "demo-admin-pass"
+    And the admin is signed in with "demo-admin-pass"
+    When I open the address "/settings#ai-agents"
+    And I skip to the content
+    And I press Tab until focus is on the textbox "Admin password"
+    And I type "not-the-password"
+    And I press Tab until focus is on the button "Save what AI agents may do"
+    And I press Enter
+    Then focus is on the textbox "Admin password"
+    And the field "Admin password" shows the error "That is not the current admin password. Check it and try again."
+    And the field "Admin password" is marked invalid
+    And the page has no live region but the announcer's
+    And the assertive region stays empty
+    And the page has no accessibility violations
+
+  Scenario: A wrong admin password sent with Enter from the field is said through the announcer, since focus is there already
+    Given a daemon with sign-in on and the admin password "demo-admin-pass"
+    And the admin is signed in with "demo-admin-pass"
+    When I open the address "/settings#ai-agents"
+    And I skip to the content
+    And I press Tab until focus is on the textbox "Admin password"
+    And I type "not-the-password"
+    And I press Enter
+    Then the assertive region comes to contain "That is not the current admin password. Check it and try again."
+    And focus is on the textbox "Admin password"
+    And the field "Admin password" shows the error "That is not the current admin password. Check it and try again."
+    And the page has no live region but the announcer's
+
   Scenario: Permissions the daemon can't read are said in an alert, with no form, and the panel is a Tab stop
     Given a daemon with sign-in off
     And the daemon can't read what AI agents may do without a token
