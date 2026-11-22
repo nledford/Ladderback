@@ -4,7 +4,7 @@
 use std::collections::{BTreeMap, BTreeSet};
 use std::sync::Arc;
 
-use domain::execution::{FailureReason, OperationKind, Target};
+use domain::execution::{FailureReason, Operation, OperationKind, Target};
 use domain::planning::AgentConfig;
 use domain::{PlanId, Timestamp};
 
@@ -149,6 +149,20 @@ impl RecoverOperations {
             }
         }
     }
+
+    /// Ends `operation`, a queued operation that can't run, as failed with
+    /// `reason` at `now`, and announces the end once the log has it. An
+    /// operation no longer queued is left as it is. A write the log refuses
+    /// announces nothing, leaves the operation queued and is the error.
+    pub async fn end_queued(
+        &self,
+        operation: Operation,
+        reason: FailureReason,
+        now: Timestamp,
+    ) -> Result<(), StoreError> {
+        let _ = (operation, reason, now);
+        todo!("end the queued operation")
+    }
 }
 
 /// Why a queued backup on `target` can't run again under `config`, or
@@ -162,6 +176,18 @@ fn ended_why(target: &Target, config: &AgentConfig) -> Option<QueuedEnd> {
         .repository(&plan.repository)
         .and_then(|repository| repository.id.as_ref());
     (!target.is_on(repository)).then_some(QueuedEnd::RepositoryChanged)
+}
+
+/// The reason a queued backup on `target`, which a start took up again and
+/// which waited for its keyring, ends with once the wait is over and it
+/// can't run under `config` (`None`: the configuration can't be read or
+/// used), or `None` when it can: its plan was deleted, or now backs up to
+/// another repository than the one the backup was queued for. Never
+/// `daemon-stopped`, which would say the daemon stopped during it (decision
+/// 135, #1293).
+pub fn waited_end(target: &Target, config: Option<&AgentConfig>) -> Option<FailureReason> {
+    let _ = (target, config);
+    todo!("why a waited backup can't run")
 }
 
 #[cfg(test)]

@@ -1,9 +1,11 @@
-//! Steps for `features/execution/recovery.feature`: they leave operations in
-//! the in-memory operation log the world's `store` holds, as a daemon that
+//! Steps for `features/execution/recovery.feature` and
+//! `features/execution/never_ran.feature`: they leave operations in the
+//! in-memory operation log the world's `store` holds, as a daemon that
 //! stopped would, start the daemon again through `RecoverOperations` (its
 //! recovery, then the persistent queue's resume over a configuration with
 //! every plan the scenario names, less those it removed, each on the
-//! repository "nas" unless the scenario moved it), and read the log back
+//! repository "nas" unless the scenario moved it), end a queued backup whose
+//! wait for its keyring is over and that can't run, and read the log back
 //! through its port, and what the queue ran again and said off a recording.
 //! What the start announces is told at once to the notification rules of
 //! `steps/notifications.rs`, which read the operation from the same log.
@@ -408,6 +410,26 @@ fn config_unreadable(agent: &mut Agent) {
     agent.notifications.unreadable = true;
 }
 
+/// The configuration the scenario left: every plan it names, less those it
+/// removed, each on the repository "nas" unless it moved it.
+fn scenario_config(world: &RecoveryWorld) -> domain::planning::AgentConfig {
+    let plans: Vec<(&str, &str)> = world
+        .seeded
+        .iter()
+        .filter_map(|seeded| seeded.plan.as_deref())
+        .filter(|plan| !world.removed.iter().any(|removed| removed == plan))
+        .map(|plan| {
+            let on = world
+                .moved
+                .iter()
+                .find(|(moved, _)| moved == plan)
+                .map_or("nas", |(_, repository)| repository.as_str());
+            (plan, on)
+        })
+        .collect();
+    config_with_plans(&plans, repository_id)
+}
+
 /// The start's recovery over `store`, announcing on a bus that tells the
 /// scenario's notification rules of each piece of news as it is published.
 async fn recovery(agent: &Agent, store: Arc<dyn OperationStore>) -> RecoverOperations {
@@ -428,21 +450,7 @@ async fn daemon_starts_again(agent: &mut Agent) {
     let runs = Arc::new(RecordingRuns::new(agent.clock.clone()));
     if let Ok(recovered) = recovered {
         let world = &agent.recovery;
-        let plans: Vec<(&str, &str)> = world
-            .seeded
-            .iter()
-            .filter_map(|seeded| seeded.plan.as_deref())
-            .filter(|plan| !world.removed.iter().any(|removed| removed == plan))
-            .map(|plan| {
-                let on = world
-                    .moved
-                    .iter()
-                    .find(|(moved, _)| moved == plan)
-                    .map_or("nas", |(_, repository)| repository.as_str());
-                (plan, on)
-            })
-            .collect();
-        let config = config_with_plans(&plans, repository_id);
+        let config = scenario_config(world);
         recovery
             .resume(
                 recovered.queued,
@@ -454,6 +462,31 @@ async fn daemon_starts_again(agent: &mut Agent) {
             .await;
     }
     agent.recovery.runs = Some(runs);
+}
+
+/// The start took the queued backup of `plan` up again and it waited for
+/// its keyring (decision 135). Now the keyring is unlocked, and the backup
+/// is looked at against the configuration the scenario left: it ends when
+/// it can't run, its end announced once the log has it, and it is left as
+/// it is when it can (#1293).
+#[when(expr = "the keyring the queued backup of the plan {string} waited for is unlocked")]
+async fn keyring_unlocked_after_wait(agent: &mut Agent, plan: String) {
+    let id = agent.recovery.backup(&plan).id;
+    let operation = detail(agent, id)
+        .await
+        .record
+        .queued_operation()
+        .expect("the backup is queued");
+    let config = scenario_config(&agent.recovery);
+    let config = (!agent.recovery.unreadable).then_some(&config);
+    let Some(reason) = app::recovery::waited_end(operation.target(), config) else {
+        return;
+    };
+    recovery(agent, agent.store.clone())
+        .await
+        .end_queued(operation, reason, agent.clock.now())
+        .await
+        .expect("the log takes the end");
 }
 
 #[when("the daemon starts again on a log that cannot be written")]
@@ -629,6 +662,15 @@ async fn assert_failed_daemon_stopped(agent: &Agent, id: OperationId) {
     match status {
         OperationStatus::Failed { reason } => assert_eq!(reason.code(), "daemon-stopped"),
         other => panic!("the operation is not failed: {other:?}"),
+    }
+}
+
+#[then(expr = "the log shows the backup of the plan {string} as failed with the code {string}")]
+async fn backup_failed_with(agent: &mut Agent, plan: String, code: String) {
+    let id = agent.recovery.backup(&plan).id;
+    match detail(agent, id).await.record.status {
+        OperationStatus::Failed { reason } => assert_eq!(reason.code(), code),
+        other => panic!("the backup of the plan {plan} is not failed: {other:?}"),
     }
 }
 

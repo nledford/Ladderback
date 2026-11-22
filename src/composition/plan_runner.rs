@@ -833,6 +833,15 @@ fn start_refused(error: &StartError) -> String {
     }
 }
 
+/// The reason a queued backup that waited for its keyring ends with when,
+/// once the wait is over, its job is refused with `error` as it is built
+/// again: never `daemon-stopped`, which would say the daemon stopped during
+/// it (decision 135, #1293).
+pub(super) fn never_ran(error: &StartError) -> FailureReason {
+    let _ = error;
+    todo!("the reason a refused build after the wait ends with")
+}
+
 #[async_trait]
 impl PlanRuns for PlanRunner {
     async fn start(

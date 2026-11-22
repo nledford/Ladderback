@@ -179,6 +179,9 @@ pub fn failure(reason: &FailureReason) -> ErrorDto {
         F::DaemonStopped => ErrorDto::new(ErrorCode::DaemonStopped, [], None),
         F::DaemonShutDown => ErrorDto::new(ErrorCode::DaemonShutDown, [], None),
         F::Superseded => ErrorDto::new(ErrorCode::Superseded, [], None),
+        F::PlanRemoved | F::PlanMoved | F::ConfigUnusable | F::KeyFilesNotLeftOut => {
+            todo!("the never-ran reasons on the wire")
+        }
         F::NoLocationUsable => ErrorDto::new(ErrorCode::NoLocationUsable, [], None),
         F::NoLocationRuleHolds => ErrorDto::new(ErrorCode::NoLocationRuleHolds, [], None),
         F::PasswordNotAccepted => ErrorDto::new(ErrorCode::PasswordNotAccepted, [], None),

@@ -793,6 +793,19 @@ fn a_backup_that_gave_way_to_a_newer_run_codes_as_superseded() {
     assert_eq!(FailureReason::Superseded.code(), "superseded");
 }
 
+/// A queued backup that waited for its keyring and couldn't run once the
+/// wait was over codes as why, never as a stopped daemon (#1293).
+#[test]
+fn a_backup_that_waited_and_never_ran_codes_as_why() {
+    assert_eq!(FailureReason::PlanRemoved.code(), "plan-removed");
+    assert_eq!(FailureReason::PlanMoved.code(), "plan-moved");
+    assert_eq!(FailureReason::ConfigUnusable.code(), "config-unusable");
+    assert_eq!(
+        FailureReason::KeyFilesNotLeftOut.code(),
+        "key-files-not-left-out"
+    );
+}
+
 #[test]
 fn a_job_with_too_much_to_mask_codes_as_secrets_too_large_to_mask() {
     let reason = FailureReason::SecretsTooLargeToMask {
