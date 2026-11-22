@@ -189,8 +189,12 @@ jobs:
   # full mode. The jobs the mode skips do so by their own `if`, which
   # reports them as skipped under their names, so each required check still
   # reports (GitHub counts a skipped one as passing); `check` skips its macOS
-  # leg by another route, described there. Turning the mode off is deleting
-  # the variable or setting it to `full`.
+  # leg by another route, described there. A pull request that changes the
+  # workflows, the actions, the Justfile or `scripts/` runs in full mode
+  # whatever the variable says, since what it changes may be a job the mode
+  # skips (#1295 broke the release-build tests that way, through the Justfile
+  # and a script only that job runs). Turning the mode off is deleting the
+  # variable or setting it to `full`.
   changes:
     name: Changed paths
     if: github.event_name == 'pull_request'
@@ -223,6 +227,7 @@ jobs:
           ui=false
           workflows=false
           deps=false
+          ci_files=false
           count=0
           while IFS= read -r -d '' file; do
             count=$((count + 1))
@@ -274,6 +279,11 @@ jobs:
             case "$file" in
               Cargo.lock | Cargo.toml | */Cargo.toml | deny.toml | */package.json | */package-lock.json | ui-tests/.nvmrc) deps=true ;;
             esac
+            # What CI itself is made of: a change here runs in full mode
+            # (decision 124), so the jobs it changes run before the merge.
+            case "$file" in
+              .github/workflows/* | .github/actions/* | Justfile | scripts/*) ci_files=true ;;
+            esac
           done < "$RUNNER_TEMP/changed-files"
           # A change with no files isn't a docs change, and runs the jobs.
           if [ "$count" -eq 0 ]; then docs_only=false; service=true; ui=true; workflows=true; deps=true; fi
@@ -283,6 +293,7 @@ jobs:
             [Mm][Vv][Pp]) mvp=true ;;
             *) mvp=false ;;
           esac
+          if [ "$ci_files" = true ]; then mvp=false; fi
           {
             echo "docs-only=$docs_only"
             echo "service=$service"
@@ -857,10 +868,11 @@ jobs:
   # crates and sources, then `npm audit` on the two npm lockfiles (technical
   # design §13.6). It also runs on the nightly schedule, because an advisory
   # can appear with no change to the code; a scheduled run notifies no one, so
-  # a failed one opens an issue (`deny-report` below), as `mutants-nightly`
-  # does. Not a required check: the maintainer may add it to the ruleset once
-  # it has proved stable. It fetches the advisory databases, so a GitHub
-  # outage can fail it for a reason that isn't a dependency's.
+  # a failed one opens an issue (`deny-report` below), as a failed nightly
+  # mutation shard does (`mutants-nightly-report`). Not a required check: the
+  # maintainer may add it to the ruleset once it has proved stable. It fetches
+  # the advisory databases, so a GitHub outage can fail it for a reason that
+  # isn't a dependency's.
   deny:
     name: Dependencies (cargo-deny)
     needs: changes
@@ -982,16 +994,30 @@ jobs:
         env:
           SHARDS: ${{ needs.mutants-shard.result }}
 
-  # A scheduled run notifies no one, so a failure opens an issue, or comments
-  # on the one already open, rather than going unseen.
+  # Every mutant of the gated crates, nightly, split round-robin over 32
+  # runners. One runner had 8,551 mutants to test and ran out of its
+  # 180 minutes every night. A shard running two at a time tests a mutant in
+  # 14 to 22 seconds (development.md §13.1; 6 to 29 s in pull requests'
+  # shards, by crate), so a 32nd of the 8,910 there were on 2026-11-22, about
+  # 279, takes 65 to 102 minutes, and 135 at the slowest rate seen, after a
+  # baseline of about 4. At most 12 run at once, so the nightly leaves
+  # runners for the pull requests and pushes of the morning it runs into.
+  # The step's own limit is under the job's, so running out of time fails
+  # the step rather than cancelling the job, which `mutants-nightly-report`
+  # would not report. `--caught --unviable` print every outcome as it comes,
+  # so a shard that runs out of time shows how far it got.
   mutants-nightly:
-    name: Mutation testing (full)
+    name: Mutation testing (full, shard ${{ matrix.shard }} of 32)
     if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
     runs-on: ubuntu-26.04
     timeout-minutes: 180
     permissions:
       contents: read
-      issues: write
+    strategy:
+      fail-fast: false
+      max-parallel: 12
+      matrix:
+        shard: [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26, 27, 28, 29, 30, 31]
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -999,20 +1025,35 @@ jobs:
       - uses: $/.github/actions/setup-rust
         with:
           tools: just,cargo-mutants
-      - run: just mutants-all
-      - if: failure()
+      - run: just mutants-all --jobs 2 --shard "$SHARD/32" --sharding round-robin --caught --unviable
+        timeout-minutes: 165
+        env:
+          SHARD: ${{ matrix.shard }}
+      - if: failure() || cancelled()
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
-          name: mutants.out
+          name: mutants.out-nightly-shard-${{ matrix.shard }}
           path: mutants.out
           retention-days: 14
-      # Only on a failure of this job's own steps (a timeout counts), not on
-      # a cancel. The title is fixed, so a second failure finds the open issue.
-      - if: failure()
-        uses: $/.github/actions/report-nightly-failure
+
+  # A failed nightly mutation shard opens an issue, or comments on the open
+  # one: a scheduled run notifies no one. One job for all 32 shards, so
+  # their failures make one report, not 32 racing to open the issue. A
+  # cancel isn't reported; a shard that ran out of time failed its step
+  # (above). Its name matches no required check.
+  mutants-nightly-report:
+    name: Report the nightly mutation run
+    needs: mutants-nightly
+    if: always() && github.event_name == 'schedule' && needs.mutants-nightly.result == 'failure'
+    runs-on: ubuntu-26.04
+    timeout-minutes: 5
+    permissions:
+      issues: write # to open or comment on the issue; no checkout, so no contents
+    steps:
+      - uses: $/.github/actions/report-nightly-failure
         with:
           title: Nightly mutation run failed
-          body: "The full mutation run (`just mutants-all`) failed: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}. The run's `mutants.out` artifact lists the missed mutants and timeouts."
+          body: "The full mutation run (`just mutants-all`, in 32 shards) failed: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}. Each failed shard's `mutants.out-nightly-shard-N` artifact lists its missed mutants and timeouts; a shard that ran out of time ends with its step's timeout."
 
   # Deletes the Actions cache entries a push to main superseded, once the jobs
   # that save them are done: mbx saves in its post step, after a job's last
