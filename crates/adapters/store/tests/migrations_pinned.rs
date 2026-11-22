@@ -109,6 +109,11 @@ const PINNED: &[(i64, &str, &str)] = &[
         "agent zone",
         "b7854d21e3698c75a1cc30c93aac694790235efd2f7ef914e90ebebab9ba88c9b27b67b8fbd598c1f2bd5e348a949931",
     ),
+    (
+        20,
+        "operation restored to",
+        "3d64f847e1ae6f9288d4f1fa7d85febfbb9a823b278acb0c71c416de6e351c6111bcbb2db6e0e1f8a7b13b52f019f2a7",
+    ),
 ];
 
 /// The migration's file name, as `sqlx::migrate!` reads it: sqlx turns the

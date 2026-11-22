@@ -50,6 +50,7 @@ const SNAPSHOTS: Record<string, string> = {
   - text: Demo empty
   - radio "Demo unreachable"
   - text: Demo unreachable
+- button "Columns"
 - region "Demo folders":
   - table "Demo folders":
     - caption: Demo folders

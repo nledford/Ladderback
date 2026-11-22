@@ -24,8 +24,8 @@ use crate::components::button::Content;
 use crate::components::skeleton::rules::Awaited;
 use crate::components::status_badge::rules::BadgeState;
 use crate::components::{
-    Button, ChangeMarks, Column, Cue, MarkAllSeen, Name as TableName, PauseUpdates, Progress,
-    Sentences, Sort, SortKey, State, StatusBadge, Table, Toast, ToastTone, Toasts,
+    Button, ChangeMarks, Column, ColumnsChoice, Cue, MarkAllSeen, Name as TableName, PauseUpdates,
+    Progress, Sentences, Sort, SortKey, State, StatusBadge, Table, Toast, ToastTone, Toasts,
     cell_sentence_view, hand_focus_when_gone, refusal_alert, runs_view, say_refusals,
 };
 use crate::components::{first_load, paced};
@@ -432,6 +432,7 @@ fn operations_table(
 ) -> AnyView {
     let name_localizer = Arc::clone(localizer);
     let operation = Column::new(
+        "operation",
         text(localizer, msg::UI_COLUMN_OPERATION),
         Rem::tenths(80),
         move |row: Signal<OperationRow>| {
@@ -447,6 +448,7 @@ fn operations_table(
     let status_localizer = Arc::clone(localizer);
     let status_zone = zone.clone();
     let status = Column::new(
+        "status",
         text(localizer, msg::UI_COLUMN_STATUS),
         Rem::tenths(95),
         move |row: Signal<OperationRow>| status_view(&status_localizer, status_zone.clone(), row),
@@ -457,6 +459,7 @@ fn operations_table(
     ));
     let started_localizer = Arc::clone(localizer);
     let started = Column::new(
+        "started",
         text(localizer, msg::UI_COLUMN_STARTED),
         // Room for the sort button's label, "Sort by started", and a whole
         // start time on one line each in the widest common sans-serif
@@ -485,6 +488,7 @@ fn operations_table(
     );
     let result_localizer = Arc::clone(localizer);
     let result = Column::new(
+        "result",
         text(localizer, msg::UI_COLUMN_RESULT),
         // The rest of the page's 58 rem: room for a long path such as
         // "/srv/backups/home-laptop.password" (18.1 rem in DejaVu Sans,
@@ -495,6 +499,7 @@ fn operations_table(
     let cancel_localizer = Arc::clone(localizer);
     let cancel_connection = connection.clone();
     let actions = Column::new(
+        "actions",
         text(localizer, msg::UI_COLUMN_ACTIONS),
         Rem::tenths(80),
         move |row: Signal<OperationRow>| {
@@ -516,6 +521,7 @@ fn operations_table(
     view! {
         <Table
             name=TableName::Heading(PAGE_HEADING_ID.to_owned())
+            columns_choice=ColumnsChoice::new("operations", Arc::clone(localizer))
             row_header=operation
             columns=vec![status, started, result, actions]
             rows=Memo::new(move |_| page.with(|state| state.rows.clone()))

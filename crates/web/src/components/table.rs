@@ -3,43 +3,75 @@
 //! headers tell a screen reader and what shows in its place, host-tested;
 //! this module is the glue that draws it.
 
-use std::cell::Cell;
+use std::cell::{Cell, RefCell};
 use std::collections::HashMap;
 use std::hash::Hash;
-use std::iter;
 use std::sync::Arc;
+use std::time::Duration;
 
+use api::MsgArg;
+use l10n::{Localizer, msg};
+use lepticons_data::LucideGlyph;
 use leptos::prelude::*;
 use leptos::wasm_bindgen::JsCast;
 use leptos::wasm_bindgen::closure::Closure;
 
 use super::button::{Appearance, Button, Content};
-use super::{Spinner, focus_element};
+use super::{Checkbox, Icon, Spinner, Tip, Tooltip, focus_element};
 use crate::announcer::Politeness;
 use crate::live::reply;
+use crate::page::storage;
+use crate::routes::text_with;
+use crate::text;
 use crate::variants::{Rem, Size};
 
 pub(crate) mod rules;
 
 pub use rules::{Align, Name, SortKey, State};
-use rules::{Direction, Marks, Shown, Sorted};
+use rules::{Direction, Layout, Marks, Shown, Sorted, Step};
 
 thread_local! {
     /// The number the next table's caption `id` takes, so no two on a page
     /// share one.
     static NEXT_ID: Cell<u32> = const { Cell::new(0) };
+    /// The columns each table `id` given a [`ColumnsChoice`] shows, as this
+    /// browser keeps them, read once a page: the tables of one id share it.
+    static KEPT: RefCell<HashMap<&'static str, ArcRwSignal<Option<String>>>> =
+        RefCell::default();
 }
 
-/// How a column draws its cell in a row: built once, when the row first
-/// shows, from the row as a signal, so the cell follows the row's changes in
-/// place and a control in it is never built again.
+/// What a table's choice of columns is kept under in the browser's local
+/// storage, before the table's id.
+const KEPT_KEY: &str = "ladderback-columns-";
+
+/// A table's Columns panel, where the reader hides, shows and reorders the
+/// columns after the row header's (decision 140): `id` names the table's
+/// choice, which this browser keeps for every table of that id, and the
+/// panel's words are `localizer`'s. Lower-case letters, digits and hyphens.
+pub struct ColumnsChoice {
+    id: &'static str,
+    localizer: Arc<Localizer>,
+}
+
+impl ColumnsChoice {
+    /// The Columns panel of the table `id`, its words `localizer`'s.
+    pub fn new(id: &'static str, localizer: Arc<Localizer>) -> Self {
+        Self { id, localizer }
+    }
+}
+
+/// How a column draws its cell in a row: built when the row first shows, and
+/// again when its column shows after the reader hid it, from the row as a
+/// signal, so the cell follows the row's changes in place and a control in
+/// it is never built again while its column shows.
 type Draw<R> = Arc<dyn Fn(Signal<R>) -> AnyView + Send + Sync>;
 
-/// One column of a [`Table`]: its header's words, its width, how its cells
-/// are aligned, how each is drawn and, if it can be sorted by, how. A row
-/// header's column may keep the room its words need to read whole, and the
-/// column a live update changes may carry the change mark ([`Cue`]).
+/// One column of a [`Table`]: its id, its header's words, its width, how its
+/// cells are aligned, how each is drawn and, if it can be sorted by, how. A
+/// row header's column may keep the room its words need to read whole, and
+/// the column a live update changes may carry the change mark ([`Cue`]).
 pub struct Column<R: Send + Sync + 'static> {
+    id: &'static str,
     header: String,
     width: Rem,
     whole: Option<Rem>,
@@ -50,15 +82,21 @@ pub struct Column<R: Send + Sync + 'static> {
 }
 
 impl<R: Send + Sync + 'static> Column<R> {
-    /// A column headed `header`, `width` wide, its cells at the start of the
-    /// line and drawn by `draw`, which is called once for each row as it
-    /// first shows and binds what it draws to the row's signal.
+    /// A column `id` headed `header`, `width` wide, its cells at the start
+    /// of the line and drawn by `draw`, which is called once for each row as
+    /// it first shows, and again as the column shows after it was hidden,
+    /// and binds what it draws to the row's signal. The `id`,
+    /// lower-case letters, digits and hyphens, unlike its table's others,
+    /// names it in what the browser keeps of a table's Columns panel
+    /// (decision 140), so it stays as releases come.
     pub fn new(
+        id: &'static str,
         header: impl Into<String>,
         width: Rem,
         draw: impl Fn(Signal<R>) -> AnyView + Send + Sync + 'static,
     ) -> Self {
         Self {
+            id,
             header: header.into(),
             width,
             whole: None,
@@ -353,6 +391,7 @@ pub fn Table<R, K, KF>(
     #[prop(optional)] footer: Option<Footer>,
     #[prop(optional)] row_header_id: Option<fn(&R) -> String>,
     #[prop(optional)] marks: Option<ChangeMarks<K>>,
+    #[prop(optional)] columns_choice: Option<ColumnsChoice>,
 ) -> impl IntoView
 where
     R: Clone + PartialEq + Send + Sync + 'static,
@@ -370,13 +409,54 @@ where
     let whole = row_header.whole;
     let columns: Arc<Vec<Column<R>>> =
         Arc::new(std::iter::once(row_header).chain(columns).collect());
-    let width = rules::table_width(
-        pinned,
-        whole,
-        columns.iter().skip(1).map(|column| column.width),
-    );
+    // The columns after the row header's, by the caller's place: their ids,
+    // and the layout the reader chose of them (decision 140), kept where the
+    // table has a Columns panel.
+    let ids: Arc<[&'static str]> = columns.iter().skip(1).map(|column| column.id).collect();
+    let choice = columns_choice.map(|choice| (kept_columns(choice.id), choice));
+    let layout = {
+        let ids = Arc::clone(&ids);
+        let kept = choice.as_ref().map(|(kept, _)| kept.clone());
+        Memo::new(move |_| match &kept {
+            Some(kept) => kept.with(|kept| Layout::from_kept(kept.as_deref(), &ids)),
+            None => Layout::given(ids.len()),
+        })
+    };
+    // The table's places (the row header's 0) of the columns it shows after
+    // the row header's, in their order; placed once the focus a moving
+    // column's cells may hold is noted (below).
+    let shown_columns = Memo::new(move |_| {
+        layout.with(|layout| {
+            layout
+                .shown()
+                .into_iter()
+                .map(|column| column + 1)
+                .collect::<Vec<_>>()
+        })
+    });
+    let placed_columns = RwSignal::new(shown_columns.get_untracked());
+    let widths: Arc<[Rem]> = columns.iter().map(|column| column.width).collect();
+    let width = Signal::derive({
+        let widths = Arc::clone(&widths);
+        move || {
+            placed_columns.with(|placed| {
+                rules::table_width(
+                    pinned,
+                    whole,
+                    placed.iter().filter_map(|at| widths.get(*at).copied()),
+                )
+            })
+        }
+    });
     let pinned_room = rules::pinned_room(pinned, whole);
     let sorted = RwSignal::new(None::<Sorted>);
+    // Hiding the column the rows are sorted by ends the sort.
+    Effect::new(move |_| {
+        let kept = layout.with(|layout| rules::sort_kept(sorted.get_untracked(), layout));
+        if kept != sorted.get_untracked() {
+            sorted.set(kept);
+        }
+    });
     let shown = Memo::new(move |_| rules::shown(state.get(), rows.with(Vec::len)));
     let order = {
         let columns = Arc::clone(&columns);
@@ -416,6 +496,17 @@ where
             give_back_focus(focused);
         }
     });
+    // A column that moves takes its cells with it, as a row does, so a
+    // control of the body that had focus gets it back: a pointer's drag in
+    // the Columns panel leaves focus where it was.
+    Effect::new(move |_| {
+        let next = shown_columns.get();
+        let focused = focused_in(body);
+        placed_columns.set(next);
+        if let Some(focused) = focused {
+            give_back_focus(focused);
+        }
+    });
     let Sentences {
         loading,
         empty,
@@ -433,8 +524,50 @@ where
             .map(|cue| (at, cue.on, Arc::from(cue.changed.as_str())))
     });
     let marks = marks.unwrap_or_default().marks;
+    // Whether the table shows the column a live update changes: while it
+    // doesn't, a change marks nothing, and hiding it sees every mark, so no
+    // row keeps an edge its words no longer say (1.3.1).
+    let cue_shown = {
+        let watched = watch.as_ref().map(|(at, _, _)| *at);
+        Memo::new(move |_| {
+            watched
+                .and_then(|at| at.checked_sub(1))
+                .is_none_or(|column| layout.with(|layout| layout.is_shown(column)))
+        })
+    };
+    Effect::new(move |_| {
+        if !cue_shown.get() {
+            marks.try_maybe_update(|marks| {
+                let any = marks.any();
+                marks.see_all();
+                (any, ())
+            });
+        }
+    });
+    let panel = choice.map(|(kept, choice)| {
+        columns_panel(ColumnsPanel {
+            table: id,
+            choice,
+            kept,
+            ids,
+            headers: columns
+                .iter()
+                .skip(1)
+                .map(|column| column.header.clone())
+                .collect(),
+            layout,
+            // A caption names the table only while it shows.
+            described_by: {
+                let (frame_name, captioned) = (frame_name.clone(), caption.is_some());
+                Signal::derive(move || {
+                    (!captioned || shown.get() == Shown::Table).then(|| frame_name.clone())
+                })
+            },
+        })
+    });
     view! {
         <div>
+            {panel}
             {move || {
                 (shown.get() == Shown::Loading).then(|| view! { <Spinner label=loading.clone() /> })
             }}
@@ -448,8 +581,17 @@ where
                     Shown::Table => {
                         let columns = Arc::clone(&row_columns);
                         let watch = watch.clone();
-                        let header_row = header_row(&columns, sorted);
-                        let footer_row = footer.clone().map(|footer| footer_row(&columns, footer));
+                        let column_places = placed_columns.read_only();
+                        let header_row = header_row(Arc::clone(&columns), sorted, column_places);
+                        let footer_row = footer
+                            .clone()
+                            .map(|footer| footer_row(Arc::clone(&columns), footer, column_places));
+                        let widths = Arc::clone(&widths);
+                        let drawn = Drawn {
+                            columns: Arc::clone(&columns),
+                            placed: column_places,
+                            cue_shown,
+                        };
                         view! {
                             // The frame is the size container the table's width
                             // is measured against, and what scrolls. It is the
@@ -468,7 +610,7 @@ where
                                 <table
                                     class="data-table"
                                     aria-labelledby=labelled_by.clone()
-                                    style:inline-size=width.clone()
+                                    style:inline-size=move || width.get()
                                 >
                                     {caption
                                         .clone()
@@ -480,18 +622,21 @@ where
                                             }
                                         })}
                                     <colgroup>
-                                        {columns
-                                            .iter()
-                                            .enumerate()
-                                            .map(|(at, column)| {
-                                                let width = if at == 0 {
-                                                    rules::row_header_width(column.width, column.whole)
-                                                } else {
-                                                    column.width.to_string()
-                                                };
+                                        <col style:inline-size=rules::row_header_width(
+                                            pinned,
+                                            whole,
+                                        ) />
+                                        <For
+                                            each=move || placed_columns.get()
+                                            key=|at| *at
+                                            children=move |at| {
+                                                let width = widths
+                                                    .get(at)
+                                                    .map(ToString::to_string)
+                                                    .unwrap_or_default();
                                                 view! { <col style:inline-size=width /> }
-                                            })
-                                            .collect_view()}
+                                            }
+                                        />
                                     </colgroup>
                                     {header_row}
                                     <tbody node_ref=body>
@@ -500,7 +645,7 @@ where
                                             key=|key| key.clone()
                                             children=move |key| {
                                                 row_view(
-                                                    &columns,
+                                                    &drawn,
                                                     rows,
                                                     index,
                                                     key,
@@ -524,97 +669,113 @@ where
     .into_any()
 }
 
-/// The header row: each column's words, and a sortable column's button,
-/// whose press sorts by it and says so.
+/// The header row: the row header's words, then each shown column's
+/// (`placed`), in their order, and a sortable column's button, whose press
+/// sorts by it and says so.
 fn header_row<R: Send + Sync + 'static>(
-    columns: &[Column<R>],
+    columns: Arc<Vec<Column<R>>>,
     sorted: RwSignal<Option<Sorted>>,
+    placed: ReadSignal<Vec<usize>>,
 ) -> AnyView {
-    let cells = columns
-        .iter()
-        .enumerate()
-        .map(|(at, column)| {
-            let class = column.align.class();
-            let header = column.header.clone();
-            match &column.sort {
-                None => view! {
-                    <th scope="col" class=class>
-                        {header}
-                    </th>
-                }
-                .into_any(),
-                Some(sort) => {
-                    let (ascending, descending) = (sort.ascending.clone(), sort.descending.clone());
-                    let first = sort.first;
-                    let press = Callback::new(move |()| {
-                        let next = rules::press(sorted.get_untracked(), at, first);
-                        sorted.set(Some(next));
-                        reply(
-                            Politeness::Polite,
-                            rules::sentence(next.direction, &ascending, &descending),
-                        );
-                    });
-                    view! {
-                        <th
-                            scope="col"
-                            class=class
-                            aria-sort=move || rules::aria_sort(sorted.get(), at)
-                        >
-                            <span class="sort-header">
-                                {header}
-                                <Button
-                                    content=Content::IconAndText {
-                                        glyph: Signal::derive(move || rules::glyph(
-                                            sorted.get(),
-                                            at,
-                                        )),
-                                        label: Signal::stored(sort.label.clone()),
-                                    }
-                                    appearance=Appearance::Ghost
-                                    size=Size::Small
-                                    on_press=press
-                                />
-                            </span>
-                        </th>
-                    }
-                    .into_any()
-                }
-            }
-        })
-        .collect_view();
+    let first = columns.first().map(|column| header_cell(column, 0, sorted));
     view! {
         <thead>
-            <tr>{cells}</tr>
+            <tr>
+                {first}
+                <For
+                    each=move || placed.get()
+                    key=|at| *at
+                    children=move |at| columns.get(at).map(|column| header_cell(column, at, sorted))
+                />
+            </tr>
         </thead>
     }
     .into_any()
 }
 
-/// The footer row: its header, then a cell for each column after the row
-/// header's, each aligned as its column; a column the footer has no cell for
-/// gets an empty one, so each column keeps its rule.
-fn footer_row<R: Send + Sync + 'static>(columns: &[Column<R>], footer: Footer) -> AnyView {
-    let cells = columns
-        .iter()
-        .skip(1)
-        .zip(footer.cells.into_iter().map(Some).chain(iter::repeat(None)))
-        .map(|(column, cell)| {
-            view! { <td class=column.align.class()>{move || cell.map(|cell| cell.get())}</td> }
-        })
-        .collect_view();
+/// The header cell of `column`, the table's place `at` (the row header's 0).
+fn header_cell<R: Send + Sync + 'static>(
+    column: &Column<R>,
+    at: usize,
+    sorted: RwSignal<Option<Sorted>>,
+) -> AnyView {
+    let class = column.align.class();
+    let header = column.header.clone();
+    match &column.sort {
+        None => view! {
+            <th scope="col" class=class>
+                {header}
+            </th>
+        }
+        .into_any(),
+        Some(sort) => {
+            let (ascending, descending) = (sort.ascending.clone(), sort.descending.clone());
+            let first = sort.first;
+            let press = Callback::new(move |()| {
+                let next = rules::press(sorted.get_untracked(), at, first);
+                sorted.set(Some(next));
+                reply(
+                    Politeness::Polite,
+                    rules::sentence(next.direction, &ascending, &descending),
+                );
+            });
+            view! {
+                <th scope="col" class=class aria-sort=move || rules::aria_sort(sorted.get(), at)>
+                    <span class="sort-header">
+                        {header}
+                        <Button
+                            content=Content::IconAndText {
+                                glyph: Signal::derive(move || rules::glyph(sorted.get(), at)),
+                                label: Signal::stored(sort.label.clone()),
+                            }
+                            appearance=Appearance::Ghost
+                            size=Size::Small
+                            on_press=press
+                        />
+                    </span>
+                </th>
+            }
+            .into_any()
+        }
+    }
+}
+
+/// The footer row: its header, then a cell for each shown column (`placed`),
+/// in their order, each aligned as its column; a column the footer has no
+/// cell for gets an empty one, so each column keeps its rule.
+fn footer_row<R: Send + Sync + 'static>(
+    columns: Arc<Vec<Column<R>>>,
+    footer: Footer,
+    placed: ReadSignal<Vec<usize>>,
+) -> AnyView {
     let class = columns.first().and_then(|column| column.align.class());
-    let header = footer.header;
+    let Footer { header, cells } = footer;
+    let cell = move |at: usize| {
+        let class = columns.get(at).and_then(|column| column.align.class());
+        let cell = at.checked_sub(1).and_then(|at| cells.get(at).copied());
+        view! { <td class=class>{move || cell.map(|cell| cell.get())}</td> }
+    };
     view! {
         <tfoot>
             <tr>
                 <th scope="row" class=class>
                     {move || header.get()}
                 </th>
-                {cells}
+                <For each=move || placed.get() key=|at| *at children=cell />
             </tr>
         </tfoot>
     }
     .into_any()
+}
+
+/// The columns a row draws: every one, by the table's place (the row
+/// header's 0), the places of those it shows after the row header's, in
+/// their order, and whether it shows the cued one.
+#[derive(Clone)]
+struct Drawn<R: Send + Sync + 'static> {
+    columns: Arc<Vec<Column<R>>>,
+    placed: ReadSignal<Vec<usize>>,
+    cue_shown: Memo<bool>,
 }
 
 /// One row, built once as it first shows: its cells bind to the row as it
@@ -623,7 +784,7 @@ fn footer_row<R: Send + Sync + 'static>(columns: &[Column<R>], footer: Footer) -
 /// what its marked cell says), a change there marks the row in `marks` and
 /// lights its arrival.
 fn row_view<R, K>(
-    columns: &[Column<R>],
+    drawn: &Drawn<R>,
     rows: Signal<Vec<R>>,
     index: Memo<HashMap<K, usize>>,
     key: K,
@@ -635,6 +796,12 @@ where
     R: Clone + PartialEq + Send + Sync + 'static,
     K: Clone + Eq + Hash + Send + Sync + 'static,
 {
+    let Drawn {
+        columns,
+        placed,
+        cue_shown,
+    } = drawn;
+    let (placed, cue_shown) = (*placed, *cue_shown);
     let find = {
         let key = key.clone();
         move || {
@@ -658,49 +825,54 @@ where
         let key = key.clone();
         move |_| marks.with(|marks| marks.is_unseen(&key))
     });
-    let cells = columns
-        .iter()
-        .enumerate()
-        .map(|(at, column)| {
+    let header_cell = columns.first().map(|column| {
+        let class = column.align.class();
+        let cell = (column.draw)(row);
+        let tabindex = id.is_some().then_some("-1");
+        view! {
+            <th scope="row" class=class id=id.clone() tabindex=tabindex>
+                {cell}
+            </th>
+        }
+    });
+    let cell = {
+        let columns = Arc::clone(columns);
+        let watched = watch
+            .as_ref()
+            .map(|(at, _, words)| (*at, Arc::clone(words)));
+        move |at: usize| {
+            let column = columns.get(at)?;
             let class = column.align.class();
             let cell = (column.draw)(row);
-            if at == 0 {
-                let tabindex = id.is_some().then_some("-1");
-                view! {
-                    <th scope="row" class=class id=id.clone() tabindex=tabindex>
-                        {cell}
-                    </th>
-                }
-                .into_any()
-            } else if let Some((_, _, words)) =
-                watch.as_ref().filter(|(watched, _, _)| *watched == at)
-            {
-                // The mark's words after the cell's own, out of sight, while
-                // the row is marked: its name then says it (1.3.1). The frame
-                // that scrolls holds their box, as it does every out-of-sight
-                // box in a cell.
-                let words = Arc::clone(words);
-                view! {
-                    <td class=class data-cued="">
-                        {cell}
-                        {move || {
-                            unseen
-                                .get()
-                                .then(|| {
-                                    view! {
-                                        {" "}
-                                        <span class="sr-only">{words.to_string()}</span>
-                                    }
-                                })
-                        }}
-                    </td>
-                }
-                .into_any()
-            } else {
-                view! { <td class=class>{cell}</td> }.into_any()
-            }
-        })
-        .collect_view();
+            Some(
+                if let Some((_, words)) = watched.as_ref().filter(|(watched, _)| *watched == at) {
+                    // The mark's words after the cell's own, out of sight, while
+                    // the row is marked: its name then says it (1.3.1). The frame
+                    // that scrolls holds their box, as it does every out-of-sight
+                    // box in a cell.
+                    let words = Arc::clone(words);
+                    view! {
+                        <td class=class data-cued="">
+                            {cell}
+                            {move || {
+                                unseen
+                                    .get()
+                                    .then(|| {
+                                        view! {
+                                            {" "}
+                                            <span class="sr-only">{words.to_string()}</span>
+                                        }
+                                    })
+                            }}
+                        </td>
+                    }
+                    .into_any()
+                } else {
+                    view! { <td class=class>{cell}</td> }.into_any()
+                },
+            )
+        }
+    };
     let arrival = RwSignal::new(Arrival::Settled);
     let line = NodeRef::<leptos::html::Tr>::new();
     let cued = watch.is_some();
@@ -719,14 +891,17 @@ where
             let focused = line
                 .get_untracked()
                 .is_some_and(|line| holds_focus_within(&line));
+            let cue_shown = cue_shown.get_untracked();
+            let seen = rules::seen_as_it_comes(focused, cue_shown);
             // The marks' watchers hear of it only when a row is marked.
             let lights = marks
                 .try_maybe_update(|marks| {
-                    let lights = marks.change(&changed, shown.as_ref(), &now, focused);
-                    (lights && !focused, lights)
+                    let lights = marks.change(&changed, shown.as_ref(), &now, seen);
+                    (lights && !seen, lights)
                 })
                 .unwrap_or_default();
-            if lights {
+            // A hidden column's change lights nothing a cell could explain.
+            if lights && cue_shown {
                 light(arrival);
             }
             now
@@ -756,12 +931,13 @@ where
         <tr
             node_ref=line
             data-cue=state
-            data-unseen=move || unseen.get().then_some("")
+            data-unseen=move || (unseen.get() && cue_shown.get()).then_some("")
             on:transitionend=settle
             on:transitioncancel=settle
             on:focusin=see
         >
-            {cells}
+            {header_cell}
+            <For each=move || placed.get() key=|at| *at children=cell />
         </tr>
     }
     .into_any()
@@ -860,4 +1036,422 @@ fn refocus(element: &web_sys::HtmlElement) {
     if element.is_connected() && fell {
         let _ = element.focus();
     }
+}
+
+/// The columns this browser keeps for the table `id`, as one signal every
+/// table of that id shares, read from the browser's local storage the first
+/// time a page asks. Outside input: [`Layout::from_kept`] reads it.
+fn kept_columns(id: &'static str) -> ArcRwSignal<Option<String>> {
+    KEPT.with(|kept| {
+        kept.borrow_mut()
+            .entry(id)
+            .or_insert_with(|| {
+                ArcRwSignal::new(storage().and_then(|storage| {
+                    storage.get_item(&format!("{KEPT_KEY}{id}")).ok().flatten()
+                }))
+            })
+            .clone()
+    })
+}
+
+/// Keeps `value` as the columns of the table `id` in this browser, or
+/// forgets them for none. A browser that refuses its storage keeps the
+/// choice for as long as the page stays open.
+fn keep_columns(id: &str, value: Option<&str>) {
+    let Some(storage) = storage() else {
+        return;
+    };
+    let key = format!("{KEPT_KEY}{id}");
+    let _ = match value {
+        Some(value) => storage.set_item(&key, value),
+        None => storage.remove_item(&key),
+    };
+}
+
+/// What a table's Columns panel draws from: the table's number, its
+/// [`ColumnsChoice`], the choice kept, the ids and headers of the columns
+/// after the row header's by the caller's place, their layout, and the
+/// `id` of what names the table, which describes the panel's button.
+struct ColumnsPanel {
+    table: u32,
+    choice: ColumnsChoice,
+    kept: ArcRwSignal<Option<String>>,
+    ids: Arc<[&'static str]>,
+    headers: Arc<[String]>,
+    layout: Memo<Layout>,
+    described_by: Signal<Option<String>>,
+}
+
+/// The Columns panel (decision 140): a disclosure button, "Columns",
+/// described by the table's name, and the panel it shows, a list named by
+/// the button with an item for each column after the row header's, in the
+/// table's order, then "Reset columns". Each item has a checkbox that shows
+/// or hides its column and Move buttons that move it a place, unavailable
+/// at the ends, focus staying on the button pressed until its column can't
+/// move that way, then going to the other; a pointer may drag the item by
+/// its handle instead, which a screen reader skips. Each change is said
+/// politely, and kept. Escape closes the panel, focus back on its button,
+/// once no tooltip took it.
+fn columns_panel(panel: ColumnsPanel) -> AnyView {
+    let ColumnsPanel {
+        table,
+        choice: ColumnsChoice { id, localizer },
+        kept,
+        ids,
+        headers,
+        layout,
+        described_by,
+    } = panel;
+    let count = ids.len();
+    let button_id = format!("table-{table}-columns");
+    let panel_id = format!("{button_id}-panel");
+    let open = RwSignal::new(false);
+    let keep = Callback::new(move |next: Layout| {
+        let value = next.to_keep(&ids);
+        keep_columns(id, value.as_deref());
+        kept.set(value);
+    });
+    let header_of = {
+        let headers = Arc::clone(&headers);
+        move |column: usize| headers.get(column).cloned().unwrap_or_default()
+    };
+    let say = {
+        let localizer = Arc::clone(&localizer);
+        Callback::new(
+            move |(message, column, position): (l10n::MessageId, String, usize)| {
+                let as_count = |n: usize| MsgArg::Count(u64::try_from(n).unwrap_or(u64::MAX));
+                reply(
+                    Politeness::Polite,
+                    &text_with(
+                        &localizer,
+                        message,
+                        &[
+                            ("column", MsgArg::Text(column)),
+                            ("position", as_count(position)),
+                            ("count", as_count(count)),
+                        ],
+                    ),
+                );
+            },
+        )
+    };
+    // A column moved: kept, and said with its place now, from 1.
+    let moved = {
+        let header_of = header_of.clone();
+        Callback::new(move |(column, next): (usize, Layout)| {
+            let position = next.position(column).map_or(0, |at| at + 1);
+            keep.run(next);
+            say.run((msg::UI_TABLE_COLUMNS_MOVED, header_of(column), position));
+        })
+    };
+    // A pointer's drag of an item by its handle: the column it holds, and
+    // the gap of the list it stands at.
+    let dragging = RwSignal::new(None::<(usize, i32)>);
+    let gap = RwSignal::new(None::<usize>);
+    let list = NodeRef::<leptos::html::Ul>::new();
+    let item = {
+        let localizer = Arc::clone(&localizer);
+        let button_id = button_id.clone();
+        move |column: usize| {
+            let header = header_of(column);
+            let t = |message, header: &str| {
+                text_with(
+                    &localizer,
+                    message,
+                    &[("column", MsgArg::Text(header.to_owned()))],
+                )
+            };
+            let (up_name, down_name) = (
+                t(msg::UI_TABLE_COLUMNS_MOVE_UP, &header),
+                t(msg::UI_TABLE_COLUMNS_MOVE_DOWN, &header),
+            );
+            let up_id = format!("{button_id}-{column}-up");
+            let down_id = format!("{button_id}-{column}-down");
+            let checked = RwSignal::new(layout.with_untracked(|layout| layout.is_shown(column)));
+            // The box follows the layout (a reset), and the layout the box.
+            Effect::new(move |_| {
+                let shown = layout.with(|layout| layout.is_shown(column));
+                if checked.get_untracked() != shown {
+                    checked.set(shown);
+                }
+            });
+            {
+                let header = header.clone();
+                Effect::watch(
+                    move || checked.get(),
+                    move |shown, _, _| {
+                        let now = layout.get_untracked();
+                        if now.is_shown(column) == *shown {
+                            return;
+                        }
+                        keep.run(now.showing(column, *shown));
+                        let message = if *shown {
+                            msg::UI_TABLE_COLUMNS_SHOWN
+                        } else {
+                            msg::UI_TABLE_COLUMNS_HIDDEN
+                        };
+                        say.run((message, header.clone(), 0));
+                    },
+                    false,
+                );
+            }
+            let step = move |step: Step, pressed: String, other: String| {
+                Callback::new(move |()| {
+                    let now = layout.get_untracked();
+                    if !now.can_move(column, step) {
+                        return;
+                    }
+                    let next = now.moved(column, step);
+                    let to = if next.can_move(column, step) {
+                        pressed.clone()
+                    } else {
+                        other.clone()
+                    };
+                    moved.run((column, next));
+                    // The item moved, and its button lost focus with it.
+                    request_animation_frame(move || {
+                        focus_element(&to);
+                    });
+                })
+            };
+            let up = step(Step::Up, up_id.clone(), down_id.clone());
+            let down = step(Step::Down, down_id.clone(), up_id.clone());
+            let grab = move |event: web_sys::PointerEvent| {
+                // One pointer drags at a time: a second one pressed meanwhile
+                // moves nothing.
+                if event.button() != 0 || dragging.get_untracked().is_some() {
+                    return;
+                }
+                event.prevent_default();
+                // On what the pointer pressed, inside the handle, so its
+                // moves and its release come to the list however far it
+                // goes (the page's delegated listeners make the handle no
+                // `current_target`).
+                if let Some(handle) = event
+                    .target()
+                    .and_then(|handle| handle.dyn_into::<web_sys::Element>().ok())
+                {
+                    let _ = handle.set_pointer_capture(event.pointer_id());
+                }
+                dragging.set(Some((column, event.pointer_id())));
+                gap.set(None);
+            };
+            // Where a drop would place the dragged column: a line before
+            // this item, or after it as the last; none where it stays put.
+            let drop_mark = move || {
+                let (dragged, gap) = (dragging.get()?.0, gap.get()?);
+                layout.with(|layout| {
+                    let from = layout.position(dragged)?;
+                    let at = layout.position(column)?;
+                    if rules::drop_place(from, gap) == from {
+                        None
+                    } else if gap == at {
+                        Some("before")
+                    } else if gap == at + 1 && gap == layout.order().len() {
+                        Some("after")
+                    } else {
+                        None
+                    }
+                })
+            };
+            view! {
+                // Where the panel has room (`@md`, in rem, so larger text
+                // narrows it too), a row of the list's grid
+                // (`grid-cols-subgrid`): every label shares one column and
+                // the Move buttons line up however long a column's name is.
+                // Without that room, as at 320 px with 200 % text, the row
+                // wraps its buttons under the label instead (1.4.10). The
+                // checkbox's own block margin is a form's spacing between
+                // fields; in a list of rows it would open a gap above and
+                // below each, so it goes.
+                <li
+                    class="group relative flex flex-wrap items-center gap-x-1 py-0.5 @md:col-span-4 @md:grid @md:grid-cols-subgrid [&>div]:my-0"
+                    data-drop=drop_mark
+                >
+                    // The drop line: shown only where a drop would land, so
+                    // forced colors, which paint every border drawn, draw
+                    // no other.
+                    <span
+                        aria-hidden="true"
+                        class="pointer-events-none absolute inset-0 hidden border-accent group-data-[drop=before]:block group-data-[drop=before]:border-bs-2 group-data-[drop=after]:block group-data-[drop=after]:border-be-2"
+                    ></span>
+                    <span
+                        data-drag-handle=""
+                        aria-hidden="true"
+                        class="inline-flex min-inline-6 min-block-6 items-center justify-center cursor-grab touch-none text-muted"
+                        on:pointerdown=grab
+                    >
+                        <Icon glyph=LucideGlyph::MoveVertical />
+                    </span>
+                    <Checkbox id=format!("{button_id}-{column}") label=header checked=checked />
+                    <Tooltip tip=Tip::Names(up_name.clone())>
+                        <Button
+                            id=up_id
+                            content=Content::IconOnly {
+                                glyph: LucideGlyph::ArrowUp.into(),
+                                label: up_name.into(),
+                            }
+                            appearance=Appearance::Ghost
+                            size=Size::Small
+                            disabled=Signal::derive(move || {
+                                !layout.with(|layout| layout.can_move(column, Step::Up))
+                            })
+                            on_press=up
+                        />
+                    </Tooltip>
+                    <Tooltip tip=Tip::Names(down_name.clone())>
+                        <Button
+                            id=down_id
+                            content=Content::IconOnly {
+                                glyph: LucideGlyph::ArrowDown.into(),
+                                label: down_name.into(),
+                            }
+                            appearance=Appearance::Ghost
+                            size=Size::Small
+                            disabled=Signal::derive(move || {
+                                !layout.with(|layout| layout.can_move(column, Step::Down))
+                            })
+                            on_press=down
+                        />
+                    </Tooltip>
+                </li>
+            }
+        }
+    };
+    // The list hears the dragging pointer, held by the handle it pressed;
+    // another pointer's moves and release are not the drag's.
+    let held = move |event: &web_sys::PointerEvent| {
+        dragging
+            .get_untracked()
+            .filter(|(_, pointer)| *pointer == event.pointer_id())
+            .map(|(column, _)| column)
+    };
+    let drag = move |event: web_sys::PointerEvent| {
+        if held(&event).is_none() {
+            return;
+        }
+        if let Some(list) = list.get_untracked() {
+            gap.set(Some(rules::gap_at(
+                &middles(&list),
+                f64::from(event.client_y()),
+            )));
+        }
+    };
+    let drop = move |event: web_sys::PointerEvent| {
+        let Some(dragged) = held(&event) else {
+            return;
+        };
+        let at_gap = gap.get_untracked();
+        dragging.set(None);
+        gap.set(None);
+        let Some(at_gap) = at_gap else {
+            return;
+        };
+        let now = layout.get_untracked();
+        let Some(from) = now.position(dragged) else {
+            return;
+        };
+        let to = rules::drop_place(from, at_gap);
+        if to != from {
+            moved.run((dragged, now.moved_to(dragged, to)));
+        }
+    };
+    let cancel = move |event: web_sys::PointerEvent| {
+        if held(&event).is_some() {
+            dragging.set(None);
+            gap.set(None);
+        }
+    };
+    let reset = {
+        let localizer = Arc::clone(&localizer);
+        Callback::new(move |()| {
+            keep.run(Layout::given(count));
+            reply(
+                Politeness::Polite,
+                &text(&localizer, msg::UI_TABLE_COLUMNS_WAS_RESET),
+            );
+        })
+    };
+    // After the window's own listeners: an Escape that hid a tooltip did
+    // its work, as a dialog's does.
+    let close = {
+        let button_id = button_id.clone();
+        move |event: web_sys::KeyboardEvent| {
+            if event.key() != "Escape" || !open.get_untracked() {
+                return;
+            }
+            let button_id = button_id.clone();
+            set_timeout(
+                move || {
+                    if !event.default_prevented() {
+                        open.set(false);
+                        focus_element(&button_id);
+                    }
+                },
+                Duration::ZERO,
+            );
+        }
+    };
+    view! {
+        <div class="@container flex flex-col items-start gap-2 mbe-2" on:keydown=close>
+            <Button
+                id=button_id.clone()
+                content=Content::IconAndText {
+                    glyph: Signal::derive(move || {
+                        if open.get() { LucideGlyph::ChevronUp } else { LucideGlyph::ChevronDown }
+                    }),
+                    label: Signal::stored(text(&localizer, msg::UI_TABLE_COLUMNS)),
+                }
+                appearance=Appearance::Ghost
+                size=Size::Small
+                expanded=open
+                controls=panel_id.clone()
+                described_by=described_by
+                on_press=Callback::new(move |()| open.update(|open| *open = !*open))
+            />
+            // The panel's own box shows (`hidden`); its flex box is inside.
+            <div id=panel_id hidden=move || !open.get() class="border border-muted p-3">
+                <div class="flex flex-col items-start gap-3">
+                    // Preflight takes its markers, and with them Safari's
+                    // list role, which the list's name and count need.
+                    <ul
+                        node_ref=list
+                        role="list"
+                        aria-labelledby=button_id
+                        class="m-0 flex flex-col ps-0 @md:grid @md:grid-cols-[auto_1fr_auto_auto] @md:items-center @md:gap-x-1"
+                        on:pointermove=drag
+                        on:pointerup=drop
+                        on:pointercancel=cancel
+                    >
+                        <For
+                            each=move || layout.with(|layout| layout.order().to_vec())
+                            key=|column| *column
+                            children=item
+                        />
+                    </ul>
+                    <Button
+                        content=Content::Text(
+                            Signal::stored(text(&localizer, msg::UI_TABLE_COLUMNS_RESET)),
+                        )
+                        size=Size::Small
+                        on_press=reset
+                    />
+                </div>
+            </div>
+        </div>
+    }
+    .into_any()
+}
+
+/// The middles of a list's items from the top of the viewport, in their
+/// order, for [`rules::gap_at`].
+fn middles(list: &web_sys::Element) -> Vec<f64> {
+    let items = list.children();
+    (0..items.length())
+        .filter_map(|at| items.item(at))
+        .map(|item| {
+            let rect = item.get_bounding_client_rect();
+            rect.top() + rect.height() / 2.0
+        })
+        .collect()
 }

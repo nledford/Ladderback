@@ -85,6 +85,8 @@ Feature: A row whose status changes stays marked until it is seen
     When I skip to the content
     And I press Tab until focus is on the button "Mark all as seen"
     And I press Tab
+    Then focus is on the button "Columns"
+    When I press Tab
     Then focus is on the region "Operations"
     When I press Shift+Tab until focus is on the button "Mark all as seen"
     And I press Enter
@@ -95,6 +97,30 @@ Feature: A row whose status changes stays marked until it is seen
     And the row "demo-docs" of the table "Operations" doesn't say "Changed, not yet seen" in its "Status" column to a screen reader
     And the row "demo-home" of the table "Operations" doesn't say "Changed, not yet seen" in its "Status" column to a screen reader
     And the page doesn't offer the button "Mark all as seen"
+
+  # A hidden status column marks nothing (decision 140): its mark is its
+  # cell's bold and its word, which go with it. Hiding it sees its marks,
+  # and a change while it is hidden is seen as it comes, so showing it
+  # again brings back no mark for a change the reader couldn't see.
+  Scenario: Hiding the status column sees its marks, and a change while it is hidden marks nothing
+    Given the daemon reports running backups of "demo-home" and "demo-docs"
+    When I open the address "/operations"
+    And the table "Operations" has a row "demo-docs" that shows "Running"
+    And the daemon reports that the backup of "demo-docs" has succeeded with 5 files
+    Then the row "demo-docs" of the table "Operations" is marked as changed, its "Status" in bold and an edge at its start
+    When I skip to the content
+    And I press Tab until focus is on the button "Columns"
+    And I press Enter
+    And I press Tab until focus is on the checkbox "Status"
+    And I press Space
+    Then the row "demo-docs" of the table "Operations" is not marked
+    And the page doesn't offer the button "Mark all as seen"
+    When the daemon reports that the backup of "demo-home" has failed
+    Then the page doesn't offer the button "Cancel demo-home"
+    When I press Space
+    Then the row "demo-home" of the table "Operations" shows "Failed" in its "Status" column
+    And the row "demo-home" of the table "Operations" is not marked
+    And the row "demo-docs" of the table "Operations" is not marked
 
   # Mark all as seen hides itself when its last mark goes without its press:
   # a refusal or the page's unreachable state takes the table's place, and

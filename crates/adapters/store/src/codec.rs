@@ -237,6 +237,7 @@ pub(crate) fn encode_failure(
         ),
         FailureReason::DaemonStopped => ("daemon-stopped", Vec::new(), None),
         FailureReason::DaemonShutDown => ("daemon-shut-down", Vec::new(), None),
+        FailureReason::Superseded => ("superseded", Vec::new(), None),
         FailureReason::NoLocationUsable => ("no-location-usable", Vec::new(), None),
         FailureReason::RestoreTargetUnwritable => ("restore-target-unwritable", Vec::new(), None),
         FailureReason::NoLocationRuleHolds => ("no-location-rule-holds", Vec::new(), None),
@@ -359,6 +360,7 @@ pub(crate) fn decode_failure(
         "engine-exit-timed-out" => Ok(FailureReason::EngineExitTimedOut),
         "daemon-stopped" => Ok(FailureReason::DaemonStopped),
         "daemon-shut-down" => Ok(FailureReason::DaemonShutDown),
+        "superseded" => Ok(FailureReason::Superseded),
         "no-location-usable" => Ok(FailureReason::NoLocationUsable),
         "restore-target-unwritable" => Ok(FailureReason::RestoreTargetUnwritable),
         "no-location-rule-holds" => Ok(FailureReason::NoLocationRuleHolds),
@@ -901,6 +903,22 @@ mod tests {
             Err(bad) => panic!("the written columns decode: {} {}", bad.column, bad.why),
         };
         assert_eq!(back, FailureReason::DaemonStopped);
+    }
+
+    /// A backup that gave way to a newer run of its plan reads back as
+    /// superseded, not as a stopped daemon (#1245).
+    #[test]
+    fn superseded_round_trips() {
+        let columns = encode_failure(&FailureReason::Superseded)
+            .expect("a failure with no arguments encodes");
+        assert_eq!(columns.code, "superseded");
+        assert_eq!(columns.args, "[]");
+        assert_eq!(columns.detail, None);
+        let back = match decode_failure(Some(columns.code), Some(&columns.args), columns.detail) {
+            Ok(reason) => reason,
+            Err(bad) => panic!("the written columns decode: {} {}", bad.column, bad.why),
+        };
+        assert_eq!(back, FailureReason::Superseded);
     }
 
     /// A run the schedule started that was refused for a setting, for each

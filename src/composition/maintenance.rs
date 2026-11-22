@@ -1286,6 +1286,10 @@ mod tests {
                 unavailable_with(ErrorCode::DaemonShutDown, Vec::new(), None),
             ),
             (
+                FailureReason::Superseded,
+                unavailable_with(ErrorCode::Superseded, Vec::new(), None),
+            ),
+            (
                 FailureReason::RestoreTargetUnwritable,
                 unavailable_with(ErrorCode::RestoreTargetUnwritable, Vec::new(), None),
             ),

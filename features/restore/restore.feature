@@ -13,7 +13,8 @@ Feature: Restoring files from a snapshot
   the deadline a backup of its repository has; it can be cancelled, and is
   recorded in the history and announced as other operations are. The
   history names the entry it read, by its path from the snapshot's top, with
-  any secret of the repository in it masked.
+  any secret of the repository in it masked, and where it went: the new
+  folder it wrote into, or in place.
 
   # The untagged scenarios run the restore use case with a scripted engine
   # and a fake clock; the agent's restore folder is
@@ -35,6 +36,18 @@ Feature: Restoring files from a snapshot
     And sign-in is off
     When the person restores "home/docs" of the snapshot, confirming with "3f2a1b4c"
     Then the history names the entry "/home/docs"
+
+  Scenario: The history names the new folder a restore wrote into
+    Given a snapshot "3f2a1b4c" of the host "laptop" in the repository "demo"
+    And sign-in is off
+    When the person restores "home/docs" of the snapshot, confirming with "3f2a1b4c"
+    Then the history says the restore went into the folder "/home/demo/ladderback-restore/laptop-3f2a1b4c-20270115-080000"
+
+  Scenario: The history says a restore over the original files went in place
+    Given a snapshot "3f2a1b4c" of the host "laptop" in the repository "demo"
+    And sign-in is off
+    When the person restores "home/docs" of the snapshot in place, confirming with "3f2a1b4c"
+    Then the history says the restore went in place
 
   Scenario: An entry whose path holds the repository's password is named with the password masked
     Given a snapshot "3f2a1b4c" of the host "laptop" in the repository "demo"
@@ -256,7 +269,7 @@ Feature: Restoring files from a snapshot
     And I press Enter
     Then the polite region comes to contain "Restore of demo-1.txt finished."
     When I open the address "/operations"
-    Then the row "Restore from demo" of the table "Operations" lists "demo-1.txt" in its "Result" column
+    Then the table "Operations" has the row of a restore of "demo-1.txt" from "demo" into a new folder in the agent's restore folder
     And the page has no accessibility violations
 
   @ui

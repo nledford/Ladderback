@@ -14,8 +14,10 @@ import { Then, When } from "@cucumber/cucumber";
 import type { Locator, Page } from "playwright";
 
 import { expect } from "../support/expect.ts";
+import { demoSection } from "../support/gallery.ts";
 import { journey, namePattern, scrollKey } from "../support/keyboard.ts";
 import { patienceMs } from "../support/patience.ts";
+import { dragHandleOf, pointer } from "../support/pointer.ts";
 import type { BrowserWorld } from "../support/world.ts";
 import { rowNamed } from "./live.ts";
 
@@ -395,7 +397,9 @@ async function columnAt(world: BrowserWorld, name: string, column: string): Prom
 async function markOf(world: BrowserWorld, name: string, row: string, column: string): Promise<Mark> {
   const found = rowNamed(world, name, row).first();
   await found.waitFor({ state: "visible", timeout: patienceMs() });
-  const index = await columnAt(world, name, column);
+  // A hidden column has no cell, so nothing of it is bold: only the edge
+  // can mark its row.
+  const index = (await table(world.page, name).locator("thead th").allInnerTexts()).map(headerWords).indexOf(column);
   return found.evaluate((element, at) => {
     const probe = document.createElement("span");
     probe.style.setProperty("forced-color-adjust", "none");
@@ -561,4 +565,112 @@ Then("the page doesn't offer the button {string}", async function (this: Browser
     .getByRole("button", { name: namePattern(name) })
     .first()
     .waitFor({ state: "hidden", timeout: patienceMs() });
+});
+
+Then("the column headers of the table {string} are {string}", async function (this: BrowserWorld, name: string, headers: string) {
+  const found = table(this.page, name).locator("thead th");
+  await expect.poll(async () => (await found.allInnerTexts()).map(headerWords).join(", "), { timeout: patienceMs() }).toBe(headers);
+});
+
+// The button says whether its panel shows (`aria-expanded`), and the panel
+// it controls (`aria-controls`) shows or is hidden with it.
+for (const [state, expanded] of [
+  ["open", "true"],
+  ["closed", "false"],
+] as const) {
+  Then(`the button {string} says its panel is ${state}`, async function (this: BrowserWorld, name: string) {
+    const button = this.page.getByRole("button", { name: namePattern(name) });
+    await expect(button).toHaveAttribute("aria-expanded", expanded);
+    const controls = await button.getAttribute("aria-controls");
+    assert.ok(controls !== null, `the button "${name}" names no panel it controls`);
+    const panel = this.page.locator(`[id="${controls}"]`);
+    if (expanded === "true") await expect(panel).toBeVisible();
+    else await expect(panel).toBeHidden();
+  });
+}
+
+Then(
+  "the Columns panel of the {string} demo lists {string}, each shown",
+  async function (this: BrowserWorld, demo: string, columns: string) {
+    const list = demoSection(this.page, demo).getByRole("list", { name: "Columns", exact: true });
+    const boxes = list.getByRole("listitem").getByRole("checkbox");
+    await expect(boxes).toHaveCount(columns.split(", ").length);
+    for (const [at, column] of columns.split(", ").entries()) {
+      await expect(boxes.nth(at)).toHaveAccessibleName(column);
+      await expect(boxes.nth(at)).toBeChecked();
+    }
+  },
+);
+
+// A Move button at its end of the list says it is unavailable
+// (`aria-disabled`) and stays in the Tab order, never `disabled` nor
+// taken out of it (A1). Focus may be elsewhere: on the button that opened
+// the panel, or on the other Move button it went to. Its name carries the
+// column's words in bidi isolation marks, so it is matched by
+// `namePattern`.
+Then(
+  "the button {string} says it is unavailable, and is not disabled, wherever focus is",
+  async function (this: BrowserWorld, name: string) {
+    const button = this.page.getByRole("button", { name: namePattern(name) });
+    await expect(button).toHaveCount(1);
+    await expect(button).toHaveAttribute("aria-disabled", "true");
+    await expect(button).not.toHaveAttribute("disabled");
+    assert.ok(await button.evaluate((element) => (element as HTMLElement).tabIndex >= 0), `the button "${name}" left the Tab order`);
+  },
+);
+
+/** The item of the Columns panel's list that holds the column `column`. */
+function panelItem(page: Page, column: string): Locator {
+  return page
+    .getByRole("list", { name: "Columns", exact: true })
+    .getByRole("listitem")
+    .filter({ has: page.getByRole("checkbox", { name: column, exact: true }) });
+}
+
+When(
+  "I drag the column {string} by its handle onto the top half of the column {string} in the Columns panel",
+  async function (this: BrowserWorld, dragged: string, onto: string) {
+    await pointer(this.page).dragOntoTopHalf(dragHandleOf(panelItem(this.page, dragged)), panelItem(this.page, onto));
+  },
+);
+
+When(
+  "I hold the column {string} by its handle over the top half of the column {string} in the Columns panel",
+  async function (this: BrowserWorld, dragged: string, onto: string) {
+    await pointer(this.page).holdOverTopHalf(dragHandleOf(panelItem(this.page, dragged)), panelItem(this.page, onto));
+  },
+);
+
+When("I let go of the pointer", async function (this: BrowserWorld) {
+  await pointer(this.page).letGo();
+});
+
+// Where a dragged column would land is a line across the list's item: at
+// its top before it, at its bottom after the last. Every line the panel
+// draws is counted, a border at least 2px wide across nine tenths of an
+// item, of a color that shows: so a border kept transparent elsewhere,
+// which forced colors paints in the text's color, counts too (1.4.11).
+Then("the Columns panel draws one line, before the column {string}", async function (this: BrowserWorld, column: string) {
+  const list = this.page.getByRole("list", { name: "Columns", exact: true });
+  const lines = await list.evaluate((element) =>
+    [...element.children].flatMap((item) => {
+      const width = item.getBoundingClientRect().width;
+      const label = item.querySelector("label")?.textContent?.trim() ?? "";
+      const drawn: string[] = [];
+      for (const part of [item, ...item.querySelectorAll("*")]) {
+        const style = getComputedStyle(part);
+        if (style.display === "none" || style.visibility !== "visible") continue;
+        if (part.getBoundingClientRect().width < width * 0.9) continue;
+        for (const side of ["top", "bottom"] as const) {
+          const shows =
+            Number.parseFloat(style.getPropertyValue(`border-${side}-width`)) >= 2 &&
+            style.getPropertyValue(`border-${side}-style`) !== "none" &&
+            !/^(transparent|rgba\(.*,\s*0\))$/.test(style.getPropertyValue(`border-${side}-color`));
+          if (shows) drawn.push(`${side === "top" ? "before" : "after"} ${label}`);
+        }
+      }
+      return drawn;
+    }),
+  );
+  assert.deepEqual(lines, [`before ${column}`], "the lines the Columns panel draws");
 });

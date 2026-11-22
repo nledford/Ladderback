@@ -22,7 +22,7 @@ use jiff::Timestamp;
 
 pub use template::{MAX_TEMPLATE_BYTES, Template};
 
-use crate::execution::{OperationKind, OperationStatus, Target, WarningKind};
+use crate::execution::{FailureReason, OperationKind, OperationStatus, Target, WarningKind};
 use crate::planning::{InvalidValue, ValueKind, Violation, is_relative_program};
 use crate::secrets::SecretRef;
 use crate::{OperationId, PlanId, RepositoryAlias};
@@ -202,8 +202,18 @@ impl Event {
     /// The event `subject` makes when it ends with `outcome`, at `at`. A
     /// failure's code is the one the operation's status records, and a
     /// failure the log hasn't recorded has none; a success with warnings
-    /// tells the code of each kind of warning, each once.
+    /// tells the code of each kind of warning, each once. A backup that gave
+    /// way to a newer run of its plan never ran and makes no event: the newer
+    /// run tells its own end (#1245).
     pub fn ended(subject: Subject<'_>, outcome: Outcome, at: Timestamp) -> Option<Self> {
+        if matches!(
+            subject.status,
+            OperationStatus::Failed {
+                reason: FailureReason::Superseded
+            }
+        ) {
+            return None;
+        }
         let kind = EventKind::ended(subject.kind, outcome)?;
         let codes = match outcome {
             Outcome::Failed => failed(subject.status),

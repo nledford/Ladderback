@@ -321,6 +321,36 @@ Given("the daemon reports a running check of {string}", function (this: BrowserW
   this.scriptedDaemon = daemon;
 });
 
+Given(
+  "the daemon reports a running restore of {string} from {string} into the folder {string}",
+  function (this: BrowserWorld, entry: string, repository: string, folder: string) {
+    const daemon = new ScriptedDaemon();
+    daemon.addRunningRestore(entry, repository, folder, "2026-11-09T10:00:01Z");
+    this.scriptedDaemon = daemon;
+  },
+);
+
+Given(
+  "the daemon reports a running restore of {string} from {string} in place",
+  function (this: BrowserWorld, entry: string, repository: string) {
+    const daemon = new ScriptedDaemon();
+    daemon.addRunningRestore(entry, repository, null, "2026-11-09T10:00:01Z");
+    this.scriptedDaemon = daemon;
+  },
+);
+
+// A queued backup whose wait for its keyring ended while a newer run of its
+// plan was going: it gave way to that run, and never ran (#1245).
+Given("the daemon reports a backup of {string} that gave way to a newer run of its plan", function (this: BrowserWorld, plan: string) {
+  const daemon = new ScriptedDaemon();
+  daemon.addBackup(plan, "failed", {
+    queuedAt: "2026-11-09T10:00:00Z",
+    finishedAt: "2026-11-09T10:00:55Z",
+    failure: { code: "superseded" },
+  });
+  this.scriptedDaemon = daemon;
+});
+
 Given("the daemon reports running backups of {string} and {string}", function (this: BrowserWorld, first: string, second: string) {
   const daemon = new ScriptedDaemon();
   daemon.addBackup(first, "running", { queuedAt: "2026-11-09T10:00:00Z", startedAt: "2026-11-09T10:00:01Z" });
@@ -471,6 +501,21 @@ When(
     await scripted(this).checkProgressesInStep(repository, stepCode("checking trees"), current, total);
   },
 );
+
+When(
+  "the daemon reports that the restore of {string} is {int} of {int} done",
+  async function (this: BrowserWorld, entry: string, current: number, total: number) {
+    await scripted(this).restoreProgresses(entry, current, total);
+  },
+);
+
+When("the daemon reports that the restore of {string} has failed", async function (this: BrowserWorld, entry: string) {
+  await scripted(this).restoreFails(entry, "2026-11-09T10:05:00Z");
+});
+
+When("the daemon reports that the restore of {string} has succeeded", async function (this: BrowserWorld, entry: string) {
+  await scripted(this).restoreSucceeds(entry, "2026-11-09T10:05:00Z");
+});
 
 // The page's clock, which a Given installed, moves on: its timers that fall
 // due meanwhile run, and what it reads as the time has moved on with them.

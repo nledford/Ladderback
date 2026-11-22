@@ -404,6 +404,7 @@ fn failures() -> Vec<(
             "[]",
             None,
         ),
+        (FailureReason::Superseded, "superseded", "[]", None),
     ]
 }
 

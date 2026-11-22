@@ -216,6 +216,19 @@ fn a_failed_operation_tells_its_stored_code_and_never_its_detail() {
     assert!(!format!("{event:?}").contains("canary-detail-text"));
 }
 
+/// A backup that gave way to a newer run of its plan tells nothing: the
+/// newer run tells its own end, and a healthchecks check isn't failed for a
+/// run that never started (#1245).
+#[test]
+fn a_backup_that_gave_way_to_a_newer_run_is_no_event() {
+    let mut superseded = operation(OperationKind::Backup, Some("home"));
+    superseded.fail(FailureReason::Superseded, at()).unwrap();
+    assert_eq!(
+        Event::ended(subject(&superseded), Outcome::Failed, at()),
+        None
+    );
+}
+
 #[test]
 fn a_started_backup_tells_its_plan_and_a_maintenance_start_is_no_event() {
     let backup = operation(OperationKind::Backup, Some("home"));

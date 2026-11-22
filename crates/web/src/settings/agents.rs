@@ -28,7 +28,7 @@ use crate::components::link::rules::{Destination, LinkTone};
 use crate::components::text_field::{Access, Kind};
 use crate::components::{
     Alert, Button, Fingerprint, Link, RadioGroup, ReviewDialog, StepUp, StepUpField, TextField,
-    focus_element, holds_focus, refusal_alert, say_refusals,
+    focus_element, holds_focus, point_at_refusal, refusal_alert, say_refusals,
 };
 use crate::live::{PageClock, reply};
 use crate::pairing::{AddressWarning, Countdown, life, minutes};
@@ -437,8 +437,9 @@ pub(crate) fn Agents(localizer: Arc<Localizer>, on: bool) -> impl IntoView {
                     Err(_) => problem.set(Some(unanswered(&localizer))),
                 },
                 Some(Posted::Refused(ErrorCode::StepUpFailed, ..)) => {
-                    step_up_error.set(Some(text(&localizer, msg::UI_PAIRING_STEP_UP_FAILED)));
-                    focus_element(STEP_UP_ID);
+                    let words = text(&localizer, msg::UI_PAIRING_STEP_UP_FAILED);
+                    step_up_error.set(Some(words.clone()));
+                    point_at_refusal(STEP_UP_ID, &words);
                 }
                 Some(Posted::Refused(code, args, detail)) => problem.set(Some(refused_sentence(
                     &localizer,
@@ -558,6 +559,7 @@ pub(crate) fn Agents(localizer: Arc<Localizer>, on: bool) -> impl IntoView {
                 step_up=step_up
                 value=confirmation
                 error=step_up_error
+                on_page=true
             />
             <p class=ACTIONS>
                 <Button

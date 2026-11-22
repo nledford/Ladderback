@@ -3,6 +3,8 @@
 //! the label. [`rules`] decides how its box and its mark are drawn, and a
 //! radio's, host-tested; this module is the glue that draws it.
 
+use std::sync::Arc;
+
 use lepticons_data::LucideGlyph;
 use leptos::prelude::*;
 
@@ -32,7 +34,7 @@ use rules::Shape;
 /// announcer or an error summary, and only once the form is checked.
 #[component]
 pub fn Checkbox(
-    id: &'static str,
+    #[prop(into)] id: Arc<str>,
     label: String,
     #[prop(optional)] description: Option<String>,
     #[prop(optional, into)] error: Signal<Option<String>>,
@@ -42,22 +44,29 @@ pub fn Checkbox(
     let has_error = move || error.with(Option::is_some);
     let description = description.map(|text| {
         view! {
-            <p id=description_id(id) class=rules::UNDER_LABEL>
+            <p id=description_id(&id) class=rules::UNDER_LABEL>
                 {text}
             </p>
         }
     });
+    let (described, erred) = (Arc::clone(&id), Arc::clone(&id));
     view! {
         <div class=rules::LINE>
             <span class=rules::CELL>
                 <input
-                    id=id
+                    id=Arc::clone(&id)
                     type="checkbox"
                     class=rules::box_class(Shape::Square)
                     prop:checked=move || checked.get()
                     on:change=move |event| checked.set(event_target_checked(&event))
                     aria-describedby=move || {
-                        described_by(id, has_description, Access::Editable, has_error(), None)
+                        described_by(
+                            &described,
+                            has_description,
+                            Access::Editable,
+                            has_error(),
+                            None,
+                        )
                     }
                     aria-invalid=move || invalid(has_error())
                 />
@@ -74,7 +83,7 @@ pub fn Checkbox(
                     .get()
                     .map(|text| {
                         view! {
-                            <p id=error_id(id) class=rules::ERROR_UNDER_LABEL>
+                            <p id=error_id(&erred) class=rules::ERROR_UNDER_LABEL>
                                 {text}
                             </p>
                         }

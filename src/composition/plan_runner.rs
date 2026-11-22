@@ -456,8 +456,12 @@ impl PlanRunner {
                 // place: it gives way to it.
                 let Ok(place) = self.queue.unless_going(&plan, limit) else {
                     self.registry.finish(&id);
-                    self.end_unrunnable(operation, "a newer run of its plan is going")
-                        .await;
+                    self.end_unrunnable(
+                        operation,
+                        FailureReason::Superseded,
+                        "a newer run of its plan is going",
+                    )
+                    .await;
                     return;
                 };
                 self.spawn_resumed(operation, *built, place, cancel);
@@ -468,7 +472,8 @@ impl PlanRunner {
             }
             Waited::Unrunnable(why) => {
                 self.registry.finish(&id);
-                self.end_unrunnable(operation, &why).await;
+                self.end_unrunnable(operation, FailureReason::DaemonStopped, &why)
+                    .await;
             }
         }
     }
@@ -565,18 +570,21 @@ impl PlanRunner {
         }));
     }
 
-    /// Ends a queued backup that can't run again as failed
-    /// `daemon-stopped`, as decision 40 ended every queued operation, with
-    /// `why` in the log: left queued, it would show as queued with nothing
-    /// to run it until the next start (decision 73). An end the log takes
-    /// is announced, as every end a start makes is (decision 91).
-    async fn end_unrunnable(&self, mut operation: domain::execution::Operation, why: &str) {
+    /// Ends a queued backup that can't run again as failed with `reason`,
+    /// with `why` in the log: `daemon-stopped`, as decision 40 ended every
+    /// queued operation, or `superseded` when it gave way to a newer run of
+    /// its plan (decision 135). Left queued, it would show as queued with
+    /// nothing to run it until the next start (decision 73). An end the log
+    /// takes is announced, as every end a start makes is (decision 91).
+    async fn end_unrunnable(
+        &self,
+        mut operation: domain::execution::Operation,
+        reason: FailureReason,
+        why: &str,
+    ) {
         let hyphenated = operation.id().as_uuid().hyphenated();
         log::warn!("the queued backup {hyphenated} can't run again, and ends as failed: {why}");
-        if operation
-            .fail(FailureReason::DaemonStopped, SystemClock.now())
-            .is_err()
-        {
+        if operation.fail(reason, SystemClock.now()).is_err() {
             return;
         }
         match self.store.save(&operation, None).await {
@@ -956,7 +964,8 @@ impl PlanRuns for PlanRunner {
             // the next start (decision 73). An end the log took is announced,
             // as every end a start makes is (decision 91).
             Err(why) => {
-                self.end_unrunnable(operation, &why).await;
+                self.end_unrunnable(operation, FailureReason::DaemonStopped, &why)
+                    .await;
             }
         }
     }

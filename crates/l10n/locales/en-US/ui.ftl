@@ -1374,6 +1374,64 @@ ui-operation-failed =
        *[other] Operation failed.
     }
 
+# The row header of a restore the log kept the entry and the target of: the
+# entry it restored, the repository it read and where it went (#813).
+# $entry (text): the entry's path in the snapshot, such as /home/docs. It is shown as it came.
+# $repository (text): the repository's alias. It is shown as it came.
+# $to (text): in-place when the restore wrote over the entry's original path, or folder when it wrote into a new folder.
+# $folder (text): the new folder's path, for folder only. It is shown as it came.
+ui-operation-restore-of =
+    { $to ->
+        [in-place] In-place restore of { $entry } from { $repository }
+       *[folder] Restore of { $entry } from { $repository } to { $folder }
+    }
+
+# The button that cancels a running or queued restore the log kept the entry
+# and the target of, named as its row is (ui-operation-restore-of). It begins
+# with ui-cancel.
+# $entry (text): the entry's path in the snapshot. It is shown as it came.
+# $repository (text): the repository's alias. It is shown as it came.
+# $to (text): in-place or folder, as for ui-operation-restore-of.
+# $folder (text): the new folder's path, for folder only. It is shown as it came.
+ui-cancel-operation-restore-of =
+    { $to ->
+        [in-place] Cancel the in-place restore of { $entry } from { $repository }
+       *[folder] Cancel the restore of { $entry } from { $repository } to { $folder }
+    }
+
+# Announced politely on the Operations page when a restore it watched, which
+# the log kept the entry and the target of, ended well, warnings or not.
+# $entry (text): the entry's path in the snapshot. It is shown as it came.
+# $to (text): in-place or folder, as for ui-operation-restore-of.
+# $folder (text): the new folder's path, for folder only. It is shown as it came.
+ui-operation-restore-finished =
+    { $to ->
+        [in-place] In-place restore of { $entry } finished.
+       *[folder] Restore of { $entry } to { $folder } finished.
+    }
+
+# Announced politely on the Operations page when a restore it watched, which
+# the log kept the entry and the target of, was cancelled.
+# $entry (text): the entry's path in the snapshot. It is shown as it came.
+# $to (text): in-place or folder, as for ui-operation-restore-of.
+# $folder (text): the new folder's path, for folder only. It is shown as it came.
+ui-operation-restore-cancelled =
+    { $to ->
+        [in-place] In-place restore of { $entry } cancelled.
+       *[folder] Restore of { $entry } to { $folder } cancelled.
+    }
+
+# Announced assertively on the Operations page when a restore it watched,
+# which the log kept the entry and the target of, ended badly.
+# $entry (text): the entry's path in the snapshot. It is shown as it came.
+# $to (text): in-place or folder, as for ui-operation-restore-of.
+# $folder (text): the new folder's path, for folder only. It is shown as it came.
+ui-operation-restore-failed =
+    { $to ->
+        [in-place] In-place restore of { $entry } failed.
+       *[folder] Restore of { $entry } to { $folder } failed.
+    }
+
 # One fact of a finished backup's result: the snapshot it wrote, by the first
 # 8 hex digits of its ID, as rustic names a snapshot.
 # $snapshot (text): those digits. They are shown as they came.
@@ -1554,6 +1612,18 @@ ui-operation-progress =
         [restore] Restore progress
         [download] Download progress
        *[other] Operation progress
+    }
+
+# The name of a running restore's progress bar when the log kept its entry
+# and its target, as its row is named (ui-operation-restore-of).
+# $entry (text): the entry's path in the snapshot. It is shown as it came.
+# $repository (text): the repository's alias. It is shown as it came.
+# $to (text): in-place or folder, as for ui-operation-restore-of.
+# $folder (text): the new folder's path, for folder only. It is shown as it came.
+ui-operation-progress-restore-of =
+    { $to ->
+        [in-place] In-place restore progress of { $entry } from { $repository }
+       *[folder] Restore progress of { $entry } from { $repository } to { $folder }
     }
 
 # What a screen reader reads as the value of a progress bar that shows a
@@ -2426,6 +2496,44 @@ ui-mark-all-seen = Mark all as seen
 # and the reader hasn't seen yet, as a mark it carries; never shown. It
 # reads on its own, after the cell's own words ("Failed").
 ui-table-cue-unseen = Changed, not yet seen
+
+# The button before a table that opens and closes its Columns panel, where
+# the reader hides, shows and reorders the table's columns. The panel's
+# list of columns is named by it too.
+ui-table-columns = Columns
+
+# The Columns panel's button that moves a column one place toward the
+# start of the table, shown as an arrow; its name.
+# $column (text): the column's header, as the table shows it.
+ui-table-columns-move-up = Move { $column } up
+
+# The Columns panel's button that moves a column one place toward the end
+# of the table, shown as an arrow; its name.
+# $column (text): the column's header, as the table shows it.
+ui-table-columns-move-down = Move { $column } down
+
+# The Columns panel's button that shows every column again, in the order
+# the page gives them.
+ui-table-columns-reset = Reset columns
+
+# Said politely, once, when the reader hides a column in the Columns panel.
+# $column (text): the column's header, as the table shows it.
+ui-table-columns-hidden = { $column } hidden.
+
+# Said politely, once, when the reader shows a hidden column again in the
+# Columns panel.
+# $column (text): the column's header, as the table shows it.
+ui-table-columns-shown = { $column } shown.
+
+# Said politely, once, when the reader moves a column in the Columns panel,
+# by a Move button or by dragging it.
+# $column (text): the column's header, as the table shows it.
+# $position (number): its place in the panel's list now, from 1.
+# $count (number): how many columns the list holds.
+ui-table-columns-moved = { $column } moved to position { $position } of { $count }.
+
+# Said politely, once, when "Reset columns" is pressed.
+ui-table-columns-was-reset = Columns reset: every column shown, in the order given.
 
 # Said politely, once, when "Mark all as seen" is pressed.
 # $count (number): how many rows it marked as seen.
