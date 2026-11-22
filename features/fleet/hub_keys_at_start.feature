@@ -17,3 +17,13 @@ Feature: The hub's keys at its first start
     When the hub starts
     Then the hub doesn't start, and says its hub key file holds no key it can use
     And the hub key file still holds what it held
+
+  @e2e
+  Scenario: A hub whose hub key file is gone while a machine is paired starts and makes no new key
+    Given a hub with a pairing token made at its terminal
+    And the hub is serving on loopback
+    And a machine named "e2e-laptop" paired with the token from its terminal
+    And the hub's hub key file is lost
+    When the hub restarts on the same address
+    Then the hub makes no new hub key
+    And the hub's log says its hub key file is missing and to restore it from a backup

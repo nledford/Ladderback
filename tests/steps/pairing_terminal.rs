@@ -934,14 +934,20 @@ async fn plain_daemon_starts(agent: &mut Agent) {
 fn hub_keys_made(agent: &mut Agent) {
     let data = testkit::daemon::data_dir(&hub_root(agent));
     for name in HUB_KEY_FILES {
-        assert!(data.join(name).is_file(), "no {name} in {}", data.display());
+        let file = data.join(name);
+        let held = std::fs::read(&file).unwrap_or_else(|error| panic!("{name}: {error}"));
+        assert!(!held.is_empty(), "{name} in {} is empty", data.display());
     }
 }
 
 #[then("the machine's data folder holds no hub key, no recovery key and no recovery seed")]
 fn no_hub_keys_made(agent: &mut Agent) {
     let data = testkit::daemon::data_dir(&other_hub_root(agent));
-    assert!(data.is_dir(), "the machine never started: {}", data.display());
+    assert!(
+        data.is_dir(),
+        "the machine never started: {}",
+        data.display()
+    );
     for name in HUB_KEY_FILES {
         assert!(!data.join(name).exists(), "{name} in {}", data.display());
     }
@@ -995,5 +1001,33 @@ fn hub_key_file_unchanged(agent: &mut Agent) {
     assert_eq!(
         std::fs::read_to_string(&file).expect("the hub key file"),
         NOT_A_KEY
+    );
+}
+
+#[given("the hub's hub key file is lost")]
+fn hub_key_lost(agent: &mut Agent) {
+    let key = testkit::daemon::data_dir(&hub_root(agent)).join("hub-key");
+    std::fs::remove_file(&key).unwrap_or_else(|error| panic!("{}: {error}", key.display()));
+}
+
+#[then("the hub makes no new hub key")]
+fn no_new_hub_key(agent: &mut Agent) {
+    let key = testkit::daemon::data_dir(&hub_root(agent)).join("hub-key");
+    assert!(!key.exists(), "a new hub key was made");
+}
+
+#[then("the hub's log says its hub key file is missing and to restore it from a backup")]
+fn log_says_hub_key_missing(agent: &mut Agent) {
+    let log = agent
+        .pairing_terminal
+        .hub_log
+        .as_ref()
+        .expect("a hub's log");
+    let text = std::fs::read_to_string(log).expect("the hub's log");
+    assert!(
+        text.contains("hub-key")
+            && text.contains("is missing while machines are registered")
+            && text.contains("restore it from your backup"),
+        "{text}"
     );
 }

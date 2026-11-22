@@ -58,8 +58,8 @@ pub enum HubStep {
 
 impl HubPairing {
     /// A session on a connection whose `tls-exporter` value is `exporter`,
-    /// `None` on any but the hub's own TLS. The hub's keys are read, or
-    /// made the first time, once per connection.
+    /// `None` on any but the hub's own TLS. The hub's keys are read once
+    /// per connection; they were made at the hub's start ([`Self::start`]).
     pub async fn session(
         &self,
         exporter: Option<[u8; KEY_BYTES]>,
