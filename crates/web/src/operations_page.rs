@@ -482,7 +482,7 @@ fn operations_table(
             text(localizer, msg::UI_SORT_BY_STARTED),
             text(localizer, msg::UI_SORTED_OLDEST),
             text(localizer, msg::UI_SORTED_NEWEST),
-            |row: &OperationRow| SortKey::Text(key(row).to_owned()),
+            sort_key,
         )
         .descending_first(),
     );
@@ -770,9 +770,8 @@ fn badge_of(localizer: &Localizer, status: &str) -> (BadgeState, String) {
     }
 }
 
-/// The order a row's life is told by: the instant its `Started` cell shows,
-/// which for a queued run is the instant it was queued. As RFC 3339 in UTC it
-/// orders as its bytes do.
+/// The instant a row's `Started` cell shows, as the daemon wrote it: when it
+/// started, or for a queued run when it was queued.
 fn key(row: &OperationRow) -> &str {
     row.summary
         .started_at
@@ -785,8 +784,11 @@ fn key(row: &OperationRow) -> &str {
 /// the seconds when two times differ in precision or offset (#138). A time
 /// that can't be read sorts before every other.
 fn sort_key(row: &OperationRow) -> SortKey {
-    let _ = row;
-    todo!()
+    SortKey::Instant(
+        key(row)
+            .parse::<jiff::Timestamp>()
+            .unwrap_or(jiff::Timestamp::MIN),
+    )
 }
 
 /// A status as the badge and the label show it: which state, and which

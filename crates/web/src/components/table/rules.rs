@@ -116,36 +116,41 @@ pub type SortBy<'a, R> = (Direction, &'a dyn Fn(&R) -> SortKey);
 /// The keys of `rows` in the order the table shows them: the order given,
 /// or, sorted `by` a direction and a column's sort key, that order, rows
 /// whose keys tie keeping the order given (a stable sort), whichever way it
-/// runs. Each row's sort key is read once.
-pub fn order<R, K>(rows: &[R], key: impl Fn(&R) -> K, by: Option<SortBy<'_, R>>) -> Vec<K> {
-    let Some((direction, sort_key)) = by else {
-        return rows.iter().map(key).collect();
-    };
-    let mut keyed: Vec<(SortKey, usize)> = rows
-        .iter()
-        .enumerate()
-        .map(|(at, row)| (sort_key(row), at))
-        .collect();
-    // The position given breaks a tie, ascending whichever way the keys run.
-    keyed.sort_by(|(a, at_a), (b, at_b)| {
-        let by_key = match direction {
-            Direction::Ascending => a.cmp(b),
-            Direction::Descending => b.cmp(a),
-        };
-        by_key.then(at_a.cmp(at_b))
+/// runs. A key given again is dropped, its first row kept, since the rows
+/// come from the daemon and a keyed list given one key twice panics in the
+/// browser (#138). Each row's sort key is read once.
+pub fn order<R, K: Clone + Eq + Hash>(
+    rows: &[R],
+    key: impl Fn(&R) -> K,
+    by: Option<SortBy<'_, R>>,
+) -> Vec<K> {
+    let mut seen = HashSet::with_capacity(rows.len());
+    let firsts = rows.iter().filter_map(|row| {
+        let key = key(row);
+        seen.insert(key.clone()).then_some((row, key))
     });
-    keyed
-        .into_iter()
-        .filter_map(|(_, at)| rows.get(at).map(&key))
-        .collect()
+    let Some((direction, sort_key)) = by else {
+        return firsts.map(|(_, key)| key).collect();
+    };
+    let mut keyed: Vec<(SortKey, K)> = firsts.map(|(row, key)| (sort_key(row), key)).collect();
+    // A stable sort: rows whose keys tie keep the order given, whichever way
+    // the keys run.
+    keyed.sort_by(|(a, _), (b, _)| match direction {
+        Direction::Ascending => a.cmp(b),
+        Direction::Descending => b.cmp(a),
+    });
+    keyed.into_iter().map(|(_, key)| key).collect()
 }
 
 /// Where each key of `rows` first stands in them: a key given twice is the
 /// first row's, the row the table shows ([`order`]), so its cells read that
 /// row (#138).
 pub fn positions<R, K: Eq + Hash>(rows: &[R], key: impl Fn(&R) -> K) -> HashMap<K, usize> {
-    let _ = (rows, key);
-    todo!()
+    let mut positions = HashMap::with_capacity(rows.len());
+    for (at, row) in rows.iter().enumerate() {
+        positions.entry(key(row)).or_insert(at);
+    }
+    positions
 }
 
 /// Where the rows a table shows stand, as its caller knows it.

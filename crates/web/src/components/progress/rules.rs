@@ -299,14 +299,15 @@ pub(crate) fn wait_for(due: Duration, now: Duration) -> Duration {
 }
 
 /// What `progress` tells, with the time `left` when it has a total, and
-/// when its run was heard of when it has none.
+/// when its run was heard of when it has none. A count past its total is
+/// told as the total, as `percent` holds it (#138).
 fn told_of(progress: &Progress, left: Option<Left>) -> Told {
     let measure = progress
         .total
         .zip(percent(progress.current, progress.total))
         .map(|(total, percent)| Measure {
             percent,
-            current: progress.current,
+            current: progress.current.min(total),
             total,
             unit: progress.unit,
             left,
