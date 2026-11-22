@@ -1022,8 +1022,15 @@ async fn tidy_workers_cache(dir: &std::path::Path, recorded: Recorded) {
     .await;
     match tidied {
         Ok(tidying) => log_tidying(&tidying),
-        Err(error) => log::warn!("the cache folder {} was not tidied: {error}", dir.display()),
+        Err(ended) => log::warn!("{}", untidied_line(dir, &ended)),
     }
+}
+
+/// The log line for a tidying task that ended without a result: how it
+/// ended, never a panic's message (I4).
+fn untidied_line(dir: &std::path::Path, ended: &tokio::task::JoinError) -> String {
+    let _ = (dir, ended);
+    todo!()
 }
 
 /// Says in the log what tidying the cache removed, and what it couldn't.
@@ -1254,4 +1261,22 @@ pub(super) fn daemon_resolve(
     ResolveRepository::new(secrets)
         .telling(Arc::new(log_secret_warning))
         .waiting_for_keyring(app::secrets::KeyringWait::new(clock, started))
+}
+
+#[cfg(test)]
+mod untidied_tests {
+    use super::untidied_line;
+
+    #[tokio::test]
+    async fn a_panicked_tidying_is_logged_without_its_message() {
+        let ended = tokio::task::spawn_blocking(|| -> () { panic!("canary-1384-secret") })
+            .await
+            .expect_err("the task panics");
+        let line = untidied_line(std::path::Path::new("/cache"), &ended);
+        assert!(!line.contains("canary-1384-secret"), "{line}");
+        assert_eq!(
+            line,
+            "the cache folder /cache was not tidied: the tidying panicked"
+        );
+    }
 }
