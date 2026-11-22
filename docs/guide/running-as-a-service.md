@@ -1,6 +1,6 @@
 # Running as a service
 
-[Install](install.md#start-ladderback) starts Ladderback with `ladderback install-service`. This page says what that service is, how it restarts and stops, how to run Ladderback in a terminal instead, and what macOS's keychain and code signing ask of an update.
+[Install](install.md#start-ladderback) starts Ladderback with `ladderback install-service`. This page says what that service is, how it restarts and stops, how to run Ladderback in a terminal instead, how to give the service a proxy, and what macOS's keychain and code signing ask of an update.
 
 ## Running it in a terminal
 
@@ -13,6 +13,73 @@ To run it in the background instead, from each login on, run `ladderback install
 **Restart Ladderback** in Settings restarts the service, now or once the running operations finish, and the page reloads once it is back (systemd waits 10 seconds before it starts the service again). A service installed by an earlier version can't be restarted from there: run `ladderback install-service` again first.
 
 If the service stops without its service manager asking it to, after a crash or a `kill` from another program, the manager starts it again: systemd after 10 seconds, launchd within 10 seconds. So a `kill` doesn't stop it, nor free its data folder for another `ladderback serve`. To stop it until your next login, run `systemctl --user stop ladderback` on Linux or `launchctl bootout gui/$(id -u)/io.github.nledford.ladderback` on macOS. A service installed by an earlier version stays stopped after another program's `kill`: run `ladderback install-service` again.
+
+## Behind a proxy
+
+Ladderback reaches cloud repositories, notification services and the update check through the proxy the standard variables name, never your system's proxy settings: `HTTPS_PROXY`, `HTTP_PROXY` and `ALL_PROXY`, with `NO_PROXY` for the hosts it reaches directly, in upper or lower case. Set `HTTPS_PROXY` rather than `ALL_PROXY` alone: rclone, which reaches some repositories, reads only the other three. `ladderback serve` in a terminal takes them from your shell. The service doesn't: `install-service` writes nothing of your environment into the service file, so that no secret lands in it, and writes the file afresh each time it runs. On a machine that reaches the internet only through a proxy, give the variables to the service manager instead, in a place `install-service` leaves alone, as below.
+
+### Linux
+
+Run `systemctl --user edit ladderback`. It opens an editor on an override file for the service: type the variables between the two comment lines at the top and save, then restart the service.
+
+```ini
+[Service]
+Environment=HTTPS_PROXY=http://proxy.example.com:3128
+Environment=HTTP_PROXY=http://proxy.example.com:3128
+Environment=NO_PROXY=localhost,127.0.0.1,nas.example.com
+```
+
+```sh
+systemctl --user restart ladderback
+```
+
+systemd keeps the override in `~/.config/systemd/user/ladderback.service.d/override.conf`, and `install-service` leaves it there, so it outlasts updates; `remove-service` leaves it too. `systemctl --user show -p Environment ladderback` lists the variables the service starts with; the running process itself keeps its environment from being read under `/proc`, even by you. `systemctl --user revert ladderback` removes the override; restart the service after that too.
+
+### macOS
+
+`install-service` writes the launchd agent's file afresh each time, so a variable written into it lasts only until the next `install-service`. Set the variables in launchd instead, which hands them to every program it starts for you from then on, Ladderback included, then restart the service so it takes them:
+
+```sh
+launchctl setenv HTTPS_PROXY 'http://proxy.example.com:3128'
+launchctl setenv HTTP_PROXY 'http://proxy.example.com:3128'
+launchctl setenv NO_PROXY 'localhost,127.0.0.1,nas.example.com'
+launchctl kickstart -k gui/$(id -u)/io.github.nledford.ladderback
+```
+
+`kickstart -k` stops a running backup; **Restart Ladderback** in Settings can wait for it instead. The variables outlast `install-service`, a restart from Settings and launchd starting the service again after a crash, but not logging out or restarting the Mac. `launchctl getenv HTTPS_PROXY` prints what launchd holds, and `launchctl print gui/$(id -u)/io.github.nledford.ladderback` lists the variables under `inherited environment`. `launchctl unsetenv HTTPS_PROXY`, then a restart, takes one away.
+
+To set them at each login, add a launch agent of your own that sets them and restarts Ladderback, under a label of yours, such as `~/Library/LaunchAgents/local.proxy-environment.plist`:
+
+```xml
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+	<key>Label</key>
+	<string>local.proxy-environment</string>
+	<key>ProgramArguments</key>
+	<array>
+		<string>/bin/sh</string>
+		<string>-c</string>
+		<string>launchctl setenv HTTPS_PROXY 'http://proxy.example.com:3128'; launchctl setenv HTTP_PROXY 'http://proxy.example.com:3128'; launchctl setenv NO_PROXY 'localhost,127.0.0.1,nas.example.com'; launchctl kickstart -k gui/$(id -u)/io.github.nledford.ladderback</string>
+	</array>
+	<key>RunAtLoad</key>
+	<true/>
+</dict>
+</plist>
+```
+
+`launchctl bootstrap gui/$(id -u) ~/Library/LaunchAgents/local.proxy-environment.plist` runs it now, and launchd runs it at each login after that; `install-service` and `remove-service` don't touch it. launchd starts it and Ladderback in no set order, so at a login Ladderback may start before the variables are set, and the restart then stops any backup it has begun. A `proxy` setting in Ladderback's own configuration ([#1420](https://github.com/nledford/Ladderback/issues/1420)) is planned to do without both. To undo it, run `launchctl bootout gui/$(id -u)/local.proxy-environment` and delete the file.
+
+### A password in the proxy URL
+
+A proxy that asks for a password takes it in the URL: `http://name:password@proxy.example.com:3128`. Percent-encode every character of the name and password but letters, digits and `-._~` (`@` as `%40`), and in the systemd override write each `%` as `%%`: systemd reads `%` as the start of a specifier, and otherwise drops the line, with only a line in its journal, or changes the password. Ladderback passes the URL as it is to its workers and the programs they start, such as rclone, and masks the password and the whole `name:password`, as written and decoded, wherever their output shows them, as it does a repository's password ([technical design §10.2](https://github.com/nledford/Ladderback/blob/main/docs/design/security.md#102-repository-secrets), "A proxy URL with credentials embedded"). Unlike a repository's password, it can't come from the keyring or a file: Ladderback reads the URL from the environment as it is.
+
+The password then lives as plain text where you put it, readable by you and every program running as you. On Linux that is the override file, which `systemctl --user edit` saves with mode 0644, readable by anyone who can reach its folder: before you first save one, run `mkdir -p -m 700 ~/.config/systemd/user/ladderback.service.d`, and again after a `revert`, which deletes the folder. On macOS it is in the environment of every program launchd starts for you until you log out, your apps and terminals included, in your launch agent's file under `~/Library`, which only you can open, and in your shell's history. `systemctl --user show -p Environment` and `launchctl getenv` print it too: leave it out when you share their output.
+
+### Checking that it works
+
+Once the service has restarted with the variables, test a cloud repository through it: on the **Repositories** page, fill in **Test, connect or create a repository** with the repository's **Location** and password, and press **Test the repository**. The proxy's own log shows the connection to the repository's host; when the proxy refuses it, the test fails with a connection error. The update check isn't a quick test: after a restart it asks a day after its last check, and never sooner than 5 minutes after the start.
 
 ## Updating without interrupting a backup
 
