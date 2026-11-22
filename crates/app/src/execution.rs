@@ -127,6 +127,22 @@ pub struct Finished {
     pub stats_failed: Option<crate::stats::StatsError>,
 }
 
+/// How many times the end of a backup the log held as queued is written
+/// again when the log refuses it ([`RunOperation::end_resumed`]).
+pub const END_WRITE_RETRIES: u32 = 3;
+
+/// How long [`RunOperation::end_resumed`] waits before it writes a refused
+/// end again.
+pub const END_WRITE_SPACING: SignedDuration = SignedDuration::from_secs(15);
+
+/// How [`RunOperation::end_resumed`] ended a backup the log held as queued:
+/// the operation as it ended, and whether the log took the end.
+#[derive(Debug)]
+pub struct ResumedEnd {
+    pub finished: Finished,
+    pub written: bool,
+}
+
 /// A run in progress.
 struct Run {
     operation: Operation,
@@ -260,12 +276,18 @@ impl RunOperation {
         }
     }
 
-    /// Ends `operation`, a backup the log held as queued when the daemon
-    /// stopped, failed with `reason`: the next start took it up again (decision
-    /// 73) and its start was refused before anything ran (§5). One write, of
-    /// the end, then the news that it failed, as [`Self::refused`]. No hook
-    /// runs and the engine is never asked.
-    pub async fn refuse_resumed(&self, operation: Operation, reason: FailureReason) -> Finished {
+    /// Ends `operation`, a backup the log held as queued, failed with
+    /// `reason`: the next start took it up again (decision 73) and its
+    /// start was refused before anything ran (§5), or it can't run again
+    /// (decision 135). One write, of the end, written again up to
+    /// [`END_WRITE_RETRIES`] times, [`END_WRITE_SPACING`] apart, while the
+    /// log refuses it: left unwritten, the backup would show as queued with
+    /// nothing to run or cancel it until the next start (#1250). Then the
+    /// news that it failed, as [`Self::refused`], once the log took the
+    /// end: one it never takes stays queued, and the next start ends and
+    /// announces it then, so it is announced once (#522). No hook runs and
+    /// the engine is never asked.
+    pub async fn end_resumed(&self, operation: Operation, reason: FailureReason) -> ResumedEnd {
         let mut run = Run {
             operation,
             result: None,
@@ -273,14 +295,40 @@ impl RunOperation {
             stopped_by_hook: false,
         };
         self.fail(&mut run, reason);
-        self.record(&mut run).await;
-        announce_end(self.events.as_deref(), &run.operation).await;
-        Finished {
-            operation: run.operation,
-            result: None,
-            recording_errors: run.recording_errors,
-            stats_failed: None,
+        let written = self.record_end(&mut run).await;
+        if written {
+            announce_end(self.events.as_deref(), &run.operation).await;
         }
+        ResumedEnd {
+            finished: Finished {
+                operation: run.operation,
+                result: None,
+                recording_errors: run.recording_errors,
+                stats_failed: None,
+            },
+            written,
+        }
+    }
+
+    /// Writes `run`'s end, and again, as [`Self::end_resumed`] says, while
+    /// the log refuses it; each refusal is one of `run`'s recording
+    /// errors. Whether the log took it.
+    async fn record_end(&self, run: &mut Run) -> bool {
+        for retry in 0..=END_WRITE_RETRIES {
+            if retry > 0 {
+                let again_at = self
+                    .clock
+                    .now()
+                    .checked_add(END_WRITE_SPACING)
+                    .unwrap_or(domain::Timestamp::MAX);
+                self.clock.sleep_until(again_at).await;
+            }
+            match save_within_bound(&*self.clock, &*self.store, &run.operation, None).await {
+                Ok(()) => return true,
+                Err(error) => run.recording_errors.push(error),
+            }
+        }
+        false
     }
 
     /// Runs the job of an operation [`Self::queue`] recorded, as
@@ -348,7 +396,7 @@ impl RunOperation {
     /// Ends `operation`, a backup the log held as queued when the daemon
     /// stopped, cancelled before it ran: its start waited for its keyring
     /// to be unlocked, and a cancel came first (#1221). One write, of the
-    /// end, then the news, as [`Self::refuse_resumed`]. No hook runs and
+    /// end, then the news, as [`Self::end_resumed`]. No hook runs and
     /// the engine is never asked.
     pub async fn cancel_resumed(&self, operation: Operation) -> Finished {
         self.end_cancelled(Run {

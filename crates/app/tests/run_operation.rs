@@ -1763,8 +1763,9 @@ async fn a_resumed_backup_refused_before_it_runs_is_written_once_as_failed_and_a
         store.clone(),
     )
     .with_events(bus)
-    .refuse_resumed(queued, reason.clone())
-    .await;
+    .end_resumed(queued, reason.clone())
+    .await
+    .finished;
 
     let failed = OperationStatus::Failed { reason };
     assert_eq!(finished.operation.id(), id());
@@ -1793,4 +1794,121 @@ async fn a_resumed_backup_refused_before_it_runs_is_written_once_as_failed_and_a
         ),
         "{heard:?}"
     );
+}
+
+/// A backup left queued, refused for a secret.
+fn refused_queued_backup() -> (Operation, FailureReason) {
+    let queued = Operation::queue(
+        id(),
+        OperationKind::Backup,
+        Trigger::Schedule,
+        Target {
+            plan: Some(domain::PlanId::parse("home").unwrap()),
+            repository: None,
+        },
+        t(1),
+    );
+    let reason = FailureReason::SecretRefused {
+        field: "password".to_owned(),
+        refusal: domain::execution::refusal::SettingRefusal::SecretMissing {
+            source: "/srv/demo-password".to_owned(),
+        },
+    };
+    (queued, reason)
+}
+
+/// The end of a backup left queued that the log refuses at first is
+/// written again, `END_WRITE_SPACING` apart, until the log takes it, and
+/// announced once, after the write that took (#1250): left unwritten, it
+/// would show as queued with nothing to run or cancel it.
+#[tokio::test]
+async fn a_resumed_backups_end_the_log_refuses_at_first_is_written_again_and_announced_once() {
+    use app::event_bus::BroadcastEventBus;
+    use app::execution::END_WRITE_SPACING;
+    use app::ports::{Clock, EventBus};
+
+    let store = Arc::new(Flaky::refusing(
+        2,
+        StoreError::Unavailable {
+            detail: "the database is locked".to_owned(),
+        },
+    ));
+    let clock = Arc::new(FakeClock::auto_advancing(t(9)));
+    let bus = Arc::new(BroadcastEventBus::new());
+    let mut page = bus.subscribe().await;
+    let (queued, reason) = refused_queued_backup();
+
+    let ended = RunOperation::new(
+        Arc::new(NeverAsked::default()),
+        clock.clone(),
+        store.clone(),
+    )
+    .with_events(bus)
+    .end_resumed(queued, reason.clone())
+    .await;
+
+    assert!(ended.written, "the log took the end");
+    assert_eq!(ended.finished.recording_errors.len(), 2);
+    assert_eq!(store.writes.load(Ordering::SeqCst), 3, "three writes");
+    assert_eq!(
+        clock.now(),
+        t(9) + END_WRITE_SPACING + END_WRITE_SPACING,
+        "each write again waited its spacing"
+    );
+    let kept = store
+        .inner
+        .get(id())
+        .await
+        .unwrap()
+        .expect("the end is kept");
+    assert_eq!(kept.record.status, OperationStatus::Failed { reason });
+    assert_eq!(ended.finished.operation.finished_at(), Some(t(9)));
+    assert!(
+        matches!(
+            page.next().now_or_never().flatten(),
+            Some(api::UiEvent::OperationFailed { .. })
+        ),
+        "the end is announced"
+    );
+    assert!(
+        page.next().now_or_never().is_none(),
+        "the end is announced once"
+    );
+}
+
+/// The end of a backup left queued that the log never takes is not
+/// announced: the operation stays queued for the next start, which ends
+/// and announces it then, so it is announced once (#522). The log is
+/// asked `END_WRITE_RETRIES` times more, then given up on (#1250).
+#[tokio::test]
+async fn a_resumed_backups_end_the_log_never_takes_is_not_announced() {
+    use app::event_bus::BroadcastEventBus;
+    use app::execution::END_WRITE_RETRIES;
+    use app::ports::EventBus;
+
+    let store = Arc::new(Flaky::broken(StoreError::Unavailable {
+        detail: "the disk is full".to_owned(),
+    }));
+    let bus = Arc::new(BroadcastEventBus::new());
+    let mut page = bus.subscribe().await;
+    let (queued, reason) = refused_queued_backup();
+
+    let ended = RunOperation::new(
+        Arc::new(NeverAsked::default()),
+        Arc::new(FakeClock::auto_advancing(t(9))),
+        store.clone(),
+    )
+    .with_events(bus)
+    .end_resumed(queued, reason.clone())
+    .await;
+
+    let tries = usize::try_from(END_WRITE_RETRIES).unwrap() + 1;
+    assert!(!ended.written, "the log never took the end");
+    assert_eq!(store.writes.load(Ordering::SeqCst), tries);
+    assert_eq!(ended.finished.recording_errors.len(), tries);
+    assert_eq!(
+        ended.finished.operation.status(),
+        &OperationStatus::Failed { reason }
+    );
+    assert!(page.next().now_or_never().is_none(), "nothing is announced");
 }
