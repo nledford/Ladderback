@@ -128,6 +128,60 @@ async fn an_agent_pairing_again_under_another_hostname_is_told_the_one_held() {
     assert_eq!(on_a_new_token.held_as, Some(laptop()));
 }
 
+/// A machine the hub holds approved that pairs again, under another
+/// hostname, on the token it spent or on a new one, is told it is approved
+/// and the hostname held (#1341); a new or pending one is told it isn't,
+/// and so is one whose hub doesn't say, as a hub that predates it doesn't.
+#[tokio::test]
+async fn an_agent_pairing_again_is_told_whether_the_hub_approved_it() {
+    let hub = Hub::new(1);
+    let machine = agent(Arc::default());
+    let token = hub.token(pinned()).await;
+    let first = pair(&hub, &machine, token.clone()).await.unwrap();
+    assert!(!first.approved, "a new machine waits for approval");
+    let pending = pair(&hub, &machine, token.clone()).await.unwrap();
+    assert!(!pending.approved, "a pending machine still waits");
+
+    let held = hub.pairing.agent_named(&laptop()).await.unwrap().unwrap();
+    hub.pairing.approve(&held).await.unwrap().unwrap();
+    let desktop = Hostname::parse("desktop").unwrap();
+    let on_the_spent_token = pair_as(&hub, &machine, token, desktop.clone())
+        .await
+        .unwrap();
+    assert!(on_the_spent_token.approved, "on the spent token");
+    assert_eq!(on_the_spent_token.held_as, Some(laptop()));
+    let new_token = hub.token(pinned()).await;
+    let on_a_new_token = pair_as(&hub, &machine, new_token.clone(), desktop)
+        .await
+        .unwrap();
+    assert!(on_a_new_token.approved, "on a new token");
+    assert_eq!(on_a_new_token.held_as, Some(laptop()));
+
+    let keys = hub.pairing.keys().await.unwrap();
+    let (connect, handshake) = machine
+        .connect(new_token, agent_id(), laptop(), None)
+        .await
+        .unwrap();
+    let (challenge, hub_side) = hub
+        .pairing
+        .challenge(&keys, &connect, Some(EXPORTER))
+        .unwrap();
+    let (pair, awaiting) = machine
+        .answer_challenge(handshake, &challenge, Some(EXPORTER))
+        .await
+        .unwrap();
+    let PairAnswer::Paired(mut paired) = hub.pairing.pair(&keys, &hub_side, &pair).await.unwrap()
+    else {
+        panic!("the hub refused");
+    };
+    paired.approval = None;
+    let told = machine
+        .take_answer(awaiting, &PairAnswer::Paired(paired))
+        .await
+        .unwrap();
+    assert!(!told.approved, "a hub that doesn't say");
+}
+
 /// A machine that pairs again under the hostname it first used is told
 /// nothing more, and neither is one whose hub sends no hostname, as a hub
 /// that predates it doesn't.
@@ -785,6 +839,7 @@ async fn an_unsigned_answer_is_a_dropped_connection() {
             recovery_key: *keys.recovery_key(),
             signature: unsigned,
             hostname: None,
+            approval: None,
         }),
     ];
     for answer in answers {

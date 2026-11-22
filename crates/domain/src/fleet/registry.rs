@@ -152,6 +152,18 @@ impl AgentRecord {
     pub const fn is_pending(&self) -> bool {
         matches!(self.status, AgentStatus::Pending { .. })
     }
+
+    /// Whether the agent is approved and the hub hasn't heard from it since
+    /// the approval: its next proof is its first connection as an approved
+    /// agent, which the hub's log records once (#1342). A proof or a
+    /// pairing sets `last_seen` after the approval, and an approval keeps
+    /// it, so this needs no state of its own.
+    pub fn unseen_since_approval(&self) -> bool {
+        match self.status {
+            AgentStatus::Approved { at } => self.last_seen <= at,
+            AgentStatus::Pending { .. } => false,
+        }
+    }
 }
 
 /// The agent a pending agent's hostname looks like, which the hub flags on
@@ -337,18 +349,19 @@ pub enum Pairing {
     Again(AgentRecord),
     /// The same pairing again on the token it spent, as when `Paired` was
     /// lost: answered as before, and nothing changes. It carries the
-    /// hostname the hub holds the agent under, which the agent is told.
-    Repeated(Hostname),
+    /// record as the hub holds it, whose hostname and status the agent is
+    /// told.
+    Repeated(AgentRecord),
 }
 
 impl Pairing {
-    /// The hostname the hub holds the agent under after this pairing: the
-    /// one asked for on a new agent, and the first one on an agent that
-    /// pairs again (decision 120: a pending agent can't rename itself).
-    pub const fn hostname(&self) -> &Hostname {
+    /// The agent's record after this pairing. Its hostname is the one asked
+    /// for on a new agent, and the first one on an agent that pairs again
+    /// (decision 120: a pending agent can't rename itself); its status is
+    /// pending on a new agent, and kept on one that pairs again.
+    pub const fn record(&self) -> &AgentRecord {
         match self {
-            Self::New(record) | Self::Again(record) => &record.hostname,
-            Self::Repeated(hostname) => hostname,
+            Self::New(record) | Self::Again(record) | Self::Repeated(record) => record,
         }
     }
 }
@@ -375,7 +388,7 @@ pub fn decide_pairing(
             let same = agent_id == request.agent_id && agent_key == request.agent_key;
             return match view.by_id {
                 Some(record) if same && record.key == agent_key => {
-                    Ok(Pairing::Repeated(record.hostname.clone()))
+                    Ok(Pairing::Repeated(record.clone()))
                 }
                 _ => Err(PairRefusal::TokenUsed),
             };
@@ -457,13 +470,15 @@ pub struct ProofView<'a> {
 }
 
 /// The decision a proof gets at `now` (decision 120, "The handshake"): the
-/// agent's record as it now is, seen now and keeping the greater counter.
-/// Telling a copy of the agent by its counter is #296's.
+/// agent's record as it now is, seen now and keeping the greater counter,
+/// and whether the proof is its first since its approval, as the record in
+/// `view` says before this one is kept (#1342). Telling a copy of the agent
+/// by its counter is #296's.
 pub fn decide_proof(
     view: &ProofView<'_>,
     request: &ProofRequest,
     now: Timestamp,
-) -> Result<AgentRecord, ProofRefusal> {
+) -> Result<Proved, ProofRefusal> {
     let Some(record) = view.record else {
         return Err(ProofRefusal::ProofRefused);
     };
@@ -473,11 +488,27 @@ pub fn decide_proof(
     {
         return Err(ProofRefusal::ProofRefused);
     }
-    Ok(AgentRecord {
-        counter: record.counter.max(request.counter),
-        last_seen: now,
-        ..record.clone()
+    Ok(Proved {
+        agent: AgentRecord {
+            counter: record.counter.max(request.counter),
+            last_seen: now,
+            ..record.clone()
+        },
+        first_since_approval: record.unseen_since_approval(),
     })
+}
+
+/// An agent whose proof holds (decision 120, "The handshake").
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct Proved {
+    /// The agent's record as it now is: seen now, keeping the greater
+    /// counter.
+    pub agent: AgentRecord,
+    /// Whether this is the agent's first connection since a person approved
+    /// it, which the hub's log records once (#1342). It is read from the
+    /// record the decision is made on, so an approval that lands while the
+    /// hub checks the proof still counts.
+    pub first_since_approval: bool,
 }
 
 /// Why a person's approval of an agent changed nothing (decision 120,

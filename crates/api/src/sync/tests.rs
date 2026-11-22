@@ -39,11 +39,13 @@ fn every_frame_reads_back_as_written() {
             recovery_key: "r".into(),
             signature: "s".into(),
             hostname: None,
+            status: None,
         },
         HubFrame::Paired {
             recovery_key: "r".into(),
             signature: "s".into(),
             hostname: Some("laptop".into()),
+            status: Some(AgentApproval::Approved),
         },
         HubFrame::Refused {
             code: "token-used".into(),
@@ -121,9 +123,9 @@ fn a_refusal_names_its_error_code() {
     }
 }
 
-/// A `paired` frame from a hub that predates the hostname has none, and one
-/// from a later hub with a field this build doesn't know still reads (decision
-/// 120: optional fields stay within a protocol).
+/// A `paired` frame from a hub that predates the hostname or the status has
+/// neither, and one from a later hub with a field this build doesn't know
+/// still reads (decision 120: optional fields stay within a protocol).
 #[test]
 fn a_paired_frame_reads_with_or_without_the_hostname_and_unknown_fields() {
     let without = r#"{"type":"paired","recovery_key":"r","signature":"s"}"#;
@@ -133,24 +135,60 @@ fn a_paired_frame_reads_with_or_without_the_hostname_and_unknown_fields() {
             recovery_key: "r".into(),
             signature: "s".into(),
             hostname: None,
+            status: None,
         })
     );
+    let sent = HubFrame::Paired {
+        recovery_key: "r".into(),
+        signature: "s".into(),
+        hostname: None,
+        status: None,
+    }
+    .to_text();
     assert!(
-        !HubFrame::Paired {
-            recovery_key: "r".into(),
-            signature: "s".into(),
-            hostname: None,
-        }
-        .to_text()
-        .contains("hostname")
+        !sent.contains("hostname") && !sent.contains("status"),
+        "{sent}"
     );
-    let later = r#"{"type":"paired","recovery_key":"r","signature":"s","hostname":"laptop","a_later_field":1}"#;
+    let later = r#"{"type":"paired","recovery_key":"r","signature":"s","hostname":"laptop","status":"approved","a_later_field":1}"#;
     assert_eq!(
         HubFrame::from_text(later),
         Ok(HubFrame::Paired {
             recovery_key: "r".into(),
             signature: "s".into(),
             hostname: Some("laptop".into()),
+            status: Some(AgentApproval::Approved),
         })
+    );
+}
+
+/// A `paired` status this build doesn't know, or of another type, reads as
+/// none, as from a hub that doesn't say: the status is shown, never decided
+/// on, so a later hub's word can't refuse the whole frame (#1341). The
+/// signed `Welcome`'s status, which the machine acts on, stays strict.
+#[test]
+fn a_paired_status_this_build_doesnt_know_reads_as_none() {
+    for status in [r#""suspended""#, "7", "null"] {
+        let text =
+            format!(r#"{{"type":"paired","recovery_key":"r","signature":"s","status":{status}}}"#);
+        assert_eq!(
+            HubFrame::from_text(&text),
+            Ok(HubFrame::Paired {
+                recovery_key: "r".into(),
+                signature: "s".into(),
+                hostname: None,
+                status: None,
+            }),
+            "{status}"
+        );
+    }
+    let welcome = |status: &str| {
+        format!(
+            r#"{{"hub_protocols":[1,1],"agent_protocols":[1,1],"generation":1,"hub_handshakes":1,"hub_version":"v","signed_at":1,"status":"{status}"}}"#
+        )
+    };
+    assert!(WelcomePayload::from_bytes(welcome("pending").as_bytes()).is_ok());
+    assert_eq!(
+        WelcomePayload::from_bytes(welcome("suspended").as_bytes()),
+        Err(UnreadableFrame)
     );
 }

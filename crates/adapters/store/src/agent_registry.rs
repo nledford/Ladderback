@@ -8,8 +8,8 @@ use async_trait::async_trait;
 use domain::fleet::{
     AgentRecord, AgentStatus, ApprovalRefused, BindingKind, Fingerprint, HostnameKey, KEY_BYTES,
     MachineZone, PairRefusal, PairRequest, Pairing, PairingView, ProofRefusal, ProofRequest,
-    ProofView, PublicKey, TokenId, TokenRecord, TokenUse, admits_unused_token, decide_approval,
-    decide_pairing, decide_proof, voids_tokens_for_new_key,
+    ProofView, Proved, PublicKey, TokenId, TokenRecord, TokenUse, admits_unused_token,
+    decide_approval, decide_pairing, decide_proof, voids_tokens_for_new_key,
 };
 use domain::{AgentId, Timestamp};
 use sqlx::{Connection, SqliteConnection};
@@ -332,7 +332,7 @@ impl AgentRegistry for SqliteStore {
         &self,
         request: &ProofRequest,
         now: Timestamp,
-    ) -> Result<Result<AgentRecord, ProofRefusal>, StoreError> {
+    ) -> Result<Result<Proved, ProofRefusal>, StoreError> {
         let now = to_the_millisecond(now);
         let id = row::agent_id_text(request.agent_id);
         let _call = self.call().await;
@@ -358,8 +358,8 @@ impl AgentRegistry for SqliteStore {
         };
         let decided = decide_proof(&view, request, now);
         match &decided {
-            Ok(agent) => {
-                write_agent(&mut tx, agent, false).await?;
+            Ok(proved) => {
+                write_agent(&mut tx, &proved.agent, false).await?;
                 tx.commit().await.map_err(unavailable)?;
             }
             Err(_) => tx.rollback().await.map_err(unavailable)?,

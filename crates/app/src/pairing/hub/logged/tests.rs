@@ -4,7 +4,7 @@ use domain::fleet::{
 };
 use domain::{AgentId, Timestamp, Uuid};
 
-use super::paired;
+use super::{approved as approved_line, connected, paired};
 
 fn key(byte: u8) -> PublicKey {
     PublicKey::from_bytes([byte; 32]).expect("a key")
@@ -85,7 +85,7 @@ fn a_machine_known_already_says_whether_it_waits_or_is_approved() {
 #[test]
 fn a_pairing_repeated_on_its_spent_token_says_nothing_changed() {
     let request = request("e2e-laptop");
-    let line = paired(&request, &Pairing::Repeated(request.hostname.clone()));
+    let line = paired(&request, &Pairing::Repeated(record(&request, approved())));
     assert!(
         line.contains("repeated its pairing") && line.contains("nothing changed"),
         "{line}"
@@ -106,4 +106,70 @@ fn a_hostname_is_escaped_and_no_secret_is_in_the_line() {
     let pairing_key = Fingerprint::of_key(&request.pairing_key);
     assert!(!line.contains(&pairing_key.to_string()), "{line}");
     assert!(!line.contains(&pairing_key.full_hex()), "{line}");
+}
+
+/// The record the hub holds for `request`'s agent under `hostname`, the one
+/// it first paired under.
+fn held_as(request: &PairRequest, hostname: &str, status: AgentStatus) -> AgentRecord {
+    AgentRecord {
+        hostname: Hostname::parse(hostname).expect("a hostname"),
+        ..record(request, status)
+    }
+}
+
+/// A machine that pairs again under another hostname is named by the one
+/// the hub holds, which its pages list, and the one it asked for, each
+/// escaped, as the machine's own line names both (#1342).
+#[test]
+fn a_machine_pairing_again_under_another_hostname_is_named_by_the_one_held() {
+    let request = request("other\"one");
+    let fingerprint = Fingerprint::of_key(&request.agent_key);
+    assert_eq!(
+        paired(
+            &request,
+            &Pairing::Again(held_as(&request, "first", approved()))
+        ),
+        format!(
+            "machine \"first\" (asked as \"other\\\"one\") paired again as agent \
+             01900000-0000-7000-8000-000000000001 with key {fingerprint}; it is approved already"
+        )
+    );
+    let repeated = paired(
+        &request,
+        &Pairing::Repeated(held_as(&request, "first", pending())),
+    );
+    assert!(
+        repeated.starts_with("machine \"first\" (asked as \"other\\\"one\") repeated its pairing"),
+        "{repeated}"
+    );
+}
+
+/// An approval is named as a pairing is, by hostname, agent ID and key
+/// fingerprint, so the person can match it with the machine's screen.
+#[test]
+fn an_approval_is_named_by_hostname_agent_id_and_key() {
+    let request = request("Nick's laptop");
+    let fingerprint = Fingerprint::of_key(&request.agent_key);
+    assert_eq!(
+        approved_line(&record(&request, approved())),
+        format!(
+            "machine \"Nick\\'s laptop\" approved as agent \
+             01900000-0000-7000-8000-000000000001 with key {fingerprint}"
+        )
+    );
+}
+
+/// An approved machine's first connection after its approval is named as
+/// a pairing is, and says it is the first.
+#[test]
+fn a_first_connection_after_approval_is_named_by_hostname_agent_id_and_key() {
+    let request = request("e2e-laptop");
+    let fingerprint = Fingerprint::of_key(&request.agent_key);
+    assert_eq!(
+        connected(&record(&request, approved())),
+        format!(
+            "machine \"e2e-laptop\" connected as agent 01900000-0000-7000-8000-000000000001 \
+             with key {fingerprint}, its first connection since it was approved"
+        )
+    );
 }
