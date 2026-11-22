@@ -20,7 +20,7 @@ A repository holds the backups, encrypted with a password you choose. Open the *
 4. **Where to keep the password:** on a Mac, **In the system keyring**. On Linux, **In the configuration file**: once [started as a service](install.md), Ladderback runs before you log in, and can't read the keyring until you do, so a backup due before then would fail. The Repositories page marks such a password **Kept in the configuration file**. A password can [live in other places](secrets.md) too.
 5. Press **Create the repository**. The page says **The repository was created.** and lists the repository.
 
-A repository you create here is maintained from this machine: this machine forgets and prunes its old snapshots, as step 5 shows. If the folder already holds a repository, from rustic or from Ladderback on another computer, press **Connect the repository** instead. Turn on **Maintain this repository from this machine** only when no other machine maintains it.
+A repository you create here is maintained from this machine: this machine forgets and prunes its old snapshots, as step 5 shows. If the folder already holds a repository, from rustic or from Ladderback on another computer, press **Connect the repository** instead. Turn on **Maintain this repository from this machine** only when no other machine maintains it. Left off, this machine backs up into the repository but never forgets, prunes or checks it, and its Snapshots page says so; **Maintain from this machine** there turns it on later.
 
 ## 2. Add a plan
 
@@ -49,8 +49,8 @@ The start page, behind the **Ladderback** link at the top, and the **Plans** pag
 A backup you have never restored from is only a promise, so restore one file now:
 
 1. Open the **Snapshots** page and press **Snapshots of external-drive**, your repository's name. It lists the snapshots under **Plan documents**, newest first.
-2. Choose the snapshot's ID. Its page shows **Folders and files**, the tree of what it holds: open the folders down to a file, and select it.
-3. Press **Restore** followed by the file's name. In the dialog, keep **Where to restore** at **Into a new folder**, type the snapshot's short ID the dialog shows into **Snapshot ID**, and press **Restore**.
+2. Choose the snapshot's ID. Its page shows **Folders and files**, the tree of what it holds, from the top of the disk: `Users` on a Mac, `home` on Linux. Open the folders down to a file, and select it.
+3. Press **Restore** followed by the file's name. In the dialog, keep **Where to restore** at **Into a new folder**, type the snapshot's short ID the dialog shows into **Snapshot ID**, or press **Copy the ID** and paste it, and press **Restore**.
 4. The page says **Restore of** the file **finished. Its files are in** a new folder inside `ladderback-restore` in your home folder, named after the computer, the snapshot and the time. Open the file there and compare it with the original.
 
 A restore into a new folder never touches the original files, and no restore deletes a file. Delete the restored copy once you have checked it.
@@ -68,4 +68,4 @@ Open the **Restart Ladderback** tab, press **Restart Ladderback**, then **Restar
 What the web UI can't do yet:
 
 - **Forget and prune don't run on a schedule yet.** Your plan's keep policy takes effect when you press **Forget snapshots** on the Snapshots page, and the space comes back when you press **Prune unused data**, then again after the wait it names. Until you do, the repository only grows.
-- **Restores into a new folder go into `ladderback-restore` in your home folder.** The web UI can't choose another folder.
+- **Restores into a new folder go into `ladderback-restore` in your home folder.** The web UI can't choose another folder; `restore-folder` in the `[agent]` table of `config.toml` can ([technical design §6.1](https://github.com/nledford/Ladderback/blob/main/docs/design/scheduling-and-config.md#61-source-of-truth)).
