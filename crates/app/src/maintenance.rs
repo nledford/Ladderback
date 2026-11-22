@@ -163,6 +163,12 @@ pub enum MaintenanceError {
     InvalidRetention {
         plan: PlanId,
     },
+    /// The data folder was copied from another computer, or a new machine
+    /// ID was taken for the copy and is used from the next start: this
+    /// machine keeps backing up and runs no forget, prune or adoption, nor
+    /// previews one, lest it take another computer's snapshots for its own
+    /// (I1, I6). Refused before the repository is opened.
+    DataFolderCopied,
 }
 
 /// A maintenance run with every decision made and its I7 slot held: the
@@ -355,6 +361,9 @@ pub struct RunMaintenance {
     locations: Option<Arc<crate::locations::ChooseLocation>>,
     /// Reads the stats after a check, when set.
     stats: Option<Arc<crate::stats::ReadStats>>,
+    /// Where this machine stands: a copied data folder runs no maintenance
+    /// but a check (§16, decision NN).
+    machine: Arc<crate::machine::MachineStanding>,
 }
 
 impl RunMaintenance {
@@ -388,6 +397,7 @@ impl RunMaintenance {
             events: None,
             locations: None,
             stats: None,
+            machine: Arc::default(),
         }
     }
 
@@ -440,6 +450,13 @@ impl RunMaintenance {
     /// result, before its end is recorded (§16, decision 104).
     pub fn with_stats(mut self, stats: Arc<crate::stats::ReadStats>) -> Self {
         self.stats = Some(stats);
+        self
+    }
+
+    /// Reads where this machine stands before each run and preview: a
+    /// copied data folder's are refused (§16, decision NN).
+    pub fn with_machine(mut self, machine: Arc<crate::machine::MachineStanding>) -> Self {
+        self.machine = machine;
         self
     }
 

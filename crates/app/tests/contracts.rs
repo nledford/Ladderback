@@ -1371,3 +1371,16 @@ impl contract::sources::SourcesHarness for FakeDisks {
 async fn the_fake_sources_meet_the_sources_contract() {
     contract::sources::run(&FakeDisks).await;
 }
+
+struct FakeMachines;
+
+impl contract::this_machine::ThisMachineHarness for FakeMachines {
+    fn on(&self, identifier: Option<&str>) -> Arc<dyn app::ports::ThisMachine> {
+        Arc::new(app::fakes::FakeThisMachine::new(identifier))
+    }
+}
+
+#[test]
+fn the_fake_machine_meets_the_this_machine_contract() {
+    contract::this_machine::run(&FakeMachines);
+}

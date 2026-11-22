@@ -12,6 +12,7 @@ mod high_impact;
 mod hostname;
 mod key_files;
 mod keys;
+mod machine;
 mod pin;
 mod registry;
 mod route;
@@ -36,6 +37,9 @@ pub use key_files::{
 pub use keys::{
     KEY_BYTES, KeyRefused, PublicKey, SIGNATURE_BYTES, SMALL_ORDER_KEYS, Signature,
     SignatureRefused, SigningSeed,
+};
+pub use machine::{
+    IdentifierMatch, InvalidMachineIdentifier, MAX_MACHINE_IDENTIFIER_BYTES, MachineIdentifier,
 };
 pub use pin::{HubPin, MAX_PIN_BYTES, PinRefused};
 pub use registry::{

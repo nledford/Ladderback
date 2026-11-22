@@ -552,6 +552,7 @@ pub(super) async fn refusal(
         MaintenanceError::InvalidRetention { .. } => {
             unavailable(ErrorCode::OperationFailed, Vec::new(), None)
         }
+        MaintenanceError::DataFolderCopied => todo!(),
     }
 }
 
