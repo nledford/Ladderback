@@ -20,8 +20,8 @@ use crate::components::ACTIONS;
 use crate::components::button::{Appearance, Content, Kind};
 use crate::components::skeleton::rules::Awaited;
 use crate::components::{
-    Button, StepUp, StepUpField, Toast, ToastTone, Toasts, first_load, paced, refusal_alert,
-    say_refusals,
+    Button, StepUp, StepUpField, Toast, ToastTone, Toasts, first_load, paced, point_at_refusal,
+    refusal_alert, say_refusals,
 };
 use crate::live::reply;
 use crate::repositories::Sentence;
@@ -45,7 +45,8 @@ const SAVE_ID: &str = "ai-agents-save";
 /// them (`read`, which Settings' tabs follow too), a group per permission
 /// and the button that saves them, with the admin password's field before
 /// it while sign-in is on (`on`). A read or a save the daemon refuses is an
-/// alert; a wrong password is the field's error.
+/// alert; a wrong password is the field's error, which
+/// [`point_at_refusal`] takes the reader to, since the field is on the page.
 #[component]
 pub(super) fn AiAgentsSection(
     localizer: Arc<Localizer>,
@@ -113,15 +114,15 @@ pub(super) fn AiAgentsSection(
                     // Cleared first, so a second wrong try is said again.
                     password_error.set(None);
                     tick().await;
-                    password_error.try_set(Some(
-                        refused_sentence(
-                            &localizer,
-                            ErrorCode::CurrentPasswordWrong,
-                            &args,
-                            detail.as_deref(),
-                        )
-                        .plain(),
-                    ));
+                    let words = refused_sentence(
+                        &localizer,
+                        ErrorCode::CurrentPasswordWrong,
+                        &args,
+                        detail.as_deref(),
+                    )
+                    .plain();
+                    password_error.try_set(Some(words.clone()));
+                    point_at_refusal(PASSWORD_ID, &words);
                     return;
                 }
                 Some(Posted::Refused(code, args, detail)) => {
@@ -190,6 +191,7 @@ pub(super) fn AiAgentsSection(
                                             step_up=StepUp::Password
                                             value=password
                                             error=password_error
+                                            on_page=true
                                         />
                                     }
                                 });
