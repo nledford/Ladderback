@@ -156,8 +156,9 @@ fn refused(error: DryRunError) -> DryRunsError {
         DryRunError::Walk { .. } => {
             // The engine's words can name a path the walk met, and the log
             // is served at the `read` scope: they are left out. A walk
-            // fails only when its thread panics, and the panic is written
-            // to stderr as it happens, outside the log the route serves.
+            // fails only when its thread panics, and the panic's place is
+            // written to stderr as it happens, outside the log the route
+            // serves (#1384).
             log::warn!("A plan dry run's walk failed.");
             DryRunsError::Failed
         }

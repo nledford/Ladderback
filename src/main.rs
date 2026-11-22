@@ -285,6 +285,10 @@ fn description(path: &str, argument: Option<&str>) -> Option<MessageId> {
 }
 
 fn main() -> ExitCode {
+    // First, for every command: a panic's message can quote a secret, the
+    // daemon's in its service log, a prompt's on the terminal (#1384). A
+    // worker replaces it with its own, which masks the message (§4.1).
+    panic_report::install();
     let Cli { plain, command } = match parse(std::env::args_os().collect()) {
         Ok(cli) => cli,
         Err(status) => return status,

@@ -7,10 +7,36 @@
 //! the secrets to mask it with. `ladderback worker` replaces this hook with
 //! its own, which masks the message with the job's secrets (§4.1).
 
+use std::backtrace::{Backtrace, BacktraceStatus};
+use std::io::{self, Write as _};
+use std::panic::Location;
+
 /// Replaces the panic hook with one that reports where a panic happened and
-/// on which thread, and leaves its message out.
+/// on which thread, and leaves its message out. The backtrace follows when
+/// `RUST_BACKTRACE` asks for it, as the default hook gives it: it names
+/// functions and places, never a value.
 pub(crate) fn install() {
-    todo!()
+    std::panic::set_hook(Box::new(|info| {
+        let thread = std::thread::current();
+        let text = report(info.location(), thread.name());
+        let backtrace = Backtrace::capture();
+        // A process that can't write to stderr has nowhere better to say it.
+        let _ = match backtrace.status() {
+            BacktraceStatus::Captured => writeln!(io::stderr(), "{text}\n{backtrace}"),
+            _ => writeln!(io::stderr(), "{text}"),
+        };
+    }));
+}
+
+/// The one line a panic is reported as.
+fn report(location: Option<&Location<'_>>, thread: Option<&str>) -> String {
+    let place = location.map_or_default(|place| {
+        format!(" at {}:{}:{}", place.file(), place.line(), place.column())
+    });
+    let thread = thread.unwrap_or("<unnamed>");
+    format!(
+        "ladderback panicked{place} in thread '{thread}'; its message is left out, as it can quote a secret"
+    )
 }
 
 #[cfg(test)]
