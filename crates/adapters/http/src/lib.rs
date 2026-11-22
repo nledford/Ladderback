@@ -792,7 +792,9 @@ fn outer_layers(app: Router) -> Router {
 /// The answer to a request whose handler panicked (§13.5): `500` with the
 /// API's error envelope, and one ERROR line in the log. Neither shows what
 /// the panic carried or anything of the request: a panic's message holds
-/// whatever the code had in hand, a secret included (I4).
+/// whatever the code had in hand, a secret included (I4). Rust's panic hook
+/// runs before this, and the daemon sets none of its own, so the default
+/// one still writes the message to stderr.
 fn panicked(_payload: Box<dyn std::any::Any + Send + 'static>) -> Response {
     log::error!("a request's handler panicked; it was answered 500 internal-error");
     refused(
