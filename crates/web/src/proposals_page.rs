@@ -25,7 +25,7 @@ use crate::components::button::{Appearance, Content, Kind};
 use crate::components::skeleton::rules::Awaited;
 use crate::components::{
     Banner, Button, StepUp, StepUpField, TextField, Toast, ToastTone, Toasts, focus_element,
-    hand_focus_when_gone, refusal_alert, say_refusals, text_field,
+    hand_focus_when_gone, point_at_refusal, refusal_alert, say_refusals, text_field,
 };
 use crate::components::{first_load, paced};
 use crate::live::reply;
@@ -420,7 +420,9 @@ fn Review(
                         Some(said) => {
                             error.set(None);
                             tick().await;
-                            error.try_set(Some(say(&localizer, said)));
+                            let words = say(&localizer, said);
+                            error.try_set(Some(words.clone()));
+                            point_at_refusal(STEP_UP_ID, &words);
                         }
                         None => approve_alert.set(Some(refused_sentence(
                             &localizer,
@@ -537,6 +539,7 @@ fn Review(
                     step_up=step_up.clone()
                     value=value
                     error=error
+                    on_page=true
                 />
                 <p class=ACTIONS>
                     <Button

@@ -69,6 +69,20 @@ Feature: Approving a waiting machine on the hub's page
     And focus stays on the button "Pause live updates"
     And the table "Waiting for approval" lists "demo-desktop" with the key fingerprint the machine showed
 
+  Scenario: Resuming the machines' lists is said through the announcer, and the tab has no live region of its own
+    Given a hub with sign-in off
+    And a machine named "demo-laptop" waits for approval on the hub
+    When I open the address "/settings#agents"
+    And I skip to the content
+    And I press Tab until focus is on the button "Pause live updates"
+    And I press Enter
+    Then the polite region reads "Live updates are paused."
+    When a machine named "demo-desktop" waits for approval on the hub
+    Then the button "Pause live updates" is described by "Live updates are paused. One change is waiting."
+    When I press Enter
+    Then the polite region reads "Live updates are on again. One machine started waiting while they were paused."
+    And the page has no live region but the announcer's
+
   Scenario: Leaving Settings ends the pause of the machines' lists
     Given a hub with sign-in off
     And a machine named "demo-laptop" waits for approval on the hub

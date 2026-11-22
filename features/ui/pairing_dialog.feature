@@ -73,6 +73,65 @@ Feature: Making a pairing token on the hub's page
     Then the polite region reads "The unused pairing token was canceled."
     And the page has no live region but the announcer's
 
+  Scenario: With sign-in off, the Machines tab has no live region but the announcer's as it loads
+    Given a hub with sign-in off
+    When I open the address "/settings#agents"
+    And I skip to the content
+    And I press Tab until focus is on the button "Copy the ID"
+    Then the page has no live region but the announcer's
+    And the page has no accessibility violations
+
+  Scenario: Copy the ID is answered through the announcer, and the Machines tab has no live region of its own
+    Given a hub with sign-in off
+    And the page may use the clipboard
+    When I open the address "/settings#agents"
+    And I skip to the content
+    And I press Tab until focus is on the button "Copy the ID"
+    And I press Enter
+    Then the polite region reads "Copied."
+    And the page has no live region but the announcer's
+
+  Scenario: A browser that won't copy the ID is told to copy it by hand, through the announcer
+    Given a hub with sign-in off
+    And the browser refuses the page the clipboard
+    When I open the address "/settings#agents"
+    And I skip to the content
+    And I press Tab until focus is on the button "Copy the ID"
+    And I press Enter
+    Then the polite region reads "The browser would not let the page copy it. Select the ID and copy it yourself."
+    And the page has no live region but the announcer's
+
+  Scenario: With sign-in off, a wrong key ID is the field's own error, which focus reads once
+    Given a hub with sign-in off
+    When I open the address "/settings#agents"
+    And I skip to the content
+    And I press Tab until focus is on the textbox "Hub key ID"
+    And I type "not-the-key-id"
+    And I press Tab until focus is on the button "Make a pairing token"
+    And I press Enter
+    Then focus is on the textbox "Hub key ID"
+    And the field "Hub key ID" shows the error "That isn't right, so no token was made. Try again."
+    And the field "Hub key ID" is marked invalid
+    And the page has no live region but the announcer's
+    And the assertive region stays empty
+    And the page has no accessibility violations
+
+  Scenario: With sign-in on, a wrong admin password is the field's own error, which focus reads once
+    Given a hub with sign-in on and the admin password "demo-admin-pass"
+    And the admin is signed in with "demo-admin-pass"
+    When I open the address "/settings#agents"
+    And I skip to the content
+    And I press Tab until focus is on the textbox "Admin password"
+    And I type "not-the-password"
+    And I press Tab until focus is on the button "Make a pairing token"
+    And I press Enter
+    Then focus is on the textbox "Admin password"
+    And the field "Admin password" shows the error "That isn't right, so no token was made. Try again."
+    And the field "Admin password" is marked invalid
+    And the page has no live region but the announcer's
+    And the assertive region stays empty
+    And the page has no accessibility violations
+
   Scenario: A token the hub fails to cancel on Escape is said to still work until it lapses
     Given a hub with sign-in off
     And the hub fails to cancel pairing tokens
