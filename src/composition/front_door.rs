@@ -7,7 +7,7 @@
 //! machine on loopback and closes every other connection.
 
 use std::collections::VecDeque;
-use std::net::SocketAddr;
+use std::net::{IpAddr, SocketAddr};
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::Duration;
@@ -38,6 +38,40 @@ const WAITING: usize = 64;
 /// nothing can't hold the door shut (decision 120, "At most 64 connections
 /// at the door").
 const AT_THE_DOOR: usize = 64;
+
+/// How many connections at the door one address beyond loopback may hold.
+/// A newcomer past it closes that address's oldest, as the `/sync/v1`
+/// table does, so one address can't take the door's whole bound (decision
+/// 120, "At most 64 connections at the door").
+const PER_ADDRESS: usize = 8;
+
+/// A connection at the door, as the door holds it.
+pub(crate) trait AtDoor {
+    /// Closes it.
+    fn close(&self);
+    /// Whether it has left the door: closed, or handed to the server.
+    fn is_gone(&self) -> bool;
+}
+
+/// The connections at the door, oldest first, by the address each came
+/// from.
+pub(crate) struct AtTheDoor<C: AtDoor> {
+    open: VecDeque<(IpAddr, C)>,
+}
+
+impl<C: AtDoor> AtTheDoor<C> {
+    pub(crate) fn new() -> Self {
+        Self {
+            open: VecDeque::with_capacity(AT_THE_DOOR),
+        }
+    }
+
+    /// Takes in `connection` from `from`.
+    pub(crate) fn admit(&mut self, from: IpAddr, connection: C) {
+        let _ = (from, connection, &mut self.open);
+        todo!()
+    }
+}
 
 /// What the front door does with a connection, by the first byte it sent
 /// and the address it came from.
@@ -180,7 +214,7 @@ mod tests {
     use tokio::net::TcpStream;
     use tokio::time::Instant;
 
-    use super::{AT_THE_DOOR, Door, FIRST_BYTE_WITHIN, door, open};
+    use super::{AT_THE_DOOR, AtDoor, AtTheDoor, Door, FIRST_BYTE_WITHIN, PER_ADDRESS, door, open};
 
     /// The first byte of a TLS handshake record.
     const HANDSHAKE: u8 = 0x16;
@@ -280,5 +314,111 @@ mod tests {
             still_open(&mut others[0]).await,
             "closed another than the oldest"
         );
+    }
+
+    /// Stopping the door, as the server does at shutdown, closes the
+    /// connections still at it at once, not each at its own time limit.
+    #[tokio::test]
+    async fn stopping_the_door_closes_the_connections_still_at_it() {
+        let listener = GatedListener::bind(SocketAddr::from((Ipv4Addr::LOCALHOST, 0)))
+            .await
+            .unwrap();
+        let at = listener.local_addr().unwrap();
+        let mut server = open(listener, at, None);
+        let connected = Instant::now();
+        let mut waiting = silent(at).await;
+        // Accepted after it, so it is at the door by now.
+        handed(at, &mut server).await;
+        drop(server);
+        assert!(
+            closed_soon(&mut waiting, connected).await,
+            "still at the door"
+        );
+    }
+
+    /// A connection at the door in a test: closed is all it records.
+    #[derive(Clone, Default)]
+    struct Probe(std::rc::Rc<std::cell::Cell<bool>>);
+
+    impl AtDoor for Probe {
+        fn close(&self) {
+            self.0.set(true);
+        }
+
+        fn is_gone(&self) -> bool {
+            self.0.get()
+        }
+    }
+
+    /// `count` connections from `from` taken in at `door`.
+    fn admitted(door: &mut AtTheDoor<Probe>, from: IpAddr, count: usize) -> Vec<Probe> {
+        (0..count)
+            .map(|_| {
+                let probe = Probe::default();
+                door.admit(from, probe.clone());
+                probe
+            })
+            .collect()
+    }
+
+    fn closed(probes: &[Probe]) -> Vec<bool> {
+        probes.iter().map(AtDoor::is_gone).collect()
+    }
+
+    /// An address beyond loopback past its share closes its own oldest, and
+    /// no other address's.
+    #[test]
+    fn an_address_past_its_share_closes_its_own_oldest() {
+        let mut at_the_door = AtTheDoor::new();
+        let one = IpAddr::V4(Ipv4Addr::new(192, 0, 2, 7));
+        let other = IpAddr::V6(Ipv6Addr::new(0x2001, 0xdb8, 0, 0, 0, 0, 0, 7));
+        let other_s = admitted(&mut at_the_door, other, 1);
+        let first = admitted(&mut at_the_door, one, PER_ADDRESS);
+        assert!(!closed(&first).contains(&true), "closed within the share");
+        let newcomer = admitted(&mut at_the_door, one, 1);
+        let mut expected = vec![false; PER_ADDRESS];
+        expected[0] = true;
+        assert_eq!(closed(&first), expected);
+        assert_eq!(closed(&other_s), [false]);
+        assert_eq!(closed(&newcomer), [false]);
+    }
+
+    /// A connection that has left the door no longer counts in its
+    /// address's share.
+    #[test]
+    fn a_connection_gone_from_the_door_leaves_its_share() {
+        let mut at_the_door = AtTheDoor::new();
+        let one = IpAddr::V4(Ipv4Addr::new(192, 0, 2, 7));
+        let first = admitted(&mut at_the_door, one, PER_ADDRESS);
+        first[3].close();
+        admitted(&mut at_the_door, one, 1);
+        let mut expected = vec![false; PER_ADDRESS];
+        expected[3] = true;
+        assert_eq!(closed(&first), expected);
+    }
+
+    /// Loopback, where a local proxy brings every client in from one
+    /// address, has no share of its own: only the door's whole bound holds
+    /// it, and that closes the oldest of all.
+    #[test]
+    fn loopback_has_no_share_only_the_door_s_bound() {
+        let mapped = IpAddr::V6(Ipv4Addr::LOCALHOST.to_ipv6_mapped());
+        for from in [
+            IpAddr::V4(Ipv4Addr::LOCALHOST),
+            IpAddr::V6(Ipv6Addr::LOCALHOST),
+            mapped,
+        ] {
+            let mut at_the_door = AtTheDoor::new();
+            let beyond = admitted(&mut at_the_door, IpAddr::V4(Ipv4Addr::new(192, 0, 2, 7)), 1);
+            let local = admitted(&mut at_the_door, from, AT_THE_DOOR - 1);
+            assert!(
+                !closed(&local).contains(&true),
+                "{from}: closed within the bound"
+            );
+            assert_eq!(closed(&beyond), [false], "{from}");
+            admitted(&mut at_the_door, from, 1);
+            assert_eq!(closed(&beyond), [true], "{from}: the oldest of all is open");
+            assert!(!closed(&local).contains(&true), "{from}: closed another");
+        }
     }
 }

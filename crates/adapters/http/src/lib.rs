@@ -30,6 +30,7 @@ mod request_checks;
 mod response_headers;
 mod restart;
 mod restores;
+mod serving;
 mod sign_in;
 mod sync;
 
@@ -74,6 +75,7 @@ pub use request_checks::{
 };
 pub use restart::{Restart, RestartAsker, Work, asked_by};
 pub use restores::{RestoreRefusal, RestoreStart, Restores};
+pub use serving::{ServedListener, serve_connections};
 pub use sign_in::{COOKIE_NAME, CSRF_HEADER, SignIn};
 pub use sync::SyncHub;
 
