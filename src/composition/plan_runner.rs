@@ -316,9 +316,10 @@ impl PlanRunner {
     /// refused for, as the configuration it started under named it: a plan
     /// that backs up to another by now doesn't start, and none of its
     /// secrets is resolved to find out (#1247 is whether it should run on
-    /// the new one). A plan whose next run is due by the time the parked
-    /// task looks stays refused as it was: no read taken after that bound
-    /// lets the run go on.
+    /// the new one). A deleted plan's run doesn't start, whatever its
+    /// bound, as a queued backup's doesn't (#1317). A plan whose next run
+    /// is due by the time the parked task looks stays refused as it was:
+    /// no read taken after that bound lets the run go on.
     async fn start_parked(
         &self,
         plan: PlanId,
@@ -330,9 +331,12 @@ impl PlanRunner {
         let Some(config) = self.config_for_a_run(&plan, &trigger).await else {
             return;
         };
-        let on = PlanRepository::of(&config, &plan);
-        if let (Some(now), Some(then)) = (&on, &refused_on)
-            && now.is_other_than(then)
+        let Some(on) = PlanRepository::of(&config, &plan) else {
+            log_not_started(&plan, &trigger, &StartError::UnknownPlan);
+            return;
+        };
+        if let Some(then) = &refused_on
+            && on.is_other_than(then)
         {
             log_moved(&plan, &trigger);
             return;
