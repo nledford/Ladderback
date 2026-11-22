@@ -18,7 +18,11 @@
 //      `password-keyring` entry once, in this terminal, so that the
 //      keychain, which asks once for each new build (#892), asks while
 //      someone is there. An entry it can't read stops the script here,
-//      unless `--ignore-keyring-failure`.
+//      unless `--ignore-keyring-failure`. The question can open behind
+//      other windows and be answered late (#1375): when standard input and
+//      standard error are a terminal, a failed check keeps the new build
+//      and, once the person presses Enter, checks once more; a second
+//      failure, or input that ends instead, stops the script.
 //   3. The wait: every 5 s, until the daemon's operation log holds no
 //      operation `running` or `queued`, for up to `--wait` minutes, after
 //      which it gives up without installing. `--now` skips the wait.
@@ -103,6 +107,7 @@ import { spawnSync } from "node:child_process";
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, renameSync, rmSync } from "node:fs";
 import { constants, platform } from "node:os";
 import path from "node:path";
+import { createInterface } from "node:readline";
 import { DatabaseSync } from "node:sqlite";
 import { setImmediate as nextTurn, setTimeout as sleep } from "node:timers/promises";
 import { pathToFileURL } from "node:url";
@@ -420,8 +425,37 @@ export interface KeyringCheck {
 }
 
 /** Step 2a: whether the new program read every keyring entry, at its check or, at a terminal, at one more once the person has answered. */
-export async function keyringRead(_world: KeyringCheck): Promise<boolean> {
-  throw new Error("not yet");
+export async function keyringRead(world: KeyringCheck): Promise<boolean> {
+  if (world.check()) return true;
+  world.say(
+    "install-restart: the new program couldn't read every keyring entry, or the configuration that names them (above), so a backup or a notification that needs one may fail too.",
+  );
+  if (!world.attended) return false;
+  const pressed = await world.ask(
+    "install-restart: the new build is kept, so it can check again. If the keychain asked whether ladderback may use an entry, its question may be behind other windows, or have come too late: answer it with Always Allow, or fix the entry named above, then press Enter to check again (Ctrl-C stops).",
+  );
+  if (!pressed) return false;
+  if (world.check()) return true;
+  world.say(
+    "install-restart: the new program still couldn't read every keyring entry. Check that the keychain holds each entry named above under that name and that its question was answered with Always Allow, then run just install-restart again.",
+  );
+  return false;
+}
+
+/** Says `line` on standard error, then waits for a line of standard input: true when Enter was pressed, false when the input ended first. */
+async function enterPressed(line: string): Promise<boolean> {
+  // Not a terminal interface: the terminal stays in its own line mode, so
+  // Ctrl-C still stops the script through its signal handlers.
+  const input = createInterface({ input: process.stdin, terminal: false });
+  const { promise, resolve } = Promise.withResolvers<boolean>();
+  input.once("line", () => resolve(true));
+  input.once("close", () => resolve(false));
+  process.stderr.write(`${line}\n`);
+  try {
+    return await promise;
+  } finally {
+    input.close();
+  }
 }
 
 /** What one run does, read from its arguments and environment. */
@@ -525,10 +559,15 @@ async function update(options: Options): Promise<number> {
   // The keychain asks once for each new build before it lets the build read
   // a `password-keyring` entry (#892): asked here, in the terminal, the
   // question comes while someone is there, not at the next scheduled run.
-  if (run(staged, ["check-keyring"]) !== 0) {
-    console.error(
-      "install-restart: the new program couldn't read every keyring entry, or the configuration that names them (above), so a backup or a notification that needs one may fail too.",
-    );
+  // With --ignore-keyring-failure the person has said to go on, so a
+  // failed check isn't offered again.
+  const read = await keyringRead({
+    check: () => run(staged, ["check-keyring"]) === 0,
+    attended: !options.ignoreKeyring && Boolean(process.stdin.isTTY) && Boolean(process.stderr.isTTY),
+    ask: enterPressed,
+    say: (line) => console.error(line),
+  });
+  if (!read) {
     if (!options.ignoreKeyring) {
       console.error(
         `install-restart: Not installing or restarting; ${program} and the running daemon are untouched. --ignore-keyring-failure restarts all the same.`,
