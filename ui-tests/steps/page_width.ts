@@ -3,8 +3,10 @@
 import assert from "node:assert/strict";
 
 import { Given, Then } from "@cucumber/cucumber";
+import type { Locator } from "playwright";
 
 import { expect } from "../support/expect.ts";
+import { namePattern } from "../support/keyboard.ts";
 import type { BrowserWorld } from "../support/world.ts";
 
 // Where the page keeps the width chosen, in the browser's local storage, and
@@ -123,4 +125,65 @@ Then("no paragraph or form of the main content is wider than {int} characters", 
     return wide;
   }, limit);
   assert.deepEqual(tooWide, [], `paragraphs or forms wider than ${limit} characters`);
+});
+
+// The header's content stands in the page's frame (decision 141): the band
+// behind the header spans the window, and the header's own content box starts
+// and ends where `<main>`'s does, so the product's name starts where each
+// page's heading does. Each landmark is found by role; only boxes are read.
+async function contentEdges(landmark: Locator) {
+  return landmark.evaluate((element) => {
+    const drawn = element.getBoundingClientRect();
+    const style = getComputedStyle(element);
+    const window = document.documentElement.clientWidth;
+    return {
+      before: drawn.left + Number.parseFloat(style.paddingLeft),
+      after: window - drawn.right + Number.parseFloat(style.paddingRight),
+    };
+  });
+}
+
+Then("the header's band is as wide as the window", async function (this: BrowserWorld) {
+  const { band, window } = await this.page.getByRole("banner").evaluate((header) => ({
+    band: (header.parentElement ?? header).getBoundingClientRect().width,
+    window: document.documentElement.clientWidth,
+  }));
+  assert.ok(Math.abs(band - window) <= 0.5, `the header's band is ${band}px wide in a ${window}px window`);
+});
+
+async function assertSharedEdge(world: BrowserWorld, edge: "before" | "after", side: string) {
+  const [banner, main] = await Promise.all([contentEdges(world.page.getByRole("banner")), contentEdges(world.page.getByRole("main"))]);
+  assert.ok(
+    Math.abs(banner[edge] - main[edge]) <= 0.5,
+    `the header's content is ${banner[edge]}px from the window's ${side}, the main content ${main[edge]}px`,
+  );
+}
+
+Then(
+  "the banner's content and the main content start at the same distance from the window's inline start",
+  async function (this: BrowserWorld) {
+    await assertSharedEdge(this, "before", "inline start");
+  },
+);
+
+Then(
+  "the banner's content and the main content end at the same distance from the window's inline end",
+  async function (this: BrowserWorld) {
+    await assertSharedEdge(this, "after", "inline end");
+  },
+);
+
+Then("the link {string} starts where the main heading starts", async function (this: BrowserWorld, name: string) {
+  const link = this.page.getByRole("banner").getByRole("link", { name: namePattern(name) });
+  const heading = this.page.getByRole("main").getByRole("heading", { level: 1 });
+  await expect(link).toBeVisible();
+  await expect(heading).toBeVisible();
+  const [linkStart, headingStart] = [
+    await link.evaluate((element) => element.getBoundingClientRect().left),
+    await heading.evaluate((element) => element.getBoundingClientRect().left),
+  ];
+  assert.ok(
+    Math.abs(linkStart - headingStart) <= 1,
+    `the link "${name}" starts at ${linkStart}px, the main heading at ${headingStart}px`,
+  );
 });

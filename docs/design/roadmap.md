@@ -227,6 +227,7 @@ Decisions 1–6 recorded 2026-11-08. Decisions 7–12 recorded 2026-11-08 after 
 | [138](decisions/138-the-storage-protects-an-offsite-copy.md) | The storage, not Ladderback, keeps an offsite copy that a machine that backs up can't delete |
 | [139](decisions/139-no-graphql-api.md) | No GraphQL API |
 | [140](decisions/140-a-reader-chooses-a-tables-columns.md) | A reader chooses which of a table's columns show, and in what order |
+| [141](decisions/141-the-header-stands-in-the-page-frame.md) | The header's content stands in the page's frame, and the pages' links take the text's color |
 | [142](decisions/142-the-running-version-in-the-footer.md) | The running version stands in a footer at the foot of every page |
 
 ## 17. Open questions

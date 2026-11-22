@@ -357,14 +357,14 @@ pub(crate) fn Agents(localizer: Arc<Localizer>, on: bool) -> impl IntoView {
         Some(TokenCertificateDto::Pinned) if serves_own => PINNED,
         _ => CA,
     });
-    let key_id = hub.map(|key| key.key_id).unwrap_or_default();
+    let fingerprint = hub.map(|key| key.fingerprint).unwrap_or_default();
     let (step_up, proxy_warning) = if on {
         (StepUp::Password, None)
     } else {
-        let step_up = StepUp::ShortId {
-            label: t(msg::UI_PAIRING_KEY_ID_LABEL),
-            hint: t(msg::UI_PAIRING_KEY_ID_HINT),
-            short: key_id,
+        let step_up = StepUp::Fingerprint {
+            label: t(msg::UI_PAIRING_KEY_FINGERPRINT_LABEL),
+            hint: t(msg::UI_PAIRING_KEY_FINGERPRINT_HINT),
+            fingerprint,
         };
         let warning = view! { <ProxyWarning localizer=Arc::clone(&localizer) /> };
         (step_up, Some(warning))

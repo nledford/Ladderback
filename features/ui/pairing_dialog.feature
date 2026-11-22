@@ -16,8 +16,8 @@ Feature: Making a pairing token on the hub's page
     And the page may use the clipboard
     When I open the address "/settings#agents"
     And I skip to the content
-    And I press Tab until focus is on the textbox "Hub key ID"
-    And I type the hub's key ID
+    And I press Tab until focus is on the textbox "Hub key fingerprint"
+    And I type the hub key's fingerprint
     And I press Tab until focus is on the button "Make a pairing token"
     And I press Enter
     Then focus is on the button "Copy the token"
@@ -30,6 +30,21 @@ Feature: Making a pairing token on the hub's page
     Then the clipboard holds the pairing token the dialog showed
     When I press Shift+Tab until focus is on the textbox "The pairing token"
     Then the textbox "The pairing token" holds the pairing token the dialog showed
+
+  Scenario: With sign-in off, the step-up asks for the hub key's fingerprint the hub's terminal printed, and takes it pasted
+    Given a hub with sign-in off whose terminal printed its key's fingerprint
+    And the page may use the clipboard
+    When I open the address "/settings#agents"
+    Then the textbox "Hub key fingerprint" is described by the fingerprint the hub's terminal printed
+    And the page doesn't show "Hub key ID"
+    When I skip to the content
+    And I press Tab until focus is on the button "Copy the fingerprint"
+    And I press Enter
+    And I press Tab until focus is on the textbox "Hub key fingerprint"
+    And I paste what the page copied
+    And I press Tab until focus is on the button "Make a pairing token"
+    And I press Enter
+    Then the dialog "Copy the pairing token" shows the hub key's fingerprint in full
 
   Scenario: With sign-in on, the admin password confirms a token
     Given a hub with sign-in on and the admin password "demo-admin-pass"
@@ -77,16 +92,16 @@ Feature: Making a pairing token on the hub's page
     Given a hub with sign-in off
     When I open the address "/settings#agents"
     And I skip to the content
-    And I press Tab until focus is on the button "Copy the ID"
+    And I press Tab until focus is on the button "Copy the fingerprint"
     Then the page has no live region but the announcer's
     And the page has no accessibility violations
 
-  Scenario: Copy the ID is answered through the announcer, and the Machines tab has no live region of its own
+  Scenario: Copy the fingerprint is answered through the announcer, and the Machines tab has no live region of its own
     Given a hub with sign-in off
     And the page may use the clipboard
     When I open the address "/settings#agents"
     And I skip to the content
-    And I press Tab until focus is on the button "Copy the ID"
+    And I press Tab until focus is on the button "Copy the fingerprint"
     And I press Enter
     Then the polite region reads "Copied."
     And the page has no live region but the announcer's
@@ -96,22 +111,22 @@ Feature: Making a pairing token on the hub's page
     And the browser refuses the page the clipboard
     When I open the address "/settings#agents"
     And I skip to the content
-    And I press Tab until focus is on the button "Copy the ID"
+    And I press Tab until focus is on the button "Copy the fingerprint"
     And I press Enter
-    Then the polite region reads "The browser would not let the page copy it. Select the ID and copy it yourself."
+    Then the polite region reads "The browser would not let the page copy it. Select the fingerprint and copy it yourself."
     And the page has no live region but the announcer's
 
-  Scenario: With sign-in off, a wrong key ID is the field's own error, which focus reads once
+  Scenario: With sign-in off, a wrong fingerprint is the field's own error, which focus reads once
     Given a hub with sign-in off
     When I open the address "/settings#agents"
     And I skip to the content
-    And I press Tab until focus is on the textbox "Hub key ID"
-    And I type "not-the-key-id"
+    And I press Tab until focus is on the textbox "Hub key fingerprint"
+    And I type "not-the-fingerprint"
     And I press Tab until focus is on the button "Make a pairing token"
     And I press Enter
-    Then focus is on the textbox "Hub key ID"
-    And the field "Hub key ID" shows the error "That isn't right, so no token was made. Try again."
-    And the field "Hub key ID" is marked invalid
+    Then focus is on the textbox "Hub key fingerprint"
+    And the field "Hub key fingerprint" shows the error "That isn't right, so no token was made. Try again."
+    And the field "Hub key fingerprint" is marked invalid
     And the page has no live region but the announcer's
     And the assertive region stays empty
     And the page has no accessibility violations
@@ -277,8 +292,8 @@ Feature: Making a pairing token on the hub's page
     And I skip to the content
     And I press Tab until focus is on the radio "A certificate authority's certificate"
     And I press the up arrow until focus is on the radio "The hub's own certificate"
-    And I press Tab until focus is on the textbox "Hub key ID"
-    And I type the hub's key ID
+    And I press Tab until focus is on the textbox "Hub key fingerprint"
+    And I type the hub key's fingerprint
     And I press Tab until focus is on the button "Make a pairing token"
     And I press Enter
     Then the dialog "Copy the pairing token" says "pinned to the hub's own certificate"

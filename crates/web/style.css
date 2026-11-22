@@ -155,20 +155,31 @@ a {
   inset-block-start: 0.5rem;
 }
 
-/* The brand on its own line, then the pages' links and, at that line's end,
-   Sign out (`.site-account`), which wraps under the links on a narrow
-   screen. Every part of the line stands on one baseline, no part is taller
-   than the links and nothing lies under them, so where the line fits, the
-   header is as tall signed in as with sign-in off. The running version is
-   the footer's (`components/footer.rs`). */
+/* A Ledger Gray band (`py-3 bg-surface`, in `main.rs`) spans the window. The
+   header's content stands in the page's frame (`.site-header`, whose width
+   class is the frame's own, `page_width.rs`, as `<main>`'s is), 1rem from the
+   frame's inline edges as `<main>`'s content is, so the product's name
+   starts where each page's heading does. In the frame, the brand on its own
+   line, then the pages' links and, at that line's end, Sign out
+   (`.site-account`), which wraps under the links on a narrow screen. Every
+   part of the line stands on one baseline, no part is taller than the links
+   and nothing lies under them, so where the line fits, the header is as tall
+   signed in as with sign-in off. The running version is the footer's
+   (`components/footer.rs`).
+
+   The line stands on its parts' last baselines, in every engine: WebKit takes
+   a flex container's first baseline from its first item, and Sign out's is
+   its icon's foot, so on first baselines it stood 3 px off the links'.
+   The line is narrow: the links are 0.5rem apart and Sign out has no gap of
+   its own before it (its padding is the room), so the seven links and Sign
+   out of a pseudolocale, which take 903 px in DejaVu Sans, the widest font
+   a Linux machine falls back on, still leave 25 px of the frame's 928. */
 .site-header {
   display: flex;
   flex-wrap: wrap;
   align-items: baseline;
-  gap: 0 1rem;
-  padding-block: 0.75rem;
+  align-items: last baseline;
   padding-inline: 1rem;
-  background: var(--surface);
 }
 
 .brand {
@@ -224,7 +235,7 @@ a {
    Sign out stands on its last baseline, its words': a button's first
    baseline is its first part's, its icon's foot, which stands lower in the
    button than its words' baseline, so on the line's first baseline Sign out
-   rose 2 px over the links and the header's line grew. */
+   rose 2 px over the links and the header's line grew (`.site-header`). */
 .site-account {
   display: flex;
   flex-wrap: wrap;
@@ -248,7 +259,7 @@ a {
 .site-nav ul {
   display: flex;
   flex-wrap: wrap;
-  gap: 0.25rem 1rem;
+  gap: 0.25rem 0.5rem;
   list-style: none;
   margin: 0;
   padding: 0;
@@ -259,9 +270,9 @@ a {
   padding-block: 0.25rem;
 }
 
-/* The frame's width is `<main>`'s own Tailwind utilities, which Settings'
-   Page width chooses (`page_width.rs`): a width here, unlayered, would beat
-   them. */
+/* The frame's width is the Tailwind utilities `page_width.rs` gives `<main>`
+   and the header's content, which Settings' Page width chooses: a width
+   here, unlayered, would beat them. */
 main {
   padding: 1rem;
 }
