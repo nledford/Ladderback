@@ -68,6 +68,15 @@ impl PageWidth {
             Self::Full => "[&_p]:max-w-[70ch] [&_form]:max-w-[70ch]",
         }
     }
+
+    /// The Tailwind utilities of the page's frame, which the header's content
+    /// takes as `<main>` does: as wide as the choice lays the page. Narrow
+    /// centers it at 60rem; Full width leaves it to the window. What
+    /// `<main>` alone needs, its paragraphs and forms at a readable length,
+    /// [`main_class`](Self::main_class) adds.
+    pub(crate) const fn frame_class(self) -> &'static str {
+        todo!()
+    }
 }
 
 /// Narrow's value.
@@ -144,6 +153,42 @@ mod tests {
         assert!(!full.contains("max-w-240"), "{full}");
         for measure in ["[&_p]:max-w-[70ch]", "[&_form]:max-w-[70ch]"] {
             assert!(full.split(' ').any(|class| class == measure), "{full}");
+        }
+    }
+
+    #[test]
+    fn the_frame_narrows_to_60rem_and_centers_and_full_width_bounds_nothing() {
+        let narrow = PageWidth::Narrow.frame_class();
+        // 240 steps of Tailwind's 0.25rem spacing: 60rem.
+        assert!(
+            narrow.split(' ').any(|class| class == "max-w-240"),
+            "{narrow}"
+        );
+        assert!(
+            narrow.split(' ').any(|class| class == "mx-auto"),
+            "{narrow}"
+        );
+        assert_eq!(
+            PageWidth::Full.frame_class(),
+            "",
+            "Full width's frame is the window"
+        );
+    }
+
+    #[test]
+    fn main_takes_every_class_of_the_frame_in_both_widths() {
+        for width in [PageWidth::Narrow, PageWidth::Full] {
+            let main = width.main_class();
+            for class in width
+                .frame_class()
+                .split(' ')
+                .filter(|class| !class.is_empty())
+            {
+                assert!(
+                    main.split(' ').any(|taken| taken == class),
+                    "main's classes `{main}` lack the frame's `{class}`"
+                );
+            }
         }
     }
 }

@@ -8,7 +8,8 @@ Feature: Choosing the width of the pages
   starts, and as soon as it is chosen, with no reload. In Full width the
   tables use the window's width, while paragraphs and forms keep a readable
   line length of about 70 characters. A window 320 px wide shows the page
-  across its width with either choice.
+  across its width with either choice. The header's content stands in the
+  same frame: the product's name starts where each page's heading does.
 
   Scenario: Settings offers Narrow and Full width, and Narrow keeps a wide window's page at 60rem
     Given a viewport of 1600 by 900 pixels
@@ -82,3 +83,19 @@ Feature: Choosing the width of the pages
     And the radio "Narrow" of the group "Width of each page" is checked
     And the main content is no wider than 60 rem
     And the page has no accessibility violations
+
+  # The band behind the header spans the window; the header's content stands
+  # in the page's frame, as `<main>` does.
+  Scenario Outline: The header's content shares the page's frame with <width>, in a window <window> pixels wide
+    Given a viewport of <window> by 900 pixels
+    And the page width chosen in this browser is "<width>"
+    When I open the address "/settings#page-width"
+    Then the header's band is as wide as the window
+    And the banner's content and the main content start at the same distance from the window's inline start
+    And the banner's content and the main content end at the same distance from the window's inline end
+    And the link "Ladderback" starts where the main heading starts
+    And the page has no accessibility violations
+
+    Examples:
+      | window | width      |
+      | 1600   | Narrow     |
