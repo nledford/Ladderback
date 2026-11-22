@@ -6,7 +6,8 @@
 //! `features/fleet/machine_zone.feature`: the hub's
 //! `ladderback pairing-token`, `ladderback serve --hub` and the routes its
 //! page approves through, and a machine's `ladderback pair` and
-//! `ladderback hub-status`, each a real process on folders of its own.
+//! `ladderback hub-status`, each a real process on folders of its own, and
+//! the scenarios of `features/fleet/hub_keys_at_start.feature`.
 
 use std::io::Write as _;
 use std::net::SocketAddr;
@@ -50,6 +51,8 @@ pub struct PairingTerminal {
     said: Option<Said>,
     /// The status and body of the hub's answer to the page's last request.
     page_answer: Option<(u16, String)>,
+    /// What a hub that didn't start said before it ended.
+    refused_start: Option<String>,
 }
 
 /// What a command said, and whether it succeeded.
@@ -903,5 +906,94 @@ fn refuses_with_code(agent: &mut Agent, code: String) {
         answer["code"].as_str(),
         Some(code.as_str()),
         "{status} {body}"
+    );
+}
+
+/// The hub's key files the first start makes.
+const HUB_KEY_FILES: [&str; 3] = ["hub-key", "hub-recovery-key", "hub-recovery-seed"];
+
+#[when("the hub starts for the first time")]
+async fn hub_starts_first_time(agent: &mut Agent) {
+    hub_serving(agent).await;
+}
+
+#[when("Ladderback starts for the first time on a machine that isn't a hub")]
+async fn plain_daemon_starts(agent: &mut Agent) {
+    let (child, outcome, _) = start(
+        agent.scratch(),
+        Some(&other_hub_root(agent)),
+        &["--listen", "127.0.0.1:0"],
+        None,
+    )
+    .await;
+    assert!(matches!(outcome, Outcome::Listening(_)), "{outcome:?}");
+    agent.pairing_terminal.other_hub = Some(child);
+}
+
+#[then("the hub's data folder holds a hub key, a recovery key and a recovery seed")]
+fn hub_keys_made(agent: &mut Agent) {
+    let data = testkit::daemon::data_dir(&hub_root(agent));
+    for name in HUB_KEY_FILES {
+        assert!(data.join(name).is_file(), "no {name} in {}", data.display());
+    }
+}
+
+#[then("the machine's data folder holds no hub key, no recovery key and no recovery seed")]
+fn no_hub_keys_made(agent: &mut Agent) {
+    let data = testkit::daemon::data_dir(&other_hub_root(agent));
+    assert!(data.is_dir(), "the machine never started: {}", data.display());
+    for name in HUB_KEY_FILES {
+        assert!(!data.join(name).exists(), "{name} in {}", data.display());
+    }
+}
+
+/// What the hub key file holds when it holds no key.
+const NOT_A_KEY: &str = "this is not a key\n";
+
+#[given("the hub's data folder holds a hub key file with no key in it")]
+fn hub_key_file_is_no_key(agent: &mut Agent) {
+    use std::os::unix::fs::PermissionsExt as _;
+    let data = testkit::daemon::data_dir(&hub_root(agent));
+    std::fs::create_dir_all(&data).expect("the data folder");
+    let file = data.join("hub-key");
+    std::fs::write(&file, NOT_A_KEY).expect("a hub key file");
+    std::fs::set_permissions(&file, std::fs::Permissions::from_mode(0o600))
+        .expect("the file's mode");
+}
+
+#[when("the hub starts")]
+async fn hub_starts(agent: &mut Agent) {
+    let (_child, outcome, _) = start(
+        agent.scratch(),
+        Some(&hub_root(agent)),
+        &["--listen", "127.0.0.1:0", "--hub"],
+        None,
+    )
+    .await;
+    let Outcome::Exited(status, said) = outcome else {
+        panic!("the hub started: {outcome:?}");
+    };
+    assert!(!status.success(), "{status}: {said}");
+    agent.pairing_terminal.refused_start = Some(said);
+}
+
+#[then("the hub doesn't start, and says its hub key file holds no key it can use")]
+fn hub_refused_its_key_file(agent: &mut Agent) {
+    let said = agent
+        .pairing_terminal
+        .refused_start
+        .as_deref()
+        .expect("a hub that didn't start");
+    for expected in ["hub-key", "holds no key", "didn't start"] {
+        assert!(said.contains(expected), "{expected}: {said}");
+    }
+}
+
+#[then("the hub key file still holds what it held")]
+fn hub_key_file_unchanged(agent: &mut Agent) {
+    let file = testkit::daemon::data_dir(&hub_root(agent)).join("hub-key");
+    assert_eq!(
+        std::fs::read_to_string(&file).expect("the hub key file"),
+        NOT_A_KEY
     );
 }
