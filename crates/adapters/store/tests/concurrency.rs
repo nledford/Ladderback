@@ -9,10 +9,8 @@ use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::{Duration, Instant};
 
-use app::ports::{HistoryQuery, OperationStore, ReportInbox, StoreError};
+use app::ports::{HistoryQuery, OperationStore, StoreError};
 use domain::execution::{FailureReason, Operation};
-use domain::fleet::{PlansReport, ReportedPlan};
-use domain::{AgentId, PlanId, Uuid};
 use sqlx::sqlite::SqliteConnection;
 use support::*;
 
@@ -157,24 +155,28 @@ async fn a_read_never_sees_half_of_a_save() {
 
 /// A machine's plans as the hub keeps them: `count` plans, with `left_out`
 /// more it didn't send.
-fn plans_report(count: usize, left_out: u64) -> PlansReport {
+#[cfg(feature = "hub")]
+fn plans_report(count: usize, left_out: u64) -> domain::fleet::PlansReport {
     let plans = (0..count)
-        .map(|n| ReportedPlan {
-            plan: PlanId::parse(&format!("plan-{n}")).expect("a plan's ID"),
+        .map(|n| domain::fleet::ReportedPlan {
+            plan: domain::PlanId::parse(&format!("plan-{n}")).expect("a plan's ID"),
             last: None,
             next_run: None,
         })
         .collect();
-    PlansReport::from_parts(plans, left_out).expect("a snapshot within the limit")
+    domain::fleet::PlansReport::from_parts(plans, left_out).expect("a snapshot within the limit")
 }
 
 /// A read of a machine's plans is one snapshot: never the plans of one
 /// report with the count left out of another (§7.2, #1440).
+#[cfg(feature = "hub")]
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn a_read_of_plans_never_sees_half_of_a_snapshot() {
+    use app::ports::ReportInbox as _;
+
     let scratch = Scratch::new();
     let store = Arc::new(scratch.open().await);
-    let agent = AgentId::from_uuid(Uuid::from_u128(0xa1));
+    let agent = domain::AgentId::from_uuid(domain::Uuid::from_u128(0xa1));
     // Two snapshots that differ in both their plans and their count left out.
     let (few, many) = (plans_report(1, 9), plans_report(8, 0));
     store
