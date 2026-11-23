@@ -103,15 +103,17 @@ Then("the field {string} no longer shows the error {string}", async function (th
     .toBe(false);
 });
 
+// The field has no error element, whatever its words: none on the page under
+// the id the field's error takes (`text_field::rules::error_id`), and none
+// among what the field points at.
 Then("the field {string} shows no error", async function (this: BrowserWorld, name: string) {
-  const describedBy = await this.page.getByRole("textbox", { name }).getAttribute("aria-describedby");
-  const shown = await Promise.all(
-    (describedBy ?? "")
-      .split(/\s+/)
-      .filter(Boolean)
-      .map((id) => this.page.locator(`#${id}`).textContent()),
-  );
-  assert.ok(!shown.includes("A repository name is required."), `the field ${JSON.stringify(name)} still shows the error`);
+  const input = this.page.getByRole("textbox", { name });
+  const id = await input.getAttribute("id");
+  assert.ok(id, `the field ${JSON.stringify(name)} has no id for its error to take`);
+  const errorId = `${id}-error`;
+  await expect(this.page.locator(`[id="${errorId}"]`)).toHaveCount(0);
+  const describedBy = ((await input.getAttribute("aria-describedby")) ?? "").split(/\s+/);
+  assert.ok(!describedBy.includes(errorId), `the field ${JSON.stringify(name)} still points at its error`);
 });
 
 Then("the field {string} is described only by {string}", async function (this: BrowserWorld, name: string, description: string) {
