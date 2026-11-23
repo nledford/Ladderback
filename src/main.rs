@@ -836,6 +836,10 @@ fn run_daemon(
         // open (§5, decision 73).
         let runs = background.runs();
         let restart = state.restart.clone();
+        // A paired machine's reports subscribe before the scheduler starts,
+        // so an operation it starts at once is reported (§7.2).
+        #[cfg(feature = "hub")]
+        let early = app::ports::EventBus::subscribe(state.events.as_ref()).await;
         let scheduled = tokio::spawn(background.run(random));
         // A paired machine's reports to its hub run beside the scheduler
         // and never hold it up (§7.2).
@@ -844,6 +848,7 @@ fn run_daemon(
             tokio::spawn(hub::reporting(
                 data_dir,
                 Arc::clone(&state.events),
+                early,
                 Arc::clone(&operation_log.store),
             ))
         });
