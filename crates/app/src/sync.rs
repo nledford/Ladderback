@@ -12,7 +12,7 @@ use std::sync::Arc;
 use api::UiEvent;
 use domain::fleet::{
     AckRefused, AgentReport, Approval, EpochSeconds, Happening, Hostname, MAX_OUTBOX_REPORTS,
-    MachineZone, SEND_WINDOW, WireName, check_ack,
+    MachineCheck, MachineZone, SEND_WINDOW, WireName, check_ack,
 };
 use domain::maintenance::{RepositoryReport, RepositoryReports};
 use domain::planning::Maintenance;
@@ -138,6 +138,9 @@ pub enum SyncFailure {
 /// The agent's side of the sync: one session at a time with the hub it
 /// pinned, replaying its outbox.
 pub struct SyncWithHub {
+    /// Where the machine stands, which each session tells what the hub made
+    /// of it, when the sync is given it.
+    standing: Option<Arc<MachineStanding>>,
     connect: ConnectToHub,
     outbox: Arc<dyn Outbox>,
     clock: Arc<dyn Clock>,
@@ -167,6 +170,7 @@ impl SyncWithHub {
         zone: Option<MachineZone>,
     ) -> Self {
         Self {
+            standing: None,
             connect,
             outbox,
             clock,
@@ -301,9 +305,9 @@ impl SyncWithHub {
     /// each session: a refusal as a second computer, verified as signed by
     /// the paired hub, or a connection the hub took.
     #[must_use]
-    pub fn with_standing(self, standing: Arc<MachineStanding>) -> Self {
-        let _ = standing;
-        todo!()
+    pub fn with_standing(mut self, standing: Arc<MachineStanding>) -> Self {
+        self.standing = Some(standing);
+        self
     }
 
     /// One session: connects, sends every report not yet acknowledged, in
@@ -311,11 +315,25 @@ impl SyncWithHub {
     /// hub's acknowledgements, and returns once the hub acknowledged the
     /// last of them. A pending agent sends nothing.
     pub async fn sync_once(&self) -> Result<Synced, SyncFailure> {
-        let (connected, mut channel) = self
+        let connected = self
             .connect
             .connect_channel(self.agent_id, self.hostname.clone(), self.zone.clone())
-            .await
-            .map_err(SyncFailure::Connect)?;
+            .await;
+        if let Some(standing) = &self.standing {
+            match &connected {
+                // The hub's `Welcome` held: it took this computer.
+                Ok(_) => standing.hub_took(),
+                // Only a refusal the paired hub signed reaches here: one it
+                // didn't is `Unsigned`, and unlocks nothing.
+                Err(ConnectFailure::Refused(refused))
+                    if refused.code == MachineCheck::refusal() =>
+                {
+                    standing.hub_refused();
+                }
+                Err(_) => {}
+            }
+        }
+        let (connected, mut channel) = connected.map_err(SyncFailure::Connect)?;
         if connected.approval == Approval::Pending {
             return Ok(Synced::Pending);
         }

@@ -934,13 +934,16 @@ const PAIRING_POLL: std::time::Duration = std::time::Duration::from_secs(30);
 /// paired when this starts records from `early`, the events since its
 /// caller subscribed before starting the scheduler. One that hasn't paired
 /// drops them, looks for its pairing every [`PAIRING_POLL`], and keeps no
-/// report until then. Runs until aborted.
+/// report until then. Each session tells `standing` what the hub made of
+/// this machine: refused, signed, as a second computer under its machine
+/// ID, or taken (decision 150). Runs until aborted.
 pub(crate) async fn reporting(
     data_dir: PathBuf,
     events: Arc<dyn EventBus>,
     early: futures::stream::BoxStream<'static, api::UiEvent>,
     store: Arc<SqliteStore>,
     config: Arc<dyn app::ports::ConfigStore>,
+    standing: Arc<app::machine::MachineStanding>,
 ) {
     let identity = Arc::new(FileIdentity::in_data_dir(&data_dir));
     let mut early = Some(early);
@@ -989,7 +992,8 @@ pub(crate) async fn reporting(
     )
     // A maintenance running here keeps its repository's lease from a
     // release, as its operation log says.
-    .with_leases(config, leases, store);
+    .with_leases(config, leases, store)
+    .with_standing(standing);
     tokio::join!(recording, syncing.run());
 }
 
@@ -1312,6 +1316,7 @@ mod tests {
             early,
             Arc::clone(&store),
             Arc::new(app::fakes::InMemoryConfigStore::default()),
+            Arc::default(),
         ));
         events
             .publish(api::UiEvent::OperationStarted {
