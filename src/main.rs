@@ -852,6 +852,8 @@ fn run_daemon(
         // listens, and stop with it: they run on what the log still holds
         // open (§5, decision 73).
         let runs = background.runs();
+        #[cfg(feature = "hub")]
+        let standing = background.standing();
         let restart = state.restart.clone();
         // A paired machine's reports subscribe before the scheduler starts,
         // so an operation it starts at once is reported (§7.2).
@@ -872,6 +874,7 @@ fn run_daemon(
                 early,
                 Arc::clone(&operation_log.store),
                 config,
+                standing,
             ))
         });
         let app = http_adapter::router(

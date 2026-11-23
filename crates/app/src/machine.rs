@@ -1,11 +1,15 @@
 //! Whether this machine's data folder was copied from another computer
-//! (technical design §7.1; §16, decision 144; #296). The machine ID lives in
-//! the data folder, so a copy of the folder on another computer (a restored
-//! backup of a home folder, a cloned disk or virtual machine) runs under the
-//! same ID, and its forget would take the first machine's snapshots for its
-//! own (I1, I6). The machine identifier the system gives the computer is
-//! recorded beside the ID and compared at each start: a copy keeps backing
-//! up and stops maintaining until the person takes a new machine ID.
+//! (technical design §7.1; §16, decision 144; #296), or its hub refused it
+//! as a second computer under its machine ID (decision 150; #1462). The
+//! machine ID lives in the data folder, so a copy of the folder on another
+//! computer (a restored backup of a home folder, a cloned disk or virtual
+//! machine) runs under the same ID, and its forget would take the first
+//! machine's snapshots for its own (I1, I6). The machine identifier the
+//! system gives the computer is recorded beside the ID and compared at each
+//! start: a copy keeps backing up and stops maintaining until the person
+//! takes a new machine ID. A copy made before the identifier was kept
+//! recorded its own computer's, so only its hub's signed refusal tells it,
+//! and the person may take a new machine ID on it too.
 
 use std::sync::{Arc, Mutex, PoisonError};
 
@@ -33,6 +37,12 @@ pub enum Standing {
     /// start; until then maintenance stays refused, since this run still
     /// tags and selects snapshots under the old ID.
     NewIdTaken,
+    /// The hub this machine paired with refused it, signed, as a second
+    /// computer under its machine ID (`identity-conflict`): backups run, and
+    /// the person may take a new machine ID. It may be the original
+    /// computer, so it maintains as before; its hub grants it nothing while
+    /// it refuses it. Its hub taking it again sets it back to [`Self::Same`].
+    RefusedByHub,
     /// This computer's identifier couldn't be read, so a copy can't be
     /// told: the machine runs as usual.
     Unread,
@@ -41,12 +51,40 @@ pub enum Standing {
 impl Standing {
     /// Whether the machine runs the maintenance its configuration asks for.
     pub fn maintains(self) -> bool {
-        matches!(self, Self::Same | Self::Unread)
+        matches!(self, Self::Same | Self::RefusedByHub | Self::Unread)
+    }
+
+    /// Whether the person may take a new machine ID: on a copied data
+    /// folder, or on a machine its hub refused as a second computer.
+    pub fn offers_new_id(self) -> bool {
+        matches!(self, Self::Copied | Self::RefusedByHub)
+    }
+
+    /// Where the machine stands once the hub it paired with refused it,
+    /// signed, as a second computer: refused, when it stood as usual. A copy
+    /// stays one, a new ID taken stays taken, and a machine whose identifier
+    /// couldn't be read at its start ignores the refusal: it can't take a
+    /// new ID without one.
+    fn refused_by_hub(self) -> Self {
+        match self {
+            Self::Same => Self::RefusedByHub,
+            other => other,
+        }
+    }
+
+    /// Where the machine stands once the hub it paired with took it: as
+    /// usual, when it stood refused. A copied data folder stays stopped
+    /// whatever its hub says (I1).
+    fn taken_by_hub(self) -> Self {
+        match self {
+            Self::RefusedByHub => Self::Same,
+            other => other,
+        }
     }
 }
 
 /// The standing every part of a running daemon reads: set once at start,
-/// and by [`TakeNewId`].
+/// by [`TakeNewId`], and by the sync with its hub.
 #[derive(Debug, Default)]
 pub struct MachineStanding(Mutex<Standing>);
 
@@ -61,6 +99,24 @@ impl MachineStanding {
 
     fn set(&self, standing: Standing) {
         *self.0.lock().unwrap_or_else(PoisonError::into_inner) = standing;
+    }
+
+    /// Changes the standing under one lock, so a sync's change and a new ID
+    /// taken never undo each other.
+    fn change(&self, change: fn(Standing) -> Standing) {
+        let mut held = self.0.lock().unwrap_or_else(PoisonError::into_inner);
+        *held = change(*held);
+    }
+
+    /// The hub this machine paired with refused it, signed, as a second
+    /// computer under its machine ID.
+    pub fn hub_refused(&self) {
+        self.change(Standing::refused_by_hub);
+    }
+
+    /// The hub this machine paired with took it.
+    pub fn hub_took(&self) {
+        self.change(Standing::taken_by_hub);
     }
 
     /// Whether the machine runs the maintenance its configuration asks for.
@@ -123,8 +179,8 @@ pub fn check_at_start(machine: &dyn ThisMachine) -> Found {
 /// Why a new machine ID wasn't taken. A typed code, never a sentence.
 #[derive(Debug, PartialEq)]
 pub enum NewIdError {
-    /// The data folder isn't a copy, or a new ID was taken already: the
-    /// ID stays.
+    /// The data folder isn't a copy and its hub hasn't refused it as a
+    /// second computer, or a new ID was taken already: the ID stays.
     NotCopied,
     /// The configuration couldn't be read or written: nothing changed.
     Config(ConfigError),
@@ -142,9 +198,10 @@ pub enum NewIdError {
     Machine(MachineError),
 }
 
-/// "This is a new computer: take a new ID", for a copied data folder: the
-/// machine gives up maintaining every repository it maintained, so it and
-/// the computer it was copied from never both maintain one (I1), then takes
+/// "This is a new computer: take a new ID", for a copied data folder or a
+/// machine its hub refused as a second computer: the machine gives up
+/// maintaining every repository it maintained, so it and the other
+/// computer under its machine ID never both maintain one (I1), then takes
 /// a new machine ID and records this computer's identifier beside it. Its
 /// plans stay; its backups carry the new ID from the next start, and the
 /// snapshots under the old ID stay the other computer's (I6).
@@ -189,7 +246,7 @@ impl TakeNewId {
     )]
     pub async fn take(&self) -> Result<AgentId, NewIdError> {
         let _writing = self.writes.lock().await;
-        if self.standing.get() != Standing::Copied {
+        if !self.standing.get().offers_new_id() {
             return Err(NewIdError::NotCopied);
         }
         // Read before anything is written: a computer whose identifier can't
@@ -244,3 +301,6 @@ impl TakeNewId {
         Ok(id)
     }
 }
+
+#[cfg(test)]
+mod tests;

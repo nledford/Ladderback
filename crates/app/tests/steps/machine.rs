@@ -1,7 +1,8 @@
-//! Steps for `features/fleet/copied_data_folder.feature`: the check at
-//! start against a fake machine, the maintenance a copy refuses through the
-//! forget steps' use case, and a new machine ID taken over the forget
-//! steps' configuration.
+//! Steps for `features/fleet/copied_data_folder.feature`, and for the
+//! machine of `features/fleet/refused_new_id.feature`, the copy its hub
+//! refused: the check at start against a fake machine, the maintenance a
+//! copy refuses through the forget steps' use case, and a new machine ID
+//! taken over the forget steps' configuration.
 
 use std::sync::Arc;
 
@@ -19,6 +20,9 @@ use super::Agent;
 /// This computer's identifier, and the one another computer has.
 const THIS_COMPUTER: &str = "0123456789abcdef0123456789abcdef";
 const OTHER_COMPUTER: &str = "fedcba9876543210fedcba9876543210";
+/// The identifier of the computer a copy of the agent's data folder runs
+/// on, as its `Hello`'s fingerprint is made from it.
+pub(crate) const COPY_COMPUTER: &str = "000000000000000000000000000000c0";
 
 /// The scenario's machine: what its system gives and its data folder
 /// records, where it stands, and what the check and a new ID answered.
@@ -36,6 +40,11 @@ impl MachineWorld {
     /// Where the machine stands, which the maintenance use case reads.
     pub fn standing(&self) -> Arc<MachineStanding> {
         Arc::clone(&self.standing)
+    }
+
+    /// Where the machine stands, once a Given set it up.
+    pub fn set_up_standing(&self) -> Option<Arc<MachineStanding>> {
+        self.machine.as_ref().map(|_| self.standing())
     }
 
     fn machine(&self) -> Arc<FakeThisMachine> {
@@ -82,6 +91,15 @@ fn unread(agent: &mut Agent) {
     set_up(agent, None, Some(THIS_COMPUTER));
 }
 
+/// A copy made before the identifier was kept: its first start recorded
+/// its own computer's, so the check at start finds nothing (decision 144).
+#[given("the copy recorded its own computer's machine identifier at its first start")]
+fn copy_recorded_its_own(agent: &mut Agent) {
+    set_up(agent, Some(COPY_COMPUTER), None);
+    agent.machine.start();
+    assert_eq!(agent.machine.found, Some(Found::Recorded));
+}
+
 #[when("the agent starts on this computer")]
 fn starts(agent: &mut Agent) {
     agent.machine.start();
@@ -110,7 +128,7 @@ async fn check_running(agent: &mut Agent) {
     agent.machine.running = Some(id);
 }
 
-#[when("the person takes a new machine ID")]
+#[when(regex = r"^the person takes a new machine ID(?: on the copy)?$")]
 async fn takes_new_id(agent: &mut Agent) {
     let take = TakeNewId::new(
         agent.machine.machine(),
@@ -147,6 +165,16 @@ fn finds_nothing_new(agent: &mut Agent) {
     assert_eq!(agent.machine.standing.get(), Standing::Same);
 }
 
+#[then("the copy stands refused by its hub as a second computer")]
+fn copy_refused_by_hub(agent: &mut Agent) {
+    assert_eq!(agent.machine.standing.get(), Standing::RefusedByHub);
+}
+
+#[then("the copy stands as usual")]
+fn copy_as_usual(agent: &mut Agent) {
+    assert_eq!(agent.machine.standing.get(), Standing::Same);
+}
+
 #[then("the agent notes that this computer's machine identifier couldn't be read")]
 fn notes_unread(agent: &mut Agent) {
     assert!(
@@ -157,7 +185,7 @@ fn notes_unread(agent: &mut Agent) {
     assert_eq!(agent.machine.standing.get(), Standing::Unread);
 }
 
-#[then("the agent maintains the repositories its configuration asks it to")]
+#[then(regex = r"^the (?:agent|copy) maintains the repositories its configuration asks it to$")]
 fn maintains(agent: &mut Agent) {
     assert!(agent.machine.standing.maintains());
 }
@@ -167,13 +195,15 @@ fn maintains_nothing(agent: &mut Agent) {
     assert!(!agent.machine.standing.maintains());
 }
 
-#[then("maintenance stays refused until the agent starts again")]
+#[then(
+    regex = r"^(?:maintenance stays refused until the agent starts again|the copy's maintenance stays refused until it starts again)$"
+)]
 fn refused_until_restart(agent: &mut Agent) {
     assert_eq!(agent.machine.standing.get(), Standing::NewIdTaken);
     assert!(!agent.machine.standing.maintains());
 }
 
-#[then("the machine has a new machine ID")]
+#[then(regex = r"^the (?:machine|copy) has a new machine ID$")]
 fn has_new_id(agent: &mut Agent) {
     let taken = match &agent.machine.taken {
         Some(Ok(id)) => *id,
@@ -182,7 +212,7 @@ fn has_new_id(agent: &mut Agent) {
     assert_eq!(agent.machine.machine().renewed_id(), Some(taken));
 }
 
-#[then("the machine ID is unchanged")]
+#[then(regex = r"^(?:the|the copy's) machine ID is unchanged$")]
 fn id_unchanged(agent: &mut Agent) {
     assert_eq!(agent.machine.machine().renewed_id(), None);
 }
@@ -197,7 +227,9 @@ fn records_this_computer(agent: &mut Agent) {
     );
 }
 
-#[then("taking a new machine ID is refused, as the data folder isn't a copy")]
+#[then(
+    regex = r"^(?:taking a new machine ID is refused, as the data folder isn't a copy|taking a new machine ID on the copy is refused)$"
+)]
 fn new_id_refused(agent: &mut Agent) {
     assert_eq!(agent.machine.taken, Some(Err(NewIdError::NotCopied)));
 }

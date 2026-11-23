@@ -845,6 +845,43 @@ async fn an_unknown_agent_and_another_key_get_one_signed_refusal() {
     assert_eq!(hub.registry.agents().await.unwrap(), before);
 }
 
+/// Only a refusal as a second computer stands the machine refused by its
+/// hub: another signed refusal, as a key the hub doesn't hold gets, leaves
+/// it as it was (#1462).
+#[tokio::test]
+async fn only_a_signed_identity_conflict_stands_the_machine_refused() {
+    use crate::machine::{MachineStanding, Standing};
+    use crate::sync::{SyncFailure, SyncWithHub};
+    use domain::fleet::OutboxEpoch;
+
+    let hub = hub(1);
+    let identity = paired(&hub, 1).await;
+    let stranger = with_pin_of(&identity).await;
+    let standing = Arc::new(MachineStanding::new(Standing::Same));
+    let sync = SyncWithHub::new(
+        connecting(
+            stranger,
+            Arc::new(LoopbackHubConnector::to(hub.pairing.clone())),
+        ),
+        Arc::new(crate::fakes::InMemoryOutbox::new(OutboxEpoch::from_uuid(
+            Uuid::from_u128(0xe1),
+        ))),
+        Arc::new(FakeClock::new(
+            Timestamp::from_second(1_800_000_030).unwrap(),
+        )),
+        agent_id(1),
+        hostname(1),
+        None,
+    )
+    .with_standing(standing.clone());
+    let failure = sync.sync_once().await;
+    let Err(SyncFailure::Connect(ConnectFailure::Refused(refused))) = failure else {
+        panic!("{failure:?}");
+    };
+    assert_eq!(refused.code.as_str(), "proof-refused");
+    assert_eq!(standing.get(), Standing::Same);
+}
+
 /// The `Hello` carries the fingerprint of the computer the agent runs on,
 /// under its ID, and never the identifier itself (decision 150).
 #[tokio::test]

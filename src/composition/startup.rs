@@ -199,6 +199,13 @@ impl Background {
         Arc::clone(&self.config)
     }
 
+    /// Where this machine stands, which its sync with a hub it paired with
+    /// tells what the hub made of it (decision 150).
+    #[cfg(feature = "hub")]
+    pub(crate) fn standing(&self) -> Arc<app::machine::MachineStanding> {
+        Arc::clone(&self.runner.machine)
+    }
+
     /// What the orderly stop freezes ([`Self::runs`]) of a daemon that
     /// leaves the queue's leftovers and the scheduler unstarted, as a
     /// headless or scratch session does: the backups queued before it stay

@@ -40,14 +40,18 @@ pub struct MachineDto {
 
 /// Where this machine stands: `copied` when its data folder came from
 /// another computer, so it runs no forget, prune or adoption;
-/// `new-id-taken` once the person took a new machine ID, used from the next
-/// start; `unread` when this computer's identifier couldn't be read, so a
-/// copy can't be told and the machine runs as usual.
+/// `refused-by-hub` when the hub it paired with refused it, signed, as a
+/// second computer under its machine ID, which may be the original
+/// computer; `new-id-taken` once the person took a new machine ID, for
+/// either, used from the next start; `unread` when this computer's
+/// identifier couldn't be read, so a copy can't be told and the machine
+/// runs as usual.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "kebab-case")]
 pub enum MachineStandingDto {
     Same,
     Copied,
+    RefusedByHub,
     NewIdTaken,
     Unread,
 }
