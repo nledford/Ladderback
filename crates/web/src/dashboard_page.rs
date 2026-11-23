@@ -1,0 +1,380 @@
+//! The hub's dashboard, the route `/dashboard` (technical design §4.3, §4.4;
+//! #569): each approved machine in a section of its own, named by its
+//! hostname, with when it last connected, a warning when the hub let go of
+//! its oldest reports, and a table of its latest operations. What it shows
+//! while paused, counts, says, reads again for and how its times read is
+//! `dashboard.rs`'s, decided on the host; this is the DOM glue, which the
+//! `@ui` scenarios of `features/ui/hub_dashboard.feature` run.
+//!
+//! The machines are read when the page opens, again each time the events
+//! stream opens, the first time and after a reconnect, and when an event of
+//! the hub's says a machine was approved or reported an operation. A pause
+//! holds what the page shows, not the reads.
+
+use std::sync::Arc;
+use std::time::Duration;
+
+use api::{
+    HUB_MACHINES_PATH, HubMachineDto, HubMachinesDto, IanaZone, MachineOperationDto, MsgArg,
+};
+use l10n::{Localizer, msg};
+use leptos::prelude::*;
+
+use crate::backend::Rereads;
+use crate::components::alert::rules::AlertTone;
+use crate::components::link::rules::{Destination, Matching};
+use crate::components::skeleton::rules::Awaited;
+use crate::components::{
+    Alert, Column, Link, Name, PauseUpdates, Sentences, State, StatusBadge, Table, first_load,
+    paced,
+};
+use crate::dashboard::{Fleet, instant, outcome_badge, reads_again};
+use crate::pause;
+use crate::routes::{NotFound, PageHeading, text_with, time_view};
+use crate::settings::agents::hub_known;
+use crate::text;
+use crate::variants::Rem;
+use crate::visit::Visit;
+use crate::wording::Words;
+use crate::ws;
+
+/// The banner beside the pause button while the page is paused.
+const PAUSED_ID: &str = "dashboard-paused";
+/// How long one read of the machines may take before it counts as
+/// unanswered.
+const READ_PATIENCE: Duration = Duration::from_secs(5);
+/// How long the page waits before it asks again after a read that went
+/// unanswered while none had answered: the "few seconds" it says.
+const ASK_AGAIN: Duration = Duration::from_secs(3);
+
+/// The route `/dashboard`: the dashboard on a daemon serving as a hub, and
+/// what any path nothing serves shows on one that isn't; nothing until the
+/// page knows which.
+#[component]
+pub(crate) fn DashboardRoute(localizer: Arc<Localizer>) -> impl IntoView {
+    let hub = hub_known();
+    move || match hub() {
+        None => ().into_any(),
+        Some(true) => view! { <Dashboard localizer=Arc::clone(&localizer) /> }.into_any(),
+        Some(false) => view! { <NotFound localizer=Arc::clone(&localizer) /> }.into_any(),
+    }
+}
+
+/// On a hub, the start page's way to the dashboard; nothing elsewhere.
+#[component]
+pub(crate) fn DashboardLink(localizer: Arc<Localizer>) -> impl IntoView {
+    let hub = hub_known();
+    move || {
+        (hub() == Some(true)).then(|| {
+            let words = text(&localizer, msg::UI_MACHINES_DASHBOARD_LINK);
+            Destination::route("/dashboard", Matching::Exact).map(|to| {
+                view! {
+                    <p>
+                        <Link to=to localizer=Arc::clone(&localizer)>
+                            {words}
+                        </Link>
+                    </p>
+                }
+            })
+        })
+    }
+}
+
+/// Lands one read's answer in `fleet`, or its lack of one: an answer
+/// replaces the machines shown, and no answer keeps them, or says the hub
+/// didn't answer while none has. Whether the page still waits for its
+/// first answer.
+fn land(fleet: Fleet, read: Option<HubMachinesDto>) -> bool {
+    if let Some(read) = read {
+        let _ = fleet.machines.try_set(read.machines);
+        let _ = fleet.state.try_set(State::Ready);
+        return false;
+    }
+    let waiting = matches!(
+        fleet.state.try_get_untracked(),
+        Some(State::Loading | State::Unreachable)
+    );
+    if waiting {
+        let _ = fleet.state.try_set(State::Unreachable);
+    }
+    waiting
+}
+
+/// Reads the machines into `fleet`, paced by `rereads` (`ws::reread_hub`).
+fn read(fleet: Fleet, rereads: StoredValue<Rereads>, visit: &Visit) {
+    ws::reread_hub(
+        format!("{}{HUB_MACHINES_PATH}", ws::origin()),
+        rereads,
+        visit,
+        (READ_PATIENCE, ASK_AGAIN),
+        move |read| land(fleet, read),
+    );
+}
+
+/// Reads the machines into `fleet` now, when the events stream opens and
+/// when an event asks for it, as long as the page shows.
+fn follow(fleet: Fleet) {
+    let rereads = StoredValue::new(Rereads::default());
+    let (visit, departure) = Visit::begin();
+    on_cleanup(move || drop(departure));
+    read(fleet, rereads, &visit);
+    let (opening, hearing) = (visit.clone(), visit.clone());
+    ws::listen(
+        &ws::origin(),
+        &visit,
+        move || read(fleet, rereads, &opening),
+        move |event| {
+            if reads_again(&event) {
+                read(fleet, rereads, &hearing);
+            }
+        },
+    );
+}
+
+/// The dashboard itself.
+#[component]
+fn Dashboard(localizer: Arc<Localizer>) -> impl IntoView {
+    let fleet = Fleet::new();
+    follow(fleet);
+    let viewer = l10n::viewer_zone();
+    let (pause_label, paused_said) = (
+        text(&localizer, msg::UI_LIVE_PAUSE),
+        text(&localizer, msg::UI_LIVE_PAUSED),
+    );
+    let banner_localizer = Arc::clone(&localizer);
+    let resume_localizer = Arc::clone(&localizer);
+    let on_resume = Callback::new(move |()| {
+        let words = fleet.resume();
+        text_with(&resume_localizer, words.id, &words.args)
+    });
+    let loading = text(&localizer, msg::UI_DASHBOARD_LOADING);
+    let unreachable = text(&localizer, msg::UI_DASHBOARD_UNREACHABLE);
+    let none = text(&localizer, msg::UI_DASHBOARD_NONE);
+    let shown = fleet.shown();
+    // Whether there is a machine to show, apart from the machines: their
+    // sections update in place, and only this builds them again.
+    let empty = Memo::new(move |_| shown.with(Vec::is_empty));
+    let (state, pace) = paced(
+        move || fleet.shown_state().get(),
+        |state| *state == State::Loading,
+    );
+    let heading = text(&localizer, msg::UI_DASHBOARD_HEADING);
+    let intro = text(&localizer, msg::UI_DASHBOARD_INTRO);
+    view! {
+        <PageHeading>{heading}</PageHeading>
+        <p>{intro}</p>
+        <PauseUpdates
+            label=pause_label
+            paused_said=paused_said
+            paused=Signal::derive(move || fleet.paused())
+            banner=Signal::derive(move || {
+                let words = pause::banner(fleet.pending());
+                text_with(&banner_localizer, words.id, &words.args)
+            })
+            banner_id=PAUSED_ID
+            on_pause=Callback::new(move |()| fleet.pause())
+            on_resume=on_resume
+        />
+        {move || match (state.get(), empty.get()) {
+            (State::Loading, _) => first_load(loading.clone(), Awaited::table(2), pace).into_any(),
+            (State::Unreachable, _) => view! { <p>{unreachable.clone()}</p> }.into_any(),
+            (State::Ready, true) => view! { <p>{none.clone()}</p> }.into_any(),
+            (State::Ready, false) => {
+                let localizer = Arc::clone(&localizer);
+                let viewer = viewer.clone();
+                view! {
+                    <For
+                        each=move || shown.get()
+                        key=|machine: &HubMachineDto| machine.agent_id.clone()
+                        children=move |machine: HubMachineDto| {
+                            machine_section(&localizer, shown, machine, viewer.clone())
+                        }
+                    />
+                }
+                    .into_any()
+            }
+        }}
+    }
+}
+
+/// The section of `first`, a machine as the page first showed it, kept as
+/// `shown` has it since: its heading, when it last connected, the reports
+/// the hub let go of, and its latest operations. Its hostname is the one it
+/// was approved under, which a later read doesn't change.
+fn machine_section(
+    localizer: &Arc<Localizer>,
+    shown: Signal<Vec<HubMachineDto>>,
+    first: HubMachineDto,
+    viewer: Option<IanaZone>,
+) -> impl IntoView + use<> {
+    let HubMachineDto {
+        agent_id, hostname, ..
+    } = first;
+    let heading_id = format!("dashboard-machine-{agent_id}");
+    let labelled_by = heading_id.clone();
+    let machine = Signal::derive(move || {
+        shown.with(|machines| {
+            machines
+                .iter()
+                .find(|machine| machine.agent_id == agent_id)
+                .cloned()
+        })
+    });
+    let zone = Signal::derive(move || machine.with(|machine| machine.as_ref()?.zone.clone()));
+    let last_connected = {
+        let localizer = Arc::clone(localizer);
+        let viewer = viewer.clone();
+        move || {
+            let at = machine.with(|machine| {
+                machine
+                    .as_ref()
+                    .map(|machine| machine.last_seen.clone())
+                    .unwrap_or_default()
+            });
+            let when = shown_instant(&localizer, &at, viewer.as_ref(), zone.get().as_deref());
+            text_with(
+                &localizer,
+                msg::UI_DASHBOARD_LAST_CONNECTED,
+                &[("when", MsgArg::Text(when))],
+            )
+        }
+    };
+    let dropped = {
+        let localizer = Arc::clone(localizer);
+        move || {
+            let count = machine.with(|machine| machine.as_ref().map_or(0, |m| m.reports_dropped));
+            (count > 0).then(|| {
+                let words = text_with(
+                    &localizer,
+                    msg::UI_DASHBOARD_DROPPED,
+                    &[("count", MsgArg::Count(count))],
+                );
+                view! {
+                    <Alert localizer=Arc::clone(&localizer) tone=AlertTone::Warning>
+                        {words}
+                    </Alert>
+                }
+            })
+        }
+    };
+    let caption = text_with(
+        localizer,
+        msg::UI_DASHBOARD_OPERATIONS,
+        &[("hostname", MsgArg::Text(hostname.clone()))],
+    );
+    let operations = Signal::derive(move || {
+        machine.with(|machine| {
+            machine
+                .as_ref()
+                .map(|machine| machine.operations.clone())
+                .unwrap_or_default()
+        })
+    });
+    let (row_header, columns) = operation_columns(localizer, viewer, zone);
+    let t = |id| text(localizer, id);
+    let sentences = Sentences {
+        loading: t(msg::UI_DASHBOARD_LOADING),
+        empty: t(msg::UI_DASHBOARD_NO_OPERATIONS),
+        unreachable: t(msg::UI_DASHBOARD_UNREACHABLE),
+    };
+    view! {
+        <section aria-labelledby=labelled_by>
+            <h2 id=heading_id>
+                <bdi>{hostname}</bdi>
+            </h2>
+            <p>{last_connected}</p>
+            {dropped}
+            <Table
+                name=Name::Caption(caption)
+                row_header=row_header
+                columns=columns
+                rows=operations
+                key=|row: &MachineOperationDto| row.operation.clone()
+                state=State::Ready
+                sentences=sentences
+            />
+        </section>
+    }
+}
+
+/// The instant `at` as the dashboard writes it, in the viewer's zone and the
+/// machine's `zone` beside it when they differ; as it came when it can't be
+/// read, never a blank.
+fn shown_instant(
+    localizer: &Localizer,
+    at: &str,
+    viewer: Option<&IanaZone>,
+    zone: Option<&str>,
+) -> String {
+    instant(at, viewer, zone).map_or_else(
+        || at.to_owned(),
+        |Words { id, args }| text_with(localizer, id, &args),
+    )
+}
+
+/// The columns of a machine's operations: when each started, its row's
+/// header, when it ended, how it came out and the error code it failed with.
+fn operation_columns(
+    localizer: &Arc<Localizer>,
+    viewer: Option<IanaZone>,
+    zone: Signal<Option<String>>,
+) -> (
+    Column<MachineOperationDto>,
+    Vec<Column<MachineOperationDto>>,
+) {
+    let time_column = |id: &'static str, header, at: fn(&MachineOperationDto) -> Option<String>| {
+        let localizer = Arc::clone(localizer);
+        let viewer = viewer.clone();
+        Column::new(
+            id,
+            text(&localizer, header),
+            Rem::tenths(160),
+            move |row: Signal<MachineOperationDto>| {
+                let localizer = Arc::clone(&localizer);
+                let viewer = viewer.clone();
+                (move || match row.with(at) {
+                    Some(raw) => {
+                        let shown =
+                            shown_instant(&localizer, &raw, viewer.as_ref(), zone.get().as_deref());
+                        time_view(shown, Some(raw))
+                    }
+                    None => text(&localizer, msg::UI_DASHBOARD_UNKNOWN).into_any(),
+                })
+                .into_any()
+            },
+        )
+    };
+    let started = time_column("started", msg::UI_DASHBOARD_STARTED, |row| {
+        row.started_at.clone()
+    });
+    let ended = time_column("ended", msg::UI_DASHBOARD_ENDED, |row| row.ended_at.clone());
+    let outcome = {
+        let localizer = Arc::clone(localizer);
+        Column::new(
+            "outcome",
+            text(&localizer, msg::UI_DASHBOARD_OUTCOME),
+            Rem::tenths(80),
+            move |row: Signal<MachineOperationDto>| {
+                let localizer = Arc::clone(&localizer);
+                let badge = Signal::derive(move || row.with(|row| outcome_badge(row.outcome)));
+                view! {
+                    <StatusBadge
+                        state=Signal::derive(move || badge.get().0)
+                        label=Signal::derive(move || text(&localizer, badge.get().1))
+                    />
+                }
+                .into_any()
+            },
+        )
+    };
+    let code = Column::new(
+        "code",
+        text(localizer, msg::UI_DASHBOARD_CODE),
+        Rem::tenths(120),
+        |row: Signal<MachineOperationDto>| {
+            view! { <bdi>{move || row.with(|row| row.code.clone().unwrap_or_default())}</bdi> }
+                .into_any()
+        },
+    );
+    (started, vec![ended, outcome, code])
+}

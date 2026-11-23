@@ -17,8 +17,9 @@ Feature: Approving a waiting machine on the hub's page
     And I skip to the content
     Then the table "Waiting for approval" lists "demo-laptop" with the key fingerprint the machine showed
     When I press Tab until focus is on the button "Approve demo-laptop"
-    And the page reads the list of machines again
-    Then focus is on the button "Approve demo-laptop"
+    And a machine named "demo-desktop" waits for approval on the hub
+    Then the table "Waiting for approval" lists "demo-desktop" with the key fingerprint the machine showed
+    And focus is on the button "Approve demo-laptop"
     When I press Enter
     Then focus is on the button "Cancel"
     And the dialog "Approve demo-laptop?" shows the key fingerprint the machine showed
@@ -30,7 +31,7 @@ Feature: Approving a waiting machine on the hub's page
     Then the dialog "Approve demo-laptop?" is closed
     And the page says "demo-laptop is approved."
     And the table "Approved machines" lists "demo-laptop" with the key fingerprint the machine showed
-    And the page lists no machine waiting for approval
+    And the table "Waiting for approval" lists "demo-desktop" with the key fingerprint the machine showed
     And the machine "demo-laptop" is told the hub approved it
 
   Scenario: A wrong fingerprint approves nothing, and the review says so
@@ -99,3 +100,29 @@ Feature: Approving a waiting machine on the hub's page
     Then the button "Pause live updates" is not pressed
     When a machine named "demo-desktop" waits for approval on the hub
     Then the table "Waiting for approval" lists "demo-desktop" with the key fingerprint the machine showed
+
+  Scenario: A machine that asks to pair while the Machines tab is open is listed at once and announced politely
+    Given a hub with sign-in off
+    When I open the address "/settings#agents"
+    Then the page lists no machine waiting for approval
+    When a machine named "demo-laptop" waits for approval on the hub
+    Then the table "Waiting for approval" lists "demo-laptop" with the key fingerprint the machine showed
+    And the polite region reads "demo-laptop is waiting for approval."
+
+  Scenario: A Machines tab the hub didn't answer says so, and asks again until it does
+    Given a hub with sign-in off
+    And a machine named "demo-laptop" waits for approval on the hub
+    And the hub fails its first two answers about its machines
+    When I open the address "/settings#agents"
+    Then the page says "The hub didn't answer, so its machines can't be listed. The page asks again in a few seconds."
+    And the table "Waiting for approval" lists "demo-laptop" with the key fingerprint the machine showed
+
+  Scenario: A machine approved on another page of the hub moves to the Machines tab's approved machines at once
+    Given a hub with sign-in off
+    And the page's clock stands still from the start until a step moves it on
+    And a machine named "demo-laptop" waits for approval on the hub
+    When I open the address "/settings#agents"
+    Then the table "Waiting for approval" lists "demo-laptop" with the key fingerprint the machine showed
+    When a person approves "demo-laptop" on another page of the hub
+    Then the table "Approved machines" lists "demo-laptop" with the key fingerprint the machine showed
+    And the page lists no machine waiting for approval

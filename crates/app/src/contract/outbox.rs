@@ -14,7 +14,7 @@ use domain::fleet::{
 };
 use domain::{AgentId, OperationId, Timestamp, Uuid};
 
-use crate::ports::{Appended, Outbox, OutboxEntry, ReportInbox};
+use crate::ports::{Appended, LatestReports, Outbox, OutboxEntry, ReportInbox};
 
 /// Opens an outbox: a new, empty one, or the one before opened again on
 /// the same place.
@@ -55,6 +55,7 @@ pub async fn run_inbox(harness: &dyn ReportInboxHarness) {
     taken_reports_outlive_the_hub(harness).await;
     racing_deliveries_are_taken_once(harness).await;
     past_the_cap_the_oldest_give_way_and_are_counted(harness).await;
+    the_latest_reports_are_read_with_the_count_let_go_of(harness).await;
 }
 
 /// The value of `result`, after a failed assertion if it is an error.
@@ -297,6 +298,55 @@ async fn reports(inbox: &dyn ReportInbox, agent: AgentId) -> Vec<OutboxEntry> {
     ok(inbox.reports(agent).await, "the reports taken").unwrap_or_default()
 }
 
+async fn latest(inbox: &dyn ReportInbox, agent: AgentId, limit: usize) -> Option<LatestReports> {
+    ok(inbox.latest(agent, limit).await, "the latest reports")
+}
+
+/// The latest `limit` reports of one agent, in the order the hub took
+/// them, and how many of its reports it let go of: none of an agent it
+/// took nothing of, and never another agent's.
+async fn the_latest_reports_are_read_with_the_count_let_go_of(harness: &dyn ReportInboxHarness) {
+    let inbox = harness.empty().await;
+    assert_eq!(
+        latest(inbox.as_ref(), AGENT, 3).await,
+        Some(LatestReports {
+            reports: Vec::new(),
+            dropped: 0,
+        })
+    );
+    for place in 1..=4 {
+        taken(inbox.as_ref(), AGENT, &entry(EPOCH, place)).await;
+    }
+    taken(inbox.as_ref(), OTHER_AGENT, &entry(EPOCH, 9)).await;
+    let reports = |places: &[u64]| -> Vec<AgentReport> {
+        places
+            .iter()
+            .map(|place| entry(EPOCH, *place).report)
+            .collect()
+    };
+    assert_eq!(
+        latest(inbox.as_ref(), AGENT, 3).await,
+        Some(LatestReports {
+            reports: reports(&[2, 3, 4]),
+            dropped: 0,
+        })
+    );
+    assert_eq!(
+        latest(inbox.as_ref(), AGENT, 10).await,
+        Some(LatestReports {
+            reports: reports(&[1, 2, 3, 4]),
+            dropped: 0,
+        })
+    );
+    assert_eq!(
+        latest(inbox.as_ref(), OTHER_AGENT, 10).await,
+        Some(LatestReports {
+            reports: reports(&[9]),
+            dropped: 0,
+        })
+    );
+}
+
 /// What the hub did with `entry`, and how many of the agent's reports it
 /// had let go of in all when this one made it let go of some.
 async fn ingested(
@@ -485,6 +535,13 @@ async fn past_the_cap_the_oldest_give_way_and_are_counted(harness: &dyn ReportIn
         ingested(inbox.as_ref(), OTHER_AGENT, &entry(EPOCH, 2)).await,
         Some((Ingest::New, None)),
         "another agent's reports are counted apart"
+    );
+    assert_eq!(
+        latest(inbox.as_ref(), AGENT, 1)
+            .await
+            .map(|latest| latest.dropped),
+        Some(3),
+        "the count let go of is read"
     );
     assert_eq!(
         reports(inbox.as_ref(), OTHER_AGENT).await,

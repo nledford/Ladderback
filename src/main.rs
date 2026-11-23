@@ -716,7 +716,10 @@ fn run_daemon(
     let mut front_door: Option<Option<tls_adapter::HubListener>> = None;
     #[cfg(feature = "hub")]
     if hub && let Some(data_dir) = platform::dirs::data_dir() {
-        let pairing = hub::hub_pairing(&data_dir, Arc::clone(&operation_log.store));
+        // It tells the page's browsers of its machines as they pair, are
+        // approved and report (#569).
+        let pairing = hub::hub_pairing(&data_dir, Arc::clone(&operation_log.store))
+            .with_events(Arc::clone(&state.events));
         // The hub's keys are made now, on its first start, and read after
         // that, so a key file it can't read stops the start here rather than
         // the first machine or token that needs it (decision 120). A start

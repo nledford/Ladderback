@@ -195,6 +195,62 @@ pub struct HubAgentsDto {
     pub agents: Vec<HubAgentDto>,
 }
 
+/// Where the hub's dashboard reads its approved machines and their latest
+/// operations (§4.3, #569): `GET`, answered with a [`HubMachinesDto`].
+pub const HUB_MACHINES_PATH: &str = "/api/v1/hub/machines";
+
+/// How a machine's operation came out, as far as the hub heard.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "kebab-case")]
+pub enum MachineOutcomeDto {
+    /// It started, and the hub heard no end yet.
+    Running,
+    Succeeded,
+    Failed,
+}
+
+/// One of a machine's latest operations, from its reports (§7.2): when it
+/// started and ended by the machine's clock (RFC 3339), either unknown when
+/// the hub didn't take that report, how it came out, and the wire name of
+/// the error code it failed with.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "kebab-case", deny_unknown_fields)]
+pub struct MachineOperationDto {
+    pub operation: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub started_at: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub ended_at: Option<String>,
+    pub outcome: MachineOutcomeDto,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub code: Option<String>,
+}
+
+/// One approved machine on the hub's dashboard: when the hub last heard
+/// from it (RFC 3339), its IANA time zone when it gave one, how many of its
+/// reports the hub let go of past the cap, and its latest operations,
+/// newest first. Whether it is online isn't told: a machine connects only
+/// to send its reports, so the hub holds no lasting connection to read it
+/// from (§16, decision 149).
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "kebab-case", deny_unknown_fields)]
+pub struct HubMachineDto {
+    pub agent_id: String,
+    pub hostname: String,
+    pub last_seen: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub zone: Option<String>,
+    pub reports_dropped: u64,
+    pub operations: Vec<MachineOperationDto>,
+}
+
+/// The hub's approved machines, oldest first.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "kebab-case", deny_unknown_fields)]
+pub struct HubMachinesDto {
+    pub machines: Vec<HubMachineDto>,
+}
+
 /// An approval asked for: the key the person compared (64 hex digits, as
 /// [`HubAgentDto::key`]), so the hub approves that agent with that key and
 /// no other, and the step-up confirmation: the admin password with sign-in

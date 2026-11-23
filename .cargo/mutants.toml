@@ -187,10 +187,12 @@
 #
 # `crates/web/src/settings/machines.rs` is the DOM glue of the Machines tab's
 # machines on a hub (§16, decision 121, "Waiting for approval"): it reads the
-# list every few seconds while the tab is mounted, draws the waiting and the
-# approved machines' tables, opens the review, sends the approval and says
-# its answer. What the tables show while live updates are paused, what waits
-# and what the resume says are `crates/web/src/machines_list.rs`'s, tested
+# list when the tab is built, when the events stream opens and when a hub's
+# event asks (#569), draws the waiting and the approved machines' tables,
+# says politely that a machine started waiting, opens the review, sends the
+# approval and says its answer. What the tables show while live updates are
+# paused, what waits and what the resume says are
+# `crates/web/src/machines_list.rs`'s, tested
 # on the host and gated. What the step-up asks and how it is checked, which
 # agent a key approves and each refusal's code are the hub's, tested on the
 # host (`crates/adapters/http/src/hub_pages/tests.rs`, `crates/app/src/pairing/`
@@ -198,6 +200,16 @@
 # `features/fleet/approving_on_the_hubs_page.feature`); its words are the
 # catalog's. The `@ui` scenarios of `features/ui/approving_machines.feature`
 # run the glue in Chromium, Firefox and WebKit.
+#
+# `crates/web/src/dashboard_page.rs` is the DOM glue of the hub's dashboard
+# (§4.3, #569): it reads the machines when the page opens, when the events
+# stream opens and when an event asks, and draws each machine's section and
+# table. Which events read again, what a pause holds and counts, what the
+# resume says, how an outcome reads and how a time reads beside the viewer's
+# are `crates/web/src/dashboard.rs`'s, tested on the host and gated; the
+# machines and their operations are the hub's (`crates/app/src/pairing/hub/`,
+# `crates/adapters/http/src/hub_pages/tests.rs`). The `@ui` scenarios of
+# `features/ui/hub_dashboard.feature` run the glue in Chromium and WebKit.
 #
 # The wasm32-only test modules of `web` (`formatting.rs`, `time_zones.rs`) are
 # not listed: they are declared `#[cfg(test)]`, which cargo-mutants skips (see
@@ -226,6 +238,7 @@ exclude_globs = [
     "crates/web/src/full_disk_access_warning.rs",
     "crates/web/src/settings/dry_run_allowlist.rs",
     "crates/web/src/settings/machines.rs",
+    "crates/web/src/dashboard_page.rs",
 ]
 # Mutants that no test can tell from the real code, or that no host can run:
 exclude_re = [

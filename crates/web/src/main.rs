@@ -106,6 +106,15 @@ mod pause;
 // has it (decision 122).
 #[cfg(feature = "hub")]
 mod machines_list;
+// What the hub's dashboard shows while paused, counts, says, reads again
+// for and how its times read, decided on the host; `dashboard_page.rs` is
+// its glue. Only a build with the hub has it (decision 122).
+#[cfg(feature = "hub")]
+mod dashboard;
+// The hub's dashboard, the route `/dashboard`, and the start page's way to
+// it: the DOM glue of `dashboard.rs`. Only a build with the hub has it.
+#[cfg(feature = "hub")]
+mod dashboard_page;
 // What the hub's pairing dialog decides, on the host; `settings/agents.rs`
 // is its glue. Only a build with the hub has it (decision 122).
 #[cfg(feature = "hub")]
@@ -215,6 +224,20 @@ fn gallery_page(localizer: Arc<Localizer>) -> AnyView {
     }
 }
 
+/// The page of `/dashboard`: the hub's dashboard in a build that has the hub
+/// (it shows only on a daemon serving as one), and a path nothing serves in
+/// one that doesn't.
+fn dashboard_page(localizer: Arc<Localizer>) -> AnyView {
+    #[cfg(feature = "hub")]
+    {
+        view! { <dashboard_page::DashboardRoute localizer=localizer /> }.into_any()
+    }
+    #[cfg(not(feature = "hub"))]
+    {
+        view! { <NotFound localizer=localizer /> }.into_any()
+    }
+}
+
 /// Watches the router: each path the reader navigates to after the first is
 /// titled (`page::retitle`). The first path is the page load, which
 /// `page::declare` titled. Focus is the page heading's (`routes::PageHeading`).
@@ -244,6 +267,7 @@ fn Pages(localizer: Arc<Localizer>) -> impl IntoView {
     let repositories = Arc::clone(&localizer);
     let log = Arc::clone(&localizer);
     let settings = Arc::clone(&localizer);
+    let dashboard = Arc::clone(&localizer);
     view! {
         <Arrival localizer=localizer />
         <Routes fallback=move || view! { <NotFound localizer=Arc::clone(&not_found) /> }>
@@ -281,6 +305,7 @@ fn Pages(localizer: Arc<Localizer>) -> impl IntoView {
                 path=path!("/settings")
                 view=move || view! { <Settings localizer=Arc::clone(&settings) /> }
             />
+            <Route path=path!("/dashboard") view=move || dashboard_page(Arc::clone(&dashboard)) />
         </Routes>
     }
 }

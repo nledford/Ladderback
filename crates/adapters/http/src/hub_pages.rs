@@ -15,7 +15,7 @@ use std::sync::Arc;
 
 use api::ErrorCode;
 use app::pairing::{
-    ApprovalAsk, HubPairing, HubPairingError, MadeToken, TokenAsk, TokenAskRefused,
+    ApprovalAsk, HubPairing, HubPairingError, Machine, MadeToken, TokenAsk, TokenAskRefused,
 };
 use axum::Router;
 use axum::extract::{ConnectInfo, Path, Request, State};
@@ -23,8 +23,8 @@ use axum::http::{HeaderMap, StatusCode};
 use axum::response::{IntoResponse, Response};
 use domain::access::step_up::StepUpConfirmation;
 use domain::fleet::{
-    AgentRecord, AgentStatus, ApprovalRefused, Fingerprint, HubAddress, HubRoute, HubScheme,
-    ListedAgent, PublicKey, RouteRefused, TokenId, TokenTls,
+    AgentRecord, AgentStatus, ApprovalRefused, EpochSeconds, Fingerprint, HubAddress, HubRoute,
+    HubScheme, ListedAgent, PublicKey, ReportedOutcome, RouteRefused, TokenId, TokenTls,
 };
 use domain::{AgentId, SignedDuration, Timestamp, Uuid};
 
@@ -44,6 +44,7 @@ pub(crate) fn routes(routes: Router<AppState>) -> Router<AppState> {
         .route(api::PAIRING_TOKENS_PATH, axum::routing::post(make_token))
         .route(PAIRING_TOKEN_PATH, axum::routing::delete(cancel_token))
         .route(api::HUB_AGENTS_PATH, axum::routing::get(agents))
+        .route(api::HUB_MACHINES_PATH, axum::routing::get(machines))
         .route(AGENT_APPROVAL_PATH, axum::routing::post(approve))
 }
 
@@ -202,6 +203,62 @@ async fn agents(State(state): State<AppState>) -> Response {
         .into_response(),
         Err(error) => hub_refusal(&error),
     }
+}
+
+/// Every approved machine, oldest first, with its latest operations, as a
+/// [`api::HubMachinesDto`]: the page's dashboard shows them.
+async fn machines(State(state): State<AppState>) -> Response {
+    let Some(pairing) = pairing_of(&state) else {
+        return not_a_hub();
+    };
+    match pairing.machines().await {
+        Ok(machines) => axum::Json(api::HubMachinesDto {
+            machines: machines.iter().map(machine_dto).collect(),
+        })
+        .into_response(),
+        Err(error) => hub_refusal(&error),
+    }
+}
+
+fn machine_dto(machine: &Machine) -> api::HubMachineDto {
+    let record = &machine.record;
+    api::HubMachineDto {
+        agent_id: record.agent_id.as_uuid().to_string(),
+        hostname: record.hostname.as_str().to_owned(),
+        last_seen: record.last_seen.to_string(),
+        zone: record.zone.as_ref().map(|zone| zone.as_str().to_owned()),
+        reports_dropped: machine.reports_dropped,
+        operations: machine
+            .operations
+            .iter()
+            .map(|operation| {
+                let (outcome, code) = match &operation.outcome {
+                    ReportedOutcome::Running => (api::MachineOutcomeDto::Running, None),
+                    ReportedOutcome::Succeeded => (api::MachineOutcomeDto::Succeeded, None),
+                    ReportedOutcome::Failed { code } => (
+                        api::MachineOutcomeDto::Failed,
+                        Some(code.as_str().to_owned()),
+                    ),
+                };
+                api::MachineOperationDto {
+                    operation: operation.op_id.as_uuid().to_string(),
+                    started_at: operation.started_at.and_then(time_of),
+                    ended_at: operation.ended_at.and_then(time_of),
+                    outcome,
+                    code,
+                }
+            })
+            .collect(),
+    }
+}
+
+/// A reported time as the API writes times; none past what a timestamp
+/// holds, which no machine's clock reaches.
+fn time_of(at: EpochSeconds) -> Option<String> {
+    let seconds = i64::try_from(at.seconds()).ok()?;
+    Timestamp::from_second(seconds)
+        .ok()
+        .map(|time| time.to_string())
 }
 
 /// The waiting agent the path names approved, under the key the

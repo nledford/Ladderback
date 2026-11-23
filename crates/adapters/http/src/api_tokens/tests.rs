@@ -2371,3 +2371,90 @@ async fn with_sign_in_off_an_ai_agent_is_told_which_file_couldnt_be_read() {
         serde_json::json!({ "file": { "type": "text", "value": "config.toml" } })
     );
 }
+
+/// A machine that started waiting, and the other machine events (#569).
+fn machine_events() -> [api::UiEvent; 5] {
+    let agent = "018f0000-0000-7000-8000-0000000000a1".to_owned();
+    let at = "2026-11-09T10:00:00Z".to_owned();
+    [
+        api::UiEvent::AgentPending {
+            agent: agent.clone(),
+            hostname: "laptop".to_owned(),
+            at: at.clone(),
+        },
+        api::UiEvent::AgentApproved {
+            agent: agent.clone(),
+            hostname: "laptop".to_owned(),
+            at: at.clone(),
+        },
+        api::UiEvent::AgentOnline {
+            agent: agent.clone(),
+            at: at.clone(),
+        },
+        api::UiEvent::AgentOffline {
+            agent: agent.clone(),
+            at,
+        },
+        api::UiEvent::AgentReported {
+            agent,
+            operation: "018f0000-0000-7000-8000-000000000001".to_owned(),
+            outcome: api::MachineOutcomeDto::Failed,
+        },
+    ]
+}
+
+/// The hub's machines are told only where its routes answer: to a session
+/// or the browser with sign-in off, never to a token, even one holding
+/// every permission; other events reach both.
+#[test]
+fn machine_events_are_shown_only_where_the_hubs_machines_are() {
+    for event in machine_events() {
+        assert_eq!(
+            event_shown(every(), true, event.clone()),
+            Some(event.clone())
+        );
+        assert_eq!(
+            event_shown(every(), false, event.clone()),
+            None,
+            "{event:?}"
+        );
+    }
+    let other = api::UiEvent::ProposalChanged {
+        proposal: "p1".to_owned(),
+        status: api::ProposalStatusDto::Pending,
+    };
+    assert_eq!(event_shown(every(), false, other.clone()), Some(other));
+}
+
+/// A token holding every permission hears no machine event on its stream,
+/// and still hears the next event of another kind.
+#[tokio::test]
+async fn a_tokens_events_stream_tells_nothing_of_the_hubs_machines() {
+    use tokio_tungstenite::tungstenite::Message;
+
+    let daemon = Daemon::new();
+    let token = daemon.token(&Permission::ALL).await;
+    let events = Arc::new(app::fakes::InMemoryEventBus::new());
+    let mut state = daemon.state();
+    state.events = events.clone();
+    let addr = serving_events(state).await;
+    let mut socket = events_with(addr, ("authorization", &token)).await;
+    for event in machine_events() {
+        app::ports::EventBus::publish(events.as_ref(), event).await;
+    }
+    app::ports::EventBus::publish(
+        events.as_ref(),
+        api::UiEvent::ProposalChanged {
+            proposal: "p1".to_owned(),
+            status: api::ProposalStatusDto::Pending,
+        },
+    )
+    .await;
+    let seen = match socket.next().await {
+        Some(Ok(Message::Text(text))) => {
+            serde_json::from_str::<serde_json::Value>(text.as_str()).unwrap()
+        }
+        other => panic!("the next event arrives as text: {other:?}"),
+    };
+    assert_eq!(seen["type"], "proposal-changed", "{seen}");
+}

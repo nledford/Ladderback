@@ -61,6 +61,15 @@ pub struct Ingested {
     pub dropped: Option<u64>,
 }
 
+/// What the hub's dashboard reads of one agent's reports (#569): its
+/// latest, in the order the hub took them, and how many of its reports the
+/// hub let go of in all.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct LatestReports {
+    pub reports: Vec<AgentReport>,
+    pub dropped: u64,
+}
+
 /// The hub's reports of its agents (technical design §7.2): each agent's
 /// last [`MAX_REPORTS_HELD`](domain::fleet::MAX_REPORTS_HELD) reports, how
 /// many it let go of past that, and for each of its last epochs the place
@@ -81,4 +90,8 @@ pub trait ReportInbox: Send + Sync {
 
     /// The reports kept of `agent`, in the order it took them.
     async fn reports(&self, agent: AgentId) -> Result<Vec<OutboxEntry>, StoreError>;
+
+    /// The last `limit` reports kept of `agent`, in the order it took them,
+    /// and how many of its reports it let go of past the cap.
+    async fn latest(&self, agent: AgentId, limit: usize) -> Result<LatestReports, StoreError>;
 }

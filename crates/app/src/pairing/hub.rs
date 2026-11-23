@@ -16,14 +16,18 @@ use domain::{AgentId, SignedDuration, TimeZoneDatabase};
 use super::wire::{ack_payload, read_hello, read_report, welcome_payload};
 use crate::access::Access;
 use crate::ports::{
-    Added, AgentRegistry, Clock, Identity, IdentityError, Random, RandomUnavailable, ReportInbox,
-    Signing, SigningError, StoreError,
+    Added, AgentRegistry, Clock, EventBus, Identity, IdentityError, Random, RandomUnavailable,
+    ReportInbox, Signing, SigningError, StoreError,
 };
 
 mod dialog;
+mod fleet;
 mod logged;
+#[cfg(test)]
+mod tests;
 
 pub use dialog::{AgentsListed, ApprovalAsk, MadeToken, TokenAsk, TokenAskRefused};
+pub use fleet::Machine;
 
 /// The hub's side of pairing: its keys, its tokens, and its answers to an
 /// agent's `Connect` and `Pair`.
@@ -47,6 +51,9 @@ pub struct HubPairing {
     /// The agents that sent a report far behind the last the hub took of
     /// them since it started: it warns of each once (#1387).
     warned_behind: Mutex<HashSet<AgentId>>,
+    /// Where the hub tells its browsers that a machine started waiting,
+    /// was approved or reported (#569).
+    events: Option<Arc<dyn EventBus>>,
     /// The agents under whose ID the hub refused a second computer since
     /// it started: it warns of each once (decision 150).
     warned_second: Mutex<HashSet<AgentId>>,
@@ -202,6 +209,7 @@ impl HubPairing {
             inbox: None,
             warned_full: Mutex::default(),
             warned_behind: Mutex::default(),
+            events: None,
             warned_second: Mutex::default(),
         }
     }
@@ -219,6 +227,13 @@ impl HubPairing {
     #[must_use]
     pub fn with_inbox(mut self, inbox: Arc<dyn ReportInbox>) -> Self {
         self.inbox = Some(inbox);
+        self
+    }
+
+    /// This pairing telling `events` of its machines (#569).
+    #[must_use]
+    pub fn with_events(mut self, events: Arc<dyn EventBus>) -> Self {
+        self.events = Some(events);
         self
     }
 
@@ -400,6 +415,7 @@ impl HubPairing {
             .await?;
         if let Ok(agent) = &approved {
             log::info!("{}", logged::approved(agent));
+            self.tell(fleet::approved(agent, self.clock.now())).await;
         }
         Ok(approved)
     }
@@ -487,6 +503,9 @@ impl HubPairing {
         match self.registry.pair(&request, self.clock.now()).await? {
             Ok(pairing) => {
                 log::info!("{}", logged::paired(&request, &pairing));
+                if let Some(event) = fleet::waiting(&pairing, self.clock.now()) {
+                    self.tell(event).await;
+                }
                 let paired = SignedMessage::Paired {
                     hub_key: keys.key,
                     agent_id: handshake.agent_id,
@@ -741,6 +760,10 @@ impl HubPairing {
         let taken = inbox.ingest(syncing.agent_id, &entry, now).await?;
         if let Some(dropped) = taken.dropped {
             self.warn_full(syncing.agent_id, dropped);
+        }
+        if taken.ingest == Ingest::New {
+            self.tell(fleet::reported(syncing.agent_id, &entry.report))
+                .await;
         }
         if taken.ingest == Ingest::Behind {
             self.warn_behind(syncing.agent_id, entry.seq);

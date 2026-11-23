@@ -9,7 +9,7 @@
 //! has waited stay as they were at the press. Resuming drops the copy, so the
 //! latest list shows at once.
 
-use api::{AgentStatusDto, HubAgentDto, LookalikeDto, MsgArg};
+use api::{AgentStatusDto, HubAgentDto, LookalikeDto, MsgArg, UiEvent};
 use l10n::msg;
 use leptos::prelude::*;
 
@@ -89,6 +89,11 @@ impl Listed {
     /// Whether the reader has paused the lists.
     pub(crate) fn paused(self) -> bool {
         self.held.with(Option::is_some)
+    }
+
+    /// Whether the reader has paused the lists, without following it.
+    pub(crate) fn paused_untracked(self) -> bool {
+        self.held.with_untracked(Option::is_some)
     }
 
     /// Whether a read has answered, as the page shows it.
@@ -266,6 +271,27 @@ fn started_waiting(held: &[HubAgentDto], agents: &[HubAgentDto]) -> usize {
         .count()
 }
 
+/// What the Machines tab does on hearing an event of the hub's (#569).
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub(crate) enum Heard {
+    /// Nothing its lists show changed.
+    Nothing,
+    /// A machine was approved: the lists are read again.
+    ReadAgain,
+    /// The machine named here started waiting for approval: the lists are
+    /// read again, and the page says so politely while it isn't paused.
+    Waiting(String),
+}
+
+/// What the Machines tab does on hearing `event`.
+pub(crate) fn heard(event: &UiEvent) -> Heard {
+    match event {
+        UiEvent::AgentPending { hostname, .. } => Heard::Waiting(hostname.clone()),
+        UiEvent::AgentApproved { .. } => Heard::ReadAgain,
+        _ => Heard::Nothing,
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use l10n::Localizer;
@@ -304,6 +330,43 @@ mod tests {
             .collect()
     }
 
+    /// A machine that starts waiting is read and said by its hostname, an
+    /// approval is read, and nothing else changes the lists: a report, a
+    /// machine's connection or an operation's events.
+    #[test]
+    fn a_machine_starting_to_wait_is_read_and_said_and_an_approval_is_read() {
+        let at = || "2026-11-21T10:00:00Z".to_owned();
+        let pending = UiEvent::AgentPending {
+            agent: "agent-demo-laptop".to_owned(),
+            hostname: "demo-laptop".to_owned(),
+            at: at(),
+        };
+        assert_eq!(heard(&pending), Heard::Waiting("demo-laptop".to_owned()));
+        let approved = UiEvent::AgentApproved {
+            agent: "agent-demo-laptop".to_owned(),
+            hostname: "demo-laptop".to_owned(),
+            at: at(),
+        };
+        assert_eq!(heard(&approved), Heard::ReadAgain);
+        for other in [
+            UiEvent::AgentReported {
+                agent: "agent-demo-laptop".to_owned(),
+                operation: "op-1".to_owned(),
+                outcome: api::MachineOutcomeDto::Running,
+            },
+            UiEvent::AgentOnline {
+                agent: "agent-demo-laptop".to_owned(),
+                at: at(),
+            },
+            UiEvent::AgentOffline {
+                agent: "agent-demo-laptop".to_owned(),
+                at: at(),
+            },
+        ] {
+            assert_eq!(heard(&other), Heard::Nothing, "{other:?}");
+        }
+    }
+
     /// The words' text, isolation marks aside.
     fn said(words: &Words) -> String {
         text_with(&Localizer::new(&[]), words.id, &words.args).replace(['\u{2066}', '\u{2069}'], "")
@@ -316,6 +379,7 @@ mod tests {
             agent("demo-macbook", AgentStatusDto::Approved, 60),
         ]);
         assert!(!listed.paused());
+        assert!(!listed.paused_untracked());
         assert_eq!(hostnames(listed, AgentStatusDto::Pending), ["demo-laptop"]);
         assert_eq!(
             hostnames(listed, AgentStatusDto::Approved),
@@ -335,6 +399,7 @@ mod tests {
         let listed = listed(vec![agent("demo-laptop", AgentStatusDto::Pending, 5)]);
         listed.pause();
         assert!(listed.paused());
+        assert!(listed.paused_untracked());
         listed.agents.set(vec![
             agent("demo-laptop", AgentStatusDto::Pending, 10),
             agent("demo-desktop", AgentStatusDto::Pending, 1),

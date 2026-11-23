@@ -8,7 +8,9 @@ use domain::fleet::{
 };
 use domain::{AgentId, Timestamp};
 
-use crate::ports::{Appended, Ingested, Outbox, OutboxEntry, ReportInbox, StoreError};
+use crate::ports::{
+    Appended, Ingested, LatestReports, Outbox, OutboxEntry, ReportInbox, StoreError,
+};
 
 /// The agent's outbox in memory, for use-case tests and acceptance
 /// scenarios: one instance stands for one database, so a test that keeps it
@@ -173,5 +175,24 @@ impl ReportInbox for InMemoryReportInbox {
             .get(&agent)
             .map(|held| held.reports.clone())
             .unwrap_or_default())
+    }
+
+    async fn latest(&self, agent: AgentId, limit: usize) -> Result<LatestReports, StoreError> {
+        let agents = self.agents.lock().unwrap_or_else(PoisonError::into_inner);
+        Ok(agents.get(&agent).map_or(
+            LatestReports {
+                reports: Vec::new(),
+                dropped: 0,
+            },
+            |held| LatestReports {
+                reports: held
+                    .reports
+                    .iter()
+                    .skip(held.reports.len().saturating_sub(limit))
+                    .map(|entry| entry.report.clone())
+                    .collect(),
+                dropped: held.dropped,
+            },
+        ))
     }
 }

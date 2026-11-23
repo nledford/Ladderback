@@ -4,19 +4,20 @@ use std::sync::Arc;
 use app::access::Access;
 use app::fakes::{
     FakeClock, FakeSigning, InMemoryAdminPassword, InMemoryAgentRegistry, InMemoryApiTokenStore,
-    InMemoryIdentity, InMemorySessionStore, SeededRandom,
+    InMemoryIdentity, InMemoryReportInbox, InMemorySessionStore, SeededRandom,
 };
 use app::pairing::HubPairing;
-use app::ports::{AgentRegistry as _, Signing as _};
+use app::ports::{AgentRegistry as _, OutboxEntry, ReportInbox as _, Signing as _};
 use axum::body::Body;
 use axum::http::header::{HOST, SET_COOKIE};
 use axum::http::{Method, StatusCode};
 use domain::access::api_token::{ApiTokenLabel, TokenPermissions};
 use domain::access::permissions::{Permission, Permissions};
 use domain::fleet::{
-    AgentRecord, AgentStatus, Fingerprint, Hostname, MachineFingerprint, SigningSeed,
+    AgentRecord, AgentReport, AgentStatus, EpochSeconds, Fingerprint, Happening, Hostname,
+    MachineFingerprint, OutboxEpoch, ReportSeq, SigningSeed, WireName,
 };
-use domain::{AgentId, Timestamp, Uuid};
+use domain::{AgentId, OperationId, Timestamp, Uuid};
 use http_body_util::BodyExt;
 use tower::ServiceExt;
 
@@ -44,6 +45,7 @@ struct Daemon {
     registry: Arc<InMemoryAgentRegistry>,
     access: Option<Arc<Access>>,
     certificate: Option<Fingerprint>,
+    inbox: Arc<InMemoryReportInbox>,
 }
 
 impl Daemon {
@@ -66,6 +68,8 @@ impl Daemon {
             clock(),
             "0.5.0-hub".to_owned(),
         );
+        let inbox = Arc::new(InMemoryReportInbox::default());
+        let pairing = pairing.with_inbox(Arc::clone(&inbox) as _);
         let pairing = match &access {
             Some(access) => pairing.with_access(Arc::clone(access)),
             None => pairing,
@@ -75,6 +79,7 @@ impl Daemon {
             registry,
             access,
             certificate: None,
+            inbox,
         }
     }
 
@@ -92,6 +97,7 @@ impl Daemon {
             registry: Arc::new(InMemoryAgentRegistry::new()),
             access: None,
             certificate: None,
+            inbox: Arc::new(InMemoryReportInbox::default()),
         }
     }
 
@@ -701,6 +707,79 @@ async fn the_page_lists_each_agent_with_its_key_its_wait_its_lookalike_and_a_sec
     );
 }
 
+/// The dashboard's route: each approved machine with its latest
+/// operations, newest first, a failure's code and the count let go of;
+/// no waiting machine.
+#[tokio::test]
+async fn the_page_shows_each_approved_machine_with_its_latest_operations() {
+    let daemon = Daemon::hub(false);
+    let earlier = Timestamp::from_second(1_799_999_400).unwrap();
+    let approved = agent(1, "macbook", true, earlier);
+    daemon.registry.hold(approved.clone());
+    daemon.registry.hold(agent(2, "laptop", false, earlier));
+    let failed = Happening::Failed {
+        code: WireName::parse("repository-unreachable").unwrap(),
+    };
+    for (seq, n, happening, at) in [
+        (1, 1, Happening::Started, 1_799_999_000),
+        (2, 1, Happening::Succeeded, 1_799_999_100),
+        (3, 2, failed, 1_799_999_200),
+    ] {
+        let entry = OutboxEntry {
+            epoch: OutboxEpoch::from_uuid(Uuid::from_u128(0xe1)),
+            seq: ReportSeq::new(seq).unwrap(),
+            report: AgentReport {
+                op_id: OperationId::from_uuid(Uuid::from_u128(n)),
+                happening,
+                at: EpochSeconds::from_seconds(at),
+            },
+        };
+        daemon
+            .inbox
+            .ingest(approved.agent_id, &entry, now())
+            .await
+            .unwrap();
+    }
+    let response = daemon
+        .send(build(
+            Method::GET,
+            api::HUB_MACHINES_PATH,
+            LOOPBACK,
+            &[],
+            "",
+        ))
+        .await;
+    assert_eq!(response.status(), StatusCode::OK);
+    let shown: api::HubMachinesDto = serde_json::from_value(json(response).await).unwrap();
+    let time = |second| Some(Timestamp::from_second(second).unwrap().to_string());
+    assert_eq!(
+        shown.machines,
+        [api::HubMachineDto {
+            agent_id: approved.agent_id.as_uuid().to_string(),
+            hostname: "macbook".to_owned(),
+            last_seen: approved.last_seen.to_string(),
+            zone: None,
+            reports_dropped: 0,
+            operations: vec![
+                api::MachineOperationDto {
+                    operation: Uuid::from_u128(2).to_string(),
+                    started_at: None,
+                    ended_at: time(1_799_999_200),
+                    outcome: api::MachineOutcomeDto::Failed,
+                    code: Some("repository-unreachable".to_owned()),
+                },
+                api::MachineOperationDto {
+                    operation: Uuid::from_u128(1).to_string(),
+                    started_at: time(1_799_999_000),
+                    ended_at: time(1_799_999_100),
+                    outcome: api::MachineOutcomeDto::Succeeded,
+                    code: None,
+                },
+            ],
+        }]
+    );
+}
+
 #[tokio::test]
 async fn on_loopback_the_fingerprint_approves_the_agent_under_the_key_compared_once() {
     let daemon = Daemon::hub(false);
@@ -808,8 +887,10 @@ async fn with_sign_in_on_only_a_session_lists_or_approves_and_confirms_with_the_
     // The hub key is made while no agent is registered, as on a real hub.
     daemon.pairing.as_ref().unwrap().hub_key().await.unwrap();
     daemon.registry.hold(waiting.clone());
-    let list = build(Method::GET, api::HUB_AGENTS_PATH, LOOPBACK, &[], "");
-    assert_eq!(daemon.send(list).await.status(), StatusCode::UNAUTHORIZED);
+    for path in [api::HUB_AGENTS_PATH, api::HUB_MACHINES_PATH] {
+        let list = build(Method::GET, path, LOOPBACK, &[], "");
+        assert_eq!(daemon.send(list).await.status(), StatusCode::UNAUTHORIZED);
+    }
     let unsigned = daemon
         .send(approve(LOOPBACK, &[], &waiting, PASSWORD))
         .await;
@@ -830,6 +911,7 @@ async fn with_sign_in_on_only_a_session_lists_or_approves_and_confirms_with_the_
     let bearer = [("authorization", format!("Bearer {}", created.text.expose()))];
     for request in [
         build(Method::GET, api::HUB_AGENTS_PATH, LOOPBACK, &bearer, ""),
+        build(Method::GET, api::HUB_MACHINES_PATH, LOOPBACK, &bearer, ""),
         approve(LOOPBACK, &bearer, &waiting, PASSWORD),
     ] {
         assert_eq!(
