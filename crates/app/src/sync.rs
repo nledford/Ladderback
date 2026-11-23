@@ -22,6 +22,7 @@ use domain::{AgentId, OperationId, SignedDuration, Timestamp, Uuid};
 
 use crate::leases::MaintenanceLeases;
 use crate::machine::MachineStanding;
+use crate::others_snapshots::{ListingsDue, OthersSnapshots};
 use crate::pairing::{AgentChannel, ChannelError, ConnectFailure, ConnectToHub, Connected};
 use crate::ports::{Appended, Clock, ConfigError, ConfigStore, OperationStore, Outbox, StoreError};
 
@@ -165,12 +166,14 @@ pub struct SyncWithHub {
 }
 
 /// What a session needs to ask for the machine's leases: the repositories
-/// it uses, from its configuration, where it keeps what it is granted, and
-/// the maintenance running here, which keeps its lease from a release.
+/// it uses, from its configuration, where it keeps what it is granted, the
+/// maintenance running here, which keeps its lease from a release, and
+/// what its listings showed of other agents' snapshots in each repository.
 struct Leasing {
     config: Arc<dyn ConfigStore>,
     leases: Arc<MaintenanceLeases>,
     operations: Arc<dyn OperationStore>,
+    others: Arc<OthersSnapshots>,
 }
 
 /// What the agent told its hub besides its reports, on its monotonic clock.
@@ -230,21 +233,34 @@ impl SyncWithHub {
     /// repositories `config` asks to maintain here, and keeping them in
     /// `leases`: a lease the configuration no longer asks for is released
     /// first, unless `operations` has a maintenance of its repository
-    /// running, then every repository whose ID is known is reported and the
-    /// hub's grants taken (§7.2, §7.3, I1).
+    /// running, then every repository whose ID is known is reported, with
+    /// whether `others` saw another agent's recent snapshots in it, and
+    /// the hub's grants taken (§7.2, §7.3, I1).
     #[must_use]
     pub fn with_leases(
         mut self,
         config: Arc<dyn ConfigStore>,
         leases: Arc<MaintenanceLeases>,
         operations: Arc<dyn OperationStore>,
+        others: Arc<OthersSnapshots>,
     ) -> Self {
         self.leases = Some(Leasing {
             config,
             leases,
             operations,
+            others,
         });
         self
+    }
+
+    /// This sync running `listings` before each session, so the session
+    /// reports what each repository the machine asks to maintain holds
+    /// rather than what one it hasn't listed may hold (§7.3; §16, decision
+    /// NN).
+    #[must_use]
+    pub fn with_listings(self, listings: Arc<ListingsDue>) -> Self {
+        let _ = listings;
+        todo!()
     }
 
     /// Releases what the configuration no longer asks to maintain here,

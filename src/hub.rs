@@ -1005,7 +1005,7 @@ pub(crate) async fn reporting(
     )
     // A maintenance running here keeps its repository's lease from a
     // release, as its operation log says.
-    .with_leases(config, leases, store)
+    .with_leases(config, leases, store, Arc::default())
     .with_standing(standing)
     .with_progress(Arc::clone(&progress));
     if let Some(plans) = plans {
