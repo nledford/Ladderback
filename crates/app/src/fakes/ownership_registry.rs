@@ -4,6 +4,7 @@ use std::sync::{Mutex, PoisonError};
 use async_trait::async_trait;
 use domain::maintenance::{
     LeaseEpoch, ReleaseRefused, RepositoryOwnership, RepositoryReport, RepositoryReports,
+    report_counts,
 };
 use domain::{AgentId, RepositoryId, Timestamp};
 
@@ -43,8 +44,32 @@ impl OwnershipRegistry for InMemoryOwnershipRegistry {
         reports: &RepositoryReports,
         now: Timestamp,
     ) -> Result<Vec<ClaimDecision>, StoreError> {
-        let _ = (self.kept(), agent, reports, now);
-        todo!()
+        let mut kept = self.kept();
+        let Kept {
+            owners,
+            reports: taken,
+        } = &mut *kept;
+        taken.insert(agent, (reports.entries().to_vec(), now));
+        let decided = reports
+            .entries()
+            .iter()
+            .map(|entry| {
+                let others_report = taken.iter().any(|(other, (entries, at))| {
+                    *other != agent
+                        && report_counts(*at, now)
+                        && entries.iter().any(|e| e.repository == entry.repository)
+                });
+                let outcome = owners
+                    .entry(entry.repository.clone())
+                    .or_insert_with(|| RepositoryOwnership::new(entry.repository.clone()))
+                    .claim(agent, entry.request, entry.shared(others_report), now);
+                ClaimDecision {
+                    repository: entry.repository.clone(),
+                    outcome,
+                }
+            })
+            .collect();
+        Ok(decided)
     }
 
     async fn release(
@@ -53,15 +78,22 @@ impl OwnershipRegistry for InMemoryOwnershipRegistry {
         repository: &RepositoryId,
         epoch: LeaseEpoch,
     ) -> Result<Result<(), ReleaseRefused>, StoreError> {
-        let _ = (agent, repository, epoch);
-        todo!()
+        Ok(self
+            .kept()
+            .owners
+            .get_mut(repository)
+            .map_or(Err(ReleaseRefused), |owner| owner.release(agent, epoch)))
     }
 
     async fn ownership(
         &self,
         repository: &RepositoryId,
     ) -> Result<RepositoryOwnership, StoreError> {
-        let _ = repository;
-        todo!()
+        Ok(self
+            .kept()
+            .owners
+            .get(repository)
+            .cloned()
+            .unwrap_or_else(|| RepositoryOwnership::new(repository.clone())))
     }
 }

@@ -49,8 +49,13 @@ impl RepositoryOwners {
         agent: AgentId,
         reports: &RepositoryReports,
     ) -> Result<Reported, StoreError> {
-        let _ = (&self.agents, &self.owners, &self.clock, agent, reports);
-        todo!()
+        match self.agents.agent(agent).await? {
+            Some(record) if !record.is_pending() => {
+                let decided = self.owners.report(agent, reports, self.clock.now()).await?;
+                Ok(Reported::Decided(decided))
+            }
+            _ => Ok(Reported::NotApproved),
+        }
     }
 
     /// Ends the lease `agent` holds on `repository` at `epoch`, at its
@@ -61,7 +66,6 @@ impl RepositoryOwners {
         repository: &RepositoryId,
         epoch: LeaseEpoch,
     ) -> Result<Result<(), ReleaseRefused>, StoreError> {
-        let _ = (agent, repository, epoch);
-        todo!()
+        self.owners.release(agent, repository, epoch).await
     }
 }
