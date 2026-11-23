@@ -1363,7 +1363,10 @@ impl HubLink for WatchingLink {
                 HubStep::Wait | HubStep::Fail(_) => {}
             }
         }
-        self.syncing.lock().unwrap().push(self.session.is_syncing());
+        self.syncing
+            .lock()
+            .unwrap()
+            .push(self.session.syncing_agent().is_some());
         Ok(())
     }
 

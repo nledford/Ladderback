@@ -617,21 +617,20 @@ impl app::ports::HubLink for PlainLink {
     }
 }
 
-/// Once the hub welcomed an approved agent, the connection leaves the
-/// handshake's bound: a report sent after it is acknowledged. It is closed
-/// once the agent sends nothing for the idle bound (§7.2).
-#[tokio::test]
-async fn a_syncing_connection_outlives_the_handshake_bound_until_it_is_idle() {
+/// A hub that keeps reports, served on loopback under `bounds`, and an
+/// agent it approved: what connects that agent, its ID and its hostname.
+async fn approved_agent(
+    bounds: Bounds,
+) -> (
+    app::pairing::ConnectToHub,
+    domain::AgentId,
+    domain::fleet::Hostname,
+) {
     use app::pairing::{AgentPairing, ConnectToHub, PairWithHub};
-    use app::ports::{AgentRegistry as _, OutboxEntry};
-    use domain::fleet::{
-        Ack, AgentReport, Approval, EpochSeconds, Happening, Hostname, HubAddress, OutboxEpoch,
-        ReportSeq, TokenTls,
-    };
-    use domain::{AgentId, OperationId, Uuid};
+    use app::ports::AgentRegistry as _;
+    use domain::fleet::{Hostname, HubAddress, TokenTls};
+    use domain::{AgentId, Uuid};
 
-    let handshake = Duration::from_millis(300);
-    let idle = Duration::from_millis(900);
     let registry = Arc::new(InMemoryAgentRegistry::new());
     let pairing = Arc::new(
         HubPairing::new(
@@ -646,11 +645,6 @@ async fn a_syncing_connection_outlives_the_handshake_bound_until_it_is_idle() {
         )
         .with_inbox(Arc::new(app::fakes::InMemoryReportInbox::default())),
     );
-    let bounds = Bounds {
-        handshake_within: handshake,
-        idle_within: idle,
-        ..Bounds::DECIDED
-    };
     let address = serve(&SyncHub::bounded(pairing.clone(), bounds)).await;
     let keys = pairing.keys().await.unwrap();
     let at = HubAddress::parse(&format!("http://{address}")).unwrap();
@@ -683,21 +677,47 @@ async fn a_syncing_connection_outlives_the_handshake_bound_until_it_is_idle() {
         connector,
         "0.0.0-agent".to_owned(),
     );
+    (connecting, agent, hostname)
+}
+
+/// A report of a start at `seq` of one epoch.
+fn report(seq: u64) -> app::ports::OutboxEntry {
+    use domain::fleet::{AgentReport, EpochSeconds, Happening, OutboxEpoch, ReportSeq};
+    use domain::{OperationId, Uuid};
+
+    app::ports::OutboxEntry {
+        epoch: OutboxEpoch::from_uuid(Uuid::from_u128(0xe1)),
+        seq: ReportSeq::new(seq).unwrap(),
+        report: AgentReport {
+            op_id: OperationId::from_uuid(Uuid::from_u128(0x0b)),
+            happening: Happening::Started,
+            at: EpochSeconds::from_seconds(1_800_000_000),
+        },
+    }
+}
+
+/// Once the hub welcomed an approved agent, the connection leaves the
+/// handshake's bound: a report sent after it is acknowledged. It is closed
+/// once the agent sends nothing for the idle bound (§7.2).
+#[tokio::test]
+async fn a_syncing_connection_outlives_the_handshake_bound_until_it_is_idle() {
+    use domain::fleet::{Ack, Approval};
+
+    let handshake = Duration::from_millis(300);
+    let idle = Duration::from_millis(900);
+    let bounds = Bounds {
+        handshake_within: handshake,
+        idle_within: idle,
+        ..Bounds::DECIDED
+    };
+    let (connecting, agent, hostname) = approved_agent(bounds).await;
     let (connected, mut channel) = connecting
         .connect_channel(agent, hostname, None)
         .await
         .unwrap();
     assert_eq!(connected.approval, Approval::Approved);
     tokio::time::sleep(handshake * 2).await;
-    let entry = OutboxEntry {
-        epoch: OutboxEpoch::from_uuid(Uuid::from_u128(0xe1)),
-        seq: ReportSeq::FIRST,
-        report: AgentReport {
-            op_id: OperationId::from_uuid(Uuid::from_u128(0x0b)),
-            happening: Happening::Started,
-            at: EpochSeconds::from_seconds(1_800_000_000),
-        },
-    };
+    let entry = report(1);
     let started = std::time::Instant::now();
     channel.send_report(&entry).await.unwrap();
     assert_eq!(
@@ -714,4 +734,46 @@ async fn a_syncing_connection_outlives_the_handshake_bound_until_it_is_idle() {
         took >= idle && took <= idle + MARGIN,
         "closed after {took:?}, not at its {idle:?} idle bound"
     );
+}
+
+/// One live connection per agent ID (decision 120): an agent's new session
+/// closes its older one, which takes no report after it, and the older
+/// one's end leaves the newer one live, so the next session closes it.
+#[tokio::test]
+async fn a_new_session_of_an_agent_closes_its_older_one() {
+    use domain::fleet::Ack;
+
+    let (connecting, agent, hostname) = approved_agent(Bounds::DECIDED).await;
+    let (_, mut older) = connecting
+        .connect_channel(agent, hostname.clone(), None)
+        .await
+        .unwrap();
+    let (_, mut newer) = connecting
+        .connect_channel(agent, hostname.clone(), None)
+        .await
+        .unwrap();
+    // The send may fail or not, depending on when the close arrives; no
+    // `Ack` answers it either way.
+    let _ = older.send_report(&report(1)).await;
+    let answer = tokio::time::timeout(PATIENCE, older.receive_ack()).await;
+    assert!(matches!(answer, Ok(Err(_))), "{answer:?}");
+    drop(older);
+    // The older connection's end has run before the newer one sends.
+    tokio::time::sleep(Duration::from_millis(100)).await;
+    let entry = report(2);
+    newer.send_report(&entry).await.unwrap();
+    assert_eq!(
+        newer.receive_ack().await.unwrap(),
+        Ack {
+            epoch: entry.epoch,
+            seq: entry.seq,
+        }
+    );
+    let (_, _newest) = connecting
+        .connect_channel(agent, hostname, None)
+        .await
+        .unwrap();
+    let _ = newer.send_report(&report(3)).await;
+    let answer = tokio::time::timeout(PATIENCE, newer.receive_ack()).await;
+    assert!(matches!(answer, Ok(Err(_))), "{answer:?}");
 }

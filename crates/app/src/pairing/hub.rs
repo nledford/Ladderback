@@ -814,3 +814,10 @@ pub(super) struct Syncing {
     /// The sequence number of the hub's next message.
     next_sent: u64,
 }
+
+impl Syncing {
+    /// The agent whose messages the connection carries.
+    pub(super) fn agent_id(&self) -> AgentId {
+        self.agent_id
+    }
+}

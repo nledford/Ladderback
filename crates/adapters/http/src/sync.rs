@@ -16,8 +16,9 @@
 //! hybrid key exchange, and a `Connect` naming one on any other closes
 //! `binding-unavailable`. Once the hub welcomed an approved agent, which
 //! then sends its reports (§7.2), the connection leaves the
-//! unauthenticated and stays open until the agent closes it or sends
-//! nothing for 10 minutes; its frames keep the same cap.
+//! unauthenticated and stays open until the agent closes it, sends
+//! nothing for 10 minutes or connects again, since an agent holds one live
+//! connection (decision 120); its frames keep the same cap.
 //!
 //! In a build with the hub, every path under `/sync/` is these routes',
 //! behind a check of their own in place of the browser's request checks
@@ -119,7 +120,7 @@ mod check {
 
 #[cfg(feature = "hub")]
 mod served {
-    use std::collections::VecDeque;
+    use std::collections::{HashMap, VecDeque};
     use std::net::IpAddr;
     use std::sync::{Arc, Mutex, PoisonError};
     use std::time::Duration;
@@ -130,6 +131,7 @@ mod served {
     use axum::extract::ws::{CloseFrame, Message, WebSocket, WebSocketUpgrade, close_code};
     use axum::extract::{ConnectInfo, Extension};
     use axum::routing::get;
+    use domain::AgentId;
     use domain::fleet::{Fingerprint, KEY_BYTES};
     use tokio::sync::Notify;
 
@@ -190,6 +192,7 @@ mod served {
                     pairing,
                     bounds,
                     waiting: Mutex::default(),
+                    live: Mutex::default(),
                 })),
                 certificate: None,
                 without_tls: false,
@@ -277,6 +280,9 @@ mod served {
         pairing: Arc<HubPairing>,
         bounds: Bounds,
         waiting: Mutex<Waiting>,
+        /// Each approved agent's one live connection (decision 120): its
+        /// place's number and what tells it a newer one replaced it.
+        live: Mutex<HashMap<AgentId, (u64, Arc<Notify>)>>,
     }
 
     impl std::fmt::Debug for Served {
@@ -309,7 +315,8 @@ mod served {
         /// Closed with this reason, unanswered.
         Refused(&'static str),
         /// Closed with no reason: the agent left, the time ran out, it was
-        /// evicted, or the hub couldn't take a step.
+        /// evicted, a newer connection of the agent replaced it, or the hub
+        /// couldn't take a step.
         Dropped,
     }
 
@@ -317,7 +324,7 @@ mod served {
     /// whose reports the hub now takes.
     enum Handshake {
         Ended(End),
-        Syncing(Box<HubSession>),
+        Syncing(AgentId, Box<HubSession>),
     }
 
     /// What the agent sent next.
@@ -345,7 +352,15 @@ mod served {
             self.leave(id);
             let end = match handshake {
                 Handshake::Ended(end) => end,
-                Handshake::Syncing(mut session) => self.sync(&mut socket, &mut session).await,
+                Handshake::Syncing(agent, mut session) => {
+                    let replaced = self.go_live(agent, id);
+                    let end = tokio::select! {
+                        end = self.sync(&mut socket, &mut session) => end,
+                        () = replaced.notified() => End::Dropped,
+                    };
+                    self.end_live(agent, id);
+                    end
+                }
             };
             let (code, reason) = match end {
                 End::Answered => (close_code::NORMAL, ""),
@@ -405,6 +420,31 @@ mod served {
                 .retain(|open| open.id != id);
         }
 
+        /// Makes connection `id` `agent`'s one live connection, closing the
+        /// one it replaces (decision 120); what tells it a newer one
+        /// replaced it in turn.
+        fn go_live(&self, agent: AgentId, id: u64) -> Arc<Notify> {
+            let replaced = Arc::new(Notify::new());
+            let older = self
+                .live
+                .lock()
+                .unwrap_or_else(PoisonError::into_inner)
+                .insert(agent, (id, Arc::clone(&replaced)));
+            if let Some((_, older)) = older {
+                older.notify_one();
+            }
+            replaced
+        }
+
+        /// Connection `id` of `agent` ended: it leaves the table unless a
+        /// newer one took its place.
+        fn end_live(&self, agent: AgentId, id: u64) {
+            let mut live = self.live.lock().unwrap_or_else(PoisonError::into_inner);
+            if live.get(&agent).is_some_and(|(live, _)| *live == id) {
+                live.remove(&agent);
+            }
+        }
+
         async fn converse(
             &self,
             socket: &mut WebSocket,
@@ -428,8 +468,8 @@ mod served {
                 if let Some(end) = self.take(socket, &mut session, read).await {
                     return Handshake::Ended(end);
                 }
-                if session.is_syncing() {
-                    return Handshake::Syncing(Box::new(session));
+                if let Some(agent) = session.syncing_agent() {
+                    return Handshake::Syncing(agent, Box::new(session));
                 }
                 read = next(socket).await;
             }

@@ -1,4 +1,5 @@
 use api::sync::{AgentFrame, HubFrame};
+use domain::AgentId;
 use domain::fleet::{AgentRecord, KEY_BYTES};
 
 use super::hub::{
@@ -31,11 +32,15 @@ pub struct HubSession {
 }
 
 impl HubSession {
-    /// Whether the hub welcomed an approved agent on this connection and
-    /// takes its signed messages: the transport then holds it open past
-    /// the handshake's bounds, as long as the agent isn't idle.
-    pub fn is_syncing(&self) -> bool {
-        matches!(self.stage, Stage::Syncing(_))
+    /// The approved agent the hub welcomed on this connection, once it
+    /// takes its signed messages: the transport then holds the connection
+    /// open past the handshake's bounds, as long as the agent isn't idle,
+    /// and keeps it as the agent's one live connection (decision 120).
+    pub fn syncing_agent(&self) -> Option<AgentId> {
+        match &self.stage {
+            Stage::Syncing(syncing) => Some(syncing.agent_id()),
+            _ => None,
+        }
     }
 }
 

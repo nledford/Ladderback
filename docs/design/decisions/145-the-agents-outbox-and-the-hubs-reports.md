@@ -10,7 +10,7 @@
 - **What the hub lets go of.** The hub keeps the newest 10,000 reports of each agent, a few years of an agent's daily backups, so one agent can't fill the hub's store. Losing the oldest silently would leave a dashboard that looks whole and isn't, so the hub counts what it let go of, per agent, for the dashboard (#569) to show, and its log says so once per agent while it runs. The line names the agent and the count, never what a report says (I4).
 - **The window.** 32 reports ahead of the acknowledgements lets a burst flow without a round trip per report, and bounds what a dropped connection makes the agent send again.
 - **Epochs.** The hub keeps the last place of each agent's 8 newest epochs, by when it last took one: a rebuilt agent database starts a new epoch, and 8 is more than an agent rebuilds in its life, while an older epoch's place is forgotten.
-- **The connection.** An approved agent's connection leaves the handshake's bounds once the hub welcomed it, and the hub closes one that sends no frame for 10 minutes, so a stuck agent doesn't hold a socket for good; its frames keep the 4 KiB cap.
+- **The connection.** An approved agent's connection leaves the handshake's bounds once the hub welcomed it, and the hub closes one that sends no frame for 10 minutes, so a stuck agent doesn't hold a socket for good, and one whose agent connected again, so an agent holds one live connection ([decision 120](120-agent-hub-connection-security.md)); its frames keep the 4 KiB cap.
 
 ## Consequences
 
