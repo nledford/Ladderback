@@ -611,7 +611,7 @@ error-hub-proof-invalid = The { -hub } didn't prove its key. If you reset or rei
 
 # The hub refused this machine's proof. The hub gives one answer for every
 # cause, so the message names them all.
-error-proof-refused = The { -hub } refused this { -machine }. It may have been removed, or its key may have changed. Look at the list of { -machine(form: "other") } on the { -hub }; to bring it back, make a replacement token for it. If this { -machine } was never approved, its wait may have lapsed: make a new token and pair again.
+error-proof-refused = The { -hub } refused this { -machine }. It may have been removed, or its key may have changed. Look at the list of { -machine(form: "other") } on the { -hub }. If this { -machine } was never approved, its wait may have lapsed: make a new token and pair again.
 
 # The hub already has as many machines waiting for approval as it allows. The
 # token stays good.
