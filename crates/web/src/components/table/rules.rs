@@ -132,14 +132,30 @@ pub fn order<R, K: Clone + Eq + Hash>(
     let Some((direction, sort_key)) = by else {
         return firsts.map(|(_, key)| key).collect();
     };
-    let mut keyed: Vec<(SortKey, K)> = firsts.map(|(row, key)| (sort_key(row), key)).collect();
-    // A stable sort: rows whose keys tie keep the order given, whichever way
-    // the keys run.
+    // The rows' sort keys, each with where its row stands among `keys`, are
+    // sorted by one function for every row type (#1429).
+    let mut keys = Vec::with_capacity(rows.len());
+    let mut keyed = Vec::with_capacity(rows.len());
+    for (at, (row, key)) in firsts.enumerate() {
+        keyed.push((sort_key(row), at));
+        keys.push(Some(key));
+    }
+    sort_keys(&mut keyed, direction);
+    keyed
+        .into_iter()
+        .filter_map(|(_, at)| keys.get_mut(at).and_then(Option::take))
+        .collect()
+}
+
+/// Sorts `keyed`, each a row's sort key and where the row stands, the way
+/// `direction` runs. A stable sort: rows whose keys tie keep the order given,
+/// whichever way the keys run. Not generic, so the standard library's sort
+/// is built once for every table rather than once for each row type (#1429).
+fn sort_keys(keyed: &mut [(SortKey, usize)], direction: Direction) {
     keyed.sort_by(|(a, _), (b, _)| match direction {
         Direction::Ascending => a.cmp(b),
         Direction::Descending => b.cmp(a),
     });
-    keyed.into_iter().map(|(_, key)| key).collect()
 }
 
 /// Where each key of `rows` first stands in them: a key given twice is the
