@@ -99,6 +99,7 @@ async fn paired(hub: &Hub, n: u128) -> Arc<InMemoryIdentity> {
         identity.clone(),
         Arc::new(FakeSigning),
         Arc::new(SeededRandom::new(9_000 + u64::try_from(n).unwrap())),
+        Arc::new(crate::fakes::InMemoryLeaseCache::default()),
     );
     PairWithHub::new(
         pairing,

@@ -5,11 +5,17 @@ use domain::fleet::{
     Hostname, HubAddress, KeyFile, PairAnswer, PairingToken, PublicKey, Refused, SeedFile,
     Signature, TokenTls, WireName,
 };
-use domain::{AgentId, SignedDuration, Timestamp, Uuid};
+use domain::maintenance::{EpochFloor, HeldLease, HeldLeases, LeaseEpoch};
+use domain::{AgentId, RepositoryId, SignedDuration, Timestamp, Uuid};
 
 use super::*;
-use crate::fakes::{FakeClock, FakeSigning, InMemoryAgentRegistry, InMemoryIdentity, SeededRandom};
-use crate::ports::{AgentRegistry, Clock, Identity, IdentityError, Signing};
+use crate::fakes::{
+    FakeClock, FakeSigning, InMemoryAgentRegistry, InMemoryIdentity, InMemoryLeaseCache,
+    SeededRandom,
+};
+use crate::ports::{
+    AgentRegistry, Clock, Identity, IdentityError, LeaseCache, Signing, StoreError,
+};
 
 pub(super) const EXPORTER: [u8; 32] = [0xee; 32];
 
@@ -58,10 +64,16 @@ pub(super) fn pinned() -> TokenTls {
 }
 
 pub(super) fn agent(identity: Arc<InMemoryIdentity>) -> AgentPairing {
+    agent_keeping(identity, Arc::new(InMemoryLeaseCache::default()))
+}
+
+/// An agent whose leases and epoch floors are in `leases`.
+fn agent_keeping(identity: Arc<InMemoryIdentity>, leases: Arc<dyn LeaseCache>) -> AgentPairing {
     AgentPairing::new(
         identity,
         Arc::new(FakeSigning),
         Arc::new(SeededRandom::new(9_000)),
+        leases,
     )
 }
 
@@ -875,6 +887,7 @@ async fn a_taken_hostname_names_its_holder() {
         Arc::new(InMemoryIdentity::default()),
         Arc::new(FakeSigning),
         Arc::new(SeededRandom::new(77_000)),
+        Arc::new(InMemoryLeaseCache::default()),
     );
     let keys = hub.pairing.keys().await.unwrap();
     let other_id = AgentId::from_uuid(Uuid::from_u128(2));
@@ -1018,4 +1031,133 @@ async fn nothing_shown_holds_a_secret() {
             assert!(!one.contains(secret.as_str()), "{one}");
         }
     }
+}
+
+/// What a machine keeps of the hub it paired with: a lease on one
+/// repository at epoch 3, and its floor there.
+fn kept() -> HeldLeases {
+    let repository = RepositoryId::parse(&"a".repeat(64)).unwrap();
+    let epoch = LeaseEpoch::new(3).unwrap();
+    HeldLeases::from_parts(
+        [(
+            repository.clone(),
+            HeldLease {
+                epoch,
+                ends_at: Timestamp::from_second(1_900_000_000).unwrap(),
+            },
+        )],
+        [(
+            repository,
+            EpochFloor {
+                recovery_number: 0,
+                generation: 1,
+                epoch,
+            },
+        )],
+    )
+}
+
+/// A machine that pins no hub forgets the leases and epoch floors it kept
+/// when it pairs: they are another hub's, whose epochs the new hub's don't
+/// follow, so they would refuse its every grant (#1481).
+#[tokio::test]
+async fn i1_a_machine_pairing_with_a_new_hub_forgets_the_old_hubs_leases_and_floors() {
+    let hub = Hub::new(1);
+    let cache = Arc::new(InMemoryLeaseCache::default());
+    cache.save(&kept()).await.unwrap();
+    let agent = agent_keeping(Arc::default(), cache.clone());
+    pair(&hub, &agent, hub.token(pinned()).await).await.unwrap();
+    assert_eq!(cache.load().await.unwrap(), HeldLeases::default());
+}
+
+/// A cache that reads but can't be written.
+struct Unwritable;
+
+#[async_trait::async_trait]
+impl LeaseCache for Unwritable {
+    async fn load(&self) -> Result<HeldLeases, StoreError> {
+        Ok(kept())
+    }
+
+    async fn save(&self, _leases: &HeldLeases) -> Result<(), StoreError> {
+        Err(StoreError::Unavailable {
+            detail: "read-only".to_owned(),
+        })
+    }
+}
+
+/// A machine that can't forget the old hub's floors pins no new hub, so
+/// the floors never stay under a new pin, and pairing again tries again.
+#[tokio::test]
+async fn a_machine_that_cant_forget_the_old_hubs_floors_pins_no_new_hub() {
+    let hub = Hub::new(1);
+    let identity = Arc::new(InMemoryIdentity::default());
+    let agent = agent_keeping(identity.clone(), Arc::new(Unwritable));
+    let outcome = pair(&hub, &agent, hub.token(pinned()).await).await;
+    assert!(
+        matches!(outcome, Err(AgentPairingError::Leases(_))),
+        "{outcome:?}"
+    );
+    assert_eq!(identity.pin().await.unwrap(), None);
+}
+
+/// A machine that pairs again with the hub it pins keeps its leases and
+/// epoch floors: that hub's epochs only rose past them, and they still
+/// catch a rewound copy of it (decision 137).
+#[tokio::test]
+async fn i1_a_machine_pairing_again_with_its_hub_keeps_its_leases_and_floors() {
+    let hub = Hub::new(1);
+    let cache = Arc::new(InMemoryLeaseCache::default());
+    let agent = agent_keeping(Arc::default(), cache.clone());
+    pair(&hub, &agent, hub.token(pinned()).await).await.unwrap();
+    cache.save(&kept()).await.unwrap();
+    pair(&hub, &agent, hub.token(pinned()).await).await.unwrap();
+    assert_eq!(cache.load().await.unwrap(), kept());
+}
+
+/// A machine that comes to pin another hub while it pairs, so it refuses
+/// the answer, keeps that hub's leases and epoch floors: they still catch
+/// a rewound copy of the hub it pins.
+#[tokio::test]
+async fn i1_a_machine_refusing_a_hub_it_doesnt_pin_keeps_its_leases_and_floors() {
+    let other = Hub::new(2);
+    let hub = Hub::new(1);
+    let identity = Arc::new(InMemoryIdentity::default());
+    let cache = Arc::new(InMemoryLeaseCache::default());
+    let agent = agent_keeping(identity.clone(), cache.clone());
+    let keys = hub.pairing.keys().await.unwrap();
+    let (connect, handshake) = agent
+        .connect(hub.token(pinned()).await, agent_id(), laptop(), None)
+        .await
+        .unwrap();
+    let (challenge, hub_side) = hub
+        .pairing
+        .challenge(&keys, &connect, Some(EXPORTER))
+        .unwrap();
+    let (pair_message, awaiting) = agent
+        .answer_challenge(handshake, &challenge, Some(EXPORTER))
+        .await
+        .unwrap();
+    let answer = hub
+        .pairing
+        .pair(&keys, &hub_side, &pair_message)
+        .await
+        .unwrap();
+    let other_key = *other.pairing.keys().await.unwrap().key();
+    identity
+        .write_pin(&domain::fleet::HubPin::new(
+            other_key,
+            pinned(),
+            other_key,
+            HubAddress::parse("https://other.example:9443").unwrap(),
+        ))
+        .await
+        .unwrap();
+    cache.save(&kept()).await.unwrap();
+    let refused = agent.take_answer(awaiting, &answer).await;
+    assert!(
+        matches!(refused, Err(AgentPairingError::PinnedToAnotherHub { .. })),
+        "{refused:?}"
+    );
+    assert_eq!(cache.load().await.unwrap(), kept());
 }

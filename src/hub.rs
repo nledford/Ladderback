@@ -760,18 +760,25 @@ async fn on_the_agent(
         Ok(id) => id,
         Err(error) => return refused(localizer, &error.to_string()),
     };
+    // The leases and epoch floors a new hub replaces are in the database.
+    let store = match SqliteStore::open(&data_dir.join(DATABASE)).await {
+        Ok(store) => Arc::new(store),
+        Err(error) => return refused(localizer, &error.to_string()),
+    };
     let connector = WebSocketHubConnector::new();
     let pairing = AgentPairing::new(
         Arc::new(FileIdentity::in_data_dir(data_dir)),
         Arc::new(AwsLcSigning),
         Arc::new(OsRandom),
+        Arc::<SqliteStore>::clone(&store),
     );
     let address = token.address().as_str().to_owned();
     let asked = hostname.clone();
-    match PairWithHub::new(pairing, Arc::new(connector))
+    let outcome = PairWithHub::new(pairing, Arc::new(connector))
         .pair(token, agent_id, hostname, machine_zone())
-        .await
-    {
+        .await;
+    store.close().await;
+    match outcome {
         Ok(paired) => {
             let fingerprint = ("fingerprint", text(Fingerprint::of_key(&paired.agent_key)));
             let (one_name, held_name) = if paired.approved {
