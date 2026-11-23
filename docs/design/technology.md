@@ -19,7 +19,27 @@ The pages' buttons (§4.5, #780) turn on `arrows`, `multimedia` and `files` (713
 
 The header's hamburger Menu button (decision 143) draws Lucide's `Menu`, which turns on `layout`: 136 icons, 98 of them in no category already on. That category alone adds 29,560 B (0.49 %) to the release `web` wasm built with `--no-default-features`, 5,986,103 B before and 6,015,663 B after, and 4,220 B (0.37 %) to its brotli, 1,151,933 B before and 1,156,153 B after. Measured as above, at `74524c76` and after (the category turned on in a copy of it).
 
-The web UI's files go out precompressed (§10.1, #1367): a release build's post-build hook writes a Brotli copy at quality 11 and a gzip copy at level 9 beside each file they make smaller, with Node's own `zlib`, so neither the build nor the daemon gains a crate for it. The release `web` wasm built with `--no-default-features` is 6,016,499 B; its Brotli copy is 1,158,221 B (19.3 %) and its gzip copy 1,907,958 B (31.7 %), and a browser downloads one of those in its place: over plain HTTP on loopback, Chromium and Firefox took the Brotli copy and WebKit the gzip one. The copies add 11 to 15 s to a release build of the UI. The release binary embeds them beside the files, so it grows 3,137,312 B (4.6 %), 67,796,480 B before and 70,933,792 B after. Measured with `just install` at `f1a274515` and on this change.
+The web UI's files go out precompressed (§10.1, #1367): a release build's post-build hook writes a Brotli copy at quality 11 and a gzip copy at level 9 beside each file they make smaller, with Node's own `zlib`, so neither the build nor the daemon gains a crate for it. The release `web` wasm built with `--no-default-features` was 6,016,499 B before decision 146; its Brotli copy was 1,158,221 B (19.3 %) and its gzip copy 1,907,958 B (31.7 %), and a browser downloads one in its place: over plain HTTP on loopback, Chromium and Firefox took the Brotli copy and WebKit the gzip one. The copies add 11 to 15 s to a release build of the UI. The release binary embeds them beside the files, so it grows 3,137,312 B (4.6 %), 67,796,480 B before and 70,933,792 B after. Measured with `just install` at `f1a274515` and on this change.
+
+The release web UI's wasm is built for size (§16, decision 146; #1428): `just web-release` builds it with the `wasm-release` profile, `release` with `opt-level = "z"`, fat LTO and one codegen unit, which only the wasm uses (§13.11). The precompression hook still runs: trunk sets `TRUNK_PROFILE` to `release` for `--release` whatever Cargo profile it builds with, and a release binary built on it sends the wasm's Brotli copy to a client that asks for `br` and its gzip copy to one that asks for `gzip`, byte for byte the files the hook wrote. Measured on macOS arm64 at `96ccda57d` and after, with `just web-release`'s command:
+
+| Profile | wasm | Brotli | gzip |
+|---|---|---|---|
+| `release`: `opt-level = 3`, no LTO, 16 codegen units (before) | 6,102,140 B | 1,176,199 B | 1,939,078 B |
+| `opt-level = "s"`, fat LTO, one codegen unit (not chosen) | 4,005,910 B (−34.4 %) | 922,183 B (−21.6 %) | 1,322,690 B (−31.8 %) |
+| **`wasm-release`: `opt-level = "z"`, fat LTO, one codegen unit** | **3,388,986 B (−44.5 %)** | **841,044 B (−28.5 %)** | **1,161,010 B (−40.1 %)** |
+
+*Build time.* With every dependency already in the build cache, the whole build took 130 s before and 132 s after: Cargo's part grew from 90 s to 114 s, and wasm-opt and the copies took less time on the smaller wasm. After an edit to the UI's own code, Cargo's part is 46 to 49 s with `release` and 121 to 134 s with `wasm-release` (the whole build 80 to 84 s against 141 to 160 s), so `just web` and `just web-test` keep `release`. From an empty target folder, #1428 measured 155 s before and 200 s after.
+
+*Run time.* Measured in headless Chromium against `just try --demo`'s debug daemon, which reads the UI folder on each request, so the builds took turns on one daemon; medians of 9 page loads each, at full speed and with the CPU slowed 4×. A load is from navigation to the page drawn; script time is Chrome's main-thread script time (`ScriptDuration`, which counts the test driver's own scripts too, the same in each build) while the Snapshots page draws its 145 rows, and over 10 changes of page by the links:
+
+| Build | Load | Script, 145 rows | Script, 10 page changes | Load, 4× | Script, 145 rows, 4× | Script, 10 page changes, 4× |
+|---|---|---|---|---|---|---|
+| `release` (before) | 108 ms | 30 ms | 84 ms | 333 ms | 144 ms | 422 ms |
+| `opt-level = "s"` | 82 ms | 28 ms | 83 ms | 316 ms | 131 ms | 405 ms |
+| `wasm-release` (`z`) | 78 ms | 29 ms | 96 ms | 295 ms | 146 ms | 481 ms |
+
+The smaller wasm loads 28 % sooner (11 % with the CPU slowed), over loopback, where downloading costs next to nothing; over a network the smaller download gains more. `z` spends about 1 ms longer in script on a change of page at full speed and 6 ms slowed (14 % of the measured script time, the driver's share included); the wall-clock time of a page change didn't move past its noise, since it waits on the daemon's answer for most of its time. Other builds were loading the machine during these runs.
 
 ### 8.2 Backend crates
 
