@@ -8,7 +8,7 @@ use domain::fleet::{
     MachineFingerprint, MachineZone, PairRefusal, PairRequest, Pairing, PairingView, ProofRefusal,
     ProofRequest, ProofView, Proved, PublicKey, RemovalRefused, SecondMachine, TokenId,
     TokenRecord, TokenUse, Tombstone, admits_unused_token, decide_approval, decide_pairing,
-    decide_proof, voids_tokens_for_new_key,
+    decide_proof, decide_removal, voids_tokens_for_new_key,
 };
 use domain::{AgentId, SignedDuration, Timestamp};
 
@@ -381,17 +381,43 @@ impl AgentRegistry for InMemoryAgentRegistry {
         agent_key: PublicKey,
         now: Timestamp,
     ) -> Result<Result<Tombstone, RemovalRefused>, StoreError> {
-        let _ = (agent_id, agent_key, now);
-        todo!()
+        let now = to_the_millisecond(now);
+        let mut kept = self.kept();
+        let decided = decide_removal(
+            kept.agents.iter().find(|a| a.agent_id == agent_id),
+            &agent_key,
+            now,
+        );
+        if let Ok(tombstone) = &decided {
+            kept.agents.retain(|a| a.agent_id != agent_id);
+            kept.machines.remove(&agent_id);
+            kept.tombstones.retain(|t| t.agent_id != agent_id);
+            kept.tombstones.push(tombstone.clone());
+        }
+        Ok(decided)
     }
 
     async fn tombstone(&self, agent_id: AgentId) -> Result<Option<Tombstone>, StoreError> {
-        let _ = agent_id;
-        todo!()
+        let kept = self.kept();
+        Ok(kept
+            .tombstones
+            .iter()
+            .find(|t| t.agent_id == agent_id)
+            .cloned())
     }
 
     async fn drop_lapsed(&self, now: Timestamp) -> Result<Vec<AgentRecord>, StoreError> {
-        let _ = now;
-        todo!()
+        let mut kept = self.kept();
+        let (mut lapsed, left): (Vec<_>, Vec<_>) = std::mem::take(&mut kept.agents)
+            .into_iter()
+            .partition(|a| a.lapsed_at(now));
+        kept.agents = left;
+        for agent in &lapsed {
+            kept.machines.remove(&agent.agent_id);
+        }
+        lapsed.sort_by_key(|a| match a.status {
+            AgentStatus::Pending { since } | AgentStatus::Approved { at: since } => since,
+        });
+        Ok(lapsed)
     }
 }
