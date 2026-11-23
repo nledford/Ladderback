@@ -113,7 +113,7 @@ The gallery's "Shared vocabulary" demo shows every value named in words, each st
 
 - **The first six components** were `ModalDialog`, `SortableTable` (since `Table`), `FormField` (since `TextField`), `StatusBadge`, `Progress` and `Toast`, each with its contract now in a file of its own (the table below).
 
-  Menus and disclosures stay for later milestones. Every gallery demo shows its loading, empty, error and success states where they apply, and the demo strings come from `ui.ftl`.
+  Menus stay for later milestones; the disclosure menu came with the one-line header (decision 152). Every gallery demo shows its loading, empty, error and success states where they apply, and the demo strings come from `ui.ftl`.
 - **Form controls take the page's font.** A browser draws the text of a button, a field, a select and a text area in a font of its own, fixed in size (13.33 px in Chromium), whatever the page's text size: at 200 % text every button's label stayed at that size while the text around it doubled (1.4.4). `style.css` sets `font: inherit` on all four once, in its base rules, so a control's text has the size and face of the text around it, and what a control sizes in `em`, such as the checkbox's box, grows with it. `features/ui/components/gallery.feature` pins it at 200 % text on the gallery's buttons, and the gallery at 320 × 256 with that text: nothing scrolls sideways, nothing is clipped, no accessibility violations.
 - **Badge and status tokens:** `style.css` carries the badge's own `--badge-{loading,empty}-{fg,bg}` and each status tone's pair, `--{success,warning,error}-{fg,bg}`, for both color schemes, each pill its words token on its fill token, drawn as Tailwind utilities. The weakest pair is Error's in dark colors at 8.20:1; every pair clears 4.5:1 in both schemes.
 - **Tailwind v4** rides trunk's pipeline: a `pre_build` hook in `crates/web/Trunk.toml` runs `@tailwindcss/cli` (pinned exactly in `crates/web/package.json`, with `package-lock.json`, so a lockfile refresh can't move it and every build of a commit compiles the same CSS) over `tailwind.css`, whose `@theme inline` maps the tokens of `style.css` as Tailwind colors, theme and utilities only, no preflight, so `style.css` stays the base stylesheet and the tokens stay the single source of truth. Its output `tw-out.css` is rebuilt on every build and not tracked (the root `.gitignore` names it), and `index.html` links both. Components and pages style with its utilities first, and `style.css` keeps only what they can't reasonably express (decision 117; the move of the existing rules is #931).
@@ -132,6 +132,7 @@ The gallery's "Shared vocabulary" demo shows every value named in words, each st
 | [The banner](accessibility/banner.md) | `components/banner.rs` |
 | [The button](accessibility/button.md) | `components/button.rs` |
 | [The checkbox](accessibility/checkbox.md) | `components/checkbox.rs` |
+| [The disclosure menu](accessibility/disclosure_menu.md) | `components/disclosure_menu.rs` |
 | [The fingerprint](accessibility/fingerprint.md) | `components/fingerprint.rs` |
 | [The footer](accessibility/footer.md) | `components/footer.rs` |
 | [The icon](accessibility/icon.md) | `components/icon.rs` |
