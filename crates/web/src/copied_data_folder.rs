@@ -113,7 +113,9 @@ pub(crate) fn CopiedDataFolder(localizer: Arc<Localizer>) -> impl IntoView {
         let copied = match shown {
             MachineStandingDto::Copied => true,
             MachineStandingDto::NewIdTaken => false,
-            MachineStandingDto::Same | MachineStandingDto::Unread => return None,
+            MachineStandingDto::Same
+            | MachineStandingDto::Unread
+            | MachineStandingDto::RefusedByHub => return None,
         };
         let content = if copied {
             let review_localizer = Arc::clone(&localizer);

@@ -12,6 +12,7 @@ use std::sync::Arc;
 use api::UiEvent;
 use api::sync::{AgentFrame, ReportPayload};
 use app::fakes::{FakeClock, InMemoryOutbox, LoopbackHubConnector};
+use app::machine::MachineStanding;
 use app::ports::{Appended, Outbox, ReportInbox};
 use app::sync::{RecordReports, SyncFailure, SyncWithHub, Synced};
 use base64::Engine;
@@ -45,6 +46,9 @@ pub(super) struct Side {
     pub(super) synced: Vec<Result<Synced, SyncFailure>>,
     /// The sync loop, once the agent keeps syncing.
     running: Option<Running>,
+    /// Where the machine stands, which its syncs tell what the hub made of
+    /// it, when a scenario follows it.
+    pub(super) standing: Option<Arc<MachineStanding>>,
 }
 
 /// How many of the sync loop's waits a step moves through before it gives
@@ -95,6 +99,7 @@ impl Side {
             backups: 0,
             synced: Vec::new(),
             running: None,
+            standing: None,
         }
     }
 
@@ -138,6 +143,10 @@ impl Side {
             machine.hostname.clone(),
             machine.zone.clone(),
         );
+        let sync = match &self.standing {
+            Some(standing) => sync.with_standing(Arc::clone(standing)),
+            None => sync,
+        };
         let outcome = sync.sync_once().await;
         self.synced.push(outcome);
         self.synced.last().expect("a sync")
@@ -149,6 +158,12 @@ impl Side {
             .await
             .expect("the reports waiting")
             .len()
+    }
+
+    /// The hub's refusals reach this side with a signature the hub didn't
+    /// make.
+    pub(super) fn forge_refusals(&self) {
+        self.connector.forge_refusals();
     }
 }
 

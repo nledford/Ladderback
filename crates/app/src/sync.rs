@@ -19,6 +19,7 @@ use domain::planning::Maintenance;
 use domain::{AgentId, OperationId, SignedDuration, Timestamp, Uuid};
 
 use crate::leases::MaintenanceLeases;
+use crate::machine::MachineStanding;
 use crate::pairing::{AgentChannel, ChannelError, ConnectFailure, ConnectToHub, Connected};
 use crate::ports::{Appended, Clock, ConfigError, ConfigStore, OperationStore, Outbox, StoreError};
 
@@ -294,6 +295,15 @@ impl SyncWithHub {
             );
         }
         Ok(())
+    }
+
+    /// This sync telling `standing` what its hub made of the machine in
+    /// each session: a refusal as a second computer, verified as signed by
+    /// the paired hub, or a connection the hub took.
+    #[must_use]
+    pub fn with_standing(self, standing: Arc<MachineStanding>) -> Self {
+        let _ = standing;
+        todo!()
     }
 
     /// One session: connects, sends every report not yet acknowledged, in

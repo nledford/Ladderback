@@ -1,11 +1,15 @@
 //! Whether this machine's data folder was copied from another computer
-//! (technical design §7.1; §16, decision 144; #296). The machine ID lives in
-//! the data folder, so a copy of the folder on another computer (a restored
-//! backup of a home folder, a cloned disk or virtual machine) runs under the
-//! same ID, and its forget would take the first machine's snapshots for its
-//! own (I1, I6). The machine identifier the system gives the computer is
-//! recorded beside the ID and compared at each start: a copy keeps backing
-//! up and stops maintaining until the person takes a new machine ID.
+//! (technical design §7.1; §16, decision 144; #296), or its hub refused it
+//! as a second computer under its machine ID (decision 150; #1462). The
+//! machine ID lives in the data folder, so a copy of the folder on another
+//! computer (a restored backup of a home folder, a cloned disk or virtual
+//! machine) runs under the same ID, and its forget would take the first
+//! machine's snapshots for its own (I1, I6). The machine identifier the
+//! system gives the computer is recorded beside the ID and compared at each
+//! start: a copy keeps backing up and stops maintaining until the person
+//! takes a new machine ID. A copy made before the identifier was kept
+//! recorded its own computer's, so only its hub's signed refusal tells it,
+//! and the person may take a new machine ID on it too.
 
 use std::sync::{Arc, Mutex, PoisonError};
 
@@ -33,6 +37,12 @@ pub enum Standing {
     /// start; until then maintenance stays refused, since this run still
     /// tags and selects snapshots under the old ID.
     NewIdTaken,
+    /// The hub this machine paired with refused it, signed, as a second
+    /// computer under its machine ID (`identity-conflict`): backups run, and
+    /// the person may take a new machine ID. It may be the original
+    /// computer, so it maintains as before; its hub grants it nothing while
+    /// it refuses it. Its hub taking it again sets it back to [`Self::Same`].
+    RefusedByHub,
     /// This computer's identifier couldn't be read, so a copy can't be
     /// told: the machine runs as usual.
     Unread,
@@ -61,6 +71,17 @@ impl MachineStanding {
 
     fn set(&self, standing: Standing) {
         *self.0.lock().unwrap_or_else(PoisonError::into_inner) = standing;
+    }
+
+    /// The hub this machine paired with refused it, signed, as a second
+    /// computer under its machine ID.
+    pub fn hub_refused(&self) {
+        todo!()
+    }
+
+    /// The hub this machine paired with took it.
+    pub fn hub_took(&self) {
+        todo!()
     }
 
     /// Whether the machine runs the maintenance its configuration asks for.
@@ -244,3 +265,6 @@ impl TakeNewId {
         Ok(id)
     }
 }
+
+#[cfg(test)]
+mod tests;
