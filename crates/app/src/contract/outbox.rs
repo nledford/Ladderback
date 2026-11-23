@@ -9,8 +9,8 @@ use std::sync::Arc;
 
 use async_trait::async_trait;
 use domain::fleet::{
-    AgentReport, EpochSeconds, Happening, Ingest, MAX_OUTBOX_REPORTS, MAX_REPORTS_HELD,
-    OutboxEpoch, ReportSeq, SEND_WINDOW, WireName,
+    AgentReport, EpochSeconds, Happening, Ingest, MAX_EPOCHS_HELD, MAX_OUTBOX_REPORTS,
+    MAX_REPORTS_HELD, OutboxEpoch, ReportSeq, SEND_WINDOW, WireName,
 };
 use domain::{AgentId, OperationId, Timestamp, Uuid};
 
@@ -51,6 +51,7 @@ pub async fn run_inbox(harness: &dyn ReportInboxHarness) {
     a_gap_is_no_reason_to_refuse(harness).await;
     a_report_far_behind_the_last_taken_is_behind(harness).await;
     each_agent_and_epoch_counts_alone(harness).await;
+    the_epoch_just_taken_is_kept_however_the_clock_moved(harness).await;
     taken_reports_outlive_the_hub(harness).await;
     racing_deliveries_are_taken_once(harness).await;
     past_the_cap_the_oldest_give_way_and_are_counted(harness).await;
@@ -279,7 +280,17 @@ fn now() -> Timestamp {
 /// What the hub did with `entry`, none after a failed assertion if it
 /// couldn't take it.
 async fn taken(inbox: &dyn ReportInbox, agent: AgentId, entry: &OutboxEntry) -> Option<Ingest> {
-    ok(inbox.ingest(agent, entry, now()).await, "taking a report").map(|taken| taken.ingest)
+    taken_at(inbox, agent, entry, now()).await
+}
+
+/// What the hub did with `entry`, taken at `at`.
+async fn taken_at(
+    inbox: &dyn ReportInbox,
+    agent: AgentId,
+    entry: &OutboxEntry,
+    at: Timestamp,
+) -> Option<Ingest> {
+    ok(inbox.ingest(agent, entry, at).await, "taking a report").map(|taken| taken.ingest)
 }
 
 async fn reports(inbox: &dyn ReportInbox, agent: AgentId) -> Vec<OutboxEntry> {
@@ -367,6 +378,39 @@ async fn each_agent_and_epoch_counts_alone(harness: &dyn ReportInboxHarness) {
         "a new epoch leaves the old one's count"
     );
     assert_eq!(reports(inbox, OTHER_AGENT).await, [entry(EPOCH, 1)]);
+}
+
+/// The hub keeps the last place of an agent's [`MAX_EPOCHS_HELD`] newest
+/// epochs, by when it last took one of each, and always of the epoch it
+/// just took, even when its clock stepped back behind the others': a
+/// resend of that report is no new one.
+async fn the_epoch_just_taken_is_kept_however_the_clock_moved(harness: &dyn ReportInboxHarness) {
+    let inbox = harness.empty().await;
+    let inbox = inbox.as_ref();
+    let later = Timestamp::constant(1_800_000_200, 0);
+    let epochs: Vec<OutboxEpoch> = (1..=MAX_EPOCHS_HELD + 1)
+        .map(|n| OutboxEpoch::from_uuid(Uuid::from_u128(0x100 + u128::from(n))))
+        .collect();
+    let (Some(first), Some((newest, before))) = (epochs.first(), epochs.split_last()) else {
+        return;
+    };
+    for epoch in before {
+        taken_at(inbox, AGENT, &entry(*epoch, 1), later).await;
+    }
+    assert_eq!(
+        taken_at(inbox, AGENT, &entry(*newest, 1), now()).await,
+        Some(Ingest::New)
+    );
+    assert_eq!(
+        taken_at(inbox, AGENT, &entry(*newest, 1), now()).await,
+        Some(Ingest::Duplicate),
+        "the epoch just taken is kept"
+    );
+    assert_eq!(
+        taken_at(inbox, AGENT, &entry(*first, 1), later).await,
+        Some(Ingest::New),
+        "the first epoch of those taken at once gave way"
+    );
 }
 
 async fn taken_reports_outlive_the_hub(harness: &dyn ReportInboxHarness) {

@@ -38,9 +38,11 @@ const RAISE: &str = "INSERT INTO sync_watermarks (agent_id, epoch, seq, ingested
      DO UPDATE SET seq = excluded.seq, ingested_at = excluded.ingested_at";
 const TAKE: &str = "INSERT INTO sync_reports (agent_id, epoch, seq, op_id, happening, code, at) \
      VALUES (?, ?, ?, ?, ?, ?, ?)";
+/// The agent's newest epochs by when the hub last took one of each, the
+/// one just taken always among them, however the hub's clock moved.
 const FORGET_EPOCHS: &str = "DELETE FROM sync_watermarks WHERE agent_id = ?1 AND epoch NOT IN \
      (SELECT epoch FROM sync_watermarks WHERE agent_id = ?1 \
-      ORDER BY ingested_at DESC, rowid DESC LIMIT ?2)";
+      ORDER BY (epoch = ?3) DESC, ingested_at DESC, rowid DESC LIMIT ?2)";
 const TALLY: &str = "INSERT INTO sync_report_tallies (agent_id, held, dropped) VALUES (?, 1, 0) \
      ON CONFLICT (agent_id) DO UPDATE SET held = held + 1 RETURNING held";
 const FORGET_OLDEST: &str = "DELETE FROM sync_reports WHERE id IN \
@@ -223,6 +225,7 @@ impl ReportInbox for SqliteStore {
         sqlx::query(FORGET_EPOCHS)
             .bind(&agent)
             .bind(i64::try_from(MAX_EPOCHS_HELD).unwrap_or(i64::MAX))
+            .bind(&epoch)
             .execute(&mut *tx)
             .await
             .map_err(unavailable)?;

@@ -146,7 +146,10 @@ impl ReportInbox for InMemoryReportInbox {
             None => held.epochs.insert(0, (entry.epoch, entry.seq, received_at)),
         }
         let epochs = usize::try_from(MAX_EPOCHS_HELD).unwrap_or(usize::MAX);
-        held.epochs.sort_by_key(|(_, _, at)| std::cmp::Reverse(*at));
+        // The one just taken first, however the clock moved, then the
+        // newest by when the hub last took one.
+        held.epochs
+            .sort_by_key(|(epoch, _, at)| (*epoch != entry.epoch, std::cmp::Reverse(*at)));
         held.epochs.truncate(epochs);
         held.reports.push(entry.clone());
         let reports = usize::try_from(MAX_REPORTS_HELD).unwrap_or(usize::MAX);
