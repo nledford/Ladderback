@@ -70,7 +70,7 @@ pub use operation_store::{
     DEFAULT_PAGE_SIZE, HistoryPage, HistoryQuery, MAX_PAGE_SIZE, OperationDetail, OperationRecord,
     OperationStore, PageSize, Recovered, Start, StoreError, maintained_repository,
 };
-pub use outbox::{Appended, Ingested, Outbox, OutboxEntry, ReportInbox};
+pub use outbox::{Appended, Ingested, LatestReports, Outbox, OutboxEntry, ReportInbox};
 pub use ownership_registry::{ClaimDecision, OwnershipRegistry};
 pub use platform::{Network, NetworkLink, PlatformError, PowerSupply};
 pub use profiles::{

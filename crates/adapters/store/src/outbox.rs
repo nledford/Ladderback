@@ -2,7 +2,7 @@
 //! §7.2, migration `0021_sync_outbox`): the `Outbox` and `ReportInbox`
 //! ports on the store's own file, built only with the hub (decision 122).
 
-use app::ports::{Appended, Ingested, Outbox, OutboxEntry, ReportInbox, StoreError};
+use app::ports::{Appended, Ingested, LatestReports, Outbox, OutboxEntry, ReportInbox, StoreError};
 use async_trait::async_trait;
 use domain::fleet::{
     AgentReport, EpochSeconds, Happening, Ingest, MAX_EPOCHS_HELD, MAX_REPORTS_HELD,
@@ -279,6 +279,10 @@ impl ReportInbox for SqliteStore {
                 })
             })
             .collect()
+    }
+
+    async fn latest(&self, agent: AgentId, limit: usize) -> Result<LatestReports, StoreError> {
+        todo!("{agent:?} {limit}")
     }
 }
 

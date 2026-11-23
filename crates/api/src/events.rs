@@ -88,6 +88,29 @@ pub enum UiEvent {
     AgentOnline { agent: String, at: String },
     /// An agent left the fleet.
     AgentOffline { agent: String, at: String },
+    /// A machine paired with this hub and waits for a person's approval
+    /// (§16, decision 121, "Waiting for approval"). Told only to a browser
+    /// that sees the hub's machines; a page that lists them reads them
+    /// again on hearing it.
+    AgentPending {
+        agent: String,
+        hostname: String,
+        at: String,
+    },
+    /// A person approved the machine `agent`.
+    AgentApproved {
+        agent: String,
+        hostname: String,
+        at: String,
+    },
+    /// The hub took a report of the machine `agent`'s operation `operation`
+    /// (§7.2): that it started, or how it ended. A page that shows the
+    /// machine's operations reads them again on hearing it.
+    AgentReported {
+        agent: String,
+        operation: String,
+        outcome: crate::MachineOutcomeDto,
+    },
     /// A proposal's status changed (decision 89, point 14): facts only,
     /// never its rationale, its changes or its proposer's label. A page
     /// that shows proposals reads them again on hearing it.

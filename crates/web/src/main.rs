@@ -106,6 +106,11 @@ mod pause;
 // has it (decision 122).
 #[cfg(feature = "hub")]
 mod machines_list;
+// What the hub's dashboard shows while paused, counts, says, reads again
+// for and how its times read, decided on the host; `dashboard_page.rs` is
+// its glue. Only a build with the hub has it (decision 122).
+#[cfg(feature = "hub")]
+mod dashboard;
 // What the hub's pairing dialog decides, on the host; `settings/agents.rs`
 // is its glue. Only a build with the hub has it (decision 122).
 #[cfg(feature = "hub")]

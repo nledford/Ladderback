@@ -16,6 +16,7 @@ mod machine;
 mod outbox;
 mod pin;
 mod registry;
+mod reported;
 mod route;
 mod signed;
 mod token;
@@ -55,6 +56,9 @@ pub use registry::{
     TokenLifeRefused, TokenRecord, TokenUse, UNUSED_TOKEN_LIMIT, UnusedTokensFull,
     admits_unused_token, decide_approval, decide_pairing, decide_proof, list_agents, token_life,
     voids_tokens_for_new_key,
+};
+pub use reported::{
+    OPERATIONS_SHOWN, REPORTS_READ, ReportedOperation, ReportedOutcome, latest_operations,
 };
 pub use route::{HubRoute, RouteRefused, RouteSession, is_loopback};
 pub use signed::{

@@ -878,6 +878,12 @@ impl Opener {
             Self::AiAgent(without_token) => without_token.permissions().await.ok(),
         }
     }
+
+    /// Whether the stream tells of the hub's machines, which only a
+    /// session sees, as it alone reaches the hub's routes.
+    const fn sees_machines(&self) -> bool {
+        matches!(self, Self::Session(_))
+    }
 }
 
 /// Reads the bus and writes each event to the client, as `shown` lets it
@@ -907,7 +913,11 @@ async fn forward(
                 // An event that cannot be written is not retryable here: the
                 // client is gone, so the connection ends rather than falling
                 // behind.
-                let Ok(text) = serde_json::to_string(&api_tokens::event_shown(shown, event)) else {
+                let machines = opener.as_ref().is_none_or(Opener::sees_machines);
+                let Some(event) = api_tokens::event_shown(shown, machines, event) else {
+                    continue;
+                };
+                let Ok(text) = serde_json::to_string(&event) else {
                     break;
                 };
                 if socket.send(Message::Text(text.into())).await.is_err() {

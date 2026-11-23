@@ -366,6 +366,12 @@ mod tests {
     }
 
     #[test]
+    #[cfg(feature = "hub")]
+    fn the_hubs_dashboard_is_titled_with_the_product_name() {
+        assert_eq!(title_of("/dashboard"), "Dashboard – Ladderback");
+    }
+
+    #[test]
     fn the_plans_page_is_titled_with_the_product_name() {
         assert_eq!(title_of("/plans"), "Plans – Ladderback");
     }

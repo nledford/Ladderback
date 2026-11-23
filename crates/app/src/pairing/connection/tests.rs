@@ -300,6 +300,14 @@ impl crate::ports::ReportInbox for FullInbox {
     ) -> Result<Vec<crate::ports::OutboxEntry>, crate::ports::StoreError> {
         self.inner.reports(agent).await
     }
+
+    async fn latest(
+        &self,
+        agent: domain::AgentId,
+        limit: usize,
+    ) -> Result<crate::ports::LatestReports, crate::ports::StoreError> {
+        self.inner.latest(agent, limit).await
+    }
 }
 
 /// The hub warns that it let go of an agent's reports in the step that let

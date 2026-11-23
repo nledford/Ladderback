@@ -3681,6 +3681,78 @@ ui-machines-resumed =
 # as having started to wait meanwhile.
 ui-machines-resumed-unlisted = Live updates are on again.
 
+# Said politely when a machine pairs with the hub while the Machines tab is open and its live updates are on (#569).
+# $hostname (string): the name the machine gave.
+ui-machines-started-waiting = { $hostname } is waiting for approval.
+
+# A link to the dashboard of the approved machines, on the Machines tab and, on a hub, on the start page.
+ui-machines-dashboard-link = See the approved { -machine(form: "other") }' latest operations
+
+## The hub's dashboard (#569): each approved machine, when it last connected,
+## the reports the hub let go of, and its latest operations, as its reports
+## told them.
+
+# The dashboard's heading.
+ui-dashboard-heading = Dashboard
+
+# The dashboard's title, as the browser's tab and history show it.
+ui-dashboard-title = Dashboard – { -brand-name }
+
+# What the dashboard shows, under its heading.
+ui-dashboard-intro = Each approved { -machine }'s latest operations, as it reported them to this { -hub }. A { -machine } connects only to send its reports, so this page shows when it last connected, not whether it is online.
+
+# Shown while the dashboard's first read of the machines is on its way.
+ui-dashboard-loading = Loading the { -machine(form: "other") }…
+
+# Shown in place of the machines when none is approved.
+ui-dashboard-none = No { -machine } is approved yet. Approve one on the Machines tab of Settings.
+
+# Shown in place of the machines when the hub didn't answer the page's request for them.
+ui-dashboard-unreachable = The { -hub } didn't answer, so its { -machine(form: "other") } can't be shown. The page asks again in a few seconds.
+
+# When the machine last connected to the hub.
+# $when (string): the time, as ui-instant or ui-dashboard-time-elsewhere writes it.
+ui-dashboard-last-connected = Last connected { $when }.
+
+# An instant in the viewer's zone, then in the machine's own zone, which differs (#115), written as ui-instant writes one.
+# $time (instant): the instant in the viewer's zone.
+# $there (instant): the same instant in the machine's zone.
+# $zone (string): the machine's IANA time-zone name, such as America/Chicago.
+ui-dashboard-time-elsewhere = { DATETIME($time, dateStyle: "short", timeStyle: "medium") } ({ DATETIME($there, dateStyle: "short", timeStyle: "medium") } in { $zone })
+
+# A warning on a machine whose oldest reports the hub let go of past its cap, so some of its operations may be missing.
+# $count (number): how many reports it let go of.
+ui-dashboard-dropped =
+    { $count ->
+        [one] The { -hub } let go of this { -machine }'s oldest report to keep within its limit, so an older operation may be missing.
+       *[other] The { -hub } let go of { $count } of this { -machine }'s oldest reports to keep within its limit, so older operations may be missing.
+    }
+
+# The caption of a machine's table of operations.
+# $hostname (string): the machine's name.
+ui-dashboard-operations = Latest operations of { $hostname }
+
+# Shown in place of a machine's operations when it reported none.
+ui-dashboard-no-operations = No operation reported yet.
+
+# The headers of a machine's operations' columns: when each started, when it ended, how it came out, and the error code it failed with.
+ui-dashboard-started = Started
+ui-dashboard-ended = Ended
+ui-dashboard-outcome = Result
+ui-dashboard-code = Error code
+
+# A start or end the hub has no report of: the machine let its start go when its outbox was full, or it hasn't ended.
+ui-dashboard-unknown = Not reported
+
+# Said politely when live updates on the dashboard are on again.
+# $count (number): how many machines changed while the updates were paused, which the page now shows.
+ui-dashboard-resumed =
+    { $count ->
+        [0] Live updates are on again. No { -machine } changed while they were paused.
+        [one] Live updates are on again. One { -machine } changed while they were paused.
+       *[other] Live updates are on again. { $count } { -machine(form: "other") } changed while they were paused.
+    }
+
 ## Settings' "Dry-run allowlist" tab (decision 89): the folders a plan dry
 ## run an AI agent asks for may read, which only a person sets.
 

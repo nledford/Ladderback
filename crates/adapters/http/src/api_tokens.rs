@@ -145,8 +145,20 @@ pub fn status_shown(permissions: Permissions, status: api::StatusDto) -> api::St
 /// What `permissions` may see of `event`: a warning's arguments, its item
 /// and the engine's own words, as [`warning_shown`], and a failure's
 /// arguments and the engine's own words, as [`summary_shown`], only with
-/// Snapshot contents.
-pub(crate) fn event_shown(permissions: Permissions, event: api::UiEvent) -> api::UiEvent {
+/// Snapshot contents. The hub's machines, as its routes, only `machines`:
+/// for a session, or the browser with sign-in off (§16, decision 121),
+/// never a token or an AI agent, whatever it holds.
+pub(crate) fn event_shown(
+    permissions: Permissions,
+    machines: bool,
+    event: api::UiEvent,
+) -> Option<api::UiEvent> {
+    let _ = machines;
+    Some(contents_shown(permissions, event))
+}
+
+/// What `permissions` may see of `event`'s contents.
+fn contents_shown(permissions: Permissions, event: api::UiEvent) -> api::UiEvent {
     if permissions.grants(Permission::SnapshotContents) {
         return event;
     }

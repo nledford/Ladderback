@@ -15,7 +15,6 @@ import type { Locator } from "playwright";
 
 import { expect } from "../support/expect.ts";
 import { namePattern } from "../support/keyboard.ts";
-import { patienceMs } from "../support/patience.ts";
 import { type BrowserWorld, binary, binaryEnv } from "../support/world.ts";
 import { ownBase } from "./api_tokens.ts";
 import { tabInDialog } from "./accessibility.ts";
@@ -60,7 +59,7 @@ async function onMachine(world: BrowserWorld, hostname: string, args: string[], 
  *  its origin, and answers with its status and its body's text: a Given
  *  runs before the scenario's page and its browser context exist, so it
  *  asks outside them. */
-async function askHub(world: BrowserWorld, route: string, body?: unknown): Promise<{ status: number; text: string }> {
+export async function askHub(world: BrowserWorld, route: string, body?: unknown): Promise<{ status: number; text: string }> {
   const base = ownBase(world);
   const answer = await fetch(`${base}${route}`, {
     method: body === undefined ? "GET" : "POST",
@@ -123,18 +122,34 @@ Given("a machine named {string} waits for approval on the hub", async function (
   await pairMachine(this, hostname);
 });
 
-Given("a machine named {string} is approved on the hub", async function (this: BrowserWorld, hostname: string) {
-  await pairMachine(this, hostname);
-  const listed = await askHub(this, "/api/v1/hub/agents");
+/** The agent ID and key the hub lists for the machine named `hostname`. */
+export async function listedMachine(world: BrowserWorld, hostname: string): Promise<{ "agent-id": string; key: string }> {
+  const listed = await askHub(world, "/api/v1/hub/agents");
   assert.equal(listed.status, 200, `the hub listed no machines: ${listed.text}`);
   const { agents } = JSON.parse(listed.text) as { agents: { "agent-id": string; hostname: string; key: string }[] };
   const machine = agents.find((agent) => agent.hostname === hostname);
   assert.ok(machine, `the hub lists no ${hostname}`);
-  const approved = await askHub(this, `/api/v1/hub/agents/${machine["agent-id"]}/approval`, {
+  return machine;
+}
+
+/** Approves the waiting machine named `hostname`, as a person would on
+ *  another page of the hub, with the step-up. */
+export async function approveMachine(world: BrowserWorld, hostname: string): Promise<void> {
+  const machine = await listedMachine(world, hostname);
+  const approved = await askHub(world, `/api/v1/hub/agents/${machine["agent-id"]}/approval`, {
     key: machine.key,
-    confirmation: await hubFingerprint(this),
+    confirmation: await hubFingerprint(world),
   });
   assert.equal(approved.status, 200, `the hub approved nothing: ${approved.text}`);
+}
+
+Given("a machine named {string} is approved on the hub", async function (this: BrowserWorld, hostname: string) {
+  await pairMachine(this, hostname);
+  await approveMachine(this, hostname);
+});
+
+When("a person approves {string} on another page of the hub", async function (this: BrowserWorld, hostname: string) {
+  await approveMachine(this, hostname);
 });
 
 When(
@@ -187,18 +202,15 @@ Then("the table {string} shows what it showed when I noted it", async function (
   assert.equal((await table(this, name).textContent()) ?? "", before);
 });
 
-// The page reads the list again every few seconds: one read, answered in
-// full, and drawn. Each read finds the waiting machines older by the seconds
-// between reads, so the table reading otherwise than before shows the read
-// drawn.
-When("the page reads the list of machines again", async function (this: BrowserWorld) {
-  const waiting = table(this, "Waiting for approval");
-  const before = (await waiting.textContent()) ?? "";
-  const answer = await this.page.waitForResponse((answer) => new URL(answer.url()).pathname === "/api/v1/hub/agents", {
-    timeout: patienceMs(),
-  });
-  await answer.finished();
-  await expect(waiting).not.toHaveText(before);
+When("I approve {string} on the Machines tab", async function (this: BrowserWorld, hostname: string) {
+  const fingerprint = await hubFingerprint(this);
+  await tabTo(this, "button", `Approve ${hostname}`);
+  await this.page.keyboard.press("Enter");
+  await tabInDialog(this, "textbox", "Hub key fingerprint");
+  await this.page.keyboard.type(fingerprint);
+  await tabInDialog(this, "button", `Approve ${hostname}`);
+  await this.page.keyboard.press("Enter");
+  await expect(this.page.getByText(`${hostname} is approved.`)).toBeVisible();
 });
 
 Then("the page lists no machine waiting for approval", async function (this: BrowserWorld) {
