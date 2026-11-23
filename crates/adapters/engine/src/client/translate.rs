@@ -443,6 +443,7 @@ pub(super) fn translate(event: WorkerEvent, redactor: &Redactor) -> Option<Engin
                 | ErrorCode::ProofRefused
                 | ErrorCode::PendingLimit
                 | ErrorCode::BindingUnavailable
+                | ErrorCode::IdentityConflict
                 | ErrorCode::HubUnreachable
                 | ErrorCode::HubPinMismatch
                 | ErrorCode::HubUntrusted

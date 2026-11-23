@@ -492,4 +492,29 @@ pub(crate) mod hub {
     /// Keeps the machine zone an agent reported, NULL for none, over the
     /// one it held. Parameters: the zone, the agent ID.
     pub(crate) const RECORD_ZONE: &str = "UPDATE agents SET zone = ? WHERE id = ?";
+
+    /// The machine fingerprint held under one agent ID (decision 150).
+    /// Parameter: the agent ID.
+    pub(crate) const AGENT_MACHINE: &str = "SELECT machine FROM agents WHERE id = ?";
+
+    /// Keeps the first machine fingerprint heard under an agent ID.
+    /// Parameters: the fingerprint, the agent ID.
+    pub(crate) const CLAIM_MACHINE: &str = "UPDATE agents SET machine = ? WHERE id = ?";
+
+    /// Keeps when a second computer was last refused under an agent ID.
+    /// Parameters: the time in Unix milliseconds, the agent ID.
+    pub(crate) const REFUSE_SECOND_MACHINE: &str =
+        "UPDATE agents SET second_machine_at = ? WHERE id = ?";
+
+    /// Every agent under whose ID a second computer was refused, oldest
+    /// agent first.
+    pub(crate) const SECOND_MACHINES: &str = concat!(
+        "SELECT id, second_machine_at FROM agents ",
+        "WHERE second_machine_at IS NOT NULL ORDER BY rowid"
+    );
+
+    /// Forgets the machine fingerprint held under an agent ID, and its last
+    /// refusal. Parameter: the agent ID.
+    pub(crate) const FORGET_MACHINE: &str =
+        "UPDATE agents SET machine = NULL, second_machine_at = NULL WHERE id = ?";
 }

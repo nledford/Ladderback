@@ -5,8 +5,8 @@
 
 use app::ports::StoreError;
 use domain::fleet::{
-    AgentRecord, AgentStatus, BindingKind, Hostname, KEY_BYTES, MachineZone, PublicKey,
-    TokenRecord, TokenUse,
+    AgentRecord, AgentStatus, BindingKind, Hostname, KEY_BYTES, MachineFingerprint, MachineZone,
+    PublicKey, SecondMachine, TokenRecord, TokenUse,
 };
 use domain::{AgentId, Uuid};
 use sqlx::sqlite::SqliteRow;
@@ -172,5 +172,42 @@ pub(crate) fn agent(row: &SqliteRow) -> Result<AgentRecord, StoreError> {
         counter,
         last_seen: reader.required_time("last_seen")?,
         zone,
+    })
+}
+
+/// The `machine` column of a row of `agents`: the fingerprint the hub took
+/// under the agent's ID, or none (decision 150).
+pub(crate) fn held_machine(row: &SqliteRow) -> Result<Option<MachineFingerprint>, StoreError> {
+    let reader = Reader {
+        row,
+        scope: "an agent's machine".to_owned(),
+    };
+    reader
+        .text("machine")?
+        .map(|text| {
+            MachineFingerprint::from_hex(&text).map_err(|_| {
+                reader.corrupt(
+                    "machine",
+                    format!("{} is not a machine fingerprint", shown(&text)),
+                )
+            })
+        })
+        .transpose()
+}
+
+/// A row of `agents` under whose ID a second computer was refused: its ID
+/// and `second_machine_at`.
+pub(crate) fn second_machine(row: &SqliteRow) -> Result<SecondMachine, StoreError> {
+    let mut reader = Reader {
+        row,
+        scope: "an agent".to_owned(),
+    };
+    let agent_id = reader
+        .agent_id("id")?
+        .ok_or_else(|| reader.corrupt("id", "is NULL"))?;
+    reader.scope = format!("agent {}", agent_id_text(agent_id));
+    Ok(SecondMachine {
+        agent_id,
+        at: reader.required_time("second_machine_at")?,
     })
 }

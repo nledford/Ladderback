@@ -153,9 +153,9 @@ async fn reopening_does_not_apply_the_migrations_again() {
     assert_eq!(
         versions,
         [
-            1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22
+            1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23
         ],
-        "twenty-two migrations ship: {first:?}"
+        "twenty-three migrations ship: {first:?}"
     );
     assert!(
         first.iter().all(|row| row.2),

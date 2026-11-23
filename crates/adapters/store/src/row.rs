@@ -39,7 +39,9 @@ use crate::summary::Summary;
 mod hub;
 
 #[cfg(feature = "hub")]
-pub(crate) use hub::{agent, agent_id_text, counter_text, pairing_token};
+pub(crate) use hub::{
+    agent, agent_id_text, counter_text, held_machine, pairing_token, second_machine,
+};
 
 /// One row, and what a report calls it.
 struct Reader<'r> {

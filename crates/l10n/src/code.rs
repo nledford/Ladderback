@@ -172,6 +172,7 @@ code_messages!(ERRORS, error_message, ErrorCode {
     ProofRefused => msg::ERROR_PROOF_REFUSED,
     PendingLimit => msg::ERROR_PENDING_LIMIT,
     BindingUnavailable => msg::ERROR_BINDING_UNAVAILABLE,
+    IdentityConflict => msg::ERROR_IDENTITY_CONFLICT,
     HubUnreachable => msg::ERROR_HUB_UNREACHABLE,
     HubPinMismatch => msg::ERROR_HUB_PIN_MISMATCH,
     HubUntrusted => msg::ERROR_HUB_UNTRUSTED,

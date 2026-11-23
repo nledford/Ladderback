@@ -12,9 +12,9 @@ use base64::Engine as _;
 use base64::engine::general_purpose::URL_SAFE_NO_PAD;
 use domain::fleet::{
     Ack, AgentEnvelope, AgentReport, Approval, BindingKind, Challenge, Connect, EpochSeconds,
-    Handshakes, Happening, Hello, Holder, Hostname, HubEnvelope, KEY_BYTES, MachineZone, Nonce,
-    OutboxEpoch, Pair, PairAnswer, Paired, Proof, Protocols, PublicKey, Refused, ReportSeq,
-    SIGNATURE_BYTES, Signature, Welcome, WireName,
+    Handshakes, Happening, Hello, Holder, Hostname, HubEnvelope, KEY_BYTES, MachineFingerprint,
+    MachineZone, Nonce, OutboxEpoch, Pair, PairAnswer, Paired, Proof, Protocols, PublicKey,
+    Refused, ReportSeq, SIGNATURE_BYTES, Signature, Welcome, WireName,
 };
 use domain::{AgentId, OperationId, Uuid};
 
@@ -128,6 +128,7 @@ pub fn hello_payload(hello: &Hello) -> Vec<u8> {
         protocols: range(hello.protocols),
         clock: hello.clock.seconds(),
         zone: hello.zone.as_ref().map(|zone| zone.as_str().to_owned()),
+        machine: hello.machine.as_ref().map(MachineFingerprint::to_hex),
     }
     .to_bytes()
 }
@@ -141,6 +142,11 @@ pub fn read_hello(bytes: &[u8]) -> Result<Hello, WireRefused> {
         protocols: protocols(payload.protocols)?,
         clock: EpochSeconds::from_seconds(payload.clock),
         zone: zone(payload.zone.as_deref())?,
+        machine: payload
+            .machine
+            .as_deref()
+            .map(|text| MachineFingerprint::from_hex(text).map_err(|_| WireRefused))
+            .transpose()?,
     })
 }
 

@@ -625,6 +625,10 @@ pub enum ErrorCode {
     /// The hub closed the connection because it can't offer the binding
     /// the agent's token names, before it proved itself.
     BindingUnavailable,
+    /// The hub already takes another computer under this machine's ID, as
+    /// when a data folder was copied: it refused this one, which keeps its
+    /// reports until it has an ID of its own.
+    IdentityConflict,
     /// No hub answered at the argument `address`: the connection was
     /// refused, the name didn't resolve, or nothing answered in time.
     /// Nothing was sent.
@@ -1674,6 +1678,7 @@ impl ErrorCode {
             | Self::ProofRefused
             | Self::PendingLimit
             | Self::BindingUnavailable
+            | Self::IdentityConflict
             | Self::PlainAddress
             | Self::HubConnectionLost
             | Self::HubLinkLost

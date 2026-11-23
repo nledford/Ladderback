@@ -117,6 +117,11 @@ pub struct HelloPayload {
     /// name.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub zone: Option<String>,
+    /// The machine fingerprint of the computer the agent runs on, as 64
+    /// lower-case hex digits; absent from a build before fingerprints or
+    /// when the computer's identifier can't be read.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub machine: Option<String>,
 }
 
 /// The payload of the hub's `Welcome`.
@@ -276,6 +281,7 @@ pub fn refusal_code(code: &str) -> ErrorCode {
             | ErrorCode::ProofRefused
             | ErrorCode::PendingLimit
             | ErrorCode::BindingUnavailable
+            | ErrorCode::IdentityConflict
     ) {
         named
     } else {

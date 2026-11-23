@@ -124,6 +124,11 @@ const PINNED: &[(i64, &str, &str)] = &[
         "repository ownership",
         "9830265cdca77fa0fffa7997ebe0625db177f505fdfb8598a2c6638d7fb7828d0dd8c7b1e570f501269ccd2178a42650",
     ),
+    (
+        23,
+        "agent machine",
+        "93b6b3965f2690f89b9e101384c1db2f789ca08e3b357033e945208a373780484b8e83aee0066b3849f99e99f1d23831",
+    ),
 ];
 
 /// The migration's file name, as `sqlx::migrate!` reads it: sqlx turns the
