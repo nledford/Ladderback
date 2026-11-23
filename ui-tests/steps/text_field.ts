@@ -5,13 +5,17 @@
 import assert from "node:assert/strict";
 
 import { Then } from "@cucumber/cucumber";
-import type { Locator } from "playwright";
+import type { ElementHandle, Locator } from "playwright";
 
 import { expect } from "../support/expect.ts";
 import { demoSection } from "../support/gallery.ts";
 import { namePattern } from "../support/keyboard.ts";
 import { patienceMs } from "../support/patience.ts";
 import type { BrowserWorld } from "../support/world.ts";
+
+// The error element each scenario's field last showed, with its words, so a
+// later step can tell the same error drawn again from one left in place.
+const shownErrors = new WeakMap<BrowserWorld, { name: string; error: string; element: ElementHandle | null }>();
 
 // The field's own error is on screen and in its description; a form's error
 // summary may repeat the words as a link, so they are looked for among what
@@ -36,6 +40,26 @@ Then("the field {string} shows the error {string}", async function (this: Browse
       { message: `the field "${name}" shows the error "${error}"` },
     )
     .toBe(true);
+  const id = await input.getAttribute("id");
+  shownErrors.set(this, { name, error, element: id === null ? null : await this.page.$(`[id="${id}-error"]`) });
+});
+
+// A second try refused alike is heard only when its error is drawn afresh: a
+// live region, or an alert, left in place with the same words says nothing
+// new (§4.5, "Step-up field"). So the field's error element is a new one,
+// an alert again, with the same words.
+Then("the field {string} shows that error again, as a new alert", async function (this: BrowserWorld, name: string) {
+  const shown = shownErrors.get(this);
+  assert.ok(shown?.name === name && shown.element !== null, `no error of the field ${JSON.stringify(name)} was seen before`);
+  const input = this.page.getByRole("textbox", { name });
+  const error = this.page.locator(`[id="${await input.getAttribute("id")}-error"]`);
+  await expect
+    .poll(async () => !(await shown.element?.evaluate((element) => element.isConnected)), {
+      message: `the field "${name}" keeps its error "${shown.error}" in place rather than draw it again`,
+    })
+    .toBe(true);
+  await expect(error).toHaveRole("alert");
+  await expect(error).toHaveText(shown.error);
 });
 
 Then("the field {string} is described by {string}", async function (this: BrowserWorld, name: string, description: string) {
