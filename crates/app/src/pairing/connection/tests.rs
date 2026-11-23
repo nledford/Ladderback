@@ -769,6 +769,52 @@ async fn the_sync_loop_logs_a_streak_of_failures_once() {
     assert!(warned[0].starts_with("the outbox couldn't be read"));
 }
 
+/// The agent's sync loop opens a session for a progress alone: with no
+/// report waiting in its outbox and no lease to ask for, the progress of
+/// the operation it runs still reaches the hub (§7.2, #1440).
+#[tokio::test]
+async fn the_sync_loop_tells_the_hub_a_progress_with_no_report_waiting() {
+    use crate::ports::ReportInbox as _;
+    use crate::sync::{LiveProgress, SyncWithHub};
+    use api::{OperationStep, ProgressUnit, UiEvent};
+    use domain::fleet::OutboxEpoch;
+
+    let inbox = Arc::new(crate::fakes::InMemoryReportInbox::default());
+    let hub = hub_with(1, |pairing| pairing.with_inbox(inbox.clone()));
+    let identity = approved(&hub).await;
+    let progress = Arc::new(LiveProgress::new());
+    progress.hear(&UiEvent::OperationProgress {
+        operation: Uuid::from_u128(0x0d).to_string(),
+        step: Some(OperationStep::BackingUp),
+        unit: ProgressUnit::Bytes,
+        current: 40,
+        total: Some(100),
+        at: Some("2027-01-15T08:00:05Z".to_owned()),
+    });
+    let told = progress.latest().expect("the progress is kept");
+    let clock = Arc::new(FakeClock::new(
+        Timestamp::from_second(1_800_000_030).unwrap(),
+    ));
+    let sync = SyncWithHub::new(
+        connecting(
+            identity,
+            Arc::new(LoopbackHubConnector::to(hub.pairing.clone())),
+        ),
+        Arc::new(crate::fakes::InMemoryOutbox::new(OutboxEpoch::from_uuid(
+            Uuid::from_u128(0xe1),
+        ))),
+        clock.clone(),
+        agent_id(1),
+        hostname(1),
+        None,
+    )
+    .with_progress(progress);
+
+    let warned = warned_by_the_sync_loop(sync, &clock, 2).await;
+    assert!(warned.is_empty(), "{warned:?}");
+    assert_eq!(inbox.progress(agent_id(1)).await.unwrap(), Some(told));
+}
+
 /// A channel shows its sequence numbers in a log and leaves out its keys.
 #[tokio::test]
 async fn a_channel_shows_its_sequence_numbers_and_no_key() {
