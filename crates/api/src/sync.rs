@@ -281,6 +281,7 @@ pub fn refusal_code(code: &str) -> ErrorCode {
             | ErrorCode::ProofRefused
             | ErrorCode::PendingLimit
             | ErrorCode::BindingUnavailable
+            | ErrorCode::IdentityConflict
     ) {
         named
     } else {

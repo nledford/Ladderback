@@ -292,7 +292,7 @@ fn agent_dto(listed: &ListedAgent, now: Timestamp) -> api::HubAgentDto {
             hostname: like.hostname.as_str().to_owned(),
             last_seen: like.last_seen.to_string(),
         }),
-        second_machine_at: None,
+        second_machine_at: listed.second_machine_at.map(|at| at.to_string()),
     }
 }
 
