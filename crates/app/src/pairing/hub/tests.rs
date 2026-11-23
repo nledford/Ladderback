@@ -7,7 +7,7 @@ use api::{MachineOutcomeDto, UiEvent};
 use async_trait::async_trait;
 use domain::fleet::{
     AgentReport, EpochSeconds, Fingerprint, Happening, Hostname, HubAddress, OPERATIONS_SHOWN,
-    OutboxEpoch, ReportSeq, ReportedOperation, ReportedOutcome, TokenTls,
+    OutboxEpoch, Pairing, ReportSeq, ReportedOperation, ReportedOutcome, TokenTls,
 };
 use domain::{AgentId, OperationId, Timestamp, Uuid};
 use futures::StreamExt as _;
@@ -173,6 +173,21 @@ async fn a_machine_that_pairs_and_is_approved_is_told() {
             at: now(),
         }]
     );
+}
+
+/// Only the pairing that makes a machine wait is told: not the same pairing
+/// repeated, nor an approved machine that pairs again.
+#[tokio::test]
+async fn only_a_pairing_that_makes_a_machine_wait_is_told() {
+    let hub = hub();
+    paired(&hub, 1).await;
+    let at = Timestamp::from_second(NOW).unwrap();
+    let pending = hub.registry.agent(agent_id(1)).await.unwrap().unwrap();
+    assert!(super::fleet::waiting(&Pairing::Again(pending.clone()), at).is_some());
+    assert_eq!(super::fleet::waiting(&Pairing::Repeated(pending), at), None);
+    approve(&hub, 1).await;
+    let approved = hub.registry.agent(agent_id(1)).await.unwrap().unwrap();
+    assert_eq!(super::fleet::waiting(&Pairing::Again(approved), at), None);
 }
 
 /// Each report the hub takes is told, with how the operation stands; one

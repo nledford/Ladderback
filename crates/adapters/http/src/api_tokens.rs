@@ -153,8 +153,15 @@ pub(crate) fn event_shown(
     machines: bool,
     event: api::UiEvent,
 ) -> Option<api::UiEvent> {
-    let _ = machines;
-    Some(contents_shown(permissions, event))
+    let of_machines = matches!(
+        event,
+        api::UiEvent::AgentPending { .. }
+            | api::UiEvent::AgentApproved { .. }
+            | api::UiEvent::AgentOnline { .. }
+            | api::UiEvent::AgentOffline { .. }
+            | api::UiEvent::AgentReported { .. }
+    );
+    (machines || !of_machines).then(|| contents_shown(permissions, event))
 }
 
 /// What `permissions` may see of `event`'s contents.
