@@ -1,9 +1,9 @@
-//! The machine routes, `/api/v1/machine` (§7.1, §16 decision 144): the start
-//! page reads whether this machine's data folder was copied from another
-//! computer, and, for a copy, asks for a new machine ID. The routes aren't
-//! in the API tokens' scope table, so only a session (or anyone, with
-//! sign-in off) reaches them, and the request checks hold the change to
-//! the page's own origin.
+//! The machine routes, `/api/v1/machine` (§7.1, §16 decisions 144 and 150):
+//! the start page reads whether this machine's data folder was copied from
+//! another computer, or its hub refused it as a second computer, and, for
+//! either, asks for a new machine ID. The routes aren't in the API tokens'
+//! scope table, so only a session (or anyone, with sign-in off) reaches
+//! them, and the request checks hold the change to the page's own origin.
 
 use std::sync::Arc;
 
@@ -22,8 +22,9 @@ pub(crate) const MACHINE_PATH: &str = "/api/v1/machine";
 pub(crate) const NEW_ID_PATH: &str = "/api/v1/machine/new-id";
 
 /// Where this machine stands, and what takes a new machine ID for a copied
-/// data folder. Without one, as in a test's daemon that never checked, the
-/// machine stands as usual and no new ID can be taken.
+/// data folder or a machine its hub refused. Without one, as in a test's
+/// daemon that never checked, the machine stands as usual and no new ID
+/// can be taken.
 #[derive(Clone, Default)]
 pub struct MachineRoute {
     take: Option<Arc<TakeNewId>>,
@@ -46,7 +47,7 @@ fn answer(standing: Standing) -> Response {
         Standing::Same => MachineStandingDto::Same,
         Standing::Copied => MachineStandingDto::Copied,
         Standing::NewIdTaken => MachineStandingDto::NewIdTaken,
-        Standing::RefusedByHub => todo!(),
+        Standing::RefusedByHub => MachineStandingDto::RefusedByHub,
         Standing::Unread => MachineStandingDto::Unread,
     };
     (StatusCode::OK, Json(MachineDto { standing })).into_response()
@@ -58,9 +59,9 @@ pub(crate) async fn read(State(state): State<AppState>) -> Response {
 }
 
 /// `POST /api/v1/machine/new-id`: takes a new machine ID for a copied data
-/// folder, giving up its maintenance first, then answers as the read does.
-/// A machine whose data folder wasn't copied, or that took one already,
-/// keeps its ID.
+/// folder, or a machine its hub refused as a second computer, giving up its
+/// maintenance first, then answers as the read does. Any other machine, or
+/// one that took a new ID already, keeps its ID.
 pub(crate) async fn take_new_id(State(state): State<AppState>) -> Response {
     let Some(take) = &state.machine.take else {
         return refused(StatusCode::CONFLICT, ErrorCode::MachineNotCopied);
@@ -68,7 +69,7 @@ pub(crate) async fn take_new_id(State(state): State<AppState>) -> Response {
     match take.take().await {
         Ok(id) => {
             log::warn!(
-                "took the new machine ID {} for this data folder copied from another computer, and turned off its maintenance of every repository: restart Ladderback to start using it",
+                "took the new machine ID {} for this computer, as its data folder was copied from another computer or its hub refused it as a second computer, and turned off its maintenance of every repository: restart Ladderback to start using it",
                 id.as_uuid()
             );
             answer(take.standing())
