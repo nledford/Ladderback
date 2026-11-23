@@ -119,6 +119,12 @@ ui-copied-data-folder-heading = This data folder came from another computer
 # What the notice says under its heading while the data folder is a copy. Forget, prune and adoption are the maintenance a copy doesn't run.
 ui-copied-data-folder-body = { -brand-name } found that this computer isn't the one its data folder was made on: the folder was restored from a backup, or copied with a disk or a virtual machine. Backups run as usual. Forget, prune and adoption are stopped, so this computer can't remove the other computer's snapshots as if they were its own.
 
+# The heading of the start page's notice, shown when the hub this computer paired with refused it, signed, as a second computer under its machine ID: the hub took another computer as this machine first. This computer may be the original, so the notice never says it is a copy. It names the notice's region.
+ui-refused-machine-heading = Your { -hub } took another computer as this one
+
+# What the notice says under its heading while the hub refuses this computer: the two ways back, as the hub's refusal names them. `ladderback pairing-token --forget-computer` is typed as it is: keep it a string literal.
+ui-refused-machine-body = Your { -hub } refused this computer: it took another computer as this { -machine } first, as happens when a data folder is copied or the system is reinstalled. Backups run as usual, and their reports wait here until the { -hub } takes this computer. If this computer is the copy, take a new ID, restart { -brand-name } and pair it again. If it is the computer that should keep this ID, stop { -brand-name } on the other one or give that one a new ID, then stop the { -hub }'s daemon and run { "ladderback pairing-token --forget-computer" } with this { -machine }'s name on the { -hub }.
+
 # The notice's button, which asks first, in a dialog, before taking a new machine ID.
 ui-copied-data-folder-new-id = This is a new computer: take a new ID
 
@@ -134,8 +140,14 @@ ui-copied-data-folder-review-confirm = Take a new ID
 # Said in the dialog while the new machine ID is being taken.
 ui-copied-data-folder-review-taking = Taking a new machine ID…
 
-# What the notice says once the new machine ID is taken: it is used from the next start, and until then maintenance stays stopped.
-ui-copied-data-folder-taken = New machine ID taken. Restart { -brand-name } to start using it: until then, forget, prune and adoption stay stopped.
+# The heading of the notice once the new machine ID is taken, for a copied data folder or a computer its hub refused. It names the notice's region.
+ui-copied-data-folder-taken-heading = New machine ID taken
+
+# What the notice says under that heading: the new machine ID is used from the next start, and until then maintenance is stopped. A machine its hub refused maintained until the new ID was taken, so this never says it stays stopped.
+ui-copied-data-folder-taken = Restart { -brand-name } to start using it: until then, forget, prune and adoption are stopped.
+
+# Said politely once the new machine ID is taken, on its own, while focus moves to the notice's heading: the heading's words and the sentence under it, whole.
+ui-copied-data-folder-taken-said = New machine ID taken. Restart { -brand-name } to start using it: until then, forget, prune and adoption are stopped.
 
 # Said under that: taking the new ID turned maintenance off on each repository this computer maintained.
 ui-copied-data-folder-maintenance-off = Maintenance is off on every repository this computer maintained. Once { -brand-name } has restarted, turn it back on for each repository this computer should maintain.
