@@ -523,6 +523,7 @@ pub(super) async fn refusal(
     match error {
         MaintenanceError::UnknownRepository => MaintenanceRefusal::UnknownRepository,
         MaintenanceError::NotOwner => MaintenanceRefusal::NotOwner,
+        MaintenanceError::NoLease(_) => todo!(),
         // The configuration is refused as a save of it is (#347).
         MaintenanceError::Unavailable(error) => app::ports::config_unusable(*error, unavailable),
         MaintenanceError::Resolve(error) => secret_refused(config, repository, &error).await,
@@ -1035,6 +1036,22 @@ mod tests {
             .await,
             MaintenanceRefusal::NotOwner
         );
+    }
+
+    #[tokio::test]
+    async fn a_repository_this_machine_holds_no_lease_on_is_told_as_the_route_answers_it() {
+        use domain::maintenance::NoLease;
+        for why in [NoLease::NoneHeld, NoLease::RanOut] {
+            assert_eq!(
+                refusal(
+                    &InMemoryConfigStore::new(),
+                    &alias(),
+                    MaintenanceError::NoLease(why)
+                )
+                .await,
+                MaintenanceRefusal::NoLease
+            );
+        }
     }
 
     #[tokio::test]

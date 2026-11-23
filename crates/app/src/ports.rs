@@ -14,6 +14,7 @@ mod hooks;
 mod hub_connector;
 mod identity;
 mod keyring;
+mod lease_cache;
 mod notifier;
 mod operation_store;
 mod outbox;
@@ -63,6 +64,7 @@ pub use hooks::{
 pub use hub_connector::{HubConnector, HubLink, LinkError};
 pub use identity::{Attempt, Identity, IdentityError};
 pub use keyring::{Kept, Keyring, KeyringActivation, KeyringError};
+pub use lease_cache::LeaseCache;
 pub use notifier::{
     Credentials, DELIVERY_TIMEOUT, Destination, Message, Notification, Notifier, NotifyError,
 };

@@ -1461,3 +1461,26 @@ impl contract::ownership_registry::OwnershipRegistryHarness for InMemoryOwners {
 async fn in_memory_ownership_registry_meets_the_ownership_registry_contract() {
     contract::ownership_registry::run(&InMemoryOwners::default()).await;
 }
+
+/// A machine's lease cache in memory, kept for `reopened` as with the
+/// outbox.
+#[derive(Default)]
+struct InMemoryLeases(Mutex<Option<Arc<app::fakes::InMemoryLeaseCache>>>);
+
+#[async_trait]
+impl contract::lease_cache::LeaseCacheHarness for InMemoryLeases {
+    async fn empty(&self) -> Arc<dyn app::ports::LeaseCache> {
+        let cache = Arc::new(app::fakes::InMemoryLeaseCache::default());
+        *self.0.lock().unwrap() = Some(Arc::clone(&cache));
+        cache
+    }
+
+    async fn reopened(&self) -> Arc<dyn app::ports::LeaseCache> {
+        self.0.lock().unwrap().clone().expect("a cache was opened")
+    }
+}
+
+#[tokio::test]
+async fn in_memory_lease_cache_meets_the_lease_cache_contract() {
+    contract::lease_cache::run(&InMemoryLeases::default()).await;
+}

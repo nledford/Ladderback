@@ -16,6 +16,8 @@ mod agent_registry;
 mod api_tokens;
 mod codec;
 mod error_args;
+#[cfg(feature = "hub")]
+mod leases;
 mod locations;
 #[cfg(feature = "hub")]
 mod outbox;

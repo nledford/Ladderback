@@ -7,7 +7,8 @@
 
 use std::sync::Arc;
 
-use domain::maintenance::{LeaseEpoch, ReleaseRefused, RepositoryReports};
+use domain::fleet::GENERATION;
+use domain::maintenance::{LeaseEpoch, ReleaseRefused, RepoGrants, RepositoryReports};
 use domain::{AgentId, RepositoryId};
 
 use crate::ports::{AgentRegistry, ClaimDecision, Clock, OwnershipRegistry, StoreError};
@@ -56,6 +57,20 @@ impl RepositoryOwners {
             }
             _ => Ok(Reported::NotApproved),
         }
+    }
+
+    /// Decides `reports` as [`report`](Self::report) does, and gives every
+    /// lease `agent` then holds and claimed (granted, renewed or left to
+    /// run out), signed at the hub's now; none for an agent that isn't
+    /// approved. A lease it holds on a repository it no longer claims is
+    /// left out: it ends at the agent's release or its expiry.
+    pub async fn grant(
+        &self,
+        agent: AgentId,
+        reports: &RepositoryReports,
+    ) -> Result<Option<RepoGrants>, StoreError> {
+        let _ = (agent, reports, GENERATION);
+        todo!()
     }
 
     /// Ends the lease `agent` holds on `repository` at `epoch`, at its

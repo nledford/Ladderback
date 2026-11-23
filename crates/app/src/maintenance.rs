@@ -18,6 +18,13 @@
 //! is the write that takes the slot, and a `start` dropped while it waits for
 //! the log may have taken it already, so a caller that can be dropped runs
 //! `start` and `execute` on a task of its own (`RunMaintenance::start`).
+//!
+//! A machine paired with a hub runs a forget, a prune, a check or an
+//! adoption only while it holds a live lease on the repository from its
+//! hub, judged on the hub's time; one that holds none is refused with
+//! [`MaintenanceError::NoLease`] before anything is stored, and the
+//! refusal is logged with why (§7.3, I1; §16, decision NN). A preview
+//! changes nothing and takes no lock that writes, so it asks for none.
 
 use std::future::Future;
 use std::pin::{Pin, pin};
@@ -25,8 +32,8 @@ use std::sync::Arc;
 
 use domain::maintenance::{
     AdoptSelection, AdoptionRefusal, ForgetComparison, ForgetPreview, ForgetSelection, ForgetSide,
-    ManagedPlan, OrphanedGroup, OtherHosts, Ownership, Partition, SelectionToken, Snapshot,
-    UnmanagedGroup,
+    ManagedPlan, NoLease, OrphanedGroup, OtherHosts, Ownership, Partition, SelectionToken,
+    Snapshot, UnmanagedGroup,
 };
 use domain::planning::{AgentConfig, Plan};
 use domain::{
@@ -112,6 +119,11 @@ pub enum MaintenanceError {
     /// This agent doesn't maintain the repository: its entry doesn't ask for
     /// `local` (I1, §7.3). Refused before the engine is asked anything.
     NotOwner,
+    /// This machine is paired with a hub and holds no live lease on the
+    /// repository from it (I1, §7.3): it never heard a grant, its hub
+    /// granted the lease to no one or another agent, or the lease ran out
+    /// on the hub's time. Refused before anything is stored.
+    NoLease(NoLease),
     /// The configuration couldn't be read or used: the store's own report,
     /// which says where a mistake is and never holds a value of the file,
     /// so a route refuses it as a save of it is refused (#347).
@@ -364,6 +376,9 @@ pub struct RunMaintenance {
     /// Where this machine stands: a copied data folder runs no maintenance
     /// but a check (§16, decision 144).
     machine: Arc<crate::machine::MachineStanding>,
+    /// The leases from this machine's hub, when it may be paired with one:
+    /// a paired machine runs maintenance only while it holds one (I1).
+    leases: Option<Arc<crate::leases::MaintenanceLeases>>,
 }
 
 impl RunMaintenance {
@@ -398,6 +413,7 @@ impl RunMaintenance {
             locations: None,
             stats: None,
             machine: Arc::default(),
+            leases: None,
         }
     }
 
@@ -460,6 +476,13 @@ impl RunMaintenance {
         self
     }
 
+    /// Refuses each run, never a preview, while this machine is paired with
+    /// a hub and holds no live lease on the repository (I1, §7.3).
+    pub fn with_leases(mut self, leases: Arc<crate::leases::MaintenanceLeases>) -> Self {
+        self.leases = Some(leases);
+        self
+    }
+
     /// Whether a manual check reads every pack's data. It doesn't: a check a
     /// person starts reads the repository's structure only.
     const CHECK_READS_DATA: bool = false;
@@ -510,6 +533,7 @@ impl RunMaintenance {
         // agent is found to maintain the repository.
         let config = self.maintained(alias).await?;
         let (access, secret_warnings) = self.identified(op, &config, alias).await?;
+        self.leased(alias, access.id.as_ref()).await?;
 
         let (other_hosts, partition, job) = match kind {
             MaintenanceKind::Forget => {
@@ -612,6 +636,9 @@ impl RunMaintenance {
         // its slot, which keeps it maintained here until it ends (I1).
         let _writing = self.writes.lock().await;
         self.maintained(&alias).await?;
+        // The repository the job opens is the one whose lease it needs.
+        let opened = job.access().and_then(|access| access.id.as_ref());
+        self.leased(&alias, opened).await?;
         let mut operation = Operation::queue(
             id,
             job.kind(),
@@ -987,6 +1014,31 @@ impl RunMaintenance {
             access,
             warnings.iter().map(SecretWarning::warning).collect(),
         ))
+    }
+
+    /// Refuses a run on `repository`, the one the configuration's `alias`
+    /// opened, while this machine is paired with a hub and holds no live
+    /// lease on it, and logs why (I1, §7.3).
+    async fn leased(
+        &self,
+        alias: &RepositoryAlias,
+        repository: Option<&RepositoryId>,
+    ) -> Result<(), MaintenanceError> {
+        let Some(leases) = &self.leases else {
+            return Ok(());
+        };
+        leases.permits(repository).await.map_err(|why| {
+            let because = match why {
+                NoLease::NoneHeld => "it holds no lease on the repository from its hub",
+                NoLease::RanOut => "its lease on the repository ran out on the hub's time",
+            };
+            log::warn!(
+                "maintenance of {} refused (maintenance-no-lease): this machine is paired \
+                 with a hub and {because}",
+                alias.as_str()
+            );
+            MaintenanceError::NoLease(why)
+        })
     }
 
     /// The repository's snapshots, from one listing.
@@ -2754,6 +2806,92 @@ mod start_tests {
             "nothing was stored: {:?}",
             logged.operations
         );
+    }
+
+    /// A start on a machine paired with a hub is refused, nothing stored,
+    /// until the machine holds a live lease on the repository the job
+    /// opens, and the refusal is logged with why (I1, §7.3).
+    #[tokio::test]
+    async fn i1_a_paired_machine_starts_a_run_only_while_it_holds_a_lease() {
+        use domain::fleet::{HubAddress, HubPin, PublicKey, TokenTls};
+        use domain::maintenance::{Grant, LeaseEpoch, RepoGrants};
+
+        use crate::fakes::{InMemoryIdentity, InMemoryLeaseCache};
+        use crate::ports::Identity as _;
+
+        let configs = Arc::new(InMemoryConfigStore::new());
+        configs
+            .save(&config(Maintenance::Local))
+            .await
+            .expect("the configuration saves");
+        let store = Arc::new(InMemoryOperationStore::new());
+        let start = Timestamp::from_second(1_800_000_000).expect("a time");
+        let clock = Arc::new(FakeClock::new(start));
+        let identity = Arc::new(InMemoryIdentity::default());
+        let key = |byte| PublicKey::from_bytes([byte; 32]).expect("a key");
+        identity
+            .write_pin(&HubPin::new(
+                key(7),
+                TokenTls::Ca,
+                key(9),
+                HubAddress::parse("https://hub.example:9898").expect("an address"),
+            ))
+            .await
+            .expect("the pin is kept");
+        let leases = Arc::new(crate::leases::MaintenanceLeases::new(
+            identity,
+            Arc::new(InMemoryLeaseCache::default()),
+            clock.clone(),
+        ));
+        let use_case = RunMaintenance::new(
+            Arc::new(crate::fakes::SimulatedEngine::new(clock.clone())),
+            clock,
+            store.clone(),
+            ResolveRepository::new(Arc::new(FakeSecrets::default())),
+            Arc::new(FakeRetention),
+            configs,
+            Arc::default(),
+            AgentId::from_uuid(Uuid::from_u128(1)),
+            "demo-host".to_owned(),
+            Arc::new(FakeSources),
+        )
+        .with_leases(leases.clone());
+        crate::test_log::capture_the_log();
+        assert_eq!(
+            use_case.start(assessed()).await.err(),
+            Some(MaintenanceError::NoLease(NoLease::NoneHeld))
+        );
+        let logged = store
+            .list(&HistoryQuery::default())
+            .await
+            .expect("the log answers");
+        assert!(logged.operations.is_empty(), "nothing was stored");
+        let warned: Vec<String> = crate::test_log::logged_by("app::maintenance")
+            .into_iter()
+            .map(|(_, line)| line)
+            .collect();
+        assert!(
+            warned.iter().any(|line| line
+                == "maintenance of demo refused (maintenance-no-lease): this machine is \
+                    paired with a hub and it holds no lease on the repository from its hub"),
+            "{warned:?}"
+        );
+        let grants = RepoGrants {
+            generation: 1,
+            signed_at: start,
+            grants: vec![Grant {
+                repository: RepositoryId::parse(&"07".repeat(32)).expect("a repository ID"),
+                epoch: LeaseEpoch::new(1).expect("an epoch"),
+                expires_at: start
+                    .checked_add(SignedDuration::from_hours(7 * 24))
+                    .expect("a time"),
+            }],
+        };
+        leases
+            .take(&grants, 0, start)
+            .await
+            .expect("the grants are kept");
+        assert!(use_case.start(assessed()).await.is_ok(), "the run starts");
     }
 }
 

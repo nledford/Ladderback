@@ -38,6 +38,9 @@ pub enum MaintenanceRefusal {
     /// This agent doesn't maintain the repository (I1): nothing was read or
     /// run.
     NotOwner,
+    /// This machine is paired with a hub and holds no live lease on the
+    /// repository from it (I1): nothing was stored or run.
+    NoLease,
     /// The configuration holds no plan to adopt into. Names the plan.
     UnknownPlan { plan: String },
     /// Another maintenance operation holds the repository (I7). Names the
@@ -267,6 +270,7 @@ fn answer(alias: &str, error: MaintenanceRefusal) -> (StatusCode, api::ErrorDto)
             text("alias", alias.to_owned()),
             None,
         ),
+        MaintenanceRefusal::NoLease => todo!(),
         MaintenanceRefusal::UnknownPlan { plan } => (
             StatusCode::NOT_FOUND,
             ErrorCode::PlanUnknown,

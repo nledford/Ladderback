@@ -16,8 +16,9 @@ use domain::fleet::{
 };
 use domain::{AgentId, OperationId, SignedDuration, Timestamp, Uuid};
 
-use crate::pairing::{ChannelError, ConnectFailure, ConnectToHub};
-use crate::ports::{Appended, Clock, Outbox, StoreError};
+use crate::leases::MaintenanceLeases;
+use crate::pairing::{AgentChannel, ChannelError, ConnectFailure, ConnectToHub, Connected};
+use crate::ports::{Appended, Clock, ConfigStore, Outbox, StoreError};
 
 /// How long the agent waits before it tries its hub again after the first
 /// failure; each failure after doubles it, up to [`LONGEST_BACKOFF`].
@@ -27,6 +28,10 @@ pub const LONGEST_BACKOFF: SignedDuration = SignedDuration::from_secs(300);
 /// How often the agent looks for reports in its outbox while it has
 /// nothing to send, and how long it waits after a session that sent them.
 pub const POLL: SignedDuration = SignedDuration::from_secs(2);
+/// How often a machine paired with a hub asks for its grants when it has
+/// no report to send: far inside a lease's life, so a lease the hub keeps
+/// renewing never runs out while the hub can be reached.
+pub const GRANTS_EVERY: SignedDuration = SignedDuration::from_mins(15);
 
 /// Puts each report the hub needs into the outbox as the agent's operations
 /// make it.
@@ -132,6 +137,15 @@ pub struct SyncWithHub {
     agent_id: AgentId,
     hostname: Hostname,
     zone: Option<MachineZone>,
+    /// The machine's leases, when it asks its hub for them.
+    leases: Option<Leasing>,
+}
+
+/// What a session needs to ask for the machine's leases: the repositories
+/// it uses, from its configuration, and where it keeps what it is granted.
+struct Leasing {
+    config: Arc<dyn ConfigStore>,
+    leases: Arc<MaintenanceLeases>,
 }
 
 impl SyncWithHub {
@@ -150,7 +164,41 @@ impl SyncWithHub {
             agent_id,
             hostname,
             zone,
+            leases: None,
         }
+    }
+
+    /// This sync asking, in each session, for the leases on the
+    /// repositories `config` asks to maintain here, and keeping them in
+    /// `leases`: a lease the configuration no longer asks for is released
+    /// first, then every repository whose ID is known is reported and the
+    /// hub's grants taken (§7.2, §7.3, I1).
+    #[must_use]
+    pub fn with_leases(
+        mut self,
+        config: Arc<dyn ConfigStore>,
+        leases: Arc<MaintenanceLeases>,
+    ) -> Self {
+        self.leases = Some(Leasing { config, leases });
+        self
+    }
+
+    /// Releases what the configuration no longer asks to maintain here,
+    /// reports every repository it uses, and takes the hub's grants.
+    async fn exchange_leases(
+        &self,
+        leasing: &Leasing,
+        connected: &Connected,
+        channel: &mut AgentChannel,
+    ) -> Result<(), SyncFailure> {
+        let _ = (
+            leasing,
+            connected,
+            channel,
+            &leasing.config,
+            &leasing.leases,
+        );
+        todo!()
     }
 
     /// One session: connects, sends every report not yet acknowledged, in
@@ -165,6 +213,10 @@ impl SyncWithHub {
             .map_err(SyncFailure::Connect)?;
         if connected.approval == Approval::Pending {
             return Ok(Synced::Pending);
+        }
+        if let Some(leasing) = &self.leases {
+            self.exchange_leases(leasing, &connected, &mut channel)
+                .await?;
         }
         let mut sent = 0;
         // Each window starts after the last place acknowledged, so a session

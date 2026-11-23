@@ -162,6 +162,58 @@ pub struct AckPayload {
     pub seq: u64,
 }
 
+/// The payload of the agent's `ReposSnapshot`: every repository it uses
+/// whose ID it knows (§7.2, §7.3).
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ReposPayload {
+    pub repos: Vec<RepoPayload>,
+}
+
+/// One repository in `ReposSnapshot`: its rustic ID as hex, the
+/// maintenance it asks for (`local`, `hub` or `none`), and whether it holds
+/// another agent's tagged snapshots.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct RepoPayload {
+    pub repo_id: String,
+    pub requested_maintenance: String,
+    pub others_snapshots: bool,
+}
+
+/// The payload of the hub's `RepoGrants`: every lease the hub counts the
+/// agent as holding, at its `generation`, with the hub's clock when it
+/// signed them, in seconds since the Unix epoch.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct GrantsPayload {
+    pub generation: u64,
+    pub signed_at: u64,
+    pub grants: Vec<GrantPayload>,
+}
+
+/// One lease in `RepoGrants`, until `expires_at` on the hub's clock.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct GrantPayload {
+    pub repo_id: String,
+    pub epoch: u64,
+    pub expires_at: u64,
+}
+
+/// The payload of the agent's `ReleaseAck`: it dropped its lease on
+/// `repo_id` at `epoch` and runs no maintenance on it.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ReleasePayload {
+    pub repo_id: String,
+    pub epoch: u64,
+}
+
+/// The payload of the hub's `Released`, its answer to a `ReleaseAck`: the
+/// release it took, with the hub's clock when it signed.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ReleasedPayload {
+    pub repo_id: String,
+    pub epoch: u64,
+    pub signed_at: u64,
+}
+
 /// Whether a person has approved the agent.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "kebab-case")]
@@ -230,6 +282,25 @@ impl AckPayload {
         written(self).into_bytes()
     }
 }
+
+/// Each lease payload reads from and writes to its bytes as the others do.
+macro_rules! payload_bytes {
+    ($($payload:ty),+) => {$(
+        impl $payload {
+            /// The payload `bytes` hold.
+            pub fn from_bytes(bytes: &[u8]) -> Result<Self, UnreadableFrame> {
+                serde_json::from_slice(bytes).map_err(|_| UnreadableFrame)
+            }
+
+            /// The payload's bytes, which its sender signs.
+            pub fn to_bytes(&self) -> Vec<u8> {
+                written(self).into_bytes()
+            }
+        }
+    )+};
+}
+
+payload_bytes!(ReposPayload, GrantsPayload, ReleasePayload, ReleasedPayload);
 
 impl AgentFrame {
     /// The frame `text` holds.
