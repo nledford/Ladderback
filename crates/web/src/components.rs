@@ -28,6 +28,7 @@ pub(crate) mod badge;
 pub(crate) mod banner;
 pub(crate) mod button;
 mod checkbox;
+pub(crate) mod disclosure_menu;
 mod error_summary;
 pub(crate) mod fingerprint;
 mod footer;

@@ -2614,7 +2614,7 @@ ui-live-resumed =
 # The accessible name of the navigation in the header, the list of links to the pages.
 ui-nav-label = Pages
 
-# The accessible name of the header's icon-only hamburger button, on a screen narrower than 41rem, that shows and hides the menu: the pages' links and Sign out. The same name whether the menu shows or not.
+# The accessible name of the header's icon-only hamburger button, on a screen narrower than 54rem, that shows and hides the menu: every page's link and Sign out. The same name whether the menu shows or not.
 ui-menu-button = Menu
 
 # The navigation's link to the operations page.
@@ -2637,6 +2637,9 @@ ui-nav-log = Log
 
 # The navigation's link to the Settings page.
 ui-nav-settings = Settings
+
+# The words of the header's button that shows and hides the Settings menu, after the pages' links: a panel holding the links to the Settings and Log pages and, while signed in, Sign out. The name of that group of pages; the same whether the menu shows or not.
+ui-settings-menu-button = Settings
 
 ## The repositories page: the repositories Ladderback backs up to, and the
 ## form that tests, connects or creates one (§4.4).

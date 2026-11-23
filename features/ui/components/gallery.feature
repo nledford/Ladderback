@@ -46,6 +46,7 @@ Feature: The component gallery
       | Live table        |
       | Fingerprint       |
       | Footer            |
+      | Disclosure menu   |
       | Table             |
       | Tooltip           |
 
@@ -93,6 +94,7 @@ Feature: The component gallery
       | Steps       |
       | Fingerprint |
       | Footer      |
+      | Disclosure menu |
 
   Scenario Outline: Each component's structure is pinned by an ARIA snapshot
     When I open the component gallery
@@ -130,6 +132,7 @@ Feature: The component gallery
       | Steps       |
       | Fingerprint |
       | Footer      |
+      | Disclosure menu |
 
   Scenario Outline: A button's label grows with the reader's text size
     Given the reader sets the text size to 200 percent

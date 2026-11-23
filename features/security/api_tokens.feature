@@ -238,8 +238,10 @@ Feature: API tokens
   @ui
   Rule: In Settings, the admin creates, lists, changes and revokes API tokens by keyboard alone, and sees a secret only once
 
-    Scenario: The Settings link in the navigation moves focus to the page's heading
+    Scenario: The Settings link in the Settings menu moves focus to the page's heading
       When I open the web UI
+      And I press Tab until focus is on the button "Settings"
+      And I press Enter
       And I press Tab until focus is on the link "Settings"
       And I press Enter
       Then focus is on the main heading "Settings"

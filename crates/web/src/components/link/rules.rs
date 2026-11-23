@@ -233,6 +233,28 @@ impl LinkTone {
     }
 }
 
+/// Where a link stands, which decides whether it is underlined at rest
+/// (#1452). Every link names one: none is the default, so each page decides
+/// for each of its links.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum LinkPlacement {
+    /// Among words: a sentence, a paragraph, a banner or an alert. Always
+    /// underlined, so it is never told from the words around it by its
+    /// color alone (1.4.1): Ladder Blue is under 3:1 against the text, and
+    /// the text's own color is 1:1.
+    InText,
+    /// On its own: the header's links, a menu's rows, a link alone in a
+    /// table's cell or in a list of links. No underline at rest: nothing
+    /// around it is words it could be mistaken for.
+    Alone,
+}
+
+/// How a link of this placement is drawn, in Tailwind utilities.
+fn look(placement: LinkPlacement) -> &'static str {
+    let _ = placement;
+    todo!()
+}
+
 /// How a link is drawn, in Tailwind utilities (decision 117), logical ones
 /// only: always underlined, so a link in a line of text is never told by its
 /// color alone (1.4.1), and its color needs no 3:1 against the words around
@@ -495,5 +517,35 @@ mod tests {
         ] {
             assert_eq!(link_class(tone), format!("link {class} {LOOK}"), "{tone:?}");
         }
+    }
+
+    fn classes(placement: LinkPlacement) -> Vec<&'static str> {
+        look(placement).split_whitespace().collect()
+    }
+
+    #[test]
+    fn a_link_in_text_is_underlined_at_rest_and_one_standing_alone_only_under_the_pointer_or_pressed()
+     {
+        let in_text = classes(LinkPlacement::InText);
+        assert!(in_text.contains(&"underline"), "{in_text:?}");
+        assert!(!in_text.contains(&"no-underline"), "{in_text:?}");
+
+        let alone = classes(LinkPlacement::Alone);
+        assert!(alone.contains(&"no-underline"), "{alone:?}");
+        assert!(!alone.contains(&"underline"), "{alone:?}");
+        assert!(alone.contains(&"hover:underline"), "{alone:?}");
+        assert!(alone.contains(&"active:underline"), "{alone:?}");
+    }
+
+    #[test]
+    fn the_current_page_is_bold_wherever_a_link_stands_and_barred_at_its_start_when_alone() {
+        for placement in [LinkPlacement::InText, LinkPlacement::Alone] {
+            assert!(
+                classes(placement).contains(&"aria-[current=page]:font-bold"),
+                "{placement:?}"
+            );
+        }
+        assert!(classes(LinkPlacement::Alone).contains(&"aria-[current=page]:border-s-3"));
+        assert!(!classes(LinkPlacement::InText).contains(&"aria-[current=page]:border-s-3"));
     }
 }

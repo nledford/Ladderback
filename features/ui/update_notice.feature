@@ -27,7 +27,8 @@ Feature: The available update in the header
     When I open the web UI
     Then the link "Version 99.0.0 is available (goes to another site)" shows the words "Version 99.0.0 is available", then an icon a screen reader skips
     And the link "Version 99.0.0 is available (goes to another site)" is marked external, sends no referrer and opens where the reader is
-    And every link in the banner is underlined below its letters, 9 in all
+    And the link "Version 99.0.0 is available (goes to another site)" is underlined below its letters
+    And the link "Ladderback" is not underlined at rest
 
   Scenario: On a narrow screen with large text, the notice wraps and stays whole
     Given a viewport of 320 by 256 pixels

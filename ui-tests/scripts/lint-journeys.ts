@@ -2,11 +2,13 @@
 // keyboard alone (A1), so they may only use support/keyboard.ts. The one
 // exception is support/pointer.ts, which the maintainer approved for the
 // tooltip's hover contract (WCAG 1.4.13 is pointer behaviour), a link's
-// underline under the pointer, and the one drag of a table's Columns panel
-// (decision 140), whose Move buttons do the same by keyboard: it presses
-// only for that drag, and every control is still reached and pressed by
-// keyboard alone. Steps call its moves by name; a new pointer action there
-// needs the maintainer's word too.
+// underline under the pointer, the one drag of a table's Columns panel
+// (decision 140), whose Move buttons do the same by keyboard, and a press
+// held on one element (`holdOn`, approved 2026-11-23 for #1452's pressed
+// link and #1453's Settings menu closing on a press outside it; decision
+// 152): it presses only for those, and every control is still reached and
+// pressed by keyboard alone. Steps call its moves by name; a new pointer
+// action there needs the maintainer's word too.
 //
 // Fails too if an `@ui` scenario's keyboard walk crosses the header to reach
 // the page's content (§4.4, skip-to-content.ts), which the walk's run-time
