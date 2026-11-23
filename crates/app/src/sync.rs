@@ -14,11 +14,13 @@ use domain::fleet::{
     AckRefused, AgentReport, Approval, EpochSeconds, Happening, Hostname, MAX_OUTBOX_REPORTS,
     MachineZone, SEND_WINDOW, WireName, check_ack,
 };
+use domain::maintenance::{RepositoryReport, RepositoryReports};
+use domain::planning::Maintenance;
 use domain::{AgentId, OperationId, SignedDuration, Timestamp, Uuid};
 
 use crate::leases::MaintenanceLeases;
 use crate::pairing::{AgentChannel, ChannelError, ConnectFailure, ConnectToHub, Connected};
-use crate::ports::{Appended, Clock, ConfigStore, Outbox, StoreError};
+use crate::ports::{Appended, Clock, ConfigError, ConfigStore, Outbox, StoreError};
 
 /// How long the agent waits before it tries its hub again after the first
 /// failure; each failure after doubles it, up to [`LONGEST_BACKOFF`].
@@ -126,6 +128,10 @@ pub enum SyncFailure {
     /// The hub acknowledged what this session didn't send.
     Ack(AckRefused),
     Store(StoreError),
+    /// The configuration, which names the repositories whose leases the
+    /// machine asks for, couldn't be read: the leases it holds are kept
+    /// as they were.
+    Config(Box<ConfigError>),
 }
 
 /// The agent's side of the sync: one session at a time with the hub it
@@ -191,14 +197,82 @@ impl SyncWithHub {
         connected: &Connected,
         channel: &mut AgentChannel,
     ) -> Result<(), SyncFailure> {
-        let _ = (
-            leasing,
-            connected,
-            channel,
-            &leasing.config,
-            &leasing.leases,
-        );
-        todo!()
+        let config = leasing
+            .config
+            .load()
+            .await
+            .map_err(|error| SyncFailure::Config(Box::new(error)))?;
+        let mut reports = Vec::new();
+        let mut local = Vec::new();
+        for repository in config.repositories().values() {
+            let Some(id) = &repository.id else { continue };
+            if repository.maintenance == Maintenance::Local {
+                local.push(id.clone());
+            }
+            // Whether the repository holds another machine's snapshots
+            // isn't known here yet (#1465): the hub's other check, another
+            // machine's report of it, still refuses a shared one.
+            reports.push(RepositoryReport {
+                repository: id.clone(),
+                request: repository.maintenance,
+                holds_other_agents_snapshots: false,
+            });
+        }
+        let held = leasing.leases.held().await.map_err(SyncFailure::Store)?;
+        for (repository, epoch) in held {
+            if local.contains(&repository) {
+                continue;
+            }
+            channel
+                .send_release(&repository, epoch)
+                .await
+                .map_err(SyncFailure::Channel)?;
+            let released = channel
+                .receive_released()
+                .await
+                .map_err(SyncFailure::Channel)?;
+            if released != (repository.clone(), epoch) {
+                return Err(SyncFailure::Channel(ChannelError::OutOfTurn));
+            }
+            leasing
+                .leases
+                .released(&repository, epoch)
+                .await
+                .map_err(SyncFailure::Store)?;
+        }
+        // The machine's clock before the request leaves: the hub signs
+        // after, so the lease the machine counts never outlasts the hub's.
+        let asked_at = self.clock.now();
+        channel
+            .send_repos(&RepositoryReports::new(reports))
+            .await
+            .map_err(SyncFailure::Channel)?;
+        let grants = channel
+            .receive_grants()
+            .await
+            .map_err(SyncFailure::Channel)?;
+        let refused = leasing
+            .leases
+            .take(&grants, connected.pin.recovery_number, asked_at)
+            .await
+            .map_err(SyncFailure::Store)?;
+        for lower in refused {
+            log::warn!(
+                "the hub's grant of repository {} was refused (epoch-lower): recovery {}, \
+                 generation {}, epoch {} lies below the highest this machine has seen, \
+                 recovery {}, generation {}, epoch {}; the hub may have been rewound or \
+                 restored from an older copy, and this machine maintains the repository no \
+                 more until a grant at or above it",
+                lower.repository.as_str(),
+                lower.granted.recovery_number,
+                lower.granted.generation,
+                lower.granted.epoch.get(),
+                lower.floor.recovery_number,
+                lower.floor.generation,
+                lower.floor.epoch.get(),
+            );
+        }
+        Ok(())
     }
 
     /// One session: connects, sends every report not yet acknowledged, in
@@ -263,16 +337,21 @@ impl SyncWithHub {
 
     /// Sessions for as long as the agent runs: whenever its outbox holds a
     /// report the hub hasn't acknowledged, a session replays it, and the
-    /// outbox is looked at again after [`POLL`]; a failed session, or one
-    /// the hub holds pending, is tried again after [`backoff`]. It never
-    /// touches the agent's operations, so an agent that can't reach its hub
-    /// backs up on schedule all the same.
+    /// outbox is looked at again after [`POLL`]; a sync that asks for the
+    /// machine's leases also holds a session at its start and once
+    /// [`GRANTS_EVERY`] has passed since the last that held, on the
+    /// machine's clock either way. A failed session, or one the hub holds
+    /// pending, is tried again after [`backoff`]. It never touches the
+    /// agent's operations, so an agent that can't reach its hub backs up
+    /// on schedule all the same.
     pub async fn run(&self) {
         let mut wait = None;
         // Each streak of failures, and of unreadable outboxes, is logged
         // once, at its first.
         let mut failing = false;
         let mut unreadable = false;
+        // When the last session that held started, for the leases' cadence.
+        let mut leased_at: Option<Timestamp> = None;
         loop {
             let waiting = match self.outbox.unacknowledged(None, 1).await {
                 Ok(waiting) => {
@@ -287,7 +366,12 @@ impl SyncWithHub {
                     false
                 }
             };
-            if !waiting {
+            let started = self.clock.now();
+            // A clock set back counts as time passed, so a lease is still
+            // renewed.
+            let leases_due = self.leases.is_some()
+                && leased_at.is_none_or(|at| started.duration_since(at).abs() >= GRANTS_EVERY);
+            if !waiting && !leases_due {
                 self.clock.sleep(POLL).await;
                 continue;
             }
@@ -295,6 +379,7 @@ impl SyncWithHub {
                 Ok(Synced::Replayed { .. }) => {
                     wait = None;
                     failing = false;
+                    leased_at = Some(started);
                     // Never straight into the next session: an outbox that
                     // kept what the hub acknowledged would otherwise have
                     // the loop replay it without pause.

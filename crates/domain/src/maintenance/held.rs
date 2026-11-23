@@ -1,5 +1,5 @@
 //! A paired machine's own leases (technical design §7.3, I1; §16, decision
-//! NN): [`HeldLeases`], the leases its hub granted it and the highest lease
+//! 151): [`HeldLeases`], the leases its hub granted it and the highest lease
 //! it has seen for each repository, its epoch floor. A paired machine runs
 //! a forget, a prune, a check or an adoption only while it holds a live
 //! lease on the repository. Whether one is live is judged on the hub's
@@ -112,22 +112,66 @@ impl HeldLeases {
         recovery_number: u64,
         asked_at: Timestamp,
     ) -> Vec<EpochLower> {
-        let _ = (grants, recovery_number, asked_at);
-        todo!()
+        let mut refused = Vec::new();
+        let mut leases = BTreeMap::new();
+        for grant in &grants.grants {
+            let granted = EpochFloor {
+                recovery_number,
+                generation: grants.generation,
+                epoch: grant.epoch,
+            };
+            let floor = self
+                .floors
+                .entry(grant.repository.clone())
+                .or_insert(granted);
+            if granted < *floor {
+                refused.push(EpochLower {
+                    repository: grant.repository.clone(),
+                    floor: *floor,
+                    granted,
+                });
+                continue;
+            }
+            *floor = granted;
+            // A life no clock can hold comes from no hub this version
+            // speaks to: the machine holds nothing on it.
+            let life = grants.signed_at.duration_until(grant.expires_at);
+            let Ok(ends_at) = asked_at.checked_add(life) else {
+                continue;
+            };
+            leases.insert(
+                grant.repository.clone(),
+                HeldLease {
+                    epoch: grant.epoch,
+                    ends_at,
+                },
+            );
+        }
+        self.leases = leases;
+        refused
     }
 
     /// The epoch of the lease the machine holds on `repository` at `now`,
     /// on its own clock.
     pub fn holds(&self, repository: &RepositoryId, now: Timestamp) -> Result<LeaseEpoch, NoLease> {
-        let _ = (repository, now);
-        todo!()
+        let lease = self.leases.get(repository).ok_or(NoLease::NoneHeld)?;
+        if now < lease.ends_at {
+            Ok(lease.epoch)
+        } else {
+            Err(NoLease::RanOut)
+        }
     }
 
     /// Lets go of the lease on `repository` at `epoch`, once the hub has
     /// its release (`ReleaseAck`); the floor stays.
     pub fn released(&mut self, repository: &RepositoryId, epoch: LeaseEpoch) {
-        let _ = (repository, epoch);
-        todo!()
+        if self
+            .leases
+            .get(repository)
+            .is_some_and(|lease| lease.epoch == epoch)
+        {
+            self.leases.remove(repository);
+        }
     }
 }
 

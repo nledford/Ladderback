@@ -778,7 +778,7 @@ impl HubPairing {
         } else if message.kind == repos_kind() {
             self.grant(syncing.agent_id, &message.payload).await?
         } else if message.kind == release_kind() {
-            self.take_release(syncing.agent_id, &message.payload)
+            self.take_release(syncing.agent_id, &message.payload, now)
                 .await?
         } else {
             return Ok(Ok(None));
@@ -846,34 +846,44 @@ impl HubPairing {
     }
 
     /// Decides the repositories `agent`'s `ReposSnapshot` names, and
-    /// answers with every lease it holds, signed at the hub's time.
+    /// answers with every lease it holds, signed at the hub's time. An
+    /// agent no longer approved is answered with nothing and the
+    /// connection ends.
     async fn grant(&self, agent: AgentId, payload: &[u8]) -> Result<Answered, HubPairingError> {
-        let _ = (
-            agent,
-            payload,
-            &self.owners,
-            read_repos,
-            grants_payload,
-            grants_kind,
-        );
-        todo!()
+        let Some(owners) = &self.owners else {
+            return Ok(Ok(None));
+        };
+        let Ok(reports) = read_repos(payload) else {
+            return Ok(Err(MessageRefused::Unexpected));
+        };
+        let Some(grants) = owners.grant(agent, &reports).await? else {
+            return Ok(Err(MessageRefused::Unexpected));
+        };
+        Ok(Ok(Some((grants_kind(), grants_payload(&grants)))))
     }
 
     /// Ends the lease `agent`'s `ReleaseAck` names, and answers with
-    /// `Released`.
+    /// `Released`. A release the hub refuses names a lease the agent no
+    /// longer holds, so the agent may let go of it all the same: it is
+    /// answered alike.
     async fn take_release(
         &self,
         agent: AgentId,
         payload: &[u8],
+        now: Timestamp,
     ) -> Result<Answered, HubPairingError> {
-        let _ = (
-            agent,
-            payload,
-            read_release,
-            released_payload,
-            released_kind,
-        );
-        todo!()
+        let Some(owners) = &self.owners else {
+            return Ok(Ok(None));
+        };
+        let Ok((repository, epoch)) = read_release(payload) else {
+            return Ok(Err(MessageRefused::Unexpected));
+        };
+        // Either way the agent holds no lease at that epoch any more.
+        let _ended = owners.release(agent, &repository, epoch).await?;
+        Ok(Ok(Some((
+            released_kind(),
+            released_payload(&repository, epoch, now),
+        ))))
     }
 
     /// Warns, once per agent while the hub runs, that it lets go of the

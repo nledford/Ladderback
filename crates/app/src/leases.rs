@@ -1,5 +1,5 @@
 //! A paired machine's side of repository ownership (technical design §7.3,
-//! I1; §16, decision NN): the leases its hub grants it, kept in its
+//! I1; §16, decision 151): the leases its hub grants it, kept in its
 //! database, and whether it may maintain a repository now. A paired machine
 //! runs a forget, a prune, a check or an adoption only while it holds a
 //! live lease on the repository, judged on the hub's time, from the moment
@@ -40,8 +40,12 @@ impl MaintenanceLeases {
     /// whose ID isn't known can't be granted one, and a pin or a cache that
     /// can't be read refuses, as no lease would.
     pub async fn permits(&self, repository: Option<&RepositoryId>) -> Result<(), NoLease> {
-        let _ = (repository, &self.identity, &self.cache, &self.clock);
-        todo!()
+        if let Ok(None) = self.identity.pin().await {
+            return Ok(());
+        }
+        let repository = repository.ok_or(NoLease::NoneHeld)?;
+        let held = self.cache.load().await.map_err(|_| NoLease::NoneHeld)?;
+        held.holds(repository, self.clock.now()).map(|_| ())
     }
 
     /// Takes the hub's `grants`, its answer to a request the machine sent
@@ -54,13 +58,21 @@ impl MaintenanceLeases {
         recovery_number: u64,
         asked_at: domain::Timestamp,
     ) -> Result<Vec<EpochLower>, StoreError> {
-        let _ = (grants, recovery_number, asked_at);
-        todo!()
+        let mut held = self.cache.load().await?;
+        let refused = held.take(grants, recovery_number, asked_at);
+        self.cache.save(&held).await?;
+        Ok(refused)
     }
 
     /// Every lease the machine holds, live or not, by repository.
     pub async fn held(&self) -> Result<Vec<(RepositoryId, LeaseEpoch)>, StoreError> {
-        todo!()
+        Ok(self
+            .cache
+            .load()
+            .await?
+            .leases()
+            .map(|(repository, lease)| (repository.clone(), lease.epoch))
+            .collect())
     }
 
     /// Lets go of the lease on `repository` at `epoch`, once the hub has the
@@ -70,8 +82,9 @@ impl MaintenanceLeases {
         repository: &RepositoryId,
         epoch: LeaseEpoch,
     ) -> Result<(), StoreError> {
-        let _ = (repository, epoch);
-        todo!()
+        let mut held = self.cache.load().await?;
+        held.released(repository, epoch);
+        self.cache.save(&held).await
     }
 }
 

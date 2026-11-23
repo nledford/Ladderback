@@ -1,4 +1,4 @@
-use std::sync::Mutex;
+use std::sync::{Mutex, PoisonError};
 
 use async_trait::async_trait;
 use domain::maintenance::HeldLeases;
@@ -15,12 +15,15 @@ pub struct InMemoryLeaseCache {
 #[async_trait]
 impl LeaseCache for InMemoryLeaseCache {
     async fn load(&self) -> Result<HeldLeases, StoreError> {
-        let _ = &self.kept;
-        todo!()
+        Ok(self
+            .kept
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .clone())
     }
 
     async fn save(&self, leases: &HeldLeases) -> Result<(), StoreError> {
-        let _ = leases;
-        todo!()
+        *self.kept.lock().unwrap_or_else(PoisonError::into_inner) = leases.clone();
+        Ok(())
     }
 }

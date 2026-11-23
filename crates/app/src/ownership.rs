@@ -8,7 +8,9 @@
 use std::sync::Arc;
 
 use domain::fleet::GENERATION;
-use domain::maintenance::{LeaseEpoch, ReleaseRefused, RepoGrants, RepositoryReports};
+use domain::maintenance::{
+    ClaimOutcome, Grant, LeaseEpoch, ReleaseRefused, RepoGrants, RepositoryReports,
+};
 use domain::{AgentId, RepositoryId};
 
 use crate::ports::{AgentRegistry, ClaimDecision, Clock, OwnershipRegistry, StoreError};
@@ -50,13 +52,8 @@ impl RepositoryOwners {
         agent: AgentId,
         reports: &RepositoryReports,
     ) -> Result<Reported, StoreError> {
-        match self.agents.agent(agent).await? {
-            Some(record) if !record.is_pending() => {
-                let decided = self.owners.report(agent, reports, self.clock.now()).await?;
-                Ok(Reported::Decided(decided))
-            }
-            _ => Ok(Reported::NotApproved),
-        }
+        let decided = self.decide(agent, reports, self.clock.now()).await?;
+        Ok(decided.map_or(Reported::NotApproved, Reported::Decided))
     }
 
     /// Decides `reports` as [`report`](Self::report) does, and gives every
@@ -69,8 +66,43 @@ impl RepositoryOwners {
         agent: AgentId,
         reports: &RepositoryReports,
     ) -> Result<Option<RepoGrants>, StoreError> {
-        let _ = (agent, reports, GENERATION);
-        todo!()
+        let now = self.clock.now();
+        let Some(decided) = self.decide(agent, reports, now).await? else {
+            return Ok(None);
+        };
+        let grants = decided
+            .into_iter()
+            .filter_map(|decision| match decision.outcome {
+                ClaimOutcome::Granted(lease)
+                | ClaimOutcome::Renewed(lease)
+                | ClaimOutcome::Unrenewed(lease) => Some(Grant {
+                    repository: decision.repository,
+                    epoch: lease.epoch,
+                    expires_at: lease.expires_at,
+                }),
+                ClaimOutcome::Refused(_) | ClaimOutcome::NoClaim => None,
+            })
+            .collect();
+        Ok(Some(RepoGrants {
+            generation: GENERATION,
+            signed_at: now,
+            grants,
+        }))
+    }
+
+    /// What the hub decided of `reports` at `now`, when `agent` is approved.
+    async fn decide(
+        &self,
+        agent: AgentId,
+        reports: &RepositoryReports,
+        now: domain::Timestamp,
+    ) -> Result<Option<Vec<ClaimDecision>>, StoreError> {
+        match self.agents.agent(agent).await? {
+            Some(record) if !record.is_pending() => {
+                Ok(Some(self.owners.report(agent, reports, now).await?))
+            }
+            _ => Ok(None),
+        }
     }
 
     /// Ends the lease `agent` holds on `repository` at `epoch`, at its

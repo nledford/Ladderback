@@ -247,7 +247,8 @@ async fn an_old_database_gains_the_rule_and_keeps_what_it_holds() {
             (20, true),
             (21, true),
             (22, true),
-            (23, true)
+            (23, true),
+            (24, true)
         ]
     );
     let prune = started(queued_on_repository(0x50, OperationKind::Prune));
@@ -321,7 +322,8 @@ async fn an_old_database_with_nothing_to_fix_is_upgraded_without_changing_a_row(
             (20, true),
             (21, true),
             (22, true),
-            (23, true)
+            (23, true),
+            (24, true)
         ]
     );
     let check = started(queued_on_repository(0x20, OperationKind::Check));
@@ -393,7 +395,8 @@ async fn a_log_from_before_the_alias_was_kept_reads_back_without_one() {
             (20, true),
             (21, true),
             (22, true),
-            (23, true)
+            (23, true),
+            (24, true)
         ]
     );
     let check = store
@@ -496,7 +499,8 @@ async fn a_log_at_version_4_gains_the_index_of_successes_and_changes_no_row() {
             (20, true),
             (21, true),
             (22, true),
-            (23, true)
+            (23, true),
+            (24, true)
         ]
     );
     let index: Option<String> = sqlx::query_scalar(
@@ -557,7 +561,7 @@ async fn a_database_at_version_9_gains_no_session_and_no_session_length_and_keep
     assert!(matches!(length, Ok(None)), "{length:?}");
     let mut raw = scratch.raw().await;
     assert_eq!(api_token_row(&mut raw).await, before);
-    assert_eq!(applied_versions(&mut raw).await.last(), Some(&(23, true)));
+    assert_eq!(applied_versions(&mut raw).await.last(), Some(&(24, true)));
 }
 
 #[tokio::test]
@@ -580,7 +584,7 @@ async fn a_database_at_version_10_gains_no_reading_and_keeps_its_sessions_length
         "{length:?}"
     );
     let mut raw = scratch.raw().await;
-    assert_eq!(applied_versions(&mut raw).await.last(), Some(&(23, true)));
+    assert_eq!(applied_versions(&mut raw).await.last(), Some(&(24, true)));
 }
 
 #[tokio::test]
@@ -602,7 +606,7 @@ async fn a_database_at_version_11_gains_no_release_check_and_keeps_its_session_l
         "{length:?}"
     );
     let mut raw = scratch.raw().await;
-    assert_eq!(applied_versions(&mut raw).await.last(), Some(&(23, true)));
+    assert_eq!(applied_versions(&mut raw).await.last(), Some(&(24, true)));
 }
 
 #[tokio::test]
@@ -621,7 +625,7 @@ async fn a_database_at_version_12_gains_no_proposal_and_keeps_its_release_check(
     let check = app::ports::ScheduleStore::release_check(&store).await;
     assert!(matches!(check, Ok(Some(_))), "{check:?}");
     let mut raw = scratch.raw().await;
-    assert_eq!(applied_versions(&mut raw).await.last(), Some(&(23, true)));
+    assert_eq!(applied_versions(&mut raw).await.last(), Some(&(24, true)));
 }
 
 #[tokio::test]
@@ -650,7 +654,7 @@ async fn a_database_at_version_13_keeps_its_proposals_with_nothing_decided() {
     assert_eq!(kept.approved_from, None);
     assert_eq!(kept.applied_as, None);
     let mut raw = scratch.raw().await;
-    assert_eq!(applied_versions(&mut raw).await.last(), Some(&(23, true)));
+    assert_eq!(applied_versions(&mut raw).await.last(), Some(&(24, true)));
 }
 
 /// A restore an earlier build logged names no entry: the column the
@@ -671,7 +675,7 @@ async fn a_database_at_version_14_keeps_its_restores_naming_no_entry() {
     assert_eq!(restore.record.kind, OperationKind::Restore);
     assert_eq!(restore.record.entry, None);
     let mut raw = scratch.raw().await;
-    assert_eq!(applied_versions(&mut raw).await.last(), Some(&(23, true)));
+    assert_eq!(applied_versions(&mut raw).await.last(), Some(&(24, true)));
 }
 
 /// A database an earlier build kept gains the hub's registry, empty, in
@@ -696,7 +700,7 @@ async fn a_database_at_version_15_gains_an_empty_registry_and_keeps_its_log() {
                 .unwrap_or_else(|error| panic!("{table} is there: {error}"));
         assert_eq!(rows, 0, "{table} is empty");
     }
-    assert_eq!(applied_versions(&mut raw).await.last(), Some(&(23, true)));
+    assert_eq!(applied_versions(&mut raw).await.last(), Some(&(24, true)));
 }
 
 /// Version 17 gives every API token permissions in place of its scopes, each
@@ -781,7 +785,7 @@ async fn a_database_at_version_16_gives_each_api_token_the_permissions_its_scope
         "a token that could only start backups still reads nothing"
     );
     let mut raw = scratch.raw().await;
-    assert_eq!(applied_versions(&mut raw).await.last(), Some(&(23, true)));
+    assert_eq!(applied_versions(&mut raw).await.last(), Some(&(24, true)));
 }
 
 /// Version 18 records no TLS key for a hub that had none, so its next start
@@ -809,7 +813,7 @@ async fn a_database_at_version_17_gains_no_recorded_tls_key_and_keeps_its_tokens
                 .unwrap_or_else(|error| panic!("{table} is there: {error}"));
         assert_eq!(rows, expected, "{table}");
     }
-    assert_eq!(applied_versions(&mut raw).await.last(), Some(&(23, true)));
+    assert_eq!(applied_versions(&mut raw).await.last(), Some(&(24, true)));
 }
 
 /// Version 19 keeps each agent the hub registered, with no machine zone
@@ -843,7 +847,7 @@ async fn a_database_at_version_18_keeps_its_agents_with_no_zone() {
             None
         )]
     );
-    assert_eq!(applied_versions(&mut raw).await.last(), Some(&(23, true)));
+    assert_eq!(applied_versions(&mut raw).await.last(), Some(&(24, true)));
 }
 
 /// A restore an earlier build logged names no target: the column the
@@ -876,5 +880,5 @@ async fn a_database_at_version_19_keeps_its_restores_naming_no_target() {
     );
     assert_eq!(restore.record.restored_to, None);
     let mut raw = scratch.raw().await;
-    assert_eq!(applied_versions(&mut raw).await.last(), Some(&(23, true)));
+    assert_eq!(applied_versions(&mut raw).await.last(), Some(&(24, true)));
 }

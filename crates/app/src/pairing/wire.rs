@@ -380,8 +380,9 @@ pub fn read_released(bytes: &[u8]) -> Result<(RepositoryId, LeaseEpoch), WireRef
 
 /// `number` when the agent's store can hold it: up to `i64::MAX`.
 fn storable(number: u64) -> Result<u64, WireRefused> {
-    let _ = number;
-    todo!()
+    i64::try_from(number)
+        .map(|_| number)
+        .map_err(|_| WireRefused)
 }
 
 fn lease_epoch(number: u64) -> Result<LeaseEpoch, WireRefused> {
@@ -401,8 +402,8 @@ fn seconds_down(time: Timestamp) -> u64 {
 
 /// `time`'s seconds since the Unix epoch, rounded up; 0 before it.
 fn seconds_up(time: Timestamp) -> u64 {
-    let _ = time;
-    todo!()
+    let part = u64::from(time.subsec_nanosecond() > 0);
+    seconds_down(time).saturating_add(part)
 }
 
 /// How `Welcome` and `Paired` say an agent's approval on the wire.

@@ -270,7 +270,12 @@ fn answer(alias: &str, error: MaintenanceRefusal) -> (StatusCode, api::ErrorDto)
             text("alias", alias.to_owned()),
             None,
         ),
-        MaintenanceRefusal::NoLease => todo!(),
+        MaintenanceRefusal::NoLease => (
+            StatusCode::CONFLICT,
+            ErrorCode::MaintenanceNoLease,
+            text("alias", alias.to_owned()),
+            None,
+        ),
         MaintenanceRefusal::UnknownPlan { plan } => (
             StatusCode::NOT_FOUND,
             ErrorCode::PlanUnknown,

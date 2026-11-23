@@ -23,7 +23,7 @@
 //! adoption only while it holds a live lease on the repository from its
 //! hub, judged on the hub's time; one that holds none is refused with
 //! [`MaintenanceError::NoLease`] before anything is stored, and the
-//! refusal is logged with why (§7.3, I1; §16, decision NN). A preview
+//! refusal is logged with why (§7.3, I1; §16, decision 151). A preview
 //! changes nothing and takes no lock that writes, so it asks for none.
 
 use std::future::Future;
