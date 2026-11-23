@@ -19,7 +19,9 @@ use crate::pairing::wire::{
     AgentMessage, HubMessage, agent_message, hub_envelope_frame, hub_message, read_hello,
     read_welcome, welcome_payload,
 };
-use crate::pairing::{AgentPairing, HubPairing, MessageRefused, PairWithHub, ProofAnswer};
+use crate::pairing::{
+    AgentPairing, HelloAnswer, HubPairing, MessageRefused, PairWithHub, ProofAnswer,
+};
 use crate::ports::{AgentRegistry, HubLink};
 
 /// One hub on fakes: its registry, its key files, its clock.
@@ -836,7 +838,7 @@ async fn an_unknown_agent_and_another_key_get_one_signed_refusal() {
 }
 
 /// The `Hello` carries the fingerprint of the computer the agent runs on,
-/// under its ID, and never the identifier itself (decision NN).
+/// under its ID, and never the identifier itself (decision 150).
 #[tokio::test]
 async fn a_hello_carries_this_computers_fingerprint_under_the_agents_id() {
     let hub = hub(1);
@@ -874,7 +876,7 @@ async fn a_hello_carries_this_computers_fingerprint_under_the_agents_id() {
 /// A second computer under one agent's ID, as a copied data folder makes,
 /// is refused with a signed `identity-conflict`, keeps neither its reports
 /// nor its zone on the hub, and is flagged and warned of once; the first
-/// computer is taken as before (I1, I6; decision NN).
+/// computer is taken as before (I1, I6; decision 150).
 #[tokio::test]
 async fn a_second_computer_under_one_id_is_refused_and_the_first_kept() {
     let hub = hub(1);
@@ -931,7 +933,7 @@ async fn a_second_computer_under_one_id_is_refused_and_the_first_kept() {
 /// The way back for a machine refused as a second computer: a person at the
 /// hub forgets the computer it took under the ID, and the next one to
 /// connect is taken in its place; the one forgotten is then the second
-/// (decision NN).
+/// (decision 150).
 #[tokio::test]
 async fn a_forgotten_computer_lets_the_next_one_be_taken_in_its_place() {
     let hub = hub(1);
@@ -1423,7 +1425,7 @@ async fn the_hub_welcomes_only_a_proved_agents_first_hello() {
             Err(refusal)
         );
     }
-    let welcome = hub
+    let Ok(HelloAnswer::Welcome(welcome)) = hub
         .pairing
         .welcome(
             &keys,
@@ -1433,7 +1435,9 @@ async fn the_hub_welcomes_only_a_proved_agents_first_hello() {
         )
         .await
         .unwrap()
-        .unwrap();
+    else {
+        panic!("a welcome");
+    };
     assert_eq!(welcome.seq, 1);
     assert_eq!(welcome.kind, domain::fleet::welcome_kind());
     assert_eq!(

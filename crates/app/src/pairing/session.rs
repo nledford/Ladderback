@@ -3,7 +3,8 @@ use domain::AgentId;
 use domain::fleet::{AgentRecord, KEY_BYTES};
 
 use super::hub::{
-    HubHandshake, HubKeys, HubPairing, HubPairingError, MessageRefused, ProofAnswer, Syncing,
+    HelloAnswer, HubHandshake, HubKeys, HubPairing, HubPairingError, MessageRefused, ProofAnswer,
+    Syncing,
 };
 use super::wire::{AgentMessage, agent_message, answer_frame, challenge_frame, hub_envelope_frame};
 use domain::fleet::PairAnswer;
@@ -132,13 +133,18 @@ impl HubPairing {
                     .welcome(&session.keys, &handshake, &agent, &hello)
                     .await
                 {
-                    Ok(Ok(welcome)) => match self.syncing(handshake, &agent) {
-                        Some(syncing) => {
-                            session.stage = Stage::Syncing(Box::new(syncing));
-                            HubStep::Reply(hub_envelope_frame(&welcome))
+                    Ok(Ok(HelloAnswer::Refused(refused))) => {
+                        HubStep::Last(answer_frame(&PairAnswer::Refused(refused)))
+                    }
+                    Ok(Ok(HelloAnswer::Welcome(welcome))) => {
+                        match self.syncing(handshake, &agent) {
+                            Some(syncing) => {
+                                session.stage = Stage::Syncing(Box::new(syncing));
+                                HubStep::Reply(hub_envelope_frame(&welcome))
+                            }
+                            None => HubStep::Last(hub_envelope_frame(&welcome)),
                         }
-                        None => HubStep::Last(hub_envelope_frame(&welcome)),
-                    },
+                    }
                     Ok(Err(refused)) => HubStep::Close(close_reason(refused)),
                     Err(error) => HubStep::Fail(error),
                 }
