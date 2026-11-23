@@ -7,7 +7,8 @@ use std::path::PathBuf;
 
 use app::ports::AgentRegistry as _;
 use cucumber::{given, then, when};
-use domain::fleet::AgentStatus;
+use domain::Timestamp;
+use domain::fleet::{AgentStatus, MachineCheck, MachineFingerprint};
 use store::SqliteStore;
 use testkit::children::Owned;
 
@@ -251,6 +252,57 @@ async fn hub_serves_again(agent: &mut Agent) {
     assert_eq!(again, address);
     agent.pairing_terminal.hub = Some(child);
     agent.pairing_terminal.hub_log = Some(log);
+}
+
+#[when("the hub stops")]
+fn hub_stops(agent: &mut Agent) {
+    // Dropping the daemon ends it and waits for it.
+    agent.pairing_terminal.hub = None;
+}
+
+#[given(
+    expr = "the hub took another computer as {string} first, as a copy of the machine's data folder would make it"
+)]
+async fn hub_took_another_computer(agent: &mut Agent, hostname: String) {
+    assert!(agent.pairing_terminal.hub.is_none(), "the hub is stopped");
+    // Another computer's machine fingerprint than this one's, as the
+    // `Hello` of a copy of the machine's data folder on it would carry.
+    let other = MachineFingerprint::from_hex(&"5a".repeat(32)).expect("a fingerprint");
+    let database = testkit::daemon::data_dir(&hub_root(agent)).join("ladderback.db");
+    let store = SqliteStore::open(&database).await.expect("the hub's store");
+    let agent_id = held(&store, &hostname).await.agent_id;
+    // Pairing took this computer; the other one connected first instead.
+    assert!(store.forget_machine(agent_id).await.expect("forgotten"));
+    let check = store
+        .check_machine(agent_id, Some(&other), Timestamp::now())
+        .await
+        .expect("checked");
+    store.close().await;
+    assert_eq!(check, Some(MachineCheck::Claimed));
+}
+
+#[then(expr = "once the hub stops, it holds no second computer under {string}")]
+async fn no_second_computer(agent: &mut Agent, hostname: String) {
+    // Dropping the daemon ends it and waits for it.
+    agent.pairing_terminal.hub = None;
+    let database = testkit::daemon::data_dir(&hub_root(agent)).join("ladderback.db");
+    let store = SqliteStore::open(&database).await.expect("the hub's store");
+    let agent_id = held(&store, &hostname).await.agent_id;
+    let second = store.second_machines().await.expect("the second computers");
+    store.close().await;
+    assert!(
+        second.iter().all(|second| second.agent_id != agent_id),
+        "{second:?}"
+    );
+}
+
+/// The agent the hub's `store` holds under `hostname`.
+async fn held(store: &SqliteStore, hostname: &str) -> domain::fleet::AgentRecord {
+    let agents = store.agents().await.expect("the hub's agents");
+    agents
+        .into_iter()
+        .find(|listed| listed.hostname.as_str() == hostname)
+        .unwrap_or_else(|| panic!("the hub holds no agent named {hostname}"))
 }
 
 #[then(expr = "once the hub stops, it lists {string} as waiting for approval")]

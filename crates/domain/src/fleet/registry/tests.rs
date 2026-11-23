@@ -166,6 +166,7 @@ fn a_pending_lookalike_is_flagged_with_the_agent_it_looks_like() {
             ListedAgent {
                 record: approved,
                 looks_like: None,
+                second_machine_at: None,
             },
             ListedAgent {
                 record: lookalike,
@@ -174,10 +175,12 @@ fn a_pending_lookalike_is_flagged_with_the_agent_it_looks_like() {
                     hostname: name("Laptop"),
                     last_seen: at(-50),
                 }),
+                second_machine_at: None,
             },
             ListedAgent {
                 record: other_script,
                 looks_like: None,
+                second_machine_at: None,
             },
         ]
     );

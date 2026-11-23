@@ -7,9 +7,10 @@ use app::ports::{Added, AgentRegistry, StoreError};
 use async_trait::async_trait;
 use domain::fleet::{
     AgentRecord, AgentStatus, ApprovalRefused, BindingKind, Fingerprint, HostnameKey, KEY_BYTES,
-    MachineZone, PairRefusal, PairRequest, Pairing, PairingView, ProofRefusal, ProofRequest,
-    ProofView, Proved, PublicKey, TokenId, TokenRecord, TokenUse, admits_unused_token,
-    decide_approval, decide_pairing, decide_proof, voids_tokens_for_new_key,
+    MachineCheck, MachineFingerprint, MachineZone, PairRefusal, PairRequest, Pairing, PairingView,
+    ProofRefusal, ProofRequest, ProofView, Proved, PublicKey, SecondMachine, TokenId, TokenRecord,
+    TokenUse, admits_unused_token, decide_approval, decide_pairing, decide_proof,
+    voids_tokens_for_new_key,
 };
 use domain::{AgentId, Timestamp};
 use sqlx::{Connection, SqliteConnection};
@@ -381,6 +382,25 @@ impl AgentRegistry for SqliteStore {
             .await
             .map_err(unavailable)?;
         Ok(())
+    }
+
+    async fn check_machine(
+        &self,
+        agent_id: AgentId,
+        presented: Option<&MachineFingerprint>,
+        now: Timestamp,
+    ) -> Result<Option<MachineCheck>, StoreError> {
+        let _ = (agent_id, presented, now);
+        todo!()
+    }
+
+    async fn second_machines(&self) -> Result<Vec<SecondMachine>, StoreError> {
+        todo!()
+    }
+
+    async fn forget_machine(&self, agent_id: AgentId) -> Result<bool, StoreError> {
+        let _ = agent_id;
+        todo!()
     }
 
     /// One transaction, the write lock taken up front, so the record the

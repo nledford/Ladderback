@@ -3,10 +3,10 @@ use std::sync::{Arc, Mutex, MutexGuard, PoisonError};
 
 use async_trait::async_trait;
 use domain::fleet::{
-    AgentRecord, AgentStatus, ApprovalRefused, BindingKind, Fingerprint, HostnameKey, MachineZone,
-    PairRefusal, PairRequest, Pairing, PairingView, ProofRefusal, ProofRequest, ProofView, Proved,
-    PublicKey, TokenId, TokenRecord, TokenUse, admits_unused_token, decide_approval,
-    decide_pairing, decide_proof, voids_tokens_for_new_key,
+    AgentRecord, AgentStatus, ApprovalRefused, BindingKind, Fingerprint, HostnameKey, MachineCheck,
+    MachineFingerprint, MachineZone, PairRefusal, PairRequest, Pairing, PairingView, ProofRefusal,
+    ProofRequest, ProofView, Proved, PublicKey, SecondMachine, TokenId, TokenRecord, TokenUse,
+    admits_unused_token, decide_approval, decide_pairing, decide_proof, voids_tokens_for_new_key,
 };
 use domain::{AgentId, SignedDuration, Timestamp};
 
@@ -299,6 +299,25 @@ impl AgentRegistry for InMemoryAgentRegistry {
             agent.zone = zone.cloned();
         }
         Ok(())
+    }
+
+    async fn check_machine(
+        &self,
+        agent_id: AgentId,
+        presented: Option<&MachineFingerprint>,
+        now: Timestamp,
+    ) -> Result<Option<MachineCheck>, StoreError> {
+        let _ = (agent_id, presented, now);
+        todo!()
+    }
+
+    async fn second_machines(&self) -> Result<Vec<SecondMachine>, StoreError> {
+        todo!()
+    }
+
+    async fn forget_machine(&self, agent_id: AgentId) -> Result<bool, StoreError> {
+        let _ = agent_id;
+        todo!()
     }
 
     async fn approve(

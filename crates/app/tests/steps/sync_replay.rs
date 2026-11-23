@@ -31,18 +31,18 @@ pub(super) struct SyncWorld {
     down: bool,
 }
 
-struct Side {
+pub(super) struct Side {
     outbox: Arc<InMemoryOutbox>,
     record: RecordReports,
     connector: Arc<LoopbackHubConnector>,
     /// The reports recorded, in order.
-    recorded: Vec<AgentReport>,
+    pub(super) recorded: Vec<AgentReport>,
     /// How many reports were kept while the hub couldn't be reached.
     kept_while_down: usize,
     /// How many backups ran.
     backups: u128,
     /// Each sync's outcome, in order.
-    synced: Vec<Result<Synced, SyncFailure>>,
+    pub(super) synced: Vec<Result<Synced, SyncFailure>>,
     /// The sync loop, once the agent keeps syncing.
     running: Option<Running>,
 }
@@ -100,7 +100,7 @@ impl Side {
 
     /// One backup: its start and its end, recorded as the agent's
     /// operations make them.
-    async fn backup(&mut self, agent: u128, down: bool) {
+    pub(super) async fn backup(&mut self, agent: u128, down: bool) {
         self.backups += 1;
         let operation = Uuid::from_u128((agent << 64) | self.backups).to_string();
         let started = 1_800_000_000 + 600 * i64::try_from(self.backups).unwrap();
@@ -127,7 +127,7 @@ impl Side {
         }
     }
 
-    async fn sync(&mut self, machine: &Machine) -> &Result<Synced, SyncFailure> {
+    pub(super) async fn sync(&mut self, machine: &Machine) -> &Result<Synced, SyncFailure> {
         let sync = SyncWithHub::new(
             machine.connecting(self.connector.clone()),
             self.outbox.clone(),
@@ -143,7 +143,7 @@ impl Side {
         self.synced.last().expect("a sync")
     }
 
-    async fn waiting(&self) -> usize {
+    pub(super) async fn waiting(&self) -> usize {
         self.outbox
             .unacknowledged(None, usize::MAX)
             .await
@@ -164,7 +164,7 @@ fn first(agent: &mut Agent) -> &mut Side {
         .expect("the first agent's side")
 }
 
-fn other(agent: &mut Agent) -> &mut Side {
+pub(super) fn other(agent: &mut Agent) -> &mut Side {
     let world = &mut agent.pairing;
     if world.syncing.other.is_none() {
         world.syncing.other = Some(Side::new(world, 2));

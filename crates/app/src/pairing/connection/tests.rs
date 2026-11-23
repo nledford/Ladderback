@@ -4,8 +4,9 @@ use api::sync::{AgentFrame, HubFrame};
 use async_trait::async_trait;
 use domain::fleet::{
     AgentStatus, Approval, Binding, EpochSeconds, Fingerprint, HubAddress, HubEnvelope, HubRoute,
-    KEY_BYTES, Nonce, PayloadDigest, Protocols, PublicKey, SeedFile, SignedMessage, SigningSeed,
-    TokenTls, Welcome, WelcomeRefused, WireName, hello_kind,
+    KEY_BYTES, MachineFingerprint, MachineIdentifier, MachineZone, Nonce, PayloadDigest, Protocols,
+    PublicKey, SeedFile, SignedMessage, SigningSeed, TokenTls, Welcome, WelcomeRefused, WireName,
+    hello_kind,
 };
 use domain::{SignedDuration, Timestamp, Uuid};
 
@@ -15,8 +16,8 @@ use crate::fakes::{
     LoopbackHubConnector, SeededRandom,
 };
 use crate::pairing::wire::{
-    AgentMessage, HubMessage, agent_message, hub_envelope_frame, hub_message, read_welcome,
-    welcome_payload,
+    AgentMessage, HubMessage, agent_message, hub_envelope_frame, hub_message, read_hello,
+    read_welcome, welcome_payload,
 };
 use crate::pairing::{AgentPairing, HubPairing, MessageRefused, PairWithHub, ProofAnswer};
 use crate::ports::{AgentRegistry, HubLink};
@@ -105,6 +106,15 @@ async fn with_pin_of(like: &InMemoryIdentity) -> Arc<InMemoryIdentity> {
 }
 
 fn connecting(identity: Arc<InMemoryIdentity>, connector: Arc<dyn HubConnector>) -> ConnectToHub {
+    connecting_on(identity, connector, None)
+}
+
+/// Connecting from the computer whose identifier is `machine`.
+fn connecting_on(
+    identity: Arc<InMemoryIdentity>,
+    connector: Arc<dyn HubConnector>,
+    machine: Option<MachineIdentifier>,
+) -> ConnectToHub {
     ConnectToHub::new(
         identity,
         Arc::new(FakeSigning),
@@ -114,7 +124,29 @@ fn connecting(identity: Arc<InMemoryIdentity>, connector: Arc<dyn HubConnector>)
         )),
         connector,
         "0.5.0-agent".to_owned(),
+        machine,
     )
+}
+
+/// The identifier of computer `n`.
+fn identifier(n: u128) -> MachineIdentifier {
+    MachineIdentifier::parse(&format!("{n:032x}")).unwrap()
+}
+
+/// The key files of a copy of `of`'s data folder: its pin and its agent
+/// key.
+async fn copied(of: &InMemoryIdentity) -> Arc<InMemoryIdentity> {
+    let copy = Arc::new(InMemoryIdentity::default());
+    copy.write_pin(&of.pin().await.unwrap().unwrap())
+        .await
+        .unwrap();
+    copy.keep_seed(
+        SeedFile::AgentKey,
+        of.seed(SeedFile::AgentKey).await.unwrap().unwrap(),
+    )
+    .await
+    .unwrap();
+    copy
 }
 
 fn agent_key(seed: &SigningSeed) -> PublicKey {
@@ -803,6 +835,163 @@ async fn an_unknown_agent_and_another_key_get_one_signed_refusal() {
     assert_eq!(hub.registry.agents().await.unwrap(), before);
 }
 
+/// The `Hello` carries the fingerprint of the computer the agent runs on,
+/// under its ID, and never the identifier itself (decision NN).
+#[tokio::test]
+async fn a_hello_carries_this_computers_fingerprint_under_the_agents_id() {
+    let hub = hub(1);
+    let identity = paired(&hub, 1).await;
+    let connector = Arc::new(LoopbackHubConnector::to(hub.pairing.clone()));
+    connecting_on(identity, connector.clone(), Some(identifier(1)))
+        .connect(agent_id(1), hostname(1), None)
+        .await
+        .unwrap();
+    let told: Vec<_> = connector
+        .sent()
+        .iter()
+        .filter_map(
+            |text| match agent_message(&AgentFrame::from_text(text).unwrap()) {
+                Ok(AgentMessage::Signed(envelope)) if envelope.kind == hello_kind() => {
+                    Some(read_hello(&envelope.payload).unwrap().machine)
+                }
+                _ => None,
+            },
+        )
+        .collect();
+    assert_eq!(
+        told,
+        [Some(MachineFingerprint::of(agent_id(1), &identifier(1)))]
+    );
+    assert!(
+        connector
+            .sent()
+            .iter()
+            .all(|text| !text.contains(identifier(1).as_str())),
+        "the identifier stays on the computer"
+    );
+}
+
+/// A second computer under one agent's ID, as a copied data folder makes,
+/// is refused with a signed `identity-conflict`, keeps neither its reports
+/// nor its zone on the hub, and is flagged and warned of once; the first
+/// computer is taken as before (I1, I6; decision NN).
+#[tokio::test]
+async fn a_second_computer_under_one_id_is_refused_and_the_first_kept() {
+    let hub = hub(1);
+    let identity = paired(&hub, 1).await;
+    let waiting = hub.registry.agent(agent_id(1)).await.unwrap().unwrap();
+    hub.pairing.approve(&waiting).await.unwrap().unwrap();
+    let copy = copied(&identity).await;
+    let connect = |identity: &Arc<InMemoryIdentity>, n: u128, zone: Option<MachineZone>| {
+        let connector = Arc::new(LoopbackHubConnector::to(hub.pairing.clone()));
+        let identity = identity.clone();
+        async move {
+            connecting_on(identity, connector, Some(identifier(n)))
+                .connect(agent_id(1), hostname(1), zone)
+                .await
+        }
+    };
+    let first = connect(&identity, 1, None).await.unwrap();
+    assert_eq!(first.approval, Approval::Approved);
+    crate::test_log::capture_the_log();
+    let berlin = MachineZone::parse("Europe/Berlin").ok();
+    for _ in 0..2 {
+        hub.clock.advance(SignedDuration::from_secs(60));
+        let failure = connect(&copy, 2, berlin.clone()).await;
+        let Err(ConnectFailure::Refused(refused)) = failure else {
+            panic!("{failure:?}");
+        };
+        assert_eq!(refused.code.as_str(), "identity-conflict");
+        assert_eq!(refused.holder, None);
+    }
+    let held = hub.registry.agent(agent_id(1)).await.unwrap().unwrap();
+    assert_eq!(held.zone, None, "the copy's zone isn't kept");
+    let listed = hub.pairing.agents().await.unwrap();
+    assert_eq!(listed[0].second_machine_at, Some(hub.clock.now()));
+    let again = connect(&identity, 1, None).await.unwrap();
+    assert_eq!(again.approval, Approval::Approved, "the first is taken");
+    let logged = crate::test_log::logged_by("app::pairing");
+    let warned: Vec<_> = logged
+        .iter()
+        .filter(|(level, line)| *level == log::Level::Warn && line.contains("second computer"))
+        .collect();
+    assert_eq!(warned.len(), 1, "{logged:?}");
+    assert!(
+        warned[0].1.contains(&agent_id(1).as_uuid().to_string()),
+        "{warned:?}"
+    );
+    assert!(
+        warned[0]
+            .1
+            .contains(&format!("pairing-token --forget-computer {}", hostname(1))),
+        "the line names the way back: {warned:?}"
+    );
+}
+
+/// The way back for a machine refused as a second computer: a person at the
+/// hub forgets the computer it took under the ID, and the next one to
+/// connect is taken in its place; the one forgotten is then the second
+/// (decision NN).
+#[tokio::test]
+async fn a_forgotten_computer_lets_the_next_one_be_taken_in_its_place() {
+    let hub = hub(1);
+    let identity = paired(&hub, 1).await;
+    let waiting = hub.registry.agent(agent_id(1)).await.unwrap().unwrap();
+    hub.pairing.approve(&waiting).await.unwrap().unwrap();
+    let copy = copied(&identity).await;
+    let connect = |identity: &Arc<InMemoryIdentity>, n: u128| {
+        let connector = Arc::new(LoopbackHubConnector::to(hub.pairing.clone()));
+        let identity = identity.clone();
+        async move {
+            connecting_on(identity, connector, Some(identifier(n)))
+                .connect(agent_id(1), hostname(1), None)
+                .await
+        }
+    };
+    connect(&identity, 1).await.unwrap();
+    assert!(connect(&copy, 2).await.is_err());
+    crate::test_log::capture_the_log();
+    let held = hub.registry.agent(agent_id(1)).await.unwrap().unwrap();
+    hub.pairing.forget_machine(&held).await.unwrap();
+    let listed = hub.pairing.agents().await.unwrap();
+    assert_eq!(listed[0].second_machine_at, None);
+    let taken = connect(&copy, 2).await.unwrap();
+    assert_eq!(taken.approval, Approval::Approved);
+    let failure = connect(&identity, 1).await;
+    let Err(ConnectFailure::Refused(refused)) = failure else {
+        panic!("{failure:?}");
+    };
+    assert_eq!(refused.code.as_str(), "identity-conflict");
+    let logged = crate::test_log::logged_by("app::pairing");
+    assert!(
+        logged.iter().any(|(level, line)| *level == log::Level::Info
+            && line.contains("forgot the computer")
+            && line.contains(&agent_id(1).as_uuid().to_string())),
+        "{logged:?}"
+    );
+}
+
+/// A computer whose identifier can't be read tells no fingerprint, and is
+/// taken: nothing can be told of it (decision 144).
+#[tokio::test]
+async fn a_computer_that_tells_no_fingerprint_is_taken() {
+    let hub = hub(1);
+    let identity = paired(&hub, 1).await;
+    let first = Arc::new(LoopbackHubConnector::to(hub.pairing.clone()));
+    connecting_on(identity.clone(), first, Some(identifier(1)))
+        .connect(agent_id(1), hostname(1), None)
+        .await
+        .unwrap();
+    let untold = Arc::new(LoopbackHubConnector::to(hub.pairing.clone()));
+    let connected = connecting_on(copied(&identity).await, untold, None)
+        .connect(agent_id(1), hostname(1), None)
+        .await
+        .unwrap();
+    assert_eq!(connected.approval, Approval::Pending);
+    let listed = hub.pairing.agents().await.unwrap();
+    assert_eq!(listed[0].second_machine_at, None);
+}
+
 /// What the hub signs on one connection, to forge its answers with.
 struct Forge {
     seed: SigningSeed,
@@ -1127,6 +1316,7 @@ async fn a_welcome_that_arrives_after_its_life_is_not_acted_on() {
                 delay,
             }),
             "0.5.0-agent".to_owned(),
+            None,
         )
     };
     let late = connect(life).connect(agent_id(1), hostname(1), None).await;
@@ -1191,6 +1381,7 @@ async fn the_hub_welcomes_only_a_proved_agents_first_hello() {
             protocols: domain::fleet::PROTOCOLS,
             clock: EpochSeconds::from_seconds(1_800_000_000),
             zone: None,
+            machine: None,
         });
         let signed = SignedMessage::AgentMessage {
             hub_key: *keys.key(),

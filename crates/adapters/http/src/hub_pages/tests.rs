@@ -13,7 +13,9 @@ use axum::http::header::{HOST, SET_COOKIE};
 use axum::http::{Method, StatusCode};
 use domain::access::api_token::{ApiTokenLabel, TokenPermissions};
 use domain::access::permissions::{Permission, Permissions};
-use domain::fleet::{AgentRecord, AgentStatus, Fingerprint, Hostname, SigningSeed};
+use domain::fleet::{
+    AgentRecord, AgentStatus, Fingerprint, Hostname, MachineFingerprint, SigningSeed,
+};
 use domain::{AgentId, Timestamp, Uuid};
 use http_body_util::BodyExt;
 use tower::ServiceExt;
@@ -647,13 +649,23 @@ fn now() -> Timestamp {
 }
 
 #[tokio::test]
-async fn the_page_lists_each_agent_with_its_key_its_wait_and_its_lookalike() {
+async fn the_page_lists_each_agent_with_its_key_its_wait_its_lookalike_and_a_second_computer() {
     let daemon = Daemon::hub(false);
     let earlier = Timestamp::from_second(1_799_999_400).unwrap();
     let approved = agent(1, "macbook", true, earlier);
     let waiting = agent(2, "rnacbook", false, earlier);
     daemon.registry.hold(approved.clone());
     daemon.registry.hold(waiting.clone());
+    // The hub took one computer under the waiting agent's ID and refused
+    // a second.
+    for computer in ["a", "b"] {
+        let fingerprint = MachineFingerprint::from_hex(&computer.repeat(64)).unwrap();
+        daemon
+            .registry
+            .check_machine(waiting.agent_id, Some(&fingerprint), earlier)
+            .await
+            .unwrap();
+    }
     let response = daemon
         .send(build(Method::GET, api::HUB_AGENTS_PATH, LOOPBACK, &[], ""))
         .await;
@@ -668,20 +680,23 @@ async fn the_page_lists_each_agent_with_its_key_its_wait_and_its_lookalike() {
         since: earlier.to_string(),
         seconds_ago: 600,
         looks_like,
+        second_machine_at: None,
     };
+    let mut flagged = expected(
+        &waiting,
+        api::AgentStatusDto::Pending,
+        Some(api::LookalikeDto {
+            agent_id: approved.agent_id.as_uuid().to_string(),
+            hostname: "macbook".to_owned(),
+            last_seen: earlier.to_string(),
+        }),
+    );
+    flagged.second_machine_at = Some(earlier.to_string());
     assert_eq!(
         listed.agents,
         [
             expected(&approved, api::AgentStatusDto::Approved, None),
-            expected(
-                &waiting,
-                api::AgentStatusDto::Pending,
-                Some(api::LookalikeDto {
-                    agent_id: approved.agent_id.as_uuid().to_string(),
-                    hostname: "macbook".to_owned(),
-                    last_seen: earlier.to_string(),
-                })
-            ),
+            flagged,
         ]
     );
 }

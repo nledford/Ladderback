@@ -472,6 +472,11 @@ cli-pairing-token-pending-daemon-running = the daemon is running on the data fol
 # `--hub` and `--listen` are typed as they are: keep them string literals.
 cli-pairing-token-approve-daemon-running = the daemon is running on the data folder { $path }, and this terminal approves a { -machine } only while it is stopped. Approve it in the web UI's Settings, on the Machines tab, or stop the daemon, run this command again, then start the daemon again as you started it before: through its service, or with { "--hub" } and the same options, such as { "--listen" }.
 
+# `ladderback pairing-token --forget-computer` while the daemon holds the data folder: the hub still takes only the computer it took under the machine's ID.
+# $path (text): the data folder. It is shown as it is.
+# `--hub` and `--listen` are typed as they are: keep them string literals.
+cli-pairing-token-forget-daemon-running = the daemon is running on the data folder { $path }, and this terminal forgets the computer the { -hub } took for a { -machine } only while it is stopped. Stop it, run this command again, then start the daemon again as you started it before: through its service, or with { "--hub" } and the same options, such as { "--listen" }.
+
 # The address given for the hub isn't an http:// or https:// address of at most 200 bytes.
 # $address (text): the address as given. It is shown as it came.
 # `https://name` and `https://name:port` are examples of what a person types, with `name` standing for the hub's name: keep them string literals.

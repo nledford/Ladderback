@@ -105,6 +105,35 @@ async fn lists_waiting(agent: &mut Agent) {
     agent.pairing_terminal.said = Some(said);
 }
 
+#[when(expr = "the person forgets the computer the hub took as {string} at the hub's terminal")]
+async fn forgets_computer(agent: &mut Agent, hostname: String) {
+    let said = on_hub(agent, &["pairing-token", "--forget-computer", &hostname]).await;
+    agent.pairing_terminal.said = Some(said);
+}
+
+#[then(expr = "the terminal says the hub forgot the computer it took as {string}")]
+fn says_forgot(agent: &mut Agent, hostname: String) {
+    let said = said(agent);
+    assert!(said.success, "{said:?}");
+    assert!(
+        said.stderr
+            .contains(&format!("forgot the computer it took as {hostname}")),
+        "{said:?}"
+    );
+}
+
+#[then("the terminal refuses to forget a computer while the daemon runs")]
+fn refused_forget_while_running(agent: &mut Agent) {
+    let said = said(agent);
+    assert!(!said.success, "{said:?}");
+    assert!(
+        said.stderr.contains(
+            "this terminal forgets the computer the hub took for a machine only while it is stopped"
+        ),
+        "{said:?}"
+    );
+}
+
 #[given(expr = "the hub's terminal runs in the time zone {string}")]
 fn hub_terminal_zone(agent: &mut Agent, zone: String) {
     agent.pairing_terminal.hub_zone = Some(zone);

@@ -13,6 +13,7 @@ fn hello(protocols: Protocols) -> Hello {
         protocols,
         clock: EpochSeconds::from_seconds(1_800_000_000),
         zone: None,
+        machine: None,
     }
 }
 

@@ -1,7 +1,8 @@
 use async_trait::async_trait;
 use domain::fleet::{
-    AgentRecord, ApprovalRefused, Fingerprint, MachineZone, PairRefusal, PairRequest, Pairing,
-    ProofRefusal, ProofRequest, Proved, PublicKey, TokenId, TokenRecord,
+    AgentRecord, ApprovalRefused, Fingerprint, MachineCheck, MachineFingerprint, MachineZone,
+    PairRefusal, PairRequest, Pairing, ProofRefusal, ProofRequest, Proved, PublicKey,
+    SecondMachine, TokenId, TokenRecord,
 };
 use domain::{AgentId, Timestamp};
 
@@ -85,6 +86,30 @@ pub trait AgentRegistry: Send + Sync {
         agent_id: AgentId,
         zone: Option<&MachineZone>,
     ) -> Result<(), StoreError>;
+
+    /// Compares `presented`, the machine fingerprint the `Hello` of the
+    /// agent registered under `agent_id` carried, with the one it holds,
+    /// by [`MachineCheck::of`], and keeps what the answer asks in the same
+    /// step: a first fingerprint, so of two machines' first `Hello`s at
+    /// once one is claimed and the other refused, and a second computer's
+    /// refusal at `now`, over the one before (decision 150). `None` for an
+    /// ID it doesn't hold, which changes nothing.
+    async fn check_machine(
+        &self,
+        agent_id: AgentId,
+        presented: Option<&MachineFingerprint>,
+        now: Timestamp,
+    ) -> Result<Option<MachineCheck>, StoreError>;
+
+    /// Every agent under whose ID a second computer was refused, oldest
+    /// agent first, with when the last one was.
+    async fn second_machines(&self) -> Result<Vec<SecondMachine>, StoreError>;
+
+    /// Forgets the machine fingerprint held under `agent_id`, and when a
+    /// second computer was last refused under it, so the next fingerprint a
+    /// `Hello` carries is claimed: the way back for a computer refused as a
+    /// second one (decision 150). `false` for an ID it doesn't hold.
+    async fn forget_machine(&self, agent_id: AgentId) -> Result<bool, StoreError>;
 
     /// Approves the agent registered under `agent_id` with `agent_key`, the
     /// key the person compared, at `now`, with

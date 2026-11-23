@@ -201,6 +201,7 @@ fn reads_the_same(a: &HubAgentDto, b: &HubAgentDto) -> bool {
         since: _,
         seconds_ago: _,
         looks_like,
+        second_machine_at: _,
     } = a;
     *agent_id == b.agent_id
         && *hostname == b.hostname
@@ -282,6 +283,7 @@ mod tests {
             since: "2026-11-21T10:00:00Z".to_owned(),
             seconds_ago,
             looks_like: None,
+            second_machine_at: None,
         }
     }
 

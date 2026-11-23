@@ -2,9 +2,10 @@ use std::sync::Arc;
 
 use domain::fleet::{
     AgentEnvelope, Approval, Binding, BindingKind, Challenge, Connect, EpochSeconds,
-    FIRST_SEQUENCE, Hello, Hostname, HubAddress, HubEnvelope, HubPin, HubRoute, MachineZone, Nonce,
-    PROTOCOLS, PairAnswer, PayloadDigest, Proof, PublicKey, Refused, RouteRefused, SeedFile,
-    SignedMessage, SigningSeed, WelcomeRefused, hello_kind, welcome_kind,
+    FIRST_SEQUENCE, Hello, Hostname, HubAddress, HubEnvelope, HubPin, HubRoute, MachineFingerprint,
+    MachineIdentifier, MachineZone, Nonce, PROTOCOLS, PairAnswer, PayloadDigest, Proof, PublicKey,
+    Refused, RouteRefused, SeedFile, SignedMessage, SigningSeed, WelcomeRefused, hello_kind,
+    welcome_kind,
 };
 use domain::{AgentId, SignedDuration};
 
@@ -33,6 +34,10 @@ pub struct ConnectToHub {
     connector: Arc<dyn HubConnector>,
     /// The agent's build, as `--version` names it, which `Hello` carries.
     version: String,
+    /// The identifier the operating system gives this computer, whose
+    /// fingerprint `Hello` carries; none when it can't be read
+    /// (decision 150).
+    machine: Option<MachineIdentifier>,
 }
 
 /// A connection both sides proved, and what the hub's `Welcome` said.
@@ -127,6 +132,7 @@ impl ConnectToHub {
         clock: Arc<dyn Clock>,
         connector: Arc<dyn HubConnector>,
         version: String,
+        machine: Option<MachineIdentifier>,
     ) -> Self {
         Self {
             identity,
@@ -135,6 +141,7 @@ impl ConnectToHub {
             clock,
             connector,
             version,
+            machine,
         }
     }
 
@@ -311,6 +318,10 @@ impl ConnectToHub {
             clock: EpochSeconds::from_timestamp(self.clock.now())
                 .unwrap_or(EpochSeconds::from_seconds(0)),
             zone: introduction.zone,
+            machine: self
+                .machine
+                .as_ref()
+                .map(|identifier| MachineFingerprint::of(agent_id, identifier)),
         };
         let payload = hello_payload(&hello);
         let kind = hello_kind();

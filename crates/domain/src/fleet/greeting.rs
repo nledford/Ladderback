@@ -8,6 +8,7 @@ use jiff::SignedDuration;
 use super::handshake::HANDSHAKES;
 use super::hostname::Hostname;
 use super::keys::Signature;
+use super::machine::MachineFingerprint;
 use super::registry::AgentStatus;
 use super::signed::{EpochSeconds, Handshakes, WireName};
 use super::zone::MachineZone;
@@ -129,6 +130,10 @@ pub struct Hello {
     /// The agent's machine zone when it sent `Hello`; none when its zone
     /// has no IANA name.
     pub zone: Option<MachineZone>,
+    /// The machine fingerprint of the computer the agent runs on; none
+    /// from a build before fingerprints, or when the computer's identifier
+    /// can't be read (decision 150).
+    pub machine: Option<MachineFingerprint>,
 }
 
 /// The hub's answer to `Hello`.

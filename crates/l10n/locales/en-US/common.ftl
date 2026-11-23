@@ -624,6 +624,11 @@ error-pending-limit = The { -hub } already has 20 { -machine(form: "other") } wa
 # certificate an authority signed.
 error-binding-unavailable = Not connected: the { -hub } closed the connection because it can't offer this machine's kind of connection. Make a new token for the { -hub }'s https address, served by a proxy with a certificate that a certificate authority signed, and pair again with it. Update the { -hub } if it is old.
 
+# The hub refused this machine because it already takes another computer
+# under this machine's ID, as when a data folder was copied from one computer
+# to another. Backups still run here, and their reports wait on this machine.
+error-identity-conflict = The { -hub } refused this computer: another computer already connects to it as this { -machine }, as when a data folder is copied. Backups still run here, and their reports wait. If this is a new computer, take a new machine ID from the start page, restart { -brand-name } and pair it again.
+
 # No hub answered at the token's address: the connection was refused, the
 # name didn't resolve, or nothing answered in 10 seconds. Nothing was sent.
 # $address (text): the hub's address, as the token or the command names it.

@@ -495,6 +495,14 @@ impl HubPairing {
         }
     }
 
+    /// A person at the hub forgets the computer it took under `agent`'s ID,
+    /// so the next one to connect is taken in its place: the way back for a
+    /// machine refused as a second computer (decision NN). Logged.
+    pub async fn forget_machine(&self, agent: &AgentRecord) -> Result<(), HubPairingError> {
+        let _ = agent;
+        todo!()
+    }
+
     /// Every agent the hub has registered, oldest first, each pending one
     /// flagged with the agent its hostname looks like (decision 120,
     /// "Hostnames"), which the pending row shows (decision 121).

@@ -15,6 +15,7 @@ use app::pairing::{
 };
 use app::ports::{
     AgentRegistry as _, EventBus, Identity as _, IdentityError, LinkError, Signing as _,
+    ThisMachine as _,
 };
 use app::sync::{RecordReports, SyncWithHub};
 use domain::fleet::{
@@ -63,6 +64,9 @@ pub(crate) enum TokenAsk {
         hostname: String,
         yes: bool,
     },
+    /// Forget the computer the hub took under the machine with this
+    /// hostname, so the next one to connect as it is taken (decision NN).
+    ForgetComputer(String),
 }
 
 /// The hub's pairing over `store` and the key files in `data_dir`, taking
@@ -252,6 +256,7 @@ async fn on_the_hub(localizer: &Localizer, data_dir: &Path, ask: TokenAsk) -> io
         TokenAsk::Revoke(id) => revoke(localizer, &pairing, &id).await,
         TokenAsk::Pending => pending(localizer, &pairing, &zone).await,
         TokenAsk::Approve { hostname, yes } => approve(localizer, &pairing, &hostname, yes).await,
+        TokenAsk::ForgetComputer(hostname) => forget_computer(localizer, &pairing, &hostname).await,
     };
     store.close().await;
     said
@@ -266,6 +271,7 @@ fn daemon_running(ask: &TokenAsk) -> MessageId {
         TokenAsk::Revoke(_) => msg::CLI_PAIRING_TOKEN_REVOKE_DAEMON_RUNNING,
         TokenAsk::Pending => msg::CLI_PAIRING_TOKEN_PENDING_DAEMON_RUNNING,
         TokenAsk::Approve { .. } => msg::CLI_PAIRING_TOKEN_APPROVE_DAEMON_RUNNING,
+        TokenAsk::ForgetComputer(_) => todo!(),
     }
 }
 
@@ -527,6 +533,16 @@ async fn approve(
         Ok(Err(refused)) => approval_refused(localizer, refused, &name),
         Err(error) => hub_refused(localizer, &error),
     }
+}
+
+/// `pairing-token --forget-computer`: forgets the computer the hub took
+/// under the machine named `hostname` (decision NN).
+async fn forget_computer(
+    _localizer: &Localizer,
+    _pairing: &HubPairing,
+    _hostname: &str,
+) -> io::Result<ExitCode> {
+    todo!()
 }
 
 fn approval_refused(
@@ -792,7 +808,7 @@ fn follow(
     let Some(hostname) = hostname_or_said(localizer, hostname)? else {
         return Ok(Some(ExitCode::from(2)));
     };
-    let connecting = connecting(identity);
+    let connecting = connecting(identity, data_dir);
     let outcome =
         runtime.block_on(connecting.connect_at(agent_id, hostname, machine_zone(), parsed));
     let connected = match outcome {
@@ -857,8 +873,13 @@ fn machine_zone() -> Option<MachineZone> {
     MachineZone::of(&domain::TimeZone::system())
 }
 
-/// Connecting this machine to its hub, on the pin and keys in `identity`.
-fn connecting(identity: Arc<FileIdentity>) -> ConnectToHub {
+/// Connecting this machine to its hub, on the pin and keys in `identity`,
+/// telling the fingerprint of the computer it runs on, none when its
+/// identifier can't be read (decision NN).
+fn connecting(identity: Arc<FileIdentity>, data_dir: &Path) -> ConnectToHub {
+    let machine = platform::this_machine::SystemMachine::in_data_dir(data_dir)
+        .identifier()
+        .ok();
     ConnectToHub::new(
         identity,
         Arc::new(AwsLcSigning),
@@ -866,6 +887,7 @@ fn connecting(identity: Arc<FileIdentity>) -> ConnectToHub {
         Arc::new(SystemClock),
         Arc::new(WebSocketHubConnector::new()),
         crate::build_info::SHOWN.as_str().to_owned(),
+        machine,
     )
 }
 
@@ -917,7 +939,7 @@ pub(crate) async fn reporting(
         }
     };
     let syncing = SyncWithHub::new(
-        connecting(identity),
+        connecting(identity, &data_dir),
         store,
         Arc::new(SystemClock),
         agent_id,
@@ -1016,7 +1038,7 @@ async fn connect_to_hub(
             .map_or_else(String::new, |address| address.as_str().to_owned()),
         Ok(None) | Err(_) => String::new(),
     };
-    match connecting(identity)
+    match connecting(identity, data_dir)
         .connect(agent_id, hostname, machine_zone())
         .await
     {
@@ -1406,6 +1428,7 @@ mod tests {
                 ErrorCode::PlainAddress,
             ),
             (refused("proof-refused"), ErrorCode::ProofRefused),
+            (refused("identity-conflict"), ErrorCode::IdentityConflict),
             (refused("generation-lower"), ErrorCode::HubLinkLost),
             (refused("hostname-taken"), ErrorCode::HubLinkLost),
             (refused("token-used"), ErrorCode::HubLinkLost),
@@ -1484,6 +1507,17 @@ mod tests {
             let said = format!("{other:?}");
             assert!(!pairs_again(&other), "{said}");
         }
+    }
+
+    /// While the daemon holds the data folder, `--forget-computer` is
+    /// refused in words of its own, saying what it would have done.
+    #[test]
+    fn a_running_hub_refuses_to_forget_a_computer_in_words_of_its_own() {
+        let forget = TokenAsk::ForgetComputer("e2e-laptop".to_owned());
+        assert_eq!(
+            daemon_running(&forget),
+            msg::CLI_PAIRING_TOKEN_FORGET_DAEMON_RUNNING
+        );
     }
 
     /// A key file refused for its mode is named by its file and its mode as

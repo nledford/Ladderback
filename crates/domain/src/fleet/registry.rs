@@ -182,6 +182,9 @@ pub struct Lookalike {
 pub struct ListedAgent {
     pub record: AgentRecord,
     pub looks_like: Option<Lookalike>,
+    /// When the hub last refused a second computer under the agent's ID
+    /// (decision 150); none while it never did.
+    pub second_machine_at: Option<Timestamp>,
 }
 
 /// The hub's agents, in the order given, each pending one flagged with the
@@ -219,7 +222,11 @@ pub fn list_agents(agents: Vec<AgentRecord>) -> Vec<ListedAgent> {
     agents
         .into_iter()
         .zip(flags)
-        .map(|(record, looks_like)| ListedAgent { record, looks_like })
+        .map(|(record, looks_like)| ListedAgent {
+            record,
+            looks_like,
+            second_machine_at: None,
+        })
         .collect()
 }
 

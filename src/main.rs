@@ -109,6 +109,8 @@ enum Command {
         approve: Option<String>,
         #[arg(long, requires = "approve")]
         yes: bool,
+        #[arg(skip)]
+        forget_computer: Option<String>,
     },
     #[cfg(feature = "hub")]
     Pair {
@@ -318,17 +320,23 @@ fn main() -> ExitCode {
             pending,
             approve,
             yes,
-        } => hub::pairing_token(match (list, revoke, pending, approve, address) {
-            (true, ..) => hub::TokenAsk::List,
-            (false, Some(id), ..) => hub::TokenAsk::Revoke(id),
-            (false, None, true, ..) => hub::TokenAsk::Pending,
-            (false, None, false, Some(hostname), _) => hub::TokenAsk::Approve { hostname, yes },
-            (false, None, false, None, address) => hub::TokenAsk::Make {
-                address: address.unwrap_or_default(),
-                ttl_minutes: ttl,
-                certificate_authority,
+            forget_computer,
+        } => hub::pairing_token(
+            match (forget_computer, list, revoke, pending, approve, address) {
+                (Some(hostname), ..) => hub::TokenAsk::ForgetComputer(hostname),
+                (None, true, ..) => hub::TokenAsk::List,
+                (None, false, Some(id), ..) => hub::TokenAsk::Revoke(id),
+                (None, false, None, true, ..) => hub::TokenAsk::Pending,
+                (None, false, None, false, Some(hostname), _) => {
+                    hub::TokenAsk::Approve { hostname, yes }
+                }
+                (None, false, None, false, None, address) => hub::TokenAsk::Make {
+                    address: address.unwrap_or_default(),
+                    ttl_minutes: ttl,
+                    certificate_authority,
+                },
             },
-        }),
+        ),
         #[cfg(feature = "hub")]
         Command::Pair {
             address,
@@ -1349,5 +1357,43 @@ mod tests {
                 "{args:?}"
             );
         }
+    }
+
+    /// `pairing-token --forget-computer` takes a machine's hostname and no
+    /// address, and nothing else that asks the hub's terminal for another
+    /// thing.
+    #[cfg(feature = "hub")]
+    #[test]
+    fn pairing_token_forgets_a_computer_by_its_machines_hostname_alone() {
+        let forget = ["pairing-token", "--forget-computer", "e2e-laptop"];
+        assert!(matches!(
+            parsed(&forget),
+            Ok(Cli {
+                command: Command::PairingToken {
+                    forget_computer: Some(hostname),
+                    ..
+                },
+                ..
+            }) if hostname == "e2e-laptop"
+        ));
+        for other in [
+            ["--list"].as_slice(),
+            &["--revoke", "0190f3a0-0000-7000-8000-000000000001"],
+            &["--pending"],
+            &["--approve", "e2e-desktop"],
+            &["--address", "http://127.0.0.1:9"],
+            &["--ttl", "10"],
+        ] {
+            let args: Vec<&str> = forget.iter().chain(other).copied().collect();
+            assert_eq!(
+                parsed(&args).err(),
+                Some(clap::error::ErrorKind::ArgumentConflict),
+                "{args:?}"
+            );
+        }
+        assert_eq!(
+            parsed(&["pairing-token", "--forget-computer", ""]).err(),
+            Some(clap::error::ErrorKind::InvalidValue)
+        );
     }
 }
