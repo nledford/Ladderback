@@ -280,7 +280,7 @@ web-sys = { version = "0.3.107", features = ["AbortController", "AbortSignal", "
 # so the drop does what the tests run.
 zeroize = { version = "1.9.1", features = ["derive"] }
 # The engine writes a downloaded folder as a zip archive (§10.4), streamed and
-# stored, not deflated: no compression crate (decision NN).
+# stored, not deflated: no compression crate (decision 114).
 zip = { version = "9.6.0", default-features = false }
 
 [workspace.lints.rust]
