@@ -1114,3 +1114,50 @@ async fn i1_a_machine_pairing_again_with_its_hub_keeps_its_leases_and_floors() {
     pair(&hub, &agent, hub.token(pinned()).await).await.unwrap();
     assert_eq!(cache.load().await.unwrap(), kept());
 }
+
+/// A machine that comes to pin another hub while it pairs, so it refuses
+/// the answer, keeps that hub's leases and epoch floors: they still catch
+/// a rewound copy of the hub it pins.
+#[tokio::test]
+async fn i1_a_machine_refusing_a_hub_it_doesnt_pin_keeps_its_leases_and_floors() {
+    let other = Hub::new(2);
+    let hub = Hub::new(1);
+    let identity = Arc::new(InMemoryIdentity::default());
+    let cache = Arc::new(InMemoryLeaseCache::default());
+    let agent = agent_keeping(identity.clone(), cache.clone());
+    let keys = hub.pairing.keys().await.unwrap();
+    let (connect, handshake) = agent
+        .connect(hub.token(pinned()).await, agent_id(), laptop(), None)
+        .await
+        .unwrap();
+    let (challenge, hub_side) = hub
+        .pairing
+        .challenge(&keys, &connect, Some(EXPORTER))
+        .unwrap();
+    let (pair_message, awaiting) = agent
+        .answer_challenge(handshake, &challenge, Some(EXPORTER))
+        .await
+        .unwrap();
+    let answer = hub
+        .pairing
+        .pair(&keys, &hub_side, &pair_message)
+        .await
+        .unwrap();
+    let other_key = *other.pairing.keys().await.unwrap().key();
+    identity
+        .write_pin(&domain::fleet::HubPin::new(
+            other_key,
+            pinned(),
+            other_key,
+            HubAddress::parse("https://other.example:9443").unwrap(),
+        ))
+        .await
+        .unwrap();
+    cache.save(&kept()).await.unwrap();
+    let refused = agent.take_answer(awaiting, &answer).await;
+    assert!(
+        matches!(refused, Err(AgentPairingError::PinnedToAnotherHub { .. })),
+        "{refused:?}"
+    );
+    assert_eq!(cache.load().await.unwrap(), kept());
+}
