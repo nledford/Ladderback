@@ -147,6 +147,13 @@ Feature: The hub gives each repository at most one maintenance owner
     When the new hub grants "laptop" the repository "photos" at epoch 1
     Then "laptop" may maintain "photos"
 
+  Scenario: A machine that pairs again with the hub it pins keeps the highest grant it has seen
+    Given "laptop" paired with a hub from its token
+    And "laptop" heard a grant of "photos" at epoch 3
+    When "laptop" pairs again with that hub from a new token
+    And the hub grants "laptop" the repository "photos" at epoch 2
+    Then "laptop" refused the grant of "photos" as below the highest it has seen
+
   Scenario: A machine that stops using a repository releases its lease, and another is granted it
     Given "laptop" claims the repository "photos" and hears the hub's grants
     When "laptop" stops using "photos" and the hub acknowledges its release

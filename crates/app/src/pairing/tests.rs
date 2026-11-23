@@ -1100,3 +1100,17 @@ async fn a_machine_that_cant_forget_the_old_hubs_floors_pins_no_new_hub() {
     );
     assert_eq!(identity.pin().await.unwrap(), None);
 }
+
+/// A machine that pairs again with the hub it pins keeps its leases and
+/// epoch floors: that hub's epochs only rose past them, and they still
+/// catch a rewound copy of it (decision 137).
+#[tokio::test]
+async fn i1_a_machine_pairing_again_with_its_hub_keeps_its_leases_and_floors() {
+    let hub = Hub::new(1);
+    let cache = Arc::new(InMemoryLeaseCache::default());
+    let agent = agent_keeping(Arc::default(), cache.clone());
+    pair(&hub, &agent, hub.token(pinned()).await).await.unwrap();
+    cache.save(&kept()).await.unwrap();
+    pair(&hub, &agent, hub.token(pinned()).await).await.unwrap();
+    assert_eq!(cache.load().await.unwrap(), kept());
+}

@@ -7,6 +7,7 @@ use domain::fleet::{
     MachineZone, Nonce, Pair, PairAnswer, PairingToken, PublicKey, Refused, SeedFile,
     SignedMessage, SigningSeed,
 };
+use domain::maintenance::HeldLeases;
 
 use crate::ports::{
     Attempt, Identity, IdentityError, LeaseCache, Random, RandomUnavailable, Signing, SigningError,
@@ -327,7 +328,11 @@ impl AgentPairing {
     /// The hub's answer, checked against the token's hub key. A signed
     /// `Paired` pins the hub, unless the agent pins it already, whose pin
     /// is kept as it is; a signed refusal is the hub's; anything else is a
-    /// dropped connection.
+    /// dropped connection. An agent that pins no hub forgets its leases and
+    /// epoch floors before it pins this one: they were another hub's, or
+    /// this one's from before the agent lost its pin, whose epochs this
+    /// hub's only passed (§7.3, #1481). One that pins this hub already keeps
+    /// them, so they still catch a rewound copy of it (decision 137).
     pub async fn take_answer(
         &self,
         awaiting: AwaitingPaired,
@@ -397,6 +402,9 @@ impl AgentPairing {
                 });
             }
             None => {
+                // Forgotten first: a failure here leaves no pin, so the
+                // floors never stay under the new hub's.
+                self.leases.save(&HeldLeases::default()).await?;
                 let pin = HubPin::new(
                     hub_key,
                     handshake.token.tls(),
