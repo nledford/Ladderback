@@ -37,9 +37,9 @@ use crate::components::alert::rules::AlertTone;
 use crate::components::button::Content;
 use crate::components::link::rules::{Destination, Matching};
 use crate::components::{
-    Alert, Button, Column, Confirmation, Fingerprint, Link, Name, PauseUpdates, ReviewDialog,
-    Sentences, State, StepUp, StepUpField, Table, Working, dialog_refusal_alert, focus_element,
-    hand_focus_when_gone,
+    ACTIONS, Alert, Button, Column, Confirmation, Fingerprint, Link, Name, PauseUpdates,
+    ReviewDialog, Sentences, State, StepUp, StepUpField, Table, Working, dialog_refusal_alert,
+    focus_element, hand_focus_when_gone,
 };
 use crate::live::{reply, say};
 use crate::machines_list::{Heard, Listed, heard};
@@ -47,7 +47,7 @@ use crate::pause;
 use crate::repositories::Sentence;
 use crate::routes::{refused_sentence, text_with};
 use crate::text;
-use crate::variants::{Rem, Tone};
+use crate::variants::{Rem, Size, Tone};
 use crate::visit::Visit;
 use crate::ws::{self, Posted};
 
@@ -590,6 +590,7 @@ fn leave_button(
         <Button
             id=leave_id(&agent_id)
             content=Content::Text(label.into())
+            size=Size::Small
             node_ref=button
             on_press=press
         />
@@ -609,12 +610,12 @@ fn hostname_column(localizer: &Localizer) -> Column<HubAgentDto> {
     )
 }
 
-/// A cell of the row's agent ID.
+/// A cell of the row's agent ID, which wraps at its hyphens.
 fn agent_id_column(localizer: &Localizer) -> Column<HubAgentDto> {
     Column::new(
         "agent-id",
         text(localizer, msg::UI_MACHINES_AGENT_ID),
-        Rem::tenths(80),
+        Rem::tenths(70),
         |row: Signal<HubAgentDto>| {
             view! { <bdi>{move || row.with(|row| row.agent_id.clone())}</bdi> }.into_any()
         },
@@ -627,7 +628,7 @@ fn fingerprint_column(localizer: &Arc<Localizer>) -> Column<HubAgentDto> {
     Column::new(
         "key",
         text(localizer, msg::UI_MACHINES_KEY),
-        Rem::tenths(90),
+        Rem::tenths(80),
         move |row: Signal<HubAgentDto>| {
             // A row's key doesn't change under its agent ID, so the cell is
             // drawn once rather than again at each read of the list.
@@ -669,7 +670,10 @@ fn ago_column(
 /// The waiting machines' columns: the hostname, the row's header, its agent
 /// ID, its fingerprint, how long it has waited, the machine its hostname
 /// looks like, and its Approve and Reject buttons, which `choose` and
-/// `leave` open their reviews with.
+/// `leave` open their reviews with. The columns add up to 42 rem, under the
+/// Machines panel's 44 rem at the page's default width with CI's wider
+/// fonts, so the table fits and no row action is cut off at the frame's
+/// edge; each button's label wraps inside it.
 fn waiting_columns(
     localizer: &Arc<Localizer>,
     choose: Callback<HubAgentDto>,
@@ -679,7 +683,7 @@ fn waiting_columns(
     let note = Column::new(
         "note",
         text(localizer, msg::UI_MACHINES_NOTE),
-        Rem::tenths(70),
+        Rem::tenths(60),
         move |row: Signal<HubAgentDto>| {
             let notes = Arc::clone(&notes);
             (move || {
@@ -696,7 +700,7 @@ fn waiting_columns(
     let action = Column::new(
         "action",
         text(localizer, msg::UI_MACHINES_ACTION),
-        Rem::tenths(140),
+        Rem::tenths(70),
         move |row: Signal<HubAgentDto>| {
             // Drawn once, so a read of the list every few seconds never
             // replaces the button focus is on; focus goes to the heading
@@ -709,14 +713,16 @@ fn waiting_columns(
             let press = Callback::new(move |()| choose.run(row.get_untracked()));
             let reject = leave_button(&labels, row, leave);
             view! {
-                <Button
-                    id=approve_id(&agent_id)
-                    content=Content::Text(label.into())
-                    node_ref=button
-                    on_press=press
-                />
-                " "
-                {reject}
+                <div class=ACTIONS>
+                    <Button
+                        id=approve_id(&agent_id)
+                        content=Content::Text(label.into())
+                        size=Size::Small
+                        node_ref=button
+                        on_press=press
+                    />
+                    {reject}
+                </div>
             }
             .into_any()
         },
