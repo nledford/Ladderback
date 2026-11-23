@@ -1,8 +1,9 @@
 {{!-- mdBook v0.5.4's toc.html.hbs (crates/mdbook-html/front-end/templates/), the
      sidebar it frames in each page only for a reader with JavaScript off,
      with one change: a <title>, which axe-core's document-title rule asks of
-     every page (§16, decision 128; #1216). Compare it with mdBook's own when
-     the pinned mdBook changes. --}}
+     every page (§16, decision 128; #1216). `just docs-site` fails when it no
+     longer renders mdBook's own page with only that line added
+     (scripts/check-theme-override.ts). --}}
 <!DOCTYPE HTML>
 <html lang="{{ language }}" class="{{ default_theme }}" dir="{{ text_direction }}">
     <head>

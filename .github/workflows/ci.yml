@@ -390,9 +390,9 @@ jobs:
         uses: taiki-e/install-action@cfdb7ed4ccc7c7dce37759eae89dc5674b469b39 # v2.90.3
         with:
           tool: mdbook@${{ steps.mdbook.outputs.version }}
-      # `just docs-site`'s two lines, for a docs-only pull request.
+      # `just docs-site`'s three lines, for a docs-only pull request.
       - if: matrix.skip != 'true' && needs.changes.outputs.docs-only == 'true' && runner.os == 'Linux'
-        run: mdbook build docs/guide && node scripts/check-site-links.ts
+        run: mdbook build docs/guide && node scripts/check-site-links.ts && node scripts/check-theme-override.ts
       - if: matrix.skip != 'true' && needs.changes.outputs.docs-only == 'true' && runner.os == 'Linux'
         run: node scripts/check-paragraph-length.ts
       - if: matrix.skip != 'true' && needs.changes.outputs.docs-only == 'true' && runner.os == 'Linux'

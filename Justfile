@@ -28,8 +28,8 @@ leptosfmt_version := "0.1.34"
 # The mdBook release that builds the user docs site (§16, decision 128).
 # Another release renders the pages and their anchors differently, so `setup`
 # installs this one, CI too (it reads this line), and `docs-site` refuses
-# another. docs/guide/theme/toc.html.hbs is this release's own template with a
-# title added: compare it with the new release's when this changes.
+# another. `docs-site` also fails when docs/guide/theme/toc.html.hbs no longer
+# matches this release's own template (scripts/check-theme-override.ts).
 mdbook_version := "0.5.4"
 
 # List available workflows.
@@ -95,13 +95,17 @@ _mdbook-pinned:
 # Build the user docs site (docs/guide/, §16 decision 128) into
 # docs/guide/book/, then check that every link in its pages resolves:
 # mdBook copies a broken link into the page as it is, so the check is what
-# fails the build on one (scripts/check-site-links.ts). `lint` runs it, so CI
-# does, docs-only pull requests included.
-[doc('Build the user docs site into docs/guide/book/ and check its links.')]
+# fails the build on one (scripts/check-site-links.ts). Then check that the
+# site's copy of mdBook's sidebar template still renders mdBook's own page
+# with only its title added (scripts/check-theme-override.ts), so a new
+# mdBook can't leave it stale. `lint` runs it, so CI does, docs-only pull
+# requests included.
+[doc('Build the user docs site into docs/guide/book/ and check its links and its copied template.')]
 [group('quality')]
 docs-site: _mdbook-pinned
     mdbook build docs/guide
     node scripts/check-site-links.ts
+    node scripts/check-theme-override.ts
 
 # Build the user docs site, check its links (`docs-site`), then run axe-core
 # over every page in Chromium: WCAG 2.2 A and AA, the rules the @ui scenarios
