@@ -179,7 +179,10 @@ pub(crate) fn outcome_badge(outcome: MachineOutcomeDto) -> (BadgeState, MessageI
 /// machine reported no plans, or, before its first report reached the
 /// hub, that it hasn't reported them yet.
 pub(crate) fn no_plans(plans: Option<&MachinePlansDto>) -> MessageId {
-    todo!("{plans:?}")
+    match plans {
+        Some(_) => msg::UI_DASHBOARD_PLANS_NONE,
+        None => msg::UI_DASHBOARD_NO_PLANS,
+    }
 }
 
 /// How the instant `at` (RFC 3339) reads on the dashboard: in the viewer's

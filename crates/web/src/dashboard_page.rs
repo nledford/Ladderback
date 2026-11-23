@@ -31,7 +31,7 @@ use crate::components::{
     Alert, Column, Link, Name, PauseUpdates, Progress, Sentences, State, StatusBadge, Table,
     first_load, paced,
 };
-use crate::dashboard::{Fleet, instant, outcome_badge, progress_reading, reads_again};
+use crate::dashboard::{Fleet, instant, no_plans, outcome_badge, progress_reading, reads_again};
 use crate::operations_page::badge_of;
 use crate::pause;
 use crate::routes::{NotFound, PageHeading, text_with, time_view};
@@ -380,24 +380,36 @@ fn plans_view(
                 .unwrap_or_default()
         })
     });
-    let (row_header, columns) = plan_columns(localizer, viewer, zone);
-    let t = |id| text(localizer, id);
-    let sentences = Sentences {
-        loading: t(msg::UI_DASHBOARD_LOADING),
-        empty: t(msg::UI_DASHBOARD_NO_PLANS),
-        unreachable: t(msg::UI_DASHBOARD_UNREACHABLE),
+    // Which sentence the empty table says changes only when the machine's
+    // first report of its plans arrives; the table is drawn again then.
+    let empty = Memo::new(move |_| {
+        machine
+            .with(|machine| no_plans(machine.as_ref().and_then(|machine| machine.plans.as_ref())))
+    });
+    let localizer = Arc::clone(localizer);
+    let table = move || {
+        let (row_header, columns) = plan_columns(&localizer, viewer.clone(), zone);
+        let t = |id| text(&localizer, id);
+        let sentences = Sentences {
+            loading: t(msg::UI_DASHBOARD_LOADING),
+            empty: t(empty.get()),
+            unreachable: t(msg::UI_DASHBOARD_UNREACHABLE),
+        };
+        view! {
+            <Table
+                name=Name::Caption(caption.clone())
+                row_header=row_header
+                columns=columns
+                rows=plans
+                key=|row: &MachinePlanDto| row.plan.clone()
+                state=State::Ready
+                sentences=sentences
+            />
+        }
     };
     view! {
         {left_out}
-        <Table
-            name=Name::Caption(caption)
-            row_header=row_header
-            columns=columns
-            rows=plans
-            key=|row: &MachinePlanDto| row.plan.clone()
-            state=State::Ready
-            sentences=sentences
-        />
+        {table}
     }
 }
 

@@ -3764,8 +3764,8 @@ ui-dashboard-progress = Progress of the operation running on { $hostname }
 # $hostname (string): the machine's name.
 ui-dashboard-plans = Plans of { $hostname }
 
-# Shown in place of a machine's plans when it reported none.
-ui-dashboard-no-plans = No plan reported yet.
+# Shown in place of a machine's plans before its first report of them.
+ui-dashboard-no-plans = This { -machine } hasn't reported its plans yet.
 
 # Shown in place of a machine's plans when its report listed none.
 ui-dashboard-plans-none = This { -machine } reported no plans.
