@@ -40,3 +40,22 @@ test("a line mdBook added in a new release fails", () => {
 test("an added line that isn't a title fails", () => {
   assert.equal(compareToc(PRISTINE.join("\n"), withLine(PRISTINE, 4, "        <style></style>")).length, 1);
 });
+
+test("a title added as the last line passes", () => {
+  assert.deepEqual(compareToc(PRISTINE.join("\n"), [...PRISTINE, TITLE].join("\n")), []);
+});
+
+test("an empty title fails, as axe-core's document-title rule would", () => {
+  assert.equal(compareToc(PRISTINE.join("\n"), withLine(PRISTINE, 4, "        <title></title>")).length, 1);
+});
+
+test("a title line carrying more than the title fails", () => {
+  for (const line of ["        <title>x</title><script></script>", "        <!-- <title> -->"]) {
+    assert.equal(compareToc(PRISTINE.join("\n"), withLine(PRISTINE, 4, line)).length, 1, line);
+  }
+});
+
+test("a line changed after the title fails", () => {
+  const ours = withLine(PRISTINE, 4, TITLE).replace("</html>", "</html >");
+  assert.equal(compareToc(PRISTINE.join("\n"), ours).length, 1);
+});
