@@ -54,7 +54,7 @@ use l10n::{Localizer, MessageId, msg};
 use lepticons_data::LucideGlyph;
 use leptos::ev;
 use leptos::prelude::*;
-use leptos::task::{spawn_local, tick};
+use leptos::task::spawn_local;
 use leptos_router::hooks::use_url;
 
 use crate::announcer::Politeness;
@@ -73,7 +73,7 @@ use crate::components::{
     Banner, Button, Column, ColumnsChoice, Confirmation, ErrorSummary, Name, RadioGroup,
     ReviewDialog, Sentences, State, StepUp, StepUpField, SummaryItem, Tab, Table, Tabs, TextField,
     Toast, ToastTone, Toasts, Working, copy_text, dialog_refusal_alert, hand_focus_when_gone,
-    refusal_alert, say_refusals, text_field,
+    refusal_alert, say_refusals, show_answer, text_field,
 };
 use crate::components::{first_load, paced};
 use crate::live::reply;
@@ -627,24 +627,20 @@ fn ApiTokens(localizer: Arc<Localizer>) -> impl IntoView {
             if changing.busy.try_get_untracked().is_none() {
                 return;
             }
+            let wrong = match &answer {
+                Some(Posted::Refused(code @ ErrorCode::CurrentPasswordWrong, args, detail)) => {
+                    Some(refused_sentence(&localizer, *code, args, detail.as_deref()).plain())
+                }
+                _ => None,
+            };
+            let refused = wrong.is_some();
+            show_answer(changing.password_error, wrong).await;
+            if refused {
+                changing.busy.try_set(false);
+                return;
+            }
             let kept = match answer {
                 Some(Posted::Done(answer)) => serde_json::from_str::<PermissionsDto>(&answer).ok(),
-                Some(Posted::Refused(ErrorCode::CurrentPasswordWrong, args, detail)) => {
-                    changing.busy.set(false);
-                    // Cleared first, so a second wrong try is said again.
-                    changing.password_error.set(None);
-                    tick().await;
-                    changing.password_error.try_set(Some(
-                        refused_sentence(
-                            &localizer,
-                            ErrorCode::CurrentPasswordWrong,
-                            &args,
-                            detail.as_deref(),
-                        )
-                        .plain(),
-                    ));
-                    return;
-                }
                 Some(Posted::Refused(code, args, detail)) => {
                     changing.busy.set(false);
                     changing.error.set(Some(refused_sentence(
@@ -667,7 +663,6 @@ fn ApiTokens(localizer: Arc<Localizer>) -> impl IntoView {
                 return;
             };
             changing.password.set(String::new());
-            changing.password_error.set(None);
             tokens.update(|tokens| {
                 if let Some(kept) = tokens.iter_mut().flatten().find(|kept| kept.id == token.id) {
                     kept.permissions = permissions;

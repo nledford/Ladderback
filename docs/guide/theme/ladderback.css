@@ -32,9 +32,11 @@
     }
 }
 
-/* Ayu's code comments. */
+/* Ayu's code comments, and the `<`, `/` and `>` of an XML tag, whose own
+ * dark blue reads at under 3:1 on ayu's code fill. */
 .ayu .hljs-comment,
-.ayu .hljs-quote {
+.ayu .hljs-quote,
+.ayu .hljs-tag {
     color: #8b96a3;
 }
 

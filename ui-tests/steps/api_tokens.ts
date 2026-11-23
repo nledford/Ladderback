@@ -232,6 +232,32 @@ Given("the daemon can't read what AI agents may do without a token", function (t
   });
 });
 
+// The daemon passes the page's first save of what AI agents may do on, and
+// answers each one after it as it does a try during a sign-in wait (429
+// sign-in-wait), whatever the password: a refusal that says nothing about
+// what was typed, made certain rather than raced against the real wait.
+Given(
+  "the daemon refuses each save of what AI agents may do after the first with a sign-in wait of {int} seconds",
+  function (this: BrowserWorld, seconds: number) {
+    let saves = 0;
+    this.contextRoutes.push(async (context) => {
+      await context.route(
+        (url) => url.pathname === "/api/v1/settings/without-token",
+        async (route) => {
+          if (route.request().method() !== "PUT") return route.continue();
+          saves += 1;
+          if (saves === 1) return route.continue();
+          await route.fulfill({
+            status: 429,
+            contentType: "application/json",
+            body: JSON.stringify({ code: "sign-in-wait", args: { seconds: { type: "count", value: seconds } } }),
+          });
+        },
+      );
+    });
+  },
+);
+
 // A permission's group of choices (decision 127), in the open dialog when
 // there is one: the token form behind a token's dialog has groups of the
 // same names.

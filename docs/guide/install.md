@@ -18,7 +18,7 @@ ladderback install-service
 
 It runs Ladderback in the background from each login on, and starts it now. Open `http://127.0.0.1:9898` in your browser for the web UI, and go on with [Getting started](getting-started.md).
 
-On Linux, a user's services stop when the user logs out: unless yours may already keep running, the command says to run `loginctl enable-linger`, which lets them. [Running as a service](running-as-a-service.md) has the details, and how to stop it.
+On Linux, a user's services stop when the user logs out: unless yours may already keep running, the command says to run `loginctl enable-linger`, which lets them. [Running as a service](running-as-a-service.md) has the details, how to stop it, and how to give it [a proxy](running-as-a-service.md#behind-a-proxy).
 
 ## Where Ladderback keeps your files
 
@@ -38,6 +38,7 @@ Each system's page says how to remove Ladderback: stop its service with `ladderb
 - **Ladderback's folders,** in the table above.
 - **Passwords in the keyring.** A repository's password, or a notification's token, that you kept in the system keyring (the keychain on macOS) stays there, under the name `ladderback`.
 - **Linger, on Linux.** If you ran `loginctl enable-linger` for Ladderback alone, `loginctl disable-linger` undoes it.
+- **A proxy you gave the service.** On Linux, delete `~/.config/systemd/user/ladderback.service.d`, which holds it. On macOS, `launchctl unsetenv` each variable, and remove the launch agent of your own that sets them at each login ([Running as a service](running-as-a-service.md#behind-a-proxy)).
 
 Before you delete anything more, keep each repository's password somewhere safe if you want its backups: without the password nobody can read a repository, and the settings folder or the keyring may be the only place it is. Then, to remove Ladderback's own files too:
 
