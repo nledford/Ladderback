@@ -54,10 +54,11 @@ pub trait Outbox: Send + Sync {
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct Ingested {
     pub ingest: Ingest,
-    /// How many of the agent's oldest reports were let go of to keep its
-    /// last [`MAX_REPORTS_HELD`](domain::fleet::MAX_REPORTS_HELD): none for
-    /// a duplicate.
-    pub dropped: u64,
+    /// When this report made the hub let go of the agent's oldest to keep
+    /// its last [`MAX_REPORTS_HELD`](domain::fleet::MAX_REPORTS_HELD): how
+    /// many of the agent's reports it let go of in all, counted in the same
+    /// step. None when it let go of none, as for a duplicate.
+    pub dropped: Option<u64>,
 }
 
 /// The hub's reports of its agents (technical design §7.2): each agent's
@@ -80,7 +81,4 @@ pub trait ReportInbox: Send + Sync {
 
     /// The reports kept of `agent`, in the order it took them.
     async fn reports(&self, agent: AgentId) -> Result<Vec<OutboxEntry>, StoreError>;
-
-    /// How many of `agent`'s reports were let go of past the cap, ever.
-    async fn dropped(&self, agent: AgentId) -> Result<u64, StoreError>;
 }

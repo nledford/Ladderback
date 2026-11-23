@@ -136,7 +136,7 @@ impl ReportInbox for InMemoryReportInbox {
         if verdict != Ingest::New {
             return Ok(Ingested {
                 ingest: verdict,
-                dropped: 0,
+                dropped: None,
             });
         }
         match place.and_then(|place| held.epochs.get_mut(place)) {
@@ -155,8 +155,12 @@ impl ReportInbox for InMemoryReportInbox {
         let reports = usize::try_from(MAX_REPORTS_HELD).unwrap_or(usize::MAX);
         let over = held.reports.len().saturating_sub(reports);
         held.reports.drain(..over);
-        let dropped = u64::try_from(over).unwrap_or(u64::MAX);
-        held.dropped = held.dropped.saturating_add(dropped);
+        let mut dropped = None;
+        if over > 0 {
+            let let_go = u64::try_from(over).unwrap_or(u64::MAX);
+            held.dropped = held.dropped.saturating_add(let_go);
+            dropped = Some(held.dropped);
+        }
         Ok(Ingested {
             ingest: Ingest::New,
             dropped,
@@ -169,10 +173,5 @@ impl ReportInbox for InMemoryReportInbox {
             .get(&agent)
             .map(|held| held.reports.clone())
             .unwrap_or_default())
-    }
-
-    async fn dropped(&self, agent: AgentId) -> Result<u64, StoreError> {
-        let agents = self.agents.lock().unwrap_or_else(PoisonError::into_inner);
-        Ok(agents.get(&agent).map_or(0, |held| held.dropped))
     }
 }

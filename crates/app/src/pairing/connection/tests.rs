@@ -241,7 +241,20 @@ async fn reports_past_the_cap_are_let_go_of_counted_and_warned_of_once() {
         }
         assert_eq!(sync.sync_once().await, Ok(Synced::Replayed { sent: round }));
     }
-    assert_eq!(inbox.dropped(agent_id(1)).await.unwrap(), 3);
+    let next = OutboxEntry {
+        epoch: OutboxEpoch::from_uuid(Uuid::from_u128(0xe1)),
+        seq: ReportSeq::new(4).unwrap(),
+        report: report.clone(),
+    };
+    assert_eq!(
+        inbox
+            .ingest(agent_id(1), &next, hub.clock.now())
+            .await
+            .unwrap()
+            .dropped,
+        Some(4),
+        "the count goes on from the 3 let go of"
+    );
     let warned: Vec<String> = crate::test_log::logged_by("app::pairing::hub")
         .into_iter()
         .filter(|(level, _)| *level == log::Level::Warn)
@@ -256,6 +269,97 @@ async fn reports_past_the_cap_are_let_go_of_counted_and_warned_of_once() {
         )]
     );
     assert!(!warned.concat().contains(&operation.to_string()));
+}
+
+/// The hub's reports, on which every new report lets go of one before it.
+#[derive(Default)]
+struct FullInbox {
+    inner: crate::fakes::InMemoryReportInbox,
+    let_go: std::sync::atomic::AtomicU64,
+}
+
+#[async_trait]
+impl crate::ports::ReportInbox for FullInbox {
+    async fn ingest(
+        &self,
+        agent: domain::AgentId,
+        entry: &crate::ports::OutboxEntry,
+        received_at: Timestamp,
+    ) -> Result<crate::ports::Ingested, crate::ports::StoreError> {
+        use std::sync::atomic::Ordering;
+        let mut taken = self.inner.ingest(agent, entry, received_at).await?;
+        if taken.ingest == domain::fleet::Ingest::New {
+            taken.dropped = Some(self.let_go.fetch_add(1, Ordering::SeqCst) + 1);
+        }
+        Ok(taken)
+    }
+
+    async fn reports(
+        &self,
+        agent: domain::AgentId,
+    ) -> Result<Vec<crate::ports::OutboxEntry>, crate::ports::StoreError> {
+        self.inner.reports(agent).await
+    }
+}
+
+/// The hub warns that it let go of an agent's reports in the step that let
+/// go of them, with no wait between taking the report and the warning: a
+/// step cut short after the report was taken, as the transport's idle
+/// bound cuts one, can't leave the agent marked as warned with no warning
+/// logged (§7.2).
+#[tokio::test]
+async fn a_step_cut_short_after_letting_go_of_a_report_loses_no_warning() {
+    use crate::ports::OutboxEntry;
+    use domain::fleet::{AgentReport, Happening, OutboxEpoch, ReportSeq};
+
+    let inbox = Arc::new(FullInbox::default());
+    let hub = hub_with(1, |pairing| pairing.with_inbox(inbox.clone()));
+    let identity = paired(&hub, 1).await;
+    let waiting = hub.registry.agent(agent_id(1)).await.unwrap().unwrap();
+    hub.pairing.approve(&waiting).await.unwrap().unwrap();
+    let connecting = connecting(
+        identity,
+        Arc::new(LoopbackHubConnector::to(hub.pairing.clone())),
+    );
+    let entry = |place| OutboxEntry {
+        epoch: OutboxEpoch::from_uuid(Uuid::from_u128(0xe1)),
+        seq: ReportSeq::new(place).unwrap(),
+        report: AgentReport {
+            op_id: domain::OperationId::from_uuid(Uuid::from_u128(0x0b)),
+            happening: Happening::Started,
+            at: EpochSeconds::from_seconds(1_800_000_000),
+        },
+    };
+    crate::test_log::capture_the_log();
+    let (_, mut cut) = connecting
+        .connect_channel(agent_id(1), hostname(1), None)
+        .await
+        .unwrap();
+    // Cut short at the step's first wait after the ingest, if it has one.
+    let _ = tokio::time::timeout(
+        std::time::Duration::from_millis(50),
+        cut.send_report(&entry(1)),
+    )
+    .await;
+    let (_, mut next) = connecting
+        .connect_channel(agent_id(1), hostname(1), None)
+        .await
+        .unwrap();
+    next.send_report(&entry(2)).await.unwrap();
+    next.receive_ack().await.unwrap();
+    let warned: Vec<String> = crate::test_log::logged_by("app::pairing::hub")
+        .into_iter()
+        .filter(|(level, _)| *level == log::Level::Warn)
+        .map(|(_, line)| line)
+        .collect();
+    assert_eq!(
+        warned,
+        [format!(
+            "agent {} has more reports than the 10000 the hub keeps of one machine: its \
+             oldest 1 were let go of; the hub counts the next ones without logging each",
+            agent_id(1).as_uuid()
+        )]
+    );
 }
 
 /// An agent restored from an older database numbers its new reports again

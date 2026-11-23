@@ -691,9 +691,8 @@ impl HubPairing {
         };
         let now = self.clock.now();
         let taken = inbox.ingest(syncing.agent_id, &entry, now).await?;
-        if taken.dropped > 0 {
-            self.warn_full(inbox.as_ref(), syncing.agent_id, taken.dropped)
-                .await;
+        if let Some(dropped) = taken.dropped {
+            self.warn_full(syncing.agent_id, dropped);
         }
         if taken.ingest == Ingest::Behind {
             self.warn_behind(syncing.agent_id, entry.seq);
@@ -734,16 +733,16 @@ impl HubPairing {
 
     /// Warns, once per agent while the hub runs, that it lets go of the
     /// agent's oldest reports past the cap, with how many it let go of so
-    /// far (`just_now` when the count doesn't read); the ones after are
-    /// counted ([`ReportInbox::dropped`]) and not logged.
-    async fn warn_full(&self, inbox: &dyn ReportInbox, agent: AgentId, just_now: u64) {
+    /// far; the ones after are counted and not logged. Nothing waits
+    /// between marking the agent warned and logging, so a step cut short
+    /// can't leave it marked unlogged.
+    fn warn_full(&self, agent: AgentId, dropped: u64) {
         let first = self
             .warned_full
             .lock()
             .unwrap_or_else(PoisonError::into_inner)
             .insert(agent);
         if first {
-            let dropped = inbox.dropped(agent).await.unwrap_or(just_now);
             log::warn!("{}", logged::reports_dropped(agent, dropped));
         }
     }

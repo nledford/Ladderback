@@ -297,8 +297,15 @@ async fn reports(inbox: &dyn ReportInbox, agent: AgentId) -> Vec<OutboxEntry> {
     ok(inbox.reports(agent).await, "the reports taken").unwrap_or_default()
 }
 
-async fn dropped(inbox: &dyn ReportInbox, agent: AgentId) -> Option<u64> {
-    ok(inbox.dropped(agent).await, "the count of reports let go")
+/// What the hub did with `entry`, and how many of the agent's reports it
+/// had let go of in all when this one made it let go of some.
+async fn ingested(
+    inbox: &dyn ReportInbox,
+    agent: AgentId,
+    entry: &OutboxEntry,
+) -> Option<(Ingest, Option<u64>)> {
+    ok(inbox.ingest(agent, entry, now()).await, "taking a report")
+        .map(|taken| (taken.ingest, taken.dropped))
 }
 
 async fn a_report_is_taken_once(harness: &dyn ReportInboxHarness) {
@@ -441,45 +448,46 @@ async fn racing_deliveries_are_taken_once(harness: &dyn ReportInboxHarness) {
 }
 
 /// Past [`MAX_REPORTS_HELD`] of one agent, the hub lets go of its oldest,
-/// says so for each report that made it, and counts them across restarts,
-/// for that agent alone.
+/// and each report that made it says how many it let go of in all, counted
+/// across restarts, for that agent alone.
 async fn past_the_cap_the_oldest_give_way_and_are_counted(harness: &dyn ReportInboxHarness) {
     let inbox = harness.empty().await;
-    assert_eq!(dropped(inbox.as_ref(), AGENT).await, Some(0));
     taken(inbox.as_ref(), OTHER_AGENT, &entry(EPOCH, 1)).await;
     for place in 1..=MAX_REPORTS_HELD {
-        taken(inbox.as_ref(), AGENT, &entry(EPOCH, place)).await;
-    }
-    assert_eq!(dropped(inbox.as_ref(), AGENT).await, Some(0), "at the cap");
-    for place in MAX_REPORTS_HELD + 1..=MAX_REPORTS_HELD + 2 {
-        let taken = ok(
-            inbox.ingest(AGENT, &entry(EPOCH, place), now()).await,
-            "taking a report past the cap",
-        );
         assert_eq!(
-            taken.map(|taken| (taken.ingest, taken.dropped)),
-            Some((Ingest::New, 1))
+            ingested(inbox.as_ref(), AGENT, &entry(EPOCH, place)).await,
+            Some((Ingest::New, None)),
+            "within the cap"
         );
     }
-    let duplicate = ok(
-        inbox
-            .ingest(AGENT, &entry(EPOCH, MAX_REPORTS_HELD + 2), now())
-            .await,
-        "taking a report again",
-    );
+    for (place, in_all) in [(MAX_REPORTS_HELD + 1, 1), (MAX_REPORTS_HELD + 2, 2)] {
+        assert_eq!(
+            ingested(inbox.as_ref(), AGENT, &entry(EPOCH, place)).await,
+            Some((Ingest::New, Some(in_all))),
+            "past the cap"
+        );
+    }
     assert_eq!(
-        duplicate.map(|taken| (taken.ingest, taken.dropped)),
-        Some((Ingest::Duplicate, 0))
+        ingested(inbox.as_ref(), AGENT, &entry(EPOCH, MAX_REPORTS_HELD + 2)).await,
+        Some((Ingest::Duplicate, None))
     );
     let held = reports(inbox.as_ref(), AGENT).await;
     assert_eq!(u64::try_from(held.len()).ok(), Some(MAX_REPORTS_HELD));
     assert_eq!(held.first(), Some(&entry(EPOCH, 3)), "the oldest two went");
     drop(inbox);
     let inbox = harness.reopened().await;
-    assert_eq!(dropped(inbox.as_ref(), AGENT).await, Some(2));
-    assert_eq!(dropped(inbox.as_ref(), OTHER_AGENT).await, Some(0));
+    assert_eq!(
+        ingested(inbox.as_ref(), AGENT, &entry(EPOCH, MAX_REPORTS_HELD + 3)).await,
+        Some((Ingest::New, Some(3))),
+        "the count outlives the hub"
+    );
+    assert_eq!(
+        ingested(inbox.as_ref(), OTHER_AGENT, &entry(EPOCH, 2)).await,
+        Some((Ingest::New, None)),
+        "another agent's reports are counted apart"
+    );
     assert_eq!(
         reports(inbox.as_ref(), OTHER_AGENT).await,
-        [entry(EPOCH, 1)]
+        [entry(EPOCH, 1), entry(EPOCH, 2)]
     );
 }

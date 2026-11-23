@@ -48,8 +48,7 @@ const TALLY: &str = "INSERT INTO sync_report_tallies (agent_id, held, dropped) V
 const FORGET_OLDEST: &str = "DELETE FROM sync_reports WHERE id IN \
      (SELECT id FROM sync_reports WHERE agent_id = ?1 ORDER BY id LIMIT ?2)";
 const COUNT_DROPS: &str = "UPDATE sync_report_tallies \
-     SET held = held - ?2, dropped = dropped + ?2 WHERE agent_id = ?1";
-const DROPS: &str = "SELECT dropped FROM sync_report_tallies WHERE agent_id = ?";
+     SET held = held - ?2, dropped = dropped + ?2 WHERE agent_id = ?1 RETURNING dropped";
 const REPORTS: &str = "SELECT epoch, seq, op_id, happening, code, at FROM sync_reports \
      WHERE agent_id = ? ORDER BY id";
 
@@ -199,7 +198,7 @@ impl ReportInbox for SqliteStore {
         if verdict != Ingest::New {
             return Ok(Ingested {
                 ingest: verdict,
-                dropped: 0,
+                dropped: None,
             });
         }
         sqlx::query(RAISE)
@@ -237,21 +236,24 @@ impl ReportInbox for SqliteStore {
             .try_get("held")
             .map_err(unavailable)?;
         let over = held.saturating_sub(i64::try_from(MAX_REPORTS_HELD).unwrap_or(i64::MAX));
-        let mut dropped = 0;
+        let mut dropped = None;
         if over > 0 {
-            dropped = sqlx::query(FORGET_OLDEST)
+            let let_go = sqlx::query(FORGET_OLDEST)
                 .bind(&agent)
                 .bind(over)
                 .execute(&mut *tx)
                 .await
                 .map_err(unavailable)?
                 .rows_affected();
-            sqlx::query(COUNT_DROPS)
+            let in_all: i64 = sqlx::query(COUNT_DROPS)
                 .bind(&agent)
-                .bind(i64::try_from(dropped).unwrap_or(i64::MAX))
-                .execute(&mut *tx)
+                .bind(i64::try_from(let_go).unwrap_or(i64::MAX))
+                .fetch_one(&mut *tx)
                 .await
+                .map_err(unavailable)?
+                .try_get("dropped")
                 .map_err(unavailable)?;
+            dropped = Some(u64::try_from(in_all).map_err(|_| corrupt("dropped"))?);
         }
         tx.commit().await.map_err(unavailable)?;
         Ok(Ingested {
@@ -277,21 +279,6 @@ impl ReportInbox for SqliteStore {
                 })
             })
             .collect()
-    }
-
-    async fn dropped(&self, agent: AgentId) -> Result<u64, StoreError> {
-        let _call = self.call().await;
-        let mut conn = self.pool.acquire().await.map_err(unavailable)?;
-        let row = sqlx::query(DROPS)
-            .bind(agent_id_text(agent))
-            .fetch_optional(&mut *conn)
-            .await
-            .map_err(unavailable)?;
-        let Some(row) = row else {
-            return Ok(0);
-        };
-        let dropped: i64 = row.try_get("dropped").map_err(unavailable)?;
-        u64::try_from(dropped).map_err(|_| corrupt("dropped"))
     }
 }
 
