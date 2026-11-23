@@ -9,8 +9,10 @@ use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::{Duration, Instant};
 
-use app::ports::{HistoryQuery, OperationStore, StoreError};
+use app::ports::{HistoryQuery, OperationStore, ReportInbox, StoreError};
 use domain::execution::{FailureReason, Operation};
+use domain::fleet::{PlansReport, ReportedPlan};
+use domain::{AgentId, PlanId, Uuid};
 use sqlx::sqlite::SqliteConnection;
 use support::*;
 
@@ -135,6 +137,80 @@ async fn a_read_never_sees_half_of_a_save() {
             for _ in 0..120 {
                 store.save(&many, Some(&result)).await?;
                 store.save(&few, None).await?;
+            }
+            Ok::<(), StoreError>(())
+        })
+    };
+
+    let written = within(120, "the writer", writer)
+        .await
+        .expect("the writer ends");
+    done.store(true, Ordering::Relaxed);
+    assert_eq!(written, Ok(()));
+    for reader in readers {
+        let reads = within(60, "a reader", reader)
+            .await
+            .expect("the reader ends");
+        assert!(reads.is_ok(), "{reads:?}");
+    }
+}
+
+/// A machine's plans as the hub keeps them: `count` plans, with `left_out`
+/// more it didn't send.
+fn plans_report(count: usize, left_out: u64) -> PlansReport {
+    let plans = (0..count)
+        .map(|n| ReportedPlan {
+            plan: PlanId::parse(&format!("plan-{n}")).expect("a plan's ID"),
+            last: None,
+            next_run: None,
+        })
+        .collect();
+    PlansReport::from_parts(plans, left_out).expect("a snapshot within the limit")
+}
+
+/// A read of a machine's plans is one snapshot: never the plans of one
+/// report with the count left out of another (§7.2, #1440).
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn a_read_of_plans_never_sees_half_of_a_snapshot() {
+    let scratch = Scratch::new();
+    let store = Arc::new(scratch.open().await);
+    let agent = AgentId::from_uuid(Uuid::from_u128(0xa1));
+    // Two snapshots that differ in both their plans and their count left out.
+    let (few, many) = (plans_report(1, 9), plans_report(8, 0));
+    store
+        .keep_plans(agent, &few)
+        .await
+        .expect("the first snapshot is kept");
+
+    let done = Arc::new(AtomicBool::new(false));
+    let readers: Vec<_> = (0..3)
+        .map(|_| {
+            let store = Arc::clone(&store);
+            let done = Arc::clone(&done);
+            let (few, many) = (few.clone(), many.clone());
+            tokio::spawn(async move {
+                let mut reads = 0_u32;
+                while !done.load(Ordering::Relaxed) {
+                    let found = store
+                        .plans(agent)
+                        .await
+                        .map_err(|error| format!("{error:?}"))?;
+                    if found != Some(few.clone()) && found != Some(many.clone()) {
+                        return Err(format!("a read saw neither snapshot, but {found:?}"));
+                    }
+                    reads += 1;
+                }
+                Ok::<u32, String>(reads)
+            })
+        })
+        .collect();
+    let writer = {
+        let store = Arc::clone(&store);
+        let (few, many) = (few.clone(), many.clone());
+        tokio::spawn(async move {
+            for _ in 0..300 {
+                store.keep_plans(agent, &many).await?;
+                store.keep_plans(agent, &few).await?;
             }
             Ok::<(), StoreError>(())
         })
