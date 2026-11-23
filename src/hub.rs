@@ -216,7 +216,7 @@ async fn on_the_hub(localizer: &Localizer, data_dir: &Path, ask: TokenAsk) -> io
         Err(LockError::InUse { .. }) => {
             say(
                 localizer,
-                msg::CLI_PAIRING_TOKEN_DAEMON_RUNNING,
+                daemon_running(&ask),
                 &[("path", text(data_dir.display()))],
             )?;
             return Ok(ExitCode::FAILURE);
@@ -255,6 +255,18 @@ async fn on_the_hub(localizer: &Localizer, data_dir: &Path, ask: TokenAsk) -> io
     };
     store.close().await;
     said
+}
+
+/// The message `ask` refuses with while the daemon holds the data folder:
+/// what this terminal would have done, and that the daemon must stop first.
+fn daemon_running(ask: &TokenAsk) -> MessageId {
+    match ask {
+        TokenAsk::Make { .. } => msg::CLI_PAIRING_TOKEN_MAKE_DAEMON_RUNNING,
+        TokenAsk::List => msg::CLI_PAIRING_TOKEN_LIST_DAEMON_RUNNING,
+        TokenAsk::Revoke(_) => msg::CLI_PAIRING_TOKEN_REVOKE_DAEMON_RUNNING,
+        TokenAsk::Pending => msg::CLI_PAIRING_TOKEN_PENDING_DAEMON_RUNNING,
+        TokenAsk::Approve { .. } => msg::CLI_PAIRING_TOKEN_APPROVE_DAEMON_RUNNING,
+    }
 }
 
 /// Makes a token for `address`. An `https://` address is the hub's own,

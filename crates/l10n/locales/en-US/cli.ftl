@@ -447,10 +447,30 @@ cli-mcp-call-line-no-tool = line { $line } of the script names no tool that exis
 # $limit (bytes): the longest line read.
 cli-mcp-call-line-too-long = line { $line } of the script is longer than { $limit }, so it was not read
 
-# `ladderback pairing-token` writes the hub's store from its own process, and the daemon holds the data folder.
+# `ladderback pairing-token` making a token while the daemon holds the data folder: the command writes the hub's store from its own process. "Machines" is the name of the hub's Settings tab that makes one while the daemon runs.
 # $path (text): the data folder. It is shown as it is.
 # `--hub` and `--listen` are typed as they are: keep them string literals.
-cli-pairing-token-daemon-running = the daemon is running on the data folder { $path }. Stop it, run this command again, then start the daemon again as you started it before: through its service, or with { "--hub" } and the same options, such as { "--listen" }.
+cli-pairing-token-make-daemon-running = the daemon is running on the data folder { $path }, and this terminal makes a pairing token only while it is stopped. Make one in the web UI's Settings, on the Machines tab, or stop the daemon, run this command again, then start the daemon again as you started it before: through its service, or with { "--hub" } and the same options, such as { "--listen" }.
+
+# `ladderback pairing-token --list` while the daemon holds the data folder. The hub's web UI doesn't list the unused tokens yet.
+# $path (text): the data folder. It is shown as it is.
+# `--hub` and `--listen` are typed as they are: keep them string literals.
+cli-pairing-token-list-daemon-running = the daemon is running on the data folder { $path }, and this terminal lists the unused pairing tokens only while it is stopped. Stop it, run this command again, then start the daemon again as you started it before: through its service, or with { "--hub" } and the same options, such as { "--listen" }.
+
+# `ladderback pairing-token --revoke` while the daemon holds the data folder: the token stays usable until it is revoked or lapses. The hub's web UI doesn't revoke an unused token yet.
+# $path (text): the data folder. It is shown as it is.
+# `--hub` and `--listen` are typed as they are: keep them string literals.
+cli-pairing-token-revoke-daemon-running = the daemon is running on the data folder { $path }, and this terminal revokes a pairing token only while it is stopped, so the token can still pair a { -machine }. Stop it, run this command again, then start the daemon again as you started it before: through its service, or with { "--hub" } and the same options, such as { "--listen" }.
+
+# `ladderback pairing-token --pending` while the daemon holds the data folder. "Machines" is the name of the hub's Settings tab that lists them while the daemon runs.
+# $path (text): the data folder. It is shown as it is.
+# `--hub` and `--listen` are typed as they are: keep them string literals.
+cli-pairing-token-pending-daemon-running = the daemon is running on the data folder { $path }, and this terminal lists the { -machine(form: "other") } waiting for approval only while it is stopped. See them in the web UI's Settings, on the Machines tab, or stop the daemon, run this command again, then start the daemon again as you started it before: through its service, or with { "--hub" } and the same options, such as { "--listen" }.
+
+# `ladderback pairing-token --approve` while the daemon holds the data folder. "Machines" is the name of the hub's Settings tab that approves while the daemon runs.
+# $path (text): the data folder. It is shown as it is.
+# `--hub` and `--listen` are typed as they are: keep them string literals.
+cli-pairing-token-approve-daemon-running = the daemon is running on the data folder { $path }, and this terminal approves a { -machine } only while it is stopped. Approve it in the web UI's Settings, on the Machines tab, or stop the daemon, run this command again, then start the daemon again as you started it before: through its service, or with { "--hub" } and the same options, such as { "--listen" }.
 
 # The address given for the hub isn't an http:// or https:// address of at most 200 bytes.
 # $address (text): the address as given. It is shown as it came.
