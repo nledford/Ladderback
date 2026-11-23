@@ -32,6 +32,8 @@ use gloo_net::http::{Request, RequestBuilder};
 use gloo_net::websocket::futures::WebSocket;
 use gloo_net::websocket::{Message, State};
 use leptos::prelude::{GetUntracked, RwSignal, Set, Update};
+#[cfg(feature = "hub")]
+use leptos::prelude::{StoredValue, UpdateValue};
 use leptos::task::spawn_local;
 use serde::de::DeserializeOwned;
 use serde::{Deserialize, Serialize};
@@ -740,6 +742,99 @@ async fn stream(
             }
         }
     }
+}
+
+/// Listens to the events stream of `base` (the page's own origin) while
+/// `visit` lasts, for a page that reads its own state rather than the
+/// operations history (#569). `opened` runs each time a stream opens, the
+/// first time and after each reconnect, so the page reads again what it may
+/// have missed while no stream was open; `heard` gets each event in turn.
+/// A stream that drops, or never opens, is tried again after
+/// `backend::reconnect_backoff`, as `watch`'s is.
+#[cfg(feature = "hub")]
+pub(crate) fn listen(
+    base: &str,
+    visit: &Visit,
+    opened: impl Fn() + 'static,
+    heard: impl Fn(UiEvent) + 'static,
+) {
+    let url = events_url(base);
+    spawn_local(
+        visit
+            .clone()
+            .during(async move {
+                let mut attempt = 0u32;
+                loop {
+                    if let Some(mut socket) = opened_stream(&url).await {
+                        attempt = 0;
+                        opened();
+                        while let Some(Ok(message)) = socket.next().await {
+                            if let Message::Text(text) = message
+                                && let Ok(event) = serde_json::from_str::<UiEvent>(&text)
+                            {
+                                heard(event);
+                            }
+                        }
+                    }
+                    attempt = attempt.saturating_add(1);
+                    sleep(reconnect_backoff(attempt)).await;
+                }
+            })
+            .map(|_| ()),
+    );
+}
+
+/// The events stream at `url`, once it has opened; `None` when it failed to.
+#[cfg(feature = "hub")]
+async fn opened_stream(url: &str) -> Option<WebSocket> {
+    let mut socket = WebSocket::open(url).ok()?;
+    // Ready once the socket has opened or failed: gloo wakes it on either.
+    let _ = poll_fn(|cx| Pin::new(&mut socket).poll_ready(cx)).await;
+    matches!(socket.state(), State::Open).then_some(socket)
+}
+
+/// Reads `url` into a hub page through `land` (#569), as `backend::Rereads`
+/// paces the operations' re-reads: one read out at a time, every answer
+/// landing, one more after it when an event or a stream's opening asked
+/// meanwhile, and a few tries again, later each time, when a read gets no
+/// answer in `patience`. `land` gets each read's answer, or `None`, and says
+/// whether the page still waits for its first answer: until it has one, the
+/// page asks again every `ask_again`, as it tells its reader. A read lasts no
+/// longer than the `visit`.
+#[cfg(feature = "hub")]
+pub(crate) fn reread_hub<T: DeserializeOwned + 'static>(
+    url: String,
+    rereads: StoredValue<Rereads>,
+    visit: &Visit,
+    (patience, ask_again): (Duration, Duration),
+    land: impl Fn(Option<T>) -> bool + 'static,
+) {
+    if rereads.try_update_value(Rereads::ask) != Some(true) {
+        return;
+    }
+    spawn_local(
+        visit
+            .clone()
+            .during(async move {
+                loop {
+                    let read = poll::<T>(&url, patience).await;
+                    let answered = read.is_some();
+                    let waiting = land(read);
+                    match rereads.try_update_value(|now| now.finish(answered)) {
+                        Some(Some(wait)) if wait.is_zero() => {}
+                        Some(Some(wait)) => sleep(wait).await,
+                        Some(None) if waiting => {
+                            sleep(ask_again).await;
+                            if rereads.try_update_value(Rereads::ask) != Some(true) {
+                                break;
+                            }
+                        }
+                        _ => break,
+                    }
+                }
+            })
+            .map(|_| ()),
+    );
 }
 
 /// Reads the history into `state` again after a run's end or a stream's

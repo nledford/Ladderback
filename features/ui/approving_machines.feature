@@ -109,6 +109,14 @@ Feature: Approving a waiting machine on the hub's page
     Then the table "Waiting for approval" lists "demo-laptop" with the key fingerprint the machine showed
     And the polite region reads "demo-laptop is waiting for approval."
 
+  Scenario: A Machines tab the hub didn't answer says so, and asks again until it does
+    Given a hub with sign-in off
+    And a machine named "demo-laptop" waits for approval on the hub
+    And the hub fails its first two answers about its machines
+    When I open the address "/settings#agents"
+    Then the page says "The hub didn't answer, so its machines can't be listed. The page asks again in a few seconds."
+    And the table "Waiting for approval" lists "demo-laptop" with the key fingerprint the machine showed
+
   Scenario: A machine approved on another page of the hub moves to the Machines tab's approved machines at once
     Given a hub with sign-in off
     And the page's clock stands still from the start until a step moves it on

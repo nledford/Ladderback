@@ -7,12 +7,15 @@
 //! it starts on Cancel. The page approves the agent ID under the key it
 //! listed, never a hostname alone (decision 120, "Pending approval").
 //!
-//! The hub sends the page no event when a machine starts to wait, so the list
-//! is read again every few seconds while Settings is open (it builds every
-//! tab's panel once, so this one reads while another tab is shown too), and
-//! at once after an approval. "Pause live updates" holds both tables still
+//! The list is read when the tab is built (Settings builds every tab's panel
+//! once, so this one listens while another tab is shown too), again each
+//! time the events stream opens, the first time and after a reconnect, and
+//! at once after an approval. Between reads, the hub's events say when a
+//! machine starts waiting for approval or is approved (#569): either reads
+//! the list again, and a machine that starts waiting is said politely while
+//! the tables aren't paused. "Pause live updates" holds both tables still
 //! (A3, decision 65); what they show while paused, and what the resume says,
-//! is `machines_list.rs`'s.
+//! is `machines_list.rs`'s. A link leads to the hub's dashboard.
 
 use std::sync::Arc;
 use std::time::Duration;
@@ -26,20 +29,23 @@ use leptos::prelude::*;
 use leptos::task::spawn_local;
 
 use crate::announcer::Politeness;
+use crate::backend::Rereads;
 use crate::components::alert::rules::AlertTone;
 use crate::components::button::Content;
+use crate::components::link::rules::{Destination, Matching};
 use crate::components::{
-    Alert, Button, Column, Confirmation, Fingerprint, Name, PauseUpdates, ReviewDialog, Sentences,
-    State, StepUp, StepUpField, Table, Working, dialog_refusal_alert, focus_element,
+    Alert, Button, Column, Confirmation, Fingerprint, Link, Name, PauseUpdates, ReviewDialog,
+    Sentences, State, StepUp, StepUpField, Table, Working, dialog_refusal_alert, focus_element,
     hand_focus_when_gone,
 };
-use crate::live::reply;
-use crate::machines_list::Listed;
+use crate::live::{reply, say};
+use crate::machines_list::{Heard, Listed, heard};
 use crate::pause;
 use crate::repositories::Sentence;
 use crate::routes::{refused_sentence, text_with};
 use crate::text;
 use crate::variants::{Rem, Tone};
+use crate::visit::Visit;
 use crate::ws::{self, Posted};
 
 /// The waiting machines' heading, which names their table and takes focus
@@ -54,10 +60,11 @@ const REVIEW_BODY_ID: &str = "machines-review-body";
 const STEP_UP_ID: &str = "machines-confirmation";
 /// The banner beside the pause button while the tables are paused.
 const PAUSED_ID: &str = "machines-paused";
-/// How often the list is read again while Settings is open.
-const READ_EVERY: Duration = Duration::from_secs(5);
 /// How long one read of the list may take before it counts as unanswered.
 const READ_PATIENCE: Duration = Duration::from_secs(5);
+/// How long the tab waits before it asks again after a read that went
+/// unanswered while none had answered: the "few seconds" it says.
+const ASK_AGAIN: Duration = Duration::from_secs(3);
 
 /// The id of the button that approves the agent `agent_id`, where focus
 /// returns when its review is dismissed.
@@ -74,36 +81,64 @@ fn of_machine(localizer: &Localizer, id: l10n::MessageId, hostname: &str) -> Str
     )
 }
 
-/// Reads the list once into `listed`. A read that fails after one that
-/// answered keeps the rows already shown.
-async fn read(listed: Listed) {
-    let url = format!("{}{HUB_AGENTS_PATH}", ws::origin());
-    let read = ws::poll::<HubAgentsDto>(&url, READ_PATIENCE).await;
-    match read {
-        Some(read) => {
-            let _ = listed.agents.try_set(read.agents);
-            let _ = listed.state.try_set(State::Ready);
-        }
-        None => {
-            if listed.state.try_get_untracked() == Some(State::Loading) {
-                let _ = listed.state.try_set(State::Unreachable);
-            }
-        }
+/// Lands one read's answer in `listed`, or its lack of one: an answer
+/// replaces the rows, and no answer keeps them, or says the hub didn't
+/// answer while none has. Whether the tab still waits for its first answer.
+fn land(listed: Listed, read: Option<HubAgentsDto>) -> bool {
+    if let Some(read) = read {
+        let _ = listed.agents.try_set(read.agents);
+        let _ = listed.state.try_set(State::Ready);
+        return false;
     }
+    let waiting = matches!(
+        listed.state.try_get_untracked(),
+        Some(State::Loading | State::Unreachable)
+    );
+    if waiting {
+        let _ = listed.state.try_set(State::Unreachable);
+    }
+    waiting
 }
 
-/// Reads the list into `listed` now and every [`READ_EVERY`] until Settings
-/// is left, paused or not: a pause holds what the page shows, not the reads.
-fn keep_reading(listed: Listed) {
-    spawn_local(async move {
-        loop {
-            read(listed).await;
-            gloo_timers::future::sleep(READ_EVERY).await;
-            if listed.agents.try_get_untracked().is_none() {
-                return;
+/// Reads the list into `listed`, paced by `rereads` (`ws::reread_hub`).
+fn read(listed: Listed, rereads: StoredValue<Rereads>, visit: &Visit) {
+    ws::reread_hub(
+        format!("{}{HUB_AGENTS_PATH}", ws::origin()),
+        rereads,
+        visit,
+        (READ_PATIENCE, ASK_AGAIN),
+        move |read| land(listed, read),
+    );
+}
+
+/// Reads the list into `listed` now, and again when the events stream
+/// opens and when an event of the hub's asks for it, until Settings is
+/// left, paused or not: a pause holds what the page shows, not the reads.
+/// A machine that starts waiting is said politely unless the tables are
+/// paused, whose resume counts it instead.
+fn follow(localizer: &Arc<Localizer>, listed: Listed) {
+    let rereads = StoredValue::new(Rereads::default());
+    let (visit, departure) = Visit::begin();
+    on_cleanup(move || drop(departure));
+    read(listed, rereads, &visit);
+    let localizer = Arc::clone(localizer);
+    let (opening, hearing) = (visit.clone(), visit.clone());
+    ws::listen(
+        &ws::origin(),
+        &visit,
+        move || read(listed, rereads, &opening),
+        move |event| match heard(&event) {
+            Heard::Nothing => {}
+            Heard::ReadAgain => read(listed, rereads, &hearing),
+            Heard::Waiting(hostname) => {
+                if !listed.paused_untracked() {
+                    let words = of_machine(&localizer, msg::UI_MACHINES_STARTED_WAITING, &hostname);
+                    say(Politeness::Polite, &words);
+                }
+                read(listed, rereads, &hearing);
             }
-        }
-    });
+        },
+    );
 }
 
 #[component]
@@ -113,7 +148,7 @@ pub(crate) fn Machines(localizer: Arc<Localizer>, step_up: StepUp) -> impl IntoV
         move |id| text(&localizer, id)
     };
     let listed = Listed::new();
-    keep_reading(listed);
+    follow(&localizer, listed);
     let (pause_label, paused_said) = (
         text(&localizer, msg::UI_LIVE_PAUSE),
         text(&localizer, msg::UI_LIVE_PAUSED),
@@ -175,7 +210,7 @@ pub(crate) fn Machines(localizer: Arc<Localizer>, step_up: StepUp) -> impl IntoV
                     reply(Politeness::Polite, &words);
                     said.set(Some(words));
                     open.set(false);
-                    read(listed).await;
+                    // The hub's `AgentApproved` reads the list again.
                 }
                 Some(Posted::Refused(ErrorCode::StepUpFailed, ..)) => {
                     step_up_error.set(Some(text(&localizer, msg::UI_MACHINES_STEP_UP_FAILED)));
@@ -191,8 +226,9 @@ pub(crate) fn Machines(localizer: Arc<Localizer>, step_up: StepUp) -> impl IntoV
                     // The list may have changed under the review: another
                     // tab approved it, or it paired again under a new key.
                     // The refusal answers the reader, so that row shows as
-                    // read even while paused.
-                    read(listed).await;
+                    // this read of it finds it, even while paused.
+                    let url = format!("{}{HUB_AGENTS_PATH}", ws::origin());
+                    land(listed, ws::poll::<HubAgentsDto>(&url, READ_PATIENCE).await);
                     listed.refused(&agent.agent_id);
                 }
                 None => problem.set(Some(Sentence::new(
@@ -206,6 +242,8 @@ pub(crate) fn Machines(localizer: Arc<Localizer>, step_up: StepUp) -> impl IntoV
     let (waiting_header, waiting_columns) = waiting_columns(&localizer, choose);
     let (approved_header, approved_columns) = approved_columns(&localizer);
     let review_localizer = Arc::clone(&localizer);
+    let link_localizer = Arc::clone(&localizer);
+    let dashboard_link = t(msg::UI_MACHINES_DASHBOARD_LINK);
     view! {
         <PauseUpdates
             label=pause_label
@@ -220,6 +258,16 @@ pub(crate) fn Machines(localizer: Arc<Localizer>, step_up: StepUp) -> impl IntoV
             on_resume=on_resume
         />
         <p>{move || said.get()}</p>
+        <p>
+            {Destination::route("/dashboard", Matching::Exact)
+                .map(|to| {
+                    view! {
+                        <Link to=to localizer=Arc::clone(&link_localizer)>
+                            {dashboard_link}
+                        </Link>
+                    }
+                })}
+        </p>
         <h3 id=WAITING_HEADING_ID tabindex="-1">
             {t(msg::UI_MACHINES_WAITING_HEADING)}
         </h3>

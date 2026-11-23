@@ -68,11 +68,6 @@ impl Fleet {
         self.held.with(Option::is_some)
     }
 
-    /// Whether the page is paused, without following it.
-    pub(crate) fn paused_untracked(self) -> bool {
-        self.held.with_untracked(Option::is_some)
-    }
-
     /// Whether a read has answered, as the page shows it.
     pub(crate) fn shown_state(self) -> Signal<State> {
         Signal::derive(move || {
@@ -115,13 +110,25 @@ impl Fleet {
 /// Whether `event` asks the dashboard to read its machines again: a
 /// machine was approved, or the hub took one of a machine's reports.
 pub(crate) fn reads_again(event: &UiEvent) -> bool {
-    todo!("{event:?}")
+    matches!(
+        event,
+        UiEvent::AgentApproved { .. } | UiEvent::AgentReported { .. }
+    )
 }
 
 /// How many machines read otherwise in `now` than in `held`: each that
 /// came, went or changed counts once.
 pub(crate) fn changes_since(held: &[HubMachineDto], now: &[HubMachineDto]) -> usize {
-    todo!("{held:?} {now:?}")
+    let went_or_changed = held.iter().filter(|before| !now.contains(before)).count();
+    let came = now
+        .iter()
+        .filter(|machine| {
+            !held
+                .iter()
+                .any(|before| before.agent_id == machine.agent_id)
+        })
+        .count();
+    went_or_changed + came
 }
 
 /// What the resume says, with `changed` machines changed meanwhile.
@@ -137,14 +144,48 @@ pub(crate) fn resumed(changed: usize) -> Words {
 
 /// How an operation's outcome reads in its badge: its state, and its words.
 pub(crate) fn outcome_badge(outcome: MachineOutcomeDto) -> (BadgeState, MessageId) {
-    todo!("{outcome:?}")
+    match outcome {
+        MachineOutcomeDto::Running => (BadgeState::Running, msg::UI_STATUS_RUNNING),
+        MachineOutcomeDto::Succeeded => (BadgeState::Succeeded, msg::UI_STATUS_SUCCEEDED),
+        MachineOutcomeDto::Failed => (BadgeState::Failed, msg::UI_STATUS_FAILED),
+    }
 }
 
 /// How the instant `at` (RFC 3339) reads on the dashboard: in the viewer's
 /// zone, and after it in the machine's own `zone` when the machine gave one
 /// and it differs from the viewer's (#115). `None` when `at` can't be read.
 pub(crate) fn instant(at: &str, viewer: Option<&IanaZone>, zone: Option<&str>) -> Option<Words> {
-    todo!("{at} {viewer:?} {zone:?}")
+    let utc_ms = at.parse::<jiff::Timestamp>().ok()?.as_millisecond();
+    let time = MsgArg::Timestamp {
+        utc_ms,
+        zone: viewer.cloned(),
+    };
+    let there = zone
+        .and_then(|zone| IanaZone::new(zone).ok())
+        .filter(|zone| Some(zone) != viewer);
+    Some(match there {
+        None => Words {
+            id: msg::UI_INSTANT,
+            args: vec![("when", time)],
+        },
+        Some(there) => {
+            let name = MsgArg::Text(there.as_str().to_owned());
+            Words {
+                id: msg::UI_DASHBOARD_TIME_ELSEWHERE,
+                args: vec![
+                    ("time", time),
+                    (
+                        "there",
+                        MsgArg::Timestamp {
+                            utc_ms,
+                            zone: Some(there),
+                        },
+                    ),
+                    ("zone", name),
+                ],
+            }
+        }
+    })
 }
 
 #[cfg(test)]

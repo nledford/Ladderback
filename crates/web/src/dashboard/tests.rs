@@ -86,15 +86,23 @@ fn a_paused_dashboard_holds_its_machines_and_the_resume_counts_them() {
     let fleet = Fleet::new();
     fleet.machines.set(vec![machine("demo-a", AT)]);
     fleet.state.set(State::Ready);
+    assert!(!fleet.paused());
     fleet.pause();
-    fleet
-        .machines
-        .set(vec![machine("demo-a", AT), machine("demo-b", AT)]);
+    assert!(fleet.paused());
+    assert_eq!(fleet.pending_untracked(), 0);
+    fleet.machines.set(vec![
+        machine("demo-a", AT),
+        machine("demo-b", AT),
+        machine("demo-c", AT),
+    ]);
     assert_eq!(fleet.shown().get_untracked().len(), 1);
-    assert_eq!(fleet.pending(), 1);
-    assert_eq!(fleet.resume(), resumed(1));
-    assert_eq!(fleet.shown().get_untracked().len(), 2);
+    assert_eq!(fleet.pending(), 2);
+    assert_eq!(fleet.pending_untracked(), 2);
+    assert_eq!(fleet.resume(), resumed(2));
+    assert_eq!(fleet.shown().get_untracked().len(), 3);
     assert_eq!(fleet.pending(), 0);
+    assert_eq!(fleet.pending_untracked(), 0);
+    assert!(!fleet.paused());
 }
 
 /// Each outcome reads as the operation's own status of that name, in its

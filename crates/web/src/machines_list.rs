@@ -91,6 +91,11 @@ impl Listed {
         self.held.with(Option::is_some)
     }
 
+    /// Whether the reader has paused the lists, without following it.
+    pub(crate) fn paused_untracked(self) -> bool {
+        self.held.with_untracked(Option::is_some)
+    }
+
     /// Whether a read has answered, as the page shows it.
     pub(crate) fn shown_state(self) -> Signal<State> {
         Signal::derive(move || {
@@ -279,7 +284,11 @@ pub(crate) enum Heard {
 
 /// What the Machines tab does on hearing `event`.
 pub(crate) fn heard(event: &UiEvent) -> Heard {
-    todo!("{event:?}")
+    match event {
+        UiEvent::AgentPending { hostname, .. } => Heard::Waiting(hostname.clone()),
+        UiEvent::AgentApproved { .. } => Heard::ReadAgain,
+        _ => Heard::Nothing,
+    }
 }
 
 #[cfg(test)]
@@ -368,6 +377,7 @@ mod tests {
             agent("demo-macbook", AgentStatusDto::Approved, 60),
         ]);
         assert!(!listed.paused());
+        assert!(!listed.paused_untracked());
         assert_eq!(hostnames(listed, AgentStatusDto::Pending), ["demo-laptop"]);
         assert_eq!(
             hostnames(listed, AgentStatusDto::Approved),
@@ -387,6 +397,7 @@ mod tests {
         let listed = listed(vec![agent("demo-laptop", AgentStatusDto::Pending, 5)]);
         listed.pause();
         assert!(listed.paused());
+        assert!(listed.paused_untracked());
         listed.agents.set(vec![
             agent("demo-laptop", AgentStatusDto::Pending, 10),
             agent("demo-desktop", AgentStatusDto::Pending, 1),

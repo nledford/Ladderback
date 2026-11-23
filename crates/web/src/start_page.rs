@@ -112,6 +112,7 @@ pub(crate) fn Start(localizer: Arc<Localizer>) -> impl IntoView {
         <SignInOff localizer=notice />
         <FullDiskAccessSteps localizer=full_disk_access />
         <CopiedDataFolder localizer=copied_data_folder />
+        {dashboard_link(&localizer)}
         <p>{body}</p>
         {move || match phase.get() {
             Phase::Loading => first_load(loading.clone(), Awaited::table(2), pace).into_any(),
@@ -179,6 +180,21 @@ pub(crate) fn Start(localizer: Arc<Localizer>) -> impl IntoView {
                     }
                 })}
         </p>
+    }
+}
+
+/// On a hub, the way to its dashboard, the hub's main page (#569), first
+/// after the notices; nothing in a build without the hub.
+fn dashboard_link(localizer: &Arc<Localizer>) -> AnyView {
+    #[cfg(feature = "hub")]
+    {
+        view! { <crate::dashboard_page::DashboardLink localizer=Arc::clone(localizer) /> }
+            .into_any()
+    }
+    #[cfg(not(feature = "hub"))]
+    {
+        let _ = localizer;
+        ().into_any()
     }
 }
 
