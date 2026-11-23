@@ -58,21 +58,22 @@ pub struct Snapshot {
 impl Snapshot {
     /// The plan this snapshot's `ladderback-plan:` tags name.
     pub fn plan(&self) -> OwnerTag<'_> {
-        self.tagged_by(plan_tags::PLAN_TAG_PREFIX)
+        owner_tag(&self.tags, plan_tags::PLAN_TAG_PREFIX)
     }
 
     /// The agent this snapshot's `ladderback-agent:` tags name.
     pub fn agent(&self) -> OwnerTag<'_> {
-        self.tagged_by(plan_tags::AGENT_TAG_PREFIX)
+        owner_tag(&self.tags, plan_tags::AGENT_TAG_PREFIX)
     }
+}
 
-    fn tagged_by(&self, prefix: &str) -> OwnerTag<'_> {
-        let mut texts = self.tags.iter().filter_map(|tag| tag.strip_prefix(prefix));
-        match texts.next() {
-            None => OwnerTag::Absent,
-            Some(first) if texts.all(|text| text == first) => OwnerTag::One(first),
-            Some(_) => OwnerTag::Disagree,
-        }
+/// What `tags` say of the owner their tags of the kind `prefix` name.
+fn owner_tag<'a>(tags: &'a [String], prefix: &str) -> OwnerTag<'a> {
+    let mut texts = tags.iter().filter_map(|tag| tag.strip_prefix(prefix));
+    match texts.next() {
+        None => OwnerTag::Absent,
+        Some(first) if texts.all(|text| text == first) => OwnerTag::One(first),
+        Some(_) => OwnerTag::Disagree,
     }
 }
 

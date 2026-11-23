@@ -933,6 +933,15 @@ fn connecting(identity: Arc<FileIdentity>, data_dir: &Path) -> ConnectToHub {
 /// How often a daemon on a machine that hasn't paired looks for its pairing.
 const PAIRING_POLL: std::time::Duration = std::time::Duration::from_secs(30);
 
+/// What a session reads to ask for the leases on the repositories this
+/// machine maintains (§7.3): which they are, from `config`, and what
+/// `listings` showed of other agents' snapshots in each, listing before the
+/// session each whose listing doesn't stand (decision 156).
+pub(crate) struct Maintained {
+    pub(crate) config: Arc<dyn app::ports::ConfigStore>,
+    pub(crate) listings: Arc<app::others_snapshots::ListingsDue>,
+}
+
 /// This machine's reports to its hub (§7.2): once it paired, a recorder
 /// keeps each operation's start and end in the outbox in `store`, and a
 /// session replays them to the hub whenever it holds one the hub hasn't
@@ -945,17 +954,21 @@ const PAIRING_POLL: std::time::Duration = std::time::Duration::from_secs(30);
 /// One that hasn't paired drops them, looks for its pairing every
 /// [`PAIRING_POLL`], and keeps no report until then. Each session tells
 /// `standing` what the hub made of this machine: refused, signed, as a
-/// second computer under its machine ID, or taken (decision 150). Runs
-/// until aborted.
+/// second computer under its machine ID, or taken (decision 150), and
+/// tells the hub, of each repository it uses, whether
+/// `maintained.listings` saw another agent's recent snapshots in it, after
+/// listing each it maintains whose listing doesn't stand (§7.3, decision
+/// 156). Runs until aborted.
 pub(crate) async fn reporting(
     data_dir: PathBuf,
     events: Arc<dyn EventBus>,
     early: futures::stream::BoxStream<'static, api::UiEvent>,
     store: Arc<SqliteStore>,
-    config: Arc<dyn app::ports::ConfigStore>,
+    maintained: Maintained,
     standing: Arc<app::machine::MachineStanding>,
     plans: Option<ReadPlans>,
 ) {
+    let Maintained { config, listings } = maintained;
     let identity = Arc::new(FileIdentity::in_data_dir(&data_dir));
     let mut early = Some(early);
     let agent_id = loop {
@@ -1005,7 +1018,8 @@ pub(crate) async fn reporting(
     )
     // A maintenance running here keeps its repository's lease from a
     // release, as its operation log says.
-    .with_leases(config, leases, store, Arc::default())
+    .with_leases(config, leases, store, Arc::clone(listings.seen()))
+    .with_listings(listings)
     .with_standing(standing)
     .with_progress(Arc::clone(&progress));
     if let Some(plans) = plans {
@@ -1330,12 +1344,27 @@ mod tests {
         );
         let events: Arc<dyn EventBus> = Arc::new(app::event_bus::BroadcastEventBus::new());
         let early = events.subscribe().await;
+        let config = Arc::new(app::fakes::InMemoryConfigStore::default());
+        let listings = Arc::new(app::others_snapshots::ListingsDue::new(
+            config.clone(),
+            Arc::clone(&store) as Arc<dyn app::ports::OperationStore>,
+            Arc::default(),
+            app::snapshots::ListSnapshots::new(
+                Arc::new(app::fakes::ListingEngine::default()),
+                Arc::new(SystemClock),
+                app::secrets::ResolveRepository::new(Arc::new(app::fakes::FakeSecrets::default())),
+                Arc::default(),
+            ),
+            Arc::new(app::fakes::SeededRandom::new(1)),
+            domain::AgentId::from_uuid(domain::Uuid::from_u128(1)),
+            Arc::new(SystemClock),
+        ));
         let task = tokio::spawn(reporting(
             data.path().to_owned(),
             Arc::clone(&events),
             early,
             Arc::clone(&store),
-            Arc::new(app::fakes::InMemoryConfigStore::default()),
+            Maintained { config, listings },
             Arc::default(),
             None,
         ));

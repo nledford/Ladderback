@@ -16,7 +16,7 @@ use domain::fleet::{
     AckRefused, AgentReport, Approval, EpochSeconds, Happening, Hostname, MAX_OUTBOX_REPORTS,
     MachineCheck, MachineZone, PlansReport, ReportedProgress, SEND_WINDOW, WireName, check_ack,
 };
-use domain::maintenance::{RepositoryReport, RepositoryReports};
+use domain::maintenance::RepositoryReports;
 use domain::planning::Maintenance;
 use domain::{AgentId, OperationId, SignedDuration, Timestamp, Uuid};
 
@@ -163,6 +163,8 @@ pub struct SyncWithHub {
     plans: Option<ReadPlans>,
     progress: Option<Arc<LiveProgress>>,
     told: Mutex<Told>,
+    /// The listings run before each session, when the sync is given them.
+    listings: Option<Arc<ListingsDue>>,
 }
 
 /// What a session needs to ask for the machine's leases: the repositories
@@ -211,6 +213,7 @@ impl SyncWithHub {
             plans: None,
             progress: None,
             told: Mutex::new(Told::default()),
+            listings: None,
         }
     }
 
@@ -256,11 +259,11 @@ impl SyncWithHub {
     /// This sync running `listings` before each session, so the session
     /// reports what each repository the machine asks to maintain holds
     /// rather than what one it hasn't listed may hold (§7.3; §16, decision
-    /// NN).
+    /// 156).
     #[must_use]
-    pub fn with_listings(self, listings: Arc<ListingsDue>) -> Self {
-        let _ = listings;
-        todo!()
+    pub fn with_listings(mut self, listings: Arc<ListingsDue>) -> Self {
+        self.listings = Some(listings);
+        self
     }
 
     /// Releases what the configuration no longer asks to maintain here,
@@ -278,19 +281,20 @@ impl SyncWithHub {
             .map_err(|error| SyncFailure::Config(Box::new(error)))?;
         let mut reports = Vec::new();
         let mut local = Vec::new();
+        // Each repository's recent snapshots of other agents are judged on
+        // the machine's clock now, from its last listing (decision 62).
+        let now = self.clock.now();
         for repository in config.repositories().values() {
             let Some(id) = &repository.id else { continue };
             if repository.maintenance == Maintenance::Local {
                 local.push(id.clone());
             }
-            // Whether the repository holds another machine's snapshots
-            // isn't known here yet (#1465): the hub's other check, another
-            // machine's report of it, still refuses a shared one.
-            reports.push(RepositoryReport {
-                repository: id.clone(),
-                request: repository.maintenance,
-                holds_other_agents_snapshots: false,
-            });
+            reports.push(leasing.others.report(
+                id.clone(),
+                repository.maintenance,
+                &self.agent_id,
+                now,
+            ));
         }
         let held = leasing.leases.held().await.map_err(SyncFailure::Store)?;
         for (repository, epoch) in held {
@@ -371,13 +375,18 @@ impl SyncWithHub {
         self
     }
 
-    /// One session: connects, sends every report not yet acknowledged, in
-    /// order, in windows of at most [`SEND_WINDOW`] places ahead of the
-    /// hub's acknowledgements, and once the hub acknowledged the last of
-    /// them, the agent's plans when they changed since the hub last
-    /// acknowledged them, waiting for that acknowledgement, and then the
-    /// latest progress when one is due. A pending agent sends nothing.
+    /// One session: lists the repositories whose listing is due, if the
+    /// sync is given its listings, before it connects, so no connection
+    /// waits on a repository; then connects, sends every report not yet
+    /// acknowledged, in order, in windows of at most [`SEND_WINDOW`] places
+    /// ahead of the hub's acknowledgements, and once the hub acknowledged
+    /// the last of them, the agent's plans when they changed since the hub
+    /// last acknowledged them, waiting for that acknowledgement, and then
+    /// the latest progress when one is due. A pending agent sends nothing.
     pub async fn sync_once(&self) -> Result<Synced, SyncFailure> {
+        if let Some(listings) = &self.listings {
+            listings.list().await;
+        }
         let connected = self
             .connect
             .connect_channel(self.agent_id, self.hostname.clone(), self.zone.clone())

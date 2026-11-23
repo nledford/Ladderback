@@ -1,13 +1,17 @@
 //! Whether a repository holds another agent's tagged snapshots (technical
-//! design §7.3; §16, decision 62): what a paired agent tells its hub of each
-//! repository it uses, so the hub grants `agent:<id>` only for a repository
-//! no other agent backs up to (I1). The agent learns it from its listings
-//! of the repository and keeps only the newest such snapshot's time, so it
-//! judges the 30 days at each report without listing the repository again.
+//! design §7.3; §16, decisions 62 and 156): what a paired agent tells its
+//! hub of each repository it uses, so the hub grants `agent:<id>` only for
+//! a repository no other agent backs up to (I1). The agent learns it from
+//! its listings of the repository and keeps only the newest such
+//! snapshot's time, so it judges the 30 days at each report without
+//! listing the repository again, for as long as the listing stands.
 
+use super::other_hosts::OTHER_AGENT_RECENCY;
+use super::{OwnerTag, owner_tag};
+use crate::execution::plan_tags::AGENT_TAG_PREFIX;
 use crate::{AgentId, SignedDuration, Timestamp};
 
-/// How long a listing's answer stands (decision NN): a repository last
+/// How long a listing's answer stands (decision 156): a repository last
 /// listed longer ago is listed again before the agent's next sync, and
 /// until it is, the agent says it holds another agent's snapshots.
 pub const LISTING_LASTS: SignedDuration = SignedDuration::from_hours(24);
@@ -16,8 +20,7 @@ pub const LISTING_LASTS: SignedDuration = SignedDuration::from_hours(24);
 /// [`LISTING_LASTS`] apart, either way, so a clock set back counts as time
 /// passed.
 pub fn listing_stands(listed: Timestamp, now: Timestamp) -> bool {
-    let _ = (listed, now);
-    todo!()
+    now.duration_since(listed).abs() <= LISTING_LASTS
 }
 
 /// The newest snapshot another agent tagged, among one listing of a
@@ -38,23 +41,42 @@ impl OtherAgentsSnapshots {
         agent: &AgentId,
         snapshots: impl IntoIterator<Item = (Timestamp, &'a [String])>,
     ) -> Self {
-        let _ = (agent, snapshots.into_iter());
-        todo!()
+        let own = agent.as_uuid().hyphenated().to_string();
+        let newest = snapshots
+            .into_iter()
+            .filter(|(_, tags)| match owner_tag(tags, AGENT_TAG_PREFIX) {
+                OwnerTag::One(tagger) => tagger != own,
+                OwnerTag::Disagree => true,
+                OwnerTag::Absent => false,
+            })
+            .map(|(time, _)| time)
+            .max();
+        Self { newest }
     }
 
     /// Whether one of them is recent at `now`: made in the
     /// `OTHER_AGENT_RECENCY` up to `now`, or later, by a clock ahead of
     /// this one.
     pub fn recent_at(&self, now: Timestamp) -> bool {
-        let _ = (self.newest, now);
-        todo!()
+        self.newest.is_some_and(|time| recent(time, now))
     }
+}
+
+/// Whether a snapshot another agent tagged at `time` is recent at `now`
+/// (decision 62): in the [`OTHER_AGENT_RECENCY`] up to `now`, inclusive, or
+/// after it. A `now` too near the start of time to go back from counts
+/// every snapshot before it.
+pub(super) fn recent(time: Timestamp, now: Timestamp) -> bool {
+    let since = now
+        .checked_sub(OTHER_AGENT_RECENCY)
+        .unwrap_or(Timestamp::MIN);
+    time >= since
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::execution::plan_tags::{AGENT_TAG_PREFIX, PLAN_TAG_PREFIX};
+    use crate::execution::plan_tags::PLAN_TAG_PREFIX;
     use crate::{SignedDuration, Uuid};
 
     fn agent() -> AgentId {

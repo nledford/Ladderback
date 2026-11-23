@@ -865,6 +865,11 @@ fn run_daemon(
         let config = background.config();
         #[cfg(feature = "hub")]
         let plans = background.read_plans();
+        // And what the daemon's listings showed of other agents' snapshots
+        // in them, listing before each session each it maintains whose
+        // listing doesn't stand (§7.3, decision 156).
+        #[cfg(feature = "hub")]
+        let listings = background.listings_due();
         let scheduled = tokio::spawn(background.run(random));
         // A paired machine's reports to its hub run beside the scheduler
         // and never hold it up (§7.2).
@@ -875,7 +880,7 @@ fn run_daemon(
                 Arc::clone(&state.events),
                 early,
                 Arc::clone(&operation_log.store),
-                config,
+                hub::Maintained { config, listings },
                 standing,
                 Some(plans),
             ))
