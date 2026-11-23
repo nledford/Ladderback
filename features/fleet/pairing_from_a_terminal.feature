@@ -75,8 +75,24 @@ Feature: Pairing a machine from a terminal
   Scenario: The hub's terminal makes no token while the daemon runs
     Given the hub is serving on loopback
     When the person asks the hub's terminal for a pairing token
-    Then the terminal refuses because the daemon holds the data folder
+    Then the terminal refuses to make a token while the daemon runs, and points to the Machines tab
     And the terminal shows no token
+
+  @e2e
+  Scenario: The hub's terminal lists no unused token while the daemon runs
+    Given a hub with a pairing token made at its terminal
+    And the hub is serving on loopback
+    When the person lists the unused tokens at the hub's terminal
+    Then the terminal refuses to list the unused tokens while the daemon runs
+
+  @e2e
+  Scenario: The hub's terminal revokes no token while the daemon runs, and says the token can still pair a machine
+    Given a hub with a pairing token made at its terminal
+    And the hub is serving on loopback
+    When the person revokes the token at the hub's terminal
+    Then the terminal refuses to revoke the token while the daemon runs, and says it can still pair a machine
+    When a machine named "e2e-laptop" pairs with the token from its terminal
+    Then the machine is paired and waits for approval
 
   @e2e
   Scenario: A machine refuses a plain http address on another machine

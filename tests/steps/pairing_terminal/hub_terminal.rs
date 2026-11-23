@@ -54,6 +54,15 @@ async fn make_token(agent: &mut Agent, address: &str) {
         .trim()
         .to_owned();
     agent.pairing_terminal.hub_key = Some(hub_key);
+    let id = said
+        .stderr
+        .split("Token ID ")
+        .nth(1)
+        .and_then(|rest| rest.split(',').next())
+        .unwrap_or_else(|| panic!("the terminal named the token's ID: {said:?}"))
+        .trim_matches(|c: char| c.is_whitespace() || c == '\u{2068}' || c == '\u{2069}')
+        .to_owned();
+    agent.pairing_terminal.token_id = Some(id);
 }
 
 #[given("the person revoked the token at the hub's terminal")]
@@ -104,6 +113,17 @@ fn hub_terminal_zone(agent: &mut Agent, zone: String) {
 #[when("the person lists the unused tokens at the hub's terminal")]
 async fn lists_unused(agent: &mut Agent) {
     let said = on_hub(agent, &["pairing-token", "--list"]).await;
+    agent.pairing_terminal.said = Some(said);
+}
+
+#[when("the person revokes the token at the hub's terminal")]
+async fn revokes_token(agent: &mut Agent) {
+    let id = agent
+        .pairing_terminal
+        .token_id
+        .clone()
+        .expect("a token made at the hub's terminal");
+    let said = on_hub(agent, &["pairing-token", "--revoke", &id]).await;
     agent.pairing_terminal.said = Some(said);
 }
 
@@ -327,14 +347,77 @@ async fn no_unused_token(agent: &mut Agent) {
     assert!(said.stderr.contains("no unused pairing tokens"), "{said:?}");
 }
 
-#[then("the terminal refuses because the daemon holds the data folder")]
-fn refused_while_running(agent: &mut Agent) {
+/// Checks the terminal refused because the daemon holds the data folder,
+/// saying what it would have done (`would`) and to stop the daemon first,
+/// and, with `machines_tab`, that the hub's Settings do it meanwhile.
+fn refused_while_running(agent: &Agent, would: &str, machines_tab: bool) {
     let said = said(agent);
     assert!(!said.success, "{said:?}");
-    assert!(
+    for expected in [
+        "the daemon is running on the data folder",
+        would,
+        "run this command again, then start the daemon again",
+    ] {
+        assert!(said.stderr.contains(expected), "{expected}: {said:?}");
+    }
+    assert_eq!(
         said.stderr
-            .contains("the daemon is running on the data folder"),
+            .contains("in the web UI's Settings, on the Machines tab"),
+        machines_tab,
         "{said:?}"
+    );
+}
+
+#[then(
+    "the terminal refuses to make a token while the daemon runs, and points to the Machines tab"
+)]
+fn refused_make_while_running(agent: &mut Agent) {
+    refused_while_running(
+        agent,
+        "this terminal makes a pairing token only while it is stopped",
+        true,
+    );
+}
+
+#[then("the terminal refuses to list the unused tokens while the daemon runs")]
+fn refused_list_while_running(agent: &mut Agent) {
+    refused_while_running(
+        agent,
+        "this terminal lists the unused pairing tokens only while it is stopped",
+        false,
+    );
+}
+
+#[then(
+    "the terminal refuses to revoke the token while the daemon runs, and says it can still pair a machine"
+)]
+fn refused_revoke_while_running(agent: &mut Agent) {
+    refused_while_running(
+        agent,
+        "this terminal revokes a pairing token only while it is stopped, so the token can still pair a machine",
+        false,
+    );
+}
+
+#[then(
+    "the terminal refuses to list the machines waiting while the daemon runs, and points to the Machines tab"
+)]
+fn refused_pending_while_running(agent: &mut Agent) {
+    refused_while_running(
+        agent,
+        "this terminal lists the machines waiting for approval only while it is stopped",
+        true,
+    );
+}
+
+#[then(
+    "the terminal refuses to approve a machine while the daemon runs, and points to the Machines tab"
+)]
+fn refused_approve_while_running(agent: &mut Agent) {
+    refused_while_running(
+        agent,
+        "this terminal approves a machine only while it is stopped",
+        true,
     );
 }
 
