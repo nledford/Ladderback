@@ -147,3 +147,26 @@ async fn grants_and_floors_are_kept_and_released() {
     assert_eq!(floors.len(), 1);
     assert_ne!(machine.cache.load().await.unwrap(), HeldLeases::default());
 }
+
+/// A wall clock set back after a grant doesn't lengthen the lease: the
+/// machine counts at least the monotonic time that passed since it took
+/// the grant, so its lease still runs out on the hub's time (I1).
+#[tokio::test]
+async fn i1_a_clock_set_back_doesnt_lengthen_a_lease() {
+    let machine = machine(paired().await);
+    machine.clock.advance(SignedDuration::from_hours(24));
+    let asked_at = machine.clock.now();
+    machine
+        .leases
+        .take(&grants(asked_at), 0, asked_at)
+        .await
+        .unwrap();
+    machine.clock.advance(SignedDuration::from_hours(6 * 24));
+    machine.clock.set_back(SignedDuration::from_hours(3 * 24));
+    assert_eq!(machine.leases.permits(Some(&repository('a'))).await, Ok(()));
+    machine.clock.advance(SignedDuration::from_hours(24));
+    assert_eq!(
+        machine.leases.permits(Some(&repository('a'))).await,
+        Err(NoLease::RanOut)
+    );
+}

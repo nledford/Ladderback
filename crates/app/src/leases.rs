@@ -7,10 +7,10 @@
 //! once its lease ran out, maintains nothing. A machine that isn't paired
 //! maintains what it asks for, as before. Backups and previews never ask.
 
-use std::sync::Arc;
+use std::sync::{Arc, Mutex, PoisonError};
 
-use domain::RepositoryId;
 use domain::maintenance::{EpochLower, LeaseEpoch, NoLease, RepoGrants};
+use domain::{RepositoryId, SignedDuration, Timestamp};
 
 use crate::ports::{Clock, Identity, LeaseCache, StoreError};
 
@@ -19,6 +19,9 @@ pub struct MaintenanceLeases {
     identity: Arc<dyn Identity>,
     cache: Arc<dyn LeaseCache>,
     clock: Arc<dyn Clock>,
+    /// When this process last took its hub's grants, on the machine's wall
+    /// clock and on its monotonic clock.
+    taken: Mutex<Option<(Timestamp, SignedDuration)>>,
 }
 
 impl MaintenanceLeases {
@@ -31,7 +34,21 @@ impl MaintenanceLeases {
             identity,
             cache,
             clock,
+            taken: Mutex::new(None),
         }
+    }
+
+    /// The machine's time a lease is judged at: its wall clock, but never
+    /// less than the monotonic time that passed since this process last
+    /// took its hub's grants, so a wall clock set back since doesn't
+    /// lengthen a lease (I1). One set back while the daemon was stopped
+    /// is caught only once a grant is taken again.
+    fn now(&self) -> Timestamp {
+        let wall = self.clock.now();
+        let taken = *self.taken.lock().unwrap_or_else(PoisonError::into_inner);
+        taken
+            .and_then(|(at, monotonic)| at.checked_add(self.clock.monotonic() - monotonic).ok())
+            .map_or(wall, |counted| wall.max(counted))
     }
 
     /// Whether this machine may maintain `repository`, known by its ID when
@@ -45,7 +62,7 @@ impl MaintenanceLeases {
         }
         let repository = repository.ok_or(NoLease::NoneHeld)?;
         let held = self.cache.load().await.map_err(|_| NoLease::NoneHeld)?;
-        held.holds(repository, self.clock.now()).map(|_| ())
+        held.holds(repository, self.now()).map(|_| ())
     }
 
     /// Takes the hub's `grants`, its answer to a request the machine sent
@@ -56,11 +73,13 @@ impl MaintenanceLeases {
         &self,
         grants: &RepoGrants,
         recovery_number: u64,
-        asked_at: domain::Timestamp,
+        asked_at: Timestamp,
     ) -> Result<Vec<EpochLower>, StoreError> {
+        let monotonic = self.clock.monotonic();
         let mut held = self.cache.load().await?;
         let refused = held.take(grants, recovery_number, asked_at);
         self.cache.save(&held).await?;
+        *self.taken.lock().unwrap_or_else(PoisonError::into_inner) = Some((asked_at, monotonic));
         Ok(refused)
     }
 
