@@ -75,4 +75,10 @@ Feature: Approving a machine from the hub's terminal
   Scenario: The hub's terminal approves nothing while the daemon runs
     Given the hub is serving on loopback
     When the person approves "e2e-laptop" at the hub's terminal with --yes
-    Then the terminal refuses because the daemon holds the data folder
+    Then the terminal refuses to approve a machine while the daemon runs, and points to the Machines tab
+
+  @e2e
+  Scenario: The hub's terminal lists no machine waiting while the daemon runs
+    Given the hub is serving on loopback
+    When the person lists the machines waiting at the hub's terminal
+    Then the terminal refuses to list the machines waiting while the daemon runs, and points to the Machines tab

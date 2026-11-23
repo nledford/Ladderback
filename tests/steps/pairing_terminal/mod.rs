@@ -26,6 +26,8 @@ mod machine_terminal;
 /// What the scenarios keep between steps.
 #[derive(Debug, Default)]
 pub struct PairingTerminal {
+    /// The ID the hub's terminal named the token by when it made it.
+    token_id: Option<String>,
     token: Option<String>,
     /// The hub's daemon, ended when the scenario ends or a step stops it.
     hub: Option<Owned>,
