@@ -575,6 +575,14 @@ cli-pairing-token-approve-unknown = no { -machine } named { $hostname } has pair
 # $hostname (text): the machine's hostname as it paired. It is shown as it came.
 cli-pairing-token-approve-already = { $hostname } is approved already: nothing changed.
 
+# `ladderback pairing-token --forget-computer` forgot the computer the hub took under the machine: the next computer to connect as it is the one the hub takes from then on (the way back for a machine refused as a second computer under one machine ID).
+# $hostname (text): the machine's hostname as it paired. It is shown as it came.
+cli-pairing-token-forgot-computer = The { -hub } forgot the computer it took as { $hostname }: the next computer to connect as that { -machine } is the one it takes from then on.
+
+# No machine with this hostname paired with the hub, so `--forget-computer` changed nothing.
+# $hostname (text): the hostname as given. It is shown as it came.
+cli-pairing-token-forget-unknown = no { -machine } named { $hostname } has paired with this { -hub }: nothing changed.
+
 # A hub command failed for a reason the system gave.
 # $detail (text): the system's message. It is shown as it came.
 cli-hub-command-failed = the command failed: { $detail }
@@ -750,7 +758,10 @@ cli-help-export-profile-plan = The ID of the plan to export
 cli-help-set-password = Set the admin password, which turns sign-in on, and end every session. It is typed twice at a terminal, without being shown, or read as one line of standard input; never given as an argument
 
 # What `pairing-token` does.
-cli-help-pairing-token = Make a one-time pairing token for a { -machine }, list or revoke the unused ones, or list and approve the { -machine(form: "other") } waiting for approval. Run it while the daemon is stopped
+cli-help-pairing-token = Make a one-time pairing token for a { -machine }, list or revoke the unused ones, list and approve the { -machine(form: "other") } waiting for approval, or forget the computer the { -hub } took for a { -machine }. Run it while the daemon is stopped
+
+# What `pairing-token --forget-computer` takes: the way back for a machine the hub refused because it took another computer under its machine ID first.
+cli-help-pairing-token-forget-computer = Forget the computer the { -hub } took for the { -machine } with this hostname, so the next computer to connect as it is taken. Stop the other computer first, or give it a new machine ID
 
 # What `pairing-token --address` takes. The address is an example, typed as it is: keep it a string literal.
 cli-help-pairing-token-address = The { -hub }'s address as { -machine(form: "other") } reach it, such as { "https://hub.example" }

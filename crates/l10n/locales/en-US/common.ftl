@@ -624,10 +624,14 @@ error-pending-limit = The { -hub } already has 20 { -machine(form: "other") } wa
 # certificate an authority signed.
 error-binding-unavailable = Not connected: the { -hub } closed the connection because it can't offer this machine's kind of connection. Make a new token for the { -hub }'s https address, served by a proxy with a certificate that a certificate authority signed, and pair again with it. Update the { -hub } if it is old.
 
-# The hub refused this machine because it already takes another computer
-# under this machine's ID, as when a data folder was copied from one computer
-# to another. Backups still run here, and their reports wait on this machine.
-error-identity-conflict = The { -hub } refused this computer: another computer already connects to it as this { -machine }, as when a data folder is copied. Backups still run here, and their reports wait. If this is a new computer, take a new machine ID from the start page, restart { -brand-name } and pair it again.
+# The hub refused this machine because it took another computer under this
+# machine's ID first, as when a data folder was copied from one computer to
+# another or the system was reinstalled. Backups still run here, and their
+# reports wait on this machine. The way back is in the message: a copy takes
+# a new machine ID from the start page and pairs again; the computer that
+# should keep the ID has the hub forget the one it took.
+# `ladderback pairing-token --forget-computer` is typed as it is: keep it a string literal.
+error-identity-conflict = The { -hub } refused this computer: it took another computer as this { -machine } first, as happens when a data folder is copied or the system is reinstalled. Backups still run here, and their reports wait. If this computer is the copy, take a new machine ID from the start page, restart { -brand-name } and pair it again. If it is the computer that should keep this ID, stop { -brand-name } on the other one or give that one a new ID, then stop the { -hub }'s daemon and run { "ladderback pairing-token --forget-computer" } with this { -machine }'s name on the { -hub }.
 
 # No hub answered at the token's address: the connection was refused, the
 # name didn't resolve, or nothing answered in 10 seconds. Nothing was sent.

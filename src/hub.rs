@@ -65,7 +65,7 @@ pub(crate) enum TokenAsk {
         yes: bool,
     },
     /// Forget the computer the hub took under the machine with this
-    /// hostname, so the next one to connect as it is taken (decision NN).
+    /// hostname, so the next one to connect as it is taken (decision 150).
     ForgetComputer(String),
 }
 
@@ -271,7 +271,7 @@ fn daemon_running(ask: &TokenAsk) -> MessageId {
         TokenAsk::Revoke(_) => msg::CLI_PAIRING_TOKEN_REVOKE_DAEMON_RUNNING,
         TokenAsk::Pending => msg::CLI_PAIRING_TOKEN_PENDING_DAEMON_RUNNING,
         TokenAsk::Approve { .. } => msg::CLI_PAIRING_TOKEN_APPROVE_DAEMON_RUNNING,
-        TokenAsk::ForgetComputer(_) => todo!(),
+        TokenAsk::ForgetComputer(_) => msg::CLI_PAIRING_TOKEN_FORGET_DAEMON_RUNNING,
     }
 }
 
@@ -536,13 +536,38 @@ async fn approve(
 }
 
 /// `pairing-token --forget-computer`: forgets the computer the hub took
-/// under the machine named `hostname` (decision NN).
+/// under the machine named `hostname`, so the next one to connect as it is
+/// taken in its place: the way back for a machine refused as a second
+/// computer (decision 150).
 async fn forget_computer(
-    _localizer: &Localizer,
-    _pairing: &HubPairing,
-    _hostname: &str,
+    localizer: &Localizer,
+    pairing: &HubPairing,
+    hostname: &str,
 ) -> io::Result<ExitCode> {
-    todo!()
+    let found = match Hostname::parse(hostname) {
+        Ok(name) => match pairing.agent_named(&name).await {
+            Ok(found) => found,
+            Err(error) => return hub_refused(localizer, &error),
+        },
+        Err(_) => None,
+    };
+    let Some(agent) = found else {
+        say(
+            localizer,
+            msg::CLI_PAIRING_TOKEN_FORGET_UNKNOWN,
+            &[("hostname", text(hostname))],
+        )?;
+        return Ok(ExitCode::FAILURE);
+    };
+    if let Err(error) = pairing.forget_machine(&agent).await {
+        return hub_refused(localizer, &error);
+    }
+    say(
+        localizer,
+        msg::CLI_PAIRING_TOKEN_FORGOT_COMPUTER,
+        &[("hostname", text(agent.hostname.as_str()))],
+    )?;
+    Ok(ExitCode::SUCCESS)
 }
 
 fn approval_refused(
@@ -875,7 +900,7 @@ fn machine_zone() -> Option<MachineZone> {
 
 /// Connecting this machine to its hub, on the pin and keys in `identity`,
 /// telling the fingerprint of the computer it runs on, none when its
-/// identifier can't be read (decision NN).
+/// identifier can't be read (decision 150).
 fn connecting(identity: Arc<FileIdentity>, data_dir: &Path) -> ConnectToHub {
     let machine = platform::this_machine::SystemMachine::in_data_dir(data_dir)
         .identifier()
@@ -1083,10 +1108,11 @@ fn connect_failed(failure: &ConnectFailure, address: &str) -> Said {
         ConnectFailure::Welcome(WelcomeRefused::GenerationLower) => {
             (ErrorCode::GenerationLower, vec![], None)
         }
-        // A hub refuses a proof only as `proof-refused`; any other code,
+        // A hub refuses a proof only as `proof-refused`, and a second
+        // computer under the ID as `identity-conflict`; any other code,
         // pairing's among them, would show advice for something else.
         ConnectFailure::Refused(refusal) => match api::sync::refusal_code(refusal.code.as_str()) {
-            ErrorCode::ProofRefused => (ErrorCode::ProofRefused, vec![], None),
+            code @ (ErrorCode::ProofRefused | ErrorCode::IdentityConflict) => (code, vec![], None),
             _ => (
                 ErrorCode::HubLinkLost,
                 vec![],

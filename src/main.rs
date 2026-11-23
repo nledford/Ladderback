@@ -88,7 +88,7 @@ enum Command {
     SetPassword,
     #[cfg(feature = "hub")]
     PairingToken {
-        #[arg(long, required_unless_present_any = ["list", "revoke", "pending", "approve"])]
+        #[arg(long, required_unless_present_any = ["list", "revoke", "pending", "approve", "forget_computer"])]
         address: Option<String>,
         #[arg(long, value_name = "MINUTES")]
         ttl: Option<i64>,
@@ -109,7 +109,12 @@ enum Command {
         approve: Option<String>,
         #[arg(long, requires = "approve")]
         yes: bool,
-        #[arg(skip)]
+        #[arg(
+            long,
+            value_name = "HOSTNAME",
+            value_parser = clap::builder::NonEmptyStringValueParser::new(),
+            conflicts_with_all = ["address", "ttl", "list", "revoke", "pending", "approve"]
+        )]
         forget_computer: Option<String>,
     },
     #[cfg(feature = "hub")]
@@ -258,6 +263,7 @@ fn description(path: &str, argument: Option<&str>) -> Option<MessageId> {
         ("pairing-token", Some("pending")) => msg::CLI_HELP_PAIRING_TOKEN_PENDING,
         ("pairing-token", Some("approve")) => msg::CLI_HELP_PAIRING_TOKEN_APPROVE,
         ("pairing-token", Some("yes")) => msg::CLI_HELP_PAIRING_TOKEN_YES,
+        ("pairing-token", Some("forget_computer")) => msg::CLI_HELP_PAIRING_TOKEN_FORGET_COMPUTER,
         ("pair", None) => msg::CLI_HELP_PAIR,
         ("pair", Some("address")) => msg::CLI_HELP_PAIR_ADDRESS,
         ("pair", Some("hostname")) => msg::CLI_HELP_PAIR_HOSTNAME,
