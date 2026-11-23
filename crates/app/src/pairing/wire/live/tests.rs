@@ -103,6 +103,10 @@ fn a_snapshot_with_too_many_plans_or_a_field_that_isnt_one_is_refused() {
         r#"{"plans":[{"plan":"home","next":9223372036854775808}],"left_out":0}"#.to_owned(),
         r#"{"plans":[{"plan":"home","last":{"at":9223372036854775808,"outcome":"failed"}}],"left_out":0}"#
             .to_owned(),
+        // Past the last second of year 9999, which no timestamp holds.
+        r#"{"plans":[{"plan":"home","next":253402300800}],"left_out":0}"#.to_owned(),
+        r#"{"plans":[{"plan":"home","last":{"at":253402300800,"outcome":"failed"}}],"left_out":0}"#
+            .to_owned(),
     ];
     for text in refused {
         assert_eq!(read_plans(text.as_bytes()), Err(WireRefused), "{text}");
@@ -147,6 +151,14 @@ fn a_progress_reads_back_as_it_was_written() {
         ..progress()
     };
     assert_eq!(read_progress(&progress_payload(&bare)), Ok(bare));
+    let last_second = ReportedProgress {
+        at: EpochSeconds::from_seconds(253_402_300_799),
+        ..progress()
+    };
+    assert_eq!(
+        read_progress(&progress_payload(&last_second)),
+        Ok(last_second)
+    );
 }
 
 #[test]
@@ -159,6 +171,7 @@ fn a_progress_with_a_field_that_isnt_one_is_refused() {
         r#"{"op_id":"00000000-0000-0000-0000-000000000007","unit":"bytes","current":9223372036854775808,"at":1}"#,
         r#"{"op_id":"00000000-0000-0000-0000-000000000007","unit":"bytes","current":1,"total":9223372036854775808,"at":1}"#,
         r#"{"op_id":"00000000-0000-0000-0000-000000000007","unit":"bytes","current":1,"at":9223372036854775808}"#,
+        r#"{"op_id":"00000000-0000-0000-0000-000000000007","unit":"bytes","current":1,"at":253402300800}"#,
     ];
     for text in refused {
         assert_eq!(read_progress(text.as_bytes()), Err(WireRefused), "{text}");
