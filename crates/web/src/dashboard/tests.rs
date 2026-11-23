@@ -172,6 +172,10 @@ fn each_outcome_reads_as_its_status_badge() {
         outcome_badge(MachineOutcomeDto::Failed),
         (BadgeState::Failed, msg::UI_STATUS_FAILED)
     );
+    assert_eq!(
+        outcome_badge(MachineOutcomeDto::Cancelled),
+        (BadgeState::Cancelled, msg::UI_STATUS_CANCELLED)
+    );
 }
 
 /// A machine's time reads in the viewer's zone alone when the zones match

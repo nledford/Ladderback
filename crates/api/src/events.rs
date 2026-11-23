@@ -56,7 +56,7 @@ pub enum UiEvent {
     /// The operation ended well. The run that recorded it announces this once,
     /// after its ending hooks and its last write to the operation log, so a
     /// page that reads the history on hearing it finds the end there, unless
-    /// the log lost that write. A cancelled operation has no such event.
+    /// the log lost that write.
     OperationSucceeded {
         operation: String,
         finished_at: String,
@@ -71,6 +71,13 @@ pub enum UiEvent {
         operation: String,
         code: ErrorCode,
         args: Vec<MsgArg>,
+        finished_at: String,
+    },
+    /// The operation was cancelled: announced like
+    /// [`Self::OperationSucceeded`], once the run recorded the cancel. A
+    /// paired machine reports it to its hub as the operation's end (§7.2).
+    OperationCancelled {
+        operation: String,
         finished_at: String,
     },
     /// A plan's backup failed, and the agent retries it (`backup.retrying`,

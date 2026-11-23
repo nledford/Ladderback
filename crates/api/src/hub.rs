@@ -207,6 +207,7 @@ pub enum MachineOutcomeDto {
     Running,
     Succeeded,
     Failed,
+    Cancelled,
 }
 
 /// One of a machine's latest operations, from its reports (§7.2): when it

@@ -19,7 +19,8 @@ use app::sync::{LiveProgress, ReadPlans, RecordReports, SyncWithHub, Synced};
 use cucumber::{given, then, when};
 use domain::execution::{Operation, OperationKind, Target, Trigger};
 use domain::fleet::{
-    EpochSeconds, LastRunOutcome, OutboxEpoch, PlansReport, ReportedPlan, ReportedProgress,
+    EpochSeconds, LastRunOutcome, OutboxEpoch, PlansReport, ReportedOutcome, ReportedPlan,
+    ReportedProgress,
 };
 use domain::{OperationId, PlanId, RepositoryId, SignedDuration, TimeZone, Timestamp, Uuid};
 
@@ -276,6 +277,16 @@ async fn ends(agent: &mut Agent) {
     side.hear(&event).await;
 }
 
+#[when("the backup is cancelled")]
+async fn cancelled(agent: &mut Agent) {
+    let side = side(agent);
+    let event = UiEvent::OperationCancelled {
+        operation: side.backup.expect("a backup").as_uuid().to_string(),
+        finished_at: side.clock.now().to_string(),
+    };
+    side.hear(&event).await;
+}
+
 #[then(expr = "the hub shows the agent's plans {string} and {string}, in that order")]
 async fn shows_plans(agent: &mut Agent, first: String, second: String) {
     let plans = shown(agent).await.plans.expect("the hub shows plans");
@@ -329,4 +340,15 @@ async fn shows_progress(agent: &mut Agent, current: u64, total: u64) {
 #[then("the hub shows no progress of the agent")]
 async fn shows_no_progress(agent: &mut Agent) {
     assert_eq!(shown(agent).await.progress, None);
+}
+
+#[then("the hub shows the agent's backup was cancelled")]
+async fn shows_cancelled(agent: &mut Agent) {
+    let backup = side(agent).backup.expect("a backup");
+    let operations = shown(agent).await.operations;
+    let shown = operations
+        .iter()
+        .find(|operation| operation.op_id == backup)
+        .expect("the hub shows the backup");
+    assert_eq!(shown.outcome, ReportedOutcome::Cancelled);
 }

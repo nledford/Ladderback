@@ -240,6 +240,7 @@ fn machine_dto(machine: &Machine) -> api::HubMachineDto {
                         api::MachineOutcomeDto::Failed,
                         Some(code.as_str().to_owned()),
                     ),
+                    ReportedOutcome::Cancelled => todo!(),
                 };
                 api::MachineOperationDto {
                     operation: operation.op_id.as_uuid().to_string(),

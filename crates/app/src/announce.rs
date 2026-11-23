@@ -453,11 +453,19 @@ mod tests {
         assert_eq!(start_of(&ended, None), None);
     }
 
+    /// A cancel is announced as the operation's end, so a paired machine
+    /// reports it to its hub (§7.2).
     #[test]
-    fn a_cancelled_operation_is_not_announced() {
+    fn a_cancelled_operation_is_announced_with_its_time() {
         let mut operation = running();
         operation.cancel(t(5)).expect("a running operation cancels");
-        assert_eq!(end_of(&operation), None);
+        assert_eq!(
+            end_of(&operation),
+            Some(UiEvent::OperationCancelled {
+                operation: operation.id().as_uuid().hyphenated().to_string(),
+                finished_at: t(5).to_string(),
+            })
+        );
     }
 
     #[test]

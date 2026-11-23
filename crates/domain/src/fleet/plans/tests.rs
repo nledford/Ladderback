@@ -102,6 +102,25 @@ fn progress_shows_only_while_its_operation_runs() {
     assert_eq!(progress_shown(&[], Some(progress_of(1))), None);
 }
 
+/// A cancelled operation's end, as its reports tell it, hides its progress
+/// as any other end does.
+#[test]
+fn a_cancelled_operations_progress_is_not_shown() {
+    use crate::fleet::{AgentReport, Happening, OPERATIONS_SHOWN, latest_operations};
+
+    let report = |happening, seconds| AgentReport {
+        op_id: progress_of(1).op_id,
+        happening,
+        at: EpochSeconds::from_seconds(seconds),
+    };
+    let reports = [
+        report(Happening::Started, 100),
+        report(Happening::Cancelled, 160),
+    ];
+    let operations = latest_operations(&reports, OPERATIONS_SHOWN);
+    assert_eq!(progress_shown(&operations, Some(progress_of(1))), None);
+}
+
 #[test]
 fn a_last_run_is_told_at_its_end_else_its_start_else_when_it_was_queued() {
     let at = |second| Timestamp::from_second(second).unwrap();

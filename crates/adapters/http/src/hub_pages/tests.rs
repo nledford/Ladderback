@@ -708,8 +708,8 @@ async fn the_page_lists_each_agent_with_its_key_its_wait_its_lookalike_and_a_sec
 }
 
 /// The dashboard's route: each approved machine with its latest
-/// operations, newest first, a failure's code and the count let go of;
-/// no waiting machine.
+/// operations, newest first, a failure's code, a cancel and the count let
+/// go of; no waiting machine.
 #[tokio::test]
 async fn the_page_shows_each_approved_machine_with_its_latest_operations() {
     let daemon = Daemon::hub(false);
@@ -724,6 +724,7 @@ async fn the_page_shows_each_approved_machine_with_its_latest_operations() {
         (1, 1, Happening::Started, 1_799_999_000),
         (2, 1, Happening::Succeeded, 1_799_999_100),
         (3, 2, failed, 1_799_999_200),
+        (4, 3, Happening::Cancelled, 1_799_999_300),
     ] {
         let entry = OutboxEntry {
             epoch: OutboxEpoch::from_uuid(Uuid::from_u128(0xe1)),
@@ -761,6 +762,13 @@ async fn the_page_shows_each_approved_machine_with_its_latest_operations() {
             zone: None,
             reports_dropped: 0,
             operations: vec![
+                api::MachineOperationDto {
+                    operation: Uuid::from_u128(3).to_string(),
+                    started_at: None,
+                    ended_at: time(1_799_999_300),
+                    outcome: api::MachineOutcomeDto::Cancelled,
+                    code: None,
+                },
                 api::MachineOperationDto {
                     operation: Uuid::from_u128(2).to_string(),
                     started_at: None,

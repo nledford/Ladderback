@@ -440,6 +440,7 @@ fn a_report_of_each_event_reads_back_from_its_payload() {
         Happening::Started,
         Happening::Succeeded,
         Happening::Failed { code },
+        Happening::Cancelled,
     ] {
         let entry = report_entry(happening);
         assert_eq!(read_report(&report_payload(&entry)), Ok(entry));

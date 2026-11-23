@@ -61,6 +61,26 @@ fn reports_are_read_as_operations_newest_first() {
     );
 }
 
+/// A cancel ends its operation as cancelled, and a start heard after it
+/// doesn't set it running again.
+#[test]
+fn a_cancel_ends_its_operation() {
+    let reports = [
+        report(1, Happening::Started, 100),
+        report(1, Happening::Cancelled, 160),
+        report(1, Happening::Started, 100),
+    ];
+    assert_eq!(
+        latest_operations(&reports, OPERATIONS_SHOWN),
+        [ReportedOperation {
+            op_id: op(1),
+            started_at: Some(at(100)),
+            ended_at: Some(at(160)),
+            outcome: ReportedOutcome::Cancelled,
+        }]
+    );
+}
+
 /// An operation is ordered by its latest report: one that started first and
 /// ended last is the newest.
 #[test]

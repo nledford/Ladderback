@@ -197,6 +197,7 @@ pub fn report_payload(entry: &OutboxEntry) -> Vec<u8> {
         Happening::Started => ("started", None),
         Happening::Succeeded => ("succeeded", None),
         Happening::Failed { code } => ("failed", Some(code.as_str().to_owned())),
+        Happening::Cancelled => todo!(),
     };
     ReportPayload {
         epoch: entry.epoch.as_uuid().to_string(),

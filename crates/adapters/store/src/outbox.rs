@@ -361,6 +361,7 @@ fn happening_text(happening: &Happening) -> (&'static str, Option<&str>) {
         Happening::Started => ("started", None),
         Happening::Succeeded => ("succeeded", None),
         Happening::Failed { code } => ("failed", Some(code.as_str())),
+        Happening::Cancelled => todo!(),
     }
 }
 

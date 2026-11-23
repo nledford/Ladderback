@@ -52,6 +52,17 @@ fn a_progress_is_let_go_of_when_its_operation_ends_and_not_when_another_does() {
 }
 
 #[test]
+fn a_progress_is_let_go_of_when_its_operation_is_cancelled() {
+    let live = LiveProgress::new();
+    live.hear(&progress(OP, 10));
+    live.hear(&UiEvent::OperationCancelled {
+        operation: OP.to_owned(),
+        finished_at: "2027-01-15T08:01:00Z".to_owned(),
+    });
+    assert_eq!(live.latest(), None);
+}
+
+#[test]
 fn a_progress_without_a_time_or_a_readable_id_changes_nothing() {
     let live = LiveProgress::new();
     live.hear(&progress(OP, 10));
