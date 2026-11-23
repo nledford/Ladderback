@@ -74,21 +74,25 @@ pub(super) async fn plans(
 ) -> Result<Option<PlansReport>, StoreError> {
     let agent = agent_id_text(agent);
     let _call = store.call().await;
-    let mut conn = store.pool.acquire().await.map_err(unavailable)?;
+    // One read transaction: the snapshot's count left out and its plans are
+    // one snapshot, so a report kept in between can't be seen half done.
+    let mut tx = store.pool.begin().await.map_err(unavailable)?;
     let Some(snapshot) = sqlx::query(SNAPSHOT)
         .bind(&agent)
-        .fetch_optional(&mut *conn)
+        .fetch_optional(&mut *tx)
         .await
         .map_err(unavailable)?
     else {
+        tx.commit().await.map_err(unavailable)?;
         return Ok(None);
     };
-    let left_out = held(&snapshot, "left_out")?;
     let rows = sqlx::query(PLANS)
         .bind(&agent)
-        .fetch_all(&mut *conn)
+        .fetch_all(&mut *tx)
         .await
         .map_err(unavailable)?;
+    tx.commit().await.map_err(unavailable)?;
+    let left_out = held(&snapshot, "left_out")?;
     let plans = rows.iter().map(plan_of).collect::<Result<Vec<_>, _>>()?;
     PlansReport::from_parts(plans, left_out)
         .map(Some)
