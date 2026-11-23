@@ -29,9 +29,9 @@ CREATE TABLE sync_plans (
     agent_id TEXT NOT NULL,
     place INTEGER NOT NULL CHECK (place >= 0),
     plan_id TEXT NOT NULL,
-    last_at INTEGER,
+    last_at INTEGER CHECK (last_at >= 0),
     last_outcome TEXT,
-    next_run INTEGER,
+    next_run INTEGER CHECK (next_run >= 0),
     PRIMARY KEY (agent_id, place),
     CHECK ((last_at IS NULL) = (last_outcome IS NULL))
 ) STRICT;
@@ -46,7 +46,7 @@ CREATE TABLE sync_progress (
     op_id TEXT NOT NULL,
     step TEXT,
     unit TEXT NOT NULL,
-    current INTEGER NOT NULL,
-    total INTEGER,
-    at INTEGER NOT NULL
+    current INTEGER NOT NULL CHECK (current >= 0),
+    total INTEGER CHECK (total >= 0),
+    at INTEGER NOT NULL CHECK (at >= 0)
 ) STRICT;

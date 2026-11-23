@@ -137,7 +137,7 @@ const PINNED: &[(i64, &str, &str)] = &[
     (
         25,
         "sync plans progress",
-        "e938adfc8f6a56f093ef3b31e14d34c4875feba886d00e961fa09262c1cf19543ccd455f8a86a4a311c5ed257bf20c37",
+        "8961198507044aabfd5bfe0bfd222fce8738ebc9c30c8b5fc2d03f83cc31e8ac1469b1f1d40a5e9cc86a3d7b2083a058",
     ),
 ];
 
