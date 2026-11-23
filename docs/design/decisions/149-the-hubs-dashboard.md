@@ -1,0 +1,23 @@
+# Decision 149: The hub's dashboard shows when each machine last connected and its latest operations, follows the hub's events, and is reached from the start page and the Machines tab
+
+**On a running hub, `/dashboard` shows each approved machine, oldest approved first: when it last connected, its 10 latest operations as its reports told them (when each started and ended, how it came out, and a failure's error code), and how many of its reports the hub let go of past its cap. It says when a machine last connected, never whether it is online. Times read in the viewer's zone, and in the machine's own beside them when the two differ. The page, and the Machines tab of Settings, read the hub again on its events, not on a timer. The hub's start page and its Machines tab link to the dashboard; the header has no link to it** (recorded 2026-11-23, §4.3, §4.4, §7.2, #569, #115).
+
+## Why
+
+§4.4's dashboard was a card per machine with its online status, its plans and its live progress. The hub so far knows less: a machine's registry row, and the starts and ends of its operations that its reports carried (§7.2, decision 145). The dashboard shows what the hub knows, and the rest of §4.4's card waits for the messages that carry it (#1440).
+
+- **Last connected, not online.** A machine connects only to send its reports, on a connection per burst of them (decision 145), so a machine with nothing to report is offline to the hub while it runs fine. An "Online" badge would call most healthy machines offline. "Last connected" is what the hub knows, and the person can judge it against the machine's schedule.
+- **Ten operations, read from forty reports.** Each operation has a start and an end, and either may be all the hub took (a full outbox gives up starts first; decision 145). The hub reads a machine's 40 newest reports, four for each operation shown, and folds them into operations: an end settles one, so a start sent again after it doesn't show it running again, and a report that changes nothing doesn't make its operation newer. The read is one query per approved machine, which a hub of a household's or a small office's machines bears easily.
+- **The machine's time too (#115).** A machine's operations run by its own clock and in its own zone; a plan that runs at 02:00 there reads oddly as 09:00 in the viewer's. Each time the page shows, when the machine last connected and when an operation started and ended, reads in the viewer's zone, then in the machine's with its zone named, when the machine told its zone in `Hello` and the zone differs from the viewer's.
+- **Events, not a timer.** The hub tells its browsers when a machine starts waiting for approval, is approved, or reports an operation (`AgentPending`, `AgentApproved`, `AgentReported`), and the pages read the hub again on hearing one, and each time their events stream opens, which covers what a dropped stream missed. Settings read its list every 5 seconds before (decision 121); the events make that poll needless, and each change shows at once. A read the hub doesn't answer before any has answered is said in the page's place, and asked again every 3 seconds until one answers. "Pause live updates" holds both pages still (A3, decision 65).
+- **Only for the hub's own sessions.** The hub's routes answer a signed-in session, or the browser when sign-in is off (decision 121), so its machine events go only to those streams, never to an API token's or an AI agent's, whatever permissions it holds.
+
+## Where it is reached
+
+The dashboard is the hub's main page, but the header's links are the same on every daemon (§4.4, "Navigation"): they don't change with the daemon's mode, and a hub-only link would be the first that does, on a line whose seven links and Sign out already take 903 of its 928 pixels in a pseudolocale. So the hub's start page leads to the dashboard first, after its notices, and the Machines tab of Settings, where machines are approved, leads there too, each with a link "See the approved machines' latest operations". A daemon that isn't a hub shows neither link, and its `/dashboard` is a page not found.
+
+## Known limits
+
+- A machine that starts waiting is announced politely while any tab of Settings shows, not only the Machines tab: the person is in Settings, where approving it is one tab away.
+- A read that fails after one that answered keeps the machines shown and says nothing; the next event or the stream's next opening reads again.
+- The rest of §4.4's card (plans, next runs, overdue plans, live progress, recent failures) and a machine's own page wait for #1440; removing or rejecting a machine, and its event, for #1439.

@@ -227,7 +227,7 @@ pub struct MachineOperationDto {
 /// reports the hub let go of past the cap, and its latest operations,
 /// newest first. Whether it is online isn't told: a machine connects only
 /// to send its reports, so the hub holds no lasting connection to read it
-/// from (§16, decision NN).
+/// from (§16, decision 149).
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "kebab-case", deny_unknown_fields)]
 pub struct HubMachineDto {

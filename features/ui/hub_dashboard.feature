@@ -5,7 +5,7 @@ Feature: The hub's dashboard of its approved machines
   started and ended, how it came out, and the error code of a failure), and
   a warning when the hub let go of its oldest reports. A machine connects
   only to send its reports, so the page says when it last connected rather
-  than whether it is online (§16, decision NN). A machine's times read in
+  than whether it is online (§16, decision 149). A machine's times read in
   the viewer's zone, and in its own beside them when the two differ (#115).
   The page follows the hub's events, and "Pause live updates" holds it still
   until it is pressed again (A3; §16, decision 65). It is the hub's main
