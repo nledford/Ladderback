@@ -7,7 +7,7 @@ use api::sync::{LastRunPayload, PlanPayload, PlansAckPayload, PlansPayload, Prog
 use domain::fleet::{
     EpochSeconds, LastRun, LastRunOutcome, PlansReport, ReportedPlan, ReportedProgress, WireName,
 };
-use domain::{OperationId, PlanId};
+use domain::{OperationId, PlanId, Timestamp};
 
 use super::{WireRefused, uuid};
 
@@ -32,8 +32,9 @@ pub fn plans_payload(report: &PlansReport) -> Vec<u8> {
 }
 
 /// The snapshot a payload's bytes hold: more plans than a snapshot holds, a
-/// plan ID that isn't one, an outcome this build doesn't know or a number
-/// past `i64::MAX`, which the hub's store can't hold, refuses it.
+/// plan ID that isn't one, an outcome this build doesn't know, a number
+/// past `i64::MAX`, which the hub's store can't hold, or a time past year
+/// 9999, which no timestamp holds, refuses it.
 pub fn read_plans(bytes: &[u8]) -> Result<PlansReport, WireRefused> {
     let payload = PlansPayload::from_bytes(bytes).map_err(|_| WireRefused)?;
     let plans = payload
@@ -46,17 +47,13 @@ pub fn read_plans(bytes: &[u8]) -> Result<PlansReport, WireRefused> {
                     .last
                     .map(|last| {
                         Ok(LastRun {
-                            at: EpochSeconds::from_seconds(held(last.at)?),
+                            at: time(last.at)?,
                             outcome: LastRunOutcome::from_wire_name(&last.outcome)
                                 .ok_or(WireRefused)?,
                         })
                     })
                     .transpose()?,
-                next_run: plan
-                    .next
-                    .map(held)
-                    .transpose()?
-                    .map(EpochSeconds::from_seconds),
+                next_run: plan.next.map(time).transpose()?,
             })
         })
         .collect::<Result<Vec<_>, WireRefused>>()?;
@@ -89,8 +86,8 @@ pub fn progress_payload(progress: &ReportedProgress) -> Vec<u8> {
 }
 
 /// The progress a payload's bytes hold: an operation ID that isn't a UUID,
-/// a step or unit that isn't a wire name, or a number past `i64::MAX`
-/// refuses it.
+/// a step or unit that isn't a wire name, a number past `i64::MAX` or a
+/// time past year 9999 refuses it.
 pub fn read_progress(bytes: &[u8]) -> Result<ReportedProgress, WireRefused> {
     let payload = ProgressPayload::from_bytes(bytes).map_err(|_| WireRefused)?;
     Ok(ReportedProgress {
@@ -102,7 +99,7 @@ pub fn read_progress(bytes: &[u8]) -> Result<ReportedProgress, WireRefused> {
         unit: WireName::parse(&payload.unit).map_err(|_| WireRefused)?,
         current: held(payload.current)?,
         total: payload.total.map(held).transpose()?,
-        at: EpochSeconds::from_seconds(held(payload.at)?),
+        at: time(payload.at)?,
     })
 }
 
@@ -111,6 +108,16 @@ fn held(number: u64) -> Result<u64, WireRefused> {
     i64::try_from(number)
         .map(|_| number)
         .map_err(|_| WireRefused)
+}
+
+/// `seconds` since the Unix epoch, when they are a timestamp's: the hub
+/// shows each time it keeps.
+fn time(seconds: u64) -> Result<EpochSeconds, WireRefused> {
+    i64::try_from(seconds)
+        .ok()
+        .filter(|seconds| Timestamp::from_second(*seconds).is_ok())
+        .map(|_| EpochSeconds::from_seconds(seconds))
+        .ok_or(WireRefused)
 }
 
 #[cfg(test)]

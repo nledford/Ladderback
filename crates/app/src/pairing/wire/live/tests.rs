@@ -52,18 +52,24 @@ fn a_snapshot_of_plans_reads_back_as_it_was_written() {
     assert_eq!(read_plans(&bytes), Ok(report()));
 }
 
-/// With every plan ID at its longest and every number at its largest the
-/// hub's store holds, a full snapshot still fits one frame.
+/// The last second a timestamp holds, the latest time a machine can send.
+fn latest() -> u64 {
+    domain::Timestamp::MAX.as_second().unsigned_abs()
+}
+
+/// With every plan ID at its longest, every time at its latest and every
+/// other number at its largest the hub's store holds, a full snapshot
+/// still fits one frame.
 #[test]
 fn the_largest_snapshot_fits_one_frame() {
     let largest = i64::MAX.unsigned_abs();
     let longest = |n: usize| format!("{}{n:02}", "p".repeat(62));
     let last = LastRun {
-        at: EpochSeconds::from_seconds(largest),
+        at: EpochSeconds::from_seconds(latest()),
         outcome: LastRunOutcome::SucceededWithWarnings,
     };
     let plans = (0..MAX_PLANS_REPORTED)
-        .map(|n| plan(&longest(n), Some(last), Some(largest)))
+        .map(|n| plan(&longest(n), Some(last), Some(latest())))
         .collect();
     let report = PlansReport::from_parts(plans, largest).unwrap();
     assert_eq!(read_plans(&plans_payload(&report)), Ok(report.clone()));
@@ -103,7 +109,7 @@ fn a_snapshot_with_too_many_plans_or_a_field_that_isnt_one_is_refused() {
         r#"{"plans":[{"plan":"home","next":9223372036854775808}],"left_out":0}"#.to_owned(),
         r#"{"plans":[{"plan":"home","last":{"at":9223372036854775808,"outcome":"failed"}}],"left_out":0}"#
             .to_owned(),
-        // Past the last second of year 9999, which no timestamp holds.
+        // Past the last second a timestamp holds, in year 9999.
         r#"{"plans":[{"plan":"home","next":253402300800}],"left_out":0}"#.to_owned(),
         r#"{"plans":[{"plan":"home","last":{"at":253402300800,"outcome":"failed"}}],"left_out":0}"#
             .to_owned(),
@@ -152,7 +158,7 @@ fn a_progress_reads_back_as_it_was_written() {
     };
     assert_eq!(read_progress(&progress_payload(&bare)), Ok(bare));
     let last_second = ReportedProgress {
-        at: EpochSeconds::from_seconds(253_402_300_799),
+        at: EpochSeconds::from_seconds(latest()),
         ..progress()
     };
     assert_eq!(
