@@ -392,6 +392,7 @@ pub(super) fn translate(event: WorkerEvent, redactor: &Redactor) -> Option<Engin
                 | ErrorCode::FolderUnknown
                 | ErrorCode::MaintenanceBusy
                 | ErrorCode::MaintenanceNotOwner
+                | ErrorCode::MaintenanceNoLease
                 | ErrorCode::RetentionKeepsNothing
                 | ErrorCode::MaintenanceKindUnknown
                 | ErrorCode::AdoptionNoMatch

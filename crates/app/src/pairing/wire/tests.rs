@@ -564,3 +564,107 @@ fn an_envelope_or_proof_out_of_shape_is_refused() {
     };
     assert_eq!(hub_message(&frame), Err(WireRefused));
 }
+
+/// A `ReposSnapshot` of the most repositories it names, each asking for
+/// `local`, and the `RepoGrants` that grants them all at the largest numbers
+/// the wire takes, each fit in one frame, signed and encoded: a machine that
+/// uses that many repositories still gets its leases (§7.2, I1).
+#[test]
+fn a_full_report_of_repositories_and_its_grants_each_fit_a_frame() {
+    use domain::fleet::{AgentEnvelope, HubEnvelope, grants_kind, repos_kind};
+    use domain::maintenance::{Grant, LeaseEpoch, RepoGrants, RepositoryReport, RepositoryReports};
+    use domain::planning::Maintenance;
+    use domain::{RepositoryId, Timestamp};
+
+    let largest = i64::MAX as u64;
+    let repositories: Vec<RepositoryId> = (0..MAX_REPORTED_REPOSITORIES)
+        .map(|n| RepositoryId::parse(&format!("{n:064x}")).unwrap())
+        .collect();
+    let reports = RepositoryReports::new(repositories.iter().map(|repository| RepositoryReport {
+        repository: repository.clone(),
+        request: Maintenance::Local,
+        holds_other_agents_snapshots: true,
+    }));
+    let sent = agent_envelope_frame(&AgentEnvelope {
+        kind: repos_kind(),
+        seq: u64::MAX,
+        payload: repos_payload(&reports),
+        signature: signature(7),
+    })
+    .to_text();
+    assert!(
+        sent.len() <= MAX_FRAME_BYTES,
+        "a full ReposSnapshot takes {} bytes",
+        sent.len()
+    );
+    let grants = RepoGrants {
+        generation: largest,
+        signed_at: Timestamp::MAX,
+        grants: repositories
+            .iter()
+            .map(|repository| Grant {
+                repository: repository.clone(),
+                epoch: LeaseEpoch::new(largest).unwrap(),
+                expires_at: Timestamp::MAX,
+            })
+            .collect(),
+    };
+    let answered = hub_envelope_frame(&HubEnvelope {
+        kind: grants_kind(),
+        seq: u64::MAX,
+        expires_at: EpochSeconds::from_seconds(u64::MAX),
+        payload: grants_payload(&grants),
+        signature: signature(7),
+    })
+    .to_text();
+    assert!(
+        answered.len() <= MAX_FRAME_BYTES,
+        "full RepoGrants take {} bytes",
+        answered.len()
+    );
+}
+
+/// A signing time with any part of a second past it rounds up to the next
+/// second, and a whole second stays as it is, so a grant's lease counted
+/// from it never runs longer than the hub's.
+#[test]
+fn a_signing_time_rounds_up_to_its_second_and_an_expiry_down() {
+    let whole = Timestamp::new(1_000, 0).unwrap();
+    let past = Timestamp::new(1_000, 1).unwrap();
+    assert_eq!(seconds_up(whole), 1_000);
+    assert_eq!(seconds_up(past), 1_001);
+    assert_eq!(seconds_down(whole), 1_000);
+    assert_eq!(seconds_down(past), 1_000);
+}
+
+/// The hub's grants read back from their bytes with the generation and the
+/// epochs it signed, up to the largest the agent's store holds; one past it
+/// is refused (§7.2, I1).
+#[test]
+fn grants_read_back_from_their_bytes_up_to_the_largest_the_store_holds() {
+    use domain::RepositoryId;
+    use domain::maintenance::{Grant, LeaseEpoch, RepoGrants};
+
+    let grants = |generation: u64, epoch: u64| RepoGrants {
+        generation,
+        signed_at: Timestamp::from_second(1_000).unwrap(),
+        grants: vec![Grant {
+            repository: RepositoryId::parse(&"0a".repeat(32)).unwrap(),
+            epoch: LeaseEpoch::new(epoch).unwrap(),
+            expires_at: Timestamp::from_second(2_000).unwrap(),
+        }],
+    };
+    let largest = i64::MAX as u64;
+    for (generation, epoch) in [(7, 3), (largest, largest)] {
+        let sent = grants(generation, epoch);
+        assert_eq!(read_grants(&grants_payload(&sent)), Ok(sent));
+    }
+    assert_eq!(
+        read_grants(&grants_payload(&grants(largest + 1, 3))),
+        Err(WireRefused)
+    );
+    assert_eq!(
+        read_grants(&grants_payload(&grants(7, largest + 1))),
+        Err(WireRefused)
+    );
+}

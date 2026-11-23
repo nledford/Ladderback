@@ -379,6 +379,12 @@ pub enum ErrorCode {
     /// `local` (I1, §7.3), so nothing in it was changed. The argument `alias`
     /// names it.
     MaintenanceNotOwner,
+    /// This machine is paired with a hub and holds no live lease on the
+    /// repository from it (I1, §7.3): it hasn't heard a grant, the hub
+    /// granted the repository to no one or to another machine, or its lease
+    /// ran out on the hub's time. Nothing in the repository was changed. The
+    /// argument `alias` names it.
+    MaintenanceNoLease,
     /// The plan's retention policy is set and would keep nothing, so the
     /// forget was refused before anything was removed. The argument `plan`
     /// names it.
@@ -1514,7 +1520,7 @@ impl ErrorCode {
                 kind: ArgKind::Text,
                 optional: false,
             }],
-            Self::MaintenanceNotOwner => &[ArgSpec {
+            Self::MaintenanceNotOwner | Self::MaintenanceNoLease => &[ArgSpec {
                 name: "alias",
                 kind: ArgKind::Text,
                 optional: false,

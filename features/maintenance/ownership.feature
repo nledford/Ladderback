@@ -14,6 +14,14 @@ Feature: The hub gives each repository at most one maintenance owner
   the hub's. A machine waiting for approval is granted nothing and keeps no
   other machine from a lease (§16, decision 120, "What pending means").
 
+  A paired machine maintains a repository (a forget, a prune, a check or an
+  adoption) only while it holds the hub's lease on it, and judges when the
+  lease runs out on the hub's time, which each grant carries, never on its
+  own clock. A paired machine that holds no lease, because the hub hasn't
+  granted one yet or can't be reached, maintains nothing and says why; its
+  backups and previews run all the same. A machine that isn't paired
+  maintains what it asks for, as before.
+
   Background:
     Given a hub that approved the machines "laptop" and "nas"
 
@@ -96,3 +104,44 @@ Feature: The hub gives each repository at most one maintenance owner
     When "desktop" claims the repository "photos"
     Then the hub decided nothing of the report of "desktop"
     And nobody holds the lease on "photos"
+
+  Scenario: A paired machine the hub hasn't granted a lease maintains nothing
+    Given "laptop" is paired with the hub and has heard no grant from it
+    Then "laptop" may not maintain "photos", because it holds no lease on it
+
+  Scenario: A machine that isn't paired maintains what it asks for
+    Given "laptop" isn't paired with a hub
+    Then "laptop" may maintain "photos"
+
+  Scenario: A machine maintains a repository while the hub's lease holds
+    When "laptop" claims the repository "photos" and hears the hub's grants
+    Then "laptop" may maintain "photos"
+
+  Scenario: A lease runs out on the hub's time, whatever the machine's clock says
+    Given the clock of "laptop" runs 3 days behind the hub's
+    And "laptop" claims the repository "photos" and hears the hub's grants
+    And "laptop" can't reach the hub any more
+    When 7 days pass on the hub
+    Then "laptop" may not maintain "photos", because its lease ran out
+
+  Scenario: Two paired machines never both maintain one repository, across a lost connection and skewed clocks
+    Given the clock of "laptop" runs 3 days behind the hub's
+    And the clock of "nas" runs 2 days ahead of the hub's
+    And "laptop" claims the repository "photos" and hears the hub's grants
+    And "laptop" can't reach the hub any more
+    When "nas" claims the repository "photos" and hears the hub's grants every hour for 8 days
+    Then "laptop" and "nas" never both may maintain "photos"
+    And "nas" may maintain "photos"
+
+  Scenario: A machine refuses a grant below the highest it has seen
+    Given "laptop" heard a grant of "photos" at epoch 3
+    When the hub grants "laptop" the repository "photos" at epoch 2
+    Then "laptop" refused the grant of "photos" as below the highest it has seen
+    And "laptop" may not maintain "photos", because it holds no lease on it
+
+  Scenario: A machine that stops using a repository releases its lease, and another is granted it
+    Given "laptop" claims the repository "photos" and hears the hub's grants
+    When "laptop" stops using "photos" and the hub acknowledges its release
+    And "nas" claims the repository "photos" and hears the hub's grants
+    Then "nas" may maintain "photos"
+    And "laptop" may not maintain "photos", because it holds no lease on it

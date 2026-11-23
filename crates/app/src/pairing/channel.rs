@@ -2,11 +2,16 @@ use std::sync::Arc;
 
 use domain::fleet::{
     Ack, AgentEnvelope, Binding, EpochSeconds, FIRST_SEQUENCE, HubEnvelope, Nonce, PayloadDigest,
-    PublicKey, SignedMessage, SigningSeed, WireName, ack_kind, fresh_on_hub_time, report_kind,
+    PublicKey, SignedMessage, SigningSeed, WireName, ack_kind, fresh_on_hub_time, grants_kind,
+    release_kind, released_kind, report_kind, repos_kind,
 };
-use domain::{AgentId, SignedDuration};
+use domain::maintenance::{LeaseEpoch, RepoGrants, RepositoryReports};
+use domain::{AgentId, RepositoryId, SignedDuration};
 
-use super::wire::{HubMessage, agent_envelope_frame, hub_message, read_ack, report_payload};
+use super::wire::{
+    HubMessage, agent_envelope_frame, hub_message, read_ack, read_grants, read_released,
+    release_payload, report_payload, repos_payload,
+};
 use crate::ports::{Clock, HubLink, LinkError, OutboxEntry, Signing, SigningError};
 
 /// Why a connection after the handshake went on no further. None carries a
@@ -120,6 +125,45 @@ impl AgentChannel {
             let envelope = self.receive().await?;
             if envelope.kind == ack_kind() {
                 return read_ack(&envelope.payload).map_err(|_| ChannelError::OutOfTurn);
+            }
+        }
+    }
+
+    /// Sends `reports` as every repository the agent uses
+    /// (`ReposSnapshot`), signed with the next sequence number.
+    pub async fn send_repos(&mut self, reports: &RepositoryReports) -> Result<(), ChannelError> {
+        self.send(repos_kind(), repos_payload(reports)).await
+    }
+
+    /// The hub's next grants, once they hold. A signed message of another
+    /// kind is counted and passed over.
+    pub async fn receive_grants(&mut self) -> Result<RepoGrants, ChannelError> {
+        loop {
+            let envelope = self.receive().await?;
+            if envelope.kind == grants_kind() {
+                return read_grants(&envelope.payload).map_err(|_| ChannelError::OutOfTurn);
+            }
+        }
+    }
+
+    /// Sends the release of the agent's lease on `repository` at `epoch`
+    /// (`ReleaseAck`), signed with the next sequence number.
+    pub async fn send_release(
+        &mut self,
+        repository: &RepositoryId,
+        epoch: LeaseEpoch,
+    ) -> Result<(), ChannelError> {
+        self.send(release_kind(), release_payload(repository, epoch))
+            .await
+    }
+
+    /// The release the hub next says it took, once its answer holds. A
+    /// signed message of another kind is counted and passed over.
+    pub async fn receive_released(&mut self) -> Result<(RepositoryId, LeaseEpoch), ChannelError> {
+        loop {
+            let envelope = self.receive().await?;
+            if envelope.kind == released_kind() {
+                return read_released(&envelope.payload).map_err(|_| ChannelError::OutOfTurn);
             }
         }
     }

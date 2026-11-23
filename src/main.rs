@@ -857,6 +857,10 @@ fn run_daemon(
         // so an operation it starts at once is reported (§7.2).
         #[cfg(feature = "hub")]
         let early = app::ports::EventBus::subscribe(state.events.as_ref()).await;
+        // It reads which repositories this machine maintains, for their
+        // leases (§7.3).
+        #[cfg(feature = "hub")]
+        let config = background.config();
         let scheduled = tokio::spawn(background.run(random));
         // A paired machine's reports to its hub run beside the scheduler
         // and never hold it up (§7.2).
@@ -867,6 +871,7 @@ fn run_daemon(
                 Arc::clone(&state.events),
                 early,
                 Arc::clone(&operation_log.store),
+                config,
             ))
         });
         let app = http_adapter::router(

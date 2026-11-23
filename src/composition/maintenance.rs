@@ -46,6 +46,10 @@ impl PlanRunner {
         .with_events(Arc::clone(&self.events))
         .with_stats(Arc::new(self.stats_reader()))
         .with_machine(Arc::clone(&self.machine));
+        let maintenance = match &self.leases {
+            Some(leases) => maintenance.with_leases(Arc::clone(leases)),
+            None => maintenance,
+        };
         match &self.locations {
             Some(locations) => maintenance.with_locations(Arc::clone(locations)),
             None => maintenance,
@@ -523,6 +527,7 @@ pub(super) async fn refusal(
     match error {
         MaintenanceError::UnknownRepository => MaintenanceRefusal::UnknownRepository,
         MaintenanceError::NotOwner => MaintenanceRefusal::NotOwner,
+        MaintenanceError::NoLease(_) => MaintenanceRefusal::NoLease,
         // The configuration is refused as a save of it is (#347).
         MaintenanceError::Unavailable(error) => app::ports::config_unusable(*error, unavailable),
         MaintenanceError::Resolve(error) => secret_refused(config, repository, &error).await,
@@ -1035,6 +1040,22 @@ mod tests {
             .await,
             MaintenanceRefusal::NotOwner
         );
+    }
+
+    #[tokio::test]
+    async fn a_repository_this_machine_holds_no_lease_on_is_told_as_the_route_answers_it() {
+        use domain::maintenance::NoLease;
+        for why in [NoLease::NoneHeld, NoLease::RanOut] {
+            assert_eq!(
+                refusal(
+                    &InMemoryConfigStore::new(),
+                    &alias(),
+                    MaintenanceError::NoLease(why)
+                )
+                .await,
+                MaintenanceRefusal::NoLease
+            );
+        }
     }
 
     #[tokio::test]

@@ -9,12 +9,17 @@ use domain::fleet::{
     Nonce, Pair, PairAnswer, PairRefusal, PairRequest, Paired, PairingToken, PayloadDigest, Proof,
     ProofRefusal, ProofRequest, PublicKey, Refused, ReportSeq, SeedFile, SignedMessage,
     SigningSeed, TokenId, TokenRecord, TokenTls, TokenUse, UNUSED_TOKEN_LIMIT, Welcome, WireName,
-    ack_kind, hello_kind, list_agents, report_kind, token_life, welcome_kind,
+    ack_kind, grants_kind, hello_kind, list_agents, release_kind, released_kind, report_kind,
+    repos_kind, token_life, welcome_kind,
 };
-use domain::{AgentId, SignedDuration, TimeZoneDatabase};
+use domain::{AgentId, SignedDuration, TimeZoneDatabase, Timestamp};
 
-use super::wire::{ack_payload, read_hello, read_report, welcome_payload};
+use super::wire::{
+    ack_payload, grants_payload, read_hello, read_release, read_report, read_repos,
+    released_payload, welcome_payload,
+};
 use crate::access::Access;
+use crate::ownership::RepositoryOwners;
 use crate::ports::{
     Added, AgentRegistry, Clock, EventBus, Identity, IdentityError, Random, RandomUnavailable,
     ReportInbox, Signing, SigningError, StoreError,
@@ -45,6 +50,10 @@ pub struct HubPairing {
     /// Where the hub keeps its agents' reports, when it takes them: with
     /// none, it closes each connection after `Welcome`.
     inbox: Option<Arc<dyn ReportInbox>>,
+    /// Who maintains each repository, when the hub decides it: with none,
+    /// it counts an agent's `ReposSnapshot` and `ReleaseAck` and answers
+    /// neither.
+    owners: Option<Arc<RepositoryOwners>>,
     /// The agents whose oldest reports the hub let go of past the cap since
     /// it started: it warns of each once.
     warned_full: Mutex<HashSet<AgentId>>,
@@ -207,6 +216,7 @@ impl HubPairing {
             version,
             access: None,
             inbox: None,
+            owners: None,
             warned_full: Mutex::default(),
             warned_behind: Mutex::default(),
             events: None,
@@ -234,6 +244,16 @@ impl HubPairing {
     #[must_use]
     pub fn with_events(mut self, events: Arc<dyn EventBus>) -> Self {
         self.events = Some(events);
+        self
+    }
+
+    /// This pairing deciding, by `owners`, which agent maintains each
+    /// repository its approved agents report, and answering each
+    /// `ReposSnapshot` with signed `RepoGrants` and each `ReleaseAck` with
+    /// `Released` (§7.2, §7.3).
+    #[must_use]
+    pub fn with_owners(mut self, owners: Arc<RepositoryOwners>) -> Self {
+        self.owners = Some(owners);
         self
     }
 
@@ -721,8 +741,9 @@ impl HubPairing {
     /// The hub's answer to `message`, the agent's next after its `Hello`,
     /// when it holds: signed by the agent's key on this connection with the
     /// next sequence number. A report is kept unless the hub took it
-    /// before, and acknowledged either way; a message of another kind is
-    /// counted and acted on in no way.
+    /// before, and acknowledged either way; a `ReposSnapshot` is answered
+    /// with the agent's grants and a `ReleaseAck` with `Released`; a
+    /// message of another kind is counted and acted on in no way.
     pub(super) async fn take_message(
         &self,
         keys: &HubKeys,
@@ -750,29 +771,23 @@ impl HubPairing {
             return Ok(Err(MessageRefused::OutOfSequence));
         }
         syncing.next_received = syncing.next_received.saturating_add(1);
-        if message.kind != report_kind() {
-            return Ok(Ok(None));
-        }
-        let (Some(inbox), Ok(entry)) = (&self.inbox, read_report(&message.payload)) else {
-            return Ok(Err(MessageRefused::Unexpected));
-        };
         let now = self.clock.now();
-        let taken = inbox.ingest(syncing.agent_id, &entry, now).await?;
-        if let Some(dropped) = taken.dropped {
-            self.warn_full(syncing.agent_id, dropped);
-        }
-        if taken.ingest == Ingest::New {
-            self.tell(fleet::reported(syncing.agent_id, &entry.report))
-                .await;
-        }
-        if taken.ingest == Ingest::Behind {
-            self.warn_behind(syncing.agent_id, entry.seq);
-        }
-        let payload = ack_payload(Ack {
-            epoch: entry.epoch,
-            seq: entry.seq,
-        });
-        let kind = ack_kind();
+        let answered = if message.kind == report_kind() {
+            self.take_report(syncing.agent_id, &message.payload, now)
+                .await?
+        } else if message.kind == repos_kind() {
+            self.grant(syncing.agent_id, &message.payload).await?
+        } else if message.kind == release_kind() {
+            self.take_release(syncing.agent_id, &message.payload, now)
+                .await?
+        } else {
+            return Ok(Ok(None));
+        };
+        let (kind, payload) = match answered {
+            Ok(Some(answer)) => answer,
+            Ok(None) => return Ok(Ok(None)),
+            Err(refused) => return Ok(Err(refused)),
+        };
         let sequence = syncing.next_sent;
         let expires_at = EpochSeconds::from_seconds(
             EpochSeconds::from_timestamp(now)
@@ -800,6 +815,75 @@ impl HubPairing {
             payload,
             signature,
         })))
+    }
+
+    /// Keeps `agent`'s report unless the hub took it before, and answers
+    /// with its acknowledgement either way.
+    async fn take_report(
+        &self,
+        agent: AgentId,
+        payload: &[u8],
+        now: Timestamp,
+    ) -> Result<Answered, HubPairingError> {
+        let (Some(inbox), Ok(entry)) = (&self.inbox, read_report(payload)) else {
+            return Ok(Err(MessageRefused::Unexpected));
+        };
+        let taken = inbox.ingest(agent, &entry, now).await?;
+        if let Some(dropped) = taken.dropped {
+            self.warn_full(agent, dropped);
+        }
+        if taken.ingest == Ingest::New {
+            self.tell(fleet::reported(agent, &entry.report)).await;
+        }
+        if taken.ingest == Ingest::Behind {
+            self.warn_behind(agent, entry.seq);
+        }
+        let payload = ack_payload(Ack {
+            epoch: entry.epoch,
+            seq: entry.seq,
+        });
+        Ok(Ok(Some((ack_kind(), payload))))
+    }
+
+    /// Decides the repositories `agent`'s `ReposSnapshot` names, and
+    /// answers with every lease it holds, signed at the hub's time. An
+    /// agent no longer approved is answered with nothing and the
+    /// connection ends.
+    async fn grant(&self, agent: AgentId, payload: &[u8]) -> Result<Answered, HubPairingError> {
+        let Some(owners) = &self.owners else {
+            return Ok(Ok(None));
+        };
+        let Ok(reports) = read_repos(payload) else {
+            return Ok(Err(MessageRefused::Unexpected));
+        };
+        let Some(grants) = owners.grant(agent, &reports).await? else {
+            return Ok(Err(MessageRefused::Unexpected));
+        };
+        Ok(Ok(Some((grants_kind(), grants_payload(&grants)))))
+    }
+
+    /// Ends the lease `agent`'s `ReleaseAck` names, and answers with
+    /// `Released`. A release the hub refuses names a lease the agent no
+    /// longer holds, so the agent may let go of it all the same: it is
+    /// answered alike.
+    async fn take_release(
+        &self,
+        agent: AgentId,
+        payload: &[u8],
+        now: Timestamp,
+    ) -> Result<Answered, HubPairingError> {
+        let Some(owners) = &self.owners else {
+            return Ok(Ok(None));
+        };
+        let Ok((repository, epoch)) = read_release(payload) else {
+            return Ok(Err(MessageRefused::Unexpected));
+        };
+        // Either way the agent holds no lease at that epoch any more.
+        let _ended = owners.release(agent, &repository, epoch).await?;
+        Ok(Ok(Some((
+            released_kind(),
+            released_payload(&repository, epoch, now),
+        ))))
     }
 
     /// Warns, once per agent while the hub runs, that it lets go of the
@@ -915,3 +999,6 @@ impl Syncing {
         self.agent_id
     }
 }
+
+/// The kind and payload the hub answers a message with, when it answers.
+type Answered = Result<Option<(WireName, Vec<u8>)>, MessageRefused>;

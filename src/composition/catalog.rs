@@ -438,6 +438,7 @@ fn told_failure(reason: &FailureReason) -> Option<SnapshotsError> {
         // as `engine-unavailable` unnoticed.
         M::UnknownRepository
         | M::NotOwner
+        | M::NoLease
         | M::UnknownPlan { .. }
         | M::Busy { .. }
         | M::KeepsNothing { .. }

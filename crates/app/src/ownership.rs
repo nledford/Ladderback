@@ -7,7 +7,10 @@
 
 use std::sync::Arc;
 
-use domain::maintenance::{LeaseEpoch, ReleaseRefused, RepositoryReports};
+use domain::fleet::GENERATION;
+use domain::maintenance::{
+    ClaimOutcome, Grant, LeaseEpoch, ReleaseRefused, RepoGrants, RepositoryReports,
+};
 use domain::{AgentId, RepositoryId};
 
 use crate::ports::{AgentRegistry, ClaimDecision, Clock, OwnershipRegistry, StoreError};
@@ -49,12 +52,56 @@ impl RepositoryOwners {
         agent: AgentId,
         reports: &RepositoryReports,
     ) -> Result<Reported, StoreError> {
+        let decided = self.decide(agent, reports, self.clock.now()).await?;
+        Ok(decided.map_or(Reported::NotApproved, Reported::Decided))
+    }
+
+    /// Decides `reports` as [`report`](Self::report) does, and gives every
+    /// lease `agent` then holds and claimed (granted, renewed or left to
+    /// run out), signed at the hub's now; none for an agent that isn't
+    /// approved. A lease it holds on a repository it no longer claims is
+    /// left out: it ends at the agent's release or its expiry.
+    pub async fn grant(
+        &self,
+        agent: AgentId,
+        reports: &RepositoryReports,
+    ) -> Result<Option<RepoGrants>, StoreError> {
+        let now = self.clock.now();
+        let Some(decided) = self.decide(agent, reports, now).await? else {
+            return Ok(None);
+        };
+        let grants = decided
+            .into_iter()
+            .filter_map(|decision| match decision.outcome {
+                ClaimOutcome::Granted(lease)
+                | ClaimOutcome::Renewed(lease)
+                | ClaimOutcome::Unrenewed(lease) => Some(Grant {
+                    repository: decision.repository,
+                    epoch: lease.epoch,
+                    expires_at: lease.expires_at,
+                }),
+                ClaimOutcome::Refused(_) | ClaimOutcome::NoClaim => None,
+            })
+            .collect();
+        Ok(Some(RepoGrants {
+            generation: GENERATION,
+            signed_at: now,
+            grants,
+        }))
+    }
+
+    /// What the hub decided of `reports` at `now`, when `agent` is approved.
+    async fn decide(
+        &self,
+        agent: AgentId,
+        reports: &RepositoryReports,
+        now: domain::Timestamp,
+    ) -> Result<Option<Vec<ClaimDecision>>, StoreError> {
         match self.agents.agent(agent).await? {
             Some(record) if !record.is_pending() => {
-                let decided = self.owners.report(agent, reports, self.clock.now()).await?;
-                Ok(Reported::Decided(decided))
+                Ok(Some(self.owners.report(agent, reports, now).await?))
             }
-            _ => Ok(Reported::NotApproved),
+            _ => Ok(None),
         }
     }
 

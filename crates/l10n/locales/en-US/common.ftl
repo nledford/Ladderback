@@ -720,6 +720,14 @@ error-hub-unavailable = The { -hub } couldn't read or keep its key or its pairin
 # $alias (text): the repository's alias, such as demo.
 error-maintenance-not-owner = This { -machine } does not maintain the repository { $alias }, so nothing in it was changed. To maintain it from this { -machine }, turn its maintenance on from the Snapshots page.
 
+# This machine is paired with a hub and holds no live lease on the repository
+# from it, so a forget, a prune, a check or an adoption was refused and nothing
+# in the repository was changed: it hasn't heard the hub's grant yet, the hub
+# granted the repository to another machine or to none, or the lease ran out
+# while the hub couldn't be reached.
+# $alias (text): the repository's alias, such as demo.
+error-maintenance-no-lease = This { -machine } is paired with a { -hub } and holds no lease on the repository { $alias } from it, so nothing in it was changed. Check that the { -hub } can be reached and lets this { -machine } maintain the repository, then try again.
+
 # The plan's retention policy would keep nothing, so the forget was refused
 # before anything was removed.
 # $plan (text): the plan's ID, such as home.

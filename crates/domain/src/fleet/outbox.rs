@@ -59,6 +59,26 @@ pub fn ack_kind() -> WireName {
     WireName::known("Ack")
 }
 
+/// The kind of the agent's report of every repository it uses (§7.2).
+pub fn repos_kind() -> WireName {
+    WireName::known("ReposSnapshot")
+}
+
+/// The kind of the hub's signed grants, its answer to `ReposSnapshot`.
+pub fn grants_kind() -> WireName {
+    WireName::known("RepoGrants")
+}
+
+/// The kind of the agent's release of a lease it dropped (§7.3).
+pub fn release_kind() -> WireName {
+    WireName::known("ReleaseAck")
+}
+
+/// The kind of the hub's answer to `ReleaseAck`.
+pub fn released_kind() -> WireName {
+    WireName::known("Released")
+}
+
 /// An outbox's epoch: a random ID made with the outbox, so the reports of a
 /// rebuilt database are never taken for ones the hub already acknowledged.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]

@@ -74,6 +74,7 @@ fn refusal_of(repository: &str) -> Option<MaintenanceRefusal> {
     Some(match repository {
         "missing" => MaintenanceRefusal::UnknownRepository,
         "not-owner" => MaintenanceRefusal::NotOwner,
+        "no-lease" => MaintenanceRefusal::NoLease,
         "busy" => MaintenanceRefusal::Busy {
             running: text("018f0000-0000-7000-8000-000000000003"),
         },
@@ -1165,6 +1166,30 @@ async fn maintenance_of_a_repository_this_agent_does_not_maintain_is_a_conflict_
             assert_eq!(status.as_u16(), 409, "{kind} on {route}");
             assert_eq!(answer, expected, "{kind} on {route}");
         }
+    }
+}
+
+/// A paired machine's run refused for want of its hub's lease is a conflict
+/// naming the repository, as a run it doesn't maintain is (I1, §7.3).
+#[tokio::test]
+async fn i1_maintenance_without_the_hubs_lease_is_a_conflict_naming_it() {
+    use serde_json::json;
+    let expected = json!({
+        "code": "maintenance-no-lease",
+        "args": {"alias": {"type": "text", "value": "no-lease"}},
+    });
+    for kind in ["forget", "prune", "check"] {
+        let body = format!(r#"{{"kind":"{kind}"}}"#);
+        let response = request(
+            ui(),
+            Method::POST,
+            "/api/v1/repositories/no-lease/maintenance",
+            &body,
+        )
+        .await;
+        let (status, answer) = json_of(response).await;
+        assert_eq!(status.as_u16(), 409, "{kind}");
+        assert_eq!(answer, expected, "{kind}");
     }
 }
 

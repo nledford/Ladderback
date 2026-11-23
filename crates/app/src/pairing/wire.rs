@@ -5,8 +5,9 @@
 //! hold what it must refuses the whole frame.
 
 use api::sync::{
-    AckPayload, AgentApproval, AgentFrame, HelloPayload, HolderFrame, HubFrame, MAX_FRAME_BYTES,
-    ReportPayload, WelcomePayload,
+    AckPayload, AgentApproval, AgentFrame, GrantPayload, GrantsPayload, HelloPayload, HolderFrame,
+    HubFrame, MAX_FRAME_BYTES, ReleasePayload, ReleasedPayload, RepoPayload, ReportPayload,
+    ReposPayload, WelcomePayload,
 };
 use base64::Engine as _;
 use base64::engine::general_purpose::URL_SAFE_NO_PAD;
@@ -16,7 +17,9 @@ use domain::fleet::{
     MachineZone, Nonce, OutboxEpoch, Pair, PairAnswer, Paired, Proof, Protocols, PublicKey,
     Refused, ReportSeq, SIGNATURE_BYTES, Signature, Welcome, WireName,
 };
-use domain::{AgentId, OperationId, Uuid};
+use domain::maintenance::{Grant, LeaseEpoch, RepoGrants, RepositoryReport, RepositoryReports};
+use domain::planning::Maintenance;
+use domain::{AgentId, OperationId, RepositoryId, Timestamp, Uuid};
 
 use crate::ports::OutboxEntry;
 
@@ -246,6 +249,162 @@ pub fn read_ack(bytes: &[u8]) -> Result<Ack, WireRefused> {
 /// The UUID `text` holds, in its hyphenated form only.
 fn uuid(text: &str) -> Result<Uuid, WireRefused> {
     Uuid::try_parse(text).map_err(|_| WireRefused)
+}
+
+/// The most repositories one `ReposSnapshot` names, so its frame, and the
+/// `RepoGrants` that answers it, stay within [`MAX_FRAME_BYTES`] once
+/// signed and encoded: an agent that uses more reports the first by ID, and
+/// is granted no lease on the others.
+pub const MAX_REPORTED_REPOSITORIES: usize = 21;
+
+/// The bytes of a `ReposSnapshot`'s payload, which the agent signs: at most
+/// the first [`MAX_REPORTED_REPOSITORIES`] of `reports`.
+pub fn repos_payload(reports: &RepositoryReports) -> Vec<u8> {
+    ReposPayload {
+        repos: reports
+            .entries()
+            .iter()
+            .take(MAX_REPORTED_REPOSITORIES)
+            .map(|report| RepoPayload {
+                repo_id: report.repository.as_str().to_owned(),
+                requested_maintenance: report.request.as_str().to_owned(),
+                others_snapshots: report.holds_other_agents_snapshots,
+            })
+            .collect(),
+    }
+    .to_bytes()
+}
+
+/// The reports a `ReposSnapshot`'s bytes hold: a repository ID that isn't
+/// one or a request this build doesn't know refuses it.
+pub fn read_repos(bytes: &[u8]) -> Result<RepositoryReports, WireRefused> {
+    let payload = ReposPayload::from_bytes(bytes).map_err(|_| WireRefused)?;
+    let reports = payload
+        .repos
+        .iter()
+        .map(|repo| {
+            Ok(RepositoryReport {
+                repository: RepositoryId::parse(&repo.repo_id).map_err(|_| WireRefused)?,
+                request: Maintenance::parse(&repo.requested_maintenance)
+                    .map_err(|_| WireRefused)?,
+                holds_other_agents_snapshots: repo.others_snapshots,
+            })
+        })
+        .collect::<Result<Vec<_>, WireRefused>>()?;
+    Ok(RepositoryReports::new(reports))
+}
+
+/// The bytes of a `RepoGrants`'s payload, which the hub signs. Each expiry
+/// is rounded down to its second and the signing time up, so the lease
+/// the agent counts never runs longer than the hub's.
+pub fn grants_payload(grants: &RepoGrants) -> Vec<u8> {
+    GrantsPayload {
+        generation: grants.generation,
+        signed_at: seconds_up(grants.signed_at),
+        grants: grants
+            .grants
+            .iter()
+            .map(|grant| GrantPayload {
+                repo_id: grant.repository.as_str().to_owned(),
+                epoch: grant.epoch.get(),
+                expires_at: seconds_down(grant.expires_at),
+            })
+            .collect(),
+    }
+    .to_bytes()
+}
+
+/// The grants a `RepoGrants`'s bytes hold: a repository ID that isn't one,
+/// an epoch of 0, a generation or an epoch past `i64::MAX`, which the
+/// agent's store can't hold, or a time past the last there is refuses them.
+pub fn read_grants(bytes: &[u8]) -> Result<RepoGrants, WireRefused> {
+    let payload = GrantsPayload::from_bytes(bytes).map_err(|_| WireRefused)?;
+    let grants = payload
+        .grants
+        .iter()
+        .map(|grant| {
+            Ok(Grant {
+                repository: RepositoryId::parse(&grant.repo_id).map_err(|_| WireRefused)?,
+                epoch: lease_epoch(grant.epoch)?,
+                expires_at: time(grant.expires_at)?,
+            })
+        })
+        .collect::<Result<Vec<_>, WireRefused>>()?;
+    Ok(RepoGrants {
+        generation: storable(payload.generation)?,
+        signed_at: time(payload.signed_at)?,
+        grants,
+    })
+}
+
+/// The bytes of a `ReleaseAck`'s payload, which the agent signs.
+pub fn release_payload(repository: &RepositoryId, epoch: LeaseEpoch) -> Vec<u8> {
+    ReleasePayload {
+        repo_id: repository.as_str().to_owned(),
+        epoch: epoch.get(),
+    }
+    .to_bytes()
+}
+
+/// The release a `ReleaseAck`'s bytes hold.
+pub fn read_release(bytes: &[u8]) -> Result<(RepositoryId, LeaseEpoch), WireRefused> {
+    let payload = ReleasePayload::from_bytes(bytes).map_err(|_| WireRefused)?;
+    Ok((
+        RepositoryId::parse(&payload.repo_id).map_err(|_| WireRefused)?,
+        lease_epoch(payload.epoch)?,
+    ))
+}
+
+/// The bytes of a `Released`'s payload, which the hub signs.
+pub fn released_payload(
+    repository: &RepositoryId,
+    epoch: LeaseEpoch,
+    signed_at: Timestamp,
+) -> Vec<u8> {
+    ReleasedPayload {
+        repo_id: repository.as_str().to_owned(),
+        epoch: epoch.get(),
+        signed_at: seconds_up(signed_at),
+    }
+    .to_bytes()
+}
+
+/// The release a `Released`'s bytes say the hub took.
+pub fn read_released(bytes: &[u8]) -> Result<(RepositoryId, LeaseEpoch), WireRefused> {
+    let payload = ReleasedPayload::from_bytes(bytes).map_err(|_| WireRefused)?;
+    time(payload.signed_at)?;
+    Ok((
+        RepositoryId::parse(&payload.repo_id).map_err(|_| WireRefused)?,
+        lease_epoch(payload.epoch)?,
+    ))
+}
+
+/// `number` when the agent's store can hold it: up to `i64::MAX`.
+fn storable(number: u64) -> Result<u64, WireRefused> {
+    i64::try_from(number)
+        .map(|_| number)
+        .map_err(|_| WireRefused)
+}
+
+fn lease_epoch(number: u64) -> Result<LeaseEpoch, WireRefused> {
+    LeaseEpoch::new(storable(number)?).ok_or(WireRefused)
+}
+
+/// The time `seconds` after the Unix epoch.
+fn time(seconds: u64) -> Result<Timestamp, WireRefused> {
+    let seconds = i64::try_from(seconds).map_err(|_| WireRefused)?;
+    Timestamp::from_second(seconds).map_err(|_| WireRefused)
+}
+
+/// `time`'s whole seconds since the Unix epoch, rounded down; 0 before it.
+fn seconds_down(time: Timestamp) -> u64 {
+    u64::try_from(time.as_second()).unwrap_or(0)
+}
+
+/// `time`'s seconds since the Unix epoch, rounded up; 0 before it.
+fn seconds_up(time: Timestamp) -> u64 {
+    let part = u64::from(time.subsec_nanosecond() > 0);
+    seconds_down(time).saturating_add(part)
 }
 
 /// How `Welcome` and `Paired` say an agent's approval on the wire.

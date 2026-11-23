@@ -28,6 +28,7 @@ pub mod history;
 pub mod hub_tls;
 pub mod interop;
 pub mod keyring_check;
+pub mod leases;
 pub mod locations;
 pub mod log_write;
 pub mod machine;

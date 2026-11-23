@@ -281,3 +281,26 @@ async fn sqlite_store_meets_the_ownership_registry_contract() {
     )
     .await;
 }
+
+#[cfg(feature = "hub")]
+#[async_trait]
+impl contract::lease_cache::LeaseCacheHarness for SqliteFiles {
+    async fn empty(&self) -> Arc<dyn app::ports::LeaseCache> {
+        Arc::new(self.new_store().await)
+    }
+
+    async fn reopened(&self) -> Arc<dyn app::ports::LeaseCache> {
+        Arc::new(self.last_store().await)
+    }
+}
+
+#[cfg(feature = "hub")]
+#[tokio::test]
+async fn sqlite_store_meets_the_lease_cache_contract() {
+    within(
+        120,
+        "the lease cache contract suite",
+        contract::lease_cache::run(&SqliteFiles::default()),
+    )
+    .await;
+}

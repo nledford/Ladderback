@@ -192,6 +192,13 @@ impl Background {
         self.runner.runs.clone()
     }
 
+    /// The configuration the daemon runs on, which a paired machine's sync
+    /// reads for the leases it asks its hub for (§7.3).
+    #[cfg(feature = "hub")]
+    pub(crate) fn config(&self) -> Arc<dyn ConfigStore> {
+        Arc::clone(&self.config)
+    }
+
     /// What the orderly stop freezes ([`Self::runs`]) of a daemon that
     /// leaves the queue's leftovers and the scheduler unstarted, as a
     /// headless or scratch session does: the backups queued before it stay
@@ -666,6 +673,7 @@ async fn state_over(
         readings: Arc::<SqliteStore>::clone(&log.store),
         full_disk_access,
         machine: standing,
+        leases: maintenance_leases(data_dir, &log.store),
     });
     // `~/ladderback-restore`. With no home folder, or one that isn't
     // UTF-8, there is none: a restore to a new folder then needs
@@ -840,6 +848,30 @@ async fn state_over(
         background,
         stopping,
     ))
+}
+
+/// The leases a paired machine maintains under (§7.3, I1): its pin in
+/// `data_dir` and its lease cache in `store`, which the sync with its hub
+/// keeps (`hub::reporting`). An unpaired machine isn't held to them.
+#[cfg(feature = "hub")]
+fn maintenance_leases(
+    data_dir: &std::path::Path,
+    store: &Arc<SqliteStore>,
+) -> Option<Arc<app::leases::MaintenanceLeases>> {
+    Some(Arc::new(app::leases::MaintenanceLeases::new(
+        Arc::new(platform::identity::FileIdentity::in_data_dir(data_dir)),
+        Arc::<SqliteStore>::clone(store),
+        Arc::new(SystemClock),
+    )))
+}
+
+/// A build without the hub never pairs, so it holds no leases.
+#[cfg(not(feature = "hub"))]
+fn maintenance_leases(
+    _data_dir: &std::path::Path,
+    _store: &Arc<SqliteStore>,
+) -> Option<Arc<app::leases::MaintenanceLeases>> {
+    None
 }
 
 /// Where this machine stands, from the check at start of whether its data

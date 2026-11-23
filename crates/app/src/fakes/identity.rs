@@ -98,6 +98,9 @@ impl Identity for InMemoryIdentity {
     }
 
     async fn pin(&self) -> Result<Option<HubPin>, IdentityError> {
+        if let Some(error) = &self.unreadable {
+            return Err(error.clone());
+        }
         Ok(self.kept().pin.clone())
     }
 

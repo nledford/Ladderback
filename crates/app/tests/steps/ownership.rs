@@ -3,19 +3,27 @@
 //! registries and a clock of the hub's own that moves only when a step
 //! moves it (technical design §7.3, I1). A machine's claim is its report of
 //! the one repository with the request `local`; a machine that stops using
-//! a repository reports none.
+//! a repository reports none. A machine's own side, whether it may maintain
+//! a repository, is its leases use case on an in-memory cache and a clock
+//! of its own, which may run off the hub's and moves with it.
 
 use std::collections::BTreeMap;
 use std::sync::Arc;
 
-use app::fakes::{FakeClock, InMemoryAgentRegistry, InMemoryOwnershipRegistry};
+use app::fakes::{
+    FakeClock, InMemoryAgentRegistry, InMemoryIdentity, InMemoryLeaseCache,
+    InMemoryOwnershipRegistry,
+};
+use app::leases::MaintenanceLeases;
 use app::ownership::{Reported, RepositoryOwners};
-use app::ports::{ClaimDecision, Clock, OwnershipRegistry};
+use app::ports::{ClaimDecision, Clock, Identity, OwnershipRegistry};
 use cucumber::{given, then, when};
-use domain::fleet::{AgentRecord, AgentStatus, Hostname, PublicKey};
+use domain::fleet::{
+    AgentRecord, AgentStatus, GENERATION, Hostname, HubAddress, HubPin, PublicKey, TokenTls,
+};
 use domain::maintenance::{
-    ClaimOutcome, ClaimRefused, Lease, LeaseEpoch, ReleaseRefused, RepositoryOwnership,
-    RepositoryReport, RepositoryReports,
+    ClaimOutcome, ClaimRefused, EpochLower, Grant, Lease, LeaseEpoch, NoLease, ReleaseRefused,
+    RepoGrants, RepositoryOwnership, RepositoryReport, RepositoryReports,
 };
 use domain::planning::Maintenance;
 use domain::{AgentId, RepositoryId, SignedDuration, Timestamp, Uuid};
@@ -37,6 +45,18 @@ pub(super) struct OwnershipWorld {
     /// The two machines that claimed at once.
     racers: Option<(String, String)>,
     released: Option<Result<(), ReleaseRefused>>,
+    /// Each machine's own side: its leases and its clock.
+    holders: BTreeMap<String, Holder>,
+    /// Whether two machines were both let maintain one repository at once.
+    both_maintained: bool,
+}
+
+/// A machine's own side: the leases it keeps, its clock, and the grants it
+/// refused last as below its floor.
+struct Holder {
+    leases: Arc<MaintenanceLeases>,
+    clock: Arc<FakeClock>,
+    refused: Vec<EpochLower>,
 }
 
 impl Default for OwnershipWorld {
@@ -53,6 +73,8 @@ impl Default for OwnershipWorld {
             granted: BTreeMap::new(),
             racers: None,
             released: None,
+            holders: BTreeMap::new(),
+            both_maintained: false,
         }
     }
 }
@@ -162,8 +184,125 @@ impl OwnershipWorld {
         self.ownership(repository).await.binding(now).copied()
     }
 
+    /// Moves the hub's clock and every machine's by `by`.
     fn pass(&self, by: SignedDuration) {
         self.clock.advance(by);
+        for holder in self.holders.values() {
+            holder.clock.advance(by);
+        }
+    }
+
+    /// Starts `machine`'s own side, paired with the hub or not, its clock
+    /// `skew` off the hub's.
+    async fn start_machine(&mut self, machine: &str, paired: bool, skew: SignedDuration) {
+        let identity = Arc::new(InMemoryIdentity::default());
+        if paired {
+            let key = |byte| PublicKey::from_bytes([byte; 32]).unwrap();
+            let pin = HubPin::new(
+                key(7),
+                TokenTls::Ca,
+                key(9),
+                HubAddress::parse("https://hub.example:9898").unwrap(),
+            );
+            identity.write_pin(&pin).await.unwrap();
+        }
+        let clock = Arc::new(FakeClock::new(self.clock.now().checked_add(skew).unwrap()));
+        let leases = Arc::new(MaintenanceLeases::new(
+            identity,
+            Arc::new(InMemoryLeaseCache::default()),
+            clock.clone(),
+        ));
+        self.holders.insert(
+            machine.to_owned(),
+            Holder {
+                leases,
+                clock,
+                refused: Vec::new(),
+            },
+        );
+    }
+
+    /// `machine`'s own side, paired with the hub and on its time when no
+    /// step started it otherwise.
+    async fn holder(&mut self, machine: &str) -> &mut Holder {
+        if !self.holders.contains_key(machine) {
+            self.start_machine(machine, true, SignedDuration::ZERO)
+                .await;
+        }
+        self.holders.get_mut(machine).unwrap()
+    }
+
+    /// `machine` takes `grants`, its answer to a request it sent now on its
+    /// own clock.
+    async fn take(&mut self, machine: &str, grants: &RepoGrants) {
+        let holder = self.holder(machine).await;
+        let asked_at = holder.clock.now();
+        holder.refused = holder
+            .leases
+            .take(grants, 0, asked_at)
+            .await
+            .expect("the cache answers");
+    }
+
+    /// `machine` claims `repository` and takes the hub's grants in answer.
+    async fn hear(&mut self, machine: &str, repository: &str) {
+        let id = self.repository(repository);
+        let agent = self.machine(machine);
+        let asked_at = self.holder(machine).await.clock.now();
+        let grants = self
+            .use_case()
+            .grant(
+                agent,
+                &RepositoryReports::new([RepositoryReport {
+                    repository: id,
+                    request: Maintenance::Local,
+                    holds_other_agents_snapshots: false,
+                }]),
+            )
+            .await
+            .expect("the registry answers")
+            .expect("an approved machine is answered");
+        let holder = self.holder(machine).await;
+        holder.refused = holder
+            .leases
+            .take(&grants, 0, asked_at)
+            .await
+            .expect("the cache answers");
+    }
+
+    /// Whether `machine` may maintain `repository` now.
+    async fn permits(&mut self, machine: &str, repository: &str) -> Result<(), NoLease> {
+        let id = self.repository(repository);
+        self.holder(machine).await.leases.permits(Some(&id)).await
+    }
+
+    /// Notes whether more than one machine may maintain `repository` now.
+    async fn watch_both(&mut self, repository: &str) {
+        let machines: Vec<String> = self.holders.keys().cloned().collect();
+        let mut allowed = 0;
+        for machine in machines {
+            if self.permits(&machine, repository).await.is_ok() {
+                allowed += 1;
+            }
+        }
+        self.both_maintained |= allowed > 1;
+    }
+
+    /// The hub's grant to a machine of `repository` at `number`, signed now
+    /// for 7 days, as a hub rewound to any epoch would sign it.
+    fn grant_at(&mut self, repository: &str, number: u64) -> RepoGrants {
+        let signed_at = self.clock.now();
+        RepoGrants {
+            generation: GENERATION,
+            signed_at,
+            grants: vec![Grant {
+                repository: self.repository(repository),
+                epoch: epoch(number),
+                expires_at: signed_at
+                    .checked_add(SignedDuration::from_hours(7 * 24))
+                    .unwrap(),
+            }],
+        }
     }
 }
 
@@ -437,5 +576,132 @@ fn decided_nothing(world: &mut Agent, machine: String) {
     assert_eq!(
         world.ownership.last.get(&machine),
         Some(&Reported::NotApproved)
+    );
+}
+
+#[given(expr = "{string} is paired with the hub and has heard no grant from it")]
+async fn paired_no_grant(world: &mut Agent, machine: String) {
+    world
+        .ownership
+        .start_machine(&machine, true, SignedDuration::ZERO)
+        .await;
+}
+
+#[given(expr = "{string} isn't paired with a hub")]
+async fn not_paired(world: &mut Agent, machine: String) {
+    world
+        .ownership
+        .start_machine(&machine, false, SignedDuration::ZERO)
+        .await;
+}
+
+#[given(expr = "the clock of {string} runs {int} days behind the hub's")]
+async fn clock_behind(world: &mut Agent, machine: String, days: i64) {
+    world
+        .ownership
+        .start_machine(&machine, true, SignedDuration::from_hours(-24 * days))
+        .await;
+}
+
+#[given(expr = "the clock of {string} runs {int} days ahead of the hub's")]
+async fn clock_ahead(world: &mut Agent, machine: String, days: i64) {
+    world
+        .ownership
+        .start_machine(&machine, true, SignedDuration::from_hours(24 * days))
+        .await;
+}
+
+#[given(expr = "{string} claims the repository {string} and hears the hub's grants")]
+#[when(expr = "{string} claims the repository {string} and hears the hub's grants")]
+async fn claims_and_hears(world: &mut Agent, machine: String, repository: String) {
+    world.ownership.hear(&machine, &repository).await;
+}
+
+#[when(
+    expr = "{string} claims the repository {string} and hears the hub's grants every hour for {int} days"
+)]
+async fn hears_every_hour(world: &mut Agent, machine: String, repository: String, days: u32) {
+    for _ in 0..days * 24 {
+        world.ownership.hear(&machine, &repository).await;
+        world.ownership.watch_both(&repository).await;
+        world.ownership.pass(SignedDuration::from_hours(1));
+        world.ownership.watch_both(&repository).await;
+    }
+    world.ownership.hear(&machine, &repository).await;
+    world.ownership.watch_both(&repository).await;
+}
+
+#[given(expr = "{string} heard a grant of {string} at epoch {int}")]
+async fn heard_a_grant(world: &mut Agent, machine: String, repository: String, number: u64) {
+    let grants = world.ownership.grant_at(&repository, number);
+    world.ownership.take(&machine, &grants).await;
+    assert_eq!(world.ownership.holder(&machine).await.refused, vec![]);
+}
+
+#[when(expr = "the hub grants {string} the repository {string} at epoch {int}")]
+async fn hub_grants_at(world: &mut Agent, machine: String, repository: String, number: u64) {
+    let grants = world.ownership.grant_at(&repository, number);
+    world.ownership.take(&machine, &grants).await;
+}
+
+#[when(expr = "{string} stops using {string} and the hub acknowledges its release")]
+async fn stops_and_released(world: &mut Agent, machine: String, repository: String) {
+    let agent = world.ownership.machine(&machine);
+    let id = world.ownership.repository(&repository);
+    let leases = world.ownership.holder(&machine).await.leases.clone();
+    for (held, at) in leases.held().await.expect("the cache answers") {
+        if held != id {
+            continue;
+        }
+        world
+            .ownership
+            .use_case()
+            .release(agent, &held, at)
+            .await
+            .expect("the registry answers")
+            .expect("the hub takes the holder's release");
+        leases.released(&held, at).await.expect("the cache answers");
+    }
+    world.ownership.report(&machine, Vec::new()).await;
+}
+
+#[then(expr = "{string} may maintain {string}")]
+async fn may_maintain(world: &mut Agent, machine: String, repository: String) {
+    assert_eq!(world.ownership.permits(&machine, &repository).await, Ok(()));
+}
+
+#[then(expr = "{string} may not maintain {string}, because it holds no lease on it")]
+async fn may_not_none_held(world: &mut Agent, machine: String, repository: String) {
+    assert_eq!(
+        world.ownership.permits(&machine, &repository).await,
+        Err(NoLease::NoneHeld)
+    );
+}
+
+#[then(expr = "{string} may not maintain {string}, because its lease ran out")]
+async fn may_not_ran_out(world: &mut Agent, machine: String, repository: String) {
+    assert_eq!(
+        world.ownership.permits(&machine, &repository).await,
+        Err(NoLease::RanOut)
+    );
+}
+
+#[then(expr = "{string} and {string} never both may maintain {string}")]
+async fn never_both(world: &mut Agent, first: String, second: String, repository: String) {
+    let both = world.ownership.permits(&first, &repository).await.is_ok()
+        && world.ownership.permits(&second, &repository).await.is_ok();
+    assert!(
+        !world.ownership.both_maintained && !both,
+        "{first} and {second} both maintained {repository} at once"
+    );
+}
+
+#[then(expr = "{string} refused the grant of {string} as below the highest it has seen")]
+async fn refused_lower(world: &mut Agent, machine: String, repository: String) {
+    let id = world.ownership.repository(&repository);
+    let refused = &world.ownership.holder(&machine).await.refused;
+    assert!(
+        matches!(refused.as_slice(), [EpochLower { repository, .. }] if *repository == id),
+        "{refused:?}"
     );
 }

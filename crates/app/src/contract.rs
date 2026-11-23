@@ -14,6 +14,7 @@ pub mod full_disk_access;
 pub mod hooks;
 pub mod hub_connector;
 pub mod identity;
+pub mod lease_cache;
 pub mod network;
 pub mod network_link;
 pub mod notifier;
