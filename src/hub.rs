@@ -981,13 +981,15 @@ pub(crate) async fn reporting(
     ));
     let syncing = SyncWithHub::new(
         connecting(identity, &data_dir),
-        store,
+        Arc::<SqliteStore>::clone(&store),
         Arc::new(SystemClock),
         agent_id,
         hostname,
         machine_zone(),
     )
-    .with_leases(config, leases);
+    // A maintenance running here keeps its repository's lease from a
+    // release, as its operation log says.
+    .with_leases(config, leases, store);
     tokio::join!(recording, syncing.run());
 }
 

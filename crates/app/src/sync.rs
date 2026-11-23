@@ -20,7 +20,7 @@ use domain::{AgentId, OperationId, SignedDuration, Timestamp, Uuid};
 
 use crate::leases::MaintenanceLeases;
 use crate::pairing::{AgentChannel, ChannelError, ConnectFailure, ConnectToHub, Connected};
-use crate::ports::{Appended, Clock, ConfigError, ConfigStore, Outbox, StoreError};
+use crate::ports::{Appended, Clock, ConfigError, ConfigStore, OperationStore, Outbox, StoreError};
 
 /// How long the agent waits before it tries its hub again after the first
 /// failure; each failure after doubles it, up to [`LONGEST_BACKOFF`].
@@ -148,10 +148,12 @@ pub struct SyncWithHub {
 }
 
 /// What a session needs to ask for the machine's leases: the repositories
-/// it uses, from its configuration, and where it keeps what it is granted.
+/// it uses, from its configuration, where it keeps what it is granted, and
+/// the maintenance running here, which keeps its lease from a release.
 struct Leasing {
     config: Arc<dyn ConfigStore>,
     leases: Arc<MaintenanceLeases>,
+    operations: Arc<dyn OperationStore>,
 }
 
 impl SyncWithHub {
@@ -177,15 +179,21 @@ impl SyncWithHub {
     /// This sync asking, in each session, for the leases on the
     /// repositories `config` asks to maintain here, and keeping them in
     /// `leases`: a lease the configuration no longer asks for is released
-    /// first, then every repository whose ID is known is reported and the
+    /// first, unless `operations` has a maintenance of its repository
+    /// running, then every repository whose ID is known is reported and the
     /// hub's grants taken (§7.2, §7.3, I1).
     #[must_use]
     pub fn with_leases(
         mut self,
         config: Arc<dyn ConfigStore>,
         leases: Arc<MaintenanceLeases>,
+        operations: Arc<dyn OperationStore>,
     ) -> Self {
-        self.leases = Some(Leasing { config, leases });
+        self.leases = Some(Leasing {
+            config,
+            leases,
+            operations,
+        });
         self
     }
 
@@ -223,6 +231,24 @@ impl SyncWithHub {
             if local.contains(&repository) {
                 continue;
             }
+            // A release lets the hub grant the repository to another
+            // machine, so none goes out while a maintenance of it runs
+            // here: the hub counts the lease until it runs out instead.
+            let running = leasing
+                .operations
+                .running_maintenance(Some(&repository))
+                .await
+                .map_err(SyncFailure::Store)?;
+            if running.is_some() {
+                continue;
+            }
+            // Let go first: a release the hub takes but whose answer is
+            // lost must leave nothing here to maintain under.
+            leasing
+                .leases
+                .released(&repository, epoch)
+                .await
+                .map_err(SyncFailure::Store)?;
             channel
                 .send_release(&repository, epoch)
                 .await
@@ -234,11 +260,6 @@ impl SyncWithHub {
             if released != (repository.clone(), epoch) {
                 return Err(SyncFailure::Channel(ChannelError::OutOfTurn));
             }
-            leasing
-                .leases
-                .released(&repository, epoch)
-                .await
-                .map_err(SyncFailure::Store)?;
         }
         // The machine's clock before the request leaves: the hub signs
         // after, so the lease the machine counts never outlasts the hub's.

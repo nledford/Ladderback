@@ -1752,6 +1752,9 @@ struct Watching {
     syncing: Arc<std::sync::Mutex<Vec<bool>>>,
     closes: Arc<std::sync::Mutex<Vec<&'static str>>>,
     twice: bool,
+    /// The hub's answer to a release is lost on the way, as when the
+    /// connection drops after the hub took it.
+    drop_released: bool,
 }
 
 struct WatchingLink {
@@ -1761,6 +1764,7 @@ struct WatchingLink {
     syncing: Arc<std::sync::Mutex<Vec<bool>>>,
     closes: Arc<std::sync::Mutex<Vec<&'static str>>>,
     twice: bool,
+    drop_released: bool,
 }
 
 #[async_trait]
@@ -1774,6 +1778,7 @@ impl HubConnector for Watching {
             syncing: self.syncing.clone(),
             closes: self.closes.clone(),
             twice: self.twice,
+            drop_released: self.drop_released,
         }))
     }
 }
@@ -1791,8 +1796,13 @@ impl HubLink for WatchingLink {
             Ok(AgentMessage::Signed(envelope)) if envelope.kind == domain::fleet::report_kind()
         );
         let times = if self.twice && report { 2 } else { 1 };
+        let release = matches!(
+            agent_message(frame),
+            Ok(AgentMessage::Signed(envelope)) if envelope.kind == domain::fleet::release_kind()
+        );
         for _ in 0..times {
             match self.hub.step(&mut self.session, frame).await {
+                HubStep::Reply(_) | HubStep::Last(_) if self.drop_released && release => {}
                 HubStep::Reply(answer) | HubStep::Last(answer) => self.answers.push_back(answer),
                 HubStep::Close(reason) => self.closes.lock().unwrap().push(reason),
                 HubStep::Wait | HubStep::Fail(_) => {}
@@ -1940,6 +1950,8 @@ struct Leasing {
     leases: Arc<crate::leases::MaintenanceLeases>,
     machine_clock: Arc<FakeClock>,
     sync: crate::sync::SyncWithHub,
+    identity: Arc<InMemoryIdentity>,
+    operations: Arc<crate::fakes::InMemoryOperationStore>,
 }
 
 async fn leasing(machine_start: Timestamp) -> Leasing {
@@ -1990,8 +2002,9 @@ async fn leasing(machine_start: Timestamp) -> Leasing {
         machine_clock.clone(),
     ));
     let connector = Arc::new(LoopbackHubConnector::to(hub.pairing.clone()));
+    let operations = Arc::new(crate::fakes::InMemoryOperationStore::new());
     let sync = SyncWithHub::new(
-        connecting(identity, connector),
+        connecting(identity.clone(), connector),
         Arc::new(crate::fakes::InMemoryOutbox::new(OutboxEpoch::from_uuid(
             Uuid::from_u128(0xe1),
         ))),
@@ -2000,7 +2013,7 @@ async fn leasing(machine_start: Timestamp) -> Leasing {
         hostname(1),
         None,
     )
-    .with_leases(configs.clone(), leases.clone());
+    .with_leases(configs.clone(), leases.clone(), operations.clone());
     Leasing {
         hub,
         owners,
@@ -2009,7 +2022,109 @@ async fn leasing(machine_start: Timestamp) -> Leasing {
         leases,
         machine_clock,
         sync,
+        identity,
+        operations,
     }
+}
+
+/// A sync of the machine `leasing` sets up, on a connection that loses the
+/// hub's answer to each release.
+fn losing_released(leasing: &Leasing) -> crate::sync::SyncWithHub {
+    use domain::fleet::OutboxEpoch;
+
+    let connector = Arc::new(Watching {
+        hub: Some(leasing.hub.pairing.clone()),
+        drop_released: true,
+        ..Watching::default()
+    });
+    crate::sync::SyncWithHub::new(
+        connecting(leasing.identity.clone(), connector),
+        Arc::new(crate::fakes::InMemoryOutbox::new(OutboxEpoch::from_uuid(
+            Uuid::from_u128(0xe2),
+        ))),
+        leasing.machine_clock.clone(),
+        agent_id(1),
+        hostname(1),
+        None,
+    )
+    .with_leases(
+        leasing.configs.clone(),
+        leasing.leases.clone(),
+        leasing.operations.clone(),
+    )
+}
+
+/// A machine lets go of a lease before it sends its release, so a release
+/// the hub took but whose answer was lost leaves the machine holding
+/// nothing: were the entry to ask to maintain the repository again, it
+/// runs nothing under a lease the hub may have granted elsewhere (§7.3,
+/// I1).
+#[tokio::test]
+async fn i1_a_release_whose_answer_is_lost_leaves_the_machine_holding_nothing() {
+    use domain::maintenance::NoLease;
+    use domain::planning::Maintenance;
+
+    use crate::ports::ConfigStore as _;
+
+    let leasing = leasing(Timestamp::from_second(1_800_000_000).unwrap()).await;
+    leasing.sync.sync_once().await.unwrap();
+    assert_eq!(leasing.leases.permits(Some(&photos())).await, Ok(()));
+    leasing
+        .configs
+        .save(&photos_config(Maintenance::Hub))
+        .await
+        .unwrap();
+    assert!(losing_released(&leasing).sync_once().await.is_err());
+    assert_eq!(leasing.leases.held().await.unwrap(), vec![]);
+    leasing
+        .configs
+        .save(&photos_config(Maintenance::Local))
+        .await
+        .unwrap();
+    assert_eq!(
+        leasing.leases.permits(Some(&photos())).await,
+        Err(NoLease::NoneHeld)
+    );
+}
+
+/// A machine releases nothing while a maintenance of the repository runs
+/// here, though its entry no longer asks to maintain it: the hub would
+/// otherwise grant the repository to another machine mid-run, so it counts
+/// the lease until it runs out instead (§7.3, I1).
+#[tokio::test]
+async fn i1_a_lease_is_not_released_while_maintenance_runs_on_its_repository() {
+    use domain::execution::{Operation, OperationKind, Target, Trigger};
+    use domain::planning::Maintenance;
+
+    use crate::ports::{ConfigStore as _, OperationStore as _, OwnershipRegistry as _, Start};
+
+    let leasing = leasing(Timestamp::from_second(1_800_000_000).unwrap()).await;
+    leasing.sync.sync_once().await.unwrap();
+    let at = leasing.machine_clock.now();
+    let target = Target {
+        plan: None,
+        repository: Some(photos()),
+    };
+    let id = domain::OperationId::from_uuid(Uuid::from_u128(0x0619));
+    let mut prune = Operation::queue(id, OperationKind::Prune, Trigger::Manual, target, at);
+    prune.start(at).unwrap();
+    assert_eq!(
+        leasing.operations.try_start(&prune).await,
+        Ok(Start::Started)
+    );
+    leasing
+        .configs
+        .save(&photos_config(Maintenance::Hub))
+        .await
+        .unwrap();
+    leasing.sync.sync_once().await.unwrap();
+    let held = leasing.owners.ownership(&photos()).await.unwrap();
+    assert_eq!(
+        held.binding(leasing.hub.clock.now())
+            .map(|lease| lease.holder),
+        Some(agent_id(1)),
+        "the hub still counts the lease"
+    );
 }
 
 /// When the machine's lease on `photos` runs out on its own clock, as its
