@@ -121,7 +121,7 @@ The events WebSocket answers a client's ping with a pong, so a live page survive
 
 **Settled in the live-pages build** (`crates/web/src/backend.rs`, `ws.rs`, `operations_page.rs`):
 
-- **State model.** Each live page holds its state in one `RwSignal`. The operations page's is `OperationsState`: the history rows (newest first) plus the live progress of a run still going. The initial REST fetch builds it; every `UiEvent` is applied to it by a pure function (`apply`) in the host-tested module, so a missed event cannot be represented wrongly; an event about an operation the state doesn't hold is ignored — the reconnect's re-fetch brings the whole story, never a half-invented row.
+- **State model.** Each live page holds its state in one `RwSignal`. The operations page's is `OperationsState`: the history rows (newest first) plus the live progress of a run still going. The initial REST fetch builds it; every `UiEvent` is applied to it by a pure function (`apply`) in the host-tested module, so a missed event cannot be represented wrongly; an event about an operation the state doesn't hold is ignored — the reconnect's re-fetch brings the whole story, never a half-invented row. A history or a re-read that names an operation twice is held once, as first named, and a re-read's missing runs come first by the instant they were queued, never by its text (#138).
 
   Nor does an event take a row back, whatever order it and a read of the history arrive in: a start moves only a queued row, and progress and warnings reach only a row that has not ended.
 

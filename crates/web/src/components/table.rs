@@ -376,7 +376,7 @@ pub struct Footer {
 /// - **The loading wait announced** where the reader caused it, as a
 ///   spinner's (4.1.3).
 /// - **A key for each row unlike every other row's**, since rows are told
-///   apart by it.
+///   apart by it: a row whose key an earlier row has doesn't show (#138).
 /// - **Focus moved on when its row goes**, such as to the next row or the
 ///   page's heading, since a removed row takes its focus with it (2.4.3).
 #[component]
@@ -475,14 +475,7 @@ where
             })
         })
     };
-    let index = Memo::new(move |_| {
-        rows.with(|rows| {
-            rows.iter()
-                .enumerate()
-                .map(|(at, row)| (key(row), at))
-                .collect::<HashMap<K, usize>>()
-        })
-    });
+    let index = Memo::new(move |_| rows.with(|rows| rules::positions(rows, key)));
     // The order the rows stand in, which follows `order` a step behind: the
     // step notes the control that had focus in the body before a move takes
     // it away (a moved node loses focus), and gives it back after.

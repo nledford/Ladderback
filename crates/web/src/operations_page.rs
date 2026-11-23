@@ -482,7 +482,7 @@ fn operations_table(
             text(localizer, msg::UI_SORT_BY_STARTED),
             text(localizer, msg::UI_SORTED_OLDEST),
             text(localizer, msg::UI_SORTED_NEWEST),
-            |row: &OperationRow| SortKey::Text(key(row).to_owned()),
+            sort_key,
         )
         .descending_first(),
     );
@@ -770,14 +770,25 @@ fn badge_of(localizer: &Localizer, status: &str) -> (BadgeState, String) {
     }
 }
 
-/// The order a row's life is told by: the instant its `Started` cell shows,
-/// which for a queued run is the instant it was queued. As RFC 3339 in UTC it
-/// orders as its bytes do.
+/// The instant a row's `Started` cell shows, as the daemon wrote it: when it
+/// started, or for a queued run when it was queued.
 fn key(row: &OperationRow) -> &str {
     row.summary
         .started_at
         .as_deref()
         .unwrap_or(&row.summary.queued_at)
+}
+
+/// What the Started column sorts a row by: the instant of [`key`], as the
+/// time it is rather than its text, which orders by the characters after
+/// the seconds when two times differ in precision or offset (#138). A time
+/// that can't be read sorts before every other.
+fn sort_key(row: &OperationRow) -> SortKey {
+    SortKey::Instant(
+        key(row)
+            .parse::<jiff::Timestamp>()
+            .unwrap_or(jiff::Timestamp::MIN),
+    )
 }
 
 /// A status as the badge and the label show it: which state, and which
@@ -852,6 +863,39 @@ mod tests {
         assert_eq!(key(&started), "2026-11-09T10:00:02Z");
         let queued = summary(None, "2026-11-09T10:00:01Z");
         assert_eq!(key(&queued), "2026-11-09T10:00:01Z");
+    }
+
+    // The daemon writes its times as RFC 3339, whose text orders as the time
+    // does only at one precision and one offset (#138).
+    #[test]
+    fn rows_sort_by_the_instant_they_started_not_by_its_text() {
+        let whole = summary(Some("2026-11-10T21:00:00Z"), "2026-11-10T20:00:00Z");
+        let half_past = summary(Some("2026-11-10T21:00:00.5Z"), "2026-11-10T20:00:00Z");
+        assert!(
+            sort_key(&whole) < sort_key(&half_past),
+            "half a second later is later, though '.' comes before 'Z'"
+        );
+        let east = summary(Some("2026-11-10T21:30:00+01:00"), "2026-11-10T20:00:00Z");
+        assert!(
+            sort_key(&east) < sort_key(&whole),
+            "20:30 UTC is before 21:00 UTC, whatever its digits"
+        );
+        let same = summary(Some("2026-11-10T22:00:00+01:00"), "2026-11-10T20:00:00Z");
+        assert_eq!(
+            sort_key(&same),
+            sort_key(&whole),
+            "one instant at two offsets ties"
+        );
+        let queued = summary(None, "2026-11-10T21:00:00.25Z");
+        assert!(sort_key(&whole) < sort_key(&queued) && sort_key(&queued) < sort_key(&half_past));
+    }
+
+    #[test]
+    fn a_time_that_cant_be_read_sorts_before_every_other() {
+        let mut unread = summary(None, "2026-11-10T21:00:00Z");
+        unread.summary.queued_at = "soon".to_owned();
+        let earliest = summary(None, "0001-01-01T00:00:00Z");
+        assert!(sort_key(&unread) < sort_key(&earliest));
     }
 
     #[test]

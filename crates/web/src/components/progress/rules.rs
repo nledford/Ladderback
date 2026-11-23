@@ -299,14 +299,15 @@ pub(crate) fn wait_for(due: Duration, now: Duration) -> Duration {
 }
 
 /// What `progress` tells, with the time `left` when it has a total, and
-/// when its run was heard of when it has none.
+/// when its run was heard of when it has none. A count past its total is
+/// told as the total, as `percent` holds it (#138).
 fn told_of(progress: &Progress, left: Option<Left>) -> Told {
     let measure = progress
         .total
         .zip(percent(progress.current, progress.total))
         .map(|(total, percent)| Measure {
             percent,
-            current: progress.current,
+            current: progress.current.min(total),
             total,
             unit: progress.unit,
             left,
@@ -674,6 +675,17 @@ mod tests {
         assert_eq!(
             teller.report(backing_up(2, 10), at(100)),
             measured(backing_up(2, 10), 20, None)
+        );
+    }
+
+    // A count past its total is all of it in the amounts too, as it is in
+    // the share: never "12 of 10" beside 100% (#138).
+    #[test]
+    fn the_amounts_never_say_more_done_than_the_total() {
+        let mut teller = Teller::default();
+        assert_eq!(
+            teller.report(backing_up(12, 10), at(100)),
+            measured(backing_up(10, 10), 100, None)
         );
     }
 

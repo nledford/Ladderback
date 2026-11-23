@@ -5,6 +5,8 @@
 //! Approve and Reject send, and what a refusal of the step-up field is said
 //! as. `proposals_page.rs` is its glue.
 
+use std::collections::HashSet;
+
 use api::{
     ApproveProposalDto, ErrorCode, ErrorDto, ForgetPlanDto, ForgetSideDto, MsgArg, PlanSettingDto,
     ProposalDto, ProposalReviewDto, ProposalStatusDto, RejectProposalDto, RepositoryForgetDto,
@@ -185,11 +187,15 @@ fn listing(caption: MessageId, plan: &ForgetPlanDto) -> ForgetListing {
 
 /// The proposals a person can still decide, in the order the daemon lists
 /// them (newest first): the pending ones. Every other status has ended, or
-/// is being applied, and is history.
+/// is being applied, and is history. A proposal named again is dropped, its
+/// first listing kept, since the list is keyed by proposal (#138).
 pub(crate) fn pending(proposals: Vec<ProposalDto>) -> Vec<ProposalDto> {
+    let mut seen = HashSet::with_capacity(proposals.len());
     proposals
         .into_iter()
-        .filter(|proposal| proposal.status == ProposalStatusDto::Pending)
+        .filter(|proposal| {
+            proposal.status == ProposalStatusDto::Pending && seen.insert(proposal.id.clone())
+        })
         .collect()
 }
 

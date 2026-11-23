@@ -10,7 +10,7 @@
 //! and the event, and the reconnect path re-fetches the whole history
 //! instead of guessing what was lost.
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::time::Duration;
 
 use api::{
@@ -66,10 +66,15 @@ pub(crate) struct OperationsState {
 }
 
 impl OperationsState {
+    /// The state of a history read whole: an operation it names again is
+    /// dropped, its first row kept, since the table keys its rows by
+    /// operation (#138).
     pub(crate) fn from_history(operations: Vec<OperationSummaryDto>, next: Option<String>) -> Self {
+        let mut seen = HashSet::with_capacity(operations.len());
         Self {
             rows: operations
                 .into_iter()
+                .filter(|summary| seen.insert(summary.id.clone()))
                 .map(|summary| OperationRow {
                     summary,
                     progress: None,
@@ -198,7 +203,13 @@ impl OperationsState {
             .map(|row| (row.summary.id.clone(), row))
             .collect();
         let mut rows = Vec::with_capacity(page.operations.len());
+        // An operation the page names again is dropped, as `from_history`
+        // drops it.
+        let mut seen = HashSet::with_capacity(page.operations.len());
         for mut summary in page.operations {
+            if !seen.insert(summary.id.clone()) {
+                continue;
+            }
             let live = held.remove(&summary.id);
             rows.push(match live {
                 // The held row is further along than the page says, or as
@@ -235,10 +246,14 @@ impl OperationsState {
             .filter(|row| rank(&row.summary.status) < TERMINAL)
             .collect();
         // The order of a map is nobody's: a run the page has not written
-        // yet is newest, and between two of them the queue decides.
-        live.sort_by(|a, b| {
-            (a.summary.queued_at.as_str(), a.summary.id.as_str())
-                .cmp(&(b.summary.queued_at.as_str(), b.summary.id.as_str()))
+        // yet is newest, by the instant it was queued, not its text (#138;
+        // one that can't be read is oldest), and between two of them the
+        // queue decides.
+        live.sort_by_cached_key(|row| {
+            (
+                row.summary.queued_at.parse::<jiff::Timestamp>().ok(),
+                row.summary.id.clone(),
+            )
         });
         live.reverse();
         rows.splice(0..0, live);
@@ -1513,6 +1528,108 @@ mod tests {
             rereads.finish(false),
             Some(Duration::from_secs(1)),
             "its own tries start over"
+        );
+    }
+
+    /// The summary of the run `short`, `status`, queued at `queued_at`.
+    fn queued_at(short: &str, status: &str, queued_at: &str) -> OperationSummaryDto {
+        let mut summary = summary(short, status, status != "queued", false);
+        summary.queued_at = queued_at.to_owned();
+        summary
+    }
+
+    // A replayed event or an overlapping page can name one operation twice,
+    // and the table keys its rows by operation: the state holds it once, as
+    // the history first has it (#138).
+    #[test]
+    fn a_history_that_names_an_operation_twice_holds_it_once_as_first_named() {
+        let state = OperationsState::from_history(
+            vec![
+                summary(FIRST, "running", true, false),
+                summary(SECOND, "queued", false, false),
+                summary(FIRST, "queued", false, false),
+            ],
+            None,
+        );
+        let ids: Vec<&str> = state
+            .rows
+            .iter()
+            .map(|row| row.summary.id.as_str())
+            .collect();
+        assert_eq!(ids, [id(FIRST), id(SECOND)]);
+        assert_eq!(state.rows[0].summary.status, "running");
+    }
+
+    #[test]
+    fn a_merged_page_that_names_an_operation_twice_holds_it_once_with_its_live_update() {
+        let mut state =
+            OperationsState::from_history(vec![summary(FIRST, "queued", false, false)], None);
+        state.apply(&UiEvent::OperationStarted {
+            operation: id(FIRST),
+            repository: Some("demo".to_owned()),
+            started_at: "2026-11-09T10:00:02Z".to_owned(),
+        });
+        state.merge(page(
+            vec![
+                summary(FIRST, "queued", false, false),
+                summary(SECOND, "queued", false, false),
+                summary(FIRST, "queued", false, false),
+            ],
+            None,
+        ));
+        let ids: Vec<&str> = state
+            .rows
+            .iter()
+            .map(|row| row.summary.id.as_str())
+            .collect();
+        assert_eq!(ids, [id(FIRST), id(SECOND)]);
+        assert_eq!(
+            state.rows[0].summary.status, "running",
+            "the start heard live survives the page"
+        );
+        state.apply(&UiEvent::OperationProgress {
+            operation: id(FIRST),
+            step: None,
+            unit: ProgressUnit::Count,
+            current: 2,
+            total: Some(5),
+            at: None,
+        });
+        assert_eq!(state.rows.len(), 2);
+        assert_eq!(
+            state.rows[0]
+                .progress
+                .as_ref()
+                .map(|progress| progress.current),
+            Some(2)
+        );
+    }
+
+    // Runs the page has not written yet come first, newest first by when
+    // they were queued, as the time it is, not its text (#138).
+    #[test]
+    fn runs_the_page_lacks_come_newest_first_by_the_instant_they_were_queued() {
+        const THIRD: &str = "000000000003";
+        const FOURTH: &str = "000000000004";
+        let mut state = OperationsState::from_history(
+            vec![
+                queued_at(FOURTH, "queued", "soon"),
+                queued_at(FIRST, "running", "2026-11-10T21:00:00Z"),
+                queued_at(SECOND, "running", "2026-11-10T21:00:00.5Z"),
+                queued_at(THIRD, "queued", "2026-11-10T21:59:00+01:00"),
+            ],
+            None,
+        );
+        state.merge(page(Vec::new(), None));
+        let ids: Vec<&str> = state
+            .rows
+            .iter()
+            .map(|row| row.summary.id.as_str())
+            .collect();
+        assert_eq!(
+            ids,
+            [id(SECOND), id(FIRST), id(THIRD), id(FOURTH)],
+            "21:00:00.5 UTC, 21:00 UTC, 20:59 UTC, then a time that can't be read"
         );
     }
 }
