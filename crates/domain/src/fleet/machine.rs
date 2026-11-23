@@ -4,7 +4,7 @@
 //! folder copied to another computer brings that computer's machine ID with
 //! it, but not its identifier, so the two disagree there. The hub tells the
 //! two computers apart by the machine fingerprint each one's `Hello`
-//! carries, and takes one of them (§7.2; §16, decision NN).
+//! carries, and takes one of them (§7.2; §16, decision 150).
 
 use std::fmt;
 
@@ -120,21 +120,26 @@ impl MachineFingerprint {
     /// The fingerprint of the computer whose identifier is `identifier`,
     /// running as `agent_id`.
     pub fn of(agent_id: AgentId, identifier: &MachineIdentifier) -> Self {
-        let _ = (agent_id, identifier, FINGERPRINT_LABEL, Sha256::new());
-        todo!()
+        let mut digest = Sha256::new();
+        digest.update(FINGERPRINT_LABEL);
+        digest.update(agent_id.as_uuid().as_bytes());
+        digest.update(identifier.as_str().as_bytes());
+        Self(digest.finalize().into())
     }
 
     /// The fingerprint 64 lower-case hex digits spell.
     pub fn from_hex(text: &str) -> Result<Self, InvalidMachineFingerprint> {
         let mut bytes = [0; KEY_BYTES];
-        let _ = (text, decode_hex32("", &mut bytes));
-        todo!()
+        if decode_hex32(text, &mut bytes) {
+            Ok(Self(bytes))
+        } else {
+            Err(InvalidMachineFingerprint)
+        }
     }
 
     /// The fingerprint as 64 lower-case hex digits.
     pub fn to_hex(&self) -> String {
-        let _ = lower_hex(&self.0);
-        todo!()
+        lower_hex(&self.0)
     }
 }
 
@@ -145,7 +150,7 @@ impl fmt::Debug for MachineFingerprint {
 }
 
 /// What the hub makes of the machine fingerprint a `Hello` carries, beside
-/// the one it holds under the machine's ID (decision NN).
+/// the one it holds under the machine's ID (decision 150).
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum MachineCheck {
     /// The hub held none, and keeps this one: the first machine it hears
@@ -167,25 +172,29 @@ pub enum MachineCheck {
 impl MachineCheck {
     /// The code of the refusal a [`MachineCheck::Second`] gets.
     pub fn refusal() -> WireName {
-        todo!()
+        WireName::known("identity-conflict")
     }
 
     /// Compares `presented`, the fingerprint the `Hello` carried, with
     /// `held`, the one the hub holds under the machine's ID.
     pub fn of(held: Option<&MachineFingerprint>, presented: Option<&MachineFingerprint>) -> Self {
-        let _ = (held, presented);
-        todo!()
+        match (held, presented) {
+            (_, None) => Self::Untold,
+            (None, Some(_)) => Self::Claimed,
+            (Some(held), Some(presented)) if held == presented => Self::Same,
+            (Some(_), Some(_)) => Self::Second,
+        }
     }
 
     /// Whether the hub takes the machine: every check but a second
     /// computer's.
     pub fn takes(self) -> bool {
-        todo!()
+        self != Self::Second
     }
 }
 
 /// An agent under whose ID the hub refused a second computer, and when it
-/// last did, which the hub's list of machines shows (decision NN).
+/// last did, which the hub's list of machines shows (decision 150).
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct SecondMachine {
     pub agent_id: AgentId,
