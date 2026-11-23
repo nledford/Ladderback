@@ -1,8 +1,9 @@
 //! The hub's registry of agents and pairing tokens (§3.1, the Fleet
 //! context; §7.1; §16, decision 120, "Pairing" and "Pending approval"): an
-//! agent's record, a token's record, how two hostnames compare, and the
-//! decision a `Pair` gets. The rules live here; the registry's port keeps
-//! the records and applies a decision in the same step that read them.
+//! agent's record, a token's record, how two hostnames compare, the
+//! decision a `Pair` gets, a removed agent's tombstone and a waiting
+//! agent's lapse. The rules live here; the registry's port keeps the
+//! records and applies a decision in the same step that read them.
 
 use jiff::{SignedDuration, Timestamp};
 use unicode_normalization::UnicodeNormalization as _;
@@ -18,6 +19,11 @@ use crate::AgentId;
 /// The most agents that may wait for approval at once; a pairing past it
 /// is refused (`pending-limit`) and leaves the token unspent.
 pub const PENDING_LIMIT: usize = 20;
+
+/// How long an agent may wait for approval: a pending agent this old
+/// lapses, and the hub drops it, frees its hostname and keeps no tombstone,
+/// since nobody judged it (decision 120, "Pending approval").
+pub const PENDING_LIFE: SignedDuration = SignedDuration::from_hours(7 * 24);
 
 /// The most tokens that may be unused at once.
 pub const UNUSED_TOKEN_LIMIT: usize = 20;
@@ -164,6 +170,13 @@ impl AgentRecord {
             AgentStatus::Pending { .. } => false,
         }
     }
+
+    /// Whether the agent waited for approval [`PENDING_LIFE`] or longer at
+    /// `now`: a lapsed agent is dropped. An approved agent never lapses.
+    pub fn lapsed_at(&self, now: Timestamp) -> bool {
+        let _ = now;
+        todo!()
+    }
 }
 
 /// The agent a pending agent's hostname looks like, which the hub flags on
@@ -228,6 +241,42 @@ pub fn list_agents(agents: Vec<AgentRecord>) -> Vec<ListedAgent> {
             second_machine_at: None,
         })
         .collect()
+}
+
+/// What the hub keeps of an agent a person removed or rejected (decision
+/// 120, "Pairing"): its agent ID, the hostname it held and its last key, so
+/// the hub can tell the agent, signed, that it was removed, and refuse an
+/// ordinary token under its ID. It holds no hostname: another machine may
+/// take the name.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct Tombstone {
+    pub agent_id: AgentId,
+    pub hostname: Hostname,
+    pub key: PublicKey,
+    /// When the person removed it.
+    pub removed_at: Timestamp,
+}
+
+/// Why a person's removal or rejection of an agent changed nothing.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum RemovalRefused {
+    /// No agent is registered under the ID with the key the person saw: it
+    /// never paired, was removed or lapsed, or holds another key now.
+    Unknown,
+}
+
+/// The decision a person's removal of the agent under `agent_key` gets at
+/// `now`, given `record`, the agent registered under its ID: the agent,
+/// pending or approved, leaves the registry and its tombstone is kept
+/// (decision 120, "Removing, re-keying and recovering an agent"; rejecting
+/// a waiting agent is the same removal).
+pub fn decide_removal(
+    record: Option<&AgentRecord>,
+    agent_key: &PublicKey,
+    now: Timestamp,
+) -> Result<Tombstone, RemovalRefused> {
+    let _ = (record, agent_key, now);
+    todo!()
 }
 
 /// What has become of a pairing token.
@@ -314,6 +363,9 @@ pub enum PairRefusal {
     AgentKeyMismatch,
     /// [`PENDING_LIMIT`] agents wait already. The token stays unspent.
     PendingLimit,
+    /// A person removed or rejected the agent under the ID, and the hub
+    /// keeps its tombstone: an ordinary token can't bring it back.
+    AgentRemoved,
 }
 
 impl PairRefusal {
@@ -328,6 +380,7 @@ impl PairRefusal {
             Self::AgentKeyMismatch => "agent-key-mismatch",
             Self::HubKeyMismatch => "hub-key-mismatch",
             Self::PendingLimit => "pending-limit",
+            Self::AgentRemoved => "agent-removed",
         })
     }
 }
@@ -344,6 +397,8 @@ pub struct PairingView<'a> {
     pub by_hostname: Option<&'a AgentRecord>,
     /// How many agents wait for approval.
     pub pending: usize,
+    /// The tombstone kept under the request's agent ID.
+    pub tombstone: Option<&'a Tombstone>,
 }
 
 /// What a pairing does to the registry.

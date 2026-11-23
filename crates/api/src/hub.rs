@@ -144,6 +144,12 @@ pub fn agent_approval_path(agent_id: &str) -> String {
     format!("{HUB_AGENTS_PATH}/{agent_id}/approval")
 }
 
+/// Where the page rejects the waiting agent `agent_id`, or removes it once
+/// approved: `POST` a [`RemoveAgentDto`], answered `204 No Content`.
+pub fn agent_removal_path(agent_id: &str) -> String {
+    format!("{HUB_AGENTS_PATH}/{agent_id}/removal")
+}
+
 /// Whether a registered agent waits for a person's approval or has it.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "kebab-case")]
@@ -269,4 +275,14 @@ impl std::fmt::Debug for ApproveAgentDto {
             .field("key", &self.key)
             .finish_non_exhaustive()
     }
+}
+
+/// A rejection or removal asked for: the key the person saw in the
+/// machine's row (64 hex digits, as [`HubAgentDto::key`]), so the hub
+/// removes that agent with that key and no other. No step-up: a removal
+/// only takes authority away.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "kebab-case", deny_unknown_fields)]
+pub struct RemoveAgentDto {
+    pub key: String,
 }

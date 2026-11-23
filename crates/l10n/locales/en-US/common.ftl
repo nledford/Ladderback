@@ -617,6 +617,11 @@ error-proof-refused = The { -hub } refused this { -machine }. It may have been r
 # token stays good.
 error-pending-limit = The { -hub } already has 20 { -machine(form: "other") } waiting for approval. Approve or reject some, then pair again with this token.
 
+# The hub removed this machine, or someone rejected it while it waited for
+# approval: it refuses the machine's connections and an ordinary token under
+# its ID.
+error-agent-removed = The { -hub } removed this { -machine }, or someone rejected it. It keeps backing up on its own. A new ordinary token is refused; ask whoever runs the { -hub } for a replacement token for this { -machine }.
+
 # The hub closed the connection before proving itself: it can't offer the
 # kind of connection this machine's token names, as when a proxy ends TLS in
 # front of it. This build makes only tokens of CA-checked addresses, so the

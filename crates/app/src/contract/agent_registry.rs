@@ -9,8 +9,9 @@ use std::sync::Arc;
 use async_trait::async_trait;
 use domain::fleet::{
     AgentRecord, AgentStatus, ApprovalRefused, BindingKind, Fingerprint, Hostname, KEY_BYTES,
-    MachineCheck, MachineFingerprint, MachineZone, PENDING_LIMIT, PairRefusal, PairRequest,
-    Pairing, ProofRefusal, ProofRequest, PublicKey, SecondMachine, TokenRecord, TokenUse,
+    MachineCheck, MachineFingerprint, MachineZone, PENDING_LIFE, PENDING_LIMIT, PairRefusal,
+    PairRequest, Pairing, ProofRefusal, ProofRequest, PublicKey, RemovalRefused, SecondMachine,
+    TokenRecord, TokenUse, Tombstone,
 };
 use domain::{AgentId, Timestamp, Uuid};
 
@@ -30,6 +31,15 @@ pub trait AgentRegistryHarness: Send + Sync {
 pub async fn run(harness: &dyn AgentRegistryHarness) {
     tokens_and_pairings(harness).await;
     proofs_approvals_and_machines(harness).await;
+    removals_and_lapses(harness).await;
+}
+
+async fn removals_and_lapses(harness: &dyn AgentRegistryHarness) {
+    a_removal_keeps_a_tombstone_frees_the_hostname_and_outlives_the_hub(harness).await;
+    a_removed_id_is_refused_an_ordinary_token(harness).await;
+    a_removal_of_an_unknown_agent_or_another_key_changes_nothing(harness).await;
+    racing_removals_remove_once(harness).await;
+    lapsed_pending_agents_are_dropped_without_a_tombstone(harness).await;
 }
 
 async fn tokens_and_pairings(harness: &dyn AgentRegistryHarness) {
@@ -1072,4 +1082,217 @@ async fn racing_approvals_approve_once(harness: &dyn AgentRegistryHarness) {
         .filter(|result| matches!(result, Ok(Err(ApprovalRefused::AlreadyApproved))))
         .count();
     assert_eq!((approved, refused), (1, 7), "{results:?}");
+}
+
+async fn remove(
+    registry: &dyn AgentRegistry,
+    request: &PairRequest,
+    now: Timestamp,
+) -> Option<Result<Tombstone, RemovalRefused>> {
+    ok(
+        registry
+            .remove(request.agent_id, request.agent_key, now)
+            .await,
+        "removing",
+    )
+}
+
+async fn tombstone(registry: &dyn AgentRegistry, id: AgentId) -> Option<Tombstone> {
+    ok(registry.tombstone(id).await, "reading a tombstone").flatten()
+}
+
+async fn a_removal_keeps_a_tombstone_frees_the_hostname_and_outlives_the_hub(
+    harness: &dyn AgentRegistryHarness,
+) {
+    let (Some(first), Some(second), Some(request), Some(other)) = (
+        token(1, 0),
+        token(2, 40),
+        request(1, 1, "laptop"),
+        request(2, 2, "laptop"),
+    ) else {
+        return;
+    };
+    let registry = harness.empty().await;
+    add(registry.as_ref(), &first).await;
+    pair(registry.as_ref(), &request, at(10)).await;
+    approve(registry.as_ref(), &request, at(20)).await;
+    let kept = Tombstone {
+        agent_id: request.agent_id,
+        hostname: request.hostname.clone(),
+        key: request.agent_key,
+        removed_at: at(30),
+    };
+    assert_eq!(
+        remove(registry.as_ref(), &request, at(30)).await,
+        Some(Ok(kept.clone()))
+    );
+    assert_eq!(agents(registry.as_ref()).await, []);
+    assert_eq!(
+        tombstone(registry.as_ref(), request.agent_id).await,
+        Some(kept.clone())
+    );
+    assert_eq!(tombstone(registry.as_ref(), other.agent_id).await, None);
+    let registry = harness.reopened().await;
+    assert_eq!(
+        tombstone(registry.as_ref(), request.agent_id).await,
+        Some(kept.clone()),
+        "a tombstone outlives the hub"
+    );
+    assert_eq!(
+        ok(registry.agent(request.agent_id).await, "reading the agent"),
+        Some(None)
+    );
+    add(registry.as_ref(), &second).await;
+    assert!(
+        matches!(
+            pair(registry.as_ref(), &other, at(50)).await,
+            Some(Ok(Pairing::New(_)))
+        ),
+        "a removed agent's hostname is free"
+    );
+    assert!(
+        matches!(remove(registry.as_ref(), &other, at(60)).await, Some(Ok(_))),
+        "the machine that took the name is removed in turn"
+    );
+    assert_eq!(
+        tombstone(registry.as_ref(), request.agent_id).await,
+        Some(kept),
+        "each removed agent keeps its own tombstone"
+    );
+}
+
+async fn a_removed_id_is_refused_an_ordinary_token(harness: &dyn AgentRegistryHarness) {
+    let (Some(first), Some(second), Some(request)) =
+        (token(1, 0), token(2, 40), request(1, 1, "laptop"))
+    else {
+        return;
+    };
+    let registry = harness.empty().await;
+    add(registry.as_ref(), &first).await;
+    pair(registry.as_ref(), &request, at(10)).await;
+    remove(registry.as_ref(), &request, at(20)).await;
+    add(registry.as_ref(), &second).await;
+    let again = PairRequest {
+        pairing_key: second.pairing_key,
+        ..request
+    };
+    assert_eq!(
+        pair(registry.as_ref(), &again, at(50)).await,
+        Some(Err(PairRefusal::AgentRemoved))
+    );
+    assert_eq!(agents(registry.as_ref()).await, []);
+    assert_eq!(
+        unused(registry.as_ref(), at(50)).await,
+        [second],
+        "the refusal leaves the token unused"
+    );
+}
+
+async fn a_removal_of_an_unknown_agent_or_another_key_changes_nothing(
+    harness: &dyn AgentRegistryHarness,
+) {
+    let (Some(token), Some(request), Some(stranger), Some(other_key)) = (
+        token(1, 0),
+        request(1, 1, "laptop"),
+        request(2, 1, "desktop"),
+        key(55),
+    ) else {
+        return;
+    };
+    let registry = harness.empty().await;
+    assert_eq!(
+        remove(registry.as_ref(), &request, at(5)).await,
+        Some(Err(RemovalRefused::Unknown)),
+        "an empty registry removes no one"
+    );
+    add(registry.as_ref(), &token).await;
+    pair(registry.as_ref(), &request, at(10)).await;
+    let before = agents(registry.as_ref()).await;
+    assert_eq!(
+        remove(registry.as_ref(), &stranger, at(20)).await,
+        Some(Err(RemovalRefused::Unknown))
+    );
+    let rekeyed = PairRequest {
+        agent_key: other_key,
+        ..request.clone()
+    };
+    assert_eq!(
+        remove(registry.as_ref(), &rekeyed, at(20)).await,
+        Some(Err(RemovalRefused::Unknown))
+    );
+    assert_eq!(agents(registry.as_ref()).await, before);
+    assert_eq!(tombstone(registry.as_ref(), request.agent_id).await, None);
+}
+
+async fn racing_removals_remove_once(harness: &dyn AgentRegistryHarness) {
+    let (Some(token), Some(request)) = (token(1, 0), request(1, 1, "laptop")) else {
+        return;
+    };
+    let registry = harness.empty().await;
+    add(registry.as_ref(), &token).await;
+    pair(registry.as_ref(), &request, at(10)).await;
+    let removals = (0..8).map(|n| registry.remove(request.agent_id, request.agent_key, at(20 + n)));
+    let results = futures::future::join_all(removals).await;
+    let removed = results
+        .iter()
+        .filter(|result| matches!(result, Ok(Ok(_))))
+        .count();
+    let refused = results
+        .iter()
+        .filter(|result| matches!(result, Ok(Err(RemovalRefused::Unknown))))
+        .count();
+    assert_eq!((removed, refused), (1, 7), "{results:?}");
+}
+
+async fn lapsed_pending_agents_are_dropped_without_a_tombstone(harness: &dyn AgentRegistryHarness) {
+    let (Some(first), Some(second), Some(third), Some(early), Some(later), Some(approved)) = (
+        token(1, 0),
+        token(2, 0),
+        token(3, 0),
+        request(1, 1, "laptop"),
+        request(2, 2, "desktop"),
+        request(3, 3, "server"),
+    ) else {
+        return;
+    };
+    let registry = harness.empty().await;
+    for token in [&first, &second, &third] {
+        add(registry.as_ref(), token).await;
+    }
+    pair(registry.as_ref(), &approved, at(5)).await;
+    approve(registry.as_ref(), &approved, at(6)).await;
+    pair(registry.as_ref(), &early, at(10)).await;
+    pair(registry.as_ref(), &later, at(20)).await;
+    let lapsed = |now: Timestamp| registry.drop_lapsed(now);
+    let just_before = at(10) + PENDING_LIFE - domain::SignedDuration::from_millis(1);
+    assert_eq!(
+        ok(lapsed(just_before).await, "dropping lapsed agents"),
+        Some(vec![])
+    );
+    assert_eq!(agents(registry.as_ref()).await.len(), 3);
+    let dropped = ok(
+        lapsed(at(20) + PENDING_LIFE).await,
+        "dropping lapsed agents",
+    )
+    .unwrap_or_default();
+    let ids: Vec<_> = dropped.iter().map(|agent| agent.agent_id).collect();
+    assert_eq!(ids, [early.agent_id, later.agent_id], "oldest first");
+    let left = agents(registry.as_ref()).await;
+    assert_eq!(
+        left.iter().map(|agent| agent.agent_id).collect::<Vec<_>>(),
+        [approved.agent_id],
+        "an approved agent never lapses"
+    );
+    assert!(matches!(
+        left.first().map(|agent| &agent.status),
+        Some(AgentStatus::Approved { .. })
+    ));
+    assert_eq!(tombstone(registry.as_ref(), early.agent_id).await, None);
+    assert_eq!(
+        ok(
+            lapsed(at(20) + PENDING_LIFE).await,
+            "dropping lapsed agents"
+        ),
+        Some(vec![])
+    );
 }

@@ -2,7 +2,9 @@
 //! web page (§16, decision 121, "The hub's dialog", "Waiting for
 //! approval"): high-impact actions, each confirmed by a fresh step-up every
 //! time and refused beyond loopback while sign-in is off (decision 120,
-//! "Who may make a token, approve or re-key").
+//! "Who may make a token, approve or re-key"). A machine rejected or
+//! removed only loses authority: the session alone does, refused beyond
+//! loopback while sign-in is off like the rest.
 
 use std::fmt;
 use std::net::IpAddr;
@@ -10,7 +12,7 @@ use std::net::IpAddr;
 use domain::access::step_up::{StepUpConfirmation, StepUpFor};
 use domain::fleet::{
     AgentRecord, ApprovalRefused, Fingerprint, HubAddress, ListedAgent, PairingToken, PublicKey,
-    TokenId, TokenTls, needs_sign_in,
+    RemovalRefused, TokenId, TokenTls, Tombstone, needs_sign_in,
 };
 use domain::{AgentId, SignedDuration, Timestamp};
 
@@ -110,6 +112,17 @@ impl fmt::Debug for ApprovalAsk {
     }
 }
 
+/// What the page asks for: the agent `agent_id`, under the key `agent_key`
+/// the person saw in its row, rejected while it waits or removed once
+/// approved.
+#[derive(Clone, Copy, Debug)]
+pub struct RemovalAsk {
+    pub agent_id: AgentId,
+    pub agent_key: PublicKey,
+    /// Whether the request came from beyond loopback.
+    pub beyond_loopback: bool,
+}
+
 /// Every agent the hub has registered, as [`HubPairing::agents`] lists them,
 /// and when they were read: how long each has waited is counted from `at`.
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -161,6 +174,19 @@ impl HubPairing {
         self.stepped_up(ask.beyond_loopback, ask.peer, ask.confirmation)
             .await?;
         Ok(self.approve_now(ask.agent_id, ask.agent_key).await?)
+    }
+
+    /// The agent `ask` names removed, pending (a rejection) or approved:
+    /// only that agent ID with that key, the one the person saw. It only
+    /// takes authority away, so no step-up is asked, as revoking a token
+    /// asks none (decision 120, "Who may make a token, approve or
+    /// re-key"); beyond loopback, sign-in must be on.
+    pub async fn remove_asked(
+        &self,
+        ask: RemovalAsk,
+    ) -> Result<Result<Tombstone, RemovalRefused>, TokenAskRefused> {
+        let _ = ask;
+        todo!()
     }
 
     /// [`HubPairing::agents`], with the time they were read.

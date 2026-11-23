@@ -348,6 +348,12 @@ mod tests {
             at: at(),
         };
         assert_eq!(heard(&approved), Heard::ReadAgain);
+        let removed = UiEvent::AgentRemoved {
+            agent: "agent-demo-laptop".to_owned(),
+            hostname: "demo-laptop".to_owned(),
+            at: at(),
+        };
+        assert_eq!(heard(&removed), Heard::ReadAgain);
         for other in [
             UiEvent::AgentReported {
                 agent: "agent-demo-laptop".to_owned(),

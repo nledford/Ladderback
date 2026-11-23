@@ -8,9 +8,9 @@ use async_trait::async_trait;
 use domain::fleet::{
     AgentRecord, AgentStatus, ApprovalRefused, BindingKind, Fingerprint, HostnameKey, KEY_BYTES,
     MachineCheck, MachineFingerprint, MachineZone, PairRefusal, PairRequest, Pairing, PairingView,
-    ProofRefusal, ProofRequest, ProofView, Proved, PublicKey, SecondMachine, TokenId, TokenRecord,
-    TokenUse, admits_unused_token, decide_approval, decide_pairing, decide_proof,
-    voids_tokens_for_new_key,
+    ProofRefusal, ProofRequest, ProofView, Proved, PublicKey, RemovalRefused, SecondMachine,
+    TokenId, TokenRecord, TokenUse, Tombstone, admits_unused_token, decide_approval,
+    decide_pairing, decide_proof, voids_tokens_for_new_key,
 };
 use domain::{AgentId, Timestamp};
 use sqlx::{Connection, SqliteConnection};
@@ -287,6 +287,7 @@ impl AgentRegistry for SqliteStore {
             by_id: by_id.as_ref(),
             by_hostname: by_hostname.as_ref(),
             pending,
+            tombstone: None,
         };
         let decided = decide_pairing(&view, request, now);
         match &decided {
@@ -478,5 +479,25 @@ impl AgentRegistry for SqliteStore {
             Err(_) => tx.rollback().await.map_err(unavailable)?,
         }
         Ok(decided)
+    }
+
+    async fn remove(
+        &self,
+        agent_id: AgentId,
+        agent_key: PublicKey,
+        now: Timestamp,
+    ) -> Result<Result<Tombstone, RemovalRefused>, StoreError> {
+        let _ = (agent_id, agent_key, now);
+        todo!()
+    }
+
+    async fn tombstone(&self, agent_id: AgentId) -> Result<Option<Tombstone>, StoreError> {
+        let _ = agent_id;
+        todo!()
+    }
+
+    async fn drop_lapsed(&self, now: Timestamp) -> Result<Vec<AgentRecord>, StoreError> {
+        let _ = now;
+        todo!()
     }
 }

@@ -2,7 +2,7 @@ use async_trait::async_trait;
 use domain::fleet::{
     AgentRecord, ApprovalRefused, Fingerprint, MachineCheck, MachineFingerprint, MachineZone,
     PairRefusal, PairRequest, Pairing, ProofRefusal, ProofRequest, Proved, PublicKey,
-    SecondMachine, TokenId, TokenRecord,
+    RemovalRefused, SecondMachine, TokenId, TokenRecord, Tombstone,
 };
 use domain::{AgentId, Timestamp};
 
@@ -122,4 +122,25 @@ pub trait AgentRegistry: Send + Sync {
         agent_key: PublicKey,
         now: Timestamp,
     ) -> Result<Result<AgentRecord, ApprovalRefused>, StoreError>;
+
+    /// Removes the agent registered under `agent_id` with `agent_key`, the
+    /// key the person saw, pending or approved, at `now`, with
+    /// [`domain::fleet::decide_removal`] on the record it holds, and keeps
+    /// its tombstone in the same step: of two removals at once, one removes
+    /// and the other is refused `Unknown`. A refusal changes nothing.
+    async fn remove(
+        &self,
+        agent_id: AgentId,
+        agent_key: PublicKey,
+        now: Timestamp,
+    ) -> Result<Result<Tombstone, RemovalRefused>, StoreError>;
+
+    /// The tombstone kept under `agent_id`, if a person removed it.
+    async fn tombstone(&self, agent_id: AgentId) -> Result<Option<Tombstone>, StoreError>;
+
+    /// Drops every pending agent that [lapsed](AgentRecord::lapsed_at) at
+    /// `now`, keeping no tombstone, and answers them, oldest first. An
+    /// approval racing the lapse either approves first, and the agent
+    /// stays, or is refused `Unknown`.
+    async fn drop_lapsed(&self, now: Timestamp) -> Result<Vec<AgentRecord>, StoreError>;
 }

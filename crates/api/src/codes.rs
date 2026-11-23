@@ -628,6 +628,10 @@ pub enum ErrorCode {
     /// As many agents as the hub allows wait for approval already. The
     /// token stays good.
     PendingLimit,
+    /// The hub removed this machine, or a person rejected it while it
+    /// waited: it refuses its connections and an ordinary token under its
+    /// ID. The machine keeps backing up on its own.
+    AgentRemoved,
     /// The hub closed the connection because it can't offer the binding
     /// the agent's token names, before it proved itself.
     BindingUnavailable,
@@ -1683,6 +1687,7 @@ impl ErrorCode {
             | Self::HubProofInvalid
             | Self::ProofRefused
             | Self::PendingLimit
+            | Self::AgentRemoved
             | Self::BindingUnavailable
             | Self::IdentityConflict
             | Self::PlainAddress

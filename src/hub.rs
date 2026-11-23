@@ -1480,6 +1480,7 @@ mod tests {
             ),
             (refused("proof-refused"), ErrorCode::ProofRefused),
             (refused("identity-conflict"), ErrorCode::IdentityConflict),
+            (refused("agent-removed"), ErrorCode::AgentRemoved),
             (refused("generation-lower"), ErrorCode::HubLinkLost),
             (refused("hostname-taken"), ErrorCode::HubLinkLost),
             (refused("token-used"), ErrorCode::HubLinkLost),

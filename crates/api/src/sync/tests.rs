@@ -115,6 +115,7 @@ fn a_refusal_names_its_error_code() {
         ("hub-key-mismatch", ErrorCode::HubKeyMismatch),
         ("proof-refused", ErrorCode::ProofRefused),
         ("pending-limit", ErrorCode::PendingLimit),
+        ("agent-removed", ErrorCode::AgentRemoved),
         ("binding-unavailable", ErrorCode::BindingUnavailable),
         ("identity-conflict", ErrorCode::IdentityConflict),
         ("a-code-of-a-later-hub", ErrorCode::Unknown),

@@ -35,6 +35,14 @@ fn an_approval_and_a_report_read_the_machines_again() {
         operation: "op-1".to_owned(),
         outcome: MachineOutcomeDto::Succeeded,
     }));
+    assert!(
+        reads_again(&UiEvent::AgentRemoved {
+            agent: agent(),
+            hostname: "demo-laptop".to_owned(),
+            at: AT.to_owned(),
+        }),
+        "a removed machine leaves the dashboard"
+    );
     for other in [
         UiEvent::AgentPending {
             agent: agent(),

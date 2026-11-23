@@ -6,8 +6,9 @@ use async_trait::async_trait;
 use domain::fleet::{
     AgentRecord, AgentStatus, ApprovalRefused, BindingKind, Fingerprint, HostnameKey, MachineCheck,
     MachineFingerprint, MachineZone, PairRefusal, PairRequest, Pairing, PairingView, ProofRefusal,
-    ProofRequest, ProofView, Proved, PublicKey, SecondMachine, TokenId, TokenRecord, TokenUse,
-    admits_unused_token, decide_approval, decide_pairing, decide_proof, voids_tokens_for_new_key,
+    ProofRequest, ProofView, Proved, PublicKey, RemovalRefused, SecondMachine, TokenId,
+    TokenRecord, TokenUse, Tombstone, admits_unused_token, decide_approval, decide_pairing,
+    decide_proof, voids_tokens_for_new_key,
 };
 use domain::{AgentId, SignedDuration, Timestamp};
 
@@ -44,6 +45,7 @@ struct Kept {
     /// Per agent ID, the machine fingerprint held and when a second
     /// computer was last refused.
     machines: HashMap<AgentId, (Option<MachineFingerprint>, Option<Timestamp>)>,
+    tombstones: Vec<Tombstone>,
 }
 
 impl InMemoryAgentRegistry {
@@ -204,6 +206,10 @@ impl AgentRegistry for InMemoryAgentRegistry {
                 by_id: kept.agents.iter().find(|a| a.agent_id == request.agent_id),
                 by_hostname: kept.agents.iter().find(|a| a.hostname_key() == key),
                 pending: kept.agents.iter().filter(|a| a.is_pending()).count(),
+                tombstone: kept
+                    .tombstones
+                    .iter()
+                    .find(|t| t.agent_id == request.agent_id),
             };
             decide_pairing(&view, request, now)
         };
@@ -367,5 +373,25 @@ impl AgentRegistry for InMemoryAgentRegistry {
             }
         }
         Ok(decided)
+    }
+
+    async fn remove(
+        &self,
+        agent_id: AgentId,
+        agent_key: PublicKey,
+        now: Timestamp,
+    ) -> Result<Result<Tombstone, RemovalRefused>, StoreError> {
+        let _ = (agent_id, agent_key, now);
+        todo!()
+    }
+
+    async fn tombstone(&self, agent_id: AgentId) -> Result<Option<Tombstone>, StoreError> {
+        let _ = agent_id;
+        todo!()
+    }
+
+    async fn drop_lapsed(&self, now: Timestamp) -> Result<Vec<AgentRecord>, StoreError> {
+        let _ = now;
+        todo!()
     }
 }
