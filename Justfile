@@ -28,7 +28,8 @@ leptosfmt_version := "0.1.34"
 # The mdBook release that builds the user docs site (§16, decision 128).
 # Another release renders the pages and their anchors differently, so `setup`
 # installs this one, CI too (it reads this line), and `docs-site` refuses
-# another.
+# another. docs/guide/theme/toc.html.hbs is this release's own template with a
+# title added: compare it with the new release's when this changes.
 mdbook_version := "0.5.4"
 
 # List available workflows.
