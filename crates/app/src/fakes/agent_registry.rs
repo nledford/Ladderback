@@ -1,3 +1,4 @@
+use std::collections::HashMap;
 use std::fmt;
 use std::sync::{Arc, Mutex, MutexGuard, PoisonError};
 
@@ -40,6 +41,9 @@ struct Kept {
     tokens: Vec<TokenRecord>,
     agents: Vec<AgentRecord>,
     tls_key: Option<Fingerprint>,
+    /// Per agent ID, the machine fingerprint held and when a second
+    /// computer was last refused.
+    machines: HashMap<AgentId, (Option<MachineFingerprint>, Option<Timestamp>)>,
 }
 
 impl InMemoryAgentRegistry {
@@ -307,17 +311,39 @@ impl AgentRegistry for InMemoryAgentRegistry {
         presented: Option<&MachineFingerprint>,
         now: Timestamp,
     ) -> Result<Option<MachineCheck>, StoreError> {
-        let _ = (agent_id, presented, now);
-        todo!()
+        let mut kept = self.kept();
+        if !kept.agents.iter().any(|agent| agent.agent_id == agent_id) {
+            return Ok(None);
+        }
+        let (held, refused) = kept.machines.entry(agent_id).or_default();
+        let check = MachineCheck::of(held.as_ref(), presented);
+        match check {
+            MachineCheck::Claimed => *held = presented.copied(),
+            MachineCheck::Second => *refused = Some(now),
+            MachineCheck::Same | MachineCheck::Untold => {}
+        }
+        Ok(Some(check))
     }
 
     async fn second_machines(&self) -> Result<Vec<SecondMachine>, StoreError> {
-        todo!()
+        let kept = self.kept();
+        Ok(kept
+            .agents
+            .iter()
+            .filter_map(|agent| {
+                let (_, refused) = kept.machines.get(&agent.agent_id)?;
+                refused.map(|at| SecondMachine {
+                    agent_id: agent.agent_id,
+                    at,
+                })
+            })
+            .collect())
     }
 
     async fn forget_machine(&self, agent_id: AgentId) -> Result<bool, StoreError> {
-        let _ = agent_id;
-        todo!()
+        let mut kept = self.kept();
+        kept.machines.remove(&agent_id);
+        Ok(kept.agents.iter().any(|agent| agent.agent_id == agent_id))
     }
 
     async fn approve(
