@@ -28,6 +28,7 @@ on:
       - "docs/guide/**"
       - Justfile
       - scripts/check-site-links.ts
+      - scripts/check-theme-override.ts
       - ui-tests/scripts/docs-site-a11y.ts
       - ui-tests/package.json
       - ui-tests/package-lock.json
@@ -41,6 +42,7 @@ on:
       - "docs/guide/**"
       - Justfile
       - scripts/check-site-links.ts
+      - scripts/check-theme-override.ts
       - ui-tests/scripts/docs-site-a11y.ts
       - ui-tests/package.json
       - ui-tests/package-lock.json

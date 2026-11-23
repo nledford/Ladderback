@@ -3,10 +3,11 @@
 // at WCAG 2.2 AA, as axe-core keeps the product's pages (§4.5). Every page is
 // scanned with the A and AA rules the @ui scenarios scan with
 // (steps/gallery.ts), in each of mdBook's five themes, at a wide and a narrow
-// window; then the states a page load doesn't show: the landing page with its
-// theme list open and with search results showing, and the page the first
-// result opens, with its matches marked. A theme a page doesn't take fails
-// the run, so a scan can't pass in the wrong colors.
+// window, but the sidebar's page for a reader without JavaScript, which takes
+// only its own; then the states a page load doesn't show: the landing page
+// with its theme list open and with search results showing, and the page the
+// first result opens, with its matches marked. A theme a page doesn't take
+// fails the run, so a scan can't pass in the wrong colors.
 //
 // The pages are served over HTTP under /Ladderback/, the path GitHub Pages
 // serves them at (book.toml's `site-url`), so the search index and the 404
@@ -41,10 +42,11 @@ const WCAG_TAGS = ["wcag2a", "wcag2aa", "wcag21a", "wcag21aa", "wcag22aa"];
 const THEMES = ["light", "rust", "coal", "navy", "ayu"];
 
 // The sidebar as a page of its own, which mdBook frames in each page only for
-// a reader with JavaScript off. The scans cover the site as a reader with
-// JavaScript on gets it, as the theme fixes do (decision 128), so it is left
-// out: without JavaScript the frame has no title and its page none either.
+// a reader with JavaScript off. It carries no script, so it never takes the
+// reader's theme, only the site's default (book.toml's `default-theme`), the
+// theme every page has without JavaScript: it is scanned in that one alone.
 const NO_SCRIPT_TOC = "toc.html";
+const NO_SCRIPT_THEME = "light";
 
 // Wide enough for the sidebar to show beside the page, and narrow enough
 // that it folds away behind its toggle and the menu bar's buttons crowd.
@@ -88,12 +90,11 @@ function fileFor(pathname: string): string | undefined {
   }
 }
 
-/** Every page of the built site but `NO_SCRIPT_TOC`, as paths relative to it with `/`. */
+/** Every page of the built site, as paths relative to it with `/`. */
 function sitePages(): string[] {
   return readdirSync(SITE, { recursive: true, encoding: "utf8" })
     .filter((path) => path.endsWith(".html"))
     .map((path) => path.split(sep).join("/"))
-    .filter((path) => path !== NO_SCRIPT_TOC)
     .sort();
 }
 
@@ -150,6 +151,7 @@ try {
       const page = await context.newPage();
       page.setDefaultTimeout(LIMIT_MS);
       for (const file of pages) {
+        if (file === NO_SCRIPT_TOC && theme !== NO_SCRIPT_THEME) continue;
         await open(page, origin, file, theme);
         problems.push(...(await scan(page, `${file} (${theme}, ${window.name})`)));
         scans += 1;
