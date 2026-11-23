@@ -203,7 +203,9 @@ fn the_news(agent: &Agent) -> Heard {
         .filter(|heard| {
             matches!(
                 heard.news,
-                UiEvent::OperationSucceeded { .. } | UiEvent::OperationFailed { .. }
+                UiEvent::OperationSucceeded { .. }
+                    | UiEvent::OperationFailed { .. }
+                    | UiEvent::OperationCancelled { .. }
             )
         })
         .collect();
@@ -341,9 +343,20 @@ fn hears_warnings(agent: &mut Agent, count: usize) {
         "the warnings the page heard: {heard:?}"
     );
 }
-#[then("the page has heard nothing")]
-fn heard_nothing(agent: &mut Agent) {
-    assert!(agent.announcement.heard().is_empty());
+
+#[then("the page hears the operation was cancelled")]
+fn hears_cancel(agent: &mut Agent) {
+    let operation = agent.operation();
+    assert_eq!(
+        the_news(agent).news,
+        UiEvent::OperationCancelled {
+            operation: operation.id().as_uuid().hyphenated().to_string(),
+            finished_at: operation
+                .finished_at()
+                .expect("the operation ended")
+                .to_string(),
+        }
+    );
 }
 
 /// What the history held when the page read it.

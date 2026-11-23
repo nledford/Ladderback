@@ -239,7 +239,7 @@ Feature: Accessibility of the app shell
     And focus is on the row header "demo-home"
     And the polite region comes to contain "Backup finished."
 
-  # A cancelled run tells of no end on the events stream: the page reads the
+  # The page takes no news from a cancelled run's event: it reads the
   # history after the press until the run has ended there.
   Scenario: Focus moves to the row's header when the reader cancels the run of the focused Cancel button
     Given the daemon reports a running backup of "demo-home"

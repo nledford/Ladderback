@@ -145,8 +145,8 @@ pub struct WelcomePayload {
 
 /// The payload of the agent's `OpEvent`: one report from its outbox (§7.2).
 /// `epoch` is the outbox's UUID, `seq` the report's place in it, `event`
-/// `started`, `succeeded` or `failed`, `at` when it happened, and `code` the
-/// error code of a failure, by its wire name.
+/// `started`, `succeeded`, `failed` or `cancelled`, `at` when it happened,
+/// and `code` the error code of a failure, by its wire name.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ReportPayload {
     pub epoch: String,

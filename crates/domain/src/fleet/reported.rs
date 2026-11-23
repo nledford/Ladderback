@@ -58,7 +58,7 @@ pub fn latest_operations(reports: &[AgentReport], limit: usize) -> Vec<ReportedO
             Happening::Started => None,
             Happening::Succeeded => Some(ReportedOutcome::Succeeded),
             Happening::Failed { code } => Some(ReportedOutcome::Failed { code: code.clone() }),
-            Happening::Cancelled => todo!(),
+            Happening::Cancelled => Some(ReportedOutcome::Cancelled),
         };
         match (held, outcome) {
             (Some((_, operation)), None) => {

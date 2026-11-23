@@ -102,7 +102,7 @@ pub(super) fn reported(agent: AgentId, report: &AgentReport) -> UiEvent {
             Happening::Started => MachineOutcomeDto::Running,
             Happening::Succeeded => MachineOutcomeDto::Succeeded,
             Happening::Failed { .. } => MachineOutcomeDto::Failed,
-            Happening::Cancelled => todo!(),
+            Happening::Cancelled => MachineOutcomeDto::Cancelled,
         },
     }
 }

@@ -168,7 +168,7 @@ pub(crate) fn outcome_badge(outcome: MachineOutcomeDto) -> (BadgeState, MessageI
         MachineOutcomeDto::Running => (BadgeState::Running, msg::UI_STATUS_RUNNING),
         MachineOutcomeDto::Succeeded => (BadgeState::Succeeded, msg::UI_STATUS_SUCCEEDED),
         MachineOutcomeDto::Failed => (BadgeState::Failed, msg::UI_STATUS_FAILED),
-        MachineOutcomeDto::Cancelled => todo!(),
+        MachineOutcomeDto::Cancelled => (BadgeState::Cancelled, msg::UI_STATUS_CANCELLED),
     }
 }
 

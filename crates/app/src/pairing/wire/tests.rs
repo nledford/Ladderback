@@ -451,7 +451,10 @@ fn a_report_of_each_event_reads_back_from_its_payload() {
     let started = String::from_utf8(report_payload(&report_entry(Happening::Started))).unwrap();
     for changed in [
         started.replace(r#""started""#, r#""failed""#),
-        started.replace(r#""started""#, r#""cancelled""#),
+        started.replace(r#""started""#, r#""exploded""#),
+        started
+            .replace(r#""started""#, r#""cancelled""#)
+            .replace(r#""at""#, r#""code":"repo-locked","at""#),
         started.replace(r#""at""#, r#""code":"repo-locked","at""#),
         started.replace(r#""seq":3"#, r#""seq":0"#),
         started.replace(r#""seq":3"#, r#""seq":9223372036854775808"#),
