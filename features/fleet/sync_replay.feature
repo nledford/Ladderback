@@ -26,7 +26,7 @@ Feature: An agent's reports reach its hub once, in order
     Given the agent keeps syncing with its hub while it runs
     And the hub can't be reached
     When the agent runs 1 backup
-    Then the backup succeeded while the agent's sync couldn't reach the hub
+    Then the backup's 2 reports were kept while the agent's sync couldn't reach the hub
     When the hub can be reached again
     Then the hub soon holds the agent's 2 reports, each once, in the order they happened
 

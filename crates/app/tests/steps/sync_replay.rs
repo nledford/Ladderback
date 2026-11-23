@@ -303,8 +303,8 @@ async fn ran_while_down(agent: &mut Agent, count: u128) {
     );
 }
 
-#[then("the backup succeeded while the agent's sync couldn't reach the hub")]
-async fn succeeded_while_unreachable(agent: &mut Agent) {
+#[then("the backup's 2 reports were kept while the agent's sync couldn't reach the hub")]
+async fn kept_while_unreachable(agent: &mut Agent) {
     let id = agent.pairing.first().agent_id;
     let inbox = agent.pairing.hub().inbox.clone();
     let side = first(agent);

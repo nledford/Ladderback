@@ -707,10 +707,11 @@ async fn a_channel_shows_its_sequence_numbers_and_no_key() {
         .connect_channel(agent_id(1), hostname(1), None)
         .await
         .unwrap();
-    let shown = format!("{channel:?}");
-    assert!(shown.starts_with("AgentChannel { next_sent: "), "{shown}");
-    assert!(shown.contains("next_received: "), "{shown}");
-    assert!(!shown.contains("seed"), "{shown}");
+    let next = domain::fleet::FIRST_SEQUENCE + 1;
+    assert_eq!(
+        format!("{channel:?}"),
+        format!("AgentChannel {{ next_sent: {next}, next_received: {next}, .. }}")
+    );
 }
 
 /// The hub logs an approved agent's first connection since its approval
