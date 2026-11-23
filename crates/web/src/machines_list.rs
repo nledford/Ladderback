@@ -142,6 +142,21 @@ impl Listed {
         }
     }
 
+    /// Drops `agent_id` at once, from the copy too: the rejection or the
+    /// removal answers the reader's own press, so its row leaves its table
+    /// before the review closes, paused or not.
+    pub(crate) fn removed(self, agent_id: &str) {
+        let keep = |agent: &HubAgentDto| agent.agent_id != agent_id;
+        self.agents.update(|agents| agents.retain(keep));
+        if self.held.with_untracked(Option::is_some) {
+            self.held.update(|held| {
+                if let Some(held) = held {
+                    held.agents.retain(keep);
+                }
+            });
+        }
+    }
+
     /// Shows `agent_id` as the hub last listed it, in the copy too, once its
     /// approval was refused and the list read again: the refusal answers the
     /// reader's own press, so the row they compare and approve next is the
@@ -647,5 +662,32 @@ mod tests {
         assert_eq!(listed.pending(), 0);
         listed.resume();
         assert!(hostnames(listed, AgentStatusDto::Pending).is_empty());
+    }
+
+    #[test]
+    fn a_removal_drops_its_row_at_once_paused_or_not() {
+        let listed = listed(vec![
+            agent("demo-laptop", AgentStatusDto::Pending, 5),
+            agent("demo-desktop", AgentStatusDto::Approved, 5),
+            agent("demo-macbook", AgentStatusDto::Approved, 5),
+        ]);
+        listed.removed("agent-demo-laptop");
+        assert!(hostnames(listed, AgentStatusDto::Pending).is_empty());
+        assert_eq!(
+            hostnames(listed, AgentStatusDto::Approved),
+            ["demo-desktop", "demo-macbook"]
+        );
+
+        listed.pause();
+        listed.removed("agent-demo-desktop");
+        assert_eq!(
+            hostnames(listed, AgentStatusDto::Approved),
+            ["demo-macbook"]
+        );
+        listed.resume();
+        assert_eq!(
+            hostnames(listed, AgentStatusDto::Approved),
+            ["demo-macbook"]
+        );
     }
 }
