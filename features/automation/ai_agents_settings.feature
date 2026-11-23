@@ -74,6 +74,21 @@ Feature: Choosing in Settings what AI agents may do without a token
     And the field "Admin password" shows the error "That is not the current admin password. Check it and try again."
     And the page has no live region but the announcer's
 
+  Scenario: A save refused for another reason than the admin password clears the field's error from the wrong try before it
+    Given a daemon with sign-in on and the admin password "demo-admin-pass"
+    And the admin is signed in with "demo-admin-pass"
+    And the daemon refuses each save of what AI agents may do after the first with a sign-in wait of 30 seconds
+    When I open the address "/settings#ai-agents"
+    And I skip to the content
+    And I press Tab until focus is on the textbox "Admin password"
+    And I type "not-the-password"
+    And I press Enter
+    Then the field "Admin password" shows the error "That is not the current admin password. Check it and try again."
+    When I press Enter
+    Then the page shows an error alert containing "Wait 30 seconds before signing in again"
+    And the field "Admin password" no longer shows the error "That is not the current admin password. Check it and try again."
+    And the field "Admin password" is not marked invalid
+
   Scenario: Permissions the daemon can't read are said in an alert, with no form, and the panel is a Tab stop
     Given a daemon with sign-in off
     And the daemon can't read what AI agents may do without a token
