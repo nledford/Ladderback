@@ -825,6 +825,24 @@ mod tests {
     }
 
     #[test]
+    fn many_rows_that_tie_keep_the_order_given_whichever_way_the_sort_runs() {
+        // More rows than the standard library sorts by insertion alone, which
+        // keeps ties in order whatever the sort, so a sort that isn't stable
+        // shows here.
+        let rows: Vec<(i64, i64)> = (0..64).map(|at| (at, at % 3)).collect();
+        let by_value = |row: &(i64, i64)| SortKey::Number(row.1);
+        let ties = |value| (0..64).filter(move |at| at % 3 == value);
+        assert_eq!(
+            order(&rows, |row| row.0, Some((Direction::Ascending, &by_value))),
+            [0, 1, 2].into_iter().flat_map(ties).collect::<Vec<_>>()
+        );
+        assert_eq!(
+            order(&rows, |row| row.0, Some((Direction::Descending, &by_value))),
+            [2, 1, 0].into_iter().flat_map(ties).collect::<Vec<_>>()
+        );
+    }
+
+    #[test]
     fn numbers_order_by_value_not_by_their_digits() {
         let rows = [Row("nine", 9), Row("ten", 10), Row("minus", -1)];
         assert_eq!(
