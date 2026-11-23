@@ -132,14 +132,30 @@ pub fn order<R, K: Clone + Eq + Hash>(
     let Some((direction, sort_key)) = by else {
         return firsts.map(|(_, key)| key).collect();
     };
-    let mut keyed: Vec<(SortKey, K)> = firsts.map(|(row, key)| (sort_key(row), key)).collect();
-    // A stable sort: rows whose keys tie keep the order given, whichever way
-    // the keys run.
+    // The rows' sort keys, each with where its row stands among `keys`, are
+    // sorted by one function for every row type (#1429).
+    let mut keys = Vec::with_capacity(rows.len());
+    let mut keyed = Vec::with_capacity(rows.len());
+    for (at, (row, key)) in firsts.enumerate() {
+        keyed.push((sort_key(row), at));
+        keys.push(Some(key));
+    }
+    sort_keys(&mut keyed, direction);
+    keyed
+        .into_iter()
+        .filter_map(|(_, at)| keys.get_mut(at).and_then(Option::take))
+        .collect()
+}
+
+/// Sorts `keyed`, each a row's sort key and where the row stands, the way
+/// `direction` runs. A stable sort: rows whose keys tie keep the order given,
+/// whichever way the keys run. Not generic, so the standard library's sort
+/// is built once for every table rather than once for each row type (#1429).
+fn sort_keys(keyed: &mut [(SortKey, usize)], direction: Direction) {
     keyed.sort_by(|(a, _), (b, _)| match direction {
         Direction::Ascending => a.cmp(b),
         Direction::Descending => b.cmp(a),
     });
-    keyed.into_iter().map(|(_, key)| key).collect()
 }
 
 /// Where each key of `rows` first stands in them: a key given twice is the
@@ -805,6 +821,24 @@ mod tests {
                 Some((Direction::Descending, &by_count))
             ),
             ["photos", "documents", "music", "notes"]
+        );
+    }
+
+    #[test]
+    fn many_rows_that_tie_keep_the_order_given_whichever_way_the_sort_runs() {
+        // More rows than the standard library sorts by insertion alone, which
+        // keeps ties in order whatever the sort, so a sort that isn't stable
+        // shows here.
+        let rows: Vec<(i64, i64)> = (0..64).map(|at| (at, at % 3)).collect();
+        let by_value = |row: &(i64, i64)| SortKey::Number(row.1);
+        let ties = |value| (0..64).filter(move |at| at % 3 == value);
+        assert_eq!(
+            order(&rows, |row| row.0, Some((Direction::Ascending, &by_value))),
+            [0, 1, 2].into_iter().flat_map(ties).collect::<Vec<_>>()
+        );
+        assert_eq!(
+            order(&rows, |row| row.0, Some((Direction::Descending, &by_value))),
+            [2, 1, 0].into_iter().flat_map(ties).collect::<Vec<_>>()
         );
     }
 
