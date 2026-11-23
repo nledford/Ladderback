@@ -108,6 +108,43 @@ async fn a_handler_that_panics_answers_500_with_the_error_envelope_and_one_log_l
     assert!(!line.contains("broke"), "the log shows the panic: {line}");
 }
 
+/// A UI file source that breaks on every read, with what the path carried.
+struct BreaksOnRead;
+
+impl AssetSource for BreaksOnRead {
+    fn get(&self, path: &str) -> Option<Asset> {
+        panic!("the read broke on {path}");
+    }
+}
+
+// A debug build reads the UI off the runtime (#1147), where a panic comes
+// back as a failed task rather than through the panic layer: it is answered
+// the same.
+#[tokio::test]
+async fn a_read_of_the_ui_that_panics_answers_500_with_the_error_envelope_and_one_log_line() {
+    capture_the_log();
+    let response = request(
+        Arc::new(BreaksOnRead),
+        Method::GET,
+        &format!("/{CANARY}"),
+        "",
+    )
+    .await;
+    assert_eq!(response.status(), StatusCode::INTERNAL_SERVER_ERROR);
+    assert_eq!(content_type(&response), "application/json");
+    let answer = body(response).await;
+    assert_eq!(
+        serde_json::from_str::<serde_json::Value>(&answer).unwrap(),
+        serde_json::json!({"code": "internal-error"})
+    );
+    let logged = logged_here();
+    assert_eq!(logged.len(), 1, "{logged:?}");
+    let (level, line) = &logged[0];
+    assert_eq!(*level, log::Level::Error);
+    assert!(!line.contains(CANARY), "the log shows the request: {line}");
+    assert!(!line.contains("broke"), "the log shows the panic: {line}");
+}
+
 /// Sends `request` on a connection of its own and reads the answer to its
 /// end.
 async fn exchange(at: std::net::SocketAddr, request: &str) -> String {
