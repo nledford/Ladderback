@@ -50,3 +50,19 @@ Feature: The step-up field
     And I paste "1a2b3c4d"
     Then the field "Demo ID" holds what was pasted
     And the page has no accessibility violations
+
+  Scenario Outline: A second wrong try in the step-up field shows its error again as a new alert, so it is heard again
+    When I open the component gallery
+    And I skip to the content
+    And I press Tab until focus is on the button "<open>"
+    And I press Enter
+    And I press Tab until focus is on the button "<check>"
+    And I press Enter
+    Then the field "<field>" shows the error "<error>"
+    When I press Enter
+    Then the field "<field>" shows that error again, as a new alert
+
+    Examples:
+      | open                           | check                    | field          | error                                                                  |
+      | Open the demo step-up          | Check the demo password  | Admin password | That is not the demo password. Type it again, or paste it.             |
+      | Open the demo short-ID step-up | Check the demo ID        | Demo ID        | That is not the demo ID. Type or paste the 8 characters shown above.   |

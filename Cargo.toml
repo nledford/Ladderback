@@ -362,6 +362,18 @@ debug = true
 inherits = "release"
 lto = "thin"
 
+# The profile the web UI's wasm is built with for a release (`just
+# web-release`; technical design §8.1, §16 decision 146): the release profile
+# optimized for size, with fat LTO over one codegen unit, so the optimizer sees
+# the whole program and drops or merges what crosses crate boundaries. Only the
+# wasm uses it: the daemon keeps `release`'s speed (`dist` above), and `just
+# web` and `just web-test` keep `release`, whose builds are quicker to repeat.
+[profile.wasm-release]
+inherits = "release"
+opt-level = "z"
+lto = "fat"
+codegen-units = 1
+
 [package]
 name = "ladderback"
 description = "Self-hosted backup manager for rustic"

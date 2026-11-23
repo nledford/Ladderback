@@ -1551,6 +1551,65 @@ impl AssetSource for Anything {
     }
 }
 
+/// The UI's page from a source that can't read it until the runtime has run
+/// another task while the read goes on, as a debug build's read from disk
+/// mustn't stop one (#1147): it says it has started, then waits for that
+/// task's word, which the task sends only once it has heard the start.
+struct ReadsWhileTheRuntimeRuns {
+    started: std::sync::Mutex<Option<tokio::sync::oneshot::Sender<()>>>,
+    word: std::sync::Mutex<std::sync::mpsc::Receiver<()>>,
+}
+
+impl AssetSource for ReadsWhileTheRuntimeRuns {
+    fn get(&self, path: &str) -> Option<Asset> {
+        if let Some(started) = self
+            .started
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .take()
+        {
+            let _ = started.send(());
+        }
+        // The task's sender is gone once it has sent, so a later read doesn't
+        // wait either; only a task that never ran while a read waited leaves
+        // this to time out.
+        let word = self
+            .word
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .recv_timeout(std::time::Duration::from_secs(5));
+        let ran = !matches!(word, Err(std::sync::mpsc::RecvTimeoutError::Timeout));
+        (ran && path == INDEX).then_some(Asset {
+            bytes: Cow::Borrowed(b"<!doctype html><title>Ladderback</title>"),
+        })
+    }
+}
+
+// A release build's files are in memory and are served in place.
+#[cfg(debug_assertions)]
+#[tokio::test]
+async fn reading_the_ui_leaves_the_runtime_free_to_run_other_tasks() {
+    let (started, has_started) = tokio::sync::oneshot::channel();
+    let (word, waits) = std::sync::mpsc::channel();
+    // The test's runtime has one thread: this task hears the read start, and
+    // answers it, only while the read leaves that thread free.
+    tokio::spawn(async move {
+        if has_started.await.is_ok() {
+            let _ = word.send(());
+        }
+    });
+    let assets = Arc::new(ReadsWhileTheRuntimeRuns {
+        started: std::sync::Mutex::new(Some(started)),
+        word: std::sync::Mutex::new(waits),
+    });
+    let response = request(assets, Method::GET, "/", "").await;
+    assert_eq!(
+        response.status(),
+        StatusCode::OK,
+        "the read of the page held the runtime, so no other task ran while it waited"
+    );
+}
+
 #[tokio::test]
 async fn paths_never_leave_the_ui_folder() {
     for path in [
