@@ -1132,31 +1132,40 @@ async fn a_removal_keeps_a_tombstone_frees_the_hostname_and_outlives_the_hub(
         Some(kept.clone())
     );
     assert_eq!(tombstone(registry.as_ref(), other.agent_id).await, None);
+    after_reopening_the_tombstone_holds_and_the_name_is_free(harness, &kept, &other, &second).await;
+}
+
+async fn after_reopening_the_tombstone_holds_and_the_name_is_free(
+    harness: &dyn AgentRegistryHarness,
+    kept: &Tombstone,
+    other: &PairRequest,
+    second: &TokenRecord,
+) {
     let registry = harness.reopened().await;
     assert_eq!(
-        tombstone(registry.as_ref(), request.agent_id).await,
+        tombstone(registry.as_ref(), kept.agent_id).await,
         Some(kept.clone()),
         "a tombstone outlives the hub"
     );
     assert_eq!(
-        ok(registry.agent(request.agent_id).await, "reading the agent"),
+        ok(registry.agent(kept.agent_id).await, "reading the agent"),
         Some(None)
     );
-    add(registry.as_ref(), &second).await;
+    add(registry.as_ref(), second).await;
     assert!(
         matches!(
-            pair(registry.as_ref(), &other, at(50)).await,
+            pair(registry.as_ref(), other, at(50)).await,
             Some(Ok(Pairing::New(_)))
         ),
         "a removed agent's hostname is free"
     );
     assert!(
-        matches!(remove(registry.as_ref(), &other, at(60)).await, Some(Ok(_))),
+        matches!(remove(registry.as_ref(), other, at(60)).await, Some(Ok(_))),
         "the machine that took the name is removed in turn"
     );
     assert_eq!(
-        tombstone(registry.as_ref(), request.agent_id).await,
-        Some(kept),
+        tombstone(registry.as_ref(), kept.agent_id).await,
+        Some(kept.clone()),
         "each removed agent keeps its own tombstone"
     );
 }
