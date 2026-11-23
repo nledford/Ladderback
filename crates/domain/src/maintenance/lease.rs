@@ -43,16 +43,19 @@ impl LeaseEpoch {
 
     /// The epoch `number` names; none for 0.
     pub const fn new(number: u64) -> Option<Self> {
-        todo!()
+        match NonZeroU64::new(number) {
+            Some(number) => Some(Self(number)),
+            None => None,
+        }
     }
 
     pub const fn get(self) -> u64 {
-        todo!()
+        self.0.get()
     }
 
     /// The epoch after this one; none past the last.
     pub fn next(self) -> Option<Self> {
-        todo!()
+        self.0.checked_add(1).map(Self)
     }
 }
 
@@ -69,7 +72,7 @@ impl Lease {
     /// Whether the hub still counts the lease at `now`: until
     /// [`LEASE_GRACE`] past its expiry.
     pub fn binds(&self, now: Timestamp) -> bool {
-        todo!()
+        before_end(self.expires_at, LEASE_GRACE, now)
     }
 }
 
@@ -89,14 +92,20 @@ impl RepositoryReport {
     /// holds another agent's tagged snapshots. Only the hub may maintain a
     /// repository several agents use, since only it sees all their backups.
     pub fn shared(&self, others_report: bool) -> bool {
-        todo!()
+        others_report || self.holds_other_agents_snapshots
     }
 }
 
 /// Whether an agent's report made at `reported_at` still counts at `now`
 /// ([`REPORT_LIFE`]).
 pub fn report_counts(reported_at: Timestamp, now: Timestamp) -> bool {
-    todo!()
+    before_end(reported_at, REPORT_LIFE, now)
+}
+
+/// Whether `now` comes before `start` plus `span`; always past the last
+/// time there is, so what runs that long never ends.
+fn before_end(start: Timestamp, span: SignedDuration, now: Timestamp) -> bool {
+    start.checked_add(span).ok().is_none_or(|end| now < end)
 }
 
 /// One agent's report of every repository it uses: one entry for each
@@ -107,9 +116,11 @@ pub struct RepositoryReports(Vec<RepositoryReport>);
 
 impl RepositoryReports {
     pub fn new(entries: impl IntoIterator<Item = RepositoryReport>) -> Self {
-        let _ = BTreeMap::<RepositoryId, RepositoryReport>::new();
-        let _ = entries.into_iter();
-        todo!()
+        let by_repository: BTreeMap<RepositoryId, RepositoryReport> = entries
+            .into_iter()
+            .map(|entry| (entry.repository.clone(), entry))
+            .collect();
+        Self(by_repository.into_values().collect())
     }
 
     pub fn entries(&self) -> &[RepositoryReport] {
@@ -177,7 +188,7 @@ impl RepositoryOwnership {
 
     /// The lease that binds at `now`, if any.
     pub fn binding(&self, now: Timestamp) -> Option<&Lease> {
-        todo!()
+        self.lease.as_ref().filter(|lease| lease.binds(now))
     }
 
     /// Decides `agent`'s report of this repository, which asks for
@@ -198,7 +209,41 @@ impl RepositoryOwnership {
         shared: bool,
         now: Timestamp,
     ) -> ClaimOutcome {
-        todo!()
+        if request != Maintenance::Local {
+            return ClaimOutcome::NoClaim;
+        }
+        match self.binding(now).copied() {
+            Some(lease) if lease.holder != agent => {
+                ClaimOutcome::Refused(ClaimRefused::HeldByAnother(lease.holder))
+            }
+            Some(lease) if shared => ClaimOutcome::Unrenewed(lease),
+            Some(lease) => {
+                let renewed = Lease {
+                    expires_at: lease.expires_at.max(lease_end(now)),
+                    ..lease
+                };
+                self.lease = Some(renewed);
+                ClaimOutcome::Renewed(renewed)
+            }
+            None if shared => ClaimOutcome::Refused(ClaimRefused::Shared),
+            None => {
+                let next = match self.last_epoch {
+                    None => Some(LeaseEpoch::FIRST),
+                    Some(last) => last.next(),
+                };
+                let Some(epoch) = next else {
+                    return ClaimOutcome::Refused(ClaimRefused::EpochsSpent);
+                };
+                let granted = Lease {
+                    holder: agent,
+                    epoch,
+                    expires_at: lease_end(now),
+                };
+                self.last_epoch = Some(epoch);
+                self.lease = Some(granted);
+                ClaimOutcome::Granted(granted)
+            }
+        }
     }
 
     /// Ends the lease `agent` holds at `epoch`, at its holder's signed
@@ -206,8 +251,20 @@ impl RepositoryOwnership {
     /// before the lease runs out. A release by another agent or of another
     /// epoch is refused and changes nothing.
     pub fn release(&mut self, agent: AgentId, epoch: LeaseEpoch) -> Result<(), ReleaseRefused> {
-        todo!()
+        match self.lease {
+            Some(lease) if lease.holder == agent && lease.epoch == epoch => {
+                self.lease = None;
+                Ok(())
+            }
+            _ => Err(ReleaseRefused),
+        }
     }
+}
+
+/// The expiry of a lease granted or renewed at `now`: [`LEASE_LIFE`] later,
+/// or the last time there is.
+fn lease_end(now: Timestamp) -> Timestamp {
+    now.checked_add(LEASE_LIFE).unwrap_or(Timestamp::MAX)
 }
 
 #[cfg(test)]
