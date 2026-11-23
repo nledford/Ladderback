@@ -630,7 +630,7 @@ pub enum ErrorCode {
     PendingLimit,
     /// The hub removed this machine, or a person rejected it while it
     /// waited: it refuses its connections and an ordinary token under its
-    /// ID. The machine keeps backing up on its own.
+    /// ID. The machine keeps backing up and runs no maintenance.
     AgentRemoved,
     /// The hub closed the connection because it can't offer the binding
     /// the agent's token names, before it proved itself.

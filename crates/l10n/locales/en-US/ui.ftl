@@ -3681,13 +3681,13 @@ ui-machines-reject-title = Reject { $hostname }?
 # $hostname (text): the machine's hostname.
 ui-machines-remove-title = Remove { $hostname }?
 
-# What the review of rejecting a waiting machine says first.
+# What the review of rejecting a waiting machine says first. A paired machine maintains only under its hub's lease, so a rejected one runs no maintenance.
 # $hostname (text): the machine's hostname.
-ui-machines-reject-body = { $hostname } stops waiting and can't sync with this { -hub }. Its key is kept, so it can't ask again under that key. It keeps backing up on its own.
+ui-machines-reject-body = { $hostname } stops waiting and can't sync with this { -hub }, or pair with it again under its ID. It keeps backing up and runs no maintenance.
 
-# What the review of removing an approved machine says first.
+# What the review of removing an approved machine says first. A paired machine maintains only under its hub's lease, so a removed one stops maintaining.
 # $hostname (text): the machine's hostname.
-ui-machines-remove-body = { $hostname } can't sync with this { -hub } any more. Its key is kept, so it can't come back under that key. It keeps backing up on its own.
+ui-machines-remove-body = { $hostname } can't sync with this { -hub } any more, or pair with it again under its ID. It keeps backing up and stops running maintenance.
 
 # Said on the page once a waiting machine is rejected.
 # $hostname (text): the machine's hostname.

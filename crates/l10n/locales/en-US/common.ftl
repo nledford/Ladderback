@@ -619,8 +619,9 @@ error-pending-limit = The { -hub } already has 20 { -machine(form: "other") } wa
 
 # The hub removed this machine, or someone rejected it while it waited for
 # approval: it refuses the machine's connections and any token under its ID.
-# Nothing on this machine brings it back, so the message names no action.
-error-agent-removed = The { -hub } removed this { -machine }, or someone rejected it while it waited for approval. The { -hub } no longer accepts this { -machine }. It keeps backing up on its own.
+# Nothing on this machine brings it back, so the message names no action. A
+# paired machine maintains only under its hub's lease, so it runs none.
+error-agent-removed = The { -hub } removed this { -machine }, or someone rejected it while it waited for approval. The { -hub } no longer accepts this { -machine }. It keeps backing up and runs no maintenance.
 
 # The hub closed the connection before proving itself: it can't offer the
 # kind of connection this machine's token names, as when a proxy ends TLS in
@@ -691,10 +692,10 @@ error-generation-lower = The { -hub } offered an older state than this machine h
 # than the other can use.
 error-protocol-out-of-date = The { -hub } is on an older release than this machine can use, or a newer one. This machine keeps backing up. Update whichever side is older.
 
-# A pairing token or an approval was asked for on the hub's page from
-# another computer while sign-in is off, so there is no password to confirm
-# it with.
-error-pairing-needs-sign-in = Pairing a machine from another computer needs sign-in to be on, so the { -hub } did nothing. Set an admin password under Settings, start { -brand-name } again, then sign in and try again.
+# A pairing token, an approval or a removal was asked for on the hub's page
+# from another computer while sign-in is off, so there is no password to
+# confirm it with.
+error-pairing-needs-sign-in = Pairing, approving or removing a { -machine } from another computer needs sign-in to be on, so the { -hub } did nothing. Set an admin password under Settings, start { -brand-name } again, then sign in and try again.
 
 # The address for a pairing token isn't one a machine can use.
 error-hub-address-invalid = That address isn't one a { -machine } can use. Type it as { "https://" }, then the host name and the port, such as { "https://hub.example:9443" }.
@@ -708,8 +709,9 @@ error-pairing-token-limit = The { -hub } has as many unused pairing tokens as it
 # No unused pairing token has the ID asked for.
 error-pairing-token-unknown = That pairing token isn't waiting any more: it was used, it lapsed or it was canceled already.
 
-# No machine waits for approval under the agent ID and the key asked for.
-error-agent-unknown = No { -machine } with that key is waiting for approval: it never paired, it was dropped, or it holds another key now. Read the list again and compare the key with the one on the { -machine }'s own screen.
+# No machine is registered under the agent ID and the key asked for, to
+# approve or to remove.
+error-agent-unknown = No { -machine } is registered under that ID with that key: it never paired, it was removed, rejected or dropped, or it holds another key now. Read the list again and compare the key with the one on the { -machine }'s own screen.
 
 # The machine asked to be approved is approved already.
 error-agent-approved-already = That { -machine } is approved already.
