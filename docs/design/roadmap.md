@@ -237,6 +237,7 @@ Decisions 1–6 recorded 2026-11-08. Decisions 7–12 recorded 2026-11-08 after 
 | [149](decisions/149-the-hubs-dashboard.md) | The hub's dashboard shows when each machine last connected and its latest operations, follows the hub's events, and is reached from the start page and the Machines tab |
 | [150](decisions/150-the-hub-takes-one-computer-per-machine-id.md) | The hub takes one computer under each machine ID |
 | [151](decisions/151-a-paired-machine-maintains-only-under-its-hubs-lease.md) | A paired machine maintains only under a live lease from its hub, and asks for its grants every 15 minutes |
+| [154](decisions/154-removing-a-machine.md) | How a person removes or rejects a machine on the hub, and when a waiting machine lapses |
 
 ## 17. Open questions
 
