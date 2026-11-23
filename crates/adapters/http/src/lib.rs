@@ -779,8 +779,7 @@ pub fn router(assets: Arc<dyn AssetSource>, checks: RequestChecks, state: AppSta
     let app = routes
         .with_state(state)
         .fallback(move |method: Method, uri: Uri, headers: HeaderMap| {
-            let assets = Arc::clone(&assets);
-            async move { serve(assets.as_ref(), &method, &uri, &headers) }
+            serve_ui(Arc::clone(&assets), method, uri, headers)
         })
         .layer(from_fn(body_limit::enforce))
         .layer(from_fn_with_state(gate, sign_in::enforce))
@@ -1375,6 +1374,34 @@ fn refused_detailed(
     detail: Option<String>,
 ) -> Response {
     (status, axum::Json(api::ErrorDto::new(code, args, detail))).into_response()
+}
+
+/// [`serve`] in a debug build, whose UI files are read from disk as each is
+/// asked for (`read_ui_file`): on Tokio's blocking pool, so a slow read
+/// doesn't stop the runtime's other tasks (#1147). A task that fails there is
+/// a panic of `serve`'s (the runtime cancels a blocking task only as it shuts
+/// down, when nobody reads the answer), answered as a handler's panic is.
+#[cfg(debug_assertions)]
+async fn serve_ui(
+    assets: Arc<dyn AssetSource>,
+    method: Method,
+    uri: Uri,
+    headers: HeaderMap,
+) -> Response {
+    tokio::task::spawn_blocking(move || serve(assets.as_ref(), &method, &uri, &headers))
+        .await
+        .unwrap_or_else(|_| panicked(Box::new(())))
+}
+
+/// [`serve`] in a release build, whose UI files are in memory: in place.
+#[cfg(not(debug_assertions))]
+async fn serve_ui(
+    assets: Arc<dyn AssetSource>,
+    method: Method,
+    uri: Uri,
+    headers: HeaderMap,
+) -> Response {
+    serve(assets.as_ref(), &method, &uri, &headers)
 }
 
 /// The router's fallback: the UI's files, and its page for every client-side
