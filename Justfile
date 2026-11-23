@@ -668,11 +668,13 @@ release-preview:
     git --no-pager diff -- Cargo.toml CHANGELOG.md
 
 # The web UI a release embeds: built with `release_flags`, as the daemon is, so
-# it has no pseudolocales and no gallery (§12.1).
+# it has no pseudolocales and no gallery (§12.1), and with the `wasm-release`
+# profile (Cargo.toml), which optimizes it for size. `--release` stays, so trunk
+# still runs wasm-opt and the precompression hook (crates/web/Trunk.toml).
 [doc('Build the web UI into crates/web/dist as a release embeds it.')]
 [group('release')]
 web-release:
-    cd crates/web && trunk build --release {{ release_flags }}
+    cd crates/web && trunk build --release --cargo-profile wasm-release {{ release_flags }}
 
 # Installs the ladderback binary built from this checkout with `cargo install`,
 # into Cargo's bin folder (`~/.cargo/bin`, or `bin` under `--root <dir>`). It is
