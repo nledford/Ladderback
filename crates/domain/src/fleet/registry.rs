@@ -174,8 +174,10 @@ impl AgentRecord {
     /// Whether the agent waited for approval [`PENDING_LIFE`] or longer at
     /// `now`: a lapsed agent is dropped. An approved agent never lapses.
     pub fn lapsed_at(&self, now: Timestamp) -> bool {
-        let _ = now;
-        todo!()
+        match self.status {
+            AgentStatus::Pending { since } => now.duration_since(since) >= PENDING_LIFE,
+            AgentStatus::Approved { .. } => false,
+        }
     }
 }
 
@@ -246,8 +248,8 @@ pub fn list_agents(agents: Vec<AgentRecord>) -> Vec<ListedAgent> {
 /// What the hub keeps of an agent a person removed or rejected (decision
 /// 120, "Pairing"): its agent ID, the hostname it held and its last key, so
 /// the hub can tell the agent, signed, that it was removed, and refuse an
-/// ordinary token under its ID. It holds no hostname: another machine may
-/// take the name.
+/// ordinary token under its ID. The hostname is kept as a record only, not
+/// held: another machine may take the name.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Tombstone {
     pub agent_id: AgentId,
@@ -275,8 +277,15 @@ pub fn decide_removal(
     agent_key: &PublicKey,
     now: Timestamp,
 ) -> Result<Tombstone, RemovalRefused> {
-    let _ = (record, agent_key, now);
-    todo!()
+    let record = record
+        .filter(|record| record.key == *agent_key)
+        .ok_or(RemovalRefused::Unknown)?;
+    Ok(Tombstone {
+        agent_id: record.agent_id,
+        hostname: record.hostname.clone(),
+        key: record.key,
+        removed_at: now,
+    })
 }
 
 /// What has become of a pairing token.
@@ -457,6 +466,9 @@ pub fn decide_pairing(
         }
         TokenUse::Unused if now >= token.expires_at => return Err(PairRefusal::TokenExpired),
         TokenUse::Unused => {}
+    }
+    if view.tombstone.is_some() {
+        return Err(PairRefusal::AgentRemoved);
     }
     if let Some(record) = view.by_id {
         if record.key != request.agent_key {
