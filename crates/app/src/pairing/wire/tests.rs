@@ -431,7 +431,7 @@ fn report_entry(happening: Happening) -> OutboxEntry {
 
 /// A report of each event reads back from its payload, a failure with its
 /// code; an event with a code it can't have, or without one it needs, is
-/// refused.
+/// refused, as is a place the hub's store can't hold (past `i64::MAX`).
 #[test]
 fn a_report_of_each_event_reads_back_from_its_payload() {
     let code = WireName::parse("repo-locked").unwrap();
@@ -443,12 +443,16 @@ fn a_report_of_each_event_reads_back_from_its_payload() {
         let entry = report_entry(happening);
         assert_eq!(read_report(&report_payload(&entry)), Ok(entry));
     }
+    let mut last = report_entry(Happening::Started);
+    last.seq = ReportSeq::new(i64::MAX.unsigned_abs()).unwrap();
+    assert_eq!(read_report(&report_payload(&last)), Ok(last));
     let started = String::from_utf8(report_payload(&report_entry(Happening::Started))).unwrap();
     for changed in [
         started.replace(r#""started""#, r#""failed""#),
         started.replace(r#""started""#, r#""cancelled""#),
         started.replace(r#""at""#, r#""code":"repo-locked","at""#),
         started.replace(r#""seq":3"#, r#""seq":0"#),
+        started.replace(r#""seq":3"#, r#""seq":9223372036854775808"#),
     ] {
         assert_eq!(
             read_report(changed.as_bytes()),

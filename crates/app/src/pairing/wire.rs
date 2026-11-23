@@ -194,9 +194,9 @@ pub fn report_payload(entry: &OutboxEntry) -> Vec<u8> {
     .to_bytes()
 }
 
-/// The report a payload's bytes hold: a place of 0, an event this build
-/// doesn't know, a failure without its code or a start or success with one
-/// refuses it.
+/// The report a payload's bytes hold: a place of 0 or past `i64::MAX`,
+/// which the hub's store can't hold, an event this build doesn't know, a
+/// failure without its code or a start or success with one refuses it.
 pub fn read_report(bytes: &[u8]) -> Result<OutboxEntry, WireRefused> {
     let payload = ReportPayload::from_bytes(bytes).map_err(|_| WireRefused)?;
     let code = payload.code.as_deref().map(WireName::parse);
@@ -208,7 +208,9 @@ pub fn read_report(bytes: &[u8]) -> Result<OutboxEntry, WireRefused> {
     };
     Ok(OutboxEntry {
         epoch: OutboxEpoch::from_uuid(uuid(&payload.epoch)?),
-        seq: ReportSeq::new(payload.seq).ok_or(WireRefused)?,
+        seq: ReportSeq::new(payload.seq)
+            .filter(|seq| i64::try_from(seq.get()).is_ok())
+            .ok_or(WireRefused)?,
         report: AgentReport {
             op_id: OperationId::from_uuid(uuid(&payload.op_id)?),
             happening,

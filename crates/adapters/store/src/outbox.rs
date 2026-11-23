@@ -310,7 +310,8 @@ async fn meta(conn: &mut SqliteConnection) -> Result<Option<(OutboxEpoch, u64)>,
     Ok(Some((epoch_of(&row, "epoch")?, last)))
 }
 
-/// A place as the store keeps it: every place the outbox gives fits.
+/// A place as the store keeps it: every place the outbox gives fits, and
+/// the hub reads none that doesn't (`read_report`).
 fn place(seq: ReportSeq) -> i64 {
     i64::try_from(seq.get()).unwrap_or(i64::MAX)
 }
