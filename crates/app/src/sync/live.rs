@@ -32,7 +32,32 @@ impl ReadPlans {
 
     /// The agent's plans as they stand now, in its configuration's order.
     pub async fn read(&self) -> Result<PlansReport, StatusError> {
-        todo!()
+        let status = self.status.read().await?;
+        let planned = self
+            .schedules
+            .planned_runs()
+            .await
+            .map_err(StatusError::Store)?;
+        let plans = status
+            .plans
+            .into_iter()
+            .map(|standing| ReportedPlan {
+                last: standing.last.as_ref().and_then(|last| {
+                    LastRun::of(
+                        &last.status,
+                        last.queued_at,
+                        last.started_at,
+                        last.finished_at,
+                    )
+                }),
+                next_run: planned
+                    .iter()
+                    .find(|run| run.plan == standing.plan)
+                    .and_then(|run| EpochSeconds::from_timestamp(run.at)),
+                plan: standing.plan,
+            })
+            .collect();
+        Ok(PlansReport::of(plans))
     }
 }
 
@@ -51,8 +76,18 @@ impl LiveProgress {
     /// Keeps the progress `event` tells, in place of the one before; lets
     /// it go when `event` ends its operation. An event whose ID, time,
     /// step or unit doesn't read changes nothing.
-    pub fn hear(&self, _event: &UiEvent) {
-        todo!()
+    pub fn hear(&self, event: &UiEvent) {
+        let mut latest = self.latest.lock().unwrap_or_else(PoisonError::into_inner);
+        if let Some(progress) = progress_of(event) {
+            *latest = Some(progress);
+        } else if let UiEvent::OperationSucceeded { operation, .. }
+        | UiEvent::OperationFailed { operation, .. } = event
+            && latest
+                .as_ref()
+                .is_some_and(|progress| Some(progress.op_id) == operation_id(operation))
+        {
+            *latest = None;
+        }
     }
 
     /// The progress kept now, none between operations.

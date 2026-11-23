@@ -114,15 +114,26 @@ impl Fleet {
 pub(crate) fn reads_again(event: &UiEvent) -> bool {
     matches!(
         event,
-        UiEvent::AgentApproved { .. } | UiEvent::AgentReported { .. }
+        UiEvent::AgentApproved { .. }
+            | UiEvent::AgentReported { .. }
+            | UiEvent::AgentPlans { .. }
+            | UiEvent::AgentProgress { .. }
     )
 }
 
 /// What the shared progress bar draws of a machine's latest `progress`
 /// (decision 83): heard at its `at`, which starts its measure too, since
 /// the hub keeps only the latest; no time for an `at` that can't be read.
-pub(crate) fn progress_reading(_progress: &MachineProgressDto) -> Progress {
-    todo!()
+pub(crate) fn progress_reading(progress: &MachineProgressDto) -> Progress {
+    let at = progress.at.parse::<jiff::Timestamp>().ok();
+    Progress {
+        step: progress.step,
+        unit: progress.unit,
+        current: progress.current,
+        total: progress.total,
+        reported_at: at,
+        since: at,
+    }
 }
 
 /// How many machines read otherwise in `now` than in `held`: each that

@@ -15,27 +15,54 @@ impl HubPairing {
     /// tells the browsers, and answers with a `PlansAck`.
     pub(super) async fn take_plans(
         &self,
-        _agent: AgentId,
-        _payload: &[u8],
+        agent: AgentId,
+        payload: &[u8],
     ) -> Result<Answered, HubPairingError> {
-        todo!()
+        let (Some(inbox), Ok(plans)) = (&self.inbox, read_plans(payload)) else {
+            return Ok(Err(MessageRefused::Unexpected));
+        };
+        inbox.keep_plans(agent, &plans).await?;
+        self.tell(UiEvent::AgentPlans {
+            agent: agent.as_uuid().to_string(),
+        })
+        .await;
+        Ok(Ok(Some((plans_ack_kind(), plans_ack_payload()))))
     }
 
     /// Keeps `agent`'s latest progress in place of the one before and
     /// tells the browsers; the agent waits for no answer.
     pub(super) async fn take_progress(
         &self,
-        _agent: AgentId,
-        _payload: &[u8],
+        agent: AgentId,
+        payload: &[u8],
     ) -> Result<Answered, HubPairingError> {
-        todo!()
+        let (Some(inbox), Ok(progress)) = (&self.inbox, read_progress(payload)) else {
+            return Ok(Err(MessageRefused::Unexpected));
+        };
+        inbox.keep_progress(agent, &progress).await?;
+        self.tell(UiEvent::AgentProgress {
+            agent: agent.as_uuid().to_string(),
+            progress: progress_dto(&progress),
+        })
+        .await;
+        Ok(Ok(None))
     }
 }
 
 /// `progress` as the API tells it: a step or unit this build doesn't know
 /// as `Unknown`, which a page shows as no step and a plain number.
-pub fn progress_dto(_progress: &ReportedProgress) -> MachineProgressDto {
-    todo!()
+pub fn progress_dto(progress: &ReportedProgress) -> MachineProgressDto {
+    MachineProgressDto {
+        operation: progress.op_id.as_uuid().to_string(),
+        step: progress
+            .step
+            .as_ref()
+            .map(|step| known(step).unwrap_or(OperationStep::Unknown)),
+        unit: known(&progress.unit).unwrap_or(ProgressUnit::Unknown),
+        current: progress.current,
+        total: progress.total,
+        at: time_of(progress.at).unwrap_or_default(),
+    }
 }
 
 /// The step or unit `name` names, read as the API reads its kebab-case

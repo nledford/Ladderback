@@ -200,23 +200,29 @@ impl ReportInbox for InMemoryReportInbox {
         ))
     }
 
-    async fn keep_plans(&self, _agent: AgentId, _plans: &PlansReport) -> Result<(), StoreError> {
-        todo!()
+    async fn keep_plans(&self, agent: AgentId, plans: &PlansReport) -> Result<(), StoreError> {
+        let mut agents = self.agents.lock().unwrap_or_else(PoisonError::into_inner);
+        agents.entry(agent).or_default().plans = Some(plans.clone());
+        Ok(())
     }
 
-    async fn plans(&self, _agent: AgentId) -> Result<Option<PlansReport>, StoreError> {
-        Ok(None)
+    async fn plans(&self, agent: AgentId) -> Result<Option<PlansReport>, StoreError> {
+        let agents = self.agents.lock().unwrap_or_else(PoisonError::into_inner);
+        Ok(agents.get(&agent).and_then(|held| held.plans.clone()))
     }
 
     async fn keep_progress(
         &self,
-        _agent: AgentId,
-        _progress: &ReportedProgress,
+        agent: AgentId,
+        progress: &ReportedProgress,
     ) -> Result<(), StoreError> {
-        todo!()
+        let mut agents = self.agents.lock().unwrap_or_else(PoisonError::into_inner);
+        agents.entry(agent).or_default().progress = Some(progress.clone());
+        Ok(())
     }
 
-    async fn progress(&self, _agent: AgentId) -> Result<Option<ReportedProgress>, StoreError> {
-        Ok(None)
+    async fn progress(&self, agent: AgentId) -> Result<Option<ReportedProgress>, StoreError> {
+        let agents = self.agents.lock().unwrap_or_else(PoisonError::into_inner);
+        Ok(agents.get(&agent).and_then(|held| held.progress.clone()))
     }
 }

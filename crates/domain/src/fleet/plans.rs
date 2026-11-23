@@ -43,13 +43,29 @@ impl LastRunOutcome {
     }
 
     /// The outcome `name` names; none for a name this build doesn't know.
-    pub fn from_wire_name(_name: &str) -> Option<Self> {
-        todo!()
+    pub fn from_wire_name(name: &str) -> Option<Self> {
+        [
+            Self::Queued,
+            Self::Running,
+            Self::Succeeded,
+            Self::SucceededWithWarnings,
+            Self::Failed,
+            Self::Cancelled,
+        ]
+        .into_iter()
+        .find(|outcome| outcome.wire_name() == name)
     }
 
     /// How an operation of `status` stands.
-    pub const fn of(_status: &OperationStatus) -> Self {
-        todo!()
+    pub const fn of(status: &OperationStatus) -> Self {
+        match status {
+            OperationStatus::Queued => Self::Queued,
+            OperationStatus::Running => Self::Running,
+            OperationStatus::Succeeded => Self::Succeeded,
+            OperationStatus::SucceededWithWarnings => Self::SucceededWithWarnings,
+            OperationStatus::Failed { .. } => Self::Failed,
+            OperationStatus::Cancelled => Self::Cancelled,
+        }
     }
 }
 
@@ -67,12 +83,15 @@ impl LastRun {
     /// else its start, else when it was queued. None for a time before
     /// 1970, which the wire doesn't hold.
     pub fn of(
-        _status: &OperationStatus,
-        _queued: Timestamp,
-        _started: Option<Timestamp>,
-        _finished: Option<Timestamp>,
+        status: &OperationStatus,
+        queued: Timestamp,
+        started: Option<Timestamp>,
+        finished: Option<Timestamp>,
     ) -> Option<Self> {
-        todo!()
+        Some(Self {
+            at: EpochSeconds::from_timestamp(finished.or(started).unwrap_or(queued))?,
+            outcome: LastRunOutcome::of(status),
+        })
     }
 }
 
@@ -97,14 +116,18 @@ pub struct PlansReport {
 impl PlansReport {
     /// The report of `plans`: the first [`MAX_PLANS_REPORTED`], and the
     /// count of the rest.
-    pub fn of(_plans: Vec<ReportedPlan>) -> Self {
-        todo!()
+    pub fn of(mut plans: Vec<ReportedPlan>) -> Self {
+        let rest = plans.split_off(plans.len().min(MAX_PLANS_REPORTED));
+        Self {
+            plans,
+            left_out: u64::try_from(rest.len()).unwrap_or(u64::MAX),
+        }
     }
 
     /// The report a snapshot holds: none for one with more than
     /// [`MAX_PLANS_REPORTED`] plans, which no machine sends.
-    pub fn from_parts(_plans: Vec<ReportedPlan>, _left_out: u64) -> Option<Self> {
-        todo!()
+    pub fn from_parts(plans: Vec<ReportedPlan>, left_out: u64) -> Option<Self> {
+        (plans.len() <= MAX_PLANS_REPORTED).then_some(Self { plans, left_out })
     }
 
     /// The plans reported, in the machine's order.
@@ -137,10 +160,15 @@ pub struct ReportedProgress {
 /// its reports tell them. A progress whose operation ended, or that the
 /// hub knows nothing of, shows nothing.
 pub fn progress_shown(
-    _operations: &[ReportedOperation],
-    _progress: Option<ReportedProgress>,
+    operations: &[ReportedOperation],
+    progress: Option<ReportedProgress>,
 ) -> Option<ReportedProgress> {
-    todo!()
+    progress.filter(|progress| {
+        operations.iter().any(|operation| {
+            operation.op_id == progress.op_id
+                && matches!(operation.outcome, ReportedOutcome::Running)
+        })
+    })
 }
 
 /// The kind of the agent's snapshot of its plans.
