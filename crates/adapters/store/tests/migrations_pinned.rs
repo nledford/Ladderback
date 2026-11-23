@@ -119,6 +119,11 @@ const PINNED: &[(i64, &str, &str)] = &[
         "sync outbox",
         "5ba648f4c11c5cd67e1b81a2a40094fc3aff22cafc8dc4564c559384a8253b936be759e6206f0269266e2c2158c65227",
     ),
+    (
+        22,
+        "repository ownership",
+        "9830265cdca77fa0fffa7997ebe0625db177f505fdfb8598a2c6638d7fb7828d0dd8c7b1e570f501269ccd2178a42650",
+    ),
 ];
 
 /// The migration's file name, as `sqlx::migrate!` reads it: sqlx turns the

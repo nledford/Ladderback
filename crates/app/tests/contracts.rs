@@ -1434,3 +1434,30 @@ impl contract::outbox::ReportInboxHarness for InMemoryInboxes {
 async fn in_memory_report_inbox_meets_the_report_inbox_contract() {
     contract::outbox::run_inbox(&InMemoryInboxes::default()).await;
 }
+
+/// The hub's registry of maintenance owners in memory, kept for `reopened`
+/// as with the outbox.
+#[derive(Default)]
+struct InMemoryOwners(Mutex<Option<Arc<app::fakes::InMemoryOwnershipRegistry>>>);
+
+#[async_trait]
+impl contract::ownership_registry::OwnershipRegistryHarness for InMemoryOwners {
+    async fn empty(&self) -> Arc<dyn app::ports::OwnershipRegistry> {
+        let registry = Arc::new(app::fakes::InMemoryOwnershipRegistry::new());
+        *self.0.lock().unwrap() = Some(Arc::clone(&registry));
+        registry
+    }
+
+    async fn reopened(&self) -> Arc<dyn app::ports::OwnershipRegistry> {
+        self.0
+            .lock()
+            .unwrap()
+            .clone()
+            .expect("a registry was opened")
+    }
+}
+
+#[tokio::test]
+async fn in_memory_ownership_registry_meets_the_ownership_registry_contract() {
+    contract::ownership_registry::run(&InMemoryOwners::default()).await;
+}

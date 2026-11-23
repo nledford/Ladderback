@@ -258,3 +258,26 @@ async fn sqlite_store_meets_the_report_inbox_contract() {
     )
     .await;
 }
+
+#[cfg(feature = "hub")]
+#[async_trait]
+impl contract::ownership_registry::OwnershipRegistryHarness for SqliteFiles {
+    async fn empty(&self) -> Arc<dyn app::ports::OwnershipRegistry> {
+        Arc::new(self.new_store().await)
+    }
+
+    async fn reopened(&self) -> Arc<dyn app::ports::OwnershipRegistry> {
+        Arc::new(self.last_store().await)
+    }
+}
+
+#[cfg(feature = "hub")]
+#[tokio::test]
+async fn sqlite_store_meets_the_ownership_registry_contract() {
+    within(
+        120,
+        "the ownership registry contract suite",
+        contract::ownership_registry::run(&SqliteFiles::default()),
+    )
+    .await;
+}

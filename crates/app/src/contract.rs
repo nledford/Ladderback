@@ -19,6 +19,7 @@ pub mod network_link;
 pub mod notifier;
 pub mod operation_store;
 pub mod outbox;
+pub mod ownership_registry;
 pub mod power;
 pub mod profiles;
 pub mod proposal_store;

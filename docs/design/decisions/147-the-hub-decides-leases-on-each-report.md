@@ -1,0 +1,24 @@
+# Decision 147: The hub decides each repository's lease on every report, and counts a lease an hour past its expiry
+
+**The hub decides a repository's lease each time an approved agent reports it. A report with the request `local` is a claim: the first is granted a lease of 7 days at the next epoch, each later one of its holder renews it to 7 days from the hub's now and never to an earlier expiry, and another agent's is refused while the lease binds. A lease binds until an hour past its expiry, and another agent's report counts as using the repository for 7 days after the hub took it. Every repository an agent reports is decided in one transaction, so of claims that race, exactly one is granted.**
+
+## Why
+
+§7.3 set the lease (an epoch, an expiry of 7 days, renewal, a release that moves it early) and left open what renews it, how long the hub waits past an expiry, and how long a report counts. I1 needs each answered so that no two agents ever hold the repository at once.
+
+- **Renewal is a report.** An agent says what it uses in `ReposSnapshot` (§7.2), and its holder's claim of the repository again is what renews the lease. The hub needs no other message, and renews only a lease whose holder still asks for it, as decision 137 has it. A holder that stops asking for `local` keeps its lease until it releases it or the lease runs out.
+- **A renewal never moves an expiry earlier.** The holder was told its expiry. A hub clock set back must not shorten it, or the hub could grant the repository to another agent while the holder still runs maintenance under the expiry it was told.
+- **An hour of grace.** The holder stops at its lease's expiry, judged on the hub's time through the clock offset ([decision 120](120-agent-hub-connection-security.md), "Time"). That offset is only as fresh as the holder's last session, so its view of the hub's time can drift. The hub counts a lease until an hour past its expiry before it grants the repository to another agent, so a holder whose clock drifted by less than that has stopped first. Its own holder may still renew it in that hour, at the same epoch.
+- **A report counts for a lease's life.** Only the hub may maintain a repository several agents use, so another agent's report makes a claim refused and the holder's lease unrenewed. A machine gone for longer than a lease would otherwise keep every other agent from the repository for good. So a report counts for 7 days after the hub took it, as a lease runs 7 days after its last renewal.
+- **One transaction per report.** The store decides a whole report in one `BEGIN IMMEDIATE` transaction, and the in-memory registry under one lock. Two claims that race are then decided one after the other: the first is granted, the second sees its lease and is refused.
+- **A release names its epoch.** The hub ends a lease early only at its holder's release of the epoch it holds. A release by another agent, or of an older epoch, changes nothing, so a release that arrives late can't end a newer lease.
+
+## Consequences
+
+- An agent must report its repositories more often than every 7 days to keep its lease: on each connection, on a change, and at least once a day (§7.2, `ReposSnapshot`).
+- A repository moves from an owner that disappeared 7 days and an hour after its last renewal.
+- A machine that pairs with a hub while another holds its repository is refused, and the holder isn't renewed: nobody maintains the repository after the lease runs out, until a person makes the hub its owner (§7.3). That is the safe direction.
+- A pending agent's report is neither kept nor decided: it holds nothing and keeps nobody from a lease. Its first report after approval is its first claim. The hub doesn't yet trust a pending machine ([decision 120](120-agent-hub-connection-security.md)), so its report can't keep approved machines from a lease. Until it is approved it runs as a standalone agent, which can't rule out another owner and warns instead (I1), so the hub may grant a repository it maintains on its own.
+- A hub clock that steps forward by more than the grace while a lease is held, as on a computer without a battery clock that sets its time after a holder connected, can grant the repository to another agent while the holder still judges its lease on the offset it measured before the step. The agent's offset is only as fresh as the hub's last signed message to it, so the wire must carry the hub's time with each grant (§7.2, `RepoGrants`); a hub whose clock steps forward by more than an hour between two of them is a limit of this decision.
+- The registry keeps each repository's last epoch once one was given, even after its lease ends, so epochs only rise across releases and restarts.
+- Building the registry takes no lease away from a paired agent: the agent's maintenance waits on a lease only once the hub sends grants (§7.2, `RepoGrants`).
