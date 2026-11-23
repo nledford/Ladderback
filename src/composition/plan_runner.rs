@@ -85,6 +85,9 @@ pub(super) struct PlanRunner {
     /// Where this machine stands: a data folder copied from another computer
     /// runs no forget, prune or adoption (§7.1, §16 decision 144).
     pub(super) machine: Arc<app::machine::MachineStanding>,
+    /// The hub's leases a paired machine maintains under (§7.3, I1): none
+    /// in a build without the hub, which never pairs.
+    pub(super) leases: Option<Arc<app::leases::MaintenanceLeases>>,
 }
 
 impl PlanRunner {

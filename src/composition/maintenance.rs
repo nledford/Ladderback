@@ -46,6 +46,10 @@ impl PlanRunner {
         .with_events(Arc::clone(&self.events))
         .with_stats(Arc::new(self.stats_reader()))
         .with_machine(Arc::clone(&self.machine));
+        let maintenance = match &self.leases {
+            Some(leases) => maintenance.with_leases(Arc::clone(leases)),
+            None => maintenance,
+        };
         match &self.locations {
             Some(locations) => maintenance.with_locations(Arc::clone(locations)),
             None => maintenance,

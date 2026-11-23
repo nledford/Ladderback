@@ -9,6 +9,8 @@ use std::sync::Arc;
 
 use api::{ErrorCode, MsgArg};
 use app::hub_tls::{HubTlsKey, TlsKeyRefusal};
+use app::leases::MaintenanceLeases;
+use app::ownership::RepositoryOwners;
 use app::pairing::{
     AgentPairing, AgentPairingError, ChallengeRefused, ConnectFailure, ConnectToHub, Connected,
     HubPairing, HubPairingError, HubStart, PairFailure, PairWithHub,
@@ -80,7 +82,12 @@ pub(crate) fn hub_pairing(data_dir: &Path, store: Arc<SqliteStore>) -> HubPairin
         Arc::new(SystemClock),
         crate::build_info::SHOWN.as_str().to_owned(),
     )
-    .with_inbox(store)
+    .with_inbox(Arc::<SqliteStore>::clone(&store))
+    .with_owners(Arc::new(RepositoryOwners::new(
+        Arc::<SqliteStore>::clone(&store),
+        store,
+        Arc::new(SystemClock),
+    )))
 }
 
 /// The hub's TLS key in `data_dir`, from which its built-in TLS serves a
@@ -933,6 +940,7 @@ pub(crate) async fn reporting(
     events: Arc<dyn EventBus>,
     early: futures::stream::BoxStream<'static, api::UiEvent>,
     store: Arc<SqliteStore>,
+    config: Arc<dyn app::ports::ConfigStore>,
 ) {
     let identity = Arc::new(FileIdentity::in_data_dir(&data_dir));
     let mut early = Some(early);
@@ -963,6 +971,14 @@ pub(crate) async fn reporting(
             }
         }
     };
+    // Each session also asks for the leases on the repositories this
+    // machine maintains, and keeps the hub's grants beside the outbox,
+    // where its maintenance reads them (§7.3, I1).
+    let leases = Arc::new(MaintenanceLeases::new(
+        Arc::<FileIdentity>::clone(&identity),
+        Arc::<SqliteStore>::clone(&store),
+        Arc::new(SystemClock),
+    ));
     let syncing = SyncWithHub::new(
         connecting(identity, &data_dir),
         store,
@@ -970,7 +986,8 @@ pub(crate) async fn reporting(
         agent_id,
         hostname,
         machine_zone(),
-    );
+    )
+    .with_leases(config, leases);
     tokio::join!(recording, syncing.run());
 }
 
@@ -1292,6 +1309,7 @@ mod tests {
             Arc::clone(&events),
             early,
             Arc::clone(&store),
+            Arc::new(app::fakes::InMemoryConfigStore::default()),
         ));
         events
             .publish(api::UiEvent::OperationStarted {

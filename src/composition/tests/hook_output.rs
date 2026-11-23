@@ -181,6 +181,7 @@ async fn what_hooks_printing_secrets_left(
         readings: Arc::new(app::fakes::InMemoryStatsStore::new()),
         full_disk_access: None,
         machine: Arc::default(),
+        leases: None,
         left_out: KeyFilesLeftOut::default(),
         writes: Arc::default(),
     };

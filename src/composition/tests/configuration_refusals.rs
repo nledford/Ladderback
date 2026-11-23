@@ -106,6 +106,7 @@ async fn a_listing_and_a_backup_refuse_a_configuration_that_cannot_be_used_as_a_
             readings: Arc::new(app::fakes::InMemoryStatsStore::new()),
             full_disk_access: None,
             machine: Arc::default(),
+            leases: None,
             left_out: KeyFilesLeftOut::default(),
             writes: Arc::default(),
         };
@@ -159,6 +160,7 @@ async fn a_scheduled_run_over_a_configuration_that_cannot_be_used_queues_nothing
             readings: Arc::new(app::fakes::InMemoryStatsStore::new()),
             full_disk_access: None,
             machine: Arc::default(),
+            leases: None,
             left_out: KeyFilesLeftOut::default(),
             writes: Arc::default(),
         };
