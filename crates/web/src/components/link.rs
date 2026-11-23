@@ -11,16 +11,19 @@ use leptos_router::hooks::use_location;
 
 use super::Icon;
 use crate::text;
-use rules::{Destination, LinkTone};
+use rules::{Destination, LinkPlacement, LinkTone};
 
 // Where a link goes and what it tells, decided on the host; `Link` is its
 // glue.
 pub(crate) mod rules;
 
-/// A link (§4.5): an `<a>`, always underlined, in Ladder Blue unless its
-/// page names `LinkTone::Inherit`, the color of the text around it, as a
-/// link inside a status sentence is. It has no size: it is the text around
-/// it. Its words are its `children`, which name it.
+/// A link (§4.5): an `<a>`, in Ladder Blue unless its page names
+/// `LinkTone::Inherit`, the color of the text around it, as a link inside a
+/// status sentence is. It has no size: it is the text around it. Its words
+/// are its `children`, which name it. Where it stands is its `placement`,
+/// which every link names ([`LinkPlacement`]): among words it is always
+/// underlined; standing alone it is underlined only under the pointer or
+/// pressed, and the page it names has a bar at its start (decision 152).
 ///
 /// `to` is where it goes, parsed once ([`Destination`]):
 ///
@@ -53,9 +56,10 @@ pub fn Link(
     to: Destination,
     localizer: Arc<Localizer>,
     #[prop(optional)] tone: LinkTone,
+    placement: LinkPlacement,
     children: Children,
 ) -> impl IntoView {
-    let class = rules::link_class(tone);
+    let class = rules::link_class(tone, placement);
     let rel = to.rel();
     let leaves = to.leaves();
     let href = match &to {

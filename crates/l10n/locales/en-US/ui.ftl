@@ -464,6 +464,13 @@ ui-gallery-link-status = The demo check failed: { $link } says why.
 # The words of the link inside ui-gallery-link-status.
 ui-gallery-link-status-link = the demo log
 
+# A link standing alone in the link demo's list of links, to the gallery
+# itself, the page the reader is on.
+ui-gallery-link-standing-here = Demo standing link to this page
+
+# A link standing alone in the link demo's list of links, to the start page.
+ui-gallery-link-standing-start = Demo standing link to the start page
+
 # The heading of the gallery's alert demo (§4.5): an inline message in each
 # tone, one with a link inside it and one the reader can dismiss.
 ui-gallery-alert-heading = Alert

@@ -26,7 +26,7 @@ use leptos_router::hooks::use_params_map;
 
 use crate::components::ACTIONS;
 use crate::components::button::{Appearance, Content};
-use crate::components::link::rules::{Destination, Matching};
+use crate::components::link::rules::{Destination, LinkPlacement, Matching};
 use crate::components::tree::rules::{Selection, folder_url};
 use crate::components::{
     Button, Confirmation, FolderLoader, FolderPage, Link, RadioGroup, ReviewDialog, StepUp,
@@ -146,7 +146,7 @@ fn snapshot_view(localizer: Arc<Localizer>, alias: String, snapshot: String) -> 
             {back
                 .map(|to| {
                     view! {
-                        <Link to=to localizer=back_localizer>
+                        <Link to=to localizer=back_localizer placement=LinkPlacement::InText>
                             {back_words}
                         </Link>
                     }

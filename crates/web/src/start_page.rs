@@ -12,7 +12,7 @@ use l10n::{Localizer, msg};
 use leptos::prelude::*;
 use leptos::task::spawn_local;
 
-use crate::components::link::rules::{Destination, Matching};
+use crate::components::link::rules::{Destination, LinkPlacement, Matching};
 use crate::components::skeleton::rules::Awaited;
 use crate::components::{
     Column, Link, Name as TableName, Sentences, State, Table, refusal_alert, say_refusals,
@@ -136,7 +136,11 @@ pub(crate) fn Start(localizer: Arc<Localizer>) -> impl IntoView {
                                 {to
                                     .map(|to| {
                                         view! {
-                                            <Link to=to localizer=localizer>
+                                            <Link
+                                                to=to
+                                                localizer=localizer
+                                                placement=LinkPlacement::InText
+                                            >
                                                 {repositories_link}
                                             </Link>
                                         }
@@ -146,7 +150,11 @@ pub(crate) fn Start(localizer: Arc<Localizer>) -> impl IntoView {
                                 {to_plans
                                     .map(|to| {
                                         view! {
-                                            <Link to=to localizer=plans_localizer>
+                                            <Link
+                                                to=to
+                                                localizer=plans_localizer
+                                                placement=LinkPlacement::InText
+                                            >
                                                 {plans_link}
                                             </Link>
                                         }
@@ -162,7 +170,7 @@ pub(crate) fn Start(localizer: Arc<Localizer>) -> impl IntoView {
             {Destination::route("/operations", Matching::Exact)
                 .map(|to| {
                     view! {
-                        <Link to=to localizer=operations_localizer>
+                        <Link to=to localizer=operations_localizer placement=LinkPlacement::InText>
                             {operations_link}
                         </Link>
                     }
@@ -174,7 +182,7 @@ pub(crate) fn Start(localizer: Arc<Localizer>) -> impl IntoView {
             {Destination::outside(PLAN_FORMAT_URL)
                 .map(|to| {
                     view! {
-                        <Link to=to localizer=links>
+                        <Link to=to localizer=links placement=LinkPlacement::InText>
                             {plan_format_link}
                         </Link>
                     }

@@ -21,7 +21,7 @@ use crate::announcer::Politeness;
 use crate::components::ACTIONS;
 use crate::components::banner::rules::BannerTone;
 use crate::components::button::{Appearance, Button, Content};
-use crate::components::link::rules::{Destination, Matching};
+use crate::components::link::rules::{Destination, LinkPlacement, Matching};
 use crate::components::{
     Banner, Link, Toast, ToastTone, Toasts, hand_focus_when_gone, refusal_alert, say_refusals,
 };
@@ -114,7 +114,11 @@ pub(crate) fn FullDiskAccessBanner(
                     {to
                         .map(|to| {
                             view! {
-                                <Link to=to localizer=link_localizer>
+                                <Link
+                                    to=to
+                                    localizer=link_localizer
+                                    placement=LinkPlacement::InText
+                                >
                                     {link}
                                 </Link>
                             }

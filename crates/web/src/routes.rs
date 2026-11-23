@@ -14,7 +14,7 @@ use serde::Serialize;
 use std::str::FromStr;
 
 use crate::components::Link;
-use crate::components::link::rules::{Destination, Matching};
+use crate::components::link::rules::{Destination, LinkPlacement, Matching};
 use crate::full_disk_access::describing_the_heading;
 use crate::full_disk_access_warning::FullDiskAccessFound;
 use crate::repositories::Sentence;
@@ -269,7 +269,7 @@ pub(crate) fn NotFound(localizer: Arc<Localizer>) -> impl IntoView {
             {to
                 .map(|to| {
                     view! {
-                        <Link to=to localizer=localizer>
+                        <Link to=to localizer=localizer placement=LinkPlacement::InText>
                             {words}
                         </Link>
                     }

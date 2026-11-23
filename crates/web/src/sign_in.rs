@@ -18,7 +18,7 @@ use crate::announcer::Politeness;
 use crate::components::ACTIONS;
 use crate::components::alert::rules::AlertTone;
 use crate::components::button::{Appearance, Content, Kind};
-use crate::components::link::rules::{Destination, Matching};
+use crate::components::link::rules::{Destination, LinkPlacement, Matching};
 use crate::components::{
     Alert, Banner, Button, Checkbox, ErrorSummary, Link, ModalDialog, SummaryItem, TextField,
     text_field,
@@ -471,7 +471,7 @@ pub(crate) fn admin_password_link(localizer: &Arc<Localizer>) -> impl IntoView +
     let href = format!("/settings#{}", Section::AdminPassword.fragment());
     Destination::route(&href, Matching::Exact).map(|to| {
         view! {
-            <Link to=to localizer=localizer>
+            <Link to=to localizer=localizer placement=LinkPlacement::InText>
                 {words}
             </Link>
         }

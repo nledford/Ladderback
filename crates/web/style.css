@@ -597,16 +597,29 @@ main:focus {
    its color: its words in its tone (`--tone`: Ladder Blue unless its page
    names the text around it), and under forced colors the system's link
    color, its underline and icon with it, whatever the tone (a WebKit that
-   only reports the media query keeps the author's). They stay here because
-   the base rule above colors every `<a>`, and a rule outside Tailwind's
-   layers outranks any utility. */
+   only reports the media query keeps the author's). A link standing alone
+   (`.link-alone`) turns the deeper Ladder Blue while pressed, whatever its
+   tone, its underline held, and the bar of the page it names stays in the
+   text's color under forced colors too, which would otherwise draw it in
+   the link's (decision 152). They stay here because the base rule above
+   colors every `<a>`, and a rule outside Tailwind's layers outranks any
+   utility. */
 .link {
   color: var(--tone);
 }
 
+.link-alone:active {
+  color: var(--accent-hover);
+}
+
 @media (forced-colors: active) {
-  .link {
+  .link,
+  .link-alone:active {
     color: LinkText;
+  }
+
+  .link-alone[aria-current="page"] {
+    border-inline-start-color: CanvasText;
   }
 }
 

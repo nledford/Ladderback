@@ -34,6 +34,9 @@ const PAIRS = [
   { name: "link on surface", fg: "--accent", bg: "--surface", min: 4.5 },
   { name: "text on page", fg: "--fg", bg: "--bg", min: 4.5 },
   { name: "link on page", fg: "--accent", bg: "--bg", min: 4.5 },
+  // A link standing alone, pressed (decision 152), in the header's band and on the page.
+  { name: "pressed link on surface", fg: "--accent-hover", bg: "--surface", min: 4.5 },
+  { name: "pressed link on page", fg: "--accent-hover", bg: "--bg", min: 4.5 },
   { name: "form error on page", fg: "--error-fg", bg: "--bg", min: 4.5 },
   { name: "table rule on page", fg: "--muted", bg: "--bg", min: 3 },
   { name: "secondary tone on page", fg: "--muted", bg: "--bg", min: 4.5 },

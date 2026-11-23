@@ -186,7 +186,7 @@ mod variants;
 
 use components::banner::rules::BannerTone;
 use components::button::{Appearance, Content};
-use components::link::rules::{Destination, LinkTone, Matching};
+use components::link::rules::{Destination, LinkPlacement, LinkTone, Matching};
 use components::{Banner, Button, Footer, Link, Tip, Tooltip, focus_element};
 use daemon_log_page::DaemonLog;
 use full_disk_access_warning::{FullDiskAccessBanner, FullDiskAccessFound};
@@ -348,7 +348,12 @@ fn Navigation(localizer: Arc<Localizer>, open: RwSignal<bool>) -> impl IntoView 
             Destination::route(path, Matching::Section).map(|to| {
                 view! {
                     <li>
-                        <Link to=to localizer=Arc::clone(&localizer) tone=LinkTone::Inherit>
+                        <Link
+                            to=to
+                            localizer=Arc::clone(&localizer)
+                            tone=LinkTone::Inherit
+                            placement=LinkPlacement::Alone
+                        >
                             {words}
                         </Link>
                     </li>
@@ -626,7 +631,11 @@ fn App(localizer: Arc<Localizer>) -> impl IntoView {
             view! {
                 <div class="site-update basis-full [min-inline-size:0]">
                     <Banner localizer=Arc::clone(&updates)>
-                        <Link to=Destination::Outside(update.notes) localizer=link_localizer>
+                        <Link
+                            to=Destination::Outside(update.notes)
+                            localizer=link_localizer
+                            placement=LinkPlacement::InText
+                        >
                             {sentence}
                         </Link>
                     </Banner>
@@ -700,6 +709,7 @@ fn App(localizer: Arc<Localizer>) -> impl IntoView {
                                                 to=to
                                                 localizer=Arc::clone(&localizer)
                                                 tone=LinkTone::Inherit
+                                                placement=LinkPlacement::Alone
                                             >
                                                 <BrandMark />
                                                 {text(&localizer, msg::UI_BRAND)}

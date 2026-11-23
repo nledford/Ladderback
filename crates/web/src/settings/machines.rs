@@ -32,7 +32,7 @@ use crate::announcer::Politeness;
 use crate::backend::Rereads;
 use crate::components::alert::rules::AlertTone;
 use crate::components::button::Content;
-use crate::components::link::rules::{Destination, Matching};
+use crate::components::link::rules::{Destination, LinkPlacement, Matching};
 use crate::components::{
     Alert, Button, Column, Confirmation, Fingerprint, Link, Name, PauseUpdates, ReviewDialog,
     Sentences, State, StepUp, StepUpField, Table, Working, dialog_refusal_alert, focus_element,
@@ -262,7 +262,11 @@ pub(crate) fn Machines(localizer: Arc<Localizer>, step_up: StepUp) -> impl IntoV
             {Destination::route("/dashboard", Matching::Exact)
                 .map(|to| {
                     view! {
-                        <Link to=to localizer=Arc::clone(&link_localizer)>
+                        <Link
+                            to=to
+                            localizer=Arc::clone(&link_localizer)
+                            placement=LinkPlacement::InText
+                        >
                             {dashboard_link}
                         </Link>
                     }
