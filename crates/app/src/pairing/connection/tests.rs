@@ -471,6 +471,133 @@ fn unreadable() -> crate::ports::StoreError {
     }
 }
 
+/// An outbox of one epoch whose reports lie at the places given, as a full
+/// one's lie once it gave up its starts, and which can't record the first
+/// `Ack` it is given.
+struct GappedOutbox {
+    epoch: domain::fleet::OutboxEpoch,
+    held: std::sync::Mutex<Vec<crate::ports::OutboxEntry>>,
+    recorded_an_ack: std::sync::atomic::AtomicBool,
+}
+
+impl GappedOutbox {
+    fn at(places: impl IntoIterator<Item = u64>) -> Self {
+        let epoch = domain::fleet::OutboxEpoch::from_uuid(Uuid::from_u128(0xe1));
+        let held = places
+            .into_iter()
+            .map(|place| crate::ports::OutboxEntry {
+                epoch,
+                seq: domain::fleet::ReportSeq::new(place).unwrap(),
+                report: domain::fleet::AgentReport {
+                    op_id: domain::OperationId::from_uuid(Uuid::from_u128(u128::from(place))),
+                    happening: domain::fleet::Happening::Succeeded,
+                    at: EpochSeconds::from_seconds(1_800_000_000),
+                },
+            })
+            .collect();
+        Self {
+            epoch,
+            held: std::sync::Mutex::new(held),
+            recorded_an_ack: std::sync::atomic::AtomicBool::new(false),
+        }
+    }
+}
+
+#[async_trait]
+impl crate::ports::Outbox for GappedOutbox {
+    async fn append(
+        &self,
+        _: &domain::fleet::AgentReport,
+    ) -> Result<crate::ports::Appended, crate::ports::StoreError> {
+        Err(unreadable())
+    }
+
+    async fn unacknowledged(
+        &self,
+        after: Option<domain::fleet::ReportSeq>,
+        limit: usize,
+    ) -> Result<Vec<crate::ports::OutboxEntry>, crate::ports::StoreError> {
+        let held = self.held.lock().unwrap();
+        Ok(held
+            .iter()
+            .filter(|entry| after.is_none_or(|after| entry.seq > after))
+            .take(limit)
+            .cloned()
+            .collect())
+    }
+
+    async fn acknowledge(
+        &self,
+        epoch: domain::fleet::OutboxEpoch,
+        through: domain::fleet::ReportSeq,
+    ) -> Result<(), crate::ports::StoreError> {
+        use std::sync::atomic::Ordering;
+        if !self.recorded_an_ack.swap(true, Ordering::SeqCst) {
+            return Err(unreadable());
+        }
+        if epoch == self.epoch {
+            self.held
+                .lock()
+                .unwrap()
+                .retain(|entry| entry.seq > through);
+        }
+        Ok(())
+    }
+}
+
+/// A send window spans at most [`SEND_WINDOW`] places, however far apart
+/// the outbox's reports lie: the hub tells a report sent again from an
+/// older database's by how far behind its last it lies. So a window sent
+/// again, its acknowledgements not recorded, is taken as resent, and the
+/// hub warns of no older database (§7.2).
+///
+/// [`SEND_WINDOW`]: domain::fleet::SEND_WINDOW
+#[tokio::test]
+async fn a_window_sent_again_across_the_outboxs_gaps_is_taken_as_resent() {
+    use crate::ports::ReportInbox as _;
+    use crate::sync::{SyncWithHub, Synced};
+
+    let inbox = Arc::new(crate::fakes::InMemoryReportInbox::default());
+    let hub = hub_with(1, |pairing| pairing.with_inbox(inbox.clone()));
+    let identity = paired(&hub, 1).await;
+    let waiting = hub.registry.agent(agent_id(1)).await.unwrap().unwrap();
+    hub.pairing.approve(&waiting).await.unwrap().unwrap();
+    let places: Vec<u64> = (1..=32).map(|n| 2 * n).collect();
+    let sync = SyncWithHub::new(
+        connecting(
+            identity,
+            Arc::new(LoopbackHubConnector::to(hub.pairing.clone())),
+        ),
+        Arc::new(GappedOutbox::at(places.clone())),
+        Arc::new(FakeClock::new(
+            Timestamp::from_second(1_800_000_030).unwrap(),
+        )),
+        agent_id(1),
+        hostname(1),
+        None,
+    );
+    crate::test_log::capture_the_log();
+    assert!(
+        sync.sync_once().await.is_err(),
+        "the first acknowledgement is recorded"
+    );
+    assert_eq!(sync.sync_once().await, Ok(Synced::Replayed { sent: 32 }));
+    let taken: Vec<u64> = inbox
+        .reports(agent_id(1))
+        .await
+        .unwrap()
+        .iter()
+        .map(|entry| entry.seq.get())
+        .collect();
+    assert_eq!(taken, places);
+    let warned: Vec<String> = crate::test_log::logged_by("app::pairing::hub")
+        .into_iter()
+        .filter(|(level, _)| *level == log::Level::Warn)
+        .map(|(_, line)| line)
+        .collect();
+    assert_eq!(warned, Vec::<String>::new());
+}
+
 /// Runs the agent's sync loop through `waits` of its waits on `clock`, and
 /// returns the warnings it logged. The loop runs on a thread of its own, so
 /// a loop that never waits fails the test within a second rather than

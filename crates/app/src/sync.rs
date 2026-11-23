@@ -154,9 +154,9 @@ impl SyncWithHub {
     }
 
     /// One session: connects, sends every report not yet acknowledged, in
-    /// order, at most [`SEND_WINDOW`] ahead of the hub's acknowledgements,
-    /// and returns once the hub acknowledged the last of them. A pending
-    /// agent sends nothing.
+    /// order, in windows of at most [`SEND_WINDOW`] places ahead of the
+    /// hub's acknowledgements, and returns once the hub acknowledged the
+    /// last of them. A pending agent sends nothing.
     pub async fn sync_once(&self) -> Result<Synced, SyncFailure> {
         let (connected, mut channel) = self
             .connect
@@ -171,11 +171,18 @@ impl SyncWithHub {
         // goes through the outbox once even if acknowledging kept nothing.
         let mut after = None;
         loop {
-            let window = self
+            let mut window = self
                 .outbox
                 .unacknowledged(after, SEND_WINDOW)
                 .await
                 .map_err(SyncFailure::Store)?;
+            // A window spans places, not reports: the hub tells a report sent
+            // again from an older database's by how far behind its last it
+            // lies, and the gaps a full outbox leaves would stretch it.
+            if let Some(start) = window.first().map(|entry| entry.seq.get()) {
+                let span = u64::try_from(SEND_WINDOW).unwrap_or(u64::MAX);
+                window.retain(|entry| entry.seq.get().saturating_sub(start) < span);
+            }
             let (Some(first), Some(last)) = (window.first(), window.last()) else {
                 return Ok(Synced::Replayed { sent });
             };

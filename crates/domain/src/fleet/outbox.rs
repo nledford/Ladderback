@@ -24,8 +24,9 @@ pub const MAX_REPORTS_HELD: u64 = 10_000;
 /// report of longest ago forgotten first.
 pub const MAX_EPOCHS_HELD: u64 = 8;
 
-/// The most reports the agent sends before it waits for the hub's
-/// acknowledgements of them.
+/// How many places of its outbox the agent sends before it waits for the
+/// hub's acknowledgements of them: a window holds the reports of at most
+/// that many places, fewer where a full outbox left gaps.
 pub const SEND_WINDOW: usize = 32;
 
 /// Whether a hub's message that expires at `expires_at` holds when it
