@@ -51,6 +51,10 @@ const COUNT_DROPS: &str = "UPDATE sync_report_tallies \
      SET held = held - ?2, dropped = dropped + ?2 WHERE agent_id = ?1 RETURNING dropped";
 const REPORTS: &str = "SELECT epoch, seq, op_id, happening, code, at FROM sync_reports \
      WHERE agent_id = ? ORDER BY id";
+/// An agent's newest reports, newest first; the caller turns them round.
+const LATEST: &str = "SELECT op_id, happening, code, at FROM sync_reports \
+     WHERE agent_id = ? ORDER BY id DESC LIMIT ?";
+const DROPPED: &str = "SELECT dropped FROM sync_report_tallies WHERE agent_id = ?";
 
 #[async_trait]
 impl Outbox for SqliteStore {
@@ -282,7 +286,29 @@ impl ReportInbox for SqliteStore {
     }
 
     async fn latest(&self, agent: AgentId, limit: usize) -> Result<LatestReports, StoreError> {
-        todo!("{agent:?} {limit}")
+        let agent = agent_id_text(agent);
+        let _call = self.call().await;
+        let mut conn = self.pool.acquire().await.map_err(unavailable)?;
+        let rows = sqlx::query(LATEST)
+            .bind(&agent)
+            .bind(i64::try_from(limit).unwrap_or(i64::MAX))
+            .fetch_all(&mut *conn)
+            .await
+            .map_err(unavailable)?;
+        let mut reports = rows.iter().map(report_of).collect::<Result<Vec<_>, _>>()?;
+        reports.reverse();
+        let dropped: Option<i64> = sqlx::query(DROPPED)
+            .bind(&agent)
+            .fetch_optional(&mut *conn)
+            .await
+            .map_err(unavailable)?
+            .map(|row| row.try_get("dropped"))
+            .transpose()
+            .map_err(unavailable)?;
+        Ok(LatestReports {
+            reports,
+            dropped: u64::try_from(dropped.unwrap_or(0)).map_err(|_| corrupt("dropped"))?,
+        })
     }
 }
 

@@ -178,6 +178,21 @@ impl ReportInbox for InMemoryReportInbox {
     }
 
     async fn latest(&self, agent: AgentId, limit: usize) -> Result<LatestReports, StoreError> {
-        todo!("{agent:?} {limit}")
+        let agents = self.agents.lock().unwrap_or_else(PoisonError::into_inner);
+        Ok(agents.get(&agent).map_or(
+            LatestReports {
+                reports: Vec::new(),
+                dropped: 0,
+            },
+            |held| LatestReports {
+                reports: held
+                    .reports
+                    .iter()
+                    .skip(held.reports.len().saturating_sub(limit))
+                    .map(|entry| entry.report.clone())
+                    .collect(),
+                dropped: held.dropped,
+            },
+        ))
     }
 }

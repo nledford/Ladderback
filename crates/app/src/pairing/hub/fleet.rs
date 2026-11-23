@@ -4,8 +4,13 @@
 //! each approved machine with its latest operations.
 
 use api::{MachineOutcomeDto, UiEvent};
-use domain::fleet::{AgentRecord, AgentReport, Happening, Pairing, ReportedOperation};
+use domain::fleet::{
+    AgentRecord, AgentReport, Happening, OPERATIONS_SHOWN, Pairing, REPORTS_READ,
+    ReportedOperation, latest_operations,
+};
 use domain::{AgentId, Timestamp};
+
+use crate::ports::LatestReports;
 
 use super::{HubPairing, HubPairingError};
 
@@ -22,14 +27,33 @@ pub struct Machine {
 impl HubPairing {
     /// Tells the browsers `event`, when the hub tells them anything.
     pub(super) async fn tell(&self, event: UiEvent) {
-        if self.events.is_some() {
-            todo!("{event:?}")
+        if let Some(events) = &self.events {
+            events.publish(event).await;
         }
     }
 
-    /// Every approved machine, oldest first, with its latest operations.
+    /// Every approved machine, oldest first, with its latest operations:
+    /// none of a hub that takes no reports.
     pub async fn machines(&self) -> Result<Vec<Machine>, HubPairingError> {
-        todo!()
+        let mut machines = Vec::new();
+        for record in self.registry.agents().await? {
+            if record.is_pending() {
+                continue;
+            }
+            let latest = match &self.inbox {
+                Some(inbox) => inbox.latest(record.agent_id, REPORTS_READ).await?,
+                None => LatestReports {
+                    reports: Vec::new(),
+                    dropped: 0,
+                },
+            };
+            machines.push(Machine {
+                record,
+                reports_dropped: latest.dropped,
+                operations: latest_operations(&latest.reports, OPERATIONS_SHOWN),
+            });
+        }
+        Ok(machines)
     }
 }
 

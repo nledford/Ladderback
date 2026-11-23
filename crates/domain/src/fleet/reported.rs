@@ -42,11 +42,50 @@ pub struct ReportedOperation {
 }
 
 /// The latest `limit` operations `reports` tell of, newest first: the
-/// operation whose report came last first. `reports` are in the order the
+/// operation a report changed last first. `reports` are in the order the
 /// hub took them. An operation's end settles it: a start heard after its
-/// end, as a resend can bring, doesn't set it running again.
+/// end, as a resend can bring, doesn't set it running again, and a report
+/// that changes nothing doesn't make its operation newer.
 pub fn latest_operations(reports: &[AgentReport], limit: usize) -> Vec<ReportedOperation> {
-    todo!("{reports:?} {limit}")
+    // Each operation and the place of the last report that changed it.
+    let mut known: Vec<(usize, ReportedOperation)> = Vec::new();
+    for (place, report) in reports.iter().enumerate() {
+        let held = known
+            .iter_mut()
+            .find(|(_, operation)| operation.op_id == report.op_id);
+        let outcome = match &report.happening {
+            Happening::Started => None,
+            Happening::Succeeded => Some(ReportedOutcome::Succeeded),
+            Happening::Failed { code } => Some(ReportedOutcome::Failed { code: code.clone() }),
+        };
+        match (held, outcome) {
+            (Some((_, operation)), None) => {
+                operation.started_at.get_or_insert(report.at);
+            }
+            (Some((changed, operation)), Some(outcome)) => {
+                if operation.ended_at.is_none() {
+                    operation.ended_at = Some(report.at);
+                    operation.outcome = outcome;
+                    *changed = place;
+                }
+            }
+            (None, outcome) => known.push((
+                place,
+                ReportedOperation {
+                    op_id: report.op_id,
+                    started_at: outcome.is_none().then_some(report.at),
+                    ended_at: outcome.is_some().then_some(report.at),
+                    outcome: outcome.unwrap_or(ReportedOutcome::Running),
+                },
+            )),
+        }
+    }
+    known.sort_by_key(|(changed, _)| std::cmp::Reverse(*changed));
+    known
+        .into_iter()
+        .take(limit)
+        .map(|(_, operation)| operation)
+        .collect()
 }
 
 #[cfg(test)]
