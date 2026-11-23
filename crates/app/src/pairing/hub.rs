@@ -7,10 +7,10 @@ use domain::fleet::{
     Connect, EpochSeconds, FIRST_SEQUENCE, HANDSHAKES, Holder, Hostname, HostnameKey, HubAddress,
     HubEnvelope, Ingest, KEY_BYTES, KeyFile, ListedAgent, MESSAGE_LIFE, MachineCheck, MachineZone,
     Nonce, Pair, PairAnswer, PairRefusal, PairRequest, Paired, PairingToken, PayloadDigest, Proof,
-    ProofRefusal, ProofRequest, PublicKey, Refused, ReportSeq, SeedFile, SignedMessage,
-    SigningSeed, TokenId, TokenRecord, TokenTls, TokenUse, UNUSED_TOKEN_LIMIT, Welcome, WireName,
-    ack_kind, grants_kind, hello_kind, list_agents, release_kind, released_kind, report_kind,
-    repos_kind, token_life, welcome_kind,
+    ProofRefusal, ProofRequest, PublicKey, Refused, RemovalRefused, ReportSeq, SeedFile,
+    SignedMessage, SigningSeed, TokenId, TokenRecord, TokenTls, TokenUse, Tombstone,
+    UNUSED_TOKEN_LIMIT, Welcome, WireName, ack_kind, grants_kind, hello_kind, list_agents,
+    release_kind, released_kind, report_kind, repos_kind, token_life, welcome_kind,
 };
 use domain::{AgentId, SignedDuration, TimeZoneDatabase, Timestamp};
 
@@ -392,7 +392,7 @@ impl HubPairing {
 
     /// The agents waiting for a person's approval, in the registry's order.
     pub async fn pending(&self) -> Result<Vec<AgentRecord>, HubPairingError> {
-        let mut agents = self.registry.agents().await?;
+        let mut agents = self.registered().await?;
         agents.retain(AgentRecord::is_pending);
         Ok(agents)
     }
@@ -406,8 +406,7 @@ impl HubPairing {
     ) -> Result<Option<AgentRecord>, HubPairingError> {
         let key = HostnameKey::of(hostname);
         Ok(self
-            .registry
-            .agents()
+            .registered()
             .await?
             .into_iter()
             .find(|agent| agent.hostname_key() == key))
@@ -429,6 +428,7 @@ impl HubPairing {
         agent_id: AgentId,
         agent_key: PublicKey,
     ) -> Result<Result<AgentRecord, ApprovalRefused>, HubPairingError> {
+        self.drop_lapsed().await?;
         let approved = self
             .registry
             .approve(agent_id, agent_key, self.clock.now())
@@ -438,6 +438,42 @@ impl HubPairing {
             self.tell(fleet::approved(agent, self.clock.now())).await;
         }
         Ok(approved)
+    }
+
+    /// Removes the agent `agent_id` registered with `agent_key`, now,
+    /// pending (a rejection) or approved, keeps its tombstone, logs the
+    /// removal and tells the browsers (decision 154).
+    pub(super) async fn remove_now(
+        &self,
+        agent_id: AgentId,
+        agent_key: PublicKey,
+    ) -> Result<Result<Tombstone, RemovalRefused>, HubPairingError> {
+        let removed = self
+            .registry
+            .remove(agent_id, agent_key, self.clock.now())
+            .await?;
+        if let Ok(tombstone) = &removed {
+            log::info!("{}", logged::removed(tombstone));
+            self.tell(fleet::removed(tombstone)).await;
+        }
+        Ok(removed)
+    }
+
+    /// Drops every agent that waited for approval
+    /// [`PENDING_LIFE`](domain::fleet::PENDING_LIFE) or
+    /// longer, now, and logs each: the lapse is taken whenever the hub
+    /// reads its agents, so no timer is needed (decision 154).
+    async fn drop_lapsed(&self) -> Result<(), HubPairingError> {
+        for agent in self.registry.drop_lapsed(self.clock.now()).await? {
+            log::info!("{}", logged::lapsed(&agent));
+        }
+        Ok(())
+    }
+
+    /// Every agent the registry holds once the lapsed ones are dropped.
+    async fn registered(&self) -> Result<Vec<AgentRecord>, HubPairingError> {
+        self.drop_lapsed().await?;
+        Ok(self.registry.agents().await?)
     }
 
     /// The hub's answer to `connect` on a session whose `tls-exporter`
@@ -520,6 +556,7 @@ impl HubPairing {
             kind: handshake.kind,
             hub_key: keys.key,
         };
+        self.drop_lapsed().await?;
         match self.registry.pair(&request, self.clock.now()).await? {
             Ok(pairing) => {
                 log::info!("{}", logged::paired(&request, &pairing));
@@ -564,7 +601,7 @@ impl HubPairing {
     /// with when the hub last refused a second computer under its ID
     /// (decision 150).
     pub async fn agents(&self) -> Result<Vec<ListedAgent>, HubPairingError> {
-        let mut listed = list_agents(self.registry.agents().await?);
+        let mut listed = list_agents(self.registered().await?);
         for second in self.registry.second_machines().await? {
             if let Some(agent) = listed
                 .iter_mut()
@@ -578,7 +615,9 @@ impl HubPairing {
 
     /// The hub's answer to a paired agent's `proof`: the agent's record,
     /// seen now with the greater counter, when the proof holds under the
-    /// key it registered for a binding kind it paired with; one signed
+    /// key it registered for a binding kind it paired with; a signed
+    /// `agent-removed` when a person removed the agent and the proof holds
+    /// under the key its tombstone keeps (decision 154); one signed
     /// `proof-refused` for every other cause (decision 120, "The
     /// handshake").
     pub async fn prove(
@@ -587,27 +626,35 @@ impl HubPairing {
         handshake: &HubHandshake,
         proof: &Proof,
     ) -> Result<ProofAnswer, HubPairingError> {
-        let refused = || {
-            self.refuse(keys, handshake, &PairRefusal::ProofRefused)
+        let refused = |refusal: &PairRefusal| {
+            self.refuse(keys, handshake, refusal)
                 .map(ProofAnswer::Refused)
         };
-        let Some(agent) = self.registry.agent(handshake.agent_id).await? else {
-            return refused();
-        };
-        let message = SignedMessage::AgentProof {
+        self.drop_lapsed().await?;
+        let message = |agent_key: PublicKey| SignedMessage::AgentProof {
             hub_key: keys.key,
             agent_id: handshake.agent_id,
-            agent_key: agent.key,
+            agent_key,
             agent_nonce: handshake.agent_nonce,
             hub_nonce: handshake.hub_nonce,
             binding: handshake.binding,
             counter: proof.counter,
         };
-        if !self
-            .signing
-            .verify(&agent.key, &message.to_bytes(), &proof.agent_proof)
-        {
-            return refused();
+        let holds = |agent_key: &PublicKey| {
+            self.signing.verify(
+                agent_key,
+                &message(*agent_key).to_bytes(),
+                &proof.agent_proof,
+            )
+        };
+        let Some(agent) = self.registry.agent(handshake.agent_id).await? else {
+            return match self.registry.tombstone(handshake.agent_id).await? {
+                Some(tombstone) if holds(&tombstone.key) => refused(&PairRefusal::AgentRemoved),
+                _ => refused(&PairRefusal::ProofRefused),
+            };
+        };
+        if !holds(&agent.key) {
+            return refused(&PairRefusal::ProofRefused);
         }
         let request = ProofRequest {
             agent_id: handshake.agent_id,
@@ -627,7 +674,7 @@ impl HubPairing {
                 }
                 Ok(ProofAnswer::Proved(proved.agent))
             }
-            Err(ProofRefusal::ProofRefused) => refused(),
+            Err(ProofRefusal::ProofRefused) => refused(&PairRefusal::ProofRefused),
         }
     }
 

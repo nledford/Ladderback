@@ -1,11 +1,13 @@
 //! The lines the hub logs when a machine pairs (#1307), when a person
-//! approves one, when an approved one first connects (#1342), when it
-//! first lets go of an agent's reports past the cap (§7.2), and when an
-//! agent first sends a report far behind the last it took (#1387).
+//! approves or removes one, when a waiting one lapses (decision 154), when
+//! an approved one first connects (#1342), when it first lets go of an
+//! agent's reports past the cap (§7.2), and when an agent first sends a
+//! report far behind the last it took (#1387).
 
 use domain::AgentId;
 use domain::fleet::{
     AgentRecord, AgentStatus, Fingerprint, MAX_REPORTS_HELD, PairRequest, Pairing, ReportSeq,
+    Tombstone,
 };
 
 /// The line for the first time `agent` sends a report the hub took before,
@@ -65,6 +67,29 @@ pub(super) fn paired(request: &PairRequest, outcome: &Pairing) -> String {
 /// pairing names it, so it reads beside the line of that pairing.
 pub(super) fn approved(agent: &AgentRecord) -> String {
     format!("{} approved as {}", machine(agent), identity(agent))
+}
+
+/// The line for the agent a person has just removed, or rejected while it
+/// waited, named as a pairing names it: the hub keeps its tombstone and
+/// refuses its connections from now on.
+pub(super) fn removed(tombstone: &Tombstone) -> String {
+    format!(
+        "machine \"{}\" removed as agent {} with key {}; the hub refuses its connections and \
+         its pairings with an ordinary token",
+        tombstone.hostname.as_str().escape_debug(),
+        tombstone.agent_id.as_uuid(),
+        Fingerprint::of_key(&tombstone.key),
+    )
+}
+
+/// The line for `agent`, dropped because nobody approved it within 7 days:
+/// its hostname is free, and it may pair again with a new token.
+pub(super) fn lapsed(agent: &AgentRecord) -> String {
+    format!(
+        "{} ({}) lapsed: nobody approved it within 7 days; it may pair again with a new token",
+        machine(agent),
+        identity(agent),
+    )
 }
 
 /// The line for `agent`'s first connection since a person approved it,

@@ -185,8 +185,10 @@ impl HubPairing {
         &self,
         ask: RemovalAsk,
     ) -> Result<Result<Tombstone, RemovalRefused>, TokenAskRefused> {
-        let _ = ask;
-        todo!()
+        if needs_sign_in(self.access.is_some(), ask.beyond_loopback) {
+            return Err(TokenAskRefused::NeedsSignIn);
+        }
+        Ok(self.remove_now(ask.agent_id, ask.agent_key).await?)
     }
 
     /// [`HubPairing::agents`], with the time they were read.

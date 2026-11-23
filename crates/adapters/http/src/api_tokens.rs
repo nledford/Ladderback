@@ -157,6 +157,7 @@ pub(crate) fn event_shown(
         event,
         api::UiEvent::AgentPending { .. }
             | api::UiEvent::AgentApproved { .. }
+            | api::UiEvent::AgentRemoved { .. }
             | api::UiEvent::AgentOnline { .. }
             | api::UiEvent::AgentOffline { .. }
             | api::UiEvent::AgentReported { .. }

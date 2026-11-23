@@ -905,9 +905,10 @@ async fn a_taken_hostname_names_its_holder() {
     );
 }
 
-/// A record the hub holds of agent `n` under `name`, pending or approved.
+/// A record the hub holds of agent `n` under `name`, pending or approved,
+/// since an hour before the hub's clock, so a pending one hasn't lapsed.
 fn held(n: u8, name: &str, pending: bool) -> AgentRecord {
-    let at = Timestamp::from_second(1_700_000_000).unwrap();
+    let at = Timestamp::from_second(1_800_000_000 - 3_600).unwrap();
     AgentRecord {
         agent_id: AgentId::from_uuid(Uuid::from_u128(u128::from(n))),
         key: PublicKey::from_bytes([n; 32]).unwrap(),
