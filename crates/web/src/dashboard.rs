@@ -108,11 +108,13 @@ impl Fleet {
 }
 
 /// Whether `event` asks the dashboard to read its machines again: a
-/// machine was approved, or the hub took one of a machine's reports.
+/// machine was approved or removed, or the hub took one of its reports.
 pub(crate) fn reads_again(event: &UiEvent) -> bool {
     matches!(
         event,
-        UiEvent::AgentApproved { .. } | UiEvent::AgentReported { .. }
+        UiEvent::AgentApproved { .. }
+            | UiEvent::AgentRemoved { .. }
+            | UiEvent::AgentReported { .. }
     )
 }
 

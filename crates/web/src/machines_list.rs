@@ -287,7 +287,7 @@ pub(crate) enum Heard {
 pub(crate) fn heard(event: &UiEvent) -> Heard {
     match event {
         UiEvent::AgentPending { hostname, .. } => Heard::Waiting(hostname.clone()),
-        UiEvent::AgentApproved { .. } => Heard::ReadAgain,
+        UiEvent::AgentApproved { .. } | UiEvent::AgentRemoved { .. } => Heard::ReadAgain,
         _ => Heard::Nothing,
     }
 }
