@@ -3767,6 +3767,9 @@ ui-dashboard-plans = Plans of { $hostname }
 # Shown in place of a machine's plans when it reported none.
 ui-dashboard-no-plans = No plan reported yet.
 
+# Shown in place of a machine's plans when its report listed none.
+ui-dashboard-plans-none = This { -machine } reported no plans.
+
 # The headers of a machine's plans' columns: the plan, how its last run went and when, and when it runs next.
 ui-dashboard-plan = Plan
 ui-dashboard-last-run = Last run

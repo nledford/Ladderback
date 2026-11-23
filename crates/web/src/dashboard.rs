@@ -8,7 +8,10 @@
 //! As on the Machines tab (`machines_list.rs`), the page goes on reading
 //! while it is paused and shows the copy; resuming drops it.
 
-use api::{HubMachineDto, IanaZone, MachineOutcomeDto, MachineProgressDto, MsgArg, UiEvent};
+use api::{
+    HubMachineDto, IanaZone, MachineOutcomeDto, MachinePlansDto, MachineProgressDto, MsgArg,
+    UiEvent,
+};
 use l10n::{MessageId, msg};
 use leptos::prelude::*;
 
@@ -170,6 +173,13 @@ pub(crate) fn outcome_badge(outcome: MachineOutcomeDto) -> (BadgeState, MessageI
         MachineOutcomeDto::Failed => (BadgeState::Failed, msg::UI_STATUS_FAILED),
         MachineOutcomeDto::Cancelled => (BadgeState::Cancelled, msg::UI_STATUS_CANCELLED),
     }
+}
+
+/// What a machine's table of plans says while it lists none: that the
+/// machine reported no plans, or, before its first report reached the
+/// hub, that it hasn't reported them yet.
+pub(crate) fn no_plans(plans: Option<&MachinePlansDto>) -> MessageId {
+    todo!("{plans:?}")
 }
 
 /// How the instant `at` (RFC 3339) reads on the dashboard: in the viewer's

@@ -178,6 +178,18 @@ fn each_outcome_reads_as_its_status_badge() {
     );
 }
 
+/// A machine that reported its plans and had none says so; one whose plans
+/// haven't reached the hub yet says that instead.
+#[test]
+fn a_machine_with_no_plans_tells_none_reported_from_none_yet() {
+    assert_eq!(no_plans(None), msg::UI_DASHBOARD_NO_PLANS);
+    let none = MachinePlansDto {
+        plans: Vec::new(),
+        left_out: 0,
+    };
+    assert_eq!(no_plans(Some(&none)), msg::UI_DASHBOARD_PLANS_NONE);
+}
+
 /// A machine's time reads in the viewer's zone alone when the zones match
 /// or the machine gave none, and in both, the machine's named, when they
 /// differ: one message with both times (#115).

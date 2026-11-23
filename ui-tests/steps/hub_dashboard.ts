@@ -175,6 +175,18 @@ Given(
   },
 );
 
+// The machine's snapshot of its plans as the hub keeps it when the machine
+// reported none (migration 0025): no plan, and none left out.
+Given("{string} reported no plans to the hub", async function (this: BrowserWorld, hostname: string) {
+  const agent = (await listedMachine(this, hostname))["agent-id"];
+  const database = hubDatabase(this);
+  try {
+    database.prepare("INSERT INTO sync_plan_snapshots (agent_id, left_out) VALUES (?, 0)").run(agent);
+  } finally {
+    database.close();
+  }
+});
+
 // The latest progress of the machine's operation numbered `n`, as the hub
 // keeps it (migration 0025): a backup's bytes at the instant `at`.
 Given(

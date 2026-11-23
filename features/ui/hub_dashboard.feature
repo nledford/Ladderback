@@ -89,10 +89,12 @@ Feature: The hub's dashboard of its approved machines
     And I press Enter
     Then focus is on the main heading "Dashboard"
 
-  Scenario: Each machine shows its plans as it last reported them, and says when it left some out
+  Scenario: Each machine shows its plans as it last reported them, and says when it left some out or reported none
     Given a hub with sign-in off
     And a machine named "demo-laptop" is approved on the hub
     And a machine named "demo-desktop" is approved on the hub
+    And a machine named "demo-tablet" is approved on the hub
+    And "demo-tablet" reported no plans to the hub
     And "demo-laptop" reported these plans to the hub, and 2 more it left out:
       | plan      | last run  | last run minutes ago | next run in minutes |
       | documents | succeeded | 60                   | 30                  |
@@ -105,7 +107,8 @@ Feature: The hub's dashboard of its approved machines
       | photos    | Failed      | None planned |
       | music     | Not run yet |              |
     And the page says "This machine has 2 more plans than it reports to the hub, so those plans aren't shown."
-    And the page says "No plan reported yet."
+    And the page says "This machine hasn't reported its plans yet."
+    And the page says "This machine reported no plans."
     And the page has no accessibility violations
 
   Scenario: A machine's running operation shows its progress, which the keyboard reaches
