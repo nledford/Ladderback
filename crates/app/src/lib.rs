@@ -50,6 +50,7 @@ pub mod secrets;
 pub mod snapshots;
 pub mod stats;
 pub mod status;
+pub mod sync;
 pub mod updates;
 pub mod without_token;
 

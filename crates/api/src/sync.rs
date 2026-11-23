@@ -134,6 +134,29 @@ pub struct WelcomePayload {
     pub status: AgentApproval,
 }
 
+/// The payload of the agent's `OpEvent`: one report from its outbox (§7.2).
+/// `epoch` is the outbox's UUID, `seq` the report's place in it, `event`
+/// `started`, `succeeded` or `failed`, `at` when it happened, and `code` the
+/// error code of a failure, by its wire name.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ReportPayload {
+    pub epoch: String,
+    pub seq: u64,
+    pub op_id: String,
+    pub event: String,
+    pub at: u64,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub code: Option<String>,
+}
+
+/// The payload of the hub's `Ack`: it holds every report of `epoch` through
+/// `seq`.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct AckPayload {
+    pub epoch: String,
+    pub seq: u64,
+}
+
 /// Whether a person has approved the agent.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "kebab-case")]
@@ -179,6 +202,30 @@ impl WelcomePayload {
     }
 }
 
+impl ReportPayload {
+    /// The payload `bytes` hold.
+    pub fn from_bytes(bytes: &[u8]) -> Result<Self, UnreadableFrame> {
+        serde_json::from_slice(bytes).map_err(|_| UnreadableFrame)
+    }
+
+    /// The payload's bytes, which the agent signs.
+    pub fn to_bytes(&self) -> Vec<u8> {
+        written(self).into_bytes()
+    }
+}
+
+impl AckPayload {
+    /// The payload `bytes` hold.
+    pub fn from_bytes(bytes: &[u8]) -> Result<Self, UnreadableFrame> {
+        serde_json::from_slice(bytes).map_err(|_| UnreadableFrame)
+    }
+
+    /// The payload's bytes, which the hub signs.
+    pub fn to_bytes(&self) -> Vec<u8> {
+        written(self).into_bytes()
+    }
+}
+
 impl AgentFrame {
     /// The frame `text` holds.
     pub fn from_text(text: &str) -> Result<Self, UnreadableFrame> {
@@ -200,6 +247,14 @@ impl HubFrame {
     /// The frame's text.
     pub fn to_text(&self) -> String {
         written(self)
+    }
+}
+
+/// The wire name of `code`, as a report of a failure carries it.
+pub fn code_name(code: ErrorCode) -> String {
+    match serde_json::to_value(code) {
+        Ok(serde_json::Value::String(name)) => name,
+        _ => "unknown".to_owned(),
     }
 }
 

@@ -4,6 +4,7 @@
 //! rule of its own.
 
 mod agent;
+mod channel;
 mod client;
 mod connection;
 mod hub;
@@ -14,6 +15,7 @@ mod wire;
 pub use agent::{
     AgentHandshake, AgentPairing, AgentPairingError, AwaitingPaired, ChallengeRefused, PairedHub,
 };
+pub use channel::{AgentChannel, ChannelError};
 pub use client::{PairFailure, PairWithHub};
 pub use connection::{ConnectFailure, ConnectToHub, Connected};
 pub use hub::{

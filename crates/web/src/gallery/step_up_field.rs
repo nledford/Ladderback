@@ -4,10 +4,11 @@ use std::sync::Arc;
 
 use l10n::{Localizer, msg};
 use leptos::prelude::*;
+use leptos::task::spawn_local;
 
 use super::DemoHeading;
 use crate::components::button::Content;
-use crate::components::{Button, Confirmation, ReviewDialog, StepUp, StepUpField};
+use crate::components::{Button, Confirmation, ReviewDialog, StepUp, StepUpField, show_answer};
 use crate::text;
 use crate::variants::Tone;
 
@@ -18,7 +19,8 @@ pub(super) fn StepUpFieldDemo(localizer: Arc<Localizer>) -> impl IntoView {
     let t = move |id| text(&localizer_t, id);
     // The step-up demos, one per thing the field can ask for: whether each
     // dialog is open, what is typed and the error its confirm button shows,
-    // whatever was typed.
+    // whatever was typed, through `show_answer` as a page's answer is, so a
+    // second wrong try is heard again.
     let step_up_open = RwSignal::new(false);
     let step_up_error = RwSignal::<Option<String>>::new(None);
     let step_up_wrong = t(msg::UI_GALLERY_DEMO_STEP_UP_WRONG);
@@ -61,7 +63,9 @@ pub(super) fn StepUpFieldDemo(localizer: Arc<Localizer>) -> impl IntoView {
                 confirm=Some(Confirmation {
                     label: t(msg::UI_GALLERY_CHECK_DEMO_STEP_UP),
                     tone: Tone::Primary,
-                    action: Callback::new(move |()| step_up_error.set(Some(step_up_wrong.clone()))),
+                    action: Callback::new(move |()| {
+                        spawn_local(show_answer(step_up_error, Some(step_up_wrong.clone())));
+                    }),
                 })
                 returns_to="gallery-step-up".to_owned()
                 described_by="gallery-step-up-body".to_owned()
@@ -95,7 +99,7 @@ pub(super) fn StepUpFieldDemo(localizer: Arc<Localizer>) -> impl IntoView {
                     label: t(msg::UI_GALLERY_CHECK_DEMO_STEP_UP_ID),
                     tone: Tone::Primary,
                     action: Callback::new(move |()| {
-                        step_up_id_error.set(Some(step_up_id_wrong.clone()));
+                        spawn_local(show_answer(step_up_id_error, Some(step_up_id_wrong.clone())));
                     }),
                 })
                 returns_to="gallery-step-up-id".to_owned()

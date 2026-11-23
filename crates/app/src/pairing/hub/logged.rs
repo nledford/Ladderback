@@ -1,7 +1,28 @@
 //! The lines the hub logs when a machine pairs (#1307), when a person
-//! approves one, and when an approved one first connects (#1342).
+//! approves one, when an approved one first connects (#1342), when it
+//! first lets go of an agent's reports past the cap (§7.2), and when an
+//! agent first sends a report far behind the last it took (#1387).
 
-use domain::fleet::{AgentRecord, AgentStatus, Fingerprint, PairRequest, Pairing};
+use domain::AgentId;
+use domain::fleet::{
+    AgentRecord, AgentStatus, Fingerprint, MAX_REPORTS_HELD, PairRequest, Pairing, ReportSeq,
+};
+
+/// The line for the first time `agent` sends a report the hub took before,
+/// at `seq` of its outbox, further behind the last the hub took of its
+/// epoch than a report sent again lies: its outbox numbers its reports
+/// again from an older place, as one restored from an older database does,
+/// and the hub keeps none of them (#1387). It names the agent and the
+/// place only, nothing a report says (I4).
+pub(super) fn reports_behind(agent: AgentId, seq: ReportSeq) -> String {
+    format!(
+        "agent {} sent a report at place {} of its outbox, far behind the last the hub took \
+         of it: its database may have been restored from an older copy; the hub takes such \
+         reports as held already, keeps none of them, and doesn't log the next ones",
+        agent.as_uuid(),
+        seq.get(),
+    )
+}
 
 /// What a person at the hub's terminal or in its log matches against the
 /// machine's own screen: the machine's hostname, between double quotes and
@@ -53,6 +74,17 @@ pub(super) fn connected(agent: &AgentRecord) -> String {
         "{} connected as {}, its first connection since it was approved",
         machine(agent),
         identity(agent),
+    )
+}
+
+/// The line for the first time the hub lets go of `agent`'s oldest reports
+/// to keep its last [`MAX_REPORTS_HELD`], `dropped` of them so far. It
+/// names the agent and the count only, nothing a report says (I4).
+pub(super) fn reports_dropped(agent: AgentId, dropped: u64) -> String {
+    format!(
+        "agent {} has more reports than the {MAX_REPORTS_HELD} the hub keeps of one machine: \
+         its oldest {dropped} were let go of; the hub counts the next ones without logging each",
+        agent.as_uuid(),
     )
 }
 

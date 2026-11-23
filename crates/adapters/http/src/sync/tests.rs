@@ -575,3 +575,205 @@ async fn a_route_beside_the_sync_routes_under_sync_is_never_reached() {
         .unwrap();
     assert_eq!(response.status(), StatusCode::NOT_FOUND);
 }
+
+/// An agent's link over a plain WebSocket to `address`, whatever the route,
+/// as one with no TLS of the hub's own carries its frames.
+struct Plain(String);
+
+struct PlainLink(Socket);
+
+#[async_trait]
+impl app::ports::HubConnector for Plain {
+    async fn connect(
+        &self,
+        _route: &domain::fleet::HubRoute,
+    ) -> Result<Box<dyn app::ports::HubLink>, app::ports::LinkError> {
+        Ok(Box::new(PlainLink(open(&self.0).await)))
+    }
+}
+
+#[async_trait]
+impl app::ports::HubLink for PlainLink {
+    fn exporter(&self) -> Option<[u8; domain::fleet::KEY_BYTES]> {
+        None
+    }
+
+    async fn send(&mut self, frame: &AgentFrame) -> Result<(), app::ports::LinkError> {
+        self.0
+            .send(Message::text(frame.to_text()))
+            .await
+            .map_err(|_| app::ports::LinkError::Closed { reason: None })
+    }
+
+    async fn receive(&mut self) -> Result<HubFrame, app::ports::LinkError> {
+        loop {
+            return match self.0.next().await {
+                Some(Ok(Message::Text(text))) => HubFrame::from_text(text.as_str())
+                    .map_err(|_| app::ports::LinkError::Unreadable),
+                Some(Ok(Message::Ping(_) | Message::Pong(_))) => continue,
+                _ => Err(app::ports::LinkError::Closed { reason: None }),
+            };
+        }
+    }
+}
+
+/// A hub that keeps reports, served on loopback under `bounds`, and an
+/// agent it approved: what connects that agent, its ID and its hostname.
+async fn approved_agent(
+    bounds: Bounds,
+) -> (
+    app::pairing::ConnectToHub,
+    domain::AgentId,
+    domain::fleet::Hostname,
+) {
+    use app::pairing::{AgentPairing, ConnectToHub, PairWithHub};
+    use app::ports::AgentRegistry as _;
+    use domain::fleet::{Hostname, HubAddress, TokenTls};
+    use domain::{AgentId, Uuid};
+
+    let registry = Arc::new(InMemoryAgentRegistry::new());
+    let pairing = Arc::new(
+        HubPairing::new(
+            registry.clone(),
+            Arc::new(InMemoryIdentity::default()),
+            Arc::new(FakeSigning),
+            Arc::new(SeededRandom::new(5)),
+            Arc::new(FakeClock::new(
+                Timestamp::from_second(1_800_000_000).unwrap(),
+            )),
+            "0.0.0-test".to_owned(),
+        )
+        .with_inbox(Arc::new(app::fakes::InMemoryReportInbox::default())),
+    );
+    let address = serve(&SyncHub::bounded(pairing.clone(), bounds)).await;
+    let keys = pairing.keys().await.unwrap();
+    let at = HubAddress::parse(&format!("http://{address}")).unwrap();
+    let token = pairing
+        .make_token(&keys, at, TokenTls::Ca, None)
+        .await
+        .unwrap();
+    let agent = AgentId::from_uuid(Uuid::from_u128(1));
+    let hostname = Hostname::parse("laptop").unwrap();
+    let identity = Arc::new(InMemoryIdentity::default());
+    let connector = Arc::new(Plain(address));
+    let machine = AgentPairing::new(
+        identity.clone(),
+        Arc::new(FakeSigning),
+        Arc::new(SeededRandom::new(9)),
+    );
+    PairWithHub::new(machine, connector.clone())
+        .pair(token, agent, hostname.clone(), None)
+        .await
+        .unwrap();
+    let waiting = registry.agent(agent).await.unwrap().unwrap();
+    pairing.approve(&waiting).await.unwrap().unwrap();
+    let connecting = ConnectToHub::new(
+        identity,
+        Arc::new(FakeSigning),
+        Arc::new(SeededRandom::new(77)),
+        Arc::new(FakeClock::new(
+            Timestamp::from_second(1_800_000_030).unwrap(),
+        )),
+        connector,
+        "0.0.0-agent".to_owned(),
+    );
+    (connecting, agent, hostname)
+}
+
+/// A report of a start at `seq` of one epoch.
+fn report(seq: u64) -> app::ports::OutboxEntry {
+    use domain::fleet::{AgentReport, EpochSeconds, Happening, OutboxEpoch, ReportSeq};
+    use domain::{OperationId, Uuid};
+
+    app::ports::OutboxEntry {
+        epoch: OutboxEpoch::from_uuid(Uuid::from_u128(0xe1)),
+        seq: ReportSeq::new(seq).unwrap(),
+        report: AgentReport {
+            op_id: OperationId::from_uuid(Uuid::from_u128(0x0b)),
+            happening: Happening::Started,
+            at: EpochSeconds::from_seconds(1_800_000_000),
+        },
+    }
+}
+
+/// Once the hub welcomed an approved agent, the connection leaves the
+/// handshake's bound: a report sent after it is acknowledged. It is closed
+/// once the agent sends nothing for the idle bound (§7.2).
+#[tokio::test]
+async fn a_syncing_connection_outlives_the_handshake_bound_until_it_is_idle() {
+    use domain::fleet::{Ack, Approval};
+
+    let handshake = Duration::from_millis(300);
+    let idle = Duration::from_millis(900);
+    let bounds = Bounds {
+        handshake_within: handshake,
+        idle_within: idle,
+        ..Bounds::DECIDED
+    };
+    let (connecting, agent, hostname) = approved_agent(bounds).await;
+    let (connected, mut channel) = connecting
+        .connect_channel(agent, hostname, None)
+        .await
+        .unwrap();
+    assert_eq!(connected.approval, Approval::Approved);
+    tokio::time::sleep(handshake * 2).await;
+    let entry = report(1);
+    let started = std::time::Instant::now();
+    channel.send_report(&entry).await.unwrap();
+    assert_eq!(
+        channel.receive_ack().await.unwrap(),
+        Ack {
+            epoch: entry.epoch,
+            seq: entry.seq,
+        }
+    );
+    let closed = tokio::time::timeout(idle + PATIENCE, channel.receive_ack()).await;
+    assert!(matches!(closed, Ok(Err(_))), "{closed:?}");
+    let took = started.elapsed();
+    assert!(
+        took >= idle && took <= idle + MARGIN,
+        "closed after {took:?}, not at its {idle:?} idle bound"
+    );
+}
+
+/// One live connection per agent ID (decision 120): an agent's new session
+/// closes its older one, which takes no report after it, and the older
+/// one's end leaves the newer one live, so the next session closes it.
+#[tokio::test]
+async fn a_new_session_of_an_agent_closes_its_older_one() {
+    use domain::fleet::Ack;
+
+    let (connecting, agent, hostname) = approved_agent(Bounds::DECIDED).await;
+    let (_, mut older) = connecting
+        .connect_channel(agent, hostname.clone(), None)
+        .await
+        .unwrap();
+    let (_, mut newer) = connecting
+        .connect_channel(agent, hostname.clone(), None)
+        .await
+        .unwrap();
+    // The send may fail or not, depending on when the close arrives; no
+    // `Ack` answers it either way.
+    let _ = older.send_report(&report(1)).await;
+    let answer = tokio::time::timeout(PATIENCE, older.receive_ack()).await;
+    assert!(matches!(answer, Ok(Err(_))), "{answer:?}");
+    drop(older);
+    // The older connection's end has run before the newer one sends.
+    tokio::time::sleep(Duration::from_millis(100)).await;
+    let entry = report(2);
+    newer.send_report(&entry).await.unwrap();
+    assert_eq!(
+        newer.receive_ack().await.unwrap(),
+        Ack {
+            epoch: entry.epoch,
+            seq: entry.seq,
+        }
+    );
+    let (_, _newest) = connecting
+        .connect_channel(agent, hostname, None)
+        .await
+        .unwrap();
+    let _ = newer.send_report(&report(3)).await;
+    let answer = tokio::time::timeout(PATIENCE, newer.receive_ack()).await;
+    assert!(matches!(answer, Ok(Err(_))), "{answer:?}");
+}

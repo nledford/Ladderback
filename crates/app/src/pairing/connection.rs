@@ -9,6 +9,7 @@ use domain::fleet::{
 use domain::{AgentId, SignedDuration};
 
 use super::agent::{ChallengeRefused, check_challenge, refusal_holds};
+use super::channel::{AgentChannel, Bound};
 use super::wire::{
     HubMessage, agent_envelope_frame, connect_frame, hello_payload, hub_message, proof_frame,
     read_welcome,
@@ -22,8 +23,8 @@ use crate::ports::{
 /// "The handshake" and "Signed messages after the handshake"): it checks the
 /// hub against its pin before it proves anything, proves itself with its
 /// agent key and connection counter, says `Hello`, and takes the hub's
-/// signed `Welcome`. One connection, one greeting: the link that stays open
-/// is #568's.
+/// signed `Welcome`. The connection then carries the agent's reports
+/// ([`Self::connect_channel`]).
 pub struct ConnectToHub {
     identity: Arc<dyn Identity>,
     signing: Arc<dyn Signing>,
@@ -151,6 +152,19 @@ impl ConnectToHub {
         hostname: Hostname,
         zone: Option<MachineZone>,
     ) -> Result<Connected, ConnectFailure> {
+        self.connect_channel(agent_id, hostname, zone)
+            .await
+            .map(|(connected, _)| connected)
+    }
+
+    /// [`Self::connect`], keeping the connection after the `Welcome` for
+    /// the signed messages that follow it.
+    pub async fn connect_channel(
+        &self,
+        agent_id: AgentId,
+        hostname: Hostname,
+        zone: Option<MachineZone>,
+    ) -> Result<(Connected, AgentChannel), ConnectFailure> {
         let (pin, seed) = self.paired().await?;
         let addresses: Vec<HubAddress> = pin.addresses().cloned().collect();
         let mut first = None;
@@ -202,6 +216,7 @@ impl ConnectToHub {
             changed,
         )
         .await
+        .map(|(connected, _)| connected)
     }
 
     /// The pin and agent key seed of a paired machine.
@@ -263,7 +278,7 @@ impl ConnectToHub {
         agent_id: AgentId,
         introduction: Introduction,
         changed: bool,
-    ) -> Result<Connected, ConnectFailure> {
+    ) -> Result<(Connected, AgentChannel), ConnectFailure> {
         let Opened {
             mut link,
             connect,
@@ -367,14 +382,33 @@ impl ConnectToHub {
             return Err(ConnectFailure::Unsigned);
         }
         let waited = self.clock.monotonic().saturating_sub(hello_sent);
-        self.take_welcome(pin, agent_key, &welcome, waited, changed)
-            .await
+        let (connected, welcomed_at) = self
+            .take_welcome(pin, agent_key, &welcome, waited, changed)
+            .await?;
+        let bound = Bound {
+            hub_key: connected.pin.hub_key,
+            agent_id,
+            agent_nonce: connect.agent_nonce,
+            hub_nonce: challenge.hub_nonce,
+            binding,
+        };
+        let channel = AgentChannel::after_welcome(
+            link,
+            self.signing.clone(),
+            self.clock.clone(),
+            seed.clone(),
+            bound,
+            welcomed_at,
+            hello_sent,
+        );
+        Ok((connected, channel))
     }
 
     /// The agent's pin and approval after the hub's signed `welcome`,
     /// which reached it `waited` after it sent `Hello` and which it acts on
-    /// only once the welcome holds. The pin is written when its generation
-    /// rises or it `changed` before the connection.
+    /// only once the welcome holds, with when the hub signed it. The pin is
+    /// written when its generation rises or it `changed` before the
+    /// connection.
     async fn take_welcome(
         &self,
         mut pin: HubPin,
@@ -382,7 +416,7 @@ impl ConnectToHub {
         welcome: &HubEnvelope,
         waited: SignedDuration,
         changed: bool,
-    ) -> Result<Connected, ConnectFailure> {
+    ) -> Result<(Connected, EpochSeconds), ConnectFailure> {
         if welcome.kind != welcome_kind() {
             return Err(ConnectFailure::OutOfTurn);
         }
@@ -396,11 +430,14 @@ impl ConnectToHub {
         if raised || changed {
             self.identity.write_pin(&pin).await?;
         }
-        Ok(Connected {
-            approval: read.approval,
-            pin,
-            agent_key,
-        })
+        Ok((
+            Connected {
+                approval: read.approval,
+                pin,
+                agent_key,
+            },
+            read.signed_at,
+        ))
     }
 }
 
