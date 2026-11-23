@@ -84,6 +84,13 @@ Feature: Choosing the width of the pages
     And the main content is no wider than 60 rem
     And the page has no accessibility violations
 
+  # On the start page the product's name is the current page's link, and
+  # still the brand: no bar before it, and it starts where the heading does.
+  Scenario: On the start page the product's name still starts where the main heading starts
+    Given a viewport of 1280 by 900 pixels
+    When I open the address "/"
+    Then the link "Ladderback" starts where the main heading starts
+
   # The band behind the header spans the window; the header's content stands
   # in the page's frame, as `<main>` does.
   Scenario Outline: The header's content shares the page's frame with <width>, in a window <window> pixels wide

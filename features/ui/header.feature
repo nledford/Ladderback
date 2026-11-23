@@ -58,11 +58,10 @@ Feature: The header bar
       | 864   | the link "Ladderback", the pages' links and the button "Settings" share one line |
       | 863   | the button "Menu" is collapsed                                                         |
 
-  # Inside the page's frame the pseudolocale's longer words leave the line
-  # little room: in DejaVu Sans, the widest font a Linux machine falls back
-  # on, the seven links and Sign out take 903 px of the frame's 928, in the
-  # macOS system font about 820.
-  Scenario: Signed in with the longer words of a pseudolocale, the pages' links and Sign out still share one line
+  # Inside the page's frame a pseudolocale's longer words don't fit on the
+  # brand's line, so the navigation moves whole onto a line of its own under
+  # it, the Settings button still at its end.
+  Scenario: Signed in with the longer words of a pseudolocale, the pages' links and the Settings button still share one line
     Given a viewport of 1280 by 720 pixels
     And the language chosen in this browser is "en-XA"
     And a daemon with sign-in on and the admin password "demo-admin-pass"
@@ -187,9 +186,9 @@ Feature: The header bar
       | width | height | size | colors       |
       | 1280  | 720    | 100  | light colors |
 
-  # Below 41rem Sign out is a row of the menu's panel, so the button shows the
+  # Below 54rem Sign out is a row of the menu's panel, so the button shows the
   # panel first; the failed sign-out leaves the panel open, where focus is.
-  Scenario: A sign-out that reaches no daemon from the menu below 41rem is an error alert said assertively, and leaves the menu open and the header's height as it was, at 320 pixels with 200 percent text in dark colors
+  Scenario: A sign-out that reaches no daemon from the menu below 54rem is an error alert said assertively, and leaves the menu open and the header's height as it was, at 320 pixels with 200 percent text in dark colors
     Given a viewport of 320 by 256 pixels
     And the reader sets the text size to 200 percent
     And the browser asks for "dark colors"
@@ -241,11 +240,12 @@ Feature: The header bar
     Then focus is on the heading "Settings"
     And the page shows no error alert containing "did not answer"
 
-  # Below 41rem the seven links no longer fit on one line, so they and Sign
-  # out sit in a panel behind a hamburger button, as on most small screens
-  # (decision 143): the brand's line ends with the icon-only button, a
-  # finger's target, and the panel stands under it when shown.
-  Scenario Outline: On a screen narrower than 41rem the pages' links and Sign out sit behind an icon-only Menu button, at <size> percent text
+  # Below 54rem the pages' links and the Settings button no longer fit on the
+  # brand's line, so every page and Sign out sit in a panel behind a hamburger
+  # button, as on most small screens (decision 143): the brand's line ends
+  # with the icon-only button, a finger's target, and the panel stands under
+  # it when shown.
+  Scenario Outline: On a screen narrower than 54rem the pages' links and Sign out sit behind an icon-only Menu button, at <size> percent text
     Given a viewport of <width> by <height> pixels
     And the reader sets the text size to <size> percent
     And a daemon with sign-in on and the admin password "demo-admin-pass"
@@ -337,9 +337,9 @@ Feature: The header bar
       | dark colors   |
       | forced colors |
 
-  # The button is drawn below 41rem alone. Where it isn't, Escape has nothing
+  # The button is drawn below 54rem alone. Where it isn't, Escape has nothing
   # to close and nowhere to return focus to, so it changes nothing.
-  Scenario: Escape in the header with the window widened past 41rem leaves the Menu button as it was
+  Scenario: Escape in the header with the window widened past 54rem leaves the Menu button as it was
     Given a viewport of 390 by 844 pixels
     And a daemon with sign-in on and the admin password "demo-admin-pass"
     When I open the address "/repositories"
@@ -352,9 +352,9 @@ Feature: The header bar
     And I press Enter
     Then the button "Menu" is expanded
     When the window widens to 1280 pixels
-    And I press Tab until focus is on the link "Settings"
+    And I press Tab until focus is on the link "Pending changes"
     And I press Escape
-    Then focus is on the link "Settings"
+    Then focus is on the link "Pending changes"
     When the window narrows to 390 pixels
     Then the button "Menu" is expanded
     And the pages' links are shown below the brand's line, each at least 3 rem tall

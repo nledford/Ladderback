@@ -159,21 +159,21 @@ a {
    header's content stands in the page's frame (`.site-header`, whose width
    class is the frame's own, `page_width.rs`, as `<main>`'s is), 1rem from the
    frame's inline edges as `<main>`'s content is, so the product's name
-   starts where each page's heading does. In the frame, the brand on its own
-   line, then the pages' links and, at that line's end, Sign out
-   (`.site-account`), which wraps under the links on a narrow screen. Every
-   part of the line stands on one baseline, no part is taller than the links
-   and nothing lies under them, so where the line fits, the header is as tall
-   signed in as with sign-in off. The running version is the footer's
-   (`components/footer.rs`).
+   starts where each page's heading does. In the frame, one line where it
+   fits (decision 152): the brand at its start, which takes the room the
+   navigation leaves, and at its end the navigation, the pages used most
+   and the Settings menu's button. Where the line doesn't fit, as with a
+   longer language or larger text, the navigation moves whole onto a line of
+   its own under the brand, at that line's end, and its own list wraps only
+   when even that line is too short. Every part of the line stands on one
+   baseline, no part is taller than the links and nothing lies under them:
+   the Settings menu's panel stands over the page, not in the header, so the
+   header is as tall signed in as with sign-in off. The running version is
+   the footer's (`components/footer.rs`).
 
-   The line stands on its parts' last baselines, in every engine: WebKit takes
-   a flex container's first baseline from its first item, and Sign out's is
-   its icon's foot, so on first baselines it stood 3 px off the links'.
-   The line is narrow: the links are 0.5rem apart and Sign out has no gap of
-   its own before it (its padding is the room), so the seven links and Sign
-   out of a pseudolocale, which take 903 px in DejaVu Sans, the widest font
-   a Linux machine falls back on, still leave 25 px of the frame's 928. */
+   The line stands on its parts' last baselines, in every engine: WebKit
+   takes a flex container's first baseline from its first item, and a
+   button's first baseline can be its icon's foot rather than its words'. */
 .site-header {
   display: flex;
   flex-wrap: wrap;
@@ -193,6 +193,15 @@ a {
 .brand a {
   display: inline-block;
   padding-block: 0.25rem;
+}
+
+/* On the start page the brand is the current page's link standing alone,
+   and stays the brand: no bar and no bold of a current link, its name
+   where each page's heading starts (decision 141). */
+.brand a[aria-current="page"] {
+  border-inline-start: 0;
+  padding-inline-start: 0;
+  font-weight: inherit;
 }
 
 /* The mark (`BrandMark` in main.rs), as tall as the name's letters, the
@@ -225,25 +234,25 @@ a {
   }
 }
 
-/* Sign out, at the end of the links' line. On a narrow screen it wraps under
-   the links and stays at the line's end, never alone at the line's start.
-   It may be narrower than its longest unbreakable run, as a flex item is
-   not unless told, so with larger text it never pushes the page sideways
-   (1.4.10).
-
-   Sign out stands on its last baseline, its words': a button's first
-   baseline is its first part's, its icon's foot, which stands lower in the
-   button than its words' baseline, so on the line's first baseline Sign out
-   rose 2 px over the links and the header's line grew (`.site-header`). */
+/* Sign out, the Settings menu's last row, under the pages' links and a
+   hairline: a row as tall as theirs, its icon where their words start. It
+   may be narrower than its longest unbreakable run, as a flex item is not
+   unless told, so with larger text it never pushes the page sideways
+   (1.4.10). The button's own look is `Button`'s; only the size it takes
+   and where its content starts are set here, through the properties it
+   reads. */
 .site-account {
-  display: flex;
-  flex-wrap: wrap;
-  justify-content: flex-end;
-  align-items: baseline;
-  align-items: last baseline;
-  gap: 0.25rem 1rem;
-  margin-inline-start: auto;
+  display: block;
   min-inline-size: 0;
+  margin-block-start: 0.25rem;
+  border-block-start: 1px solid var(--field-edge);
+}
+
+.site-account .button {
+  inline-size: 100%;
+  justify-content: flex-start;
+  --control-height: max(2.75rem, 2em);
+  --control-padding: calc(1rem - 1px);
 }
 
 /* The available update's link, in its banner on a line of its own under the
@@ -253,12 +262,22 @@ a {
   padding-block: 0.25rem;
 }
 
-/* The pages' links (`Link`), in the header of every page; `Link` draws the
-   current page bold, which is more than its color (§4.5, A2). */
+/* The pages' links (`Link`, standing alone), in the header of every page,
+   then the Settings menu (`DisclosureMenu`). `Link` draws the current page
+   bold with a bar at its start, which is more than its color (§4.5, A2);
+   here the bar takes 3px of the link's inline padding, so its words stay
+   where they were. The navigation stands at the header's line's end, and
+   on a line of its own, at that line's end too. */
+.site-nav {
+  margin-inline-start: auto;
+  min-inline-size: 0;
+}
+
 .site-nav ul {
   display: flex;
   flex-wrap: wrap;
-  gap: 0.25rem 0.5rem;
+  justify-content: flex-end;
+  gap: 0.25rem;
   list-style: none;
   margin: 0;
   padding: 0;
@@ -266,30 +285,64 @@ a {
 
 .site-nav a {
   display: inline-block;
-  padding-block: 0.25rem;
+  padding: 0.25rem 0.5rem;
 }
 
-/* Below 41rem the seven pages' links no longer fit on one line, so they and
-   Sign out sit in a panel (`.site-menu`) behind the menu button
-   (`.site-menu-button`, a hamburger), which ends the brand's line: the
-   header is that line and, shown, the panel under it, in the page's flow
-   (no overlay, no focus trap). The panel is a bordered box in the page's own
-   color on the header's Ledger Gray band, its corners the small radius; its
-   rows are full-width blocks at least 3rem tall, a finger's target, with
-   1rem of inline padding. A row tints to Ledger Gray under the pointer; the
-   current page is told by its weight and a 3px bar at its inline start in
-   the text's own color, a border so it stays under forced colors (which
-   draw it in the system's text color), and is the only row with one, so the
-   rows' words stay aligned. Sign out ends the panel under a hairline, a row
-   as tall as the links. The focus ring is drawn inside a row, where the
-   panel's clipping can't cut it. The rules stay here
-   rather than as Tailwind utilities: the navigation's and the header's base
-   rules live outside Tailwind's layers (#931), where a utility could not
-   override them, so the narrow screen's rules lie beside them, in one block
-   with one breakpoint. Wider than 41rem none of this applies: the button
-   isn't drawn and the panel, which draws no box of its own (`display:
-   contents`), leaves the links and Sign out on the header's line, always
-   shown, whatever the button was last pressed to do. */
+.site-nav a[aria-current="page"] {
+  padding-inline-start: calc(0.5rem - 3px);
+}
+
+/* The Settings menu's button marks the current page's group bold, as a
+   current link is: the base rule gives every button the font of the text
+   around it (`font: inherit`), which outranks a utility. */
+.disclosure-menu-button[aria-current="true"] {
+  font-weight: 700;
+}
+
+/* From 54rem up the Settings menu's panel stands over the page under its
+   button, its rows the list's links, each a block 2.75rem tall, a row of
+   its own rather than a link of the header's line. */
+@media (width >= 54rem) {
+  .site-nav .disclosure-menu-panel ul {
+    display: block;
+  }
+
+  .site-nav .disclosure-menu-panel a {
+    display: flex;
+    align-items: center;
+    min-block-size: 2.75rem;
+    padding: 0 1rem;
+  }
+
+  .site-nav .disclosure-menu-panel a[aria-current="page"] {
+    padding-inline-start: calc(1rem - 3px);
+  }
+}
+
+/* Below 54rem the pages' links and the Settings menu's button no longer fit
+   on the brand's line, so every page and Sign out sit in a panel
+   (`.site-menu`) behind the menu button (`.site-menu-button`, a hamburger),
+   which ends the brand's line: the header is that line and, shown, the
+   panel under it, in the page's flow (no overlay, no focus trap). The
+   Settings menu's button isn't drawn there, and its panel's rows are rows of
+   this panel, after the pages', always shown: no menu in a menu (decision
+   152). The panel is a bordered box in the page's own color on the
+   header's Ledger Gray band, its corners the small radius; its rows are
+   full-width blocks at least 3rem tall, a finger's target, with 1rem of
+   inline padding. A row tints to Ledger Gray under the pointer; the current
+   page is told by its weight and a 3px bar at its inline start in the
+   text's own color, a border so it stays under forced colors (which draw it
+   in the system's text color), and is the only row with one, so the rows'
+   words stay aligned. Sign out ends the panel under a hairline, a row as
+   tall as the links. The focus ring is drawn inside a row, where the
+   panel's clipping can't cut it. The rules stay here rather than as
+   Tailwind utilities: the navigation's and the header's base rules live
+   outside Tailwind's layers (#931), where a utility could not override
+   them, so the narrow screen's rules lie beside them, in one block with one
+   breakpoint. From 54rem up none of this applies: the button isn't drawn
+   and the panel, which draws no box of its own (`display: contents`),
+   leaves the navigation on the header's line, always shown, whatever the
+   button was last pressed to do. */
 .site-menu {
   display: contents;
 }
@@ -298,7 +351,7 @@ a {
   display: none;
 }
 
-@media (width < 41rem) {
+@media (width < 54rem) {
   .site-menu-button {
     display: flex;
     margin-inline-start: auto;
@@ -323,8 +376,30 @@ a {
     outline-offset: -3px;
   }
 
+  .site-nav {
+    margin-inline-start: 0;
+  }
+
   .site-nav ul {
     display: block;
+  }
+
+  .site-nav .disclosure-menu-button {
+    display: none;
+  }
+
+  /* The Settings menu's panel, shown whatever its button last did, as a
+     part of this panel: no box, no place of its own, no width of its own. */
+  .site-nav .disclosure-menu-panel {
+    display: block;
+    position: static;
+    margin: 0;
+    padding: 0;
+    border: 0;
+    border-radius: 0;
+    background: none;
+    min-inline-size: 0;
+    max-inline-size: none;
   }
 
   .site-nav a {
@@ -342,20 +417,11 @@ a {
   }
 
   .site-account {
-    display: block;
-    margin-inline-start: 0;
-    border-block-start: 1px solid var(--field-edge);
+    margin-block-start: 0;
   }
 
-  /* Sign out is a row of the panel, as tall as the links, its icon where
-     their words start. The button's own look is `Button`'s; only the size it
-     takes and where its content starts are set here, through the properties
-     it reads. */
   .site-account .button {
-    inline-size: 100%;
-    justify-content: flex-start;
     --control-height: max(3rem, 2em);
-    --control-padding: calc(1rem - 1px);
   }
 }
 
@@ -618,7 +684,10 @@ main:focus {
     color: LinkText;
   }
 
-  .link-alone[aria-current="page"] {
+  /* The narrow header's rows draw their bar in `--fg` by a rule of their
+     own, which this one must outrank. */
+  .link-alone[aria-current="page"],
+  .site-nav a.link-alone[aria-current="page"] {
     border-inline-start-color: CanvasText;
   }
 }

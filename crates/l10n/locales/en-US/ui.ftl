@@ -865,6 +865,34 @@ ui-gallery-fingerprint-name = Demo { -hub } key fingerprint
 # the foot of every page.
 ui-gallery-footer-heading = Footer
 
+# The heading of the gallery's disclosure menu demo (§4.5): buttons that
+# show and hide a panel of links under them, as the header's Settings menu.
+ui-gallery-disclosure-menu-heading = Disclosure menu
+
+# The words of the demo's second menu's button, whose panel holds a link to
+# the gallery itself, the page the reader is on.
+ui-gallery-disclosure-menu-pages = Demo pages
+
+# The words of the demo's first menu's button, whose panel holds a link to
+# another page.
+ui-gallery-disclosure-menu-other = Demo other pages
+
+# A row of the second menu: a link to the gallery itself.
+ui-gallery-disclosure-menu-here = Demo menu link to this page
+
+# A row of the second menu: a link to the start page.
+ui-gallery-disclosure-menu-start = Demo menu link to the start page
+
+# The second menu's last row: a button, which does nothing in the demo.
+ui-gallery-disclosure-menu-action = Demo menu action
+
+# The first menu's row: a link to the Log page.
+ui-gallery-disclosure-menu-log = Demo menu link to the log
+
+# A button after the demo's menus, where focus goes when it leaves them;
+# it does nothing.
+ui-gallery-disclosure-menu-after = Demo after the menu
+
 # The heading of the gallery's steps demo (§4.5): a process's steps in
 # order, each with its state, and where the process has reached.
 ui-gallery-steps-heading = Steps

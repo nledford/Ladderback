@@ -56,6 +56,7 @@ pub use badge::Badge;
 pub use banner::{Banner, BannerDismissal};
 pub use button::Button;
 pub use checkbox::Checkbox;
+pub use disclosure_menu::DisclosureMenu;
 pub(crate) use error_summary::{ErrorSummary, SummaryItem};
 pub use fingerprint::Fingerprint;
 pub use footer::Footer;

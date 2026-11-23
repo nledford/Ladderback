@@ -22,6 +22,7 @@ mod badge;
 mod banner;
 mod button;
 mod checkbox;
+mod disclosure_menu;
 mod fingerprint;
 mod footer;
 mod icon;
@@ -104,6 +105,11 @@ pub(crate) fn Gallery(localizer: Arc<Localizer>) -> impl IntoView {
         // After the fingerprint's demo: no part of a footer is a Tab stop,
         // so it lengthens no walk either.
         <footer::FooterDemo localizer=Arc::clone(&localizer) />
+        // After the footer's demo, past every demo a journey walks to from
+        // the page's top, and before the table's, which journeys reach by
+        // Shift+Tab from the page's start, so its stops lengthen none of
+        // those walks; its scenarios start at its anchor.
+        <disclosure_menu::DisclosureMenuDemo localizer=Arc::clone(&localizer) />
         // Before the tooltip's, so a journey reaches its controls by
         // Shift+Tab from the page's start, past the tooltip's few.
         <table::TableDemo localizer=Arc::clone(&localizer) />
