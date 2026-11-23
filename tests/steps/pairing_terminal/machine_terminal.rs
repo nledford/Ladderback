@@ -3,7 +3,9 @@
 
 use std::net::SocketAddr;
 
+use app::ports::ThisMachine as _;
 use cucumber::{given, then, when};
+use platform::this_machine::SystemMachine;
 
 use super::{machine_root, on_machine, said};
 use crate::Agent;
@@ -209,6 +211,17 @@ fn machine_paired(agent: &mut Agent) {
 #[then(regex = r"^the machine is refused because (.+)$")]
 fn machine_refused(agent: &mut Agent, reason: String) {
     let expected = match reason.as_str() {
+        "the hub took another computer as it first" => {
+            // A computer that gives no identifier tells the hub nothing,
+            // and is taken as before (decision 144).
+            let data_dir = testkit::daemon::data_dir(&machine_root(agent));
+            if SystemMachine::in_data_dir(&data_dir).identifier().is_err() {
+                testkit::skip!(
+                    "this computer gives no machine identifier, so the hub can't tell it from another"
+                );
+            }
+            "took another computer as this machine first"
+        }
         "the token was revoked" => "This token was canceled on the hub",
         "the address would show the token to the network" => "shows the token to the network",
         "the hub's certificate isn't the one the token names" => {

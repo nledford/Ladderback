@@ -15,11 +15,11 @@
 - **On Linux, only 32 lowercase hexadecimal digits are an identifier** (decided 2026-11-22). machine-id(5) gives the machine ID that form; anything else, such as the `uninitialized` systemd writes on a first boot or an empty file, isn't the computer's lasting identifier, and recorded or compared it would make the computer look like a copy of itself at a later start. It counts as unreadable: it refuses nothing, and the log says so.
 - **A running maintenance operation keeps the ID.** A copy still runs checks, and while one runs this machine maintains its repository. Giving that up at once would let the computer it was copied from start a prune beside it (I1), so taking a new ID asks `Ownership::give_up` of each repository it maintained, as turning its maintenance off does, and a running one refuses the whole take with `maintenance-busy`.
 - **No identifier recorded is an upgrade, not a copy.** Data folders from before this decision have none; recording this computer's at the first start keeps every existing machine as it was.
-- **The identifier stays in the data folder, never the database**, as the machine ID and key do (§7.1), so `db rebuild` can't change it. It is read only to compare, never sent anywhere or shown.
+- **The identifier stays in the data folder, never the database**, as the machine ID and key do (§7.1), so `db rebuild` can't change it. It is read only to compare, and never shown or sent: what reaches the hub is a digest of it keyed by the machine ID, which doesn't give it back ([decision 150](150-the-hub-takes-one-computer-per-machine-id.md)).
 
 ## Known limits
 
-- A copy that keeps the identifier, such as a cloned virtual machine whose `/etc/machine-id` was cloned too, or a data folder restored onto the computer it came from, isn't told. The hub's refusal of two live machines with one ID is the next part of #296.
+- A copy that keeps the identifier, such as a cloned virtual machine whose `/etc/machine-id` was cloned too, or a data folder restored onto the computer it came from, isn't told. The hub doesn't tell it either: its machine fingerprint is the original's ([decision 150](150-the-hub-takes-one-computer-per-machine-id.md)).
 - Reinstalling the operating system changes `/etc/machine-id` on Linux, so the same computer is told it is a copy. Taking a new ID is then the way on, and its old snapshots stay under the old ID until the person adopts them.
 - A recorded file that can't be read runs as usual with a warning in the log, so a damaged record hides a copy until it is fixed.
 - The snapshots the copy backed up before the restart carry the old ID.

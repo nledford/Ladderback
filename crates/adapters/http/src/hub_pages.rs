@@ -303,6 +303,7 @@ async fn approve(
             let listed = ListedAgent {
                 record,
                 looks_like: None,
+                second_machine_at: None,
             };
             let at = approved_at(&listed.record);
             axum::Json(agent_dto(&listed, at)).into_response()
@@ -348,6 +349,7 @@ fn agent_dto(listed: &ListedAgent, now: Timestamp) -> api::HubAgentDto {
             hostname: like.hostname.as_str().to_owned(),
             last_seen: like.last_seen.to_string(),
         }),
+        second_machine_at: listed.second_machine_at.map(|at| at.to_string()),
     }
 }
 

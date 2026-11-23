@@ -235,6 +235,7 @@ Decisions 1–6 recorded 2026-11-08. Decisions 7–12 recorded 2026-11-08 after 
 | [146](decisions/146-the-web-ui-wasm-is-built-for-size.md) | The release web UI's wasm is built for size, with a profile of its own |
 | [147](decisions/147-the-hub-decides-leases-on-each-report.md) | The hub decides each repository's lease on every report, and counts a lease an hour past its expiry |
 | [149](decisions/149-the-hubs-dashboard.md) | The hub's dashboard shows when each machine last connected and its latest operations, follows the hub's events, and is reached from the start page and the Machines tab |
+| [150](decisions/150-the-hub-takes-one-computer-per-machine-id.md) | The hub takes one computer under each machine ID |
 
 ## 17. Open questions
 

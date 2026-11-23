@@ -140,6 +140,7 @@ async fn reports(hub: &Hub, identity: Arc<InMemoryIdentity>, n: u128, entries: &
         Arc::new(FakeClock::new(Timestamp::from_second(NOW).unwrap())),
         Arc::new(LoopbackHubConnector::to(hub.pairing.clone())),
         "0.5.0-agent".to_owned(),
+        None,
     );
     let (_, mut channel) = connecting
         .connect_channel(agent_id(n), hostname(n), None)

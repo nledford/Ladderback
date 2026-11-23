@@ -9,8 +9,8 @@ use std::sync::Arc;
 use async_trait::async_trait;
 use domain::fleet::{
     AgentRecord, AgentStatus, ApprovalRefused, BindingKind, Fingerprint, Hostname, KEY_BYTES,
-    MachineZone, PENDING_LIMIT, PairRefusal, PairRequest, Pairing, ProofRefusal, ProofRequest,
-    PublicKey, TokenRecord, TokenUse,
+    MachineCheck, MachineFingerprint, MachineZone, PENDING_LIMIT, PairRefusal, PairRequest,
+    Pairing, ProofRefusal, ProofRequest, PublicKey, SecondMachine, TokenRecord, TokenUse,
 };
 use domain::{AgentId, Timestamp, Uuid};
 
@@ -28,6 +28,11 @@ pub trait AgentRegistryHarness: Send + Sync {
 }
 
 pub async fn run(harness: &dyn AgentRegistryHarness) {
+    tokens_and_pairings(harness).await;
+    proofs_approvals_and_machines(harness).await;
+}
+
+async fn tokens_and_pairings(harness: &dyn AgentRegistryHarness) {
     nothing_is_registered_at_first(harness).await;
     a_token_is_kept_as_it_was_given_while_unused(harness).await;
     unused_tokens_are_listed_oldest_first(harness).await;
@@ -44,6 +49,9 @@ pub async fn run(harness: &dyn AgentRegistryHarness) {
     another_key_under_a_registered_id_is_refused(harness).await;
     records_outlive_the_hub(harness).await;
     racing_pairings_on_one_token_pair_one(harness).await;
+}
+
+async fn proofs_approvals_and_machines(harness: &dyn AgentRegistryHarness) {
     a_proof_keeps_the_greater_counter_and_when_it_was_seen(harness).await;
     a_proof_of_another_id_key_or_kind_changes_nothing(harness).await;
     the_first_proof_after_an_approval_says_so_once(harness).await;
@@ -52,6 +60,10 @@ pub async fn run(harness: &dyn AgentRegistryHarness) {
     racing_approvals_approve_once(harness).await;
     the_tls_key_is_recorded_once_and_outlives_the_hub(harness).await;
     the_machine_zone_an_agent_reported_last_is_kept(harness).await;
+    the_first_machine_is_kept_and_a_second_is_refused_and_listed(harness).await;
+    a_refused_second_machine_leaves_the_first_taken(harness).await;
+    a_machine_that_tells_no_fingerprint_changes_nothing(harness).await;
+    a_forgotten_machine_lets_the_next_fingerprint_be_claimed(harness).await;
 }
 
 /// The value of `result`, after a failed assertion if it is an error.
@@ -707,6 +719,202 @@ async fn the_machine_zone_an_agent_reported_last_is_kept(harness: &dyn AgentRegi
         "recording no zone",
     );
     assert_eq!(zone_of(reopened.as_ref()).await, Some(None));
+}
+
+fn machine(byte: u8) -> Option<MachineFingerprint> {
+    ok(
+        MachineFingerprint::from_hex(&format!("{byte:02x}").repeat(KEY_BYTES)),
+        "a test fingerprint",
+    )
+}
+
+async fn check(
+    registry: &dyn AgentRegistry,
+    agent: AgentId,
+    presented: Option<&MachineFingerprint>,
+    now: Timestamp,
+) -> Option<Option<MachineCheck>> {
+    ok(
+        registry.check_machine(agent, presented, now).await,
+        "checking a machine",
+    )
+}
+
+async fn second_machines(registry: &dyn AgentRegistry) -> Vec<SecondMachine> {
+    ok(registry.second_machines().await, "listing second machines").unwrap_or_default()
+}
+
+/// A registry with one agent paired, and that agent's ID.
+async fn one_paired(
+    harness: &dyn AgentRegistryHarness,
+) -> Option<(Arc<dyn AgentRegistry>, AgentId)> {
+    let (Some(token), Some(request)) = (token(1, 0), request(1, 1, "laptop")) else {
+        return None;
+    };
+    let registry = harness.empty().await;
+    add(registry.as_ref(), &token).await;
+    let paired = pair(registry.as_ref(), &request, at(10)).await;
+    assert!(matches!(paired, Some(Ok(Pairing::New(_)))), "{paired:?}");
+    Some((registry, request.agent_id))
+}
+
+/// The first fingerprint under an agent's ID is kept through a restart;
+/// the same one again is the same machine, and another is a second
+/// computer, whose last refusal is listed, through a restart too
+/// (decision 150).
+async fn the_first_machine_is_kept_and_a_second_is_refused_and_listed(
+    harness: &dyn AgentRegistryHarness,
+) {
+    let (Some((registry, agent)), Some(first), Some(second)) =
+        (one_paired(harness).await, machine(0x11), machine(0x22))
+    else {
+        return;
+    };
+    assert_eq!(
+        check(registry.as_ref(), agent, Some(&first), at(20)).await,
+        Some(Some(MachineCheck::Claimed))
+    );
+    let reopened = harness.reopened().await;
+    assert_eq!(
+        check(reopened.as_ref(), agent, Some(&first), at(30)).await,
+        Some(Some(MachineCheck::Same))
+    );
+    assert!(second_machines(reopened.as_ref()).await.is_empty());
+    assert_eq!(
+        check(reopened.as_ref(), agent, Some(&second), at(40)).await,
+        Some(Some(MachineCheck::Second))
+    );
+    assert_eq!(
+        check(reopened.as_ref(), agent, Some(&second), at(50)).await,
+        Some(Some(MachineCheck::Second)),
+        "a refused computer stays refused"
+    );
+    let listed = vec![SecondMachine {
+        agent_id: agent,
+        at: at(50),
+    }];
+    assert_eq!(second_machines(reopened.as_ref()).await, listed);
+    assert_eq!(
+        second_machines(harness.reopened().await.as_ref()).await,
+        listed
+    );
+}
+
+/// A second computer's refusal changes no record and leaves the first
+/// machine taken as before; an ID the registry doesn't hold claims nothing
+/// (decision 150).
+async fn a_refused_second_machine_leaves_the_first_taken(harness: &dyn AgentRegistryHarness) {
+    let (Some((registry, agent)), Some(first), Some(second)) =
+        (one_paired(harness).await, machine(0x11), machine(0x22))
+    else {
+        return;
+    };
+    check(registry.as_ref(), agent, Some(&first), at(20)).await;
+    let before = agents(registry.as_ref()).await;
+    assert_eq!(
+        check(registry.as_ref(), agent, Some(&second), at(40)).await,
+        Some(Some(MachineCheck::Second))
+    );
+    assert_eq!(
+        agents(registry.as_ref()).await,
+        before,
+        "a refusal changes no record"
+    );
+    assert_eq!(
+        check(registry.as_ref(), agent, Some(&first), at(60)).await,
+        Some(Some(MachineCheck::Same)),
+        "the first machine is taken as before"
+    );
+    assert_eq!(
+        check(registry.as_ref(), agent_id(9), Some(&second), at(70)).await,
+        Some(None)
+    );
+    assert_eq!(
+        check(registry.as_ref(), agent_id(9), Some(&first), at(80)).await,
+        Some(None),
+        "an ID it doesn't hold claims nothing"
+    );
+}
+
+/// A `Hello` with no fingerprint is taken and claims nothing: the first
+/// fingerprint after it is still the one kept.
+async fn a_machine_that_tells_no_fingerprint_changes_nothing(harness: &dyn AgentRegistryHarness) {
+    let (Some(token), Some(request), Some(first), Some(second)) = (
+        token(1, 0),
+        request(1, 1, "laptop"),
+        machine(0x11),
+        machine(0x22),
+    ) else {
+        return;
+    };
+    let registry = harness.empty().await;
+    add(registry.as_ref(), &token).await;
+    let paired = pair(registry.as_ref(), &request, at(10)).await;
+    assert!(matches!(paired, Some(Ok(Pairing::New(_)))), "{paired:?}");
+    let agent = request.agent_id;
+    assert_eq!(
+        check(registry.as_ref(), agent, None, at(20)).await,
+        Some(Some(MachineCheck::Untold))
+    );
+    assert_eq!(
+        check(registry.as_ref(), agent, Some(&first), at(30)).await,
+        Some(Some(MachineCheck::Claimed))
+    );
+    assert_eq!(
+        check(registry.as_ref(), agent, None, at(40)).await,
+        Some(Some(MachineCheck::Untold))
+    );
+    assert_eq!(
+        check(registry.as_ref(), agent, Some(&second), at(50)).await,
+        Some(Some(MachineCheck::Second))
+    );
+}
+
+/// Forgetting the fingerprint held under an agent's ID, the way back for a
+/// refused computer, clears its last refusal too, and the next fingerprint
+/// is claimed in its place; an ID it doesn't hold is answered `false`
+/// (decision 150).
+async fn a_forgotten_machine_lets_the_next_fingerprint_be_claimed(
+    harness: &dyn AgentRegistryHarness,
+) {
+    let (Some(token), Some(request), Some(first), Some(second)) = (
+        token(1, 0),
+        request(1, 1, "laptop"),
+        machine(0x11),
+        machine(0x22),
+    ) else {
+        return;
+    };
+    let registry = harness.empty().await;
+    add(registry.as_ref(), &token).await;
+    let paired = pair(registry.as_ref(), &request, at(10)).await;
+    assert!(matches!(paired, Some(Ok(Pairing::New(_)))), "{paired:?}");
+    let agent = request.agent_id;
+    check(registry.as_ref(), agent, Some(&first), at(20)).await;
+    check(registry.as_ref(), agent, Some(&second), at(30)).await;
+    let before = agents(registry.as_ref()).await;
+    assert_eq!(
+        ok(registry.forget_machine(agent).await, "forgetting a machine"),
+        Some(true)
+    );
+    assert_eq!(
+        ok(
+            registry.forget_machine(agent_id(9)).await,
+            "forgetting an unknown machine"
+        ),
+        Some(false)
+    );
+    let reopened = harness.reopened().await;
+    assert!(second_machines(reopened.as_ref()).await.is_empty());
+    assert_eq!(agents(reopened.as_ref()).await, before, "no record changes");
+    assert_eq!(
+        check(reopened.as_ref(), agent, Some(&second), at(40)).await,
+        Some(Some(MachineCheck::Claimed))
+    );
+    assert_eq!(
+        check(reopened.as_ref(), agent, Some(&first), at(50)).await,
+        Some(Some(MachineCheck::Second))
+    );
 }
 
 /// Takes `proving` at `at(20)` and approves the agent of `request` at

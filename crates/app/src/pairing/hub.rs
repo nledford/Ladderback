@@ -5,11 +5,11 @@ use std::sync::{Arc, Mutex, PoisonError};
 use domain::fleet::{
     Ack, AgentEnvelope, AgentRecord, Approval, ApprovalRefused, Binding, BindingKind, Challenge,
     Connect, EpochSeconds, FIRST_SEQUENCE, HANDSHAKES, Holder, Hostname, HostnameKey, HubAddress,
-    HubEnvelope, Ingest, KEY_BYTES, KeyFile, ListedAgent, MESSAGE_LIFE, MachineZone, Nonce, Pair,
-    PairAnswer, PairRefusal, PairRequest, Paired, PairingToken, PayloadDigest, Proof, ProofRefusal,
-    ProofRequest, PublicKey, Refused, ReportSeq, SeedFile, SignedMessage, SigningSeed, TokenId,
-    TokenRecord, TokenTls, TokenUse, UNUSED_TOKEN_LIMIT, Welcome, ack_kind, hello_kind,
-    list_agents, report_kind, token_life, welcome_kind,
+    HubEnvelope, Ingest, KEY_BYTES, KeyFile, ListedAgent, MESSAGE_LIFE, MachineCheck, MachineZone,
+    Nonce, Pair, PairAnswer, PairRefusal, PairRequest, Paired, PairingToken, PayloadDigest, Proof,
+    ProofRefusal, ProofRequest, PublicKey, Refused, ReportSeq, SeedFile, SignedMessage,
+    SigningSeed, TokenId, TokenRecord, TokenTls, TokenUse, UNUSED_TOKEN_LIMIT, Welcome, WireName,
+    ack_kind, hello_kind, list_agents, report_kind, token_life, welcome_kind,
 };
 use domain::{AgentId, SignedDuration, TimeZoneDatabase};
 
@@ -54,6 +54,19 @@ pub struct HubPairing {
     /// Where the hub tells its browsers that a machine started waiting,
     /// was approved or reported (#569).
     events: Option<Arc<dyn EventBus>>,
+    /// The agents under whose ID the hub refused a second computer since
+    /// it started: it warns of each once (decision 150).
+    warned_second: Mutex<HashSet<AgentId>>,
+}
+
+/// The hub's answer to a proved agent's `Hello`.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum HelloAnswer {
+    /// The signed `Welcome`.
+    Welcome(HubEnvelope),
+    /// A signed refusal: another computer holds the agent's ID (decision
+    /// 150).
+    Refused(Refused),
 }
 
 /// The hub's answer to an agent's proof.
@@ -197,6 +210,7 @@ impl HubPairing {
             warned_full: Mutex::default(),
             warned_behind: Mutex::default(),
             events: None,
+            warned_second: Mutex::default(),
         }
     }
 
@@ -514,11 +528,32 @@ impl HubPairing {
         }
     }
 
+    /// A person at the hub forgets the computer it took under `agent`'s ID,
+    /// so the next one to connect is taken in its place: the way back for a
+    /// machine refused as a second computer (decision 150). Logged.
+    pub async fn forget_machine(&self, agent: &AgentRecord) -> Result<(), HubPairingError> {
+        if self.registry.forget_machine(agent.agent_id).await? {
+            log::info!("{}", logged::forgot_machine(agent));
+        }
+        Ok(())
+    }
+
     /// Every agent the hub has registered, oldest first, each pending one
     /// flagged with the agent its hostname looks like (decision 120,
-    /// "Hostnames"), which the pending row shows (decision 121).
+    /// "Hostnames"), which the pending row shows (decision 121), and each
+    /// with when the hub last refused a second computer under its ID
+    /// (decision 150).
     pub async fn agents(&self) -> Result<Vec<ListedAgent>, HubPairingError> {
-        Ok(list_agents(self.registry.agents().await?))
+        let mut listed = list_agents(self.registry.agents().await?);
+        for second in self.registry.second_machines().await? {
+            if let Some(agent) = listed
+                .iter_mut()
+                .find(|listed| listed.record.agent_id == second.agent_id)
+            {
+                agent.second_machine_at = Some(second.at);
+            }
+        }
+        Ok(listed)
     }
 
     /// The hub's answer to a paired agent's `proof`: the agent's record,
@@ -578,17 +613,21 @@ impl HubPairing {
 
     /// The hub's signed `Welcome` to `hello`, the first message of the
     /// proved `agent`, when it holds: signed by the agent's key on this
-    /// connection, sequence number 1, kind `Hello`. The machine zone the
-    /// `Hello` reports is kept over the one the agent held, pending or
-    /// approved, so a machine that moved tells its hub at its next
-    /// connection.
+    /// connection, sequence number 1, kind `Hello`. The machine fingerprint
+    /// it carries is checked first: another than the hub took under the ID
+    /// is a second computer, refused signed and warned of once, and nothing
+    /// its `Hello` says is kept (decision 150). Its proof was taken before,
+    /// as any good proof under the agent's key is: the record's last-seen
+    /// time and counter are the copy's. The machine zone the `Hello`
+    /// reports is kept over the one the agent held, pending or approved, so
+    /// a machine that moved tells its hub at its next connection.
     pub async fn welcome(
         &self,
         keys: &HubKeys,
         handshake: &HubHandshake,
         agent: &AgentRecord,
         hello: &AgentEnvelope,
-    ) -> Result<Result<HubEnvelope, MessageRefused>, HubPairingError> {
+    ) -> Result<Result<HelloAnswer, MessageRefused>, HubPairingError> {
         let signed = SignedMessage::AgentMessage {
             hub_key: keys.key,
             agent_id: handshake.agent_id,
@@ -614,6 +653,15 @@ impl HubPairing {
         let Ok(read) = read_hello(&hello.payload) else {
             return Ok(Err(MessageRefused::Unexpected));
         };
+        let check = self
+            .registry
+            .check_machine(agent.agent_id, read.machine.as_ref(), self.clock.now())
+            .await?;
+        if check.is_some_and(|check| !check.takes()) {
+            self.warn_second(agent);
+            let refused = self.signed_refusal(keys, handshake, MachineCheck::refusal(), None)?;
+            return Ok(Ok(HelloAnswer::Refused(refused)));
+        }
         let zone = known(read.zone.as_ref());
         if zone != agent.zone {
             self.registry
@@ -643,13 +691,13 @@ impl HubPairing {
             payload: PayloadDigest::of(&payload),
         };
         let signature = self.signing.sign(&keys.seed, &answer.to_bytes())?;
-        Ok(Ok(HubEnvelope {
+        Ok(Ok(HelloAnswer::Welcome(HubEnvelope {
             kind,
             seq: FIRST_SEQUENCE,
             expires_at,
             payload,
             signature,
-        }))
+        })))
     }
 
     /// The connection's state after the `Welcome` to `agent`, when the hub
@@ -784,6 +832,19 @@ impl HubPairing {
         }
     }
 
+    /// Warns, once per agent while the hub runs, that it refused a second
+    /// computer under `agent`'s ID; the ones after are refused unlogged.
+    fn warn_second(&self, agent: &AgentRecord) {
+        let first = self
+            .warned_second
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .insert(agent.agent_id);
+        if first {
+            log::warn!("{}", logged::second_machine(agent));
+        }
+    }
+
     /// `refusal`, signed over its code and the connection. A taken
     /// hostname names its holder beside the signed code.
     fn refuse(
@@ -792,7 +853,26 @@ impl HubPairing {
         handshake: &HubHandshake,
         refusal: &PairRefusal,
     ) -> Result<Refused, HubPairingError> {
-        let code = refusal.code();
+        let holder = match refusal {
+            PairRefusal::HostnameTaken { holder, last_seen } => Some(Holder {
+                hostname: holder.clone(),
+                last_seen: EpochSeconds::from_timestamp(*last_seen)
+                    .unwrap_or(EpochSeconds::from_seconds(0)),
+            }),
+            _ => None,
+        };
+        self.signed_refusal(keys, handshake, refusal.code(), holder)
+    }
+
+    /// The refusal `code`, signed over the code and the connection, with
+    /// `holder` beside it unsigned.
+    fn signed_refusal(
+        &self,
+        keys: &HubKeys,
+        handshake: &HubHandshake,
+        code: WireName,
+        holder: Option<Holder>,
+    ) -> Result<Refused, HubPairingError> {
         let signed = SignedMessage::Refusal {
             hub_key: keys.key,
             agent_id: handshake.agent_id,
@@ -802,14 +882,6 @@ impl HubPairing {
             code: &code,
         };
         let signature = self.signing.sign(&keys.seed, &signed.to_bytes())?;
-        let holder = match refusal {
-            PairRefusal::HostnameTaken { holder, last_seen } => Some(Holder {
-                hostname: holder.clone(),
-                last_seen: EpochSeconds::from_timestamp(*last_seen)
-                    .unwrap_or(EpochSeconds::from_seconds(0)),
-            }),
-            _ => None,
-        };
         Ok(Refused {
             code,
             holder,

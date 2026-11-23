@@ -341,6 +341,7 @@ fn hello() -> Hello {
         protocols: domain::fleet::PROTOCOLS,
         clock: EpochSeconds::from_seconds(1_800_000_001),
         zone: None,
+        machine: None,
     }
 }
 
@@ -478,6 +479,31 @@ fn the_machine_zone_travels_in_a_pair_and_a_hello() {
     assert!(!pair_frame(&pair()).to_text().contains("zone"));
     let plain = String::from_utf8(hello_payload(&hello())).unwrap();
     assert!(!plain.contains("zone"), "{plain}");
+}
+
+/// A `Hello` carries the machine fingerprint as 64 lower-case hex digits,
+/// and leaves it out when there is none, so an older hub reads it as
+/// before; a fingerprint out of shape refuses the frame (decision 150).
+#[test]
+fn the_machine_fingerprint_travels_in_a_hello() {
+    let machine = domain::fleet::MachineFingerprint::from_hex(&"5a".repeat(32)).unwrap();
+    let told = Hello {
+        machine: Some(machine),
+        ..hello()
+    };
+    let payload = String::from_utf8(hello_payload(&told)).unwrap();
+    assert!(
+        payload.contains(&format!(r#""machine":"{}""#, "5a".repeat(32))),
+        "{payload}"
+    );
+    assert_eq!(read_hello(payload.as_bytes()), Ok(told));
+    let plain = String::from_utf8(hello_payload(&hello())).unwrap();
+    assert!(!plain.contains("machine"), "{plain}");
+    let upper = format!(
+        r#"{{"agent_version":"x","hostname":"nas","protocols":[1,1],"clock":1,"machine":"{}"}}"#,
+        "5A".repeat(32)
+    );
+    assert_eq!(read_hello(upper.as_bytes()), Err(WireRefused));
 }
 
 /// A zone that isn't an IANA-shaped name refuses the frame, as a hostname

@@ -7,9 +7,10 @@ use app::ports::{Added, AgentRegistry, StoreError};
 use async_trait::async_trait;
 use domain::fleet::{
     AgentRecord, AgentStatus, ApprovalRefused, BindingKind, Fingerprint, HostnameKey, KEY_BYTES,
-    MachineZone, PairRefusal, PairRequest, Pairing, PairingView, ProofRefusal, ProofRequest,
-    ProofView, Proved, PublicKey, TokenId, TokenRecord, TokenUse, admits_unused_token,
-    decide_approval, decide_pairing, decide_proof, voids_tokens_for_new_key,
+    MachineCheck, MachineFingerprint, MachineZone, PairRefusal, PairRequest, Pairing, PairingView,
+    ProofRefusal, ProofRequest, ProofView, Proved, PublicKey, SecondMachine, TokenId, TokenRecord,
+    TokenUse, admits_unused_token, decide_approval, decide_pairing, decide_proof,
+    voids_tokens_for_new_key,
 };
 use domain::{AgentId, Timestamp};
 use sqlx::{Connection, SqliteConnection};
@@ -381,6 +382,74 @@ impl AgentRegistry for SqliteStore {
             .await
             .map_err(unavailable)?;
         Ok(())
+    }
+
+    /// One transaction, the write lock taken up front, so of two machines'
+    /// first `Hello`s at once the second sees the first's fingerprint.
+    async fn check_machine(
+        &self,
+        agent_id: AgentId,
+        presented: Option<&MachineFingerprint>,
+        now: Timestamp,
+    ) -> Result<Option<MachineCheck>, StoreError> {
+        let _call = self.call().await;
+        let mut conn = self.pool.acquire().await.map_err(unavailable)?;
+        let mut tx = conn
+            .begin_with("BEGIN IMMEDIATE")
+            .await
+            .map_err(unavailable)?;
+        let id = row::agent_id_text(agent_id);
+        let found = sqlx::query(sql::AGENT_MACHINE)
+            .bind(id.as_str())
+            .fetch_optional(&mut *tx)
+            .await
+            .map_err(unavailable)?;
+        let Some(found) = found else {
+            tx.rollback().await.map_err(unavailable)?;
+            return Ok(None);
+        };
+        let held = row::held_machine(&found)?;
+        let check = MachineCheck::of(held.as_ref(), presented);
+        let write = match (check, presented) {
+            (MachineCheck::Claimed, Some(presented)) => {
+                Some(sqlx::query(sql::CLAIM_MACHINE).bind(presented.to_hex()))
+            }
+            (MachineCheck::Second, _) => Some(
+                sqlx::query(sql::REFUSE_SECOND_MACHINE)
+                    .bind(to_the_millisecond(now).as_millisecond()),
+            ),
+            _ => None,
+        };
+        if let Some(write) = write {
+            write
+                .bind(id.as_str())
+                .execute(&mut *tx)
+                .await
+                .map_err(unavailable)?;
+        }
+        tx.commit().await.map_err(unavailable)?;
+        Ok(Some(check))
+    }
+
+    async fn second_machines(&self) -> Result<Vec<SecondMachine>, StoreError> {
+        let _call = self.call().await;
+        let mut conn = self.pool.acquire().await.map_err(unavailable)?;
+        let rows = sqlx::query(sql::SECOND_MACHINES)
+            .fetch_all(&mut *conn)
+            .await
+            .map_err(unavailable)?;
+        rows.iter().map(row::second_machine).collect()
+    }
+
+    async fn forget_machine(&self, agent_id: AgentId) -> Result<bool, StoreError> {
+        let _call = self.call().await;
+        let mut conn = self.pool.acquire().await.map_err(unavailable)?;
+        let done = sqlx::query(sql::FORGET_MACHINE)
+            .bind(row::agent_id_text(agent_id))
+            .execute(&mut *conn)
+            .await
+            .map_err(unavailable)?;
+        Ok(done.rows_affected() > 0)
     }
 
     /// One transaction, the write lock taken up front, so the record the

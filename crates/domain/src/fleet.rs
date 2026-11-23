@@ -41,7 +41,9 @@ pub use keys::{
     SignatureRefused, SigningSeed,
 };
 pub use machine::{
-    IdentifierMatch, InvalidMachineIdentifier, MAX_MACHINE_IDENTIFIER_BYTES, MachineIdentifier,
+    IdentifierMatch, InvalidMachineFingerprint, InvalidMachineIdentifier,
+    MAX_MACHINE_IDENTIFIER_BYTES, MachineCheck, MachineFingerprint, MachineIdentifier,
+    SecondMachine,
 };
 pub use outbox::{
     Ack, AckRefused, AgentReport, Happening, Ingest, MAX_EPOCHS_HELD, MAX_OUTBOX_REPORTS,

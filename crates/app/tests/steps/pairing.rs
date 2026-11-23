@@ -18,8 +18,8 @@ use app::pairing::{
 use app::ports::{AgentRegistry, Clock, Identity, LinkError, Signing};
 use cucumber::{given, then, when};
 use domain::fleet::{
-    AgentStatus, Approval, Fingerprint, Hostname, HubAddress, ListedAgent, MachineZone,
-    PairingToken, RouteRefused, SeedFile, SigningSeed, TokenId, TokenTls,
+    AgentStatus, Approval, Fingerprint, Hostname, HubAddress, ListedAgent, MachineIdentifier,
+    MachineZone, PairingToken, RouteRefused, SeedFile, SigningSeed, TokenId, TokenTls,
 };
 use domain::{AgentId, Offset, SignedDuration, TimeZone, TimeZoneDatabase, Timestamp, Uuid};
 
@@ -27,6 +27,8 @@ use super::Agent;
 
 #[path = "pairing_dialog.rs"]
 mod dialog;
+#[path = "second_machine.rs"]
+mod second_machine;
 #[path = "sync_replay.rs"]
 mod sync_replay;
 
@@ -113,8 +115,8 @@ impl Hub {
     }
 }
 
-/// One machine: its key files, its agent ID, its hostname and the machine
-/// zone it reports.
+/// One machine: its key files, its agent ID, its hostname, the machine
+/// zone it reports and the identifier of the computer it runs on.
 #[derive(Clone)]
 struct Machine {
     identity: Arc<InMemoryIdentity>,
@@ -122,6 +124,7 @@ struct Machine {
     hostname: Hostname,
     zone: Option<MachineZone>,
     seed: u64,
+    identifier: Option<MachineIdentifier>,
 }
 
 impl Machine {
@@ -132,6 +135,7 @@ impl Machine {
             hostname: Hostname::parse(hostname).unwrap(),
             zone: None,
             seed: n * 1_000_000,
+            identifier: MachineIdentifier::parse(&format!("{n:032x}")).ok(),
         }
     }
 
@@ -154,6 +158,7 @@ impl Machine {
             )),
             connector,
             "0.5.0-agent".to_owned(),
+            self.identifier.clone(),
         )
     }
 
@@ -913,6 +918,14 @@ async fn connects(agent: &mut Agent, twice: String) {
     for _ in 0..times {
         world.connect(&machine, None).await;
     }
+}
+
+#[given("the agent connected to its hub")]
+async fn connected_once(agent: &mut Agent) {
+    let world = &mut agent.pairing;
+    let machine = world.first().clone();
+    world.connect(&machine, None).await;
+    world.connected();
 }
 
 #[when("another hub that has another key answers its connection")]

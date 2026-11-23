@@ -168,8 +168,10 @@ pub struct LookalikeDto {
 /// digits, which an approval names back) and that key's fingerprint in full;
 /// whether it waits or is approved, since when (RFC 3339) and how many
 /// seconds ago that was by the hub's clock, so a browser whose clock is
-/// wrong still shows it right; and, while it waits, the agent its hostname
-/// looks like.
+/// wrong still shows it right; while it waits, the agent its hostname looks
+/// like; and when the hub last refused a second computer that connected
+/// under its agent ID (RFC 3339), until a person has the hub forget the
+/// computer it took.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "kebab-case", deny_unknown_fields)]
 pub struct HubAgentDto {
@@ -182,6 +184,8 @@ pub struct HubAgentDto {
     pub seconds_ago: u64,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub looks_like: Option<LookalikeDto>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub second_machine_at: Option<String>,
 }
 
 /// The agents the hub has registered, oldest first.

@@ -676,6 +676,7 @@ async fn approved_agent(
         )),
         connector,
         "0.0.0-agent".to_owned(),
+        None,
     );
     (connecting, agent, hostname)
 }

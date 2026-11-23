@@ -88,6 +88,36 @@ pub(super) fn reports_dropped(agent: AgentId, dropped: u64) -> String {
     )
 }
 
+/// The line for the first time the hub refuses a second computer under
+/// `agent`'s ID since it started, as a copied data folder makes (decision
+/// 150). It names the machine and the way back: the computer that should
+/// keep the ID is taken once a person forgets the one the hub took. The
+/// fingerprints stay out: they tell a person nothing.
+pub(super) fn second_machine(agent: &AgentRecord) -> String {
+    let hostname = agent.hostname.as_str().escape_debug();
+    format!(
+        "refused a second computer connecting as {} ({}): the hub took another computer under \
+         this machine ID first, as when a data folder is copied, and takes no reports from \
+         this one; the next refusals aren't logged. If the computer refused is a copy, take a \
+         new machine ID on its start page and pair it again. If it is the one that should keep \
+         the ID, stop Ladderback on the other one or give that one a new ID, then stop the \
+         hub's daemon and run `ladderback pairing-token --forget-computer {hostname}` on the hub",
+        machine(agent),
+        identity(agent),
+    )
+}
+
+/// The line for a person forgetting the computer the hub took under
+/// `agent`'s ID: the next to connect is taken in its place.
+pub(super) fn forgot_machine(agent: &AgentRecord) -> String {
+    format!(
+        "{} ({}): the hub forgot the computer it took under this machine ID, and takes the \
+         next one to connect",
+        machine(agent),
+        identity(agent),
+    )
+}
+
 fn machine(agent: &AgentRecord) -> String {
     format!("machine \"{}\"", agent.hostname.as_str().escape_debug())
 }
