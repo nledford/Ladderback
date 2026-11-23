@@ -13,6 +13,7 @@ mod hostname;
 mod key_files;
 mod keys;
 mod machine;
+mod outbox;
 mod pin;
 mod registry;
 mod route;
@@ -40,6 +41,11 @@ pub use keys::{
 };
 pub use machine::{
     IdentifierMatch, InvalidMachineIdentifier, MAX_MACHINE_IDENTIFIER_BYTES, MachineIdentifier,
+};
+pub use outbox::{
+    Ack, AckRefused, AgentReport, Happening, Ingest, MAX_EPOCHS_HELD, MAX_OUTBOX_REPORTS,
+    MAX_REPORTS_HELD, OutboxAdmission, OutboxEpoch, ReportSeq, SEND_WINDOW, ack_kind, admit,
+    check_ack, fresh_on_hub_time, ingest, report_kind,
 };
 pub use pin::{HubPin, MAX_PIN_BYTES, PinRefused};
 pub use registry::{

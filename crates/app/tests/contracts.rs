@@ -1384,3 +1384,53 @@ impl contract::this_machine::ThisMachineHarness for FakeMachines {
 fn the_fake_machine_meets_the_this_machine_contract() {
     contract::this_machine::run(&FakeMachines);
 }
+
+/// The in-memory outbox: a new one for each `empty`, and the same one again
+/// for `reopened`, as the real store's file outlives its handle.
+#[derive(Default)]
+struct InMemoryOutboxes(Mutex<Option<Arc<app::fakes::InMemoryOutbox>>>);
+
+#[async_trait]
+impl contract::outbox::OutboxHarness for InMemoryOutboxes {
+    async fn empty(&self) -> Arc<dyn app::ports::Outbox> {
+        let epoch = domain::fleet::OutboxEpoch::from_uuid(domain::Uuid::from_u128(0x0e));
+        let outbox = Arc::new(app::fakes::InMemoryOutbox::new(epoch));
+        *self.0.lock().unwrap() = Some(Arc::clone(&outbox));
+        outbox
+    }
+
+    async fn reopened(&self) -> Arc<dyn app::ports::Outbox> {
+        self.0
+            .lock()
+            .unwrap()
+            .clone()
+            .expect("an outbox was opened")
+    }
+}
+
+#[tokio::test]
+async fn in_memory_outbox_meets_the_outbox_contract() {
+    contract::outbox::run(&InMemoryOutboxes::default()).await;
+}
+
+/// The hub's reports in memory, kept for `reopened` as with the outbox.
+#[derive(Default)]
+struct InMemoryInboxes(Mutex<Option<Arc<app::fakes::InMemoryReportInbox>>>);
+
+#[async_trait]
+impl contract::outbox::ReportInboxHarness for InMemoryInboxes {
+    async fn empty(&self) -> Arc<dyn app::ports::ReportInbox> {
+        let inbox = Arc::new(app::fakes::InMemoryReportInbox::default());
+        *self.0.lock().unwrap() = Some(Arc::clone(&inbox));
+        inbox
+    }
+
+    async fn reopened(&self) -> Arc<dyn app::ports::ReportInbox> {
+        self.0.lock().unwrap().clone().expect("an inbox was opened")
+    }
+}
+
+#[tokio::test]
+async fn in_memory_report_inbox_meets_the_report_inbox_contract() {
+    contract::outbox::run_inbox(&InMemoryInboxes::default()).await;
+}

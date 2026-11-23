@@ -5,16 +5,20 @@
 //! hold what it must refuses the whole frame.
 
 use api::sync::{
-    AgentApproval, AgentFrame, HelloPayload, HolderFrame, HubFrame, MAX_FRAME_BYTES, WelcomePayload,
+    AckPayload, AgentApproval, AgentFrame, HelloPayload, HolderFrame, HubFrame, MAX_FRAME_BYTES,
+    ReportPayload, WelcomePayload,
 };
 use base64::Engine as _;
 use base64::engine::general_purpose::URL_SAFE_NO_PAD;
 use domain::fleet::{
-    AgentEnvelope, Approval, BindingKind, Challenge, Connect, EpochSeconds, Handshakes, Hello,
-    Holder, Hostname, HubEnvelope, KEY_BYTES, MachineZone, Nonce, Pair, PairAnswer, Paired, Proof,
-    Protocols, PublicKey, Refused, SIGNATURE_BYTES, Signature, Welcome, WireName,
+    Ack, AgentEnvelope, AgentReport, Approval, BindingKind, Challenge, Connect, EpochSeconds,
+    Handshakes, Happening, Hello, Holder, Hostname, HubEnvelope, KEY_BYTES, MachineZone, Nonce,
+    OutboxEpoch, Pair, PairAnswer, Paired, Proof, Protocols, PublicKey, Refused, ReportSeq,
+    SIGNATURE_BYTES, Signature, Welcome, WireName,
 };
-use domain::{AgentId, Uuid};
+use domain::{AgentId, OperationId, Uuid};
+
+use crate::ports::OutboxEntry;
 
 /// What an agent's frame holds, read.
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -168,6 +172,74 @@ pub fn read_welcome(bytes: &[u8]) -> Result<Welcome, WireRefused> {
         signed_at: EpochSeconds::from_seconds(payload.signed_at),
         approval: approval_of(payload.status),
     })
+}
+
+/// The bytes of a report's payload, which the agent signs: the epoch and
+/// the operation as their UUIDs' text, what happened as `started`,
+/// `succeeded` or `failed` with the code's wire name.
+pub fn report_payload(entry: &OutboxEntry) -> Vec<u8> {
+    let (event, code) = match &entry.report.happening {
+        Happening::Started => ("started", None),
+        Happening::Succeeded => ("succeeded", None),
+        Happening::Failed { code } => ("failed", Some(code.as_str().to_owned())),
+    };
+    ReportPayload {
+        epoch: entry.epoch.as_uuid().to_string(),
+        seq: entry.seq.get(),
+        op_id: entry.report.op_id.as_uuid().to_string(),
+        event: event.to_owned(),
+        at: entry.report.at.seconds(),
+        code,
+    }
+    .to_bytes()
+}
+
+/// The report a payload's bytes hold: a place of 0 or past `i64::MAX`,
+/// which the hub's store can't hold, an event this build doesn't know, a
+/// failure without its code or a start or success with one refuses it.
+pub fn read_report(bytes: &[u8]) -> Result<OutboxEntry, WireRefused> {
+    let payload = ReportPayload::from_bytes(bytes).map_err(|_| WireRefused)?;
+    let code = payload.code.as_deref().map(WireName::parse);
+    let happening = match (payload.event.as_str(), code) {
+        ("started", None) => Happening::Started,
+        ("succeeded", None) => Happening::Succeeded,
+        ("failed", Some(Ok(code))) => Happening::Failed { code },
+        _ => return Err(WireRefused),
+    };
+    Ok(OutboxEntry {
+        epoch: OutboxEpoch::from_uuid(uuid(&payload.epoch)?),
+        seq: ReportSeq::new(payload.seq)
+            .filter(|seq| i64::try_from(seq.get()).is_ok())
+            .ok_or(WireRefused)?,
+        report: AgentReport {
+            op_id: OperationId::from_uuid(uuid(&payload.op_id)?),
+            happening,
+            at: EpochSeconds::from_seconds(payload.at),
+        },
+    })
+}
+
+/// The bytes of `ack`'s payload, which the hub signs.
+pub fn ack_payload(ack: Ack) -> Vec<u8> {
+    AckPayload {
+        epoch: ack.epoch.as_uuid().to_string(),
+        seq: ack.seq.get(),
+    }
+    .to_bytes()
+}
+
+/// The acknowledgement a payload's bytes hold.
+pub fn read_ack(bytes: &[u8]) -> Result<Ack, WireRefused> {
+    let payload = AckPayload::from_bytes(bytes).map_err(|_| WireRefused)?;
+    Ok(Ack {
+        epoch: OutboxEpoch::from_uuid(uuid(&payload.epoch)?),
+        seq: ReportSeq::new(payload.seq).ok_or(WireRefused)?,
+    })
+}
+
+/// The UUID `text` holds, in its hyphenated form only.
+fn uuid(text: &str) -> Result<Uuid, WireRefused> {
+    Uuid::try_parse(text).map_err(|_| WireRefused)
 }
 
 /// How `Welcome` and `Paired` say an agent's approval on the wire.

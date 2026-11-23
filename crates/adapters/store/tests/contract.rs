@@ -212,3 +212,49 @@ async fn sqlite_store_meets_the_agent_registry_contract() {
     )
     .await;
 }
+
+#[cfg(feature = "hub")]
+#[async_trait]
+impl contract::outbox::OutboxHarness for SqliteFiles {
+    async fn empty(&self) -> Arc<dyn app::ports::Outbox> {
+        Arc::new(self.new_store().await)
+    }
+
+    async fn reopened(&self) -> Arc<dyn app::ports::Outbox> {
+        Arc::new(self.last_store().await)
+    }
+}
+
+#[cfg(feature = "hub")]
+#[tokio::test]
+async fn sqlite_store_meets_the_outbox_contract() {
+    within(
+        120,
+        "the outbox contract suite",
+        contract::outbox::run(&SqliteFiles::default()),
+    )
+    .await;
+}
+
+#[cfg(feature = "hub")]
+#[async_trait]
+impl contract::outbox::ReportInboxHarness for SqliteFiles {
+    async fn empty(&self) -> Arc<dyn app::ports::ReportInbox> {
+        Arc::new(self.new_store().await)
+    }
+
+    async fn reopened(&self) -> Arc<dyn app::ports::ReportInbox> {
+        Arc::new(self.last_store().await)
+    }
+}
+
+#[cfg(feature = "hub")]
+#[tokio::test]
+async fn sqlite_store_meets_the_report_inbox_contract() {
+    within(
+        120,
+        "the report inbox contract suite",
+        contract::outbox::run_inbox(&SqliteFiles::default()),
+    )
+    .await;
+}

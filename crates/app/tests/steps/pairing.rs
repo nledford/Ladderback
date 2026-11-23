@@ -8,8 +8,8 @@ use std::sync::atomic::{AtomicBool, Ordering};
 
 use api::sync::AgentFrame;
 use app::fakes::{
-    FakeClock, FakeSigning, InMemoryAgentRegistry, InMemoryIdentity, LoopbackHubConnector,
-    SeededRandom,
+    FakeClock, FakeSigning, InMemoryAgentRegistry, InMemoryIdentity, InMemoryReportInbox,
+    LoopbackHubConnector, SeededRandom,
 };
 use app::pairing::{
     AgentPairing, AgentPairingError, ChallengeRefused, ConnectFailure, ConnectToHub, Connected,
@@ -27,6 +27,8 @@ use super::Agent;
 
 #[path = "pairing_dialog.rs"]
 mod dialog;
+#[path = "sync_replay.rs"]
+mod sync_replay;
 
 const EXPORTER: [u8; 32] = [0xee; 32];
 
@@ -36,6 +38,8 @@ struct Hub {
     clock: Arc<FakeClock>,
     pairing: Arc<HubPairing>,
     keys: HubKeys,
+    /// The reports it took of its agents.
+    inbox: Arc<InMemoryReportInbox>,
 }
 
 impl Hub {
@@ -47,6 +51,7 @@ impl Hub {
     /// given.
     async fn with_access(seed: u64, access: Option<Arc<app::access::Access>>) -> Self {
         let registry = Arc::new(InMemoryAgentRegistry::new());
+        let inbox = Arc::new(InMemoryReportInbox::default());
         let clock = Arc::new(FakeClock::new(
             Timestamp::from_second(1_800_000_000).unwrap(),
         ));
@@ -57,7 +62,8 @@ impl Hub {
             Arc::new(SeededRandom::new(seed)),
             clock.clone(),
             "0.5.0-hub".to_owned(),
-        );
+        )
+        .with_inbox(inbox.clone());
         let pairing = Arc::new(match access {
             Some(access) => pairing.with_access(access),
             None => pairing,
@@ -68,6 +74,7 @@ impl Hub {
             clock,
             pairing,
             keys,
+            inbox,
         }
     }
 
@@ -83,14 +90,17 @@ impl Hub {
     /// This hub started again on its registry with its key files gone,
     /// which makes new keys while no agent is registered.
     async fn without_key_files(&self) -> Self {
-        let pairing = Arc::new(HubPairing::new(
-            self.registry.clone(),
-            Arc::new(InMemoryIdentity::default()),
-            Arc::new(FakeSigning),
-            Arc::new(SeededRandom::new(2)),
-            self.clock.clone(),
-            "0.5.0-hub".to_owned(),
-        ));
+        let pairing = Arc::new(
+            HubPairing::new(
+                self.registry.clone(),
+                Arc::new(InMemoryIdentity::default()),
+                Arc::new(FakeSigning),
+                Arc::new(SeededRandom::new(2)),
+                self.clock.clone(),
+                "0.5.0-hub".to_owned(),
+            )
+            .with_inbox(self.inbox.clone()),
+        );
         let keys = pairing.keys().await.expect("the hub's new keys");
         assert_ne!(keys.key(), self.keys.key());
         Self {
@@ -98,6 +108,7 @@ impl Hub {
             clock: self.clock.clone(),
             pairing,
             keys,
+            inbox: self.inbox.clone(),
         }
     }
 }
@@ -189,6 +200,8 @@ pub struct PairingWorld {
     >,
     /// The one host and port the hub answers at, once it answers at one.
     only_at: Option<(&'static str, u16)>,
+    /// The sync of the agents' reports (`fleet/sync_replay.feature`).
+    syncing: sync_replay::SyncWorld,
 }
 
 impl std::fmt::Debug for PairingWorld {

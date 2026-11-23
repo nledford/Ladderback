@@ -114,6 +114,11 @@ const PINNED: &[(i64, &str, &str)] = &[
         "operation restored to",
         "3d64f847e1ae6f9288d4f1fa7d85febfbb9a823b278acb0c71c416de6e351c6111bcbb2db6e0e1f8a7b13b52f019f2a7",
     ),
+    (
+        21,
+        "sync outbox",
+        "5ba648f4c11c5cd67e1b81a2a40094fc3aff22cafc8dc4564c559384a8253b936be759e6206f0269266e2c2158c65227",
+    ),
 ];
 
 /// The migration's file name, as `sqlx::migrate!` reads it: sqlx turns the

@@ -231,6 +231,7 @@ Decisions 1–6 recorded 2026-11-08. Decisions 7–12 recorded 2026-11-08 after 
 | [142](decisions/142-the-running-version-in-the-footer.md) | The running version stands in a footer at the foot of every page |
 | [143](decisions/143-a-hamburger-menu-holds-the-pages-links-below-41rem.md) | Below 41rem a hamburger menu holds the pages' links and Sign out |
 | [144](decisions/144-a-copied-data-folder-stops-maintaining.md) | What a machine does when its data folder was copied from another computer |
+| [145](decisions/145-the-agents-outbox-and-the-hubs-reports.md) | The agent's outbox and the hub's reports are bounded, and each says what it gives up |
 
 ## 17. Open questions
 

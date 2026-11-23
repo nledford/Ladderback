@@ -3,7 +3,7 @@
 //! Only a build with the `hub` feature has them.
 
 use std::io;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::process::ExitCode;
 use std::sync::Arc;
 
@@ -13,13 +13,17 @@ use app::pairing::{
     AgentPairing, AgentPairingError, ChallengeRefused, ConnectFailure, ConnectToHub, Connected,
     HubPairing, HubPairingError, HubStart, PairFailure, PairWithHub,
 };
-use app::ports::{AgentRegistry as _, Identity as _, IdentityError, LinkError, Signing as _};
+use app::ports::{
+    AgentRegistry as _, EventBus, Identity as _, IdentityError, LinkError, Signing as _,
+};
+use app::sync::{RecordReports, SyncWithHub};
 use domain::fleet::{
     AgentStatus, Approval, ApprovalRefused, Fingerprint, Hostname, HubAddress, HubRoute, HubScheme,
     MachineZone, PairingToken, RouteRefused, RouteSession, TokenId, TokenTls, WelcomeRefused,
     is_loopback,
 };
 use domain::{SignedDuration, Timestamp};
+use futures::StreamExt as _;
 use l10n::{Localizer, MessageId, PosixEnv, msg};
 use platform::data_dir_lock::{DataDirLock, LockError};
 use platform::identity::FileIdentity;
@@ -61,16 +65,18 @@ pub(crate) enum TokenAsk {
     },
 }
 
-/// The hub's pairing over `store` and the key files in `data_dir`.
+/// The hub's pairing over `store` and the key files in `data_dir`, taking
+/// its approved agents' reports into `store` (§7.2).
 pub(crate) fn hub_pairing(data_dir: &Path, store: Arc<SqliteStore>) -> HubPairing {
     HubPairing::new(
-        store,
+        store.clone(),
         Arc::new(FileIdentity::in_data_dir(data_dir)),
         Arc::new(AwsLcSigning),
         Arc::new(OsRandom),
         Arc::new(SystemClock),
         crate::build_info::SHOWN.as_str().to_owned(),
     )
+    .with_inbox(store)
 }
 
 /// The hub's TLS key in `data_dir`, from which its built-in TLS serves a
@@ -851,6 +857,64 @@ fn connecting(identity: Arc<FileIdentity>) -> ConnectToHub {
     )
 }
 
+/// How often a daemon on a machine that hasn't paired looks for its pairing.
+const PAIRING_POLL: std::time::Duration = std::time::Duration::from_secs(30);
+
+/// This machine's reports to its hub (§7.2): once it paired, a recorder
+/// keeps each operation's start and end in the outbox in `store`, and a
+/// session replays them to the hub whenever it holds one the hub hasn't
+/// acknowledged. Neither touches the machine's operations, so a machine
+/// that can't reach its hub backs up on schedule all the same. A machine
+/// paired when this starts records from `early`, the events since its
+/// caller subscribed before starting the scheduler. One that hasn't paired
+/// drops them, looks for its pairing every [`PAIRING_POLL`], and keeps no
+/// report until then. Runs until aborted.
+pub(crate) async fn reporting(
+    data_dir: PathBuf,
+    events: Arc<dyn EventBus>,
+    early: futures::stream::BoxStream<'static, api::UiEvent>,
+    store: Arc<SqliteStore>,
+) {
+    let identity = Arc::new(FileIdentity::in_data_dir(&data_dir));
+    let mut early = Some(early);
+    let agent_id = loop {
+        if let Ok(Some(agent_id)) = platform::agent_id::load(&data_dir)
+            && matches!(identity.pin().await, Ok(Some(_)))
+        {
+            break agent_id;
+        }
+        early = None;
+        tokio::time::sleep(PAIRING_POLL).await;
+    };
+    let Ok(hostname) = Hostname::parse(&platform::hostname()) else {
+        log::warn!(
+            "this machine's name isn't one a hub takes, so its reports aren't sent to its hub"
+        );
+        return;
+    };
+    let recorder = RecordReports::new(store.clone());
+    let mut happened = match early {
+        Some(early) => early,
+        None => events.subscribe().await,
+    };
+    let recording = async {
+        while let Some(event) = happened.next().await {
+            if let Err(error) = recorder.record(&event).await {
+                log::warn!("a report for the hub couldn't be kept in the outbox: {error:?}");
+            }
+        }
+    };
+    let syncing = SyncWithHub::new(
+        connecting(identity),
+        store,
+        Arc::new(SystemClock),
+        agent_id,
+        hostname,
+        machine_zone(),
+    );
+    tokio::join!(recording, syncing.run());
+}
+
 /// Says where the hub holds this machine.
 fn say_connected(localizer: &Localizer, connected: &Connected) -> io::Result<()> {
     match connected.approval {
@@ -1134,6 +1198,60 @@ fn read_pasted() -> io::Result<String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// A paired machine's reporting keeps the start of an operation the
+    /// scheduler began before the reporting task first ran, on the events
+    /// it was subscribed to before the scheduler started (§7.2).
+    #[tokio::test]
+    async fn a_start_published_before_reporting_runs_is_kept_for_the_hub() {
+        use app::ports::Outbox as _;
+        use domain::fleet::{Fingerprint, HubPin, TokenTls};
+
+        const KEY: &str = "d75a980182b10ab7d54bfed3c964073a0ee172f3daa62325af021a68f707511a";
+        let data = tempfile::tempdir().unwrap();
+        platform::agent_id::load_or_create(data.path()).unwrap();
+        let key = domain::fleet::PublicKey::from_hex(KEY).unwrap();
+        FileIdentity::in_data_dir(data.path())
+            .write_pin(&HubPin::new(
+                key,
+                TokenTls::Pinned(Fingerprint::from_digest([0x5a; 32])),
+                key,
+                HubAddress::parse("https://127.0.0.1:1").unwrap(),
+            ))
+            .await
+            .unwrap();
+        let store = Arc::new(
+            SqliteStore::open(&data.path().join("store.db"))
+                .await
+                .unwrap(),
+        );
+        let events: Arc<dyn EventBus> = Arc::new(app::event_bus::BroadcastEventBus::new());
+        let early = events.subscribe().await;
+        let task = tokio::spawn(reporting(
+            data.path().to_owned(),
+            Arc::clone(&events),
+            early,
+            Arc::clone(&store),
+        ));
+        events
+            .publish(api::UiEvent::OperationStarted {
+                operation: "0190f3a0-0000-7000-8000-000000000001".to_owned(),
+                repository: None,
+                started_at: "2027-01-15T08:00:00Z".to_owned(),
+            })
+            .await;
+        let kept = tokio::time::timeout(std::time::Duration::from_secs(5), async {
+            loop {
+                if !store.unacknowledged(None, 1).await.unwrap().is_empty() {
+                    break;
+                }
+                tokio::time::sleep(std::time::Duration::from_millis(10)).await;
+            }
+        })
+        .await;
+        task.abort();
+        assert!(kept.is_ok(), "the start wasn't kept in the outbox");
+    }
 
     #[test]
     fn a_moment_shows_as_its_date_and_minute_in_utc() {

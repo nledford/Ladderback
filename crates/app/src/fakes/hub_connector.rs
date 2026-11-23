@@ -1,4 +1,5 @@
 use std::collections::VecDeque;
+use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex, PoisonError};
 
 use api::sync::{AgentFrame, HubFrame, MAX_FRAME_BYTES};
@@ -29,6 +30,11 @@ pub struct LoopbackHubConnector {
 struct Tap {
     routes: Mutex<Vec<HubRoute>>,
     sent: Mutex<Vec<String>>,
+    /// Whether nothing answers on any route for now, as a hub that is down.
+    down: AtomicBool,
+    /// How many of the hub's next acknowledgements are lost, each with its
+    /// connection.
+    losing_acks: AtomicUsize,
 }
 
 impl LoopbackHubConnector {
@@ -86,6 +92,19 @@ impl LoopbackHubConnector {
             .unwrap_or_else(PoisonError::into_inner)
             .clone()
     }
+
+    /// Nothing answers on any route while `down`, as a hub that is down or
+    /// out of reach, until it is set back.
+    pub fn set_down(&self, down: bool) {
+        self.tap.down.store(down, Ordering::SeqCst);
+    }
+
+    /// The hub's next `count` acknowledgements are lost, each with the
+    /// connection it was sent on, as when the link drops just after the hub
+    /// took a report.
+    pub fn lose_acks(&self, count: usize) {
+        self.tap.losing_acks.store(count, Ordering::SeqCst);
+    }
 }
 
 #[async_trait]
@@ -96,10 +115,11 @@ impl HubConnector for LoopbackHubConnector {
             .lock()
             .unwrap_or_else(PoisonError::into_inner)
             .push(route.clone());
-        let answers = self
-            .only
-            .as_ref()
-            .is_none_or(|(host, port)| *host == route.host && *port == route.port);
+        let answers = !self.tap.down.load(Ordering::SeqCst)
+            && self
+                .only
+                .as_ref()
+                .is_none_or(|(host, port)| *host == route.host && *port == route.port);
         let Some(hub) = self.hub.clone().filter(|_| answers) else {
             return Err(LinkError::Unreachable {
                 detail: "nothing answers on this route".to_owned(),
@@ -169,7 +189,21 @@ impl HubLink for LoopLink {
             }
         };
         match self.hub.step(session, &read).await {
-            HubStep::Reply(answer) => self.inbox.push_back(answer.to_text()),
+            HubStep::Reply(answer) => {
+                let lost = matches!(&answer, HubFrame::Signed { kind, .. } if kind == "Ack")
+                    && self
+                        .tap
+                        .losing_acks
+                        .try_update(Ordering::SeqCst, Ordering::SeqCst, |left| {
+                            left.checked_sub(1)
+                        })
+                        .is_ok();
+                if lost {
+                    self.close(None);
+                } else {
+                    self.inbox.push_back(answer.to_text());
+                }
+            }
             HubStep::Wait => {}
             HubStep::Last(answer) => {
                 self.inbox.push_back(answer.to_text());

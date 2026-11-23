@@ -123,6 +123,36 @@ fn a_refusal_names_its_error_code() {
     }
 }
 
+/// A report and its acknowledgement are the JSON the other side reads, and
+/// read back as written; a failure's code goes by its wire name (§7.2).
+#[test]
+fn reports_and_acks_read_back_as_written() {
+    let report = ReportPayload {
+        epoch: "e".to_owned(),
+        seq: 7,
+        op_id: "o".to_owned(),
+        event: "failed".to_owned(),
+        at: 1_800_000_000,
+        code: Some(code_name(ErrorCode::TokenUsed)),
+    };
+    let bytes = report.to_bytes();
+    assert_eq!(
+        String::from_utf8(bytes.clone()).unwrap(),
+        r#"{"epoch":"e","seq":7,"op_id":"o","event":"failed","at":1800000000,"code":"token-used"}"#
+    );
+    assert_eq!(ReportPayload::from_bytes(&bytes), Ok(report));
+    let ack = AckPayload {
+        epoch: "e".to_owned(),
+        seq: 7,
+    };
+    let bytes = ack.to_bytes();
+    assert_eq!(
+        String::from_utf8(bytes.clone()).unwrap(),
+        r#"{"epoch":"e","seq":7}"#
+    );
+    assert_eq!(AckPayload::from_bytes(&bytes), Ok(ack));
+}
+
 /// A `paired` frame from a hub that predates the hostname or the status has
 /// neither, and one from a later hub with a field this build doesn't know
 /// still reads (decision 120: optional fields stay within a protocol).
