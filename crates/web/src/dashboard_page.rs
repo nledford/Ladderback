@@ -1,21 +1,24 @@
 //! The hub's dashboard, the route `/dashboard` (technical design §4.3, §4.4;
-//! #569): each approved machine in a section of its own, named by its
+//! #569, #1440): each approved machine in a section of its own, named by its
 //! hostname, with when it last connected, a warning when the hub let go of
-//! its oldest reports, and a table of its latest operations. What it shows
-//! while paused, counts, says, reads again for and how its times read is
-//! `dashboard.rs`'s, decided on the host; this is the DOM glue, which the
-//! `@ui` scenarios of `features/ui/hub_dashboard.feature` run.
+//! its oldest reports, the shared progress bar of the operation it runs, a
+//! table of its latest operations and one of its plans, with a warning when
+//! it left some out. What it shows while paused, counts, says, reads again
+//! for and how its times and progress read is `dashboard.rs`'s, decided on
+//! the host; this is the DOM glue, which the `@ui` scenarios of
+//! `features/ui/hub_dashboard.feature` run.
 //!
 //! The machines are read when the page opens, again each time the events
 //! stream opens, the first time and after a reconnect, and when an event of
-//! the hub's says a machine was approved or reported an operation. A pause
-//! holds what the page shows, not the reads.
+//! the hub's says a machine was approved, reported an operation, its plans
+//! or its progress. A pause holds what the page shows, not the reads.
 
 use std::sync::Arc;
 use std::time::Duration;
 
 use api::{
-    HUB_MACHINES_PATH, HubMachineDto, HubMachinesDto, IanaZone, MachineOperationDto, MsgArg,
+    HUB_MACHINES_PATH, HubMachineDto, HubMachinesDto, IanaZone, MachineOperationDto,
+    MachinePlanDto, MsgArg,
 };
 use l10n::{Localizer, msg};
 use leptos::prelude::*;
@@ -25,10 +28,11 @@ use crate::components::alert::rules::AlertTone;
 use crate::components::link::rules::{Destination, Matching};
 use crate::components::skeleton::rules::Awaited;
 use crate::components::{
-    Alert, Column, Link, Name, PauseUpdates, Sentences, State, StatusBadge, Table, first_load,
-    paced,
+    Alert, Column, Link, Name, PauseUpdates, Progress, Sentences, State, StatusBadge, Table,
+    first_load, paced,
 };
-use crate::dashboard::{Fleet, instant, outcome_badge, reads_again};
+use crate::dashboard::{Fleet, instant, outcome_badge, progress_reading, reads_again};
+use crate::operations_page::badge_of;
 use crate::pause;
 use crate::routes::{NotFound, PageHeading, text_with, time_view};
 use crate::settings::agents::hub_known;
@@ -199,8 +203,9 @@ fn Dashboard(localizer: Arc<Localizer>) -> impl IntoView {
 
 /// The section of `first`, a machine as the page first showed it, kept as
 /// `shown` has it since: its heading, when it last connected, the reports
-/// the hub let go of, and its latest operations. Its hostname is the one it
-/// was approved under, which a later read doesn't change.
+/// the hub let go of, the progress of the operation it runs, its latest
+/// operations and its plans. Its hostname is the one it was approved under,
+/// which a later read doesn't change.
 fn machine_section(
     localizer: &Arc<Localizer>,
     shown: Signal<Vec<HubMachineDto>>,
@@ -212,6 +217,7 @@ fn machine_section(
     } = first;
     let heading_id = format!("dashboard-machine-{agent_id}");
     let labelled_by = heading_id.clone();
+    let then_focus = heading_id.clone();
     let machine = Signal::derive(move || {
         shown.with(|machines| {
             machines
@@ -270,20 +276,50 @@ fn machine_section(
                 .unwrap_or_default()
         })
     });
-    let (row_header, columns) = operation_columns(localizer, viewer, zone);
+    let (row_header, columns) = operation_columns(localizer, viewer.clone(), zone);
     let t = |id| text(localizer, id);
     let sentences = Sentences {
         loading: t(msg::UI_DASHBOARD_LOADING),
         empty: t(msg::UI_DASHBOARD_NO_OPERATIONS),
         unreachable: t(msg::UI_DASHBOARD_UNREACHABLE),
     };
+    let progress = {
+        let localizer = Arc::clone(localizer);
+        let label = text_with(
+            &localizer,
+            msg::UI_DASHBOARD_PROGRESS,
+            &[("hostname", MsgArg::Text(hostname.clone()))],
+        );
+        let viewer = viewer.clone();
+        let reading = Memo::new(move |_| {
+            machine.with(|machine| machine.as_ref()?.progress.as_ref().map(progress_reading))
+        });
+        let running = Memo::new(move |_| reading.with(Option::is_some));
+        // Progress is never announced (decision 83): the bar tells its value
+        // when the reader comes to it.
+        move || {
+            running.get().then(|| {
+                view! {
+                    <Progress
+                        localizer=Arc::clone(&localizer)
+                        label=label.clone()
+                        then_focus=then_focus.clone()
+                        reading=Signal::derive(move || reading.get().unwrap_or_default())
+                        zone=viewer.clone()
+                    />
+                }
+            })
+        }
+    };
+    let plans_section = plans_view(localizer, &hostname, machine, viewer, zone);
     view! {
         <section aria-labelledby=labelled_by>
-            <h2 id=heading_id>
+            <h2 id=heading_id tabindex="-1">
                 <bdi>{hostname}</bdi>
             </h2>
             <p>{last_connected}</p>
             {dropped}
+            {progress}
             <Table
                 name=Name::Caption(caption)
                 row_header=row_header
@@ -293,7 +329,75 @@ fn machine_section(
                 state=State::Ready
                 sentences=sentences
             />
+            {plans_section}
         </section>
+    }
+}
+
+/// A machine's plans as it last reported them: a warning when it left some
+/// out, then their table, which says none was reported before the first.
+fn plans_view(
+    localizer: &Arc<Localizer>,
+    hostname: &str,
+    machine: Signal<Option<HubMachineDto>>,
+    viewer: Option<IanaZone>,
+    zone: Signal<Option<String>>,
+) -> impl IntoView + use<> {
+    let left_out = {
+        let localizer = Arc::clone(localizer);
+        move || {
+            let count = machine.with(|machine| {
+                machine
+                    .as_ref()
+                    .and_then(|machine| machine.plans.as_ref())
+                    .map_or(0, |plans| plans.left_out)
+            });
+            (count > 0).then(|| {
+                let words = text_with(
+                    &localizer,
+                    msg::UI_DASHBOARD_PLANS_LEFT_OUT,
+                    &[("count", MsgArg::Count(count))],
+                );
+                view! {
+                    <Alert localizer=Arc::clone(&localizer) tone=AlertTone::Warning>
+                        {words}
+                    </Alert>
+                }
+            })
+        }
+    };
+    let caption = text_with(
+        localizer,
+        msg::UI_DASHBOARD_PLANS,
+        &[("hostname", MsgArg::Text(hostname.to_owned()))],
+    );
+    let plans = Signal::derive(move || {
+        machine.with(|machine| {
+            machine
+                .as_ref()
+                .and_then(|machine| machine.plans.as_ref())
+                .map(|plans| plans.plans.clone())
+                .unwrap_or_default()
+        })
+    });
+    let (row_header, columns) = plan_columns(localizer, viewer, zone);
+    let t = |id| text(localizer, id);
+    let sentences = Sentences {
+        loading: t(msg::UI_DASHBOARD_LOADING),
+        empty: t(msg::UI_DASHBOARD_NO_PLANS),
+        unreachable: t(msg::UI_DASHBOARD_UNREACHABLE),
+    };
+    view! {
+        {left_out}
+        <Table
+            name=Name::Caption(caption)
+            row_header=row_header
+            columns=columns
+            rows=plans
+            key=|row: &MachinePlanDto| row.plan.clone()
+            state=State::Ready
+            sentences=sentences
+        />
     }
 }
 
@@ -377,4 +481,75 @@ fn operation_columns(
         },
     );
     (started, vec![ended, outcome, code])
+}
+
+/// The columns of a machine's plans: each plan, its row's header, how and
+/// when it last ran, and when it runs next, each by the machine's clock.
+fn plan_columns(
+    localizer: &Arc<Localizer>,
+    viewer: Option<IanaZone>,
+    zone: Signal<Option<String>>,
+) -> (Column<MachinePlanDto>, Vec<Column<MachinePlanDto>>) {
+    let plan = Column::new(
+        "plan",
+        text(localizer, msg::UI_DASHBOARD_PLAN),
+        Rem::tenths(160),
+        |row: Signal<MachinePlanDto>| {
+            view! { <bdi>{move || row.with(|row| row.plan.clone())}</bdi> }.into_any()
+        },
+    );
+    let last_run = {
+        let localizer = Arc::clone(localizer);
+        let viewer = viewer.clone();
+        Column::new(
+            "last-run",
+            text(&localizer, msg::UI_DASHBOARD_LAST_RUN),
+            Rem::tenths(240),
+            move |row: Signal<MachinePlanDto>| {
+                let localizer = Arc::clone(&localizer);
+                let viewer = viewer.clone();
+                (move || match row.with(|row| row.last_run.clone()) {
+                    Some(run) => {
+                        let shown = shown_instant(
+                            &localizer,
+                            &run.at,
+                            viewer.as_ref(),
+                            zone.get().as_deref(),
+                        );
+                        let (state, label) = badge_of(&localizer, &run.status);
+                        view! {
+                            <StatusBadge state=state label=label />
+                            " "
+                            {time_view(shown, Some(run.at))}
+                        }
+                        .into_any()
+                    }
+                    None => text(&localizer, msg::UI_DASHBOARD_NEVER_RUN).into_any(),
+                })
+                .into_any()
+            },
+        )
+    };
+    let next_run = {
+        let localizer = Arc::clone(localizer);
+        Column::new(
+            "next-run",
+            text(&localizer, msg::UI_DASHBOARD_NEXT_RUN),
+            Rem::tenths(160),
+            move |row: Signal<MachinePlanDto>| {
+                let localizer = Arc::clone(&localizer);
+                let viewer = viewer.clone();
+                (move || match row.with(|row| row.next_run.clone()) {
+                    Some(raw) => {
+                        let shown =
+                            shown_instant(&localizer, &raw, viewer.as_ref(), zone.get().as_deref());
+                        time_view(shown, Some(raw))
+                    }
+                    None => text(&localizer, msg::UI_DASHBOARD_NOT_PLANNED).into_any(),
+                })
+                .into_any()
+            },
+        )
+    };
+    (plan, vec![last_run, next_run])
 }

@@ -16,6 +16,7 @@ use std::sync::Arc;
 use api::ErrorCode;
 use app::pairing::{
     ApprovalAsk, HubPairing, HubPairingError, Machine, MadeToken, TokenAsk, TokenAskRefused,
+    progress_dto, time_of,
 };
 use axum::Router;
 use axum::extract::{ConnectInfo, Path, Request, State};
@@ -23,8 +24,8 @@ use axum::http::{HeaderMap, StatusCode};
 use axum::response::{IntoResponse, Response};
 use domain::access::step_up::StepUpConfirmation;
 use domain::fleet::{
-    AgentRecord, AgentStatus, ApprovalRefused, EpochSeconds, Fingerprint, HubAddress, HubRoute,
-    HubScheme, ListedAgent, PublicKey, ReportedOutcome, RouteRefused, TokenId, TokenTls,
+    AgentRecord, AgentStatus, ApprovalRefused, Fingerprint, HubAddress, HubRoute, HubScheme,
+    ListedAgent, PlansReport, PublicKey, ReportedOutcome, RouteRefused, TokenId, TokenTls,
 };
 use domain::{AgentId, SignedDuration, Timestamp, Uuid};
 
@@ -249,16 +250,30 @@ fn machine_dto(machine: &Machine) -> api::HubMachineDto {
                 }
             })
             .collect(),
+        plans: machine.plans.as_ref().map(plans_dto),
+        progress: machine.progress.as_ref().map(progress_dto),
     }
 }
 
-/// A reported time as the API writes times; none past what a timestamp
-/// holds, which no machine's clock reaches.
-fn time_of(at: EpochSeconds) -> Option<String> {
-    let seconds = i64::try_from(at.seconds()).ok()?;
-    Timestamp::from_second(seconds)
-        .ok()
-        .map(|time| time.to_string())
+/// A machine's plans as the dashboard shows them.
+fn plans_dto(plans: &PlansReport) -> api::MachinePlansDto {
+    api::MachinePlansDto {
+        plans: plans
+            .plans()
+            .iter()
+            .map(|plan| api::MachinePlanDto {
+                plan: plan.plan.as_str().to_owned(),
+                last_run: plan.last.and_then(|last| {
+                    time_of(last.at).map(|at| api::MachinePlanRunDto {
+                        at,
+                        status: last.outcome.wire_name().to_owned(),
+                    })
+                }),
+                next_run: plan.next_run.and_then(time_of),
+            })
+            .collect(),
+        left_out: plans.left_out(),
+    }
 }
 
 /// The waiting agent the path names approved, under the key the

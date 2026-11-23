@@ -242,6 +242,13 @@ pub struct HubMachineDto {
     pub zone: Option<String>,
     pub reports_dropped: u64,
     pub operations: Vec<MachineOperationDto>,
+    /// Its plans as it last reported them; none before it reported any.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub plans: Option<MachinePlansDto>,
+    /// The latest progress of the operation it runs, while the hub's
+    /// reports say it runs.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub progress: Option<MachineProgressDto>,
 }
 
 /// The hub's approved machines, oldest first.
@@ -269,4 +276,53 @@ impl std::fmt::Debug for ApproveAgentDto {
             .field("key", &self.key)
             .finish_non_exhaustive()
     }
+}
+
+/// A machine's plans as it last reported them (§7.2): at most
+/// `domain::fleet::MAX_PLANS_REPORTED`, in its configuration's order, and
+/// how many more it has.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "kebab-case", deny_unknown_fields)]
+pub struct MachinePlansDto {
+    pub plans: Vec<MachinePlanDto>,
+    pub left_out: u64,
+}
+
+/// One of a machine's plans: its ID, its last run, and its next planned
+/// run by the machine's clock (RFC 3339), each none when it has none.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "kebab-case", deny_unknown_fields)]
+pub struct MachinePlanDto {
+    pub plan: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub last_run: Option<MachinePlanRunDto>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub next_run: Option<String>,
+}
+
+/// A plan's last run: when it last changed (RFC 3339) and its status, as
+/// the history page names it: `queued`, `running`, `succeeded`,
+/// `succeeded-with-warnings`, `failed` or `cancelled`.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "kebab-case", deny_unknown_fields)]
+pub struct MachinePlanRunDto {
+    pub at: String,
+    pub status: String,
+}
+
+/// The latest progress of a machine's running operation `operation`, as
+/// the local Operations page shows one (decision 83): its step, what it
+/// counts, how far it came of its total, and when the machine heard it
+/// (RFC 3339).
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "kebab-case", deny_unknown_fields)]
+pub struct MachineProgressDto {
+    pub operation: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub step: Option<crate::OperationStep>,
+    pub unit: crate::ProgressUnit,
+    pub current: u64,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub total: Option<u64>,
+    pub at: String,
 }

@@ -10,6 +10,8 @@ fn machine(hostname: &str, last_seen: &str) -> HubMachineDto {
         zone: None,
         reports_dropped: 0,
         operations: Vec::new(),
+        plans: None,
+        progress: None,
     }
 }
 
@@ -52,6 +54,55 @@ fn an_approval_and_a_report_read_the_machines_again() {
     ] {
         assert!(!reads_again(&other), "{other:?}");
     }
+}
+
+/// The hub taking a machine's plans or its running operation's progress
+/// reads the machines again, so both show as they come.
+#[test]
+fn new_plans_and_new_progress_read_the_machines_again() {
+    let agent = || "agent-demo-laptop".to_owned();
+    assert!(reads_again(&UiEvent::AgentPlans { agent: agent() }));
+    assert!(reads_again(&UiEvent::AgentProgress {
+        agent: agent(),
+        progress: progress(AT),
+    }));
+}
+
+fn progress(at: &str) -> MachineProgressDto {
+    MachineProgressDto {
+        operation: "op-1".to_owned(),
+        step: Some(api::OperationStep::BackingUp),
+        unit: api::ProgressUnit::Bytes,
+        current: 512,
+        total: Some(2048),
+        at: at.to_owned(),
+    }
+}
+
+/// A machine's progress draws as the Operations page's bar does, its last
+/// report and the start of its measure both when the hub heard it.
+#[test]
+fn a_machines_progress_reads_as_the_shared_bar_draws_it() {
+    let heard = Some(jiff::Timestamp::from_millisecond(AT_MS).unwrap());
+    assert_eq!(
+        progress_reading(&progress(AT)),
+        Progress {
+            step: Some(api::OperationStep::BackingUp),
+            unit: api::ProgressUnit::Bytes,
+            current: 512,
+            total: Some(2048),
+            reported_at: heard,
+            since: heard,
+        }
+    );
+}
+
+/// A time the page can't read draws the bar with no time, never a wrong one.
+#[test]
+fn a_progress_heard_at_an_unreadable_time_shows_no_time() {
+    let reading = progress_reading(&progress("yesterday"));
+    assert_eq!((reading.reported_at, reading.since), (None, None));
+    assert_eq!(reading.current, 512);
 }
 
 /// Each machine that came, went or reads otherwise is one change, however

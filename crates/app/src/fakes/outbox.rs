@@ -4,7 +4,7 @@ use std::sync::{Mutex, PoisonError};
 use async_trait::async_trait;
 use domain::fleet::{
     AgentReport, Ingest, MAX_EPOCHS_HELD, MAX_REPORTS_HELD, OutboxAdmission, OutboxEpoch,
-    ReportSeq, admit, ingest,
+    PlansReport, ReportSeq, ReportedProgress, admit, ingest,
 };
 use domain::{AgentId, Timestamp};
 
@@ -115,6 +115,10 @@ struct Agent {
     reports: Vec<OutboxEntry>,
     /// How many reports were let go of past the cap.
     dropped: u64,
+    /// The plans it reported last.
+    plans: Option<PlansReport>,
+    /// The progress it reported last.
+    progress: Option<ReportedProgress>,
 }
 
 #[async_trait]
@@ -194,5 +198,25 @@ impl ReportInbox for InMemoryReportInbox {
                 dropped: held.dropped,
             },
         ))
+    }
+
+    async fn keep_plans(&self, _agent: AgentId, _plans: &PlansReport) -> Result<(), StoreError> {
+        todo!()
+    }
+
+    async fn plans(&self, _agent: AgentId) -> Result<Option<PlansReport>, StoreError> {
+        Ok(None)
+    }
+
+    async fn keep_progress(
+        &self,
+        _agent: AgentId,
+        _progress: &ReportedProgress,
+    ) -> Result<(), StoreError> {
+        todo!()
+    }
+
+    async fn progress(&self, _agent: AgentId) -> Result<Option<ReportedProgress>, StoreError> {
+        Ok(None)
     }
 }

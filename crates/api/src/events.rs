@@ -111,6 +111,15 @@ pub enum UiEvent {
         operation: String,
         outcome: crate::MachineOutcomeDto,
     },
+    /// The hub took a snapshot of the machine `agent`'s plans (§7.2). A
+    /// page that shows the machine's plans reads them again on hearing it.
+    AgentPlans { agent: String },
+    /// The hub took the latest progress of the machine `agent`'s running
+    /// operation (§7.2), which a page that shows it shows as it comes.
+    AgentProgress {
+        agent: String,
+        progress: crate::MachineProgressDto,
+    },
     /// A proposal's status changed (decision 89, point 14): facts only,
     /// never its rationale, its changes or its proposer's label. A page
     /// that shows proposals reads them again on hearing it.

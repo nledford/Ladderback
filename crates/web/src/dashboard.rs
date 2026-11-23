@@ -8,10 +8,11 @@
 //! As on the Machines tab (`machines_list.rs`), the page goes on reading
 //! while it is paused and shows the copy; resuming drops it.
 
-use api::{HubMachineDto, IanaZone, MachineOutcomeDto, MsgArg, UiEvent};
+use api::{HubMachineDto, IanaZone, MachineOutcomeDto, MachineProgressDto, MsgArg, UiEvent};
 use l10n::{MessageId, msg};
 use leptos::prelude::*;
 
+use crate::backend::Progress;
 use crate::components::State;
 use crate::components::status_badge::rules::BadgeState;
 use crate::wording::Words;
@@ -108,12 +109,20 @@ impl Fleet {
 }
 
 /// Whether `event` asks the dashboard to read its machines again: a
-/// machine was approved, or the hub took one of a machine's reports.
+/// machine was approved, or the hub took one of a machine's reports, its
+/// plans or its running operation's progress.
 pub(crate) fn reads_again(event: &UiEvent) -> bool {
     matches!(
         event,
         UiEvent::AgentApproved { .. } | UiEvent::AgentReported { .. }
     )
+}
+
+/// What the shared progress bar draws of a machine's latest `progress`
+/// (decision 83): heard at its `at`, which starts its measure too, since
+/// the hub keeps only the latest; no time for an `at` that can't be read.
+pub(crate) fn progress_reading(_progress: &MachineProgressDto) -> Progress {
+    todo!()
 }
 
 /// How many machines read otherwise in `now` than in `held`: each that

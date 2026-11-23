@@ -56,7 +56,11 @@ pub async fn run_inbox(harness: &dyn ReportInboxHarness) {
     racing_deliveries_are_taken_once(harness).await;
     past_the_cap_the_oldest_give_way_and_are_counted(harness).await;
     the_latest_reports_are_read_with_the_count_let_go_of(harness).await;
+    live::the_latest_plans_are_kept_in_place_of_the_last(harness).await;
+    live::the_latest_progress_is_kept_in_place_of_the_last(harness).await;
 }
+
+mod live;
 
 /// The value of `result`, after a failed assertion if it is an error.
 fn ok<T, E: fmt::Debug>(result: Result<T, E>, what: &str) -> Option<T> {

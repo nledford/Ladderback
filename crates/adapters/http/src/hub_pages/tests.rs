@@ -776,6 +776,8 @@ async fn the_page_shows_each_approved_machine_with_its_latest_operations() {
                     code: None,
                 },
             ],
+            plans: None,
+            progress: None,
         }]
     );
 }

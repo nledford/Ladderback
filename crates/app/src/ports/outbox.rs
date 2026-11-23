@@ -1,5 +1,5 @@
 use async_trait::async_trait;
-use domain::fleet::{AgentReport, Ingest, OutboxEpoch, ReportSeq};
+use domain::fleet::{AgentReport, Ingest, OutboxEpoch, PlansReport, ReportSeq, ReportedProgress};
 use domain::{AgentId, Timestamp};
 
 use super::StoreError;
@@ -94,4 +94,21 @@ pub trait ReportInbox: Send + Sync {
     /// The last `limit` reports kept of `agent`, in the order it took them,
     /// and how many of its reports it let go of past the cap.
     async fn latest(&self, agent: AgentId, limit: usize) -> Result<LatestReports, StoreError>;
+
+    /// Keeps `plans` as `agent`'s plans, in place of any it kept before.
+    async fn keep_plans(&self, agent: AgentId, plans: &PlansReport) -> Result<(), StoreError>;
+
+    /// The plans last kept of `agent`; none before it reported any.
+    async fn plans(&self, agent: AgentId) -> Result<Option<PlansReport>, StoreError>;
+
+    /// Keeps `progress` as `agent`'s latest progress, in place of any it
+    /// kept before, of whichever operation.
+    async fn keep_progress(
+        &self,
+        agent: AgentId,
+        progress: &ReportedProgress,
+    ) -> Result<(), StoreError>;
+
+    /// The progress last kept of `agent`; none before it reported any.
+    async fn progress(&self, agent: AgentId) -> Result<Option<ReportedProgress>, StoreError>;
 }

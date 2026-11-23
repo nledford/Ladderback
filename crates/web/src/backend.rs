@@ -182,6 +182,8 @@ impl OperationsState {
             | UiEvent::AgentPending { .. }
             | UiEvent::AgentApproved { .. }
             | UiEvent::AgentReported { .. }
+            | UiEvent::AgentPlans { .. }
+            | UiEvent::AgentProgress { .. }
             | UiEvent::BackupRetrying { .. }
             | UiEvent::ProposalChanged { .. } => {}
         }

@@ -342,6 +342,36 @@ impl crate::ports::ReportInbox for FullInbox {
     ) -> Result<crate::ports::LatestReports, crate::ports::StoreError> {
         self.inner.latest(agent, limit).await
     }
+
+    async fn keep_plans(
+        &self,
+        agent: domain::AgentId,
+        plans: &domain::fleet::PlansReport,
+    ) -> Result<(), crate::ports::StoreError> {
+        self.inner.keep_plans(agent, plans).await
+    }
+
+    async fn plans(
+        &self,
+        agent: domain::AgentId,
+    ) -> Result<Option<domain::fleet::PlansReport>, crate::ports::StoreError> {
+        self.inner.plans(agent).await
+    }
+
+    async fn keep_progress(
+        &self,
+        agent: domain::AgentId,
+        progress: &domain::fleet::ReportedProgress,
+    ) -> Result<(), crate::ports::StoreError> {
+        self.inner.keep_progress(agent, progress).await
+    }
+
+    async fn progress(
+        &self,
+        agent: domain::AgentId,
+    ) -> Result<Option<domain::fleet::ReportedProgress>, crate::ports::StoreError> {
+        self.inner.progress(agent).await
+    }
 }
 
 /// The hub warns that it let go of an agent's reports in the step that let
