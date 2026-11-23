@@ -20,7 +20,10 @@ Feature: The hub gives each repository at most one maintenance owner
   own clock. A paired machine that holds no lease, because the hub hasn't
   granted one yet or can't be reached, maintains nothing and says why; its
   backups and previews run all the same. A machine that isn't paired
-  maintains what it asks for, as before.
+  maintains what it asks for, as before. A machine that lost its hub and
+  pairs with a new one forgets the leases and the highest grants the old
+  hub gave it, whose epochs the new hub's don't follow; one that pairs
+  again with the hub it pins keeps them.
 
   Background:
     Given a hub that approved the machines "laptop" and "nas"
