@@ -565,6 +565,65 @@ fn an_envelope_or_proof_out_of_shape_is_refused() {
     assert_eq!(hub_message(&frame), Err(WireRefused));
 }
 
+/// A `ReposSnapshot` of the most repositories it names, each asking for
+/// `local`, and the `RepoGrants` that grants them all at the largest numbers
+/// the wire takes, each fit in one frame, signed and encoded: a machine that
+/// uses that many repositories still gets its leases (§7.2, I1).
+#[test]
+fn a_full_report_of_repositories_and_its_grants_each_fit_a_frame() {
+    use domain::fleet::{AgentEnvelope, HubEnvelope, grants_kind, repos_kind};
+    use domain::maintenance::{Grant, LeaseEpoch, RepoGrants, RepositoryReport, RepositoryReports};
+    use domain::planning::Maintenance;
+    use domain::{RepositoryId, Timestamp};
+
+    let largest = i64::MAX as u64;
+    let repositories: Vec<RepositoryId> = (0..MAX_REPORTED_REPOSITORIES)
+        .map(|n| RepositoryId::parse(&format!("{n:064x}")).unwrap())
+        .collect();
+    let reports = RepositoryReports::new(repositories.iter().map(|repository| RepositoryReport {
+        repository: repository.clone(),
+        request: Maintenance::Local,
+        holds_other_agents_snapshots: true,
+    }));
+    let sent = agent_envelope_frame(&AgentEnvelope {
+        kind: repos_kind(),
+        seq: u64::MAX,
+        payload: repos_payload(&reports),
+        signature: signature(7),
+    })
+    .to_text();
+    assert!(
+        sent.len() <= MAX_FRAME_BYTES,
+        "a full ReposSnapshot takes {} bytes",
+        sent.len()
+    );
+    let grants = RepoGrants {
+        generation: largest,
+        signed_at: Timestamp::MAX,
+        grants: repositories
+            .iter()
+            .map(|repository| Grant {
+                repository: repository.clone(),
+                epoch: LeaseEpoch::new(largest).unwrap(),
+                expires_at: Timestamp::MAX,
+            })
+            .collect(),
+    };
+    let answered = hub_envelope_frame(&HubEnvelope {
+        kind: grants_kind(),
+        seq: u64::MAX,
+        expires_at: EpochSeconds::from_seconds(u64::MAX),
+        payload: grants_payload(&grants),
+        signature: signature(7),
+    })
+    .to_text();
+    assert!(
+        answered.len() <= MAX_FRAME_BYTES,
+        "full RepoGrants take {} bytes",
+        answered.len()
+    );
+}
+
 /// A signing time with any part of a second past it rounds up to the next
 /// second, and a whole second stays as it is, so a grant's lease counted
 /// from it never runs longer than the hub's.

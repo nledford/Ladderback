@@ -251,10 +251,11 @@ fn uuid(text: &str) -> Result<Uuid, WireRefused> {
     Uuid::try_parse(text).map_err(|_| WireRefused)
 }
 
-/// The most repositories one `ReposSnapshot` names, so its frame stays
-/// within [`MAX_FRAME_BYTES`]: an agent that uses more reports the first by
-/// ID, and is granted no lease on the others.
-pub const MAX_REPORTED_REPOSITORIES: usize = 24;
+/// The most repositories one `ReposSnapshot` names, so its frame, and the
+/// `RepoGrants` that answers it, stay within [`MAX_FRAME_BYTES`] once
+/// signed and encoded: an agent that uses more reports the first by ID, and
+/// is granted no lease on the others.
+pub const MAX_REPORTED_REPOSITORIES: usize = 21;
 
 /// The bytes of a `ReposSnapshot`'s payload, which the agent signs: at most
 /// the first [`MAX_REPORTED_REPOSITORIES`] of `reports`.
