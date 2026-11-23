@@ -1,0 +1,399 @@
+//! The `OwnershipRegistry` contract (technical design §7.3, I1): each
+//! repository's lease decided on the reports the hub keeps, one claim of
+//! any that race granted, an agent's report replacing its last and counting
+//! for its life only, a release ending the lease, and the epochs rising
+//! across releases and restarts of the hub.
+
+use std::fmt;
+use std::sync::Arc;
+
+use async_trait::async_trait;
+use domain::maintenance::{
+    ClaimOutcome, ClaimRefused, LEASE_GRACE, LEASE_LIFE, Lease, LeaseEpoch, REPORT_LIFE,
+    ReleaseRefused, RepositoryOwnership, RepositoryReport, RepositoryReports,
+};
+use domain::planning::Maintenance;
+use domain::{AgentId, RepositoryId, SignedDuration, Timestamp, Uuid};
+
+use crate::ports::{ClaimDecision, OwnershipRegistry};
+
+/// Opens a registry: a new, empty one, or the one before opened again on
+/// the same place.
+#[async_trait]
+pub trait OwnershipRegistryHarness: Send + Sync {
+    /// A registry that holds nothing yet.
+    async fn empty(&self) -> Arc<dyn OwnershipRegistry>;
+    /// The registry [`empty`](Self::empty) last gave, opened again, as
+    /// after a restart of the hub.
+    async fn reopened(&self) -> Arc<dyn OwnershipRegistry>;
+}
+
+pub async fn run(harness: &dyn OwnershipRegistryHarness) {
+    a_repository_nobody_reported_has_no_owner(harness).await;
+    the_first_claim_is_granted_and_kept(harness).await;
+    i1_the_second_claim_is_refused(harness).await;
+    i1_of_claims_that_race_one_is_granted(harness).await;
+    a_report_decides_every_repository_it_names(harness).await;
+    another_agents_report_stops_the_renewal(harness).await;
+    a_report_replaces_the_agents_last(harness).await;
+    a_renewal_is_kept(harness).await;
+    a_report_stops_counting_after_its_life(harness).await;
+    a_report_of_another_agents_snapshots_is_refused(harness).await;
+    a_release_ends_the_lease_and_epochs_keep_rising(harness).await;
+    leases_and_reports_outlive_the_hub(harness).await;
+}
+
+/// The value of `result`, after a failed assertion if it is an error.
+fn ok<T, E: fmt::Debug>(result: Result<T, E>, what: &str) -> Option<T> {
+    let error = result.as_ref().err();
+    assert!(error.is_none(), "{what}: {error:?}");
+    result.ok()
+}
+
+fn agent(n: u128) -> AgentId {
+    AgentId::from_uuid(Uuid::from_u128(n))
+}
+
+fn repository(digit: char) -> Option<RepositoryId> {
+    ok(
+        RepositoryId::parse(&digit.to_string().repeat(64)),
+        "a repository ID",
+    )
+}
+
+/// A whole second, so a store that keeps milliseconds keeps it exactly.
+fn at(seconds: i64) -> Option<Timestamp> {
+    ok(
+        Timestamp::from_second(1_800_000_000 + seconds),
+        "a test time",
+    )
+}
+
+fn after(time: Timestamp, by: SignedDuration) -> Option<Timestamp> {
+    ok(time.checked_add(by), "a later time")
+}
+
+fn entry(digit: char, request: Maintenance) -> Option<RepositoryReport> {
+    Some(RepositoryReport {
+        repository: repository(digit)?,
+        request,
+        holds_other_agents_snapshots: false,
+    })
+}
+
+/// A report of `entries`.
+fn reports(entries: &[Option<RepositoryReport>]) -> Option<RepositoryReports> {
+    entries
+        .iter()
+        .cloned()
+        .collect::<Option<Vec<_>>>()
+        .map(RepositoryReports::new)
+}
+
+/// What `registry` decided of `agent`'s report of `entries` at `now`.
+async fn report(
+    registry: &dyn OwnershipRegistry,
+    agent: AgentId,
+    entries: &[Option<RepositoryReport>],
+    now: Option<Timestamp>,
+) -> Option<Vec<ClaimDecision>> {
+    let (Some(reports), Some(now)) = (reports(entries), now) else {
+        return None;
+    };
+    ok(registry.report(agent, &reports, now).await, "a report")
+}
+
+/// The one outcome of `agent`'s claim of the repository `digit` at `now`.
+async fn claim(
+    registry: &dyn OwnershipRegistry,
+    agent: AgentId,
+    digit: char,
+    now: Option<Timestamp>,
+) -> Option<ClaimOutcome> {
+    let decided = report(registry, agent, &[entry(digit, Maintenance::Local)], now).await?;
+    assert_eq!(decided.len(), 1, "one repository reported: {decided:?}");
+    decided.into_iter().next().map(|decision| decision.outcome)
+}
+
+async fn ownership(registry: &dyn OwnershipRegistry, digit: char) -> Option<RepositoryOwnership> {
+    ok(
+        registry.ownership(&repository(digit)?).await,
+        "an ownership",
+    )
+}
+
+fn epoch(number: u64) -> Option<LeaseEpoch> {
+    LeaseEpoch::new(number)
+}
+
+/// `holder`'s lease at `number`, expiring [`LEASE_LIFE`] after `from`.
+fn lease(holder: AgentId, number: u64, from: Option<Timestamp>) -> Option<Lease> {
+    Some(Lease {
+        holder,
+        epoch: epoch(number)?,
+        expires_at: after(from?, LEASE_LIFE)?,
+    })
+}
+
+async fn a_repository_nobody_reported_has_no_owner(harness: &dyn OwnershipRegistryHarness) {
+    let registry = harness.empty().await;
+    let Some(id) = repository('a') else { return };
+    assert_eq!(
+        ownership(registry.as_ref(), 'a').await,
+        Some(RepositoryOwnership::new(id))
+    );
+}
+
+async fn the_first_claim_is_granted_and_kept(harness: &dyn OwnershipRegistryHarness) {
+    let registry = harness.empty().await;
+    let granted = lease(agent(1), 1, at(0));
+    assert_eq!(
+        claim(registry.as_ref(), agent(1), 'a', at(0)).await,
+        granted.map(ClaimOutcome::Granted)
+    );
+    let kept = ownership(registry.as_ref(), 'a').await;
+    assert_eq!(kept.as_ref().and_then(|kept| kept.lease), granted);
+    assert_eq!(kept.and_then(|kept| kept.last_epoch), epoch(1));
+}
+
+/// I1's test (technical design §0): two agents request `local` for one
+/// repository, and the second is rejected.
+async fn i1_the_second_claim_is_refused(harness: &dyn OwnershipRegistryHarness) {
+    let registry = harness.empty().await;
+    claim(registry.as_ref(), agent(1), 'a', at(0)).await;
+    assert_eq!(
+        claim(registry.as_ref(), agent(2), 'a', at(1)).await,
+        Some(ClaimOutcome::Refused(ClaimRefused::HeldByAnother(agent(1))))
+    );
+    assert_eq!(
+        ownership(registry.as_ref(), 'a')
+            .await
+            .and_then(|kept| kept.lease),
+        lease(agent(1), 1, at(0))
+    );
+}
+
+/// Agents that claim one repository at once: one is granted, and every
+/// other is refused because that one holds it.
+async fn i1_of_claims_that_race_one_is_granted(harness: &dyn OwnershipRegistryHarness) {
+    let registry = harness.empty().await;
+    let claims = (1..=8).map(|n| {
+        let registry = Arc::clone(&registry);
+        async move { (n, claim(registry.as_ref(), agent(n), 'a', at(0)).await) }
+    });
+    let outcomes = futures::future::join_all(claims).await;
+    let granted: Vec<u128> = outcomes
+        .iter()
+        .filter(|(_, outcome)| matches!(outcome, Some(ClaimOutcome::Granted(_))))
+        .map(|(n, _)| *n)
+        .collect();
+    assert_eq!(granted.len(), 1, "exactly one claim granted: {outcomes:?}");
+    let Some(winner) = granted.first().copied().map(agent) else {
+        return;
+    };
+    for (n, outcome) in &outcomes {
+        if agent(*n) != winner {
+            assert_eq!(
+                *outcome,
+                Some(ClaimOutcome::Refused(ClaimRefused::HeldByAnother(winner))),
+                "agent {n}"
+            );
+        }
+    }
+    assert_eq!(
+        ownership(registry.as_ref(), 'a')
+            .await
+            .and_then(|kept| kept.lease),
+        lease(winner, 1, at(0))
+    );
+}
+
+async fn a_report_decides_every_repository_it_names(harness: &dyn OwnershipRegistryHarness) {
+    let registry = harness.empty().await;
+    let decided = report(
+        registry.as_ref(),
+        agent(1),
+        &[
+            entry('b', Maintenance::Hub),
+            entry('a', Maintenance::Local),
+            entry('c', Maintenance::None),
+        ],
+        at(0),
+    )
+    .await;
+    let expected = (|| {
+        Some(vec![
+            ClaimDecision {
+                repository: repository('a')?,
+                outcome: ClaimOutcome::Granted(lease(agent(1), 1, at(0))?),
+            },
+            ClaimDecision {
+                repository: repository('b')?,
+                outcome: ClaimOutcome::NoClaim,
+            },
+            ClaimDecision {
+                repository: repository('c')?,
+                outcome: ClaimOutcome::NoClaim,
+            },
+        ])
+    })();
+    assert_eq!(decided, expected);
+}
+
+/// The holder's lease isn't renewed once another agent reports the
+/// repository, whatever that agent asks for.
+async fn another_agents_report_stops_the_renewal(harness: &dyn OwnershipRegistryHarness) {
+    let registry = harness.empty().await;
+    claim(registry.as_ref(), agent(1), 'a', at(0)).await;
+    report(
+        registry.as_ref(),
+        agent(2),
+        &[entry('a', Maintenance::None)],
+        at(10),
+    )
+    .await;
+    assert_eq!(
+        claim(registry.as_ref(), agent(1), 'a', at(20)).await,
+        lease(agent(1), 1, at(0)).map(ClaimOutcome::Unrenewed)
+    );
+}
+
+async fn a_report_replaces_the_agents_last(harness: &dyn OwnershipRegistryHarness) {
+    let registry = harness.empty().await;
+    claim(registry.as_ref(), agent(1), 'a', at(0)).await;
+    report(
+        registry.as_ref(),
+        agent(2),
+        &[entry('a', Maintenance::None)],
+        at(10),
+    )
+    .await;
+    report(registry.as_ref(), agent(2), &[], at(20)).await;
+    assert_eq!(
+        claim(registry.as_ref(), agent(1), 'a', at(30)).await,
+        lease(agent(1), 1, at(30)).map(ClaimOutcome::Renewed)
+    );
+}
+
+async fn a_renewal_is_kept(harness: &dyn OwnershipRegistryHarness) {
+    let registry = harness.empty().await;
+    claim(registry.as_ref(), agent(1), 'a', at(0)).await;
+    claim(registry.as_ref(), agent(1), 'a', at(100)).await;
+    let renewed = lease(agent(1), 1, at(100));
+    assert_eq!(
+        ownership(registry.as_ref(), 'a')
+            .await
+            .and_then(|kept| kept.lease),
+        renewed
+    );
+    let reopened = harness.reopened().await;
+    assert_eq!(
+        ownership(reopened.as_ref(), 'a')
+            .await
+            .and_then(|kept| kept.lease),
+        renewed,
+        "the renewal outlives the hub"
+    );
+    let first_lease_ends = at(0)
+        .and_then(|start| after(start, LEASE_LIFE))
+        .and_then(|expiry| after(expiry, LEASE_GRACE));
+    assert_eq!(
+        claim(reopened.as_ref(), agent(2), 'a', first_lease_ends).await,
+        Some(ClaimOutcome::Refused(ClaimRefused::HeldByAnother(agent(1)))),
+        "the renewed lease still binds once the first would have ended"
+    );
+}
+
+async fn a_report_stops_counting_after_its_life(harness: &dyn OwnershipRegistryHarness) {
+    let registry = harness.empty().await;
+    report(
+        registry.as_ref(),
+        agent(2),
+        &[entry('a', Maintenance::None)],
+        at(0),
+    )
+    .await;
+    let Some(late) = at(0).and_then(|start| after(start, REPORT_LIFE)) else {
+        return;
+    };
+    let Some(just_before) = after(late, SignedDuration::from_millis(-1)) else {
+        return;
+    };
+    assert_eq!(
+        claim(registry.as_ref(), agent(1), 'a', Some(just_before)).await,
+        Some(ClaimOutcome::Refused(ClaimRefused::Shared))
+    );
+    assert_eq!(
+        claim(registry.as_ref(), agent(1), 'a', Some(late)).await,
+        lease(agent(1), 1, Some(late)).map(ClaimOutcome::Granted)
+    );
+}
+
+async fn a_report_of_another_agents_snapshots_is_refused(harness: &dyn OwnershipRegistryHarness) {
+    let registry = harness.empty().await;
+    let tagged = entry('a', Maintenance::Local).map(|entry| RepositoryReport {
+        holds_other_agents_snapshots: true,
+        ..entry
+    });
+    let decided = report(registry.as_ref(), agent(1), &[tagged], at(0)).await;
+    assert_eq!(
+        decided.map(|decided| decided.into_iter().map(|d| d.outcome).collect::<Vec<_>>()),
+        Some(vec![ClaimOutcome::Refused(ClaimRefused::Shared)])
+    );
+}
+
+async fn a_release_ends_the_lease_and_epochs_keep_rising(harness: &dyn OwnershipRegistryHarness) {
+    let registry = harness.empty().await;
+    let (Some(id), Some(first)) = (repository('a'), epoch(1)) else {
+        return;
+    };
+    claim(registry.as_ref(), agent(1), 'a', at(0)).await;
+    assert_eq!(
+        ok(registry.release(agent(2), &id, first).await, "a release"),
+        Some(Err(ReleaseRefused))
+    );
+    report(registry.as_ref(), agent(1), &[], at(10)).await;
+    assert_eq!(
+        claim(registry.as_ref(), agent(2), 'a', at(20)).await,
+        Some(ClaimOutcome::Refused(ClaimRefused::HeldByAnother(agent(1))))
+    );
+    assert_eq!(
+        ok(registry.release(agent(1), &id, first).await, "a release"),
+        Some(Ok(()))
+    );
+    assert_eq!(
+        claim(registry.as_ref(), agent(2), 'a', at(30)).await,
+        lease(agent(2), 2, at(30)).map(ClaimOutcome::Granted)
+    );
+}
+
+async fn leases_and_reports_outlive_the_hub(harness: &dyn OwnershipRegistryHarness) {
+    let registry = harness.empty().await;
+    claim(registry.as_ref(), agent(1), 'a', at(0)).await;
+    report(
+        registry.as_ref(),
+        agent(2),
+        &[entry('b', Maintenance::Hub)],
+        at(10),
+    )
+    .await;
+    let (Some(id), Some(first)) = (repository('a'), epoch(1)) else {
+        return;
+    };
+    report(registry.as_ref(), agent(1), &[], at(10)).await;
+    ok(registry.release(agent(1), &id, first).await, "a release");
+    let kept = ownership(registry.as_ref(), 'a').await;
+
+    let reopened = harness.reopened().await;
+    assert_eq!(ownership(reopened.as_ref(), 'a').await, kept);
+    assert_eq!(
+        claim(reopened.as_ref(), agent(3), 'a', at(20)).await,
+        lease(agent(3), 2, at(20)).map(ClaimOutcome::Granted),
+        "the epochs given before the restart stay given"
+    );
+    assert_eq!(
+        claim(reopened.as_ref(), agent(3), 'b', at(30)).await,
+        Some(ClaimOutcome::Refused(ClaimRefused::Shared)),
+        "the reports taken before the restart still count"
+    );
+}

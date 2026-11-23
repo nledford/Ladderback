@@ -19,6 +19,8 @@ mod error_args;
 mod locations;
 #[cfg(feature = "hub")]
 mod outbox;
+#[cfg(feature = "hub")]
+mod ownership;
 mod proposals;
 mod report;
 mod row;

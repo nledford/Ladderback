@@ -1,0 +1,48 @@
+use async_trait::async_trait;
+use domain::maintenance::{
+    ClaimOutcome, LeaseEpoch, ReleaseRefused, RepositoryOwnership, RepositoryReports,
+};
+use domain::{AgentId, RepositoryId, Timestamp};
+
+use super::StoreError;
+
+/// What the hub decided of one repository in an agent's report.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct ClaimDecision {
+    pub repository: RepositoryId,
+    pub outcome: ClaimOutcome,
+}
+
+/// The hub's registry of maintenance owners (technical design §7.3, I1):
+/// each repository's [`RepositoryOwnership`], and the last report of each
+/// approved agent, kept in its database. Times are the hub's, kept to the
+/// millisecond.
+#[async_trait]
+pub trait OwnershipRegistry: Send + Sync {
+    /// Takes `reports` as every repository `agent` uses, in place of its
+    /// last report, and decides each with [`RepositoryOwnership::claim`] at
+    /// `now`, shared when another agent's report of it still counts
+    /// (`domain::maintenance::report_counts`) or the report says so, keeping
+    /// what it decided. Each repository is decided and kept in one step
+    /// with the reports it was decided on, so of two claims that race, one
+    /// is granted and the other sees it (I1).
+    async fn report(
+        &self,
+        agent: AgentId,
+        reports: &RepositoryReports,
+        now: Timestamp,
+    ) -> Result<Vec<ClaimDecision>, StoreError>;
+
+    /// Ends the lease `agent` holds on `repository` at `epoch`
+    /// ([`RepositoryOwnership::release`]), in one step.
+    async fn release(
+        &self,
+        agent: AgentId,
+        repository: &RepositoryId,
+        epoch: LeaseEpoch,
+    ) -> Result<Result<(), ReleaseRefused>, StoreError>;
+
+    /// The repository's ownership: a new one when no agent ever reported it.
+    async fn ownership(&self, repository: &RepositoryId)
+    -> Result<RepositoryOwnership, StoreError>;
+}

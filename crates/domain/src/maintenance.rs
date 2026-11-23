@@ -19,11 +19,16 @@ use crate::execution::plan_tags;
 use crate::planning::{AgentSettings, Maintenance, Plan, RetentionPolicy};
 use crate::{AgentId, Offset, OperationId, PlanId, SnapshotId, Timestamp};
 
+mod lease;
 mod other_hosts;
 #[cfg(test)]
 mod properties;
 mod stats;
 
+pub use lease::{
+    ClaimOutcome, ClaimRefused, LEASE_GRACE, LEASE_LIFE, Lease, LeaseEpoch, REPORT_LIFE,
+    ReleaseRefused, RepositoryOwnership, RepositoryReport, RepositoryReports, report_counts,
+};
 pub use other_hosts::{MAX_NAMED_OTHER_HOSTS, OtherHosts};
 pub use stats::{READINGS_KEPT_FOR, RepositoryStats, StatsReading};
 

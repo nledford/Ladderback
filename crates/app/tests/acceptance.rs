@@ -63,6 +63,8 @@ mod hub_tls_key_steps;
 mod interop_steps;
 #[path = "steps/notifications.rs"]
 mod notifications_steps;
+#[path = "steps/ownership.rs"]
+mod ownership_steps;
 #[path = "steps/pairing.rs"]
 mod pairing_steps;
 #[path = "steps/plans.rs"]
@@ -128,6 +130,7 @@ struct Agent {
     full_disk_access: full_disk_access_steps::FullDiskAccessWorld,
     download: download_steps::DownloadWorld,
     status: status_steps::StatusWorld,
+    ownership: ownership_steps::OwnershipWorld,
 }
 
 impl std::fmt::Debug for Agent {
@@ -186,6 +189,7 @@ impl Agent {
             machine: Default::default(),
             full_disk_access: Default::default(),
             status: Default::default(),
+            ownership: Default::default(),
         }
     }
 
