@@ -139,6 +139,14 @@ Feature: The hub gives each repository at most one maintenance owner
     Then "laptop" refused the grant of "photos" as below the highest it has seen
     And "laptop" may not maintain "photos", because it holds no lease on it
 
+  Scenario: A machine paired with a new hub forgets what its old hub granted
+    Given "laptop" heard a grant of "photos" at epoch 3
+    And "laptop" lost its hub and holds no pin
+    When "laptop" pairs with a new hub
+    Then "laptop" may not maintain "photos", because it holds no lease on it
+    When the new hub grants "laptop" the repository "photos" at epoch 1
+    Then "laptop" may maintain "photos"
+
   Scenario: A machine that stops using a repository releases its lease, and another is granted it
     Given "laptop" claims the repository "photos" and hears the hub's grants
     When "laptop" stops using "photos" and the hub acknowledges its release

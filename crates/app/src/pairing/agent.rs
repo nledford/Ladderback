@@ -9,7 +9,8 @@ use domain::fleet::{
 };
 
 use crate::ports::{
-    Attempt, Identity, IdentityError, Random, RandomUnavailable, Signing, SigningError,
+    Attempt, Identity, IdentityError, LeaseCache, Random, RandomUnavailable, Signing, SigningError,
+    StoreError,
 };
 
 /// The agent's side of pairing: it checks the hub against the token before
@@ -18,6 +19,7 @@ pub struct AgentPairing {
     identity: Arc<dyn Identity>,
     signing: Arc<dyn Signing>,
     random: Arc<dyn Random>,
+    leases: Arc<dyn LeaseCache>,
 }
 
 /// What the agent keeps of a pairing between its `Connect` and the hub's
@@ -100,6 +102,9 @@ pub enum AgentPairingError {
     Identity(IdentityError),
     Signing(SigningError),
     Random(RandomUnavailable),
+    /// The machine couldn't forget the leases and epoch floors of the hub
+    /// it paired with before: it pins the new hub only once they are gone.
+    Leases(StoreError),
 }
 
 /// Why the agent stops at the hub's `Challenge`, having sent nothing after
@@ -133,6 +138,12 @@ impl From<SigningError> for AgentPairingError {
 impl From<RandomUnavailable> for AgentPairingError {
     fn from(error: RandomUnavailable) -> Self {
         Self::Random(error)
+    }
+}
+
+impl From<StoreError> for AgentPairingError {
+    fn from(error: StoreError) -> Self {
+        Self::Leases(error)
     }
 }
 
@@ -219,11 +230,13 @@ impl AgentPairing {
         identity: Arc<dyn Identity>,
         signing: Arc<dyn Signing>,
         random: Arc<dyn Random>,
+        leases: Arc<dyn LeaseCache>,
     ) -> Self {
         Self {
             identity,
             signing,
             random,
+            leases,
         }
     }
 
