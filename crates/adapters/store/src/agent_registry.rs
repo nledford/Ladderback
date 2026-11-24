@@ -90,6 +90,18 @@ async fn tombstone(
     found.as_ref().map(row::tombstone).transpose()
 }
 
+async fn key_tombstone(
+    conn: &mut SqliteConnection,
+    key: &PublicKey,
+) -> Result<Option<Tombstone>, StoreError> {
+    let found = sqlx::query(sql::TOMBSTONE_BY_KEY)
+        .bind(key.as_bytes().as_slice())
+        .fetch_optional(&mut *conn)
+        .await
+        .map_err(unavailable)?;
+    found.as_ref().map(row::tombstone).transpose()
+}
+
 async fn unused_tokens(
     conn: &mut SqliteConnection,
     now: Timestamp,
@@ -295,13 +307,14 @@ impl AgentRegistry for SqliteStore {
         .await?;
         let pending = count(&mut tx, sql::COUNT_PENDING_AGENTS).await?;
         let tombstone = tombstone(&mut tx, request.agent_id).await?;
+        let key_tombstone = key_tombstone(&mut tx, &request.agent_key).await?;
         let view = PairingView {
             token: token.as_ref(),
             by_id: by_id.as_ref(),
             by_hostname: by_hostname.as_ref(),
             pending,
             tombstone: tombstone.as_ref(),
-            key_tombstone: None,
+            key_tombstone: key_tombstone.as_ref(),
         };
         let decided = decide_pairing(&view, request, now);
         match &decided {

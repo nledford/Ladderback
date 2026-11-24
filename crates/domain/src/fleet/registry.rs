@@ -478,6 +478,9 @@ pub fn decide_pairing(
     if view.tombstone.is_some() {
         return Err(PairRefusal::AgentRemoved);
     }
+    if view.key_tombstone.is_some() {
+        return Err(PairRefusal::AgentKeyRemoved);
+    }
     if let Some(record) = view.by_id {
         if record.key != request.agent_key {
             return Err(PairRefusal::AgentKeyMismatch);
