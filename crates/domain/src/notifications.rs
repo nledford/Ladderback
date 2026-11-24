@@ -270,7 +270,15 @@ impl Event {
     /// The event of a paired machine's maintenance of `repository`, by its
     /// alias here, paused for want of a lease since `since`.
     pub fn maintenance_paused(repository: RepositoryAlias, since: Timestamp) -> Self {
-        todo!("{repository:?} {since}")
+        Self {
+            kind: EventKind::RepoMaintenancePaused,
+            operation: None,
+            plan: None,
+            repository: Some(repository),
+            at: since,
+            codes: Vec::new(),
+            attempt: None,
+        }
     }
 
     fn of(kind: EventKind, subject: Subject<'_>, codes: Vec<&'static str>, at: Timestamp) -> Self {

@@ -126,7 +126,13 @@ impl HeldLeases {
     /// lease ran out. `None` when it holds no lease and noted no pause: the
     /// next [`watch`](Self::watch) notes one.
     pub fn paused_since(&self, repository: &RepositoryId, now: Timestamp) -> Option<Timestamp> {
-        todo!("{repository:?} {now}")
+        if self.holds(repository, now).is_ok() {
+            return None;
+        }
+        self.paused
+            .get(repository)
+            .map(|pause| pause.since)
+            .or_else(|| self.leases.get(repository).map(|lease| lease.ends_at))
     }
 
     /// Notes at `now` the pause of each repository of `maintained`, those
@@ -141,8 +147,32 @@ impl HeldLeases {
         maintained: impl IntoIterator<Item = &'a RepositoryId>,
         now: Timestamp,
     ) -> Vec<(RepositoryId, Timestamp)> {
-        let _ = maintained.into_iter().count();
-        todo!("{now}")
+        let mut paused = BTreeMap::new();
+        let mut due = Vec::new();
+        for repository in maintained {
+            if self.holds(repository, now).is_ok() {
+                continue;
+            }
+            let mut pause = self.paused.get(repository).copied().unwrap_or(Pause {
+                since: self
+                    .leases
+                    .get(repository)
+                    .map_or(now, |lease| lease.ends_at),
+                alerted: false,
+            });
+            let since = pause.since;
+            // A date no clock can hold is never due.
+            let lasted = since
+                .checked_add(PAUSE_ALERT_AFTER)
+                .is_ok_and(|at| now >= at);
+            if lasted && !pause.alerted {
+                pause.alerted = true;
+                due.push((repository.clone(), since));
+            }
+            paused.insert(repository.clone(), pause);
+        }
+        self.paused = paused;
+        due
     }
 
     pub fn leases(&self) -> impl Iterator<Item = (&RepositoryId, &HeldLease)> {
