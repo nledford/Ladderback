@@ -2,6 +2,8 @@
 
 **Below 41rem the header's seven links and Sign out sit in a menu behind a hamburger button: an icon-only Ghost button, 44 px square at least, that ends the brand's line where it fits. Shown, the menu is a bordered panel under that line in the page's flow, a row for each page and one for Sign out, each 3rem tall at least. Escape, a page chosen or a sign-out hides it again. The header is then the brand's line alone** (recorded 2026-11-22, §4.4 and §4.5; the maintainer chose the pattern on 2026-11-22 in the navigation bar critique, with Flowbite's navbar as the reference: <https://flowbite.com/docs/components/navbar/#hamburger-menu>).
 
+**Partly superseded by decision 152** (2026-11-23, #1453): the hamburger menu is drawn below 54rem, not 41rem, where the header's one line no longer fits, and its rows are the five pages, then Settings, the Log and Sign out. The rest of this record is kept as it was decided.
+
 ## Why
 
 Below 41rem (656 px) the seven links no longer fit on one line: 614 px of links beside 2rem of the frame's padding. They wrapped onto two lines at 390 px and six at 320 px with 200 % text, with Sign out under them, so the header took 18.5 % of a 390×844 screen, 29 % of one 320 px wide, and the whole first screen at 320 px with 200 % text, before the first word of a page. The 320 Rule was met, and the reader's first screen was still navigation.

@@ -2,6 +2,8 @@
 
 **A Ledger Gray band spans the window, and the header's content stands in the page's frame, as `<main>` does: as wide as Settings' Page width lays each page, and 1rem from the frame's inline edges, so the product's name starts where each page's heading does. The pages' links are drawn in the color of the text around them, underlined, the current page bold; in the header, Ladder Blue is the focus ring's alone** (recorded 2026-11-22, §4.4 and §4.5; chosen in a design critique of the header, for the maintainer's approval with the change that makes it).
 
+**Partly superseded by decision 152** (2026-11-23, #1452, #1453): from 54rem up the pages' links stand on the brand's line, five of them, with Settings, the Log and Sign out in a Settings menu at its end, and a link standing alone in the header shows no underline at rest. The band and the frame stand as decided here. The rest of this record is kept as it was decided.
+
 ## Why
 
 The header's content was pinned to the window's edges while `<main>` was a centered column of 60rem, so the header was the one full-width row on a centered page. At 1280 px the product's name started 160 px left of the page's heading, at 1600 px 320 px, and 335 px of empty band lay between the last link and the end of the line.

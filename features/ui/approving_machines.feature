@@ -94,7 +94,9 @@ Feature: Approving a waiting machine on the hub's page
     And the button "Pause live updates" is pressed
     And I press Shift+Tab until focus is on the link "Operations"
     And I press Enter
-    And I press Shift+Tab until focus is on the link "Settings"
+    And I press Shift+Tab until focus is on the button "Settings"
+    And I press Enter
+    And I press Tab until focus is on the link "Settings"
     And I press Enter
     And I change the address's fragment to "#agents"
     Then the button "Pause live updates" is not pressed

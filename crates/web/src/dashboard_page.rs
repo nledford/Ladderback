@@ -25,7 +25,7 @@ use leptos::prelude::*;
 
 use crate::backend::Rereads;
 use crate::components::alert::rules::AlertTone;
-use crate::components::link::rules::{Destination, Matching};
+use crate::components::link::rules::{Destination, LinkPlacement, Matching};
 use crate::components::skeleton::rules::Awaited;
 use crate::components::{
     Alert, Column, Link, Name, PauseUpdates, Progress, Sentences, State, StatusBadge, Table,
@@ -74,7 +74,11 @@ pub(crate) fn DashboardLink(localizer: Arc<Localizer>) -> impl IntoView {
             Destination::route("/dashboard", Matching::Exact).map(|to| {
                 view! {
                     <p>
-                        <Link to=to localizer=Arc::clone(&localizer)>
+                        <Link
+                            to=to
+                            localizer=Arc::clone(&localizer)
+                            placement=LinkPlacement::InText
+                        >
                             {words}
                         </Link>
                     </p>

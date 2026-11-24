@@ -233,25 +233,63 @@ impl LinkTone {
     }
 }
 
-/// How a link is drawn, in Tailwind utilities (decision 117), logical ones
-/// only: always underlined, so a link in a line of text is never told by its
-/// color alone (1.4.1), and its color needs no 3:1 against the words around
-/// it. The underline is a token's thickness (`--link-underline`), drawn far
+/// Where a link stands, which decides whether it is underlined at rest
+/// (#1452). Every link names one: none is the default, so each page decides
+/// for each of its links.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum LinkPlacement {
+    /// Among words: a sentence, a paragraph, a banner or an alert. Always
+    /// underlined, so it is never told from the words around it by its
+    /// color alone (1.4.1): Ladder Blue is under 3:1 against the text, and
+    /// the text's own color is 1:1.
+    InText,
+    /// On its own: the header's links, a menu's rows, a link alone in a
+    /// table's cell or in a list of links. No underline at rest: nothing
+    /// around it is words it could be mistaken for.
+    Alone,
+}
+
+/// How a link of this placement is drawn, in Tailwind utilities (decision
+/// 117), logical ones only. The underline is a token's thickness drawn far
 /// enough under the baseline to clear the letters' descenders
-/// (`--link-underline-offset`), which ink skipping keeps it off besides, and
-/// thicker under the pointer (`--link-underline-hover`); focus keeps the
-/// global ring. The page it names is bold (The Weight Not Color Rule). An
-/// outside link's icon stands a quarter of an em after its words. Its color
-/// is `style.css`'s, which says why.
-const LOOK: &str = "underline decoration-(length:--link-underline) \
-    underline-offset-(--link-underline-offset) [text-decoration-skip-ink:auto] \
-    hover:decoration-(length:--link-underline-hover) aria-[current=page]:font-bold \
-    [&>.icon]:ms-[0.25em]";
+/// (`--link-underline-offset`), which ink skipping keeps it off besides;
+/// focus keeps the global ring; the page it names is bold (The Weight Not
+/// Color Rule), and an outside link's icon stands a quarter of an em after
+/// its words. Its color is `style.css`'s, which says why.
+///
+/// - **In text:** always underlined (`--link-underline`), so it is never
+///   told by its color alone (1.4.1) and its color needs no 3:1 against the
+///   words around it, and thicker under the pointer
+///   (`--link-underline-hover`).
+/// - **Alone:** no underline at rest; under the pointer and pressed the
+///   thicker underline shows, and pressed it turns `--accent-hover`
+///   (`style.css`'s `.link-alone`). The page it names has a 3px bar at its
+///   inline start in the text's color besides its weight, the cue the
+///   header's links and a menu's rows share, set off from its words by
+///   `0.5rem`; a page's own layout may set that space (`style.css`'s
+///   header rules do).
+fn look(placement: LinkPlacement) -> &'static str {
+    match placement {
+        LinkPlacement::InText => {
+            "underline decoration-(length:--link-underline) \
+             underline-offset-(--link-underline-offset) [text-decoration-skip-ink:auto] \
+             hover:decoration-(length:--link-underline-hover) aria-[current=page]:font-bold \
+             [&>.icon]:ms-[0.25em]"
+        }
+        LinkPlacement::Alone => {
+            "link-alone no-underline hover:underline active:underline \
+             decoration-(length:--link-underline-hover) \
+             underline-offset-(--link-underline-offset) [text-decoration-skip-ink:auto] \
+             aria-[current=page]:font-bold aria-[current=page]:border-s-3 \
+             aria-[current=page]:border-fg aria-[current=page]:ps-2 [&>.icon]:ms-[0.25em]"
+        }
+    }
+}
 
 /// The classes of the link: the link's own, which names it and colors it in
-/// `style.css`, its tone's, and its look.
-pub fn link_class(tone: LinkTone) -> String {
-    format!("link {} {LOOK}", tone.tone().class())
+/// `style.css`, its tone's, and its placement's look.
+pub fn link_class(tone: LinkTone, placement: LinkPlacement) -> String {
+    format!("link {} {}", tone.tone().class(), look(placement))
 }
 
 #[cfg(test)]
@@ -489,11 +527,47 @@ mod tests {
         assert_eq!(LinkTone::default(), LinkTone::Primary);
         assert_eq!(LinkTone::Primary.tone(), Tone::Primary);
         assert_eq!(LinkTone::Inherit.tone(), Tone::Inherit);
-        for (tone, class) in [
-            (LinkTone::Primary, "tone-primary"),
-            (LinkTone::Inherit, "tone-inherit"),
-        ] {
-            assert_eq!(link_class(tone), format!("link {class} {LOOK}"), "{tone:?}");
+        for placement in [LinkPlacement::InText, LinkPlacement::Alone] {
+            for (tone, class) in [
+                (LinkTone::Primary, "tone-primary"),
+                (LinkTone::Inherit, "tone-inherit"),
+            ] {
+                assert_eq!(
+                    link_class(tone, placement),
+                    format!("link {class} {}", look(placement)),
+                    "{tone:?} {placement:?}"
+                );
+            }
         }
+    }
+
+    fn classes(placement: LinkPlacement) -> Vec<&'static str> {
+        look(placement).split_whitespace().collect()
+    }
+
+    #[test]
+    fn a_link_in_text_is_underlined_at_rest_and_one_standing_alone_only_under_the_pointer_or_pressed()
+     {
+        let in_text = classes(LinkPlacement::InText);
+        assert!(in_text.contains(&"underline"), "{in_text:?}");
+        assert!(!in_text.contains(&"no-underline"), "{in_text:?}");
+
+        let alone = classes(LinkPlacement::Alone);
+        assert!(alone.contains(&"no-underline"), "{alone:?}");
+        assert!(!alone.contains(&"underline"), "{alone:?}");
+        assert!(alone.contains(&"hover:underline"), "{alone:?}");
+        assert!(alone.contains(&"active:underline"), "{alone:?}");
+    }
+
+    #[test]
+    fn the_current_page_is_bold_wherever_a_link_stands_and_barred_at_its_start_when_alone() {
+        for placement in [LinkPlacement::InText, LinkPlacement::Alone] {
+            assert!(
+                classes(placement).contains(&"aria-[current=page]:font-bold"),
+                "{placement:?}"
+            );
+        }
+        assert!(classes(LinkPlacement::Alone).contains(&"aria-[current=page]:border-s-3"));
+        assert!(!classes(LinkPlacement::InText).contains(&"aria-[current=page]:border-s-3"));
     }
 }

@@ -16,6 +16,7 @@ const catalog = [
   "ui-nav-plans = Plans",
   "ui-nav-settings = Settings",
   "ui-menu-button = Menu",
+  "ui-settings-menu-button = Settings",
   "ui-sign-out = Sign out",
 ].join("\n");
 // Built in each test, so a catalog it can't read fails that test alone.
@@ -423,6 +424,7 @@ test("the header's stops come from the English catalog, the navigation's own nam
   assert.doesNotMatch('the link "Version 1.2.3 is available"', stops, "an outside link's name says it leaves");
   assert.match('the button "Sign out"', stops);
   assert.match('the button "Menu"', stops, "the button that shows the pages' links and Sign out on a narrow screen");
+  assert.match('the button "Settings"', stops, "the Settings menu's button, from 54rem up");
   assert.doesNotMatch('the button "Pending changes"', stops);
   assert.doesNotMatch('the link "Pages"', stops);
   assert.doesNotMatch('the button "Plans"', stops);
@@ -435,5 +437,6 @@ test("the header's stops come from the English catalog, the navigation's own nam
 test("a header message the catalog lacks is an error", () => {
   assert.throws(() => headerTargets(catalog.replace("ui-sign-out = Sign out", "")), /no message ui-sign-out/);
   assert.throws(() => headerTargets(catalog.replace("ui-menu-button = Menu", "")), /no message ui-menu-button/);
+  assert.throws(() => headerTargets(catalog.replace("ui-settings-menu-button = Settings", "")), /no message ui-settings-menu-button/);
   assert.throws(() => headerTargets(catalog.replace("-brand-name = Ladderback", "")), /no message -brand-name/);
 });

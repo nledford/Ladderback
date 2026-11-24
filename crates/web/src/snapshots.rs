@@ -27,6 +27,7 @@ use leptos::wasm_bindgen::JsValue;
 use crate::announcer::Politeness;
 use crate::components::ACTIONS;
 use crate::components::button::Content;
+use crate::components::link::rules::LinkPlacement;
 use crate::components::skeleton::rules::Awaited;
 use crate::components::tree::rules::snapshot_link;
 use crate::components::{
@@ -1023,7 +1024,7 @@ pub(crate) fn snapshots_table(
             // text, never a link that could leave it.
             match alias.as_deref().and_then(|alias| snapshot_link(alias, &id)) {
                 Some(to) => view! {
-                    <Link to=to localizer=Arc::clone(&id_localizer)>
+                    <Link to=to localizer=Arc::clone(&id_localizer) placement=LinkPlacement::Alone>
                         {short}
                     </Link>
                 }

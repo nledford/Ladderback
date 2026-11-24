@@ -3,10 +3,13 @@
 // while the pointer moves onto it (WCAG 1.4.13, Content on Hover or Focus),
 // and a link's underline grows thicker under it (§4.5); that is pointer
 // behaviour, so their scenarios move the pointer.
-// Its moves never press, but for one: the drag of a column in a table's
+// Its moves never press, but for two: the drag of a column in a table's
 // Columns panel (decision 140), whose scenario checks dragging itself, a
 // pointer's own behaviour, while its Move buttons do all of it by keyboard
-// (2.5.7). Every control is still reached and used by keyboard alone
+// (2.5.7); and a press held on one element (decision 152), for what only a
+// pressing pointer shows or does: a pressed link's look, and a press outside
+// an open disclosure menu closing it, which Escape and Tab do by keyboard.
+// Every control is still reached and used by keyboard alone
 // (support/keyboard.ts), so no journey can pass by clicking (A1). `npm run
 // lint` keeps pointer actions out of steps/, which call these by name.
 
@@ -53,6 +56,15 @@ export function pointer(page: Page) {
   return {
     /** Moves the pointer to the middle of the one element `locator` finds. */
     restOn,
+
+    /** Moves the pointer to the middle of the one element `locator` finds
+     *  and presses it there, still pressed: a pressed element's look, or
+     *  what a press there does. `letGo` ends it. */
+    async holdOn(locator: Locator): Promise<void> {
+      await locator.scrollIntoViewIfNeeded();
+      await restOn(locator);
+      await page.mouse.down();
+    },
 
     /** Moves the pointer to the point `x`, `y` of the viewport. */
     moveTo,

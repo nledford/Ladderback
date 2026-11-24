@@ -60,8 +60,10 @@ Then("every button on the page is drawn from the tokens, none in the browser's o
     const corner = getComputedStyle(probe).borderTopLeftRadius;
     probe.remove();
     // A tab is a button too, drawn flat on its list's rule by the tabs'
-    // own rules (§4.5, "Tabs"), whose look the tabs' scenarios check.
-    return Array.from(document.querySelectorAll("button:not([role='tab'])"))
+    // own rules (§4.5, "Tabs"), whose look the tabs' scenarios check; so is
+    // a disclosure menu's button, drawn as the navigation's words beside it
+    // (decision 152), whose look the disclosure menu's scenarios check.
+    return Array.from(document.querySelectorAll("button:not([role='tab']):not(.disclosure-menu-button)"))
       .filter((button) => getComputedStyle(button).borderTopLeftRadius !== corner)
       .map((button) => (button.getAttribute("aria-label") ?? button.textContent ?? "").trim());
   });

@@ -177,11 +177,11 @@ Feature: Plans page
     When I press Tab until focus is on the button "Save the plan"
     And I press Enter
     Then the polite region comes to contain "The plan demo-home is saved."
-    When I press Shift+Tab until focus is on the link "Log"
+    When I press Shift+Tab until focus is on the link "Pending changes"
     Then the page shows the button "Save the plan"
     When the daemon has answered the held reads of the plans list
     Then the button "Save the plan" leaves the page
-    And focus stays on the link "Log"
+    And focus stays on the link "Pending changes"
 
   Scenario: A plan's form opened while another plan is saved stays open
     Given two demo plans "demo-home" and "demo-work" with a scratch repository

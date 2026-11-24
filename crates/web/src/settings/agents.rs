@@ -24,7 +24,7 @@ use crate::announcer::{Clock, Politeness};
 use crate::components::ACTIONS;
 use crate::components::alert::rules::AlertTone;
 use crate::components::button::Content;
-use crate::components::link::rules::{Destination, LinkTone};
+use crate::components::link::rules::{Destination, LinkPlacement, LinkTone};
 use crate::components::text_field::{Access, Kind};
 use crate::components::{
     Alert, Button, Fingerprint, Link, RadioGroup, ReviewDialog, StepUp, StepUpField, TextField,
@@ -591,7 +591,12 @@ fn ProxyWarning(localizer: Arc<Localizer>) -> impl IntoView {
             {Destination::outside(PROXY_GUIDE_URL)
                 .map(|to| {
                     view! {
-                        <Link to=to localizer=link_localizer tone=LinkTone::Inherit>
+                        <Link
+                            to=to
+                            localizer=link_localizer
+                            tone=LinkTone::Inherit
+                            placement=LinkPlacement::InText
+                        >
                             {link}
                         </Link>
                     }

@@ -16,8 +16,10 @@ Feature: The Log page
       | 2026-11-15T09:00:02.500Z | error | ladderback::notify    | the notification to demo-channel failed        |
       | 2026-11-15T09:00:03.750Z | info  | ladderback::scheduler | the plan home runs next at 2026-11-15 10:00:00 |
 
-  Scenario: The Log link in the navigation moves focus to the page's heading, and the page lists the lines newest first
+  Scenario: The Log link in the Settings menu moves focus to the page's heading, and the page lists the lines newest first
     When I open the web UI
+    And I press Tab until focus is on the button "Settings"
+    And I press Enter
     And I press Tab until focus is on the link "Log"
     And I press Enter
     Then focus is on the main heading "Log"

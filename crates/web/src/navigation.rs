@@ -1,4 +1,4 @@
-//! What the header's menu decides on a screen narrower than 41rem (decision
+//! What the header's menu decides on a screen narrower than 54rem (decision
 //! 143): its pages' links and Sign out sit in a panel behind a hamburger
 //! button, which shows and hides it. Decided here and tested on the host;
 //! `main.rs`'s `Navigation` and `MenuButton` are the glue that draws it,
@@ -32,7 +32,7 @@ pub(crate) fn glyph(open: bool) -> LucideGlyph {
 }
 
 /// The panel's classes: its own, and the one that says whether it is open,
-/// which `style.css` reads below 41rem alone.
+/// which `style.css` reads below 54rem alone.
 pub(crate) fn menu_class(open: bool) -> &'static str {
     if open {
         "site-menu site-menu-open"
@@ -43,7 +43,7 @@ pub(crate) fn menu_class(open: bool) -> &'static str {
 
 /// Whether a key pressed in the header hides the panel and returns focus to
 /// the button: Escape, only while the panel is shown and only while the
-/// button is drawn, which is below 41rem alone. Where it isn't drawn there is
+/// button is drawn, which is below 54rem alone. Where it isn't drawn there is
 /// nothing to close and nowhere for focus to return to.
 pub(crate) fn escape_closes(open: bool, key: &str, button_drawn: bool) -> bool {
     open && button_drawn && key == "Escape"
@@ -54,13 +54,6 @@ pub(crate) fn escape_closes(open: bool, key: &str, button_drawn: bool) -> bool {
 /// sign-in finds it hidden.
 pub(crate) fn hidden_without_pages(shows_pages: bool) -> bool {
     !shows_pages
-}
-
-/// Whether a box of this size is drawn: a `display: none` box has none. The
-/// glue reads the menu button's box and asks this, so the decision is the
-/// host's and the glue only reads the DOM.
-pub(crate) fn is_drawn(width: f64, height: f64) -> bool {
-    width > 0.0 && height > 0.0
 }
 
 #[cfg(test)]
@@ -104,7 +97,7 @@ mod tests {
             (true, "Tab", true),
             (true, "escape", true),
             // Links opened on a narrow screen, the window widened past
-            // 41rem: the button is undrawn, so Escape has nothing to do.
+            // 54rem: the button is undrawn, so Escape has nothing to do.
             (true, "Escape", false),
             (false, "Escape", false),
         ] {
@@ -119,21 +112,5 @@ mod tests {
     fn the_panel_is_hidden_whenever_the_page_shows_none() {
         assert!(hidden_without_pages(false));
         assert!(!hidden_without_pages(true));
-    }
-
-    #[test]
-    fn a_box_is_drawn_only_with_a_width_and_a_height() {
-        assert!(is_drawn(1.0, 1.0));
-        assert!(is_drawn(48.0, 48.0));
-        assert!(is_drawn(0.5, 0.5));
-        for (width, height) in [
-            (0.0, 48.0),
-            (48.0, 0.0),
-            (0.0, 0.0),
-            (-1.0, 48.0),
-            (48.0, -1.0),
-        ] {
-            assert!(!is_drawn(width, height), "{width} by {height}");
-        }
     }
 }

@@ -58,8 +58,8 @@ const MAIN_HEADING = /^the main heading\b/;
 // The header's own stops, by their messages in the English catalog: the
 // skip link, the product's name, the pages' links (every `ui-nav-` message
 // but the navigation's own name), the available update's notes, the menu
-// button, which shows those links and Sign out below 41rem (decision 143),
-// and Sign out.
+// button, which shows every page and Sign out below 54rem (decisions 143
+// and 152), the Settings menu's button and Sign out.
 // The notes are on another site, so their link's name ends with the words
 // every outside link adds (`ui-link-outside`, §4.5). A walk to one of them
 // crosses the header on purpose (§4.4), as the run-time guard allows.
@@ -67,7 +67,7 @@ const HEADER_LINKS = ["ui-skip-link", "ui-brand"];
 const HEADER_OUTSIDE_LINKS = ["ui-update-available"];
 const OUTSIDE_NOTE = "ui-link-outside";
 const HEADER_NAV_LINK = /^ui-nav-(?!label$)/;
-const HEADER_BUTTONS = ["ui-menu-button", "ui-sign-out"];
+const HEADER_BUTTONS = ["ui-menu-button", "ui-settings-menu-button", "ui-sign-out"];
 
 /** How a walk step names a stop in the header, from the English catalog's
  *  text (`crates/l10n/locales/en-US/*.ftl`, the files joined): `the link

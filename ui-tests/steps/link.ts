@@ -15,13 +15,14 @@ import { demoSection, eachOf } from "../support/gallery.ts";
 
 // A link (technical design §4.5): a page of the app is a route change, the
 // page the reader is on is marked and bold, a link to another site says so
-// in its name and with an icon a screen reader skips, and every link is
-// underlined, in Ladder Blue or the color of the text around it, and in the
-// system's link color under forced colors. Each link is read alone with
+// in its name and with an icon a screen reader skips, and a link among
+// words is underlined, one standing alone only under the pointer or pressed
+// (decision 152), in Ladder Blue or the color of the text around it, and in
+// the system's link color under forced colors. Each link is read alone with
 // `evaluate`.
 
 // The links of the gallery's "Link" demo.
-const LINK_DEMO_LINKS = 6;
+const LINK_DEMO_LINKS = 8;
 
 function linkNamed(page: Page, name: string): Locator {
   return page.getByRole("link", { name: namePattern(name) });
@@ -200,14 +201,107 @@ async function assertSystemLinkColor(links: Locator, count: number): Promise<voi
   }
 }
 
+// No underline drawn: the words alone, nothing under them.
+async function assertNotUnderlined(links: Locator[]): Promise<void> {
+  for (const link of links) {
+    const drawn = await link.evaluate((el) => ({
+      name: (el.textContent ?? "").trim(),
+      line: getComputedStyle(el).textDecorationLine,
+    }));
+    assert.ok(!drawn.line.includes("underline"), `the link "${drawn.name}" is underlined at rest`);
+  }
+}
+
+// Each link of the demo underlined or not, as its place asks: among words,
+// always; standing alone, not at rest.
+Then(
+  "each link of the {string} demo is underlined as it stands:",
+  async function (this: BrowserWorld, component: string, table: DataTable) {
+    const rows = table.hashes() as { link: string; underline: string }[];
+    const section = demoSection(this.page, component);
+    await eachOf(section.getByRole("link"), rows.length);
+    for (const { link: name, underline } of rows) {
+      const link = section.getByRole("link", { name: namePattern(name) });
+      if (underline === "below its letters") await assertUnderlinedBelowLetters(link, 1);
+      else if (underline === "none at rest") await assertNotUnderlined([link]);
+      else throw new Error(`no underline "${underline}": "below its letters" or "none at rest"`);
+    }
+  },
+);
+
+Then(
+  /^no link in the (banner|main content) is underlined, (\d+) in all$/,
+  async function (this: BrowserWorld, where: string, count: string) {
+    await assertNotUnderlined(await eachOf(landmark(this.page, where).getByRole("link"), Number(count)));
+  },
+);
+
+Then("the link {string} is underlined below its letters", async function (this: BrowserWorld, name: string) {
+  await expect.poll(() => linkNamed(this.page, name).evaluate((el) => getComputedStyle(el).textDecorationLine)).toContain("underline");
+  await assertUnderlinedBelowLetters(linkNamed(this.page, name), 1);
+});
+
+// The current page standing alone: a bar at the link's inline start, at
+// least 3px, in the color of the text around the link, whatever its tone.
+// Under forced colors the text's color is the system's (CanvasText), read
+// as the system's link color is: an engine that only reports the media
+// query leaves the page's own text in the author's color.
+Then(
+  "the link {string} is marked by a bar at its inline start, in the text's color",
+  async function (this: BrowserWorld, name: string) {
+    const drawn = await linkNamed(this.page, name).evaluate((el) => {
+      const style = getComputedStyle(el);
+      let text = getComputedStyle(el.parentElement ?? el).color;
+      if (matchMedia("(forced-colors: active)").matches) {
+        const probe = document.createElement("span");
+        probe.style.forcedColorAdjust = "none";
+        probe.style.color = "CanvasText";
+        document.body.append(probe);
+        text = getComputedStyle(probe).color;
+        probe.remove();
+      }
+      return {
+        width: Number.parseFloat(style.borderInlineStartWidth),
+        style: style.borderInlineStartStyle,
+        color: style.borderInlineStartColor,
+        text,
+      };
+    });
+    assert.ok(drawn.width >= 3 && drawn.style === "solid", `the link "${name}"'s bar is ${drawn.width}px ${drawn.style}`);
+    assert.equal(drawn.color, drawn.text, `the link "${name}"'s bar is not in the color of the text around it`);
+  },
+);
+
+When("I hold the pointer down on the link {string}", async function (this: BrowserWorld, name: string) {
+  await pointer(this.page).holdOn(linkNamed(this.page, name));
+});
+
+Then("the link {string} is not underlined at rest", async function (this: BrowserWorld, name: string) {
+  await assertNotUnderlined(await eachOf(linkNamed(this.page, name), 1));
+});
+
+// Pressed: the words in a token's color, the underline held with them.
+Then(
+  "the link {string} is drawn in {string} and underlined below its letters",
+  async function (this: BrowserWorld, name: string, token: string) {
+    const link = linkNamed(this.page, name);
+    const drawn = await link.evaluate((el, wanted) => {
+      const probe = document.createElement("span");
+      probe.style.color = `var(${wanted})`;
+      document.body.append(probe);
+      const want = getComputedStyle(probe).color;
+      probe.remove();
+      return { want, text: getComputedStyle(el).color };
+    }, token);
+    assert.equal(drawn.text, drawn.want, `the link "${name}" is not drawn in ${token}`);
+    await assertUnderlinedBelowLetters(link, 1);
+  },
+);
+
 /** A landmark of every page, as a step names it. */
 function landmark(page: Page, name: string): Locator {
   return page.getByRole(name === "banner" ? "banner" : "main");
 }
-
-Then("every link of the {string} demo is underlined below its letters", async function (this: BrowserWorld, component: string) {
-  await assertUnderlinedBelowLetters(demoSection(this.page, component).getByRole("link"), LINK_DEMO_LINKS);
-});
 
 Then("each link of the {string} demo is drawn in its tone:", async function (this: BrowserWorld, component: string, table: DataTable) {
   await assertTones(demoSection(this.page, component), table);

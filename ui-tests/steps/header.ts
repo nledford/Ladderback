@@ -35,11 +35,11 @@ async function extent(part: Locator): Promise<{ top: number; box: number; words:
   });
 }
 
-// The pages' links and Sign out stand on one baseline, and nothing in the
-// header lies under them: an empty line would leave a band below the links,
-// and a part on its own baseline would sit off the line. Nor does Sign out
-// reach above or below the links' boxes, so the line is as tall as the links
-// make it, as with sign-in off, when there is no Sign out.
+// The pages' links and the header's button (the Settings menu's) stand on
+// one baseline, and nothing in the header lies under them: an empty line
+// would leave a band below the links, and a part on its own baseline would
+// sit off the line. Nor does the button reach above or below the links'
+// boxes, so the line is as tall as the links make it.
 async function assertLastLineShared(world: BrowserWorld, signOut: [string, Locator]): Promise<void> {
   const banner = world.page.getByRole("banner");
   const links = await banner.getByRole("navigation").getByRole("link").all();
@@ -73,28 +73,75 @@ async function assertLastLineShared(world: BrowserWorld, signOut: [string, Locat
   assert.ok(inner - lowest <= ROUNDING_PX, `the header holds ${Math.round(inner - lowest)}px under its last line`);
 }
 
-Then("the pages' links and the button {string} share the header's last line", async function (this: BrowserWorld, name: string) {
-  const button = this.page.getByRole("banner").getByRole("button", { name: namePattern(name) });
-  await assertLastLineShared(this, [`the button "${name}"`, button]);
-});
-
-// A pseudolocale words Sign out in letters of its own, so the button is the
-// banner's one button, found by its role alone.
+// A pseudolocale words the Settings button in letters of its own, so the
+// button is the banner's one button shown, found by its role alone.
 Then("the pages' links and the banner's one button share the header's last line", async function (this: BrowserWorld) {
   const button = this.page.getByRole("banner").getByRole("button");
   assert.equal(await button.count(), 1, "the banner has not one button");
   await assertLastLineShared(this, ["the banner's button", button]);
 });
 
-// Sign out isn't a page, so it stands outside the navigation landmark, and
-// so outside its list of pages too.
-Then("the button {string} is in the banner, outside the navigation", async function (this: BrowserWorld, name: string) {
-  const banner = this.page.getByRole("banner");
-  const button = banner.getByRole("button", { name: namePattern(name) });
-  assert.equal(await button.count(), 1, `the banner has no button "${name}"`);
-  const pages = banner.getByRole("navigation");
-  const inside = await pages.evaluate((nav, held) => held !== null && nav.contains(held), await button.elementHandle());
-  assert.equal(inside, false, `the button "${name}" is in the navigation`);
+// The brand, every link of the navigation and the button stand on one
+// line: a level through all of them crosses every box.
+Then(
+  "the link {string}, the pages' links and the button {string} share one line",
+  async function (this: BrowserWorld, linkName: string, buttonName: string) {
+    const banner = this.page.getByRole("banner");
+    const brand = banner.getByRole("link", { name: namePattern(linkName) });
+    const button = banner.getByRole("button", { name: namePattern(buttonName) });
+    await Promise.all([expect(brand).toBeVisible(), expect(button).toBeVisible()]);
+    const links = await banner.getByRole("navigation").getByRole("link").all();
+    assert.ok(links.length > 0, "the navigation shows no links");
+    const parts: [string, Locator][] = [
+      [`the link "${linkName}"`, brand],
+      ...links.map((link, at): [string, Locator] => [`link ${at + 1}`, link]),
+      [`the button "${buttonName}"`, button],
+    ];
+    const boxes = await Promise.all(
+      parts.map(async ([part, locator]) => ({
+        part,
+        ...(await locator.evaluate((el) => {
+          const box = el.getBoundingClientRect();
+          return { top: box.top, bottom: box.bottom };
+        })),
+      })),
+    );
+    const lowestTop = Math.max(...boxes.map(({ top }) => top));
+    const above = boxes.filter(({ bottom }) => bottom <= lowestTop + ROUNDING_PX).map(({ part }) => part);
+    assert.deepEqual(above, [], "parts on a line above the others");
+  },
+);
+
+Then("the navigation shows these links, in order:", async function (this: BrowserWorld, table: DataTable) {
+  const wanted = (table.hashes() as { link: string }[]).map(({ link }) => link);
+  const navigation = this.page.getByRole("banner").getByRole("navigation");
+  await expect(navigation.getByRole("link")).toHaveCount(wanted.length);
+  const shown = await navigation.getByRole("link").allTextContents();
+  assert.deepEqual(
+    shown.map((name) => name.trim()),
+    wanted,
+    "the navigation's links",
+  );
+});
+
+// The Settings menu is part of the navigation, its button after the pages'
+// links in reading order and on the line.
+Then("the button {string} is in the navigation, after its links", async function (this: BrowserWorld, name: string) {
+  const navigation = this.page.getByRole("banner").getByRole("navigation");
+  const button = navigation.getByRole("button", { name: namePattern(name) });
+  await expect(button).toHaveCount(1);
+  const after = await navigation
+    .getByRole("link")
+    .evaluateAll(
+      (links, held) =>
+        held !== null && links.every((link) => (link.compareDocumentPosition(held) & Node.DOCUMENT_POSITION_FOLLOWING) !== 0),
+      await button.elementHandle(),
+    );
+  assert.ok(after, `the button "${name}" comes before a link of the navigation`);
+});
+
+Then("the link {string} is hidden", async function (this: BrowserWorld, name: string) {
+  await expect(this.page.getByRole("banner").getByRole("link", { name: namePattern(name), includeHidden: true })).toBeHidden();
 });
 
 // Focus on a control of the page, not on the main landmark itself (which
@@ -136,7 +183,7 @@ Then("the header keeps the height noted", async function (this: BrowserWorld) {
   assert.ok(Math.abs(now - noted) <= ROUNDING_PX, `the header was ${Math.round(noted)}px tall, now ${Math.round(now)}px`);
 });
 
-// A screen narrower than 41rem (decision 143): the pages' links and Sign out
+// A screen narrower than 54rem (decisions 143, 152): the pages' links and Sign out
 // sit in a panel behind a hamburger button. The header as the reader sees it
 // is the band behind the banner, its parent, padding included.
 Then("the header is under {int} rem tall", async function (this: BrowserWorld, limit: number) {
@@ -154,12 +201,12 @@ Then("the banner shows no button {string}", async function (this: BrowserWorld, 
 // The button that shows the menu is a disclosure: `aria-expanded` says
 // whether the panel shows, and `aria-controls` names it.
 Then("the button {string} is collapsed", async function (this: BrowserWorld, name: string) {
-  const button = this.page.getByRole("banner").getByRole("button", { name: namePattern(name) });
+  const button = this.page.getByRole("button", { name: namePattern(name) });
   await expect(button).toHaveAttribute("aria-expanded", "false");
 });
 
 Then("the button {string} is expanded", async function (this: BrowserWorld, name: string) {
-  const button = this.page.getByRole("banner").getByRole("button", { name: namePattern(name) });
+  const button = this.page.getByRole("button", { name: namePattern(name) });
   await expect(button).toHaveAttribute("aria-expanded", "true");
 });
 
@@ -200,7 +247,7 @@ Then("the button {string} is at least {int} pixels square", async function (this
   assert.ok(Math.abs(box.width - box.height) <= 0.5, `the button "${name}" is ${box.width}px by ${box.height}px`);
 });
 
-// Closed, Sign out is not drawn below 41rem.
+// Closed, Sign out is not drawn below 54rem.
 Then("the button {string} is hidden", async function (this: BrowserWorld, name: string) {
   await expect(this.page.getByRole("banner").getByRole("button", { name: namePattern(name) })).toBeHidden();
 });
