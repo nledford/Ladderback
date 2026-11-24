@@ -240,6 +240,7 @@ Decisions 1–6 recorded 2026-11-08. Decisions 7–12 recorded 2026-11-08 after 
 | [152](decisions/152-a-one-line-header-with-a-settings-menu.md) | A one-line header with a Settings menu, and links standing alone without an underline |
 | [154](decisions/154-removing-a-machine.md) | How a person removes or rejects a machine on the hub, and when a waiting machine lapses |
 | [157](decisions/157-the-hubs-start-window-runs-on-its-monotonic-clock.md) | The hub's start window waits on every agent whose last report named a repository, for 7 days and an hour on its monotonic clock |
+| [158](decisions/158-maintenance-paused.md) | A paired machine shows when its maintenance paused for want of a lease, and tells it after 14 days |
 
 ## 17. Open questions
 
