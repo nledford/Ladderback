@@ -16,7 +16,7 @@ Ladderback backs up your computers on a schedule, shows your backups in one web 
 
 <picture>
   <source media="(prefers-color-scheme: dark)" srcset="docs/guide/start-page-dark.png">
-  <img src="docs/guide/start-page.png" alt="Ladderback's start page: a header with the pages' links and a Settings menu, a note that sign-in is off with a link to set an admin password, and a table of two plans, demo-home and demo-photos, each with the date and time of its next run." width="1280" height="800">
+  <img src="docs/guide/start-page.png" alt="Ladderback's start page: a header with the pages' links and a Settings menu, a note that sign-in is off with a link to set an admin password, and a table of two plans, demo-home and demo-photos, each with the date and time of its next run.">
 </picture>
 
 ## What it does
