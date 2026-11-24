@@ -34,6 +34,7 @@ pub mod log_write;
 pub mod machine;
 pub mod maintenance;
 pub mod notifications;
+pub mod others_snapshots;
 pub mod ownership;
 pub mod pairing;
 pub mod plans;

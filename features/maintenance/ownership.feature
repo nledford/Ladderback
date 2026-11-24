@@ -34,6 +34,18 @@ Feature: The hub gives each repository at most one maintenance owner
   grants nobody else the repository meanwhile, and the holder's own report
   gives the lease back to it. Its holder's lease is renewed all the while.
 
+  A machine also tells the hub, with each repository it reports, whether
+  the repository holds a snapshot another machine's agent made in the last
+  30 days, as the machine's last listing of it showed, judged on the
+  machine's clock at each report: the hub then grants the machine nothing,
+  even when no other paired machine reports the repository. Before each
+  sync with the hub, the machine lists each repository it asks to
+  maintain that it hasn't listed in the last day, once; a listing older
+  than a day, or none, may miss one, so until a listing succeeds the
+  machine says it holds one. The history of the machine's earlier
+  installation counts as another machine's until it is adopted into a plan
+  of this one (§16, decisions 62 and 156).
+
   Background:
     Given a hub that approved the machines "laptop" and "nas"
 
@@ -83,6 +95,77 @@ Feature: The hub gives each repository at most one maintenance owner
     When "laptop" claims the repository "photos", which holds another machine's snapshots
     Then the claim of "laptop" was refused because another machine uses the repository
     And nobody holds the lease on "photos"
+
+  Scenario Outline: A machine tells the hub of another machine's recent snapshots, and is refused the repository
+    Given "laptop" asks to maintain the repository "photos"
+    And "laptop" listed "photos", which holds <snapshots>
+    When "laptop" reports the repositories it uses
+    Then "laptop" told the hub that "photos" holds another machine's snapshots
+    And the claim of "laptop" was refused because another machine uses the repository
+    And nobody holds the lease on "photos"
+
+    Examples:
+      | snapshots                                                     |
+      | a snapshot another machine made 30 days ago                   |
+      | the history its earlier installation made 3 days ago          |
+
+  Scenario Outline: A machine whose repository holds no other machine's recent snapshots is granted it
+    Given "laptop" asks to maintain the repository "photos"
+    And "laptop" listed "photos", which holds <snapshots>
+    When "laptop" reports the repositories it uses
+    Then "laptop" told the hub that "photos" holds no other machine's snapshots
+    And "laptop" holds the lease on "photos" at epoch 1, for 7 days from now
+
+    Examples:
+      | snapshots                                                              |
+      | a snapshot another machine made 31 days ago                            |
+      | only its own snapshots                                                 |
+      | the history its earlier installation made 3 days ago, adopted since    |
+
+  Scenario: Another machine's snapshot stops counting 30 days after it was made, without another listing
+    Given "laptop" asks to maintain the repository "photos"
+    And "laptop" listed "photos", which holds a snapshot another machine made 30 days ago
+    When "laptop" reports the repositories it uses
+    Then the claim of "laptop" was refused because another machine uses the repository
+    When 1 hour passes on the hub
+    And "laptop" reports the repositories it uses
+    Then "laptop" holds the lease on "photos" at epoch 1, for 7 days from now
+
+  Scenario: A machine that hasn't listed a repository since it started says it may hold another machine's snapshots
+    Given "laptop" asks to maintain the repository "photos"
+    When "laptop" reports the repositories it uses
+    Then "laptop" told the hub that "photos" holds another machine's snapshots
+    And the claim of "laptop" was refused because another machine uses the repository
+
+  Scenario: A listing more than a day old no longer counts
+    Given "laptop" asks to maintain the repository "photos"
+    And "laptop" listed "photos", which holds only its own snapshots
+    When 2 days pass on the hub
+    And "laptop" reports the repositories it uses
+    Then "laptop" told the hub that "photos" holds another machine's snapshots
+    And the claim of "laptop" was refused because another machine uses the repository
+
+  Scenario: A machine lists each repository it maintains before it syncs, and is granted one no other machine uses
+    Given "laptop" asks to maintain the repository "photos"
+    And "photos" holds only snapshots "laptop" made
+    When "laptop" syncs with the hub
+    Then "laptop" listed "photos" 1 time
+    And "laptop" told the hub that "photos" holds no other machine's snapshots
+    And "laptop" holds the lease on "photos" at epoch 1, for 7 days from now
+
+  Scenario: A machine lists a repository again before a sync once its listing is more than a day old
+    Given "laptop" asks to maintain the repository "photos"
+    And "photos" holds only snapshots "laptop" made
+    And "laptop" synced with the hub
+    When another machine backs up to "photos"
+    And "laptop" syncs with the hub
+    Then "laptop" listed "photos" 1 time
+    And "laptop" told the hub that "photos" holds no other machine's snapshots
+    When 2 days pass on the hub
+    And "laptop" syncs with the hub
+    Then "laptop" listed "photos" 2 times
+    And "laptop" told the hub that "photos" holds another machine's snapshots
+    And the lease of "laptop" on "photos" wasn't renewed, because another machine uses the repository
 
   Scenario: A lease moves sooner only when its holder releases it
     Given "laptop" holds the lease on "photos"

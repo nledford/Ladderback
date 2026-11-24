@@ -8,21 +8,31 @@
 //! restore over a copy the registry's backup kept. A machine's own side,
 //! whether it may maintain a repository, is its leases use case on an
 //! in-memory cache and a clock of its own, which may run off the hub's and
-//! moves with it. A machine that pairs does so in process, on that cache,
-//! with a hub's pairing use case of its own.
+//! moves with it; what it sees of its repositories is an engine of
+//! in-memory repositories, listed through its daemon's listings and those
+//! its sync runs before each session. A machine that pairs does so in
+//! process, on that cache, with a hub's pairing use case of its own.
 
 use std::collections::BTreeMap;
 use std::sync::Arc;
 
 use app::fakes::{
-    FakeClock, FakeSigning, InMemoryAgentRegistry, InMemoryIdentity, InMemoryLeaseCache,
-    InMemoryOwnershipRegistry, SeededRandom,
+    FakeClock, FakeSecrets, FakeSigning, InMemoryAgentRegistry, InMemoryConfigStore,
+    InMemoryIdentity, InMemoryLeaseCache, InMemoryOperationStore, InMemoryOwnershipRegistry,
+    ListingEngine, SeededRandom,
 };
 use app::leases::MaintenanceLeases;
+use app::others_snapshots::{ListingsDue, NoteListings, OthersSnapshots};
 use app::ownership::{Reported, RepositoryOwners};
 use app::pairing::{AgentPairing, HubKeys, HubPairing};
-use app::ports::{ClaimDecision, Clock, Identity, OwnershipRegistry};
+use app::ports::{
+    ClaimDecision, Clock, ConfigStore, Engine, EngineEvent, Identity, Job, OwnershipRegistry,
+    RepositoryAccess, SnapshotSummary,
+};
+use app::secrets::ResolveRepository;
+use app::snapshots::ListSnapshots;
 use cucumber::{given, then, when};
+use domain::execution::plan_tags::{AGENT_TAG_PREFIX, PLAN_TAG_PREFIX};
 use domain::fleet::{
     AgentRecord, AgentStatus, Fingerprint, GENERATION, Hostname, HubAddress, HubPin, PublicKey,
     SeedFile, TokenTls,
@@ -31,8 +41,15 @@ use domain::maintenance::{
     ClaimOutcome, ClaimRefused, EpochLower, Grant, Lease, LeaseEpoch, NoLease, ReleaseRefused,
     RepoGrants, RepositoryOwnership, RepositoryReport, RepositoryReports,
 };
-use domain::planning::Maintenance;
-use domain::{AgentId, RepositoryId, SignedDuration, Timestamp, Uuid};
+use domain::planning::{
+    AgentConfig, AgentSettings, GroupBy, Hooks, Maintenance, RepositoryConfig, RepositorySettings,
+};
+use domain::secrets::{SecretRef, SecretValue};
+use domain::{
+    AgentId, OperationId, RepositoryAlias, RepositoryId, SignedDuration, SnapshotId, Timestamp,
+    Uuid,
+};
+use futures::StreamExt;
 
 use super::Agent;
 
@@ -74,13 +91,21 @@ struct PairingHub {
 const EXPORTER: [u8; 32] = [0xee; 32];
 
 /// A machine's own side: its key files, the leases it keeps and their
-/// cache, its clock, and the grants it refused last as below its floor.
+/// cache, its clock, the grants it refused last as below its floor, what
+/// its listings showed of other machines' snapshots, the repositories it
+/// asks to maintain, and what it last told the hub of them.
 struct Holder {
     identity: Arc<InMemoryIdentity>,
     cache: Arc<InMemoryLeaseCache>,
     leases: Arc<MaintenanceLeases>,
     clock: Arc<FakeClock>,
     refused: Vec<EpochLower>,
+    others: Arc<OthersSnapshots>,
+    maintains: Vec<RepositoryId>,
+    told: Vec<RepositoryReport>,
+    /// The repositories as the machine sees them, and how often each was
+    /// listed.
+    engine: Arc<ListingEngine>,
 }
 
 impl Default for OwnershipWorld {
@@ -280,6 +305,10 @@ impl OwnershipWorld {
                 leases,
                 clock,
                 refused: Vec::new(),
+                others: Arc::default(),
+                maintains: Vec::new(),
+                told: Vec::new(),
+                engine: Arc::default(),
             },
         );
     }
@@ -426,10 +455,193 @@ impl OwnershipWorld {
             .expect("the machine is paired");
         self.paired_with = Some(hub);
     }
+
+    /// `machine` lists `repository`, which holds one snapshot `agent`
+    /// tagged, made `days` days ago on its clock, through the listings the
+    /// machine's daemon runs.
+    async fn list(&mut self, machine: &str, repository: &str, agent: AgentId, days: i64) {
+        let id = self.repository(repository);
+        let me = self.machine(machine);
+        let holder = self.holder(machine).await;
+        let made = holder
+            .clock
+            .now()
+            .checked_sub(SignedDuration::from_hours(days * 24))
+            .unwrap();
+        holder
+            .engine
+            .holds(id.clone(), vec![snapshot_of(agent, made)]);
+        let noting = NoteListings::new(
+            holder.engine.clone(),
+            Arc::clone(&holder.others),
+            me,
+            holder.clock.clone(),
+        );
+        let running = noting
+            .run(
+                OperationId::from_uuid(Uuid::from_u128(1)),
+                Job::Ls(access(id)),
+            )
+            .await
+            .expect("the listing runs");
+        let _: Vec<EngineEvent> = running.events.collect().await;
+    }
+
+    /// `machine` syncs with the hub: its sync first lists each repository
+    /// it asks to maintain whose listing doesn't stand, then reports them.
+    async fn sync(&mut self, machine: &str) {
+        let me = self.machine(machine);
+        let names: BTreeMap<RepositoryId, String> = self
+            .repositories
+            .iter()
+            .map(|(name, id)| (id.clone(), name.clone()))
+            .collect();
+        let holder = self.holder(machine).await;
+        let config = Arc::new(InMemoryConfigStore::new());
+        config
+            .save(&maintaining(&holder.maintains, &names))
+            .await
+            .expect("the configuration is saved");
+        let listing = ListSnapshots::new(
+            Arc::new(NoteListings::new(
+                holder.engine.clone(),
+                Arc::clone(&holder.others),
+                me,
+                holder.clock.clone(),
+            )),
+            holder.clock.clone(),
+            ResolveRepository::new(Arc::new(FakeSecrets::default())),
+            Arc::default(),
+        );
+        ListingsDue::new(
+            config,
+            Arc::new(InMemoryOperationStore::new()),
+            Arc::clone(&holder.others),
+            listing,
+            Arc::new(SeededRandom::new(1)),
+            me,
+            holder.clock.clone(),
+        )
+        .list()
+        .await;
+        self.report_uses(machine).await;
+    }
+
+    /// `machine` reports every repository it asks to maintain, as its sync
+    /// with the hub does, at the time its clock says.
+    async fn report_uses(&mut self, machine: &str) {
+        let me = self.machine(machine);
+        let holder = self.holder(machine).await;
+        let now = holder.clock.now();
+        let told: Vec<RepositoryReport> = holder
+            .maintains
+            .iter()
+            .map(|id| {
+                holder
+                    .others
+                    .report(id.clone(), Maintenance::Local, &me, now)
+            })
+            .collect();
+        holder.told.clone_from(&told);
+        self.report(machine, told).await;
+    }
+
+    /// What `machine` last told the hub of `repository`.
+    async fn told(&mut self, machine: &str, repository: &str) -> RepositoryReport {
+        let id = self.repository(repository);
+        self.holder(machine)
+            .await
+            .told
+            .iter()
+            .find(|report| report.repository == id)
+            .cloned()
+            .expect("the machine reported the repository")
+    }
 }
 
 fn epoch(number: u64) -> LeaseEpoch {
     LeaseEpoch::new(number).expect("an epoch above 0")
+}
+
+/// Another machine's agent.
+fn another_machine() -> AgentId {
+    AgentId::from_uuid(Uuid::from_u128(0xa0))
+}
+
+/// The agent of a machine's earlier installation, before it was
+/// reinstalled under a new machine ID.
+fn earlier_installation() -> AgentId {
+    AgentId::from_uuid(Uuid::from_u128(0xe0))
+}
+
+/// A snapshot `agent`'s plan `home` made at `time`.
+fn snapshot_of(agent: AgentId, time: Timestamp) -> SnapshotSummary {
+    SnapshotSummary {
+        id: SnapshotId::parse(&"5".repeat(64)).unwrap(),
+        time,
+        offset: domain::Offset::UTC,
+        hostname: "laptop".to_owned(),
+        label: String::new(),
+        tags: vec![
+            format!("{PLAN_TAG_PREFIX}home"),
+            format!("{AGENT_TAG_PREFIX}{}", agent.as_uuid().hyphenated()),
+        ],
+        paths: vec!["/home/demo".to_owned()],
+        paths_truncated: false,
+        tags_truncated: false,
+    }
+}
+
+/// A configuration that asks to maintain each of `repositories` here, under
+/// its name in `names`.
+fn maintaining(
+    repositories: &[RepositoryId],
+    names: &BTreeMap<RepositoryId, String>,
+) -> AgentConfig {
+    let entries = repositories
+        .iter()
+        .map(|id| {
+            let name = names.get(id).expect("a named repository");
+            let entry = RepositoryConfig {
+                locations: Default::default(),
+                id: Some(id.clone()),
+                settings: RepositorySettings {
+                    repository: format!("/srv/{name}"),
+                    repo_hot: None,
+                    password: SecretRef::Inline(SecretValue::new("demo-password")),
+                    options: BTreeMap::new(),
+                    options_hot: BTreeMap::new(),
+                    options_cold: BTreeMap::new(),
+                },
+                maintenance: Maintenance::Local,
+                group_by: GroupBy::default(),
+                hooks: Hooks::default(),
+            };
+            (RepositoryAlias::parse(name).expect("an alias"), entry)
+        })
+        .collect();
+    AgentConfig::new(
+        AgentSettings::default(),
+        Hooks::default(),
+        entries,
+        Vec::new(),
+    )
+    .expect("a valid configuration")
+}
+
+/// The access a listing of the repository `id` opens it with.
+fn access(id: RepositoryId) -> RepositoryAccess {
+    RepositoryAccess {
+        repository: "/srv/photos".to_owned(),
+        repo_hot: None,
+        password: SecretValue::new("demo-password"),
+        options: BTreeMap::new(),
+        options_hot: BTreeMap::new(),
+        options_cold: BTreeMap::new(),
+        secrets: Vec::new(),
+        id: Some(id),
+        entry: None,
+    }
 }
 
 #[given(expr = "a hub that approved the machines {string} and {string}")]
@@ -916,4 +1128,101 @@ async fn refused_lower(world: &mut Agent, machine: String, repository: String) {
         matches!(refused.as_slice(), [EpochLower { repository, .. }] if *repository == id),
         "{refused:?}"
     );
+}
+
+#[given(expr = "{string} asks to maintain the repository {string}")]
+async fn asks_to_maintain(world: &mut Agent, machine: String, repository: String) {
+    let id = world.ownership.repository(&repository);
+    world.ownership.holder(&machine).await.maintains.push(id);
+}
+
+#[given(
+    expr = "{string} listed {string}, which holds a snapshot another machine made {int} days ago"
+)]
+async fn listed_another_machines(
+    world: &mut Agent,
+    machine: String,
+    repository: String,
+    days: i64,
+) {
+    world
+        .ownership
+        .list(&machine, &repository, another_machine(), days)
+        .await;
+}
+
+#[given(expr = "{string} listed {string}, which holds only its own snapshots")]
+async fn listed_its_own(world: &mut Agent, machine: String, repository: String) {
+    let me = world.ownership.machine(&machine);
+    world.ownership.list(&machine, &repository, me, 1).await;
+}
+
+#[given(
+    expr = "{string} listed {string}, which holds the history its earlier installation made {int} days ago"
+)]
+async fn listed_earlier_history(world: &mut Agent, machine: String, repository: String, days: i64) {
+    world
+        .ownership
+        .list(&machine, &repository, earlier_installation(), days)
+        .await;
+}
+
+/// An adoption rewrites the history under this machine's agent tag (§16,
+/// decision 62), so the listing after it shows this machine's tag.
+#[given(
+    expr = "{string} listed {string}, which holds the history its earlier installation made {int} days ago, adopted since"
+)]
+async fn listed_adopted_history(world: &mut Agent, machine: String, repository: String, days: i64) {
+    let me = world.ownership.machine(&machine);
+    world.ownership.list(&machine, &repository, me, days).await;
+}
+
+#[when(expr = "{string} reports the repositories it uses")]
+async fn reports_its_repositories(world: &mut Agent, machine: String) {
+    world.ownership.report_uses(&machine).await;
+}
+
+#[then(expr = "{string} told the hub that {string} holds another machine's snapshots")]
+async fn told_others(world: &mut Agent, machine: String, repository: String) {
+    let told = world.ownership.told(&machine, &repository).await;
+    assert!(told.holds_other_agents_snapshots, "{told:?}");
+}
+
+#[then(expr = "{string} told the hub that {string} holds no other machine's snapshots")]
+async fn told_no_others(world: &mut Agent, machine: String, repository: String) {
+    let told = world.ownership.told(&machine, &repository).await;
+    assert!(!told.holds_other_agents_snapshots, "{told:?}");
+}
+
+#[given(expr = "{string} holds only snapshots {string} made")]
+async fn holds_only_own(world: &mut Agent, repository: String, machine: String) {
+    let id = world.ownership.repository(&repository);
+    let me = world.ownership.machine(&machine);
+    let holder = world.ownership.holder(&machine).await;
+    let made = holder.clock.now() - SignedDuration::from_hours(24);
+    holder.engine.holds(id, vec![snapshot_of(me, made)]);
+}
+
+#[given(expr = "{string} synced with the hub")]
+#[when(expr = "{string} syncs with the hub")]
+async fn syncs(world: &mut Agent, machine: String) {
+    world.ownership.sync(&machine).await;
+}
+
+#[when(expr = "another machine backs up to {string}")]
+async fn another_backs_up(world: &mut Agent, repository: String) {
+    let id = world.ownership.repository(&repository);
+    for holder in world.ownership.holders.values() {
+        let made = holder.clock.now();
+        holder
+            .engine
+            .holds(id.clone(), vec![snapshot_of(another_machine(), made)]);
+    }
+}
+
+#[then(expr = "{string} listed {string} {int} time(s)")]
+async fn listed_times(world: &mut Agent, machine: String, repository: String, times: usize) {
+    let id = world.ownership.repository(&repository);
+    let holder = world.ownership.holder(&machine).await;
+    assert_eq!(holder.engine.listings(&id), times);
 }
