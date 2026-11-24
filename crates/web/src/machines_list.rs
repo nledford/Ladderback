@@ -200,6 +200,13 @@ fn of_status(agents: &[HubAgentDto], status: AgentStatusDto) -> Vec<HubAgentDto>
         .collect()
 }
 
+/// How long `seconds` reads, in milliseconds: the hub counts whole seconds,
+/// so a status that began under a second ago reads as one second, never as
+/// "0 ms".
+pub(crate) fn shown_ms(seconds: u64) -> u64 {
+    seconds.max(1).saturating_mul(1000)
+}
+
 /// Marks `agent_id` approved just now.
 fn mark_approved(agents: &mut [HubAgentDto], agent_id: &str) {
     for agent in agents.iter_mut().filter(|agent| agent.agent_id == agent_id) {
@@ -760,6 +767,14 @@ mod tests {
             assert_eq!(command[..2], ["ladderback", "pairing-token"], "{hostname}");
             assert_eq!(command[2..], *last, "{hostname}");
         }
+    }
+
+    #[test]
+    fn a_status_under_a_second_old_reads_as_one_second() {
+        assert_eq!(shown_ms(0), 1000);
+        assert_eq!(shown_ms(1), 1000);
+        assert_eq!(shown_ms(65), 65_000);
+        assert_eq!(shown_ms(u64::MAX), u64::MAX);
     }
 
     #[test]

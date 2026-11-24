@@ -50,7 +50,7 @@ use crate::components::{
     focus_element, hand_focus_when_gone,
 };
 use crate::live::{reply, say};
-use crate::machines_list::{Heard, Listed, heard};
+use crate::machines_list::{Heard, Listed, heard, shown_ms};
 use crate::pause;
 use crate::repositories::Sentence;
 use crate::routes::{refused_sentence, text_with};
@@ -935,24 +935,4 @@ fn approved_columns(
             action,
         ],
     )
-}
-
-/// How long `seconds` reads, in milliseconds: the hub counts whole seconds,
-/// so a status that began under a second ago reads as one second, never as
-/// "0 ms".
-fn shown_ms(seconds: u64) -> u64 {
-    seconds.max(1).saturating_mul(1000)
-}
-
-#[cfg(test)]
-mod tests {
-    use super::shown_ms;
-
-    #[test]
-    fn a_status_under_a_second_old_reads_as_one_second() {
-        assert_eq!(shown_ms(0), 1000);
-        assert_eq!(shown_ms(1), 1000);
-        assert_eq!(shown_ms(65), 65_000);
-        assert_eq!(shown_ms(u64::MAX), u64::MAX);
-    }
 }
