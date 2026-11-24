@@ -1,7 +1,8 @@
 //! Whether this machine's data folder was copied from another computer
 //! (technical design §7.1; §16, decision 144; #296), or its hub refused it
-//! as a second computer under its machine ID (decision 150; #1462). The
-//! machine ID lives in the data folder, so a copy of the folder on another
+//! as a second computer under its machine ID (decision 150; #1462), or
+//! removed it (decision 154; #1489). The machine ID lives in the data
+//! folder, so a copy of the folder on another
 //! computer (a restored backup of a home folder, a cloned disk or virtual
 //! machine) runs under the same ID, and its forget would take the first
 //! machine's snapshots for its own (I1, I6). The machine identifier the
@@ -58,33 +59,50 @@ pub enum Standing {
 impl Standing {
     /// Whether the machine runs the maintenance its configuration asks for.
     pub fn maintains(self) -> bool {
-        matches!(self, Self::Same | Self::RefusedByHub | Self::Unread)
+        matches!(
+            self,
+            Self::Same | Self::RefusedByHub | Self::RemovedByHub | Self::Unread
+        )
     }
 
     /// Whether the person may take a new machine ID: on a copied data
-    /// folder, or on a machine its hub refused as a second computer.
+    /// folder, or on a machine its hub refused as a second computer or
+    /// removed.
     pub fn offers_new_id(self) -> bool {
-        matches!(self, Self::Copied | Self::RefusedByHub)
+        matches!(self, Self::Copied | Self::RefusedByHub | Self::RemovedByHub)
     }
 
     /// Where the machine stands once the hub it paired with refused it,
-    /// signed, as a second computer: refused, when it stood as usual. A copy
+    /// signed, as a second computer: refused, when it stood as usual or
+    /// removed (a hub that got that far no longer holds it removed). A copy
     /// stays one, a new ID taken stays taken, and a machine whose identifier
     /// couldn't be read at its start ignores the refusal: it can't take a
     /// new ID without one.
     fn refused_by_hub(self) -> Self {
         match self {
-            Self::Same => Self::RefusedByHub,
+            Self::Same | Self::RemovedByHub => Self::RefusedByHub,
+            other => other,
+        }
+    }
+
+    /// Where the machine stands once the hub it paired with removed it, or
+    /// rejected it while it waited, signed: removed, when it stood as usual
+    /// or refused. A copy stays one, a new ID taken stays taken, and a
+    /// machine whose identifier couldn't be read can't take a new ID
+    /// without one.
+    fn removed_by_hub(self) -> Self {
+        match self {
+            Self::Same | Self::RefusedByHub => Self::RemovedByHub,
             other => other,
         }
     }
 
     /// Where the machine stands once the hub it paired with took it: as
-    /// usual, when it stood refused. A copied data folder stays stopped
-    /// whatever its hub says (I1).
+    /// usual, when it stood refused or removed. A copied data folder stays
+    /// stopped whatever its hub says (I1).
     fn taken_by_hub(self) -> Self {
         match self {
-            Self::RefusedByHub => Self::Same,
+            Self::RefusedByHub | Self::RemovedByHub => Self::Same,
             other => other,
         }
     }
@@ -124,7 +142,7 @@ impl MachineStanding {
     /// The hub this machine paired with removed it, or rejected it while it
     /// waited for approval, signed.
     pub fn hub_removed(&self) {
-        todo!()
+        self.change(Standing::removed_by_hub);
     }
 
     /// The hub this machine paired with took it.
@@ -193,7 +211,8 @@ pub fn check_at_start(machine: &dyn ThisMachine) -> Found {
 #[derive(Debug, PartialEq)]
 pub enum NewIdError {
     /// The data folder isn't a copy and its hub hasn't refused it as a
-    /// second computer, or a new ID was taken already: the ID stays.
+    /// second computer nor removed it, or a new ID was taken already: the
+    /// ID stays.
     NotCopied,
     /// The configuration couldn't be read or written: nothing changed.
     Config(ConfigError),
@@ -211,13 +230,14 @@ pub enum NewIdError {
     Machine(MachineError),
 }
 
-/// "This is a new computer: take a new ID", for a copied data folder or a
-/// machine its hub refused as a second computer: the machine gives up
-/// maintaining every repository it maintained, so it and the other
+/// Taking a new machine ID, for a copied data folder, a machine its hub
+/// refused as a second computer, or one its hub removed: the machine gives
+/// up maintaining every repository it maintained, so it and another
 /// computer under its machine ID never both maintain one (I1), then takes
 /// a new machine ID and records this computer's identifier beside it. Its
 /// plans stay; its backups carry the new ID from the next start, and the
-/// snapshots under the old ID stay the other computer's (I6).
+/// snapshots under the old ID stay under it (I6): the other computer's, or,
+/// for a removed machine, until the person adopts them.
 pub struct TakeNewId {
     machine: Arc<dyn ThisMachine>,
     standing: Arc<MachineStanding>,

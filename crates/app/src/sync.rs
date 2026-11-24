@@ -14,7 +14,8 @@ use std::sync::{Arc, Mutex, PoisonError};
 use api::UiEvent;
 use domain::fleet::{
     AckRefused, AgentReport, Approval, EpochSeconds, Happening, Hostname, MAX_OUTBOX_REPORTS,
-    MachineCheck, MachineZone, PlansReport, ReportedProgress, SEND_WINDOW, WireName, check_ack,
+    MachineCheck, MachineZone, PairRefusal, PlansReport, ReportedProgress, SEND_WINDOW, WireName,
+    check_ack,
 };
 use domain::maintenance::RepositoryReports;
 use domain::planning::Maintenance;
@@ -401,6 +402,13 @@ impl SyncWithHub {
                     if refused.code == MachineCheck::refusal() =>
                 {
                     standing.hub_refused();
+                }
+                // A person removed this machine on its hub, or rejected it
+                // while it waited: the hub never takes its ID again.
+                Err(ConnectFailure::Refused(refused))
+                    if refused.code == PairRefusal::AgentRemoved.code() =>
+                {
+                    standing.hub_removed();
                 }
                 Err(_) => {}
             }
