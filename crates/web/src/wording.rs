@@ -439,7 +439,7 @@ mod tests {
             .map(|words| text_with(&Localizer::new(&[]), words.id, &words.args));
         assert!(
             shown.as_deref().is_some_and(|shown| shown.starts_with(
-                "Maintenance from this machine has been paused since Nov 1, 2026, because"
+                "Maintenance from this machine has been paused since 2026-11-01 UTC, because"
             )),
             "{shown:?}"
         );
