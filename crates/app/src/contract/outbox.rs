@@ -43,11 +43,13 @@ pub async fn run(harness: &dyn OutboxHarness) {
     reports_and_their_places_outlive_the_agent(harness).await;
     racing_appends_each_get_a_place(harness).await;
     a_failure_keeps_its_code(harness).await;
+    a_cancel_is_kept(harness).await;
     a_full_outbox_says_which_start_gave_way(harness).await;
 }
 
 pub async fn run_inbox(harness: &dyn ReportInboxHarness) {
     a_report_is_taken_once(harness).await;
+    a_cancel_is_taken(harness).await;
     a_gap_is_no_reason_to_refuse(harness).await;
     a_report_far_behind_the_last_taken_is_behind(harness).await;
     each_agent_and_epoch_counts_alone(harness).await;
@@ -56,7 +58,11 @@ pub async fn run_inbox(harness: &dyn ReportInboxHarness) {
     racing_deliveries_are_taken_once(harness).await;
     past_the_cap_the_oldest_give_way_and_are_counted(harness).await;
     the_latest_reports_are_read_with_the_count_let_go_of(harness).await;
+    live::the_latest_plans_are_kept_in_place_of_the_last(harness).await;
+    live::the_latest_progress_is_kept_in_place_of_the_last(harness).await;
 }
+
+mod live;
 
 /// The value of `result`, after a failed assertion if it is an error.
 fn ok<T, E: fmt::Debug>(result: Result<T, E>, what: &str) -> Option<T> {
@@ -235,6 +241,15 @@ async fn a_failure_keeps_its_code(harness: &dyn OutboxHarness) {
     assert_eq!(held.first().map(|entry| &entry.report), Some(&failed));
 }
 
+/// A cancel waits like any other end, and reads back as a cancel.
+async fn a_cancel_is_kept(harness: &dyn OutboxHarness) {
+    let outbox = harness.empty().await;
+    let cancelled = report(9, Happening::Cancelled);
+    appended(outbox.as_ref(), &cancelled).await;
+    let held = waiting(outbox.as_ref()).await;
+    assert_eq!(held.first().map(|entry| &entry.report), Some(&cancelled));
+}
+
 /// Full, the outbox gives up its oldest start for a new report and says
 /// which it gave up, so the agent can log it; an end before that start
 /// stays (`domain::fleet::admit`).
@@ -381,6 +396,18 @@ async fn a_report_is_taken_once(harness: &dyn ReportInboxHarness) {
         reports(inbox, AGENT).await,
         [entry(EPOCH, 1), entry(EPOCH, 2)]
     );
+}
+
+/// The hub keeps a cancel as it took it.
+async fn a_cancel_is_taken(harness: &dyn ReportInboxHarness) {
+    let inbox = harness.empty().await;
+    let inbox = inbox.as_ref();
+    let cancelled = OutboxEntry {
+        report: report(1, Happening::Cancelled),
+        ..entry(EPOCH, 1)
+    };
+    assert_eq!(taken(inbox, AGENT, &cancelled).await, Some(Ingest::New));
+    assert_eq!(reports(inbox, AGENT).await, [cancelled]);
 }
 
 async fn a_gap_is_no_reason_to_refuse(harness: &dyn ReportInboxHarness) {

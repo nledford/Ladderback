@@ -176,19 +176,24 @@ impl OperationsState {
             }
             // The fleet's comings and goings, a machine's approval and
             // reports, a retry planned and a proposal's status are no row of
-            // this table: the retry is one once it is queued.
+            // this table: the retry is one once it is queued. A cancel is
+            // the settle-poll's, which the page that cancelled runs (§4.4).
             UiEvent::AgentOnline { .. }
             | UiEvent::AgentOffline { .. }
             | UiEvent::AgentPending { .. }
             | UiEvent::AgentApproved { .. }
+            | UiEvent::AgentRemoved { .. }
             | UiEvent::AgentReported { .. }
+            | UiEvent::AgentPlans { .. }
+            | UiEvent::AgentProgress { .. }
             | UiEvent::BackupRetrying { .. }
+            | UiEvent::OperationCancelled { .. }
             | UiEvent::ProposalChanged { .. } => {}
         }
     }
 
     /// Merges a page the page just re-read: the settle-poll after a cancel
-    /// (a cancelled run emits no `UiEvent`), the re-read a run's end asks for,
+    /// (the page takes no news from a cancel's `UiEvent`), the re-read a run's end asks for,
     /// the one each opened stream starts and the refetch a reconnect starts
     /// from. The page is the source of truth for what it holds, but it never
     /// regresses a status an event advanced — the store can answer with what
@@ -994,8 +999,8 @@ mod tests {
 
     #[test]
     fn a_merged_page_adopts_the_end_the_store_has_and_the_page_does_not_hold() {
-        // The settle-poll after a cancel: no event ends a cancelled run, the
-        // re-read is where the end comes from.
+        // The settle-poll after a cancel: the page takes no news from a
+        // cancel's event, the re-read is where the end comes from.
         let mut state =
             OperationsState::from_history(vec![summary(FIRST, "running", true, false)], None);
         state.merge(page(vec![summary(FIRST, "cancelled", true, true)], None));

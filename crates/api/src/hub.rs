@@ -144,6 +144,12 @@ pub fn agent_approval_path(agent_id: &str) -> String {
     format!("{HUB_AGENTS_PATH}/{agent_id}/approval")
 }
 
+/// Where the page rejects the waiting agent `agent_id`, or removes it once
+/// approved: `POST` a [`RemoveAgentDto`], answered `204 No Content`.
+pub fn agent_removal_path(agent_id: &str) -> String {
+    format!("{HUB_AGENTS_PATH}/{agent_id}/removal")
+}
+
 /// Whether a registered agent waits for a person's approval or has it.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "kebab-case")]
@@ -207,6 +213,7 @@ pub enum MachineOutcomeDto {
     Running,
     Succeeded,
     Failed,
+    Cancelled,
 }
 
 /// One of a machine's latest operations, from its reports (§7.2): when it
@@ -242,6 +249,13 @@ pub struct HubMachineDto {
     pub zone: Option<String>,
     pub reports_dropped: u64,
     pub operations: Vec<MachineOperationDto>,
+    /// Its plans as it last reported them; none before it reported any.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub plans: Option<MachinePlansDto>,
+    /// The latest progress of the operation it runs, while the hub's
+    /// reports say it runs.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub progress: Option<MachineProgressDto>,
 }
 
 /// The hub's approved machines, oldest first.
@@ -269,4 +283,63 @@ impl std::fmt::Debug for ApproveAgentDto {
             .field("key", &self.key)
             .finish_non_exhaustive()
     }
+}
+
+/// A rejection or removal asked for: the key the person saw in the
+/// machine's row (64 hex digits, as [`HubAgentDto::key`]), so the hub
+/// removes that agent with that key and no other. No step-up: a removal
+/// only takes authority away.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "kebab-case", deny_unknown_fields)]
+pub struct RemoveAgentDto {
+    pub key: String,
+}
+
+/// A machine's plans as it last reported them (§7.2): at most
+/// `domain::fleet::MAX_PLANS_REPORTED`, in its configuration's order, and
+/// how many more it has.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "kebab-case", deny_unknown_fields)]
+pub struct MachinePlansDto {
+    pub plans: Vec<MachinePlanDto>,
+    pub left_out: u64,
+}
+
+/// One of a machine's plans: its ID, its last run, and its next planned
+/// run by the machine's clock (RFC 3339), each none when it has none.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "kebab-case", deny_unknown_fields)]
+pub struct MachinePlanDto {
+    pub plan: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub last_run: Option<MachinePlanRunDto>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub next_run: Option<String>,
+}
+
+/// A plan's last run: when it last changed (RFC 3339) and its status, as
+/// the history page names it: `queued`, `running`, `succeeded`,
+/// `succeeded-with-warnings`, `failed` or `cancelled`.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "kebab-case", deny_unknown_fields)]
+pub struct MachinePlanRunDto {
+    pub at: String,
+    pub status: String,
+}
+
+/// The latest progress of a machine's running operation `operation`, as
+/// the local Operations page shows one (decision 83): its step, what it
+/// counts, how far it came of its total, and when the machine heard it
+/// (RFC 3339).
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "kebab-case", deny_unknown_fields)]
+pub struct MachineProgressDto {
+    pub operation: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub step: Option<crate::OperationStep>,
+    pub unit: crate::ProgressUnit,
+    pub current: u64,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub total: Option<u64>,
+    pub at: String,
 }

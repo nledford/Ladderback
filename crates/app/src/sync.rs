@@ -5,14 +5,16 @@
 //! acknowledged, in order, once the hub has approved the agent. Delivery is
 //! at least once: a report leaves the outbox only when the hub's signed
 //! acknowledgement covers it, and the hub takes a report it took before as
-//! a duplicate.
+//! a duplicate. A session then tells the hub the agent's plans when they
+//! changed since it last acknowledged them, and the progress of the
+//! operation it runs (`live`).
 
-use std::sync::Arc;
+use std::sync::{Arc, Mutex, PoisonError};
 
 use api::UiEvent;
 use domain::fleet::{
     AckRefused, AgentReport, Approval, EpochSeconds, Happening, Hostname, MAX_OUTBOX_REPORTS,
-    MachineCheck, MachineZone, SEND_WINDOW, WireName, check_ack,
+    MachineCheck, MachineZone, PlansReport, ReportedProgress, SEND_WINDOW, WireName, check_ack,
 };
 use domain::maintenance::{RepositoryReport, RepositoryReports};
 use domain::planning::Maintenance;
@@ -22,6 +24,10 @@ use crate::leases::MaintenanceLeases;
 use crate::machine::MachineStanding;
 use crate::pairing::{AgentChannel, ChannelError, ConnectFailure, ConnectToHub, Connected};
 use crate::ports::{Appended, Clock, ConfigError, ConfigStore, OperationStore, Outbox, StoreError};
+
+mod live;
+
+pub use live::{LiveProgress, PLANS_CHECK, PROGRESS_EVERY, ReadPlans};
 
 /// How long the agent waits before it tries its hub again after the first
 /// failure; each failure after doubles it, up to [`LONGEST_BACKOFF`].
@@ -61,6 +67,10 @@ impl RecordReports {
                 operation,
                 finished_at,
             } => (operation, Happening::Succeeded, finished_at),
+            UiEvent::OperationCancelled {
+                operation,
+                finished_at,
+            } => (operation, Happening::Cancelled, finished_at),
             UiEvent::OperationFailed {
                 operation,
                 code,
@@ -136,7 +146,7 @@ pub enum SyncFailure {
 }
 
 /// The agent's side of the sync: one session at a time with the hub it
-/// pinned, replaying its outbox.
+/// pinned, replaying its outbox, then telling its plans and progress.
 pub struct SyncWithHub {
     /// Where the machine stands, which each session tells what the hub made
     /// of it, when the sync is given it.
@@ -149,6 +159,9 @@ pub struct SyncWithHub {
     zone: Option<MachineZone>,
     /// The machine's leases, when it asks its hub for them.
     leases: Option<Leasing>,
+    plans: Option<ReadPlans>,
+    progress: Option<Arc<LiveProgress>>,
+    told: Mutex<Told>,
 }
 
 /// What a session needs to ask for the machine's leases: the repositories
@@ -158,6 +171,20 @@ struct Leasing {
     config: Arc<dyn ConfigStore>,
     leases: Arc<MaintenanceLeases>,
     operations: Arc<dyn OperationStore>,
+}
+
+/// What the agent told its hub besides its reports, on its monotonic clock.
+#[derive(Default)]
+struct Told {
+    /// The plans the hub last acknowledged; none since the agent started.
+    plans: Option<PlansReport>,
+    /// When the agent last read its plans.
+    plans_read: Option<SignedDuration>,
+    /// Whether the last read of its plans failed, so a streak of failures
+    /// is logged once.
+    plans_unreadable: bool,
+    /// The progress last sent, and when.
+    progress: Option<(ReportedProgress, SignedDuration)>,
 }
 
 impl SyncWithHub {
@@ -178,7 +205,25 @@ impl SyncWithHub {
             hostname,
             zone,
             leases: None,
+            plans: None,
+            progress: None,
+            told: Mutex::new(Told::default()),
         }
+    }
+
+    /// Tells the hub the plans `plans` reads, whenever they changed.
+    #[must_use]
+    pub fn with_plans(mut self, plans: ReadPlans) -> Self {
+        self.plans = Some(plans);
+        self
+    }
+
+    /// Tells the hub the progress `progress` keeps, at most every
+    /// [`PROGRESS_EVERY`].
+    #[must_use]
+    pub fn with_progress(mut self, progress: Arc<LiveProgress>) -> Self {
+        self.progress = Some(progress);
+        self
     }
 
     /// This sync asking, in each session, for the leases on the
@@ -312,8 +357,10 @@ impl SyncWithHub {
 
     /// One session: connects, sends every report not yet acknowledged, in
     /// order, in windows of at most [`SEND_WINDOW`] places ahead of the
-    /// hub's acknowledgements, and returns once the hub acknowledged the
-    /// last of them. A pending agent sends nothing.
+    /// hub's acknowledgements, and once the hub acknowledged the last of
+    /// them, the agent's plans when they changed since the hub last
+    /// acknowledged them, waiting for that acknowledgement, and then the
+    /// latest progress when one is due. A pending agent sends nothing.
     pub async fn sync_once(&self) -> Result<Synced, SyncFailure> {
         let connected = self
             .connect
@@ -341,6 +388,31 @@ impl SyncWithHub {
             self.exchange_leases(leasing, &connected, &mut channel)
                 .await?;
         }
+        let sent = self.replay(&mut channel).await?;
+        if let Some(plans) = self.plans_to_tell().await {
+            channel
+                .send_plans(&plans)
+                .await
+                .map_err(SyncFailure::Channel)?;
+            channel
+                .receive_plans_ack()
+                .await
+                .map_err(SyncFailure::Channel)?;
+            self.told().plans = Some(plans);
+        }
+        if let Some(progress) = self.progress_to_tell() {
+            channel
+                .send_progress(&progress)
+                .await
+                .map_err(SyncFailure::Channel)?;
+            self.told().progress = Some((progress, self.clock.monotonic()));
+        }
+        Ok(Synced::Replayed { sent })
+    }
+
+    /// Sends every report not yet acknowledged, and returns how many once
+    /// the hub acknowledged the last of them.
+    async fn replay(&self, channel: &mut AgentChannel) -> Result<u64, SyncFailure> {
         let mut sent = 0;
         // Each window starts after the last place acknowledged, so a session
         // goes through the outbox once even if acknowledging kept nothing.
@@ -359,7 +431,7 @@ impl SyncWithHub {
                 window.retain(|entry| entry.seq.get().saturating_sub(start) < span);
             }
             let (Some(first), Some(last)) = (window.first(), window.last()) else {
-                return Ok(Synced::Replayed { sent });
+                return Ok(sent);
             };
             let (epoch, through) = (first.epoch, last.seq);
             after = Some(through);
@@ -384,10 +456,64 @@ impl SyncWithHub {
         }
     }
 
+    fn told(&self) -> std::sync::MutexGuard<'_, Told> {
+        self.told.lock().unwrap_or_else(PoisonError::into_inner)
+    }
+
+    /// The agent's plans as they stand now, when they differ from those the
+    /// hub last acknowledged; none when they don't, or don't read. A streak
+    /// of failed reads is logged once.
+    async fn plans_to_tell(&self) -> Option<PlansReport> {
+        let read = self.plans.as_ref()?.read().await;
+        let mut told = self.told();
+        told.plans_read = Some(self.clock.monotonic());
+        match read {
+            Ok(plans) => {
+                told.plans_unreadable = false;
+                (told.plans.as_ref() != Some(&plans)).then_some(plans)
+            }
+            Err(error) => {
+                if !told.plans_unreadable {
+                    log::warn!("the plans for the hub couldn't be read: {error:?}");
+                }
+                told.plans_unreadable = true;
+                None
+            }
+        }
+    }
+
+    /// Whether [`PLANS_CHECK`] passed since the agent last read its plans.
+    fn plans_due(&self) -> bool {
+        self.plans.is_some()
+            && self
+                .told()
+                .plans_read
+                .is_none_or(|read| self.clock.monotonic().saturating_sub(read) >= PLANS_CHECK)
+    }
+
+    /// The latest progress, when it isn't the one last sent and
+    /// [`PROGRESS_EVERY`] passed since then.
+    fn progress_to_tell(&self) -> Option<ReportedProgress> {
+        let latest = self.progress.as_ref()?.latest()?;
+        let now = self.clock.monotonic();
+        match &self.told().progress {
+            Some((sent, at)) if *sent == latest || now.saturating_sub(*at) < PROGRESS_EVERY => None,
+            _ => Some(latest),
+        }
+    }
+
+    /// Whether a session has anything to tell the hub besides reports: a
+    /// progress due, or plans that changed once [`PLANS_CHECK`] passed.
+    async fn live_due(&self) -> bool {
+        self.progress_to_tell().is_some()
+            || (self.plans_due() && self.plans_to_tell().await.is_some())
+    }
+
     /// Sessions for as long as the agent runs: whenever its outbox holds a
-    /// report the hub hasn't acknowledged, a session replays it, and the
-    /// outbox is looked at again after [`POLL`]; a sync that asks for the
-    /// machine's leases also holds a session at its start and once
+    /// report the hub hasn't acknowledged, a progress is due, or its plans
+    /// changed when it read them, every [`PLANS_CHECK`], a session tells
+    /// the hub, and the agent looks again after [`POLL`]; a sync that asks
+    /// for the machine's leases also holds a session at its start and once
     /// [`GRANTS_EVERY`] has passed since the last that held, on the
     /// machine's clock either way. A failed session, or one the hub holds
     /// pending, is tried again after [`backoff`]. It never touches the
@@ -420,7 +546,7 @@ impl SyncWithHub {
             // renewed.
             let leases_due = self.leases.is_some()
                 && leased_at.is_none_or(|at| started.duration_since(at).abs() >= GRANTS_EVERY);
-            if !waiting && !leases_due {
+            if !waiting && !leases_due && !self.live_due().await {
                 self.clock.sleep(POLL).await;
                 continue;
             }

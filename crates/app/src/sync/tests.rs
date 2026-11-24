@@ -68,6 +68,25 @@ fn an_operations_start_and_end_are_reports() {
     );
 }
 
+/// A cancel is an end too, which the outbox keeps however full it is.
+#[test]
+fn a_cancel_is_an_end_report() {
+    let cancelled = UiEvent::OperationCancelled {
+        operation: OP.to_owned(),
+        finished_at: "2027-01-15T08:00:09Z".to_owned(),
+    };
+    let report = RecordReports::report_of(&cancelled);
+    assert_eq!(
+        report,
+        Some(AgentReport {
+            op_id: op(),
+            happening: Happening::Cancelled,
+            at: at(1_800_000_009),
+        })
+    );
+    assert!(report.is_some_and(|report| report.kept()));
+}
+
 #[test]
 fn a_failure_reports_its_code_and_none_of_its_arguments() {
     let failed = UiEvent::OperationFailed {

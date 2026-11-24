@@ -152,6 +152,8 @@ dependencies = [
  "domain",
  "futures",
  "log",
+ "serde",
+ "serde_json",
  "testkit",
  "tokio",
  "uuid",

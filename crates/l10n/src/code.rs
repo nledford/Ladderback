@@ -171,6 +171,7 @@ code_messages!(ERRORS, error_message, ErrorCode {
     HubProofInvalid => msg::ERROR_HUB_PROOF_INVALID,
     ProofRefused => msg::ERROR_PROOF_REFUSED,
     PendingLimit => msg::ERROR_PENDING_LIMIT,
+    AgentRemoved => msg::ERROR_AGENT_REMOVED,
     BindingUnavailable => msg::ERROR_BINDING_UNAVAILABLE,
     IdentityConflict => msg::ERROR_IDENTITY_CONFLICT,
     HubUnreachable => msg::ERROR_HUB_UNREACHABLE,

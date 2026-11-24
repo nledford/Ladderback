@@ -1,7 +1,9 @@
 //! Steps for the untagged scenarios of `features/fleet/pairing.feature` and
 //! `features/fleet/connecting.feature`: an agent pairing with its hub, then
 //! connecting to it, both sides run in process on fakes (§7.1, §7.2; §16,
-//! decision 120, "The handshake", "Pairing" and "Pending approval").
+//! decision 120, "The handshake", "Pairing" and "Pending approval"). The
+//! hub lists its agents as its page does, so a waiting agent that lapsed
+//! is gone from them.
 
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -27,6 +29,10 @@ use super::Agent;
 
 #[path = "pairing_dialog.rs"]
 mod dialog;
+#[path = "hub_plans.rs"]
+mod hub_plans;
+#[path = "removing.rs"]
+mod removing;
 #[path = "second_machine.rs"]
 mod second_machine;
 #[path = "sync_replay.rs"]
@@ -204,10 +210,15 @@ pub struct PairingWorld {
             app::pairing::TokenAskRefused,
         >,
     >,
+    /// What the hub answered the last removal asked for on its page.
+    removed: Option<removing::Removal>,
     /// The one host and port the hub answers at, once it answers at one.
     only_at: Option<(&'static str, u16)>,
     /// The sync of the agents' reports (`fleet/sync_replay.feature`).
     syncing: sync_replay::SyncWorld,
+    /// The sync of the first agent's plans and progress
+    /// (`fleet/plans_and_progress.feature`).
+    live: hub_plans::LiveWorld,
 }
 
 impl std::fmt::Debug for PairingWorld {
@@ -294,7 +305,8 @@ impl PairingWorld {
     }
 
     async fn agents(&self) -> Vec<domain::fleet::AgentRecord> {
-        self.hub().registry.agents().await.expect("the agents")
+        let listed = self.hub().pairing.agents().await.expect("the agents");
+        listed.into_iter().map(|listed| listed.record).collect()
     }
 
     /// The second agent as the hub lists it.
@@ -779,6 +791,7 @@ fn refused(agent: &mut Agent, reason: String) {
         "the ID belongs to another key" => "agent-key-mismatch",
         "the hub's key isn't the token's" => "hub-key-mismatch",
         "too many agents wait for approval" => "pending-limit",
+        "the hub removed the agent" => "agent-removed",
         other => panic!("no refusal is named {other:?}"),
     };
     assert_eq!(agent.pairing.refusal_code(), code);

@@ -11,7 +11,7 @@ Decided:
    - after a restart decision 40's recovery ends such a row as `daemon-stopped` though the run succeeded;
    - a maintenance run's repository keeps its I7 slot until then (a page told the forget ended can be refused the next maintenance run as busy);
    - and a stalled log delays the end event by up to 20 s.
-3. **A failure the run finds out itself is announced now**, where only the engine's own `Failed` was: an engine that exited without a result, a deadline that passed, an event out of order, an engine that can't start or doesn't take its job in time, a before-hook that stops the run. A cancelled run still announces nothing.
+3. **A failure the run finds out itself is announced now**, where only the engine's own `Failed` was: an engine that exited without a result, a deadline that passed, an event out of order, an engine that can't start or doesn't take its job in time, a before-hook that stops the run. A cancelled run still announced nothing then; since #1440 it announces `operation-cancelled`, so a paired machine reports the end to its hub, and a page takes no news from it.
 4. **The engine's end for a read** (the identify and list reads, a repository test, init or connect) **is no longer published as an operation's end**, and a forget that runs as several jobs announces once.
 5. **Left as it was:**
    - `failure` still words an engine's rejection of a job as `engine-unavailable` and a hook's failure as `operation-failed`, where the log stores `invalid-job-spec` and `hook-failed`;

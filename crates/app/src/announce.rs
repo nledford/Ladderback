@@ -51,10 +51,8 @@ pub(crate) async fn announce_start(
     }
 }
 
-/// The news that `operation` ended: a success or a failure, with the time it
-/// finished. `None` for an operation that has not ended, and for a cancelled
-/// one, which no page is told of: the page that cancelled it reads the
-/// history until it settles.
+/// The news that `operation` ended: a success, a failure or a cancel, with
+/// the time it finished. `None` for an operation that has not ended.
 pub fn end_of(operation: &Operation) -> Option<UiEvent> {
     let finished_at = operation.finished_at()?.to_string();
     let id = operation.id().as_uuid().hyphenated().to_string();
@@ -74,7 +72,11 @@ pub fn end_of(operation: &Operation) -> Option<UiEvent> {
                 finished_at,
             })
         }
-        OperationStatus::Queued | OperationStatus::Running | OperationStatus::Cancelled => None,
+        OperationStatus::Cancelled => Some(UiEvent::OperationCancelled {
+            operation: id,
+            finished_at,
+        }),
+        OperationStatus::Queued | OperationStatus::Running => None,
     }
 }
 
@@ -453,11 +455,19 @@ mod tests {
         assert_eq!(start_of(&ended, None), None);
     }
 
+    /// A cancel is announced as the operation's end, so a paired machine
+    /// reports it to its hub (§7.2).
     #[test]
-    fn a_cancelled_operation_is_not_announced() {
+    fn a_cancelled_operation_is_announced_with_its_time() {
         let mut operation = running();
         operation.cancel(t(5)).expect("a running operation cancels");
-        assert_eq!(end_of(&operation), None);
+        assert_eq!(
+            end_of(&operation),
+            Some(UiEvent::OperationCancelled {
+                operation: operation.id().as_uuid().hyphenated().to_string(),
+                finished_at: t(5).to_string(),
+            })
+        );
     }
 
     #[test]

@@ -46,8 +46,8 @@ use crate::queue::Place;
 ///   [`Finished::recording_errors`] and nothing else changes.
 /// - With a bus ([`Self::with_events`]) the run announces how the operation
 ///   ended, once, after the ending hooks and the last write to the log, so a
-///   page that reads the history on the news finds the end there; a cancelled
-///   operation is not announced (§4.4).
+///   page that reads the history on the news finds the end there; a cancel
+///   is announced too, for the hub's report (§4.4, §7.2).
 pub struct RunOperation {
     engine: Arc<dyn Engine>,
     clock: Arc<dyn Clock>,

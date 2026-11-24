@@ -456,7 +456,7 @@ impl RunMaintenance {
     /// Announces how each run ends on `events` (§4.4): once, after the last
     /// write to the log, whether the log took that write or not. A run of
     /// several engine jobs ends once, and so does a run that reads the
-    /// repository first; a cancelled run is not announced.
+    /// repository first; a cancelled run is announced as cancelled.
     pub fn with_events(mut self, events: Arc<dyn EventBus>) -> Self {
         self.events = Some(events);
         self

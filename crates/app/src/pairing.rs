@@ -20,7 +20,8 @@ pub use client::{PairFailure, PairWithHub};
 pub use connection::{ConnectFailure, ConnectToHub, Connected};
 pub use hub::{
     AgentsListed, ApprovalAsk, HelloAnswer, HubHandshake, HubKeys, HubPairing, HubPairingError,
-    HubStart, Machine, MadeToken, MessageRefused, ProofAnswer, TokenAsk, TokenAskRefused,
+    HubStart, Machine, MadeToken, MessageRefused, ProofAnswer, RemovalAsk, TokenAsk,
+    TokenAskRefused, progress_dto, time_of,
 };
 pub use session::{BINDING_UNAVAILABLE, HubSession, HubStep, PROTOCOL_ERROR, SEQUENCE_ERROR};
 pub use state::PairingState;

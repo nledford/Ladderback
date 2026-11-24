@@ -206,6 +206,21 @@ impl Background {
         Arc::clone(&self.runner.machine)
     }
 
+    /// What a paired machine tells its hub of its plans (§7.2): their
+    /// standing in the log this daemon keeps, and their planned runs.
+    #[cfg(feature = "hub")]
+    pub(crate) fn read_plans(&self) -> app::sync::ReadPlans {
+        app::sync::ReadPlans::new(
+            app::status::ReadStatus::new(
+                Arc::clone(&self.config),
+                Arc::clone(&self.store),
+                Arc::new(SystemClock),
+                domain::TimeZone::system(),
+            ),
+            Arc::clone(&self.schedules),
+        )
+    }
+
     /// What the orderly stop freezes ([`Self::runs`]) of a daemon that
     /// leaves the queue's leftovers and the scheduler unstarted, as a
     /// headless or scratch session does: the backups queued before it stay

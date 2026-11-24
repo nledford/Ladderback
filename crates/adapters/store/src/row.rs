@@ -40,7 +40,7 @@ mod hub;
 
 #[cfg(feature = "hub")]
 pub(crate) use hub::{
-    agent, agent_id_text, counter_text, held_machine, pairing_token, second_machine,
+    agent, agent_id_text, counter_text, held_machine, pairing_token, second_machine, tombstone,
 };
 
 /// One row, and what a report calls it.
