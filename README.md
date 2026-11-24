@@ -14,7 +14,10 @@ Ladderback backs up your computers on a schedule, shows your backups in one web 
 > [!WARNING]
 > **Ladderback is new software.** Version 0.5.0 runs scheduled backups and restores from them in your browser, but restores arrived only in 0.4.0. Before you rely on these backups, try restoring a file into a scratch folder. The `rustic` command-line program restores from any repository Ladderback backs up to, and stays your fallback. Until the hub (M8), each computer runs its own Ladderback, with its own web page. The [roadmap](#roadmap) has the order.
 
-![Ladderback's start page: the menu of pages, a note that sign-in is off, and a table of two plans, demo-home and demo-photos, each with the date and time of its next run.](docs/guide/start-page.png)
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="docs/guide/start-page-dark.png">
+  <img src="docs/guide/start-page.png" alt="Ladderback's start page: a header with the pages' links and a Settings menu, a note that sign-in is off with a link to set an admin password, and a table of two plans, demo-home and demo-photos, each with the date and time of its next run." width="1280" height="800">
+</picture>
 
 ## What it does
 
