@@ -606,7 +606,7 @@ error-agent-key-mismatch = The { -hub } has another { -machine } under this { -m
 # machine ID after its hub removed it makes a new key too, so this one holds
 # a removed machine's key, as a copy of its data folder would. The token
 # stays good.
-error-agent-key-removed = The { -hub } removed a { -machine } that held this { -machine }'s key, and refuses that key under any machine ID. Don't pair again with this data folder; ask whoever runs the { -hub }.
+error-agent-key-removed = The { -hub } removed a { -machine } that held this { -machine }'s key, and refuses that key under any machine ID: this data folder may have been copied from that { -machine }. Ask whoever runs the { -hub } before you pair from it again.
 
 # The hub's key isn't the one this machine trusts or its token names. Nothing
 # of the token was sent.
@@ -627,9 +627,11 @@ error-pending-limit = The { -hub } already has 20 { -machine(form: "other") } wa
 # The hub removed this machine, or someone rejected it while it waited for
 # approval: it refuses the machine's connections and any token under its ID.
 # The way back is a new machine ID, taken from the start page and paired
-# again with a new token, which the hub's owner approves again. A paired
-# machine maintains only under its hub's lease, so it runs none.
-error-agent-removed = The { -hub } removed this { -machine }, or someone rejected it while it waited for approval, and no longer accepts its ID. It keeps backing up and runs no maintenance. To report to the { -hub } again, take a new machine ID from the start page, restart { -brand-name } and pair it again with a new token.
+# again with a new token, which the hub's owner approves again. A machine
+# whose computer's identifier couldn't be read is never offered one; the
+# daemon's log says why. A paired machine maintains only under its hub's
+# lease, so it runs none.
+error-agent-removed = The { -hub } removed this { -machine }, or someone rejected it while it waited for approval, and no longer accepts its ID. It keeps backing up and runs no maintenance. To report to the { -hub } again, take a new machine ID from the start page, restart { -brand-name } and pair it again with a new token. If the start page offers no new machine ID, this computer's identifier couldn't be read: { -brand-name }'s log says why.
 
 # The hub closed the connection before proving itself: it can't offer the
 # kind of connection this machine's token names, as when a proxy ends TLS in
