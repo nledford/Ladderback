@@ -9,7 +9,9 @@
 
 use std::sync::{Arc, Mutex, PoisonError};
 
-use domain::maintenance::{EpochLower, LeaseEpoch, NoLease, Ownership, RepoGrants, RepositoryReport};
+use domain::maintenance::{
+    EpochLower, LeaseEpoch, NoLease, Ownership, RepoGrants, RepositoryReport,
+};
 use domain::{RepositoryAlias, RepositoryId, SignedDuration, Timestamp};
 
 use crate::notifications::{Notify, Report};
