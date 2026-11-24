@@ -2811,6 +2811,13 @@ impl app::ports::Identity for DamagedKeys {
         Err(damaged(domain::fleet::KeyFile::RecoverySeed))
     }
 
+    async fn renew_agent_key(
+        &self,
+        _seed: domain::fleet::SigningSeed,
+    ) -> Result<(), app::ports::IdentityError> {
+        Err(damaged(domain::fleet::KeyFile::AgentKey))
+    }
+
     async fn recovery_key(
         &self,
     ) -> Result<Option<domain::fleet::PublicKey>, app::ports::IdentityError> {

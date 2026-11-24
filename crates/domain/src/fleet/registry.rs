@@ -375,6 +375,11 @@ pub enum PairRefusal {
     /// A person removed or rejected the agent under the ID, and the hub
     /// keeps its tombstone: an ordinary token can't bring it back.
     AgentRemoved,
+    /// A person removed or rejected an agent that held the request's agent
+    /// key, and the hub keeps its tombstone: the key is refused under any
+    /// agent ID, so a machine removed for a leaked key can't come back with
+    /// it under a new ID. The token stays unspent.
+    AgentKeyRemoved,
 }
 
 impl PairRefusal {
@@ -390,6 +395,7 @@ impl PairRefusal {
             Self::HubKeyMismatch => "hub-key-mismatch",
             Self::PendingLimit => "pending-limit",
             Self::AgentRemoved => "agent-removed",
+            Self::AgentKeyRemoved => "agent-key-removed",
         })
     }
 }
@@ -408,6 +414,8 @@ pub struct PairingView<'a> {
     pub pending: usize,
     /// The tombstone kept under the request's agent ID.
     pub tombstone: Option<&'a Tombstone>,
+    /// A tombstone kept with the request's agent key, under any agent ID.
+    pub key_tombstone: Option<&'a Tombstone>,
 }
 
 /// What a pairing does to the registry.
@@ -469,6 +477,9 @@ pub fn decide_pairing(
     }
     if view.tombstone.is_some() {
         return Err(PairRefusal::AgentRemoved);
+    }
+    if view.key_tombstone.is_some() {
+        return Err(PairRefusal::AgentKeyRemoved);
     }
     if let Some(record) = view.by_id {
         if record.key != request.agent_key {

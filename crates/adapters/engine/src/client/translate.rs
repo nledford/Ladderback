@@ -444,6 +444,7 @@ pub(super) fn translate(event: WorkerEvent, redactor: &Redactor) -> Option<Engin
                 | ErrorCode::ProofRefused
                 | ErrorCode::PendingLimit
                 | ErrorCode::AgentRemoved
+                | ErrorCode::AgentKeyRemoved
                 | ErrorCode::BindingUnavailable
                 | ErrorCode::IdentityConflict
                 | ErrorCode::HubUnreachable

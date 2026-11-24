@@ -22,10 +22,35 @@ pub async fn run(fresh: &dyn Identity) {
     a_pin_is_replaced_whole(fresh).await;
     each_attempt_takes_the_next_counter(fresh).await;
     one_attempt_holds_the_counter_at_a_time(fresh).await;
+    a_new_agent_key_replaces_the_kept_one(fresh).await;
 }
 
 fn seed(byte: u8) -> SigningSeed {
     SigningSeed::from_bytes([byte; 32])
+}
+
+/// A new agent key replaces the one kept, each time, and leaves the other
+/// seeds as they are.
+async fn a_new_agent_key_replaces_the_kept_one(identity: &dyn Identity) {
+    let hub = exposed(&identity.seed(SeedFile::HubKey).await);
+    let recovery = exposed(&identity.seed(SeedFile::RecoverySeed).await);
+    assert_eq!(
+        exposed(&identity.seed(SeedFile::AgentKey).await),
+        Some([1; 32])
+    );
+    for byte in [6, 7] {
+        assert_eq!(identity.renew_agent_key(seed(byte)).await, Ok(()));
+        assert_eq!(
+            exposed(&identity.seed(SeedFile::AgentKey).await),
+            Some([byte; 32]),
+            "the new agent key is the one kept"
+        );
+    }
+    assert_eq!(exposed(&identity.seed(SeedFile::HubKey).await), hub);
+    assert_eq!(
+        exposed(&identity.seed(SeedFile::RecoverySeed).await),
+        recovery
+    );
 }
 
 /// RFC 8032 §7.1's keys of tests 1 and 2; `None`, after a failed

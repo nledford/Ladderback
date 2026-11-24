@@ -62,6 +62,7 @@ fn view<'a>(token: &'a TokenRecord) -> PairingView<'a> {
         by_hostname: None,
         pending: 0,
         tombstone: None,
+        key_tombstone: None,
     }
 }
 
@@ -788,6 +789,45 @@ fn a_removed_agents_id_is_refused_with_an_ordinary_token() {
         Err(PairRefusal::TokenRevoked)
     );
     assert_eq!(PairRefusal::AgentRemoved.code().as_str(), "agent-removed");
+}
+
+/// A removed agent's key is refused under any other agent ID, as removed
+/// too: a machine removed for a leaked key can't come back with it under a
+/// new ID. A new key under the new ID pairs as a new agent; a spent token
+/// is refused as such first.
+#[test]
+fn a_removed_agents_key_is_refused_under_a_new_id() {
+    let unused = token(TokenUse::Unused);
+    let tombstone = tombstone_of(7, key(4));
+    let key_removed = PairingView {
+        key_tombstone: Some(&tombstone),
+        ..view(&unused)
+    };
+    assert_eq!(
+        decide_pairing(&key_removed, &request(), at(10)),
+        Err(PairRefusal::AgentKeyRemoved)
+    );
+    let new_key = PairRequest {
+        agent_key: key(9),
+        ..request()
+    };
+    assert!(matches!(
+        decide_pairing(&view(&unused), &new_key, at(10)),
+        Ok(Pairing::New(_))
+    ));
+    let revoked = token(TokenUse::Revoked);
+    let key_removed = PairingView {
+        key_tombstone: Some(&tombstone),
+        ..view(&revoked)
+    };
+    assert_eq!(
+        decide_pairing(&key_removed, &request(), at(10)),
+        Err(PairRefusal::TokenRevoked)
+    );
+    assert_eq!(
+        PairRefusal::AgentKeyRemoved.code().as_str(),
+        "agent-key-removed"
+    );
 }
 
 /// A pending agent lapses once it has waited 7 days, not a second before;

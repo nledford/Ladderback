@@ -123,6 +123,18 @@ impl Identity for FileIdentity {
         .await
     }
 
+    /// Writes the new seed beside the old file and renames it over, so the
+    /// file holds one key or the other, never part of each.
+    async fn renew_agent_key(&self, seed: SigningSeed) -> Result<(), IdentityError> {
+        let file = KeyFile::AgentKey;
+        let folder = self.folder.clone();
+        let text = line(seed.to_hex());
+        blocking(file, move || {
+            replace(&folder, file, text.as_bytes()).map_err(|error| unavailable(file, &error))
+        })
+        .await
+    }
+
     async fn recovery_key(&self) -> Result<Option<PublicKey>, IdentityError> {
         self.read(KeyFile::RecoveryKey, parse_key).await
     }

@@ -38,7 +38,7 @@ async fn removes(agent: &mut Agent, hostname: String) {
     agent.pairing.ask_to_remove(&hostname, None).await;
 }
 
-#[given(expr = "the person removed {string} on the hub's page")]
+#[given(regex = r#"^the person (?:removed|rejected) "([^"]+)" on the hub's page$"#)]
 async fn removed_before(agent: &mut Agent, hostname: String) {
     let world = &mut agent.pairing;
     world.ask_to_remove(&hostname, None).await;

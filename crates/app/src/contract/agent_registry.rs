@@ -37,6 +37,7 @@ pub async fn run(harness: &dyn AgentRegistryHarness) {
 async fn removals_and_lapses(harness: &dyn AgentRegistryHarness) {
     a_removal_keeps_a_tombstone_frees_the_hostname_and_outlives_the_hub(harness).await;
     a_removed_id_is_refused_an_ordinary_token(harness).await;
+    a_removed_key_is_refused_under_a_new_id(harness).await;
     a_removal_of_an_unknown_agent_or_another_key_changes_nothing(harness).await;
     racing_removals_remove_once(harness).await;
     lapsed_pending_agents_are_dropped_without_a_tombstone(harness).await;
@@ -1194,6 +1195,46 @@ async fn a_removed_id_is_refused_an_ordinary_token(harness: &dyn AgentRegistryHa
         unused(registry.as_ref(), at(50)).await,
         [second],
         "the refusal leaves the token unused"
+    );
+}
+
+/// A removed agent's key is refused under a new agent ID, and the token
+/// stays unused; a new key under that ID pairs as a new agent.
+async fn a_removed_key_is_refused_under_a_new_id(harness: &dyn AgentRegistryHarness) {
+    let (Some(first), Some(second), Some(request), Some(renewed)) = (
+        token(1, 0),
+        token(2, 40),
+        request(1, 1, "laptop"),
+        request(3, 2, "laptop"),
+    ) else {
+        return;
+    };
+    let registry = harness.empty().await;
+    add(registry.as_ref(), &first).await;
+    pair(registry.as_ref(), &request, at(10)).await;
+    approve(registry.as_ref(), &request, at(15)).await;
+    remove(registry.as_ref(), &request, at(20)).await;
+    add(registry.as_ref(), &second).await;
+    let same_key = PairRequest {
+        agent_key: request.agent_key,
+        ..renewed.clone()
+    };
+    assert_eq!(
+        pair(registry.as_ref(), &same_key, at(50)).await,
+        Some(Err(PairRefusal::AgentKeyRemoved))
+    );
+    assert_eq!(agents(registry.as_ref()).await, []);
+    assert_eq!(
+        unused(registry.as_ref(), at(50)).await,
+        [second],
+        "the refusal leaves the token unused"
+    );
+    assert!(
+        matches!(
+            pair(registry.as_ref(), &renewed, at(60)).await,
+            Some(Ok(Pairing::New(_)))
+        ),
+        "a new key under the new ID pairs"
     );
 }
 

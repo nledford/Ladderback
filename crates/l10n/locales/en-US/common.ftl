@@ -601,6 +601,13 @@ error-hostname-taken = The { -hub } already has a { -machine } named { $hostname
 # The hub has another machine under this machine's ID.
 error-agent-key-mismatch = The { -hub } has another { -machine } under this { -machine }'s ID. Don't pair again; ask whoever runs the { -hub }.
 
+# The hub removed, or someone rejected, a machine that held this machine's
+# key, and refuses that key under any machine ID. A machine that takes a new
+# machine ID after its hub removed it makes a new key too, so this one holds
+# a removed machine's key, as a copy of its data folder would. The token
+# stays good.
+error-agent-key-removed = The { -hub } removed a { -machine } that held this { -machine }'s key, and refuses that key under any machine ID: this data folder may have been copied from that { -machine }. Ask whoever runs the { -hub } before you pair from it again.
+
 # The hub's key isn't the one this machine trusts or its token names. Nothing
 # of the token was sent.
 error-hub-key-mismatch = This { -hub }'s key isn't the one this { -machine } trusts. If you reset or reinstalled the { -hub } on purpose, make a new token on the { -hub } and pair again, and compare the { -hub } key's fingerprint on both screens first. If you didn't, don't pair again: someone may be posing as it.
@@ -619,9 +626,12 @@ error-pending-limit = The { -hub } already has 20 { -machine(form: "other") } wa
 
 # The hub removed this machine, or someone rejected it while it waited for
 # approval: it refuses the machine's connections and any token under its ID.
-# Nothing on this machine brings it back, so the message names no action. A
-# paired machine maintains only under its hub's lease, so it runs none.
-error-agent-removed = The { -hub } removed this { -machine }, or someone rejected it while it waited for approval. The { -hub } no longer accepts this { -machine }. It keeps backing up and runs no maintenance.
+# The way back is a new machine ID, taken from the start page and paired
+# again with a new token, which the hub's owner approves again. A machine
+# whose computer's identifier couldn't be read is never offered one; the
+# daemon's log says why. A paired machine maintains only under its hub's
+# lease, so it runs none.
+error-agent-removed = The { -hub } removed this { -machine }, or someone rejected it while it waited for approval, and no longer accepts its ID. It keeps backing up and runs no maintenance. To report to the { -hub } again, take a new machine ID from the start page, restart { -brand-name } and pair it again with a new token. If the start page offers no new machine ID, this computer's identifier couldn't be read: { -brand-name }'s log says why.
 
 # The hub closed the connection before proving itself: it can't offer the
 # kind of connection this machine's token names, as when a proxy ends TLS in
@@ -760,9 +770,9 @@ error-maintenance-selection-changed = The repository changed after you reviewed 
 error-maintenance-data-folder-copied = This computer's data folder came from another computer, so it doesn't forget, prune or adopt snapshots: it could remove the other computer's. Backups and checks still run. If this is a new computer, take a new machine ID from the start page and restart { -brand-name }.
 
 # A new machine ID was asked for, and the data folder wasn't copied from
-# another computer, nor did the hub refuse this computer as a second one, or
-# a new ID was taken for it already, so nothing changed.
-error-machine-not-copied = No new machine ID was taken: this computer's data folder wasn't copied from another computer and its { -hub } didn't refuse it, or it took a new ID already. Nothing changed.
+# another computer, nor did the hub refuse this computer as a second one or
+# remove it, or a new ID was taken for it already, so nothing changed.
+error-machine-not-copied = No new machine ID was taken: this computer's data folder wasn't copied from another computer and its { -hub } didn't refuse or remove it, or it took a new ID already. Nothing changed.
 
 # The repository did not answer a read in time, so there was nothing to show
 # or to review.

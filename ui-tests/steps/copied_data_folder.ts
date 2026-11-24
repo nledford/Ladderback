@@ -1,9 +1,9 @@
 // Steps of the start page's machine notice journeys
 // (features/ui/copied_data_folder.feature): where the agent's machine stands,
 // as a Given sets it in the daemon's answers, the notice the start page shows
-// for a copy or a machine its hub refused, and the request that takes a new
-// machine ID. Elements are found by role and accessible name, as in every
-// journey.
+// for a copy or a machine its hub refused or removed, and the request that
+// takes a new machine ID. Elements are found by role and accessible name, as
+// in every journey.
 
 import assert from "node:assert/strict";
 
@@ -19,12 +19,14 @@ import type { BrowserWorld } from "../support/world.ts";
 const GONE_MS = 10_000;
 
 // The notice's headings, which name its region: a copied data folder's, a
-// machine its hub refused, and either once a new machine ID is taken.
+// machine its hub refused, one its hub removed, and any of them once a new
+// machine ID is taken.
 const NOTICE = "This data folder came from another computer";
 const REFUSED = "Your hub took another computer as this one";
+const REMOVED = "Your hub removed this computer";
 const TAKEN = "New machine ID taken";
 
-type Standing = "same" | "copied" | "refused-by-hub" | "new-id-taken" | "unread";
+type Standing = "same" | "copied" | "refused-by-hub" | "removed-by-hub" | "new-id-taken" | "unread";
 
 // What the scripted answers say, and what the page asked of them.
 interface Scripted {
@@ -76,6 +78,10 @@ Given("the agent's hub refused it, signed, as a second computer", function (this
   answers(this).standing = "refused-by-hub";
 });
 
+Given("the agent's hub removed it, signed", function (this: BrowserWorld) {
+  answers(this).standing = "removed-by-hub";
+});
+
 Given("the agent found its data folder on the computer it was made on", function (this: BrowserWorld) {
   answers(this).standing = "same";
 });
@@ -89,6 +95,12 @@ Then("the page says the hub took another computer as this one", async function (
   await notice(this, REFUSED).waitFor({ state: "visible", timeout: patienceMs() });
   await expect(notice(this, REFUSED)).toContainText("Backups run as usual");
   await expect(notice(this, REFUSED)).toContainText("ladderback pairing-token --forget-computer");
+});
+
+Then("the page says the hub removed this machine, and to pair it again under a new ID", async function (this: BrowserWorld) {
+  await notice(this, REMOVED).waitFor({ state: "visible", timeout: patienceMs() });
+  await expect(notice(this, REMOVED)).toContainText("Backups run as usual");
+  await expect(notice(this, REMOVED)).toContainText("pair it again");
 });
 
 // The refused computer may be the original: nothing on the page says its
@@ -126,9 +138,9 @@ Then("the page says nothing of a copied data folder", async function (this: Brow
     requestAnimationFrame(() => requestAnimationFrame(() => resolve()));
     return promise;
   });
-  // None of the notice's headings: a copy's, a refused machine's or a new
-  // ID taken.
-  for (const heading of [NOTICE, REFUSED, TAKEN]) {
+  // None of the notice's headings: a copy's, a refused or removed
+  // machine's, or a new ID taken.
+  for (const heading of [NOTICE, REFUSED, REMOVED, TAKEN]) {
     await expect(notice(this, heading)).toHaveCount(0, { timeout: Math.min(GONE_MS, patienceMs()) });
   }
 });

@@ -13,6 +13,7 @@
 ## The tombstone
 
 - **It keeps the agent ID and the key,** so the hub can prove to the removed machine, signed, that it removed it, and refuse an ordinary token under that ID (decision 120, "A removed agent's ID is a tombstone"). A proof under another key gets `proof-refused`, as any stranger does, so the tombstone tells a stranger nothing.
+- **Its key is refused under any agent ID (#1489).** A `Pair` whose agent key is a tombstone's key is refused `agent-key-removed`, and its token stays unspent. A removal judges the machine, and its key is what proves the machine: without this refusal, a machine removed because its data folder leaked could take a new ID and pair again under the leaked key, and a copy of that folder could pair under an ID of its own. The tombstones are read by key inside the pairing's transaction; there are few, so no index.
 - **It keeps the hostname only as a record.** The hostname is not held and not unique among tombstones: another machine may pair under the name at once. Comparing a new name with removed ones for lookalikes stays with #1346.
 - **It is kept for good,** in `agent_tombstones` (migration `0026_agent_tombstones.sql`). A second removal under the same ID replaces the one before.
 
@@ -24,8 +25,11 @@
 
 ## Telling the machine
 
-- **On its next connect.** A machine whose proof holds under the key its tombstone keeps gets a signed `agent-removed` and a close. Decision 120 answered it `proof-refused`, as a stranger; the signed refusal goes only to the holder of the removed key, so it tells a stranger nothing and lets the machine say plainly what happened. `ladderback hub-status` and `ladderback pair` show its message: the hub removed or rejected this machine and no longer accepts it, and it keeps backing up and runs no maintenance. The message names no action, since no replacement token exists yet to bring it back.
+- **On its next connect.** A machine whose proof holds under the key its tombstone keeps gets a signed `agent-removed` and a close. Decision 120 answered it `proof-refused`, as a stranger; the signed refusal goes only to the holder of the removed key, so it tells a stranger nothing and lets the machine say plainly what happened. `ladderback hub-status` and `ladderback pair` show its message: the hub removed or rejected this machine and no longer accepts its ID, it keeps backing up and runs no maintenance, and the way back is a new machine ID taken from the start page and paired again (#1489).
 - **A live connection ends at its next `ReposSnapshot`.** Decision 120's signed `Removed` message, sent as the hub closes the connection, is not built. A machine connected at the moment of its removal is closed with `protocol-error` the next time it asks for its grants, within 15 minutes ([decision 151](151-a-paired-machine-maintains-only-under-its-hubs-lease.md)), since the hub finds no record of it; until then the hub still takes its reports and tells them to its browsers. It learns of the removal when it next connects.
+- **A new machine ID and a new agent key are the way back (#1489).** The machine's sync takes the signed `agent-removed` as its standing, `removed-by-hub`, and its start page says so and offers a new machine ID, as for a machine its hub refused as a second computer ([decision 150](150-the-hub-takes-one-computer-per-machine-id.md)). Taking it turns maintenance off on every repository the machine maintained and makes a new agent key, as every new machine ID does (multi-machine §7.1). A refusal the hub didn't sign changes nothing, and a machine whose identifier couldn't be read at its start is offered no new ID.
+- **It asks again as a new machine.** Started again under the new ID, it pairs with a new ordinary token and waits for approval as any new machine does: the tombstone keeps the old ID and the old key, neither of which it uses again, and the hostname is free. The waiting row needs no mark that the machine was removed before: its fingerprint is new, and the person approving it decides again. Reports it kept while removed are sent under the new ID once it is approved.
+- **Its standing is kept in memory only,** as decision 150's refused-by-hub is: after a restart the start page offers nothing until the machine's next sync is refused again, signed, which it is at its first connection.
 
 ## Telling the browsers
 
@@ -33,8 +37,9 @@ The hub tells its browsers `AgentRemoved` with the machine's agent ID, hostname 
 
 ## Consequences
 
-- A removal is permanent until replacement tokens are built (decision 120, "Pairing"): the machine can't come back under its ID.
+- A removal is permanent for the machine ID and its agent key: the machine comes back only under a new ID and a new key, approved again. Replacement tokens, which would bring it back under its old ID, are not built (decision 120, "Pairing").
+- A copy whose data folder took a new machine ID on a build before #1489 still holds the original's key, and is refused `agent-key-removed` once the original is removed. Its way on is a new data folder, paired again.
 - Leases the hub counted for a removed machine are not ended at the removal. They expire as decision 147 says, so the hub grants a repository the removed machine held to another only after that lease runs out, and the removed machine maintains nothing once its own copy of the lease ends ([decision 151](151-a-paired-machine-maintains-only-under-its-hubs-lease.md)). A `ReposSnapshot` decided across the removal, its approval read just before and its lease written just after, can still renew such a lease, which only delays that handover.
-- A removed or rejected machine stays paired on its own side, with no way to unpair yet, so it never maintains its repositories again; its messages say it runs no maintenance.
+- A removed or rejected machine stays paired on its own side until it takes a new ID and pairs again, so meanwhile it never maintains its repositories; its messages say it runs no maintenance.
 - The hub keeps a removed machine's operation reports (`sync_reports`, up to 10,000), their tallies and its watermarks; its ownership reports expire on their own.
 - The waiting table shows how long a machine has waited, not how long is left, and a lapsed machine leaves it only when the page next reads the hub.

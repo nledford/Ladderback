@@ -532,6 +532,13 @@ pub(crate) mod hub {
     pub(crate) const TOMBSTONE: &str =
         "SELECT id, pubkey, hostname, removed_at FROM agent_tombstones WHERE id = ?";
 
+    /// A tombstone kept with an agent key, under any agent ID, the oldest
+    /// first. Parameter: the agent key's bytes.
+    pub(crate) const TOMBSTONE_BY_KEY: &str = concat!(
+        "SELECT id, pubkey, hostname, removed_at FROM agent_tombstones ",
+        "WHERE pubkey = ? ORDER BY removed_at, rowid LIMIT 1"
+    );
+
     /// The pending agents waiting since a moment or before, oldest first.
     /// Parameter: the moment, in Unix milliseconds.
     pub(crate) const LAPSED_AGENTS: &str =

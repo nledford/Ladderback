@@ -172,6 +172,7 @@ code_messages!(ERRORS, error_message, ErrorCode {
     ProofRefused => msg::ERROR_PROOF_REFUSED,
     PendingLimit => msg::ERROR_PENDING_LIMIT,
     AgentRemoved => msg::ERROR_AGENT_REMOVED,
+    AgentKeyRemoved => msg::ERROR_AGENT_KEY_REMOVED,
     BindingUnavailable => msg::ERROR_BINDING_UNAVAILABLE,
     IdentityConflict => msg::ERROR_IDENTITY_CONFLICT,
     HubUnreachable => msg::ERROR_HUB_UNREACHABLE,

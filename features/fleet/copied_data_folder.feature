@@ -49,6 +49,7 @@ Feature: A copied data folder keeps backing up and stops maintaining
     When the agent starts on this computer
     And the person takes a new machine ID
     Then the machine has a new machine ID
+    And the machine holds a new agent key
     And the data folder records this computer's machine identifier
     And the repository's maintenance is now "none"
     And maintenance stays refused until the agent starts again
@@ -66,6 +67,7 @@ Feature: A copied data folder keeps backing up and stops maintaining
     And the person takes a new machine ID
     Then taking a new machine ID is refused because that check is running
     And the machine ID is unchanged
+    And the machine's agent key is unchanged
     And the repository's maintenance is now "local"
 
   Scenario: An unchanged machine sees nothing new

@@ -154,6 +154,10 @@ mod tests {
             self.files.forget_recovery_seed().await
         }
 
+        async fn renew_agent_key(&self, seed: SigningSeed) -> Result<(), IdentityError> {
+            self.files.renew_agent_key(seed).await
+        }
+
         async fn recovery_key(&self) -> Result<Option<PublicKey>, IdentityError> {
             self.files.recovery_key().await
         }
