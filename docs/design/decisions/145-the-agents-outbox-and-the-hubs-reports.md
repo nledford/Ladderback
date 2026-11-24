@@ -1,6 +1,8 @@
 # Decision 145: The agent's outbox and the hub's reports are bounded, and each says what it gives up
 
-**An agent keeps each operation's start and end in a persistent outbox of at most 10,000 reports and replays them to its hub in order, at most 32 places ahead of the hub's acknowledgements, on the one long-lived connection described by decision 159; a failed connection is tried again after 1 s, doubled up to 5 minutes. Full, the outbox gives up its oldest start for a new report and refuses one only when it holds 10,000 ends. The hub takes a report once, keeps the last place of each agent's 8 newest epochs and at most 10,000 reports of each agent, and lets go of the oldest past that. Every report given up, refused or let go of is said: a warning in the agent's log for each, and on the hub a count per agent and one warning per agent while it runs** (recorded 2026-11-22, amended 2026-11-24, §7.2, #568, #1463).
+**An agent keeps each operation's start and end in a persistent outbox of at most 10,000 reports and replays them to its hub in order, at most 32 places ahead of the hub's acknowledgements, on the one long-lived connection described by decision 159; a failed connection is tried again after 1 s, doubled up to 5 minutes.** (recorded 2026-11-22, amended 2026-11-24, §7.2, #568, #1463).
+
+A full outbox gives up its oldest start for a new report and refuses one only when it holds 10,000 ends. The hub takes a report once, keeps the last place of each agent's 8 newest epochs and at most 10,000 reports of each agent, and lets go of the oldest past that. Every report given up, refused or let go of is said: a warning in the agent's log for each, and on the hub a count per agent and one warning per agent while it runs.
 
 ## Why
 
