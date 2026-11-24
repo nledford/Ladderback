@@ -3665,6 +3665,46 @@ ui-machines-approving = Approving { $hostname }…
 # Said in the review when the step-up is wrong: the machine wasn't approved.
 ui-machines-step-up-failed = That isn't right, so the { -machine } wasn't approved. Try again.
 
+# The button that opens the review of rejecting a waiting machine, and the review's button that rejects it.
+# $hostname (text): the machine's hostname.
+ui-machines-reject = Reject { $hostname }
+
+# The button that opens the review of removing an approved machine, and the review's button that removes it.
+# $hostname (text): the machine's hostname.
+ui-machines-remove = Remove { $hostname }
+
+# The title of the review of rejecting a waiting machine.
+# $hostname (text): the machine's hostname.
+ui-machines-reject-title = Reject { $hostname }?
+
+# The title of the review of removing an approved machine.
+# $hostname (text): the machine's hostname.
+ui-machines-remove-title = Remove { $hostname }?
+
+# What the review of rejecting a waiting machine says first. A paired machine maintains only under its hub's lease, so a rejected one runs no maintenance.
+# $hostname (text): the machine's hostname.
+ui-machines-reject-body = { $hostname } stops waiting and can't sync with this { -hub }, or pair with it again under its ID. It keeps backing up and runs no maintenance.
+
+# What the review of removing an approved machine says first. A paired machine maintains only under its hub's lease, so a removed one stops maintaining.
+# $hostname (text): the machine's hostname.
+ui-machines-remove-body = { $hostname } can't sync with this { -hub } any more, or pair with it again under its ID. It keeps backing up and stops running maintenance.
+
+# Said on the page once a waiting machine is rejected.
+# $hostname (text): the machine's hostname.
+ui-machines-rejected = { $hostname } is rejected.
+
+# Said on the page once an approved machine is removed.
+# $hostname (text): the machine's hostname.
+ui-machines-removed = { $hostname } is removed.
+
+# Said in the review while the hub rejects the machine, which holds the review still.
+# $hostname (text): the machine's hostname.
+ui-machines-rejecting = Rejecting { $hostname }…
+
+# Said in the review while the hub removes the machine, which holds the review still.
+# $hostname (text): the machine's hostname.
+ui-machines-removing = Removing { $hostname }…
+
 # Shown in place of the tables while the page reads the machines.
 ui-machines-loading = Loading the { -machine(form: "other") }…
 

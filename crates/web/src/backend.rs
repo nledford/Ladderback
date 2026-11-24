@@ -182,6 +182,7 @@ impl OperationsState {
             | UiEvent::AgentOffline { .. }
             | UiEvent::AgentPending { .. }
             | UiEvent::AgentApproved { .. }
+            | UiEvent::AgentRemoved { .. }
             | UiEvent::AgentReported { .. }
             | UiEvent::AgentPlans { .. }
             | UiEvent::AgentProgress { .. }

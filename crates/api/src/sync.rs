@@ -355,6 +355,7 @@ pub fn refusal_code(code: &str) -> ErrorCode {
             | ErrorCode::HubKeyMismatch
             | ErrorCode::ProofRefused
             | ErrorCode::PendingLimit
+            | ErrorCode::AgentRemoved
             | ErrorCode::BindingUnavailable
             | ErrorCode::IdentityConflict
     ) {

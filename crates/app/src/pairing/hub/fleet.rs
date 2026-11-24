@@ -1,13 +1,13 @@
 //! What the hub tells its browsers of its machines, and what its dashboard
 //! reads of them (technical design §4.3, §7.2; #569, #1440): that a machine
-//! started waiting for approval, was approved or reported an operation, and
-//! each approved machine with its latest operations, its plans and the
-//! progress of the operation it runs.
+//! started waiting for approval, was approved, was removed or reported an
+//! operation, and each approved machine with its latest operations, its
+//! plans and the progress of the operation it runs.
 
 use api::{MachineOutcomeDto, UiEvent};
 use domain::fleet::{
     AgentRecord, AgentReport, Happening, OPERATIONS_SHOWN, Pairing, PlansReport, REPORTS_READ,
-    ReportedOperation, ReportedProgress, latest_operations, progress_shown,
+    ReportedOperation, ReportedProgress, Tombstone, latest_operations, progress_shown,
 };
 use domain::{AgentId, Timestamp};
 
@@ -90,6 +90,16 @@ pub(super) fn approved(agent: &AgentRecord, at: Timestamp) -> UiEvent {
         agent: agent.agent_id.as_uuid().to_string(),
         hostname: agent.hostname.to_string(),
         at: at.to_string(),
+    }
+}
+
+/// What the browsers hear of the agent `tombstone` keeps, which a person
+/// has just removed or rejected.
+pub(super) fn removed(tombstone: &Tombstone) -> UiEvent {
+    UiEvent::AgentRemoved {
+        agent: tombstone.agent_id.as_uuid().to_string(),
+        hostname: tombstone.hostname.to_string(),
+        at: tombstone.removed_at.to_string(),
     }
 }
 

@@ -6,7 +6,7 @@
 use app::ports::StoreError;
 use domain::fleet::{
     AgentRecord, AgentStatus, BindingKind, Hostname, KEY_BYTES, MachineFingerprint, MachineZone,
-    PublicKey, SecondMachine, TokenRecord, TokenUse,
+    PublicKey, SecondMachine, TokenRecord, TokenUse, Tombstone,
 };
 use domain::{AgentId, Uuid};
 use sqlx::sqlite::SqliteRow;
@@ -64,6 +64,13 @@ impl Reader<'_> {
         }
         Ok(Some(id))
     }
+
+    /// The `hostname` column, which must be a hostname a pairing accepts.
+    fn hostname(&self) -> Result<Hostname, StoreError> {
+        let text = self.required_text("hostname")?;
+        Hostname::parse(&text)
+            .map_err(|_| self.corrupt("hostname", format!("{} is not a hostname", shown(&text))))
+    }
 }
 
 /// A row of `pairing_tokens`.
@@ -117,6 +124,24 @@ pub(crate) fn pairing_token(row: &SqliteRow) -> Result<TokenRecord, StoreError> 
     })
 }
 
+/// A row of `agent_tombstones`.
+pub(crate) fn tombstone(row: &SqliteRow) -> Result<Tombstone, StoreError> {
+    let mut reader = Reader {
+        row,
+        scope: "a removed agent".to_owned(),
+    };
+    let agent_id = reader
+        .agent_id("id")?
+        .ok_or_else(|| reader.corrupt("id", "is NULL"))?;
+    reader.scope = format!("removed agent {}", agent_id_text(agent_id));
+    Ok(Tombstone {
+        agent_id,
+        hostname: reader.hostname()?,
+        key: reader.required_key("pubkey")?,
+        removed_at: reader.required_time("removed_at")?,
+    })
+}
+
 /// A row of `agents`.
 pub(crate) fn agent(row: &SqliteRow) -> Result<AgentRecord, StoreError> {
     let mut reader = Reader {
@@ -127,13 +152,7 @@ pub(crate) fn agent(row: &SqliteRow) -> Result<AgentRecord, StoreError> {
         .agent_id("id")?
         .ok_or_else(|| reader.corrupt("id", "is NULL"))?;
     reader.scope = format!("agent {}", agent_id_text(agent_id));
-    let hostname_text = reader.required_text("hostname")?;
-    let hostname = Hostname::parse(&hostname_text).map_err(|_| {
-        reader.corrupt(
-            "hostname",
-            format!("{} is not a hostname", shown(&hostname_text)),
-        )
-    })?;
+    let hostname = reader.hostname()?;
     let status_at = reader.required_time("status_at")?;
     let status_text = reader.required_text("status")?;
     let status = match status_text.as_str() {

@@ -98,7 +98,7 @@ impl PairingWorld {
         self.approved = Some(self.hub().pairing.approve_asked(ask).await);
     }
 
-    async fn agent_named(&self, hostname: &str) -> domain::fleet::AgentRecord {
+    pub(super) async fn agent_named(&self, hostname: &str) -> domain::fleet::AgentRecord {
         self.agents()
             .await
             .into_iter()

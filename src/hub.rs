@@ -1148,11 +1148,14 @@ fn connect_failed(failure: &ConnectFailure, address: &str) -> Said {
         ConnectFailure::Welcome(WelcomeRefused::GenerationLower) => {
             (ErrorCode::GenerationLower, vec![], None)
         }
-        // A hub refuses a proof only as `proof-refused`, and a second
-        // computer under the ID as `identity-conflict`; any other code,
-        // pairing's among them, would show advice for something else.
+        // A hub refuses a proof only as `proof-refused`, a second computer
+        // under the ID as `identity-conflict`, and a removed machine as
+        // `agent-removed`; any other code, pairing's among them, would
+        // show advice for something else.
         ConnectFailure::Refused(refusal) => match api::sync::refusal_code(refusal.code.as_str()) {
-            code @ (ErrorCode::ProofRefused | ErrorCode::IdentityConflict) => (code, vec![], None),
+            code @ (ErrorCode::ProofRefused
+            | ErrorCode::IdentityConflict
+            | ErrorCode::AgentRemoved) => (code, vec![], None),
             _ => (
                 ErrorCode::HubLinkLost,
                 vec![],
@@ -1498,6 +1501,7 @@ mod tests {
             ),
             (refused("proof-refused"), ErrorCode::ProofRefused),
             (refused("identity-conflict"), ErrorCode::IdentityConflict),
+            (refused("agent-removed"), ErrorCode::AgentRemoved),
             (refused("generation-lower"), ErrorCode::HubLinkLost),
             (refused("hostname-taken"), ErrorCode::HubLinkLost),
             (refused("token-used"), ErrorCode::HubLinkLost),

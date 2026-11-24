@@ -943,3 +943,108 @@ async fn with_sign_in_on_only_a_session_lists_or_approves_and_confirms_with_the_
         .await;
     assert_eq!(approved.status(), StatusCode::OK);
 }
+
+fn remove(peer: IpAddr, headers: &[(&str, String)], agent: &AgentRecord) -> Request {
+    let body = serde_json::json!({ "key": agent.key.to_hex() });
+    let path = api::agent_removal_path(&agent.agent_id.as_uuid().to_string());
+    build(Method::POST, &path, peer, headers, &body.to_string())
+}
+
+#[tokio::test]
+async fn on_loopback_a_waiting_or_approved_agent_is_removed_under_its_key_once() {
+    let daemon = Daemon::hub(false);
+    let approved = agent(1, "macbook", true, now());
+    let waiting = agent(2, "laptop", false, now());
+    daemon.registry.hold(approved.clone());
+    daemon.registry.hold(waiting.clone());
+    let rekeyed = AgentRecord {
+        key: domain::fleet::PublicKey::from_bytes([0x55; 32]).unwrap(),
+        ..approved.clone()
+    };
+    assert_eq!(
+        refusal(daemon.send(remove(LOOPBACK, &[], &rekeyed)).await).await,
+        (StatusCode::NOT_FOUND, "agent-unknown".to_owned()),
+        "another key removes nothing"
+    );
+    for removed in [&approved, &waiting] {
+        let response = daemon.send(remove(LOOPBACK, &[], removed)).await;
+        assert_eq!(response.status(), StatusCode::NO_CONTENT);
+        let kept = daemon.registry.agent(removed.agent_id).await.unwrap();
+        assert_eq!(kept, None);
+        let tombstone = daemon.registry.tombstone(removed.agent_id).await.unwrap();
+        assert_eq!(tombstone.map(|kept| kept.key), Some(removed.key));
+        assert_eq!(
+            refusal(daemon.send(remove(LOOPBACK, &[], removed)).await).await,
+            (StatusCode::NOT_FOUND, "agent-unknown".to_owned())
+        );
+    }
+    let not_an_id = api::agent_removal_path("laptop");
+    let body = serde_json::json!({ "key": waiting.key.to_hex() }).to_string();
+    let not_an_id = build(Method::POST, &not_an_id, LOOPBACK, &[], &body);
+    assert_eq!(
+        refusal(daemon.send(not_an_id).await).await,
+        (StatusCode::NOT_FOUND, "agent-unknown".to_owned())
+    );
+    let path = api::agent_removal_path(&waiting.agent_id.as_uuid().to_string());
+    for body in [
+        r#"{"key":"laptop"}"#,
+        r#"{"key":"aa","confirmation":"x"}"#,
+        "",
+    ] {
+        let bad = build(Method::POST, &path, LOOPBACK, &[], body);
+        assert_eq!(
+            refusal(daemon.send(bad).await).await,
+            (StatusCode::BAD_REQUEST, "invalid-body".to_owned()),
+            "{body:?}"
+        );
+    }
+}
+
+#[tokio::test]
+async fn beyond_loopback_with_sign_in_off_no_agent_is_removed() {
+    let daemon = Daemon::hub(false);
+    let waiting = agent(2, "laptop", false, now());
+    daemon.registry.hold(waiting.clone());
+    assert_eq!(
+        refusal(daemon.send(remove(REMOTE, &[], &waiting)).await).await,
+        (StatusCode::FORBIDDEN, "pairing-needs-sign-in".to_owned())
+    );
+    assert!(
+        daemon
+            .registry
+            .agent(waiting.agent_id)
+            .await
+            .unwrap()
+            .is_some()
+    );
+}
+
+#[tokio::test]
+async fn with_sign_in_on_only_a_session_removes_and_without_a_step_up() {
+    let daemon = Daemon::hub(true);
+    let waiting = agent(2, "laptop", false, now());
+    daemon.registry.hold(waiting.clone());
+    let unsigned = daemon.send(remove(LOOPBACK, &[], &waiting)).await;
+    assert_eq!(unsigned.status(), StatusCode::UNAUTHORIZED);
+    let created = daemon
+        .access
+        .as_ref()
+        .unwrap()
+        .create_api_token(
+            ApiTokenLabel::new("assistant".to_owned()).unwrap(),
+            TokenPermissions::new(Permission::ALL.iter().fold(Permissions::NONE, |held, row| {
+                held.with(*row, Some(row.level())).unwrap()
+            }))
+            .unwrap(),
+        )
+        .await
+        .unwrap();
+    let bearer = [("authorization", format!("Bearer {}", created.text.expose()))];
+    assert_eq!(
+        refusal(daemon.send(remove(LOOPBACK, &bearer, &waiting)).await).await,
+        (StatusCode::FORBIDDEN, "api-token-permission".to_owned())
+    );
+    let session = daemon.signed_in().await;
+    let removed = daemon.send(remove(REMOTE, &session, &waiting)).await;
+    assert_eq!(removed.status(), StatusCode::NO_CONTENT);
+}

@@ -110,6 +110,15 @@ pub enum UiEvent {
         hostname: String,
         at: String,
     },
+    /// A person removed the machine `agent`, or rejected it while it
+    /// waited (§16, decision 120, "Removing, re-keying and recovering an
+    /// agent"). A page that lists the hub's machines reads them again on
+    /// hearing it.
+    AgentRemoved {
+        agent: String,
+        hostname: String,
+        at: String,
+    },
     /// The hub took a report of the machine `agent`'s operation `operation`
     /// (§7.2): that it started, or how it ended. A page that shows the
     /// machine's operations reads them again on hearing it.

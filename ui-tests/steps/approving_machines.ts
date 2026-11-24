@@ -1,9 +1,9 @@
-// Steps of approving a waiting machine on the hub's page
-// (features/ui/approving_machines.feature; §16, decision 121, "Waiting for
-// approval"): machines of the scenario's own that pair with its hub through
-// `ladderback pair`, each on folders of its own, and what the Machines tab
-// lists and its review shows. Elements are found by role and accessible
-// name, as in every journey.
+// Steps of approving, rejecting and removing a machine on the hub's page
+// (features/ui/approving_machines.feature and removing_machines.feature;
+// §16, decisions 121 and 154): machines of the scenario's own that pair
+// with its hub through `ladderback pair`, each on folders of its own, and
+// what the Machines tab lists and its reviews show. Elements are found by
+// role and accessible name, as in every journey.
 
 import assert from "node:assert/strict";
 import { spawn } from "node:child_process";
@@ -152,6 +152,16 @@ When("a person approves {string} on another page of the hub", async function (th
   await approveMachine(this, hostname);
 });
 
+When("a person removes {string} on another page of the hub", async function (this: BrowserWorld, hostname: string) {
+  const machine = await listedMachine(this, hostname);
+  const removed = await askHub(this, `/api/v1/hub/agents/${machine["agent-id"]}/removal`, { key: machine.key });
+  assert.equal(removed.status, 204, `the hub removed nothing: ${removed.text}`);
+});
+
+Then("the table {string} no longer lists {string}", async function (this: BrowserWorld, name: string, hostname: string) {
+  await expect(table(this, name).getByRole("rowheader", { name: namePattern(hostname) })).toHaveCount(0);
+});
+
 When(
   "I approve {string} on the Machines tab, typing a fingerprint that doesn't match",
   async function (this: BrowserWorld, hostname: string) {
@@ -177,7 +187,7 @@ Then(
 );
 
 Then("the dialog {string} shows the key fingerprint the machine showed", async function (this: BrowserWorld, name: string) {
-  const hostname = /^Approve (.+)\?$/.exec(name)?.[1];
+  const hostname = /^(?:Approve|Reject|Remove) (.+)\?$/.exec(name)?.[1];
   assert.ok(hostname, `a review named for its machine: ${name}`);
   await showsFingerprint(this.page.getByRole("dialog", { name: namePattern(name) }), hostname, shownKey(this, hostname));
 });

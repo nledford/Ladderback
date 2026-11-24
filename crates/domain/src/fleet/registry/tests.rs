@@ -61,6 +61,7 @@ fn view<'a>(token: &'a TokenRecord) -> PairingView<'a> {
         by_id: None,
         by_hostname: None,
         pending: 0,
+        tombstone: None,
     }
 }
 
@@ -708,4 +709,96 @@ fn an_approved_agent_is_unseen_since_approval_until_the_hub_hears_from_it() {
     );
     assert!(!approved_at(10, 11).unseen_since_approval());
     assert!(!waiting_with(1, key(4), "laptop").unseen_since_approval());
+}
+
+fn tombstone_of(agent: u128, agent_key: PublicKey) -> Tombstone {
+    Tombstone {
+        agent_id: id(agent),
+        hostname: name("laptop"),
+        key: agent_key,
+        removed_at: at(-10),
+    }
+}
+
+/// A person removes an agent, pending or approved, under the key they saw:
+/// the hub keeps its ID, hostname and key, and when.
+#[test]
+fn a_removed_agent_leaves_its_tombstone() {
+    for registered in [
+        record(1, key(4), "laptop"),
+        waiting_with(1, key(4), "laptop"),
+    ] {
+        assert_eq!(
+            decide_removal(Some(&registered), &key(4), at(10)),
+            Ok(Tombstone {
+                agent_id: id(1),
+                hostname: name("laptop"),
+                key: key(4),
+                removed_at: at(10),
+            })
+        );
+    }
+}
+
+/// A removal names the key the person saw: none registered, or another key
+/// under the ID, removes nothing.
+#[test]
+fn a_removal_under_another_key_or_of_no_agent_is_refused() {
+    let registered = record(1, key(4), "laptop");
+    assert_eq!(
+        decide_removal(Some(&registered), &key(5), at(10)),
+        Err(RemovalRefused::Unknown)
+    );
+    assert_eq!(
+        decide_removal(None, &key(4), at(10)),
+        Err(RemovalRefused::Unknown)
+    );
+}
+
+/// An ordinary token under a removed agent's ID is refused as removed,
+/// whatever key the pairing brings; a token that is spent, revoked or
+/// lapsed is refused as such first.
+#[test]
+fn a_removed_agents_id_is_refused_with_an_ordinary_token() {
+    let unused = token(TokenUse::Unused);
+    let tombstone = tombstone_of(1, key(4));
+    let removed = PairingView {
+        tombstone: Some(&tombstone),
+        ..view(&unused)
+    };
+    assert_eq!(
+        decide_pairing(&removed, &request(), at(10)),
+        Err(PairRefusal::AgentRemoved)
+    );
+    let another_key = PairRequest {
+        agent_key: key(9),
+        ..request()
+    };
+    assert_eq!(
+        decide_pairing(&removed, &another_key, at(10)),
+        Err(PairRefusal::AgentRemoved)
+    );
+    let revoked = token(TokenUse::Revoked);
+    let removed = PairingView {
+        tombstone: Some(&tombstone),
+        ..view(&revoked)
+    };
+    assert_eq!(
+        decide_pairing(&removed, &request(), at(10)),
+        Err(PairRefusal::TokenRevoked)
+    );
+    assert_eq!(PairRefusal::AgentRemoved.code().as_str(), "agent-removed");
+}
+
+/// A pending agent lapses once it has waited 7 days, not a second before;
+/// an approved agent never does.
+#[test]
+fn a_pending_agent_lapses_after_seven_days() {
+    let waiting = waiting_with(1, key(4), "laptop");
+    let seven_days = 7 * 24 * 3600;
+    assert!(!waiting.lapsed_at(at(-100 + seven_days - 1)));
+    assert!(waiting.lapsed_at(at(-100 + seven_days)));
+    assert!(waiting.lapsed_at(at(-100 + seven_days + 1)));
+    let approved = record(1, key(4), "laptop");
+    assert!(!approved.lapsed_at(at(-100 + 30 * seven_days)));
 }
