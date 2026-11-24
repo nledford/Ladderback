@@ -192,6 +192,13 @@ pub(crate) struct Releases {
 }
 
 impl Background {
+    /// The leases the runner's maintenance reads, for a test of what the
+    /// daemon wires.
+    #[cfg(all(test, feature = "hub"))]
+    pub(super) fn maintenance_reads(&self) -> Option<Arc<app::leases::MaintenanceLeases>> {
+        self.runner.leases.clone()
+    }
+
     /// What the daemon's orderly stop freezes: every run of an operation,
     /// whoever started it (decision 92).
     pub(crate) fn runs(&self) -> runs::Runs {
@@ -210,6 +217,15 @@ impl Background {
     #[cfg(feature = "hub")]
     pub(crate) fn standing(&self) -> Arc<app::machine::MachineStanding> {
         Arc::clone(&self.runner.machine)
+    }
+
+    /// The leases this machine maintains under (§7.3, I1), the one handle
+    /// its sync with a hub takes the hub's grants through and its
+    /// maintenance reads them through, so both judge a lease by one floor
+    /// (decision 151).
+    #[cfg(feature = "hub")]
+    pub(crate) fn leases(&self) -> Arc<app::leases::MaintenanceLeases> {
+        todo!()
     }
 
     /// What a paired machine tells its hub of its plans (§7.2): their
