@@ -364,6 +364,7 @@ impl Catalog for DemoCatalog {
                 repo_hot: None,
                 password: api::PasswordSourceDto::Inline,
                 maintained_here: true,
+                maintenance_paused_since: None,
                 create_offered: false,
                 warnings: Vec::new(),
                 locations: Vec::new(),

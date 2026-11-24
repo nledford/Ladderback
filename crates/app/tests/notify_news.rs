@@ -203,7 +203,7 @@ async fn an_end_that_comes_while_a_channel_is_slow_is_told_after_any_number_of_w
     slow.open.send_replace(true);
     turns_until(|| slow.inner.delivered().len() >= 2).await;
 
-    let told: Vec<(EventKind, OperationId)> = slow
+    let told: Vec<(EventKind, Option<OperationId>)> = slow
         .inner
         .delivered()
         .iter()
@@ -212,8 +212,8 @@ async fn an_end_that_comes_while_a_channel_is_slow_is_told_after_any_number_of_w
     assert_eq!(
         told,
         [
-            (EventKind::BackupStarted, first.id()),
-            (EventKind::BackupFailed, second.id()),
+            (EventKind::BackupStarted, Some(first.id())),
+            (EventKind::BackupFailed, Some(second.id())),
         ]
     );
 }

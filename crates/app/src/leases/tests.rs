@@ -1,7 +1,7 @@
 use std::sync::Arc;
 
 use domain::fleet::{HubAddress, HubPin, KeyFile, PublicKey, TokenTls};
-use domain::maintenance::{EpochFloor, Grant, HeldLeases};
+use domain::maintenance::{EpochFloor, Grant, HeldLeases, Pause};
 use domain::{SignedDuration, Timestamp};
 
 use super::*;
@@ -169,4 +169,95 @@ async fn i1_a_clock_set_back_doesnt_lengthen_a_lease() {
         machine.leases.permits(Some(&repository('a'))).await,
         Err(NoLease::RanOut)
     );
+}
+
+/// A cache that kept a pause of `photos` since the start, not yet told.
+async fn kept_pause(cache: &InMemoryLeaseCache) {
+    let paused = HeldLeases::default().with_pauses([(
+        repository('a'),
+        Pause {
+            since: start(),
+            alerted: false,
+        },
+    )]);
+    cache.save_pauses(&paused).await.unwrap();
+}
+
+#[tokio::test]
+async fn a_paired_machine_notes_and_reads_its_pauses_now() {
+    let machine = machine(paired().await);
+    assert_eq!(machine.leases.paused(Some(&repository('a'))).await, None);
+    assert_eq!(machine.leases.watch(&[repository('a')]).await, Ok(vec![]));
+    machine.clock.advance(SignedDuration::from_hours(24));
+    assert_eq!(
+        machine.leases.paused(Some(&repository('a'))).await,
+        Some(start())
+    );
+    assert_eq!(machine.leases.paused(None).await, None);
+    machine.clock.advance(SignedDuration::from_hours(13 * 24));
+    assert_eq!(
+        machine.leases.watch(&[repository('a')]).await,
+        Ok(vec![(repository('a'), start())])
+    );
+    assert_eq!(machine.leases.told(&repository('a'), start()).await, Ok(()));
+    assert_eq!(
+        machine
+            .cache
+            .load()
+            .await
+            .unwrap()
+            .pauses()
+            .collect::<Vec<_>>(),
+        vec![(
+            &repository('a'),
+            &Pause {
+                since: start(),
+                alerted: true
+            }
+        )]
+    );
+    assert_eq!(machine.leases.watch(&[repository('a')]).await, Ok(vec![]));
+}
+
+#[tokio::test]
+async fn a_machine_that_isnt_paired_is_never_paused_and_drops_what_it_noted() {
+    let machine = machine(Arc::new(InMemoryIdentity::default()));
+    kept_pause(&machine.cache).await;
+    assert_eq!(machine.leases.paused(Some(&repository('a'))).await, None);
+    machine.clock.advance(SignedDuration::from_hours(30 * 24));
+    assert_eq!(machine.leases.watch(&[repository('a')]).await, Ok(vec![]));
+    assert_eq!(machine.cache.load().await.unwrap().pauses().count(), 0);
+}
+
+#[tokio::test]
+async fn a_pin_that_cant_be_read_notes_and_says_nothing() {
+    let machine = machine(Arc::new(InMemoryIdentity::unreadable(
+        IdentityError::Damaged {
+            file: KeyFile::HubPin,
+        },
+    )));
+    kept_pause(&machine.cache).await;
+    assert_eq!(machine.leases.paused(Some(&repository('a'))).await, None);
+    machine.clock.advance(SignedDuration::from_hours(30 * 24));
+    assert_eq!(machine.leases.watch(&[repository('a')]).await, Ok(vec![]));
+    assert_eq!(machine.cache.load().await.unwrap().pauses().count(), 1);
+}
+
+#[tokio::test]
+async fn i1_a_watch_keeps_the_lease_a_grant_took_and_the_grant_keeps_the_pauses() {
+    let machine = machine(paired().await);
+    kept_pause(&machine.cache).await;
+    let refused = machine
+        .leases
+        .take(&grants(start()), 0, start())
+        .await
+        .unwrap();
+    assert_eq!(refused, vec![]);
+    assert_eq!(machine.cache.load().await.unwrap().pauses().count(), 1);
+    // The grant clears the pause at once; the next watch drops it.
+    assert_eq!(machine.leases.paused(Some(&repository('a'))).await, None);
+    assert_eq!(machine.leases.watch(&[repository('a')]).await, Ok(vec![]));
+    let kept = machine.cache.load().await.unwrap();
+    assert_eq!(kept.pauses().count(), 0);
+    assert_eq!(kept.leases().count(), 1);
 }

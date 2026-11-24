@@ -1,13 +1,16 @@
-//! A paired machine's leases from its hub and its epoch floors (technical
-//! design §7.3, I1; migration `0024_agent_leases`): the `LeaseCache` port on
-//! the store's own file, built only with the hub (decision 122). A save
-//! replaces both tables in one transaction, so a load never sees half of
-//! one. Numbers past `i64::MAX` are refused where they enter, on the wire,
+//! A paired machine's leases from its hub, its epoch floors and its paused
+//! maintenance (technical design §7.3, I1; migrations `0024_agent_leases`
+//! and `0027_agent_maintenance_paused`; decision 158): the `LeaseCache`
+//! port on the store's own file, built only with the hub (decision 122). A
+//! save replaces the leases and floors in one transaction, and a save of
+//! the pauses replaces the pauses alone, so a load never sees half of one
+//! and a watch never writes back a lease a grant let go. Numbers past
+//! `i64::MAX` are refused where they enter, on the wire,
 //! so each fits its column.
 
 use app::ports::{LeaseCache, StoreError};
 use async_trait::async_trait;
-use domain::maintenance::{EpochFloor, HeldLease, HeldLeases, LeaseEpoch};
+use domain::maintenance::{EpochFloor, HeldLease, HeldLeases, LeaseEpoch, Pause};
 use domain::{RepositoryId, Timestamp};
 use sqlx::sqlite::SqliteRow;
 use sqlx::{Connection, Row};
@@ -17,6 +20,11 @@ use crate::{SqliteStore, unavailable};
 const LEASES: &str = "SELECT repo_id, epoch, ends_at FROM agent_leases";
 
 const FLOORS: &str = "SELECT repo_id, recovery_number, generation, epoch FROM agent_epoch_floors";
+
+const PAUSES: &str = "SELECT repo_id, since, alerted FROM agent_maintenance_paused";
+
+const KEEP_PAUSE: &str =
+    "INSERT INTO agent_maintenance_paused (repo_id, since, alerted) VALUES (?1, ?2, ?3)";
 
 const KEEP_LEASE: &str = "INSERT INTO agent_leases (repo_id, epoch, ends_at) VALUES (?1, ?2, ?3)";
 
@@ -63,8 +71,26 @@ impl LeaseCache for SqliteStore {
                 ))
             })
             .collect::<Result<Vec<_>, StoreError>>()?;
+        let pauses = sqlx::query(PAUSES)
+            .fetch_all(&mut *tx)
+            .await
+            .map_err(unavailable)?
+            .iter()
+            .map(|row| {
+                Ok((
+                    repository_of(row)?,
+                    Pause {
+                        since: Timestamp::from_millisecond(
+                            row.try_get("since").map_err(unavailable)?,
+                        )
+                        .map_err(|_| corrupt("since"))?,
+                        alerted: row.try_get("alerted").map_err(unavailable)?,
+                    },
+                ))
+            })
+            .collect::<Result<Vec<_>, StoreError>>()?;
         tx.commit().await.map_err(unavailable)?;
-        Ok(HeldLeases::from_parts(leases, floors))
+        Ok(HeldLeases::from_parts(leases, floors).with_pauses(pauses))
     }
 
     async fn save(&self, leases: &HeldLeases) -> Result<(), StoreError> {
@@ -97,6 +123,29 @@ impl LeaseCache for SqliteStore {
                 .bind(column(floor.recovery_number)?)
                 .bind(column(floor.generation)?)
                 .bind(column(floor.epoch.get())?)
+                .execute(&mut *tx)
+                .await
+                .map_err(unavailable)?;
+        }
+        tx.commit().await.map_err(unavailable)
+    }
+
+    async fn save_pauses(&self, leases: &HeldLeases) -> Result<(), StoreError> {
+        let _call = self.call().await;
+        let mut conn = self.pool.acquire().await.map_err(unavailable)?;
+        let mut tx = conn
+            .begin_with("BEGIN IMMEDIATE")
+            .await
+            .map_err(unavailable)?;
+        sqlx::query("DELETE FROM agent_maintenance_paused")
+            .execute(&mut *tx)
+            .await
+            .map_err(unavailable)?;
+        for (repository, pause) in leases.pauses() {
+            sqlx::query(KEEP_PAUSE)
+                .bind(repository.as_str())
+                .bind(pause.since.as_millisecond())
+                .bind(pause.alerted)
                 .execute(&mut *tx)
                 .await
                 .map_err(unavailable)?;

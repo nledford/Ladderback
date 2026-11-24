@@ -23,7 +23,16 @@ impl LeaseCache for InMemoryLeaseCache {
     }
 
     async fn save(&self, leases: &HeldLeases) -> Result<(), StoreError> {
-        *self.kept.lock().unwrap_or_else(PoisonError::into_inner) = leases.clone();
+        let mut kept = self.kept.lock().unwrap_or_else(PoisonError::into_inner);
+        let pauses = kept.pauses().map(|(id, pause)| (id.clone(), *pause));
+        *kept = leases.clone().with_pauses(pauses.collect::<Vec<_>>());
+        Ok(())
+    }
+
+    async fn save_pauses(&self, leases: &HeldLeases) -> Result<(), StoreError> {
+        let mut kept = self.kept.lock().unwrap_or_else(PoisonError::into_inner);
+        let pauses = leases.pauses().map(|(id, pause)| (id.clone(), *pause));
+        *kept = kept.clone().with_pauses(pauses);
         Ok(())
     }
 }

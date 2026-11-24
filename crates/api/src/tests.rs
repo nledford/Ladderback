@@ -104,6 +104,7 @@ fn a_repository_row_carries_its_warnings_as_a_code_and_arguments_and_leaves_none
         repo_hot: None,
         password: PasswordSourceDto::Inline,
         maintained_here: true,
+        maintenance_paused_since: None,
         create_offered: true,
         warnings: vec![WarningDto {
             code: WarningCode::ConfigInlineSecret,
@@ -927,6 +928,7 @@ mod catalog_dto_tests {
                 repo_hot: None,
                 password: PasswordSourceDto::Inline,
                 maintained_here: false,
+                maintenance_paused_since: None,
                 create_offered: false,
                 warnings: Vec::new(),
                 locations: Vec::new(),
@@ -980,6 +982,7 @@ mod catalog_dto_tests {
             repo_hot: Some("/mnt/hot".to_owned()),
             password: PasswordSourceDto::Inline,
             maintained_here: false,
+            maintenance_paused_since: None,
             create_offered: false,
             warnings: Vec::new(),
             locations: Vec::new(),

@@ -13,7 +13,7 @@ fn localizer() -> Localizer {
 fn event(kind: EventKind) -> Event {
     Event {
         kind,
-        operation: OperationId::from_uuid(Uuid::from_u128(OPERATION)),
+        operation: Some(OperationId::from_uuid(Uuid::from_u128(OPERATION))),
         plan: PlanId::parse("demo-plan").ok(),
         repository: RepositoryAlias::parse("demo-repo").ok(),
         at: Timestamp::from_second(1_800_000_000).expect("a time"),
@@ -320,6 +320,7 @@ fn each_event_has_a_title_that_says_what_happened() {
             "Prune failed",
             "Check failed",
             "Restore failed",
+            "Maintenance paused",
         ]
     );
 }
@@ -389,4 +390,22 @@ fn an_ntfy_title_is_written_in_the_agents_locale_whatever_the_message() {
         assert_eq!(header(&request, "Title"), header_text(&pseudo));
         assert_eq!(header(&request, "Tags"), "backup.failed");
     }
+}
+
+#[test]
+fn paused_maintenance_says_which_repository_and_since_when_and_posts_no_operation() {
+    let localizer = localizer();
+    let paused = Event::maintenance_paused(
+        RepositoryAlias::parse("demo-repo").expect("an alias"),
+        Timestamp::from_second(1_800_000_000).expect("a time"),
+    );
+    assert_eq!(
+        default_message(&localizer, &paused),
+        "Maintenance of demo-repo from this machine has been paused since Jan 15, 2027, 8:00\u{202f}AM UTC, because it holds no lease on the repository from its hub."
+    );
+    let body = webhook_body(&paused, "");
+    assert_eq!(body["event"], "repo.maintenance_paused");
+    assert_eq!(body["operation"], serde_json::Value::Null);
+    assert_eq!(body["repository"], "demo-repo");
+    assert_eq!(body["time"], "2027-01-15T08:00:00Z");
 }

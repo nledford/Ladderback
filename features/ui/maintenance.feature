@@ -38,6 +38,18 @@ Feature: Maintenance of a repository on the Snapshots page
     And the page offers no button "Check the repository"
     And the page offers no adoption button into the plan "away"
 
+  Scenario: A paired machine's paused maintenance is shown on the repository as a warning, by keyboard alone
+    Given a demo plan "home" with a tiny scratch repository
+    And the plan "home" has been backed up 2 times
+    And the daemon says maintenance of "demo" from this machine is paused since "2026-11-01T12:00:00Z"
+    When I open the address "/snapshots"
+    And I skip to the content
+    And I press Tab until focus is on the button "Snapshots of demo"
+    And I press Enter
+    Then the page shows a warning alert containing "Maintenance from this machine has been paused since Nov 1, 2026, because it holds no lease on this repository from its hub."
+    And the page offers the button "Forget snapshots"
+    And the page has no accessibility violations
+
   Scenario: Maintenance from this agent is turned on after a warning that only one place may maintain a repository
     Given a demo plan "home" with a tiny scratch repository
     And the plan "home" has been backed up 2 times

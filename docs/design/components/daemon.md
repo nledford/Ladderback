@@ -121,6 +121,7 @@ This section decides what the daemon does: its HTTP server and API, the schedule
 - **Repositories API.** `GET /api/v1/repositories` answers `{"repositories": […]}`, one row per configured repository in alias order:
   - `alias`.
   - `maintained-here` (whether this agent maintains it, §7.3: `true` only for `maintenance = "local"`; a row without it reads as `false`, so a page offers no maintenance it can't run).
+  - `maintenance-paused-since` (since when, RFC 3339, a paired machine's maintenance of a repository it maintains has been paused for want of a lease from its hub, §7.3, decision 158; left out while it isn't paired, holds a live lease, hasn't noted the pause yet, or can't read its pin or leases).
   - `create-offered` (whether the row offers to create the repository, decision 53: `true` while its entry records no `repository-id`, the newest operation of a plan that backs up to it failed `repository-not-found` and none of them ever succeeded, so never while nothing is on record; left out when `false`, and `false` for every row when the operation log can't be read, which the daemon logs at WARN).
   - `repository` and `repo-hot` (where it is, with any password in a URL masked by the domain's `Redactor`).
   - `password`, where the password comes from (`{"source": "inline"}`, or `file` with `path`, `keyring` with `entry`, `env` with `name`, `command` with `program`), never its value (I4).

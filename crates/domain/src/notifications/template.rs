@@ -136,7 +136,9 @@ impl Template {
                     }
                 }
                 Part::Value(Placeholder::Operation) => {
-                    message.push_str(&event.operation.as_uuid().to_string());
+                    if let Some(operation) = event.operation {
+                        message.push_str(&operation.as_uuid().to_string());
+                    }
                 }
                 Part::Value(Placeholder::Code) => {
                     if let Some(code) = event.code() {

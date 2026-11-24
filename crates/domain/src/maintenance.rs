@@ -28,7 +28,10 @@ mod properties;
 mod start_window;
 mod stats;
 
-pub use held::{EpochFloor, EpochLower, Grant, HeldLease, HeldLeases, NoLease, RepoGrants};
+pub use held::{
+    EpochFloor, EpochLower, Grant, HeldLease, HeldLeases, NoLease, PAUSE_ALERT_AFTER, Pause,
+    RepoGrants,
+};
 pub use lease::{
     ClaimOutcome, ClaimRefused, LEASE_GRACE, LEASE_LIFE, Lease, LeaseEpoch, REPORT_LIFE,
     ReleaseRefused, RepositoryOwnership, RepositoryReport, RepositoryReports, report_counts,

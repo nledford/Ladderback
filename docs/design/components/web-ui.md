@@ -30,6 +30,8 @@ Every page follows §4.5. Pages:
 
    A repository this agent maintains that holds snapshots from other hosts (§3.1) says so before those buttons and in the review of a forget, an adoption or a prune, since another machine may maintain it too (§7.3).
 
+   On a paired machine, a repository it maintains but holds no live lease on from its hub shows a Warning alert before those buttons: maintenance from this machine has been paused since a date, in the viewer's zone, because it holds no lease on the repository, and starts again once the hub grants one (§7.3, decision 158). The buttons stay, and a run asked for answers `maintenance-no-lease`. The repository list's `maintenance-paused-since` (RFC 3339) carries the date; a value the page can't read shows nothing.
+
    After those buttons, **Maintain from this agent** (or **Stop maintaining from this agent** when this agent maintains it) turns maintenance of the repository from this agent on or off, after a dialog that says what that means (decision 48). A repository this agent doesn't maintain shows its history without those buttons and says why.
 
    **Refusals** are Error alerts in the sender's words (§4.5, "The alert"): a list of repositories the daemon refuses where the repositories to pick from would be, a refused read of the history, a refused maintenance request or a refused cancel after the maintenance buttons, and a refused read of the stats in their section, each said assertively once; a refused change of who maintains the repository inside its dialog, which stays open.
