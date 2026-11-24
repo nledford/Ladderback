@@ -46,6 +46,7 @@ async fn the_lists_refuse_a_configuration_that_cannot_be_used_as_a_save_does() {
             sources: Arc::new(app::fakes::FakeSources),
             reads: Arc::default(),
             listings: Arc::default(),
+            leases: None,
             link: Arc::new(NameWatch::new(
                 Arc::new(app::fakes::FakeNetworkLink::new()),
                 || {},
@@ -84,6 +85,7 @@ async fn a_listing_and_a_backup_refuse_a_configuration_that_cannot_be_used_as_a_
             sources: Arc::new(app::fakes::FakeSources),
             reads: Arc::default(),
             listings: Arc::default(),
+            leases: None,
             link: Arc::new(NameWatch::new(
                 Arc::new(app::fakes::FakeNetworkLink::new()),
                 || {},

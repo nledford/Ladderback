@@ -469,6 +469,7 @@ async fn offers_listed(
         sources: Arc::new(app::fakes::FakeSources),
         reads: Arc::default(),
         listings: Arc::default(),
+        leases: None,
         link: Arc::new(NameWatch::new(
             Arc::new(app::fakes::FakeNetworkLink::new()),
             || {},

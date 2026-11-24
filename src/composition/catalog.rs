@@ -62,6 +62,11 @@ pub(super) struct ConfigCatalog {
     /// The turns to list a repository's snapshots, which every listing
     /// shares (#710).
     pub(super) listings: Arc<ReadTurns>,
+    /// The hub's leases a paired machine maintains under (§7.3): a
+    /// repository it maintains and holds no live lease on shows since when
+    /// its maintenance is paused (decision 158). None in a build without
+    /// the hub.
+    pub(super) leases: Option<Arc<app::leases::MaintenanceLeases>>,
 }
 
 #[async_trait]
@@ -193,6 +198,19 @@ impl Catalog for ConfigCatalog {
         }
         let reads_names = self.link.reads_names();
         let last_link = self.link.last_link();
+        // Since when the maintenance of each repository this machine
+        // maintains is paused for want of a lease, on a paired machine.
+        let mut paused = HashMap::new();
+        if let Some(leases) = &self.leases {
+            for (alias, repository) in config.repositories() {
+                if !domain::maintenance::Ownership::owned_here(repository.maintenance) {
+                    continue;
+                }
+                if let Some(since) = leases.paused(repository.id.as_ref()).await {
+                    paused.insert(alias, since);
+                }
+            }
+        }
         Ok(api::RepositoriesDto {
             repositories: config
                 .repositories()
@@ -211,6 +229,7 @@ impl Catalog for ConfigCatalog {
                         offered.contains(alias),
                     );
                     row.warnings.extend(mixed_link_note(repository, last_link));
+                    row.maintenance_paused_since = paused.get(alias).map(|since| since.to_string());
                     row
                 })
                 .collect(),

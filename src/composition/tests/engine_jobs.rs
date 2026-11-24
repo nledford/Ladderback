@@ -58,6 +58,7 @@ async fn every_job_names_the_repository_id_the_configuration_recorded() {
         sources: Arc::new(app::fakes::FakeSources),
         reads: Arc::default(),
         listings: Arc::default(),
+        leases: None,
         link: Arc::new(NameWatch::new(
             Arc::new(app::fakes::FakeNetworkLink::new()),
             || {},
@@ -140,6 +141,7 @@ async fn every_job_carries_the_entry_it_was_made_from() {
         sources: Arc::new(app::fakes::FakeSources),
         reads: Arc::default(),
         listings: Arc::default(),
+        leases: None,
         link: Arc::new(NameWatch::new(
             Arc::new(app::fakes::FakeNetworkLink::new()),
             || {},
@@ -238,6 +240,7 @@ async fn a_job_that_opens_an_entry_without_an_id_records_it_in_the_file() {
         sources: Arc::new(app::fakes::FakeSources),
         reads: Arc::default(),
         listings: Arc::default(),
+        leases: None,
         link: Arc::new(NameWatch::new(
             Arc::new(app::fakes::FakeNetworkLink::new()),
             || {},

@@ -90,6 +90,7 @@ async fn the_list_shows_where_each_password_comes_from_and_never_the_password() 
         sources: Arc::new(app::fakes::FakeSources),
         reads: Arc::default(),
         listings: Arc::default(),
+        leases: None,
         link: Arc::new(NameWatch::new(
             Arc::new(app::fakes::FakeNetworkLink::new()),
             || {},

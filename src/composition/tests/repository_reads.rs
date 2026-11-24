@@ -87,6 +87,7 @@ async fn catalog_at(
         sources: Arc::new(app::fakes::FakeSources),
         reads: Arc::default(),
         listings: Arc::default(),
+        leases: None,
         link: Arc::new(NameWatch::new(
             Arc::new(app::fakes::FakeNetworkLink::new()),
             || {},
@@ -128,6 +129,7 @@ async fn the_plans_list_carries_the_planned_run_of_each_scheduled_plan() {
         sources: Arc::new(app::fakes::FakeSources),
         reads: Arc::default(),
         listings: Arc::default(),
+        leases: None,
         link: Arc::new(NameWatch::new(
             Arc::new(app::fakes::FakeNetworkLink::new()),
             || {},
@@ -144,6 +146,106 @@ async fn the_plans_list_carries_the_planned_run_of_each_scheduled_plan() {
         vec![
             ("home", true, Some("2026-11-09T05:00:00Z")),
             ("docs", false, None),
+        ]
+    );
+}
+
+/// On a paired machine, the repositories list says since when the
+/// maintenance of each repository maintained here is paused for want of a
+/// lease, as RFC 3339, and nothing for a repository maintained elsewhere or
+/// one whose pause isn't noted yet (decision 158).
+#[tokio::test]
+async fn the_repositories_list_says_since_when_maintenance_here_is_paused() {
+    use domain::fleet::{HubAddress, HubPin, PublicKey, TokenTls};
+    use domain::maintenance::{HeldLeases, Pause};
+    use domain::planning::Maintenance;
+    let id =
+        |digit: char| domain::RepositoryId::parse(&digit.to_string().repeat(64)).expect("an ID");
+    let entry = |digit, maintenance| domain::planning::RepositoryConfig {
+        locations: Default::default(),
+        id: Some(id(digit)),
+        settings: RepositorySettings {
+            repository: format!("/srv/{digit}"),
+            repo_hot: None,
+            password: SecretRef::Inline(domain::secrets::SecretValue::new("canary")),
+            options: Default::default(),
+            options_hot: Default::default(),
+            options_cold: Default::default(),
+        },
+        maintenance,
+        group_by: Default::default(),
+        hooks: Default::default(),
+    };
+    let alias = |name| RepositoryAlias::parse(name).expect("an alias");
+    let config = Arc::new(InMemoryConfigStore::new());
+    config
+        .save(
+            &domain::planning::AgentConfig::new(
+                Default::default(),
+                Default::default(),
+                std::collections::BTreeMap::from([
+                    (alias("photos"), entry('a', Maintenance::Local)),
+                    (alias("music"), entry('b', Maintenance::None)),
+                    (alias("docs"), entry('c', Maintenance::Local)),
+                ]),
+                Vec::new(),
+            )
+            .expect("a valid configuration"),
+        )
+        .await
+        .expect("the configuration saves");
+    let identity = Arc::new(app::fakes::InMemoryIdentity::default());
+    let key = |byte| PublicKey::from_bytes([byte; 32]).expect("a key");
+    let pin = HubPin::new(
+        key(7),
+        TokenTls::Ca,
+        key(9),
+        HubAddress::parse("https://hub.example:9898").expect("an address"),
+    );
+    app::ports::Identity::write_pin(identity.as_ref(), &pin)
+        .await
+        .expect("the pin is kept");
+    let since = domain::Timestamp::from_second(1_800_000_000).expect("a time");
+    let pause = Pause {
+        since,
+        alerted: false,
+    };
+    let cache = Arc::new(app::fakes::InMemoryLeaseCache::default());
+    app::ports::LeaseCache::save_pauses(
+        cache.as_ref(),
+        &HeldLeases::default().with_pauses([(id('a'), pause), (id('b'), pause)]),
+    )
+    .await
+    .expect("the pauses are kept");
+    let clock = Arc::new(app::fakes::FakeClock::new(since));
+    let catalog = ConfigCatalog {
+        config,
+        engine: engine(),
+        operations: Arc::new(app::fakes::InMemoryOperationStore::new()),
+        schedules: Arc::new(app::fakes::InMemoryScheduleStore::new()),
+        sources: Arc::new(app::fakes::FakeSources),
+        reads: Arc::default(),
+        listings: Arc::default(),
+        leases: Some(Arc::new(app::leases::MaintenanceLeases::new(
+            identity, cache, clock,
+        ))),
+        link: Arc::new(NameWatch::new(
+            Arc::new(app::fakes::FakeNetworkLink::new()),
+            || {},
+        )),
+    };
+    let listed = catalog.repositories().await.expect("the list");
+    let shown: Vec<(&str, Option<&str>)> = listed
+        .repositories
+        .iter()
+        .map(|row| (row.alias.as_str(), row.maintenance_paused_since.as_deref()))
+        .collect();
+    assert_eq!(
+        shown,
+        vec![
+            ("docs", None),
+            ("music", None),
+            ("photos", Some("2027-01-15T08:00:00Z")),
         ]
     );
 }
