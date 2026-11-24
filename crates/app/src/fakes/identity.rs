@@ -81,6 +81,10 @@ impl Identity for InMemoryIdentity {
         Ok(())
     }
 
+    async fn renew_agent_key(&self, _seed: SigningSeed) -> Result<(), IdentityError> {
+        todo!()
+    }
+
     async fn recovery_key(&self) -> Result<Option<PublicKey>, IdentityError> {
         Ok(self.kept().recovery_key)
     }

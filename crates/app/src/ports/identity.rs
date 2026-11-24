@@ -7,8 +7,9 @@ use domain::fleet::{ConnectionCounter, HubPin, KeyFile, PublicKey, SeedFile, Sig
 /// The key files of an agent and its hub (§7.1; §16, decision 120, "The hub
 /// key" and "A copied data folder"): kept in the data folder, never the
 /// database, so `db rebuild` can't change them. A key, once kept, is never
-/// replaced by this port: the hub key's rotation is the one exception, and
-/// it has an order of its own. The seeds come from the `Random` port.
+/// replaced by this port but in two ways, each with an order of its own: the
+/// hub key's rotation, and a new agent key when the machine takes a new
+/// machine ID (decision 154). The seeds come from the `Random` port.
 #[async_trait]
 pub trait Identity: Send + Sync {
     /// The seed `file` holds, or `None` when there is no such file.
@@ -26,6 +27,12 @@ pub trait Identity: Send + Sync {
     /// Deletes the recovery seed, once the person has confirmed the
     /// Recovery Kit. Done when there is none.
     async fn forget_recovery_seed(&self) -> Result<(), IdentityError>;
+
+    /// Replaces the agent key's seed with `seed`, kept or not, as one
+    /// write: a reader finds the old seed or the new one, never part of
+    /// either, and a power loss can't roll it back once this has answered.
+    /// Only a new machine ID replaces it (decision 154).
+    async fn renew_agent_key(&self, seed: SigningSeed) -> Result<(), IdentityError>;
 
     /// The recovery key's public half, or `None` when there is none.
     async fn recovery_key(&self) -> Result<Option<PublicKey>, IdentityError>;

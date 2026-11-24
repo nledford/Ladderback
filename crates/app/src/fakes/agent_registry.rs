@@ -210,6 +210,7 @@ impl AgentRegistry for InMemoryAgentRegistry {
                     .tombstones
                     .iter()
                     .find(|t| t.agent_id == request.agent_id),
+                key_tombstone: None,
             };
             decide_pairing(&view, request, now)
         };

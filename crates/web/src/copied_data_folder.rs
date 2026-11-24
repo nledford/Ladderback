@@ -124,6 +124,7 @@ pub(crate) fn CopiedDataFolder(localizer: Arc<Localizer>) -> impl IntoView {
             MachineStandingDto::RefusedByHub => {
                 (refused_heading.clone(), Some(refused_body.clone()))
             }
+            MachineStandingDto::RemovedByHub => todo!(),
             MachineStandingDto::NewIdTaken => (taken_heading.clone(), None),
             MachineStandingDto::Same | MachineStandingDto::Unread => return None,
         };

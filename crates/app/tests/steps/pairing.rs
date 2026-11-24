@@ -31,6 +31,8 @@ use super::Agent;
 mod dialog;
 #[path = "hub_plans.rs"]
 mod hub_plans;
+#[path = "removed_new_id.rs"]
+mod removed_new_id;
 #[path = "removing.rs"]
 mod removing;
 #[path = "second_machine.rs"]
@@ -219,6 +221,9 @@ pub struct PairingWorld {
     /// The sync of the first agent's plans and progress
     /// (`fleet/plans_and_progress.feature`).
     live: hub_plans::LiveWorld,
+    /// The first agent's machine ID before it took a new one
+    /// (`fleet/removed_new_id.feature`).
+    old_id: Option<AgentId>,
 }
 
 impl std::fmt::Debug for PairingWorld {
@@ -367,6 +372,15 @@ impl PairingWorld {
 
     fn first(&self) -> &Machine {
         self.first.as_ref().expect("the first agent")
+    }
+
+    /// The key files a new machine ID is taken over: the copy's, or the
+    /// first agent's; `None` when the scenario paired no machine.
+    pub fn new_id_identity(&self, copy: bool) -> Option<Arc<InMemoryIdentity>> {
+        let machine = if copy { &self.second } else { &self.first };
+        machine
+            .as_ref()
+            .map(|machine| Arc::clone(&machine.identity))
     }
 
     /// The connector to `hub`, which answers only where the world says.
@@ -792,6 +806,7 @@ fn refused(agent: &mut Agent, reason: String) {
         "the hub's key isn't the token's" => "hub-key-mismatch",
         "too many agents wait for approval" => "pending-limit",
         "the hub removed the agent" => "agent-removed",
+        "the hub removed the agent's key" => "agent-key-removed",
         other => panic!("no refusal is named {other:?}"),
     };
     assert_eq!(agent.pairing.refusal_code(), code);

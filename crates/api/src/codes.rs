@@ -632,6 +632,10 @@ pub enum ErrorCode {
     /// waited: it refuses its connections and an ordinary token under its
     /// ID. The machine keeps backing up and runs no maintenance.
     AgentRemoved,
+    /// The hub removed, or a person rejected, a machine that held this
+    /// machine's agent key: it refuses the key under any machine ID. The
+    /// token stays good.
+    AgentKeyRemoved,
     /// The hub closed the connection because it can't offer the binding
     /// the agent's token names, before it proved itself.
     BindingUnavailable,
@@ -1688,6 +1692,7 @@ impl ErrorCode {
             | Self::ProofRefused
             | Self::PendingLimit
             | Self::AgentRemoved
+            | Self::AgentKeyRemoved
             | Self::BindingUnavailable
             | Self::IdentityConflict
             | Self::PlainAddress

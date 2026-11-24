@@ -18,7 +18,8 @@ use domain::maintenance::Ownership;
 use domain::{AgentId, OperationId};
 
 use crate::ports::{
-    ConfigError, ConfigStore, MachineError, OperationStore, Problem, StoreError, ThisMachine,
+    ConfigError, ConfigStore, Identity, MachineError, OperationStore, Problem, Random, StoreError,
+    ThisMachine,
 };
 use crate::repositories::ConfigWrites;
 
@@ -43,6 +44,12 @@ pub enum Standing {
     /// computer, so it maintains as before; its hub grants it nothing while
     /// it refuses it. Its hub taking it again sets it back to [`Self::Same`].
     RefusedByHub,
+    /// The hub this machine paired with removed it, or rejected it while it
+    /// waited for approval, signed (`agent-removed`): it never takes the
+    /// machine's ID again. Backups run, and the person may take a new
+    /// machine ID and pair again under it. It maintains as before, as a
+    /// machine its hub refused does: its hub grants it nothing.
+    RemovedByHub,
     /// This computer's identifier couldn't be read, so a copy can't be
     /// told: the machine runs as usual.
     Unread,
@@ -112,6 +119,12 @@ impl MachineStanding {
     /// computer under its machine ID.
     pub fn hub_refused(&self) {
         self.change(Standing::refused_by_hub);
+    }
+
+    /// The hub this machine paired with removed it, or rejected it while it
+    /// waited for approval, signed.
+    pub fn hub_removed(&self) {
+        todo!()
     }
 
     /// The hub this machine paired with took it.
@@ -228,6 +241,13 @@ impl TakeNewId {
             operations,
             writes,
         }
+    }
+
+    /// Taking a new machine ID makes a new agent key too, its seed drawn
+    /// from `random` and kept by `identity`.
+    #[must_use]
+    pub fn with_agent_key(self, _identity: Arc<dyn Identity>, _random: Arc<dyn Random>) -> Self {
+        self
     }
 
     /// Where the machine stands now.

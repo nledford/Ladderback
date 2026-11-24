@@ -601,6 +601,13 @@ error-hostname-taken = The { -hub } already has a { -machine } named { $hostname
 # The hub has another machine under this machine's ID.
 error-agent-key-mismatch = The { -hub } has another { -machine } under this { -machine }'s ID. Don't pair again; ask whoever runs the { -hub }.
 
+# The hub removed, or someone rejected, a machine that held this machine's
+# key, and refuses that key under any machine ID. A machine that takes a new
+# machine ID after its hub removed it makes a new key too, so this one holds
+# a removed machine's key, as a copy of its data folder would. The token
+# stays good.
+error-agent-key-removed = The { -hub } removed a { -machine } that held this { -machine }'s key, and refuses that key under any machine ID. Don't pair again with this data folder; ask whoever runs the { -hub }.
+
 # The hub's key isn't the one this machine trusts or its token names. Nothing
 # of the token was sent.
 error-hub-key-mismatch = This { -hub }'s key isn't the one this { -machine } trusts. If you reset or reinstalled the { -hub } on purpose, make a new token on the { -hub } and pair again, and compare the { -hub } key's fingerprint on both screens first. If you didn't, don't pair again: someone may be posing as it.

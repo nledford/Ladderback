@@ -1,5 +1,5 @@
 @ui
-Feature: A copied data folder, or a machine its hub refused, is told on the start page
+Feature: A copied data folder, or a machine its hub refused or removed, is told on the start page
   When the machine identifier this computer gives isn't the one recorded
   beside its machine ID (`features/fleet/copied_data_folder.feature`), the
   start page says the data folder came from another computer: backups run,
@@ -11,8 +11,11 @@ Feature: A copied data folder, or a machine its hub refused, is told on the star
   ID (`features/fleet/refused_new_id.feature`) is told so, and offered the
   same button and review; it may be the original computer, so the page
   never says its data folder came from another one, nor once its new ID is
-  taken. Everything works by keyboard alone. An unchanged machine is told
-  nothing.
+  taken. A machine its hub removed, or rejected while it waited, signed
+  (`features/fleet/removed_new_id.feature`), is told so and offered a new
+  machine ID with which to pair again; its review says the snapshots under
+  the old ID stay there and that the hub's owner approves it again.
+  Everything works by keyboard alone. An unchanged machine is told nothing.
 
   Scenario: A copied data folder is told, with a way to take a new ID
     Given the agent found its data folder was copied from another computer
@@ -61,6 +64,26 @@ Feature: A copied data folder, or a machine its hub refused, is told on the star
     And the page doesn't say the data folder came from another computer
     And the page offers the link "Restart Ladderback"
     And the page has no accessibility violations
+
+  Scenario: A machine its hub removed is told, and takes a new ID by keyboard alone
+    Given the agent's hub removed it, signed
+    When I open the web UI
+    Then the page says the hub removed this machine, and to pair it again under a new ID
+    And the page doesn't say the data folder came from another computer
+    And the page has no accessibility violations
+    When I skip to the content
+    And I press Tab until focus is on the button "Take a new machine ID"
+    And I press Enter
+    Then the dialog "Take a new machine ID?" opens with focus inside it
+    And the dialog "Take a new machine ID?" says "stops maintaining every repository it maintained"
+    And the dialog "Take a new machine ID?" says "approves it again"
+    And the page has no accessibility violations
+    When I press Tab until focus is on the button "Take a new ID" in the dialog
+    And I press Enter
+    Then the agent was asked once to take a new machine ID
+    And the page says a new machine ID was taken, to be used once Ladderback restarts
+    And focus is on the heading "New machine ID taken"
+    And the page offers the link "Restart Ladderback"
 
   Scenario: Cancel takes no new ID, and focus goes back to the button
     Given the agent found its data folder was copied from another computer

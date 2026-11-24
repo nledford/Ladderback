@@ -959,6 +959,69 @@ async fn only_a_signed_identity_conflict_stands_the_machine_refused() {
     assert_eq!(standing.get(), Standing::Same);
 }
 
+/// Only the paired hub's signed `agent-removed` stands the machine removed
+/// by its hub, so it may take a new machine ID: the same refusal with a
+/// signature the hub didn't make leaves it as it was (#1489).
+#[tokio::test]
+async fn only_a_signed_agent_removed_stands_the_machine_removed() {
+    use crate::machine::{MachineStanding, Standing};
+    use crate::sync::{SyncFailure, SyncWithHub};
+    use domain::fleet::OutboxEpoch;
+
+    let hub = hub(1);
+    let identity = paired(&hub, 1).await;
+    let record = hub.registry.agent(agent_id(1)).await.unwrap().unwrap();
+    hub.registry
+        .remove(agent_id(1), record.key, hub.clock.now())
+        .await
+        .unwrap()
+        .unwrap();
+    let standing = Arc::new(MachineStanding::new(Standing::Same));
+    let connector = Arc::new(LoopbackHubConnector::to(hub.pairing.clone()));
+    let sync = SyncWithHub::new(
+        connecting(identity.clone(), connector.clone()),
+        Arc::new(crate::fakes::InMemoryOutbox::new(OutboxEpoch::from_uuid(
+            Uuid::from_u128(0xe1),
+        ))),
+        Arc::new(FakeClock::new(
+            Timestamp::from_second(1_800_000_030).unwrap(),
+        )),
+        agent_id(1),
+        hostname(1),
+        None,
+    )
+    .with_standing(standing.clone());
+
+    connector.forge_refusals();
+    let failure = sync.sync_once().await;
+    assert!(
+        matches!(failure, Err(SyncFailure::Connect(ConnectFailure::Unsigned))),
+        "{failure:?}"
+    );
+    assert_eq!(standing.get(), Standing::Same);
+
+    let signed = Arc::new(LoopbackHubConnector::to(hub.pairing.clone()));
+    let sync = SyncWithHub::new(
+        connecting(identity, signed),
+        Arc::new(crate::fakes::InMemoryOutbox::new(OutboxEpoch::from_uuid(
+            Uuid::from_u128(0xe1),
+        ))),
+        Arc::new(FakeClock::new(
+            Timestamp::from_second(1_800_000_030).unwrap(),
+        )),
+        agent_id(1),
+        hostname(1),
+        None,
+    )
+    .with_standing(standing.clone());
+    let failure = sync.sync_once().await;
+    let Err(SyncFailure::Connect(ConnectFailure::Refused(refused))) = failure else {
+        panic!("{failure:?}");
+    };
+    assert_eq!(refused.code.as_str(), "agent-removed");
+    assert_eq!(standing.get(), Standing::RemovedByHub);
+}
+
 /// The `Hello` carries the fingerprint of the computer the agent runs on,
 /// under its ID, and never the identifier itself (decision 150).
 #[tokio::test]

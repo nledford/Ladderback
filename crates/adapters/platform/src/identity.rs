@@ -123,6 +123,10 @@ impl Identity for FileIdentity {
         .await
     }
 
+    async fn renew_agent_key(&self, _seed: SigningSeed) -> Result<(), IdentityError> {
+        todo!()
+    }
+
     async fn recovery_key(&self) -> Result<Option<PublicKey>, IdentityError> {
         self.read(KeyFile::RecoveryKey, parse_key).await
     }

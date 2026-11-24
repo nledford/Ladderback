@@ -301,6 +301,7 @@ impl AgentRegistry for SqliteStore {
             by_hostname: by_hostname.as_ref(),
             pending,
             tombstone: tombstone.as_ref(),
+            key_tombstone: None,
         };
         let decided = decide_pairing(&view, request, now);
         match &decided {

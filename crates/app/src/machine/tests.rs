@@ -46,3 +46,51 @@ fn a_machine_its_hub_refused_maintains_as_before() {
     assert!(!Standing::Copied.maintains());
     assert!(!Standing::NewIdTaken.maintains());
 }
+
+/// A machine its hub removed, or rejected while it waited (#1489): the hub
+/// never takes its ID again, so it may take a new one, whether it stood as
+/// usual or refused as a second computer before.
+#[test]
+fn a_machine_its_hub_removed_stands_removed() {
+    let removed = MachineStanding::hub_removed;
+    assert_eq!(after(Standing::Same, removed), Standing::RemovedByHub);
+    assert_eq!(
+        after(Standing::RefusedByHub, removed),
+        Standing::RemovedByHub
+    );
+    assert_eq!(
+        after(Standing::RemovedByHub, removed),
+        Standing::RemovedByHub
+    );
+    // A copy stays one, a new ID taken stays taken, and a machine whose
+    // identifier couldn't be read can't take a new ID without one.
+    assert_eq!(after(Standing::Copied, removed), Standing::Copied);
+    assert_eq!(after(Standing::NewIdTaken, removed), Standing::NewIdTaken);
+    assert_eq!(after(Standing::Unread, removed), Standing::Unread);
+}
+
+/// A hub that takes the machine, or refuses it only as a second computer,
+/// got past its proof: it no longer holds the machine removed.
+#[test]
+fn its_hub_taking_or_refusing_the_machine_clears_the_removal() {
+    assert_eq!(
+        after(Standing::RemovedByHub, MachineStanding::hub_took),
+        Standing::Same
+    );
+    assert_eq!(
+        after(Standing::RemovedByHub, MachineStanding::hub_refused),
+        Standing::RefusedByHub
+    );
+}
+
+#[test]
+fn a_machine_its_hub_removed_may_take_a_new_id_and_maintains_as_before() {
+    // Its hub grants it no lease, which is what stops its maintenance, as
+    // for a machine its hub refused.
+    assert!(Standing::RemovedByHub.offers_new_id());
+    assert!(Standing::RemovedByHub.maintains());
+    assert!(Standing::RefusedByHub.offers_new_id());
+    assert!(!Standing::Same.offers_new_id());
+    assert!(!Standing::NewIdTaken.offers_new_id());
+    assert!(!Standing::Unread.offers_new_id());
+}

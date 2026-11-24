@@ -167,7 +167,7 @@ impl Side {
     }
 }
 
-fn first(agent: &mut Agent) -> &mut Side {
+pub(super) fn first(agent: &mut Agent) -> &mut Side {
     let world = &mut agent.pairing;
     if world.syncing.first.is_none() {
         world.syncing.first = Some(Side::new(world, 1));
@@ -247,20 +247,28 @@ async fn other_runs_backups(agent: &mut Agent, count: u32) {
     }
 }
 
+/// The agent's sync tells its machine's standing what the hub made of it,
+/// as the daemon's does, once a scenario set up its machine.
+async fn sync_first(agent: &mut Agent) {
+    let machine = agent.pairing.first.take().expect("the first agent");
+    let standing = agent.machine.set_up_standing();
+    let side = first(agent);
+    side.standing = standing;
+    side.sync(&machine).await;
+    agent.pairing.first = Some(machine);
+}
+
 #[when("the agent tries to sync with its hub")]
 async fn tries_to_sync(agent: &mut Agent) {
-    let machine = agent.pairing.first.take().expect("the first agent");
-    first(agent).sync(&machine).await;
-    agent.pairing.first = Some(machine);
+    sync_first(agent).await;
 }
 
 #[when("the agent syncs with its hub")]
 async fn syncs(agent: &mut Agent) {
-    let machine = agent.pairing.first.take().expect("the first agent");
-    let outcome = first(agent).sync(&machine).await.clone();
-    agent.pairing.first = Some(machine);
+    sync_first(agent).await;
+    let outcome = first(agent).synced.last();
     assert!(
-        matches!(outcome, Ok(Synced::Replayed { .. })),
+        matches!(outcome, Some(Ok(Synced::Replayed { .. }))),
         "{outcome:?}"
     );
 }

@@ -48,6 +48,7 @@ fn answer(standing: Standing) -> Response {
         Standing::Copied => MachineStandingDto::Copied,
         Standing::NewIdTaken => MachineStandingDto::NewIdTaken,
         Standing::RefusedByHub => MachineStandingDto::RefusedByHub,
+        Standing::RemovedByHub => todo!(),
         Standing::Unread => MachineStandingDto::Unread,
     };
     (StatusCode::OK, Json(MachineDto { standing })).into_response()

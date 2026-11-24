@@ -33,6 +33,7 @@ Feature: A machine its hub refused as a second computer can take a new machine I
     And the copy maintains the repositories its configuration asks it to
     When the person takes a new machine ID on the copy
     Then the copy has a new machine ID
+    And the copy holds a new agent key
     And the repository's maintenance is now "none"
     And the copy's maintenance stays refused until it starts again
 
@@ -44,6 +45,7 @@ Feature: A machine its hub refused as a second computer can take a new machine I
     When the person takes a new machine ID on the copy
     Then taking a new machine ID on the copy is refused
     And the copy's machine ID is unchanged
+    And the copy's agent key is unchanged
     And the repository's maintenance is now "local"
 
   Scenario: Once the hub takes the computer again, the machine stands as before
@@ -56,3 +58,4 @@ Feature: A machine its hub refused as a second computer can take a new machine I
     When the person takes a new machine ID on the copy
     Then taking a new machine ID on the copy is refused
     And the copy's machine ID is unchanged
+    And the copy's agent key is unchanged
