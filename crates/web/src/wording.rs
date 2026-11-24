@@ -437,10 +437,16 @@ mod tests {
         assert_eq!(maintenance_paused("yesterday", None), None);
         let shown = maintenance_paused("2026-11-01T12:00:00Z", None)
             .map(|words| text_with(&Localizer::new(&[]), words.id, &words.args));
+        // On the host the date is ICU4X's when a workspace build turns on
+        // `l10n/icu` (the daemon's feature), and the plain UTC fallback when
+        // `web` builds alone, as the release-build tests do; either names the day.
         assert!(
-            shown.as_deref().is_some_and(|shown| shown.starts_with(
-                "Maintenance from this machine has been paused since Nov 1, 2026, because"
-            )),
+            shown.as_deref().is_some_and(|shown| [
+                "Maintenance from this machine has been paused since Nov 1, 2026, because",
+                "Maintenance from this machine has been paused since 2026-11-01 UTC, because",
+            ]
+            .iter()
+            .any(|day| shown.starts_with(day))),
             "{shown:?}"
         );
     }
