@@ -182,6 +182,10 @@ pub(crate) struct Background {
     /// sync tells its hub with each repository (§7.3; §16, decision 156).
     #[cfg(feature = "hub")]
     listings_due: Arc<app::others_snapshots::ListingsDue>,
+    /// The leases this machine maintains under, the same the runner's
+    /// maintenance reads.
+    #[cfg(feature = "hub")]
+    leases: Arc<app::leases::MaintenanceLeases>,
 }
 
 /// What the release check asks (decision 107): its feed, and the version it
@@ -192,6 +196,13 @@ pub(crate) struct Releases {
 }
 
 impl Background {
+    /// The leases the runner's maintenance reads, for a test of what the
+    /// daemon wires.
+    #[cfg(all(test, feature = "hub"))]
+    pub(super) fn maintenance_reads(&self) -> Option<Arc<app::leases::MaintenanceLeases>> {
+        self.runner.leases.clone()
+    }
+
     /// What the daemon's orderly stop freezes: every run of an operation,
     /// whoever started it (decision 92).
     pub(crate) fn runs(&self) -> runs::Runs {
@@ -210,6 +221,15 @@ impl Background {
     #[cfg(feature = "hub")]
     pub(crate) fn standing(&self) -> Arc<app::machine::MachineStanding> {
         Arc::clone(&self.runner.machine)
+    }
+
+    /// The leases this machine maintains under (§7.3, I1), the one handle
+    /// its sync with a hub takes the hub's grants through and its
+    /// maintenance reads them through, so both judge a lease by one floor
+    /// (decision 151).
+    #[cfg(feature = "hub")]
+    pub(crate) fn leases(&self) -> Arc<app::leases::MaintenanceLeases> {
+        Arc::clone(&self.leases)
     }
 
     /// What a paired machine tells its hub of its plans (§7.2): their
@@ -590,7 +610,16 @@ async fn state_over(
     // The bus and the notification rules come first, so that recovery can
     // announce each operation it ends (decision 91).
     let bus: Arc<dyn EventBus> = Arc::new(BroadcastEventBus::new());
-    let leases = maintenance_leases(data_dir, &log.store);
+    // One for maintenance, its pause watch, the catalog and the sync with a
+    // hub alike: the floor the sync's take of the hub's grants sets is the
+    // one maintenance judges a lease by (I1, decision 151).
+    #[cfg(feature = "hub")]
+    let held = maintenance_leases(data_dir, &log.store);
+    #[cfg(feature = "hub")]
+    let leases = Some(Arc::clone(&held));
+    // A build without the hub never pairs, so it holds no leases.
+    #[cfg(not(feature = "hub"))]
+    let leases = None;
     notify_over(
         bus.as_ref(),
         Arc::clone(&config),
@@ -900,6 +929,8 @@ async fn state_over(
         releases: None,
         #[cfg(feature = "hub")]
         listings_due,
+        #[cfg(feature = "hub")]
+        leases: held,
     };
     Ok((
         AppState {
@@ -941,21 +972,12 @@ async fn state_over(
 fn maintenance_leases(
     data_dir: &std::path::Path,
     store: &Arc<SqliteStore>,
-) -> Option<Arc<app::leases::MaintenanceLeases>> {
-    Some(Arc::new(app::leases::MaintenanceLeases::new(
+) -> Arc<app::leases::MaintenanceLeases> {
+    Arc::new(app::leases::MaintenanceLeases::new(
         Arc::new(platform::identity::FileIdentity::in_data_dir(data_dir)),
         Arc::<SqliteStore>::clone(store),
         Arc::new(SystemClock),
-    )))
-}
-
-/// A build without the hub never pairs, so it holds no leases.
-#[cfg(not(feature = "hub"))]
-fn maintenance_leases(
-    _data_dir: &std::path::Path,
-    _store: &Arc<SqliteStore>,
-) -> Option<Arc<app::leases::MaintenanceLeases>> {
-    None
+    ))
 }
 
 /// Where this machine stands, from the check at start of whether its data

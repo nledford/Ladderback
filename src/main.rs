@@ -870,6 +870,10 @@ fn run_daemon(
         // listing doesn't stand (§7.3, decision 156).
         #[cfg(feature = "hub")]
         let listings = background.listings_due();
+        // And the leases maintenance reads, which it takes the hub's grants
+        // into, so both judge a lease by one floor (§7.3, I1).
+        #[cfg(feature = "hub")]
+        let leases = background.leases();
         let scheduled = tokio::spawn(background.run(random));
         // A paired machine's reports to its hub run beside the scheduler
         // and never hold it up (§7.2).
@@ -880,7 +884,11 @@ fn run_daemon(
                 Arc::clone(&state.events),
                 early,
                 Arc::clone(&operation_log.store),
-                hub::Maintained { config, listings },
+                hub::Maintained {
+                    config,
+                    listings,
+                    leases,
+                },
                 standing,
                 Some(plans),
             ))

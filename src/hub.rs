@@ -936,10 +936,13 @@ const PAIRING_POLL: std::time::Duration = std::time::Duration::from_secs(30);
 /// What a session reads to ask for the leases on the repositories this
 /// machine maintains (§7.3): which they are, from `config`, and what
 /// `listings` showed of other agents' snapshots in each, listing before the
-/// session each whose listing doesn't stand (decision 156).
+/// session each whose listing doesn't stand (decision 156); and `leases`,
+/// the ones its maintenance reads, which it takes the hub's grants into, so
+/// both judge a lease by one floor (I1).
 pub(crate) struct Maintained {
     pub(crate) config: Arc<dyn app::ports::ConfigStore>,
     pub(crate) listings: Arc<app::others_snapshots::ListingsDue>,
+    pub(crate) leases: Arc<MaintenanceLeases>,
 }
 
 /// This machine's reports to its hub (§7.2): once it paired, a recorder
@@ -968,7 +971,11 @@ pub(crate) async fn reporting(
     standing: Arc<app::machine::MachineStanding>,
     plans: Option<ReadPlans>,
 ) {
-    let Maintained { config, listings } = maintained;
+    let Maintained {
+        config,
+        listings,
+        leases,
+    } = maintained;
     let identity = Arc::new(FileIdentity::in_data_dir(&data_dir));
     let mut early = Some(early);
     let agent_id = loop {
@@ -1000,14 +1007,6 @@ pub(crate) async fn reporting(
             }
         }
     };
-    // Each session also asks for the leases on the repositories this
-    // machine maintains, and keeps the hub's grants beside the outbox,
-    // where its maintenance reads them (§7.3, I1).
-    let leases = Arc::new(MaintenanceLeases::new(
-        Arc::<FileIdentity>::clone(&identity),
-        Arc::<SqliteStore>::clone(&store),
-        Arc::new(SystemClock),
-    ));
     let mut syncing = SyncWithHub::new(
         connecting(identity, &data_dir),
         Arc::<SqliteStore>::clone(&store),
@@ -1364,7 +1363,15 @@ mod tests {
             Arc::clone(&events),
             early,
             Arc::clone(&store),
-            Maintained { config, listings },
+            Maintained {
+                config,
+                listings,
+                leases: Arc::new(MaintenanceLeases::new(
+                    Arc::new(FileIdentity::in_data_dir(data.path())),
+                    Arc::<SqliteStore>::clone(&store),
+                    Arc::new(SystemClock),
+                )),
+            },
             Arc::default(),
             None,
         ));
