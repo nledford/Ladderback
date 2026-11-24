@@ -343,6 +343,23 @@ impl HubLink for LoopLink {
             }
         };
         let step = self.hub.step(session, &read).await;
+        let went_live = session.syncing_agent().filter(|_| {
+            let mut live = self
+                .held
+                .live
+                .lock()
+                .unwrap_or_else(PoisonError::into_inner);
+            let first = live.is_none();
+            if first {
+                *live = session.syncing_agent();
+            }
+            first
+        });
+        if let Some(agent) = went_live {
+            let held = self.held.clone();
+            let close = Box::new(move || held.closed.store(true, Ordering::SeqCst));
+            self.hub.went_live(agent, self.held.connection, close).await;
+        }
         match step {
             HubStep::Reply(answer) => {
                 let lost = matches!(&answer, HubFrame::Signed { kind, .. } if kind == "Ack")

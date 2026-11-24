@@ -5,17 +5,21 @@
 //! progress is kept in place of the one before and told to the browsers.
 
 use api::{MachineProgressDto, OperationStep, ProgressUnit, UiEvent};
-use domain::fleet::{EpochSeconds, ReportedProgress, WireName, plans_ack_kind};
+use domain::fleet::{EpochSeconds, ReportedProgress, WireName, heartbeat_ack_kind, plans_ack_kind};
 use domain::{AgentId, Timestamp};
 
 use super::{Answered, HubPairing, HubPairingError, MessageRefused};
-use crate::pairing::wire::{plans_ack_payload, read_plans, read_progress};
+use crate::pairing::wire::{
+    heartbeat_ack_payload, plans_ack_payload, read_heartbeat, read_plans, read_progress,
+};
 
 impl HubPairing {
     /// Answers `payload`, the machine's heartbeat, with a `HeartbeatAck`.
     pub(super) fn take_heartbeat(&self, payload: &[u8]) -> Answered {
-        let _ = payload;
-        todo!("the hub answers a heartbeat")
+        match read_heartbeat(payload) {
+            Ok(()) => Ok(Some((heartbeat_ack_kind(), heartbeat_ack_payload()))),
+            Err(_) => Err(MessageRefused::Unexpected),
+        }
     }
 
     /// Keeps `agent`'s snapshot of its plans in place of the one before,

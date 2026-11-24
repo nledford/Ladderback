@@ -112,13 +112,16 @@ impl Fleet {
 }
 
 /// Whether `event` asks the dashboard to read its machines again: a
-/// machine was approved or removed, or the hub took one of a machine's
-/// reports, its plans or its running operation's progress.
+/// machine was approved or removed, came online or went offline, or the
+/// hub took one of a machine's reports, its plans or its running
+/// operation's progress.
 pub(crate) fn reads_again(event: &UiEvent) -> bool {
     matches!(
         event,
         UiEvent::AgentApproved { .. }
             | UiEvent::AgentRemoved { .. }
+            | UiEvent::AgentOnline { .. }
+            | UiEvent::AgentOffline { .. }
             | UiEvent::AgentReported { .. }
             | UiEvent::AgentPlans { .. }
             | UiEvent::AgentProgress { .. }

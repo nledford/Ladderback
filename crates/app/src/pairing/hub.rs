@@ -461,7 +461,8 @@ impl HubPairing {
 
     /// Removes the agent `agent_id` registered with `agent_key`, now,
     /// pending (a rejection) or approved, keeps its tombstone, logs the
-    /// removal and tells the browsers (decision 154).
+    /// removal, closes the agent's live connection and tells the browsers
+    /// (decision 154; §16, decision 159).
     pub(super) async fn remove_now(
         &self,
         agent_id: AgentId,
@@ -473,6 +474,7 @@ impl HubPairing {
             .await?;
         if let Ok(tombstone) = &removed {
             log::info!("{}", logged::removed(tombstone));
+            self.let_go(agent_id);
             self.tell(fleet::removed(tombstone)).await;
         }
         Ok(removed)
