@@ -26,13 +26,15 @@ use leptos::wasm_bindgen::JsValue;
 
 use crate::announcer::Politeness;
 use crate::components::ACTIONS;
+use crate::components::alert::rules::AlertTone;
 use crate::components::button::Content;
 use crate::components::link::rules::LinkPlacement;
 use crate::components::skeleton::rules::Awaited;
 use crate::components::tree::rules::snapshot_link;
 use crate::components::{
-    Button, Column, Confirmation, Link, Name as TableName, ReviewDialog, Sentences, State, Table,
-    Working, dialog_refusal_alert, recover_focus, refusal_alert, say_refusals, sentence_view,
+    Alert, Button, Column, Confirmation, Link, Name as TableName, ReviewDialog, Sentences, State,
+    Table, Working, dialog_refusal_alert, recover_focus, refusal_alert, say_refusals,
+    sentence_view,
 };
 use crate::components::{first_load, paced};
 use crate::live::{reply, say};
@@ -522,9 +524,10 @@ pub(crate) fn Snapshots(localizer: Arc<Localizer>) -> impl IntoView {
     let unreachable_body = text(&localizer, msg::UI_UNREACHABLE_BODY);
     let unreachable = RwSignal::new(false);
     // The repositories to pick from, each with whether this agent maintains
-    // it; `None` while the read is on its way.
-    let repositories = RwSignal::<Option<Vec<(String, bool)>>>::new(None);
-    let chosen = RwSignal::<Option<(String, bool)>>::new(None);
+    // it and since when that maintenance is paused for want of a lease, on a
+    // paired machine; `None` while the read is on its way.
+    let repositories = RwSignal::<Option<Vec<(String, bool, Option<String>)>>>::new(None);
+    let chosen = RwSignal::<Option<(String, bool, Option<String>)>>::new(None);
     // The page of a repository is made anew when another is picked, not when
     // the one shown is picked again; that only asks for its history again.
     let shown_alias = Memo::new(move |_| chosen.get());
@@ -544,7 +547,7 @@ pub(crate) fn Snapshots(localizer: Arc<Localizer>) -> impl IntoView {
                 repositories.set(Some(
                     read.repositories
                         .into_iter()
-                        .map(|row| (row.alias, row.maintained_here))
+                        .map(|row| (row.alias, row.maintained_here, row.maintenance_paused_since))
                         .collect(),
                 ));
             }
@@ -602,7 +605,7 @@ pub(crate) fn Snapshots(localizer: Arc<Localizer>) -> impl IntoView {
             (Some(aliases), _) => {
                 aliases
                     .into_iter()
-                    .map(|(alias, maintained)| {
+                    .map(|(alias, maintained, paused)| {
                         let label = text_with(
                             &picker,
                             msg::UI_SNAPSHOTS_OF,
@@ -614,7 +617,7 @@ pub(crate) fn Snapshots(localizer: Arc<Localizer>) -> impl IntoView {
                             <Button
                                 content=Content::Text(label.into())
                                 on_press=Callback::new(move |()| {
-                                    chosen.set(Some((alias.clone(), maintained)));
+                                    chosen.set(Some((alias.clone(), maintained, paused.clone())));
                                     picks.update(|picks| *picks = picks.wrapping_add(1));
                                 })
                             />
@@ -627,12 +630,13 @@ pub(crate) fn Snapshots(localizer: Arc<Localizer>) -> impl IntoView {
         {move || {
             shown_alias
                 .get()
-                .map(|(alias, maintained)| {
+                .map(|(alias, maintained, paused)| {
                     view! {
                         <Repository
                             localizer=Arc::clone(&localizer)
                             alias=alias
                             maintained=maintained
+                            paused=paused
                             unreachable=unreachable
                             picks=picks
                             remember=remember
@@ -647,13 +651,16 @@ pub(crate) fn Snapshots(localizer: Arc<Localizer>) -> impl IntoView {
 /// whatever is asked. It is made anew for each repository picked, and reads
 /// its history again each time its repository is picked. A repository this
 /// agent does not maintain shows its history and says why it offers no
-/// maintenance. Either way the page offers to turn maintenance from this
-/// agent on or off, after a dialog that says what that means.
+/// maintenance; one it maintains whose maintenance is `paused` for want of
+/// a lease, since when the daemon wrote, warns of it above the buttons.
+/// Either way the page offers to turn maintenance from this agent on or
+/// off, after a dialog that says what that means.
 #[component]
 fn Repository(
     localizer: Arc<Localizer>,
     alias: String,
     maintained: bool,
+    paused: Option<String>,
     unreachable: RwSignal<bool>,
     picks: RwSignal<u32>,
     remember: Callback<(String, bool)>,
@@ -674,6 +681,25 @@ fn Repository(
         } else {
             msg::UI_MAINTENANCE_ELSEWHERE
         })
+    };
+    // Since when maintenance from this paired machine is paused (§7.3,
+    // decision 158), read in the viewer's zone.
+    let paused = page.viewer.with_value(|zone| {
+        paused
+            .as_deref()
+            .and_then(|since| wording::maintenance_paused(since, zone.as_ref()))
+    });
+    let paused_alert = move || {
+        paused
+            .clone()
+            .filter(|_| page.maintained.get())
+            .map(|words| {
+                view! {
+                    <Alert localizer=page.localizer.get_value() tone=AlertTone::Warning>
+                        {page.words(&words)}
+                    </Alert>
+                }
+            })
     };
     let buttons = move || {
         page.maintained.get().then(|| {
@@ -765,6 +791,7 @@ fn Repository(
                     .map(|note| view! { <p>{note}</p> })
                     .collect_view()
             }}
+            {paused_alert}
             {buttons}
             <p class=ACTIONS>
                 <Button
