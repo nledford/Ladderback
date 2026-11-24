@@ -15,6 +15,7 @@ use app::leases::{MaintenanceLeases, WatchPauses};
 use app::notifications::Notify;
 use app::ports::{ConfigStore, Identity, NotifyError};
 use domain::fleet::{HubAddress, HubPin, PublicKey, TokenTls};
+use domain::fleet::{SIGNATURE_BYTES, Signature};
 use domain::maintenance::{Grant, LeaseEpoch, RepoGrants};
 use domain::notifications::{
     Channel, ChannelKind, ChannelName, EventKind, Notifications, Rule, RuleName,
@@ -148,6 +149,7 @@ async fn machine() -> Machine {
             repository: id('a'),
             epoch: LeaseEpoch::new(1).expect("an epoch"),
             expires_at: start().checked_add(days(7)).expect("a time"),
+            signature: Signature::from_bytes([0; SIGNATURE_BYTES]).expect("a signature"),
         }],
     };
     assert_eq!(
