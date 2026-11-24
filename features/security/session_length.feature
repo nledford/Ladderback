@@ -359,7 +359,9 @@ Feature: How long signing in lasts
       And the admin is signed in with "demo-admin-pass"
       And the admin has set Stay signed in for to "Until I close the browser"
       When I open the address "/settings"
-      And I press Shift+Tab until focus is on the button "Sign out"
+      And I press Shift+Tab until focus is on the button "Settings"
+      And I press Enter
+      And I press Tab until focus is on the button "Sign out"
       And I press Enter
       Then focus is on the heading "Sign in to Ladderback"
       And the page offers no checkbox "Keep me signed in on this device"

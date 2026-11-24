@@ -476,6 +476,13 @@ ui-gallery-link-status = The demo check failed: { $link } says why.
 # The words of the link inside ui-gallery-link-status.
 ui-gallery-link-status-link = the demo log
 
+# A link standing alone in the link demo's list of links, to the gallery
+# itself, the page the reader is on.
+ui-gallery-link-standing-here = Demo standing link to this page
+
+# A link standing alone in the link demo's list of links, to the start page.
+ui-gallery-link-standing-start = Demo standing link to the start page
+
 # The heading of the gallery's alert demo (§4.5): an inline message in each
 # tone, one with a link inside it and one the reader can dismiss.
 ui-gallery-alert-heading = Alert
@@ -869,6 +876,34 @@ ui-gallery-fingerprint-name = Demo { -hub } key fingerprint
 # The heading of the gallery's footer demo (§4.5): the running version at
 # the foot of every page.
 ui-gallery-footer-heading = Footer
+
+# The heading of the gallery's disclosure menu demo (§4.5): buttons that
+# show and hide a panel of links under them, as the header's Settings menu.
+ui-gallery-disclosure-menu-heading = Disclosure menu
+
+# The words of the demo's second menu's button, whose panel holds a link to
+# the gallery itself, the page the reader is on.
+ui-gallery-disclosure-menu-pages = Demo pages
+
+# The words of the demo's first menu's button, whose panel holds a link to
+# another page.
+ui-gallery-disclosure-menu-other = Demo other pages
+
+# A row of the second menu: a link to the gallery itself.
+ui-gallery-disclosure-menu-here = Demo menu link to this page
+
+# A row of the second menu: a link to the start page.
+ui-gallery-disclosure-menu-start = Demo menu link to the start page
+
+# The second menu's last row: a button, which does nothing in the demo.
+ui-gallery-disclosure-menu-action = Demo menu action
+
+# The first menu's row: a link to the Log page.
+ui-gallery-disclosure-menu-log = Demo menu link to the log
+
+# A button after the demo's menus, where focus goes when it leaves them;
+# it does nothing.
+ui-gallery-disclosure-menu-after = Demo after the menu
 
 # The heading of the gallery's steps demo (§4.5): a process's steps in
 # order, each with its state, and where the process has reached.
@@ -2626,7 +2661,7 @@ ui-live-resumed =
 # The accessible name of the navigation in the header, the list of links to the pages.
 ui-nav-label = Pages
 
-# The accessible name of the header's icon-only hamburger button, on a screen narrower than 41rem, that shows and hides the menu: the pages' links and Sign out. The same name whether the menu shows or not.
+# The accessible name of the header's icon-only hamburger button, on a screen narrower than 54rem, that shows and hides the menu: every page's link and Sign out. The same name whether the menu shows or not.
 ui-menu-button = Menu
 
 # The navigation's link to the operations page.
@@ -2649,6 +2684,9 @@ ui-nav-log = Log
 
 # The navigation's link to the Settings page.
 ui-nav-settings = Settings
+
+# The words of the header's button that shows and hides the Settings menu, after the pages' links: a panel holding the links to the Settings and Log pages and, while signed in, Sign out. The name of that group of pages; the same whether the menu shows or not.
+ui-settings-menu-button = Settings
 
 ## The repositories page: the repositories Ladderback backs up to, and the
 ## form that tests, connects or creates one (§4.4).

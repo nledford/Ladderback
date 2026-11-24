@@ -18,7 +18,7 @@ use leptos::task::spawn_local;
 
 use crate::announcer::Politeness;
 use crate::components::button::{Appearance, Content};
-use crate::components::link::rules::{Destination, Matching};
+use crate::components::link::rules::{Destination, LinkPlacement, Matching};
 use crate::components::{
     ACTIONS, Button, Confirmation, Link, ReviewDialog, Working, dialog_refusal_alert, focus_element,
 };
@@ -156,7 +156,11 @@ pub(crate) fn CopiedDataFolder(localizer: Arc<Localizer>) -> impl IntoView {
                     {Destination::route(RESTART_HREF, Matching::Exact)
                         .map(|to| {
                             view! {
-                                <Link to=to localizer=restart_localizer>
+                                <Link
+                                    to=to
+                                    localizer=restart_localizer
+                                    placement=LinkPlacement::InText
+                                >
                                     {restart_label}
                                 </Link>
                             }

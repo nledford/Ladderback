@@ -10,7 +10,7 @@ use l10n::{Localizer, MessageId, msg};
 use leptos::prelude::*;
 
 use crate::components::Link;
-use crate::components::link::rules::{Destination, LinkTone, Matching};
+use crate::components::link::rules::{Destination, LinkPlacement, LinkTone, Matching};
 use crate::page;
 use crate::repositories::Sentence;
 use crate::routes::{PageHeading, text_with};
@@ -22,6 +22,7 @@ mod badge;
 mod banner;
 mod button;
 mod checkbox;
+mod disclosure_menu;
 mod fingerprint;
 mod footer;
 mod icon;
@@ -104,6 +105,11 @@ pub(crate) fn Gallery(localizer: Arc<Localizer>) -> impl IntoView {
         // After the fingerprint's demo: no part of a footer is a Tab stop,
         // so it lengthens no walk either.
         <footer::FooterDemo localizer=Arc::clone(&localizer) />
+        // After the footer's demo, past every demo a journey walks to from
+        // the page's top, and before the table's, which journeys reach by
+        // Shift+Tab from the page's start, so its stops lengthen none of
+        // those walks; its scenarios start at its anchor.
+        <disclosure_menu::DisclosureMenuDemo localizer=Arc::clone(&localizer) />
         // Before the tooltip's, so a journey reaches its controls by
         // Shift+Tab from the page's start, past the tooltip's few.
         <table::TableDemo localizer=Arc::clone(&localizer) />
@@ -148,7 +154,7 @@ fn demo_link(
     let localizer = Arc::clone(localizer);
     to.map(|to| {
         view! {
-            <Link to=to localizer=localizer>
+            <Link to=to localizer=localizer placement=LinkPlacement::InText>
                 {words}
             </Link>
         }
@@ -172,7 +178,7 @@ fn sentence_link(
             let localizer = Arc::clone(localizer);
             view! {
                 {sentence.before}
-                <Link to=to localizer=localizer tone=tone>
+                <Link to=to localizer=localizer tone=tone placement=LinkPlacement::InText>
                     {words}
                 </Link>
                 {after}

@@ -28,7 +28,7 @@ Feature: Browsing a snapshot's tree by keyboard
   # shared link (§4.5). The way back goes to the Snapshots page, which the
   # navigation marks as the section the reader is in, so it is not itself
   # the current page.
-  Scenario: A snapshot's ID in its row and the way back from its page are underlined links
+  Scenario: A snapshot's ID standing alone in its row shows no underline at rest, and the way back from its page is underlined
     Given a demo plan "home" with a tiny scratch repository
     And the plan "home" has been backed up 1 times
     When I open the address "/snapshots"
@@ -36,7 +36,7 @@ Feature: Browsing a snapshot's tree by keyboard
     And I press Tab until focus is on the button "Snapshots of demo"
     And I press Enter
     And I press Tab until focus is on the link to the newest snapshot of the plan "home"
-    Then every link in the main content is underlined below its letters, 1 in all
+    Then no link in the main content is underlined, 1 in all
     When I press Enter
     Then focus is on the main heading
     And every link in the main content is underlined below its letters, 1 in all

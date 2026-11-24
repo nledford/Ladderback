@@ -539,7 +539,14 @@ const SNAPSHOTS: Record<string, string> = {
   - text: \u2069 says why.
 - paragraph:
   - link "Demo rustic documentation, right to left (goes to another site)":
-    - /url: https://rustic.cli.rs/`,
+    - /url: https://rustic.cli.rs/
+- list:
+  - listitem:
+    - link "Demo standing link to this page":
+      - /url: /_gallery
+  - listitem:
+    - link "Demo standing link to the start page":
+      - /url: /`,
   // Each banner is its icon, an image named for its tone, then its words,
   // with no role of its own: no live region and no landmark. The notice ends
   // with its Dismiss button, whose tooltip is hidden from a screen reader.
@@ -625,4 +632,10 @@ const SNAPSHOTS: Record<string, string> = {
   Footer: `- heading "Footer" [level=2]
 - paragraph: Version ⁨0.4.0⁩
 - paragraph: Version ⁨0.4.0+4444444.dirty⁩`,
+  // Closed, a disclosure menu is its button alone: its panel is hidden, from
+  // a screen reader too, until the button shows it.
+  "Disclosure menu": `- heading "Disclosure menu" [level=2]
+- button "Demo other pages"
+- button "Demo pages"
+- button "Demo after the menu"`,
 };

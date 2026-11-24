@@ -172,8 +172,8 @@ Given("the daemon has found that version {string} is available", function (this:
 });
 
 // The notice is the header's last line, under the pages' links and outside
-// their navigation, or, below 41rem where the menu button holds the links
-// (decision 143), under the line that ends with the button. It is no live
+// their navigation, or, below 54rem where the menu button holds the links
+// (decisions 143, 152), under the line that ends with the button. It is no live
 // region of its own: only the announcer talks (A3). Its link opens the
 // release's notes without telling GitHub the page it came from, and its name
 // says it goes to another site, as every outside link's does (§4.5).
@@ -181,7 +181,7 @@ Then(
   "the header links to the notes of version {string} on a line of its own under the pages' links",
   async function (this: BrowserWorld, version: string) {
     const banner = this.page.getByRole("banner");
-    // By its tag: below 41rem the closed navigation is undrawn, so no role finds it.
+    // By its tag: below 54rem the closed navigation is undrawn, so no role finds it.
     const navigation = banner.locator("nav");
     const link = banner.getByRole("link", { name: namePattern(`Version ${version} is available (goes to another site)`) });
     await expect(link).toHaveCount(1);

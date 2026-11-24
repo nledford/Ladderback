@@ -6,7 +6,8 @@ use l10n::{Localizer, msg};
 use leptos::prelude::*;
 
 use super::{DemoHeading, demo_link, sentence_link};
-use crate::components::link::rules::{Destination, LinkTone, Matching};
+use crate::components::Link;
+use crate::components::link::rules::{Destination, LinkPlacement, LinkTone, Matching};
 use crate::text;
 
 /// The link's demo (`#link-demo`).
@@ -14,6 +15,18 @@ use crate::text;
 pub(super) fn LinkDemo(localizer: Arc<Localizer>) -> impl IntoView {
     let localizer_t = Arc::clone(&localizer);
     let t = move |id| text(&localizer_t, id);
+    // A link standing alone, a row of a list of links.
+    let standing = |path: &str, words: String| {
+        Destination::route(path, Matching::Exact).map(|to| {
+            view! {
+                <li>
+                    <Link to=to localizer=Arc::clone(&localizer) placement=LinkPlacement::Alone>
+                        {words}
+                    </Link>
+                </li>
+            }
+        })
+    };
     view! {
         <section id="link-demo">
             <DemoHeading text=t(msg::UI_GALLERY_LINK_HEADING) />
@@ -72,6 +85,12 @@ pub(super) fn LinkDemo(localizer: Arc<Localizer>) -> impl IntoView {
                     t(msg::UI_GALLERY_LINK_OUTSIDE_RTL),
                 )}
             </p>
+            // Links standing alone, in a list of links: no underline at rest,
+            // the page the reader is on bold with a bar at its start.
+            <ul>
+                {standing("/_gallery", t(msg::UI_GALLERY_LINK_STANDING_HERE))}
+                {standing("/", t(msg::UI_GALLERY_LINK_STANDING_START))}
+            </ul>
         </section>
     }
 }

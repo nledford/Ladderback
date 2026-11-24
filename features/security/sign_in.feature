@@ -621,7 +621,9 @@ Feature: Sign-in
       And I type "demo-admin-pass"
       And I press Enter
       Then focus is on the heading "Repositories"
-      When I press Shift+Tab until focus is on the button "Sign out"
+      When I press Shift+Tab until focus is on the button "Settings"
+      And I press Enter
+      And I press Tab until focus is on the button "Sign out"
       And I press Enter
       Then focus is on the heading "Sign in to Ladderback"
       And the page is titled "Sign in – Ladderback"
@@ -643,7 +645,9 @@ Feature: Sign-in
       And I press Enter
       Then focus is on the heading "Repositories"
       When I open the address "/repositories" in a second tab
-      And I press Shift+Tab until focus is on the button "Sign out"
+      And I press Shift+Tab until focus is on the button "Settings"
+      And I press Enter
+      And I press Tab until focus is on the button "Sign out"
       And I press Enter
       Then focus is on the heading "Sign in to Ladderback"
       When I press Tab until focus is on the textbox "Admin password"
@@ -742,6 +746,8 @@ Feature: Sign-in
       Given a daemon with sign-in off
       When I open the web UI
       And the admin password "demo-admin-pass" is set
+      And I press Tab until focus is on the button "Settings"
+      And I press Enter
       And I press Tab until focus is on the link "Settings"
       And I press Enter
       Then focus is on the main heading "Settings"

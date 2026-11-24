@@ -39,12 +39,7 @@ Feature: The text field
     And the field "Demo host" is edged 2 pixels wide in --error
 
   Scenario: A multi-line text field takes an entry a line and shows its error as a one-line field does
-    When I open the component gallery
-    And I skip to the content
-    And I press Tab until focus is on the button "Open a demo review"
-    And I press Tab until focus is on the button "Filled Primary"
-    And I press Tab until focus is on the button "Demo work in progress"
-    And I press Tab until focus is on the button "Send the demo form"
+    When I open the "Text field" demo
     And I press Tab until focus is on the textbox "Demo folders"
     And I type "/srv/demo/photos"
     And I press Enter
