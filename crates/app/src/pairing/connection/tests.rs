@@ -2622,3 +2622,143 @@ async fn i1_a_failed_listing_before_a_session_is_refused_and_tried_again_at_the_
     assert_eq!(engine.listings(&photos()), 2);
     assert_eq!(leasing.leases.permits(Some(&photos())).await, Ok(()));
 }
+
+/// The machine's report of `photos`, as its sync sends it, with the floor
+/// it holds and that floor's proof.
+async fn reported_photos(leasing: &Leasing) -> domain::maintenance::RepositoryReports {
+    use domain::maintenance::{RepositoryReport, RepositoryReports};
+    use domain::planning::Maintenance;
+
+    let report = RepositoryReport {
+        repository: photos(),
+        request: Maintenance::Local,
+        holds_other_agents_snapshots: false,
+        floor: None,
+    };
+    RepositoryReports::new(leasing.leases.with_floors(vec![report]).await.unwrap())
+}
+
+/// Has the machine take a grant of `photos` at epoch `number`, signed by
+/// `keys` at the hub's time for 7 days, as a hub granted it before the copy
+/// it was restored from lost the grant; under the recovery number of the
+/// floor the machine holds.
+async fn take_grant_at(leasing: &Leasing, keys: &crate::pairing::HubKeys, number: u64) {
+    use domain::fleet::GENERATION;
+    use domain::maintenance::{Lease, LeaseEpoch};
+
+    use crate::ports::LeaseCache as _;
+
+    let held = leasing.cache.load().await.unwrap();
+    let recovery_number = held
+        .floors()
+        .find(|(repository, _)| **repository == photos())
+        .map(|(_, floor)| floor.recovery_number)
+        .expect("the machine was granted photos before");
+    let signed_at = leasing.hub.clock.now();
+    let lease = Lease {
+        holder: agent_id(1),
+        epoch: LeaseEpoch::new(number).unwrap(),
+        expires_at: signed_at
+            .checked_add(SignedDuration::from_hours(7 * 24))
+            .unwrap(),
+    };
+    let grants = crate::pairing::signed_grants(
+        &FakeSigning,
+        keys,
+        agent_id(1),
+        GENERATION,
+        signed_at,
+        vec![(photos(), lease)],
+    )
+    .unwrap();
+    let refused = leasing
+        .leases
+        .take(&grants, recovery_number, leasing.machine_clock.now())
+        .await
+        .unwrap();
+    assert_eq!(refused, vec![]);
+}
+
+/// A machine keeps each grant with the hub's signature over its entry
+/// alone, and shows it back with its floor: the hub that signed it takes it
+/// as proof of the epoch (decision 137).
+#[tokio::test]
+async fn i1_a_grant_is_kept_with_a_proof_its_hub_takes_back() {
+    use domain::maintenance::LeaseEpoch;
+
+    let leasing = leasing(Timestamp::from_second(1_800_000_000).unwrap()).await;
+    leasing.sync.sync_once().await.unwrap();
+    let reports = reported_photos(&leasing).await;
+    let keys = leasing.hub.pairing.keys().await.unwrap();
+    let proven = crate::pairing::proven_floors(&FakeSigning, &keys, agent_id(1), &reports);
+    assert_eq!(
+        proven
+            .iter()
+            .map(|floor| (floor.repository.clone(), floor.epoch, floor.held))
+            .collect::<Vec<_>>(),
+        vec![(photos(), LeaseEpoch::new(1).unwrap(), true)]
+    );
+}
+
+/// A hub restored from an older copy hears a floor it signed above the
+/// epoch it counts: it enters recovery mode and withholds its grants
+/// (`GrantsWithheld`), and the machine keeps the lease it holds, which
+/// runs out on its own (decision 137, I1).
+#[tokio::test]
+async fn i1_a_hub_that_hears_a_proven_floor_above_its_counter_withholds_its_grants() {
+    use crate::ports::OwnershipRegistry as _;
+
+    let leasing = leasing(Timestamp::from_second(1_800_000_000).unwrap()).await;
+    leasing.sync.sync_once().await.unwrap();
+    let keys = leasing.hub.pairing.keys().await.unwrap();
+    take_grant_at(&leasing, &keys, 5).await;
+    let end = kept_end(&leasing.cache).await;
+    assert!(!leasing.hub.pairing.recovering().await.unwrap());
+    leasing.machine_clock.advance(SignedDuration::from_secs(60));
+    leasing.hub.clock.advance(SignedDuration::from_secs(60));
+    leasing.sync.sync_once().await.unwrap();
+    assert!(leasing.hub.pairing.recovering().await.unwrap());
+    assert_eq!(kept_end(&leasing.cache).await, end, "nothing renewed");
+    assert_eq!(leasing.leases.permits(Some(&photos())).await, Ok(()));
+    let held = leasing.owners.ownership(&photos()).await.unwrap();
+    assert_eq!(
+        held.binding(leasing.hub.clock.now())
+            .map(|lease| lease.epoch.get()),
+        Some(1),
+        "the hub granted nothing above its counter"
+    );
+}
+
+/// A floor whose proof another hub's key signed doesn't count: the hub
+/// logs it, stays out of recovery mode and grants as before (decision 137,
+/// "A report counts only with its proof").
+#[tokio::test]
+async fn i1_a_floor_another_hubs_key_signed_is_logged_and_doesnt_count() {
+    crate::test_log::capture_the_log();
+    let leasing = leasing(Timestamp::from_second(1_800_000_000).unwrap()).await;
+    leasing.sync.sync_once().await.unwrap();
+    let other = hub(2).pairing.keys().await.unwrap();
+    take_grant_at(&leasing, &other, 5).await;
+    let reports = reported_photos(&leasing).await;
+    let keys = leasing.hub.pairing.keys().await.unwrap();
+    assert_eq!(
+        crate::pairing::proven_floors(&FakeSigning, &keys, agent_id(1), &reports),
+        vec![]
+    );
+    leasing.sync.sync_once().await.unwrap();
+    assert!(!leasing.hub.pairing.recovering().await.unwrap());
+    let warned: Vec<String> = crate::test_log::logged_by("app::pairing")
+        .into_iter()
+        .filter(|(level, _)| *level == log::Level::Warn)
+        .map(|(_, line)| line)
+        .collect();
+    let unproven = format!(
+        "agent {} reported an epoch floor of 5 on repository {}",
+        agent_id(1).as_uuid(),
+        photos().as_str()
+    );
+    assert!(
+        warned.iter().any(|line| line.starts_with(&unproven)),
+        "{warned:?}"
+    );
+}
