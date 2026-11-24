@@ -111,6 +111,14 @@ pub(crate) async fn take_new_id(State(state): State<AppState>) -> Response {
                 ErrorCode::OperationFailed,
             )
         }
+        Err(NewIdError::AgentKey(error)) => {
+            // The key files' error stays in the daemon's log.
+            log::warn!("no new agent key was made: {error:?}");
+            refused(
+                StatusCode::INTERNAL_SERVER_ERROR,
+                ErrorCode::OperationFailed,
+            )
+        }
     }
 }
 

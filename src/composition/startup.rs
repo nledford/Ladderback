@@ -649,13 +649,21 @@ async fn state_over(
     let writes = Arc::new(ConfigWrites::default());
     // A new machine ID gives up maintenance under the same lock, and not
     // while a maintenance operation the log holds still runs (I1).
-    let machine_route = http_adapter::MachineRoute::new(Arc::new(app::machine::TakeNewId::new(
+    let take_new_id = app::machine::TakeNewId::new(
         this_machine,
         Arc::clone(&standing),
         Arc::clone(&config),
         Arc::clone(&store),
         Arc::clone(&writes),
-    )));
+    );
+    // A build that pairs makes a new agent key with the new ID: a copy
+    // holds the original's key (decision 154).
+    #[cfg(feature = "hub")]
+    let take_new_id = take_new_id.with_agent_key(
+        Arc::new(platform::identity::FileIdentity::in_data_dir(data_dir)),
+        Arc::new(OsRandom),
+    );
+    let machine_route = http_adapter::MachineRoute::new(Arc::new(take_new_id));
     // What AI agents may do without a token: the configuration's
     // `[without-token]` table, changed under the same lock (§10.5).
     let without_token = Arc::new(app::without_token::WithoutToken::new(

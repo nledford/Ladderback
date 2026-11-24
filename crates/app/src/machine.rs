@@ -14,13 +14,13 @@
 
 use std::sync::{Arc, Mutex, PoisonError};
 
-use domain::fleet::IdentifierMatch;
+use domain::fleet::{IdentifierMatch, KeyFile, SigningSeed};
 use domain::maintenance::Ownership;
 use domain::{AgentId, OperationId};
 
 use crate::ports::{
-    ConfigError, ConfigStore, Identity, MachineError, OperationStore, Problem, Random, StoreError,
-    ThisMachine,
+    ConfigError, ConfigStore, Identity, IdentityError, MachineError, OperationStore, Problem,
+    Random, StoreError, ThisMachine,
 };
 use crate::repositories::ConfigWrites;
 
@@ -228,22 +228,32 @@ pub enum NewIdError {
     /// the ID stays, or a new one was written without this computer's
     /// identifier beside it, which the next start finds a copy still.
     Machine(MachineError),
+    /// The new agent key couldn't be drawn, and nothing changed; or it
+    /// couldn't be written, once maintenance was given up: the machine ID
+    /// and the agent key stay as they were.
+    AgentKey(IdentityError),
 }
 
 /// Taking a new machine ID, for a copied data folder, a machine its hub
 /// refused as a second computer, or one its hub removed: the machine gives
 /// up maintaining every repository it maintained, so it and another
 /// computer under its machine ID never both maintain one (I1), then takes
-/// a new machine ID and records this computer's identifier beside it. Its
-/// plans stay; its backups carry the new ID from the next start, and the
-/// snapshots under the old ID stay under it (I6): the other computer's, or,
-/// for a removed machine, until the person adopts them.
+/// a new machine ID and records this computer's identifier beside it. It
+/// makes a new agent key too, in a build that pairs: a copy holds the
+/// original's key, and a removed machine's key is refused by its hub under
+/// any ID (decision 154). Its plans stay; its backups carry the new ID from
+/// the next start, and the snapshots under the old ID stay under it (I6):
+/// the other computer's, or, for a removed machine, until the person adopts
+/// them.
 pub struct TakeNewId {
     machine: Arc<dyn ThisMachine>,
     standing: Arc<MachineStanding>,
     config: Arc<dyn ConfigStore>,
     operations: Arc<dyn OperationStore>,
     writes: Arc<ConfigWrites>,
+    /// Where the agent key is kept, and what draws a new one's seed; `None`
+    /// in a build without the hub, which never pairs.
+    agent_key: Option<(Arc<dyn Identity>, Arc<dyn Random>)>,
 }
 
 impl TakeNewId {
@@ -260,13 +270,15 @@ impl TakeNewId {
             config,
             operations,
             writes,
+            agent_key: None,
         }
     }
 
     /// Taking a new machine ID makes a new agent key too, its seed drawn
     /// from `random` and kept by `identity`.
     #[must_use]
-    pub fn with_agent_key(self, _identity: Arc<dyn Identity>, _random: Arc<dyn Random>) -> Self {
+    pub fn with_agent_key(mut self, identity: Arc<dyn Identity>, random: Arc<dyn Random>) -> Self {
+        self.agent_key = Some((identity, random));
         self
     }
 
@@ -292,6 +304,18 @@ impl TakeNewId {
         // Read before anything is written: a computer whose identifier can't
         // be read now keeps its ID and its maintenance as they are.
         let identifier = self.machine.identifier().map_err(NewIdError::Machine)?;
+        let agent_key = match &self.agent_key {
+            Some((identity, random)) => {
+                let bytes = random.token().map_err(|unavailable| {
+                    NewIdError::AgentKey(IdentityError::Unavailable {
+                        file: KeyFile::AgentKey,
+                        detail: unavailable.0,
+                    })
+                })?;
+                Some((identity, SigningSeed::from_bytes(bytes)))
+            }
+            None => None,
+        };
         let loaded = self.config.load().await.map_err(NewIdError::Config)?;
         let mut repositories = loaded.repositories().clone();
         let mut gave_up = false;
@@ -332,6 +356,16 @@ impl TakeNewId {
                 .save(&changed)
                 .await
                 .map_err(NewIdError::Config)?;
+        }
+        // The key before the ID: a write cut short between the two leaves
+        // the old ID with a new key, and a copy finds itself one again at
+        // its next start; never a new ID with the old key, which a hub that
+        // removed the machine refuses under any ID.
+        if let Some((identity, seed)) = agent_key {
+            identity
+                .renew_agent_key(seed)
+                .await
+                .map_err(NewIdError::AgentKey)?;
         }
         let id = self
             .machine
