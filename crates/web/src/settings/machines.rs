@@ -2,6 +2,9 @@
 //! approval"): the machines waiting for approval, each with its hostname,
 //! agent ID, key fingerprint in full, how long it has waited and a note when
 //! its hostname looks like another machine's, and the machines approved.
+//! A machine under whose ID the hub refused a second computer says so in its
+//! note in either table, with how long ago, and a warning above the tables
+//! names it and gives the two ways back (decision 150).
 //! Approve opens a review that names the machine, shows its fingerprint to
 //! compare with the machine's own screen and asks for the step-up each time;
 //! it starts on Cancel. The page approves the agent ID under the key it
@@ -50,7 +53,7 @@ use crate::components::{
     focus_element, hand_focus_when_gone,
 };
 use crate::live::{reply, say};
-use crate::machines_list::{Heard, Listed, heard, shown_ms};
+use crate::machines_list::{Heard, Listed, WaysBack, heard, second_computer, shown_ms, ways_back};
 use crate::pause;
 use crate::repositories::Sentence;
 use crate::routes::{refused_sentence, text_with};
@@ -370,6 +373,28 @@ pub(crate) fn Machines(localizer: Arc<Localizer>, step_up: StepUp) -> impl IntoV
     let link_localizer = Arc::clone(&localizer);
     let dashboard_link = t(msg::UI_MACHINES_DASHBOARD_LINK);
     let recovery = recovery_notice(&localizer, step_up.clone());
+    // One warning for each machine the hub refused a second computer for,
+    // in the tables' order, as the rows the tables show (paused or not).
+    // Drawn again only when they change, so a read that changes none keeps
+    // a selection of the command, or a screen reader's place in it.
+    let warnings = {
+        let (waiting, approved) = (
+            listed.of(AgentStatusDto::Pending),
+            listed.of(AgentStatusDto::Approved),
+        );
+        let warned = Memo::new(move |_| {
+            let (waiting, approved) = (waiting.get(), approved.get());
+            ways_back(waiting.iter().chain(&approved))
+        });
+        let localizer = Arc::clone(&localizer);
+        move || {
+            warned
+                .get()
+                .into_iter()
+                .map(|ways| ways_back_alert(&localizer, ways))
+                .collect_view()
+        }
+    };
     view! {
         {recovery}
         <PauseUpdates
@@ -399,6 +424,7 @@ pub(crate) fn Machines(localizer: Arc<Localizer>, step_up: StepUp) -> impl IntoV
                     }
                 })}
         </p>
+        {warnings}
         <h3 id=WAITING_HEADING_ID tabindex="-1">
             {t(msg::UI_MACHINES_WAITING_HEADING)}
         </h3>
@@ -830,20 +856,51 @@ fn ago_column(
     )
 }
 
-/// The waiting machines' columns: the hostname, the row's header, its agent
-/// ID, its fingerprint, how long it has waited, the machine its hostname
-/// looks like, and its Approve and Reject buttons, which `choose` and
-/// `leave` open their reviews with. The columns add up to 42 rem, under the
-/// Machines panel's 44 rem at the page's default width with CI's wider
-/// fonts, so the table fits and no row action is cut off at the frame's
-/// edge; each button's label wraps inside it.
-fn waiting_columns(
-    localizer: &Arc<Localizer>,
-    choose: Callback<HubAgentDto>,
-    leave: Callback<HubAgentDto>,
-) -> (Column<HubAgentDto>, Vec<Column<HubAgentDto>>) {
+/// The warning above the tables for one machine the hub refused a second
+/// computer for (decision 150): its words, then the command on a line of
+/// its own, left to right in any language. The command's words are kept
+/// whole on a line; the hostname, last, wraps where it must, so a long one
+/// still reflows (1.4.10), and keeps each of its spaces, so a name with a
+/// run of them is copied as the hub knows it.
+fn ways_back_alert(localizer: &Arc<Localizer>, ways: WaysBack) -> impl IntoView + use<> {
+    let words = text_with(localizer, ways.words.id, &ways.words.args);
+    let last = ways.command.len().saturating_sub(1);
+    let command = ways
+        .command
+        .into_iter()
+        .enumerate()
+        .map(|(at, word)| {
+            let class = if at == last {
+                "whitespace-break-spaces wrap-anywhere"
+            } else {
+                "whitespace-nowrap"
+            };
+            view! {
+                {(at > 0).then_some(" ")}
+                <span class=class>{word}</span>
+            }
+        })
+        .collect_view();
+    view! {
+        <Alert localizer=Arc::clone(localizer) tone=AlertTone::Warning>
+            <p>{words}</p>
+            <p>
+                <code dir="ltr" translate="no">
+                    {command}
+                </code>
+            </p>
+        </Alert>
+    }
+}
+
+/// A cell of the row's notes, each a paragraph: the machine its hostname
+/// looks like, which only a waiting machine has, and the second computer
+/// the hub refused under its ID, with how long ago and where the warning
+/// with the ways back is (decision 150). Each read of the list draws them
+/// again: they hold no control.
+fn note_column(localizer: &Arc<Localizer>) -> Column<HubAgentDto> {
     let notes = Arc::clone(localizer);
-    let note = Column::new(
+    Column::new(
         "note",
         text(localizer, msg::UI_MACHINES_NOTE),
         Rem::tenths(60),
@@ -851,14 +908,31 @@ fn waiting_columns(
             let notes = Arc::clone(&notes);
             (move || {
                 row.with(|row| {
-                    row.looks_like
-                        .as_ref()
-                        .map(|like| of_machine(&notes, msg::UI_MACHINES_LOOKS_LIKE, &like.hostname))
+                    let like = row.looks_like.as_ref().map(|like| {
+                        view! { <p>{of_machine(&notes, msg::UI_MACHINES_LOOKS_LIKE, &like.hostname)}</p> }
+                    });
+                    let refused = second_computer(row)
+                        .map(|words| view! { <p>{text_with(&notes, words.id, &words.args)}</p> });
+                    view! { <div class="flex flex-col gap-2">{like}{refused}</div> }
                 })
             })
             .into_any()
         },
-    );
+    )
+}
+
+/// The waiting machines' columns: the hostname, the row's header, its agent
+/// ID, its fingerprint, how long it has waited, its notes, and its Approve
+/// and Reject buttons, which `choose` and `leave` open their reviews with.
+/// The columns add up to 42 rem, under the Machines panel's 44 rem at the
+/// page's default width with CI's wider fonts, so the table fits and no row
+/// action is cut off at the frame's edge; each button's label wraps inside
+/// it.
+fn waiting_columns(
+    localizer: &Arc<Localizer>,
+    choose: Callback<HubAgentDto>,
+    leave: Callback<HubAgentDto>,
+) -> (Column<HubAgentDto>, Vec<Column<HubAgentDto>>) {
     let labels = Arc::clone(localizer);
     let action = Column::new(
         "action",
@@ -901,15 +975,16 @@ fn waiting_columns(
                 msg::UI_MACHINES_WAITED,
                 msg::UI_MACHINES_WAITED_FOR,
             ),
-            note,
+            note_column(localizer),
             action,
         ],
     )
 }
 
 /// The approved machines' columns: the hostname, the row's header, its agent
-/// ID, its fingerprint, how long ago it was approved, and its Remove button,
-/// which `leave` opens the review with.
+/// ID, its fingerprint, how long ago it was approved, its notes, and its
+/// Remove button, which `leave` opens the review with. They add up to 42
+/// rem, as the waiting machines' do.
 fn approved_columns(
     localizer: &Arc<Localizer>,
     leave: Callback<HubAgentDto>,
@@ -932,6 +1007,7 @@ fn approved_columns(
                 msg::UI_MACHINES_APPROVED_SINCE,
                 msg::UI_MACHINES_APPROVED_AGO,
             ),
+            note_column(localizer),
             action,
         ],
     )

@@ -217,7 +217,9 @@ fn mark_approved(agents: &mut [HubAgentDto], agent_id: &str) {
 
 /// Whether the rows `a` and `b` read the same but for how long ago their
 /// status began, which every read changes: `seconds_ago`, and `since`,
-/// which the page doesn't show and an approval made on the page moves.
+/// which the page doesn't show and an approval made on the page moves. When
+/// the hub last refused a second computer reads as a time too, as a wait
+/// does, so only whether it refused one counts.
 fn reads_the_same(a: &HubAgentDto, b: &HubAgentDto) -> bool {
     let HubAgentDto {
         agent_id,
@@ -228,7 +230,7 @@ fn reads_the_same(a: &HubAgentDto, b: &HubAgentDto) -> bool {
         since: _,
         seconds_ago: _,
         looks_like,
-        second_machine_at: _,
+        second_machine_at,
     } = a;
     *agent_id == b.agent_id
         && *hostname == b.hostname
@@ -236,6 +238,7 @@ fn reads_the_same(a: &HubAgentDto, b: &HubAgentDto) -> bool {
         && *fingerprint == b.fingerprint
         && *status == b.status
         && notes_the_same(looks_like.as_ref(), b.looks_like.as_ref())
+        && second_machine_at.is_some() == b.second_machine_at.is_some()
 }
 
 /// Whether two rows' notes name the same machine: the page shows only its
@@ -259,15 +262,31 @@ fn notes_the_same(a: Option<&LookalikeDto>, b: Option<&LookalikeDto>) -> bool {
 /// What the row's note says of the second computer the hub last refused
 /// under its machine ID (decision 150): that the hub refused it, how long
 /// ago, and that the ways back are in the warning about the machine above
-/// the tables. `None` when the hub refused none.
+/// the tables. `None` when the hub refused none. A time the page can't read
+/// still flags the machine, without how long ago: the flag is what the
+/// person mustn't miss.
 pub(crate) fn second_computer(row: &HubAgentDto) -> Option<Words> {
-    let _ = row;
-    todo!()
+    let at = row.second_machine_at.as_deref()?;
+    let hostname = ("hostname", MsgArg::Text(row.hostname.clone()));
+    Some(match refused_seconds_ago(row, at) {
+        Some(seconds) => Words {
+            id: msg::UI_MACHINES_SECOND_COMPUTER,
+            args: vec![
+                hostname,
+                ("duration", MsgArg::DurationMs(shown_ms(seconds))),
+            ],
+        },
+        None => Words {
+            id: msg::UI_MACHINES_SECOND_COMPUTER_UNTIMED,
+            args: vec![hostname],
+        },
+    })
 }
 
 /// The warning above the tables for one machine the hub refused a second
 /// computer for: its words, which name the machine and end where the
-/// command is to be typed, and that command's words (decision 150).
+/// command is to be typed, and that command's words, each kept whole on a
+/// line (decision 150).
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub(crate) struct WaysBack {
     pub(crate) words: Words,
@@ -275,17 +294,60 @@ pub(crate) struct WaysBack {
 }
 
 /// The warnings for the machines of `rows` the hub refused a second
-/// computer for, in their order.
+/// computer for, in their order: the page gives the waiting machines', then
+/// the approved ones', as its tables stand.
 pub(crate) fn ways_back<'a>(rows: impl IntoIterator<Item = &'a HubAgentDto>) -> Vec<WaysBack> {
-    let _ = rows.into_iter();
-    todo!()
+    rows.into_iter()
+        .filter(|row| row.second_machine_at.is_some())
+        .map(|row| WaysBack {
+            words: Words {
+                id: msg::UI_MACHINES_SECOND_COMPUTER_WAYS_BACK,
+                args: vec![("hostname", MsgArg::Text(row.hostname.clone()))],
+            },
+            command: forget_command(&row.hostname),
+        })
+        .collect()
 }
 
 /// The command that forgets the computer the hub took as `hostname`, word
-/// by word, as a POSIX shell reads it.
+/// by word, as a POSIX shell reads it: a hostname of anything but ASCII
+/// letters, digits, dots, hyphens and underscores (a Mac's "Demo's MacBook
+/// Pro") is quoted, and one that starts with a hyphen is joined to the
+/// option, so it isn't read as an option itself. Quoted here rather than
+/// by `shell_words`, as the daemon quotes, since the web UI doesn't depend
+/// on it for one rule.
 fn forget_command(hostname: &str) -> Vec<String> {
-    let _ = hostname;
-    todo!()
+    let plain = hostname
+        .chars()
+        .all(|c| c.is_ascii_alphanumeric() || matches!(c, '.' | '-' | '_'));
+    let quoted = if plain {
+        hostname.to_owned()
+    } else {
+        format!("'{}'", hostname.replace('\'', r"'\''"))
+    };
+    let mut command = vec!["ladderback".to_owned(), "pairing-token".to_owned()];
+    if hostname.starts_with('-') {
+        command.push(format!("--forget-computer={quoted}"));
+    } else {
+        command.extend(["--forget-computer".to_owned(), quoted]);
+    }
+    command
+}
+
+/// How many whole seconds before the hub's latest read of `row` the hub
+/// refused a second computer, `at` (RFC 3339), by the hub's clock, as the
+/// row's other times: its now is when the row's status began and
+/// `seconds_ago` after, so a browser whose clock is wrong reads it right. A
+/// refusal after that now, by a clock set back, was none ago. `None` when
+/// either time can't be read or the hub's now is out of range.
+fn refused_seconds_ago(row: &HubAgentDto, at: &str) -> Option<u64> {
+    let at = at.parse::<jiff::Timestamp>().ok()?.as_millisecond();
+    let since = row.since.parse::<jiff::Timestamp>().ok()?.as_millisecond();
+    let now = i64::try_from(row.seconds_ago)
+        .ok()?
+        .checked_mul(1000)?
+        .checked_add(since)?;
+    Some(u64::try_from(now.saturating_sub(at) / 1000).unwrap_or(0))
 }
 
 /// How many changes `agents` and `state` hold that `held` doesn't: each
