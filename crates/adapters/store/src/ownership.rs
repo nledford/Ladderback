@@ -1,16 +1,17 @@
 //! The hub's registry of maintenance owners (technical design §7.3, I1;
-//! migration `0022_repository_ownership`): the `OwnershipRegistry` port on
-//! the store's own file, built only with the hub (decision 122). A whole
-//! report is decided in one `BEGIN IMMEDIATE` transaction, so of claims
-//! that race, the first to write is granted and the others see its lease.
-//! Times are kept in milliseconds, and `now` is cut to a millisecond before
-//! anything is decided, so a lease reads back as it was given.
+//! migrations `0022_repository_ownership` and `0028_hub_recovery`): the
+//! `OwnershipRegistry` port on the store's own file, built only with the
+//! hub (decision 122). A whole report, with the floors it proved, is
+//! decided in one `BEGIN IMMEDIATE` transaction, so of claims that race,
+//! the first to write is granted and the others see its lease. Times are
+//! kept in milliseconds, and `now` is cut to a millisecond before anything
+//! is decided, so a lease reads back as it was given.
 
 use app::ports::{ClaimDecision, OwnershipRegistry, StoreError};
 use async_trait::async_trait;
 use domain::maintenance::{
-    Lease, LeaseEpoch, ReleaseRefused, RepositoryOwnership, RepositoryReports, StartWindow,
-    report_counts,
+    HubRecovery, Lease, LeaseEpoch, ProvenFloor, ReleaseRefused, RepositoryOwnership,
+    RepositoryReports, StartWindow, report_counts,
 };
 use domain::{AgentId, RepositoryId, Timestamp, Uuid};
 use sqlx::sqlite::SqliteRow;
@@ -37,12 +38,20 @@ const KEEP_OWNER: &str = "INSERT INTO repository_owners \
      ON CONFLICT (repo_id) DO UPDATE SET last_epoch = excluded.last_epoch, \
      holder = excluded.holder, epoch = excluded.epoch, expires_at = excluded.expires_at";
 
+const RECOVERY: &str = "SELECT repo_id, holder, epoch, expires_at, held FROM hub_recovery_floors";
+
+const KEEP_FLOOR: &str = "INSERT INTO hub_recovery_floors \
+     (repo_id, holder, epoch, expires_at, held) VALUES (?1, ?2, ?3, ?4, ?5) \
+     ON CONFLICT (repo_id) DO UPDATE SET holder = excluded.holder, epoch = excluded.epoch, \
+     expires_at = excluded.expires_at, held = excluded.held";
+
 #[async_trait]
 impl OwnershipRegistry for SqliteStore {
     async fn report(
         &self,
         agent: AgentId,
         reports: &RepositoryReports,
+        proven: &[ProvenFloor],
         now: Timestamp,
         window: &StartWindow,
     ) -> Result<Vec<ClaimDecision>, StoreError> {
@@ -54,6 +63,13 @@ impl OwnershipRegistry for SqliteStore {
             .begin_with("BEGIN IMMEDIATE")
             .await
             .map_err(unavailable)?;
+        let mut recovery = recovery(&mut tx).await?;
+        for floor in proven {
+            let ownership = owner(&mut tx, &floor.repository).await?;
+            if recovery.hear(&ownership, floor) {
+                keep_floor(&mut tx, floor).await?;
+            }
+        }
         sqlx::query(FORGET_REPORT)
             .bind(&agent_text)
             .execute(&mut *tx)
@@ -79,18 +95,23 @@ impl OwnershipRegistry for SqliteStore {
             for row in &others {
                 others_report |= report_counts(time_of(row, "reported_at")?, now);
             }
-            let before = owner(&mut tx, &entry.repository).await?;
-            let mut after = before.clone();
-            let outcome = after.claim_after_start(
-                window,
-                agent,
-                entry.request,
-                entry.shared(others_report),
-                now,
-            );
-            if after != before {
-                keep(&mut tx, &after).await?;
-            }
+            let outcome = if recovery.is_on() {
+                recovery.decide(entry.request)
+            } else {
+                let before = owner(&mut tx, &entry.repository).await?;
+                let mut after = before.clone();
+                let outcome = after.claim_after_start(
+                    window,
+                    agent,
+                    entry.request,
+                    entry.shared(others_report),
+                    now,
+                );
+                if after != before {
+                    keep(&mut tx, &after).await?;
+                }
+                outcome
+            };
             decided.push(ClaimDecision {
                 repository: entry.repository.clone(),
                 outcome,
@@ -98,6 +119,36 @@ impl OwnershipRegistry for SqliteStore {
         }
         tx.commit().await.map_err(unavailable)?;
         Ok(decided)
+    }
+
+    async fn recovery(&self) -> Result<HubRecovery, StoreError> {
+        let _call = self.call().await;
+        let mut conn = self.pool.acquire().await.map_err(unavailable)?;
+        recovery(&mut conn).await
+    }
+
+    async fn end_recovery(&self) -> Result<bool, StoreError> {
+        let _call = self.call().await;
+        let mut conn = self.pool.acquire().await.map_err(unavailable)?;
+        let mut tx = conn
+            .begin_with("BEGIN IMMEDIATE")
+            .await
+            .map_err(unavailable)?;
+        let recovery = recovery(&mut tx).await?;
+        for floor in recovery.floors() {
+            let before = owner(&mut tx, &floor.repository).await?;
+            let mut after = before.clone();
+            after.recover(floor);
+            if after != before {
+                keep(&mut tx, &after).await?;
+            }
+        }
+        sqlx::query("DELETE FROM hub_recovery_floors")
+            .execute(&mut *tx)
+            .await
+            .map_err(unavailable)?;
+        tx.commit().await.map_err(unavailable)?;
+        Ok(recovery.is_on())
     }
 
     async fn reported_uses(&self) -> Result<Vec<(AgentId, RepositoryId)>, StoreError> {
@@ -230,4 +281,43 @@ fn corrupt(column: &str) -> StoreError {
     StoreError::Corrupt {
         detail: format!("repository owners: column {column} doesn't read"),
     }
+}
+
+/// The floors that hold the hub in recovery mode, as kept.
+async fn recovery(conn: &mut SqliteConnection) -> Result<HubRecovery, StoreError> {
+    let rows = sqlx::query(RECOVERY)
+        .fetch_all(conn)
+        .await
+        .map_err(unavailable)?;
+    let floors = rows
+        .iter()
+        .map(|row| {
+            let repository: String = row.try_get("repo_id").map_err(unavailable)?;
+            let holder: String = row.try_get("holder").map_err(unavailable)?;
+            Ok(ProvenFloor {
+                repository: RepositoryId::parse(&repository).map_err(|_| corrupt("repo_id"))?,
+                holder: Uuid::try_parse(&holder)
+                    .map(AgentId::from_uuid)
+                    .map_err(|_| corrupt("holder"))?,
+                epoch: epoch_of(row, "epoch")?,
+                expires_at: time_of(row, "expires_at")?,
+                held: row.try_get("held").map_err(unavailable)?,
+            })
+        })
+        .collect::<Result<Vec<_>, StoreError>>()?;
+    Ok(HubRecovery::from_floors(floors))
+}
+
+/// Writes `floor` over the one kept of its repository.
+async fn keep_floor(conn: &mut SqliteConnection, floor: &ProvenFloor) -> Result<(), StoreError> {
+    sqlx::query(KEEP_FLOOR)
+        .bind(floor.repository.as_str())
+        .bind(agent_id_text(floor.holder))
+        .bind(epoch_column(floor.epoch)?)
+        .bind(floor.expires_at.as_millisecond())
+        .bind(floor.held)
+        .execute(conn)
+        .await
+        .map_err(unavailable)?;
+    Ok(())
 }

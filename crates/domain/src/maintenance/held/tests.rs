@@ -1,5 +1,13 @@
 use super::*;
 use crate::SignedDuration;
+use crate::fleet::{KEY_BYTES, SIGNATURE_BYTES};
+
+/// A canonical signature standing for the hub's over the entry at `number`.
+fn signature(number: u64) -> Signature {
+    let mut bytes = [0; SIGNATURE_BYTES];
+    bytes[..KEY_BYTES].fill(u8::try_from(number).unwrap());
+    Signature::from_bytes(bytes).unwrap()
+}
 
 fn repository(digit: char) -> RepositoryId {
     RepositoryId::parse(&digit.to_string().repeat(64)).unwrap()
@@ -23,6 +31,7 @@ fn grants(number: u64, signed_at: Timestamp) -> RepoGrants {
         generation: 1,
         signed_at,
         grants: vec![Grant {
+            signature: signature(number),
             repository: repository('a'),
             epoch: epoch(number),
             expires_at: signed_at
@@ -171,8 +180,69 @@ fn what_a_cache_kept_reads_back() {
             .map(|(repository, lease)| (repository.clone(), *lease)),
         held.floors()
             .map(|(repository, floor)| (repository.clone(), *floor)),
+        held.proofs()
+            .map(|(repository, proof)| (repository.clone(), *proof)),
     );
     assert_eq!(kept, held);
+    assert_eq!(kept.proofs().count(), 1);
+}
+
+/// The floor `photos` reports at `number`, from `grants(number, hub(0))`.
+fn reported(number: u64, held: bool) -> ReportedFloor {
+    ReportedFloor {
+        epoch: epoch(number),
+        expires_at: hub(7 * DAY),
+        signature: signature(number),
+        held,
+    }
+}
+
+#[test]
+fn a_grant_is_kept_as_its_floors_proof() {
+    let mut held = HeldLeases::default();
+    held.take(&grants(2, hub(0)), 0, hub(0));
+    assert_eq!(
+        held.reported_floor(&repository('a'), hub(1)),
+        Some(reported(2, true))
+    );
+}
+
+#[test]
+fn a_floor_whose_lease_ended_is_reported_as_not_held() {
+    let mut held = HeldLeases::default();
+    held.take(&grants(2, hub(0)), 0, hub(0));
+    assert_eq!(
+        held.reported_floor(&repository('a'), hub(7 * DAY)),
+        Some(reported(2, false))
+    );
+    held.released(&repository('a'), epoch(2));
+    assert_eq!(
+        held.reported_floor(&repository('a'), hub(1)),
+        Some(reported(2, false))
+    );
+}
+
+#[test]
+fn a_grant_below_the_floor_leaves_the_floors_proof() {
+    let mut held = HeldLeases::default();
+    held.take(&grants(3, hub(0)), 0, hub(0));
+    held.take(&grants(2, hub(0)), 0, hub(0));
+    assert_eq!(
+        held.reported_floor(&repository('a'), hub(1)),
+        Some(reported(3, false))
+    );
+}
+
+#[test]
+fn a_floor_kept_with_no_proof_is_not_reported() {
+    let floor = EpochFloor {
+        recovery_number: 0,
+        generation: 1,
+        epoch: epoch(2),
+    };
+    let held = HeldLeases::from_parts([], [(repository('a'), floor)], []);
+    assert_eq!(held.reported_floor(&repository('a'), hub(1)), None);
+    assert_eq!(held.reported_floor(&repository('b'), hub(1)), None);
 }
 
 /// A machine on the hub's time that took the grant of `photos` at hub(0).

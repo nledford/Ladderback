@@ -19,13 +19,21 @@
 //! politely while the tables aren't paused. "Pause live updates" holds both
 //! tables still (A3, decision 65); what they show while paused, and what the
 //! resume says, is `machines_list.rs`'s. A link leads to the hub's dashboard.
+//!
+//! While the hub is in recovery mode, read when the tab is built, a warning
+//! leads the tab: a machine proved a lease the hub doesn't count, as after
+//! a restore from an older backup, so it grants and renews none. Its button
+//! opens a review that asks for the step-up, as an approval does, and ends
+//! recovery mode once the person confirms the old hub is stopped or gone
+//! (decision 137).
 
 use std::sync::Arc;
 use std::time::Duration;
 
 use api::{
-    AgentStatusDto, ApproveAgentDto, ErrorCode, HUB_AGENTS_PATH, HubAgentDto, HubAgentsDto, MsgArg,
-    RemoveAgentDto, agent_approval_path, agent_removal_path,
+    AgentStatusDto, ApproveAgentDto, EndRecoveryDto, ErrorCode, HUB_AGENTS_PATH,
+    HUB_RECOVERY_CONFIRMATION_PATH, HUB_RECOVERY_PATH, HubAgentDto, HubAgentsDto, HubRecoveryDto,
+    MsgArg, RemoveAgentDto, agent_approval_path, agent_removal_path,
 };
 use l10n::{Localizer, msg};
 use leptos::prelude::*;
@@ -70,6 +78,15 @@ const READ_PATIENCE: Duration = Duration::from_secs(5);
 /// How long the tab waits before it asks again after a read that went
 /// unanswered while none had answered: the "few seconds" it says.
 const ASK_AGAIN: Duration = Duration::from_secs(3);
+/// The recovery-mode notice's heading, which names its section.
+const RECOVERY_HEADING_ID: &str = "machines-recovery-heading";
+/// The button that opens the review of ending recovery mode, where focus
+/// returns when the review is dismissed.
+const RECOVERY_BUTTON_ID: &str = "machines-end-recovery";
+/// What the review of ending recovery mode says first.
+const RECOVERY_BODY_ID: &str = "machines-recovery-body";
+/// That review's step-up field.
+const RECOVERY_STEP_UP_ID: &str = "machines-recovery-confirmation";
 
 /// The id of the button that approves the agent `agent_id`, where focus
 /// returns when its review is dismissed.
@@ -352,7 +369,9 @@ pub(crate) fn Machines(localizer: Arc<Localizer>, step_up: StepUp) -> impl IntoV
     let leave_review_localizer = Arc::clone(&localizer);
     let link_localizer = Arc::clone(&localizer);
     let dashboard_link = t(msg::UI_MACHINES_DASHBOARD_LINK);
+    let recovery = recovery_notice(&localizer, step_up.clone());
     view! {
+        {recovery}
         <PauseUpdates
             label=pause_label
             paused_said=paused_said
@@ -447,6 +466,146 @@ pub(crate) fn Machines(localizer: Arc<Localizer>, step_up: StepUp) -> impl IntoV
                     )
                 })
         }}
+    }
+}
+
+/// The recovery-mode notice, while the hub is in recovery mode, and the
+/// review that ends it with the step-up (decision 137). Read once, when the
+/// tab is built.
+fn recovery_notice(localizer: &Arc<Localizer>, step_up: StepUp) -> impl IntoView + use<> {
+    let recovering = RwSignal::new(false);
+    spawn_local(async move {
+        let url = format!("{}{HUB_RECOVERY_PATH}", ws::origin());
+        if let Some(read) = ws::poll::<HubRecoveryDto>(&url, READ_PATIENCE).await {
+            let _ = recovering.try_set(read.recovering);
+        }
+    });
+    let open = RwSignal::new(false);
+    let confirmation = RwSignal::new(String::new());
+    let step_up_error = RwSignal::new(None::<String>);
+    let problem = RwSignal::new(None::<Sentence>);
+    let said = RwSignal::new(None::<String>);
+    let busy = RwSignal::new(false);
+    let choose = Callback::new(move |()| {
+        // The step-up is asked for again each time, as an approval's is.
+        confirmation.set(String::new());
+        step_up_error.set(None);
+        problem.set(None);
+        open.set(true);
+    });
+    let end_localizer = Arc::clone(localizer);
+    let end = Callback::new(move |()| {
+        if busy.get_untracked() {
+            return;
+        }
+        problem.set(None);
+        step_up_error.set(None);
+        let ask = EndRecoveryDto {
+            confirmation: confirmation.get_untracked(),
+        };
+        confirmation.set(String::new());
+        busy.set(true);
+        let localizer = Arc::clone(&end_localizer);
+        spawn_local(async move {
+            let url = format!("{}{HUB_RECOVERY_CONFIRMATION_PATH}", ws::origin());
+            let answer = ws::post(&url, &ask).await;
+            if busy.try_set(false).is_some() {
+                // The tab was left while the confirmation was on its way.
+                return;
+            }
+            match answer {
+                Some(Posted::Done(_)) => {
+                    let words = text(&localizer, msg::UI_MACHINES_RECOVERY_ENDED);
+                    // Said through the announcer, as an approval is.
+                    reply(Politeness::Polite, &words);
+                    said.set(Some(words));
+                    recovering.set(false);
+                    open.set(false);
+                }
+                Some(Posted::Refused(ErrorCode::StepUpFailed, ..)) => {
+                    step_up_error.set(Some(text(
+                        &localizer,
+                        msg::UI_MACHINES_RECOVERY_STEP_UP_FAILED,
+                    )));
+                    focus_element(RECOVERY_STEP_UP_ID);
+                }
+                Some(Posted::Refused(code, args, detail)) => {
+                    problem.set(Some(refused_sentence(
+                        &localizer,
+                        code,
+                        &args,
+                        detail.as_deref(),
+                    )));
+                }
+                None => problem.set(Some(Sentence::new(
+                    &text(&localizer, msg::UI_PAIRING_UNANSWERED),
+                    None,
+                ))),
+            }
+        });
+    });
+    let t = {
+        let localizer = Arc::clone(localizer);
+        move |id| text(&localizer, id)
+    };
+    let button_label = StoredValue::new(t(msg::UI_MACHINES_END_RECOVERY));
+    let heading = StoredValue::new(t(msg::UI_MACHINES_RECOVERY_HEADING));
+    let notice = StoredValue::new(t(msg::UI_MACHINES_RECOVERY_NOTICE));
+    let alert_localizer = Arc::clone(localizer);
+    let field_localizer = Arc::clone(localizer);
+    let problem_localizer = Arc::clone(localizer);
+    view! {
+        <p>{move || said.get()}</p>
+        {move || {
+            recovering
+                .get()
+                .then(|| {
+                    view! {
+                        <section aria-labelledby=RECOVERY_HEADING_ID>
+                            <h3 id=RECOVERY_HEADING_ID tabindex="-1">
+                                {heading.get_value()}
+                            </h3>
+                            <Alert localizer=Arc::clone(&alert_localizer) tone=AlertTone::Warning>
+                                {notice.get_value()}
+                            </Alert>
+                            <Button
+                                id=RECOVERY_BUTTON_ID
+                                content=Content::Text(button_label.get_value().into())
+                                on_press=choose
+                            />
+                        </section>
+                    }
+                })
+        }}
+        <ReviewDialog
+            open=open
+            title=t(msg::UI_MACHINES_RECOVERY_REVIEW_TITLE)
+            dismiss_label=t(msg::UI_REVIEW_CANCEL)
+            confirm=Some(Confirmation {
+                label: t(msg::UI_MACHINES_END_RECOVERY),
+                tone: Tone::Primary,
+                action: end,
+            })
+            returns_to=RECOVERY_BUTTON_ID.to_owned()
+            described_by=RECOVERY_BODY_ID.to_owned()
+            working=Working {
+                active: busy.into(),
+                status: t(msg::UI_MACHINES_RECOVERY_ENDING),
+            }
+            fallback=WAITING_HEADING_ID.to_owned()
+        >
+            <p id=RECOVERY_BODY_ID>{t(msg::UI_MACHINES_RECOVERY_REVIEW_BODY)}</p>
+            {move || {
+                problem.get().map(|sentence| dialog_refusal_alert(&problem_localizer, sentence))
+            }}
+            <StepUpField
+                id=RECOVERY_STEP_UP_ID
+                localizer=field_localizer
+                step_up=step_up
+                value=confirmation
+                error=step_up_error
+            />
+        </ReviewDialog>
     }
 }
 

@@ -12,9 +12,9 @@ use std::sync::{Arc, Mutex, MutexGuard, PoisonError};
 
 use domain::fleet::GENERATION;
 use domain::maintenance::{
-    ClaimOutcome, Grant, LeaseEpoch, ReleaseRefused, RepoGrants, RepositoryReports, StartWindow,
+    ClaimOutcome, Lease, LeaseEpoch, ProvenFloor, ReleaseRefused, RepositoryReports, StartWindow,
 };
-use domain::{AgentId, RepositoryId, SignedDuration};
+use domain::{AgentId, RepositoryId, SignedDuration, Timestamp};
 
 use crate::ports::{AgentRegistry, ClaimDecision, Clock, OwnershipRegistry, StoreError};
 
@@ -25,6 +25,23 @@ pub enum Reported {
     Decided(Vec<ClaimDecision>),
     /// The agent is pending, or the hub has no record of it: nothing was
     /// kept or decided.
+    NotApproved,
+}
+
+/// What the hub answers an agent's `ReposSnapshot` with.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum Granting {
+    /// Every lease the agent holds and claimed, at the hub's `generation`,
+    /// decided at `signed_at` on its clock: `RepoGrants`, once signed.
+    Leases {
+        generation: u64,
+        signed_at: Timestamp,
+        leases: Vec<(RepositoryId, Lease)>,
+    },
+    /// The hub is in recovery mode: it grants and renews nothing, and the
+    /// agent keeps what it holds until it runs out (`GrantsWithheld`).
+    Withheld,
+    /// The agent is pending, or the hub has no record of it.
     NotApproved,
 }
 
@@ -55,49 +72,68 @@ impl RepositoryOwners {
         }
     }
 
-    /// Takes `reports` as every repository `agent` uses, and decides each
-    /// at the hub's now when the agent is approved.
+    /// Takes `reports` as every repository `agent` uses, with `proven`, the
+    /// floors among them whose proof the hub checked, and decides each at
+    /// the hub's now when the agent is approved.
     pub async fn report(
         &self,
         agent: AgentId,
         reports: &RepositoryReports,
+        proven: &[ProvenFloor],
     ) -> Result<Reported, StoreError> {
-        let decided = self.decide(agent, reports, self.clock.now()).await?;
+        let decided = self
+            .decide(agent, reports, proven, self.clock.now())
+            .await?;
         Ok(decided.map_or(Reported::NotApproved, Reported::Decided))
     }
 
     /// Decides `reports` as [`report`](Self::report) does, and gives every
     /// lease `agent` then holds and claimed (granted, renewed or left to
-    /// run out), signed at the hub's now; none for an agent that isn't
-    /// approved. A lease it holds on a repository it no longer claims is
-    /// left out: it ends at the agent's release or its expiry.
+    /// run out), decided at the hub's now, for the hub to sign; none for an
+    /// agent that isn't approved. A lease it holds on a repository it no
+    /// longer claims is left out: it ends at the agent's release or its
+    /// expiry. In recovery mode it gives nothing, and the agent keeps what
+    /// it holds until it runs out (decision 137).
     pub async fn grant(
         &self,
         agent: AgentId,
         reports: &RepositoryReports,
-    ) -> Result<Option<RepoGrants>, StoreError> {
+        proven: &[ProvenFloor],
+    ) -> Result<Granting, StoreError> {
         let now = self.clock.now();
-        let Some(decided) = self.decide(agent, reports, now).await? else {
-            return Ok(None);
+        let Some(decided) = self.decide(agent, reports, proven, now).await? else {
+            return Ok(Granting::NotApproved);
         };
-        let grants = decided
+        if self.recovering().await? {
+            return Ok(Granting::Withheld);
+        }
+        let leases = decided
             .into_iter()
             .filter_map(|decision| match decision.outcome {
                 ClaimOutcome::Granted(lease)
                 | ClaimOutcome::Renewed(lease)
-                | ClaimOutcome::Unrenewed(lease) => Some(Grant {
-                    repository: decision.repository,
-                    epoch: lease.epoch,
-                    expires_at: lease.expires_at,
-                }),
+                | ClaimOutcome::Unrenewed(lease) => Some((decision.repository, lease)),
                 ClaimOutcome::Refused(_) | ClaimOutcome::NoClaim => None,
             })
             .collect();
-        Ok(Some(RepoGrants {
+        Ok(Granting::Leases {
             generation: GENERATION,
             signed_at: now,
-            grants,
-        }))
+            leases,
+        })
+    }
+
+    /// Whether the hub is in recovery mode (decision 137).
+    pub async fn recovering(&self) -> Result<bool, StoreError> {
+        Ok(self.owners.recovery().await?.is_on())
+    }
+
+    /// Ends recovery mode, at a person's confirmation that the old hub is
+    /// stopped or gone: each counter rises to the floor proved for it, and
+    /// a lease still held at it is its holder's again. Whether the hub was
+    /// in recovery mode.
+    pub async fn end_recovery(&self) -> Result<bool, StoreError> {
+        self.owners.end_recovery().await
     }
 
     /// What the hub decided of `reports` at `now`, when `agent` is approved.
@@ -105,12 +141,16 @@ impl RepositoryOwners {
         &self,
         agent: AgentId,
         reports: &RepositoryReports,
+        proven: &[ProvenFloor],
         now: domain::Timestamp,
     ) -> Result<Option<Vec<ClaimDecision>>, StoreError> {
         match self.agents.agent(agent).await? {
             Some(record) if !record.is_pending() => {
                 let window = self.window(agent).await?;
-                let decided = self.owners.report(agent, reports, now, &window).await?;
+                let decided = self
+                    .owners
+                    .report(agent, reports, proven, now, &window)
+                    .await?;
                 self.heard(agent);
                 Ok(Some(decided))
             }

@@ -3,8 +3,8 @@ use std::sync::{Mutex, PoisonError};
 
 use async_trait::async_trait;
 use domain::maintenance::{
-    LeaseEpoch, ReleaseRefused, RepositoryOwnership, RepositoryReport, RepositoryReports,
-    StartWindow, report_counts,
+    HubRecovery, LeaseEpoch, ProvenFloor, ReleaseRefused, RepositoryOwnership, RepositoryReport,
+    RepositoryReports, StartWindow, report_counts,
 };
 use domain::{AgentId, RepositoryId, Timestamp};
 
@@ -24,6 +24,8 @@ struct Kept {
     owners: BTreeMap<RepositoryId, RepositoryOwnership>,
     /// Each agent's last report, and when the hub took it.
     reports: BTreeMap<AgentId, (Vec<RepositoryReport>, Timestamp)>,
+    /// The floors that hold the hub in recovery mode.
+    recovery: HubRecovery,
 }
 
 impl InMemoryOwnershipRegistry {
@@ -50,6 +52,7 @@ impl OwnershipRegistry for InMemoryOwnershipRegistry {
         &self,
         agent: AgentId,
         reports: &RepositoryReports,
+        proven: &[ProvenFloor],
         now: Timestamp,
         window: &StartWindow,
     ) -> Result<Vec<ClaimDecision>, StoreError> {
@@ -57,12 +60,26 @@ impl OwnershipRegistry for InMemoryOwnershipRegistry {
         let Kept {
             owners,
             reports: taken,
+            recovery,
         } = &mut *kept;
+        for floor in proven {
+            let ownership = owners
+                .get(&floor.repository)
+                .cloned()
+                .unwrap_or_else(|| RepositoryOwnership::new(floor.repository.clone()));
+            recovery.hear(&ownership, floor);
+        }
         taken.insert(agent, (reports.entries().to_vec(), now));
         let decided = reports
             .entries()
             .iter()
             .map(|entry| {
+                if recovery.is_on() {
+                    return ClaimDecision {
+                        repository: entry.repository.clone(),
+                        outcome: recovery.decide(entry.request),
+                    };
+                }
                 let others_report = taken.iter().any(|(other, (entries, at))| {
                     *other != agent
                         && report_counts(*at, now)
@@ -85,6 +102,22 @@ impl OwnershipRegistry for InMemoryOwnershipRegistry {
             })
             .collect();
         Ok(decided)
+    }
+
+    async fn recovery(&self) -> Result<HubRecovery, StoreError> {
+        Ok(self.kept().recovery.clone())
+    }
+
+    async fn end_recovery(&self) -> Result<bool, StoreError> {
+        let mut kept = self.kept();
+        let recovery = std::mem::take(&mut kept.recovery);
+        for floor in recovery.floors() {
+            kept.owners
+                .entry(floor.repository.clone())
+                .or_insert_with(|| RepositoryOwnership::new(floor.repository.clone()))
+                .recover(floor);
+        }
+        Ok(recovery.is_on())
     }
 
     async fn reported_uses(&self) -> Result<Vec<(AgentId, RepositoryId)>, StoreError> {

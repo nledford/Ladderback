@@ -1,16 +1,16 @@
-//! A paired machine's leases from its hub, its epoch floors and its paused
-//! maintenance (technical design §7.3, I1; migrations `0024_agent_leases`
-//! and `0027_agent_maintenance_paused`; decision 158): the `LeaseCache`
-//! port on the store's own file, built only with the hub (decision 122). A
-//! save replaces the leases and floors in one transaction, and a save of
-//! the pauses replaces the pauses alone, so a load never sees half of one
-//! and a watch never writes back a lease a grant let go. Numbers past
-//! `i64::MAX` are refused where they enter, on the wire,
-//! so each fits its column.
+//! A paired machine's leases from its hub and its epoch floors, each with
+//! the hub's proof of it when the machine keeps one (technical design
+//! §7.3, I1; migrations `0024_agent_leases`, `0027_agent_maintenance_paused`
+//! and `0028_hub_recovery`): the `LeaseCache` port on the store's own file,
+//! built only with the hub (decision 122). A save replaces both tables in one
+//! transaction, and a save of the pauses replaces the pauses alone, so a load
+//! never sees half of one. Numbers past `i64::MAX` are refused where they
+//! enter, on the wire, so each fits its column.
 
 use app::ports::{LeaseCache, StoreError};
 use async_trait::async_trait;
-use domain::maintenance::{EpochFloor, HeldLease, HeldLeases, LeaseEpoch, Pause};
+use domain::fleet::{SIGNATURE_BYTES, Signature};
+use domain::maintenance::{EpochFloor, FloorProof, HeldLease, HeldLeases, LeaseEpoch, Pause};
 use domain::{RepositoryId, Timestamp};
 use sqlx::sqlite::SqliteRow;
 use sqlx::{Connection, Row};
@@ -19,7 +19,8 @@ use crate::{SqliteStore, unavailable};
 
 const LEASES: &str = "SELECT repo_id, epoch, ends_at FROM agent_leases";
 
-const FLOORS: &str = "SELECT repo_id, recovery_number, generation, epoch FROM agent_epoch_floors";
+const FLOORS: &str = "SELECT repo_id, recovery_number, generation, epoch, expires_at, signature \
+     FROM agent_epoch_floors";
 
 const PAUSES: &str = "SELECT repo_id, since, alerted FROM agent_maintenance_paused";
 
@@ -29,7 +30,8 @@ const KEEP_PAUSE: &str =
 const KEEP_LEASE: &str = "INSERT INTO agent_leases (repo_id, epoch, ends_at) VALUES (?1, ?2, ?3)";
 
 const KEEP_FLOOR: &str = "INSERT INTO agent_epoch_floors \
-     (repo_id, recovery_number, generation, epoch) VALUES (?1, ?2, ?3, ?4)";
+     (repo_id, recovery_number, generation, epoch, expires_at, signature) \
+     VALUES (?1, ?2, ?3, ?4, ?5, ?6)";
 
 #[async_trait]
 impl LeaseCache for SqliteStore {
@@ -55,14 +57,19 @@ impl LeaseCache for SqliteStore {
                 ))
             })
             .collect::<Result<Vec<_>, StoreError>>()?;
+        let mut proofs = Vec::new();
         let floors = sqlx::query(FLOORS)
             .fetch_all(&mut *tx)
             .await
             .map_err(unavailable)?
             .iter()
             .map(|row| {
+                let repository = repository_of(row)?;
+                if let Some(proof) = proof_of(row)? {
+                    proofs.push((repository.clone(), proof));
+                }
                 Ok((
-                    repository_of(row)?,
+                    repository,
                     EpochFloor {
                         recovery_number: number_of(row, "recovery_number")?,
                         generation: number_of(row, "generation")?,
@@ -90,7 +97,7 @@ impl LeaseCache for SqliteStore {
             })
             .collect::<Result<Vec<_>, StoreError>>()?;
         tx.commit().await.map_err(unavailable)?;
-        Ok(HeldLeases::from_parts(leases, floors).with_pauses(pauses))
+        Ok(HeldLeases::from_parts(leases, floors, proofs).with_pauses(pauses))
     }
 
     async fn save(&self, leases: &HeldLeases) -> Result<(), StoreError> {
@@ -118,11 +125,14 @@ impl LeaseCache for SqliteStore {
                 .map_err(unavailable)?;
         }
         for (repository, floor) in leases.floors() {
+            let proof = leases.proof(repository);
             sqlx::query(KEEP_FLOOR)
                 .bind(repository.as_str())
                 .bind(column(floor.recovery_number)?)
                 .bind(column(floor.generation)?)
                 .bind(column(floor.epoch.get())?)
+                .bind(proof.map(|proof| proof.expires_at.as_millisecond()))
+                .bind(proof.map(|proof| proof.signature.as_bytes().to_vec()))
                 .execute(&mut *tx)
                 .await
                 .map_err(unavailable)?;
@@ -174,6 +184,26 @@ fn number_of(row: &SqliteRow, name: &str) -> Result<u64, StoreError> {
 
 fn epoch_of(row: &SqliteRow) -> Result<LeaseEpoch, StoreError> {
     LeaseEpoch::new(number_of(row, "epoch")?).ok_or_else(|| corrupt("epoch"))
+}
+
+/// The proof a floor's row keeps: its expiry and its signature together,
+/// or neither.
+fn proof_of(row: &SqliteRow) -> Result<Option<FloorProof>, StoreError> {
+    let expires_at: Option<i64> = row.try_get("expires_at").map_err(unavailable)?;
+    let signature: Option<Vec<u8>> = row.try_get("signature").map_err(unavailable)?;
+    match (expires_at, signature) {
+        (None, None) => Ok(None),
+        (Some(expires_at), Some(signature)) => {
+            let bytes = <[u8; SIGNATURE_BYTES]>::try_from(signature.as_slice())
+                .map_err(|_| corrupt("signature"))?;
+            Ok(Some(FloorProof {
+                expires_at: Timestamp::from_millisecond(expires_at)
+                    .map_err(|_| corrupt("expires_at"))?,
+                signature: Signature::from_bytes(bytes).map_err(|_| corrupt("signature"))?,
+            }))
+        }
+        _ => Err(corrupt("signature")),
+    }
 }
 
 fn corrupt(name: &str) -> StoreError {

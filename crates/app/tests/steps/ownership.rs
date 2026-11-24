@@ -11,7 +11,10 @@
 //! moves with it; what it sees of its repositories is an engine of
 //! in-memory repositories, listed through its daemon's listings and those
 //! its sync runs before each session. A machine that pairs does so in
-//! process, on that cache, with a hub's pairing use case of its own.
+//! process, on that cache, with a hub's pairing use case of its own. The
+//! hub signs each lease it grants with keys of its own, made when a grant
+//! is first signed, and checks the floors each report carries against
+//! them.
 
 use std::collections::{BTreeMap, BTreeSet};
 use std::sync::Arc;
@@ -24,8 +27,8 @@ use app::fakes::{
 use app::leases::{MaintenanceLeases, WatchPauses};
 use app::notifications::Notify;
 use app::others_snapshots::{ListingsDue, NoteListings, OthersSnapshots};
-use app::ownership::{Reported, RepositoryOwners};
-use app::pairing::{AgentPairing, HubKeys, HubPairing};
+use app::ownership::{Granting, Reported, RepositoryOwners};
+use app::pairing::{AgentPairing, HubKeys, HubPairing, proven_floors, signed_grants};
 use app::ports::{
     ClaimDecision, Clock, ConfigStore, Engine, EngineEvent, Identity, Job, OwnershipRegistry,
     RepositoryAccess, SnapshotSummary,
@@ -39,8 +42,8 @@ use domain::fleet::{
     SeedFile, TokenTls,
 };
 use domain::maintenance::{
-    ClaimOutcome, ClaimRefused, EpochLower, Grant, Lease, LeaseEpoch, NoLease, ReleaseRefused,
-    RepoGrants, RepositoryOwnership, RepositoryReport, RepositoryReports,
+    ClaimOutcome, ClaimRefused, EpochLower, Lease, LeaseEpoch, NoLease, ProvenFloor,
+    ReleaseRefused, RepoGrants, RepositoryOwnership, RepositoryReport, RepositoryReports,
 };
 use domain::notifications::{
     Channel, ChannelKind, ChannelName, EventKind, Notifications, Rule, RuleName,
@@ -83,6 +86,8 @@ pub(super) struct OwnershipWorld {
     paired_with: Option<PairingHub>,
     /// How many hubs machines have paired with, each with keys of its own.
     hubs_made: u64,
+    /// The keys the hub signs its grants with, once it has signed one.
+    keys: Option<HubKeys>,
     /// Each machine's configuration and notification rules, for a machine
     /// that watches its maintenance.
     watchers: BTreeMap<String, Watcher>,
@@ -149,6 +154,7 @@ impl Default for OwnershipWorld {
             both_maintained: false,
             paired_with: None,
             hubs_made: 0,
+            keys: None,
             watchers: BTreeMap::new(),
         }
     }
@@ -214,12 +220,23 @@ impl OwnershipWorld {
             .clone()
     }
 
-    /// `machine` reports `entries` as every repository it uses.
+    /// `machine` reports `entries` as every repository it uses, each with
+    /// the floor it holds on it and its proof.
     async fn report(&mut self, machine: &str, entries: Vec<RepositoryReport>) {
         let agent = self.machine(machine);
+        let entries = match self.holders.get(machine) {
+            Some(holder) => holder
+                .leases
+                .with_floors(entries)
+                .await
+                .expect("the cache answers"),
+            None => entries,
+        };
+        let reports = RepositoryReports::new(entries);
+        let proven = self.proven(agent, &reports);
         let reported = self
             .use_case()
-            .report(agent, &RepositoryReports::new(entries))
+            .report(agent, &reports, &proven)
             .await
             .expect("the registry answers");
         if let Reported::Decided(decided) = &reported {
@@ -240,6 +257,7 @@ impl OwnershipWorld {
                 repository,
                 request: Maintenance::Local,
                 holds_other_agents_snapshots: others_snapshots,
+                floor: None,
             }],
         )
         .await;
@@ -254,6 +272,7 @@ impl OwnershipWorld {
                 repository,
                 request: Maintenance::None,
                 holds_other_agents_snapshots: false,
+                floor: None,
             }],
         )
         .await;
@@ -350,30 +369,65 @@ impl OwnershipWorld {
             .expect("the cache answers");
     }
 
-    /// `machine` claims `repository` and takes the hub's grants in answer.
+    /// `machine` claims `repository` and takes the hub's grants in answer;
+    /// grants the hub withholds leave it what it holds.
     async fn hear(&mut self, machine: &str, repository: &str) {
         let id = self.repository(repository);
         let agent = self.machine(machine);
         let asked_at = self.holder(machine).await.clock.now();
-        let grants = self
-            .use_case()
-            .grant(
-                agent,
-                &RepositoryReports::new([RepositoryReport {
-                    repository: id,
-                    request: Maintenance::Local,
-                    holds_other_agents_snapshots: false,
-                }]),
-            )
+        let reports = self
+            .holder(machine)
             .await
-            .expect("the registry answers")
-            .expect("an approved machine is answered");
+            .leases
+            .with_floors(vec![RepositoryReport {
+                repository: id,
+                request: Maintenance::Local,
+                holds_other_agents_snapshots: false,
+                floor: None,
+            }])
+            .await
+            .expect("the cache answers");
+        let reports = RepositoryReports::new(reports);
+        let proven = self.proven(agent, &reports);
+        let granting = self
+            .use_case()
+            .grant(agent, &reports, &proven)
+            .await
+            .expect("the registry answers");
+        let (generation, signed_at, leases) = match granting {
+            Granting::Leases {
+                generation,
+                signed_at,
+                leases,
+            } => (generation, signed_at, leases),
+            Granting::Withheld => return,
+            Granting::NotApproved => panic!("an approved machine is answered"),
+        };
+        let keys = self.keys().await;
+        let grants = signed_grants(&FakeSigning, keys, agent, generation, signed_at, leases)
+            .expect("the hub signs");
         let holder = self.holder(machine).await;
         holder.refused = holder
             .leases
             .take(&grants, 0, asked_at)
             .await
             .expect("the cache answers");
+    }
+
+    /// The keys the hub signs its grants with.
+    async fn keys(&mut self) -> &HubKeys {
+        if self.keys.is_none() {
+            self.keys = Some(self.make_hub().await.keys);
+        }
+        self.keys.as_ref().unwrap()
+    }
+
+    /// The floors in `agent`'s `reports` whose proof the hub's keys hold.
+    fn proven(&self, agent: AgentId, reports: &RepositoryReports) -> Vec<ProvenFloor> {
+        self.keys
+            .as_ref()
+            .map(|keys| proven_floors(&FakeSigning, keys, agent, reports))
+            .unwrap_or_default()
     }
 
     /// Whether `machine` may maintain `repository` now.
@@ -394,21 +448,42 @@ impl OwnershipWorld {
         self.both_maintained |= allowed > 1;
     }
 
-    /// The hub's grant to a machine of `repository` at `number`, signed now
-    /// for 7 days, as a hub rewound to any epoch would sign it.
-    fn grant_at(&mut self, repository: &str, number: u64) -> RepoGrants {
+    /// The hub's grant to `machine` of `repository` at `number`, signed now
+    /// for 7 days, as a hub rewound to any epoch would sign it: with the
+    /// hub's keys, or with another hub's.
+    async fn grant_at(
+        &mut self,
+        machine: &str,
+        repository: &str,
+        number: u64,
+        another_hub: bool,
+    ) -> RepoGrants {
+        let agent = self.machine(machine);
+        let repository = self.repository(repository);
         let signed_at = self.clock.now();
-        RepoGrants {
-            generation: GENERATION,
+        let lease = Lease {
+            holder: agent,
+            epoch: epoch(number),
+            expires_at: signed_at
+                .checked_add(SignedDuration::from_hours(7 * 24))
+                .unwrap(),
+        };
+        let other;
+        let keys = if another_hub {
+            other = self.make_hub().await.keys;
+            &other
+        } else {
+            self.keys().await
+        };
+        signed_grants(
+            &FakeSigning,
+            keys,
+            agent,
+            GENERATION,
             signed_at,
-            grants: vec![Grant {
-                repository: self.repository(repository),
-                epoch: epoch(number),
-                expires_at: signed_at
-                    .checked_add(SignedDuration::from_hours(7 * 24))
-                    .unwrap(),
-            }],
-        }
+            vec![(repository, lease)],
+        )
+        .expect("the hub signs")
     }
 
     /// A hub with keys of its own that no machine has paired with yet.
@@ -713,6 +788,7 @@ async fn claim_at_once(world: &mut Agent, first: String, second: String, reposit
             repository: id,
             request: Maintenance::Local,
             holds_other_agents_snapshots: false,
+            floor: None,
         }])
     };
     let use_case = world.ownership.use_case();
@@ -722,8 +798,8 @@ async fn claim_at_once(world: &mut Agent, first: String, second: String, reposit
     );
     let (first_report, second_report) = (entry(id.clone()), entry(id));
     let (one, other) = futures::join!(
-        use_case.report(a, &first_report),
-        use_case.report(b, &second_report)
+        use_case.report(a, &first_report, &[]),
+        use_case.report(b, &second_report, &[])
     );
     world
         .ownership
@@ -915,6 +991,29 @@ fn refused_shared(world: &mut Agent, machine: String) {
     );
 }
 
+#[then(expr = "the claim of {string} was refused because the hub is in recovery mode")]
+fn refused_recovering(world: &mut Agent, machine: String) {
+    assert_eq!(
+        world.ownership.outcome(&machine),
+        ClaimOutcome::Refused(ClaimRefused::Recovering)
+    );
+}
+
+#[then("the hub is in recovery mode")]
+async fn in_recovery(world: &mut Agent) {
+    assert!(world.ownership.use_case().recovering().await.unwrap());
+}
+
+#[then("the hub isn't in recovery mode")]
+async fn not_in_recovery(world: &mut Agent) {
+    assert!(!world.ownership.use_case().recovering().await.unwrap());
+}
+
+#[when("a person confirms on the hub that the old hub is stopped or gone")]
+async fn confirms_old_hub_gone(world: &mut Agent) {
+    assert!(world.ownership.use_case().end_recovery().await.unwrap());
+}
+
 #[then(expr = "the claim of {string} was refused because the hub has just started")]
 fn refused_starting(world: &mut Agent, machine: String) {
     assert_eq!(
@@ -1025,14 +1124,37 @@ async fn hears_every_hour(world: &mut Agent, machine: String, repository: String
 
 #[given(expr = "{string} heard a grant of {string} at epoch {int}")]
 async fn heard_a_grant(world: &mut Agent, machine: String, repository: String, number: u64) {
-    let grants = world.ownership.grant_at(&repository, number);
+    let grants = world
+        .ownership
+        .grant_at(&machine, &repository, number, false)
+        .await;
+    world.ownership.take(&machine, &grants).await;
+    assert_eq!(world.ownership.holder(&machine).await.refused, vec![]);
+}
+
+#[given(expr = "{string} heard a grant of {string} at epoch {int} signed by another hub's key")]
+async fn heard_another_hubs_grant(
+    world: &mut Agent,
+    machine: String,
+    repository: String,
+    number: u64,
+) {
+    // The hub has keys of its own, which signed none of it.
+    world.ownership.keys().await;
+    let grants = world
+        .ownership
+        .grant_at(&machine, &repository, number, true)
+        .await;
     world.ownership.take(&machine, &grants).await;
     assert_eq!(world.ownership.holder(&machine).await.refused, vec![]);
 }
 
 #[when(expr = "the hub grants {string} the repository {string} at epoch {int}")]
 async fn hub_grants_at(world: &mut Agent, machine: String, repository: String, number: u64) {
-    let grants = world.ownership.grant_at(&repository, number);
+    let grants = world
+        .ownership
+        .grant_at(&machine, &repository, number, false)
+        .await;
     world.ownership.take(&machine, &grants).await;
 }
 

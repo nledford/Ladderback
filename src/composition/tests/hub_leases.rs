@@ -3,6 +3,7 @@
 
 use app::ports::Identity as _;
 use domain::fleet::{HubAddress, HubPin, PublicKey, TokenTls};
+use domain::fleet::{SIGNATURE_BYTES, Signature};
 use domain::maintenance::{Grant, LeaseEpoch, NoLease, RepoGrants};
 use domain::{RepositoryId, SignedDuration};
 use platform::SystemClock;
@@ -44,6 +45,7 @@ async fn i1_a_clock_set_back_after_the_syncs_take_doesnt_lengthen_the_lease_main
             expires_at: asked_at
                 .checked_add(SignedDuration::from_millis(10))
                 .expect("a time"),
+            signature: Signature::from_bytes([0; SIGNATURE_BYTES]).expect("a signature"),
         }],
     };
     daemon

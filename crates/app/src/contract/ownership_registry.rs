@@ -10,8 +10,9 @@ use std::sync::Arc;
 
 use async_trait::async_trait;
 use domain::maintenance::{
-    ClaimOutcome, ClaimRefused, LEASE_GRACE, LEASE_LIFE, Lease, LeaseEpoch, REPORT_LIFE,
-    ReleaseRefused, RepositoryOwnership, RepositoryReport, RepositoryReports, StartWindow,
+    ClaimOutcome, ClaimRefused, LEASE_GRACE, LEASE_LIFE, Lease, LeaseEpoch, ProvenFloor,
+    REPORT_LIFE, ReleaseRefused, RepositoryOwnership, RepositoryReport, RepositoryReports,
+    StartWindow,
 };
 use domain::planning::Maintenance;
 use domain::{AgentId, RepositoryId, SignedDuration, Timestamp, Uuid};
@@ -44,6 +45,9 @@ pub async fn run(harness: &dyn OwnershipRegistryHarness) {
     leases_and_reports_outlive_the_hub(harness).await;
     the_reported_uses_are_each_agents_last_report(harness).await;
     the_start_window_grants_no_new_owner(harness).await;
+    a_floor_above_the_counter_starts_recovery_mode(harness).await;
+    a_floor_at_the_counter_changes_nothing(harness).await;
+    ending_recovery_mode_raises_the_counter_to_the_floor(harness).await;
 }
 
 /// The value of `result`, after a failed assertion if it is an error.
@@ -81,6 +85,7 @@ fn entry(digit: char, request: Maintenance) -> Option<RepositoryReport> {
         repository: repository(digit)?,
         request,
         holds_other_agents_snapshots: false,
+        floor: None,
     })
 }
 
@@ -117,7 +122,7 @@ async fn report_in(
         return None;
     };
     ok(
-        registry.report(agent, &reports, now, window).await,
+        registry.report(agent, &reports, &[], now, window).await,
         "a report",
     )
 }
@@ -507,5 +512,149 @@ async fn the_start_window_grants_no_new_owner(harness: &dyn OwnershipRegistryHar
         ownership(registry.as_ref(), 'b').await,
         repository('b').map(RepositoryOwnership::new),
         "no epoch was given"
+    );
+}
+
+/// `holder`'s proven floor on the repository `digit` at `number`, its entry
+/// running out a lease life after `at(0)`.
+fn proven(holder: AgentId, digit: char, number: u64, held: bool) -> Option<ProvenFloor> {
+    Some(ProvenFloor {
+        repository: repository(digit)?,
+        holder,
+        epoch: epoch(number)?,
+        expires_at: after(at(0)?, LEASE_LIFE)?,
+        held,
+    })
+}
+
+/// What `registry` decided of `agent`'s report of `entries` with the
+/// floors `floors` proved, at `now`.
+async fn report_proving(
+    registry: &dyn OwnershipRegistry,
+    agent: AgentId,
+    entries: &[Option<RepositoryReport>],
+    floors: &[Option<ProvenFloor>],
+    now: Option<Timestamp>,
+) -> Option<Vec<ClaimDecision>> {
+    let (Some(reports), Some(floors), Some(now)) = (
+        reports(entries),
+        floors.iter().cloned().collect::<Option<Vec<_>>>(),
+        now,
+    ) else {
+        return None;
+    };
+    ok(
+        registry
+            .report(agent, &reports, &floors, now, &StartWindow::default())
+            .await,
+        "a report",
+    )
+}
+
+async fn floors(registry: &dyn OwnershipRegistry) -> Option<Vec<ProvenFloor>> {
+    ok(registry.recovery().await, "the recovery")
+        .map(|recovery| recovery.floors().cloned().collect())
+}
+
+async fn a_floor_above_the_counter_starts_recovery_mode(harness: &dyn OwnershipRegistryHarness) {
+    let registry = harness.empty().await;
+    let decided = report_proving(
+        registry.as_ref(),
+        agent(1),
+        &[entry('a', Maintenance::Local)],
+        &[proven(agent(1), 'a', 3, true)],
+        at(10),
+    )
+    .await;
+    let outcomes: Option<Vec<_>> = decided.map(|d| d.into_iter().map(|d| d.outcome).collect());
+    assert_eq!(
+        outcomes,
+        Some(vec![ClaimOutcome::Refused(ClaimRefused::Recovering)]),
+        "the report that proved it is refused too"
+    );
+    assert_eq!(
+        claim(registry.as_ref(), agent(2), 'b', at(20)).await,
+        Some(ClaimOutcome::Refused(ClaimRefused::Recovering)),
+        "nobody is granted anything"
+    );
+    assert_eq!(
+        ownership(registry.as_ref(), 'b').await,
+        repository('b').map(RepositoryOwnership::new),
+        "no epoch was given"
+    );
+    let reopened = harness.reopened().await;
+    assert_eq!(
+        floors(reopened.as_ref()).await,
+        proven(agent(1), 'a', 3, true).map(|floor| vec![floor]),
+        "recovery mode outlives the hub"
+    );
+}
+
+async fn a_floor_at_the_counter_changes_nothing(harness: &dyn OwnershipRegistryHarness) {
+    let registry = harness.empty().await;
+    claim(registry.as_ref(), agent(1), 'a', at(0)).await;
+    let decided = report_proving(
+        registry.as_ref(),
+        agent(1),
+        &[entry('a', Maintenance::Local)],
+        &[proven(agent(1), 'a', 1, true)],
+        at(10),
+    )
+    .await;
+    assert_eq!(
+        decided
+            .and_then(|d| d.into_iter().next())
+            .map(|d| d.outcome),
+        lease(agent(1), 1, at(10)).map(ClaimOutcome::Renewed)
+    );
+    assert_eq!(floors(registry.as_ref()).await, Some(vec![]));
+}
+
+async fn ending_recovery_mode_raises_the_counter_to_the_floor(
+    harness: &dyn OwnershipRegistryHarness,
+) {
+    let registry = harness.empty().await;
+    claim(registry.as_ref(), agent(2), 'b', at(0)).await;
+    report_proving(
+        registry.as_ref(),
+        agent(1),
+        &[entry('a', Maintenance::Local), entry('b', Maintenance::Hub)],
+        &[
+            proven(agent(1), 'a', 3, true),
+            proven(agent(1), 'b', 4, false),
+        ],
+        at(10),
+    )
+    .await;
+    assert_eq!(
+        ok(registry.end_recovery().await, "the end of recovery mode"),
+        Some(true)
+    );
+    assert_eq!(floors(registry.as_ref()).await, Some(vec![]));
+    let held = ownership(registry.as_ref(), 'a').await;
+    assert_eq!(held.as_ref().and_then(|o| o.last_epoch), epoch(3));
+    assert_eq!(
+        held.and_then(|o| o.lease),
+        lease(agent(1), 3, at(0)),
+        "the held lease is the hub's again"
+    );
+    let released = ownership(registry.as_ref(), 'b').await;
+    assert_eq!(released.as_ref().and_then(|o| o.last_epoch), epoch(4));
+    assert_eq!(
+        released.and_then(|o| o.lease),
+        None,
+        "the lease below the floor is dropped"
+    );
+    // The machine that proved the floor stops using the repository, so it
+    // no longer counts as shared.
+    report_proving(registry.as_ref(), agent(1), &[], &[], at(15)).await;
+    assert_eq!(
+        claim(registry.as_ref(), agent(2), 'b', at(20)).await,
+        lease(agent(2), 5, at(20)).map(ClaimOutcome::Granted),
+        "the next epoch lies above the floor"
+    );
+    assert_eq!(
+        ok(registry.end_recovery().await, "a second end"),
+        Some(false)
     );
 }

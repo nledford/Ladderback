@@ -18,8 +18,8 @@
 
 - A repository once used by a machine that is gone can't move to a new owner for 7 days and an hour after each start of the hub, and a new repository waits the same for every such machine. Nothing yet removes a machine's reports from the hub; removing a machine (#1492) will. Its holder, if any, keeps renewing, and the refusal is silent.
 - A machine paired after the backup a hub was restored from, or one that had reported nothing before it, isn't waited for (decision 137, "What it costs").
-- A hub restored behind a machine's epoch floor still grants below it once the window ends; the machine refuses the grant (`epoch-lower`), so nobody maintains the repository until recovery mode and the reported floors (#1495) let the hub issue above it.
-- A lease binding in the restored database is renewed for its holder when it reports, even if that holder let it go after the backup and another machine was granted the repository at a later epoch. The holder accepts the renewal, since its epoch is its own floor. Two machines then hold it until the later one next hears the hub. Decision 137's recovery mode closes this (#1495).
+- A hub restored behind a machine's epoch floor enters recovery mode when that floor is proved, and grants no leases until a person confirms the old hub is stopped or gone. Ending recovery raises each affected repository's counter above its floor.
+- The start window and recovery mode are separate: the window still protects every repository's first owner change after a start, while recovery mode protects repositories whose floors show that this hub was rewound.
 - A hub clock that steps forward after the window has ended is still decision 147's limit.
 
 ## Rejected

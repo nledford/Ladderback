@@ -2885,6 +2885,7 @@ mod start_tests {
                 expires_at: start
                     .checked_add(SignedDuration::from_hours(7 * 24))
                     .expect("a time"),
+                signature: domain::fleet::Signature::from_bytes([0; 64]).expect("a signature"),
             }],
         };
         leases

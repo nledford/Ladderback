@@ -4,11 +4,11 @@
 //! agent's reports past the cap (§7.2), and when an agent first sends a
 //! report far behind the last it took (#1387).
 
-use domain::AgentId;
 use domain::fleet::{
     AgentRecord, AgentStatus, Fingerprint, MAX_REPORTS_HELD, PairRequest, Pairing, ReportSeq,
     Tombstone,
 };
+use domain::{AgentId, RepositoryId};
 
 /// The line for the first time `agent` sends a report the hub took before,
 /// at `seq` of its outbox, further behind the last the hub took of its
@@ -111,6 +111,36 @@ pub(super) fn reports_dropped(agent: AgentId, dropped: u64) -> String {
          its oldest {dropped} were let go of; the hub counts the next ones without logging each",
         agent.as_uuid(),
     )
+}
+
+/// The line for a floor `agent` reported on `repository` whose proof isn't
+/// a lease entry this hub key signed: it doesn't count (decision 137). It
+/// names the agent, the repository and the epoch claimed, never the proof.
+pub(super) fn floor_unproven(agent: AgentId, repository: &RepositoryId, epoch: u64) -> String {
+    format!(
+        "agent {} reported an epoch floor of {epoch} on repository {} without a lease entry \
+         this hub signed: the floor doesn't count",
+        agent.as_uuid(),
+        repository.as_str(),
+    )
+}
+
+/// The line for the hub entering recovery mode at `agent`'s report: it
+/// grants and renews no lease until a person confirms the old hub is
+/// stopped or gone.
+pub(super) fn recovering(agent: AgentId) -> String {
+    format!(
+        "agent {} proved a lease above what this hub counts, as after a restore from an older \
+         copy: the hub grants and renews no lease until a person confirms on the Machines tab \
+         that the old hub is stopped or gone",
+        agent.as_uuid(),
+    )
+}
+
+/// The line for a person ending recovery mode.
+pub(super) const fn recovered() -> &'static str {
+    "a person confirmed the old hub is stopped or gone: recovery mode ended, and each \
+     repository's epochs continue above the floors its machines proved"
 }
 
 /// The line for the first time the hub refuses a second computer under

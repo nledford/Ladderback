@@ -4,8 +4,10 @@ use std::sync::Arc;
 use app::access::Access;
 use app::fakes::{
     FakeClock, FakeSigning, InMemoryAdminPassword, InMemoryAgentRegistry, InMemoryApiTokenStore,
-    InMemoryIdentity, InMemoryReportInbox, InMemorySessionStore, SeededRandom,
+    InMemoryIdentity, InMemoryOwnershipRegistry, InMemoryReportInbox, InMemorySessionStore,
+    SeededRandom,
 };
+use app::ownership::RepositoryOwners;
 use app::pairing::HubPairing;
 use app::ports::{AgentRegistry as _, OutboxEntry, ReportInbox as _, Signing as _};
 use axum::body::Body;
@@ -46,6 +48,8 @@ struct Daemon {
     access: Option<Arc<Access>>,
     certificate: Option<Fingerprint>,
     inbox: Arc<InMemoryReportInbox>,
+    /// The registry of maintenance owners the hub decides leases in.
+    owners: Arc<InMemoryOwnershipRegistry>,
 }
 
 impl Daemon {
@@ -70,6 +74,12 @@ impl Daemon {
         );
         let inbox = Arc::new(InMemoryReportInbox::default());
         let pairing = pairing.with_inbox(Arc::clone(&inbox) as _);
+        let owners = Arc::new(InMemoryOwnershipRegistry::new());
+        let pairing = pairing.with_owners(Arc::new(RepositoryOwners::new(
+            Arc::clone(&registry) as _,
+            Arc::clone(&owners) as _,
+            clock(),
+        )));
         let pairing = match &access {
             Some(access) => pairing.with_access(Arc::clone(access)),
             None => pairing,
@@ -80,6 +90,7 @@ impl Daemon {
             access,
             certificate: None,
             inbox,
+            owners,
         }
     }
 
@@ -98,6 +109,7 @@ impl Daemon {
             access: None,
             certificate: None,
             inbox: Arc::new(InMemoryReportInbox::default()),
+            owners: Arc::new(InMemoryOwnershipRegistry::new()),
         }
     }
 
@@ -323,6 +335,8 @@ async fn a_daemon_not_serving_as_a_hub_answers_its_routes_as_unknown() {
     let daemon = Daemon::not_a_hub();
     for (method, path) in [
         (Method::GET, api::HUB_PATH.to_owned()),
+        (Method::GET, api::HUB_RECOVERY_PATH.to_owned()),
+        (Method::POST, api::HUB_RECOVERY_CONFIRMATION_PATH.to_owned()),
         (Method::POST, api::PAIRING_TOKENS_PATH.to_owned()),
         (
             Method::DELETE,
@@ -1047,4 +1061,153 @@ async fn with_sign_in_on_only_a_session_removes_and_without_a_step_up() {
     let session = daemon.signed_in().await;
     let removed = daemon.send(remove(REMOTE, &session, &waiting)).await;
     assert_eq!(removed.status(), StatusCode::NO_CONTENT);
+}
+
+/// The hub hears a floor it signed above the epoch it counts, as after a
+/// restore from an older copy: it enters recovery mode (decision 137).
+async fn into_recovery(daemon: &Daemon) {
+    use app::ports::OwnershipRegistry as _;
+    use domain::maintenance::{LeaseEpoch, ProvenFloor, RepositoryReports, StartWindow};
+
+    let floor = ProvenFloor {
+        repository: domain::RepositoryId::parse(&"0a".repeat(32)).unwrap(),
+        holder: AgentId::from_uuid(Uuid::from_u128(2)),
+        epoch: LeaseEpoch::new(5).unwrap(),
+        expires_at: now(),
+        held: true,
+    };
+    daemon
+        .owners
+        .report(
+            floor.holder,
+            &RepositoryReports::new([]),
+            &[floor],
+            now(),
+            &StartWindow::new([]),
+        )
+        .await
+        .unwrap();
+}
+
+fn read_recovery(peer: IpAddr, headers: &[(&str, String)]) -> Request {
+    build(Method::GET, api::HUB_RECOVERY_PATH, peer, headers, "")
+}
+
+fn end_recovery(peer: IpAddr, headers: &[(&str, String)], confirmation: &str) -> Request {
+    let body = serde_json::json!({ "confirmation": confirmation }).to_string();
+    let path = api::HUB_RECOVERY_CONFIRMATION_PATH;
+    build(Method::POST, path, peer, headers, &body)
+}
+
+/// Whether the hub answers it is in recovery mode.
+async fn recovering(daemon: &Daemon) -> bool {
+    let response = daemon.send(read_recovery(LOOPBACK, &[])).await;
+    assert_eq!(response.status(), StatusCode::OK);
+    let read: api::HubRecoveryDto = serde_json::from_value(json(response).await).unwrap();
+    read.recovering
+}
+
+/// The page reads whether the hub is in recovery mode, and a person ends
+/// it with a step-up confirmed as an approval's is; a second end, or one on
+/// a hub not in recovery mode, changes nothing (decision 137).
+#[tokio::test]
+async fn on_loopback_the_fingerprint_ends_recovery_mode_the_page_reads() {
+    let daemon = Daemon::hub(false);
+    let fingerprint = daemon.fingerprint().await;
+    assert!(!recovering(&daemon).await);
+    into_recovery(&daemon).await;
+    assert!(recovering(&daemon).await);
+    let ended = daemon.send(end_recovery(LOOPBACK, &[], &fingerprint)).await;
+    assert_eq!(ended.status(), StatusCode::NO_CONTENT);
+    assert!(!recovering(&daemon).await);
+    let again = daemon.send(end_recovery(LOOPBACK, &[], &fingerprint)).await;
+    assert_eq!(again.status(), StatusCode::NO_CONTENT);
+    assert!(!recovering(&daemon).await);
+}
+
+/// Ending recovery mode is confirmed as an approval is: refused beyond
+/// loopback while sign-in is off, refused with a wrong fingerprint or a
+/// body the hub can't read, and the hub stays in recovery mode.
+#[tokio::test]
+async fn recovery_mode_ends_only_with_a_step_up_that_holds() {
+    let daemon = Daemon::hub(false);
+    let fingerprint = daemon.fingerprint().await;
+    into_recovery(&daemon).await;
+    assert_eq!(
+        refusal(daemon.send(end_recovery(REMOTE, &[], &fingerprint)).await).await,
+        (StatusCode::FORBIDDEN, "pairing-needs-sign-in".to_owned())
+    );
+    let wrong = if fingerprint == "0000-0000-0000-0000-0000" {
+        "1111-1111-1111-1111-1111"
+    } else {
+        "0000-0000-0000-0000-0000"
+    };
+    assert_eq!(
+        refusal(daemon.send(end_recovery(LOOPBACK, &[], wrong)).await).await,
+        (StatusCode::FORBIDDEN, "step-up-failed".to_owned())
+    );
+    let unreadable = build(
+        Method::POST,
+        api::HUB_RECOVERY_CONFIRMATION_PATH,
+        LOOPBACK,
+        &[],
+        "{}",
+    );
+    assert_eq!(
+        refusal(daemon.send(unreadable).await).await,
+        (StatusCode::BAD_REQUEST, "invalid-body".to_owned())
+    );
+    assert!(recovering(&daemon).await);
+}
+
+/// With sign-in on, only a session reads or ends recovery mode, and it
+/// confirms with the password from anywhere; an API token with every
+/// permission does neither.
+#[tokio::test]
+async fn with_sign_in_on_only_a_session_reads_or_ends_recovery_mode() {
+    let daemon = Daemon::hub(true);
+    daemon.pairing.as_ref().unwrap().hub_key().await.unwrap();
+    into_recovery(&daemon).await;
+    assert_eq!(
+        daemon.send(read_recovery(LOOPBACK, &[])).await.status(),
+        StatusCode::UNAUTHORIZED
+    );
+    let created = daemon
+        .access
+        .as_ref()
+        .unwrap()
+        .create_api_token(
+            ApiTokenLabel::new("assistant".to_owned()).unwrap(),
+            TokenPermissions::new(Permission::ALL.iter().fold(Permissions::NONE, |held, row| {
+                held.with(*row, Some(row.level())).unwrap()
+            }))
+            .unwrap(),
+        )
+        .await
+        .unwrap();
+    let bearer = [("authorization", format!("Bearer {}", created.text.expose()))];
+    for request in [
+        read_recovery(LOOPBACK, &bearer),
+        end_recovery(LOOPBACK, &bearer, PASSWORD),
+    ] {
+        assert_eq!(
+            refusal(daemon.send(request).await).await,
+            (StatusCode::FORBIDDEN, "api-token-permission".to_owned())
+        );
+    }
+    let session = daemon.signed_in().await;
+    let wrong = daemon.send(end_recovery(REMOTE, &session, "not-it")).await;
+    assert_eq!(
+        refusal(wrong).await,
+        (StatusCode::FORBIDDEN, "step-up-failed".to_owned())
+    );
+    let read = daemon.send(read_recovery(REMOTE, &session)).await;
+    let read: api::HubRecoveryDto = serde_json::from_value(json(read).await).unwrap();
+    assert!(read.recovering);
+    let peer = IpAddr::V4(Ipv4Addr::new(192, 0, 2, 12));
+    let ended = daemon.send(end_recovery(peer, &session, PASSWORD)).await;
+    assert_eq!(ended.status(), StatusCode::NO_CONTENT);
+    let read = daemon.send(read_recovery(REMOTE, &session)).await;
+    let read: api::HubRecoveryDto = serde_json::from_value(json(read).await).unwrap();
+    assert!(!read.recovering);
 }

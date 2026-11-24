@@ -11,16 +11,16 @@ use domain::fleet::{
     SignedMessage, SigningSeed, TokenId, TokenRecord, TokenTls, TokenUse, Tombstone,
     UNUSED_TOKEN_LIMIT, Welcome, WireName, ack_kind, grants_kind, hello_kind, list_agents,
     plans_kind, progress_kind, release_kind, released_kind, report_kind, repos_kind, token_life,
-    welcome_kind,
+    welcome_kind, withheld_kind,
 };
 use domain::{AgentId, SignedDuration, TimeZoneDatabase, Timestamp};
 
 use super::wire::{
     ack_payload, grants_payload, read_hello, read_release, read_report, read_repos,
-    released_payload, welcome_payload,
+    released_payload, welcome_payload, withheld_payload,
 };
 use crate::access::Access;
-use crate::ownership::RepositoryOwners;
+use crate::ownership::{Granting, RepositoryOwners};
 use crate::ports::{
     Added, AgentRegistry, Clock, EventBus, Identity, IdentityError, Random, RandomUnavailable,
     ReportInbox, Signing, SigningError, StoreError,
@@ -28,13 +28,17 @@ use crate::ports::{
 
 mod dialog;
 mod fleet;
+mod lease_proof;
 mod live;
 mod logged;
 #[cfg(test)]
 mod tests;
 
-pub use dialog::{AgentsListed, ApprovalAsk, MadeToken, RemovalAsk, TokenAsk, TokenAskRefused};
+pub use dialog::{
+    AgentsListed, ApprovalAsk, MadeToken, RecoveryAsk, RemovalAsk, TokenAsk, TokenAskRefused,
+};
 pub use fleet::Machine;
+pub use lease_proof::{proven_floors, signed_grants};
 pub use live::{progress_dto, time_of};
 
 /// The hub's side of pairing: its keys, its tokens, and its answers to an
@@ -69,6 +73,11 @@ pub struct HubPairing {
     /// The agents under whose ID the hub refused a second computer since
     /// it started: it warns of each once (decision 150).
     warned_second: Mutex<HashSet<AgentId>>,
+    /// Whether the hub warned it is in recovery mode since it entered it.
+    warned_recovering: Mutex<bool>,
+    /// Serializes ownership decisions and grant signing, so recovery cannot
+    /// begin between the recovery check and the signed answer.
+    granting: futures::lock::Mutex<()>,
 }
 
 /// The hub's answer to a proved agent's `Hello`.
@@ -224,6 +233,8 @@ impl HubPairing {
             warned_behind: Mutex::default(),
             events: None,
             warned_second: Mutex::default(),
+            warned_recovering: Mutex::default(),
+            granting: futures::lock::Mutex::new(()),
         }
     }
 
@@ -828,7 +839,7 @@ impl HubPairing {
             self.take_report(syncing.agent_id, &message.payload, now)
                 .await?
         } else if message.kind == repos_kind() {
-            self.grant(syncing.agent_id, &message.payload).await?
+            self.grant(keys, syncing.agent_id, &message.payload).await?
         } else if message.kind == release_kind() {
             self.take_release(syncing.agent_id, &message.payload, now)
                 .await?
@@ -902,21 +913,85 @@ impl HubPairing {
         Ok(Ok(Some((ack_kind(), payload))))
     }
 
-    /// Decides the repositories `agent`'s `ReposSnapshot` names, and
-    /// answers with every lease it holds, signed at the hub's time. An
-    /// agent no longer approved is answered with nothing and the
-    /// connection ends.
-    async fn grant(&self, agent: AgentId, payload: &[u8]) -> Result<Answered, HubPairingError> {
+    /// Decides the repositories `agent`'s `ReposSnapshot` names, with the
+    /// floors whose proof holds, and answers with every lease it holds,
+    /// each entry signed apart as well, at the hub's time; in recovery
+    /// mode, with `GrantsWithheld`. An agent no longer approved is answered
+    /// with nothing and the connection ends.
+    async fn grant(
+        &self,
+        keys: &HubKeys,
+        agent: AgentId,
+        payload: &[u8],
+    ) -> Result<Answered, HubPairingError> {
         let Some(owners) = &self.owners else {
             return Ok(Ok(None));
         };
+        let _granting = self.granting.lock().await;
         let Ok(reports) = read_repos(payload) else {
             return Ok(Err(MessageRefused::Unexpected));
         };
-        let Some(grants) = owners.grant(agent, &reports).await? else {
-            return Ok(Err(MessageRefused::Unexpected));
+        let proven = proven_floors(self.signing.as_ref(), keys, agent, &reports);
+        match owners.grant(agent, &reports, &proven).await? {
+            Granting::Leases {
+                generation,
+                signed_at,
+                leases,
+            } => {
+                let grants = signed_grants(
+                    self.signing.as_ref(),
+                    keys,
+                    agent,
+                    generation,
+                    signed_at,
+                    leases,
+                )?;
+                Ok(Ok(Some((grants_kind(), grants_payload(&grants)))))
+            }
+            Granting::Withheld => {
+                self.warn_recovering(agent);
+                Ok(Ok(Some((withheld_kind(), withheld_payload()))))
+            }
+            Granting::NotApproved => Ok(Err(MessageRefused::Unexpected)),
+        }
+    }
+
+    /// Whether the hub is in recovery mode; a hub that keeps no owners
+    /// never is.
+    pub async fn recovering(&self) -> Result<bool, HubPairingError> {
+        match &self.owners {
+            Some(owners) => Ok(owners.recovering().await?),
+            None => Ok(false),
+        }
+    }
+
+    /// Ends recovery mode, once a person's step-up holds.
+    async fn end_recovery(&self) -> Result<bool, HubPairingError> {
+        let Some(owners) = &self.owners else {
+            return Ok(false);
         };
-        Ok(Ok(Some((grants_kind(), grants_payload(&grants)))))
+        let ended = owners.end_recovery().await?;
+        if ended {
+            *self
+                .warned_recovering
+                .lock()
+                .unwrap_or_else(PoisonError::into_inner) = false;
+            log::warn!("{}", logged::recovered());
+        }
+        Ok(ended)
+    }
+
+    /// Warns, once each time the hub enters recovery mode while it runs,
+    /// that `agent`'s report found it there.
+    fn warn_recovering(&self, agent: AgentId) {
+        let mut warned = self
+            .warned_recovering
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner);
+        if !*warned {
+            *warned = true;
+            log::warn!("{}", logged::recovering(agent));
+        }
     }
 
     /// Ends the lease `agent`'s `ReleaseAck` names, and answers with

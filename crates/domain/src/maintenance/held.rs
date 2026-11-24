@@ -14,6 +14,8 @@
 use std::collections::BTreeMap;
 
 use super::lease::LeaseEpoch;
+use super::recovery::ReportedFloor;
+use crate::fleet::Signature;
 use crate::{RepositoryId, SignedDuration, Timestamp};
 
 /// How long a paired machine's maintenance of a repository stays paused
@@ -40,12 +42,15 @@ pub struct EpochFloor {
     pub epoch: LeaseEpoch,
 }
 
-/// One lease in the hub's grants: until `expires_at` on the hub's clock.
+/// One lease in the hub's grants: until `expires_at` on the hub's clock,
+/// with the hub key's signature over the entry alone (`lease-entry`), which
+/// the machine keeps as proof of its floor (decision 137).
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Grant {
     pub repository: RepositoryId,
     pub epoch: LeaseEpoch,
     pub expires_at: Timestamp,
+    pub signature: Signature,
 }
 
 /// The hub's signed grants to one machine (`RepoGrants`, §7.2): every lease
@@ -86,24 +91,35 @@ pub struct EpochLower {
     pub granted: EpochFloor,
 }
 
+/// The proof of a floor: the expiry and hub signature of the lease entry
+/// that set it, which the machine reports back with the floor.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct FloorProof {
+    pub expires_at: Timestamp,
+    pub signature: Signature,
+}
+
 /// A paired machine's leases, epoch floors and paused maintenance.
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub struct HeldLeases {
     leases: BTreeMap<RepositoryId, HeldLease>,
     floors: BTreeMap<RepositoryId, EpochFloor>,
     paused: BTreeMap<RepositoryId, Pause>,
+    proofs: BTreeMap<RepositoryId, FloorProof>,
 }
 
 impl HeldLeases {
-    /// The leases and floors a cache kept.
+    /// The leases, floors and proofs a cache kept.
     pub fn from_parts(
         leases: impl IntoIterator<Item = (RepositoryId, HeldLease)>,
         floors: impl IntoIterator<Item = (RepositoryId, EpochFloor)>,
+        proofs: impl IntoIterator<Item = (RepositoryId, FloorProof)>,
     ) -> Self {
         Self {
             leases: leases.into_iter().collect(),
             floors: floors.into_iter().collect(),
             paused: BTreeMap::new(),
+            proofs: proofs.into_iter().collect(),
         }
     }
 
@@ -187,7 +203,7 @@ impl HeldLeases {
             .get_mut(repository)
             .filter(|pause| pause.since == since)
         {
-            pause.alerted = true;
+            pause.alerted = true
         }
     }
 
@@ -197,6 +213,33 @@ impl HeldLeases {
 
     pub fn floors(&self) -> impl Iterator<Item = (&RepositoryId, &EpochFloor)> {
         self.floors.iter()
+    }
+
+    pub fn proofs(&self) -> impl Iterator<Item = (&RepositoryId, &FloorProof)> {
+        self.proofs.iter()
+    }
+
+    /// The proof of the floor on `repository`, when the machine keeps one.
+    pub fn proof(&self, repository: &RepositoryId) -> Option<&FloorProof> {
+        self.proofs.get(repository)
+    }
+
+    /// What the machine reports of its floor on `repository` at `now`, on
+    /// its own clock: the floor's epoch with its proof, and whether it still
+    /// holds the lease at that epoch. Nothing for a floor with no proof.
+    pub fn reported_floor(
+        &self,
+        repository: &RepositoryId,
+        now: Timestamp,
+    ) -> Option<ReportedFloor> {
+        let floor = self.floors.get(repository)?;
+        let proof = self.proofs.get(repository)?;
+        Some(ReportedFloor {
+            epoch: floor.epoch,
+            expires_at: proof.expires_at,
+            signature: proof.signature,
+            held: self.holds(repository, now) == Ok(floor.epoch),
+        })
     }
 
     /// Takes `grants`, the hub's answer to a request the machine sent at
@@ -235,6 +278,13 @@ impl HeldLeases {
                 continue;
             }
             *floor = granted;
+            self.proofs.insert(
+                grant.repository.clone(),
+                FloorProof {
+                    expires_at: grant.expires_at,
+                    signature: grant.signature,
+                },
+            );
             // A life no clock can hold comes from no hub this version
             // speaks to: the machine holds nothing on it.
             let life = grants.signed_at.duration_until(grant.expires_at);

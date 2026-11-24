@@ -95,6 +95,7 @@ fn i1_a_repository_never_listed_is_reported_as_holding_another_agents_snapshots(
             repository: photos(),
             request: Maintenance::Local,
             holds_other_agents_snapshots: true,
+            floor: None,
         }
     );
     assert!(seen.due(&photos(), &machine(), now()));
@@ -111,6 +112,7 @@ fn a_listed_repository_is_reported_with_its_request_and_what_its_listing_showed(
                 repository: photos(),
                 request,
                 holds_other_agents_snapshots: false,
+                floor: None,
             }
         );
     }

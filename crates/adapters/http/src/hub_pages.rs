@@ -1,24 +1,26 @@
 //! The hub's own routes under `/api/v1/hub` (§16, decisions 120 and 121):
 //! the key its page shows, the pairing tokens the page makes and cancels,
-//! and the agents it lists, approves, rejects and removes. Only a build
-//! with the hub has them (decision 122), and a daemon not serving as a hub
-//! answers them as it does any unknown path.
+//! the agents it lists, approves, rejects and removes, and its recovery
+//! mode, which the page reads and a person ends (decision 137). Only a
+//! build with the hub has them (decision 122), and a daemon not serving as
+//! a hub answers them as it does any unknown path.
 //!
-//! Making a token and approving an agent are high-impact actions: a
-//! session's only (no API token permission opens them, so a token is refused
-//! before it gets here), confirmed by a fresh step-up each time, and refused
-//! from beyond loopback while sign-in is off (decision 120, "Who may make a
-//! token, approve or re-key"). Rejecting or removing an agent only takes
-//! authority away: a session's only too, and refused beyond loopback while
-//! sign-in is off, but with no step-up (decision 154).
+//! Making a token, approving an agent and ending recovery mode are
+//! high-impact actions: a session's only (no API token permission opens
+//! them, so a token is refused before it gets here), confirmed by a fresh
+//! step-up each time, and refused from beyond loopback while sign-in is off
+//! (decision 120, "Who may make a token, approve or re-key"). Rejecting or
+//! removing an agent only takes authority away: a session's only too, and
+//! refused beyond loopback while sign-in is off, but with no step-up
+//! (decision 154).
 
 use std::net::IpAddr;
 use std::sync::Arc;
 
 use api::ErrorCode;
 use app::pairing::{
-    ApprovalAsk, HubPairing, HubPairingError, Machine, MadeToken, RemovalAsk, TokenAsk,
-    TokenAskRefused, progress_dto, time_of,
+    ApprovalAsk, HubPairing, HubPairingError, Machine, MadeToken, RecoveryAsk, RemovalAsk,
+    TokenAsk, TokenAskRefused, progress_dto, time_of,
 };
 use axum::Router;
 use axum::extract::{ConnectInfo, Path, Request, State};
@@ -55,6 +57,11 @@ pub(crate) fn routes(routes: Router<AppState>) -> Router<AppState> {
         .route(api::HUB_MACHINES_PATH, axum::routing::get(machines))
         .route(AGENT_APPROVAL_PATH, axum::routing::post(approve))
         .route(AGENT_REMOVAL_PATH, axum::routing::post(remove))
+        .route(api::HUB_RECOVERY_PATH, axum::routing::get(recovery))
+        .route(
+            api::HUB_RECOVERY_CONFIRMATION_PATH,
+            axum::routing::post(end_recovery),
+        )
 }
 
 /// The hub's pairing, or none when this daemon doesn't serve as a hub.
@@ -338,6 +345,48 @@ async fn approve(
         Ok(Err(ApprovalRefused::AlreadyApproved)) => {
             crate::refused(StatusCode::CONFLICT, ErrorCode::AgentApprovedAlready)
         }
+        Err(refused) => ask_refusal(refused),
+    }
+}
+
+/// Whether the hub is in recovery mode, as a [`api::HubRecoveryDto`]: the
+/// Machines tab shows its notice while it is (decision 137).
+async fn recovery(State(state): State<AppState>) -> Response {
+    let Some(pairing) = pairing_of(&state) else {
+        return not_a_hub();
+    };
+    match pairing.recovering().await {
+        Ok(recovering) => axum::Json(api::HubRecoveryDto { recovering }).into_response(),
+        Err(error) => hub_refusal(&error),
+    }
+}
+
+/// Recovery mode ended, once the step-up the [`api::EndRecoveryDto`] holds
+/// confirms a person's word that the old hub is stopped or gone: answered
+/// `204` whether or not the hub was in recovery mode (decision 137).
+async fn end_recovery(State(state): State<AppState>, request: Request) -> Response {
+    let Some(pairing) = pairing_of(&state) else {
+        return not_a_hub();
+    };
+    let peer = match peer_of(&request) {
+        Ok(peer) => peer,
+        Err(refused) => return *refused,
+    };
+    let beyond = beyond_loopback(request.headers(), peer);
+    // Bounded by the API's body limit, as a token's ask is.
+    let Ok(body) = axum::body::to_bytes(request.into_body(), usize::MAX).await else {
+        return crate::refused(StatusCode::BAD_REQUEST, ErrorCode::InvalidBody);
+    };
+    let Ok(api::EndRecoveryDto { confirmation }) = serde_json::from_slice(&body) else {
+        return crate::refused(StatusCode::BAD_REQUEST, ErrorCode::InvalidBody);
+    };
+    let ask = RecoveryAsk {
+        peer,
+        beyond_loopback: beyond,
+        confirmation: StepUpConfirmation::parse(confirmation).ok(),
+    };
+    match pairing.end_recovery_asked(ask).await {
+        Ok(_) => StatusCode::NO_CONTENT.into_response(),
         Err(refused) => ask_refusal(refused),
     }
 }

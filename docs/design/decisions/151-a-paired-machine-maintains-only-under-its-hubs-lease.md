@@ -26,7 +26,7 @@
 - `RepoGrants` carries no `owner`, `keep_delete` or `prune_margin`, and `ReposSnapshot` no `alias`, yet: every grant is the receiving machine's own lease, and the deadline inputs come with the owner prune guard (#573).
 - A configuration the machine can't read ends the session (`SyncFailure::Config`) before anything is asked, and the leases it holds stay as they were until they run out.
 - A hub that doesn't decide ownership answers neither `ReposSnapshot` nor `ReleaseAck`. The machine then waits the 15 seconds it gives each answer, the session fails, and it holds no lease from that hub.
-- `ReposSnapshot` names at most 21 repositories, the first by ID, so it and its `RepoGrants` each fit a 4096-byte frame. A machine that uses more holds no lease on the others.
+- `ReposSnapshot` names at most 9 repositories, the first by ID, so the floor proofs and `RepoGrants` fit a 4096-byte frame. A machine that uses more holds no lease on the others.
 - The lease is checked when a run starts, not while it runs. A prune started just before its lease ends can run past the hub's hour of grace, when another machine may hold the repository. The owner prune guard's deadline (#573) is where that closes.
 - A run checks its lease before it takes its place in the operation log, so a session in that gap may release the lease of a run about to start. The gap is milliseconds; the release names a repository the configuration no longer asks this machine to maintain.
 - A clock set back while the daemon was stopped lengthens a lease by as much until a session takes its grants again, which the daemon asks for as it starts; one that can't reach its hub keeps the longer lease.

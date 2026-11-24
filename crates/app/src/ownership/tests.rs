@@ -21,6 +21,7 @@ impl OwnershipRegistry for FailingReport {
         &self,
         agent: AgentId,
         reports: &RepositoryReports,
+        proven: &[ProvenFloor],
         now: domain::Timestamp,
         window: &StartWindow,
     ) -> Result<Vec<ClaimDecision>, StoreError> {
@@ -29,7 +30,17 @@ impl OwnershipRegistry for FailingReport {
                 detail: "the database is locked".to_owned(),
             });
         }
-        self.registry.report(agent, reports, now, window).await
+        self.registry
+            .report(agent, reports, proven, now, window)
+            .await
+    }
+
+    async fn recovery(&self) -> Result<domain::maintenance::HubRecovery, StoreError> {
+        self.registry.recovery().await
+    }
+
+    async fn end_recovery(&self) -> Result<bool, StoreError> {
+        self.registry.end_recovery().await
     }
 
     async fn reported_uses(&self) -> Result<Vec<(AgentId, RepositoryId)>, StoreError> {
@@ -76,6 +87,7 @@ fn reports(request: Maintenance) -> RepositoryReports {
         repository: photos(),
         request,
         holds_other_agents_snapshots: false,
+        floor: None,
     }])
 }
 
@@ -92,6 +104,7 @@ async fn a_report_that_wasnt_stored_doesnt_end_the_start_window() {
         .report(
             laptop,
             &reports(Maintenance::None),
+            &[],
             clock.now(),
             &StartWindow::default(),
         )
@@ -106,11 +119,14 @@ async fn a_report_that_wasnt_stored_doesnt_end_the_start_window() {
     let hub = RepositoryOwners::new(agents, registry, clock);
 
     assert!(
-        hub.report(laptop, &reports(Maintenance::None))
+        hub.report(laptop, &reports(Maintenance::None), &[])
             .await
             .is_err()
     );
-    let refused = hub.report(nas, &reports(Maintenance::Local)).await.unwrap();
+    let refused = hub
+        .report(nas, &reports(Maintenance::Local), &[])
+        .await
+        .unwrap();
 
     assert_eq!(
         refused,

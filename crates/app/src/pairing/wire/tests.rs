@@ -576,7 +576,9 @@ fn an_envelope_or_proof_out_of_shape_is_refused() {
 #[test]
 fn a_full_report_of_repositories_and_its_grants_each_fit_a_frame() {
     use domain::fleet::{AgentEnvelope, HubEnvelope, grants_kind, repos_kind};
-    use domain::maintenance::{Grant, LeaseEpoch, RepoGrants, RepositoryReport, RepositoryReports};
+    use domain::maintenance::{
+        Grant, LeaseEpoch, RepoGrants, ReportedFloor, RepositoryReport, RepositoryReports,
+    };
     use domain::planning::Maintenance;
     use domain::{RepositoryId, Timestamp};
 
@@ -588,6 +590,12 @@ fn a_full_report_of_repositories_and_its_grants_each_fit_a_frame() {
         repository: repository.clone(),
         request: Maintenance::Local,
         holds_other_agents_snapshots: true,
+        floor: Some(ReportedFloor {
+            epoch: LeaseEpoch::new(largest).unwrap(),
+            expires_at: Timestamp::from_second(Timestamp::MAX.as_second()).unwrap(),
+            signature: signature(7),
+            held: true,
+        }),
     }));
     let sent = agent_envelope_frame(&AgentEnvelope {
         kind: repos_kind(),
@@ -610,6 +618,7 @@ fn a_full_report_of_repositories_and_its_grants_each_fit_a_frame() {
                 repository: repository.clone(),
                 epoch: LeaseEpoch::new(largest).unwrap(),
                 expires_at: Timestamp::MAX,
+                signature: signature(7),
             })
             .collect(),
     };
@@ -656,6 +665,7 @@ fn grants_read_back_from_their_bytes_up_to_the_largest_the_store_holds() {
             repository: RepositoryId::parse(&"0a".repeat(32)).unwrap(),
             epoch: LeaseEpoch::new(epoch).unwrap(),
             expires_at: Timestamp::from_second(2_000).unwrap(),
+            signature: signature(9),
         }],
     };
     let largest = i64::MAX as u64;
@@ -671,4 +681,67 @@ fn grants_read_back_from_their_bytes_up_to_the_largest_the_store_holds() {
         read_grants(&grants_payload(&grants(7, largest + 1))),
         Err(WireRefused)
     );
+}
+
+/// A machine's floor on a repository reads back from its report's bytes
+/// with the proof the hub signed, and a repository it holds no floor on
+/// reads back with none (§7.3, decision 137).
+#[test]
+fn a_floor_reads_back_with_its_proof() {
+    use domain::RepositoryId;
+    use domain::maintenance::{LeaseEpoch, ReportedFloor, RepositoryReport, RepositoryReports};
+    use domain::planning::Maintenance;
+
+    let report = |digit: &str, floor| RepositoryReport {
+        repository: RepositoryId::parse(&digit.repeat(64)).unwrap(),
+        request: Maintenance::Local,
+        holds_other_agents_snapshots: false,
+        floor,
+    };
+    for held in [true, false] {
+        let sent = RepositoryReports::new([
+            report(
+                "a",
+                Some(ReportedFloor {
+                    epoch: LeaseEpoch::new(4).unwrap(),
+                    expires_at: Timestamp::from_second(2_000).unwrap(),
+                    signature: signature(5),
+                    held,
+                }),
+            ),
+            report("b", None),
+        ]);
+        assert_eq!(read_repos(&repos_payload(&sent)), Ok(sent));
+    }
+}
+
+/// A legacy agent may still send more repositories than the recovery frame
+/// cap; the new hub only accepts the first capped set.
+#[test]
+fn a_legacy_report_is_capped_when_read() {
+    use api::sync::{RepoPayload, ReposPayload};
+
+    let bytes = ReposPayload {
+        repos: (0..=MAX_REPORTED_REPOSITORIES)
+            .map(|n| RepoPayload {
+                repo_id: format!("{n:064x}"),
+                requested_maintenance: "local".to_owned(),
+                others_snapshots: false,
+                floor: None,
+            })
+            .collect(),
+    }
+    .to_bytes();
+    let reports = read_repos(&bytes).expect("the legacy report is readable");
+    assert_eq!(reports.entries().len(), MAX_REPORTED_REPOSITORIES);
+}
+
+/// A grant from a pre-recovery hub has no floor proof, but remains a usable
+/// lease when read by a recovery-capable agent.
+#[test]
+fn a_legacy_grant_without_a_signature_reads_as_unproved() {
+    let bytes = br#"{"generation":1,"signed_at":1000,"grants":[{"repo_id":"0000000000000000000000000000000000000000000000000000000000000000","epoch":1,"expires_at":2000}]}"#;
+    let grants = read_grants(bytes).expect("the legacy grant is readable");
+    assert_eq!(grants.grants.len(), 1);
+    assert_eq!(grants.grants[0].signature.as_bytes(), &[0; SIGNATURE_BYTES]);
 }
