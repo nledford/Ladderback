@@ -517,6 +517,7 @@ async fn a_log_at_version_4_gains_the_index_of_successes_and_changes_no_row() {
             (24, true),
             (25, true),
             (26, true),
+            (27, true),
             (28, true)
         ]
     );
