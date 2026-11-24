@@ -264,8 +264,13 @@ impl RepositoryOwnership {
         shared: bool,
         now: Timestamp,
     ) -> ClaimOutcome {
-        let _ = (window, agent, request, shared, now);
-        todo!()
+        if request == Maintenance::Local
+            && window.holds(&self.repository)
+            && self.binding(now).is_none()
+        {
+            return ClaimOutcome::Refused(ClaimRefused::Starting);
+        }
+        self.claim(agent, request, shared, now)
     }
 
     /// Ends the lease `agent` holds at `epoch`, at its holder's signed
