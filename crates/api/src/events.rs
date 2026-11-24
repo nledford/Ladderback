@@ -56,7 +56,7 @@ pub enum UiEvent {
     /// The operation ended well. The run that recorded it announces this once,
     /// after its ending hooks and its last write to the operation log, so a
     /// page that reads the history on hearing it finds the end there, unless
-    /// the log lost that write. A cancelled operation has no such event.
+    /// the log lost that write.
     OperationSucceeded {
         operation: String,
         finished_at: String,
@@ -71,6 +71,13 @@ pub enum UiEvent {
         operation: String,
         code: ErrorCode,
         args: Vec<MsgArg>,
+        finished_at: String,
+    },
+    /// The operation was cancelled: announced like
+    /// [`Self::OperationSucceeded`], once the run recorded the cancel. A
+    /// paired machine reports it to its hub as the operation's end (§7.2).
+    OperationCancelled {
+        operation: String,
         finished_at: String,
     },
     /// A plan's backup failed, and the agent retries it (`backup.retrying`,
@@ -119,6 +126,15 @@ pub enum UiEvent {
         agent: String,
         operation: String,
         outcome: crate::MachineOutcomeDto,
+    },
+    /// The hub took a snapshot of the machine `agent`'s plans (§7.2). A
+    /// page that shows the machine's plans reads them again on hearing it.
+    AgentPlans { agent: String },
+    /// The hub took the latest progress of the machine `agent`'s running
+    /// operation (§7.2), which a page that shows it shows as it comes.
+    AgentProgress {
+        agent: String,
+        progress: crate::MachineProgressDto,
     },
     /// A proposal's status changed (decision 89, point 14): facts only,
     /// never its rationale, its changes or its proposer's label. A page

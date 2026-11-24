@@ -15,6 +15,7 @@ mod keys;
 mod machine;
 mod outbox;
 mod pin;
+mod plans;
 mod registry;
 mod reported;
 mod route;
@@ -52,6 +53,10 @@ pub use outbox::{
     repos_kind,
 };
 pub use pin::{HubPin, MAX_PIN_BYTES, PinRefused};
+pub use plans::{
+    LastRun, LastRunOutcome, MAX_PLANS_REPORTED, PlansReport, ReportedPlan, ReportedProgress,
+    plans_ack_kind, plans_kind, progress_kind, progress_shown,
+};
 pub use registry::{
     AgentRecord, AgentStatus, ApprovalRefused, HostnameKey, HostnameSkeleton, LONGEST_TOKEN_LIFE,
     ListedAgent, Lookalike, PENDING_LIFE, PENDING_LIMIT, PairRefusal, PairRequest, Pairing,

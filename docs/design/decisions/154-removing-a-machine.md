@@ -14,7 +14,7 @@
 
 - **It keeps the agent ID and the key,** so the hub can prove to the removed machine, signed, that it removed it, and refuse an ordinary token under that ID (decision 120, "A removed agent's ID is a tombstone"). A proof under another key gets `proof-refused`, as any stranger does, so the tombstone tells a stranger nothing.
 - **It keeps the hostname only as a record.** The hostname is not held and not unique among tombstones: another machine may pair under the name at once. Comparing a new name with removed ones for lookalikes stays with #1346.
-- **It is kept for good,** in `agent_tombstones` (migration `0025_agent_tombstones.sql`). A second removal under the same ID replaces the one before.
+- **It is kept for good,** in `agent_tombstones` (migration `0026_agent_tombstones.sql`). A second removal under the same ID replaces the one before.
 
 ## The lapse
 

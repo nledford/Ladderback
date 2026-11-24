@@ -19,7 +19,7 @@ use app::ports::{
     AgentRegistry as _, EventBus, Identity as _, IdentityError, LinkError, Signing as _,
     ThisMachine as _,
 };
-use app::sync::{RecordReports, SyncWithHub};
+use app::sync::{LiveProgress, ReadPlans, RecordReports, SyncWithHub};
 use domain::fleet::{
     AgentStatus, Approval, ApprovalRefused, Fingerprint, Hostname, HubAddress, HubRoute, HubScheme,
     MachineZone, PairingToken, RouteRefused, RouteSession, TokenId, TokenTls, WelcomeRefused,
@@ -760,18 +760,25 @@ async fn on_the_agent(
         Ok(id) => id,
         Err(error) => return refused(localizer, &error.to_string()),
     };
+    // The leases and epoch floors a new hub replaces are in the database.
+    let store = match SqliteStore::open(&data_dir.join(DATABASE)).await {
+        Ok(store) => Arc::new(store),
+        Err(error) => return refused(localizer, &error.to_string()),
+    };
     let connector = WebSocketHubConnector::new();
     let pairing = AgentPairing::new(
         Arc::new(FileIdentity::in_data_dir(data_dir)),
         Arc::new(AwsLcSigning),
         Arc::new(OsRandom),
+        Arc::<SqliteStore>::clone(&store),
     );
     let address = token.address().as_str().to_owned();
     let asked = hostname.clone();
-    match PairWithHub::new(pairing, Arc::new(connector))
+    let outcome = PairWithHub::new(pairing, Arc::new(connector))
         .pair(token, agent_id, hostname, machine_zone())
-        .await
-    {
+        .await;
+    store.close().await;
+    match outcome {
         Ok(paired) => {
             let fingerprint = ("fingerprint", text(Fingerprint::of_key(&paired.agent_key)));
             let (one_name, held_name) = if paired.approved {
@@ -929,14 +936,17 @@ const PAIRING_POLL: std::time::Duration = std::time::Duration::from_secs(30);
 /// This machine's reports to its hub (§7.2): once it paired, a recorder
 /// keeps each operation's start and end in the outbox in `store`, and a
 /// session replays them to the hub whenever it holds one the hub hasn't
-/// acknowledged. Neither touches the machine's operations, so a machine
-/// that can't reach its hub backs up on schedule all the same. A machine
-/// paired when this starts records from `early`, the events since its
-/// caller subscribed before starting the scheduler. One that hasn't paired
-/// drops them, looks for its pairing every [`PAIRING_POLL`], and keeps no
-/// report until then. Each session tells `standing` what the hub made of
-/// this machine: refused, signed, as a second computer under its machine
-/// ID, or taken (decision 150). Runs until aborted.
+/// acknowledged. A session also tells the hub the plans `plans` reads when
+/// they changed, and the progress of the operation running, which the
+/// recorder keeps from the same events. Neither touches the machine's
+/// operations, so a machine that can't reach its hub backs up on schedule
+/// all the same. A machine paired when this starts records from `early`,
+/// the events since its caller subscribed before starting the scheduler.
+/// One that hasn't paired drops them, looks for its pairing every
+/// [`PAIRING_POLL`], and keeps no report until then. Each session tells
+/// `standing` what the hub made of this machine: refused, signed, as a
+/// second computer under its machine ID, or taken (decision 150). Runs
+/// until aborted.
 pub(crate) async fn reporting(
     data_dir: PathBuf,
     events: Arc<dyn EventBus>,
@@ -944,6 +954,7 @@ pub(crate) async fn reporting(
     store: Arc<SqliteStore>,
     config: Arc<dyn app::ports::ConfigStore>,
     standing: Arc<app::machine::MachineStanding>,
+    plans: Option<ReadPlans>,
 ) {
     let identity = Arc::new(FileIdentity::in_data_dir(&data_dir));
     let mut early = Some(early);
@@ -963,12 +974,14 @@ pub(crate) async fn reporting(
         return;
     };
     let recorder = RecordReports::new(store.clone());
+    let progress = Arc::new(LiveProgress::new());
     let mut happened = match early {
         Some(early) => early,
         None => events.subscribe().await,
     };
     let recording = async {
         while let Some(event) = happened.next().await {
+            progress.hear(&event);
             if let Err(error) = recorder.record(&event).await {
                 log::warn!("a report for the hub couldn't be kept in the outbox: {error:?}");
             }
@@ -982,7 +995,7 @@ pub(crate) async fn reporting(
         Arc::<SqliteStore>::clone(&store),
         Arc::new(SystemClock),
     ));
-    let syncing = SyncWithHub::new(
+    let mut syncing = SyncWithHub::new(
         connecting(identity, &data_dir),
         Arc::<SqliteStore>::clone(&store),
         Arc::new(SystemClock),
@@ -993,7 +1006,11 @@ pub(crate) async fn reporting(
     // A maintenance running here keeps its repository's lease from a
     // release, as its operation log says.
     .with_leases(config, leases, store)
-    .with_standing(standing);
+    .with_standing(standing)
+    .with_progress(Arc::clone(&progress));
+    if let Some(plans) = plans {
+        syncing = syncing.with_plans(plans);
+    }
     tokio::join!(recording, syncing.run());
 }
 
@@ -1320,6 +1337,7 @@ mod tests {
             Arc::clone(&store),
             Arc::new(app::fakes::InMemoryConfigStore::default()),
             Arc::default(),
+            None,
         ));
         events
             .publish(api::UiEvent::OperationStarted {

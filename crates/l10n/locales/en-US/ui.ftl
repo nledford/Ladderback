@@ -3796,6 +3796,39 @@ ui-dashboard-code = Error code
 # A start or end the hub has no report of: the machine let its start go when its outbox was full, or it hasn't ended.
 ui-dashboard-unknown = Not reported
 
+# The name of the progress bar of the operation a machine runs, as its latest report to the hub told it (decision 83).
+# $hostname (string): the machine's name.
+ui-dashboard-progress = Progress of the operation running on { $hostname }
+
+# The caption of a machine's table of plans, as it last reported them.
+# $hostname (string): the machine's name.
+ui-dashboard-plans = Plans of { $hostname }
+
+# Shown in place of a machine's plans before its first report of them.
+ui-dashboard-no-plans = This { -machine } hasn't reported its plans yet.
+
+# Shown in place of a machine's plans when its report listed none.
+ui-dashboard-plans-none = This { -machine } reported no plans.
+
+# The headers of a machine's plans' columns: the plan, how its last run went and when, and when it runs next.
+ui-dashboard-plan = Plan
+ui-dashboard-last-run = Last run
+ui-dashboard-next-run = Next run
+
+# A plan the machine has never run.
+ui-dashboard-never-run = Not run yet
+
+# A plan with no run planned, such as one without a schedule.
+ui-dashboard-not-planned = None planned
+
+# A warning on a machine that has more plans than it reports to the hub, so the table leaves some out.
+# $count (number): how many plans it left out.
+ui-dashboard-plans-left-out =
+    { $count ->
+        [one] This { -machine } has one more plan than it reports to the { -hub }, so that plan isn't shown.
+       *[other] This { -machine } has { $count } more plans than it reports to the { -hub }, so those plans aren't shown.
+    }
+
 # Said politely when live updates on the dashboard are on again.
 # $count (number): how many machines changed while the updates were paused, which the page now shows.
 ui-dashboard-resumed =

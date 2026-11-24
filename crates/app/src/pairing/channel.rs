@@ -2,15 +2,16 @@ use std::sync::Arc;
 
 use domain::fleet::{
     Ack, AgentEnvelope, Binding, EpochSeconds, FIRST_SEQUENCE, HubEnvelope, Nonce, PayloadDigest,
-    PublicKey, SignedMessage, SigningSeed, WireName, ack_kind, fresh_on_hub_time, grants_kind,
-    release_kind, released_kind, report_kind, repos_kind,
+    PlansReport, PublicKey, ReportedProgress, SignedMessage, SigningSeed, WireName, ack_kind,
+    fresh_on_hub_time, grants_kind, plans_ack_kind, plans_kind, progress_kind, release_kind,
+    released_kind, report_kind, repos_kind,
 };
 use domain::maintenance::{LeaseEpoch, RepoGrants, RepositoryReports};
 use domain::{AgentId, RepositoryId, SignedDuration};
 
 use super::wire::{
-    HubMessage, agent_envelope_frame, hub_message, read_ack, read_grants, read_released,
-    release_payload, report_payload, repos_payload,
+    HubMessage, agent_envelope_frame, hub_message, plans_payload, progress_payload, read_ack,
+    read_grants, read_plans_ack, read_released, release_payload, report_payload, repos_payload,
 };
 use crate::ports::{Clock, HubLink, LinkError, OutboxEntry, Signing, SigningError};
 
@@ -146,6 +147,23 @@ impl AgentChannel {
         }
     }
 
+    /// Sends the snapshot of the agent's `plans`, signed with the next
+    /// sequence number.
+    pub async fn send_plans(&mut self, plans: &PlansReport) -> Result<(), ChannelError> {
+        self.send(plans_kind(), plans_payload(plans)).await
+    }
+
+    /// The hub's next `PlansAck`, once it holds. A signed message of a kind
+    /// this build doesn't take is counted and passed over.
+    pub async fn receive_plans_ack(&mut self) -> Result<(), ChannelError> {
+        loop {
+            let envelope = self.receive().await?;
+            if envelope.kind == plans_ack_kind() {
+                return read_plans_ack(&envelope.payload).map_err(|_| ChannelError::OutOfTurn);
+            }
+        }
+    }
+
     /// Sends the release of the agent's lease on `repository` at `epoch`
     /// (`ReleaseAck`), signed with the next sequence number.
     pub async fn send_release(
@@ -166,6 +184,12 @@ impl AgentChannel {
                 return read_released(&envelope.payload).map_err(|_| ChannelError::OutOfTurn);
             }
         }
+    }
+
+    /// Sends `progress`, signed with the next sequence number; the hub
+    /// answers it with nothing.
+    pub async fn send_progress(&mut self, progress: &ReportedProgress) -> Result<(), ChannelError> {
+        self.send(progress_kind(), progress_payload(progress)).await
     }
 
     /// Sends a message of `kind` holding `payload`, signed with the next

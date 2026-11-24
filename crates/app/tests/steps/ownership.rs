@@ -5,21 +5,25 @@
 //! the one repository with the request `local`; a machine that stops using
 //! a repository reports none. A machine's own side, whether it may maintain
 //! a repository, is its leases use case on an in-memory cache and a clock
-//! of its own, which may run off the hub's and moves with it.
+//! of its own, which may run off the hub's and moves with it. A machine
+//! that pairs does so in process, on that cache, with a hub's pairing use
+//! case of its own.
 
 use std::collections::BTreeMap;
 use std::sync::Arc;
 
 use app::fakes::{
-    FakeClock, InMemoryAgentRegistry, InMemoryIdentity, InMemoryLeaseCache,
-    InMemoryOwnershipRegistry,
+    FakeClock, FakeSigning, InMemoryAgentRegistry, InMemoryIdentity, InMemoryLeaseCache,
+    InMemoryOwnershipRegistry, SeededRandom,
 };
 use app::leases::MaintenanceLeases;
 use app::ownership::{Reported, RepositoryOwners};
+use app::pairing::{AgentPairing, HubKeys, HubPairing};
 use app::ports::{ClaimDecision, Clock, Identity, OwnershipRegistry};
 use cucumber::{given, then, when};
 use domain::fleet::{
-    AgentRecord, AgentStatus, GENERATION, Hostname, HubAddress, HubPin, PublicKey, TokenTls,
+    AgentRecord, AgentStatus, Fingerprint, GENERATION, Hostname, HubAddress, HubPin, PublicKey,
+    SeedFile, TokenTls,
 };
 use domain::maintenance::{
     ClaimOutcome, ClaimRefused, EpochLower, Grant, Lease, LeaseEpoch, NoLease, ReleaseRefused,
@@ -49,11 +53,26 @@ pub(super) struct OwnershipWorld {
     holders: BTreeMap<String, Holder>,
     /// Whether two machines were both let maintain one repository at once.
     both_maintained: bool,
+    /// The hub a machine last paired with, when one did.
+    paired_with: Option<PairingHub>,
+    /// How many hubs machines have paired with, each with keys of its own.
+    hubs_made: u64,
 }
 
-/// A machine's own side: the leases it keeps, its clock, and the grants it
-/// refused last as below its floor.
+/// A hub a machine pairs with: its pairing use case and its keys.
+struct PairingHub {
+    pairing: HubPairing,
+    keys: HubKeys,
+}
+
+/// The binding both sides of an in-process pairing agree on.
+const EXPORTER: [u8; 32] = [0xee; 32];
+
+/// A machine's own side: its key files, the leases it keeps and their
+/// cache, its clock, and the grants it refused last as below its floor.
 struct Holder {
+    identity: Arc<InMemoryIdentity>,
+    cache: Arc<InMemoryLeaseCache>,
     leases: Arc<MaintenanceLeases>,
     clock: Arc<FakeClock>,
     refused: Vec<EpochLower>,
@@ -75,6 +94,8 @@ impl Default for OwnershipWorld {
             released: None,
             holders: BTreeMap::new(),
             both_maintained: false,
+            paired_with: None,
+            hubs_made: 0,
         }
     }
 }
@@ -207,14 +228,17 @@ impl OwnershipWorld {
             identity.write_pin(&pin).await.unwrap();
         }
         let clock = Arc::new(FakeClock::new(self.clock.now().checked_add(skew).unwrap()));
+        let cache = Arc::new(InMemoryLeaseCache::default());
         let leases = Arc::new(MaintenanceLeases::new(
-            identity,
-            Arc::new(InMemoryLeaseCache::default()),
+            identity.clone(),
+            cache.clone(),
             clock.clone(),
         ));
         self.holders.insert(
             machine.to_owned(),
             Holder {
+                identity,
+                cache,
                 leases,
                 clock,
                 refused: Vec::new(),
@@ -303,6 +327,66 @@ impl OwnershipWorld {
                     .unwrap(),
             }],
         }
+    }
+
+    /// A hub with keys of its own that no machine has paired with yet.
+    async fn make_hub(&mut self) -> PairingHub {
+        self.hubs_made += 1;
+        let pairing = HubPairing::new(
+            Arc::new(InMemoryAgentRegistry::new()),
+            Arc::new(InMemoryIdentity::default()),
+            Arc::new(FakeSigning),
+            Arc::new(SeededRandom::new(self.hubs_made * 1_000)),
+            self.clock.clone(),
+            "0.5.0-hub".to_owned(),
+        );
+        let keys = pairing.keys().await.expect("the hub's keys");
+        PairingHub { pairing, keys }
+    }
+
+    /// `machine` pairs with `hub` from a token the hub made, as the person
+    /// runs `ladderback pair` on it.
+    async fn pair(&mut self, machine: &str, hub: PairingHub) {
+        let agent_id = self.machine(machine);
+        let holder = self.holder(machine).await;
+        let agent = AgentPairing::new(
+            holder.identity.clone(),
+            Arc::new(FakeSigning),
+            Arc::new(SeededRandom::new(9_000)),
+            holder.cache.clone(),
+        );
+        let token = hub
+            .pairing
+            .make_token(
+                &hub.keys,
+                HubAddress::parse("https://hub.example:9443").unwrap(),
+                TokenTls::Pinned(Fingerprint::from_digest([7; 32])),
+                None,
+            )
+            .await
+            .expect("a token");
+        let (connect, handshake) = agent
+            .connect(token, agent_id, Hostname::parse(machine).unwrap(), None)
+            .await
+            .expect("the machine connects");
+        let (challenge, hub_side) = hub
+            .pairing
+            .challenge(&hub.keys, &connect, Some(EXPORTER))
+            .expect("the hub's challenge");
+        let (pair, awaiting) = agent
+            .answer_challenge(handshake, &challenge, Some(EXPORTER))
+            .await
+            .expect("the machine answers");
+        let answer = hub
+            .pairing
+            .pair(&hub.keys, &hub_side, &pair)
+            .await
+            .expect("the hub's answer");
+        agent
+            .take_answer(awaiting, &answer)
+            .await
+            .expect("the machine is paired");
+        self.paired_with = Some(hub);
     }
 }
 
@@ -642,6 +726,53 @@ async fn heard_a_grant(world: &mut Agent, machine: String, repository: String, n
 async fn hub_grants_at(world: &mut Agent, machine: String, repository: String, number: u64) {
     let grants = world.ownership.grant_at(&repository, number);
     world.ownership.take(&machine, &grants).await;
+}
+
+#[given(expr = "{string} lost its hub and holds no pin")]
+async fn lost_its_hub(world: &mut Agent, machine: String) {
+    let holder = world.ownership.holder(&machine).await;
+    let fresh = Arc::new(InMemoryIdentity::default());
+    // The machine keeps its own key: only the hub's pin is gone.
+    if let Some(seed) = holder.identity.seed(SeedFile::AgentKey).await.unwrap() {
+        fresh.keep_seed(SeedFile::AgentKey, seed).await.unwrap();
+    }
+    holder.identity = fresh.clone();
+    holder.leases = Arc::new(MaintenanceLeases::new(
+        fresh,
+        holder.cache.clone(),
+        holder.clock.clone(),
+    ));
+}
+
+#[given(expr = "{string} paired with a hub from its token")]
+async fn paired_from_a_token(world: &mut Agent, machine: String) {
+    world
+        .ownership
+        .start_machine(&machine, false, SignedDuration::ZERO)
+        .await;
+    let hub = world.ownership.make_hub().await;
+    world.ownership.pair(&machine, hub).await;
+}
+
+#[when(expr = "{string} pairs with a new hub")]
+async fn pairs_with_a_new_hub(world: &mut Agent, machine: String) {
+    let hub = world.ownership.make_hub().await;
+    world.ownership.pair(&machine, hub).await;
+}
+
+#[when(expr = "{string} pairs again with that hub from a new token")]
+async fn pairs_again(world: &mut Agent, machine: String) {
+    let hub = world
+        .ownership
+        .paired_with
+        .take()
+        .expect("a hub the machine paired with");
+    world.ownership.pair(&machine, hub).await;
+}
+
+#[when(expr = "the new hub grants {string} the repository {string} at epoch {int}")]
+async fn new_hub_grants_at(world: &mut Agent, machine: String, repository: String, number: u64) {
+    hub_grants_at(world, machine, repository, number).await;
 }
 
 #[when(expr = "{string} stops using {string} and the hub acknowledges its release")]

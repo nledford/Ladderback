@@ -29,6 +29,8 @@ use super::Agent;
 
 #[path = "pairing_dialog.rs"]
 mod dialog;
+#[path = "hub_plans.rs"]
+mod hub_plans;
 #[path = "removing.rs"]
 mod removing;
 #[path = "second_machine.rs"]
@@ -148,6 +150,7 @@ impl Machine {
             self.identity.clone(),
             Arc::new(FakeSigning),
             Arc::new(SeededRandom::new(self.seed)),
+            Arc::new(app::fakes::InMemoryLeaseCache::default()),
         )
     }
 
@@ -213,6 +216,9 @@ pub struct PairingWorld {
     only_at: Option<(&'static str, u16)>,
     /// The sync of the agents' reports (`fleet/sync_replay.feature`).
     syncing: sync_replay::SyncWorld,
+    /// The sync of the first agent's plans and progress
+    /// (`fleet/plans_and_progress.feature`).
+    live: hub_plans::LiveWorld,
 }
 
 impl std::fmt::Debug for PairingWorld {

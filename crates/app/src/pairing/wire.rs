@@ -23,6 +23,12 @@ use domain::{AgentId, OperationId, RepositoryId, Timestamp, Uuid};
 
 use crate::ports::OutboxEntry;
 
+mod live;
+
+pub use live::{
+    plans_ack_payload, plans_payload, progress_payload, read_plans, read_plans_ack, read_progress,
+};
+
 /// What an agent's frame holds, read.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum AgentMessage {
@@ -185,12 +191,13 @@ pub fn read_welcome(bytes: &[u8]) -> Result<Welcome, WireRefused> {
 
 /// The bytes of a report's payload, which the agent signs: the epoch and
 /// the operation as their UUIDs' text, what happened as `started`,
-/// `succeeded` or `failed` with the code's wire name.
+/// `succeeded`, `cancelled` or `failed` with the code's wire name.
 pub fn report_payload(entry: &OutboxEntry) -> Vec<u8> {
     let (event, code) = match &entry.report.happening {
         Happening::Started => ("started", None),
         Happening::Succeeded => ("succeeded", None),
         Happening::Failed { code } => ("failed", Some(code.as_str().to_owned())),
+        Happening::Cancelled => ("cancelled", None),
     };
     ReportPayload {
         epoch: entry.epoch.as_uuid().to_string(),
@@ -205,7 +212,8 @@ pub fn report_payload(entry: &OutboxEntry) -> Vec<u8> {
 
 /// The report a payload's bytes hold: a place of 0 or past `i64::MAX`,
 /// which the hub's store can't hold, an event this build doesn't know, a
-/// failure without its code or a start or success with one refuses it.
+/// failure without its code or a start, success or cancel with one refuses
+/// it.
 pub fn read_report(bytes: &[u8]) -> Result<OutboxEntry, WireRefused> {
     let payload = ReportPayload::from_bytes(bytes).map_err(|_| WireRefused)?;
     let code = payload.code.as_deref().map(WireName::parse);
@@ -213,6 +221,7 @@ pub fn read_report(bytes: &[u8]) -> Result<OutboxEntry, WireRefused> {
         ("started", None) => Happening::Started,
         ("succeeded", None) => Happening::Succeeded,
         ("failed", Some(Ok(code))) => Happening::Failed { code },
+        ("cancelled", None) => Happening::Cancelled,
         _ => return Err(WireRefused),
     };
     Ok(OutboxEntry {

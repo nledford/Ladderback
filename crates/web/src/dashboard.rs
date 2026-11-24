@@ -8,10 +8,14 @@
 //! As on the Machines tab (`machines_list.rs`), the page goes on reading
 //! while it is paused and shows the copy; resuming drops it.
 
-use api::{HubMachineDto, IanaZone, MachineOutcomeDto, MsgArg, UiEvent};
+use api::{
+    HubMachineDto, IanaZone, MachineOutcomeDto, MachinePlansDto, MachineProgressDto, MsgArg,
+    UiEvent,
+};
 use l10n::{MessageId, msg};
 use leptos::prelude::*;
 
+use crate::backend::Progress;
 use crate::components::State;
 use crate::components::status_badge::rules::BadgeState;
 use crate::wording::Words;
@@ -108,14 +112,32 @@ impl Fleet {
 }
 
 /// Whether `event` asks the dashboard to read its machines again: a
-/// machine was approved or removed, or the hub took one of its reports.
+/// machine was approved or removed, or the hub took one of a machine's
+/// reports, its plans or its running operation's progress.
 pub(crate) fn reads_again(event: &UiEvent) -> bool {
     matches!(
         event,
         UiEvent::AgentApproved { .. }
             | UiEvent::AgentRemoved { .. }
             | UiEvent::AgentReported { .. }
+            | UiEvent::AgentPlans { .. }
+            | UiEvent::AgentProgress { .. }
     )
+}
+
+/// What the shared progress bar draws of a machine's latest `progress`
+/// (decision 83): heard at its `at`, which starts its measure too, since
+/// the hub keeps only the latest; no time for an `at` that can't be read.
+pub(crate) fn progress_reading(progress: &MachineProgressDto) -> Progress {
+    let at = progress.at.parse::<jiff::Timestamp>().ok();
+    Progress {
+        step: progress.step,
+        unit: progress.unit,
+        current: progress.current,
+        total: progress.total,
+        reported_at: at,
+        since: at,
+    }
 }
 
 /// How many machines read otherwise in `now` than in `held`: each that
@@ -150,6 +172,17 @@ pub(crate) fn outcome_badge(outcome: MachineOutcomeDto) -> (BadgeState, MessageI
         MachineOutcomeDto::Running => (BadgeState::Running, msg::UI_STATUS_RUNNING),
         MachineOutcomeDto::Succeeded => (BadgeState::Succeeded, msg::UI_STATUS_SUCCEEDED),
         MachineOutcomeDto::Failed => (BadgeState::Failed, msg::UI_STATUS_FAILED),
+        MachineOutcomeDto::Cancelled => (BadgeState::Cancelled, msg::UI_STATUS_CANCELLED),
+    }
+}
+
+/// What a machine's table of plans says while it lists none: that the
+/// machine reported no plans, or, before its first report reached the
+/// hub, that it hasn't reported them yet.
+pub(crate) fn no_plans(plans: Option<&MachinePlansDto>) -> MessageId {
+    match plans {
+        Some(_) => msg::UI_DASHBOARD_PLANS_NONE,
+        None => msg::UI_DASHBOARD_NO_PLANS,
     }
 }
 

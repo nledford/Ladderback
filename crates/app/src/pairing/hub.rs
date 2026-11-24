@@ -10,7 +10,8 @@ use domain::fleet::{
     ProofRefusal, ProofRequest, PublicKey, Refused, RemovalRefused, ReportSeq, SeedFile,
     SignedMessage, SigningSeed, TokenId, TokenRecord, TokenTls, TokenUse, Tombstone,
     UNUSED_TOKEN_LIMIT, Welcome, WireName, ack_kind, grants_kind, hello_kind, list_agents,
-    release_kind, released_kind, report_kind, repos_kind, token_life, welcome_kind,
+    plans_kind, progress_kind, release_kind, released_kind, report_kind, repos_kind, token_life,
+    welcome_kind,
 };
 use domain::{AgentId, SignedDuration, TimeZoneDatabase, Timestamp};
 
@@ -27,12 +28,14 @@ use crate::ports::{
 
 mod dialog;
 mod fleet;
+mod live;
 mod logged;
 #[cfg(test)]
 mod tests;
 
 pub use dialog::{AgentsListed, ApprovalAsk, MadeToken, RemovalAsk, TokenAsk, TokenAskRefused};
 pub use fleet::Machine;
+pub use live::{progress_dto, time_of};
 
 /// The hub's side of pairing: its keys, its tokens, and its answers to an
 /// agent's `Connect` and `Pair`.
@@ -790,7 +793,9 @@ impl HubPairing {
     /// next sequence number. A report is kept unless the hub took it
     /// before, and acknowledged either way; a `ReposSnapshot` is answered
     /// with the agent's grants and a `ReleaseAck` with `Released`; a
-    /// message of another kind is counted and acted on in no way.
+    /// snapshot of plans is kept and acknowledged; a progress is kept and
+    /// not answered; a message of another kind is counted and acted on in
+    /// no way.
     pub(super) async fn take_message(
         &self,
         keys: &HubKeys,
@@ -826,6 +831,11 @@ impl HubPairing {
             self.grant(syncing.agent_id, &message.payload).await?
         } else if message.kind == release_kind() {
             self.take_release(syncing.agent_id, &message.payload, now)
+                .await?
+        } else if message.kind == plans_kind() {
+            self.take_plans(syncing.agent_id, &message.payload).await?
+        } else if message.kind == progress_kind() {
+            self.take_progress(syncing.agent_id, &message.payload)
                 .await?
         } else {
             return Ok(Ok(None));
