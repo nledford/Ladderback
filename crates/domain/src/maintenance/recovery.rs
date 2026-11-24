@@ -11,7 +11,7 @@
 
 use std::collections::BTreeMap;
 
-use super::lease::{ClaimOutcome, ClaimRefused, LeaseEpoch, RepositoryOwnership};
+use super::lease::{ClaimOutcome, ClaimRefused, Lease, LeaseEpoch, RepositoryOwnership};
 use crate::fleet::Signature;
 use crate::planning::Maintenance;
 use crate::{AgentId, RepositoryId, Timestamp};
@@ -63,7 +63,7 @@ impl HubRecovery {
 
     /// Whether the hub is in recovery mode: it grants and renews nothing.
     pub fn is_on(&self) -> bool {
-        todo!()
+        !self.floors.is_empty()
     }
 
     /// Hears `floor`, proved for the repository `ownership` records: kept
@@ -72,31 +72,50 @@ impl HubRecovery {
     /// Its holder's newer report at the same epoch replaces its own. Whether
     /// anything changed.
     pub fn hear(&mut self, ownership: &RepositoryOwnership, floor: &ProvenFloor) -> bool {
-        let _ = (ownership, floor);
-        todo!()
+        if !self.is_on() && !ownership.is_behind(floor) {
+            return false;
+        }
+        let stands = self.floors.get(&floor.repository).is_some_and(|kept| {
+            kept.epoch > floor.epoch
+                || (kept.epoch == floor.epoch && (kept.holder != floor.holder || kept == floor))
+        });
+        if stands {
+            return false;
+        }
+        self.floors.insert(floor.repository.clone(), floor.clone());
+        true
     }
 
     /// Decides a report asking for `request` while the hub is in recovery
     /// mode: a claim (`local`) is refused, and nothing is renewed.
     pub fn decide(&self, request: Maintenance) -> ClaimOutcome {
-        let _ = request;
-        todo!()
+        if request == Maintenance::Local {
+            ClaimOutcome::Refused(ClaimRefused::Recovering)
+        } else {
+            ClaimOutcome::NoClaim
+        }
     }
 }
 
 impl RepositoryOwnership {
     /// Whether `floor` lies above the epochs this hub counts as given.
     pub fn is_behind(&self, floor: &ProvenFloor) -> bool {
-        let _ = floor;
-        todo!()
+        self.last_epoch.is_none_or(|last| last < floor.epoch)
     }
 
     /// Takes `floor` once a person ends recovery mode: the counter rises to
     /// it, a lease below it is dropped, and a lease its holder still holds
     /// at it is the hub's again. A counter past the floor stands.
     pub fn recover(&mut self, floor: &ProvenFloor) {
-        let _ = floor;
-        todo!()
+        if !self.is_behind(floor) {
+            return;
+        }
+        self.last_epoch = Some(floor.epoch);
+        self.lease = floor.held.then_some(Lease {
+            holder: floor.holder,
+            epoch: floor.epoch,
+            expires_at: floor.expires_at,
+        });
     }
 }
 

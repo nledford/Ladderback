@@ -114,6 +114,7 @@ impl OthersSnapshots {
             repository,
             request,
             holds_other_agents_snapshots,
+            floor: None,
         }
     }
 }

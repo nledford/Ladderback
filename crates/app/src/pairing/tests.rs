@@ -1055,6 +1055,7 @@ fn kept() -> HeldLeases {
                 epoch,
             },
         )],
+        [],
     )
 }
 

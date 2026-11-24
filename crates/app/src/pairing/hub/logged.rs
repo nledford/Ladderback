@@ -4,11 +4,11 @@
 //! agent's reports past the cap (§7.2), and when an agent first sends a
 //! report far behind the last it took (#1387).
 
-use domain::{AgentId, RepositoryId};
 use domain::fleet::{
     AgentRecord, AgentStatus, Fingerprint, MAX_REPORTS_HELD, PairRequest, Pairing, ReportSeq,
     Tombstone,
 };
+use domain::{AgentId, RepositoryId};
 
 /// The line for the first time `agent` sends a report the hub took before,
 /// at `seq` of its outbox, further behind the last the hub took of its

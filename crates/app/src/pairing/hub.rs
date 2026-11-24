@@ -11,13 +11,12 @@ use domain::fleet::{
     SignedMessage, SigningSeed, TokenId, TokenRecord, TokenTls, TokenUse, Tombstone,
     UNUSED_TOKEN_LIMIT, Welcome, WireName, ack_kind, grants_kind, hello_kind, list_agents,
     plans_kind, progress_kind, release_kind, released_kind, report_kind, repos_kind, token_life,
-    welcome_kind, withheld_kind, GENERATION,
+    welcome_kind, withheld_kind,
 };
-use domain::maintenance::{Grant, ProvenFloor, RepoGrants, RepositoryReports};
 use domain::{AgentId, SignedDuration, TimeZoneDatabase, Timestamp};
 
 use super::wire::{
-    ack_payload, entry_expiry, grants_payload, read_hello, read_release, read_report, read_repos,
+    ack_payload, grants_payload, read_hello, read_release, read_report, read_repos,
     released_payload, welcome_payload, withheld_payload,
 };
 use crate::access::Access;
@@ -29,13 +28,17 @@ use crate::ports::{
 
 mod dialog;
 mod fleet;
+mod lease_proof;
 mod live;
 mod logged;
 #[cfg(test)]
 mod tests;
 
-pub use dialog::{AgentsListed, ApprovalAsk, MadeToken, RecoveryAsk, RemovalAsk, TokenAsk, TokenAskRefused};
+pub use dialog::{
+    AgentsListed, ApprovalAsk, MadeToken, RecoveryAsk, RemovalAsk, TokenAsk, TokenAskRefused,
+};
 pub use fleet::Machine;
+pub use lease_proof::{proven_floors, signed_grants};
 pub use live::{progress_dto, time_of};
 
 /// The hub's side of pairing: its keys, its tokens, and its answers to an
@@ -923,38 +926,21 @@ impl HubPairing {
         let Ok(reports) = read_repos(payload) else {
             return Ok(Err(MessageRefused::Unexpected));
         };
-        let proven = self.proven(keys, agent, &reports);
+        let proven = proven_floors(self.signing.as_ref(), keys, agent, &reports);
         match owners.grant(agent, &reports, &proven).await? {
             Granting::Leases {
                 generation,
                 signed_at,
                 leases,
             } => {
-                let grants = leases
-                    .into_iter()
-                    .map(|(repository, lease)| {
-                        let entry = SignedMessage::LeaseEntry {
-                            hub_key: keys.key,
-                            agent_id: agent,
-                            repository: &repository,
-                            generation,
-                            epoch: lease.epoch.get(),
-                            expires_at: entry_expiry(lease.expires_at),
-                        };
-                        let signature = self.signing.sign(&keys.seed, &entry.to_bytes())?;
-                        Ok(Grant {
-                            repository,
-                            epoch: lease.epoch,
-                            expires_at: lease.expires_at,
-                            signature,
-                        })
-                    })
-                    .collect::<Result<Vec<_>, SigningError>>()?;
-                let grants = RepoGrants {
+                let grants = signed_grants(
+                    self.signing.as_ref(),
+                    keys,
+                    agent,
                     generation,
                     signed_at,
-                    grants,
-                };
+                    leases,
+                )?;
                 Ok(Ok(Some((grants_kind(), grants_payload(&grants)))))
             }
             Granting::Withheld => {
@@ -963,45 +949,6 @@ impl HubPairing {
             }
             Granting::NotApproved => Ok(Err(MessageRefused::Unexpected)),
         }
-    }
-
-    /// The floors in `reports` whose proof is a lease entry this hub key
-    /// signed for `agent` at its generation (decision 137). Each other
-    /// floor doesn't count, and is logged.
-    fn proven(&self, keys: &HubKeys, agent: AgentId, reports: &RepositoryReports) -> Vec<ProvenFloor> {
-        reports
-            .entries()
-            .iter()
-            .filter_map(|report| {
-                let floor = report.floor?;
-                let entry = SignedMessage::LeaseEntry {
-                    hub_key: keys.key,
-                    agent_id: agent,
-                    repository: &report.repository,
-                    generation: GENERATION,
-                    epoch: floor.epoch.get(),
-                    expires_at: entry_expiry(floor.expires_at),
-                };
-                if self
-                    .signing
-                    .verify(&keys.key, &entry.to_bytes(), &floor.signature)
-                {
-                    Some(ProvenFloor {
-                        repository: report.repository.clone(),
-                        holder: agent,
-                        epoch: floor.epoch,
-                        expires_at: floor.expires_at,
-                        held: floor.held,
-                    })
-                } else {
-                    log::warn!(
-                        "{}",
-                        logged::floor_unproven(agent, &report.repository, floor.epoch.get())
-                    );
-                    None
-                }
-            })
-            .collect()
     }
 
     /// Whether the hub is in recovery mode; a hub that keeps no owners

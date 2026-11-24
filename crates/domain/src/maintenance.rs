@@ -37,9 +37,9 @@ pub use lease::{
     ClaimOutcome, ClaimRefused, LEASE_GRACE, LEASE_LIFE, Lease, LeaseEpoch, REPORT_LIFE,
     ReleaseRefused, RepositoryOwnership, RepositoryReport, RepositoryReports, report_counts,
 };
-pub use recovery::{HubRecovery, ProvenFloor, ReportedFloor};
 pub use other_hosts::{MAX_NAMED_OTHER_HOSTS, OtherHosts};
 pub use others_snapshots::{LISTING_LASTS, OtherAgentsSnapshots, listing_stands};
+pub use recovery::{HubRecovery, ProvenFloor, ReportedFloor};
 pub use start_window::{START_WINDOW, StartWindow};
 pub use stats::{READINGS_KEPT_FOR, RepositoryStats, StatsReading};
 

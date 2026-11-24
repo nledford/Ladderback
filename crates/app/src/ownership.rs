@@ -81,7 +81,9 @@ impl RepositoryOwners {
         reports: &RepositoryReports,
         proven: &[ProvenFloor],
     ) -> Result<Reported, StoreError> {
-        let decided = self.decide(agent, reports, proven, self.clock.now()).await?;
+        let decided = self
+            .decide(agent, reports, proven, self.clock.now())
+            .await?;
         Ok(decided.map_or(Reported::NotApproved, Reported::Decided))
     }
 
@@ -102,6 +104,9 @@ impl RepositoryOwners {
         let Some(decided) = self.decide(agent, reports, proven, now).await? else {
             return Ok(Granting::NotApproved);
         };
+        if self.recovering().await? {
+            return Ok(Granting::Withheld);
+        }
         let leases = decided
             .into_iter()
             .filter_map(|decision| match decision.outcome {
@@ -120,7 +125,7 @@ impl RepositoryOwners {
 
     /// Whether the hub is in recovery mode (decision 137).
     pub async fn recovering(&self) -> Result<bool, StoreError> {
-        todo!()
+        Ok(self.owners.recovery().await?.is_on())
     }
 
     /// Ends recovery mode, at a person's confirmation that the old hub is
@@ -128,7 +133,7 @@ impl RepositoryOwners {
     /// a lease still held at it is its holder's again. Whether the hub was
     /// in recovery mode.
     pub async fn end_recovery(&self) -> Result<bool, StoreError> {
-        todo!()
+        self.owners.end_recovery().await
     }
 
     /// What the hub decided of `reports` at `now`, when `agent` is approved.

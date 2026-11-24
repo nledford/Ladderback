@@ -205,12 +205,27 @@ impl HeldLeases {
         self.proofs.iter()
     }
 
+    /// The proof of the floor on `repository`, when the machine keeps one.
+    pub fn proof(&self, repository: &RepositoryId) -> Option<&FloorProof> {
+        self.proofs.get(repository)
+    }
+
     /// What the machine reports of its floor on `repository` at `now`, on
     /// its own clock: the floor's epoch with its proof, and whether it still
     /// holds the lease at that epoch. Nothing for a floor with no proof.
-    pub fn reported_floor(&self, repository: &RepositoryId, now: Timestamp) -> Option<ReportedFloor> {
-        let _ = (repository, now);
-        todo!()
+    pub fn reported_floor(
+        &self,
+        repository: &RepositoryId,
+        now: Timestamp,
+    ) -> Option<ReportedFloor> {
+        let floor = self.floors.get(repository)?;
+        let proof = self.proofs.get(repository)?;
+        Some(ReportedFloor {
+            epoch: floor.epoch,
+            expires_at: proof.expires_at,
+            signature: proof.signature,
+            held: self.holds(repository, now) == Ok(floor.epoch),
+        })
     }
 
     /// Takes `grants`, the hub's answer to a request the machine sent at
@@ -249,6 +264,13 @@ impl HeldLeases {
                 continue;
             }
             *floor = granted;
+            self.proofs.insert(
+                grant.repository.clone(),
+                FloorProof {
+                    expires_at: grant.expires_at,
+                    signature: grant.signature,
+                },
+            );
             // A life no clock can hold comes from no hub this version
             // speaks to: the machine holds nothing on it.
             let life = grants.signed_at.duration_until(grant.expires_at);

@@ -9,7 +9,7 @@
 
 use std::sync::{Arc, Mutex, PoisonError};
 
-use domain::maintenance::{EpochLower, LeaseEpoch, NoLease, Ownership, RepoGrants};
+use domain::maintenance::{EpochLower, LeaseEpoch, NoLease, Ownership, RepoGrants, RepositoryReport};
 use domain::{RepositoryAlias, RepositoryId, SignedDuration, Timestamp};
 
 use crate::notifications::{Notify, Report};
@@ -82,6 +82,24 @@ impl MaintenanceLeases {
         self.cache.save(&held).await?;
         *self.taken.lock().unwrap_or_else(PoisonError::into_inner) = Some((asked_at, monotonic));
         Ok(refused)
+    }
+
+    /// `reports`, each with the floor the machine holds on its repository
+    /// and the hub's proof of it, judged at the machine's time, so a hub
+    /// restored from an older copy learns of the epochs it gave since.
+    pub async fn with_floors(
+        &self,
+        reports: Vec<RepositoryReport>,
+    ) -> Result<Vec<RepositoryReport>, StoreError> {
+        let held = self.cache.load().await?;
+        let now = self.now();
+        Ok(reports
+            .into_iter()
+            .map(|report| RepositoryReport {
+                floor: held.reported_floor(&report.repository, now),
+                ..report
+            })
+            .collect())
     }
 
     /// Every lease the machine holds, live or not, by repository.

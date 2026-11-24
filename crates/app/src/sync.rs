@@ -332,6 +332,13 @@ impl SyncWithHub {
                 return Err(SyncFailure::Channel(ChannelError::OutOfTurn));
             }
         }
+        // Each report carries the proof of its floor, so a hub restored from
+        // an older copy learns of the epochs it gave since (decision 137).
+        let reports = leasing
+            .leases
+            .with_floors(reports)
+            .await
+            .map_err(SyncFailure::Store)?;
         // The machine's clock before the request leaves: the hub signs
         // after, so the lease the machine counts never outlasts the hub's.
         let asked_at = self.clock.now();
@@ -339,10 +346,15 @@ impl SyncWithHub {
             .send_repos(&RepositoryReports::new(reports))
             .await
             .map_err(SyncFailure::Channel)?;
-        let grants = channel
+        // A hub in recovery mode withholds its grants: the machine keeps
+        // the leases it holds, which run out on their own.
+        let Some(grants) = channel
             .receive_grants()
             .await
-            .map_err(SyncFailure::Channel)?;
+            .map_err(SyncFailure::Channel)?
+        else {
+            return Ok(());
+        };
         let refused = leasing
             .leases
             .take(&grants, connected.pin.recovery_number, asked_at)

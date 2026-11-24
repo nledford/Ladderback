@@ -552,7 +552,8 @@ async fn report_proving(
 }
 
 async fn floors(registry: &dyn OwnershipRegistry) -> Option<Vec<ProvenFloor>> {
-    ok(registry.recovery().await, "the recovery").map(|recovery| recovery.floors().cloned().collect())
+    ok(registry.recovery().await, "the recovery")
+        .map(|recovery| recovery.floors().cloned().collect())
 }
 
 async fn a_floor_above_the_counter_starts_recovery_mode(harness: &dyn OwnershipRegistryHarness) {
@@ -601,7 +602,9 @@ async fn a_floor_at_the_counter_changes_nothing(harness: &dyn OwnershipRegistryH
     )
     .await;
     assert_eq!(
-        decided.and_then(|d| d.into_iter().next()).map(|d| d.outcome),
+        decided
+            .and_then(|d| d.into_iter().next())
+            .map(|d| d.outcome),
         lease(agent(1), 1, at(10)).map(ClaimOutcome::Renewed)
     );
     assert_eq!(floors(registry.as_ref()).await, Some(vec![]));
@@ -642,6 +645,9 @@ async fn ending_recovery_mode_raises_the_counter_to_the_floor(
         None,
         "the lease below the floor is dropped"
     );
+    // The machine that proved the floor stops using the repository, so it
+    // no longer counts as shared.
+    report_proving(registry.as_ref(), agent(1), &[], &[], at(15)).await;
     assert_eq!(
         claim(registry.as_ref(), agent(2), 'b', at(20)).await,
         lease(agent(2), 5, at(20)).map(ClaimOutcome::Granted),

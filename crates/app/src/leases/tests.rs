@@ -44,6 +44,7 @@ fn grants(signed_at: Timestamp) -> RepoGrants {
             expires_at: signed_at
                 .checked_add(SignedDuration::from_hours(7 * 24))
                 .unwrap(),
+            signature: domain::fleet::Signature::from_bytes([0; 64]).unwrap(),
         }],
     }
 }

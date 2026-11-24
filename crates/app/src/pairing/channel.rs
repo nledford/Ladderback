@@ -4,14 +4,15 @@ use domain::fleet::{
     Ack, AgentEnvelope, Binding, EpochSeconds, FIRST_SEQUENCE, HubEnvelope, Nonce, PayloadDigest,
     PlansReport, PublicKey, ReportedProgress, SignedMessage, SigningSeed, WireName, ack_kind,
     fresh_on_hub_time, grants_kind, plans_ack_kind, plans_kind, progress_kind, release_kind,
-    released_kind, report_kind, repos_kind,
+    released_kind, report_kind, repos_kind, withheld_kind,
 };
 use domain::maintenance::{LeaseEpoch, RepoGrants, RepositoryReports};
 use domain::{AgentId, RepositoryId, SignedDuration};
 
 use super::wire::{
     HubMessage, agent_envelope_frame, hub_message, plans_payload, progress_payload, read_ack,
-    read_grants, read_plans_ack, read_released, release_payload, report_payload, repos_payload,
+    read_grants, read_plans_ack, read_released, read_withheld, release_payload, report_payload,
+    repos_payload,
 };
 use crate::ports::{Clock, HubLink, LinkError, OutboxEntry, Signing, SigningError};
 
@@ -136,13 +137,22 @@ impl AgentChannel {
         self.send(repos_kind(), repos_payload(reports)).await
     }
 
-    /// The hub's next grants, once they hold. A signed message of another
-    /// kind is counted and passed over.
-    pub async fn receive_grants(&mut self) -> Result<RepoGrants, ChannelError> {
+    /// The hub's next grants, once they hold; nothing when the hub withholds
+    /// them in recovery mode (`GrantsWithheld`), so the machine keeps what
+    /// it holds. A signed message of another kind is counted and passed
+    /// over.
+    pub async fn receive_grants(&mut self) -> Result<Option<RepoGrants>, ChannelError> {
         loop {
             let envelope = self.receive().await?;
             if envelope.kind == grants_kind() {
-                return read_grants(&envelope.payload).map_err(|_| ChannelError::OutOfTurn);
+                return read_grants(&envelope.payload)
+                    .map(Some)
+                    .map_err(|_| ChannelError::OutOfTurn);
+            }
+            if envelope.kind == withheld_kind() {
+                return read_withheld(&envelope.payload)
+                    .map(|()| None)
+                    .map_err(|_| ChannelError::OutOfTurn);
             }
         }
     }

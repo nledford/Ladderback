@@ -576,7 +576,9 @@ fn an_envelope_or_proof_out_of_shape_is_refused() {
 #[test]
 fn a_full_report_of_repositories_and_its_grants_each_fit_a_frame() {
     use domain::fleet::{AgentEnvelope, HubEnvelope, grants_kind, repos_kind};
-    use domain::maintenance::{Grant, LeaseEpoch, RepoGrants, RepositoryReport, RepositoryReports};
+    use domain::maintenance::{
+        Grant, LeaseEpoch, RepoGrants, ReportedFloor, RepositoryReport, RepositoryReports,
+    };
     use domain::planning::Maintenance;
     use domain::{RepositoryId, Timestamp};
 
@@ -588,6 +590,12 @@ fn a_full_report_of_repositories_and_its_grants_each_fit_a_frame() {
         repository: repository.clone(),
         request: Maintenance::Local,
         holds_other_agents_snapshots: true,
+        floor: Some(ReportedFloor {
+            epoch: LeaseEpoch::new(largest).unwrap(),
+            expires_at: Timestamp::from_second(Timestamp::MAX.as_second()).unwrap(),
+            signature: signature(7),
+            held: true,
+        }),
     }));
     let sent = agent_envelope_frame(&AgentEnvelope {
         kind: repos_kind(),
@@ -610,6 +618,7 @@ fn a_full_report_of_repositories_and_its_grants_each_fit_a_frame() {
                 repository: repository.clone(),
                 epoch: LeaseEpoch::new(largest).unwrap(),
                 expires_at: Timestamp::MAX,
+                signature: signature(7),
             })
             .collect(),
     };
@@ -656,6 +665,7 @@ fn grants_read_back_from_their_bytes_up_to_the_largest_the_store_holds() {
             repository: RepositoryId::parse(&"0a".repeat(32)).unwrap(),
             epoch: LeaseEpoch::new(epoch).unwrap(),
             expires_at: Timestamp::from_second(2_000).unwrap(),
+            signature: signature(9),
         }],
     };
     let largest = i64::MAX as u64;
@@ -671,4 +681,36 @@ fn grants_read_back_from_their_bytes_up_to_the_largest_the_store_holds() {
         read_grants(&grants_payload(&grants(7, largest + 1))),
         Err(WireRefused)
     );
+}
+
+/// A machine's floor on a repository reads back from its report's bytes
+/// with the proof the hub signed, and a repository it holds no floor on
+/// reads back with none (§7.3, decision 137).
+#[test]
+fn a_floor_reads_back_with_its_proof() {
+    use domain::RepositoryId;
+    use domain::maintenance::{LeaseEpoch, ReportedFloor, RepositoryReport, RepositoryReports};
+    use domain::planning::Maintenance;
+
+    let report = |digit: &str, floor| RepositoryReport {
+        repository: RepositoryId::parse(&digit.repeat(64)).unwrap(),
+        request: Maintenance::Local,
+        holds_other_agents_snapshots: false,
+        floor,
+    };
+    for held in [true, false] {
+        let sent = RepositoryReports::new([
+            report(
+                "a",
+                Some(ReportedFloor {
+                    epoch: LeaseEpoch::new(4).unwrap(),
+                    expires_at: Timestamp::from_second(2_000).unwrap(),
+                    signature: signature(5),
+                    held,
+                }),
+            ),
+            report("b", None),
+        ]);
+        assert_eq!(read_repos(&repos_payload(&sent)), Ok(sent));
+    }
 }

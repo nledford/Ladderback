@@ -29,10 +29,19 @@ Feature: The hub gives each repository at most one maintenance owner
   the hub moves no repository to a new owner until every machine that used
   it has reported since the start, or 7 days and an hour have passed since
   the start, counted on a clock that a change of the hub's own time doesn't
-  move (§16, decisions 137 and 157). A hub restored from a backup can't see
-  a lease it granted after the backup until its holder reports, so it
-  grants nobody else the repository meanwhile, and the holder's own report
-  gives the lease back to it. Its holder's lease is renewed all the while.
+  move (§16, decisions 137 and 157). The holder's lease is renewed all the
+  while.
+
+  A hub restored from a backup can't see a lease it granted after the
+  backup until its holder reports it. Each machine reports, with each
+  repository, the highest epoch it was granted there, with the hub key's
+  signature of that grant as its proof. A proved epoch above the hub's own
+  count puts the hub in recovery mode: it grants and renews no lease, so
+  the machine that holds one keeps maintaining until it runs out, until a
+  person confirms on the hub that the old hub is stopped or gone. The hub
+  then counts from the highest epoch proved, and gives each lease still
+  held back to its holder. An epoch without the hub key's signature
+  doesn't count.
 
   A machine also tells the hub, with each repository it reports, whether
   the repository holds a snapshot another machine's agent made in the last
@@ -267,15 +276,39 @@ Feature: The hub gives each repository at most one maintenance owner
     And nobody holds the lease on "photos"
     And "laptop" may maintain "photos"
 
-  Scenario: A restored hub gives the lease back to the machine that reports it
+  Scenario: A restored hub that hears of a lease it granted after the backup grants nothing until a person confirms
     Given "laptop" reported the repository "photos" without claiming it
     And the hub's database is backed up
     And "laptop" claims the repository "photos" and hears the hub's grants
     When the hub is restored from that backup and starts
     And "laptop" claims the repository "photos"
-    Then "laptop" holds the lease on "photos" at epoch 1, for 7 days from now
+    Then the hub is in recovery mode
+    And "laptop" may maintain "photos"
+    When "nas" claims the repository "photos"
+    Then the claim of "nas" was refused because the hub is in recovery mode
+    And nobody holds the lease on "photos"
+    When a person confirms on the hub that the old hub is stopped or gone
+    Then the hub isn't in recovery mode
+    And "laptop" holds the lease on "photos" at epoch 1
     When "laptop" claims the repository "photos" and hears the hub's grants
     Then "laptop" may maintain "photos"
+
+  Scenario: Once a person confirms, the restored hub grants above the epoch a machine proved
+    Given "laptop" reported the repository "photos" without claiming it
+    And the hub's database is backed up
+    And "laptop" claims the repository "photos" and hears the hub's grants
+    When the hub is restored from that backup and starts
+    And "laptop" claims the repository "photos"
+    And a person confirms on the hub that the old hub is stopped or gone
+    And "laptop" stops using "photos" and the hub acknowledges its release
+    And "nas" claims the repository "photos"
+    Then "nas" holds the lease on "photos" at epoch 2, for 7 days from now
+
+  Scenario: An epoch without the hub key's signature doesn't put the hub in recovery mode
+    Given "laptop" heard a grant of "photos" at epoch 3 signed by another hub's key
+    When "laptop" claims the repository "photos"
+    Then the hub isn't in recovery mode
+    And "laptop" holds the lease on "photos" at epoch 1, for 7 days from now
 
   Scenario: A restored hub grants a repository nobody had reported to nobody until every machine that had reported one has reported again
     Given "laptop" reported the repository "music" without claiming it

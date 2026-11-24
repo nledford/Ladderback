@@ -5,9 +5,9 @@
 //! hold what it must refuses the whole frame.
 
 use api::sync::{
-    AckPayload, AgentApproval, AgentFrame, GrantPayload, GrantsPayload, HelloPayload, HolderFrame,
-    HubFrame, MAX_FRAME_BYTES, ReleasePayload, ReleasedPayload, RepoPayload, ReportPayload,
-    ReposPayload, WelcomePayload, WithheldPayload,
+    AckPayload, AgentApproval, AgentFrame, FloorPayload, GrantPayload, GrantsPayload, HelloPayload,
+    HolderFrame, HubFrame, MAX_FRAME_BYTES, ReleasePayload, ReleasedPayload, RepoPayload,
+    ReportPayload, ReposPayload, WelcomePayload, WithheldPayload,
 };
 use base64::Engine as _;
 use base64::engine::general_purpose::URL_SAFE_NO_PAD;
@@ -17,7 +17,9 @@ use domain::fleet::{
     MachineZone, Nonce, OutboxEpoch, Pair, PairAnswer, Paired, Proof, Protocols, PublicKey,
     Refused, ReportSeq, SIGNATURE_BYTES, Signature, Welcome, WireName,
 };
-use domain::maintenance::{Grant, LeaseEpoch, RepoGrants, RepositoryReport, RepositoryReports};
+use domain::maintenance::{
+    Grant, LeaseEpoch, RepoGrants, ReportedFloor, RepositoryReport, RepositoryReports,
+};
 use domain::planning::Maintenance;
 use domain::{AgentId, OperationId, RepositoryId, Timestamp, Uuid};
 
@@ -260,11 +262,12 @@ fn uuid(text: &str) -> Result<Uuid, WireRefused> {
     Uuid::try_parse(text).map_err(|_| WireRefused)
 }
 
-/// The most repositories one `ReposSnapshot` names, so its frame, and the
-/// `RepoGrants` that answers it, stay within [`MAX_FRAME_BYTES`] once
-/// signed and encoded: an agent that uses more reports the first by ID, and
-/// is granted no lease on the others.
-pub const MAX_REPORTED_REPOSITORIES: usize = 21;
+/// The most repositories one `ReposSnapshot` names, so its frame, with each
+/// floor's proof, and the `RepoGrants` that answers it, with each entry's
+/// signature, stay within [`MAX_FRAME_BYTES`] once signed and encoded: an
+/// agent that uses more reports the first by ID, and is granted no lease
+/// on the others.
+pub const MAX_REPORTED_REPOSITORIES: usize = 9;
 
 /// The bytes of a `ReposSnapshot`'s payload, which the agent signs: at most
 /// the first [`MAX_REPORTED_REPOSITORIES`] of `reports`.
@@ -278,7 +281,12 @@ pub fn repos_payload(reports: &RepositoryReports) -> Vec<u8> {
                 repo_id: report.repository.as_str().to_owned(),
                 requested_maintenance: report.request.as_str().to_owned(),
                 others_snapshots: report.holds_other_agents_snapshots,
-                floor: None,
+                floor: report.floor.map(|floor| FloorPayload {
+                    epoch: floor.epoch.get(),
+                    expires_at: seconds_down(floor.expires_at),
+                    signature: encoded(floor.signature.as_bytes()),
+                    held: floor.held,
+                }),
             })
             .collect(),
     }
@@ -298,7 +306,18 @@ pub fn read_repos(bytes: &[u8]) -> Result<RepositoryReports, WireRefused> {
                 request: Maintenance::parse(&repo.requested_maintenance)
                     .map_err(|_| WireRefused)?,
                 holds_other_agents_snapshots: repo.others_snapshots,
-                floor: None,
+                floor: repo
+                    .floor
+                    .as_ref()
+                    .map(|floor| {
+                        Ok(ReportedFloor {
+                            epoch: lease_epoch(floor.epoch)?,
+                            expires_at: time(floor.expires_at)?,
+                            signature: signature(&floor.signature)?,
+                            held: floor.held,
+                        })
+                    })
+                    .transpose()?,
             })
         })
         .collect::<Result<Vec<_>, WireRefused>>()?;
