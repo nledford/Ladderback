@@ -3,7 +3,9 @@
 //! values its variables read. The page asks the localizer for the text;
 //! which message, and with which arguments, is decided here, on the host.
 
-use api::{AdoptionFromDto, MaintenanceRequestDto, MsgArg, OrphanedGroupDto, UnmanagedGroupDto};
+use api::{
+    AdoptionFromDto, IanaZone, MaintenanceRequestDto, MsgArg, OrphanedGroupDto, UnmanagedGroupDto,
+};
 use l10n::{MessageId, msg};
 
 use crate::maintenance::{
@@ -389,6 +391,25 @@ pub(crate) fn switch(maintained: bool, alias: &str) -> Switch {
     }
 }
 
+/// The warning that maintenance from this paired machine has been paused
+/// for want of a lease from its hub since `since`, as the daemon writes it
+/// (RFC 3339), read in the viewer's zone `zone` (§7.3, decision 158). None
+/// when the daemon wrote no time the page can read: the page then says
+/// nothing it can't tell.
+pub(crate) fn maintenance_paused(since: &str, zone: Option<&IanaZone>) -> Option<Words> {
+    let since = since.parse::<jiff::Timestamp>().ok()?;
+    Some(words(
+        msg::UI_MAINTENANCE_PAUSED,
+        vec![(
+            "since",
+            MsgArg::Timestamp {
+                utc_ms: since.as_millisecond(),
+                zone: zone.cloned(),
+            },
+        )],
+    ))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -396,6 +417,33 @@ mod tests {
     use crate::routes::text_with;
     use api::SnapshotDto;
     use l10n::Localizer;
+
+    #[test]
+    fn paused_maintenance_is_told_since_when_in_the_viewers_zone_and_not_at_all_when_unread() {
+        let zone = IanaZone::try_from("Europe/Berlin".to_owned()).unwrap();
+        assert_eq!(
+            maintenance_paused("2026-11-01T12:00:00.250Z", Some(&zone)),
+            Some(Words {
+                id: msg::UI_MAINTENANCE_PAUSED,
+                args: vec![(
+                    "since",
+                    MsgArg::Timestamp {
+                        utc_ms: 1_793_534_400_250,
+                        zone: Some(zone),
+                    },
+                )],
+            })
+        );
+        assert_eq!(maintenance_paused("yesterday", None), None);
+        let shown = maintenance_paused("2026-11-01T12:00:00Z", None)
+            .map(|words| text_with(&Localizer::new(&[]), words.id, &words.args));
+        assert!(
+            shown.as_deref().is_some_and(|shown| shown.starts_with(
+                "Maintenance from this machine has been paused since Nov 1, 2026, because"
+            )),
+            "{shown:?}"
+        );
+    }
 
     fn review(kind: Kind, confirm: Option<Confirm>) -> Review {
         Review {

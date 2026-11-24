@@ -49,7 +49,7 @@ fn rule(kinds: &[EventKind], channel: &str, plans: &[&str]) -> Rule {
 fn backup_event(kind: EventKind, plan_id: Option<&str>) -> Event {
     Event {
         kind,
-        operation: OperationId::from_uuid(Uuid::from_u128(7)),
+        operation: Some(OperationId::from_uuid(Uuid::from_u128(7))),
         plan: plan_id.map(plan),
         repository: Some(RepositoryAlias::parse("nas").unwrap()),
         at: at(),
@@ -101,6 +101,7 @@ fn each_event_is_named_as_section_11_names_it_and_read_back_by_that_name() {
             "prune.failed",
             "check.failed",
             "restore.failed",
+            "repo.maintenance_paused",
         ]
     );
     for kind in EventKind::ALL {
@@ -211,7 +212,7 @@ fn a_failed_operation_tells_its_stored_code_and_never_its_detail() {
     assert_eq!(event.kind, EventKind::BackupFailed);
     assert_eq!(event.codes, ["operation-failed"]);
     assert_eq!(event.plan, Some(plan("home")));
-    assert_eq!(event.operation, failed.id());
+    assert_eq!(event.operation, Some(failed.id()));
     assert_eq!(event.at, at());
     assert!(!format!("{event:?}").contains("canary-detail-text"));
 }
@@ -385,7 +386,7 @@ fn a_planned_retry_tells_the_failed_backups_plan_and_code_its_attempt_and_when_i
         event,
         Event {
             kind: EventKind::BackupRetrying,
-            operation: failed.id(),
+            operation: Some(failed.id()),
             plan: Some(plan("home")),
             repository: Some(RepositoryAlias::parse("nas").unwrap()),
             at: runs,
@@ -884,4 +885,32 @@ mod templates {
             "Sicherung «home» fehlgeschlagen ✗"
         );
     }
+}
+
+#[test]
+fn paused_maintenance_tells_its_repository_and_since_when_and_no_operation_plan_or_code() {
+    let repository = RepositoryAlias::parse("photos").unwrap();
+    let event = Event::maintenance_paused(repository.clone(), at());
+    assert_eq!(
+        event,
+        Event {
+            kind: EventKind::RepoMaintenancePaused,
+            operation: None,
+            plan: None,
+            repository: Some(repository),
+            at: at(),
+            codes: Vec::new(),
+            attempt: None,
+        }
+    );
+    assert_eq!(
+        EventKind::parse("repo.maintenance_paused"),
+        Ok(EventKind::RepoMaintenancePaused)
+    );
+    assert_eq!(event.kind.ping(), Ping::Fail);
+    let template = Template::parse("{event} {repository} [{operation}] [{plan}] {time}").unwrap();
+    assert_eq!(
+        template.render(&event),
+        "repo.maintenance_paused photos [] [] 2026-11-12T09:30:00Z"
+    );
 }

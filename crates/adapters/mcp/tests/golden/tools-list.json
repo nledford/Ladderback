@@ -1267,6 +1267,12 @@
               "default": false,
               "type": "boolean"
             },
+            "maintenance-paused-since": {
+              "type": [
+                "string",
+                "null"
+              ]
+            },
             "password": {
               "$ref": "#/$defs/PasswordSourceDto"
             },

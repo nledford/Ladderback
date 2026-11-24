@@ -720,3 +720,29 @@ Then("no live alert on the page contains {string}", async function (this: Browse
   const alerts = this.page.getByRole("alert").filter({ hasText: new RegExp(heard) });
   assert.equal(await alerts.count(), 0, `a live alert on the page contains "${needle}"`);
 });
+
+// The daemon says this paired machine's maintenance of `alias` is paused
+// since `since`, for want of a lease from its hub (§7.3, decision 158). A
+// paired machine would need a hub of its own, so the list of repositories
+// says it in the daemon's stead, as the daemon writes it.
+Given(
+  "the daemon says maintenance of {string} from this machine is paused since {string}",
+  function (this: BrowserWorld, alias: string, since: string) {
+    this.contextRoutes.push(async (context) => {
+      await context.route(
+        (url) => url.pathname === "/api/v1/repositories",
+        async (route) => {
+          if (route.request().method() !== "GET") return route.continue();
+          const response = await route.fetch();
+          const body = (await response.json()) as {
+            repositories: { alias: string; "maintenance-paused-since"?: string }[];
+          };
+          for (const row of body.repositories) {
+            if (row.alias === alias) row["maintenance-paused-since"] = since;
+          }
+          await route.fulfill({ response, json: body });
+        },
+      );
+    });
+  },
+);

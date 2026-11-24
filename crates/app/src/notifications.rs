@@ -15,9 +15,9 @@ use domain::execution::OperationStatus;
 use domain::notifications::{
     Attempt, Auth, ChannelName, Event, EventKind, Matched, Outcome, RuleName, Subject,
 };
-use domain::planning::Locale;
+use domain::planning::{AgentConfig, Locale};
 use domain::secrets::{Redactor, SecretRef, SecretValue, SecretWarning};
-use domain::{OperationId, Timestamp, Uuid};
+use domain::{OperationId, RepositoryAlias, Timestamp, Uuid};
 use futures::StreamExt;
 use futures::channel::mpsc;
 use futures::future::{self, join_all};
@@ -176,6 +176,25 @@ impl Notify {
         }
     }
 
+    /// Tells the channels of every rule that sends `repo.maintenance_paused`
+    /// that this machine's maintenance of `repository` has been paused for
+    /// want of a lease since `since`. Returns whether a rule's channel took
+    /// it, and what there is to report, as [`Self::tell`] does.
+    pub async fn tell_paused(
+        &self,
+        repository: &RepositoryAlias,
+        since: Timestamp,
+    ) -> (bool, Vec<Report>) {
+        let config = match self.config.load().await {
+            Ok(config) => config,
+            Err(error) => return (false, vec![Report::ConfigUnavailable(error)]),
+        };
+        let event = Event::maintenance_paused(repository.clone(), since);
+        let matched = config.notifications().matching(&event).count();
+        let reports = self.deliver(&config, &event).await;
+        (reports.len() < matched, reports)
+    }
+
     /// Tells the event `news` is, as [`Self::tell`] does.
     async fn told(&self, news: News) -> Vec<Report> {
         let News {
@@ -227,10 +246,17 @@ impl Notify {
         let Some(event) = event else {
             return Vec::new();
         };
+        self.deliver(&config, &event).await
+    }
+
+    /// Sends `event` to the channels of every rule of `config` that sends
+    /// it, and reports each notification that wasn't delivered.
+    async fn deliver(&self, config: &AgentConfig, event: &Event) -> Vec<Report> {
         let locale = config.agent().locale.as_ref();
-        let deliveries = notifications
-            .matching(&event)
-            .map(|matched| self.send(matched, &event, locale));
+        let deliveries = config
+            .notifications()
+            .matching(event)
+            .map(|matched| self.send(matched, event, locale));
         join_all(deliveries)
             .await
             .into_iter()

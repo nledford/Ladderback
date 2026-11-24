@@ -354,6 +354,7 @@ async fn reads_that_are_no_operation_tell_the_pages_nothing() {
         sources: Arc::new(app::fakes::FakeSources),
         reads: Arc::default(),
         listings: Arc::default(),
+        leases: None,
         link: Arc::new(NameWatch::new(
             Arc::new(app::fakes::FakeNetworkLink::new()),
             || {},

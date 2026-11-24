@@ -9,10 +9,11 @@
 
 use std::sync::{Arc, Mutex, PoisonError};
 
-use domain::maintenance::{EpochLower, LeaseEpoch, NoLease, RepoGrants};
-use domain::{RepositoryId, SignedDuration, Timestamp};
+use domain::maintenance::{EpochLower, LeaseEpoch, NoLease, Ownership, RepoGrants};
+use domain::{RepositoryAlias, RepositoryId, SignedDuration, Timestamp};
 
-use crate::ports::{Clock, Identity, LeaseCache, StoreError};
+use crate::notifications::{Notify, Report};
+use crate::ports::{Clock, ConfigStore, Identity, LeaseCache, StoreError};
 
 /// The machine's leases.
 pub struct MaintenanceLeases {
@@ -104,6 +105,133 @@ impl MaintenanceLeases {
         let mut held = self.cache.load().await?;
         held.released(repository, epoch);
         self.cache.save(&held).await
+    }
+
+    /// Since when this machine's maintenance of `repository`, known by its
+    /// ID when its entry recorded one, is paused for want of a lease, now
+    /// (decision 158): `None` while it isn't paired, holds a live lease on
+    /// it, or hasn't noted the pause yet. A repository whose ID isn't
+    /// known, a pin or a cache that can't be read says none: the page
+    /// shows nothing it can't tell, and a run is refused regardless.
+    pub async fn paused(&self, repository: Option<&RepositoryId>) -> Option<Timestamp> {
+        let Ok(Some(_)) = self.identity.pin().await else {
+            return None;
+        };
+        let held = self.cache.load().await.ok()?;
+        held.paused_since(repository?, self.now())
+    }
+
+    /// Notes, now, which of `maintained`, the repositories the
+    /// configuration asks this machine to maintain, are paused for want of
+    /// a lease, and returns each pause an earlier watch noted that has
+    /// lasted [`PAUSE_ALERT_AFTER`](domain::maintenance::PAUSE_ALERT_AFTER)
+    /// and wasn't [`told`](Self::told) yet, by repository and since when.
+    /// A machine that isn't paired drops every pause; one whose pin can't
+    /// be read notes nothing. Only the pauses are saved, so a grant taken
+    /// meanwhile stands (I1).
+    pub async fn watch(
+        &self,
+        maintained: &[RepositoryId],
+    ) -> Result<Vec<(RepositoryId, Timestamp)>, StoreError> {
+        let maintained = match self.identity.pin().await {
+            Ok(Some(_)) => maintained,
+            Ok(None) => &[],
+            Err(_) => return Ok(Vec::new()),
+        };
+        let mut held = self.cache.load().await?;
+        let before = held.clone();
+        let due = held.watch(maintained, self.now());
+        if held != before {
+            self.cache.save_pauses(&held).await?;
+        }
+        Ok(due)
+    }
+
+    /// Notes that the notification rules took the alert of the pause of
+    /// `repository` since `since`, so no watch returns it again. Only the
+    /// pauses are saved (I1).
+    pub async fn told(
+        &self,
+        repository: &RepositoryId,
+        since: Timestamp,
+    ) -> Result<(), StoreError> {
+        let mut held = self.cache.load().await?;
+        let before = held.clone();
+        held.told(repository, since);
+        if held != before {
+            self.cache.save_pauses(&held).await?;
+        }
+        Ok(())
+    }
+}
+
+/// Tells the notification rules, once, of each repository whose
+/// maintenance on this machine has been paused for want of a lease for
+/// [`PAUSE_ALERT_AFTER`](domain::maintenance::PAUSE_ALERT_AFTER), with
+/// `repo.maintenance_paused` (§11, decision 158). The daemon watches every
+/// 15 minutes, as it asks its hub for grants.
+pub struct WatchPauses {
+    config: Arc<dyn ConfigStore>,
+    leases: Arc<MaintenanceLeases>,
+    notify: Arc<Notify>,
+}
+
+impl WatchPauses {
+    pub fn new(
+        config: Arc<dyn ConfigStore>,
+        leases: Arc<MaintenanceLeases>,
+        notify: Arc<Notify>,
+    ) -> Self {
+        Self {
+            config,
+            leases,
+            notify,
+        }
+    }
+
+    /// Notes the pause of each repository this machine is asked to
+    /// maintain and knows the ID of, and tells the rules of each that has
+    /// lasted long enough. Returns what telling them left to report. A
+    /// pause is noted as told only once a rule's channel took it, so one
+    /// every channel failed is told again at the next watch; one a grant
+    /// ended since the watch read the leases isn't told. A configuration or
+    /// a cache that can't be read notes nothing and tells nothing; the next
+    /// watch tries again.
+    pub async fn watch(&self) -> Vec<Report> {
+        let Ok(config) = self.config.load().await else {
+            return Vec::new();
+        };
+        let maintained: Vec<(&RepositoryAlias, &RepositoryId)> = config
+            .repositories()
+            .iter()
+            .filter(|(_, entry)| Ownership::owned_here(entry.maintenance))
+            .filter_map(|(alias, entry)| entry.id.as_ref().map(|id| (alias, id)))
+            .collect();
+        let ids: Vec<RepositoryId> = maintained.iter().map(|(_, id)| (*id).clone()).collect();
+        let Ok(due) = self.leases.watch(&ids).await else {
+            return Vec::new();
+        };
+        let mut reports = Vec::new();
+        for (repository, since) in due {
+            let alias = maintained
+                .iter()
+                .find(|(_, id)| **id == repository)
+                .map(|(alias, _)| *alias);
+            let Some(alias) = alias else {
+                continue;
+            };
+            if self.leases.paused(Some(&repository)).await != Some(since) {
+                continue;
+            }
+            let (taken, told) = self.notify.tell_paused(alias, since).await;
+            reports.extend(told);
+            // A cache that can't be written leaves the pause untold, so the
+            // next watch tells it again.
+            if taken && self.leases.told(&repository, since).await.is_err() {
+                log::warn!("a pause told to the notification rules couldn't be noted as told");
+            }
+        }
+        reports
     }
 }
 

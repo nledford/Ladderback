@@ -6,7 +6,7 @@ use std::fmt;
 use std::sync::Arc;
 
 use async_trait::async_trait;
-use domain::maintenance::{EpochFloor, HeldLease, HeldLeases, LeaseEpoch};
+use domain::maintenance::{EpochFloor, HeldLease, HeldLeases, LeaseEpoch, Pause};
 use domain::{RepositoryId, Timestamp};
 
 use crate::ports::LeaseCache;
@@ -26,6 +26,8 @@ pub async fn run(harness: &dyn LeaseCacheHarness) {
     an_empty_cache_holds_nothing(harness).await;
     i1_leases_and_floors_outlive_a_restart(harness).await;
     a_save_replaces_the_last_whole(harness).await;
+    pauses_outlive_a_restart_and_a_save_of_the_leases(harness).await;
+    i1_a_save_of_the_pauses_leaves_the_leases_as_kept(harness).await;
 }
 
 /// The value of `result`, after a failed assertion if it is an error.
@@ -113,4 +115,73 @@ async fn a_save_replaces_the_last_whole(harness: &dyn LeaseCacheHarness) {
     );
     ok(cache.save(&fewer).await, "the cache keeps");
     assert_eq!(ok(cache.load().await, "the cache reads"), Some(fewer));
+}
+
+/// A pause of `photos`, told, and one of `music`, not yet, to the
+/// millisecond.
+fn pauses() -> Option<Vec<(RepositoryId, Pause)>> {
+    let at = |ms| ok(Timestamp::from_millisecond(ms), "a time");
+    Some(vec![
+        (
+            repository('a')?,
+            Pause {
+                since: at(1_800_000_000_123)?,
+                alerted: true,
+            },
+        ),
+        (
+            repository('b')?,
+            Pause {
+                since: at(1_800_000_000_456)?,
+                alerted: false,
+            },
+        ),
+    ])
+}
+
+async fn pauses_outlive_a_restart_and_a_save_of_the_leases(harness: &dyn LeaseCacheHarness) {
+    let cache = harness.empty().await;
+    let kept = kept().unwrap_or_default();
+    let paused = kept.clone().with_pauses(pauses().unwrap_or_default());
+    ok(cache.save(&kept).await, "the cache keeps");
+    ok(
+        cache.save_pauses(&paused).await,
+        "the cache keeps the pauses",
+    );
+    let reopened = harness.reopened().await;
+    assert_eq!(
+        ok(reopened.load().await, "the cache reads"),
+        Some(paused.clone())
+    );
+    // Taking grants saves the leases alone: the pauses stay.
+    ok(
+        reopened.save(&HeldLeases::default()).await,
+        "the cache keeps",
+    );
+    assert_eq!(
+        ok(reopened.load().await, "the cache reads"),
+        Some(HeldLeases::default().with_pauses(pauses().unwrap_or_default()))
+    );
+}
+
+async fn i1_a_save_of_the_pauses_leaves_the_leases_as_kept(harness: &dyn LeaseCacheHarness) {
+    let cache = harness.empty().await;
+    let kept = kept().unwrap_or_default();
+    ok(cache.save(&kept).await, "the cache keeps");
+    // A watch that read no lease saves its pauses: the lease taken
+    // meanwhile stays.
+    let watched = HeldLeases::default().with_pauses(pauses().unwrap_or_default());
+    ok(
+        cache.save_pauses(&watched).await,
+        "the cache keeps the pauses",
+    );
+    assert_eq!(
+        ok(cache.load().await, "the cache reads"),
+        Some(kept.clone().with_pauses(pauses().unwrap_or_default()))
+    );
+    ok(
+        cache.save_pauses(&HeldLeases::default()).await,
+        "the cache keeps the pauses",
+    );
+    assert_eq!(ok(cache.load().await, "the cache reads"), Some(kept));
 }

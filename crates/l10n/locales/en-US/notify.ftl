@@ -50,6 +50,11 @@ notify-check-failed = The check of { $repository } failed ({ $code }).
 # $code (text): the failure's code, such as restore-target-unwritable, or none when it is unknown.
 notify-restore-failed = Restoring files from { $repository } failed ({ $code }).
 
+# A paired machine's maintenance of a repository has been paused for 14 days, because it holds no lease on the repository from its hub (technical design §7.3).
+# $repository (text): the repository's alias, such as nas.
+# $since (instant): since when maintenance is paused, read in UTC; the zone's name follows it.
+notify-repo-maintenance-paused = Maintenance of { $repository } from this { -machine } has been paused since { DATETIME($since) } { DATETIME($since, timeZoneName: "short") }, because it holds no lease on the repository from its { -hub }.
+
 ### The title of a notification of each event (technical design §11): the
 ### line an ntfy topic shows above the message, on a phone's lock screen too.
 ### A short sentence that names what happened, with nothing of the event's
@@ -81,3 +86,6 @@ notify-title-check-failed = Check failed
 
 # The title of a notification that a restore of files from a snapshot failed.
 notify-title-restore-failed = Restore failed
+
+# The title of a notification that a paired machine's maintenance of a repository has been paused for 14 days for want of a lease from its hub.
+notify-title-repo-maintenance-paused = Maintenance paused
