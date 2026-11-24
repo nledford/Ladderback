@@ -242,6 +242,7 @@ Decisions 1–6 recorded 2026-11-08. Decisions 7–12 recorded 2026-11-08 after 
 | [156](decisions/156-an-agent-knows-others-snapshots-from-its-last-listing.md) | A paired agent knows another agent's snapshots from a listing at most a day old, and lists each repository it maintains before a sync when it has none |
 | [157](decisions/157-the-hubs-start-window-runs-on-its-monotonic-clock.md) | The hub's start window waits on every agent whose last report named a repository, for 7 days and an hour on its monotonic clock |
 | [158](decisions/158-maintenance-paused.md) | A paired machine shows when its maintenance paused for want of a lease, and tells it after 14 days |
+| [159](decisions/159-long-lived-hub-connections.md) | An approved machine keeps one hub connection while it runs |
 
 ## 17. Open questions
 
