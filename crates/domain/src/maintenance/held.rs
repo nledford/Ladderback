@@ -18,6 +18,20 @@ use super::recovery::ReportedFloor;
 use crate::fleet::Signature;
 use crate::{RepositoryId, SignedDuration, Timestamp};
 
+/// How long a paired machine's maintenance of a repository stays paused
+/// before the machine tells its notification rules
+/// (`repo.maintenance_paused`, §11): 14 days, two lease lives, so a laptop
+/// away from its hub for a week or a hub down a few days stays quiet.
+pub const PAUSE_ALERT_AFTER: SignedDuration = SignedDuration::from_hours(14 * 24);
+
+/// The machine's maintenance of a repository, paused for want of a lease:
+/// since when, and whether its notification rules were told.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct Pause {
+    pub since: Timestamp,
+    pub alerted: bool,
+}
+
 /// The highest lease a machine has seen for one repository, ordered by the
 /// hub's recovery number, its generation, then the lease's epoch (§7.3, "A
 /// rewound hub"). A grant below it is refused (`epoch-lower`).
