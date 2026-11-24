@@ -325,17 +325,18 @@ exclude_re = [
     # stays mutated. `@ui` scenarios catch these four, each failing with the
     # mutant applied by hand (Chromium):
     # - `menu_button_is_drawn` -> true: "Escape in the header with the window
-    #   widened past 41rem leaves the Menu button as it was" (the panel closes
-    #   and focus leaves Settings); -> false: "The Menu button shows the
-    #   pages' links ..." (Escape no longer hides the panel).
+    #   widened past 54rem leaves the Menu button as it was"; -> false: "The
+    #   Menu button shows the pages' links ..." (Escape no longer hides the
+    #   panel).
     # - `delete !` before `navigation::escape_closes`: the same Escape
-    #   scenario (Escape no longer closes the panel).
-    # - `delete !` before `tooltip_shown`: the same scenario again (with no
-    #   tooltip showing, Escape no longer closes the panel).
+    #   scenario past 54rem.
+    # - `delete !` before `tooltip_shown`: "The Menu button shows the pages'
+    #   links ..." (with no tooltip showing, Escape no longer closes the
+    #   panel). The scenario past 54rem never reaches this line.
     # Named by line, so a moved line brings the mutant back to judge.
-    'crates/web/src/main\.rs:373:5: replace menu_button_is_drawn -> bool with (true|false)$',
-    'crates/web/src/main\.rs:528:12: delete ! in App$',
-    'crates/web/src/main\.rs:546:12: delete ! in App$',
+    'crates/web/src/main\.rs:461:5: replace menu_button_is_drawn -> bool with (true|false)$',
+    'crates/web/src/main\.rs:615:12: delete ! in App$',
+    'crates/web/src/main\.rs:633:12: delete ! in App$',
 ]
 # A mutant that makes a test hang is caught, but slowly; fail fast instead.
 timeout_multiplier = 3.0
