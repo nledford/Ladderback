@@ -342,7 +342,19 @@ fn default_message(localizer: &Localizer, event: &Event) -> String {
                 ("code", MsgArg::Text(code)),
             ],
         ),
-        EventKind::RepoMaintenancePaused => todo!("{repository}"),
+        EventKind::RepoMaintenancePaused => (
+            msg::NOTIFY_REPO_MAINTENANCE_PAUSED,
+            vec![
+                ("repository", MsgArg::Text(repository)),
+                (
+                    "since",
+                    MsgArg::Timestamp {
+                        utc_ms: event.at.as_millisecond(),
+                        zone: None,
+                    },
+                ),
+            ],
+        ),
     };
     localizer.message(id, &args).text().to_owned()
 }
@@ -361,7 +373,7 @@ fn title(localizer: &Localizer, kind: EventKind) -> String {
         EventKind::PruneFailed => msg::NOTIFY_TITLE_PRUNE_FAILED,
         EventKind::CheckFailed => msg::NOTIFY_TITLE_CHECK_FAILED,
         EventKind::RestoreFailed => msg::NOTIFY_TITLE_RESTORE_FAILED,
-        EventKind::RepoMaintenancePaused => todo!(),
+        EventKind::RepoMaintenancePaused => msg::NOTIFY_TITLE_REPO_MAINTENANCE_PAUSED,
     };
     localizer.message(id, &[]).text().to_owned()
 }
