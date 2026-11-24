@@ -2,6 +2,8 @@
 
 **Each machine keeps, for every repository, the highest lease it has seen, ordered by recovery number, generation and epoch, and refuses a grant below it as `epoch-lower`; the floor never falls, and a recovery handover outranks floors a leaked key set. A hub that starts on a different machine, by its machine identifier, that a heartbeat shows to be behind a floor, or that is shown a grant it signed for a machine its registry doesn't know, enters recovery mode: it grants nothing until a person confirms, and on a different machine only the recovery handover ends it. A hub that can't read the identifier doesn't start. After any start, no repository changes owner until every machine using it has sent a heartbeat or 7 days have passed. A hub moves by handover, never by copy; a restore doesn't raise the generation** (recorded 2026-11-21, §7.3, §16; the maintainer's decisions).
 
+**Amended by decision 157** (2026-11-23): the window after a start lasts 7 days and an hour on the hub's monotonic clock, waits on every agent whose last report named the repository, and holds a repository no last report named until every agent that reported one has reported again. Until recovery mode is built (#1495), the window renews a lease binding in the restored database for the holder that reports it, even one that let it go after the backup.
+
 ## Why
 
 - **The generation floor alone misses a same-generation restore.** Decision 120 reserves the hub's generation, and nothing raises it before a move. A hub restored from a backup keeps its generation but has older epochs, so it passes the floor and can grant a lease a machine already holds at a higher epoch: two maintenance owners, which I1 forbids.
