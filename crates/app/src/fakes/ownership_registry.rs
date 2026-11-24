@@ -88,8 +88,16 @@ impl OwnershipRegistry for InMemoryOwnershipRegistry {
     }
 
     async fn reported_uses(&self) -> Result<Vec<(AgentId, RepositoryId)>, StoreError> {
-        let _kept = &self.kept;
-        todo!()
+        Ok(self
+            .kept()
+            .reports
+            .iter()
+            .flat_map(|(agent, (entries, _))| {
+                entries
+                    .iter()
+                    .map(|entry| (*agent, entry.repository.clone()))
+            })
+            .collect())
     }
 
     async fn release(
