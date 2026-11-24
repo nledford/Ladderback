@@ -125,6 +125,18 @@ ui-refused-machine-heading = Your { -hub } took another computer as this one
 # What the notice says under its heading while the hub refuses this computer: the two ways back, as the hub's refusal names them. `ladderback pairing-token --forget-computer` is typed as it is: keep it a string literal.
 ui-refused-machine-body = Your { -hub } refused this computer: it took another computer as this { -machine } first, as happens when a data folder is copied or the system is reinstalled. Backups run as usual, and their reports wait here until the { -hub } takes this computer. If this computer is the copy, take a new ID, restart { -brand-name } and pair it again. If it is the computer that should keep this ID, stop { -brand-name } on the other one or give that one a new ID, then stop the { -hub }'s daemon and run { "ladderback pairing-token --forget-computer" } with this { -machine }'s name on the { -hub }.
 
+# The heading of the start page's notice, shown when the hub this computer paired with removed it, or someone rejected it on the hub while it waited for approval, signed. The hub never accepts this machine ID again. It names the notice's region.
+ui-removed-machine-heading = Your { -hub } removed this computer
+
+# What the notice says under its heading while the hub holds this computer removed: the way back is a new machine ID, paired again with a new token and approved again on the hub.
+ui-removed-machine-body = Your { -hub } removed this computer, or someone rejected it while it waited for approval, and it no longer accepts this { -machine }'s ID. Backups run as usual, and their reports wait here. To report to the { -hub } again, take a new ID, restart { -brand-name } and pair it again with a new token.
+
+# The notice's button for a machine its hub removed, which asks first, in a dialog. It is the same computer, so the button doesn't call it a new one.
+ui-removed-machine-new-id = Take a new machine ID
+
+# What that dialog says for a machine its hub removed: what happens to this computer's plans, its maintenance and the snapshots under the old machine ID, and what comes after the restart.
+ui-removed-machine-review-body = This computer keeps its plans, and its backups carry the new ID once { -brand-name } restarts. It stops maintaining every repository it maintained: turn maintenance back on for each repository this computer should maintain. The snapshots under the old ID stay under it until you adopt them. Then pair this computer again with a new token from the { -hub }, whose owner approves it again.
+
 # The notice's button, which asks first, in a dialog, before taking a new machine ID.
 ui-copied-data-folder-new-id = This is a new computer: take a new ID
 

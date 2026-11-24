@@ -626,9 +626,10 @@ error-pending-limit = The { -hub } already has 20 { -machine(form: "other") } wa
 
 # The hub removed this machine, or someone rejected it while it waited for
 # approval: it refuses the machine's connections and any token under its ID.
-# Nothing on this machine brings it back, so the message names no action. A
-# paired machine maintains only under its hub's lease, so it runs none.
-error-agent-removed = The { -hub } removed this { -machine }, or someone rejected it while it waited for approval. The { -hub } no longer accepts this { -machine }. It keeps backing up and runs no maintenance.
+# The way back is a new machine ID, taken from the start page and paired
+# again with a new token, which the hub's owner approves again. A paired
+# machine maintains only under its hub's lease, so it runs none.
+error-agent-removed = The { -hub } removed this { -machine }, or someone rejected it while it waited for approval, and no longer accepts its ID. It keeps backing up and runs no maintenance. To report to the { -hub } again, take a new machine ID from the start page, restart { -brand-name } and pair it again with a new token.
 
 # The hub closed the connection before proving itself: it can't offer the
 # kind of connection this machine's token names, as when a proxy ends TLS in
@@ -767,9 +768,9 @@ error-maintenance-selection-changed = The repository changed after you reviewed 
 error-maintenance-data-folder-copied = This computer's data folder came from another computer, so it doesn't forget, prune or adopt snapshots: it could remove the other computer's. Backups and checks still run. If this is a new computer, take a new machine ID from the start page and restart { -brand-name }.
 
 # A new machine ID was asked for, and the data folder wasn't copied from
-# another computer, nor did the hub refuse this computer as a second one, or
-# a new ID was taken for it already, so nothing changed.
-error-machine-not-copied = No new machine ID was taken: this computer's data folder wasn't copied from another computer and its { -hub } didn't refuse it, or it took a new ID already. Nothing changed.
+# another computer, nor did the hub refuse this computer as a second one or
+# remove it, or a new ID was taken for it already, so nothing changed.
+error-machine-not-copied = No new machine ID was taken: this computer's data folder wasn't copied from another computer and its { -hub } didn't refuse or remove it, or it took a new ID already. Nothing changed.
 
 # The repository did not answer a read in time, so there was nothing to show
 # or to review.
