@@ -1,10 +1,10 @@
 use domain::fleet::{
     AgentRecord, AgentStatus, BindingKind, Fingerprint, Hostname, PairRequest, Pairing, PublicKey,
-    TokenTls,
+    TokenTls, Tombstone,
 };
 use domain::{AgentId, Timestamp, Uuid};
 
-use super::{approved as approved_line, connected, paired};
+use super::{approved as approved_line, connected, lapsed, paired, removed};
 
 fn key(byte: u8) -> PublicKey {
     PublicKey::from_bytes([byte; 32]).expect("a key")
@@ -170,6 +170,43 @@ fn a_first_connection_after_approval_is_named_by_hostname_agent_id_and_key() {
         format!(
             "machine \"e2e-laptop\" connected as agent 01900000-0000-7000-8000-000000000001 \
              with key {fingerprint}, its first connection since it was approved"
+        )
+    );
+}
+
+/// A removal is named as a pairing is, by the hostname its tombstone keeps,
+/// and says what the hub refuses from now on.
+#[test]
+fn a_removal_is_named_by_hostname_agent_id_and_key() {
+    let request = request("Nick's laptop");
+    let fingerprint = Fingerprint::of_key(&request.agent_key);
+    let tombstone = Tombstone {
+        agent_id: request.agent_id,
+        hostname: request.hostname.clone(),
+        key: request.agent_key,
+        removed_at: Timestamp::from_second(1_800_000_000).expect("a time"),
+    };
+    assert_eq!(
+        removed(&tombstone),
+        format!(
+            "machine \"Nick\\'s laptop\" removed as agent \
+             01900000-0000-7000-8000-000000000001 with key {fingerprint}; the hub refuses its \
+             connections and its pairings with an ordinary token"
+        )
+    );
+}
+
+/// A lapse is named as a pairing is, and says the machine may pair again.
+#[test]
+fn a_lapse_is_named_by_hostname_agent_id_and_key() {
+    let request = request("e2e-laptop");
+    let fingerprint = Fingerprint::of_key(&request.agent_key);
+    assert_eq!(
+        lapsed(&record(&request, pending())),
+        format!(
+            "machine \"e2e-laptop\" (agent 01900000-0000-7000-8000-000000000001 with key \
+             {fingerprint}) lapsed: nobody approved it within 7 days; it may pair again with a \
+             new token"
         )
     );
 }

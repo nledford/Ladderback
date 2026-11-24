@@ -143,6 +143,35 @@ async fn a_copy_reads_copied_and_takes_one_new_id() {
     assert_eq!(machine.renewed_id(), taken);
 }
 
+/// A machine its hub refused, signed, as a second computer: its data folder
+/// recorded this computer's identifier, so only the refusal tells it.
+#[tokio::test]
+async fn a_machine_its_hub_refused_reads_refused_by_hub_and_takes_one_new_id() {
+    let machine =
+        Arc::new(FakeThisMachine::new(Some("this-computer")).with_recorded("this-computer"));
+    let take = TakeNewId::new(
+        Arc::clone(&machine) as Arc<dyn app::ports::ThisMachine>,
+        Arc::new(MachineStanding::new(Standing::RefusedByHub)),
+        maintaining_one().await,
+        Arc::new(InMemoryOperationStore::default()),
+        Arc::default(),
+    );
+    let route = MachineRoute::new(Arc::new(take));
+    let (status, body) = send(&route, request(Method::GET, MACHINE_PATH)).await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(body, serde_json::json!({ "standing": "refused-by-hub" }));
+
+    let (status, body) = send(&route, request(Method::POST, NEW_ID_PATH)).await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(body, serde_json::json!({ "standing": "new-id-taken" }));
+    let taken = machine.renewed_id();
+    assert!(taken.is_some());
+    let (status, body) = send(&route, request(Method::POST, NEW_ID_PATH)).await;
+    assert_eq!(status, StatusCode::CONFLICT);
+    assert_eq!(body["code"], "machine-not-copied");
+    assert_eq!(machine.renewed_id(), taken);
+}
+
 #[tokio::test]
 async fn a_new_id_asked_for_from_another_origin_is_refused() {
     let (route, machine) = started("other-computer");

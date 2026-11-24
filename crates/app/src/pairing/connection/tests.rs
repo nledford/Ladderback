@@ -83,6 +83,7 @@ async fn paired(hub: &Hub, n: u128) -> Arc<InMemoryIdentity> {
         identity.clone(),
         Arc::new(FakeSigning),
         Arc::new(SeededRandom::new(9_000 + u64::try_from(n).unwrap())),
+        Arc::new(crate::fakes::InMemoryLeaseCache::default()),
     );
     let connector = LoopbackHubConnector::to(hub.pairing.clone());
     PairWithHub::new(pairing, Arc::new(connector))
@@ -341,6 +342,36 @@ impl crate::ports::ReportInbox for FullInbox {
         limit: usize,
     ) -> Result<crate::ports::LatestReports, crate::ports::StoreError> {
         self.inner.latest(agent, limit).await
+    }
+
+    async fn keep_plans(
+        &self,
+        agent: domain::AgentId,
+        plans: &domain::fleet::PlansReport,
+    ) -> Result<(), crate::ports::StoreError> {
+        self.inner.keep_plans(agent, plans).await
+    }
+
+    async fn plans(
+        &self,
+        agent: domain::AgentId,
+    ) -> Result<Option<domain::fleet::PlansReport>, crate::ports::StoreError> {
+        self.inner.plans(agent).await
+    }
+
+    async fn keep_progress(
+        &self,
+        agent: domain::AgentId,
+        progress: &domain::fleet::ReportedProgress,
+    ) -> Result<(), crate::ports::StoreError> {
+        self.inner.keep_progress(agent, progress).await
+    }
+
+    async fn progress(
+        &self,
+        agent: domain::AgentId,
+    ) -> Result<Option<domain::fleet::ReportedProgress>, crate::ports::StoreError> {
+        self.inner.progress(agent).await
     }
 }
 
@@ -739,6 +770,52 @@ async fn the_sync_loop_logs_a_streak_of_failures_once() {
     assert!(warned[0].starts_with("the outbox couldn't be read"));
 }
 
+/// The agent's sync loop opens a session for a progress alone: with no
+/// report waiting in its outbox and no lease to ask for, the progress of
+/// the operation it runs still reaches the hub (§7.2, #1440).
+#[tokio::test]
+async fn the_sync_loop_tells_the_hub_a_progress_with_no_report_waiting() {
+    use crate::ports::ReportInbox as _;
+    use crate::sync::{LiveProgress, SyncWithHub};
+    use api::{OperationStep, ProgressUnit, UiEvent};
+    use domain::fleet::OutboxEpoch;
+
+    let inbox = Arc::new(crate::fakes::InMemoryReportInbox::default());
+    let hub = hub_with(1, |pairing| pairing.with_inbox(inbox.clone()));
+    let identity = approved(&hub).await;
+    let progress = Arc::new(LiveProgress::new());
+    progress.hear(&UiEvent::OperationProgress {
+        operation: Uuid::from_u128(0x0d).to_string(),
+        step: Some(OperationStep::BackingUp),
+        unit: ProgressUnit::Bytes,
+        current: 40,
+        total: Some(100),
+        at: Some("2027-01-15T08:00:05Z".to_owned()),
+    });
+    let told = progress.latest().expect("the progress is kept");
+    let clock = Arc::new(FakeClock::new(
+        Timestamp::from_second(1_800_000_030).unwrap(),
+    ));
+    let sync = SyncWithHub::new(
+        connecting(
+            identity,
+            Arc::new(LoopbackHubConnector::to(hub.pairing.clone())),
+        ),
+        Arc::new(crate::fakes::InMemoryOutbox::new(OutboxEpoch::from_uuid(
+            Uuid::from_u128(0xe1),
+        ))),
+        clock.clone(),
+        agent_id(1),
+        hostname(1),
+        None,
+    )
+    .with_progress(progress);
+
+    let warned = warned_by_the_sync_loop(sync, &clock, 2).await;
+    assert!(warned.is_empty(), "{warned:?}");
+    assert_eq!(inbox.progress(agent_id(1)).await.unwrap(), Some(told));
+}
+
 /// A channel shows its sequence numbers in a log and leaves out its keys.
 #[tokio::test]
 async fn a_channel_shows_its_sequence_numbers_and_no_key() {
@@ -843,6 +920,43 @@ async fn an_unknown_agent_and_another_key_get_one_signed_refusal() {
         assert_eq!(refused.holder, None);
     }
     assert_eq!(hub.registry.agents().await.unwrap(), before);
+}
+
+/// Only a refusal as a second computer stands the machine refused by its
+/// hub: another signed refusal, as a key the hub doesn't hold gets, leaves
+/// it as it was (#1462).
+#[tokio::test]
+async fn only_a_signed_identity_conflict_stands_the_machine_refused() {
+    use crate::machine::{MachineStanding, Standing};
+    use crate::sync::{SyncFailure, SyncWithHub};
+    use domain::fleet::OutboxEpoch;
+
+    let hub = hub(1);
+    let identity = paired(&hub, 1).await;
+    let stranger = with_pin_of(&identity).await;
+    let standing = Arc::new(MachineStanding::new(Standing::Same));
+    let sync = SyncWithHub::new(
+        connecting(
+            stranger,
+            Arc::new(LoopbackHubConnector::to(hub.pairing.clone())),
+        ),
+        Arc::new(crate::fakes::InMemoryOutbox::new(OutboxEpoch::from_uuid(
+            Uuid::from_u128(0xe1),
+        ))),
+        Arc::new(FakeClock::new(
+            Timestamp::from_second(1_800_000_030).unwrap(),
+        )),
+        agent_id(1),
+        hostname(1),
+        None,
+    )
+    .with_standing(standing.clone());
+    let failure = sync.sync_once().await;
+    let Err(SyncFailure::Connect(ConnectFailure::Refused(refused))) = failure else {
+        panic!("{failure:?}");
+    };
+    assert_eq!(refused.code.as_str(), "proof-refused");
+    assert_eq!(standing.get(), Standing::Same);
 }
 
 /// The `Hello` carries the fingerprint of the computer the agent runs on,

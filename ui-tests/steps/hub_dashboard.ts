@@ -141,3 +141,81 @@ Then(
     await expect(section.getByText(/^Last connected /)).toContainText(new RegExp(`\\(.+ ${ISOLATION}${named}${ISOLATION}\\)`));
   },
 );
+
+// The machine's snapshot of its plans as the hub keeps it (migration
+// 0025): each row in its place, a last run `minutes ago` with its status
+// and a next run `in minutes`, each left out when its cell is empty, and
+// how many more plans the machine left out of it.
+Given(
+  "{string} reported these plans to the hub, and {int} more it left out:",
+  async function (this: BrowserWorld, hostname: string, leftOut: number, table: DataTable) {
+    const agent = (await listedMachine(this, hostname))["agent-id"];
+    const now = Math.floor(Date.now() / 1000);
+    const database = hubDatabase(this);
+    try {
+      const take = database.prepare(
+        "INSERT INTO sync_plans (agent_id, place, plan_id, last_at, last_outcome, next_run) VALUES (?, ?, ?, ?, ?, ?)",
+      );
+      table.hashes().forEach((row, place) => {
+        const ago = row["last run minutes ago"] ?? "";
+        const next = row["next run in minutes"] ?? "";
+        take.run(
+          agent,
+          place,
+          row.plan ?? "",
+          ago === "" ? null : now - Number(ago) * 60,
+          row["last run"] ? row["last run"] : null,
+          next === "" ? null : now + Number(next) * 60,
+        );
+      });
+      database.prepare("INSERT INTO sync_plan_snapshots (agent_id, left_out) VALUES (?, ?)").run(agent, leftOut);
+    } finally {
+      database.close();
+    }
+  },
+);
+
+// The machine's snapshot of its plans as the hub keeps it when the machine
+// reported none (migration 0025): no plan, and none left out.
+Given("{string} reported no plans to the hub", async function (this: BrowserWorld, hostname: string) {
+  const agent = (await listedMachine(this, hostname))["agent-id"];
+  const database = hubDatabase(this);
+  try {
+    database.prepare("INSERT INTO sync_plan_snapshots (agent_id, left_out) VALUES (?, 0)").run(agent);
+  } finally {
+    database.close();
+  }
+});
+
+// The latest progress of the machine's operation numbered `n`, as the hub
+// keeps it (migration 0025): a backup's bytes at the instant `at`.
+Given(
+  "{string} reported operation {int} backing up {int} of {int} bytes at {string}",
+  async function (this: BrowserWorld, hostname: string, n: number, current: number, total: number, at: string) {
+    const agent = (await listedMachine(this, hostname))["agent-id"];
+    const database = hubDatabase(this);
+    try {
+      database
+        .prepare("INSERT INTO sync_progress (agent_id, op_id, step, unit, current, total, at) VALUES (?, ?, ?, ?, ?, ?, ?)")
+        .run(agent, operationId(n), "backing-up", "bytes", current, total, Math.floor(Date.parse(at) / 1000));
+    } finally {
+      database.close();
+    }
+  },
+);
+
+// Each row by its plan, its last run's badge and, when the cell names one,
+// its next run's words, in the order the table shows them.
+Then("the table {string} lists, in order:", async function (this: BrowserWorld, name: string, expected: DataTable) {
+  const rows = this.page.getByRole("table", { name: namePattern(name) }).getByRole("row");
+  const wanted = expected.hashes();
+  // The header's row, then one row for each plan.
+  await expect(rows).toHaveCount(wanted.length + 1);
+  for (const [place, row] of wanted.entries()) {
+    const shown = rows.nth(place + 1);
+    await expect(shown.getByRole("rowheader")).toHaveText(namePattern(row.plan ?? ""));
+    await expect(shown).toContainText(row["last run"] ?? "");
+    const next = row["next run"] ?? "";
+    if (next !== "") await expect(shown).toContainText(next);
+  }
+});

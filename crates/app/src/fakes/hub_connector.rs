@@ -35,6 +35,9 @@ struct Tap {
     /// How many of the hub's next acknowledgements are lost, each with its
     /// connection.
     losing_acks: AtomicUsize,
+    /// Whether each refusal reaches the agent with a signature the hub
+    /// didn't make.
+    forging: AtomicBool,
 }
 
 impl LoopbackHubConnector {
@@ -105,6 +108,12 @@ impl LoopbackHubConnector {
     pub fn lose_acks(&self, count: usize) {
         self.tap.losing_acks.store(count, Ordering::SeqCst);
     }
+
+    /// Each refusal from now on reaches the agent with a signature the hub
+    /// didn't make, as one from anyone but the hub it paired with.
+    pub fn forge_refusals(&self) {
+        self.tap.forging.store(true, Ordering::SeqCst);
+    }
 }
 
 #[async_trait]
@@ -157,6 +166,22 @@ impl LoopLink {
         self.closed = true;
         self.reason = reason.map(str::to_owned);
     }
+
+    /// `answer` as it reaches the agent: a refusal with a signature the hub
+    /// didn't make, while the connector forges them.
+    fn delivered(&self, answer: HubFrame) -> String {
+        match answer {
+            HubFrame::Refused { code, holder, .. } if self.tap.forging.load(Ordering::SeqCst) => {
+                HubFrame::Refused {
+                    code,
+                    holder,
+                    signature: "A".repeat(86),
+                }
+                .to_text()
+            }
+            answer => answer.to_text(),
+        }
+    }
 }
 
 #[async_trait]
@@ -201,12 +226,14 @@ impl HubLink for LoopLink {
                 if lost {
                     self.close(None);
                 } else {
-                    self.inbox.push_back(answer.to_text());
+                    let delivered = self.delivered(answer);
+                    self.inbox.push_back(delivered);
                 }
             }
             HubStep::Wait => {}
             HubStep::Last(answer) => {
-                self.inbox.push_back(answer.to_text());
+                let delivered = self.delivered(answer);
+                self.inbox.push_back(delivered);
                 self.closed = true;
             }
             HubStep::Close(reason) => self.close(Some(reason)),

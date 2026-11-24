@@ -1,8 +1,9 @@
-// Steps of the copied data folder journeys (features/ui/copied_data_folder.feature):
-// where the agent's machine stands, as a Given sets it in the daemon's
-// answers, the notice the start page shows for a copy, and the request that
-// takes a new machine ID. Elements are found by role and accessible name, as
-// in every journey.
+// Steps of the start page's machine notice journeys
+// (features/ui/copied_data_folder.feature): where the agent's machine stands,
+// as a Given sets it in the daemon's answers, the notice the start page shows
+// for a copy or a machine its hub refused, and the request that takes a new
+// machine ID. Elements are found by role and accessible name, as in every
+// journey.
 
 import assert from "node:assert/strict";
 
@@ -17,10 +18,13 @@ import type { BrowserWorld } from "../support/world.ts";
 // (#1104), as the Full Disk Access steps do.
 const GONE_MS = 10_000;
 
-// The notice's heading, which names its region.
+// The notice's headings, which name its region: a copied data folder's, a
+// machine its hub refused, and either once a new machine ID is taken.
 const NOTICE = "This data folder came from another computer";
+const REFUSED = "Your hub took another computer as this one";
+const TAKEN = "New machine ID taken";
 
-type Standing = "same" | "copied" | "new-id-taken" | "unread";
+type Standing = "same" | "copied" | "refused-by-hub" | "new-id-taken" | "unread";
 
 // What the scripted answers say, and what the page asked of them.
 interface Scripted {
@@ -60,12 +64,16 @@ function answers(world: BrowserWorld): Scripted {
   return fresh;
 }
 
-function notice(world: BrowserWorld) {
-  return world.page.getByRole("region", { name: namePattern(NOTICE) });
+function notice(world: BrowserWorld, heading = NOTICE) {
+  return world.page.getByRole("region", { name: namePattern(heading) });
 }
 
 Given("the agent found its data folder was copied from another computer", function (this: BrowserWorld) {
   answers(this).standing = "copied";
+});
+
+Given("the agent's hub refused it, signed, as a second computer", function (this: BrowserWorld) {
+  answers(this).standing = "refused-by-hub";
 });
 
 Given("the agent found its data folder on the computer it was made on", function (this: BrowserWorld) {
@@ -77,13 +85,26 @@ Then("the page says the data folder came from another computer", async function 
   await expect(notice(this)).toContainText("Backups run as usual");
 });
 
+Then("the page says the hub took another computer as this one", async function (this: BrowserWorld) {
+  await notice(this, REFUSED).waitFor({ state: "visible", timeout: patienceMs() });
+  await expect(notice(this, REFUSED)).toContainText("Backups run as usual");
+  await expect(notice(this, REFUSED)).toContainText("ladderback pairing-token --forget-computer");
+});
+
+// The refused computer may be the original: nothing on the page says its
+// data folder came from another one.
+Then("the page doesn't say the data folder came from another computer", async function (this: BrowserWorld) {
+  await expect(notice(this)).toHaveCount(0);
+  await expect(this.page.getByText(/came from another computer|isn't the one its data folder was made on/)).toHaveCount(0);
+});
+
 Then("the page says a new machine ID was taken, to be used once Ladderback restarts", async function (this: BrowserWorld) {
-  await expect(notice(this)).toContainText("New machine ID taken");
-  await expect(notice(this)).toContainText("Restart Ladderback to start using it");
+  await notice(this, TAKEN).waitFor({ state: "visible", timeout: patienceMs() });
+  await expect(notice(this, TAKEN)).toContainText("Restart Ladderback to start using it");
 });
 
 Then("the page offers the link {string}", async function (this: BrowserWorld, name: string) {
-  const link = notice(this).getByRole("link", { name: namePattern(name) });
+  const link = notice(this, TAKEN).getByRole("link", { name: namePattern(name) });
   await expect(link).toHaveCount(1);
   await expect(link).toHaveAttribute("href", "/settings#restart");
 });
@@ -105,5 +126,9 @@ Then("the page says nothing of a copied data folder", async function (this: Brow
     requestAnimationFrame(() => requestAnimationFrame(() => resolve()));
     return promise;
   });
-  await expect(notice(this)).toHaveCount(0, { timeout: Math.min(GONE_MS, patienceMs()) });
+  // None of the notice's headings: a copy's, a refused machine's or a new
+  // ID taken.
+  for (const heading of [NOTICE, REFUSED, TAKEN]) {
+    await expect(notice(this, heading)).toHaveCount(0, { timeout: Math.min(GONE_MS, patienceMs()) });
+  }
 });

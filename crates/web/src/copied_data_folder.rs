@@ -1,10 +1,13 @@
-//! The DOM glue of the start page's notice of a copied data folder (§4.4,
-//! §7.1, §16 decision 144): it reads where the machine stands, and, while
-//! its data folder came from another computer, says that backups run and
-//! maintenance is stopped, and offers "This is a new computer: take a new
-//! ID", which a review dialog confirms. Once the new ID is taken, it says to
-//! restart Ladderback and links to the restart. The `@ui` scenarios of
-//! `features/ui/copied_data_folder.feature` run it in the browsers.
+//! The DOM glue of the start page's notice of a copied data folder, or of a
+//! machine its hub refused as a second computer (§4.4, §7.1, §16 decisions
+//! 144 and 150): it reads where the machine stands, and, while its data
+//! folder came from another computer, says that backups run and
+//! maintenance is stopped; while its hub refuses it, says so and the two
+//! ways back, never that it is a copy. Either offers "This is a new
+//! computer: take a new ID", which a review dialog confirms. Once the new
+//! ID is taken, it says to restart Ladderback and links to the restart. The
+//! `@ui` scenarios of `features/ui/copied_data_folder.feature` run it in
+//! the browsers.
 
 use std::sync::Arc;
 
@@ -44,8 +47,9 @@ const NEW_ID_PATH: &str = "/api/v1/machine/new-id";
 /// Where the restart is offered (decision 94).
 const RESTART_HREF: &str = "/settings#restart";
 
-/// The start page's notice of a copied data folder: nothing while the
-/// machine stands as usual, or before the read is answered.
+/// The start page's notice of a copied data folder, or of a machine its
+/// hub refused: nothing while the machine stands as usual, or before the
+/// read is answered.
 #[component]
 pub(crate) fn CopiedDataFolder(localizer: Arc<Localizer>) -> impl IntoView {
     let standing = RwSignal::<Option<MachineStandingDto>>::new(None);
@@ -87,7 +91,7 @@ pub(crate) fn CopiedDataFolder(localizer: Arc<Localizer>) -> impl IntoView {
                         });
                         reply(
                             Politeness::Polite,
-                            &text(&localizer, msg::UI_COPIED_DATA_FOLDER_TAKEN),
+                            &text(&localizer, msg::UI_COPIED_DATA_FOLDER_TAKEN_SAID),
                         );
                         return;
                     }
@@ -102,23 +106,31 @@ pub(crate) fn CopiedDataFolder(localizer: Arc<Localizer>) -> impl IntoView {
         });
     });
 
-    let heading = text(&localizer, msg::UI_COPIED_DATA_FOLDER_HEADING);
-    let body = text(&localizer, msg::UI_COPIED_DATA_FOLDER_BODY);
+    let copied_heading = text(&localizer, msg::UI_COPIED_DATA_FOLDER_HEADING);
+    let copied_body = text(&localizer, msg::UI_COPIED_DATA_FOLDER_BODY);
+    let refused_heading = text(&localizer, msg::UI_REFUSED_MACHINE_HEADING);
+    let refused_body = text(&localizer, msg::UI_REFUSED_MACHINE_BODY);
+    let taken_heading = text(&localizer, msg::UI_COPIED_DATA_FOLDER_TAKEN_HEADING);
     let button_label = text(&localizer, msg::UI_COPIED_DATA_FOLDER_NEW_ID);
     let taken = text(&localizer, msg::UI_COPIED_DATA_FOLDER_TAKEN);
     let maintenance_off = text(&localizer, msg::UI_COPIED_DATA_FOLDER_MAINTENANCE_OFF);
     let restart_label = text(&localizer, msg::UI_COPIED_DATA_FOLDER_RESTART);
     (move || {
-        let shown = standing.get()?;
-        let copied = match shown {
-            MachineStandingDto::Copied => true,
-            MachineStandingDto::NewIdTaken => false,
+        // A machine its hub refused may be the original computer: neither
+        // its notice nor the one once its new ID is taken says its data
+        // folder came from another computer.
+        let (heading, offered) = match standing.get()? {
+            MachineStandingDto::Copied => (copied_heading.clone(), Some(copied_body.clone())),
+            MachineStandingDto::RefusedByHub => {
+                (refused_heading.clone(), Some(refused_body.clone()))
+            }
+            MachineStandingDto::NewIdTaken => (taken_heading.clone(), None),
             MachineStandingDto::Same | MachineStandingDto::Unread => return None,
         };
-        let content = if copied {
+        let content = if let Some(body) = offered {
             let review_localizer = Arc::clone(&localizer);
             view! {
-                <p>{body.clone()}</p>
+                <p>{body}</p>
                 <div class=ACTIONS>
                     <Button
                         content=Content::Text(button_label.clone().into())
@@ -157,7 +169,6 @@ pub(crate) fn CopiedDataFolder(localizer: Arc<Localizer>) -> impl IntoView {
             }
             .into_any()
         };
-        let heading = heading.clone();
         Some(view! {
             // The notice's region, named by its heading. The heading takes
             // focus once the new ID is taken (WCAG 2.4.3).

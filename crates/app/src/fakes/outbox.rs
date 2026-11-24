@@ -4,7 +4,7 @@ use std::sync::{Mutex, PoisonError};
 use async_trait::async_trait;
 use domain::fleet::{
     AgentReport, Ingest, MAX_EPOCHS_HELD, MAX_REPORTS_HELD, OutboxAdmission, OutboxEpoch,
-    ReportSeq, admit, ingest,
+    PlansReport, ReportSeq, ReportedProgress, admit, ingest,
 };
 use domain::{AgentId, Timestamp};
 
@@ -115,6 +115,10 @@ struct Agent {
     reports: Vec<OutboxEntry>,
     /// How many reports were let go of past the cap.
     dropped: u64,
+    /// The plans it reported last.
+    plans: Option<PlansReport>,
+    /// The progress it reported last.
+    progress: Option<ReportedProgress>,
 }
 
 #[async_trait]
@@ -194,5 +198,31 @@ impl ReportInbox for InMemoryReportInbox {
                 dropped: held.dropped,
             },
         ))
+    }
+
+    async fn keep_plans(&self, agent: AgentId, plans: &PlansReport) -> Result<(), StoreError> {
+        let mut agents = self.agents.lock().unwrap_or_else(PoisonError::into_inner);
+        agents.entry(agent).or_default().plans = Some(plans.clone());
+        Ok(())
+    }
+
+    async fn plans(&self, agent: AgentId) -> Result<Option<PlansReport>, StoreError> {
+        let agents = self.agents.lock().unwrap_or_else(PoisonError::into_inner);
+        Ok(agents.get(&agent).and_then(|held| held.plans.clone()))
+    }
+
+    async fn keep_progress(
+        &self,
+        agent: AgentId,
+        progress: &ReportedProgress,
+    ) -> Result<(), StoreError> {
+        let mut agents = self.agents.lock().unwrap_or_else(PoisonError::into_inner);
+        agents.entry(agent).or_default().progress = Some(progress.clone());
+        Ok(())
+    }
+
+    async fn progress(&self, agent: AgentId) -> Result<Option<ReportedProgress>, StoreError> {
+        let agents = self.agents.lock().unwrap_or_else(PoisonError::into_inner);
+        Ok(agents.get(&agent).and_then(|held| held.progress.clone()))
     }
 }

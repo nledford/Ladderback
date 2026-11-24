@@ -763,7 +763,7 @@ fn shown(phase: Phase, refused: bool, rows: &[OperationRow]) -> Shown {
 /// A status as its badge shows it: its state, and its text. A status this
 /// build doesn't know is the empty state with the status as it came, never a
 /// blank cell.
-fn badge_of(localizer: &Localizer, status: &str) -> (BadgeState, String) {
+pub(crate) fn badge_of(localizer: &Localizer, status: &str) -> (BadgeState, String) {
     match status_display(status) {
         Some((state, label)) => (state, text(localizer, label)),
         None => (BadgeState::Empty, status.to_owned()),

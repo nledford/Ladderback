@@ -6,7 +6,8 @@ use app::ports::{Appended, Ingested, LatestReports, Outbox, OutboxEntry, ReportI
 use async_trait::async_trait;
 use domain::fleet::{
     AgentReport, EpochSeconds, Happening, Ingest, MAX_EPOCHS_HELD, MAX_REPORTS_HELD,
-    OutboxAdmission, OutboxEpoch, ReportSeq, WireName, admit, ingest,
+    OutboxAdmission, OutboxEpoch, PlansReport, ReportSeq, ReportedProgress, WireName, admit,
+    ingest,
 };
 use domain::{AgentId, OperationId, Timestamp, Uuid};
 use sqlx::sqlite::SqliteRow;
@@ -310,7 +311,29 @@ impl ReportInbox for SqliteStore {
             dropped: u64::try_from(dropped.unwrap_or(0)).map_err(|_| corrupt("dropped"))?,
         })
     }
+
+    async fn keep_plans(&self, agent: AgentId, plans: &PlansReport) -> Result<(), StoreError> {
+        live::keep_plans(self, agent, plans).await
+    }
+
+    async fn plans(&self, agent: AgentId) -> Result<Option<PlansReport>, StoreError> {
+        live::plans(self, agent).await
+    }
+
+    async fn keep_progress(
+        &self,
+        agent: AgentId,
+        progress: &ReportedProgress,
+    ) -> Result<(), StoreError> {
+        live::keep_progress(self, agent, progress).await
+    }
+
+    async fn progress(&self, agent: AgentId) -> Result<Option<ReportedProgress>, StoreError> {
+        live::progress(self, agent).await
+    }
 }
+
+mod live;
 
 /// The outbox's epoch and the last place it gave, none before its first
 /// report.
@@ -338,6 +361,7 @@ fn happening_text(happening: &Happening) -> (&'static str, Option<&str>) {
         Happening::Started => ("started", None),
         Happening::Succeeded => ("succeeded", None),
         Happening::Failed { code } => ("failed", Some(code.as_str())),
+        Happening::Cancelled => ("cancelled", None),
     }
 }
 
@@ -373,6 +397,7 @@ fn report_of(row: &SqliteRow) -> Result<AgentReport, StoreError> {
         ("failed", Some(code)) => Happening::Failed {
             code: WireName::parse(&code).map_err(|_| corrupt("code"))?,
         },
+        ("cancelled", None) => Happening::Cancelled,
         _ => return Err(corrupt("happening")),
     };
     Ok(AgentReport {

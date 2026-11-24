@@ -43,7 +43,7 @@ async fn copy_on(agent: &mut Agent, identifier: Option<MachineIdentifier>) {
 async fn copy_elsewhere(agent: &mut Agent) {
     copy_on(
         agent,
-        MachineIdentifier::parse(&format!("{:032x}", 0xc0_u32)).ok(),
+        MachineIdentifier::parse(crate::machine_steps::COPY_COMPUTER).ok(),
     )
     .await;
 }
@@ -61,11 +61,21 @@ async fn copy_backs_up(agent: &mut Agent, count: u32) {
     }
 }
 
+/// The copy's sync tells its machine's standing what the hub made of it,
+/// as the daemon's does (#1462), once a scenario set up its machine.
 #[when("the copy syncs with its hub")]
 async fn copy_syncs(agent: &mut Agent) {
     let machine = agent.pairing.second.take().expect("the copy");
-    other(agent).sync(&machine).await;
+    let standing = agent.machine.set_up_standing();
+    let side = other(agent);
+    side.standing = standing;
+    side.sync(&machine).await;
     agent.pairing.second = Some(machine);
+}
+
+#[given("the hub's refusals reach the copy with a signature the hub didn't make")]
+async fn refusals_forged(agent: &mut Agent) {
+    other(agent).forge_refusals();
 }
 
 #[when("the copy connects to its hub")]
@@ -84,6 +94,19 @@ async fn copy_refused(agent: &mut Agent) {
     };
     assert_eq!(refused.code.as_str(), "identity-conflict");
     assert_eq!(refused.holder, None);
+}
+
+#[then("the copy's sync fails as one its hub didn't sign")]
+async fn copy_unsigned(agent: &mut Agent) {
+    let side = other(agent);
+    assert!(
+        matches!(
+            side.synced.last(),
+            Some(Err(SyncFailure::Connect(ConnectFailure::Unsigned)))
+        ),
+        "{:?}",
+        side.synced.last()
+    );
 }
 
 #[then("the hub holds no report of the copy")]

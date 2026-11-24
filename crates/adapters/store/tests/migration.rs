@@ -248,7 +248,9 @@ async fn an_old_database_gains_the_rule_and_keeps_what_it_holds() {
             (21, true),
             (22, true),
             (23, true),
-            (24, true)
+            (24, true),
+            (25, true),
+            (26, true)
         ]
     );
     let prune = started(queued_on_repository(0x50, OperationKind::Prune));
@@ -323,7 +325,9 @@ async fn an_old_database_with_nothing_to_fix_is_upgraded_without_changing_a_row(
             (21, true),
             (22, true),
             (23, true),
-            (24, true)
+            (24, true),
+            (25, true),
+            (26, true)
         ]
     );
     let check = started(queued_on_repository(0x20, OperationKind::Check));
@@ -396,7 +400,9 @@ async fn a_log_from_before_the_alias_was_kept_reads_back_without_one() {
             (21, true),
             (22, true),
             (23, true),
-            (24, true)
+            (24, true),
+            (25, true),
+            (26, true)
         ]
     );
     let check = store
@@ -500,7 +506,9 @@ async fn a_log_at_version_4_gains_the_index_of_successes_and_changes_no_row() {
             (21, true),
             (22, true),
             (23, true),
-            (24, true)
+            (24, true),
+            (25, true),
+            (26, true)
         ]
     );
     let index: Option<String> = sqlx::query_scalar(
@@ -561,7 +569,7 @@ async fn a_database_at_version_9_gains_no_session_and_no_session_length_and_keep
     assert!(matches!(length, Ok(None)), "{length:?}");
     let mut raw = scratch.raw().await;
     assert_eq!(api_token_row(&mut raw).await, before);
-    assert_eq!(applied_versions(&mut raw).await.last(), Some(&(24, true)));
+    assert_eq!(applied_versions(&mut raw).await.last(), Some(&(26, true)));
 }
 
 #[tokio::test]
@@ -584,7 +592,7 @@ async fn a_database_at_version_10_gains_no_reading_and_keeps_its_sessions_length
         "{length:?}"
     );
     let mut raw = scratch.raw().await;
-    assert_eq!(applied_versions(&mut raw).await.last(), Some(&(24, true)));
+    assert_eq!(applied_versions(&mut raw).await.last(), Some(&(26, true)));
 }
 
 #[tokio::test]
@@ -606,7 +614,7 @@ async fn a_database_at_version_11_gains_no_release_check_and_keeps_its_session_l
         "{length:?}"
     );
     let mut raw = scratch.raw().await;
-    assert_eq!(applied_versions(&mut raw).await.last(), Some(&(24, true)));
+    assert_eq!(applied_versions(&mut raw).await.last(), Some(&(26, true)));
 }
 
 #[tokio::test]
@@ -625,7 +633,7 @@ async fn a_database_at_version_12_gains_no_proposal_and_keeps_its_release_check(
     let check = app::ports::ScheduleStore::release_check(&store).await;
     assert!(matches!(check, Ok(Some(_))), "{check:?}");
     let mut raw = scratch.raw().await;
-    assert_eq!(applied_versions(&mut raw).await.last(), Some(&(24, true)));
+    assert_eq!(applied_versions(&mut raw).await.last(), Some(&(26, true)));
 }
 
 #[tokio::test]
@@ -654,7 +662,7 @@ async fn a_database_at_version_13_keeps_its_proposals_with_nothing_decided() {
     assert_eq!(kept.approved_from, None);
     assert_eq!(kept.applied_as, None);
     let mut raw = scratch.raw().await;
-    assert_eq!(applied_versions(&mut raw).await.last(), Some(&(24, true)));
+    assert_eq!(applied_versions(&mut raw).await.last(), Some(&(26, true)));
 }
 
 /// A restore an earlier build logged names no entry: the column the
@@ -675,7 +683,7 @@ async fn a_database_at_version_14_keeps_its_restores_naming_no_entry() {
     assert_eq!(restore.record.kind, OperationKind::Restore);
     assert_eq!(restore.record.entry, None);
     let mut raw = scratch.raw().await;
-    assert_eq!(applied_versions(&mut raw).await.last(), Some(&(24, true)));
+    assert_eq!(applied_versions(&mut raw).await.last(), Some(&(26, true)));
 }
 
 /// A database an earlier build kept gains the hub's registry, empty, in
@@ -692,7 +700,7 @@ async fn a_database_at_version_15_gains_an_empty_registry_and_keeps_its_log() {
     let backup = store.get(id(0x71)).await.expect("reading works");
     assert!(backup.is_some(), "the backup is in the log");
     let mut raw = scratch.raw().await;
-    for table in ["agents", "pairing_tokens"] {
+    for table in ["agents", "pairing_tokens", "agent_tombstones"] {
         let rows: i64 =
             sqlx::query_scalar(sqlx::AssertSqlSafe(format!("SELECT COUNT(*) FROM {table}")))
                 .fetch_one(&mut raw)
@@ -700,7 +708,7 @@ async fn a_database_at_version_15_gains_an_empty_registry_and_keeps_its_log() {
                 .unwrap_or_else(|error| panic!("{table} is there: {error}"));
         assert_eq!(rows, 0, "{table} is empty");
     }
-    assert_eq!(applied_versions(&mut raw).await.last(), Some(&(24, true)));
+    assert_eq!(applied_versions(&mut raw).await.last(), Some(&(26, true)));
 }
 
 /// Version 17 gives every API token permissions in place of its scopes, each
@@ -785,7 +793,7 @@ async fn a_database_at_version_16_gives_each_api_token_the_permissions_its_scope
         "a token that could only start backups still reads nothing"
     );
     let mut raw = scratch.raw().await;
-    assert_eq!(applied_versions(&mut raw).await.last(), Some(&(24, true)));
+    assert_eq!(applied_versions(&mut raw).await.last(), Some(&(26, true)));
 }
 
 /// Version 18 records no TLS key for a hub that had none, so its next start
@@ -813,7 +821,7 @@ async fn a_database_at_version_17_gains_no_recorded_tls_key_and_keeps_its_tokens
                 .unwrap_or_else(|error| panic!("{table} is there: {error}"));
         assert_eq!(rows, expected, "{table}");
     }
-    assert_eq!(applied_versions(&mut raw).await.last(), Some(&(24, true)));
+    assert_eq!(applied_versions(&mut raw).await.last(), Some(&(26, true)));
 }
 
 /// Version 19 keeps each agent the hub registered, with no machine zone
@@ -847,7 +855,7 @@ async fn a_database_at_version_18_keeps_its_agents_with_no_zone() {
             None
         )]
     );
-    assert_eq!(applied_versions(&mut raw).await.last(), Some(&(24, true)));
+    assert_eq!(applied_versions(&mut raw).await.last(), Some(&(26, true)));
 }
 
 /// A restore an earlier build logged names no target: the column the
@@ -880,5 +888,74 @@ async fn a_database_at_version_19_keeps_its_restores_naming_no_target() {
     );
     assert_eq!(restore.record.restored_to, None);
     let mut raw = scratch.raw().await;
-    assert_eq!(applied_versions(&mut raw).await.last(), Some(&(24, true)));
+    assert_eq!(applied_versions(&mut raw).await.last(), Some(&(26, true)));
+}
+
+/// Version 25 keeps the agent's outbox as it was, gives the hub empty
+/// plans and progress, and refuses a negative time or count in them
+/// (§7.2, #1440).
+#[tokio::test]
+async fn a_database_at_version_24_keeps_its_outbox_and_gains_empty_plans_and_progress() {
+    let scratch = Scratch::new();
+    let mut old = database_at_version(&scratch, 24).await;
+    sqlx::query("INSERT INTO sync_outbox_meta (id, epoch, last_seq) VALUES (1, 'epoch-1', 3)")
+        .execute(&mut old)
+        .await
+        .expect("the outbox's epoch of version 24");
+    sqlx::query(
+        "INSERT INTO sync_outbox (seq, op_id, happening, code, at, kept) \
+         VALUES (3, 'op-1', 'failed', 'operation-failed', 1800000000000, 1)",
+    )
+    .execute(&mut old)
+    .await
+    .expect("a report of version 24");
+    old.close().await.expect("the old database is closed");
+
+    let _store = scratch.open().await;
+    let mut raw = scratch.raw().await;
+    let meta: (String, i64) = sqlx::query_as("SELECT epoch, last_seq FROM sync_outbox_meta")
+        .fetch_one(&mut raw)
+        .await
+        .expect("the outbox's epoch is there");
+    assert_eq!(meta, ("epoch-1".to_owned(), 3));
+    let reports: Vec<(i64, String, String, Option<String>, i64, i64)> =
+        sqlx::query_as("SELECT seq, op_id, happening, code, at, kept FROM sync_outbox")
+            .fetch_all(&mut raw)
+            .await
+            .expect("the outbox is there");
+    assert_eq!(
+        reports,
+        [(
+            3,
+            "op-1".to_owned(),
+            "failed".to_owned(),
+            Some("operation-failed".to_owned()),
+            1_800_000_000_000,
+            1
+        )]
+    );
+    for table in ["sync_plans", "sync_plan_snapshots", "sync_progress"] {
+        let rows: i64 =
+            sqlx::query_scalar(sqlx::AssertSqlSafe(format!("SELECT COUNT(*) FROM {table}")))
+                .fetch_one(&mut raw)
+                .await
+                .unwrap_or_else(|error| panic!("{table} is there: {error}"));
+        assert_eq!(rows, 0, "{table} is empty");
+    }
+    for negative in [
+        "INSERT INTO sync_plans (agent_id, place, plan_id, last_at, last_outcome, next_run) \
+         VALUES ('a', 0, 'p', -1, 'succeeded', NULL)",
+        "INSERT INTO sync_plans (agent_id, place, plan_id, last_at, last_outcome, next_run) \
+         VALUES ('a', 0, 'p', NULL, NULL, -1)",
+        "INSERT INTO sync_progress (agent_id, op_id, step, unit, current, total, at) \
+         VALUES ('a', 'op', NULL, 'bytes', -1, NULL, 0)",
+        "INSERT INTO sync_progress (agent_id, op_id, step, unit, current, total, at) \
+         VALUES ('a', 'op', NULL, 'bytes', 0, -1, 0)",
+        "INSERT INTO sync_progress (agent_id, op_id, step, unit, current, total, at) \
+         VALUES ('a', 'op', NULL, 'bytes', 0, NULL, -1)",
+    ] {
+        let refused = sqlx::query(negative).execute(&mut raw).await;
+        assert!(refused.is_err(), "refused: {negative}");
+    }
+    assert_eq!(applied_versions(&mut raw).await.last(), Some(&(26, true)));
 }

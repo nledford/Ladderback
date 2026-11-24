@@ -2372,8 +2372,9 @@ async fn with_sign_in_off_an_ai_agent_is_told_which_file_couldnt_be_read() {
     );
 }
 
-/// A machine that started waiting, and the other machine events (#569).
-fn machine_events() -> [api::UiEvent; 5] {
+/// A machine that started waiting, and the other machine events (#569,
+/// #1439).
+fn machine_events() -> [api::UiEvent; 6] {
     let agent = "018f0000-0000-7000-8000-0000000000a1".to_owned();
     let at = "2026-11-09T10:00:00Z".to_owned();
     [
@@ -2383,6 +2384,11 @@ fn machine_events() -> [api::UiEvent; 5] {
             at: at.clone(),
         },
         api::UiEvent::AgentApproved {
+            agent: agent.clone(),
+            hostname: "laptop".to_owned(),
+            at: at.clone(),
+        },
+        api::UiEvent::AgentRemoved {
             agent: agent.clone(),
             hostname: "laptop".to_owned(),
             at: at.clone(),

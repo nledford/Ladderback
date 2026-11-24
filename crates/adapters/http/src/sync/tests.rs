@@ -660,6 +660,7 @@ async fn approved_agent(
         identity.clone(),
         Arc::new(FakeSigning),
         Arc::new(SeededRandom::new(9)),
+        Arc::new(app::fakes::InMemoryLeaseCache::default()),
     );
     PairWithHub::new(machine, connector.clone())
         .pair(token, agent, hostname.clone(), None)

@@ -1,21 +1,24 @@
 //! The hub's own routes under `/api/v1/hub` (§16, decisions 120 and 121):
 //! the key its page shows, the pairing tokens the page makes and cancels,
-//! and the agents it lists and approves. Only a build with the hub has them
-//! (decision 122), and a daemon not serving as a hub answers them as it does
-//! any unknown path.
+//! and the agents it lists, approves, rejects and removes. Only a build
+//! with the hub has them (decision 122), and a daemon not serving as a hub
+//! answers them as it does any unknown path.
 //!
 //! Making a token and approving an agent are high-impact actions: a
 //! session's only (no API token permission opens them, so a token is refused
 //! before it gets here), confirmed by a fresh step-up each time, and refused
 //! from beyond loopback while sign-in is off (decision 120, "Who may make a
-//! token, approve or re-key").
+//! token, approve or re-key"). Rejecting or removing an agent only takes
+//! authority away: a session's only too, and refused beyond loopback while
+//! sign-in is off, but with no step-up (decision 154).
 
 use std::net::IpAddr;
 use std::sync::Arc;
 
 use api::ErrorCode;
 use app::pairing::{
-    ApprovalAsk, HubPairing, HubPairingError, Machine, MadeToken, TokenAsk, TokenAskRefused,
+    ApprovalAsk, HubPairing, HubPairingError, Machine, MadeToken, RemovalAsk, TokenAsk,
+    TokenAskRefused, progress_dto, time_of,
 };
 use axum::Router;
 use axum::extract::{ConnectInfo, Path, Request, State};
@@ -23,8 +26,9 @@ use axum::http::{HeaderMap, StatusCode};
 use axum::response::{IntoResponse, Response};
 use domain::access::step_up::StepUpConfirmation;
 use domain::fleet::{
-    AgentRecord, AgentStatus, ApprovalRefused, EpochSeconds, Fingerprint, HubAddress, HubRoute,
-    HubScheme, ListedAgent, PublicKey, ReportedOutcome, RouteRefused, TokenId, TokenTls,
+    AgentRecord, AgentStatus, ApprovalRefused, Fingerprint, HubAddress, HubRoute, HubScheme,
+    ListedAgent, PlansReport, PublicKey, RemovalRefused, ReportedOutcome, RouteRefused, TokenId,
+    TokenTls,
 };
 use domain::{AgentId, SignedDuration, Timestamp, Uuid};
 
@@ -37,6 +41,10 @@ const PAIRING_TOKEN_PATH: &str = "/api/v1/hub/pairing-tokens/{id}";
 /// [`api::agent_approval_path`] names it.
 const AGENT_APPROVAL_PATH: &str = "/api/v1/hub/agents/{id}/approval";
 
+/// The path the page rejects or removes one agent at: `POST`, as
+/// [`api::agent_removal_path`] names it.
+const AGENT_REMOVAL_PATH: &str = "/api/v1/hub/agents/{id}/removal";
+
 /// `routes` with the hub's own.
 pub(crate) fn routes(routes: Router<AppState>) -> Router<AppState> {
     routes
@@ -46,6 +54,7 @@ pub(crate) fn routes(routes: Router<AppState>) -> Router<AppState> {
         .route(api::HUB_AGENTS_PATH, axum::routing::get(agents))
         .route(api::HUB_MACHINES_PATH, axum::routing::get(machines))
         .route(AGENT_APPROVAL_PATH, axum::routing::post(approve))
+        .route(AGENT_REMOVAL_PATH, axum::routing::post(remove))
 }
 
 /// The hub's pairing, or none when this daemon doesn't serve as a hub.
@@ -239,6 +248,7 @@ fn machine_dto(machine: &Machine) -> api::HubMachineDto {
                         api::MachineOutcomeDto::Failed,
                         Some(code.as_str().to_owned()),
                     ),
+                    ReportedOutcome::Cancelled => (api::MachineOutcomeDto::Cancelled, None),
                 };
                 api::MachineOperationDto {
                     operation: operation.op_id.as_uuid().to_string(),
@@ -249,16 +259,30 @@ fn machine_dto(machine: &Machine) -> api::HubMachineDto {
                 }
             })
             .collect(),
+        plans: machine.plans.as_ref().map(plans_dto),
+        progress: machine.progress.as_ref().map(progress_dto),
     }
 }
 
-/// A reported time as the API writes times; none past what a timestamp
-/// holds, which no machine's clock reaches.
-fn time_of(at: EpochSeconds) -> Option<String> {
-    let seconds = i64::try_from(at.seconds()).ok()?;
-    Timestamp::from_second(seconds)
-        .ok()
-        .map(|time| time.to_string())
+/// A machine's plans as the dashboard shows them.
+fn plans_dto(plans: &PlansReport) -> api::MachinePlansDto {
+    api::MachinePlansDto {
+        plans: plans
+            .plans()
+            .iter()
+            .map(|plan| api::MachinePlanDto {
+                plan: plan.plan.as_str().to_owned(),
+                last_run: plan.last.and_then(|last| {
+                    time_of(last.at).map(|at| api::MachinePlanRunDto {
+                        at,
+                        status: last.outcome.wire_name().to_owned(),
+                    })
+                }),
+                next_run: plan.next_run.and_then(time_of),
+            })
+            .collect(),
+        left_out: plans.left_out(),
+    }
 }
 
 /// The waiting agent the path names approved, under the key the
@@ -313,6 +337,50 @@ async fn approve(
         }
         Ok(Err(ApprovalRefused::AlreadyApproved)) => {
             crate::refused(StatusCode::CONFLICT, ErrorCode::AgentApprovedAlready)
+        }
+        Err(refused) => ask_refusal(refused),
+    }
+}
+
+/// The agent the path names rejected while it waits, or removed once
+/// approved, under the key the [`api::RemoveAgentDto`] holds: the one the
+/// person saw. Answered `204 No Content`; no step-up is asked.
+async fn remove(
+    State(state): State<AppState>,
+    Path(id): Path<String>,
+    request: Request,
+) -> Response {
+    let Some(pairing) = pairing_of(&state) else {
+        return not_a_hub();
+    };
+    let peer = match peer_of(&request) {
+        Ok(peer) => peer,
+        Err(refused) => return *refused,
+    };
+    let beyond = beyond_loopback(request.headers(), peer);
+    // No agent ID was ever made from a path that isn't one.
+    let Ok(agent_id) = Uuid::parse_str(&id).map(AgentId::from_uuid) else {
+        return crate::refused(StatusCode::NOT_FOUND, ErrorCode::AgentUnknown);
+    };
+    // Bounded by the API's body limit, as an approval's is.
+    let Ok(body) = axum::body::to_bytes(request.into_body(), usize::MAX).await else {
+        return crate::refused(StatusCode::BAD_REQUEST, ErrorCode::InvalidBody);
+    };
+    let Ok(api::RemoveAgentDto { key }) = serde_json::from_slice(&body) else {
+        return crate::refused(StatusCode::BAD_REQUEST, ErrorCode::InvalidBody);
+    };
+    let Ok(agent_key) = PublicKey::from_hex(&key) else {
+        return crate::refused(StatusCode::BAD_REQUEST, ErrorCode::InvalidBody);
+    };
+    let ask = RemovalAsk {
+        agent_id,
+        agent_key,
+        beyond_loopback: beyond,
+    };
+    match pairing.remove_asked(ask).await {
+        Ok(Ok(_)) => StatusCode::NO_CONTENT.into_response(),
+        Ok(Err(RemovalRefused::Unknown)) => {
+            crate::refused(StatusCode::NOT_FOUND, ErrorCode::AgentUnknown)
         }
         Err(refused) => ask_refusal(refused),
     }

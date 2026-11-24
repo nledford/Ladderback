@@ -7,10 +7,10 @@ use app::ports::{Added, AgentRegistry, StoreError};
 use async_trait::async_trait;
 use domain::fleet::{
     AgentRecord, AgentStatus, ApprovalRefused, BindingKind, Fingerprint, HostnameKey, KEY_BYTES,
-    MachineCheck, MachineFingerprint, MachineZone, PairRefusal, PairRequest, Pairing, PairingView,
-    ProofRefusal, ProofRequest, ProofView, Proved, PublicKey, SecondMachine, TokenId, TokenRecord,
-    TokenUse, admits_unused_token, decide_approval, decide_pairing, decide_proof,
-    voids_tokens_for_new_key,
+    MachineCheck, MachineFingerprint, MachineZone, PENDING_LIFE, PairRefusal, PairRequest, Pairing,
+    PairingView, ProofRefusal, ProofRequest, ProofView, Proved, PublicKey, RemovalRefused,
+    SecondMachine, TokenId, TokenRecord, TokenUse, Tombstone, admits_unused_token, decide_approval,
+    decide_pairing, decide_proof, decide_removal, voids_tokens_for_new_key,
 };
 use domain::{AgentId, Timestamp};
 use sqlx::{Connection, SqliteConnection};
@@ -76,6 +76,18 @@ async fn agent(
         .await
         .map_err(unavailable)?;
     found.as_ref().map(row::agent).transpose()
+}
+
+async fn tombstone(
+    conn: &mut SqliteConnection,
+    agent_id: AgentId,
+) -> Result<Option<Tombstone>, StoreError> {
+    let found = sqlx::query(sql::TOMBSTONE)
+        .bind(row::agent_id_text(agent_id))
+        .fetch_optional(&mut *conn)
+        .await
+        .map_err(unavailable)?;
+    found.as_ref().map(row::tombstone).transpose()
 }
 
 async fn unused_tokens(
@@ -282,11 +294,13 @@ impl AgentRegistry for SqliteStore {
         )
         .await?;
         let pending = count(&mut tx, sql::COUNT_PENDING_AGENTS).await?;
+        let tombstone = tombstone(&mut tx, request.agent_id).await?;
         let view = PairingView {
             token: token.as_ref(),
             by_id: by_id.as_ref(),
             by_hostname: by_hostname.as_ref(),
             pending,
+            tombstone: tombstone.as_ref(),
         };
         let decided = decide_pairing(&view, request, now);
         match &decided {
@@ -478,5 +492,83 @@ impl AgentRegistry for SqliteStore {
             Err(_) => tx.rollback().await.map_err(unavailable)?,
         }
         Ok(decided)
+    }
+
+    /// One transaction, the write lock taken up front, so the record the
+    /// decision reads is the one it removes: of two removals at once, the
+    /// second finds no agent. The agent's row and its tombstone change
+    /// together or not at all.
+    async fn remove(
+        &self,
+        agent_id: AgentId,
+        agent_key: PublicKey,
+        now: Timestamp,
+    ) -> Result<Result<Tombstone, RemovalRefused>, StoreError> {
+        let now = to_the_millisecond(now);
+        let _call = self.call().await;
+        let mut conn = self.pool.acquire().await.map_err(unavailable)?;
+        let mut tx = conn
+            .begin_with("BEGIN IMMEDIATE")
+            .await
+            .map_err(unavailable)?;
+        let id = row::agent_id_text(agent_id);
+        let record = agent(&mut tx, sql::AGENT, id.clone()).await?;
+        let decided = decide_removal(record.as_ref(), &agent_key, now);
+        match &decided {
+            Ok(removed) => {
+                sqlx::query(sql::DELETE_AGENT)
+                    .bind(id.as_str())
+                    .execute(&mut *tx)
+                    .await
+                    .map_err(unavailable)?;
+                sqlx::query(sql::KEEP_TOMBSTONE)
+                    .bind(id.as_str())
+                    .bind(removed.key.as_bytes().as_slice())
+                    .bind(removed.hostname.as_str())
+                    .bind(removed.removed_at.as_millisecond())
+                    .execute(&mut *tx)
+                    .await
+                    .map_err(unavailable)?;
+                tx.commit().await.map_err(unavailable)?;
+            }
+            Err(_) => tx.rollback().await.map_err(unavailable)?,
+        }
+        Ok(decided)
+    }
+
+    async fn tombstone(&self, agent_id: AgentId) -> Result<Option<Tombstone>, StoreError> {
+        let _call = self.call().await;
+        let mut conn = self.pool.acquire().await.map_err(unavailable)?;
+        tombstone(&mut conn, agent_id).await
+    }
+
+    /// One transaction, the write lock taken up front, so an approval at
+    /// the same moment either lands first, and the agent is no longer
+    /// pending, or finds the agent dropped.
+    async fn drop_lapsed(&self, now: Timestamp) -> Result<Vec<AgentRecord>, StoreError> {
+        let Ok(cutoff) = now.checked_sub(PENDING_LIFE) else {
+            return Ok(Vec::new());
+        };
+        let _call = self.call().await;
+        let mut conn = self.pool.acquire().await.map_err(unavailable)?;
+        let mut tx = conn
+            .begin_with("BEGIN IMMEDIATE")
+            .await
+            .map_err(unavailable)?;
+        let rows = sqlx::query(sql::LAPSED_AGENTS)
+            .bind(cutoff.as_millisecond())
+            .fetch_all(&mut *tx)
+            .await
+            .map_err(unavailable)?;
+        let lapsed = rows.iter().map(row::agent).collect::<Result<Vec<_>, _>>()?;
+        for agent in &lapsed {
+            sqlx::query(sql::DELETE_AGENT)
+                .bind(row::agent_id_text(agent.agent_id))
+                .execute(&mut *tx)
+                .await
+                .map_err(unavailable)?;
+        }
+        tx.commit().await.map_err(unavailable)?;
+        Ok(lapsed)
     }
 }

@@ -517,4 +517,23 @@ pub(crate) mod hub {
     /// refusal. Parameter: the agent ID.
     pub(crate) const FORGET_MACHINE: &str =
         "UPDATE agents SET machine = NULL, second_machine_at = NULL WHERE id = ?";
+
+    /// Drops the agent under an ID. Parameter: the agent ID.
+    pub(crate) const DELETE_AGENT: &str = "DELETE FROM agents WHERE id = ?";
+
+    /// Keeps the tombstone of a removed agent, over any kept under its ID.
+    /// Parameters, in order: `id`, `pubkey`, `hostname`, `removed_at`.
+    pub(crate) const KEEP_TOMBSTONE: &str = concat!(
+        "INSERT OR REPLACE INTO agent_tombstones (id, pubkey, hostname, removed_at) ",
+        "VALUES (?, ?, ?, ?)"
+    );
+
+    /// The tombstone kept under an agent ID. Parameter: the agent ID.
+    pub(crate) const TOMBSTONE: &str =
+        "SELECT id, pubkey, hostname, removed_at FROM agent_tombstones WHERE id = ?";
+
+    /// The pending agents waiting since a moment or before, oldest first.
+    /// Parameter: the moment, in Unix milliseconds.
+    pub(crate) const LAPSED_AGENTS: &str =
+        select_agents!(" WHERE status = 'pending' AND status_at <= ? ORDER BY status_at, rowid");
 }

@@ -119,6 +119,12 @@ ui-copied-data-folder-heading = This data folder came from another computer
 # What the notice says under its heading while the data folder is a copy. Forget, prune and adoption are the maintenance a copy doesn't run.
 ui-copied-data-folder-body = { -brand-name } found that this computer isn't the one its data folder was made on: the folder was restored from a backup, or copied with a disk or a virtual machine. Backups run as usual. Forget, prune and adoption are stopped, so this computer can't remove the other computer's snapshots as if they were its own.
 
+# The heading of the start page's notice, shown when the hub this computer paired with refused it, signed, as a second computer under its machine ID: the hub took another computer as this machine first. This computer may be the original, so the notice never says it is a copy. It names the notice's region.
+ui-refused-machine-heading = Your { -hub } took another computer as this one
+
+# What the notice says under its heading while the hub refuses this computer: the two ways back, as the hub's refusal names them. `ladderback pairing-token --forget-computer` is typed as it is: keep it a string literal.
+ui-refused-machine-body = Your { -hub } refused this computer: it took another computer as this { -machine } first, as happens when a data folder is copied or the system is reinstalled. Backups run as usual, and their reports wait here until the { -hub } takes this computer. If this computer is the copy, take a new ID, restart { -brand-name } and pair it again. If it is the computer that should keep this ID, stop { -brand-name } on the other one or give that one a new ID, then stop the { -hub }'s daemon and run { "ladderback pairing-token --forget-computer" } with this { -machine }'s name on the { -hub }.
+
 # The notice's button, which asks first, in a dialog, before taking a new machine ID.
 ui-copied-data-folder-new-id = This is a new computer: take a new ID
 
@@ -134,8 +140,14 @@ ui-copied-data-folder-review-confirm = Take a new ID
 # Said in the dialog while the new machine ID is being taken.
 ui-copied-data-folder-review-taking = Taking a new machine ID…
 
-# What the notice says once the new machine ID is taken: it is used from the next start, and until then maintenance stays stopped.
-ui-copied-data-folder-taken = New machine ID taken. Restart { -brand-name } to start using it: until then, forget, prune and adoption stay stopped.
+# The heading of the notice once the new machine ID is taken, for a copied data folder or a computer its hub refused. It names the notice's region.
+ui-copied-data-folder-taken-heading = New machine ID taken
+
+# What the notice says under that heading: the new machine ID is used from the next start, and until then maintenance is stopped. A machine its hub refused maintained until the new ID was taken, so this never says it stays stopped.
+ui-copied-data-folder-taken = Restart { -brand-name } to start using it: until then, forget, prune and adoption are stopped.
+
+# Said politely once the new machine ID is taken, on its own, while focus moves to the notice's heading: the heading's words and the sentence under it, whole.
+ui-copied-data-folder-taken-said = New machine ID taken. Restart { -brand-name } to start using it: until then, forget, prune and adoption are stopped.
 
 # Said under that: taking the new ID turned maintenance off on each repository this computer maintained.
 ui-copied-data-folder-maintenance-off = Maintenance is off on every repository this computer maintained. Once { -brand-name } has restarted, turn it back on for each repository this computer should maintain.
@@ -3691,6 +3703,46 @@ ui-machines-approving = Approving { $hostname }…
 # Said in the review when the step-up is wrong: the machine wasn't approved.
 ui-machines-step-up-failed = That isn't right, so the { -machine } wasn't approved. Try again.
 
+# The button that opens the review of rejecting a waiting machine, and the review's button that rejects it.
+# $hostname (text): the machine's hostname.
+ui-machines-reject = Reject { $hostname }
+
+# The button that opens the review of removing an approved machine, and the review's button that removes it.
+# $hostname (text): the machine's hostname.
+ui-machines-remove = Remove { $hostname }
+
+# The title of the review of rejecting a waiting machine.
+# $hostname (text): the machine's hostname.
+ui-machines-reject-title = Reject { $hostname }?
+
+# The title of the review of removing an approved machine.
+# $hostname (text): the machine's hostname.
+ui-machines-remove-title = Remove { $hostname }?
+
+# What the review of rejecting a waiting machine says first. A paired machine maintains only under its hub's lease, so a rejected one runs no maintenance.
+# $hostname (text): the machine's hostname.
+ui-machines-reject-body = { $hostname } stops waiting and can't sync with this { -hub }, or pair with it again under its ID. It keeps backing up and runs no maintenance.
+
+# What the review of removing an approved machine says first. A paired machine maintains only under its hub's lease, so a removed one stops maintaining.
+# $hostname (text): the machine's hostname.
+ui-machines-remove-body = { $hostname } can't sync with this { -hub } any more, or pair with it again under its ID. It keeps backing up and stops running maintenance.
+
+# Said on the page once a waiting machine is rejected.
+# $hostname (text): the machine's hostname.
+ui-machines-rejected = { $hostname } is rejected.
+
+# Said on the page once an approved machine is removed.
+# $hostname (text): the machine's hostname.
+ui-machines-removed = { $hostname } is removed.
+
+# Said in the review while the hub rejects the machine, which holds the review still.
+# $hostname (text): the machine's hostname.
+ui-machines-rejecting = Rejecting { $hostname }…
+
+# Said in the review while the hub removes the machine, which holds the review still.
+# $hostname (text): the machine's hostname.
+ui-machines-removing = Removing { $hostname }…
+
 # Shown in place of the tables while the page reads the machines.
 ui-machines-loading = Loading the { -machine(form: "other") }…
 
@@ -3781,6 +3833,39 @@ ui-dashboard-code = Error code
 
 # A start or end the hub has no report of: the machine let its start go when its outbox was full, or it hasn't ended.
 ui-dashboard-unknown = Not reported
+
+# The name of the progress bar of the operation a machine runs, as its latest report to the hub told it (decision 83).
+# $hostname (string): the machine's name.
+ui-dashboard-progress = Progress of the operation running on { $hostname }
+
+# The caption of a machine's table of plans, as it last reported them.
+# $hostname (string): the machine's name.
+ui-dashboard-plans = Plans of { $hostname }
+
+# Shown in place of a machine's plans before its first report of them.
+ui-dashboard-no-plans = This { -machine } hasn't reported its plans yet.
+
+# Shown in place of a machine's plans when its report listed none.
+ui-dashboard-plans-none = This { -machine } reported no plans.
+
+# The headers of a machine's plans' columns: the plan, how its last run went and when, and when it runs next.
+ui-dashboard-plan = Plan
+ui-dashboard-last-run = Last run
+ui-dashboard-next-run = Next run
+
+# A plan the machine has never run.
+ui-dashboard-never-run = Not run yet
+
+# A plan with no run planned, such as one without a schedule.
+ui-dashboard-not-planned = None planned
+
+# A warning on a machine that has more plans than it reports to the hub, so the table leaves some out.
+# $count (number): how many plans it left out.
+ui-dashboard-plans-left-out =
+    { $count ->
+        [one] This { -machine } has one more plan than it reports to the { -hub }, so that plan isn't shown.
+       *[other] This { -machine } has { $count } more plans than it reports to the { -hub }, so those plans aren't shown.
+    }
 
 # Said politely when live updates on the dashboard are on again.
 # $count (number): how many machines changed while the updates were paused, which the page now shows.

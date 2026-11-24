@@ -20,4 +20,4 @@ The dashboard is the hub's main page, but the header's links are the same on eve
 
 - A machine that starts waiting is announced politely while any tab of Settings shows, not only the Machines tab: the person is in Settings, where approving it is one tab away.
 - A read that fails after one that answered keeps the machines shown and says nothing; the next event or the stream's next opening reads again.
-- The rest of §4.4's card (plans, next runs, overdue plans, live progress, recent failures) and a machine's own page wait for #1440; removing or rejecting a machine, and its event, for #1439.
+- The rest of §4.4's card (overdue plans, recent failures) and a machine's own page are still to come; plans, their next runs and live progress came with #1440 (§7.2). Removing or rejecting a machine, and its event, wait for #1439.

@@ -17,7 +17,9 @@ use crate::fakes::{
     FakeClock, FakeSigning, InMemoryAgentRegistry, InMemoryIdentity, InMemoryReportInbox,
     LoopbackHubConnector, SeededRandom,
 };
-use crate::pairing::{AgentPairing, ConnectToHub, HubPairing, PairWithHub};
+use crate::pairing::{
+    AgentPairing, ConnectToHub, HubPairing, PairWithHub, RemovalAsk, TokenAskRefused,
+};
 use crate::ports::{AgentRegistry as _, EventBus, OutboxEntry, ReportInbox as _};
 
 /// The events the hub told, in order.
@@ -99,6 +101,7 @@ async fn paired(hub: &Hub, n: u128) -> Arc<InMemoryIdentity> {
         identity.clone(),
         Arc::new(FakeSigning),
         Arc::new(SeededRandom::new(9_000 + u64::try_from(n).unwrap())),
+        Arc::new(crate::fakes::InMemoryLeaseCache::default()),
     );
     PairWithHub::new(
         pairing,
@@ -208,6 +211,7 @@ async fn each_report_taken_is_told_once() {
             entry(1, 0x0a, Happening::Started, 100),
             entry(2, 0x0a, Happening::Succeeded, 160),
             entry(3, 0x0b, Happening::Failed { code }, 200),
+            entry(4, 0x0c, Happening::Cancelled, 260),
         ],
     )
     .await;
@@ -246,9 +250,14 @@ async fn each_report_taken_is_told_once() {
                 MachineOutcomeDto::Succeeded
             ),
             (
-                agent,
+                agent.clone(),
                 op(0x0b).as_uuid().to_string(),
                 MachineOutcomeDto::Failed
+            ),
+            (
+                agent,
+                op(0x0c).as_uuid().to_string(),
+                MachineOutcomeDto::Cancelled
             ),
         ]
     );
@@ -333,4 +342,110 @@ async fn the_dashboard_shows_each_operation_it_shows_whole() {
             .all(|operation| operation.started_at.is_some() && operation.ended_at.is_some()),
         "{operations:?}"
     );
+}
+
+fn removal(n: u128, key: domain::fleet::PublicKey, beyond_loopback: bool) -> RemovalAsk {
+    RemovalAsk {
+        agent_id: agent_id(n),
+        agent_key: key,
+        beyond_loopback,
+    }
+}
+
+/// A machine removed, waiting or approved, is told to the browsers once,
+/// so another page drops it at once; a refused removal tells nothing.
+#[tokio::test]
+async fn a_removed_machine_is_told_and_a_refused_removal_is_not() {
+    let hub = hub();
+    paired(&hub, 1).await;
+    paired(&hub, 2).await;
+    approve(&hub, 2).await;
+    hub.told.taken();
+    for n in [1, 2] {
+        let key = hub.registry.agent(agent_id(n)).await.unwrap().unwrap().key;
+        let removed = hub.pairing.remove_asked(removal(n, key, false)).await;
+        assert!(matches!(removed, Ok(Ok(_))), "{removed:?}");
+        assert_eq!(
+            hub.told.taken(),
+            [UiEvent::AgentRemoved {
+                agent: agent_id(n).as_uuid().to_string(),
+                hostname: format!("laptop-{n}"),
+                at: now(),
+            }]
+        );
+        let again = hub.pairing.remove_asked(removal(n, key, false)).await;
+        assert!(
+            matches!(again, Ok(Err(domain::fleet::RemovalRefused::Unknown))),
+            "{again:?}"
+        );
+        assert_eq!(hub.told.taken(), []);
+    }
+}
+
+/// Beyond loopback with sign-in off, no removal is taken, as no approval
+/// is: the machine stays and nothing is told.
+#[tokio::test]
+async fn a_removal_beyond_loopback_needs_sign_in() {
+    let hub = hub();
+    paired(&hub, 1).await;
+    hub.told.taken();
+    let key = hub.registry.agent(agent_id(1)).await.unwrap().unwrap().key;
+    let refused = hub.pairing.remove_asked(removal(1, key, true)).await;
+    assert!(
+        matches!(refused, Err(TokenAskRefused::NeedsSignIn)),
+        "{refused:?}"
+    );
+    assert!(hub.registry.agent(agent_id(1)).await.unwrap().is_some());
+    assert_eq!(hub.told.taken(), []);
+}
+
+/// Machine `n`, waiting for approval since 7 days and an hour before the
+/// hub's clock: it has lapsed, though nothing has listed the agents since.
+fn lapsed(n: u128) -> domain::fleet::AgentRecord {
+    let since = Timestamp::from_second(NOW - 7 * 24 * 3_600 - 3_600).unwrap();
+    domain::fleet::AgentRecord {
+        agent_id: agent_id(n),
+        key: domain::fleet::PublicKey::from_bytes([u8::try_from(n).unwrap(); 32]).unwrap(),
+        hostname: hostname(n),
+        status: domain::fleet::AgentStatus::Pending { since },
+        counter: 1,
+        last_seen: since,
+        zone: None,
+    }
+}
+
+/// An approval drops the lapsed machines before it decides, so a machine
+/// that waited past 7 days unlisted is not approved, and is gone.
+#[tokio::test]
+async fn a_machine_that_lapsed_unlisted_is_not_approved() {
+    let hub = hub();
+    let laptop = lapsed(1);
+    hub.registry.hold(laptop.clone());
+    assert_eq!(
+        hub.pairing.approve(&laptop).await.unwrap(),
+        Err(domain::fleet::ApprovalRefused::Unknown)
+    );
+    assert_eq!(hub.registry.agent(agent_id(1)).await.unwrap(), None);
+}
+
+/// A pairing drops the lapsed machines before it counts the waiting ones,
+/// so 20 that lapsed unlisted leave room for a new machine.
+#[tokio::test]
+async fn machines_that_lapsed_unlisted_leave_room_for_a_new_one() {
+    let hub = hub();
+    // The hub makes its key only while no agent is registered.
+    hub.pairing.keys().await.unwrap();
+    for n in 1..=20 {
+        hub.registry.hold(lapsed(n));
+    }
+    paired(&hub, 21).await;
+    let ids: Vec<_> = hub
+        .registry
+        .agents()
+        .await
+        .unwrap()
+        .iter()
+        .map(|agent| agent.agent_id)
+        .collect();
+    assert_eq!(ids, [agent_id(21)]);
 }

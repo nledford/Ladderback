@@ -1037,3 +1037,15 @@ mod catalog_dto_tests {
         }
     }
 }
+
+/// The page rejects or removes a machine at a path of its own under the
+/// hub's agents, beside its approval, as the hub routes it.
+#[test]
+fn a_machines_removal_has_a_path_of_its_own() {
+    let id = "0194f3a2-6b1c-7d2e-8f30-415263748596";
+    assert_eq!(
+        agent_removal_path(id),
+        "/api/v1/hub/agents/0194f3a2-6b1c-7d2e-8f30-415263748596/removal"
+    );
+    assert_ne!(agent_removal_path(id), agent_approval_path(id));
+}

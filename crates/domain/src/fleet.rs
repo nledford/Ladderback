@@ -15,6 +15,7 @@ mod keys;
 mod machine;
 mod outbox;
 mod pin;
+mod plans;
 mod registry;
 mod reported;
 mod route;
@@ -52,13 +53,17 @@ pub use outbox::{
     repos_kind,
 };
 pub use pin::{HubPin, MAX_PIN_BYTES, PinRefused};
+pub use plans::{
+    LastRun, LastRunOutcome, MAX_PLANS_REPORTED, PlansReport, ReportedPlan, ReportedProgress,
+    plans_ack_kind, plans_kind, progress_kind, progress_shown,
+};
 pub use registry::{
     AgentRecord, AgentStatus, ApprovalRefused, HostnameKey, HostnameSkeleton, LONGEST_TOKEN_LIFE,
-    ListedAgent, Lookalike, PENDING_LIMIT, PairRefusal, PairRequest, Pairing, PairingView,
-    ProofRefusal, ProofRequest, ProofView, Proved, SHORTEST_TOKEN_LIFE, TOKEN_LIFE,
-    TokenLifeRefused, TokenRecord, TokenUse, UNUSED_TOKEN_LIMIT, UnusedTokensFull,
-    admits_unused_token, decide_approval, decide_pairing, decide_proof, list_agents, token_life,
-    voids_tokens_for_new_key,
+    ListedAgent, Lookalike, PENDING_LIFE, PENDING_LIMIT, PairRefusal, PairRequest, Pairing,
+    PairingView, ProofRefusal, ProofRequest, ProofView, Proved, RemovalRefused,
+    SHORTEST_TOKEN_LIFE, TOKEN_LIFE, TokenLifeRefused, TokenRecord, TokenUse, Tombstone,
+    UNUSED_TOKEN_LIMIT, UnusedTokensFull, admits_unused_token, decide_approval, decide_pairing,
+    decide_proof, decide_removal, list_agents, token_life, voids_tokens_for_new_key,
 };
 pub use reported::{
     OPERATIONS_SHOWN, REPORTS_READ, ReportedOperation, ReportedOutcome, latest_operations,
