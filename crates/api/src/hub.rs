@@ -234,17 +234,19 @@ pub struct MachineOperationDto {
 }
 
 /// One approved machine on the hub's dashboard: when the hub last heard
-/// from it (RFC 3339), its IANA time zone when it gave one, how many of its
-/// reports the hub let go of past the cap, and its latest operations,
-/// newest first. Whether it is online isn't told: a machine connects only
-/// to send its reports, so the hub holds no lasting connection to read it
-/// from (§16, decision 149).
+/// from it (RFC 3339), whether it is online, its IANA time zone when it
+/// gave one, how many of its reports the hub let go of past the cap, and
+/// its latest operations, newest first. Online means the hub holds the
+/// machine's sync connection, which it closes once the machine sent
+/// nothing for 90 seconds (§16, decision 159).
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "kebab-case", deny_unknown_fields)]
 pub struct HubMachineDto {
     pub agent_id: String,
     pub hostname: String,
     pub last_seen: String,
+    #[serde(default)]
+    pub online: bool,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub zone: Option<String>,
     pub reports_dropped: u64,

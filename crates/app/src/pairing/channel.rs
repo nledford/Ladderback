@@ -3,16 +3,16 @@ use std::sync::Arc;
 use domain::fleet::{
     Ack, AgentEnvelope, Binding, EpochSeconds, FIRST_SEQUENCE, HubEnvelope, Nonce, PayloadDigest,
     PlansReport, PublicKey, ReportedProgress, SignedMessage, SigningSeed, WireName, ack_kind,
-    fresh_on_hub_time, grants_kind, plans_ack_kind, plans_kind, progress_kind, release_kind,
-    released_kind, report_kind, repos_kind, withheld_kind,
+    fresh_on_hub_time, grants_kind, heartbeat_ack_kind, heartbeat_kind, plans_ack_kind, plans_kind,
+    progress_kind, release_kind, released_kind, report_kind, repos_kind, withheld_kind,
 };
 use domain::maintenance::{LeaseEpoch, RepoGrants, RepositoryReports};
 use domain::{AgentId, RepositoryId, SignedDuration};
 
 use super::wire::{
-    HubMessage, agent_envelope_frame, hub_message, plans_payload, progress_payload, read_ack,
-    read_grants, read_plans_ack, read_released, read_withheld, release_payload, report_payload,
-    repos_payload,
+    HubMessage, agent_envelope_frame, heartbeat_payload, hub_message, plans_payload,
+    progress_payload, read_ack, read_grants, read_heartbeat_ack, read_plans_ack, read_released,
+    read_withheld, release_payload, report_payload, repos_payload,
 };
 use crate::ports::{Clock, HubLink, LinkError, OutboxEntry, Signing, SigningError};
 
@@ -200,6 +200,23 @@ impl AgentChannel {
     /// answers it with nothing.
     pub async fn send_progress(&mut self, progress: &ReportedProgress) -> Result<(), ChannelError> {
         self.send(progress_kind(), progress_payload(progress)).await
+    }
+
+    /// Sends a heartbeat, signed with the next sequence number (§16,
+    /// decision 159).
+    pub async fn send_heartbeat(&mut self) -> Result<(), ChannelError> {
+        self.send(heartbeat_kind(), heartbeat_payload()).await
+    }
+
+    /// The hub's next `HeartbeatAck`, once it holds. A signed message of a
+    /// kind this build doesn't take is counted and passed over.
+    pub async fn receive_heartbeat_ack(&mut self) -> Result<(), ChannelError> {
+        loop {
+            let envelope = self.receive().await?;
+            if envelope.kind == heartbeat_ack_kind() {
+                return read_heartbeat_ack(&envelope.payload).map_err(|_| ChannelError::OutOfTurn);
+            }
+        }
     }
 
     /// Sends a message of `kind` holding `payload`, signed with the next

@@ -186,6 +186,13 @@ pub(crate) fn no_plans(plans: Option<&MachinePlansDto>) -> MessageId {
     }
 }
 
+/// What a machine's section says of its connection: that it is online now,
+/// while the hub holds its connection, or when it last connected (§16,
+/// decision 159).
+pub(crate) fn connection_line(online: bool) -> MessageId {
+    todo!("{online}")
+}
+
 /// How the instant `at` (RFC 3339) reads on the dashboard: in the viewer's
 /// zone, and after it in the machine's own `zone` when the machine gave one
 /// and it differs from the viewer's (#115). `None` when `at` can't be read.

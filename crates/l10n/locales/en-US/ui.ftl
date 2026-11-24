@@ -3844,6 +3844,10 @@ ui-dashboard-unreachable = The { -hub } didn't answer, so its { -machine(form: "
 # $when (string): the time, as ui-instant or ui-dashboard-time-elsewhere writes it.
 ui-dashboard-last-connected = Last connected { $when }.
 
+# Shown in place of ui-dashboard-last-connected while the hub holds the machine's connection.
+# $when (string): when the machine last connected, which this message doesn't show.
+ui-dashboard-online-now = Online now.
+
 # An instant in the viewer's zone, then in the machine's own zone, which differs (#115), written as ui-instant writes one.
 # $time (instant): the instant in the viewer's zone.
 # $there (instant): the same instant in the machine's zone.

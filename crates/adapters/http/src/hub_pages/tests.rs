@@ -773,6 +773,7 @@ async fn the_page_shows_each_approved_machine_with_its_latest_operations() {
             agent_id: approved.agent_id.as_uuid().to_string(),
             hostname: "macbook".to_owned(),
             last_seen: approved.last_seen.to_string(),
+            online: false,
             zone: None,
             reports_dropped: 0,
             operations: vec![

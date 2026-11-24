@@ -40,6 +40,18 @@ pub struct LastRunPayload {
 #[serde(deny_unknown_fields)]
 pub struct PlansAckPayload {}
 
+/// The payload of the agent's `Heartbeat` (§16, decision 159): empty, as
+/// what it runs reaches the hub as reports and progress and its next runs
+/// in its `PlansSnapshot`. A field a later release adds is read past.
+#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct HeartbeatPayload {}
+
+/// The payload of the hub's `HeartbeatAck`: it heard the heartbeat. Empty;
+/// the signed message's place in the session says which it answers.
+#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct HeartbeatAckPayload {}
+
 /// The payload of the agent's `Progress`: the latest progress of the
 /// operation `op_id`, its step and unit by their wire names, how far it
 /// came of its total, and when the agent heard it.
@@ -71,4 +83,10 @@ macro_rules! payload_bytes {
     )+};
 }
 
-payload_bytes!(PlansPayload, PlansAckPayload, ProgressPayload);
+payload_bytes!(
+    PlansPayload,
+    PlansAckPayload,
+    ProgressPayload,
+    HeartbeatPayload,
+    HeartbeatAckPayload
+);

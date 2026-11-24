@@ -1,13 +1,14 @@
 use std::collections::VecDeque;
-use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU64, AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex, PoisonError};
 
 use api::sync::{AgentFrame, HubFrame, MAX_FRAME_BYTES};
 use async_trait::async_trait;
-use domain::fleet::{HubRoute, KEY_BYTES, RouteSession};
+use domain::fleet::{HubRoute, KEY_BYTES, RouteSession, SILENCE_LIMIT};
+use domain::{AgentId, SignedDuration};
 
 use crate::pairing::{HubPairing, HubSession, HubStep};
-use crate::ports::{HubConnector, HubLink, LinkError};
+use crate::ports::{Clock, HubConnector, HubLink, LinkError};
 
 /// The `tls-exporter` value both ends of a pinned link see.
 pub const LOOPBACK_EXPORTER: [u8; KEY_BYTES] = [0xee; KEY_BYTES];
@@ -38,7 +39,52 @@ struct Tap {
     /// Whether each refusal reaches the agent with a signature the hub
     /// didn't make.
     forging: AtomicBool,
+    /// Every link the connector opened, in order, as the hub's transport
+    /// holds it.
+    links: Mutex<Vec<Arc<Held>>>,
+    /// The hub's clock, by which a link that sent nothing for
+    /// [`SILENCE_LIMIT`] is closed, when the connector watches for it.
+    clock: Mutex<Option<Arc<dyn Clock>>>,
 }
+
+impl Tap {
+    /// Now on the hub's clock, when the connector watches it.
+    fn heard_now(&self) -> SignedDuration {
+        self.clock
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .as_ref()
+            .map_or(SignedDuration::ZERO, |clock| clock.monotonic())
+    }
+}
+
+/// One link as the hub's transport holds it (decision 159): its number,
+/// the approved machine it syncs for once it does, whether the hub closed
+/// it, and when on the hub's clock it last heard a frame.
+struct Held {
+    connection: u64,
+    live: Mutex<Option<AgentId>>,
+    closed: AtomicBool,
+    heard: Mutex<SignedDuration>,
+}
+
+impl Held {
+    /// Closes the link from the hub's side and tells the hub it went away,
+    /// once.
+    async fn ended(&self, hub: &HubPairing) {
+        let live = *self.live.lock().unwrap_or_else(PoisonError::into_inner);
+        if self.closed.swap(true, Ordering::SeqCst) {
+            return;
+        }
+        if let Some(agent) = live {
+            hub.went_away(agent, self.connection).await;
+        }
+    }
+}
+
+/// The number of the next link any connector opens, as the hub's
+/// transport numbers its connections.
+static NEXT_CONNECTION: AtomicU64 = AtomicU64::new(1);
 
 impl LoopbackHubConnector {
     /// A connector whose every route reaches `hub`.
@@ -114,6 +160,67 @@ impl LoopbackHubConnector {
     pub fn forge_refusals(&self) {
         self.tap.forging.store(true, Ordering::SeqCst);
     }
+
+    /// The connector closing each link that sent nothing for
+    /// [`SILENCE_LIMIT`] by `clock`, the hub's, when asked to
+    /// ([`Self::close_silent`]), as the hub's transport does.
+    #[must_use]
+    pub fn watching(self, clock: Arc<dyn Clock>) -> Self {
+        *self
+            .tap
+            .clock
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner) = Some(clock);
+        self
+    }
+
+    /// The hub dropping every open link, as a network that went away or a
+    /// hub that stopped: the agent finds each closed at its next frame.
+    pub async fn drop_links(&self) {
+        let Some(hub) = &self.hub else {
+            return;
+        };
+        for held in self.held() {
+            held.ended(hub).await;
+        }
+    }
+
+    /// The hub closing each open link that sent nothing for
+    /// [`SILENCE_LIMIT`] by the clock it watches ([`Self::watching`]).
+    pub async fn close_silent(&self) {
+        let clock = self
+            .tap
+            .clock
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .clone();
+        let (Some(hub), Some(clock)) = (&self.hub, clock) else {
+            return;
+        };
+        let now = clock.monotonic();
+        for held in self.held() {
+            let heard = *held.heard.lock().unwrap_or_else(PoisonError::into_inner);
+            if now - heard >= SILENCE_LIMIT {
+                held.ended(hub).await;
+            }
+        }
+    }
+
+    /// How many links the hub holds open.
+    pub fn open_links(&self) -> usize {
+        self.held()
+            .iter()
+            .filter(|held| !held.closed.load(Ordering::SeqCst))
+            .count()
+    }
+
+    fn held(&self) -> Vec<Arc<Held>> {
+        self.tap
+            .links
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .clone()
+    }
 }
 
 #[async_trait]
@@ -137,13 +244,24 @@ impl HubConnector for LoopbackHubConnector {
         let exporter =
             matches!(route.session, RouteSession::Pinned(_)).then_some(LOOPBACK_EXPORTER);
         let session = hub.session(exporter.filter(|_| self.hub_binds)).await.ok();
+        let held = Arc::new(Held {
+            connection: NEXT_CONNECTION.fetch_add(1, Ordering::SeqCst),
+            live: Mutex::new(None),
+            closed: AtomicBool::new(false),
+            heard: Mutex::new(self.tap.heard_now()),
+        });
+        self.tap
+            .links
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .push(held.clone());
         Ok(Box::new(LoopLink {
             hub,
             exporter,
             tap: self.tap.clone(),
             session,
             inbox: VecDeque::new(),
-            closed: false,
+            held,
             reason: None,
         }))
     }
@@ -157,14 +275,20 @@ struct LoopLink {
     session: Option<HubSession>,
     /// What the hub sent that the agent hasn't read, in the order sent.
     inbox: VecDeque<String>,
-    closed: bool,
+    /// The link as the hub holds it: its `closed` is the hub's side.
+    held: Arc<Held>,
     reason: Option<String>,
 }
 
 impl LoopLink {
-    fn close(&mut self, reason: Option<&str>) {
-        self.closed = true;
+    /// The hub closes the link, `reason` its close reason.
+    async fn close(&mut self, reason: Option<&str>) {
         self.reason = reason.map(str::to_owned);
+        self.held.ended(&self.hub).await;
+    }
+
+    fn closed(&self) -> bool {
+        self.held.closed.load(Ordering::SeqCst)
     }
 
     /// `answer` as it reaches the agent: a refusal with a signature the hub
@@ -191,7 +315,7 @@ impl HubLink for LoopLink {
     }
 
     async fn send(&mut self, frame: &AgentFrame) -> Result<(), LinkError> {
-        if self.closed {
+        if self.closed() {
             return Err(LinkError::Closed {
                 reason: self.reason.clone(),
             });
@@ -202,18 +326,24 @@ impl HubLink for LoopLink {
             .lock()
             .unwrap_or_else(PoisonError::into_inner)
             .push(text.clone());
+        *self
+            .held
+            .heard
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner) = self.tap.heard_now();
         let Some(session) = self.session.as_mut() else {
-            self.close(None);
+            self.close(None).await;
             return Ok(());
         };
         let read = match AgentFrame::from_text(&text) {
             Ok(read) if text.len() <= MAX_FRAME_BYTES => read,
             _ => {
-                self.close(None);
+                self.close(None).await;
                 return Ok(());
             }
         };
-        match self.hub.step(session, &read).await {
+        let step = self.hub.step(session, &read).await;
+        match step {
             HubStep::Reply(answer) => {
                 let lost = matches!(&answer, HubFrame::Signed { kind, .. } if kind == "Ack")
                     && self
@@ -224,7 +354,7 @@ impl HubLink for LoopLink {
                         })
                         .is_ok();
                 if lost {
-                    self.close(None);
+                    self.close(None).await;
                 } else {
                     let delivered = self.delivered(answer);
                     self.inbox.push_back(delivered);
@@ -234,10 +364,10 @@ impl HubLink for LoopLink {
             HubStep::Last(answer) => {
                 let delivered = self.delivered(answer);
                 self.inbox.push_back(delivered);
-                self.closed = true;
+                self.close(None).await;
             }
-            HubStep::Close(reason) => self.close(Some(reason)),
-            HubStep::Fail(_) => self.close(None),
+            HubStep::Close(reason) => self.close(Some(reason)).await,
+            HubStep::Fail(_) => self.close(None).await,
         }
         Ok(())
     }

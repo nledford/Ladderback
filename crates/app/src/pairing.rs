@@ -19,9 +19,9 @@ pub use channel::{AgentChannel, ChannelError};
 pub use client::{PairFailure, PairWithHub};
 pub use connection::{ConnectFailure, ConnectToHub, Connected};
 pub use hub::{
-    AgentsListed, ApprovalAsk, HelloAnswer, HubHandshake, HubKeys, HubPairing, HubPairingError,
-    HubStart, Machine, MadeToken, MessageRefused, ProofAnswer, RecoveryAsk, RemovalAsk, TokenAsk,
-    TokenAskRefused, progress_dto, proven_floors, signed_grants, time_of,
+    AgentsListed, ApprovalAsk, CloseConnection, HelloAnswer, HubHandshake, HubKeys, HubPairing,
+    HubPairingError, HubStart, Machine, MadeToken, MessageRefused, ProofAnswer, RecoveryAsk,
+    RemovalAsk, TokenAsk, TokenAskRefused, progress_dto, proven_floors, signed_grants, time_of,
 };
 pub use session::{BINDING_UNAVAILABLE, HubSession, HubStep, PROTOCOL_ERROR, SEQUENCE_ERROR};
 pub use state::PairingState;
