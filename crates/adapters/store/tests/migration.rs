@@ -24,6 +24,8 @@ use support::*;
 const LAPTOP_HEX: &str = "1212121212121212121212121212121212121212121212121212121212121212";
 const SERVER_HEX: &str = "3434343434343434343434343434343434343434343434343434343434343434";
 
+type FloorRow = (String, i64, Option<i64>, Option<Vec<u8>>);
+
 /// The database file as the first build left it: the first migration applied,
 /// and no other.
 async fn database_at_version_1(scratch: &Scratch) -> SqliteConnection {
@@ -987,7 +989,7 @@ async fn a_database_at_version_26_keeps_its_floors_without_proof_and_gains_no_re
 
     let _store = scratch.open().await;
     let mut raw = scratch.raw().await;
-    let floors: Vec<(String, i64, Option<i64>, Option<Vec<u8>>)> =
+    let floors: Vec<FloorRow> =
         sqlx::query_as("SELECT repo_id, epoch, expires_at, signature FROM agent_epoch_floors")
             .fetch_all(&mut raw)
             .await
