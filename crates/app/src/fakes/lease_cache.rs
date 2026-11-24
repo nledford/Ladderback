@@ -26,4 +26,8 @@ impl LeaseCache for InMemoryLeaseCache {
         *self.kept.lock().unwrap_or_else(PoisonError::into_inner) = leases.clone();
         Ok(())
     }
+
+    async fn save_pauses(&self, leases: &HeldLeases) -> Result<(), StoreError> {
+        todo!("{leases:?}")
+    }
 }

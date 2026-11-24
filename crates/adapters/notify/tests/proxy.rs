@@ -151,7 +151,7 @@ fn deliver_in_copy(expect: &str) {
                 },
                 event: Event {
                     kind: EventKind::BackupFailed,
-                    operation: OperationId::from_uuid(Uuid::from_u128(1)),
+                    operation: Some(OperationId::from_uuid(Uuid::from_u128(1))),
                     plan: None,
                     repository: None,
                     at: Timestamp::UNIX_EPOCH,

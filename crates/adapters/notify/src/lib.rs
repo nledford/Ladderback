@@ -248,7 +248,7 @@ fn webhook_body(event: &Event, message: &str) -> serde_json::Value {
     serde_json::json!({
         "event": event.kind.name(),
         "message": message,
-        "operation": event.operation.as_uuid().to_string(),
+        "operation": event.operation.map(|operation| operation.as_uuid().to_string()),
         "plan": event.plan.as_ref().map(|plan| plan.as_str()),
         "repository": event.repository.as_ref().map(|repository| repository.as_str()),
         "code": event.code(),
@@ -260,7 +260,12 @@ fn webhook_body(event: &Event, message: &str) -> serde_json::Value {
 
 /// The catalog's text for `event`, in the localizer's locale.
 fn default_message(localizer: &Localizer, event: &Event) -> String {
-    let operation = || event.operation.as_uuid().to_string();
+    let operation = || {
+        event.operation.map_or_else(
+            || "none".to_owned(),
+            |operation| operation.as_uuid().to_string(),
+        )
+    };
     let plan = event
         .plan
         .as_ref()
@@ -337,6 +342,7 @@ fn default_message(localizer: &Localizer, event: &Event) -> String {
                 ("code", MsgArg::Text(code)),
             ],
         ),
+        EventKind::RepoMaintenancePaused => todo!("{repository}"),
     };
     localizer.message(id, &args).text().to_owned()
 }
@@ -355,6 +361,7 @@ fn title(localizer: &Localizer, kind: EventKind) -> String {
         EventKind::PruneFailed => msg::NOTIFY_TITLE_PRUNE_FAILED,
         EventKind::CheckFailed => msg::NOTIFY_TITLE_CHECK_FAILED,
         EventKind::RestoreFailed => msg::NOTIFY_TITLE_RESTORE_FAILED,
+        EventKind::RepoMaintenancePaused => todo!(),
     };
     localizer.message(id, &[]).text().to_owned()
 }

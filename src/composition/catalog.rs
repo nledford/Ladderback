@@ -817,6 +817,7 @@ pub(super) fn repository_row(
     api::RepositoryDto {
         alias: alias.as_str().to_owned(),
         maintained_here: domain::maintenance::Ownership::owned_here(maintenance),
+        maintenance_paused_since: None,
         create_offered,
         repository: redacted_location(settings, &settings.repository),
         repo_hot: settings

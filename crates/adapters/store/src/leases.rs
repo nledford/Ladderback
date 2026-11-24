@@ -103,6 +103,10 @@ impl LeaseCache for SqliteStore {
         }
         tx.commit().await.map_err(unavailable)
     }
+
+    async fn save_pauses(&self, leases: &HeldLeases) -> Result<(), StoreError> {
+        todo!("{leases:?}")
+    }
 }
 
 /// A number as a column holds it. One past `i64::MAX` never reaches here:

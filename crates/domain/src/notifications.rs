@@ -51,6 +51,10 @@ pub enum EventKind {
     /// A restore of a snapshot's entry failed (§10.4): its success and its
     /// start are not told.
     RestoreFailed,
+    /// A paired machine's maintenance of a repository has been paused for
+    /// want of a lease from its hub for 14 days (§7.3): told once per
+    /// pause.
+    RepoMaintenancePaused,
 }
 
 /// How an operation ended, as far as a notification tells it.
@@ -72,7 +76,7 @@ pub enum Ping {
 
 impl EventKind {
     /// Every event, in the order rules list them.
-    pub const ALL: [Self; 9] = [
+    pub const ALL: [Self; 10] = [
         Self::BackupStarted,
         Self::BackupSucceeded,
         Self::BackupWarning,
@@ -82,6 +86,7 @@ impl EventKind {
         Self::PruneFailed,
         Self::CheckFailed,
         Self::RestoreFailed,
+        Self::RepoMaintenancePaused,
     ];
 
     /// The event's name, as a rule, a template and a webhook's body say it:
@@ -97,6 +102,7 @@ impl EventKind {
             Self::PruneFailed => "prune.failed",
             Self::CheckFailed => "check.failed",
             Self::RestoreFailed => "restore.failed",
+            Self::RepoMaintenancePaused => "repo.maintenance_paused",
         }
     }
 
@@ -118,7 +124,8 @@ impl EventKind {
             | Self::ForgetFailed
             | Self::PruneFailed
             | Self::CheckFailed
-            | Self::RestoreFailed => Ping::Fail,
+            | Self::RestoreFailed
+            | Self::RepoMaintenancePaused => Ping::Fail,
         }
     }
 
@@ -150,13 +157,15 @@ impl EventKind {
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Event {
     pub kind: EventKind,
-    pub operation: OperationId,
+    /// The operation it tells of; none for a repository's paused
+    /// maintenance, which no operation is.
+    pub operation: Option<OperationId>,
     /// The plan of a backup.
     pub plan: Option<PlanId>,
     /// The repository, by the alias this agent gives it.
     pub repository: Option<RepositoryAlias>,
     /// When the operation started, for a start, or ended; for a retry, when
-    /// the retry runs.
+    /// the retry runs; for paused maintenance, since when it is paused.
     pub at: Timestamp,
     /// The codes the event tells (§9): the failure's stored code
     /// (`operation-failed`), for a failure whose reason the operation
@@ -258,10 +267,16 @@ impl Event {
         })
     }
 
+    /// The event of a paired machine's maintenance of `repository`, by its
+    /// alias here, paused for want of a lease since `since`.
+    pub fn maintenance_paused(repository: RepositoryAlias, since: Timestamp) -> Self {
+        todo!("{repository:?} {since}")
+    }
+
     fn of(kind: EventKind, subject: Subject<'_>, codes: Vec<&'static str>, at: Timestamp) -> Self {
         Self {
             kind,
-            operation: subject.operation,
+            operation: Some(subject.operation),
             plan: subject.target.plan.clone(),
             repository: subject.repository.cloned(),
             at,

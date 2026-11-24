@@ -17,7 +17,7 @@ use domain::notifications::{
 };
 use domain::planning::Locale;
 use domain::secrets::{Redactor, SecretRef, SecretValue, SecretWarning};
-use domain::{OperationId, Timestamp, Uuid};
+use domain::{OperationId, RepositoryAlias, Timestamp, Uuid};
 use futures::StreamExt;
 use futures::channel::mpsc;
 use futures::future::{self, join_all};
@@ -174,6 +174,14 @@ impl Notify {
             Some(news) => self.told(news).await,
             None => Vec::new(),
         }
+    }
+
+    /// Tells the channels of every rule that sends `repo.maintenance_paused`
+    /// that this machine's maintenance of `repository` has been paused for
+    /// want of a lease since `since`, and returns what there is to report,
+    /// as [`Self::tell`] does.
+    pub async fn tell_paused(&self, repository: &RepositoryAlias, since: Timestamp) -> Vec<Report> {
+        todo!("{repository:?} {since}")
     }
 
     /// Tells the event `news` is, as [`Self::tell`] does.

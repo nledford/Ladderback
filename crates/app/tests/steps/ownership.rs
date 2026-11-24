@@ -11,17 +11,19 @@
 //! moves with it. A machine that pairs does so in process, on that cache,
 //! with a hub's pairing use case of its own.
 
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 use std::sync::Arc;
 
 use app::fakes::{
-    FakeClock, FakeSigning, InMemoryAgentRegistry, InMemoryIdentity, InMemoryLeaseCache,
-    InMemoryOwnershipRegistry, SeededRandom,
+    FakeClock, FakeSecrets, FakeSigning, InMemoryAgentRegistry, InMemoryConfigStore,
+    InMemoryIdentity, InMemoryLeaseCache, InMemoryOperationStore, InMemoryOwnershipRegistry,
+    RecordingNotifier, SeededRandom,
 };
-use app::leases::MaintenanceLeases;
+use app::leases::{MaintenanceLeases, WatchPauses};
+use app::notifications::Notify;
 use app::ownership::{Reported, RepositoryOwners};
 use app::pairing::{AgentPairing, HubKeys, HubPairing};
-use app::ports::{ClaimDecision, Clock, Identity, OwnershipRegistry};
+use app::ports::{ClaimDecision, Clock, ConfigStore, Identity, OwnershipRegistry};
 use cucumber::{given, then, when};
 use domain::fleet::{
     AgentRecord, AgentStatus, Fingerprint, GENERATION, Hostname, HubAddress, HubPin, PublicKey,
@@ -31,8 +33,14 @@ use domain::maintenance::{
     ClaimOutcome, ClaimRefused, EpochLower, Grant, Lease, LeaseEpoch, NoLease, ReleaseRefused,
     RepoGrants, RepositoryOwnership, RepositoryReport, RepositoryReports,
 };
-use domain::planning::Maintenance;
-use domain::{AgentId, RepositoryId, SignedDuration, Timestamp, Uuid};
+use domain::notifications::{
+    Channel, ChannelKind, ChannelName, EventKind, Notifications, Rule, RuleName,
+};
+use domain::planning::{
+    AgentConfig, AgentSettings, GroupBy, Hooks, Maintenance, RepositoryConfig, RepositorySettings,
+};
+use domain::secrets::SecretRef;
+use domain::{AgentId, RepositoryAlias, RepositoryId, SignedDuration, Timestamp, Uuid};
 
 use super::Agent;
 
@@ -62,6 +70,16 @@ pub(super) struct OwnershipWorld {
     paired_with: Option<PairingHub>,
     /// How many hubs machines have paired with, each with keys of its own.
     hubs_made: u64,
+    /// Each machine's configuration and notification rules, for a machine
+    /// that watches its maintenance.
+    watchers: BTreeMap<String, Watcher>,
+}
+
+/// A machine's configuration, the rules that read it, and what they sent.
+struct Watcher {
+    config: Arc<dyn ConfigStore>,
+    notify: Arc<Notify>,
+    notifier: Arc<RecordingNotifier>,
 }
 
 /// A hub a machine pairs with: its pairing use case and its keys.
@@ -110,6 +128,7 @@ impl Default for OwnershipWorld {
             both_maintained: false,
             paired_with: None,
             hubs_made: 0,
+            watchers: BTreeMap::new(),
         }
     }
 }
@@ -916,4 +935,199 @@ async fn refused_lower(world: &mut Agent, machine: String, repository: String) {
         matches!(refused.as_slice(), [EpochLower { repository, .. }] if *repository == id),
         "{refused:?}"
     );
+}
+
+/// `machine`'s configuration: `repository` maintained here, of its ID on
+/// the hub, and, when `rule` names a channel, a rule that sends
+/// `repo.maintenance_paused` to that webhook channel.
+async fn asks_to_maintain_with(
+    world: &mut Agent,
+    machine: &str,
+    repository: &str,
+    rule: Option<&str>,
+) {
+    let id = world.ownership.repository(repository);
+    let entry = RepositoryConfig {
+        locations: Default::default(),
+        id: Some(id),
+        settings: RepositorySettings {
+            repository: format!("/srv/{repository}"),
+            repo_hot: None,
+            password: SecretRef::Env("DEMO_PASSWORD".to_owned()),
+            options: BTreeMap::new(),
+            options_hot: BTreeMap::new(),
+            options_cold: BTreeMap::new(),
+        },
+        maintenance: Maintenance::Local,
+        group_by: GroupBy::default(),
+        hooks: Hooks::default(),
+    };
+    let mut config = AgentConfig::new(
+        AgentSettings::default(),
+        Hooks::default(),
+        BTreeMap::from([(RepositoryAlias::parse(repository).unwrap(), entry)]),
+        vec![],
+    )
+    .unwrap();
+    let secrets = Arc::new(FakeSecrets::new());
+    if let Some(name) = rule {
+        secrets.set_env("DEMO_OPS_URL", "https://ops.example/hook");
+        let channel = ChannelName::parse(name).unwrap();
+        let notifications = Notifications::new(
+            BTreeMap::from([(
+                channel.clone(),
+                Channel::new(
+                    ChannelKind::Webhook,
+                    SecretRef::Env("DEMO_OPS_URL".to_owned()),
+                    None,
+                )
+                .unwrap(),
+            )]),
+            BTreeMap::from([(
+                RuleName::parse(name).unwrap(),
+                Rule::new(
+                    BTreeSet::from([EventKind::RepoMaintenancePaused]),
+                    channel,
+                    BTreeSet::new(),
+                    None,
+                )
+                .unwrap(),
+            )]),
+        )
+        .unwrap();
+        config = config.with_notifications(notifications).unwrap();
+    }
+    let store = InMemoryConfigStore::new();
+    store.save(&config).await.unwrap();
+    let config: Arc<dyn ConfigStore> = Arc::new(store);
+    let notifier = Arc::new(RecordingNotifier::new());
+    let notify = Arc::new(Notify::new(
+        config.clone(),
+        Arc::new(InMemoryOperationStore::new()),
+        secrets,
+        notifier.clone(),
+    ));
+    world.ownership.watchers.insert(
+        machine.to_owned(),
+        Watcher {
+            config,
+            notify,
+            notifier,
+        },
+    );
+}
+
+#[given(expr = "{string} asks to maintain {string}")]
+async fn asks_to_maintain(world: &mut Agent, machine: String, repository: String) {
+    asks_to_maintain_with(world, &machine, &repository, None).await;
+}
+
+#[given(
+    expr = "{string} asks to maintain {string}, with a rule that sends \"repo.maintenance_paused\" to the webhook channel {string}"
+)]
+async fn asks_to_maintain_with_a_rule(
+    world: &mut Agent,
+    machine: String,
+    repository: String,
+    channel: String,
+) {
+    asks_to_maintain_with(world, &machine, &repository, Some(&channel)).await;
+}
+
+#[when("a day passes on the hub")]
+fn a_day_passes(world: &mut Agent) {
+    world.ownership.pass(SignedDuration::from_hours(24));
+}
+
+#[when(expr = "{string} watches its maintenance")]
+async fn watches(world: &mut Agent, machine: String) {
+    let leases = world.ownership.holder(&machine).await.leases.clone();
+    let watcher = watcher(world, &machine);
+    let watch = WatchPauses::new(watcher.config.clone(), leases, watcher.notify.clone());
+    assert_eq!(watch.watch().await, vec![]);
+}
+
+/// Since when `machine` says its maintenance of `repository` is paused.
+async fn paused(world: &mut Agent, machine: &str, repository: &str) -> Option<Timestamp> {
+    let id = world.ownership.repository(repository);
+    world
+        .ownership
+        .holder(machine)
+        .await
+        .leases
+        .paused(Some(&id))
+        .await
+}
+
+/// `days` days before now on `machine`'s clock.
+async fn days_ago(world: &mut Agent, machine: &str, days: i64) -> Timestamp {
+    let now = world.ownership.holder(machine).await.clock.now();
+    now.checked_sub(SignedDuration::from_hours(24 * days))
+        .unwrap()
+}
+
+#[then(
+    expr = "maintenance of {string} on {string} is paused since its lease ran out {int} days ago"
+)]
+#[then(expr = "maintenance of {string} on {string} is paused since {int} days ago")]
+async fn paused_since(world: &mut Agent, repository: String, machine: String, days: i64) {
+    let since = days_ago(world, &machine, days).await;
+    assert_eq!(paused(world, &machine, &repository).await, Some(since));
+}
+
+#[then(expr = "maintenance of {string} on {string} isn't paused")]
+async fn not_paused(world: &mut Agent, repository: String, machine: String) {
+    assert_eq!(paused(world, &machine, &repository).await, None);
+}
+
+/// The watcher of the machine the scenario named.
+fn watcher<'a>(world: &'a Agent, machine: &str) -> &'a Watcher {
+    world
+        .ownership
+        .watchers
+        .get(machine)
+        .expect("a machine the scenario named")
+}
+
+#[then(expr = "{string} sent no notification")]
+fn sent_nothing(world: &mut Agent, machine: String) {
+    let sent = watcher(world, &machine).notifier.delivered();
+    assert!(sent.is_empty(), "{sent:?}");
+}
+
+#[then(
+    expr = "{string} was sent {string} for the repository {string}, paused since {int} days ago"
+)]
+async fn was_sent(
+    world: &mut Agent,
+    channel: String,
+    event: String,
+    repository: String,
+    days: i64,
+) {
+    let machine = world.ownership.watchers.keys().next().cloned().unwrap();
+    let since = days_ago(world, &machine, days).await;
+    let sent = watcher(world, &machine).notifier.delivered();
+    let [notification] = sent.as_slice() else {
+        panic!("one notification to {channel}: {sent:?}");
+    };
+    assert_eq!(notification.event.kind.name(), event);
+    assert_eq!(
+        notification.event.repository,
+        Some(RepositoryAlias::parse(&repository).unwrap())
+    );
+    assert_eq!(notification.event.at, since);
+    assert_eq!(notification.event.operation, None);
+}
+
+#[then(expr = "{string} was sent {string} only once")]
+fn sent_once(world: &mut Agent, channel: String, event: String) {
+    let sent: Vec<_> = world
+        .ownership
+        .watchers
+        .values()
+        .flat_map(|watcher| watcher.notifier.delivered())
+        .filter(|notification| notification.event.kind.name() == event)
+        .collect();
+    assert_eq!(sent.len(), 1, "{event} to {channel}: {sent:?}");
 }
