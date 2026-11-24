@@ -1,6 +1,6 @@
 use async_trait::async_trait;
 use domain::maintenance::{
-    ClaimOutcome, LeaseEpoch, ReleaseRefused, RepositoryOwnership, RepositoryReports,
+    ClaimOutcome, LeaseEpoch, ReleaseRefused, RepositoryOwnership, RepositoryReports, StartWindow,
 };
 use domain::{AgentId, RepositoryId, Timestamp};
 
@@ -20,18 +20,24 @@ pub struct ClaimDecision {
 #[async_trait]
 pub trait OwnershipRegistry: Send + Sync {
     /// Takes `reports` as every repository `agent` uses, in place of its
-    /// last report, and decides each with [`RepositoryOwnership::claim`] at
-    /// `now`, shared when another agent's report of it still counts
-    /// (`domain::maintenance::report_counts`) or the report says so, keeping
-    /// what it decided. Each repository is decided and kept in one step
-    /// with the reports it was decided on, so of two claims that race, one
-    /// is granted and the other sees it (I1).
+    /// last report, and decides each with
+    /// [`RepositoryOwnership::claim_after_start`] in `window` at `now`,
+    /// shared when another agent's report of it still counts
+    /// (`domain::maintenance::report_counts`) or the report says so,
+    /// keeping what it decided. Each repository is decided and kept in one
+    /// step with the reports it was decided on, so of two claims that
+    /// race, one is granted and the other sees it (I1).
     async fn report(
         &self,
         agent: AgentId,
         reports: &RepositoryReports,
         now: Timestamp,
+        window: &StartWindow,
     ) -> Result<Vec<ClaimDecision>, StoreError>;
+
+    /// Every repository each agent's last report named, however long ago
+    /// the hub took it: what the hub's start window waits on (§7.3).
+    async fn reported_uses(&self) -> Result<Vec<(AgentId, RepositoryId)>, StoreError>;
 
     /// Ends the lease `agent` holds on `repository` at `epoch`
     /// ([`RepositoryOwnership::release`]), in one step.

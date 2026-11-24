@@ -3,11 +3,13 @@
 //! registries and a clock of the hub's own that moves only when a step
 //! moves it (technical design §7.3, I1). A machine's claim is its report of
 //! the one repository with the request `local`; a machine that stops using
-//! a repository reports none. A machine's own side, whether it may maintain
-//! a repository, is its leases use case on an in-memory cache and a clock
-//! of its own, which may run off the hub's and moves with it. A machine
-//! that pairs does so in process, on that cache, with a hub's pairing use
-//! case of its own.
+//! a repository reports none. The hub's use case is made once, at the
+//! hub's start; a restart makes it again over the same registry, and a
+//! restore over a copy the registry's backup kept. A machine's own side,
+//! whether it may maintain a repository, is its leases use case on an
+//! in-memory cache and a clock of its own, which may run off the hub's and
+//! moves with it. A machine that pairs does so in process, on that cache,
+//! with a hub's pairing use case of its own.
 
 use std::collections::BTreeMap;
 use std::sync::Arc;
@@ -34,12 +36,15 @@ use domain::{AgentId, RepositoryId, SignedDuration, Timestamp, Uuid};
 
 use super::Agent;
 
-/// The hub's side: its clock, its registries, and what each machine's last
-/// report came to.
+/// The hub's side: its clock, its registries, its use case since its last
+/// start, and what each machine's last report came to.
 pub(super) struct OwnershipWorld {
     clock: Arc<FakeClock>,
     agents: Arc<InMemoryAgentRegistry>,
     owners: Arc<InMemoryOwnershipRegistry>,
+    hub: Arc<RepositoryOwners>,
+    /// The registry as the last backup of the hub's database kept it.
+    backup: Option<InMemoryOwnershipRegistry>,
     machines: BTreeMap<String, AgentId>,
     repositories: BTreeMap<String, RepositoryId>,
     /// What the hub decided of each machine's last report.
@@ -80,12 +85,21 @@ struct Holder {
 
 impl Default for OwnershipWorld {
     fn default() -> Self {
+        let clock = Arc::new(FakeClock::new(
+            Timestamp::from_second(1_800_000_000).unwrap(),
+        ));
+        let agents = Arc::new(InMemoryAgentRegistry::new());
+        let owners = Arc::new(InMemoryOwnershipRegistry::new());
         Self {
-            clock: Arc::new(FakeClock::new(
-                Timestamp::from_second(1_800_000_000).unwrap(),
+            hub: Arc::new(RepositoryOwners::new(
+                agents.clone(),
+                owners.clone(),
+                clock.clone(),
             )),
-            agents: Arc::new(InMemoryAgentRegistry::new()),
-            owners: Arc::new(InMemoryOwnershipRegistry::new()),
+            clock,
+            agents,
+            owners,
+            backup: None,
             machines: BTreeMap::new(),
             repositories: BTreeMap::new(),
             last: BTreeMap::new(),
@@ -101,8 +115,18 @@ impl Default for OwnershipWorld {
 }
 
 impl OwnershipWorld {
-    fn use_case(&self) -> RepositoryOwners {
-        RepositoryOwners::new(self.agents.clone(), self.owners.clone(), self.clock.clone())
+    fn use_case(&self) -> Arc<RepositoryOwners> {
+        self.hub.clone()
+    }
+
+    /// The hub starts again over `owners`.
+    fn start_hub(&mut self, owners: Arc<InMemoryOwnershipRegistry>) {
+        self.owners = owners;
+        self.hub = Arc::new(RepositoryOwners::new(
+            self.agents.clone(),
+            self.owners.clone(),
+            self.clock.clone(),
+        ));
     }
 
     /// Registers `name` on the hub, approved or waiting for approval.
@@ -176,6 +200,20 @@ impl OwnershipWorld {
                 repository,
                 request: Maintenance::Local,
                 holds_other_agents_snapshots: others_snapshots,
+            }],
+        )
+        .await;
+    }
+
+    /// `machine` reports `repository` with the request `none`.
+    async fn report_without_claim(&mut self, machine: &str, repository: &str) {
+        let repository = self.repository(repository);
+        self.report(
+            machine,
+            vec![RepositoryReport {
+                repository,
+                request: Maintenance::None,
+                holds_other_agents_snapshots: false,
             }],
         )
         .await;
@@ -489,6 +527,7 @@ async fn releases(world: &mut Agent, machine: String, repository: String, number
     world.ownership.released = Some(released);
 }
 
+#[given(expr = "{int} days passed on the hub")]
 #[when(expr = "{int} days pass on the hub")]
 fn days_pass(world: &mut Agent, days: i64) {
     world.ownership.pass(SignedDuration::from_hours(24 * days));
@@ -505,6 +544,40 @@ fn clock_set_back(world: &mut Agent, days: i64) {
         .ownership
         .clock
         .set_back(SignedDuration::from_hours(24 * days));
+}
+
+#[when(expr = "the hub's clock is set forward {int} days")]
+fn clock_set_forward(world: &mut Agent, days: i64) {
+    // Only the wall clock steps: the hub's monotonic time doesn't move.
+    world
+        .ownership
+        .clock
+        .suspend(SignedDuration::from_hours(24 * days));
+}
+
+#[given(expr = "{string} reported the repository {string} without claiming it")]
+async fn reported_without_claim(world: &mut Agent, machine: String, repository: String) {
+    world
+        .ownership
+        .report_without_claim(&machine, &repository)
+        .await;
+}
+
+#[given("the hub's database is backed up")]
+fn database_backed_up(world: &mut Agent) {
+    world.ownership.backup = Some(world.ownership.owners.backup());
+}
+
+#[when("the hub is restored from that backup and starts")]
+fn restored_and_starts(world: &mut Agent) {
+    let backup = world.ownership.backup.take().expect("a backup was made");
+    world.ownership.start_hub(Arc::new(backup));
+}
+
+#[when("the hub restarts")]
+fn hub_restarts(world: &mut Agent) {
+    let owners = world.ownership.owners.clone();
+    world.ownership.start_hub(owners);
 }
 
 #[when(expr = "7 days and 1 hour pass while {string} and {string} keep claiming {string}")]
@@ -612,6 +685,14 @@ fn refused_shared(world: &mut Agent, machine: String) {
     assert_eq!(
         world.ownership.outcome(&machine),
         ClaimOutcome::Refused(ClaimRefused::Shared)
+    );
+}
+
+#[then(expr = "the claim of {string} was refused because the hub has just started")]
+fn refused_starting(world: &mut Agent, machine: String) {
+    assert_eq!(
+        world.ownership.outcome(&machine),
+        ClaimOutcome::Refused(ClaimRefused::Starting)
     );
 }
 

@@ -12,6 +12,7 @@
 use std::collections::BTreeMap;
 use std::num::NonZeroU64;
 
+use super::StartWindow;
 use crate::planning::Maintenance;
 use crate::{AgentId, RepositoryId, SignedDuration, Timestamp};
 
@@ -154,6 +155,10 @@ pub enum ClaimRefused {
     HeldByAnother(AgentId),
     /// Another agent uses the repository ([`RepositoryReport::shared`]).
     Shared,
+    /// The hub has just started, and an agent that used the repository at
+    /// the start hasn't reported since ([`StartWindow`]): no repository
+    /// changes owner until it has (§7.3, decision 137).
+    Starting,
     /// Every epoch has been given. A hub never gives that many; only a
     /// tampered database could hold the last.
     EpochsSpent,
@@ -244,6 +249,23 @@ impl RepositoryOwnership {
                 ClaimOutcome::Granted(granted)
             }
         }
+    }
+
+    /// Decides a claim as [`claim`](Self::claim) does, once the hub has
+    /// started: while `window` holds the repository, a claim with no lease
+    /// binding is refused, so nobody is granted a repository a lease the
+    /// hub doesn't know of may still hold; its holder's lease is renewed
+    /// as before.
+    pub fn claim_after_start(
+        &mut self,
+        window: &StartWindow,
+        agent: AgentId,
+        request: Maintenance,
+        shared: bool,
+        now: Timestamp,
+    ) -> ClaimOutcome {
+        let _ = (window, agent, request, shared, now);
+        todo!()
     }
 
     /// Ends the lease `agent` holds at `epoch`, at its holder's signed
