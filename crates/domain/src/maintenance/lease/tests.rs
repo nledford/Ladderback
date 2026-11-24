@@ -26,6 +26,7 @@ fn report(digit: char, request: Maintenance) -> RepositoryReport {
         repository: repository(digit),
         request,
         holds_other_agents_snapshots: false,
+        floor: None,
     }
 }
 

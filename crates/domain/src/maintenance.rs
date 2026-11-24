@@ -25,17 +25,19 @@ mod other_hosts;
 mod others_snapshots;
 #[cfg(test)]
 mod properties;
+mod recovery;
 mod start_window;
 mod stats;
 
 pub use held::{
-    EpochFloor, EpochLower, Grant, HeldLease, HeldLeases, NoLease, PAUSE_ALERT_AFTER, Pause,
+    EpochFloor, EpochLower, FloorProof, Grant, HeldLease, HeldLeases, NoLease, PAUSE_ALERT_AFTER, Pause,
     RepoGrants,
 };
 pub use lease::{
     ClaimOutcome, ClaimRefused, LEASE_GRACE, LEASE_LIFE, Lease, LeaseEpoch, REPORT_LIFE,
     ReleaseRefused, RepositoryOwnership, RepositoryReport, RepositoryReports, report_counts,
 };
+pub use recovery::{HubRecovery, ProvenFloor, ReportedFloor};
 pub use other_hosts::{MAX_NAMED_OTHER_HOSTS, OtherHosts};
 pub use others_snapshots::{LISTING_LASTS, OtherAgentsSnapshots, listing_stands};
 pub use start_window::{START_WINDOW, StartWindow};

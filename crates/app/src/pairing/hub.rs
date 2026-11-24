@@ -11,16 +11,17 @@ use domain::fleet::{
     SignedMessage, SigningSeed, TokenId, TokenRecord, TokenTls, TokenUse, Tombstone,
     UNUSED_TOKEN_LIMIT, Welcome, WireName, ack_kind, grants_kind, hello_kind, list_agents,
     plans_kind, progress_kind, release_kind, released_kind, report_kind, repos_kind, token_life,
-    welcome_kind,
+    welcome_kind, withheld_kind, GENERATION,
 };
+use domain::maintenance::{Grant, ProvenFloor, RepoGrants, RepositoryReports};
 use domain::{AgentId, SignedDuration, TimeZoneDatabase, Timestamp};
 
 use super::wire::{
-    ack_payload, grants_payload, read_hello, read_release, read_report, read_repos,
-    released_payload, welcome_payload,
+    ack_payload, entry_expiry, grants_payload, read_hello, read_release, read_report, read_repos,
+    released_payload, welcome_payload, withheld_payload,
 };
 use crate::access::Access;
-use crate::ownership::RepositoryOwners;
+use crate::ownership::{Granting, RepositoryOwners};
 use crate::ports::{
     Added, AgentRegistry, Clock, EventBus, Identity, IdentityError, Random, RandomUnavailable,
     ReportInbox, Signing, SigningError, StoreError,
@@ -33,7 +34,7 @@ mod logged;
 #[cfg(test)]
 mod tests;
 
-pub use dialog::{AgentsListed, ApprovalAsk, MadeToken, RemovalAsk, TokenAsk, TokenAskRefused};
+pub use dialog::{AgentsListed, ApprovalAsk, MadeToken, RecoveryAsk, RemovalAsk, TokenAsk, TokenAskRefused};
 pub use fleet::Machine;
 pub use live::{progress_dto, time_of};
 
@@ -69,6 +70,8 @@ pub struct HubPairing {
     /// The agents under whose ID the hub refused a second computer since
     /// it started: it warns of each once (decision 150).
     warned_second: Mutex<HashSet<AgentId>>,
+    /// Whether the hub warned it is in recovery mode since it entered it.
+    warned_recovering: Mutex<bool>,
 }
 
 /// The hub's answer to a proved agent's `Hello`.
@@ -224,6 +227,7 @@ impl HubPairing {
             warned_behind: Mutex::default(),
             events: None,
             warned_second: Mutex::default(),
+            warned_recovering: Mutex::default(),
         }
     }
 
@@ -828,7 +832,7 @@ impl HubPairing {
             self.take_report(syncing.agent_id, &message.payload, now)
                 .await?
         } else if message.kind == repos_kind() {
-            self.grant(syncing.agent_id, &message.payload).await?
+            self.grant(keys, syncing.agent_id, &message.payload).await?
         } else if message.kind == release_kind() {
             self.take_release(syncing.agent_id, &message.payload, now)
                 .await?
@@ -902,21 +906,140 @@ impl HubPairing {
         Ok(Ok(Some((ack_kind(), payload))))
     }
 
-    /// Decides the repositories `agent`'s `ReposSnapshot` names, and
-    /// answers with every lease it holds, signed at the hub's time. An
-    /// agent no longer approved is answered with nothing and the
-    /// connection ends.
-    async fn grant(&self, agent: AgentId, payload: &[u8]) -> Result<Answered, HubPairingError> {
+    /// Decides the repositories `agent`'s `ReposSnapshot` names, with the
+    /// floors whose proof holds, and answers with every lease it holds,
+    /// each entry signed apart as well, at the hub's time; in recovery
+    /// mode, with `GrantsWithheld`. An agent no longer approved is answered
+    /// with nothing and the connection ends.
+    async fn grant(
+        &self,
+        keys: &HubKeys,
+        agent: AgentId,
+        payload: &[u8],
+    ) -> Result<Answered, HubPairingError> {
         let Some(owners) = &self.owners else {
             return Ok(Ok(None));
         };
         let Ok(reports) = read_repos(payload) else {
             return Ok(Err(MessageRefused::Unexpected));
         };
-        let Some(grants) = owners.grant(agent, &reports).await? else {
-            return Ok(Err(MessageRefused::Unexpected));
+        let proven = self.proven(keys, agent, &reports);
+        match owners.grant(agent, &reports, &proven).await? {
+            Granting::Leases {
+                generation,
+                signed_at,
+                leases,
+            } => {
+                let grants = leases
+                    .into_iter()
+                    .map(|(repository, lease)| {
+                        let entry = SignedMessage::LeaseEntry {
+                            hub_key: keys.key,
+                            agent_id: agent,
+                            repository: &repository,
+                            generation,
+                            epoch: lease.epoch.get(),
+                            expires_at: entry_expiry(lease.expires_at),
+                        };
+                        let signature = self.signing.sign(&keys.seed, &entry.to_bytes())?;
+                        Ok(Grant {
+                            repository,
+                            epoch: lease.epoch,
+                            expires_at: lease.expires_at,
+                            signature,
+                        })
+                    })
+                    .collect::<Result<Vec<_>, SigningError>>()?;
+                let grants = RepoGrants {
+                    generation,
+                    signed_at,
+                    grants,
+                };
+                Ok(Ok(Some((grants_kind(), grants_payload(&grants)))))
+            }
+            Granting::Withheld => {
+                self.warn_recovering(agent);
+                Ok(Ok(Some((withheld_kind(), withheld_payload()))))
+            }
+            Granting::NotApproved => Ok(Err(MessageRefused::Unexpected)),
+        }
+    }
+
+    /// The floors in `reports` whose proof is a lease entry this hub key
+    /// signed for `agent` at its generation (decision 137). Each other
+    /// floor doesn't count, and is logged.
+    fn proven(&self, keys: &HubKeys, agent: AgentId, reports: &RepositoryReports) -> Vec<ProvenFloor> {
+        reports
+            .entries()
+            .iter()
+            .filter_map(|report| {
+                let floor = report.floor?;
+                let entry = SignedMessage::LeaseEntry {
+                    hub_key: keys.key,
+                    agent_id: agent,
+                    repository: &report.repository,
+                    generation: GENERATION,
+                    epoch: floor.epoch.get(),
+                    expires_at: entry_expiry(floor.expires_at),
+                };
+                if self
+                    .signing
+                    .verify(&keys.key, &entry.to_bytes(), &floor.signature)
+                {
+                    Some(ProvenFloor {
+                        repository: report.repository.clone(),
+                        holder: agent,
+                        epoch: floor.epoch,
+                        expires_at: floor.expires_at,
+                        held: floor.held,
+                    })
+                } else {
+                    log::warn!(
+                        "{}",
+                        logged::floor_unproven(agent, &report.repository, floor.epoch.get())
+                    );
+                    None
+                }
+            })
+            .collect()
+    }
+
+    /// Whether the hub is in recovery mode; a hub that keeps no owners
+    /// never is.
+    pub async fn recovering(&self) -> Result<bool, HubPairingError> {
+        match &self.owners {
+            Some(owners) => Ok(owners.recovering().await?),
+            None => Ok(false),
+        }
+    }
+
+    /// Ends recovery mode, once a person's step-up holds.
+    async fn end_recovery(&self) -> Result<bool, HubPairingError> {
+        let Some(owners) = &self.owners else {
+            return Ok(false);
         };
-        Ok(Ok(Some((grants_kind(), grants_payload(&grants)))))
+        let ended = owners.end_recovery().await?;
+        if ended {
+            *self
+                .warned_recovering
+                .lock()
+                .unwrap_or_else(PoisonError::into_inner) = false;
+            log::warn!("{}", logged::recovered());
+        }
+        Ok(ended)
+    }
+
+    /// Warns, once each time the hub enters recovery mode while it runs,
+    /// that `agent`'s report found it there.
+    fn warn_recovering(&self, agent: AgentId) {
+        let mut warned = self
+            .warned_recovering
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner);
+        if !*warned {
+            *warned = true;
+            log::warn!("{}", logged::recovering(agent));
+        }
     }
 
     /// Ends the lease `agent`'s `ReleaseAck` names, and answers with

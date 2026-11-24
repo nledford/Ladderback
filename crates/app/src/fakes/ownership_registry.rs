@@ -3,7 +3,7 @@ use std::sync::{Mutex, PoisonError};
 
 use async_trait::async_trait;
 use domain::maintenance::{
-    LeaseEpoch, ReleaseRefused, RepositoryOwnership, RepositoryReport, RepositoryReports,
+    HubRecovery, LeaseEpoch, ProvenFloor, ReleaseRefused, RepositoryOwnership, RepositoryReport, RepositoryReports,
     StartWindow, report_counts,
 };
 use domain::{AgentId, RepositoryId, Timestamp};
@@ -50,9 +50,11 @@ impl OwnershipRegistry for InMemoryOwnershipRegistry {
         &self,
         agent: AgentId,
         reports: &RepositoryReports,
+        proven: &[ProvenFloor],
         now: Timestamp,
         window: &StartWindow,
     ) -> Result<Vec<ClaimDecision>, StoreError> {
+        let _ = proven;
         let mut kept = self.kept();
         let Kept {
             owners,
@@ -85,6 +87,14 @@ impl OwnershipRegistry for InMemoryOwnershipRegistry {
             })
             .collect();
         Ok(decided)
+    }
+
+    async fn recovery(&self) -> Result<HubRecovery, StoreError> {
+        todo!()
+    }
+
+    async fn end_recovery(&self) -> Result<bool, StoreError> {
+        todo!()
     }
 
     async fn reported_uses(&self) -> Result<Vec<(AgentId, RepositoryId)>, StoreError> {

@@ -174,13 +174,28 @@ pub struct ReposPayload {
 }
 
 /// One repository in `ReposSnapshot`: its rustic ID as hex, the
-/// maintenance it asks for (`local`, `hub` or `none`), and whether it holds
-/// another agent's tagged snapshots.
+/// maintenance it asks for (`local`, `hub` or `none`), whether it holds
+/// another agent's tagged snapshots, and the agent's epoch floor on it with
+/// its proof, once the hub granted it a lease on it.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct RepoPayload {
     pub repo_id: String,
     pub requested_maintenance: String,
     pub others_snapshots: bool,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub floor: Option<FloorPayload>,
+}
+
+/// An agent's epoch floor on one repository (§7.3, decision 137): the
+/// epoch, and the expiry and hub signature of the `RepoGrants` entry that
+/// set it, as the hub signed it (`lease-entry`); `held` while the agent
+/// still holds that lease.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct FloorPayload {
+    pub epoch: u64,
+    pub expires_at: u64,
+    pub signature: String,
+    pub held: bool,
 }
 
 /// The payload of the hub's `RepoGrants`: every lease the hub counts the
@@ -193,13 +208,22 @@ pub struct GrantsPayload {
     pub grants: Vec<GrantPayload>,
 }
 
-/// One lease in `RepoGrants`, until `expires_at` on the hub's clock.
+/// One lease in `RepoGrants`, until `expires_at` on the hub's clock, with
+/// the hub's signature over the entry alone (`lease-entry`), which the
+/// agent keeps as the proof of its floor.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct GrantPayload {
     pub repo_id: String,
     pub epoch: u64,
     pub expires_at: u64,
+    pub signature: String,
 }
+
+/// The payload of the hub's `GrantsWithheld`, its answer to
+/// `ReposSnapshot` in recovery mode: nothing is granted or renewed, and
+/// the agent keeps what it holds until it runs out.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct WithheldPayload {}
 
 /// The payload of the agent's `ReleaseAck`: it dropped its lease on
 /// `repo_id` at `epoch` and runs no maintenance on it.
@@ -304,7 +328,13 @@ macro_rules! payload_bytes {
     )+};
 }
 
-payload_bytes!(ReposPayload, GrantsPayload, ReleasePayload, ReleasedPayload);
+payload_bytes!(
+    ReposPayload,
+    GrantsPayload,
+    WithheldPayload,
+    ReleasePayload,
+    ReleasedPayload
+);
 
 impl AgentFrame {
     /// The frame `text` holds.

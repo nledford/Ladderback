@@ -7,7 +7,7 @@
 use api::sync::{
     AckPayload, AgentApproval, AgentFrame, GrantPayload, GrantsPayload, HelloPayload, HolderFrame,
     HubFrame, MAX_FRAME_BYTES, ReleasePayload, ReleasedPayload, RepoPayload, ReportPayload,
-    ReposPayload, WelcomePayload,
+    ReposPayload, WelcomePayload, WithheldPayload,
 };
 use base64::Engine as _;
 use base64::engine::general_purpose::URL_SAFE_NO_PAD;
@@ -278,6 +278,7 @@ pub fn repos_payload(reports: &RepositoryReports) -> Vec<u8> {
                 repo_id: report.repository.as_str().to_owned(),
                 requested_maintenance: report.request.as_str().to_owned(),
                 others_snapshots: report.holds_other_agents_snapshots,
+                floor: None,
             })
             .collect(),
     }
@@ -297,6 +298,7 @@ pub fn read_repos(bytes: &[u8]) -> Result<RepositoryReports, WireRefused> {
                 request: Maintenance::parse(&repo.requested_maintenance)
                     .map_err(|_| WireRefused)?,
                 holds_other_agents_snapshots: repo.others_snapshots,
+                floor: None,
             })
         })
         .collect::<Result<Vec<_>, WireRefused>>()?;
@@ -317,6 +319,7 @@ pub fn grants_payload(grants: &RepoGrants) -> Vec<u8> {
                 repo_id: grant.repository.as_str().to_owned(),
                 epoch: grant.epoch.get(),
                 expires_at: seconds_down(grant.expires_at),
+                signature: encoded(grant.signature.as_bytes()),
             })
             .collect(),
     }
@@ -336,6 +339,7 @@ pub fn read_grants(bytes: &[u8]) -> Result<RepoGrants, WireRefused> {
                 repository: RepositoryId::parse(&grant.repo_id).map_err(|_| WireRefused)?,
                 epoch: lease_epoch(grant.epoch)?,
                 expires_at: time(grant.expires_at)?,
+                signature: signature(&grant.signature)?,
             })
         })
         .collect::<Result<Vec<_>, WireRefused>>()?;
@@ -344,6 +348,24 @@ pub fn read_grants(bytes: &[u8]) -> Result<RepoGrants, WireRefused> {
         signed_at: time(payload.signed_at)?,
         grants,
     })
+}
+
+/// The bytes of a `GrantsWithheld`'s payload, which the hub signs.
+pub fn withheld_payload() -> Vec<u8> {
+    WithheldPayload {}.to_bytes()
+}
+
+/// Whether bytes hold a `GrantsWithheld`'s payload.
+pub fn read_withheld(bytes: &[u8]) -> Result<(), WireRefused> {
+    WithheldPayload::from_bytes(bytes)
+        .map(|_| ())
+        .map_err(|_| WireRefused)
+}
+
+/// The seconds a grant's expiry is signed at in its `lease-entry`, as
+/// `RepoGrants` carries it: rounded down.
+pub fn entry_expiry(expires_at: Timestamp) -> EpochSeconds {
+    EpochSeconds::from_seconds(seconds_down(expires_at))
 }
 
 /// The bytes of a `ReleaseAck`'s payload, which the agent signs.

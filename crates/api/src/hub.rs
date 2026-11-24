@@ -295,6 +295,38 @@ pub struct RemoveAgentDto {
     pub key: String,
 }
 
+/// Where the hub's page reads whether the hub is in recovery mode (§7.3,
+/// decision 137): `GET`, answered with a [`HubRecoveryDto`].
+pub const HUB_RECOVERY_PATH: &str = "/api/v1/hub/recovery";
+
+/// Where a person ends recovery mode, once the old hub is stopped or gone:
+/// `POST` with an [`EndRecoveryDto`], answered `204` whether or not the hub
+/// was in recovery mode.
+pub const HUB_RECOVERY_CONFIRMATION_PATH: &str = "/api/v1/hub/recovery/confirmation";
+
+/// Whether the hub is in recovery mode: a machine proved a lease above
+/// what the hub counts, so it grants and renews no lease until a person
+/// confirms the old hub is stopped or gone.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "kebab-case", deny_unknown_fields)]
+pub struct HubRecoveryDto {
+    pub recovering: bool,
+}
+
+/// The end of recovery mode asked for, with the step-up confirmation, as
+/// [`ApproveAgentDto::confirmation`]. Its `Debug` hides it (I4).
+#[derive(Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "kebab-case", deny_unknown_fields)]
+pub struct EndRecoveryDto {
+    pub confirmation: String,
+}
+
+impl std::fmt::Debug for EndRecoveryDto {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("EndRecoveryDto").finish_non_exhaustive()
+    }
+}
+
 /// A machine's plans as it last reported them (§7.2): at most
 /// `domain::fleet::MAX_PLANS_REPORTED`, in its configuration's order, and
 /// how many more it has.

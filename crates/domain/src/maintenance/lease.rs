@@ -12,7 +12,7 @@
 use std::collections::BTreeMap;
 use std::num::NonZeroU64;
 
-use super::StartWindow;
+use super::{ReportedFloor, StartWindow};
 use crate::planning::Maintenance;
 use crate::{AgentId, RepositoryId, SignedDuration, Timestamp};
 
@@ -85,6 +85,9 @@ pub struct RepositoryReport {
     pub repository: RepositoryId,
     pub request: Maintenance,
     pub holds_other_agents_snapshots: bool,
+    /// The machine's epoch floor on the repository, with its proof, when
+    /// the hub granted it a lease on it (§7.3, decision 137).
+    pub floor: Option<ReportedFloor>,
 }
 
 impl RepositoryReport {
@@ -162,6 +165,11 @@ pub enum ClaimRefused {
     /// Every epoch has been given. A hub never gives that many; only a
     /// tampered database could hold the last.
     EpochsSpent,
+    /// The hub is in recovery mode: a machine proved a lease above what it
+    /// counts, so it grants and renews nothing until a person confirms the
+    /// old hub is stopped or gone ([`HubRecovery`](super::HubRecovery),
+    /// §7.3, decision 137).
+    Recovering,
 }
 
 /// A release refused: the agent holds no lease of that epoch, so nothing

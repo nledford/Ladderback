@@ -14,21 +14,9 @@
 use std::collections::BTreeMap;
 
 use super::lease::LeaseEpoch;
+use super::recovery::ReportedFloor;
+use crate::fleet::Signature;
 use crate::{RepositoryId, SignedDuration, Timestamp};
-
-/// How long a paired machine's maintenance of a repository stays paused
-/// before the machine tells its notification rules
-/// (`repo.maintenance_paused`, §11): 14 days, two lease lives, so a laptop
-/// away from its hub for a week or a hub down a few days stays quiet.
-pub const PAUSE_ALERT_AFTER: SignedDuration = SignedDuration::from_hours(14 * 24);
-
-/// The machine's maintenance of a repository, paused for want of a lease:
-/// since when, and whether its notification rules were told.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub struct Pause {
-    pub since: Timestamp,
-    pub alerted: bool,
-}
 
 /// The highest lease a machine has seen for one repository, ordered by the
 /// hub's recovery number, its generation, then the lease's epoch (§7.3, "A
@@ -40,12 +28,15 @@ pub struct EpochFloor {
     pub epoch: LeaseEpoch,
 }
 
-/// One lease in the hub's grants: until `expires_at` on the hub's clock.
+/// One lease in the hub's grants: until `expires_at` on the hub's clock,
+/// with the hub key's signature over the entry alone (`lease-entry`), which
+/// the machine keeps as proof of its floor (decision 137).
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Grant {
     pub repository: RepositoryId,
     pub epoch: LeaseEpoch,
     pub expires_at: Timestamp,
+    pub signature: Signature,
 }
 
 /// The hub's signed grants to one machine (`RepoGrants`, §7.2): every lease
@@ -86,24 +77,35 @@ pub struct EpochLower {
     pub granted: EpochFloor,
 }
 
+/// The proof of a floor: the expiry and hub signature of the lease entry
+/// that set it, which the machine reports back with the floor.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct FloorProof {
+    pub expires_at: Timestamp,
+    pub signature: Signature,
+}
+
 /// A paired machine's leases, epoch floors and paused maintenance.
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub struct HeldLeases {
     leases: BTreeMap<RepositoryId, HeldLease>,
     floors: BTreeMap<RepositoryId, EpochFloor>,
     paused: BTreeMap<RepositoryId, Pause>,
+    proofs: BTreeMap<RepositoryId, FloorProof>,
 }
 
 impl HeldLeases {
-    /// The leases and floors a cache kept.
+    /// The leases, floors and proofs a cache kept.
     pub fn from_parts(
         leases: impl IntoIterator<Item = (RepositoryId, HeldLease)>,
         floors: impl IntoIterator<Item = (RepositoryId, EpochFloor)>,
+        proofs: impl IntoIterator<Item = (RepositoryId, FloorProof)>,
     ) -> Self {
         Self {
             leases: leases.into_iter().collect(),
             floors: floors.into_iter().collect(),
             paused: BTreeMap::new(),
+            proofs: proofs.into_iter().collect(),
         }
     }
 
@@ -187,7 +189,7 @@ impl HeldLeases {
             .get_mut(repository)
             .filter(|pause| pause.since == since)
         {
-            pause.alerted = true;
+            pause.alerted = true
         }
     }
 
@@ -197,6 +199,18 @@ impl HeldLeases {
 
     pub fn floors(&self) -> impl Iterator<Item = (&RepositoryId, &EpochFloor)> {
         self.floors.iter()
+    }
+
+    pub fn proofs(&self) -> impl Iterator<Item = (&RepositoryId, &FloorProof)> {
+        self.proofs.iter()
+    }
+
+    /// What the machine reports of its floor on `repository` at `now`, on
+    /// its own clock: the floor's epoch with its proof, and whether it still
+    /// holds the lease at that epoch. Nothing for a floor with no proof.
+    pub fn reported_floor(&self, repository: &RepositoryId, now: Timestamp) -> Option<ReportedFloor> {
+        let _ = (repository, now);
+        todo!()
     }
 
     /// Takes `grants`, the hub's answer to a request the machine sent at

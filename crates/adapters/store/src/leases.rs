@@ -90,7 +90,7 @@ impl LeaseCache for SqliteStore {
             })
             .collect::<Result<Vec<_>, StoreError>>()?;
         tx.commit().await.map_err(unavailable)?;
-        Ok(HeldLeases::from_parts(leases, floors).with_pauses(pauses))
+        Ok(HeldLeases::from_parts(leases, floors, []).with_pauses(pauses))
     }
 
     async fn save(&self, leases: &HeldLeases) -> Result<(), StoreError> {

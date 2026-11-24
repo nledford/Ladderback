@@ -15,7 +15,7 @@ use sha2::{Digest as _, Sha256};
 use super::Hostname;
 use super::MachineZone;
 use super::keys::{KEY_BYTES, PublicKey, lower_hex};
-use crate::AgentId;
+use crate::{AgentId, RepositoryId};
 
 /// What every label starts with: `v1` names the handshake, as `/sync/v1`
 /// does.
@@ -234,6 +234,18 @@ pub enum SignedMessage<'a> {
         recovery_number: u64,
         made_at: EpochSeconds,
     },
+    /// One lease the hub granted, signed by the hub key apart from the
+    /// message that carried it, so the machine can show it back as proof
+    /// of its epoch floor (§16, decision 137, "A report counts only with
+    /// its proof"). It names no nonce, so it outlives the connection.
+    LeaseEntry {
+        hub_key: PublicKey,
+        agent_id: AgentId,
+        repository: &'a RepositoryId,
+        generation: u64,
+        epoch: u64,
+        expires_at: EpochSeconds,
+    },
 }
 
 /// The bytes a signature is made and checked over. Only
@@ -327,6 +339,7 @@ impl SignedMessage<'_> {
             Self::Handover { .. } => "handover",
             Self::RecoveryHandover { .. } => "recovery-handover",
             Self::RecoveryRotation { .. } => "recovery-rotation",
+            Self::LeaseEntry { .. } => "lease-entry",
         }
     }
 
@@ -477,6 +490,20 @@ impl SignedMessage<'_> {
                 .key(new_recovery_key)
                 .number(*recovery_number)
                 .number(made_at.seconds()),
+            Self::LeaseEntry {
+                hub_key,
+                agent_id,
+                repository,
+                generation,
+                epoch,
+                expires_at,
+            } => w
+                .key(hub_key)
+                .agent(*agent_id)
+                .short(repository.as_str().as_bytes())
+                .number(*generation)
+                .number(*epoch)
+                .number(expires_at.seconds()),
         }
         .done()
     }

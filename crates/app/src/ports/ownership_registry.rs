@@ -1,6 +1,7 @@
 use async_trait::async_trait;
 use domain::maintenance::{
-    ClaimOutcome, LeaseEpoch, ReleaseRefused, RepositoryOwnership, RepositoryReports, StartWindow,
+    ClaimOutcome, HubRecovery, LeaseEpoch, ProvenFloor, ReleaseRefused, RepositoryOwnership,
+    RepositoryReports, StartWindow,
 };
 use domain::{AgentId, RepositoryId, Timestamp};
 
@@ -27,13 +28,29 @@ pub trait OwnershipRegistry: Send + Sync {
     /// keeping what it decided. Each repository is decided and kept in one
     /// step with the reports it was decided on, so of two claims that
     /// race, one is granted and the other sees it (I1).
+    ///
+    /// First it hears `proven`, the floors of the report whose proof the
+    /// hub checked ([`HubRecovery::hear`]), in the same step: once any
+    /// lies above what the hub counts, the hub is in recovery mode, and
+    /// every repository is decided with [`HubRecovery::decide`] instead,
+    /// changing no ownership, until [`end_recovery`](Self::end_recovery).
     async fn report(
         &self,
         agent: AgentId,
         reports: &RepositoryReports,
+        proven: &[ProvenFloor],
         now: Timestamp,
         window: &StartWindow,
     ) -> Result<Vec<ClaimDecision>, StoreError>;
+
+    /// The floors that hold the hub in recovery mode: none outside it.
+    async fn recovery(&self) -> Result<HubRecovery, StoreError>;
+
+    /// Ends recovery mode, at a person's confirmation that the old hub is
+    /// stopped or gone: each kept floor is taken with
+    /// [`RepositoryOwnership::recover`] and the floors are dropped, in one
+    /// step. Whether the hub was in recovery mode.
+    async fn end_recovery(&self) -> Result<bool, StoreError>;
 
     /// Every repository each agent's last report named, however long ago
     /// the hub took it: what the hub's start window waits on (§7.3).

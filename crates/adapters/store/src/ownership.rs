@@ -9,8 +9,8 @@
 use app::ports::{ClaimDecision, OwnershipRegistry, StoreError};
 use async_trait::async_trait;
 use domain::maintenance::{
-    Lease, LeaseEpoch, ReleaseRefused, RepositoryOwnership, RepositoryReports, StartWindow,
-    report_counts,
+    HubRecovery, Lease, LeaseEpoch, ProvenFloor, ReleaseRefused, RepositoryOwnership,
+    RepositoryReports, StartWindow, report_counts,
 };
 use domain::{AgentId, RepositoryId, Timestamp, Uuid};
 use sqlx::sqlite::SqliteRow;
@@ -43,9 +43,11 @@ impl OwnershipRegistry for SqliteStore {
         &self,
         agent: AgentId,
         reports: &RepositoryReports,
+        proven: &[ProvenFloor],
         now: Timestamp,
         window: &StartWindow,
     ) -> Result<Vec<ClaimDecision>, StoreError> {
+        let _ = proven;
         let now = Timestamp::from_millisecond(now.as_millisecond()).unwrap_or(now);
         let agent_text = agent_id_text(agent);
         let _call = self.call().await;
@@ -98,6 +100,14 @@ impl OwnershipRegistry for SqliteStore {
         }
         tx.commit().await.map_err(unavailable)?;
         Ok(decided)
+    }
+
+    async fn recovery(&self) -> Result<HubRecovery, StoreError> {
+        todo!()
+    }
+
+    async fn end_recovery(&self) -> Result<bool, StoreError> {
+        todo!()
     }
 
     async fn reported_uses(&self) -> Result<Vec<(AgentId, RepositoryId)>, StoreError> {

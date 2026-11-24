@@ -112,6 +112,27 @@ impl fmt::Debug for ApprovalAsk {
     }
 }
 
+/// What the page asks for when a person ends recovery mode: the old hub is
+/// stopped or gone (decision 137).
+pub struct RecoveryAsk {
+    /// The connection's address, whose sign-in waits a wrong password
+    /// counts against.
+    pub peer: IpAddr,
+    /// Whether the request came from beyond loopback.
+    pub beyond_loopback: bool,
+    /// As [`TokenAsk::confirmation`]. Never shown (I4).
+    pub confirmation: Option<StepUpConfirmation>,
+}
+
+impl fmt::Debug for RecoveryAsk {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("RecoveryAsk")
+            .field("peer", &self.peer)
+            .field("beyond_loopback", &self.beyond_loopback)
+            .finish_non_exhaustive()
+    }
+}
+
 /// What the page asks for: the agent `agent_id`, under the key `agent_key`
 /// the person saw in its row, rejected while it waits or removed once
 /// approved.
@@ -174,6 +195,17 @@ impl HubPairing {
         self.stepped_up(ask.beyond_loopback, ask.peer, ask.confirmation)
             .await?;
         Ok(self.approve_now(ask.agent_id, ask.agent_key).await?)
+    }
+
+    /// Ends recovery mode once the step-up is confirmed as an approval's
+    /// is: a person says the old hub is stopped or gone, and the hub may
+    /// grant again above the floors its machines proved (decision 137).
+    /// Whether the hub was in recovery mode; a hub that keeps no owners
+    /// never is.
+    pub async fn end_recovery_asked(&self, ask: RecoveryAsk) -> Result<bool, TokenAskRefused> {
+        self.stepped_up(ask.beyond_loopback, ask.peer, ask.confirmation)
+            .await?;
+        Ok(self.end_recovery().await?)
     }
 
     /// The agent `ask` names removed, pending (a rejection) or approved:

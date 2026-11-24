@@ -69,6 +69,13 @@ pub fn grants_kind() -> WireName {
     WireName::known("RepoGrants")
 }
 
+/// The kind of the hub's answer to `ReposSnapshot` in recovery mode: it
+/// grants and renews nothing, and the machine keeps what it holds until it
+/// runs out (§16, decision 137).
+pub fn withheld_kind() -> WireName {
+    WireName::known("GrantsWithheld")
+}
+
 /// The kind of the agent's release of a lease it dropped (§7.3).
 pub fn release_kind() -> WireName {
     WireName::known("ReleaseAck")

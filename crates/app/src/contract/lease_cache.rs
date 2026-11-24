@@ -1,12 +1,13 @@
 //! The `LeaseCache` contract (technical design §7.3, I1): a machine's
-//! leases and epoch floors read back as kept, across a restart, each save
-//! replacing the last whole.
+//! leases, epoch floors and each floor's proof read back as kept, across a
+//! restart, each save replacing the last whole.
 
 use std::fmt;
 use std::sync::Arc;
 
 use async_trait::async_trait;
-use domain::maintenance::{EpochFloor, HeldLease, HeldLeases, LeaseEpoch, Pause};
+use domain::fleet::{KEY_BYTES, SIGNATURE_BYTES, Signature};
+use domain::maintenance::{EpochFloor, FloorProof, HeldLease, HeldLeases, LeaseEpoch, Pause};
 use domain::{RepositoryId, Timestamp};
 
 use crate::ports::LeaseCache;
@@ -49,8 +50,9 @@ fn epoch(number: u64) -> LeaseEpoch {
     LeaseEpoch::new(number).unwrap_or(LeaseEpoch::FIRST)
 }
 
-/// A lease on `photos` at epoch 2, a floor of it, and a floor alone on
-/// `music`, to the millisecond and at the ends of each number's range.
+/// A lease on `photos` at epoch 2, a floor of it with its proof, and a
+/// floor alone on `music`, to the millisecond and at the ends of each
+/// number's range.
 fn kept() -> Option<HeldLeases> {
     let floor = |recovery_number, generation, number| EpochFloor {
         recovery_number,
@@ -58,6 +60,12 @@ fn kept() -> Option<HeldLeases> {
         epoch: epoch(number),
     };
     let ends_at = ok(Timestamp::from_millisecond(1_800_000_000_123), "a time")?;
+    let mut signature = [0; SIGNATURE_BYTES];
+    signature[..KEY_BYTES].fill(7);
+    let proof = FloorProof {
+        expires_at: ok(Timestamp::from_second(1_800_604_800), "a time")?,
+        signature: ok(Signature::from_bytes(signature), "a signature")?,
+    };
     Some(HeldLeases::from_parts(
         [(
             repository('a')?,
@@ -73,6 +81,7 @@ fn kept() -> Option<HeldLeases> {
                 floor(i64::MAX as u64, i64::MAX as u64, i64::MAX as u64),
             ),
         ],
+        [(repository('a')?, proof)],
     ))
 }
 
@@ -112,6 +121,7 @@ async fn a_save_replaces_the_last_whole(harness: &dyn LeaseCacheHarness) {
                 },
             )
         }),
+        [],
     );
     ok(cache.save(&fewer).await, "the cache keeps");
     assert_eq!(ok(cache.load().await, "the cache reads"), Some(fewer));
