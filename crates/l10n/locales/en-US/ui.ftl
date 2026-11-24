@@ -3818,9 +3818,9 @@ ui-machines-recovery-ended = Recovery mode ended. This { -hub } grants leases ag
 # Said in the review when the step-up is wrong: recovery mode didn't end.
 ui-machines-recovery-step-up-failed = That isn't right, so recovery mode didn't end. Try again.
 
-## The hub's dashboard (#569): each approved machine, when it last connected,
-## the reports the hub let go of, and its latest operations, as its reports
-## told them.
+## The hub's dashboard (#569): each approved machine, whether it is online
+## now or when it last connected, the reports the hub let go of, and its
+## latest operations, as its reports told them.
 
 # The dashboard's heading.
 ui-dashboard-heading = Dashboard
@@ -3829,7 +3829,7 @@ ui-dashboard-heading = Dashboard
 ui-dashboard-title = Dashboard – { -brand-name }
 
 # What the dashboard shows, under its heading.
-ui-dashboard-intro = Each approved { -machine }'s latest operations, as it reported them to this { -hub }. A { -machine } connects only to send its reports, so this page shows when it last connected, not whether it is online.
+ui-dashboard-intro = Each approved { -machine }'s latest operations, as it reported them to this { -hub }. A { -machine } stays connected to the { -hub } while it runs, so this page shows that it is online now, or when it last connected.
 
 # Shown while the dashboard's first read of the machines is on its way.
 ui-dashboard-loading = Loading the { -machine(form: "other") }…

@@ -193,7 +193,11 @@ pub(crate) fn no_plans(plans: Option<&MachinePlansDto>) -> MessageId {
 /// while the hub holds its connection, or when it last connected (§16,
 /// decision 159).
 pub(crate) fn connection_line(online: bool) -> MessageId {
-    todo!("{online}")
+    if online {
+        msg::UI_DASHBOARD_ONLINE_NOW
+    } else {
+        msg::UI_DASHBOARD_LAST_CONNECTED
+    }
 }
 
 /// How the instant `at` (RFC 3339) reads on the dashboard: in the viewer's

@@ -1,17 +1,19 @@
 @ui
 Feature: The hub's dashboard of its approved machines
-  On a running hub, the Dashboard shows each approved machine: when it last
-  connected, its latest operations as its reports told them (when each
-  started and ended, how it came out, and the error code of a failure), and
-  a warning when the hub let go of its oldest reports. It shows the
-  machine's plans as it last reported them (how and when each last ran, and
-  when it runs next), a warning when it has more than it reports, and the
-  progress of the operation it runs in the shared progress bar, which is
-  never announced (§7.2; §16, decision 83). A machine connects only to send
-  its reports, so the page says when it last connected rather than whether
-  it is online (§16, decision 149). A machine's times read in the viewer's
-  zone, and in its own beside them when the two differ (#115). The page
-  follows the hub's events, and "Pause live updates" holds it still until
+  On a running hub, the Dashboard shows each approved machine: that it is
+  online now, while the hub holds its connection, or else when it last
+  connected (§16, decision 159), its latest operations as its reports told
+  them (when each started and ended, how it came out, and the error code of
+  a failure), and a warning when the hub let go of its oldest reports. It
+  shows the machine's plans as it last reported them (how and when each
+  last ran, and when it runs next), a warning when it has more than it
+  reports, and the progress of the operation it runs in the shared progress
+  bar, which is never announced (§7.2; §16, decision 83). The scenarios
+  here show machines that paired from their terminals and hold no
+  connection; the hub showing a connected machine online is in
+  `features/fleet/staying_connected.feature`. A machine's times read in the
+  viewer's zone, and in its own beside them when the two differ (#115). The
+  page follows the hub's events, and "Pause live updates" holds it still until
   it is pressed again (A3; §16, decision 65). It is the hub's main page: the
   hub's start page and its Machines tab lead to it.
 

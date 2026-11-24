@@ -1,17 +1,18 @@
 //! The hub's dashboard, the route `/dashboard` (technical design §4.3, §4.4;
 //! #569, #1440): each approved machine in a section of its own, named by its
-//! hostname, with when it last connected, a warning when the hub let go of
-//! its oldest reports, the shared progress bar of the operation it runs, a
-//! table of its latest operations and one of its plans, with a warning when
-//! it left some out. What it shows while paused, counts, says, reads again
-//! for and how its times and progress read is `dashboard.rs`'s, decided on
-//! the host; this is the DOM glue, which the `@ui` scenarios of
-//! `features/ui/hub_dashboard.feature` run.
+//! hostname, with whether it is online now or when it last connected, a
+//! warning when the hub let go of its oldest reports, the shared progress
+//! bar of the operation it runs, a table of its latest operations and one
+//! of its plans, with a warning when it left some out. What it shows while
+//! paused, counts, says, reads again for and how its times and progress
+//! read is `dashboard.rs`'s, decided on the host; this is the DOM glue,
+//! which the `@ui` scenarios of `features/ui/hub_dashboard.feature` run.
 //!
 //! The machines are read when the page opens, again each time the events
 //! stream opens, the first time and after a reconnect, and when an event of
-//! the hub's says a machine was approved, reported an operation, its plans
-//! or its progress. A pause holds what the page shows, not the reads.
+//! the hub's says a machine was approved, came online or went offline,
+//! reported an operation, its plans or its progress. A pause holds what the
+//! page shows, not the reads.
 
 use std::sync::Arc;
 use std::time::Duration;
@@ -31,7 +32,9 @@ use crate::components::{
     Alert, Column, Link, Name, PauseUpdates, Progress, Sentences, State, StatusBadge, Table,
     first_load, paced,
 };
-use crate::dashboard::{Fleet, instant, no_plans, outcome_badge, progress_reading, reads_again};
+use crate::dashboard::{
+    Fleet, connection_line, instant, no_plans, outcome_badge, progress_reading, reads_again,
+};
 use crate::operations_page::badge_of;
 use crate::pause;
 use crate::routes::{NotFound, PageHeading, text_with, time_view};
@@ -235,16 +238,16 @@ fn machine_section(
         let localizer = Arc::clone(localizer);
         let viewer = viewer.clone();
         move || {
-            let at = machine.with(|machine| {
+            let (online, at) = machine.with(|machine| {
                 machine
                     .as_ref()
-                    .map(|machine| machine.last_seen.clone())
+                    .map(|machine| (machine.online, machine.last_seen.clone()))
                     .unwrap_or_default()
             });
             let when = shown_instant(&localizer, &at, viewer.as_ref(), zone.get().as_deref());
             text_with(
                 &localizer,
-                msg::UI_DASHBOARD_LAST_CONNECTED,
+                connection_line(online),
                 &[("when", MsgArg::Text(when))],
             )
         }
