@@ -100,13 +100,13 @@ The keychain still asks once for each new build, signed or not, before it lets t
 - Read the entry with Apple's `security` program, which a new build of Ladderback doesn't change: `password-command = "security find-generic-password -s ladderback -a nas -w"` for the entry `ladderback/nas`. The keychain may ask once for `security` itself, so run that command once in a terminal and answer "Always Allow".
 - Keep the password in a `password-file` only you can read (`chmod 600`).
 
-Name the certificate in `LADDERBACK_SIGN_IDENTITY` for `just install` or `just install-restart` in a checkout too:
+`just install` and `just install-restart` use the self-signed certificate named `Ladderback Code Signing` by default. Override it with `LADDERBACK_SIGN_IDENTITY` when another certificate name or SHA-1 hash is needed:
 
 ```sh
 LADDERBACK_SIGN_IDENTITY="Ladderback Code Signing" just install-restart
 ```
 
-The install script passes the variable on to the `just install` it runs. It builds the newest release, and every release from 0.4.0 on signs its build; releases up to 0.3.1 sign nothing.
+The install script passes the variable on to `just install`. It builds the newest release, and every release from 0.4.0 on signs its build; releases up to 0.3.1 sign nothing.
 
 `just install` checks the name before it builds, and installs nothing when `security` lists no valid certificate of exactly that name, or lists more than one: then name one by the SHA-1 hash it shows, or, when it is one certificate kept in two keychains, delete a copy. After installing, it signs the binary with the certificate under the identifier `io.github.nledford.ladderback` and checks the signature. Only the name passes through; the key stays in your keychain.
 

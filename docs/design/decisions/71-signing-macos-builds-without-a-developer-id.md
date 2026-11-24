@@ -2,12 +2,12 @@
 
 **A build from source can be signed with a self-signed certificate the person names; a macOS archive is published only once it can be signed with a Developer ID and notarized** (recorded 2026-11-12, §12; #281, #344). Ladderback has no paid Apple Developer account, so no Developer ID certificate and no notarization.
 
-- **M3:** on macOS, `just install` signs the installed binary with a code-signing identity from the person's own keychain when they name one, always with the same fixed identifier (`codesign -i`). Without one it installs as before, with the ad-hoc signature the linker gives every arm64 binary. The Full Disk Access checks of §12 run on the signed build.
+- **M3:** on macOS, `just install` signs the installed binary with the self-signed identity `Ladderback Code Signing` by default, or the code-signing identity the person names in `LADDERBACK_SIGN_IDENTITY`, always with the same fixed identifier (`codesign -i`). Without a valid default or override identity it refuses before building; the Full Disk Access checks of §12 run on the signed build.
 - **From 0.3.1:** each release publishes the Linux archives (decision 54, amended by #582). A macOS archive waits for #344 (Developer ID signing and notarization, not scheduled); until then macOS users build from source.
 
 **Amended 2026-11-16 (the maintainer, #281):** how `just install` signs.
 
-- **The name:** the person names the identity in `LADDERBACK_SIGN_IDENTITY`, by its name or its SHA-1 hash, which `just install` and so `just install-restart` read; not a recipe argument, as the recipes' arguments go to `cargo install`.
+- **The name:** `just install` and `just install-restart` default to `Ladderback Code Signing`; `LADDERBACK_SIGN_IDENTITY` overrides it with an identity name or SHA-1 hash. The setting is not a recipe argument, as the recipes' arguments go to `cargo install`.
 - **The identifier:** `io.github.nledford.ladderback`, the launchd agent's label.
 - **Refused before the build:** a name that `security find-identity -v -p codesigning` doesn't list as a valid identity's whole name or hash, or lists more than once, so a mistyped or untrusted certificate installs nothing. After the install it signs with that identity's hash, as `codesign` would also take a name as part of a longer one, then runs `codesign --verify` (scripts/install-signing.ts). A signing that fails then leaves the new binary installed, says how it is signed, and fails the recipe.
 - **The note:** after a restart, `install-restart` warns that the keychain, Photos and Full Disk Access ask again for a build signed ad hoc, and says for a signed one that those grants carry over.

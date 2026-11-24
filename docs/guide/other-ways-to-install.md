@@ -94,6 +94,6 @@ git checkout "$(git tag --list 'v*' --sort=-v:refname | grep -v -- - | head -n 1
 (cd crates/web && trunk build --release --no-default-features) && cargo install --locked --path . --no-default-features
 ```
 
-On macOS, name your certificate in `LADDERBACK_SIGN_IDENTITY` for `just install` too, as [Signing your build](install-macos.md#signing-your-build) says; [Running as a service](running-as-a-service.md#macos-signing-and-the-keychain) has what `just install` checks.
+On macOS, `just install` and `just install-restart` use the self-signed certificate named `Ladderback Code Signing` by default. Set `LADDERBACK_SIGN_IDENTITY` to another certificate name or SHA-1 hash when you need a different identity; [Running as a service](running-as-a-service.md#macos-signing-and-the-keychain) has what `just install` checks.
 
 To update by hand, `git fetch --tags`, the same `git checkout` line, and `just install`. After the install script installed the archive, run `just install --force`: cargo won't overwrite a binary it didn't install. Releases up to 0.2.0 track the web UI's stylesheet, which their build can rewrite: coming from one of them by hand, first put it back with `git checkout -- crates/web/tw-out.css`, or git refuses to check out the new release.

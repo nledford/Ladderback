@@ -20,6 +20,11 @@ mutants_packages := "--package domain --package app --package api --package l10n
 # artifacts change together.
 release_flags := "--no-default-features"
 
+# On macOS, development installs use this self-signed identity by default so
+# Full Disk Access and Photos grants survive an update. Set
+# LADDERBACK_SIGN_IDENTITY to a different identity or SHA-1 hash when needed.
+macos_sign_identity := env_var_or_default("LADDERBACK_SIGN_IDENTITY", "Ladderback Code Signing")
+
 # The leptosfmt release `fmt` and `fmt-check` expect (technical design §13.13).
 # Another release formats differently, so `setup` installs this one, CI too
 # (`just --evaluate leptosfmt_version`), and `fmt-check` refuses another.
@@ -691,24 +696,25 @@ web-release:
 # URL can't build that UI, so this checkout is the way in. The daemon starts its
 # own workers, so this one binary is all an installation needs. Arguments go to
 # `cargo install`: `just install --root ~/.local` installs into `~/.local/bin`.
-# On macOS, LADDERBACK_SIGN_IDENTITY names a code-signing identity in the
-# keychain to sign the installed binary with, so macOS's grants can carry over
-# to the next update (decision 71): `_signing-identity` refuses a name it can't
-# sign with before anything is built, and the install ends by signing the
-# binary (scripts/install-signing.ts). Without it, or elsewhere, nothing is
-# signed.
-[doc('Install the ladderback release binary from this checkout (arguments go to cargo install; LADDERBACK_SIGN_IDENTITY signs it on macOS).')]
+# On macOS, `macos_sign_identity` names the code-signing identity used for the
+# installed binary, defaulting to the self-signed certificate
+# `Ladderback Code Signing`. macOS carries Full Disk Access and Photos grants
+# between updates signed by the same identity (decision 71). `_signing-identity`
+# refuses a name it can't sign with before anything is built, and the install
+# ends by signing the binary (scripts/install-signing.ts). Elsewhere the
+# signing helper does nothing.
+[doc('Install the ladderback release binary from this checkout (arguments go to cargo install; macOS signs it with the configured self-signed identity).')]
 [group('release')]
 [positional-arguments]
 install *args: _signing-identity web-release
     cargo install --locked --path . --profile dist {{ release_flags }} "$@"
-    @node scripts/install-signing.ts sign "$@"
+    @LADDERBACK_SIGN_IDENTITY={{ quote(macos_sign_identity) }} node scripts/install-signing.ts sign "$@"
 
-# Refuses, before `install` builds, a LADDERBACK_SIGN_IDENTITY that names no
-# valid code-signing identity on macOS.
+# Refuses, before `install` builds, a signing identity that names no valid
+# code-signing identity on macOS.
 [private]
 _signing-identity:
-    @node scripts/install-signing.ts check
+    @LADDERBACK_SIGN_IDENTITY={{ quote(macos_sign_identity) }} node scripts/install-signing.ts check
 
 # Updates an installed service from this checkout (#519): `install` with the
 # arguments, into a staging folder beside the installed binary (its `--root`),
@@ -730,7 +736,7 @@ _signing-identity:
 [group('release')]
 [positional-arguments]
 install-restart *args:
-    node scripts/install-restart.ts "$@"
+    @LADDERBACK_SIGN_IDENTITY={{ quote(macos_sign_identity) }} node scripts/install-restart.ts "$@"
 
 # Builds the release archive for `target` as the Release builds workflow does
 # (§12.1): the web UI with the release flags, which the binary embeds, then
