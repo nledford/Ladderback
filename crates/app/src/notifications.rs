@@ -15,7 +15,7 @@ use domain::execution::OperationStatus;
 use domain::notifications::{
     Attempt, Auth, ChannelName, Event, EventKind, Matched, Outcome, RuleName, Subject,
 };
-use domain::planning::Locale;
+use domain::planning::{AgentConfig, Locale};
 use domain::secrets::{Redactor, SecretRef, SecretValue, SecretWarning};
 use domain::{OperationId, RepositoryAlias, Timestamp, Uuid};
 use futures::StreamExt;
@@ -181,7 +181,15 @@ impl Notify {
     /// want of a lease since `since`, and returns what there is to report,
     /// as [`Self::tell`] does.
     pub async fn tell_paused(&self, repository: &RepositoryAlias, since: Timestamp) -> Vec<Report> {
-        todo!("{repository:?} {since}")
+        let config = match self.config.load().await {
+            Ok(config) => config,
+            Err(error) => return vec![Report::ConfigUnavailable(error)],
+        };
+        self.deliver(
+            &config,
+            &Event::maintenance_paused(repository.clone(), since),
+        )
+        .await
     }
 
     /// Tells the event `news` is, as [`Self::tell`] does.
@@ -235,10 +243,17 @@ impl Notify {
         let Some(event) = event else {
             return Vec::new();
         };
+        self.deliver(&config, &event).await
+    }
+
+    /// Sends `event` to the channels of every rule of `config` that sends
+    /// it, and reports each notification that wasn't delivered.
+    async fn deliver(&self, config: &AgentConfig, event: &Event) -> Vec<Report> {
         let locale = config.agent().locale.as_ref();
-        let deliveries = notifications
-            .matching(&event)
-            .map(|matched| self.send(matched, &event, locale));
+        let deliveries = config
+            .notifications()
+            .matching(event)
+            .map(|matched| self.send(matched, event, locale));
         join_all(deliveries)
             .await
             .into_iter()

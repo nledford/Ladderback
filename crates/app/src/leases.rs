@@ -9,8 +9,8 @@
 
 use std::sync::{Arc, Mutex, PoisonError};
 
-use domain::maintenance::{EpochLower, LeaseEpoch, NoLease, RepoGrants};
-use domain::{RepositoryId, SignedDuration, Timestamp};
+use domain::maintenance::{EpochLower, LeaseEpoch, NoLease, Ownership, RepoGrants};
+use domain::{RepositoryAlias, RepositoryId, SignedDuration, Timestamp};
 
 use crate::notifications::{Notify, Report};
 use crate::ports::{Clock, ConfigStore, Identity, LeaseCache, StoreError};
@@ -114,7 +114,11 @@ impl MaintenanceLeases {
     /// known, a pin or a cache that can't be read says none: the page
     /// shows nothing it can't tell, and a run is refused regardless.
     pub async fn paused(&self, repository: Option<&RepositoryId>) -> Option<Timestamp> {
-        todo!("{repository:?}")
+        let Ok(Some(_)) = self.identity.pin().await else {
+            return None;
+        };
+        let held = self.cache.load().await.ok()?;
+        held.paused_since(repository?, self.now())
     }
 
     /// Notes, now, which of `maintained`, the repositories the
@@ -129,7 +133,18 @@ impl MaintenanceLeases {
         &self,
         maintained: &[RepositoryId],
     ) -> Result<Vec<(RepositoryId, Timestamp)>, StoreError> {
-        todo!("{maintained:?}")
+        let maintained = match self.identity.pin().await {
+            Ok(Some(_)) => maintained,
+            Ok(None) => &[],
+            Err(_) => return Ok(Vec::new()),
+        };
+        let mut held = self.cache.load().await?;
+        let before = held.clone();
+        let due = held.watch(maintained, self.now());
+        if held != before {
+            self.cache.save_pauses(&held).await?;
+        }
+        Ok(due)
     }
 }
 
@@ -163,8 +178,30 @@ impl WatchPauses {
     /// configuration or a cache that can't be read notes nothing and tells
     /// nothing; the next watch tries again.
     pub async fn watch(&self) -> Vec<Report> {
-        let _ = (&self.config, &self.leases, &self.notify);
-        todo!()
+        let Ok(config) = self.config.load().await else {
+            return Vec::new();
+        };
+        let maintained: Vec<(&RepositoryAlias, &RepositoryId)> = config
+            .repositories()
+            .iter()
+            .filter(|(_, entry)| Ownership::owned_here(entry.maintenance))
+            .filter_map(|(alias, entry)| entry.id.as_ref().map(|id| (alias, id)))
+            .collect();
+        let ids: Vec<RepositoryId> = maintained.iter().map(|(_, id)| (*id).clone()).collect();
+        let Ok(due) = self.leases.watch(&ids).await else {
+            return Vec::new();
+        };
+        let mut reports = Vec::new();
+        for (repository, since) in due {
+            let alias = maintained
+                .iter()
+                .find(|(_, id)| **id == repository)
+                .map(|(alias, _)| *alias);
+            if let Some(alias) = alias {
+                reports.extend(self.notify.tell_paused(alias, since).await);
+            }
+        }
+        reports
     }
 }
 
