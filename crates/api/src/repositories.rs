@@ -42,6 +42,13 @@ pub struct RepositoryDto {
     /// so a client offers no maintenance for it.
     #[serde(default)]
     pub maintained_here: bool,
+    /// Since when this paired machine's maintenance of the repository is
+    /// paused because it holds no lease on it from its hub, as an RFC 3339
+    /// time (§7.3, decision 158). Left out when it isn't: a machine that
+    /// isn't paired, a lease that holds, or a repository maintained
+    /// elsewhere.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub maintenance_paused_since: Option<String>,
     /// Whether the row offers to create the repository where its entry says:
     /// its entry records no repository ID, its latest operation failed with
     /// `repository-not-found`, and none of them ever succeeded, so never

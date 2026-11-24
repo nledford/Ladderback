@@ -174,3 +174,177 @@ fn what_a_cache_kept_reads_back() {
     );
     assert_eq!(kept, held);
 }
+
+/// A machine on the hub's time that took the grant of `photos` at hub(0).
+fn granted() -> HeldLeases {
+    let mut held = HeldLeases::default();
+    assert_eq!(held.take(&grants(1, hub(0)), 0, hub(0)), vec![]);
+    held
+}
+
+fn ms(by: i64) -> SignedDuration {
+    SignedDuration::from_millis(by)
+}
+
+#[test]
+fn maintenance_isnt_paused_while_the_lease_holds_and_is_paused_from_the_moment_it_runs_out() {
+    let held = granted();
+    let end = hub(7 * DAY);
+    let before = end.checked_sub(ms(1)).unwrap();
+    assert_eq!(held.paused_since(&repository('a'), before), None);
+    assert_eq!(held.paused_since(&repository('a'), end), Some(end));
+    assert_eq!(held.paused_since(&repository('a'), hub(9 * DAY)), Some(end));
+}
+
+#[test]
+fn a_machine_that_holds_no_lease_and_noted_no_pause_says_none_until_it_watches() {
+    let mut held = HeldLeases::default();
+    assert_eq!(held.paused_since(&repository('a'), hub(0)), None);
+    assert_eq!(held.watch([&repository('a')], hub(0)), vec![]);
+    assert_eq!(held.paused_since(&repository('a'), hub(DAY)), Some(hub(0)));
+}
+
+#[test]
+fn a_watch_notes_a_pause_since_the_lease_ran_out_and_keeps_its_date() {
+    let mut held = granted();
+    assert_eq!(held.watch([&repository('a')], hub(9 * DAY)), vec![]);
+    assert_eq!(
+        held.pauses().collect::<Vec<_>>(),
+        vec![(
+            &repository('a'),
+            &Pause {
+                since: hub(7 * DAY),
+                alerted: false
+            }
+        )]
+    );
+    // The hub lets the lease go: the pause keeps the date it had.
+    let none = RepoGrants {
+        generation: 1,
+        signed_at: hub(10 * DAY),
+        grants: vec![],
+    };
+    assert_eq!(held.take(&none, 0, hub(10 * DAY)), vec![]);
+    assert_eq!(held.watch([&repository('a')], hub(11 * DAY)), vec![]);
+    assert_eq!(
+        held.paused_since(&repository('a'), hub(11 * DAY)),
+        Some(hub(7 * DAY))
+    );
+}
+
+#[test]
+fn a_watch_while_the_lease_holds_notes_no_pause() {
+    let mut held = granted();
+    assert_eq!(held.watch([&repository('a')], hub(DAY)), vec![]);
+    assert_eq!(held.pauses().count(), 0);
+}
+
+#[test]
+fn the_next_grant_clears_a_pause_and_the_next_watch_drops_it() {
+    let mut held = granted();
+    assert_eq!(held.watch([&repository('a')], hub(9 * DAY)), vec![]);
+    assert_eq!(held.take(&grants(1, hub(9 * DAY)), 0, hub(9 * DAY)), vec![]);
+    assert_eq!(held.paused_since(&repository('a'), hub(9 * DAY)), None);
+    assert_eq!(held.watch([&repository('a')], hub(9 * DAY)), vec![]);
+    assert_eq!(held.pauses().count(), 0);
+    // Once the renewed lease runs out, the pause starts again from then.
+    assert_eq!(held.watch([&repository('a')], hub(17 * DAY)), vec![]);
+    assert_eq!(
+        held.paused_since(&repository('a'), hub(17 * DAY)),
+        Some(hub(16 * DAY))
+    );
+}
+
+#[test]
+fn a_watch_drops_the_pause_of_a_repository_the_machine_no_longer_asks_to_maintain() {
+    let mut held = granted();
+    assert_eq!(held.watch([&repository('a')], hub(9 * DAY)), vec![]);
+    assert_eq!(held.watch([], hub(9 * DAY)), vec![]);
+    assert_eq!(held.pauses().count(), 0);
+    // What the lease says still stands until a watch notes a pause again.
+    assert_eq!(
+        held.paused_since(&repository('a'), hub(9 * DAY)),
+        Some(hub(7 * DAY))
+    );
+}
+
+#[test]
+fn a_pause_is_returned_once_it_has_lasted_14_days_until_it_is_told() {
+    let mut held = granted();
+    let since = hub(7 * DAY);
+    let due = since.checked_add(PAUSE_ALERT_AFTER).unwrap();
+    assert_eq!(PAUSE_ALERT_AFTER, SignedDuration::from_hours(14 * 24));
+    assert_eq!(
+        held.watch([&repository('a')], due.checked_sub(ms(1)).unwrap()),
+        vec![]
+    );
+    assert_eq!(
+        held.watch([&repository('a')], due),
+        vec![(repository('a'), since)]
+    );
+    // Not told yet, as when every channel failed: the next watch returns
+    // it again.
+    assert_eq!(
+        held.watch([&repository('a')], due.checked_add(ms(1)).unwrap()),
+        vec![(repository('a'), since)]
+    );
+    held.told(&repository('a'), hub(8 * DAY));
+    assert_eq!(
+        held.watch([&repository('a')], hub(25 * DAY)),
+        vec![(repository('a'), since)]
+    );
+    held.told(&repository('a'), since);
+    assert_eq!(
+        held.pauses().collect::<Vec<_>>(),
+        vec![(
+            &repository('a'),
+            &Pause {
+                since,
+                alerted: true
+            }
+        )]
+    );
+    assert_eq!(held.watch([&repository('a')], hub(30 * DAY)), vec![]);
+}
+
+#[test]
+fn a_pause_first_noted_after_14_days_is_returned_only_by_the_next_watch() {
+    let mut held = granted();
+    assert_eq!(held.watch([&repository('a')], hub(30 * DAY)), vec![]);
+    assert_eq!(
+        held.watch([&repository('a')], hub(30 * DAY + 15 * 60)),
+        vec![(repository('a'), hub(7 * DAY))]
+    );
+}
+
+#[test]
+fn each_repository_is_paused_and_told_on_its_own() {
+    let mut held = granted();
+    assert_eq!(
+        held.watch([&repository('a'), &repository('b')], hub(14 * DAY)),
+        vec![]
+    );
+    assert_eq!(
+        held.watch([&repository('a'), &repository('b')], hub(21 * DAY)),
+        vec![(repository('a'), hub(7 * DAY))]
+    );
+    held.told(&repository('a'), hub(7 * DAY));
+    assert_eq!(
+        held.watch([&repository('a'), &repository('b')], hub(28 * DAY)),
+        vec![(repository('b'), hub(14 * DAY))]
+    );
+}
+
+#[test]
+fn kept_pauses_read_back_as_they_were() {
+    let pause = Pause {
+        since: hub(3),
+        alerted: true,
+    };
+    let held = HeldLeases::default().with_pauses([(repository('a'), pause)]);
+    assert_eq!(
+        held.pauses().collect::<Vec<_>>(),
+        vec![(&repository('a'), &pause)]
+    );
+    assert_eq!(held.paused_since(&repository('a'), hub(4)), Some(hub(3)));
+}

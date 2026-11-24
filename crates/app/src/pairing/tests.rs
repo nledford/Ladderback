@@ -1085,6 +1085,12 @@ impl LeaseCache for Unwritable {
             detail: "read-only".to_owned(),
         })
     }
+
+    async fn save_pauses(&self, _leases: &HeldLeases) -> Result<(), StoreError> {
+        Err(StoreError::Unavailable {
+            detail: "read-only".to_owned(),
+        })
+    }
 }
 
 /// A machine that can't forget the old hub's floors pins no new hub, so

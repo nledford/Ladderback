@@ -144,6 +144,11 @@ const PINNED: &[(i64, &str, &str)] = &[
         "agent tombstones",
         "ce005fb3b6aed9ec2a0b83c430c639deeff1bc82cfab70f1221ceefda8594b3c1c195abf9642859e0df1737c18fdabd2",
     ),
+    (
+        27,
+        "agent maintenance paused",
+        "56e4f5e5250c67b04a7f3dcddbf557cc4a6efd445e75010fe038b3df55d95a6d492256501da2f13fe713703104b841a7",
+    ),
 ];
 
 /// The migration's file name, as `sqlx::migrate!` reads it: sqlx turns the

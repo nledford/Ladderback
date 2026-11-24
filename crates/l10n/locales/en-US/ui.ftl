@@ -1865,6 +1865,10 @@ ui-maintenance-body = Each of these shows what it would do first. Nothing change
 # What the maintenance section says instead, with no buttons but the one that turns maintenance from this machine on, of a repository this machine does not maintain: its entry asks for maintenance by the hub or by nothing.
 ui-maintenance-elsewhere = This { -machine } does not maintain this repository, so it cannot forget, prune or check it, or adopt history into its plans.
 
+# A warning above the maintenance section's buttons when this paired machine holds no lease on the repository from its hub, so the hub has it maintain nothing (technical design §7.3). It goes once the hub grants a lease.
+# $since (instant): since when maintenance is paused, read in the viewer's zone.
+ui-maintenance-paused = Maintenance from this { -machine } has been paused since { DATETIME($since, dateStyle: "medium") }, because it holds no lease on this repository from its { -hub }. It starts again once the { -hub } grants one.
+
 # The button that reviews a forget: the snapshots the plans' retention no longer keeps.
 ui-maintenance-forget = Forget snapshots
 

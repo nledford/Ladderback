@@ -610,7 +610,23 @@ async fn state_over(
     // The bus and the notification rules come first, so that recovery can
     // announce each operation it ends (decision 91).
     let bus: Arc<dyn EventBus> = Arc::new(BroadcastEventBus::new());
-    notify_over(bus.as_ref(), Arc::clone(&config), Arc::clone(&store)).await;
+    // One for maintenance, its pause watch, the catalog and the sync with a
+    // hub alike: the floor the sync's take of the hub's grants sets is the
+    // one maintenance judges a lease by (I1, decision 151).
+    #[cfg(feature = "hub")]
+    let held = maintenance_leases(data_dir, &log.store);
+    #[cfg(feature = "hub")]
+    let leases = Some(Arc::clone(&held));
+    // A build without the hub never pairs, so it holds no leases.
+    #[cfg(not(feature = "hub"))]
+    let leases = None;
+    notify_over(
+        bus.as_ref(),
+        Arc::clone(&config),
+        Arc::clone(&store),
+        leases.clone(),
+    )
+    .await;
     // Nothing has run yet, so an operation the log still shows as running was
     // left by a process that stopped. It ends as failed now, which also lets
     // go of the repository a running maintenance operation held (I7). A log
@@ -720,11 +736,6 @@ async fn state_over(
     ));
     let engine: Arc<dyn Engine> = Arc::<ChooseLocation>::clone(&locations);
     let (run_ends, ends) = app::retry::run_ends();
-    // One for maintenance and the sync with a hub both: the floor its take
-    // of the hub's grants sets is the one maintenance judges a lease by
-    // (I1, decision 151).
-    #[cfg(feature = "hub")]
-    let leases = maintenance_leases(data_dir, &log.store);
     let runner = Arc::new(PlanRunner {
         config: Arc::clone(&config),
         writes: Arc::clone(&writes),
@@ -746,11 +757,7 @@ async fn state_over(
         readings: Arc::<SqliteStore>::clone(&log.store),
         full_disk_access,
         machine: standing,
-        #[cfg(feature = "hub")]
-        leases: Some(Arc::clone(&leases)),
-        // A build without the hub never pairs, so it holds no leases.
-        #[cfg(not(feature = "hub"))]
-        leases: None,
+        leases: leases.clone(),
     });
     // `~/ladderback-restore`. With no home folder, or one that isn't
     // UTF-8, there is none: a restore to a new folder then needs
@@ -885,6 +892,7 @@ async fn state_over(
         sources: Arc::new(WithinLimit(engine::RusticSources, SOURCES_LOOK_LIMIT)),
         reads: Arc::default(),
         listings,
+        leases,
     });
     let notice = Arc::new(UpdateNotice::new());
     // The daemon listens before the backups queued before the start are
@@ -914,7 +922,7 @@ async fn state_over(
         #[cfg(feature = "hub")]
         listings_due,
         #[cfg(feature = "hub")]
-        leases,
+        leases: held,
     };
     Ok((
         AppState {
@@ -1033,14 +1041,18 @@ impl http_adapter::SettingsOpener for SystemSettings {
 }
 
 /// Tells the channels of the agent's notification rules of the news on `bus`
-/// for as long as the daemon runs (§11). A notification that wasn't delivered
-/// is said in the log by its warning code, never with a secret (I4), and an
-/// event the configuration couldn't be read for by the configuration's error
-/// code. A client that can't be built is said once, and nothing is sent.
+/// for as long as the daemon runs (§11), and, on a machine that holds
+/// `leases`, of each repository whose maintenance has been paused for want
+/// of a lease long enough, watched as often as the machine asks its hub for
+/// grants (decision 158). A notification that wasn't delivered is said in
+/// the log by its warning code, never with a secret (I4), and an event the
+/// configuration couldn't be read for by the configuration's error code. A
+/// client that can't be built is said once, and nothing is sent.
 async fn notify_over(
     bus: &dyn EventBus,
     config: Arc<dyn ConfigStore>,
     store: Arc<dyn OperationStore>,
+    leases: Option<Arc<app::leases::MaintenanceLeases>>,
 ) {
     let localizer = || l10n::Localizer::new(&l10n::PosixEnv::from_process().preferences());
     let notifier = match HttpNotifier::new(localizer(), DELIVERY_TIMEOUT) {
@@ -1050,13 +1062,32 @@ async fn notify_over(
             return;
         }
     };
-    let notify = Notify::new(
-        config,
-        store,
-        Arc::new(SystemSecrets::default()),
-        Arc::new(notifier),
-    )
-    .telling(Arc::new(log_secret_warning));
+    let notify = Arc::new(
+        Notify::new(
+            Arc::clone(&config),
+            store,
+            Arc::new(SystemSecrets::default()),
+            Arc::new(notifier),
+        )
+        .telling(Arc::new(log_secret_warning)),
+    );
+    if let Some(leases) = leases {
+        let pauses = app::leases::WatchPauses::new(config, leases, Arc::clone(&notify));
+        let localizer = localizer();
+        tokio::spawn(async move {
+            let every = app::sync::GRANTS_EVERY.as_secs().unsigned_abs();
+            let mut ticks = tokio::time::interval(std::time::Duration::from_secs(every));
+            // A machine that slept watches once on waking, not once per
+            // tick it missed.
+            ticks.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
+            loop {
+                ticks.tick().await;
+                for report in pauses.watch().await {
+                    log::warn!("{}", report_line(&localizer, &report));
+                }
+            }
+        });
+    }
     // Subscribed before any run can start, so no news is missed.
     let news = bus.subscribe().await;
     let localizer = localizer();

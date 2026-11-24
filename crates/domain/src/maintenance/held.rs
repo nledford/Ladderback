@@ -7,12 +7,28 @@
 //! lease's end is moved onto the machine's own wall clock by the time
 //! between the two, so a machine whose clock runs days off stops when the
 //! hub counts the lease out, and time asleep still counts. Rules only:
-//! every time is passed in.
+//! every time is passed in. While it holds no live lease on a repository it
+//! asks to maintain, its maintenance of it is paused ([`Pause`]), and a
+//! pause that has lasted [`PAUSE_ALERT_AFTER`] is told once.
 
 use std::collections::BTreeMap;
 
 use super::lease::LeaseEpoch;
-use crate::{RepositoryId, Timestamp};
+use crate::{RepositoryId, SignedDuration, Timestamp};
+
+/// How long a paired machine's maintenance of a repository stays paused
+/// before the machine tells its notification rules
+/// (`repo.maintenance_paused`, §11): 14 days, two lease lives, so a laptop
+/// away from its hub for a week or a hub down a few days stays quiet.
+pub const PAUSE_ALERT_AFTER: SignedDuration = SignedDuration::from_hours(14 * 24);
+
+/// The machine's maintenance of a repository, paused for want of a lease:
+/// since when, and whether its notification rules were told.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct Pause {
+    pub since: Timestamp,
+    pub alerted: bool,
+}
 
 /// The highest lease a machine has seen for one repository, ordered by the
 /// hub's recovery number, its generation, then the lease's epoch (§7.3, "A
@@ -70,11 +86,12 @@ pub struct EpochLower {
     pub granted: EpochFloor,
 }
 
-/// A paired machine's leases and epoch floors.
+/// A paired machine's leases, epoch floors and paused maintenance.
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub struct HeldLeases {
     leases: BTreeMap<RepositoryId, HeldLease>,
     floors: BTreeMap<RepositoryId, EpochFloor>,
+    paused: BTreeMap<RepositoryId, Pause>,
 }
 
 impl HeldLeases {
@@ -86,6 +103,91 @@ impl HeldLeases {
         Self {
             leases: leases.into_iter().collect(),
             floors: floors.into_iter().collect(),
+            paused: BTreeMap::new(),
+        }
+    }
+
+    /// `self` with the pauses a cache kept in place of its own.
+    #[must_use]
+    pub fn with_pauses(self, pauses: impl IntoIterator<Item = (RepositoryId, Pause)>) -> Self {
+        Self {
+            paused: pauses.into_iter().collect(),
+            ..self
+        }
+    }
+
+    pub fn pauses(&self) -> impl Iterator<Item = (&RepositoryId, &Pause)> {
+        self.paused.iter()
+    }
+
+    /// Since when the machine's maintenance of `repository` is paused at
+    /// `now`, on its own clock: never while it holds a live lease on it;
+    /// else since the pause it noted, or, when it noted none yet, since its
+    /// lease ran out. `None` when it holds no lease and noted no pause: the
+    /// next [`watch`](Self::watch) notes one.
+    pub fn paused_since(&self, repository: &RepositoryId, now: Timestamp) -> Option<Timestamp> {
+        if self.holds(repository, now).is_ok() {
+            return None;
+        }
+        self.paused
+            .get(repository)
+            .map(|pause| pause.since)
+            .or_else(|| self.leases.get(repository).map(|lease| lease.ends_at))
+    }
+
+    /// Notes at `now` the pause of each repository of `maintained`, those
+    /// the machine asks to maintain, on which it holds no live lease: since
+    /// its lease ran out, or since `now` when it holds none, a pause noted
+    /// before keeping its date. Every other pause is dropped, so the next
+    /// grant clears one. Returns each pause a watch before this one noted
+    /// that has now lasted [`PAUSE_ALERT_AFTER`] and wasn't
+    /// [`told`](Self::told) yet, by repository and since when. A pause
+    /// this watch first notes isn't returned, however old: a machine that
+    /// starts or wakes long after its lease ran out asks its hub before the
+    /// next watch, and the hub's grant may end the pause first.
+    pub fn watch<'a>(
+        &mut self,
+        maintained: impl IntoIterator<Item = &'a RepositoryId>,
+        now: Timestamp,
+    ) -> Vec<(RepositoryId, Timestamp)> {
+        let mut paused = BTreeMap::new();
+        let mut due = Vec::new();
+        for repository in maintained {
+            if self.holds(repository, now).is_ok() {
+                continue;
+            }
+            let kept = self.paused.get(repository).copied();
+            let pause = kept.unwrap_or(Pause {
+                since: self
+                    .leases
+                    .get(repository)
+                    .map_or(now, |lease| lease.ends_at),
+                alerted: false,
+            });
+            // A date no clock can hold is never due.
+            let lasted = pause
+                .since
+                .checked_add(PAUSE_ALERT_AFTER)
+                .is_ok_and(|at| now >= at);
+            if kept.is_some() && lasted && !pause.alerted {
+                due.push((repository.clone(), pause.since));
+            }
+            paused.insert(repository.clone(), pause);
+        }
+        self.paused = paused;
+        due
+    }
+
+    /// Notes that the notification rules were told of the pause of
+    /// `repository` since `since`, so no watch returns it again. A pause
+    /// that ended, or one since another date, is left as it is.
+    pub fn told(&mut self, repository: &RepositoryId, since: Timestamp) {
+        if let Some(pause) = self
+            .paused
+            .get_mut(repository)
+            .filter(|pause| pause.since == since)
+        {
+            pause.alerted = true;
         }
     }
 
