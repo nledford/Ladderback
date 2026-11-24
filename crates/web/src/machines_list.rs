@@ -249,6 +249,38 @@ fn notes_the_same(a: Option<&LookalikeDto>, b: Option<&LookalikeDto>) -> bool {
     }
 }
 
+/// What the row's note says of the second computer the hub last refused
+/// under its machine ID (decision 150): that the hub refused it, how long
+/// ago, and that the ways back are in the warning about the machine above
+/// the tables. `None` when the hub refused none.
+pub(crate) fn second_computer(row: &HubAgentDto) -> Option<Words> {
+    let _ = row;
+    todo!()
+}
+
+/// The warning above the tables for one machine the hub refused a second
+/// computer for: its words, which name the machine and end where the
+/// command is to be typed, and that command's words (decision 150).
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub(crate) struct WaysBack {
+    pub(crate) words: Words,
+    pub(crate) command: Vec<String>,
+}
+
+/// The warnings for the machines of `rows` the hub refused a second
+/// computer for, in their order.
+pub(crate) fn ways_back<'a>(rows: impl IntoIterator<Item = &'a HubAgentDto>) -> Vec<WaysBack> {
+    let _ = rows.into_iter();
+    todo!()
+}
+
+/// The command that forgets the computer the hub took as `hostname`, word
+/// by word, as a POSIX shell reads it.
+fn forget_command(hostname: &str) -> Vec<String> {
+    let _ = hostname;
+    todo!()
+}
+
 /// How many changes `agents` and `state` hold that `held` doesn't: each
 /// machine whose row reads otherwise or went, each that came, and one when
 /// whether a read has answered changed.
@@ -527,7 +559,7 @@ mod tests {
             ),
             1
         );
-        let changes: [fn(&mut HubAgentDto); 5] = [
+        let changes: [fn(&mut HubAgentDto); 6] = [
             |row| row.hostname = "demo-laptop-2".to_owned(),
             |row| row.key = "key-other".to_owned(),
             |row| row.fingerprint = "fingerprint-other".to_owned(),
@@ -539,6 +571,7 @@ mod tests {
                     last_seen: "2026-11-21T09:00:00Z".to_owned(),
                 });
             },
+            |row| row.second_machine_at = Some("2026-11-21T09:00:00Z".to_owned()),
         ];
         for change in changes {
             let mut changed = laptop.clone();
@@ -575,6 +608,158 @@ mod tests {
         let mut renamed = laptop;
         renamed.agent_id = "agent-other".to_owned();
         assert_eq!(changes_since(&held, &[renamed, macbook], State::Ready), 2);
+    }
+
+    /// A second refusal under a machine ID already flagged moves only when
+    /// the hub last refused one, which reads as a time, as a wait does: the
+    /// row reads the same.
+    #[test]
+    fn a_later_refusal_of_a_second_computer_is_no_change_to_count() {
+        let mut flagged = agent("demo-laptop", AgentStatusDto::Approved, 60);
+        flagged.second_machine_at = Some("2026-11-21T09:00:00Z".to_owned());
+        let held = Held {
+            agents: vec![flagged.clone()],
+            state: State::Ready,
+        };
+        flagged.second_machine_at = Some("2026-11-21T10:00:30Z".to_owned());
+        assert_eq!(changes_since(&held, &[flagged.clone()], State::Ready), 0);
+        flagged.second_machine_at = None;
+        assert_eq!(changes_since(&held, &[flagged], State::Ready), 1);
+    }
+
+    /// The machine `demo-laptop`, approved at 10:00:00 and read
+    /// `seconds_ago` later, under whose ID the hub last refused a second
+    /// computer `at`.
+    fn refused(seconds_ago: u64, at: Option<&str>) -> HubAgentDto {
+        let mut row = agent("demo-laptop", AgentStatusDto::Approved, seconds_ago);
+        row.second_machine_at = at.map(str::to_owned);
+        row
+    }
+
+    /// What the note says after how long ago: where the ways back are.
+    const POINTER: &str = "The ways back are in the warning about demo-laptop above the tables.";
+
+    /// How long ago is the hub's: from when the row's status began and how
+    /// long ago that was, never the browser's clock, in whole seconds as the
+    /// row's other times.
+    #[test]
+    fn a_refused_second_computer_reads_how_long_ago_by_the_hubs_clock() {
+        // The hub's now is 10:00:00 and 600 s: 10:10:00.
+        let note = second_computer(&refused(600, Some("2026-11-21T10:05:00.400Z")));
+        assert_eq!(
+            note.as_ref().map(said),
+            Some(format!(
+                "The hub refused another computer as demo-laptop 4 min 59 s ago. {POINTER}"
+            ))
+        );
+        let hours = second_computer(&refused(7200, Some("2026-11-21T10:30:00Z")));
+        assert_eq!(
+            hours.as_ref().map(said),
+            Some(format!(
+                "The hub refused another computer as demo-laptop 1 h 30 min ago. {POINTER}"
+            ))
+        );
+    }
+
+    /// A refusal at the hub's now, or after it by a clock set back, reads as
+    /// a second ago, as a wait under a second does.
+    #[test]
+    fn a_refusal_at_or_after_the_hubs_now_reads_as_a_second_ago() {
+        for at in [
+            "2026-11-21T10:01:00Z",
+            "2026-11-21T10:01:00.900Z",
+            "2026-11-21T11:00:00Z",
+        ] {
+            let note = second_computer(&refused(60, Some(at)));
+            assert_eq!(
+                note.as_ref().map(said),
+                Some(format!(
+                    "The hub refused another computer as demo-laptop 1 s ago. {POINTER}"
+                )),
+                "{at}"
+            );
+        }
+    }
+
+    /// Times the page can't read still flag the machine, without how long
+    /// ago: the flag is what the person must not miss.
+    #[test]
+    fn a_refusal_whose_times_cant_be_read_still_flags_the_machine() {
+        let mut unread_since = refused(60, Some("2026-11-21T09:00:00Z"));
+        unread_since.since = "yesterday".to_owned();
+        for row in [
+            refused(60, Some("an hour ago")),
+            unread_since,
+            refused(u64::MAX, Some("2026-11-21T09:00:00Z")),
+        ] {
+            assert_eq!(
+                second_computer(&row).as_ref().map(said),
+                Some(format!(
+                    "The hub refused another computer as demo-laptop. {POINTER}"
+                ))
+            );
+        }
+    }
+
+    #[test]
+    fn a_machine_the_hub_refused_no_second_computer_for_notes_nothing() {
+        let row = refused(60, None);
+        assert_eq!(second_computer(&row), None);
+        assert_eq!(ways_back([&row]), []);
+    }
+
+    /// One warning for each machine the hub refused a second computer for,
+    /// in the order the page gives them, each naming its machine and ending
+    /// where the command that forgets the computer the hub took is typed.
+    #[test]
+    fn each_refused_machine_gets_its_ways_back_in_the_order_given() {
+        let mut desktop = agent("demo-desktop", AgentStatusDto::Pending, 5);
+        desktop.second_machine_at = Some("2026-11-21T10:00:01Z".to_owned());
+        let quiet = agent("demo-server", AgentStatusDto::Approved, 5);
+        let laptop = refused(60, Some("2026-11-21T10:00:30Z"));
+        let warnings = ways_back([&desktop, &quiet, &laptop]);
+        let said: Vec<_> = warnings
+            .iter()
+            .map(|ways| (said(&ways.words), ways.command.join(" ")))
+            .collect();
+        let ways = |hostname: &str| {
+            (
+                format!(
+                    "The hub refused another computer as {hostname}. If the refused computer is \
+                     the copy, take a new machine ID on its start page and pair it again. If it \
+                     should keep this ID, stop Ladderback on the computer the hub took or give \
+                     that one a new ID, then stop the hub's daemon and run this at the hub's \
+                     terminal:"
+                ),
+                format!("ladderback pairing-token --forget-computer {hostname}"),
+            )
+        };
+        assert_eq!(said, [ways("demo-desktop"), ways("demo-laptop")]);
+    }
+
+    /// The command is typed into a POSIX shell: a hostname with anything
+    /// but letters, digits, dots, hyphens and underscores is quoted, and
+    /// one that starts with a hyphen is joined to its option, so neither the
+    /// shell nor the option parser reads it as something else.
+    #[test]
+    fn the_command_reads_the_hostname_as_one_value_in_a_shell() {
+        for (hostname, last) in [
+            (
+                "demo_laptop.local",
+                &["--forget-computer", "demo_laptop.local"][..],
+            ),
+            (
+                "Demo's MacBook Pro",
+                &["--forget-computer", r"'Demo'\''s MacBook Pro'"],
+            ),
+            ("café", &["--forget-computer", "'café'"]),
+            ("-demo", &["--forget-computer=-demo"]),
+            ("-demo laptop", &["--forget-computer='-demo laptop'"]),
+        ] {
+            let command = forget_command(hostname);
+            assert_eq!(command[..2], ["ladderback", "pairing-token"], "{hostname}");
+            assert_eq!(command[2..], *last, "{hostname}");
+        }
     }
 
     #[test]
