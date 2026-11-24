@@ -216,6 +216,7 @@ pub struct GrantPayload {
     pub repo_id: String,
     pub epoch: u64,
     pub expires_at: u64,
+    #[serde(default)]
     pub signature: String,
 }
 

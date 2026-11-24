@@ -300,6 +300,7 @@ pub fn read_repos(bytes: &[u8]) -> Result<RepositoryReports, WireRefused> {
     let reports = payload
         .repos
         .iter()
+        .take(MAX_REPORTED_REPOSITORIES)
         .map(|repo| {
             Ok(RepositoryReport {
                 repository: RepositoryId::parse(&repo.repo_id).map_err(|_| WireRefused)?,
@@ -358,7 +359,11 @@ pub fn read_grants(bytes: &[u8]) -> Result<RepoGrants, WireRefused> {
                 repository: RepositoryId::parse(&grant.repo_id).map_err(|_| WireRefused)?,
                 epoch: lease_epoch(grant.epoch)?,
                 expires_at: time(grant.expires_at)?,
-                signature: signature(&grant.signature)?,
+                signature: if grant.signature.is_empty() {
+                    Signature::from_bytes([0; SIGNATURE_BYTES]).map_err(|_| WireRefused)?
+                } else {
+                    signature(&grant.signature)?
+                },
             })
         })
         .collect::<Result<Vec<_>, WireRefused>>()?;

@@ -75,6 +75,9 @@ pub struct HubPairing {
     warned_second: Mutex<HashSet<AgentId>>,
     /// Whether the hub warned it is in recovery mode since it entered it.
     warned_recovering: Mutex<bool>,
+    /// Serializes ownership decisions and grant signing, so recovery cannot
+    /// begin between the recovery check and the signed answer.
+    granting: futures::lock::Mutex<()>,
 }
 
 /// The hub's answer to a proved agent's `Hello`.
@@ -231,6 +234,7 @@ impl HubPairing {
             events: None,
             warned_second: Mutex::default(),
             warned_recovering: Mutex::default(),
+            granting: futures::lock::Mutex::new(()),
         }
     }
 
@@ -923,6 +927,7 @@ impl HubPairing {
         let Some(owners) = &self.owners else {
             return Ok(Ok(None));
         };
+        let _granting = self.granting.lock().await;
         let Ok(reports) = read_repos(payload) else {
             return Ok(Err(MessageRefused::Unexpected));
         };

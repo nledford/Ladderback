@@ -714,3 +714,34 @@ fn a_floor_reads_back_with_its_proof() {
         assert_eq!(read_repos(&repos_payload(&sent)), Ok(sent));
     }
 }
+
+/// A legacy agent may still send more repositories than the recovery frame
+/// cap; the new hub only accepts the first capped set.
+#[test]
+fn a_legacy_report_is_capped_when_read() {
+    use api::sync::{RepoPayload, ReposPayload};
+
+    let bytes = ReposPayload {
+        repos: (0..=MAX_REPORTED_REPOSITORIES)
+            .map(|n| RepoPayload {
+                repo_id: format!("{n:064x}"),
+                requested_maintenance: "local".to_owned(),
+                others_snapshots: false,
+                floor: None,
+            })
+            .collect(),
+    }
+    .to_bytes();
+    let reports = read_repos(&bytes).expect("the legacy report is readable");
+    assert_eq!(reports.entries().len(), MAX_REPORTED_REPOSITORIES);
+}
+
+/// A grant from a pre-recovery hub has no floor proof, but remains a usable
+/// lease when read by a recovery-capable agent.
+#[test]
+fn a_legacy_grant_without_a_signature_reads_as_unproved() {
+    let bytes = br#"{"generation":1,"signed_at":1000,"grants":[{"repo_id":"0000000000000000000000000000000000000000000000000000000000000000","epoch":1,"expires_at":2000}]}"#;
+    let grants = read_grants(bytes).expect("the legacy grant is readable");
+    assert_eq!(grants.grants.len(), 1);
+    assert_eq!(grants.grants[0].signature.as_bytes(), &[0; SIGNATURE_BYTES]);
+}
