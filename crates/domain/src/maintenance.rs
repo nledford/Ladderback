@@ -24,6 +24,7 @@ mod lease;
 mod other_hosts;
 #[cfg(test)]
 mod properties;
+mod start_window;
 mod stats;
 
 pub use held::{EpochFloor, EpochLower, Grant, HeldLease, HeldLeases, NoLease, RepoGrants};
@@ -32,6 +33,7 @@ pub use lease::{
     ReleaseRefused, RepositoryOwnership, RepositoryReport, RepositoryReports, report_counts,
 };
 pub use other_hosts::{MAX_NAMED_OTHER_HOSTS, OtherHosts};
+pub use start_window::{START_WINDOW, StartWindow};
 pub use stats::{READINGS_KEPT_FOR, RepositoryStats, StatsReading};
 
 /// One snapshot as the owner sees it: what a listing reports, minus what

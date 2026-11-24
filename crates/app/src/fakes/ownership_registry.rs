@@ -4,7 +4,7 @@ use std::sync::{Mutex, PoisonError};
 use async_trait::async_trait;
 use domain::maintenance::{
     LeaseEpoch, ReleaseRefused, RepositoryOwnership, RepositoryReport, RepositoryReports,
-    report_counts,
+    StartWindow, report_counts,
 };
 use domain::{AgentId, RepositoryId, Timestamp};
 
@@ -19,7 +19,7 @@ pub struct InMemoryOwnershipRegistry {
     kept: Mutex<Kept>,
 }
 
-#[derive(Debug, Default)]
+#[derive(Clone, Debug, Default)]
 struct Kept {
     owners: BTreeMap<RepositoryId, RepositoryOwnership>,
     /// Each agent's last report, and when the hub took it.
@@ -34,6 +34,14 @@ impl InMemoryOwnershipRegistry {
     fn kept(&self) -> std::sync::MutexGuard<'_, Kept> {
         self.kept.lock().unwrap_or_else(PoisonError::into_inner)
     }
+
+    /// A copy of everything this registry holds now, as a backup of the
+    /// hub's database holds it: restoring the backup is opening the copy.
+    pub fn backup(&self) -> Self {
+        Self {
+            kept: Mutex::new(self.kept().clone()),
+        }
+    }
 }
 
 #[async_trait]
@@ -43,6 +51,7 @@ impl OwnershipRegistry for InMemoryOwnershipRegistry {
         agent: AgentId,
         reports: &RepositoryReports,
         now: Timestamp,
+        window: &StartWindow,
     ) -> Result<Vec<ClaimDecision>, StoreError> {
         let mut kept = self.kept();
         let Kept {
@@ -62,7 +71,13 @@ impl OwnershipRegistry for InMemoryOwnershipRegistry {
                 let outcome = owners
                     .entry(entry.repository.clone())
                     .or_insert_with(|| RepositoryOwnership::new(entry.repository.clone()))
-                    .claim(agent, entry.request, entry.shared(others_report), now);
+                    .claim_after_start(
+                        window,
+                        agent,
+                        entry.request,
+                        entry.shared(others_report),
+                        now,
+                    );
                 ClaimDecision {
                     repository: entry.repository.clone(),
                     outcome,
@@ -70,6 +85,19 @@ impl OwnershipRegistry for InMemoryOwnershipRegistry {
             })
             .collect();
         Ok(decided)
+    }
+
+    async fn reported_uses(&self) -> Result<Vec<(AgentId, RepositoryId)>, StoreError> {
+        Ok(self
+            .kept()
+            .reports
+            .iter()
+            .flat_map(|(agent, (entries, _))| {
+                entries
+                    .iter()
+                    .map(|entry| (*agent, entry.repository.clone()))
+            })
+            .collect())
     }
 
     async fn release(

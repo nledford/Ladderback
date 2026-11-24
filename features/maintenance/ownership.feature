@@ -25,6 +25,15 @@ Feature: The hub gives each repository at most one maintenance owner
   hub gave it, whose epochs the new hub's don't follow; one that pairs
   again with the hub it pins keeps them.
 
+  After any start, a restart or a restore of its database from a backup,
+  the hub moves no repository to a new owner until every machine that used
+  it has reported since the start, or 7 days and an hour have passed since
+  the start, counted on a clock that a change of the hub's own time doesn't
+  move (§16, decisions 137 and 157). A hub restored from a backup can't see
+  a lease it granted after the backup until its holder reports, so it
+  grants nobody else the repository meanwhile, and the holder's own report
+  gives the lease back to it. Its holder's lease is renewed all the while.
+
   Background:
     Given a hub that approved the machines "laptop" and "nas"
 
@@ -163,3 +172,70 @@ Feature: The hub gives each repository at most one maintenance owner
     And "nas" claims the repository "photos" and hears the hub's grants
     Then "nas" may maintain "photos"
     And "laptop" may not maintain "photos", because it holds no lease on it
+
+  Scenario: A hub restored from a backup grants no second owner while the machine that used the repository hasn't reported
+    Given "laptop" reported the repository "photos" without claiming it
+    And 8 days passed on the hub
+    And the hub's database is backed up
+    And "laptop" claims the repository "photos" and hears the hub's grants
+    When the hub is restored from that backup and starts
+    And "nas" claims the repository "photos"
+    Then the claim of "nas" was refused because the hub has just started
+    And nobody holds the lease on "photos"
+    And "laptop" may maintain "photos"
+
+  Scenario: A restored hub gives the lease back to the machine that reports it
+    Given "laptop" reported the repository "photos" without claiming it
+    And the hub's database is backed up
+    And "laptop" claims the repository "photos" and hears the hub's grants
+    When the hub is restored from that backup and starts
+    And "laptop" claims the repository "photos"
+    Then "laptop" holds the lease on "photos" at epoch 1, for 7 days from now
+    When "laptop" claims the repository "photos" and hears the hub's grants
+    Then "laptop" may maintain "photos"
+
+  Scenario: A restored hub grants a repository nobody had reported to nobody until every machine that had reported one has reported again
+    Given "laptop" reported the repository "music" without claiming it
+    And "nas" reported the repository "music" without claiming it
+    And the hub's database is backed up
+    And "laptop" claims the repository "photos" and hears the hub's grants
+    When the hub is restored from that backup and starts
+    And "nas" claims the repository "photos"
+    Then the claim of "nas" was refused because the hub has just started
+    When "laptop" stops using "photos"
+    And "nas" claims the repository "photos"
+    Then "nas" holds the lease on "photos" at epoch 1, for 7 days from now
+
+  Scenario: The start window ends for a repository once every machine that used it has reported
+    Given "laptop" reported the repository "photos" without claiming it
+    And 8 days passed on the hub
+    When the hub restarts
+    And "nas" claims the repository "photos"
+    Then the claim of "nas" was refused because the hub has just started
+    When "laptop" stops using "photos"
+    And "nas" claims the repository "photos"
+    Then "nas" holds the lease on "photos" at epoch 1, for 7 days from now
+
+  Scenario: The holder's lease is renewed while the hub waits for another machine
+    Given "nas" reported the repository "photos" without claiming it
+    When 7 days pass on the hub
+    And "laptop" claims the repository "photos"
+    And the hub restarts
+    And 3 days pass on the hub
+    And "laptop" claims the repository "photos"
+    Then "laptop" holds the lease on "photos" at epoch 1, for 7 days from now
+
+  Scenario: A machine that never reports keeps a repository from moving for 7 days and an hour, whatever the hub's clock says
+    Given 8 days passed on the hub
+    And "laptop" holds the lease on "photos"
+    And "laptop" can't reach the hub any more
+    When the hub restarts
+    And the hub's clock is set forward 8 days
+    And "nas" claims the repository "photos"
+    Then the claim of "nas" was refused because the hub has just started
+    When 7 days pass on the hub
+    And "nas" claims the repository "photos"
+    Then the claim of "nas" was refused because the hub has just started
+    When 1 hour passes on the hub
+    And "nas" claims the repository "photos"
+    Then "nas" holds the lease on "photos" at epoch 2, for 7 days from now

@@ -333,3 +333,79 @@ fn a_release_by_another_agent_or_of_another_epoch_changes_nothing() {
         Err(ReleaseRefused)
     );
 }
+
+/// A start window that holds repository `a`, used by agent 9, who hasn't
+/// reported since the start.
+fn holding_a() -> StartWindow {
+    StartWindow::new([(agent(9), repository('a'))])
+}
+
+#[test]
+fn the_start_window_grants_nobody_a_repository_with_no_lease_binding() {
+    let mut free = RepositoryOwnership::new(repository('a'));
+    assert_eq!(
+        free.claim_after_start(&holding_a(), agent(1), Maintenance::Local, false, at(0)),
+        ClaimOutcome::Refused(ClaimRefused::Starting)
+    );
+    assert_eq!(free, RepositoryOwnership::new(repository('a')));
+    assert_eq!(
+        free.claim_after_start(&holding_a(), agent(1), Maintenance::Hub, false, at(0)),
+        ClaimOutcome::NoClaim,
+        "a report that claims nothing is refused nothing"
+    );
+
+    let end = plus(plus(at(0), LEASE_LIFE), LEASE_GRACE);
+    let mut lapsed = held(1, 3, at(0));
+    let before = lapsed.clone();
+    for claimant in [1, 2] {
+        assert_eq!(
+            lapsed.claim_after_start(
+                &holding_a(),
+                agent(claimant),
+                Maintenance::Local,
+                false,
+                end
+            ),
+            ClaimOutcome::Refused(ClaimRefused::Starting),
+            "agent {claimant} is granted no lease that ran out"
+        );
+    }
+    assert_eq!(lapsed, before);
+}
+
+#[test]
+fn the_start_window_renews_the_holders_lease_and_refuses_another() {
+    let mut ownership = held(1, 3, at(0));
+    assert_eq!(
+        ownership.claim_after_start(&holding_a(), agent(1), Maintenance::Local, false, at(100)),
+        ClaimOutcome::Renewed(Lease {
+            holder: agent(1),
+            epoch: epoch(3),
+            expires_at: plus(at(100), LEASE_LIFE),
+        })
+    );
+    assert_eq!(
+        ownership.claim_after_start(&holding_a(), agent(2), Maintenance::Local, false, at(100)),
+        ClaimOutcome::Refused(ClaimRefused::HeldByAnother(agent(1)))
+    );
+    assert_eq!(
+        ownership.claim_after_start(&holding_a(), agent(2), Maintenance::None, false, at(100)),
+        ClaimOutcome::NoClaim
+    );
+}
+
+#[test]
+fn a_repository_the_start_window_doesnt_hold_is_decided_as_ever() {
+    let mut window = StartWindow::new([(agent(9), repository('a')), (agent(8), repository('b'))]);
+    window.heard(agent(8));
+    assert!(window.holds(&repository('a')));
+    let mut ownership = RepositoryOwnership::new(repository('b'));
+    assert_eq!(
+        ownership.claim_after_start(&window, agent(1), Maintenance::Local, false, at(0)),
+        ClaimOutcome::Granted(Lease {
+            holder: agent(1),
+            epoch: LeaseEpoch::FIRST,
+            expires_at: plus(at(0), LEASE_LIFE),
+        })
+    );
+}

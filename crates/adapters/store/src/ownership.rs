@@ -9,7 +9,8 @@
 use app::ports::{ClaimDecision, OwnershipRegistry, StoreError};
 use async_trait::async_trait;
 use domain::maintenance::{
-    Lease, LeaseEpoch, ReleaseRefused, RepositoryOwnership, RepositoryReports, report_counts,
+    Lease, LeaseEpoch, ReleaseRefused, RepositoryOwnership, RepositoryReports, StartWindow,
+    report_counts,
 };
 use domain::{AgentId, RepositoryId, Timestamp, Uuid};
 use sqlx::sqlite::SqliteRow;
@@ -26,6 +27,8 @@ const TAKE_REPORT: &str =
 const OTHERS_REPORTS: &str =
     "SELECT reported_at FROM ownership_reports WHERE repo_id = ?1 AND agent_id <> ?2";
 
+const USES: &str = "SELECT agent_id, repo_id FROM ownership_reports";
+
 const OWNER: &str = "SELECT last_epoch, holder, epoch, expires_at \
      FROM repository_owners WHERE repo_id = ?1";
 
@@ -41,6 +44,7 @@ impl OwnershipRegistry for SqliteStore {
         agent: AgentId,
         reports: &RepositoryReports,
         now: Timestamp,
+        window: &StartWindow,
     ) -> Result<Vec<ClaimDecision>, StoreError> {
         let now = Timestamp::from_millisecond(now.as_millisecond()).unwrap_or(now);
         let agent_text = agent_id_text(agent);
@@ -77,7 +81,13 @@ impl OwnershipRegistry for SqliteStore {
             }
             let before = owner(&mut tx, &entry.repository).await?;
             let mut after = before.clone();
-            let outcome = after.claim(agent, entry.request, entry.shared(others_report), now);
+            let outcome = after.claim_after_start(
+                window,
+                agent,
+                entry.request,
+                entry.shared(others_report),
+                now,
+            );
             if after != before {
                 keep(&mut tx, &after).await?;
             }
@@ -88,6 +98,27 @@ impl OwnershipRegistry for SqliteStore {
         }
         tx.commit().await.map_err(unavailable)?;
         Ok(decided)
+    }
+
+    async fn reported_uses(&self) -> Result<Vec<(AgentId, RepositoryId)>, StoreError> {
+        let _call = self.call().await;
+        let mut conn = self.pool.acquire().await.map_err(unavailable)?;
+        let rows = sqlx::query(USES)
+            .fetch_all(&mut *conn)
+            .await
+            .map_err(unavailable)?;
+        rows.iter()
+            .map(|row| {
+                let agent: String = row.try_get("agent_id").map_err(unavailable)?;
+                let repository: String = row.try_get("repo_id").map_err(unavailable)?;
+                Ok((
+                    Uuid::try_parse(&agent)
+                        .map(AgentId::from_uuid)
+                        .map_err(|_| corrupt("agent_id"))?,
+                    RepositoryId::parse(&repository).map_err(|_| corrupt("repo_id"))?,
+                ))
+            })
+            .collect()
     }
 
     async fn release(

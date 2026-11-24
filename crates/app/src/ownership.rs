@@ -3,15 +3,18 @@
 //! repositories it uses is decided at the hub's time, granting, renewing or
 //! refusing each lease, and its holder's release ends one early. A pending
 //! agent's report changes nothing, so it holds no lease and refuses no other
-//! agent's claim (decision 120, "What pending means").
+//! agent's claim (decision 120, "What pending means"). From its start, the
+//! hub moves no repository to a new owner until every agent that used it
+//! has reported, or the start window has passed on its monotonic clock
+//! (decisions 137 and 157).
 
-use std::sync::Arc;
+use std::sync::{Arc, Mutex, MutexGuard, PoisonError};
 
 use domain::fleet::GENERATION;
 use domain::maintenance::{
-    ClaimOutcome, Grant, LeaseEpoch, ReleaseRefused, RepoGrants, RepositoryReports,
+    ClaimOutcome, Grant, LeaseEpoch, ReleaseRefused, RepoGrants, RepositoryReports, StartWindow,
 };
-use domain::{AgentId, RepositoryId};
+use domain::{AgentId, RepositoryId, SignedDuration};
 
 use crate::ports::{AgentRegistry, ClaimDecision, Clock, OwnershipRegistry, StoreError};
 
@@ -25,11 +28,16 @@ pub enum Reported {
     NotApproved,
 }
 
-/// The hub's side of repository ownership.
+/// The hub's side of repository ownership. Made once at the hub's start,
+/// which opens its start window.
 pub struct RepositoryOwners {
     agents: Arc<dyn AgentRegistry>,
     owners: Arc<dyn OwnershipRegistry>,
     clock: Arc<dyn Clock>,
+    /// The hub's monotonic time at its start.
+    started: SignedDuration,
+    /// The start window, once the first report since the start read it.
+    window: Mutex<Option<StartWindow>>,
 }
 
 impl RepositoryOwners {
@@ -39,9 +47,11 @@ impl RepositoryOwners {
         clock: Arc<dyn Clock>,
     ) -> Self {
         Self {
+            started: clock.monotonic(),
             agents,
             owners,
             clock,
+            window: Mutex::new(None),
         }
     }
 
@@ -99,10 +109,46 @@ impl RepositoryOwners {
     ) -> Result<Option<Vec<ClaimDecision>>, StoreError> {
         match self.agents.agent(agent).await? {
             Some(record) if !record.is_pending() => {
-                Ok(Some(self.owners.report(agent, reports, now).await?))
+                let window = self.window(agent).await?;
+                let decided = self.owners.report(agent, reports, now, &window).await?;
+                self.heard(agent);
+                Ok(Some(decided))
             }
             _ => Ok(None),
         }
+    }
+
+    /// The start window as `agent`'s report finds it: read from the
+    /// registry at the first report since the start, holding nothing once
+    /// its time has passed, and waiting for `agent` no more in this copy
+    /// only. The kept window stops waiting for it once its report is
+    /// stored, so a report that fails, or is dropped, opens nothing.
+    async fn window(&self, agent: AgentId) -> Result<StartWindow, StoreError> {
+        let read = if self.kept_window().is_none() {
+            Some(StartWindow::new(self.owners.reported_uses().await?))
+        } else {
+            None
+        };
+        let since_start = self.clock.monotonic().saturating_sub(self.started);
+        let mut window = {
+            let mut kept = self.kept_window();
+            let window = kept.get_or_insert_with(|| read.unwrap_or_default());
+            window.pass(since_start);
+            window.clone()
+        };
+        window.heard(agent);
+        Ok(window)
+    }
+
+    /// `agent`'s report is stored: the kept window waits for it no more.
+    fn heard(&self, agent: AgentId) {
+        if let Some(window) = self.kept_window().as_mut() {
+            window.heard(agent);
+        }
+    }
+
+    fn kept_window(&self) -> MutexGuard<'_, Option<StartWindow>> {
+        self.window.lock().unwrap_or_else(PoisonError::into_inner)
     }
 
     /// Ends the lease `agent` holds on `repository` at `epoch`, at its
@@ -116,3 +162,6 @@ impl RepositoryOwners {
         self.owners.release(agent, repository, epoch).await
     }
 }
+
+#[cfg(test)]
+mod tests;
