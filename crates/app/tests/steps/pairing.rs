@@ -146,6 +146,7 @@ impl Machine {
             self.identity.clone(),
             Arc::new(FakeSigning),
             Arc::new(SeededRandom::new(self.seed)),
+            Arc::new(app::fakes::InMemoryLeaseCache::default()),
         )
     }
 
