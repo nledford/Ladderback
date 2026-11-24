@@ -2,6 +2,8 @@
 
 **From the moment it is paired, a machine runs a forget, a prune, a check or an adoption only while it holds a live lease on the repository from its hub, and is refused with `maintenance-no-lease` otherwise; a preview is never refused for want of one. It asks for its grants in a session at start, in every session that sends reports, and whenever 15 minutes have passed on its own clock since the last. Each answer replaces every lease it holds, its end moved onto the machine's clock from the moment the request left. A grant below the repository's epoch floor is refused and only logged.**
 
+**Amended by decision 156** (2026-11-23, #1465): `ReposSnapshot` says `others_snapshots: true` for a repository whose last listing, at most a day old, held another agent's recent snapshot, and for one with no such listing, and the agent lists each repository it maintains before a sync when it has none, so the consequence below that it always says `false` no longer holds.
+
 ## Why
 
 §7.3 says an agent maintains only while its lease holds, judged on the hub's time, and that a grant below the highest seen is refused (`epoch-lower`). [Decision 147](147-the-hub-decides-leases-on-each-report.md) decides the leases on the hub. This decision is the machine's side of the wire (§7.2, `ReposSnapshot`, `RepoGrants`, `ReleaseAck`, `Released`), so I1 holds end to end.

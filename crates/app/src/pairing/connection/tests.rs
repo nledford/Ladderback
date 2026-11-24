@@ -2066,6 +2066,7 @@ struct Leasing {
     sync: crate::sync::SyncWithHub,
     identity: Arc<InMemoryIdentity>,
     operations: Arc<crate::fakes::InMemoryOperationStore>,
+    others: Arc<crate::others_snapshots::OthersSnapshots>,
 }
 
 async fn leasing(machine_start: Timestamp) -> Leasing {
@@ -2117,6 +2118,10 @@ async fn leasing(machine_start: Timestamp) -> Leasing {
     ));
     let connector = Arc::new(LoopbackHubConnector::to(hub.pairing.clone()));
     let operations = Arc::new(crate::fakes::InMemoryOperationStore::new());
+    // The machine listed `photos` and found no other agent's snapshots, so
+    // its claims are the hub's to grant.
+    let others = Arc::new(crate::others_snapshots::OthersSnapshots::default());
+    others.listed(photos(), agent_id(1), machine_start, &[]);
     let sync = SyncWithHub::new(
         connecting(identity.clone(), connector),
         Arc::new(crate::fakes::InMemoryOutbox::new(OutboxEpoch::from_uuid(
@@ -2127,7 +2132,12 @@ async fn leasing(machine_start: Timestamp) -> Leasing {
         hostname(1),
         None,
     )
-    .with_leases(configs.clone(), leases.clone(), operations.clone());
+    .with_leases(
+        configs.clone(),
+        leases.clone(),
+        operations.clone(),
+        others.clone(),
+    );
     Leasing {
         hub,
         owners,
@@ -2138,6 +2148,7 @@ async fn leasing(machine_start: Timestamp) -> Leasing {
         sync,
         identity,
         operations,
+        others,
     }
 }
 
@@ -2165,6 +2176,7 @@ fn losing_released(leasing: &Leasing) -> crate::sync::SyncWithHub {
         leasing.configs.clone(),
         leasing.leases.clone(),
         leasing.operations.clone(),
+        leasing.others.clone(),
     )
 }
 
@@ -2366,4 +2378,184 @@ async fn i1_a_session_takes_the_hubs_grants_on_its_time_and_releases_what_isnt_a
     assert_eq!(leases.held().await.unwrap(), vec![]);
     let ended = owners.ownership(&photos()).await.unwrap();
     assert_eq!(ended.binding(hub.clock.now()), None);
+}
+
+/// A snapshot the agent `agent` tagged, made at `time`.
+fn tagged_by(agent: AgentId, time: Timestamp) -> crate::ports::SnapshotSummary {
+    use domain::execution::plan_tags::{AGENT_TAG_PREFIX, PLAN_TAG_PREFIX};
+
+    crate::ports::SnapshotSummary {
+        id: domain::SnapshotId::parse(&"5".repeat(64)).unwrap(),
+        time,
+        offset: domain::Offset::UTC,
+        hostname: "demo-host".to_owned(),
+        label: String::new(),
+        tags: vec![
+            format!("{PLAN_TAG_PREFIX}home"),
+            format!("{AGENT_TAG_PREFIX}{}", agent.as_uuid().hyphenated()),
+        ],
+        paths: vec!["/home/demo".to_owned()],
+        paths_truncated: false,
+        tags_truncated: false,
+    }
+}
+
+/// A machine whose listing of a repository it asks to maintain showed
+/// another agent's snapshot of 3 days ago tells its hub so, and the hub
+/// grants it no lease, though no other paired machine reports the
+/// repository (§7.3, I1).
+#[tokio::test]
+async fn i1_a_session_reports_another_agents_recent_snapshots_and_is_granted_no_lease() {
+    use domain::maintenance::NoLease;
+
+    use crate::ports::OwnershipRegistry as _;
+
+    let start = Timestamp::from_second(1_800_000_000).unwrap();
+    let leasing = leasing(start).await;
+    leasing.others.listed(
+        photos(),
+        agent_id(1),
+        start,
+        &[tagged_by(
+            agent_id(9),
+            start - SignedDuration::from_hours(3 * 24),
+        )],
+    );
+    leasing.sync.sync_once().await.unwrap();
+    let held = leasing.owners.ownership(&photos()).await.unwrap();
+    assert_eq!(held.binding(leasing.hub.clock.now()), None);
+    assert_eq!(
+        leasing.leases.permits(Some(&photos())).await,
+        Err(NoLease::NoneHeld)
+    );
+}
+
+/// A repository no listing has shown since the daemon started may hold
+/// another agent's snapshots, so the session reports that it does, and
+/// the hub grants no lease on it (§7.3, I1).
+#[tokio::test]
+async fn i1_a_session_reports_a_repository_never_listed_as_holding_another_agents_snapshots() {
+    use domain::fleet::OutboxEpoch;
+
+    use crate::ports::OwnershipRegistry as _;
+
+    let leasing = leasing(Timestamp::from_second(1_800_000_000).unwrap()).await;
+    let never_listed = crate::sync::SyncWithHub::new(
+        connecting(
+            leasing.identity.clone(),
+            Arc::new(LoopbackHubConnector::to(leasing.hub.pairing.clone())),
+        ),
+        Arc::new(crate::fakes::InMemoryOutbox::new(OutboxEpoch::from_uuid(
+            Uuid::from_u128(0xe3),
+        ))),
+        leasing.machine_clock.clone(),
+        agent_id(1),
+        hostname(1),
+        None,
+    )
+    .with_leases(
+        leasing.configs.clone(),
+        leasing.leases.clone(),
+        leasing.operations.clone(),
+        Arc::default(),
+    );
+    never_listed.sync_once().await.unwrap();
+    let held = leasing.owners.ownership(&photos()).await.unwrap();
+    assert_eq!(held.binding(leasing.hub.clock.now()), None);
+}
+
+/// A sync of the machine `leasing` sets up that has listed nothing since it
+/// started, and lists through `engine` before each session.
+fn listing_first(
+    leasing: &Leasing,
+    engine: &Arc<crate::fakes::ListingEngine>,
+) -> crate::sync::SyncWithHub {
+    use domain::fleet::OutboxEpoch;
+
+    use crate::others_snapshots::{ListingsDue, NoteListings, OthersSnapshots};
+
+    let seen = Arc::new(OthersSnapshots::default());
+    let listing = crate::snapshots::ListSnapshots::new(
+        Arc::new(NoteListings::new(
+            engine.clone(),
+            seen.clone(),
+            agent_id(1),
+            leasing.machine_clock.clone(),
+        )),
+        leasing.machine_clock.clone(),
+        crate::secrets::ResolveRepository::new(Arc::new(crate::fakes::FakeSecrets::default())),
+        Arc::default(),
+    );
+    let listings = Arc::new(ListingsDue::new(
+        leasing.configs.clone(),
+        leasing.operations.clone(),
+        seen.clone(),
+        listing,
+        Arc::new(SeededRandom::new(3)),
+        agent_id(1),
+        leasing.machine_clock.clone(),
+    ));
+    crate::sync::SyncWithHub::new(
+        connecting(
+            leasing.identity.clone(),
+            Arc::new(LoopbackHubConnector::to(leasing.hub.pairing.clone())),
+        ),
+        Arc::new(crate::fakes::InMemoryOutbox::new(OutboxEpoch::from_uuid(
+            Uuid::from_u128(0xe4),
+        ))),
+        leasing.machine_clock.clone(),
+        agent_id(1),
+        hostname(1),
+        None,
+    )
+    .with_leases(
+        leasing.configs.clone(),
+        leasing.leases.clone(),
+        leasing.operations.clone(),
+        Arc::clone(listings.seen()),
+    )
+    .with_listings(listings)
+}
+
+/// A machine that hasn't listed a repository it asks to maintain since it
+/// started lists it before its first session, so that session reports
+/// what the repository holds and the hub grants the lease, with no person
+/// opening anything (§7.3; §16, decision 156; I1).
+#[tokio::test]
+async fn i1_a_session_lists_an_unlisted_repository_first_and_is_granted_its_lease() {
+    use crate::ports::OwnershipRegistry as _;
+
+    let leasing = leasing(Timestamp::from_second(1_800_000_000).unwrap()).await;
+    let engine = Arc::new(crate::fakes::ListingEngine::default());
+    let sync = listing_first(&leasing, &engine);
+    sync.sync_once().await.unwrap();
+    assert_eq!(engine.listings(&photos()), 1);
+    let held = leasing.owners.ownership(&photos()).await.unwrap();
+    let lease = held
+        .binding(leasing.hub.clock.now())
+        .expect("the hub granted a lease");
+    assert_eq!(lease.holder, agent_id(1));
+    assert_eq!(leasing.leases.permits(Some(&photos())).await, Ok(()));
+}
+
+/// A listing before a session that fails leaves the repository reported as
+/// holding another agent's snapshots, so the hub grants nothing; the next
+/// session lists it again, and is granted the lease once a listing succeeds
+/// (decision 156, I1).
+#[tokio::test]
+async fn i1_a_failed_listing_before_a_session_is_refused_and_tried_again_at_the_next() {
+    use crate::ports::OwnershipRegistry as _;
+
+    let leasing = leasing(Timestamp::from_second(1_800_000_000).unwrap()).await;
+    let engine = Arc::new(crate::fakes::ListingEngine::default());
+    engine.fails(photos(), true);
+    let sync = listing_first(&leasing, &engine);
+    sync.sync_once().await.unwrap();
+    assert_eq!(engine.listings(&photos()), 1);
+    let held = leasing.owners.ownership(&photos()).await.unwrap();
+    assert_eq!(held.binding(leasing.hub.clock.now()), None);
+    engine.fails(photos(), false);
+    sync.sync_once().await.unwrap();
+    assert_eq!(engine.listings(&photos()), 2);
+    assert_eq!(leasing.leases.permits(Some(&photos())).await, Ok(()));
 }

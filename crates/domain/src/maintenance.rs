@@ -22,6 +22,7 @@ use crate::{AgentId, Offset, OperationId, PlanId, SnapshotId, Timestamp};
 mod held;
 mod lease;
 mod other_hosts;
+mod others_snapshots;
 #[cfg(test)]
 mod properties;
 mod start_window;
@@ -36,6 +37,7 @@ pub use lease::{
     ReleaseRefused, RepositoryOwnership, RepositoryReport, RepositoryReports, report_counts,
 };
 pub use other_hosts::{MAX_NAMED_OTHER_HOSTS, OtherHosts};
+pub use others_snapshots::{LISTING_LASTS, OtherAgentsSnapshots, listing_stands};
 pub use start_window::{START_WINDOW, StartWindow};
 pub use stats::{READINGS_KEPT_FOR, RepositoryStats, StatsReading};
 
@@ -59,21 +61,22 @@ pub struct Snapshot {
 impl Snapshot {
     /// The plan this snapshot's `ladderback-plan:` tags name.
     pub fn plan(&self) -> OwnerTag<'_> {
-        self.tagged_by(plan_tags::PLAN_TAG_PREFIX)
+        owner_tag(&self.tags, plan_tags::PLAN_TAG_PREFIX)
     }
 
     /// The agent this snapshot's `ladderback-agent:` tags name.
     pub fn agent(&self) -> OwnerTag<'_> {
-        self.tagged_by(plan_tags::AGENT_TAG_PREFIX)
+        owner_tag(&self.tags, plan_tags::AGENT_TAG_PREFIX)
     }
+}
 
-    fn tagged_by(&self, prefix: &str) -> OwnerTag<'_> {
-        let mut texts = self.tags.iter().filter_map(|tag| tag.strip_prefix(prefix));
-        match texts.next() {
-            None => OwnerTag::Absent,
-            Some(first) if texts.all(|text| text == first) => OwnerTag::One(first),
-            Some(_) => OwnerTag::Disagree,
-        }
+/// What `tags` say of the owner their tags of the kind `prefix` name.
+fn owner_tag<'a>(tags: &'a [String], prefix: &str) -> OwnerTag<'a> {
+    let mut texts = tags.iter().filter_map(|tag| tag.strip_prefix(prefix));
+    match texts.next() {
+        None => OwnerTag::Absent,
+        Some(first) if texts.all(|text| text == first) => OwnerTag::One(first),
+        Some(_) => OwnerTag::Disagree,
     }
 }
 

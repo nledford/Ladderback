@@ -176,6 +176,12 @@ pub(crate) struct Background {
     notice: Arc<UpdateNotice>,
     /// Where the release check asks, `None` for a daemon that never checks.
     releases: Option<Releases>,
+    /// The listings a paired machine's sync runs before each session, of
+    /// each repository it maintains that has no listing standing, and what
+    /// the daemon's listings showed of other agents' snapshots, which the
+    /// sync tells its hub with each repository (§7.3; §16, decision 156).
+    #[cfg(feature = "hub")]
+    listings_due: Arc<app::others_snapshots::ListingsDue>,
 }
 
 /// What the release check asks (decision 107): its feed, and the version it
@@ -219,6 +225,14 @@ impl Background {
             ),
             Arc::clone(&self.schedules),
         )
+    }
+
+    /// The listings a paired machine's sync runs before each session, and
+    /// what the daemon's listings showed of other agents' snapshots (§7.3,
+    /// decision 156).
+    #[cfg(feature = "hub")]
+    pub(crate) fn listings_due(&self) -> Arc<app::others_snapshots::ListingsDue> {
+        Arc::clone(&self.listings_due)
     }
 
     /// What the orderly stop freezes ([`Self::runs`]) of a daemon that
@@ -660,16 +674,28 @@ async fn state_over(
         Arc::new(SystemClock),
         started,
     ));
+    // Every listing passes what it shows of other agents' snapshots on to
+    // a paired machine's reports to its hub (§7.3, I1).
+    let events_engine: Arc<dyn Engine> = Arc::new(EventEngine {
+        inner: Arc::new(workers),
+        bus: Arc::clone(&bus),
+        clock: Arc::new(SystemClock),
+    });
+    #[cfg(feature = "hub")]
+    let others = Arc::new(app::others_snapshots::OthersSnapshots::default());
+    #[cfg(feature = "hub")]
+    let events_engine: Arc<dyn Engine> = Arc::new(app::others_snapshots::NoteListings::new(
+        events_engine,
+        Arc::clone(&others),
+        agent_id,
+        Arc::new(SystemClock),
+    ));
     // The choice of a location comes first (decision 80): a job opens the
     // location it chose, and the record of an opened repository's ID
     // (decision 81) sees that job, never a probe.
     let locations = Arc::new(ChooseLocation::new(
         Arc::new(RecordOpened::new(
-            Arc::new(EventEngine {
-                inner: Arc::new(workers),
-                bus: Arc::clone(&bus),
-                clock: Arc::new(SystemClock),
-            }),
+            events_engine,
             Arc::clone(&config),
             Arc::clone(&writes),
             Arc::new(log_recording),
@@ -742,6 +768,24 @@ async fn state_over(
     // The turns to list a repository's snapshots: the snapshot list's
     // listings and the forget previews' reads take them alike (#710, #967).
     let listings: Arc<ReadTurns> = Arc::default();
+    // Before each session with its hub, a paired machine lists each
+    // repository it maintains that has no listing standing, in its turn
+    // with the daemon's other listings (§7.3, decision 156).
+    #[cfg(feature = "hub")]
+    let listings_due = Arc::new(app::others_snapshots::ListingsDue::new(
+        Arc::clone(&config),
+        Arc::clone(&store),
+        Arc::clone(&others),
+        app::snapshots::ListSnapshots::new(
+            Arc::clone(&engine),
+            Arc::new(SystemClock),
+            resolve.as_ref().clone(),
+            Arc::clone(&listings),
+        ),
+        Arc::new(OsRandom),
+        agent_id,
+        Arc::new(SystemClock),
+    ));
     let proposal_parts = proposals::ProposalParts {
         file: Arc::new(FileConfigStore::new(
             config_file.clone(),
@@ -846,6 +890,8 @@ async fn state_over(
         changes,
         notice: Arc::clone(&notice),
         releases: None,
+        #[cfg(feature = "hub")]
+        listings_due,
     };
     Ok((
         AppState {

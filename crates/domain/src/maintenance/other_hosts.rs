@@ -9,6 +9,7 @@
 
 use std::collections::BTreeSet;
 
+use super::others_snapshots::recent;
 use super::{OwnerTag, Ownership, Snapshot};
 use crate::execution::{Warning, WarningKind};
 use crate::planning::AgentConfig;
@@ -73,16 +74,11 @@ impl OtherHosts {
             )
             .collect();
         let own = agent.as_uuid().hyphenated().to_string();
-        // A `now` too near the start of time to go back from has no older
-        // snapshot to tell apart.
-        let recent_since = now
-            .checked_sub(OTHER_AGENT_RECENCY)
-            .unwrap_or(Timestamp::MIN);
         let others: BTreeSet<&str> = snapshots
             .into_iter()
             .filter(|snapshot| match snapshot.agent() {
                 OwnerTag::One(tagger) if tagger == own => false,
-                OwnerTag::One(_) | OwnerTag::Disagree if snapshot.time >= recent_since => true,
+                OwnerTag::One(_) | OwnerTag::Disagree if recent(snapshot.time, now) => true,
                 _ => !this_host.contains(snapshot.hostname.as_str()),
             })
             .map(|snapshot| snapshot.hostname.as_str())
