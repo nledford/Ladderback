@@ -209,6 +209,7 @@ async fn each_report_taken_is_told_once() {
             entry(1, 0x0a, Happening::Started, 100),
             entry(2, 0x0a, Happening::Succeeded, 160),
             entry(3, 0x0b, Happening::Failed { code }, 200),
+            entry(4, 0x0c, Happening::Cancelled, 260),
         ],
     )
     .await;
@@ -247,9 +248,14 @@ async fn each_report_taken_is_told_once() {
                 MachineOutcomeDto::Succeeded
             ),
             (
-                agent,
+                agent.clone(),
                 op(0x0b).as_uuid().to_string(),
                 MachineOutcomeDto::Failed
+            ),
+            (
+                agent,
+                op(0x0c).as_uuid().to_string(),
+                MachineOutcomeDto::Cancelled
             ),
         ]
     );

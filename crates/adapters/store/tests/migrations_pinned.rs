@@ -134,6 +134,11 @@ const PINNED: &[(i64, &str, &str)] = &[
         "agent leases",
         "dd5af54d6ea57482e406e25d192c3d75269998bc41ca55d5fc3b79d1e7afbbd29e0c789e3c1b8d438dede667d21d419f",
     ),
+    (
+        25,
+        "sync plans progress",
+        "8961198507044aabfd5bfe0bfd222fce8738ebc9c30c8b5fc2d03f83cc31e8ac1469b1f1d40a5e9cc86a3d7b2083a058",
+    ),
 ];
 
 /// The migration's file name, as `sqlx::migrate!` reads it: sqlx turns the

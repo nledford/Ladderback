@@ -27,6 +27,8 @@ use super::Agent;
 
 #[path = "pairing_dialog.rs"]
 mod dialog;
+#[path = "hub_plans.rs"]
+mod hub_plans;
 #[path = "second_machine.rs"]
 mod second_machine;
 #[path = "sync_replay.rs"]
@@ -208,6 +210,9 @@ pub struct PairingWorld {
     only_at: Option<(&'static str, u16)>,
     /// The sync of the agents' reports (`fleet/sync_replay.feature`).
     syncing: sync_replay::SyncWorld,
+    /// The sync of the first agent's plans and progress
+    /// (`fleet/plans_and_progress.feature`).
+    live: hub_plans::LiveWorld,
 }
 
 impl std::fmt::Debug for PairingWorld {

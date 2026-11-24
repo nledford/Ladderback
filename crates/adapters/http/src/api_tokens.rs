@@ -160,6 +160,8 @@ pub(crate) fn event_shown(
             | api::UiEvent::AgentOnline { .. }
             | api::UiEvent::AgentOffline { .. }
             | api::UiEvent::AgentReported { .. }
+            | api::UiEvent::AgentPlans { .. }
+            | api::UiEvent::AgentProgress { .. }
     );
     (machines || !of_machines).then(|| contents_shown(permissions, event))
 }

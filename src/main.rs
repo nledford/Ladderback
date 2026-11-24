@@ -863,6 +863,8 @@ fn run_daemon(
         // leases (§7.3).
         #[cfg(feature = "hub")]
         let config = background.config();
+        #[cfg(feature = "hub")]
+        let plans = background.read_plans();
         let scheduled = tokio::spawn(background.run(random));
         // A paired machine's reports to its hub run beside the scheduler
         // and never hold it up (§7.2).
@@ -875,6 +877,7 @@ fn run_daemon(
                 Arc::clone(&operation_log.store),
                 config,
                 standing,
+                Some(plans),
             ))
         });
         let app = http_adapter::router(

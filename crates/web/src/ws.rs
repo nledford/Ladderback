@@ -883,9 +883,9 @@ fn turn<T>(rereads: &Cell<Rereads>, step: impl FnOnce(&mut Rereads) -> T) -> T {
 /// After a start or a cancel, polls the history into `state` until
 /// `operation` has ended, as the page's own reads: the start or the cancel
 /// was the person's use of the session. A start announces before the first
-/// event can arrive, and a cancelled run emits no `UiEvent` at all, so the
-/// page does not guess — it reads the store until the store says the run
-/// settled.
+/// event can arrive, and the page takes no news from a cancel's `UiEvent`,
+/// so the page does not guess — it reads the store until the store says the
+/// run settled.
 /// `false` is the budget running out with no end in sight: the caller says
 /// so, rather than leave the reader watching a row that stopped moving.
 pub(crate) async fn settle(base: &str, state: RwSignal<OperationsState>, operation: &str) -> bool {

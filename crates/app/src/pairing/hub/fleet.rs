@@ -1,12 +1,13 @@
 //! What the hub tells its browsers of its machines, and what its dashboard
-//! reads of them (technical design §4.3, §7.2; #569): that a machine
+//! reads of them (technical design §4.3, §7.2; #569, #1440): that a machine
 //! started waiting for approval, was approved or reported an operation, and
-//! each approved machine with its latest operations.
+//! each approved machine with its latest operations, its plans and the
+//! progress of the operation it runs.
 
 use api::{MachineOutcomeDto, UiEvent};
 use domain::fleet::{
-    AgentRecord, AgentReport, Happening, OPERATIONS_SHOWN, Pairing, REPORTS_READ,
-    ReportedOperation, latest_operations,
+    AgentRecord, AgentReport, Happening, OPERATIONS_SHOWN, Pairing, PlansReport, REPORTS_READ,
+    ReportedOperation, ReportedProgress, latest_operations, progress_shown,
 };
 use domain::{AgentId, Timestamp};
 
@@ -15,13 +16,16 @@ use crate::ports::LatestReports;
 use super::{HubPairing, HubPairingError};
 
 /// One approved machine as the hub's dashboard shows it: its record, how
-/// many of its reports the hub let go of past the cap, and its latest
-/// operations, newest first.
+/// many of its reports the hub let go of past the cap, its latest
+/// operations, newest first, its plans as it last reported them, and the
+/// progress of the operation it runs, while its reports say it runs.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Machine {
     pub record: AgentRecord,
     pub reports_dropped: u64,
     pub operations: Vec<ReportedOperation>,
+    pub plans: Option<PlansReport>,
+    pub progress: Option<ReportedProgress>,
 }
 
 impl HubPairing {
@@ -40,17 +44,28 @@ impl HubPairing {
             if record.is_pending() {
                 continue;
             }
-            let latest = match &self.inbox {
-                Some(inbox) => inbox.latest(record.agent_id, REPORTS_READ).await?,
-                None => LatestReports {
-                    reports: Vec::new(),
-                    dropped: 0,
-                },
+            let (latest, plans, progress) = match &self.inbox {
+                Some(inbox) => (
+                    inbox.latest(record.agent_id, REPORTS_READ).await?,
+                    inbox.plans(record.agent_id).await?,
+                    inbox.progress(record.agent_id).await?,
+                ),
+                None => (
+                    LatestReports {
+                        reports: Vec::new(),
+                        dropped: 0,
+                    },
+                    None,
+                    None,
+                ),
             };
+            let operations = latest_operations(&latest.reports, OPERATIONS_SHOWN);
             machines.push(Machine {
                 record,
                 reports_dropped: latest.dropped,
-                operations: latest_operations(&latest.reports, OPERATIONS_SHOWN),
+                progress: progress_shown(&operations, progress),
+                operations,
+                plans,
             });
         }
         Ok(machines)
@@ -87,6 +102,7 @@ pub(super) fn reported(agent: AgentId, report: &AgentReport) -> UiEvent {
             Happening::Started => MachineOutcomeDto::Running,
             Happening::Succeeded => MachineOutcomeDto::Succeeded,
             Happening::Failed { .. } => MachineOutcomeDto::Failed,
+            Happening::Cancelled => MachineOutcomeDto::Cancelled,
         },
     }
 }
