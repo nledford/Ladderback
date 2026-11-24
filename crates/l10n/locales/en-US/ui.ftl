@@ -3794,6 +3794,30 @@ ui-machines-started-waiting = { $hostname } is waiting for approval.
 # A link to the dashboard of the approved machines, on the Machines tab and, on a hub, on the start page.
 ui-machines-dashboard-link = See the approved { -machine(form: "other") }' latest operations
 
+# The heading of the notice that leads the Machines tab while the hub is in recovery mode (decision 137).
+ui-machines-recovery-heading = Recovery mode
+
+# The warning under that heading: a machine showed the hub a lease the hub signed but no longer counts, as when the hub's data folder was restored from an older backup.
+ui-machines-recovery-notice = A { -machine } showed this { -hub } a newer lease than it counts, as after a restore from an older backup. Until you confirm the { -hub } that granted it is stopped or gone, this { -hub } grants and renews no lease, so two copies of the { -hub } can't give one repository to two { -machine(form: "other") }.
+
+# The button that opens the review of ending recovery mode, and the review's button that ends it.
+ui-machines-end-recovery = End recovery mode
+
+# The title of the review of ending recovery mode.
+ui-machines-recovery-review-title = End recovery mode?
+
+# What the review of ending recovery mode says first.
+ui-machines-recovery-review-body = End recovery mode only once the old { -hub }, the one this { -hub } was restored from, is stopped or gone for good. This { -hub } then grants leases again, each above the newest its { -machine(form: "other") } showed it.
+
+# Said in the review while the hub ends recovery mode, which holds the review still.
+ui-machines-recovery-ending = Ending recovery mode…
+
+# Said on the page once recovery mode ended.
+ui-machines-recovery-ended = Recovery mode ended. This { -hub } grants leases again.
+
+# Said in the review when the step-up is wrong: recovery mode didn't end.
+ui-machines-recovery-step-up-failed = That isn't right, so recovery mode didn't end. Try again.
+
 ## The hub's dashboard (#569): each approved machine, when it last connected,
 ## the reports the hub let go of, and its latest operations, as its reports
 ## told them.
