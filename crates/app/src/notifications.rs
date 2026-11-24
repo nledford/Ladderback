@@ -178,18 +178,21 @@ impl Notify {
 
     /// Tells the channels of every rule that sends `repo.maintenance_paused`
     /// that this machine's maintenance of `repository` has been paused for
-    /// want of a lease since `since`, and returns what there is to report,
-    /// as [`Self::tell`] does.
-    pub async fn tell_paused(&self, repository: &RepositoryAlias, since: Timestamp) -> Vec<Report> {
+    /// want of a lease since `since`. Returns whether a rule's channel took
+    /// it, and what there is to report, as [`Self::tell`] does.
+    pub async fn tell_paused(
+        &self,
+        repository: &RepositoryAlias,
+        since: Timestamp,
+    ) -> (bool, Vec<Report>) {
         let config = match self.config.load().await {
             Ok(config) => config,
-            Err(error) => return vec![Report::ConfigUnavailable(error)],
+            Err(error) => return (false, vec![Report::ConfigUnavailable(error)]),
         };
-        self.deliver(
-            &config,
-            &Event::maintenance_paused(repository.clone(), since),
-        )
-        .await
+        let event = Event::maintenance_paused(repository.clone(), since);
+        let matched = config.notifications().matching(&event).count();
+        let reports = self.deliver(&config, &event).await;
+        (reports.len() < matched, reports)
     }
 
     /// Tells the event `news` is, as [`Self::tell`] does.

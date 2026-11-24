@@ -101,6 +101,7 @@ fn each_event_is_named_as_section_11_names_it_and_read_back_by_that_name() {
             "prune.failed",
             "check.failed",
             "restore.failed",
+            "repo.maintenance_paused",
         ]
     );
     for kind in EventKind::ALL {

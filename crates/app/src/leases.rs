@@ -123,11 +123,11 @@ impl MaintenanceLeases {
 
     /// Notes, now, which of `maintained`, the repositories the
     /// configuration asks this machine to maintain, are paused for want of
-    /// a lease, and returns each pause that has lasted
-    /// [`PAUSE_ALERT_AFTER`](domain::maintenance::PAUSE_ALERT_AFTER) and
-    /// wasn't told yet, by repository and since when, noted as told. A
-    /// machine that isn't paired drops every pause; one whose pin can't be
-    /// read notes nothing. Only the pauses are saved, so a grant taken
+    /// a lease, and returns each pause an earlier watch noted that has
+    /// lasted [`PAUSE_ALERT_AFTER`](domain::maintenance::PAUSE_ALERT_AFTER)
+    /// and wasn't [`told`](Self::told) yet, by repository and since when.
+    /// A machine that isn't paired drops every pause; one whose pin can't
+    /// be read notes nothing. Only the pauses are saved, so a grant taken
     /// meanwhile stands (I1).
     pub async fn watch(
         &self,
@@ -145,6 +145,23 @@ impl MaintenanceLeases {
             self.cache.save_pauses(&held).await?;
         }
         Ok(due)
+    }
+
+    /// Notes that the notification rules took the alert of the pause of
+    /// `repository` since `since`, so no watch returns it again. Only the
+    /// pauses are saved (I1).
+    pub async fn told(
+        &self,
+        repository: &RepositoryId,
+        since: Timestamp,
+    ) -> Result<(), StoreError> {
+        let mut held = self.cache.load().await?;
+        let before = held.clone();
+        held.told(repository, since);
+        if held != before {
+            self.cache.save_pauses(&held).await?;
+        }
+        Ok(())
     }
 }
 
@@ -175,8 +192,11 @@ impl WatchPauses {
     /// Notes the pause of each repository this machine is asked to
     /// maintain and knows the ID of, and tells the rules of each that has
     /// lasted long enough. Returns what telling them left to report. A
-    /// configuration or a cache that can't be read notes nothing and tells
-    /// nothing; the next watch tries again.
+    /// pause is noted as told only once a rule's channel took it, so one
+    /// every channel failed is told again at the next watch; one a grant
+    /// ended since the watch read the leases isn't told. A configuration or
+    /// a cache that can't be read notes nothing and tells nothing; the next
+    /// watch tries again.
     pub async fn watch(&self) -> Vec<Report> {
         let Ok(config) = self.config.load().await else {
             return Vec::new();
@@ -197,8 +217,18 @@ impl WatchPauses {
                 .iter()
                 .find(|(_, id)| **id == repository)
                 .map(|(alias, _)| *alias);
-            if let Some(alias) = alias {
-                reports.extend(self.notify.tell_paused(alias, since).await);
+            let Some(alias) = alias else {
+                continue;
+            };
+            if self.leases.paused(Some(&repository)).await != Some(since) {
+                continue;
+            }
+            let (taken, told) = self.notify.tell_paused(alias, since).await;
+            reports.extend(told);
+            // A cache that can't be written leaves the pause untold, so the
+            // next watch tells it again.
+            if taken && self.leases.told(&repository, since).await.is_err() {
+                log::warn!("a pause told to the notification rules couldn't be noted as told");
             }
         }
         reports

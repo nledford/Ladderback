@@ -13,7 +13,7 @@ use app::fakes::{
 };
 use app::leases::{MaintenanceLeases, WatchPauses};
 use app::notifications::Notify;
-use app::ports::{ConfigStore, Identity};
+use app::ports::{ConfigStore, Identity, NotifyError};
 use domain::fleet::{HubAddress, HubPin, PublicKey, TokenTls};
 use domain::maintenance::{Grant, LeaseEpoch, RepoGrants};
 use domain::notifications::{
@@ -233,4 +233,35 @@ async fn a_pause_is_told_once_when_it_has_lasted_14_days() {
     machine.clock.advance(DAY);
     assert_eq!(machine.watch.watch().await, vec![]);
     assert_eq!(told(&machine.notifier).len(), 2);
+}
+
+#[tokio::test]
+async fn a_pause_no_channel_took_is_told_again_at_the_next_watch() {
+    let machine = machine().await;
+    machine
+        .notifier
+        .fail_at("https://ops.example/hook", NotifyError::Unreachable);
+    assert_eq!(machine.watch.watch().await, vec![]);
+    machine.clock.advance(days(14));
+    assert_eq!(machine.watch.watch().await.len(), 1);
+    machine.clock.advance(SignedDuration::from_mins(15));
+    assert_eq!(machine.watch.watch().await.len(), 1);
+}
+
+#[tokio::test]
+async fn a_pause_first_noted_after_14_days_is_told_only_at_the_next_watch() {
+    let machine = machine().await;
+    machine.clock.advance(days(30));
+    assert_eq!(machine.watch.watch().await, vec![]);
+    assert_eq!(told(&machine.notifier), vec![]);
+    machine.clock.advance(SignedDuration::from_mins(15));
+    assert_eq!(machine.watch.watch().await, vec![]);
+    // `music` held no lease, so its pause began at the first watch.
+    assert_eq!(
+        told(&machine.notifier),
+        vec![(
+            Some(alias("photos")),
+            start().checked_add(days(7)).expect("a time")
+        )]
+    );
 }

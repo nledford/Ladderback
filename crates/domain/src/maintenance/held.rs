@@ -139,9 +139,12 @@ impl HeldLeases {
     /// the machine asks to maintain, on which it holds no live lease: since
     /// its lease ran out, or since `now` when it holds none, a pause noted
     /// before keeping its date. Every other pause is dropped, so the next
-    /// grant clears one. Returns each pause that has now lasted
-    /// [`PAUSE_ALERT_AFTER`] and wasn't told yet, by repository and since
-    /// when, and notes it told.
+    /// grant clears one. Returns each pause a watch before this one noted
+    /// that has now lasted [`PAUSE_ALERT_AFTER`] and wasn't
+    /// [`told`](Self::told) yet, by repository and since when. A pause
+    /// this watch first notes isn't returned, however old: a machine that
+    /// starts or wakes long after its lease ran out asks its hub before the
+    /// next watch, and the hub's grant may end the pause first.
     pub fn watch<'a>(
         &mut self,
         maintained: impl IntoIterator<Item = &'a RepositoryId>,
@@ -153,26 +156,39 @@ impl HeldLeases {
             if self.holds(repository, now).is_ok() {
                 continue;
             }
-            let mut pause = self.paused.get(repository).copied().unwrap_or(Pause {
+            let kept = self.paused.get(repository).copied();
+            let pause = kept.unwrap_or(Pause {
                 since: self
                     .leases
                     .get(repository)
                     .map_or(now, |lease| lease.ends_at),
                 alerted: false,
             });
-            let since = pause.since;
             // A date no clock can hold is never due.
-            let lasted = since
+            let lasted = pause
+                .since
                 .checked_add(PAUSE_ALERT_AFTER)
                 .is_ok_and(|at| now >= at);
-            if lasted && !pause.alerted {
-                pause.alerted = true;
-                due.push((repository.clone(), since));
+            if kept.is_some() && lasted && !pause.alerted {
+                due.push((repository.clone(), pause.since));
             }
             paused.insert(repository.clone(), pause);
         }
         self.paused = paused;
         due
+    }
+
+    /// Notes that the notification rules were told of the pause of
+    /// `repository` since `since`, so no watch returns it again. A pause
+    /// that ended, or one since another date, is left as it is.
+    pub fn told(&mut self, repository: &RepositoryId, since: Timestamp) {
+        if let Some(pause) = self
+            .paused
+            .get_mut(repository)
+            .filter(|pause| pause.since == since)
+        {
+            pause.alerted = true;
+        }
     }
 
     pub fn leases(&self) -> impl Iterator<Item = (&RepositoryId, &HeldLease)> {

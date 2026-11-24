@@ -269,7 +269,7 @@ fn a_watch_drops_the_pause_of_a_repository_the_machine_no_longer_asks_to_maintai
 }
 
 #[test]
-fn a_pause_is_told_once_it_has_lasted_14_days_and_only_once() {
+fn a_pause_is_returned_once_it_has_lasted_14_days_until_it_is_told() {
     let mut held = granted();
     let since = hub(7 * DAY);
     let due = since.checked_add(PAUSE_ALERT_AFTER).unwrap();
@@ -282,6 +282,18 @@ fn a_pause_is_told_once_it_has_lasted_14_days_and_only_once() {
         held.watch([&repository('a')], due),
         vec![(repository('a'), since)]
     );
+    // Not told yet, as when every channel failed: the next watch returns
+    // it again.
+    assert_eq!(
+        held.watch([&repository('a')], due.checked_add(ms(1)).unwrap()),
+        vec![(repository('a'), since)]
+    );
+    held.told(&repository('a'), hub(8 * DAY));
+    assert_eq!(
+        held.watch([&repository('a')], hub(25 * DAY)),
+        vec![(repository('a'), since)]
+    );
+    held.told(&repository('a'), since);
     assert_eq!(
         held.pauses().collect::<Vec<_>>(),
         vec![(
@@ -296,6 +308,16 @@ fn a_pause_is_told_once_it_has_lasted_14_days_and_only_once() {
 }
 
 #[test]
+fn a_pause_first_noted_after_14_days_is_returned_only_by_the_next_watch() {
+    let mut held = granted();
+    assert_eq!(held.watch([&repository('a')], hub(30 * DAY)), vec![]);
+    assert_eq!(
+        held.watch([&repository('a')], hub(30 * DAY + 15 * 60)),
+        vec![(repository('a'), hub(7 * DAY))]
+    );
+}
+
+#[test]
 fn each_repository_is_paused_and_told_on_its_own() {
     let mut held = granted();
     assert_eq!(
@@ -306,6 +328,7 @@ fn each_repository_is_paused_and_told_on_its_own() {
         held.watch([&repository('a'), &repository('b')], hub(21 * DAY)),
         vec![(repository('a'), hub(7 * DAY))]
     );
+    held.told(&repository('a'), hub(7 * DAY));
     assert_eq!(
         held.watch([&repository('a'), &repository('b')], hub(28 * DAY)),
         vec![(repository('b'), hub(14 * DAY))]

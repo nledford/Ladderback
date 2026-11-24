@@ -199,6 +199,7 @@ async fn a_paired_machine_notes_and_reads_its_pauses_now() {
         machine.leases.watch(&[repository('a')]).await,
         Ok(vec![(repository('a'), start())])
     );
+    assert_eq!(machine.leases.told(&repository('a'), start()).await, Ok(()));
     assert_eq!(
         machine
             .cache
@@ -215,6 +216,7 @@ async fn a_paired_machine_notes_and_reads_its_pauses_now() {
             }
         )]
     );
+    assert_eq!(machine.leases.watch(&[repository('a')]).await, Ok(vec![]));
 }
 
 #[tokio::test]
