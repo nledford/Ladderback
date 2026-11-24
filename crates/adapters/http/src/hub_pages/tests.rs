@@ -336,10 +336,7 @@ async fn a_daemon_not_serving_as_a_hub_answers_its_routes_as_unknown() {
     for (method, path) in [
         (Method::GET, api::HUB_PATH.to_owned()),
         (Method::GET, api::HUB_RECOVERY_PATH.to_owned()),
-        (
-            Method::POST,
-            api::HUB_RECOVERY_CONFIRMATION_PATH.to_owned(),
-        ),
+        (Method::POST, api::HUB_RECOVERY_CONFIRMATION_PATH.to_owned()),
         (Method::POST, api::PAIRING_TOKENS_PATH.to_owned()),
         (
             Method::DELETE,
@@ -1120,14 +1117,10 @@ async fn on_loopback_the_fingerprint_ends_recovery_mode_the_page_reads() {
     assert!(!recovering(&daemon).await);
     into_recovery(&daemon).await;
     assert!(recovering(&daemon).await);
-    let ended = daemon
-        .send(end_recovery(LOOPBACK, &[], &fingerprint))
-        .await;
+    let ended = daemon.send(end_recovery(LOOPBACK, &[], &fingerprint)).await;
     assert_eq!(ended.status(), StatusCode::NO_CONTENT);
     assert!(!recovering(&daemon).await);
-    let again = daemon
-        .send(end_recovery(LOOPBACK, &[], &fingerprint))
-        .await;
+    let again = daemon.send(end_recovery(LOOPBACK, &[], &fingerprint)).await;
     assert_eq!(again.status(), StatusCode::NO_CONTENT);
     assert!(!recovering(&daemon).await);
 }
@@ -1203,9 +1196,7 @@ async fn with_sign_in_on_only_a_session_reads_or_ends_recovery_mode() {
         );
     }
     let session = daemon.signed_in().await;
-    let wrong = daemon
-        .send(end_recovery(REMOTE, &session, "not-it"))
-        .await;
+    let wrong = daemon.send(end_recovery(REMOTE, &session, "not-it")).await;
     assert_eq!(
         refusal(wrong).await,
         (StatusCode::FORBIDDEN, "step-up-failed".to_owned())

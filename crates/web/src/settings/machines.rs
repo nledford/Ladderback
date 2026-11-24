@@ -548,11 +548,9 @@ fn recovery_notice(localizer: &Arc<Localizer>, step_up: StepUp) -> impl IntoView
         let localizer = Arc::clone(localizer);
         move |id| text(&localizer, id)
     };
-    let button_label = t(msg::UI_MACHINES_END_RECOVERY);
-    let (heading, notice) = (
-        t(msg::UI_MACHINES_RECOVERY_HEADING),
-        t(msg::UI_MACHINES_RECOVERY_NOTICE),
-    );
+    let button_label = StoredValue::new(t(msg::UI_MACHINES_END_RECOVERY));
+    let heading = StoredValue::new(t(msg::UI_MACHINES_RECOVERY_HEADING));
+    let notice = StoredValue::new(t(msg::UI_MACHINES_RECOVERY_NOTICE));
     let alert_localizer = Arc::clone(localizer);
     let field_localizer = Arc::clone(localizer);
     let problem_localizer = Arc::clone(localizer);
@@ -565,17 +563,14 @@ fn recovery_notice(localizer: &Arc<Localizer>, step_up: StepUp) -> impl IntoView
                     view! {
                         <section aria-labelledby=RECOVERY_HEADING_ID>
                             <h3 id=RECOVERY_HEADING_ID tabindex="-1">
-                                {heading.clone()}
+                                {heading.get_value()}
                             </h3>
-                            <Alert
-                                localizer=Arc::clone(&alert_localizer)
-                                tone=AlertTone::Warning
-                            >
-                                {notice.clone()}
+                            <Alert localizer=Arc::clone(&alert_localizer) tone=AlertTone::Warning>
+                                {notice.get_value()}
                             </Alert>
                             <Button
                                 id=RECOVERY_BUTTON_ID
-                                content=Content::Text(button_label.clone().into())
+                                content=Content::Text(button_label.get_value().into())
                                 on_press=choose
                             />
                         </section>
