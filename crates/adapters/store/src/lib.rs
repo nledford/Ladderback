@@ -83,6 +83,11 @@ pub enum OpenError {
     /// The database was written by a newer version: it holds a migration this
     /// build doesn't know. Opening it would risk its data.
     NewerSchema { version: i64 },
+    /// The database was written by a version before the baseline schema
+    /// (§16, decision 165): its migrations are the old set, through
+    /// `version`, which this build no longer ships and can't upgrade. It is
+    /// left as it was, for the one-off copy into a baseline database.
+    OldSchema { version: i64 },
     /// A migration this build ships failed or doesn't match the one applied.
     Migration { detail: String },
 }

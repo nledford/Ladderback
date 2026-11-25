@@ -177,6 +177,7 @@ async fn a_read_of_plans_never_sees_half_of_a_snapshot() {
     let scratch = Scratch::new();
     let store = Arc::new(scratch.open().await);
     let agent = domain::AgentId::from_uuid(domain::Uuid::from_u128(0xa1));
+    register_machine(&mut scratch.raw().await, agent).await;
     // Two snapshots that differ in both their plans and their count left out.
     let (few, many) = (plans_report(1, 9), plans_report(8, 0));
     store

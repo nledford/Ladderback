@@ -51,6 +51,27 @@ impl SqliteFiles {
         store
     }
 
+    /// A new scratch database, on a hub that has registered `machines`.
+    #[cfg(feature = "hub")]
+    async fn new_store_knowing(
+        &self,
+        machines: impl IntoIterator<Item = domain::AgentId>,
+    ) -> store::SqliteStore {
+        let store = self.new_store().await;
+        let path = self
+            .0
+            .lock()
+            .unwrap()
+            .last()
+            .expect("a store was opened")
+            .path();
+        let mut raw = raw_connection(&path).await;
+        for machine in machines {
+            register_machine(&mut raw, machine).await;
+        }
+        store
+    }
+
     async fn last_store(&self) -> store::SqliteStore {
         let path = self
             .0
@@ -240,7 +261,7 @@ async fn sqlite_store_meets_the_outbox_contract() {
 #[async_trait]
 impl contract::outbox::ReportInboxHarness for SqliteFiles {
     async fn empty(&self) -> Arc<dyn app::ports::ReportInbox> {
-        Arc::new(self.new_store().await)
+        Arc::new(self.new_store_knowing(contract::outbox::MACHINES).await)
     }
 
     async fn reopened(&self) -> Arc<dyn app::ports::ReportInbox> {
@@ -263,7 +284,10 @@ async fn sqlite_store_meets_the_report_inbox_contract() {
 #[async_trait]
 impl contract::ownership_registry::OwnershipRegistryHarness for SqliteFiles {
     async fn empty(&self) -> Arc<dyn app::ports::OwnershipRegistry> {
-        Arc::new(self.new_store().await)
+        Arc::new(
+            self.new_store_knowing(contract::ownership_registry::machines())
+                .await,
+        )
     }
 
     async fn reopened(&self) -> Arc<dyn app::ports::OwnershipRegistry> {

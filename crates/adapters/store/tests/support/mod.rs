@@ -12,7 +12,7 @@ use app::ports::{BackupSummary, EngineResult, OperationDetail, OperationRecord, 
 use domain::execution::{
     FailureReason, Operation, OperationKind, Target, Trigger, Warning, WarningKind,
 };
-use domain::{OperationId, PlanId, RepositoryId, SnapshotId, Timestamp, Uuid};
+use domain::{AgentId, OperationId, PlanId, RepositoryId, SnapshotId, Timestamp, Uuid};
 use sqlx::sqlite::{SqliteConnectOptions, SqliteConnection};
 use sqlx::{ConnectOptions, Row};
 use store::{OpenError, SqliteStore};
@@ -498,4 +498,30 @@ pub async fn rows_of(conn: &mut SqliteConnection, table: &str, column: &str, n: 
         .fetch_one(&mut *conn)
         .await
         .expect("a count")
+}
+
+/// The public key bytes [`register_machine`] gives `machine`: the last
+/// byte of its ID, 32 times.
+pub fn machine_key_bytes(machine: AgentId) -> [u8; 32] {
+    [machine.as_uuid().as_bytes()[15]; 32]
+}
+
+/// Registers `machine` as an approved machine of the hub, as a pairing and
+/// an approval leave it: the hub keeps the plans, progress and ownership
+/// reports of a registered machine only.
+pub async fn register_machine(conn: &mut SqliteConnection, machine: AgentId) {
+    let hostname = format!("machine-{}", machine.as_uuid().simple());
+    sqlx::query(
+        "INSERT INTO machines (id, pubkey, hostname, hostname_key, status, status_at, counter, \
+         last_seen) VALUES (?, ?, ?, ?, 'approved', ?, '00000000000000000000', ?)",
+    )
+    .bind(machine.as_uuid().to_string())
+    .bind(machine_key_bytes(machine).as_slice())
+    .bind(&hostname)
+    .bind(&hostname)
+    .bind(ms(0))
+    .bind(ms(0))
+    .execute(conn)
+    .await
+    .expect("the machine is registered");
 }

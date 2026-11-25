@@ -6,7 +6,8 @@ Feature: Restarting after a crash
   operation it ended stops holding its repository. A queued backup never
   started, so the persistent queue runs it once the daemon serves, under
   its own ID. One daemon at a time serves a data folder: a second one is
-  refused and touches nothing.
+  refused and touches nothing. An operation log from before the baseline
+  schema is refused too, and left as it was.
 
   # A plan's after hook that waits until it is let go holds its backup
   # running: an operation has not ended until its ending hooks have, so the
@@ -57,3 +58,15 @@ Feature: Restarting after a crash
     And the history page shows the operation running
     When the plan's after hook is let go
     Then the history page shows the operation succeeded
+
+  # The baseline schema (decision 165) replaced the migrations before it:
+  # an operation log they left can't be upgraded, only copied, once, into a
+  # new one with the copy script. The daemon says so and touches nothing.
+  @e2e
+  Scenario: An operation log from before the baseline schema is refused and left as it was
+    Given Ladderback is serving on loopback with the plan "home"
+    And the daemon is killed
+    And the data folder holds an operation log an earlier Ladderback wrote before the baseline schema
+    When Ladderback is asked to serve
+    Then Ladderback refuses to start, saying the operation log is from an earlier version and naming the copy script
+    And the operation log is left as it was

@@ -324,3 +324,70 @@ async fn history_lists_one_failed_backup(agent: &mut Agent, plan: String, code: 
         "the backup never started: {backup}"
     );
 }
+
+/// The operation log of the daemon's data folder, and the copy of its
+/// bytes a step keeps to compare with.
+fn operation_log(agent: &Agent) -> (std::path::PathBuf, std::path::PathBuf) {
+    let log = Events::data_dir(agent).join("ladderback.db");
+    (log, Events::root(agent).join("ladderback.db.before"))
+}
+
+/// The log a killed daemon left is replaced by the one
+/// `crates/adapters/store/tests/fixtures/at-0029.sql` describes: the 29
+/// migrations before the baseline schema applied, in WAL mode as the store
+/// keeps it (decision 165).
+#[given(
+    "the data folder holds an operation log an earlier Ladderback wrote before the baseline schema"
+)]
+async fn an_old_operation_log(agent: &mut Agent) {
+    use sqlx::{ConnectOptions as _, Connection as _};
+
+    let (log, kept) = operation_log(agent);
+    for suffix in ["", "-wal", "-shm"] {
+        let file = format!("{}{suffix}", log.display());
+        match std::fs::remove_file(&file) {
+            Ok(()) => {}
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
+            Err(error) => panic!("{file} can't be removed: {error}"),
+        }
+    }
+    let mut raw = sqlx::sqlite::SqliteConnectOptions::new()
+        .filename(&log)
+        .create_if_missing(true)
+        .connect()
+        .await
+        .expect("the old operation log is created");
+    sqlx::raw_sql(include_str!(
+        "../../crates/adapters/store/tests/fixtures/at-0029.sql"
+    ))
+    .execute(&mut raw)
+    .await
+    .expect("the old operation log is filled");
+    sqlx::query("PRAGMA journal_mode = WAL")
+        .execute(&mut raw)
+        .await
+        .expect("the old operation log is in WAL mode");
+    raw.close().await.expect("the old operation log is closed");
+    std::fs::copy(&log, kept).expect("the old operation log is kept to compare");
+}
+
+#[then(
+    "Ladderback refuses to start, saying the operation log is from an earlier version and naming the copy script"
+)]
+fn refuses_an_old_log(agent: &mut Agent) {
+    let (status, log) = events_steps::refusal(agent);
+    assert!(!status.success(), "a refusal is a failure: {status}");
+    for words in ["earlier version", "29", "scripts/copy-to-baseline.ts"] {
+        assert!(log.contains(words), "the refusal says {words:?}:\n{log}");
+    }
+}
+
+#[then("the operation log is left as it was")]
+fn the_old_log_is_left(agent: &mut Agent) {
+    let (log, kept) = operation_log(agent);
+    assert!(
+        std::fs::read(log).expect("the operation log is readable")
+            == std::fs::read(kept).expect("the copy is readable"),
+        "the operation log is left byte for byte as it was"
+    );
+}
