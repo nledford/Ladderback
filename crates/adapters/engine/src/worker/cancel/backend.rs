@@ -1,7 +1,7 @@
 //! A repository backend that refuses a snapshot once the job is cancelled,
 //! by the daemon or by its deadline.
 
-use std::sync::{Arc, Mutex};
+use std::sync::{Arc, Mutex, PoisonError};
 
 use bytes::Bytes;
 use rustic_core::{
@@ -133,7 +133,22 @@ impl DeleteGate {
     /// What the daemon answered: `None` until a removal asked, then the
     /// answer, `None` inside when none came.
     pub(crate) fn heard(&self) -> Option<Option<DeleteAnswer>> {
-        todo!()
+        match &*self.state.lock().unwrap_or_else(PoisonError::into_inner) {
+            Gate::Unasked(_) => None,
+            Gate::Heard(answer) => Some(*answer),
+        }
+    }
+
+    /// Whether a removal may go on: asks on the first call, holding the
+    /// lock so removals on other threads wait for the one answer.
+    fn admits_removal(&self) -> bool {
+        let mut state = self.state.lock().unwrap_or_else(PoisonError::into_inner);
+        let answer = match std::mem::replace(&mut *state, Gate::Heard(None)) {
+            Gate::Unasked(ask) => ask(),
+            Gate::Heard(answer) => answer,
+        };
+        *state = Gate::Heard(answer);
+        answer == Some(DeleteAnswer::Delete)
     }
 }
 
@@ -143,8 +158,88 @@ pub(crate) fn asking_before_removal(
     backends: &RepositoryBackends,
     gate: &Arc<DeleteGate>,
 ) -> RepositoryBackends {
-    let _ = (backends, gate);
-    todo!()
+    let asking = |inner: Arc<dyn WriteBackend>| -> Arc<dyn WriteBackend> {
+        Arc::new(AskingBeforeRemoval {
+            inner,
+            gate: Arc::clone(gate),
+        })
+    };
+    RepositoryBackends::new(
+        asking(backends.repository()),
+        backends.repo_hot().map(asking),
+    )
+}
+
+struct AskingBeforeRemoval {
+    inner: Arc<dyn WriteBackend>,
+    gate: Arc<DeleteGate>,
+}
+
+impl ReadBackend for AskingBeforeRemoval {
+    fn location(&self) -> String {
+        self.inner.location()
+    }
+
+    fn list_with_size(&self, tpe: FileType) -> RusticResult<Vec<(Id, u32)>> {
+        self.inner.list_with_size(tpe)
+    }
+
+    fn list(&self, tpe: FileType) -> RusticResult<Vec<Id>> {
+        self.inner.list(tpe)
+    }
+
+    fn read_full(&self, tpe: FileType, id: &Id) -> RusticResult<Bytes> {
+        self.inner.read_full(tpe, id)
+    }
+
+    fn read_partial(
+        &self,
+        tpe: FileType,
+        id: &Id,
+        cacheable: bool,
+        offset: u32,
+        length: u32,
+    ) -> RusticResult<Bytes> {
+        self.inner.read_partial(tpe, id, cacheable, offset, length)
+    }
+
+    fn warmup_path(&self, tpe: FileType, id: &Id) -> String {
+        self.inner.warmup_path(tpe, id)
+    }
+
+    fn needs_warm_up(&self) -> bool {
+        self.inner.needs_warm_up()
+    }
+
+    fn warm_up(&self, tpe: FileType, id: &Id) -> RusticResult<()> {
+        self.inner.warm_up(tpe, id)
+    }
+}
+
+impl WriteBackend for AskingBeforeRemoval {
+    fn create(&self) -> RusticResult<()> {
+        self.inner.create()
+    }
+
+    fn write_bytes(
+        &self,
+        tpe: FileType,
+        id: &Id,
+        cacheable: bool,
+        content: BytesList,
+    ) -> RusticResult<()> {
+        self.inner.write_bytes(tpe, id, cacheable, content)
+    }
+
+    fn remove(&self, tpe: FileType, id: &Id, cacheable: bool) -> RusticResult<()> {
+        if !self.gate.admits_removal() {
+            return Err(RusticError::new(
+                ErrorKind::Other,
+                "the daemon didn't let this prune delete: nothing is removed",
+            ));
+        }
+        self.inner.remove(tpe, id, cacheable)
+    }
 }
 
 #[cfg(test)]
