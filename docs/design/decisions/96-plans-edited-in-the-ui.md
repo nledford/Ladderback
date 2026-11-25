@@ -2,6 +2,8 @@
 
 **A Plans page creates, changes and deletes plans. Each is one change of the configuration file, made under the daemon's configuration write lock by the rules the configuration keeps when it loads, and saved the way the file is written by hand (decision 69). The routes are for a session only. A plan a notification rule names isn't deleted. A deleted plan's snapshots stay in the repository, and a new plan given its ID would take them over** (recorded 2026-11-15, §6.1, §4.2, §4.4; decided by the maintainer on #616).
 
+**Amended 2026-11-24 (#1527, proposed with the fix; the maintainer may change it):** the form still has no field for an interval schedule (`every`), so a plan on one opens with an empty cron field. That field's hint then says how often the plan runs and that an empty field keeps it, in place of the hint that empty means no schedule, and an emptied cron field removes the schedule only when it held a cron schedule. A plan on an interval saved unchanged, or with the field left blank, keeps its interval; a cron schedule typed over it replaces it. The plain schedule choice (#1396) says how an interval reads back once it has one.
+
 ## Why
 
 - **The configuration is the aggregate.** `AgentConfig::add_plan`, `change_plan` and `remove_plan` give the configuration the change makes, checked whole as a loaded one is (`AgentConfig::new`, then the notification rules), or refuse it: a plan whose ID another has, one for a repository the configuration doesn't have, one that backs up nothing, or a change to a plan the configuration no longer has. A refusal saves nothing.
