@@ -31,3 +31,10 @@ Feature: A prune deletes only while its machine may still maintain the repositor
     Given this machine isn't paired with a hub
     When this machine prunes the repository
     Then the prune deleted what it planned
+
+  Scenario: A prune cancelled just as it asks deletes nothing
+    Given this machine isn't paired with a hub
+    And the prune is cancelled just as it asks whether it may delete
+    When this machine prunes the repository
+    Then the prune deleted nothing
+    And the prune was cancelled

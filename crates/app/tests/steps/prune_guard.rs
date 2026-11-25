@@ -4,8 +4,8 @@
 //! its first delete, and deletes only on yes (§7.3; §16, decision 161).
 
 use std::collections::BTreeMap;
-use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::{Arc, Mutex, PoisonError};
 
 use async_trait::async_trait;
 use cucumber::{given, then, when};
@@ -20,6 +20,7 @@ use domain::{
     AgentId, OperationId, RepositoryAlias, RepositoryId, SignedDuration, Timestamp, Uuid,
 };
 use futures::StreamExt;
+use futures::channel::oneshot;
 
 use super::Agent;
 use app::execution::Finished;
@@ -62,6 +63,8 @@ pub struct PruneGuardWorld {
     /// How long the prune then takes to warm up and repack, before its
     /// first delete.
     repacking_takes: SignedDuration,
+    /// Whether the run is cancelled just as the prune asks.
+    cancel_as_it_asks: bool,
     deleted: Arc<AtomicBool>,
     finished: Option<Finished>,
 }
@@ -87,6 +90,11 @@ fn lease_runs_out(agent: &mut Agent) {
 #[given("this machine isn't paired with a hub")]
 fn not_paired(agent: &mut Agent) {
     agent.prune_guard.paired = false;
+}
+
+#[given("the prune is cancelled just as it asks whether it may delete")]
+fn cancelled_as_it_asks(agent: &mut Agent) {
+    agent.prune_guard.cancel_as_it_asks = true;
 }
 
 #[when("this machine prunes the repository")]
@@ -133,12 +141,14 @@ async fn prune(agent: &mut Agent) {
             .await
             .expect("the grants are kept");
     }
+    let (fire, cancel) = oneshot::channel::<()>();
     let use_case = RunMaintenance::new(
         Arc::new(Pruning {
             clock: clock.clone(),
             planning_takes: world.planning_takes,
             repacking_takes: world.repacking_takes,
             deleted: Arc::clone(&world.deleted),
+            cancel_as_it_asks: Mutex::new(world.cancel_as_it_asks.then_some(fire)),
         }),
         clock,
         Arc::new(InMemoryOperationStore::new()),
@@ -160,7 +170,14 @@ async fn prune(agent: &mut Agent) {
         .start(assessed)
         .await
         .expect("the prune starts while the lease is live");
-    world.finished = Some(use_case.execute(prepared, futures::future::pending()).await);
+    // A cancel the prune fires as it asks; without one, the run is never
+    // cancelled.
+    let cancel = async move {
+        if cancel.await.is_err() {
+            futures::future::pending::<()>().await;
+        }
+    };
+    world.finished = Some(use_case.execute(prepared, cancel).await);
 }
 
 #[then("the prune deleted nothing")]
@@ -178,6 +195,14 @@ fn failed_lease_lapsed(agent: &mut Agent) {
         &OperationStatus::Failed {
             reason: FailureReason::LeaseLapsed
         }
+    );
+}
+
+#[then("the prune was cancelled")]
+fn was_cancelled(agent: &mut Agent) {
+    assert_eq!(
+        agent.prune_guard.finished().operation.status(),
+        &OperationStatus::Cancelled
     );
 }
 
@@ -228,6 +253,8 @@ struct Pruning {
     planning_takes: SignedDuration,
     repacking_takes: SignedDuration,
     deleted: Arc<AtomicBool>,
+    /// Fired as the prune asks, when the scenario cancels then.
+    cancel_as_it_asks: Mutex<Option<oneshot::Sender<()>>>,
 }
 
 struct Nothing;
@@ -258,11 +285,19 @@ impl Engine for Pruning {
                     self.repacking_takes,
                     Arc::clone(&self.deleted),
                 );
+                let cancel = self
+                    .cancel_as_it_asks
+                    .lock()
+                    .unwrap_or_else(PoisonError::into_inner)
+                    .take();
                 futures::stream::once(async move {
                     // The plan and the repack take their time; then the
                     // prune asks.
                     clock.advance(planning_takes);
                     clock.advance(repacking_takes);
+                    if let Some(cancel) = cancel {
+                        let _ = cancel.send(());
+                    }
                     let (ask, answer) = DeletionAsk::new();
                     let asked = futures::stream::iter([EngineEvent::DeletionAsked(ask)]);
                     let ended = futures::stream::once(async move {
