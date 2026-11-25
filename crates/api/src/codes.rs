@@ -385,12 +385,15 @@ pub enum ErrorCode {
     /// ran out on the hub's time. Nothing in the repository was changed. The
     /// argument `alias` names it.
     MaintenanceNoLease,
-    /// A prune worked out its plan and then, before it deleted or rewrote
-    /// anything, found that this machine may no longer maintain the
-    /// repository: it is paired with a hub and its lease on the repository
-    /// lapsed, or the daemon didn't answer the prune in time (§7.3; §16,
+    /// A prune came to its first delete and was told that this machine may
+    /// no longer maintain the repository: it is paired with a hub and its
+    /// lease on the repository lapsed while the prune ran (§7.3; §16,
     /// decision 161). Nothing was deleted.
     MaintenanceLeaseLapsed,
+    /// A prune came to its first delete, asked whether this machine may
+    /// still maintain the repository, and had no answer in time (§16,
+    /// decision 161). Nothing was deleted.
+    MaintenanceDeletionUnanswered,
     /// The plan's retention policy is set and would keep nothing, so the
     /// forget was refused before anything was removed. The argument `plan`
     /// names it.
@@ -1553,6 +1556,7 @@ impl ErrorCode {
             Self::MaintenanceSelectionChanged
             | Self::MaintenanceDataFolderCopied
             | Self::MaintenanceLeaseLapsed
+            | Self::MaintenanceDeletionUnanswered
             | Self::MachineNotCopied
             | Self::RepositoryReadTimedOut
             | Self::ProfileCommandsUnconfirmed => &[],

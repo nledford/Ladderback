@@ -1493,4 +1493,74 @@ mod tests {
         assert!(began.elapsed() < Duration::from_secs(5));
         assert_eq!(capture.parsed(), [WorkerEvent::ReadyToDelete]);
     }
+
+    /// The index and pack files of the local repository at `repo`.
+    fn repository_files(repo: &Path) -> Vec<PathBuf> {
+        let mut files: Vec<PathBuf> = ["index", "data"]
+            .iter()
+            .filter_map(|folder| std::fs::read_dir(repo.join(folder)).ok())
+            .flatten()
+            .flatten()
+            .flat_map(|entry| match std::fs::read_dir(entry.path()) {
+                Ok(inner) => inner.flatten().map(|file| file.path()).collect(),
+                Err(_) => vec![entry.path()],
+            })
+            .collect();
+        files.sort();
+        files
+    }
+
+    /// A prune that hears no answer, here because its stdin ends after the
+    /// job spec, deletes nothing and fails saying it had no answer: nothing
+    /// says the lease lapsed, and on a machine that isn't paired there is
+    /// none (decision 161).
+    #[test]
+    fn a_prune_that_hears_no_answer_deletes_nothing_and_says_so() {
+        let dir = tempfile::tempdir().unwrap();
+        let source = demo_source(dir.path());
+        let repo = demo_repository(dir.path());
+        let (exit, _) = run_job(JobKind::Init(repo.clone()), Process::real(PROGRAM));
+        assert_eq!(exit, Exit::Reported { failed: false });
+        let backup = || {
+            let (_, events) = run_job(
+                JobKind::Backup(home_backup(repo.clone(), &source)),
+                Process::real(PROGRAM),
+            );
+            events
+                .into_iter()
+                .find_map(|event| match event {
+                    WorkerEvent::Result(OpResult::Backup(result)) => Some(result.snapshot),
+                    _ => None,
+                })
+                .expect("the backup succeeded")
+        };
+        let first = backup();
+        std::fs::write(source.join("notes.txt"), b"other demo").unwrap();
+        backup();
+        let forget = crate::job::ForgetJobSpec {
+            repo: repo.clone(),
+            ids: vec![first.as_str().to_owned()],
+        };
+        let (exit, _) = run_job(JobKind::Forget(forget), Process::real(PROGRAM));
+        assert_eq!(exit, Exit::Reported { failed: false });
+        let before = repository_files(&dir.path().join("repo"));
+
+        let prune = crate::job::PruneJobSpec {
+            repo,
+            keep_delete: domain::execution::deadline::KeepDelete::MIN.get(),
+        };
+        let (exit, events) = run_job(JobKind::Prune(prune), Process::real(PROGRAM));
+        assert_eq!(exit.code(), 1, "{events:?}");
+        assert!(events.contains(&WorkerEvent::ReadyToDelete), "{events:?}");
+        assert_matches!(
+            events.last(),
+            Some(WorkerEvent::Failed {
+                code: ErrorCode::MaintenanceDeletionUnanswered,
+                ..
+            })
+        );
+        let after = repository_files(&dir.path().join("repo"));
+        let gone: Vec<_> = before.iter().filter(|file| !after.contains(file)).collect();
+        assert!(gone.is_empty(), "a prune with no answer deleted {gone:?}");
+    }
 }

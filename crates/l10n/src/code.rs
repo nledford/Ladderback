@@ -195,6 +195,7 @@ code_messages!(ERRORS, error_message, ErrorCode {
     MaintenanceNotOwner => msg::ERROR_MAINTENANCE_NOT_OWNER,
     MaintenanceNoLease => msg::ERROR_MAINTENANCE_NO_LEASE,
     MaintenanceLeaseLapsed => msg::ERROR_MAINTENANCE_LEASE_LAPSED,
+    MaintenanceDeletionUnanswered => msg::ERROR_MAINTENANCE_DELETION_UNANSWERED,
     RetentionKeepsNothing => msg::ERROR_RETENTION_KEEPS_NOTHING,
     MaintenanceKindUnknown => msg::ERROR_MAINTENANCE_KIND_UNKNOWN,
     AdoptionNoMatch => msg::ERROR_ADOPTION_NO_MATCH,

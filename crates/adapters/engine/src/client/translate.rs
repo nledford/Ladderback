@@ -264,6 +264,7 @@ pub(super) fn translate(event: WorkerEvent, redactor: &Redactor) -> Option<Engin
                 // answer, that it may no longer delete: nothing was
                 // (decision 161).
                 ErrorCode::MaintenanceLeaseLapsed => FailureReason::LeaseLapsed,
+                ErrorCode::MaintenanceDeletionUnanswered => todo!(),
                 ErrorCode::RepositoryNotFound => FailureReason::RepositoryNotFound,
                 // A server refused the credentials (decision 85): nothing was
                 // read or written. The worker names the half whose server
