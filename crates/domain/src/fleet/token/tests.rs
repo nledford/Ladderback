@@ -411,4 +411,10 @@ fn a_pasted_token_with_another_prefix_is_malformed() {
         PairingToken::parse_pasted(&format!("{other}{body}")).map(|_| ()),
         Err(TokenRefused::Malformed)
     );
+    // A `-` stands only for the prefix's `_`, never for another letter.
+    let dashed = format!("-{}", TOKEN_PREFIX.get(1..).unwrap());
+    assert_eq!(
+        PairingToken::parse_pasted(&format!("{dashed}{body}")).map(|_| ()),
+        Err(TokenRefused::Malformed)
+    );
 }

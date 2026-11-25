@@ -504,6 +504,8 @@ mod tests {
     fn a_path_without_a_backend_is_compared_as_the_local_one() {
         assert!(compared_address("/srv/demo/") == compared_address("local:/srv/demo"));
         assert!(compared_address("s3:bucket") == Address::Other("s3:bucket"));
+        assert!(compared_address("///") == Address::Local("/"));
+        assert!(compared_address("local:") == Address::Local(""));
     }
 
     #[test]
