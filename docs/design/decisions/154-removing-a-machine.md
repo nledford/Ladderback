@@ -43,3 +43,5 @@ The hub tells its browsers `AgentRemoved` with the machine's agent ID, hostname 
 - A removed or rejected machine stays paired on its own side until it takes a new ID and pairs again, so meanwhile it never maintains its repositories; its messages say it runs no maintenance.
 - The hub keeps a removed machine's operation reports (`sync_reports`, up to 10,000), their tallies and its watermarks; its ownership reports expire on their own.
 - The waiting table shows how long a machine has waited, not how long is left, and a lapsed machine leaves it only when the page next reads the hub.
+
+**Amended by [decision 163](163-the-wire-and-stored-names-say-machine.md)** (2026-11-25, #1220): removal is `POST /api/v1/hub/machines/{id}/removal`, the codes `agent-removed`, `agent-key-removed` and `agent-unknown` are `machine-removed`, `machine-key-removed` and `machine-unknown`, the event is `machine-removed`, and the table `agent_tombstones` is `machine_tombstones` (migration `0029_machine_names.sql`).
