@@ -56,7 +56,7 @@ struct Offline {
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub struct DueAlerts {
     /// Each machine offline for [`OFFLINE_ALERT_AFTER`] and not alerted
-    /// yet, with since when it is offline, oldest first by machine ID.
+    /// yet, with since when it is offline, by machine ID.
     pub offline: Vec<(AgentId, Timestamp)>,
     /// Each machine that came back after an alert, with when, in the order
     /// they came back.

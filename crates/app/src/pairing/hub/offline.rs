@@ -44,17 +44,19 @@ impl WatchMachines {
                 return Vec::new();
             }
         };
-        let mut reports = Vec::new();
-        for (agent, event) in due {
-            let (sent, told) = self.notify.tell_machine(&event).await;
+        let (agents, events): (Vec<AgentId>, Vec<Event>) = due.into_iter().unzip();
+        let (sent, reports) = self.notify.tell_machines(&events).await;
+        for ((agent, event), sent) in agents.into_iter().zip(&events).zip(sent) {
             if !sent && event.kind == EventKind::MachineOffline {
                 self.pairing.alert_untold(agent, event.at);
             }
-            reports.extend(told);
         }
         reports
     }
 }
+
+#[cfg(test)]
+mod tests;
 
 impl HubPairing {
     /// The machines' events due now, each with its machine: the returns

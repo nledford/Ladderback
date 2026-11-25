@@ -243,9 +243,10 @@ fn ping_url(mut url: Url, ping: Ping) -> Url {
 }
 
 /// The JSON a webhook is posted: the event's name and facts, and the
-/// message. A fact the event doesn't have is `null`.
+/// message. A fact the event doesn't have is `null`, but for the machine a
+/// hub's event names, which only such an event has (decision 122).
 fn webhook_body(event: &Event, message: &str) -> serde_json::Value {
-    serde_json::json!({
+    let mut body = serde_json::json!({
         "event": event.kind.name(),
         "message": message,
         "operation": event.operation.map(|operation| operation.as_uuid().to_string()),
@@ -255,8 +256,11 @@ fn webhook_body(event: &Event, message: &str) -> serde_json::Value {
         "time": event.at.to_string(),
         "attempt": event.attempt.map(|attempt| attempt.number),
         "attempts": event.attempt.map(|attempt| attempt.of),
-        "machine": event.machine.as_ref().map(|machine| machine.as_str()),
-    })
+    });
+    if let (Some(machine), Some(fields)) = (&event.machine, body.as_object_mut()) {
+        fields.insert("machine".to_owned(), machine.as_str().into());
+    }
+    body
 }
 
 /// The catalog's text for `event`, in the localizer's locale.

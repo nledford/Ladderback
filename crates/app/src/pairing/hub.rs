@@ -463,13 +463,17 @@ impl HubPairing {
 
     /// Removes the agent `agent_id` registered with `agent_key`, now,
     /// pending (a rejection) or approved, keeps its tombstone, logs the
-    /// removal, closes the agent's live connection and tells the browsers
-    /// (decision 154; §16, decision 159).
+    /// removal, closes the agent's live connection, cancels its offline
+    /// alert and tells the browsers (decision 154; §16, decisions 159 and
+    /// 168).
     pub(super) async fn remove_now(
         &self,
         agent_id: AgentId,
         agent_key: PublicKey,
     ) -> Result<Result<Tombstone, RemovalRefused>, HubPairingError> {
+        // Held as a watch of the machines is, so a watch reads the machine
+        // as approved and due no alert, or as removed.
+        let _telling = self.presence.telling.lock().await;
         let removed = self
             .registry
             .remove(agent_id, agent_key, self.clock.now())
