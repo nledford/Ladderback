@@ -122,3 +122,14 @@ Feature: A prune waits for other machines' backups and deletes only while its ma
     And another machine starts backing up to the repository while the prune repacks
     When this machine prunes the repository
     Then the prune deleted what it planned
+
+  Scenario: Another machine's backup holds the prune through both machines' heartbeats to their hub
+    Given this machine and another one are approved by their hub and keep syncing with it
+    And this machine's sync took the hub's leases on the repository and on another repository
+    And the other machine is backing up to the repository
+    When each machine's next heartbeat reaches the hub
+    Then this machine's prune of the repository is held because another machine may be backing up to it
+    And this machine's prune of the other repository isn't held
+    When the other machine's backup finishes
+    And each machine's next heartbeat reaches the hub
+    Then this machine's prune of the repository isn't held
