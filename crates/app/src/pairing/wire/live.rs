@@ -102,26 +102,25 @@ pub fn heartbeat_payload(running: Option<&[RunningBackup]>) -> Vec<u8> {
 const BACKUP: &str = "backup";
 
 /// The backups a `Heartbeat`'s bytes say the agent runs: none when it
-/// doesn't say. An operation of another kind is passed over, and more than
-/// `MAX_RUNNING_BACKUPS` operations or an ID that isn't one refuses it.
+/// doesn't say. An operation of another kind is passed over unread, and
+/// more than `MAX_RUNNING_BACKUPS` backups or an ID that isn't one refuses
+/// it.
 pub fn read_heartbeat(bytes: &[u8]) -> Result<Option<Vec<RunningBackup>>, WireRefused> {
     let payload = HeartbeatPayload::from_bytes(bytes).map_err(|_| WireRefused)?;
     let Some(running) = payload.running_ops else {
         return Ok(None);
     };
-    if running.len() > MAX_RUNNING_BACKUPS {
-        return Err(WireRefused);
-    }
-    let mut backups = Vec::with_capacity(running.len());
-    for op in running {
+    let mut backups = Vec::new();
+    for op in running.into_iter().filter(|op| op.kind == BACKUP) {
+        if backups.len() == MAX_RUNNING_BACKUPS {
+            return Err(WireRefused);
+        }
         let op_id = OperationId::from_uuid(uuid(&op.op_id)?);
         let repository = op
             .repo_id
             .map(|id| RepositoryId::parse(&id).map_err(|_| WireRefused))
             .transpose()?;
-        if op.kind == BACKUP {
-            backups.push(RunningBackup { op_id, repository });
-        }
+        backups.push(RunningBackup { op_id, repository });
     }
     Ok(Some(backups))
 }

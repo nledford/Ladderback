@@ -214,16 +214,17 @@ impl AgentChannel {
     }
 
     /// The hub's next `HeartbeatAck`, once it holds: the repositories
-    /// whose prune the hub holds, or `None` when it can't tell. A signed
-    /// message of a kind this build doesn't take is counted and passed
-    /// over.
+    /// whose prune the hub holds, or `None` when it can't tell, as for a
+    /// list this build can't read, which holds every prune and keeps the
+    /// connection. A signed message of a kind this build doesn't take is
+    /// counted and passed over.
     pub async fn receive_heartbeat_ack(
         &mut self,
     ) -> Result<Option<Vec<RepositoryId>>, ChannelError> {
         loop {
             let envelope = self.receive().await?;
             if envelope.kind == heartbeat_ack_kind() {
-                return read_heartbeat_ack(&envelope.payload).map_err(|_| ChannelError::OutOfTurn);
+                return Ok(read_heartbeat_ack(&envelope.payload).unwrap_or(None));
             }
         }
     }
