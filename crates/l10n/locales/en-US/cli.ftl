@@ -38,8 +38,8 @@ cli-warn-sign-in-off-behind-proxy = warning: sign-in is off and { $host } is an 
 
 # The daemon was asked to listen beyond loopback, with sign-in on or off, but no host name was configured, so no browser on the network could use the web UI.
 # $address (text): the address it was asked to listen on, such as 0.0.0.0:9898.
-# `--allowed-host` and `nas.example.com` are typed as they are: keep them string literals.
-cli-refuse-no-allowed-host = refusing to listen on { $address }: beyond loopback, { -brand-name } needs the host name browsers reach it by. Give one with { "--allowed-host" }, such as { "--allowed-host nas.example.com" }.
+# `--allowed-host`, `nas.example.com`, `allowed-hosts`, `[serve]` and `config.toml` are typed as they are: keep them string literals.
+cli-refuse-no-allowed-host = refusing to listen on { $address }: beyond loopback, { -brand-name } needs the host name browsers reach it by. Give one with { "--allowed-host" }, such as { "--allowed-host nas.example.com" }, or in { "allowed-hosts" } in the { "[serve]" } table of { "config.toml" }.
 
 # The admin password file is there but can't be read, or isn't a password hash, so the daemon does not start: it never runs with sign-in off by mistake.
 # $path (text): the file. It is shown as it is.
@@ -85,6 +85,30 @@ cli-set-password-sessions-left = the sessions kept in { $path } could not be for
 # $name (text): the value as it was typed. It is shown as it is.
 # `--allowed-host`, `nas.example.com`, `192.168.1.5` and `[fd00::1]` are typed as they are: keep them string literals.
 cli-invalid-allowed-host = “{ $name }” is not a host name or an address without a port, so { "--allowed-host" } cannot take it. Give a name such as { "nas.example.com" }, or an address such as { "192.168.1.5" } or { "[fd00::1]" }.
+
+# The `allowed-hosts` list in the `[serve]` table of config.toml holds a name that no Host header could ever match, which would lock the web UI out, so the daemon does not start.
+# $name (text): the value as it was written. It is shown as it is.
+# `allowed-hosts`, `[serve]`, `config.toml`, `nas.example.com`, `192.168.1.5` and `[fd00::1]` are typed as they are: keep them string literals.
+cli-invalid-allowed-host-config = “{ $name }” in { "allowed-hosts" } in the { "[serve]" } table of { "config.toml" } is not a host name or an address without a port. Give a name such as { "nas.example.com" }, or an address such as { "192.168.1.5" } or { "[fd00::1]" }.
+
+# Hub mode was turned off, by the `[serve]` table of config.toml or by `--hub=false`, but machines are paired with this hub. It stays the hub, so none of them loses its hub; the lines that follow name each machine (cli-warn-hub-mode-paired-machine). Printed by the daemon itself, before it serves.
+# $count (count): how many machines are paired. "Settings" is the web UI's page of that name, and "Machines" its tab.
+cli-warn-hub-mode-kept-on = { $count ->
+    [one] warning: hub mode stays on: { $count } { -machine } is paired with this { -hub } and would lose its { -hub }. Remove it in the web UI's Settings, on the Machines tab, and hub mode turns off at the next start:
+   *[other] warning: hub mode stays on: { $count } { -machine(form: "other") } are paired with this { -hub } and would lose their { -hub }. Remove them in the web UI's Settings, on the Machines tab, and hub mode turns off at the next start:
+}
+
+# Hub mode was turned off, but the machines paired with this hub couldn't be read. Its hub key shows it was a hub, so it stays one: no paired machine loses its hub to a failed read. Printed by the daemon itself, before it serves.
+# $detail (text): the database's message. It is shown as it came.
+cli-warn-hub-mode-unread-kept-on = warning: hub mode stays on: the { -machine(form: "other") } paired with this { -hub } couldn't be read ({ $detail }). Start { -brand-name } again, and hub mode turns off once they can be read and none is paired.
+
+# Hub mode was turned off and the machines paired with this hub couldn't be read, but it holds no hub key, so it was never a hub and starts as a machine that isn't one. Printed by the daemon itself, before it serves.
+# $detail (text): the database's message. It is shown as it came.
+cli-warn-hub-mode-unread-off = warning: the { -machine(form: "other") } paired with this { -machine } couldn't be read ({ $detail }). It has never been a { -hub }, so hub mode is off.
+
+# One machine paired with the hub that kept hub mode on, under cli-warn-hub-mode-kept-on.
+# $hostname (text): the machine's hostname as the hub registered it. It is shown as it is.
+cli-warn-hub-mode-paired-machine = { "  " }paired: { $hostname }
 
 # The daemon could not say where its own program file is, so it cannot start
 # workers.
@@ -721,17 +745,17 @@ cli-help-plain = Print plain text: no colour, and nothing drawn over what is alr
 # What `serve` does.
 cli-help-serve = Run { -brand-name } on this { -machine } and serve its web UI
 
-# What `serve --listen` does. `--allowed-host` is an option, typed as it is: keep it a string literal.
-cli-help-serve-listen = Address to listen on. Beyond loopback only with an { "--allowed-host" }; with sign-in off it then warns that anyone who can reach the address can use it. Port 0 picks a free port; the address in use is printed on startup
+# What `serve --listen` does. `--allowed-host`, `listen`, `[serve]`, `config.toml` and `127.0.0.1:9898` are typed as they are: keep them string literals.
+cli-help-serve-listen = Address to listen on, in place of { "listen" } in the { "[serve]" } table of { "config.toml" }; without either, { "127.0.0.1:9898" }. Beyond loopback only with an { "--allowed-host" }; with sign-in off it then warns that anyone who can reach the address can use it. Port 0 picks a free port; the address in use is printed on startup
 
-# What `serve --allowed-host` takes. "Host" is the name of the header a browser sends: keep it a string literal.
-cli-help-serve-allowed-host = A host name or address, without a port, that the web UI answers to besides loopback addresses, such as the name a reverse proxy forwards with the browser's { "Host" } (repeatable)
+# What `serve --allowed-host` takes. "Host" is the name of the header a browser sends: keep it a string literal. `allowed-hosts`, `[serve]` and `config.toml` are typed as they are: keep them string literals.
+cli-help-serve-allowed-host = A host name or address, without a port, that the web UI answers to besides loopback addresses, such as the name a reverse proxy forwards with the browser's { "Host" } (repeatable; in place of { "allowed-hosts" } in the { "[serve]" } table of { "config.toml" })
 
 # What `serve --service-managed` is for. `install-service` is the command, typed as it is: keep it a string literal. "Settings" is the web UI's page of that name.
 cli-help-serve-service-managed = Set by the service files { "install-service" } writes: a service manager runs { -brand-name } and starts it again when it exits with the restart status, so Settings offers a restart
 
-# What `serve --hub` does. `/sync/` is the start of the routes' paths: keep it a string literal.
-cli-help-serve-hub = Serve the { -hub }'s routes for paired { -machine(form: "other") } under { "/sync/" } as well, so that other { -machine(form: "other") } can pair with this one
+# What `serve --hub` does. `/sync/`, `--hub=false`, `hub`, `[serve]` and `config.toml` are typed as they are: keep them string literals.
+cli-help-serve-hub = Serve the { -hub }'s routes for paired { -machine(form: "other") } under { "/sync/" } as well, so that other { -machine(form: "other") } can pair with this one. This flag replaces { "hub" } in the { "[serve]" } table of { "config.toml" }; { "--hub=false" } turns hub mode off once no { -machine } is paired
 
 # What `import-profile` does.
 cli-help-import-profile = Add the { -repository } and the plans of a rustic profile to the configuration

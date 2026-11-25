@@ -440,15 +440,15 @@ pub(super) async fn resume_queued(
 }
 
 /// What the daemon's router runs against (§4.2), with `sign_in` deciding who
-/// may use it, or why it cannot, and `exposure` who can reach it, which the
-/// session route tells the page. With sign-in on, the sessions draw their
+/// may use it, or why it cannot; who can reach it is set by the caller once
+/// the `[serve]` table it hands back is read (§16, decision 167). With
+/// sign-in on, the sessions draw their
 /// tokens from `random`, and the API tokens are kept in the daemon's store.
 /// A restart is offered when `service_managed`: a service manager runs the
 /// daemon, and starts it again once it exits (decision 94).
 pub(crate) async fn daemon(
     sign_in: SignInDecided,
     random: Arc<dyn Random>,
-    exposure: http_adapter::Exposure,
     service_managed: bool,
     recent_log: Arc<dyn app::ports::RecentLogStore>,
 ) -> Result<Daemon, Refused> {
@@ -499,7 +499,6 @@ pub(crate) async fn daemon(
         random,
         Arc::new(SystemClock),
     ));
-    daemon.state.exposure = exposure;
     daemon.background.releases = releases(std::env::var_os(RELEASES_URL_VARIABLE));
     Ok(daemon)
 }
@@ -546,6 +545,9 @@ pub(super) async fn daemon_at(
         Arc::new(SystemClock),
     ));
     let loaded = config.load().await.map_err(config_refused)?;
+    // What `serve` starts with, read under the lock as the rest of the file
+    // is (§9; §16, decision 167).
+    let serve = loaded.serve().clone();
     log_inline_secrets(&loaded);
     log_never_matching_globs(
         &loaded,
@@ -581,6 +583,7 @@ pub(super) async fn daemon_at(
             lock,
             background,
             workers,
+            serve,
         }),
         Err(refused) => {
             log.close().await;

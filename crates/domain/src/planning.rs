@@ -25,8 +25,8 @@ mod rule;
 mod schedule;
 
 pub use agent::{
-    AgentConfig, AgentSettings, ChangeRefused, Concurrency, Nice, NotRecorded, UpdateCheck,
-    Violation,
+    AgentConfig, AgentSettings, ChangeRefused, Concurrency, DEFAULT_LISTEN, Nice, NotRecorded,
+    ServeSettings, UpdateCheck, Violation,
 };
 pub use dry_run::{
     DRY_RUN_WINDOW, DryRunAllowlist, DryRunFolder, DryRunRecord, ExcludeSetting,
@@ -135,6 +135,8 @@ pub enum ValueKind {
     /// A key of `[without-token]` set to neither its permission's level nor
     /// `none`.
     PermissionLevel,
+    /// `[serve] listen`: not an address with a port, such as `[::]:9898`.
+    ListenAddress,
 }
 
 /// A value the model refuses. `value` is the text as it was written, except

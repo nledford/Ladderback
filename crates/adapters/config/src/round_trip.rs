@@ -38,7 +38,7 @@ use domain::planning::{
     Locale, Location, LocationRule, Locations, MAX_DURATION, MAX_LOCATIONS, MAX_NETWORK_NAMES,
     MAX_RULE_ALTERNATIVES, MIN_INTERVAL, Maintenance, NameFilter, NetworkKind, NetworkName, Nice,
     OnFailure, Overlap, Plan, RepositoryConfig, RestoreFolder, RetentionPolicy, RetryPolicy,
-    Schedule, Source, SourceFilter, UpdateCheck,
+    Schedule, ServeSettings, Source, SourceFilter, UpdateCheck,
 };
 use domain::secrets::{CommandLine, FileRead, KeyringEntry, SecretRef, SecretValue};
 use domain::{PlanId, RepositoryAlias, RepositoryId};
@@ -904,6 +904,7 @@ struct Drawn {
     rotation: Index,
     channels: Vec<Option<Channel>>,
     rules: Vec<Option<DrawnRule>>,
+    serve: ServeSettings,
 }
 
 impl Drawn {
@@ -957,6 +958,7 @@ impl Drawn {
         };
         AgentConfig::new(self.agent, self.hooks, repositories, plans)
             .and_then(|config| config.with_notifications(Notifications::new(channels, rules)?))
+            .map(|config| config.with_serve(self.serve))
             .expect("drawn by the configuration's rules")
     }
 
@@ -978,6 +980,11 @@ impl Drawn {
             rotation: self.rotation,
             channels: mix(&before.channels, self.channels, &same.channels),
             rules: mix(&before.rules, self.rules, &same.rules),
+            serve: if same.serve {
+                before.serve.clone()
+            } else {
+                self.serve
+            },
         }
     }
 }
@@ -1005,6 +1012,7 @@ fn mix<T: Clone>(before: &[Option<T>], after: Vec<Option<T>>, same: &[bool]) -> 
 struct Same {
     agent: bool,
     hooks: bool,
+    serve: bool,
     repositories: Vec<bool>,
     plans: Vec<bool>,
     channels: Vec<bool>,
@@ -1014,13 +1022,14 @@ struct Same {
 fn same() -> impl Strategy<Value = Same> {
     let places = || vec(any::<bool>(), 4);
     (
-        (any::<bool>(), any::<bool>()),
+        (any::<bool>(), any::<bool>(), any::<bool>()),
         [places(), places(), places(), places()],
     )
         .prop_map(
-            |((agent, hooks), [repositories, plans, channels, rules])| Same {
+            |((agent, hooks, serve), [repositories, plans, channels, rules])| Same {
                 agent,
                 hooks,
+                serve,
                 repositories,
                 plans,
                 channels,
@@ -1029,11 +1038,35 @@ fn same() -> impl Strategy<Value = Same> {
         )
 }
 
+/// What `serve` starts with: each key left out or set, the address and the
+/// names from a few of each kind the reader takes.
+fn serve() -> impl Strategy<Value = ServeSettings> {
+    let address = prop_oneof![
+        Just("127.0.0.1:9898"),
+        Just("0.0.0.0:8080"),
+        Just("[::]:9898"),
+        Just("[fd00::1]:443"),
+    ]
+    .prop_map(|text| ServeSettings::parse_listen(text).expect("an address"));
+    let host = prop_oneof![
+        Just("nas.example.com".to_owned()),
+        Just("192.0.2.10".to_owned()),
+        Just("[fd00::1]".to_owned()),
+    ];
+    (weighted(0.5, address), vec(host, 0..=2), any::<bool>()).prop_map(
+        |(listen, allowed_hosts, hub)| ServeSettings {
+            listen,
+            allowed_hosts,
+            hub,
+        },
+    )
+}
+
 fn drawn() -> impl Strategy<Value = Drawn> {
     (
         // Boxed, as the lists' strategies are: unboxed, the whole drawing
         // overflowed the test thread's stack once `[agent]` had seven keys.
-        (agent().boxed(), hooks()),
+        (agent().boxed(), hooks(), serve()),
         (
             vec(weighted(0.8, repository().boxed()), 0..=3),
             vec(weighted(0.8, plan().boxed()), 0..=4),
@@ -1045,7 +1078,7 @@ fn drawn() -> impl Strategy<Value = Drawn> {
         ),
     )
         .prop_map(
-            |((agent, hooks), (repositories, plans, rotation), (channels, rules))| Drawn {
+            |((agent, hooks, serve), (repositories, plans, rotation), (channels, rules))| Drawn {
                 agent,
                 hooks,
                 repositories,
@@ -1053,6 +1086,7 @@ fn drawn() -> impl Strategy<Value = Drawn> {
                 rotation,
                 channels,
                 rules,
+                serve,
             },
         )
 }

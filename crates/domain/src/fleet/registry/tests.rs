@@ -842,3 +842,38 @@ fn a_pending_agent_lapses_after_seven_days() {
     let approved = record(1, key(4), "laptop");
     assert!(!approved.lapsed_at(at(-100 + 30 * seven_days)));
 }
+
+/// Hub mode may be off with no machine registered, or with only machines
+/// that lapsed waiting for approval: none of them is paired.
+#[test]
+fn hub_mode_may_be_off_while_no_machine_is_paired() {
+    assert_eq!(decide_hub_mode_off(&[], at(0)), Ok(()));
+    let seven_days = 7 * 24 * 3600;
+    let lapsed = waiting_with(1, key(4), "laptop");
+    assert_eq!(
+        decide_hub_mode_off(&[lapsed], at(-100 + seven_days)),
+        Ok(())
+    );
+}
+
+/// Hub mode off is refused while a machine is approved, or waits for
+/// approval and hasn't lapsed, naming each such machine in the order given
+/// and leaving out a lapsed one.
+#[test]
+fn hub_mode_off_is_refused_naming_each_paired_machine() {
+    let seven_days = 7 * 24 * 3600;
+    let approved = record(1, key(4), "media-server");
+    let waiting = waiting_with(2, key(5), "pi");
+    let lapsed = AgentRecord {
+        status: AgentStatus::Pending {
+            since: at(-seven_days),
+        },
+        ..record(3, key(6), "old-laptop")
+    };
+    assert_eq!(
+        decide_hub_mode_off(&[approved, lapsed, waiting], at(-100 + seven_days - 1)),
+        Err(HubModeOffRefused {
+            paired: vec![name("media-server"), name("pi")],
+        })
+    );
+}
