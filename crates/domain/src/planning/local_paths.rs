@@ -1119,6 +1119,12 @@ mod tests {
             "opendal:s3",
             "rclone:nas:repo",
             "rclone::sftp,host=nas,key_file=/home/demo/.ssh/nas:/srv/repo",
+            // A connection string that starts at its first setting names
+            // no backend nor remote: rclone refuses it.
+            "rclone:,type=sftp,ssh=sshx:/srv/repo",
+            // A union reads an upstream as a location, not as a combine's
+            // `name=location`.
+            "rclone:nas,type=union,upstreams='x=:sftp,ssh=sshx:/srv':",
         ] {
             assert_eq!(at(location).location_programs(), [], "{location:?}");
         }

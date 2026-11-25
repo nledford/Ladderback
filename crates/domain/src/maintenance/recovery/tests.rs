@@ -178,3 +178,10 @@ fn recovering_leaves_a_counter_past_the_floor() {
     assert_eq!(ownership.last_epoch, Some(epoch(5)));
     assert_eq!(ownership.lease, Some(lease));
 }
+
+#[test]
+fn the_floors_a_store_kept_are_held_again() {
+    let recovery = HubRecovery::from_floors([floor(1, 3, true)]);
+    assert!(recovery.is_on());
+    assert_eq!(recovery.floors().collect::<Vec<_>>(), [&floor(1, 3, true)]);
+}

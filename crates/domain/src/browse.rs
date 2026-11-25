@@ -325,6 +325,15 @@ mod tests {
         assert_eq!(name("..").as_str(), "..");
     }
 
+    /// A name read from JSON that is no name is refused saying why.
+    #[test]
+    fn a_name_read_from_json_that_is_no_name_says_why() {
+        let refused = serde_json::from_str::<EntryName>(r#""a/b""#)
+            .expect_err("a slash is no name")
+            .to_string();
+        assert!(refused.contains("an entry name holds a slash"), "{refused}");
+    }
+
     #[test]
     fn a_name_is_never_empty_and_never_holds_a_slash() {
         assert_eq!(EntryName::parse(""), Err(InvalidName::Empty));

@@ -117,3 +117,19 @@ fn each_row_grants_only_itself() {
         assert_eq!(granted, [permission]);
     }
 }
+
+#[test]
+fn granting_a_row_already_granted_keeps_it() {
+    let read = Permissions::NONE.with(Backups, Some(Read)).unwrap();
+    assert_eq!(read.with(Backups, Some(Read)), Ok(read));
+}
+
+#[test]
+fn a_row_is_set_as_the_configuration_file_names_it() {
+    let read = Permissions::NONE.with_named(Backups, "read").unwrap();
+    assert_eq!(rows(read), [(Backups, Read)]);
+    assert!(read.with_named(Backups, "none").unwrap().is_empty());
+    for refused in ["propose", "Read", ""] {
+        assert!(read.with_named(Backups, refused).is_err(), "{refused:?}");
+    }
+}

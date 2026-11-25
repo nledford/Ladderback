@@ -501,6 +501,12 @@ mod tests {
     }
 
     #[test]
+    fn a_path_without_a_backend_is_compared_as_the_local_one() {
+        assert!(compared_address("/srv/demo/") == compared_address("local:/srv/demo"));
+        assert!(compared_address("s3:bucket") == Address::Other("s3:bucket"));
+    }
+
+    #[test]
     fn a_typed_password_moves_to_the_keyring_entry_and_nothing_else_changes() {
         let entry = KeyringEntry::parse("ladderback/demo").unwrap();
         let typed = settings_with(SecretRef::Inline(SecretValue::new("demo-password")));

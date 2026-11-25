@@ -147,6 +147,7 @@ fn loopback_is_localhost_or_a_loopback_address_in_a_form_every_resolver_reads_al
         "2130706431",
         "127.256.0.1",
         "127.0.0.0.1",
+        "127.0.0.1.0",
         "127..1",
         "127.",
         "0x",
@@ -178,4 +179,27 @@ fn a_plain_address_in_a_form_resolvers_read_apart_is_refused() {
         route("http://0177.0.0.1:9898", TokenTls::Ca).map(|route| route.session),
         Err(RouteRefused::PlainOffLoopback)
     );
+}
+
+#[test]
+fn an_ipv6_host_without_a_port_takes_its_schemes() {
+    let reached = route("https://[::1]", TokenTls::Ca).unwrap();
+    assert_eq!((reached.host.as_str(), reached.port), ("::1", 443));
+}
+
+#[test]
+fn a_port_with_a_sign_is_refused() {
+    assert_eq!(
+        route("https://hub.example:+9899", TokenTls::Ca),
+        Err(RouteRefused::Malformed)
+    );
+}
+
+/// A last part past the bytes the others leave is no address, even when
+/// what it overflows into would be loopback. Not in the table shared with
+/// `crates/web/src/pairing/tests.rs`: it pins how `ipv4_read_alike` bounds
+/// its last part.
+#[test]
+fn a_last_part_past_its_room_is_no_loopback() {
+    assert!(!is_loopback("126.16777217"));
 }

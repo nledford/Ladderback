@@ -418,3 +418,12 @@ fn kept_pauses_read_back_as_they_were() {
     );
     assert_eq!(held.paused_since(&repository('a'), hub(4)), Some(hub(3)));
 }
+
+#[test]
+fn a_floors_proof_is_found_by_its_repository() {
+    let mut held = HeldLeases::default();
+    held.take(&grants(2, hub(0)), 0, hub(0));
+    let (_, kept) = held.proofs().next().unwrap();
+    assert_eq!(held.proof(&repository('a')), Some(kept));
+    assert_eq!(held.proof(&repository('b')), None);
+}
