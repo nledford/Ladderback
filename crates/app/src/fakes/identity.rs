@@ -115,7 +115,8 @@ impl Identity for InMemoryIdentity {
     }
 
     async fn forget_pin(&self) -> Result<(), IdentityError> {
-        todo!()
+        self.kept().pin = None;
+        Ok(())
     }
 
     async fn begin_attempt(&self) -> Result<Attempt, IdentityError> {

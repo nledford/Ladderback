@@ -436,7 +436,9 @@ impl AgentPairing {
     /// them keeps its pin, so it never stands alone with a lease of the
     /// hub it left (I1). Done when it pins no hub.
     pub async fn leave(&self) -> Result<(), AgentPairingError> {
-        todo!()
+        self.leases.save(&HeldLeases::default()).await?;
+        self.identity.forget_pin().await?;
+        Ok(())
     }
 
     /// The agent key's seed, made the first time the agent pairs.

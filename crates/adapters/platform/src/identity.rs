@@ -169,7 +169,12 @@ impl Identity for FileIdentity {
     }
 
     async fn forget_pin(&self) -> Result<(), IdentityError> {
-        todo!()
+        let file = KeyFile::HubPin;
+        let folder = self.folder.clone();
+        blocking(file, move || {
+            forget(&folder, file).map_err(|error| unavailable(file, &error))
+        })
+        .await
     }
 
     async fn begin_attempt(&self) -> Result<Attempt, IdentityError> {
