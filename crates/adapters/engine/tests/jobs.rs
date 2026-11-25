@@ -8,7 +8,8 @@ use std::fs::{self, File, FileTimes};
 use std::time::{Duration, SystemTime};
 
 use app::ports::{
-    Engine, EngineEvent, EngineResult, ForgetJob, Job, OperationStep, ProgressEvent, RunningJob,
+    Deletion, Engine, EngineEvent, EngineResult, ForgetJob, Job, OperationStep, ProgressEvent,
+    RunningJob,
 };
 use domain::SignedDuration;
 use domain::execution::plan_tags::{AGENT_TAG_PREFIX, PLAN_TAG_PREFIX};
@@ -537,6 +538,97 @@ async fn a_prune_plan_reports_what_a_prune_would_do_and_changes_nothing() {
         panic!("not a prune result: {events:?}");
     };
     assert_eq!(pruned.packs_marked, plan.packs_marked);
+}
+
+/// A prune asks at its first delete, once rustic has warmed up, repacked and
+/// written its new index, which on cold storage or a large repository takes
+/// hours: the answer is as fresh as the deletion. Told no, it deletes
+/// nothing, leaving the repository as a prune stopped at that point does,
+/// and fails saying the lease lapsed (I1, I2; §16, decision 161).
+#[tokio::test]
+async fn i1_a_prune_asks_at_its_first_delete_and_told_no_deletes_nothing() {
+    let scratch = Scratch::new();
+    let location = scratch.local();
+    location.init();
+    let engine = engine();
+    write_file(scratch.source().join("a.txt"), b"the first contents");
+    let first = run_to_end(
+        &engine,
+        backup_job(&location, &scratch.source(), "daily", HOUR),
+    )
+    .await;
+    let first = backed_up(&first).snapshot.clone();
+    write_file(
+        scratch.source().join("a.txt"),
+        b"contents the first snapshot never held",
+    );
+    run_to_end(
+        &engine,
+        backup_job(&location, &scratch.source(), "daily", HOUR),
+    )
+    .await;
+    run_to_end(
+        &engine,
+        Job::Forget(ForgetJob {
+            repository: location.access(PASSWORD),
+            ids: vec![first],
+        }),
+    )
+    .await;
+    let before = pack_files(&scratch.repo_dir());
+
+    let RunningJob {
+        mut events,
+        control,
+    } = engine.run(op(), prune_job(&location)).await.unwrap();
+    let (mut seen, mut at_the_ask) = (Vec::new(), None);
+    while let Some(event) = events.next().await {
+        if let EngineEvent::DeletionAsked(ask) = &event {
+            at_the_ask = Some(pack_files(&scratch.repo_dir()));
+            ask.answer(Deletion::Refused);
+        }
+        seen.push(event);
+    }
+    drop(control);
+    let at_the_ask = at_the_ask.unwrap_or_else(|| panic!("the prune never asked: {seen:?}"));
+    let gone = |now: &[String]| -> Vec<String> {
+        before
+            .iter()
+            .filter(|file| !now.contains(file))
+            .cloned()
+            .collect()
+    };
+    assert_eq!(
+        gone(&at_the_ask),
+        Vec::<String>::new(),
+        "removed before the ask"
+    );
+    assert!(
+        at_the_ask
+            .iter()
+            .any(|file| file.starts_with("index/") && !before.contains(file)),
+        "the prune asked before it wrote its new index, so not at its first delete"
+    );
+    assert_eq!(
+        seen.last(),
+        Some(&EngineEvent::Failed(FailureReason::LeaseLapsed)),
+        "{seen:?}"
+    );
+    assert_eq!(
+        gone(&pack_files(&scratch.repo_dir())),
+        Vec::<String>::new(),
+        "a prune told to delete nothing deleted"
+    );
+
+    // Told yes, the next prune deletes, and the repository checks clean.
+    let events = run_to_end(&engine, prune_job(&location)).await;
+    assert_matches!(succeeded(&events), EngineResult::Prune(_));
+    assert!(
+        !gone(&pack_files(&scratch.repo_dir())).is_empty(),
+        "a prune told yes deleted nothing"
+    );
+    let events = run_to_end(&engine, check_job(&location, true)).await;
+    succeeded(&events);
 }
 
 #[tokio::test]

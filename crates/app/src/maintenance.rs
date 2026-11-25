@@ -32,8 +32,8 @@ use std::sync::Arc;
 
 use domain::maintenance::{
     AdoptSelection, AdoptionRefusal, ForgetComparison, ForgetPreview, ForgetSelection, ForgetSide,
-    ManagedPlan, NoLease, OrphanedGroup, OtherHosts, Ownership, Partition, SelectionToken,
-    Snapshot, UnmanagedGroup,
+    LeaseEpoch, ManagedPlan, NoLease, OrphanedGroup, OtherHosts, Ownership, Partition,
+    SelectionToken, Snapshot, UnmanagedGroup,
 };
 use domain::planning::{AgentConfig, Plan};
 use domain::{
@@ -47,9 +47,9 @@ use crate::announce::{announce_end, announce_start};
 use crate::execution::Finished;
 use crate::log_write::save_within_bound;
 use crate::ports::{
-    CheckJob, Clock, ConfigError, ConfigStore, Engine, EngineError, EngineEvent, EngineResult,
-    EventBus, ForgetJob, Job, MAX_JOB_IDS, NormalizeSources, OperationStore, PruneJob,
-    RepositoryAccess, Retention, RetentionError, RewriteJob, RunningJob, SnapshotSummary,
+    CheckJob, Clock, ConfigError, ConfigStore, Deletion, Engine, EngineError, EngineEvent,
+    EngineResult, EventBus, ForgetJob, Job, MAX_JOB_IDS, NormalizeSources, OperationStore,
+    PruneJob, RepositoryAccess, Retention, RetentionError, RewriteJob, RunningJob, SnapshotSummary,
     SourcesError, Start, StoreError,
 };
 use crate::reads::ReadTurns;
@@ -191,6 +191,10 @@ pub struct PreparedMaintenance {
     /// What the forget selection found, for the run's own record; `None`
     /// for prune and check.
     partition: Option<Partition>,
+    /// The epoch of the lease the run started under; `None` on a machine
+    /// that isn't paired. A prune deletes only under the same (§16,
+    /// decision 161).
+    lease: Option<LeaseEpoch>,
 }
 
 impl PreparedMaintenance {
@@ -638,7 +642,7 @@ impl RunMaintenance {
         self.maintained(&alias).await?;
         // The repository the job opens is the one whose lease it needs.
         let opened = job.access().and_then(|access| access.id.as_ref());
-        self.leased(&alias, opened).await?;
+        let lease = self.leased(&alias, opened).await?;
         let mut operation = Operation::queue(
             id,
             job.kind(),
@@ -669,6 +673,7 @@ impl RunMaintenance {
                 operation,
                 job,
                 partition,
+                lease,
             }),
             Ok(Start::Refused { running }) => Err(MaintenanceError::Busy { running }),
             Err(error) => Err(MaintenanceError::Store(error)),
@@ -1018,27 +1023,63 @@ impl RunMaintenance {
 
     /// Refuses a run on `repository`, the one the configuration's `alias`
     /// opened, while this machine is paired with a hub and holds no live
-    /// lease on it, and logs why (I1, §7.3).
+    /// lease on it, and logs why (I1, §7.3). Otherwise it answers the
+    /// lease's epoch, `None` when the machine isn't paired.
     async fn leased(
         &self,
         alias: &RepositoryAlias,
         repository: Option<&RepositoryId>,
-    ) -> Result<(), MaintenanceError> {
+    ) -> Result<Option<LeaseEpoch>, MaintenanceError> {
         let Some(leases) = &self.leases else {
-            return Ok(());
+            return Ok(None);
         };
         leases.permits(repository).await.map_err(|why| {
-            let because = match why {
-                NoLease::NoneHeld => "it holds no lease on the repository from its hub",
-                NoLease::RanOut => "its lease on the repository ran out on the hub's time",
-            };
             log::warn!(
                 "maintenance of {} refused (maintenance-no-lease): this machine is paired \
-                 with a hub and {because}",
-                alias.as_str()
+                 with a hub and {}",
+                alias.as_str(),
+                no_lease_because(&why)
             );
             MaintenanceError::NoLease(why)
         })
+    }
+
+    /// Whether a prune that has come to its first delete may delete: while
+    /// this machine may still maintain `repository` under `started`, the
+    /// lease the run started under, judged again now, never renewed (§7.3;
+    /// §16, decision 161). A lease granted again since, at a new epoch, may
+    /// have let another machine maintain the repository meanwhile, so it
+    /// refuses, as does a machine paired or unpaired since. A machine that
+    /// isn't paired, and wasn't, always may. A refusal is logged with why.
+    async fn deletion(
+        &self,
+        operation: &Operation,
+        repository: Option<&RepositoryId>,
+        started: Option<LeaseEpoch>,
+    ) -> Deletion {
+        let Some(leases) = &self.leases else {
+            return Deletion::Permitted;
+        };
+        let why = match leases.permits(repository).await {
+            Ok(now) if now == started => return Deletion::Permitted,
+            Ok(now) => match (started, now) {
+                (Some(_), Some(_)) => {
+                    "holds a lease granted since the run started, not the one \
+                                       it started under"
+                }
+                (Some(_), None) => "was unpaired from its hub since the run started",
+                (None, _) => "was paired with a hub since the run started",
+            }
+            .to_owned(),
+            Err(why) => format!("is paired with a hub and {}", no_lease_because(&why)),
+        };
+        log::warn!(
+            "prune of {} deletes nothing (maintenance-lease-lapsed): this machine {why}",
+            operation
+                .repository_alias()
+                .map_or("the repository", RepositoryAlias::as_str),
+        );
+        Deletion::Refused
     }
 
     /// The repository's snapshots, from one listing.
@@ -1303,6 +1344,7 @@ impl RunMaintenance {
             mut operation,
             job,
             partition: _,
+            lease,
         } = prepared;
         // The log has had the operation running since `start` stored it, so
         // the news can go out now, once however many jobs the run takes (#305).
@@ -1333,6 +1375,8 @@ impl RunMaintenance {
                 let _ = operation.cancel(self.clock.now());
                 break;
             }
+            // The repository a prune's question is answered for.
+            let repository = job.access().and_then(|access| access.id.clone());
             let running = match self.engine.run(operation.id(), job).await {
                 Ok(running) => running,
                 Err(error) => {
@@ -1349,6 +1393,8 @@ impl RunMaintenance {
                     done.as_ref(),
                     total,
                     &ruled,
+                    repository.as_ref(),
+                    lease,
                 )
                 .await
             {
@@ -1396,7 +1442,12 @@ impl RunMaintenance {
     /// the operation ends: failed, or cancelled. `done` is what the jobs
     /// before this one finished, `total` how many snapshots the whole run
     /// names, and `ruled` the positions of the repository's locations that
-    /// have a rule.
+    /// have a rule. A prune's question is answered for `repository`, under
+    /// `lease`, the lease the run started under.
+    #[expect(
+        clippy::too_many_arguments,
+        reason = "one run's state, passed down from `execute` alone"
+    )]
     async fn play(
         &self,
         operation: &mut Operation,
@@ -1405,6 +1456,8 @@ impl RunMaintenance {
         done: Option<&EngineResult>,
         total: usize,
         ruled: &[u8],
+        repository: Option<&RepositoryId>,
+        lease: Option<LeaseEpoch>,
     ) -> Played {
         let RunningJob {
             events,
@@ -1439,6 +1492,28 @@ impl RunMaintenance {
                         EngineEvent::Started { .. }
                         | EngineEvent::Dumping(_)
                         | EngineEvent::Piece(_) => {}
+                        // A prune at its first delete asks, and is answered
+                        // as the run started, under the same lease. A cancel
+                        // there before the answer is given, already or once
+                        // the lease is checked, is honoured instead: the
+                        // client was told it was accepted, so the prune is
+                        // told no and stopped.
+                        EngineEvent::DeletionAsked(ask) => {
+                            let answer = if futures::poll!(cancel.as_mut()).is_ready() {
+                                None
+                            } else {
+                                let answer = self.deletion(operation, repository, lease).await;
+                                futures::poll!(cancel.as_mut()).is_pending().then_some(answer)
+                            };
+                            let Some(answer) = answer else {
+                                ask.answer(Deletion::Refused);
+                                control.stop().await;
+                                note_partial(operation, done, total);
+                                let _ = operation.cancel(self.clock.now());
+                                return Played::Ended;
+                            };
+                            ask.answer(answer);
+                        }
                         EngineEvent::Progress(_) => {
                             let _ = operation.report_progress();
                         }
@@ -1493,6 +1568,14 @@ enum Played {
     Reported(EngineResult),
     /// The operation ended: failed, or cancelled.
     Ended,
+}
+
+/// Why a paired machine may not maintain a repository, as its log says.
+fn no_lease_because(why: &NoLease) -> &'static str {
+    match why {
+        NoLease::NoneHeld => "it holds no lease on the repository from its hub",
+        NoLease::RanOut => "its lease on the repository ran out on the hub's time",
+    }
 }
 
 /// The job as the engine jobs that do it: a forget or rewrite is cut into
@@ -2476,6 +2559,7 @@ mod cancel_tests {
                     .collect(),
             }),
             partition: None,
+            lease: None,
         }
     }
 

@@ -68,8 +68,11 @@ fn machine(identity: Arc<InMemoryIdentity>) -> Machine {
 #[tokio::test]
 async fn a_machine_that_isnt_paired_maintains_without_a_lease() {
     let machine = machine(Arc::new(InMemoryIdentity::default()));
-    assert_eq!(machine.leases.permits(Some(&repository('a'))).await, Ok(()));
-    assert_eq!(machine.leases.permits(None).await, Ok(()));
+    assert_eq!(
+        machine.leases.permits(Some(&repository('a'))).await,
+        Ok(None)
+    );
+    assert_eq!(machine.leases.permits(None).await, Ok(None));
 }
 
 #[tokio::test]
@@ -90,7 +93,12 @@ async fn i1_a_paired_machine_maintains_only_while_its_lease_holds() {
         .await
         .unwrap();
     assert_eq!(refused, vec![]);
-    assert_eq!(machine.leases.permits(Some(&repository('a'))).await, Ok(()));
+    // It says which lease it holds, so a check later can tell the same
+    // lease from one granted again since (decision 161).
+    assert_eq!(
+        machine.leases.permits(Some(&repository('a'))).await,
+        Ok(Some(epoch(1)))
+    );
     assert_eq!(
         machine.leases.permits(Some(&repository('b'))).await,
         Err(NoLease::NoneHeld)
@@ -164,7 +172,10 @@ async fn i1_a_clock_set_back_doesnt_lengthen_a_lease() {
         .unwrap();
     machine.clock.advance(SignedDuration::from_hours(6 * 24));
     machine.clock.set_back(SignedDuration::from_hours(3 * 24));
-    assert_eq!(machine.leases.permits(Some(&repository('a'))).await, Ok(()));
+    assert_eq!(
+        machine.leases.permits(Some(&repository('a'))).await,
+        Ok(Some(epoch(1)))
+    );
     machine.clock.advance(SignedDuration::from_hours(24));
     assert_eq!(
         machine.leases.permits(Some(&repository('a'))).await,

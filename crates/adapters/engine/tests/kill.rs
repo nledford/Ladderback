@@ -21,7 +21,7 @@ use std::assert_matches;
 use std::path::Path;
 use std::time::Duration;
 
-use app::ports::{Engine, EngineEvent, EngineResult, Job, RunningJob};
+use app::ports::{Deletion, Engine, EngineEvent, EngineResult, Job, RunningJob};
 use domain::SignedDuration;
 use engine::WorkerEngine;
 use futures::StreamExt;
@@ -91,6 +91,8 @@ async fn kill_at(engine: &WorkerEngine, job: Job, at: usize) -> Outcome {
                     return Outcome::Killed;
                 }
             }
+            // A prune the test kills while it deletes has been let delete.
+            EngineEvent::DeletionAsked(ask) => ask.answer(Deletion::Permitted),
             EngineEvent::Failed(reason) => panic!("the job failed by itself: {reason:?}"),
             EngineEvent::Succeeded(_) => return Outcome::Ended,
             _ => {}

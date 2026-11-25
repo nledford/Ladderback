@@ -5,19 +5,24 @@ use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::Duration;
 
-use app::ports::{EngineEvent, EngineResult, SnapshotSummary};
+use app::ports::{
+    Deletion, DeletionAnswer, DeletionAsk, EngineEvent, EngineResult, SnapshotSummary,
+};
 use base64::Engine as _;
 use base64::engine::general_purpose::STANDARD;
 use domain::execution::FailureReason;
 use domain::restore::download::PIECE_BYTES;
 use domain::secrets::Redactor;
-use tokio::io::{AsyncBufReadExt, BufReader};
+use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
+use tokio::process::ChildStdin;
 use tokio::sync::{mpsc, watch};
 
 use super::DRAIN_AFTER_EXIT;
 use super::stop::{Exited, ForEvents, Order, deadline_after};
 use super::translate::translate;
-use crate::job::{MAX_LISTED_BYTES, MAX_LISTED_SNAPSHOTS, OpResult, WorkerEvent, exit_code};
+use crate::job::{
+    DeleteAnswer, MAX_LISTED_BYTES, MAX_LISTED_SNAPSHOTS, OpResult, WorkerEvent, exit_code,
+};
 
 /// The events of one job, read from the worker's stdout.
 pub(super) struct Reading {
@@ -43,6 +48,9 @@ pub(super) struct Reading {
     pub(super) first_line_by: Option<tokio::time::Instant>,
     /// The listing the worker has sent so far, when the job is one.
     pub(super) listing: Listing,
+    /// A prune's stdin, where the one answer to its question goes: `None`
+    /// for any other job, and once the prune has asked (decision 161).
+    pub(super) answer_to: Option<ChildStdin>,
 }
 
 /// A repository's listing as it arrives: the `snapshots` events of a worker
@@ -207,6 +215,15 @@ impl Reading {
                     Ok(piece) => (EngineEvent::Piece(piece), self),
                     Err(detail) => (self.broken(detail), self),
                 });
+            }
+            if matches!(event, WorkerEvent::ReadyToDelete) {
+                let Some(stdin) = self.answer_to.take() else {
+                    let detail = "the worker asked to delete outside a prune, or twice";
+                    return Some((self.broken(detail.to_owned()), self));
+                };
+                let (ask, answer) = DeletionAsk::new();
+                tokio::spawn(tell_deletion(stdin, answer, self.exited.clone()));
+                return Some((EngineEvent::DeletionAsked(ask), self));
             }
             if let Some(event) = translate(event, &self.redactor) {
                 if matches!(event, EngineEvent::Succeeded(_) | EngineEvent::Failed(_)) {
@@ -376,6 +393,29 @@ async fn read_line(reader: &mut BufReader<ForEvents>, line: &mut Vec<u8>) -> std
     }
 }
 
+/// Writes the answer a prune's question gets to its stdin as one line, and
+/// closes it; nothing once the worker has exited. A write that fails leaves
+/// the prune with no answer, on which it deletes nothing.
+async fn tell_deletion(
+    mut stdin: ChildStdin,
+    answer: DeletionAnswer,
+    mut exited: watch::Receiver<Exited>,
+) {
+    let deletion = tokio::select! {
+        deletion = answer => deletion,
+        () = worker_exited(&mut exited) => return,
+    };
+    let answer = match deletion {
+        Deletion::Permitted => DeleteAnswer::Delete,
+        Deletion::Refused => DeleteAnswer::DeleteNothing,
+    };
+    let Ok(mut line) = serde_json::to_vec(&answer) else {
+        return;
+    };
+    line.push(b'\n');
+    let _ = stdin.write_all(&line).await;
+}
+
 /// Resolves once the worker has exited.
 pub(super) async fn worker_exited(exited: &mut watch::Receiver<Exited>) {
     let _ = exited.wait_for(Option::is_some).await;
@@ -387,7 +427,7 @@ mod tests {
     use std::time::Instant;
 
     use api::WarningCode;
-    use app::ports::RunningJob;
+    use app::ports::{Engine as _, Job, RunningJob};
     use domain::{OperationId, Uuid};
     use futures::StreamExt;
 
@@ -1092,5 +1132,82 @@ mod tests {
             events.is_empty(),
             "a stopped job's events ended with {events:?}"
         );
+    }
+
+    /// A stand-in prune that asks before it deletes and ends by what it
+    /// heard on its stdin: `maintenance-lease-lapsed` on no, and
+    /// `repository-replaced`, a code the test can tell apart, on yes.
+    const ASKING_PRUNE: &str = r#"read -r spec
+echo '{"event":"ready_to_delete"}'
+read -r answer
+case "$answer" in
+  '{"answer":"delete"}') code=repository-replaced ;;
+  *) code=maintenance-lease-lapsed ;;
+esac
+printf '{"event":"failed","code":"%s","args":[],"detail":null}\n' "$code""#;
+
+    fn prune_job() -> Job {
+        Job::Prune(app::ports::PruneJob {
+            repository: access(),
+            keep_delete: domain::execution::deadline::KeepDelete::MIN,
+        })
+    }
+
+    /// The prune's events after it asked, answered with `deletion`, or with
+    /// the question dropped unanswered when `None`.
+    async fn prune_answered(deletion: Option<Deletion>) -> Vec<EngineEvent> {
+        let engine = WorkerEngine::new("sh", ["-c", ASKING_PRUNE]);
+        let op = OperationId::from_uuid(Uuid::from_u128(1));
+        let mut events = engine.run(op, prune_job()).await.unwrap().events;
+        tokio::time::timeout(Duration::from_secs(10), async {
+            let Some(EngineEvent::DeletionAsked(ask)) = events.next().await else {
+                panic!("the prune's question wasn't passed on");
+            };
+            match deletion {
+                Some(deletion) => ask.answer(deletion),
+                None => drop(ask),
+            }
+            events.collect::<Vec<_>>().await
+        })
+        .await
+        .expect("the prune's events ended")
+    }
+
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn a_prune_told_it_may_delete_hears_delete_on_its_stdin() {
+        assert_matches!(
+            prune_answered(Some(Deletion::Permitted)).await.as_slice(),
+            [EngineEvent::Failed(FailureReason::RepositoryReplaced)]
+        );
+    }
+
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn a_prune_refused_or_left_unanswered_hears_no_delete() {
+        for deletion in [Some(Deletion::Refused), None] {
+            assert_matches!(
+                prune_answered(deletion).await.as_slice(),
+                [EngineEvent::Failed(FailureReason::LeaseLapsed)],
+                "{deletion:?}"
+            );
+        }
+    }
+
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn a_worker_that_asks_to_delete_outside_a_prune_breaks_the_protocol() {
+        let events = answered(
+            fake_job(),
+            None,
+            "",
+            &[r#"{"event":"ready_to_delete"}"#.to_owned()],
+        )
+        .await;
+        let [EngineEvent::Failed(FailureReason::EngineFailed { detail })] = events.as_slice()
+        else {
+            panic!("expected one engine failure, got {events:?}");
+        };
+        assert!(detail.contains("outside a prune"), "{detail}");
     }
 }

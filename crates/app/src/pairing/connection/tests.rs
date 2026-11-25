@@ -2264,7 +2264,14 @@ async fn i1_a_release_whose_answer_is_lost_leaves_the_machine_holding_nothing() 
 
     let leasing = leasing(Timestamp::from_second(1_800_000_000).unwrap()).await;
     leasing.sync.sync_once().await.unwrap();
-    assert_eq!(leasing.leases.permits(Some(&photos())).await, Ok(()));
+    assert_eq!(
+        leasing
+            .leases
+            .permits(Some(&photos()))
+            .await
+            .map(|epoch| epoch.is_some()),
+        Ok(true)
+    );
     leasing
         .configs
         .save(&photos_config(Maintenance::Hub))
@@ -2522,11 +2529,23 @@ async fn i1_a_session_takes_the_hubs_grants_on_its_time_and_releases_what_isnt_a
         .binding(hub.clock.now())
         .expect("the hub granted a lease");
     assert_eq!(lease.holder, agent_id(1));
-    assert_eq!(leases.permits(Some(&photos())).await, Ok(()));
+    assert_eq!(
+        leases
+            .permits(Some(&photos()))
+            .await
+            .map(|epoch| epoch.is_some()),
+        Ok(true)
+    );
     // 7 days less a minute later on both clocks, the lease still holds; at
     // 7 days it ran out, whatever the machine's own clock says.
     machine_clock.advance(SignedDuration::from_secs(7 * 24 * 3600 - 60));
-    assert_eq!(leases.permits(Some(&photos())).await, Ok(()));
+    assert_eq!(
+        leases
+            .permits(Some(&photos()))
+            .await
+            .map(|epoch| epoch.is_some()),
+        Ok(true)
+    );
     machine_clock.advance(SignedDuration::from_secs(60));
     assert_eq!(leases.permits(Some(&photos())).await, Err(NoLease::RanOut));
     // Back within the lease, the entry gives maintenance to the hub: the
@@ -2697,7 +2716,14 @@ async fn i1_a_session_lists_an_unlisted_repository_first_and_is_granted_its_leas
         .binding(leasing.hub.clock.now())
         .expect("the hub granted a lease");
     assert_eq!(lease.holder, agent_id(1));
-    assert_eq!(leasing.leases.permits(Some(&photos())).await, Ok(()));
+    assert_eq!(
+        leasing
+            .leases
+            .permits(Some(&photos()))
+            .await
+            .map(|epoch| epoch.is_some()),
+        Ok(true)
+    );
 }
 
 /// A listing before a session that fails leaves the repository reported as
@@ -2719,7 +2745,14 @@ async fn i1_a_failed_listing_before_a_session_is_refused_and_tried_again_at_the_
     engine.fails(photos(), false);
     sync.sync_once().await.unwrap();
     assert_eq!(engine.listings(&photos()), 2);
-    assert_eq!(leasing.leases.permits(Some(&photos())).await, Ok(()));
+    assert_eq!(
+        leasing
+            .leases
+            .permits(Some(&photos()))
+            .await
+            .map(|epoch| epoch.is_some()),
+        Ok(true)
+    );
 }
 
 /// The machine's report of `photos`, as its sync sends it, with the floor
@@ -2818,7 +2851,14 @@ async fn i1_a_hub_that_hears_a_proven_floor_above_its_counter_withholds_its_gran
     leasing.sync.sync_once().await.unwrap();
     assert!(leasing.hub.pairing.recovering().await.unwrap());
     assert_eq!(kept_end(&leasing.cache).await, end, "nothing renewed");
-    assert_eq!(leasing.leases.permits(Some(&photos())).await, Ok(()));
+    assert_eq!(
+        leasing
+            .leases
+            .permits(Some(&photos()))
+            .await
+            .map(|epoch| epoch.is_some()),
+        Ok(true)
+    );
     let held = leasing.owners.ownership(&photos()).await.unwrap();
     assert_eq!(
         held.binding(leasing.hub.clock.now())

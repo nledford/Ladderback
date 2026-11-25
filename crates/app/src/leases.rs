@@ -55,17 +55,22 @@ impl MaintenanceLeases {
     }
 
     /// Whether this machine may maintain `repository`, known by its ID when
-    /// its entry recorded one, now: always when it isn't paired with a hub;
-    /// when it is, only while it holds a live lease on it. A repository
-    /// whose ID isn't known can't be granted one, and a pin or a cache that
-    /// can't be read refuses, as no lease would.
-    pub async fn permits(&self, repository: Option<&RepositoryId>) -> Result<(), NoLease> {
+    /// its entry recorded one, now: always when it isn't paired with a hub,
+    /// answering `None`; when it is, only while it holds a live lease on it,
+    /// answering the lease's epoch, which a grant after the lease lapsed
+    /// never repeats (§7.3). A repository whose ID isn't known can't be
+    /// granted one, and a pin or a cache that can't be read refuses, as no
+    /// lease would.
+    pub async fn permits(
+        &self,
+        repository: Option<&RepositoryId>,
+    ) -> Result<Option<LeaseEpoch>, NoLease> {
         if let Ok(None) = self.identity.pin().await {
-            return Ok(());
+            return Ok(None);
         }
         let repository = repository.ok_or(NoLease::NoneHeld)?;
         let held = self.cache.load().await.map_err(|_| NoLease::NoneHeld)?;
-        held.holds(repository, self.now()).map(|_| ())
+        held.holds(repository, self.now()).map(Some)
     }
 
     /// Takes the hub's `grants`, its answer to a request the machine sent

@@ -6,6 +6,7 @@ use domain::execution::plan_tags::PlanTags;
 use domain::find::{Listed, NamePattern, SEARCH_SECONDS, SearchCaps, choose};
 use std::collections::HashMap;
 use std::path::PathBuf;
+use std::sync::Arc;
 use std::time::{Duration, Instant};
 
 use rustic_core::repofile::{SnapshotFile, SnapshotId as RusticSnapshotId};
@@ -22,8 +23,9 @@ use super::convert::{
 };
 use super::find::{self, Child, Root, Trees};
 use super::listing;
-use super::repository::{self as location, new_repository, open, repository_id};
+use super::repository::{self as location, new_repository, open, open_to_prune, repository_id};
 use super::{Context, Done};
+use crate::job::DeleteAnswer;
 use crate::job::{
     BackupJobSpec, BrowseJobSpec, CheckJobSpec, FindJobSpec, FolderResult, ForgetJobSpec,
     ForgetResult, OpResult, ProbeResult, PruneJobSpec, RepositorySpec, StatsResult, WorkerEvent,
@@ -454,14 +456,35 @@ pub(crate) fn backup(ctx: &Context, job: &BackupJobSpec) -> Result<Done, JobErro
     Ok(Done::Reported)
 }
 
+/// Prunes with the plan it works out. Its repository asks the daemon at its
+/// first removal, after rustic's warm-up, repack and new index, whether this
+/// machine may still maintain the repository, and removes nothing unless
+/// it may: the prune then fails, its new packs and index left as a prune
+/// stopped at that point leaves them, which the next prune takes in (§7.3;
+/// §16, decision 161).
 pub(crate) fn prune(ctx: &Context, job: &PruneJobSpec) -> Result<Done, JobError> {
     let options = prune_options(job.keep_delete)?;
-    let repository = open(ctx, &job.repo)?;
+    let gate = Arc::new(ctx.delete_gate());
+    let repository = open_to_prune(ctx, &job.repo, &gate)?;
     let id = repository_id(&repository)?;
     ctx.start(None, Some(&id))?;
     let plan = repository.prune_plan(&options)?;
     let result = prune_result(id, &plan.stats);
-    repository.prune(&options, plan)?;
+    if let Err(error) = repository.prune(&options, plan) {
+        return Err(match gate.heard() {
+            Some(Some(DeleteAnswer::DeleteNothing)) => JobError::Failed {
+                code: api::ErrorCode::MaintenanceLeaseLapsed,
+                detail: "the daemon answered that this machine may no longer maintain the \
+                         repository"
+                    .to_owned(),
+            },
+            Some(None) => JobError::Failed {
+                code: api::ErrorCode::MaintenanceDeletionUnanswered,
+                detail: "the daemon didn't answer in time, or its answer wasn't one".to_owned(),
+            },
+            Some(Some(DeleteAnswer::Delete)) | None => error.into(),
+        });
+    }
     Ok(Done::Result(OpResult::Prune(result)))
 }
 

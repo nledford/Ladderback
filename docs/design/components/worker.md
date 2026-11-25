@@ -5,8 +5,9 @@ This section decides what runs in a worker process, how the daemon talks to it, 
 Each operation (backup, forget, prune, check, restore, ls, dump, stats) runs in a **child process**:
 
 ```
-daemon ──stdin: JobSpec (JSON)──► ladderback worker
+daemon ──stdin: JobSpec (one JSON line)──► ladderback worker
 daemon ◄─stdout: NDJSON Event stream── (progress, log, warning, result)
+daemon ──stdin: DeleteAnswer (a prune's one line)──► ladderback worker
 daemon ──SIGTERM → (grace) → SIGKILL──► cancel
 ```
 
@@ -68,6 +69,7 @@ enum WorkerEvent {
     Warning { item: Option<String>, during: String, code: WarningCode, detail: String }, // from Progress::error; detail = rustic's text
     Log { level: Level, message: String },   // logs are never localized (§8.4)
     Snapshots { snapshots: Vec<SnapshotResult> }, // a batch of a listing, before its Result (below)
+    ReadyToDelete, // a prune at its first delete asks whether it may delete; once (decision 161)
     Result(OpResult), // BackupSummary | ForgetSummary | PruneStats | CheckReport | …
     Failed { code: ErrorCode, args: Vec<(String, MsgArg)>, detail: Option<String> }, // codes from `api` (§8.4)
 }
@@ -75,7 +77,7 @@ enum WorkerEvent {
 
 `ProgressBars` is implemented by `EventProgressBars`, which writes these events. Per-file errors raised through `Progress::error` become **warnings**, so an operation can end as `Succeeded`, `SucceededWithWarnings` or `Failed` (§3.1). The worker builds a `Redactor` (§3.1) from its `JobSpec`'s repository and `repo_hot`, password, options, `options_hot`, `options_cold` and resolved secrets (`RepositorySpec.secrets`, copied from `RepositoryAccess.secrets`) and passes every `Log`, `Warning` and error through it (I4); §10.2 lists what it masks. A worker stopped by its watchdog emits nothing more; the daemon records the operation as `Failed { reason: DeadlinePassed }`.
 
-**Message cap.** The daemon reads the worker's stdout one line at a time and the worker reads its stdin to the end, and each side reads at most `MAX_MESSAGE_BYTES` (1 MiB, in `engine::job`) of a message plus one byte to tell it from a longer one (§13.5, rule 2).
+**Message cap.** The daemon reads the worker's stdout one line at a time and the worker reads the `JobSpec` from its stdin as one line, and each side reads at most `MAX_MESSAGE_BYTES` (1 MiB, in `engine::job`) of a message plus one byte to tell it from a longer one (§13.5, rule 2). The daemon closes a worker's stdin after the spec, but a prune's: a prune at its first delete asks with `ready_to_delete` and reads one answer line of at most 64 bytes, `delete` or `delete_nothing`, waiting at most 60 seconds; anything else deletes nothing (§7.3, decision 161). The worker reads stdin through a close-on-exec copy of it and points descriptor 0 at `/dev/null`, as it does stdout, so no program it starts reads the daemon's pipe.
 
 An event line past the cap fails the operation as `EngineFailed` with the cap in its detail, and the daemon kills the worker; a worker answers a `JobSpec` past the cap with `InvalidJobSpec`; the daemon refuses to start a worker for a spec it would reject. A line that never ends therefore never grows a buffer past the cap.
 
@@ -117,7 +119,7 @@ The worker keeps its own lines under the cap: it cuts each text field (log messa
   A `RepositorySpec` that leaves the hot fields out, as an older daemon's would, is refused as `InvalidJobSpec` (`options_hot` and `options_cold` have no default) instead of being opened as a cold-only repository.
 - The first line of a worker's stream, once its spec has parsed and the redactor is installed and before it opens anything, is a `Log` at the debug level reading `job accepted`, with nothing of the job in it: it is the proof of life the daemon's start timeout waits for (below). A spec that doesn't parse gets `Failed(InvalidJobSpec)` alone. `Started` is written when the job's clock starts: right before `to_indexed_ids()` for a backup, before `prune_plan` for a prune, before `check` for a check, and after opening the repository for `Identify`. Progress that rustic begins earlier (listing snapshots) never reports, and only `Log` and `Failed` can precede `Started`.
 - `ProgressInc` is coalesced on the leading edge: the first goes out at once, the rest are added up and sent at most every 250 ms per key, and the remainder is flushed before `ProgressFinish`. A source rustic could not read (`scan`, `archival`) is a `SourceUnreadable` warning; any other `Progress::error` is `Unknown`.
-- `Failed.code` is `deadline-passed` only when the deadline ended the job (the watchdog writes it, or the job as the worker ends when the watchdog couldn't); the codes the engine adapter reads from what rustic reports (`repository-not-found`, `repository-config-not-found`, `repository-replaced`, `credentials-refused` with its `half`, `password-not-accepted`: `translate` in `client/translate.rs`) aside, all else rustic reports is `operation-failed` with `detail` = rustic's one-line message, after redaction. Exit codes: 75 deadline (the watchdog's, or the job's once a backup has wound down at its deadline), 143 SIGTERM, 74 events could not be written. The client maps `Failed { DeadlinePassed }`, and EOF with exit code 75, to `DeadlinePassed`.
+- `Failed.code` is `deadline-passed` only when the deadline ended the job (the watchdog writes it, or the job as the worker ends when the watchdog couldn't); a prune told `delete_nothing` sends `maintenance-lease-lapsed`, and one that had no answer sends `maintenance-deletion-unanswered` (decision 161); the codes the engine adapter reads from what rustic reports (`repository-not-found`, `repository-config-not-found`, `repository-replaced`, `credentials-refused` with its `half`, `password-not-accepted`: `translate` in `client/translate.rs`) aside, all else rustic reports is `operation-failed` with `detail` = rustic's one-line message, after redaction. Exit codes: 75 deadline (the watchdog's, or the job's once a backup has wound down at its deadline), 143 SIGTERM, 74 events could not be written. The client maps `Failed { DeadlinePassed }`, and EOF with exit code 75, to `DeadlinePassed`.
 - Stopping a job sends SIGTERM, waits the grace period (`STOP_GRACE`, 35 s, past the worker's own 30 s limit on a wind-down, so a backup that archives saves its index before the SIGKILL could land; decision 50), then SIGKILL; `stop()` returns once the process has exited, and the job's events end without a result.
 
   While it waits, `stop()` reads and drops what the worker still writes: a backup winding down (item 1) whose events went unread until the pipe was full would otherwise stay blocked writing one, and the SIGKILL would leave its packs unindexed. Dropping a running job kills the worker at once, but after a result it has 10 s to finish.

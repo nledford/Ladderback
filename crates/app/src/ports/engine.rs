@@ -1,4 +1,7 @@
 use std::collections::BTreeMap;
+use std::pin::Pin;
+use std::sync::{Arc, Mutex, PoisonError};
+use std::task::{Context, Poll};
 use std::time::Duration;
 
 use async_trait::async_trait;
@@ -14,6 +17,7 @@ use domain::{
     Offset, OperationId, PlanId, RepositoryAlias, RepositoryId, SignedDuration, SnapshotId,
     Timestamp,
 };
+use futures::channel::oneshot;
 use futures::stream::BoxStream;
 
 /// Runs operations against a repository and reports what happens as a stream
@@ -638,6 +642,109 @@ pub enum EngineEvent {
     /// The next piece of a dump, at most `PIECE_BYTES` long: the entry's
     /// own bytes, never text to mask.
     Piece(Vec<u8>),
+    /// A prune has come to its first delete, past its plan and any repack,
+    /// and asks whether it may (§7.3; §16, decision 161). It deletes only
+    /// once [`DeletionAsk::answer`] says [`Deletion::Permitted`]; a
+    /// question dropped unanswered refuses.
+    DeletionAsked(DeletionAsk),
+}
+
+/// Whether a prune that asked may delete.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Deletion {
+    /// The prune goes on with the plan it worked out.
+    Permitted,
+    /// The prune deletes nothing and fails with
+    /// `FailureReason::LeaseLapsed`.
+    Refused,
+}
+
+/// A prune's question before it deletes, which whoever plays the job's
+/// events answers once. Copies share the one answer: the first given
+/// counts. Dropped unanswered, every copy of it, it answers
+/// [`Deletion::Refused`], so an event consumer that doesn't know the
+/// question never lets a prune delete.
+#[derive(Clone)]
+pub struct DeletionAsk(Arc<Mutex<Option<oneshot::Sender<Deletion>>>>);
+
+impl DeletionAsk {
+    /// A question, and the answer it gets, for the engine to wait on.
+    pub fn new() -> (Self, DeletionAnswer) {
+        let (sender, receiver) = oneshot::channel();
+        (
+            Self(Arc::new(Mutex::new(Some(sender)))),
+            DeletionAnswer(receiver),
+        )
+    }
+
+    /// Answers the question; an answer after the first changes nothing.
+    pub fn answer(&self, deletion: Deletion) {
+        // The lock only guards a take: one a panic interrupted left the
+        // sender as it was.
+        let sender = self.0.lock().unwrap_or_else(PoisonError::into_inner).take();
+        if let Some(sender) = sender {
+            // An engine that stopped waiting has nothing left to delete.
+            let _ = sender.send(deletion);
+        }
+    }
+}
+
+/// Copies of one question are equal; two questions never are.
+impl PartialEq for DeletionAsk {
+    fn eq(&self, other: &Self) -> bool {
+        Arc::ptr_eq(&self.0, &other.0)
+    }
+}
+
+impl Eq for DeletionAsk {}
+
+impl std::fmt::Debug for DeletionAsk {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str("DeletionAsk")
+    }
+}
+
+/// The answer a [`DeletionAsk`] gets: [`Deletion::Refused`] when it is
+/// dropped unanswered.
+pub struct DeletionAnswer(oneshot::Receiver<Deletion>);
+
+impl Future for DeletionAnswer {
+    type Output = Deletion;
+
+    fn poll(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Deletion> {
+        Pin::new(&mut self.0)
+            .poll(cx)
+            .map(|answered| answered.unwrap_or(Deletion::Refused))
+    }
+}
+
+#[cfg(test)]
+mod deletion_tests {
+    use futures::FutureExt;
+
+    use super::{Deletion, DeletionAsk};
+
+    /// A question no one answers refuses, so an event consumer that drops
+    /// it never lets a prune delete (decision 161).
+    #[test]
+    fn a_question_dropped_unanswered_refuses() {
+        let (ask, answer) = DeletionAsk::new();
+        let copy = ask.clone();
+        drop(ask);
+        drop(copy);
+        assert_eq!(answer.now_or_never(), Some(Deletion::Refused));
+    }
+
+    /// Copies share the one answer: the first given counts.
+    #[test]
+    fn the_first_answer_counts() {
+        let (ask, answer) = DeletionAsk::new();
+        let copy = ask.clone();
+        assert_eq!(copy, ask);
+        copy.answer(Deletion::Permitted);
+        ask.answer(Deletion::Refused);
+        assert_eq!(answer.now_or_never(), Some(Deletion::Permitted));
+    }
 }
 
 /// One progress bar's change; `key` tells concurrent bars apart. A bar names

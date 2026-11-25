@@ -371,7 +371,9 @@ impl Downloads {
                         let _ = operation
                             .record_locations(record, |position| ruled.contains(&position));
                     }
-                    EngineEvent::Progress(_) => {}
+                    // Only a prune asks before it deletes: dropped, the
+                    // question refuses.
+                    EngineEvent::Progress(_) | EngineEvent::DeletionAsked(_) => {}
                     // Nothing else comes before what the dump found.
                     EngineEvent::Succeeded(_) | EngineEvent::Piece(_) => break,
                 }
@@ -500,7 +502,8 @@ impl Handing {
                 Some(
                     EngineEvent::Progress(_)
                     | EngineEvent::Started { .. }
-                    | EngineEvent::Dumping(_),
+                    | EngineEvent::Dumping(_)
+                    | EngineEvent::DeletionAsked(_),
                 ) => {}
                 Some(EngineEvent::Failed(reason)) => return Step::Failed(reason),
                 // A dump that ends otherwise didn't hand everything over.
