@@ -83,7 +83,7 @@ pub const LEFT_OUT_OF_BACKUPS: [KeyFile; 4] = [
 /// it was `machine-key` (§16, decision 163). It is never read: a backup
 /// only leaves it out, so a key an upgrade left behind stays out of the
 /// repository as it did before (I4, decision 120).
-pub const EARLIER_MACHINE_KEY_FILE: &str = "agent-key";
+const EARLIER_MACHINE_KEY_FILE: &str = "agent-key";
 
 /// The names a backup of the data folder leaves out: those of
 /// [`LEFT_OUT_OF_BACKUPS`], then [`EARLIER_MACHINE_KEY_FILE`].
@@ -94,7 +94,8 @@ fn left_out_names() -> impl Iterator<Item = &'static str> {
         .chain([EARLIER_MACHINE_KEY_FILE])
 }
 
-/// The globs that leave [`left_out_names`] out of a backup that walks the
+/// The globs that leave [`LEFT_OUT_OF_BACKUPS`], and the key an earlier
+/// build kept as `agent-key`, out of a backup that walks the
 /// data folder at `folder`, an absolute path as the backup walks it. Each
 /// also leaves out every name that starts with the file's, which is what a
 /// write stages beside it (`hub-key.<id>.tmp`) and a rotation makes
