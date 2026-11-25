@@ -6,7 +6,7 @@
 
 [Decision 133](133-a-machine-not-an-agent.md) made "machine" the word a person reads, and left code, design prose and scenarios for one mechanical change. That change is mostly internal and can come any time. The names below can't: each is frozen somewhere outside the code, in a peer running another build, in a file on disk, in a tag in a repository or in a row of the database, so each later release that keeps "agent" there makes the move cost more. No hub has shipped in a full release yet, so few people hold the old names, and the move is cheapest now.
 
-The move is a clean cutover. [Decision 88](88-hub-and-agent-version-compatibility.md), as PR #1619 amended it, lets the sync protocol, the handshake and the hub's API change in place until 1.0.0, with no window in which a hub speaks to a machine a release behind; each such change gets a Breaking entry in the changelog with its upgrade step. Aliases would keep both spellings in the code and the tests for as long as anyone holds the old one, which is the cost the amendment exists to avoid.
+The move is a clean cutover. [Decision 88](88-hub-and-agent-version-compatibility.md), as PR #1619 amended it, lets the sync protocol, the handshake and the hub's API change in place until 1.0.0, with no window in which a hub speaks to a machine a release behind; each such change gets a Breaking entry in the changelog with its upgrade step, which the release PR writes from the change's `BREAKING CHANGE:` note (operations.md §12.1). Aliases would keep both spellings in the code and the tests for as long as anyone holds the old one, which is the cost the amendment exists to avoid.
 
 ## Decided
 
