@@ -1489,7 +1489,7 @@ fn snapshot_of(n: u8, plan: &str, host: &str) -> api::SnapshotDto {
     snapshot.tags = vec![
         "nightly".to_owned(),
         format!("ladderback-plan:{plan}"),
-        "ladderback-agent:demo".to_owned(),
+        "ladderback-machine:demo".to_owned(),
     ];
     snapshot
 }

@@ -523,7 +523,7 @@ fn each_refusal_has_its_code() {
         (PairRefusal::TokenExpired, "token-expired"),
         (PairRefusal::TokenRevoked, "token-revoked"),
         (holder, "hostname-taken"),
-        (PairRefusal::AgentKeyMismatch, "agent-key-mismatch"),
+        (PairRefusal::AgentKeyMismatch, "machine-key-mismatch"),
         (PairRefusal::HubKeyMismatch, "hub-key-mismatch"),
         (PairRefusal::PendingLimit, "pending-limit"),
     ] {
@@ -788,7 +788,7 @@ fn a_removed_agents_id_is_refused_with_an_ordinary_token() {
         decide_pairing(&removed, &request(), at(10)),
         Err(PairRefusal::TokenRevoked)
     );
-    assert_eq!(PairRefusal::AgentRemoved.code().as_str(), "agent-removed");
+    assert_eq!(PairRefusal::AgentRemoved.code().as_str(), "machine-removed");
 }
 
 /// A removed agent's key is refused under any other agent ID, as removed
@@ -826,7 +826,7 @@ fn a_removed_agents_key_is_refused_under_a_new_id() {
     );
     assert_eq!(
         PairRefusal::AgentKeyRemoved.code().as_str(),
-        "agent-key-removed"
+        "machine-key-removed"
     );
 }
 

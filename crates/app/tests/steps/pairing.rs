@@ -818,11 +818,11 @@ fn refused(agent: &mut Agent, reason: String) {
         "expired" => "token-expired",
         "revoked" => "token-revoked",
         "the hostname is taken" => "hostname-taken",
-        "the ID belongs to another key" => "agent-key-mismatch",
+        "the ID belongs to another key" => "machine-key-mismatch",
         "the hub's key isn't the token's" => "hub-key-mismatch",
         "too many agents wait for approval" => "pending-limit",
-        "the hub removed the agent" => "agent-removed",
-        "the hub removed the agent's key" => "agent-key-removed",
+        "the hub removed the agent" => "machine-removed",
+        "the hub removed the agent's key" => "machine-key-removed",
         other => panic!("no refusal is named {other:?}"),
     };
     assert_eq!(agent.pairing.refusal_code(), code);

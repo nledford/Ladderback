@@ -210,7 +210,7 @@ fn reads_the_backup(shown: &toml::Value) {
         [
             "laptop".to_owned(),
             "ladderback-plan:home".to_owned(),
-            format!("ladderback-agent:{AGENT}"),
+            format!("ladderback-machine:{AGENT}"),
         ]
     );
     for (key, expected) in [
@@ -294,7 +294,7 @@ fn reads_the_forget(shown: &toml::Value) {
     assert_eq!(
         tags,
         [
-            format!("ladderback-agent:{AGENT}").as_str(),
+            format!("ladderback-machine:{AGENT}").as_str(),
             "ladderback-plan:home"
         ]
     );

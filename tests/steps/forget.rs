@@ -189,7 +189,7 @@ async fn snapshot_taken_at(agent: &mut Agent, time: String) {
     let source = agent.backup.source.clone().expect("a plan source");
     let plan = agent.backup.plan.clone().expect("a plan");
     let tags = [
-        format!("ladderback-agent:{}", agent.agent_id.as_uuid().hyphenated()),
+        format!("ladderback-machine:{}", agent.agent_id.as_uuid().hyphenated()),
         format!("ladderback-plan:{}", plan.as_str()),
     ];
     // Distinct contents, so each backup is its own snapshot.

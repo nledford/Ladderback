@@ -720,6 +720,15 @@ fn hook_warning(detail: &str) -> Warning {
     }
 }
 
+/// The level of the machine's own hooks is `machine` in the operation log
+/// and on the wire (§16, decision 163); `agent` names no level.
+#[test]
+fn the_machines_hook_level_is_machine() {
+    assert_eq!(HookLevel::Agent.code(), "machine");
+    assert_eq!(HookLevel::parse("machine"), Some(HookLevel::Agent));
+    assert_eq!(HookLevel::parse("agent"), None);
+}
+
 #[test]
 fn hook_levels_and_ends_read_back_from_their_codes() {
     for level in [HookLevel::Agent, HookLevel::Repository, HookLevel::Plan] {
@@ -727,9 +736,9 @@ fn hook_levels_and_ends_read_back_from_their_codes() {
     }
     assert_eq!(
         [HookLevel::Agent, HookLevel::Repository, HookLevel::Plan].map(HookLevel::code),
-        ["agent", "repository", "plan"]
+        ["machine", "repository", "plan"]
     );
-    assert_eq!(HookLevel::parse("machine"), None);
+    assert_eq!(HookLevel::parse("agent"), None);
     for end in [
         HookEnd::Exited { code: 3 },
         HookEnd::Signalled,

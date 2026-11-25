@@ -965,7 +965,7 @@ async fn each_preview_names_its_kind_and_what_the_run_would_do() {
             }),
         ),
         (
-            r#"{"kind":"adopt","into":"home","from":{"from":"orphaned","agent":"a","plan":"p"}}"#,
+            r#"{"kind":"adopt","into":"home","from":{"from":"orphaned","machine":"a","plan":"p"}}"#,
             json!({
                 "kind": "adopt",
                 "into": "home",

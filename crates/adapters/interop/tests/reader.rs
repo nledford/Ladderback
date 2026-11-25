@@ -1838,7 +1838,7 @@ async fn an_empty_snapshot_filter_beside_retention_is_not_a_filter() {
 async fn the_filter_an_export_makes_is_not_a_narrowing() {
     // Selecting the snapshots of one plan of one agent is what the plan's
     // forget does anyway, so an exported profile is read back.
-    let own = "[forget]\nkeep-last = 3\n\n[snapshot-filter]\nfilter-tags = [\"ladderback-plan:home,ladderback-agent:00000000-0000-0000-0000-000000000001\"]\n";
+    let own = "[forget]\nkeep-last = 3\n\n[snapshot-filter]\nfilter-tags = [\"ladderback-plan:home,ladderback-machine:00000000-0000-0000-0000-000000000001\"]\n";
     let profile = read_ok(&with(own)).await;
     assert_eq!(
         plan(&profile, "home").retention.keep_last.map(|n| n.get()),
@@ -1848,13 +1848,15 @@ async fn the_filter_an_export_makes_is_not_a_narrowing() {
 
     for filter in [
         // Two entries are OR-ed, not both required.
-        "filter-tags = [\"ladderback-plan:home,ladderback-agent:a\", \"x\"]",
+        "filter-tags = [\"ladderback-plan:home,ladderback-machine:a\", \"x\"]",
         // Another tag makes it narrower.
-        "filter-tags = [\"ladderback-plan:home,ladderback-agent:a,x\"]",
+        "filter-tags = [\"ladderback-plan:home,ladderback-machine:a,x\"]",
         "filter-tags = [\"ladderback-plan:home\"]",
-        "filter-tags = [\"ladderback-agent:a,ladderback-plan:home\"]",
+        "filter-tags = [\"ladderback-machine:a,ladderback-plan:home\"]",
         "filter-tags = [\"ladderback-plan:home,x\"]",
-        "filter-tags = [\"ladderback-plan:home,ladderback-agent:a\"]\nfilter-hosts = [\"demo\"]",
+        "filter-tags = [\"ladderback-plan:home,ladderback-machine:a\"]\nfilter-hosts = [\"demo\"]",
+        // The tag before §16, decision 163 selects no plan's snapshots now.
+        "filter-tags = [\"ladderback-plan:home,ladderback-agent:a\"]",
         "filter-tags = []",
         "filter-tags = [1]",
     ] {

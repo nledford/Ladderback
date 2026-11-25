@@ -127,7 +127,9 @@ mod tests {
     }
 
     const PLAN: &str = "ladderback-plan:home";
-    const AGENT: &str = "ladderback-agent:00000000-0000-0000-0000-000000000001";
+    const AGENT: &str = "ladderback-machine:00000000-0000-0000-0000-000000000001";
+    /// The prefix before §16, decision 163, which no build reads now.
+    const OLD_AGENT: &str = "ladderback-agent:00000000-0000-0000-0000-000000000001";
 
     #[test]
     fn a_plan_tags_its_snapshots_with_plan_and_agent() {
@@ -149,7 +151,7 @@ mod tests {
         }
         for tag in [
             "ladderback-plan:other",
-            "ladderback-agent:x",
+            "ladderback-machine:x",
             "ladderback-",
             "Ladderback-Plan:other",
         ] {
@@ -190,6 +192,16 @@ mod tests {
         let snapshots = [snapshot(4, 40, &[PLAN]), snapshot(5, 50, &[])];
         assert_eq!(tags().parent(&snapshots), None);
         assert_eq!(tags().parent(&[]), None);
+    }
+
+    /// A snapshot still tagged `ladderback-agent:` (before §16, decision
+    /// 163) belongs to no plan: it is no parent, and the plan's next backup
+    /// scans in full.
+    #[test]
+    fn a_snapshot_with_the_old_machine_tag_belongs_to_no_plan() {
+        let old = snapshot(1, 10, &[PLAN, OLD_AGENT]);
+        assert!(!tags().mark(&old));
+        assert_eq!(tags().parent(&[old]), None);
     }
 
     #[test]

@@ -169,6 +169,23 @@ mod tests {
         assert_eq!(id.as_uuid().hyphenated().to_string(), text);
     }
 
+    /// The ID lives in `machine-id` (§16, decision 163): a new one is kept
+    /// there, and an `agent-id` an earlier build left is never read.
+    #[test]
+    fn the_id_is_kept_in_machine_id() {
+        let data = tempfile::tempdir().unwrap();
+        let id = load_or_create(data.path()).unwrap();
+        let kept = fs::read_to_string(data.path().join("machine-id")).unwrap();
+        assert_eq!(kept.trim(), id.as_uuid().hyphenated().to_string());
+        let old = tempfile::tempdir().unwrap();
+        fs::write(
+            old.path().join("agent-id"),
+            "0190a6e4-7a3b-7c3d-8e4f-0123456789ab\n",
+        )
+        .unwrap();
+        assert_eq!(load(old.path()).unwrap(), None);
+    }
+
     #[test]
     fn a_damaged_id_file_is_an_error_and_left_alone() {
         let data = tempfile::tempdir().unwrap();

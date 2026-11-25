@@ -1011,7 +1011,7 @@ mod tests {
     #[test]
     fn an_adoption_request_names_its_plan_and_group() {
         let from = AdoptionFromDto::Orphaned {
-            agent: "ladderback-agent:other".to_owned(),
+            agent: "ladderback-machine:other".to_owned(),
             plan: "ladderback-plan:old".to_owned(),
         };
         assert_eq!(
@@ -1313,7 +1313,7 @@ mod tests {
     #[test]
     fn an_adoption_starts_with_its_selection_and_keeps_its_plan_and_group() {
         let from = AdoptionFromDto::Orphaned {
-            agent: "ladderback-agent:other".to_owned(),
+            agent: "ladderback-machine:other".to_owned(),
             plan: "ladderback-plan:old".to_owned(),
         };
         let request = adoption("home", from.clone());

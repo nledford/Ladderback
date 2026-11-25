@@ -120,7 +120,7 @@ fn the_small_history_is_exactly_its_declared_snapshots_in_a_repository_rustic_ch
         .map(|(plan, time, _, _)| (plan.clone(), time.clone()))
         .collect();
     assert_eq!(seen, declared(&declaration), "the snapshots rustic lists");
-    let agent = format!("ladderback-agent:{}", AGENT.hyphenated());
+    let agent = format!("ladderback-machine:{}", AGENT.hyphenated());
     for (plan, time, tags, host) in &listed {
         // A backup's tags, as the daemon's own backups have them.
         assert_eq!(

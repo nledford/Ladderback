@@ -32,12 +32,12 @@ function operationId(n: number): string {
 }
 
 Given("the hub took these reports of {string}:", async function (this: BrowserWorld, hostname: string, table: DataTable) {
-  const agent = (await listedMachine(this, hostname))["agent-id"];
+  const agent = (await listedMachine(this, hostname))["machine-id"];
   const now = Math.floor(Date.now() / 1000);
   const database = hubDatabase(this);
   try {
     const take = database.prepare(
-      "INSERT INTO sync_reports (agent_id, epoch, seq, op_id, happening, code, at) VALUES (?, ?, ?, ?, ?, ?, ?)",
+      "INSERT INTO sync_reports (machine_id, epoch, seq, op_id, happening, code, at) VALUES (?, ?, ?, ?, ?, ?, ?)",
     );
     const rows = table.hashes();
     rows.forEach((row, place) => {
@@ -53,8 +53,8 @@ Given("the hub took these reports of {string}:", async function (this: BrowserWo
     });
     database
       .prepare(
-        "INSERT INTO sync_report_tallies (agent_id, held, dropped) VALUES (?, ?, 0) " +
-          "ON CONFLICT (agent_id) DO UPDATE SET held = held + excluded.held",
+        "INSERT INTO sync_report_tallies (machine_id, held, dropped) VALUES (?, ?, 0) " +
+          "ON CONFLICT (machine_id) DO UPDATE SET held = held + excluded.held",
       )
       .run(agent, rows.length);
   } finally {
@@ -63,13 +63,13 @@ Given("the hub took these reports of {string}:", async function (this: BrowserWo
 });
 
 Given("the hub let go of {int} of the reports of {string}", async function (this: BrowserWorld, count: number, hostname: string) {
-  const agent = (await listedMachine(this, hostname))["agent-id"];
+  const agent = (await listedMachine(this, hostname))["machine-id"];
   const database = hubDatabase(this);
   try {
     database
       .prepare(
-        "INSERT INTO sync_report_tallies (agent_id, held, dropped) VALUES (?, 0, ?) " +
-          "ON CONFLICT (agent_id) DO UPDATE SET dropped = excluded.dropped",
+        "INSERT INTO sync_report_tallies (machine_id, held, dropped) VALUES (?, 0, ?) " +
+          "ON CONFLICT (machine_id) DO UPDATE SET dropped = excluded.dropped",
       )
       .run(agent, count);
   } finally {
@@ -78,10 +78,10 @@ Given("the hub let go of {int} of the reports of {string}", async function (this
 });
 
 Given("the machine {string} runs in the time zone {string}", async function (this: BrowserWorld, hostname: string, zone: string) {
-  const agent = (await listedMachine(this, hostname))["agent-id"];
+  const agent = (await listedMachine(this, hostname))["machine-id"];
   const database = hubDatabase(this);
   try {
-    const changed = database.prepare("UPDATE agents SET zone = ? WHERE id = ?").run(zone, agent);
+    const changed = database.prepare("UPDATE machines SET zone = ? WHERE id = ?").run(zone, agent);
     assert.equal(changed.changes, 1, `the hub has no machine ${agent}`);
   } finally {
     database.close();
@@ -93,7 +93,7 @@ Given("the machine {string} runs in the time zone {string}", async function (thi
 // hub-unavailable): the read on opening and the one the events stream's
 // opening asks for. Each read after them reaches the hub.
 Given("the hub fails its first two answers about its machines", function (this: BrowserWorld) {
-  for (const where of ["**/api/v1/hub/machines", "**/api/v1/hub/agents"]) {
+  for (const where of ["**/api/v1/hub/dashboard", "**/api/v1/hub/machines"]) {
     let reads = 0;
     this.contextRoutes.push(async (context) => {
       await context.route(where, async (route) => {
@@ -149,12 +149,12 @@ Then(
 Given(
   "{string} reported these plans to the hub, and {int} more it left out:",
   async function (this: BrowserWorld, hostname: string, leftOut: number, table: DataTable) {
-    const agent = (await listedMachine(this, hostname))["agent-id"];
+    const agent = (await listedMachine(this, hostname))["machine-id"];
     const now = Math.floor(Date.now() / 1000);
     const database = hubDatabase(this);
     try {
       const take = database.prepare(
-        "INSERT INTO sync_plans (agent_id, place, plan_id, last_at, last_outcome, next_run) VALUES (?, ?, ?, ?, ?, ?)",
+        "INSERT INTO sync_plans (machine_id, place, plan_id, last_at, last_outcome, next_run) VALUES (?, ?, ?, ?, ?, ?)",
       );
       table.hashes().forEach((row, place) => {
         const ago = row["last run minutes ago"] ?? "";
@@ -168,7 +168,7 @@ Given(
           next === "" ? null : now + Number(next) * 60,
         );
       });
-      database.prepare("INSERT INTO sync_plan_snapshots (agent_id, left_out) VALUES (?, ?)").run(agent, leftOut);
+      database.prepare("INSERT INTO sync_plan_snapshots (machine_id, left_out) VALUES (?, ?)").run(agent, leftOut);
     } finally {
       database.close();
     }
@@ -178,10 +178,10 @@ Given(
 // The machine's snapshot of its plans as the hub keeps it when the machine
 // reported none (migration 0025): no plan, and none left out.
 Given("{string} reported no plans to the hub", async function (this: BrowserWorld, hostname: string) {
-  const agent = (await listedMachine(this, hostname))["agent-id"];
+  const agent = (await listedMachine(this, hostname))["machine-id"];
   const database = hubDatabase(this);
   try {
-    database.prepare("INSERT INTO sync_plan_snapshots (agent_id, left_out) VALUES (?, 0)").run(agent);
+    database.prepare("INSERT INTO sync_plan_snapshots (machine_id, left_out) VALUES (?, 0)").run(agent);
   } finally {
     database.close();
   }
@@ -192,11 +192,11 @@ Given("{string} reported no plans to the hub", async function (this: BrowserWorl
 Given(
   "{string} reported operation {int} backing up {int} of {int} bytes at {string}",
   async function (this: BrowserWorld, hostname: string, n: number, current: number, total: number, at: string) {
-    const agent = (await listedMachine(this, hostname))["agent-id"];
+    const agent = (await listedMachine(this, hostname))["machine-id"];
     const database = hubDatabase(this);
     try {
       database
-        .prepare("INSERT INTO sync_progress (agent_id, op_id, step, unit, current, total, at) VALUES (?, ?, ?, ?, ?, ?, ?)")
+        .prepare("INSERT INTO sync_progress (machine_id, op_id, step, unit, current, total, at) VALUES (?, ?, ?, ?, ?, ?, ?)")
         .run(agent, operationId(n), "backing-up", "bytes", current, total, Math.floor(Date.parse(at) / 1000));
     } finally {
       database.close();

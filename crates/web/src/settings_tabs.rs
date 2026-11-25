@@ -140,7 +140,7 @@ mod tests {
                 "api-tokens",
                 "ai-agents",
                 #[cfg(feature = "hub")]
-                "agents",
+                "machines",
                 "dry-run-allowlist",
                 "restart"
             ]

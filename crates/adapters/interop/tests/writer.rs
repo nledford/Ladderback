@@ -171,7 +171,7 @@ name = \"home\"
 sources = [\"/home/demo\", \"/srv/demo data\"]
 label = \"demo home\"
 host = \"demo-laptop\"
-tags = [\"laptop\", \"ladderback-plan:home\", \"ladderback-agent:{AGENT}\"]
+tags = [\"laptop\", \"ladderback-plan:home\", \"ladderback-machine:{AGENT}\"]
 git-ignore = true
 exclude-if-present = [\".nobackup\"]
 
@@ -185,7 +185,7 @@ keep-last = 3
 keep-daily = 7
 
 [snapshot-filter]
-filter-tags = [\"ladderback-plan:home,ladderback-agent:{AGENT}\"]
+filter-tags = [\"ladderback-plan:home,ladderback-machine:{AGENT}\"]
 "
     );
     let written = render(&export).expect("the export is made");
@@ -211,13 +211,13 @@ fn a_plan_with_nothing_set_is_written_with_what_scopes_it() {
     assert_has(
         &text,
         "backup.snapshots.0.tags",
-        strings(&["ladderback-plan:home", &format!("ladderback-agent:{AGENT}")]),
+        strings(&["ladderback-plan:home", &format!("ladderback-machine:{AGENT}")]),
     );
     assert_has(&text, "forget.group-by", string(""));
     assert_has(
         &text,
         "snapshot-filter.filter-tags",
-        strings(&[&format!("ladderback-plan:home,ladderback-agent:{AGENT}")]),
+        strings(&[&format!("ladderback-plan:home,ladderback-machine:{AGENT}")]),
     );
     for absent in [
         "global",
@@ -294,7 +294,7 @@ fn the_plans_own_tags_come_first_and_ladderbacks_last() {
             "b",
             "a",
             "ladderback-plan:home",
-            &format!("ladderback-agent:{AGENT}"),
+            &format!("ladderback-machine:{AGENT}"),
         ]),
     );
 }
@@ -1156,7 +1156,7 @@ async fn the_reader_reads_the_plan_back_apart_from_ladderbacks_own_tags() {
                 tag: "ladderback-plan:home".to_owned()
             },
             ProfileNotice::TagDropped {
-                tag: format!("ladderback-agent:{AGENT}")
+                tag: format!("ladderback-machine:{AGENT}")
             }
         ]
     );

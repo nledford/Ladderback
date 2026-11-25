@@ -396,7 +396,7 @@ fn the_payloads_read_back_from_their_bytes() {
     assert_eq!(
         String::from_utf8(welcome_payload(&welcome())).unwrap(),
         concat!(
-            r#"{"protocol":1,"hub_protocols":[1,1],"agent_protocols":[1,3],"generation":2,"#,
+            r#"{"protocol":1,"hub_protocols":[1,1],"machine_protocols":[1,3],"generation":2,"#,
             r#""hub_handshakes":1,"hub_version":"0.5.0+def5678","signed_at":1800000000,"#,
             r#""status":"approved"}"#
         )
@@ -407,9 +407,9 @@ fn the_payloads_read_back_from_their_bytes() {
 fn a_payload_out_of_shape_is_refused() {
     for bytes in [
         &b"not json"[..],
-        br#"{"agent_version":"x","hostname":"","protocols":[1,1],"clock":1}"#,
-        br#"{"agent_version":"x","hostname":"nas","protocols":[0,1],"clock":1}"#,
-        br#"{"agent_version":"x","hostname":"nas","protocols":[2,1],"clock":1}"#,
+        br#"{"machine_version":"x","hostname":"","protocols":[1,1],"clock":1}"#,
+        br#"{"machine_version":"x","hostname":"nas","protocols":[0,1],"clock":1}"#,
+        br#"{"machine_version":"x","hostname":"nas","protocols":[2,1],"clock":1}"#,
     ] {
         assert_eq!(read_hello(bytes), Err(WireRefused), "{bytes:?}");
     }
@@ -502,9 +502,9 @@ fn the_machine_fingerprint_travels_in_a_hello() {
     );
     assert_eq!(read_hello(payload.as_bytes()), Ok(told));
     let plain = String::from_utf8(hello_payload(&hello())).unwrap();
-    assert!(!plain.contains("machine"), "{plain}");
+    assert!(!plain.contains(r#""machine":"#), "{plain}");
     let upper = format!(
-        r#"{{"agent_version":"x","hostname":"nas","protocols":[1,1],"clock":1,"machine":"{}"}}"#,
+        r#"{{"machine_version":"x","hostname":"nas","protocols":[1,1],"clock":1,"machine":"{}"}}"#,
         "5A".repeat(32)
     );
     assert_eq!(read_hello(upper.as_bytes()), Err(WireRefused));
@@ -520,7 +520,7 @@ fn a_zone_out_of_shape_is_refused() {
     }
     assert_eq!(agent_message(&frame), Err(WireRefused));
     let hello =
-        br#"{"agent_version":"x","hostname":"nas","protocols":[1,1],"clock":1,"zone":"Europe/"}"#;
+        br#"{"machine_version":"x","hostname":"nas","protocols":[1,1],"clock":1,"zone":"Europe/"}"#;
     assert_eq!(read_hello(hello), Err(WireRefused));
 }
 

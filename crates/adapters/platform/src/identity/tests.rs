@@ -443,7 +443,7 @@ async fn forgetting_the_recovery_seed_deletes_its_file_alone() {
             .unwrap();
     }
     identity.forget_recovery_seed().await.unwrap();
-    assert_eq!(names(&data), ["agent-key", "hub-key"]);
+    assert_eq!(names(&data), ["hub-key", "machine-key"]);
 }
 
 /// A write cut short by a crash leaves its staged copy, which holds the

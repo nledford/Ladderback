@@ -26,7 +26,7 @@ async fn sync_refused_removed(agent: &mut Agent) {
     else {
         panic!("{:?}", side.synced.last());
     };
-    assert_eq!(refused.code.as_str(), "agent-removed");
+    assert_eq!(refused.code.as_str(), "machine-removed");
 }
 
 /// Its standing alone would let it maintain, as a machine its hub refused

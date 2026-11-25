@@ -174,6 +174,26 @@ fn a_plan_tag_without_an_agent_tag_is_orphaned() {
     assert_eq!(group.plan.as_deref(), Some("home"));
 }
 
+/// A snapshot still tagged `ladderback-agent:` with this machine's ID, as
+/// every backup before §16, decision 163 was, belongs to no plan: the
+/// plan's forget never selects it, and it is orphaned under its plan tag
+/// alone (I6).
+#[test]
+fn a_snapshot_with_the_old_machine_tag_is_never_a_plans_to_forget() {
+    let old = vec![
+        format!("{PLAN_TAG_PREFIX}home"),
+        format!("ladderback-agent:{}", own_text()),
+    ];
+    let snapshots = vec![snapshot(1, &old), snapshot(2, &old), snapshot(3, &old)];
+    let partition =
+        ForgetSelection::partition(&snapshots, &agent(), &plans(&[("home", home_policy())]));
+    assert!(partition.managed.is_empty(), "{:?}", partition.managed);
+    let [group] = partition.orphaned.try_into().expect("one orphaned group");
+    assert_eq!(group.agent, None);
+    assert_eq!(group.plan.as_deref(), Some("home"));
+    assert_eq!(group.snapshots.len(), 3);
+}
+
 fn own_text() -> String {
     agent().as_uuid().hyphenated().to_string()
 }

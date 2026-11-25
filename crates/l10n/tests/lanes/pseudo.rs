@@ -216,7 +216,7 @@ fn what_a_person_types_stays_as_it_is_in_a_transformed_message() {
         ("rule", text("network")),
         ("locations", text("several")),
         ("mode", text("0644")),
-        ("file", text("agent-key")),
+        ("file", text("machine-key")),
     ];
     for asked in ["en-XA", "ar-XB"] {
         let localizer = speaking(asked);

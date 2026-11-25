@@ -1537,7 +1537,7 @@ mod tests {
             ),
             (refused("proof-refused"), ErrorCode::ProofRefused),
             (refused("identity-conflict"), ErrorCode::IdentityConflict),
-            (refused("agent-removed"), ErrorCode::AgentRemoved),
+            (refused("machine-removed"), ErrorCode::AgentRemoved),
             (refused("generation-lower"), ErrorCode::HubLinkLost),
             (refused("hostname-taken"), ErrorCode::HubLinkLost),
             (refused("token-used"), ErrorCode::HubLinkLost),
@@ -1640,7 +1640,7 @@ mod tests {
         assert_eq!(
             said,
             Some(vec![
-                ("file", MsgArg::Text("agent-key".to_owned())),
+                ("file", MsgArg::Text("machine-key".to_owned())),
                 ("mode", MsgArg::Text("0644".to_owned())),
             ])
         );

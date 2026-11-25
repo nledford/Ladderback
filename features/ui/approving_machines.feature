@@ -13,7 +13,7 @@ Feature: Approving a waiting machine on the hub's page
   Scenario: A waiting machine is approved by keyboard alone, after its key is compared
     Given a hub with sign-in off
     And a machine named "demo-laptop" waits for approval on the hub
-    When I open the address "/settings#agents"
+    When I open the address "/settings#machines"
     And I skip to the content
     Then the table "Waiting for approval" lists "demo-laptop" with the key fingerprint the machine showed
     When I press Tab until focus is on the button "Approve demo-laptop"
@@ -37,7 +37,7 @@ Feature: Approving a waiting machine on the hub's page
   Scenario: A wrong fingerprint approves nothing, and the review says so
     Given a hub with sign-in off
     And a machine named "demo-laptop" waits for approval on the hub
-    When I open the address "/settings#agents"
+    When I open the address "/settings#machines"
     And I approve "demo-laptop" on the Machines tab, typing a fingerprint that doesn't match
     Then the dialog "Approve demo-laptop?" says "That isn't right, so the machine wasn't approved."
     And the table "Waiting for approval" lists "demo-laptop" with the key fingerprint the machine showed
@@ -46,14 +46,14 @@ Feature: Approving a waiting machine on the hub's page
     Given a hub with sign-in off
     And a machine named "demo-macbook" is approved on the hub
     And a machine named "demo-rnacbook" waits for approval on the hub
-    When I open the address "/settings#agents"
+    When I open the address "/settings#machines"
     Then the table "Waiting for approval" says "Looks like demo-macbook"
     And the page has no accessibility violations
 
   Scenario: Pausing live updates holds the machines' lists still until they resume
     Given a hub with sign-in off
     And a machine named "demo-laptop" waits for approval on the hub
-    When I open the address "/settings#agents"
+    When I open the address "/settings#machines"
     And I skip to the content
     And I press Tab until focus is on the button "Pause live updates"
     And I press Enter
@@ -73,7 +73,7 @@ Feature: Approving a waiting machine on the hub's page
   Scenario: Resuming the machines' lists is said through the announcer, and the tab has no live region of its own
     Given a hub with sign-in off
     And a machine named "demo-laptop" waits for approval on the hub
-    When I open the address "/settings#agents"
+    When I open the address "/settings#machines"
     And I skip to the content
     And I press Tab until focus is on the button "Pause live updates"
     And I press Enter
@@ -87,7 +87,7 @@ Feature: Approving a waiting machine on the hub's page
   Scenario: Leaving Settings ends the pause of the machines' lists
     Given a hub with sign-in off
     And a machine named "demo-laptop" waits for approval on the hub
-    When I open the address "/settings#agents"
+    When I open the address "/settings#machines"
     And I skip to the content
     And I press Tab until focus is on the button "Pause live updates"
     And I press Enter
@@ -98,14 +98,14 @@ Feature: Approving a waiting machine on the hub's page
     And I press Enter
     And I press Tab until focus is on the link "Settings"
     And I press Enter
-    And I change the address's fragment to "#agents"
+    And I change the address's fragment to "#machines"
     Then the button "Pause live updates" is not pressed
     When a machine named "demo-desktop" waits for approval on the hub
     Then the table "Waiting for approval" lists "demo-desktop" with the key fingerprint the machine showed
 
   Scenario: A machine that asks to pair while the Machines tab is open is listed at once and announced politely
     Given a hub with sign-in off
-    When I open the address "/settings#agents"
+    When I open the address "/settings#machines"
     Then the page lists no machine waiting for approval
     When a machine named "demo-laptop" waits for approval on the hub
     Then the table "Waiting for approval" lists "demo-laptop" with the key fingerprint the machine showed
@@ -115,7 +115,7 @@ Feature: Approving a waiting machine on the hub's page
     Given a hub with sign-in off
     And a machine named "demo-laptop" waits for approval on the hub
     And the hub fails its first two answers about its machines
-    When I open the address "/settings#agents"
+    When I open the address "/settings#machines"
     Then the page says "The hub didn't answer, so its machines can't be listed. The page asks again in a few seconds."
     And the table "Waiting for approval" lists "demo-laptop" with the key fingerprint the machine showed
 
@@ -123,7 +123,7 @@ Feature: Approving a waiting machine on the hub's page
     Given a hub with sign-in off
     And the page's clock stands still from the start until a step moves it on
     And a machine named "demo-laptop" waits for approval on the hub
-    When I open the address "/settings#agents"
+    When I open the address "/settings#machines"
     Then the table "Waiting for approval" lists "demo-laptop" with the key fingerprint the machine showed
     When a person approves "demo-laptop" on another page of the hub
     Then the table "Approved machines" lists "demo-laptop" with the key fingerprint the machine showed

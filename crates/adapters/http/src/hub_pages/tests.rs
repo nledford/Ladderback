@@ -827,7 +827,7 @@ async fn on_loopback_the_fingerprint_approves_the_agent_under_the_key_compared_o
         .await;
     assert_eq!(
         refusal(again).await,
-        (StatusCode::CONFLICT, "agent-approved-already".to_owned())
+        (StatusCode::CONFLICT, "machine-approved-already".to_owned())
     );
 }
 
@@ -851,7 +851,7 @@ async fn an_agent_or_key_that_never_paired_is_unknown_and_approves_nothing() {
                     .await
             )
             .await,
-            (StatusCode::NOT_FOUND, "agent-unknown".to_owned())
+            (StatusCode::NOT_FOUND, "machine-unknown".to_owned())
         );
     }
     let body = serde_json::json!({ "key": waiting.key.to_hex(), "confirmation": fingerprint });
@@ -859,7 +859,7 @@ async fn an_agent_or_key_that_never_paired_is_unknown_and_approves_nothing() {
     let not_an_id = build(Method::POST, &not_an_id, LOOPBACK, &[], &body.to_string());
     assert_eq!(
         refusal(daemon.send(not_an_id).await).await,
-        (StatusCode::NOT_FOUND, "agent-unknown".to_owned())
+        (StatusCode::NOT_FOUND, "machine-unknown".to_owned())
     );
     let path = api::agent_approval_path(&waiting.agent_id.as_uuid().to_string());
     let not_a_key = serde_json::json!({ "key": "laptop", "confirmation": fingerprint }).to_string();
@@ -978,7 +978,7 @@ async fn on_loopback_a_waiting_or_approved_agent_is_removed_under_its_key_once()
     };
     assert_eq!(
         refusal(daemon.send(remove(LOOPBACK, &[], &rekeyed)).await).await,
-        (StatusCode::NOT_FOUND, "agent-unknown".to_owned()),
+        (StatusCode::NOT_FOUND, "machine-unknown".to_owned()),
         "another key removes nothing"
     );
     for removed in [&approved, &waiting] {
@@ -990,7 +990,7 @@ async fn on_loopback_a_waiting_or_approved_agent_is_removed_under_its_key_once()
         assert_eq!(tombstone.map(|kept| kept.key), Some(removed.key));
         assert_eq!(
             refusal(daemon.send(remove(LOOPBACK, &[], removed)).await).await,
-            (StatusCode::NOT_FOUND, "agent-unknown".to_owned())
+            (StatusCode::NOT_FOUND, "machine-unknown".to_owned())
         );
     }
     let not_an_id = api::agent_removal_path("laptop");
@@ -998,7 +998,7 @@ async fn on_loopback_a_waiting_or_approved_agent_is_removed_under_its_key_once()
     let not_an_id = build(Method::POST, &not_an_id, LOOPBACK, &[], &body);
     assert_eq!(
         refusal(daemon.send(not_an_id).await).await,
-        (StatusCode::NOT_FOUND, "agent-unknown".to_owned())
+        (StatusCode::NOT_FOUND, "machine-unknown".to_owned())
     );
     let path = api::agent_removal_path(&waiting.agent_id.as_uuid().to_string());
     for body in [

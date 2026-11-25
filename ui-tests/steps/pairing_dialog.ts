@@ -180,7 +180,7 @@ Then(
 /** Asks for a token as a keyboard walk does, in short: the fingerprint typed
  *  in its field, then the form sent from its button. */
 async function askForToken(world: BrowserWorld): Promise<void> {
-  await world.open("/settings#agents");
+  await world.open("/settings#machines");
   const fingerprint = await hubFingerprint(world);
   await tabTo(world, "textbox", "Hub key fingerprint");
   await world.page.keyboard.type(fingerprint);

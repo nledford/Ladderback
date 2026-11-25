@@ -1025,7 +1025,7 @@ async fn only_a_signed_agent_removed_stands_the_machine_removed() {
     let Err(SyncFailure::Connect(ConnectFailure::Refused(refused))) = failure else {
         panic!("{failure:?}");
     };
-    assert_eq!(refused.code.as_str(), "agent-removed");
+    assert_eq!(refused.code.as_str(), "machine-removed");
     assert_eq!(standing.get(), Standing::RemovedByHub);
 }
 

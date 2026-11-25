@@ -90,7 +90,7 @@ fn ids(list: &[SnapshotDto]) -> Vec<String> {
 }
 
 /// The tag text a snapshot of the test's own agent carries after
-/// `ladderback-agent:`.
+/// `ladderback-machine:`.
 fn test_agent_text(agent: &Agent) -> String {
     agent.agent_id.as_uuid().hyphenated().to_string()
 }
@@ -381,7 +381,7 @@ async fn previews_adopting_orphaned(agent: &mut Agent, into: String) {
         "into": into,
         "from": {
             "from": "orphaned",
-            "agent": test_agent_text(agent),
+            "machine": test_agent_text(agent),
             "plan": from_plan.as_str(),
         },
     })
@@ -580,7 +580,7 @@ async fn adoption_preview_names(agent: &mut Agent, count: u64, into: String) {
 
 #[then("every snapshot in the repository still carries the tag of the agent that made it")]
 async fn snapshots_keep_their_agent_tag(agent: &mut Agent) {
-    let tag = format!("ladderback-agent:{}", test_agent_text(agent));
+    let tag = format!("ladderback-machine:{}", test_agent_text(agent));
     let snapshots = snapshots_of(agent).await;
     assert!(!snapshots.is_empty(), "the repository holds history");
     for (id, _, tags) in snapshots {

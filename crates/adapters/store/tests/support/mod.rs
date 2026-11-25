@@ -414,20 +414,20 @@ pub struct Stored {
     pub warning_count: i64,
 }
 
-/// The raw row of operation `n`; the operation must be there.
+/// The raw row of operation `n`; the operation must be there. A database
+/// before version 29 names the machine's column `agent_id` (§16, decision
+/// 163), and the migration tests read those too.
 pub async fn stored_row(conn: &mut SqliteConnection, n: u128) -> Stored {
-    let row = sqlx::query(
-        r#"SELECT agent_id, kind, plan_id, repo_uuid, "trigger", status, queued_at, started_at,
-                  finished_at, snapshot_id, summary_json, error_code, error_args, error_detail,
-                  warning_count
-           FROM operations WHERE id = ?1"#,
-    )
-    .bind(id_text(n))
-    .fetch_one(&mut *conn)
-    .await
-    .expect("the operation has a row");
+    let row = sqlx::query("SELECT * FROM operations WHERE id = ?1")
+        .bind(id_text(n))
+        .fetch_one(&mut *conn)
+        .await
+        .expect("the operation has a row");
     Stored {
-        agent_id: row.get("agent_id"),
+        agent_id: row
+            .try_get("machine_id")
+            .or_else(|_| row.try_get("agent_id"))
+            .expect("the machine's column"),
         kind: row.get("kind"),
         plan_id: row.get("plan_id"),
         repo_uuid: row.get("repo_uuid"),

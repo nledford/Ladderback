@@ -207,6 +207,27 @@ fn every_message_has_its_own_label() {
     }
 }
 
+/// The machine's own signed messages are named for the machine (§16,
+/// decision 163): its proof `machine-proof` and its messages after the
+/// handshake `machine-signed`, and no label says `agent`.
+#[test]
+fn the_machines_messages_are_labelled_for_the_machine() {
+    let (host, zone, grants, heartbeat, refused) = (
+        hostname(),
+        chicago(),
+        name("RepoGrants"),
+        name("Heartbeat"),
+        name("proof-refused"),
+    );
+    let labels: Vec<_> = every_message(&host, &zone, &grants, &heartbeat, &refused)
+        .iter()
+        .map(|(message, _)| message.label())
+        .collect();
+    assert!(labels.contains(&"machine-proof"), "{labels:?}");
+    assert!(labels.contains(&"machine-signed"), "{labels:?}");
+    assert!(!labels.iter().any(|label| label.contains("agent")), "{labels:?}");
+}
+
 /// The hub proof and the agent proof share a field prefix; their labels
 /// keep a hub proof from being an agent proof and the reverse.
 #[test]
@@ -391,14 +412,14 @@ const HUB_PROOF: &[&str] = &[
     "cccccccccccccccccccccccccccc0000000000000001",
 ];
 
-/// `agent-proof`.
+/// `machine-proof`.
 const AGENT_PROOF: &[&str] = &[
-    "1e6c61646465726261636b2d73796e632d7631206167656e742d70726f6f66111111111111111111",
-    "11111111111111111111111111111111111111111111110194f3a27b1c7d2e8f3041526374859622",
-    "22222222222222222222222222222222222222222222222222222222222222aaaaaaaaaaaaaaaaaa",
-    "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaabbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
-    "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbb01cccccccccccccccccccccccccccccccccccccccccccccccc",
-    "cccccccccccccccc0000000000000007",
+    "206c61646465726261636b2d73796e632d7631206d616368696e652d70726f6f6611111111111111",
+    "111111111111111111111111111111111111111111111111110194f3a27b1c7d2e8f304152637485",
+    "962222222222222222222222222222222222222222222222222222222222222222aaaaaaaaaaaaaa",
+    "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaabbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+    "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb01cccccccccccccccccccccccccccccccccccccccccccc",
+    "cccccccccccccccccccc0000000000000007",
 ];
 
 /// `pair`.
@@ -432,14 +453,14 @@ const HUB_MESSAGE: &[&str] = &[
     "7473015abd7f5cc57a2dd94b7590f04ad8084273905ee33ec5cebeae62276a97f862",
 ];
 
-/// `agent-signed`.
+/// `machine-signed`.
 const AGENT_MESSAGE: &[&str] = &[
-    "1f6c61646465726261636b2d73796e632d7631206167656e742d7369676e65641111111111111111",
-    "1111111111111111111111111111111111111111111111110194f3a27b1c7d2e8f30415263748596",
-    "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaabbbbbbbbbbbbbbbb",
-    "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb01cccccccccccccccccccccccccccccc",
-    "cccccccccccccccccccccccccccccccccc000000000000000309486561727462656174015abd7f5c",
-    "c57a2dd94b7590f04ad8084273905ee33ec5cebeae62276a97f862",
+    "216c61646465726261636b2d73796e632d7631206d616368696e652d7369676e6564111111111111",
+    "11111111111111111111111111111111111111111111111111110194f3a27b1c7d2e8f3041526374",
+    "8596aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaabbbbbbbbbbbb",
+    "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb01cccccccccccccccccccccccccc",
+    "cccccccccccccccccccccccccccccccccccccc000000000000000309486561727462656174015abd",
+    "7f5cc57a2dd94b7590f04ad8084273905ee33ec5cebeae62276a97f862",
 ];
 
 /// `hub-refused`.
