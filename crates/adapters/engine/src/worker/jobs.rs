@@ -471,15 +471,17 @@ pub(crate) fn prune(ctx: &Context, job: &PruneJobSpec) -> Result<Done, JobError>
     let plan = repository.prune_plan(&options)?;
     let result = prune_result(id, &plan.stats);
     if let Err(error) = repository.prune(&options, plan) {
-        let lapsed = |detail: &str| JobError::Failed {
-            code: api::ErrorCode::MaintenanceLeaseLapsed,
-            detail: detail.to_owned(),
-        };
         return Err(match gate.heard() {
-            Some(Some(DeleteAnswer::DeleteNothing)) => lapsed(
-                "the daemon answered that this machine may no longer maintain the repository",
-            ),
-            Some(None) => lapsed("the daemon didn't answer in time"),
+            Some(Some(DeleteAnswer::DeleteNothing)) => JobError::Failed {
+                code: api::ErrorCode::MaintenanceLeaseLapsed,
+                detail: "the daemon answered that this machine may no longer maintain the \
+                         repository"
+                    .to_owned(),
+            },
+            Some(None) => JobError::Failed {
+                code: api::ErrorCode::MaintenanceDeletionUnanswered,
+                detail: "the daemon didn't answer in time, or its answer wasn't one".to_owned(),
+            },
             Some(Some(DeleteAnswer::Delete)) | None => error.into(),
         });
     }

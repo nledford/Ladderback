@@ -745,6 +745,11 @@ fn failure_refusal(reason: FailureReason) -> FailureRefusal {
         // Only a maintenance run's prune fails this way, and it is told as
         // the run tells it.
         F::LeaseLapsed => unavailable(ErrorCode::MaintenanceLeaseLapsed, Vec::new(), None),
+        F::DeletionUnanswered => unavailable(
+            ErrorCode::MaintenanceDeletionUnanswered,
+            Vec::new(),
+            None,
+        ),
         // Only a run the schedule started records a refusal (§5): a
         // repository job or a read is refused before it runs, as
         // `secret_refusal` says.

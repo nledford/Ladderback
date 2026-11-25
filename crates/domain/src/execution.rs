@@ -106,7 +106,8 @@ impl OperationStatus {
                 | Why::ConfigUnusable
                 | Why::KeyFilesNotLeftOut
                 | Why::RestoreTargetUnwritable
-                | Why::LeaseLapsed => None,
+                | Why::LeaseLapsed
+                | Why::DeletionUnanswered => None,
             },
             Self::Queued | Self::Running | Self::Cancelled => None,
         }
@@ -248,12 +249,14 @@ pub enum FailureReason {
         field: String,
         refusal: refusal::SettingRefusal,
     },
-    /// A prune worked out its plan and then, before it deleted or rewrote
-    /// anything, wasn't let go on: this paired machine no longer held a live
-    /// lease on the repository from its hub, or the daemon didn't answer the
-    /// prune's question in time (§7.3; §16, decision 161). Nothing was
-    /// deleted.
+    /// A prune came to its first delete and wasn't let go on: this paired
+    /// machine no longer held a live lease on the repository from its hub
+    /// (§7.3; §16, decision 161). Nothing was deleted.
     LeaseLapsed,
+    /// A prune came to its first delete, asked whether this machine may
+    /// still maintain the repository, and had no answer in time (§16,
+    /// decision 161). Nothing was deleted.
+    DeletionUnanswered,
 }
 
 impl FailureReason {
@@ -289,6 +292,7 @@ impl FailureReason {
             Self::PasswordNotAccepted => "password-not-accepted",
             Self::SecretRefused { refusal, .. } => refusal.code(),
             Self::LeaseLapsed => "maintenance-lease-lapsed",
+            Self::DeletionUnanswered => "maintenance-deletion-unanswered",
         }
     }
 }

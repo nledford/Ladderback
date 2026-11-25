@@ -193,6 +193,9 @@ pub fn failure(reason: &FailureReason) -> ErrorDto {
             ErrorDto::new(code, args, detail)
         }
         F::LeaseLapsed => ErrorDto::new(ErrorCode::MaintenanceLeaseLapsed, [], None),
+        F::DeletionUnanswered => {
+            ErrorDto::new(ErrorCode::MaintenanceDeletionUnanswered, [], None)
+        }
     }
 }
 
@@ -814,6 +817,10 @@ mod tests {
             (
                 F::LeaseLapsed,
                 ErrorDto::new(C::MaintenanceLeaseLapsed, [], None),
+            ),
+            (
+                F::DeletionUnanswered,
+                ErrorDto::new(C::MaintenanceDeletionUnanswered, [], None),
             ),
             (
                 F::SecretsTooLargeToMask {
