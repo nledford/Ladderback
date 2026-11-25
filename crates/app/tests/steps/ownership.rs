@@ -433,7 +433,12 @@ impl OwnershipWorld {
     /// Whether `machine` may maintain `repository` now.
     async fn permits(&mut self, machine: &str, repository: &str) -> Result<(), NoLease> {
         let id = self.repository(repository);
-        self.holder(machine).await.leases.permits(Some(&id)).await
+        self.holder(machine)
+            .await
+            .leases
+            .permits(Some(&id))
+            .await
+            .map(|_| ())
     }
 
     /// Notes whether more than one machine may maintain `repository` now.

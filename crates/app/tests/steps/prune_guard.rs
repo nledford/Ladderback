@@ -170,7 +170,11 @@ async fn prune(agent: &mut Agent) {
         async move {
             let now = clock.now();
             leases
-                .take(&granted(2, 3, now, SignedDuration::from_hours(7 * 24)), 0, now)
+                .take(
+                    &granted(2, 3, now, SignedDuration::from_hours(7 * 24)),
+                    0,
+                    now,
+                )
                 .await
                 .expect("the new grant is kept");
         }
