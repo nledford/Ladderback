@@ -88,6 +88,10 @@ pub(super) struct PlanRunner {
     /// The hub's leases a paired machine maintains under (§7.3, I1): none
     /// in a build without the hub, which never pairs.
     pub(super) leases: Option<Arc<app::leases::MaintenanceLeases>>,
+    /// The backups this machine runs, which a paired machine's heartbeat
+    /// names so its hub holds other machines' prunes of their repositories
+    /// (§7.3, layer 2; §16, decision 166).
+    pub(super) running: Arc<app::running::RunningBackups>,
 }
 
 impl PlanRunner {
@@ -210,7 +214,8 @@ impl PlanRunner {
             Arc::clone(&self.store),
         )
         .with_hooks(Arc::clone(&self.hooks), setup)
-        .with_events(Arc::clone(&self.events));
+        .with_events(Arc::clone(&self.events))
+        .with_running(Arc::clone(&self.running));
         match &self.full_disk_access {
             Some(check) => use_case.with_full_disk_access(Arc::clone(check)),
             None => use_case,

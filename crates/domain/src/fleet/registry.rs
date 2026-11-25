@@ -50,6 +50,34 @@ pub fn voids_tokens_for_new_key(agents: usize) -> bool {
     agents == 0
 }
 
+/// Why hub mode may not be off: machines are paired with this hub, and with
+/// hub mode off each would lose its hub (§16, decision 136, point 5). Their
+/// hostnames as the hub registered them, in the order given.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct HubModeOffRefused {
+    pub paired: Vec<Hostname>,
+}
+
+/// Whether this machine may run with hub mode off, given the machines
+/// `registered` with it at `now`: only while none is paired. An approved
+/// machine is paired, and so is one waiting for approval that hasn't
+/// lapsed; a lapsed one isn't, since the hub drops it unjudged.
+pub fn decide_hub_mode_off(
+    registered: &[AgentRecord],
+    now: Timestamp,
+) -> Result<(), HubModeOffRefused> {
+    let paired: Vec<Hostname> = registered
+        .iter()
+        .filter(|record| !record.lapsed_at(now))
+        .map(|record| record.hostname.clone())
+        .collect();
+    if paired.is_empty() {
+        Ok(())
+    } else {
+        Err(HubModeOffRefused { paired })
+    }
+}
+
 /// A token's life when none is asked for.
 pub const TOKEN_LIFE: SignedDuration = SignedDuration::from_mins(15);
 

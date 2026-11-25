@@ -22,8 +22,8 @@ use app::ports::{
 use app::sync::{LiveProgress, ReadPlans, RecordReports, SyncWithHub};
 use domain::fleet::{
     AgentStatus, Approval, ApprovalRefused, Fingerprint, Hostname, HubAddress, HubRoute, HubScheme,
-    MachineZone, PairingToken, RouteRefused, RouteSession, TokenId, TokenTls, WelcomeRefused,
-    is_loopback,
+    KeyFile, MachineZone, PairingToken, RouteRefused, RouteSession, TokenId, TokenTls,
+    WelcomeRefused, is_loopback,
 };
 use domain::{SignedDuration, Timestamp};
 use futures::StreamExt as _;
@@ -88,6 +88,60 @@ pub(crate) fn hub_pairing(data_dir: &Path, store: Arc<SqliteStore>) -> HubPairin
         store,
         Arc::new(SystemClock),
     )))
+}
+
+/// Whether hub mode, turned off by config.toml or `--hub=false`, stays on
+/// (§16, decision 167), saying why on stderr and in the log when it does or
+/// when the paired machines can't be read. It stays on while a machine is
+/// paired, naming each, so none loses its hub. A registry that can't be read
+/// keeps it on only when the hub key in `data_dir` shows this machine was a
+/// hub; a machine that never was stays one that isn't.
+pub(crate) fn hub_mode_kept_on(
+    localizer: &Localizer,
+    runtime: &tokio::runtime::Runtime,
+    store: &SqliteStore,
+    data_dir: Option<&Path>,
+) -> io::Result<bool> {
+    let records = match runtime.block_on(store.agents()) {
+        Ok(records) => records,
+        Err(error) => {
+            let was_a_hub =
+                data_dir.is_some_and(|dir| dir.join(KeyFile::HubKey.file_name()).exists());
+            let (message, words) = if was_a_hub {
+                (msg::CLI_WARN_HUB_MODE_UNREAD_KEPT_ON, "stays on")
+            } else {
+                (msg::CLI_WARN_HUB_MODE_UNREAD_OFF, "is off")
+            };
+            log::warn!(
+                "hub mode {words}: the machines paired with this hub couldn't be read ({error})"
+            );
+            say(localizer, message, &[("detail", text(&error))])?;
+            return Ok(was_a_hub);
+        }
+    };
+    let Err(kept) = domain::fleet::decide_hub_mode_off(&records, Timestamp::now()) else {
+        return Ok(false);
+    };
+    log::warn!(
+        "hub mode stays on: {} machine(s) are paired with this hub",
+        kept.paired.len()
+    );
+    say(
+        localizer,
+        msg::CLI_WARN_HUB_MODE_KEPT_ON,
+        &[(
+            "count",
+            MsgArg::Count(u64::try_from(kept.paired.len()).unwrap_or(u64::MAX)),
+        )],
+    )?;
+    for hostname in &kept.paired {
+        say(
+            localizer,
+            msg::CLI_WARN_HUB_MODE_PAIRED_MACHINE,
+            &[("hostname", text(hostname.as_str()))],
+        )?;
+    }
+    Ok(true)
 }
 
 /// The hub's TLS key in `data_dir`, from which its built-in TLS serves a
@@ -960,6 +1014,10 @@ pub(crate) struct Maintained {
     pub(crate) config: Arc<dyn app::ports::ConfigStore>,
     pub(crate) listings: Arc<app::others_snapshots::ListingsDue>,
     pub(crate) leases: Arc<MaintenanceLeases>,
+    /// The backups this machine runs, which each heartbeat names so the
+    /// hub holds other machines' prunes of their repositories (§7.3, layer
+    /// 2; §16, decision 166).
+    pub(crate) running: Arc<app::running::RunningBackups>,
 }
 
 /// This machine's reports to its hub (§7.2): once it paired, a recorder
@@ -992,6 +1050,7 @@ pub(crate) async fn reporting(
         config,
         listings,
         leases,
+        running,
     } = maintained;
     let identity = Arc::new(FileIdentity::in_data_dir(&data_dir));
     let mut early = Some(early);
@@ -1037,7 +1096,8 @@ pub(crate) async fn reporting(
     .with_leases(config, leases, store, Arc::clone(listings.seen()))
     .with_listings(listings)
     .with_standing(standing)
-    .with_progress(Arc::clone(&progress));
+    .with_progress(Arc::clone(&progress))
+    .with_running(running);
     if let Some(plans) = plans {
         syncing = syncing.with_plans(plans);
     }
@@ -1388,6 +1448,7 @@ mod tests {
                     Arc::<SqliteStore>::clone(&store),
                     Arc::new(SystemClock),
                 )),
+                running: Arc::default(),
             },
             Arc::default(),
             None,

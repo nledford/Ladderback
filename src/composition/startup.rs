@@ -203,6 +203,12 @@ impl Background {
         self.runner.leases.clone()
     }
 
+    /// The runner whose backups run, for a test of what the daemon wires.
+    #[cfg(all(test, feature = "hub"))]
+    pub(super) fn runner(&self) -> &PlanRunner {
+        &self.runner
+    }
+
     /// What the daemon's orderly stop freezes: every run of an operation,
     /// whoever started it (decision 92).
     pub(crate) fn runs(&self) -> runs::Runs {
@@ -230,6 +236,13 @@ impl Background {
     #[cfg(feature = "hub")]
     pub(crate) fn leases(&self) -> Arc<app::leases::MaintenanceLeases> {
         Arc::clone(&self.leases)
+    }
+
+    /// The backups this daemon runs, which a paired machine's heartbeat
+    /// names (§16, decision 166).
+    #[cfg(feature = "hub")]
+    pub(crate) fn running(&self) -> Arc<app::running::RunningBackups> {
+        Arc::clone(&self.runner.running)
     }
 
     /// What a paired machine tells its hub of its plans (§7.2): their
@@ -440,15 +453,15 @@ pub(super) async fn resume_queued(
 }
 
 /// What the daemon's router runs against (§4.2), with `sign_in` deciding who
-/// may use it, or why it cannot, and `exposure` who can reach it, which the
-/// session route tells the page. With sign-in on, the sessions draw their
+/// may use it, or why it cannot; who can reach it is set by the caller once
+/// the `[serve]` table it hands back is read (§16, decision 167). With
+/// sign-in on, the sessions draw their
 /// tokens from `random`, and the API tokens are kept in the daemon's store.
 /// A restart is offered when `service_managed`: a service manager runs the
 /// daemon, and starts it again once it exits (decision 94).
 pub(crate) async fn daemon(
     sign_in: SignInDecided,
     random: Arc<dyn Random>,
-    exposure: http_adapter::Exposure,
     service_managed: bool,
     recent_log: Arc<dyn app::ports::RecentLogStore>,
 ) -> Result<Daemon, Refused> {
@@ -499,7 +512,6 @@ pub(crate) async fn daemon(
         random,
         Arc::new(SystemClock),
     ));
-    daemon.state.exposure = exposure;
     daemon.background.releases = releases(std::env::var_os(RELEASES_URL_VARIABLE));
     Ok(daemon)
 }
@@ -546,6 +558,9 @@ pub(super) async fn daemon_at(
         Arc::new(SystemClock),
     ));
     let loaded = config.load().await.map_err(config_refused)?;
+    // What `serve` starts with, read under the lock as the rest of the file
+    // is (§9; §16, decision 167).
+    let serve = loaded.serve().clone();
     log_inline_secrets(&loaded);
     log_never_matching_globs(
         &loaded,
@@ -581,6 +596,7 @@ pub(super) async fn daemon_at(
             lock,
             background,
             workers,
+            serve,
         }),
         Err(refused) => {
             log.close().await;
@@ -766,6 +782,7 @@ async fn state_over(
         full_disk_access,
         machine: standing,
         leases: leases.clone(),
+        running: Arc::new(app::running::RunningBackups::new()),
     });
     // `~/ladderback-restore`. With no home folder, or one that isn't
     // UTF-8, there is none: a restore to a new folder then needs

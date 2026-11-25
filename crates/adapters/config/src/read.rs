@@ -17,9 +17,9 @@ use domain::planning::{
     KeepWithin, Locale, Location, LocationRule, Locations, MAX_DRY_RUN_FOLDERS, MAX_LOCATIONS,
     MAX_NETWORK_NAMES, MAX_RULE_ALTERNATIVES, Maintenance, NameFilter, NetworkKind, NetworkName,
     Nice, OnFailure, Overlap, Plan, RepositoryConfig, RepositoryField, RepositorySettings,
-    RestoreFolder, RetentionPolicy, RetryPolicy, Schedule, Source, SourceFilter, UpdateCheck,
-    ValueKind, Violation, check_location, check_location_count, check_option_value, check_options,
-    parse_duration,
+    RestoreFolder, RetentionPolicy, RetryPolicy, Schedule, ServeSettings, Source, SourceFilter,
+    UpdateCheck, ValueKind, Violation, check_location, check_location_count, check_option_value,
+    check_options, parse_duration,
 };
 use domain::secrets::{CommandLine, FileRead, KeyringEntry, SecretRef, SecretValue};
 use domain::{InvalidId, PlanId, RepositoryAlias, RepositoryId};
@@ -28,7 +28,7 @@ use crate::locate::{Doc, Path, key_span, position, value_span};
 use crate::tables::{
     AgentTable, AlternativeTable, ChannelTable, FileTable, HookEntryTable, HookValue, HooksTable,
     LocationTable, NotificationsTable, PlanTable, RepositoryTable, RetentionTable, RetryTable,
-    RuleTable, ScheduleTable, WithoutTokenTable,
+    RuleTable, ScheduleTable, ServeTable, WithoutTokenTable,
 };
 use crate::zone::schedule_zone;
 
@@ -126,10 +126,30 @@ pub(crate) fn config(reader: &Reader<'_, '_>, file: FileTable) -> Read<AgentConf
         &root.key("without-token"),
         file.without_token.unwrap_or_default(),
     )?;
+    let serve = serve(reader, &root.key("serve"), file.serve.unwrap_or_default())?;
     AgentConfig::new(agent, hooks, repositories, plans)
         .and_then(|config| config.with_notifications(Notifications::new(channels, rules)?))
-        .map(|config| config.with_without_token(without_token))
+        .map(|config| config.with_without_token(without_token).with_serve(serve))
         .map_err(|violation| violated(reader, &root, violation))
+}
+
+/// The `[serve]` table: what `serve` starts with before its flags override
+/// it (§16, decisions 136 and 167). The address is checked here; the host
+/// names at start, by the check `--allowed-host` gets.
+fn serve(reader: &Reader<'_, '_>, path: &Path, table: ServeTable) -> Read<ServeSettings> {
+    let ServeTable {
+        listen,
+        allowed_hosts,
+        hub,
+    } = table;
+    let listen = listen
+        .map(|text| reader.value(&path.key("listen"), ServeSettings::parse_listen(&text)))
+        .transpose()?;
+    Ok(ServeSettings {
+        listen,
+        allowed_hosts: allowed_hosts.unwrap_or_default(),
+        hub: hub.unwrap_or(false),
+    })
 }
 
 /// The `[without-token]` table: what AI agents may do without a token, each

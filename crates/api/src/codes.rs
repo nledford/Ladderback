@@ -385,6 +385,12 @@ pub enum ErrorCode {
     /// ran out on the hub's time. Nothing in the repository was changed. The
     /// argument `alias` names it.
     MaintenanceNoLease,
+    /// The hub holds the prune: this machine is paired with it, and another
+    /// machine may be backing up to the repository, or this machine hasn't
+    /// heard from its hub in the last 90 seconds (§7.3, layer 2; §16,
+    /// decision 166). Refused before anything was stored; nothing in the
+    /// repository was changed. The argument `alias` names it.
+    MaintenancePruneHeld,
     /// A prune came to its first delete and was told that this machine may
     /// no longer maintain the repository: it is paired with a hub and its
     /// lease on the repository lapsed while the prune ran (§7.3; §16,
@@ -1541,11 +1547,13 @@ impl ErrorCode {
                 kind: ArgKind::Text,
                 optional: false,
             }],
-            Self::MaintenanceNotOwner | Self::MaintenanceNoLease => &[ArgSpec {
-                name: "alias",
-                kind: ArgKind::Text,
-                optional: false,
-            }],
+            Self::MaintenanceNotOwner | Self::MaintenanceNoLease | Self::MaintenancePruneHeld => {
+                &[ArgSpec {
+                    name: "alias",
+                    kind: ArgKind::Text,
+                    optional: false,
+                }]
+            }
             Self::RetentionKeepsNothing => &[ArgSpec {
                 name: "plan",
                 kind: ArgKind::Text,

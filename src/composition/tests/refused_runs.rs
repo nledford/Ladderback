@@ -71,6 +71,7 @@ async fn a_backup_started_by_hand_and_refused_for_its_secret_says_why_in_the_log
         full_disk_access: None,
         machine: Arc::default(),
         leases: None,
+        running: Arc::default(),
         left_out: KeyFilesLeftOut::default(),
         writes: Arc::default(),
     };
@@ -398,6 +399,7 @@ async fn another_plan_runs_while_a_run_waits_for_the_keyring_to_be_unlocked() {
         full_disk_access: None,
         machine: Arc::default(),
         leases: None,
+        running: Arc::default(),
         left_out: KeyFilesLeftOut::default(),
         writes: Arc::default(),
     };
@@ -2194,6 +2196,7 @@ async fn refused_runner(
         full_disk_access: None,
         machine: Arc::default(),
         leases: None,
+        running: Arc::default(),
         left_out: KeyFilesLeftOut::default(),
         writes: Arc::default(),
     };

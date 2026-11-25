@@ -16,6 +16,20 @@ Turning sign-in off and recovering a forgotten password happen only at the termi
 
 It serves plain HTTP, so with sign-in on put a reverse proxy with TLS in front of it. [Technical design §10.1](https://github.com/nledford/Ladderback/blob/main/docs/design/security.md#101-web-ui) has the details.
 
+## Settings in config.toml
+
+The address, the host names and hub mode can live in the `[serve]` table of `config.toml` instead, so the service `ladderback install-service` writes, which runs `ladderback serve --service-managed` with no other flag, starts with them:
+
+```toml
+[serve]
+listen = "0.0.0.0:9898"
+allowed-hosts = ["nas.example.com"]
+```
+
+Ladderback reads the table when it starts, so restart it after a change. A flag you give replaces its key: `--listen` the address, and any `--allowed-host` the whole list.
+
+`hub = true` in the same table makes the machine the hub in place, with its plans, snapshots and data folder as they are, and `--hub` or `--hub=false` overrides it. Hubs aren't in a release yet ([Install](install.md)). Once hub mode is on and machines are paired with it, turning it off doesn't take effect: Ladderback stays the hub, so none of them loses it, and says at start which machines to remove first in **Settings → Machines**. Moving a machine into the Docker image to make it the hub isn't supported yet ([Docker](docker.md)).
+
 ## A hub behind a reverse proxy
 
 A hub reached through a reverse proxy must turn sign-in on, by setting an admin password ([Sign-in](#sign-in)). With sign-in off, a hub trusts a request that comes from its own computer and names it as the host. A proxy on that computer sends its requests from there, and some name `127.0.0.1` as their host, as nginx does by default, so a request from anywhere looks as if it came from the hub's own computer. Anyone who can reach the proxy could then use Ladderback as you do, and make a pairing token with nothing but the hub key's ID, which isn't secret. With sign-in off, the hub's **Settings → Machines** says so too. Hubs aren't in a release yet ([Install](install.md)); [decision 120](https://github.com/nledford/Ladderback/blob/main/docs/design/decisions/120-agent-hub-connection-security.md) has the details.

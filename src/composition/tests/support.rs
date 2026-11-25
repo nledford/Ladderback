@@ -194,6 +194,7 @@ pub(super) async fn runner_at_a_gate() -> (
         full_disk_access: None,
         machine: Arc::default(),
         leases: None,
+        running: Arc::default(),
         left_out: KeyFilesLeftOut::default(),
         writes: Arc::default(),
     };
