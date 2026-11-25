@@ -38,11 +38,22 @@ table! {
         // Read by the schema probe before this table is, and written by `render`.
         schema: i64,
         agent: AgentTable,
+        serve: ServeTable,
         hooks: HooksTable,
         repositories: Repositories,
         plans: Vec<PlanTable>,
         notifications: NotificationsTable,
         without_token: WithoutTokenTable,
+    }
+}
+
+table! {
+    /// `[serve]`: what `serve` starts with, each key overridden by the flag
+    /// of its name (§16, decisions 136 and 167).
+    ServeTable {
+        listen: String,
+        allowed_hosts: Vec<String>,
+        hub: bool,
     }
 }
 

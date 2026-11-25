@@ -14,14 +14,15 @@ use domain::notifications::{Auth, Channel, Notifications, Rule};
 use domain::planning::{
     AgentConfig, AgentSettings, Cadence, GlobFile, GroupBy, HookEntry, Hooks, KeepCount,
     KeepWithin, Location, LocationRule, Maintenance, NameFilter, NetworkName, Overlap, Plan,
-    RepositoryConfig, RetentionPolicy, RetryPolicy, Schedule, UpdateCheck, format_duration,
+    RepositoryConfig, RetentionPolicy, RetryPolicy, Schedule, ServeSettings, UpdateCheck,
+    format_duration,
 };
 use domain::secrets::{FileRead, SecretRef};
 
 use crate::tables::{
     AgentTable, AlternativeTable, ChannelTable, FileTable, HookEntryTable, HookValue, HooksTable,
     LocationTable, NotificationsTable, PlanTable, Repositories, RepositoryTable, RetentionTable,
-    RetryTable, RuleTable, ScheduleTable, WithoutTokenTable,
+    RetryTable, RuleTable, ScheduleTable, ServeTable, WithoutTokenTable,
 };
 
 /// `value` unless it is empty, which isn't written.
@@ -34,8 +35,9 @@ fn glob_files(files: &[GlobFile]) -> Option<Vec<String>> {
     (!files.is_empty()).then(|| files.iter().map(|file| file.as_str().to_owned()).collect())
 }
 
-/// The text of `tables`: `schema`, then `[agent]` and `[hooks]`, a table for
-/// each repository with a `[[…locations]]` table for each further location, a table for each plan with its `[plans.retention]`, and
+/// The text of `tables`: `schema`, then `[agent]`, `[serve]` and `[hooks]`,
+/// a table for each repository with a `[[…locations]]` table for each further
+/// location, a table for each plan with its `[plans.retention]`, and
 /// a table for each notification channel and rule.
 /// `Err` holds what `toml` said when it couldn't write a value.
 pub(crate) fn text(tables: &FileTable) -> Result<String, String> {
@@ -45,7 +47,7 @@ pub(crate) fn text(tables: &FileTable) -> Result<String, String> {
     let mut out = String::new();
     for (key, value) in &root {
         match (key.as_str(), value) {
-            ("agent" | "hooks" | "without-token", toml::Value::Table(table)) => {
+            ("agent" | "serve" | "hooks" | "without-token", toml::Value::Table(table)) => {
                 section(&mut out, key, false, table, &[])?;
             }
             ("repositories", toml::Value::Table(all)) => {
@@ -169,11 +171,22 @@ pub(crate) fn file(config: &AgentConfig, schema: i64) -> Result<FileTable, Strin
     Ok(FileTable {
         schema: Some(schema),
         agent: agent(config.agent()),
+        serve: serve(config.serve()),
         hooks: hooks(config.hooks()),
         repositories: (!repositories.is_empty()).then_some(Repositories(repositories)),
         plans: (!config.plans().is_empty()).then(|| config.plans().iter().map(plan).collect()),
         notifications: notifications(config.notifications())?,
         without_token: without_token(config.without_token()),
+    })
+}
+
+/// The `[serve]` table with only the keys set, unless none is (§16,
+/// decision 167).
+fn serve(settings: &ServeSettings) -> Option<ServeTable> {
+    (settings != &ServeSettings::default()).then(|| ServeTable {
+        listen: settings.listen.map(|address| address.to_string()),
+        allowed_hosts: some_if_any(&settings.allowed_hosts),
+        hub: settings.hub.then_some(true),
     })
 }
 

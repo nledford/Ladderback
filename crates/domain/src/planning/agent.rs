@@ -117,6 +117,16 @@ pub struct ServeSettings {
     pub hub: bool,
 }
 
+impl ServeSettings {
+    /// The address `text` names for [`listen`](Self::listen): an IP address
+    /// with a port, such as `[::]:9898` or `192.0.2.10:9898`, as `--listen`
+    /// takes it.
+    pub fn parse_listen(text: &str) -> Result<SocketAddr, InvalidValue> {
+        text.parse()
+            .map_err(|_| InvalidValue::new(ValueKind::ListenAddress, text))
+    }
+}
+
 /// A rule that only the whole configuration can break. `index` is the
 /// position of the plan in the list, from 0, so that a message can say
 /// which of a long list it means.
@@ -289,7 +299,8 @@ impl AgentConfig {
     /// The configuration with `agent`, `hooks`, `repositories` and `plans`
     /// in place of its own, checked whole as [`AgentConfig::new`] and
     /// [`AgentConfig::with_notifications`] check a loaded one, its
-    /// notification rules and what AI agents may do without a token kept.
+    /// notification rules, what AI agents may do without a token and what
+    /// `serve` starts with kept.
     /// Every change that rebuilds a configuration from its parts goes
     /// through here, so a change to one part never resets another it doesn't
     /// touch to its default.
@@ -304,6 +315,7 @@ impl AgentConfig {
             .with_notifications(self.notifications.clone())?;
         Ok(Self {
             without_token: self.without_token,
+            serve: self.serve.clone(),
             ..rebuilt
         })
     }

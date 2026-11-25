@@ -66,8 +66,16 @@ pub fn decide_hub_mode_off(
     registered: &[AgentRecord],
     now: Timestamp,
 ) -> Result<(), HubModeOffRefused> {
-    let _ = (registered, now);
-    todo!()
+    let paired: Vec<Hostname> = registered
+        .iter()
+        .filter(|record| !record.lapsed_at(now))
+        .map(|record| record.hostname.clone())
+        .collect();
+    if paired.is_empty() {
+        Ok(())
+    } else {
+        Err(HubModeOffRefused { paired })
+    }
 }
 
 /// A token's life when none is asked for.
