@@ -345,3 +345,143 @@ async fn machine_rows(raw: &mut SqliteConnection, table: &str, machine: domain::
         .await
         .expect("a count")
 }
+
+/// The first real `node` on the test's own `PATH`, which runs the
+/// repository's scripts. A version manager's shim (mise, asdf) is passed
+/// over: it resolves to the manager, which reads the test's scratch `HOME`
+/// and would install Node there.
+fn node() -> Option<std::path::PathBuf> {
+    let path = std::env::var_os("PATH")?;
+    std::env::split_paths(&path)
+        .map(|dir| dir.join("node"))
+        .filter_map(|candidate| std::fs::canonicalize(candidate).ok())
+        .find(|real| real.is_file() && real.file_name().is_some_and(|name| name == "node"))
+}
+
+/// `node scripts/copy-to-baseline.ts <log>`: its exit code, and what it
+/// said on standard output and standard error.
+fn copy_to_baseline(node: &std::path::Path, log: &std::path::Path) -> (Option<i32>, String) {
+    let script = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+        .join("../../../scripts/copy-to-baseline.ts");
+    let ran = std::process::Command::new(node)
+        .arg(script)
+        .arg(log)
+        .stdin(std::process::Stdio::null())
+        .output()
+        .expect("the copy script runs");
+    let said = format!(
+        "{}{}",
+        String::from_utf8_lossy(&ran.stdout),
+        String::from_utf8_lossy(&ran.stderr)
+    );
+    (ran.status.code(), said)
+}
+
+/// How many rows `table` holds.
+async fn rows(raw: &mut SqliteConnection, table: &str) -> i64 {
+    sqlx::query_scalar(sqlx::AssertSqlSafe(format!(
+        "SELECT COUNT(*) FROM \"{table}\""
+    )))
+    .fetch_one(raw)
+    .await
+    .expect("a count")
+}
+
+/// The copy script (decision 165) takes a log at 0029 into the baseline
+/// schema, which the store opens, and opens again: every row kept but the
+/// junk the baseline's rules prove, which it names. Run again, it refuses,
+/// as it does a log not at 0029, and leaves the log as it was.
+#[tokio::test]
+async fn the_copy_script_takes_a_log_at_0029_into_the_baseline_and_refuses_any_other() {
+    use app::ports::{HistoryQuery, OperationStore};
+
+    let Some(node) = node() else {
+        testkit::skip!("no node on the PATH to run scripts/copy-to-baseline.ts");
+    };
+    let scratch = Scratch::new();
+    database_at_0029(&scratch).await;
+
+    let (code, said) = copy_to_baseline(&node, &scratch.path());
+    assert_eq!(code, Some(0), "the copy succeeds: {said}");
+    for dropped in [
+        "dropped 1 rows of sync_plans",
+        "dropped 1 rows of sync_plan_snapshots",
+        "dropped 1 rows of sync_progress",
+        "dropped 1 rows of ownership_reports",
+        "dropped 1 rows of sync_reports",
+    ] {
+        assert!(
+            said.contains(dropped),
+            "the script says {dropped:?}: {said}"
+        );
+    }
+    let kept = format!("{}.before-baseline", scratch.path().display());
+    assert!(std::path::Path::new(&kept).is_file(), "the old log is kept");
+
+    scratch.open().await.close().await;
+    let store = scratch.open().await;
+    let mut raw = scratch.raw().await;
+    for (table, held) in [
+        ("operations", 4),
+        ("op_warnings", 2),
+        ("schedule_state", 1),
+        ("retry_state", 1),
+        ("api_tokens", 1),
+        ("sessions", 1),
+        ("sign_in_settings", 1),
+        ("repo_stats", 1),
+        ("release_check", 1),
+        ("proposals", 1),
+        ("hub_tls_key", 1),
+        ("sync_outbox_meta", 1),
+        ("sync_outbox", 1),
+        ("pairing_tokens", 3),
+        ("machines", 2),
+        ("machine_tombstones", 1),
+        ("sync_watermarks", 2),
+        ("sync_reports", 3),
+        ("sync_report_tallies", 2),
+        ("repository_owners", 2),
+        ("ownership_reports", 1),
+        ("sync_plans", 1),
+        ("sync_plan_snapshots", 1),
+        ("sync_progress", 1),
+        ("machine_leases", 1),
+        ("machine_epoch_floors", 1),
+        ("machine_maintenance_paused", 1),
+        ("hub_recovery_floors", 1),
+    ] {
+        assert_eq!(rows(&mut raw, table).await, held, "{table}");
+    }
+    let tallied: i64 = sqlx::query_scalar(
+        "SELECT held FROM sync_report_tallies \
+         WHERE machine_id = '00000000-0000-0000-0000-0000000000a1'",
+    )
+    .fetch_one(&mut raw)
+    .await
+    .expect("the tally");
+    assert_eq!(tallied, 1, "the tally counts the reports still held");
+    let page = store
+        .list(&HistoryQuery::default())
+        .await
+        .expect("the history reads");
+    assert_eq!(page.operations.len(), 4, "every operation reads back");
+    raw.close().await.expect("the connection closes");
+    store.close().await;
+
+    let before = fs::read(scratch.path()).expect("the new log is readable");
+    let (code, said) = copy_to_baseline(&node, &scratch.path());
+    assert_eq!(code, Some(1), "a second run is refused: {said}");
+    fs::remove_file(&kept).expect("the kept copy is moved away");
+    let (code, said) = copy_to_baseline(&node, &scratch.path());
+    assert_eq!(code, Some(1), "a log in the baseline is refused: {said}");
+    assert!(
+        said.contains("not an operation log at migration 29"),
+        "{said}"
+    );
+    assert_eq!(
+        fs::read(scratch.path()).expect("the new log is readable"),
+        before,
+        "a refused log is left as it was"
+    );
+}
