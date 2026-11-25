@@ -6,9 +6,11 @@
 //! snapshot and progress is kept in place of the one before and told to
 //! the browsers.
 
+use std::sync::PoisonError;
+
 use api::{MachineProgressDto, OperationStep, ProgressUnit, UiEvent};
 use domain::fleet::{EpochSeconds, ReportedProgress, WireName, heartbeat_ack_kind, plans_ack_kind};
-use domain::maintenance::RunningBackup;
+use domain::maintenance::{RunningBackup, held_prunes};
 use domain::{AgentId, RepositoryId, Timestamp};
 
 use super::{Answered, HubPairing, HubPairingError, MessageRefused};
@@ -36,8 +38,19 @@ impl HubPairing {
     /// say, which holds every other machine's prune while `agent` is
     /// online (§16, decision 166).
     pub fn heard_running(&self, agent: AgentId, running: Option<Vec<RunningBackup>>) {
-        let _ = (agent, running);
-        todo!()
+        let mut kept = self
+            .presence
+            .running
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner);
+        match running {
+            Some(running) => {
+                kept.insert(agent, running);
+            }
+            None => {
+                kept.remove(&agent);
+            }
+        }
     }
 
     /// The repositories whose prune the hub holds for `agent`, now: those
@@ -46,8 +59,17 @@ impl HubPairing {
     /// (`domain::maintenance::held_prunes`). A machine offline holds
     /// nothing.
     pub fn prunes_held_for(&self, agent: AgentId) -> Option<Vec<RepositoryId>> {
-        let _ = agent;
-        todo!()
+        let others = self.online_except(agent);
+        let running = self
+            .presence
+            .running
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner);
+        held_prunes(
+            others
+                .iter()
+                .map(|other| running.get(other).map(Vec::as_slice)),
+        )
     }
 
     /// Keeps `agent`'s snapshot of its plans in place of the one before,

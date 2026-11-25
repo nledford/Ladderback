@@ -91,6 +91,8 @@ impl HubPairing {
             this_one.then(|| live.remove(&agent)).flatten()
         };
         if ended.is_some() {
+            // What it ran ends with it: a machine offline holds no prune.
+            self.forget_running(agent);
             if let Err(error) = self.registry.record_seen(agent, self.clock.now()).await {
                 log::warn!("the hub couldn't keep when it last heard from a machine: {error:?}");
             }
@@ -107,6 +109,27 @@ impl HubPairing {
             .contains_key(&agent)
     }
 
+    /// The machines the hub holds a connection of, but `agent`.
+    pub(super) fn online_except(&self, agent: AgentId) -> Vec<AgentId> {
+        self.presence
+            .live
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .keys()
+            .filter(|online| **online != agent)
+            .copied()
+            .collect()
+    }
+
+    /// Forgets what `agent`'s heartbeats said it runs.
+    fn forget_running(&self, agent: AgentId) {
+        self.presence
+            .running
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .remove(&agent);
+    }
+
     /// Closes the machine `agent`'s live connection, if the hub holds one:
     /// a person removed the machine (decision 154), which then syncs no more
     /// on a connection it proved before. The browsers heard it was removed.
@@ -117,6 +140,7 @@ impl HubPairing {
             .lock()
             .unwrap_or_else(PoisonError::into_inner)
             .remove(&agent);
+        self.forget_running(agent);
         // Closed outside the lock: what closes it may take its own.
         if let Some((_, close)) = held {
             close();
