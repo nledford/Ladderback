@@ -598,7 +598,11 @@ async fn i1_a_prune_asks_at_its_first_delete_and_told_no_deletes_nothing() {
             .cloned()
             .collect()
     };
-    assert_eq!(gone(&at_the_ask), Vec::<String>::new(), "removed before the ask");
+    assert_eq!(
+        gone(&at_the_ask),
+        Vec::<String>::new(),
+        "removed before the ask"
+    );
     assert!(
         at_the_ask
             .iter()

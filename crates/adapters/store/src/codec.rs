@@ -846,11 +846,11 @@ mod tests {
             assert_eq!(columns.code, code);
             assert_eq!(columns.args, "[]");
             assert_eq!(columns.detail, None);
-            let back =
-                match decode_failure(Some(columns.code), Some(&columns.args), columns.detail) {
-                    Ok(reason) => reason,
-                    Err(bad) => panic!("the written columns decode: {} {}", bad.column, bad.why),
-                };
+            let back = match decode_failure(Some(columns.code), Some(&columns.args), columns.detail)
+            {
+                Ok(reason) => reason,
+                Err(bad) => panic!("the written columns decode: {} {}", bad.column, bad.why),
+            };
             assert_eq!(back, reason);
         }
     }

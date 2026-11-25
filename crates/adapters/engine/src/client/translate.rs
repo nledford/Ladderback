@@ -790,7 +790,10 @@ mod tests {
     #[test]
     fn a_prune_stopped_at_its_first_delete_keeps_why() {
         for (code, reason) in [
-            (ErrorCode::MaintenanceLeaseLapsed, FailureReason::LeaseLapsed),
+            (
+                ErrorCode::MaintenanceLeaseLapsed,
+                FailureReason::LeaseLapsed,
+            ),
             (
                 ErrorCode::MaintenanceDeletionUnanswered,
                 FailureReason::DeletionUnanswered,

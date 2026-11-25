@@ -193,9 +193,7 @@ pub fn failure(reason: &FailureReason) -> ErrorDto {
             ErrorDto::new(code, args, detail)
         }
         F::LeaseLapsed => ErrorDto::new(ErrorCode::MaintenanceLeaseLapsed, [], None),
-        F::DeletionUnanswered => {
-            ErrorDto::new(ErrorCode::MaintenanceDeletionUnanswered, [], None)
-        }
+        F::DeletionUnanswered => ErrorDto::new(ErrorCode::MaintenanceDeletionUnanswered, [], None),
     }
 }
 
