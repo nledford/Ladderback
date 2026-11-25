@@ -101,7 +101,7 @@ cli-warn-hub-mode-kept-on = { $count ->
 
 # One machine paired with the hub that kept hub mode on, under cli-warn-hub-mode-kept-on.
 # $hostname (text): the machine's hostname as the hub registered it. It is shown as it is.
-cli-warn-hub-mode-paired-machine = { "  " }{ $hostname }
+cli-warn-hub-mode-paired-machine = { "  " }paired: { $hostname }
 
 # The daemon could not say where its own program file is, so it cannot start
 # workers.
