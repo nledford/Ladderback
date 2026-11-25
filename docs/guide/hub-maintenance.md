@@ -1,6 +1,6 @@
 # Maintenance with a hub
 
-Maintaining a repository means forgetting the snapshots its plans no longer keep, pruning the data no snapshot uses, checking it, and adopting history into a plan. Exactly one machine may maintain a repository, so that two never delete from it at once. Without a hub, you keep it to one: a machine maintains a repository when you press **Maintain from this machine** for it on its **Repositories** page, which sets `maintenance = "local"` in its entry in `config.toml`. Once the machine is paired with a hub, the hub makes sure of it too.
+Maintaining a repository means forgetting the snapshots its plans no longer keep, pruning the data no snapshot uses, checking it, and adopting history into a plan. Exactly one machine may maintain a repository, so that two never delete from it at once. Without a hub, you keep it to one: a machine maintains a repository when you tick **Maintain this repository from this machine** as you connect it, or press **Maintain from this machine** for it on the **Snapshots** page, which sets `maintenance = "local"` in its entry in `config.toml`. Once the machine is paired with a hub, the hub makes sure of it too.
 
 Hubs aren't in a release yet ([The hub](hub.md)).
 
@@ -8,11 +8,11 @@ Hubs aren't in a release yet ([The hub](hub.md)).
 
 A paired machine maintains a repository it asks to maintain only while it holds the hub's **lease** on it. The machine asks with each report of the repositories it uses, about every 15 minutes while it can reach the hub. The hub grants the first machine that asks a lease of 7 days, and renews it each time that machine asks again. Only one machine holds a repository's lease at a time: the hub refuses every other while it holds. A machine waiting for approval is granted nothing.
 
-A lease runs out on the hub's clock, never the machine's, so a machine whose clock is wrong still stops in time. When its holder stops asking, because it is off, removed from the hub or can't reach it, its lease runs out 7 days after it was last renewed, and an hour later the hub may grant the repository to another machine that asks. A machine that no longer uses a repository gives its lease back, so another can have it at once.
+A lease runs out on the hub's clock, never the machine's, so a machine whose clock is wrong still stops in time. When its holder stops asking, because it is off, removed from the hub or can't reach it, its lease runs out 7 days after it was last renewed, and an hour later the hub may grant the repository to another machine that asks. A machine that stops maintaining a repository, with **Stop maintaining from this machine**, gives its lease back, so another can have it at once.
 
 ## A repository more than one machine uses
 
-The hub grants a lease only on a repository no other machine uses. When a second paired machine reports the same repository, or the repository holds a snapshot another machine made in the last 30 days, the hub grants it to no machine. A machine that held its lease before keeps it until it runs out, unrenewed; after that, no machine maintains the repository.
+The hub grants a lease only on a repository no other machine uses. When a second approved machine reports the same repository, or the repository holds a snapshot another machine made in the last 30 days, the hub grants it to no machine. A machine that held its lease before keeps it until it runs out, unrenewed; after that, no machine maintains the repository.
 
 To tell, a machine lists each repository it asks to maintain at most once a day, before it reports to the hub; until a listing succeeds, the hub counts the repository as used by another machine. Snapshots the machine's earlier installation made, under another machine ID, count as another machine's until you adopt them into one of its plans.
 

@@ -14,7 +14,7 @@ Turning sign-in off and recovering a forgotten password happen only at the termi
 
 `ladderback serve --listen` takes an address beyond loopback only with at least one `--allowed-host`, the name the browser reaches Ladderback by. With sign-in off it then listens too, as Backrest does, and warns at start and on every page that **anyone who can reach that address can run and change backups**: do that only on a network you trust.
 
-It serves plain HTTP, so with sign-in on put a reverse proxy with TLS in front of it. [Technical design §10.1](https://github.com/nledford/Ladderback/blob/main/docs/design/security.md#101-web-ui) has the details.
+It serves plain HTTP, so with sign-in on put a reverse proxy with TLS in front of it. A hub serves its own TLS instead ([The hub's address](hub.md#the-hubs-address)). [Technical design §10.1](https://github.com/nledford/Ladderback/blob/main/docs/design/security.md#101-web-ui) has the details.
 
 ## Settings in config.toml
 
