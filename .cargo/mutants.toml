@@ -214,6 +214,21 @@
 # The wasm32-only test modules of `web` (`formatting.rs`, `time_zones.rs`) are
 # not listed: they are declared `#[cfg(test)]`, which cargo-mutants skips (see
 # `main.rs`), and their tests run in `just test-wasm`.
+#
+# `crates/web/src/settings/agents.rs` is the DOM glue of Settings' Agents
+# section on a hub (§16, decision 121, "The hub's dialog"): it reads the
+# hub's key and the standing it was read in, sends the make and cancel
+# requests, holds the form's and the dialog's signals, shows a token made,
+# counts it down on the page's clock, clears its text when it ends or the
+# dialog is left, copies it, moves focus to Make a new token, and shows and
+# announces what the section says. Whether the daemon is a hub, the
+# certificate offered first, whether an address is plain or warned of, what
+# a token is asked for, how long it has left and how its lapse reads, the
+# life typed, the address a cancel is sent to, which token the dialog shows,
+# counts down and may cancel, when the dialog was left and what the section
+# says of a cancel once it is closed are `pairing.rs`'s, mutated on the
+# host; the `@ui` scenarios of `features/ui/pairing_dialog.feature` run the
+# glue in Chromium.
 exclude_globs = [
     "crates/app/src/contract/**",
     "crates/l10n/src/browser.rs",
@@ -239,6 +254,7 @@ exclude_globs = [
     "crates/web/src/settings/dry_run_allowlist.rs",
     "crates/web/src/settings/machines.rs",
     "crates/web/src/dashboard_page.rs",
+    "crates/web/src/settings/agents.rs",
 ]
 # Mutants that no test can tell from the real code, or that no host can run:
 exclude_re = [
@@ -248,7 +264,7 @@ exclude_re = [
     # offset onto the wire, or `KeyringEntry`) says something a test can check,
     # so its mutants are judged. A new error type joins this list only when its
     # Display is there for `Error` alone.
-    "<impl std::fmt::Display for (ClientUnavailable|SessionFailed|ClientError|OpenError|InvalidZone|InvalidOffset|InvalidSnapshot|InvalidOperation|ConfigError|StoreError|ProfileError|ExportRefusal|SourcesError|ResolveError|LifecycleError|KeepDeleteTooShort|ReservedTag|InvalidId|InvalidValue|Violation|NoNextRun|CommandLineError|SecretError|NotAKeyringEntry|TemplateError)>",
+    "<impl std::fmt::Display for (ClientUnavailable|SessionFailed|ClientError|OpenError|InvalidZone|InvalidZoneName|InvalidOffset|InvalidSnapshot|InvalidOperation|ConfigError|StoreError|ProfileError|ExportRefusal|SourcesError|ResolveError|LifecycleError|KeepDeleteTooShort|ReservedTag|InvalidId|InvalidValue|Violation|NoNextRun|CommandLineError|SecretError|NotAKeyringEntry|TemplateError)>",
     # `web`'s `main` mounts the app into the page's `#app` through `web-sys`,
     # which only works in a browser: on the host the mutant builds and nothing
     # calls `main`. The `@ui` scenarios run it in Chromium, where a `main` that
@@ -305,7 +321,7 @@ exclude_re = [
     # `cancelling_a_wait_stops_the_wait_and_never_the_operation` checks that
     # it is never sent. The other `!`s of the wait are not excluded and are
     # caught. Named by line, so a moved line brings the mutant back to judge.
-    'crates/adapters/mcp/src/lib\.rs:535:31: delete ! in Server::wait_operation$',
+    'crates/adapters/mcp/src/lib\.rs:806:31: delete ! in Server::wait_operation$',
     # `FolderPath::top` is `Self::default()`, the path that names no folder:
     # the mutant that returns `Default::default()` is the same code.
     'crates/domain/src/browse\.rs.*: replace FolderPath::top -> Self with Default::default\(\)$',
@@ -320,6 +336,108 @@ exclude_re = [
     # of the walk are not excluded and are caught. Named by line, so a moved
     # line brings the mutant back to judge.
     'crates/app/src/proposals/diff\.rs:174:65: replace \+ with \* in middle$',
+    # `ToolName::built` is `!matches!(self, PairingState) || cfg!(feature = "hub")`.
+    # A workspace build (the one `cargo mutants` tests) unifies features and
+    # `ladderback` turns `hub` on, so the `||` is `true` for every tool: both
+    # `true` and the deleted `!` give the same answer, and no test of that
+    # build can tell them apart. Only a build without `hub` takes the other
+    # branch. Named by line, so a moved line brings the mutant back to judge.
+    'crates/adapters/mcp/src/lib\.rs:186:9: (delete ! in ToolName::built|replace ToolName::built -> bool with true)$',
+    # The fake agent registry's `Keeping` (how long its fake store's write
+    # takes) has a Debug only so the registry's derived Debug compiles: no
+    # test, contract or scenario prints a fake's internals, and what it
+    # writes changes nothing the registry does. Named by line, so a moved
+    # line brings the mutant back to judge.
+    'crates/app/src/fakes/agent_registry\.rs:36:9: replace <impl fmt::Debug for Keeping>::fmt -> fmt::Result with Ok\(Default::default\(\)\)$',
+    # `decoded`'s scratch buffer is `SIGNATURE_BYTES + 3` bytes; the mutant's
+    # `SIGNATURE_BYTES * 3` is only larger. The text's length is checked
+    # before it is decoded, so every decode fits either buffer and gives the
+    # same bytes or the same refusal. Named by line, so a moved line brings
+    # the mutant back to judge.
+    'crates/app/src/pairing/wire\.rs:619:42: replace \+ with \* in decoded$',
+    # `decoded` takes only a text of `(N * 4).div_ceil(3)` characters, and a
+    # strict decode of that many characters gives exactly `N` bytes or fails
+    # (stray bits are refused), so the guard `length == N` is true whenever
+    # the decode succeeds: a guard of `true` takes the same branch every
+    # time. Named by line, so a moved line brings the mutant back to judge.
+    'crates/app/src/pairing/wire\.rs:621:23: replace match guard length == N with true in decoded$',
+    # A token ID's byte is a high hex digit shifted left four bits and a low one
+    # below it: the two never share a bit, so `|` and `^` give the same byte.
+    # Other bytes (`&`) are caught.
+    'crates/domain/src/fleet/fingerprint\.rs.*: replace \| with \^ in TokenId::parse$',
+    # `unquoted` returning `Some(...)` for every text makes `parse_pasted`'s
+    # `while let Some(unwrapped) = unquoted(inner)` loop forever, so every test
+    # that reads a paste (`fleet::token::tests::a_pasted_token_*`) hangs rather
+    # than fails: the mutant is caught, only as a timeout no test can turn
+    # into a fast failure without a watchdog thread. Named by line, so a moved
+    # line brings the mutant back to judge.
+    'crates/domain/src/fleet/token\.rs:293:5: replace unquoted -> Option<&str> with Some\(""\)$',
+    'crates/domain/src/fleet/token\.rs:293:5: replace unquoted -> Option<&str> with Some\("xyzzy"\)$',
+    # `while rest.is_empty()` in `Template::parse` returns at once for any
+    # non-empty text (an empty template, which the secrets tests refuse) and
+    # loops forever on `""`, which nothing consumes: the tests that parse an
+    # empty template hang (`secrets::inline::tests::each_piece_is_where_the_text_writes_it`,
+    # `secrets::tests::hostile_rclone_locations_end_without_a_panic`), so the
+    # mutant is caught only as a timeout. Named by line, so a moved line brings
+    # the mutant back to judge.
+    'crates/domain/src/secrets/template\.rs:126:15: delete ! in Template::parse$',
+    # The copied data folder notice's offer to a machine its hub refused is
+    # DOM glue of the start page: its body is the one that names the command
+    # that forgets a computer, which the `@ui` scenario "A machine its hub
+    # refused is told, and takes a new ID by keyboard alone" of
+    # `features/ui/copied_data_folder.feature` checks in Chromium. Named by
+    # line, so a moved line brings the mutant back to judge.
+    'crates/web/src/copied_data_folder\.rs:116:9: delete field body from struct Offer expression in CopiedDataFolder$',
+    # `App`'s read of the hub's key drops an answer read in a standing the
+    # page has since left. It is a browser effect (`spawn_local`, signals);
+    # a guard of `!=` drops every current answer, so a hub never shows its
+    # Machines tab, which every `@ui` scenario of
+    # `features/ui/approving_machines.feature` opens in Chromium. Named by
+    # line, so a moved line brings the mutant back to judge.
+    'crates/web/src/main\.rs:459:46: replace == with != in App$',
+    # Each page's `paced` takes which shown value is its first load: DOM
+    # glue. A test of `!=` hides the page's "Loading…" while it waits, which
+    # the `@ui` scenarios check: the operations page's "A page still waiting
+    # for the daemon's answer is accessible while it loads"
+    # (`features/ui/accessibility.feature`), the repositories page's "The
+    # repositories page is accessible while it waits for the daemon's first
+    # answer" (`features/ui/repositories.feature`), and the start page's and
+    # the AI agents tab's in `features/ui/first_load.feature`. Named by line,
+    # so a moved line brings the mutant back to judge.
+    'crates/web/src/operations_page\.rs:210:75: replace == with != in Operations$',
+    'crates/web/src/repositories_page\.rs:323:68: replace == with != in Repositories$',
+    'crates/web/src/start_page\.rs:101:67: replace == with != in Start$',
+    'crates/web/src/settings/ai_agents\.rs:162:67: replace == with != in AiAgentsSection$',
+    # `panic_report::install` sets a hook that writes through `console.error`,
+    # which only a browser has. `just test-wasm` runs it:
+    # `a_panic_is_written_to_the_console_by_its_place_never_its_message`
+    # (`crates/web/src/panic_report/tests/browser.rs`) fails when no hook is
+    # installed. What the line says is `line`'s, tested on the host.
+    'crates/web/src/panic_report\.rs:23:5: replace install with \(\)$',
+    # Whether the repositories page has rows to list, rather than "No
+    # repositories yet.", is DOM glue (a memo of the page's signals); the
+    # `@ui` scenarios of `features/ui/repositories.feature` check both: "The
+    # page lists the configured repositories without a password" and the one
+    # that shows "No repositories yet.". Named by line, so a moved line brings
+    # the mutant back to judge.
+    'crates/web/src/repositories_page\.rs:320:63: delete ! in Repositories$',
+    # The AI agents tab's save is DOM glue (`spawn_local`, signals, focus):
+    # a wrong admin password is the field's error, which the `@ui` scenario
+    # "With sign-in on, a wrong admin password is the field's own error, which
+    # focus reads once, and the tab has no live region of its own"
+    # (`features/automation/ai_agents_settings.feature`) checks, and the tab
+    # says what the permissions limit with sign-in off, which "With sign-in
+    # off, the tab says what the permissions limit, and saves a change by
+    # keyboard alone" checks ("limit only ladderback mcp"). Named by line, so
+    # a moved line brings the mutant back to judge.
+    'crates/web/src/settings/ai_agents\.rs:112:17: delete match arm Some\(Posted::Refused\(code @ErrorCode::CurrentPasswordWrong, args, detail\)\) in AiAgentsSection$',
+    'crates/web/src/settings/ai_agents\.rs:155:24: delete ! in AiAgentsSection$',
+    # Whether the start page's table of plans has a Notes column is DOM glue
+    # (`start_plans_table` builds the table's columns); the `@ui` scenario "A
+    # glob of a plan that can never match is pointed out on its row in words"
+    # of `features/ui/start_page.feature`, whose one plan has a note, checks
+    # it. Named by line, so a moved line brings the mutant back to judge.
+    'crates/web/src/start_page\.rs:217:41: delete ! in start_plans_table$',
 ]
 # A mutant that makes a test hang is caught, but slowly; fail fast instead.
 timeout_multiplier = 3.0
