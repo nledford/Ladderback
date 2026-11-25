@@ -46,8 +46,16 @@ pub struct RunningBackup {
 pub fn held_prunes<'a>(
     others: impl IntoIterator<Item = Option<&'a [RunningBackup]>>,
 ) -> Option<Vec<RepositoryId>> {
-    let _ = others;
-    todo!()
+    let mut held = BTreeSet::new();
+    for running in others {
+        for backup in running? {
+            held.insert(backup.repository.clone()?);
+            if held.len() > MAX_RUNNING_BACKUPS {
+                return None;
+            }
+        }
+    }
+    Some(held.into_iter().collect())
 }
 
 /// The latest answer a paired machine heard from its hub of the prunes it
@@ -67,8 +75,11 @@ impl PruneHolds {
         wall: Timestamp,
         monotonic: SignedDuration,
     ) -> Self {
-        let _ = (held, wall, monotonic);
-        todo!()
+        Self {
+            held,
+            wall,
+            monotonic,
+        }
     }
 
     /// Whether the prune of `repository` is held at `wall` and
@@ -81,8 +92,19 @@ impl PruneHolds {
         wall: Timestamp,
         monotonic: SignedDuration,
     ) -> bool {
-        let _ = (repository, wall, monotonic);
-        todo!()
+        let wall_age = wall.duration_since(self.wall);
+        let Some(monotonic_age) = monotonic.checked_sub(self.monotonic) else {
+            return true;
+        };
+        let stale = wall_age.is_negative()
+            || monotonic_age.is_negative()
+            || wall_age >= HOLDS_STAND_FOR
+            || monotonic_age >= HOLDS_STAND_FOR;
+        stale
+            || self
+                .held
+                .as_ref()
+                .is_none_or(|held| held.contains(repository))
     }
 }
 
