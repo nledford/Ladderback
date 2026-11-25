@@ -4323,6 +4323,10 @@ ui-plan-field-hint = { $field ->
    *[name] Up to 64 lower-case letters, digits and hyphens, starting with a letter or a digit. It is the plan's ID, which tags its { -snapshot(form: "other") }, and can't be changed once the plan is saved.
   }
 
+# The hint under the cron field of a plan that runs at an interval (the configuration file's { "every" }), which the form has no field for: in place of the field's own hint, so the empty field never reads as no schedule. Saved with the field still empty, the plan keeps that interval.
+# $every (duration): how often the plan runs, such as 1 h 0 min; or, when the form can't read it, the interval as the file writes it, such as 1h.
+ui-plan-cron-hint-every = This plan runs every { $every }, as its configuration file sets it. A cron schedule typed here replaces that interval; left empty, the plan keeps it.
+
 # The button that saves the plan form.
 ui-plan-save = Save the plan
 

@@ -261,6 +261,12 @@ impl Field {
     }
 }
 
+/// The hint under `field` in the form of `plan`.
+pub(crate) fn hint_of(field: Field, plan: &PlanDto) -> Said {
+    let _ = (field, plan);
+    todo!()
+}
+
 /// A list entry as its line shows it: text as it is, a hook written as a
 /// table by its command, and anything else as the file's JSON would say it.
 fn line_of(entry: &Value) -> String {
