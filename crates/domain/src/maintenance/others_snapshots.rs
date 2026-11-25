@@ -8,7 +8,7 @@
 
 use super::other_hosts::OTHER_AGENT_RECENCY;
 use super::{OwnerTag, owner_tag};
-use crate::execution::plan_tags::MACHINE_TAG_PREFIX;
+use crate::execution::plan_tags::{MACHINE_TAG_PREFIX, carries_earlier_machine_tag};
 use crate::{AgentId, SignedDuration, Timestamp};
 
 /// How long a listing's answer stands (decision 156): a repository last
@@ -34,9 +34,11 @@ impl OtherAgentsSnapshots {
     /// Among `snapshots`, each its time and its tags, as the agent `agent`
     /// listed them. A snapshot is another agent's when its
     /// `ladderback-machine:` tags name another agent, or disagree, which
-    /// `agent`'s tag alone no longer proves was made here. One they name
-    /// `agent` in, as the history of an earlier installation once adopted
-    /// into a plan of this agent, and one no agent tagged, aren't.
+    /// `agent`'s tag alone no longer proves was made here, or when it still
+    /// carries an earlier build's `ladderback-agent:` tag, which names no
+    /// machine this build reads (decision 163). One they name `agent` in,
+    /// as the history of an earlier installation once adopted into a plan
+    /// of this agent, and one no agent tagged, aren't.
     pub fn of<'a>(
         agent: &AgentId,
         snapshots: impl IntoIterator<Item = (Timestamp, &'a [String])>,
@@ -44,10 +46,13 @@ impl OtherAgentsSnapshots {
         let own = agent.as_uuid().hyphenated().to_string();
         let newest = snapshots
             .into_iter()
-            .filter(|(_, tags)| match owner_tag(tags, MACHINE_TAG_PREFIX) {
-                OwnerTag::One(tagger) => tagger != own,
-                OwnerTag::Disagree => true,
-                OwnerTag::Absent => false,
+            .filter(|(_, tags)| {
+                carries_earlier_machine_tag(tags)
+                    || match owner_tag(tags, MACHINE_TAG_PREFIX) {
+                        OwnerTag::One(tagger) => tagger != own,
+                        OwnerTag::Disagree => true,
+                        OwnerTag::Absent => false,
+                    }
             })
             .map(|(time, _)| time)
             .max();
@@ -147,6 +152,22 @@ mod tests {
             another_agent().as_uuid().hyphenated()
         ));
         assert!(recent(&[(now() - days(3), tags)]));
+    }
+
+    /// A snapshot an earlier build tagged `ladderback-agent:` names no
+    /// machine this build reads, so the hub hears the repository is shared
+    /// until it is retagged, whichever machine it names: read only to fail
+    /// closed, never as this agent's (I1; §16, decision 163).
+    #[test]
+    fn a_snapshot_an_earlier_build_tagged_is_another_agents_whichever_it_names() {
+        for named in [agent(), another_agent()] {
+            let tags = vec![
+                format!("{PLAN_TAG_PREFIX}home"),
+                format!("ladderback-agent:{}", named.as_uuid().hyphenated()),
+            ];
+            assert!(recent(&[(now() - days(3), tags.clone())]), "{named:?}");
+            assert!(!recent(&[(now() - days(31), tags)]), "{named:?}");
+        }
     }
 
     #[test]

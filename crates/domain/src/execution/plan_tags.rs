@@ -10,6 +10,17 @@ pub const RESERVED_TAG_PREFIX: &str = "ladderback-";
 pub const PLAN_TAG_PREFIX: &str = "ladderback-plan:";
 /// The tag prefix naming the machine that made a snapshot.
 pub const MACHINE_TAG_PREFIX: &str = "ladderback-machine:";
+/// The tag prefix an earlier build named the machine under, before
+/// [`MACHINE_TAG_PREFIX`] (§16, decision 163). It never makes a snapshot a
+/// plan's or this machine's: it is read only to fail closed, so a snapshot
+/// that still carries it counts as another machine's until it is retagged.
+pub const EARLIER_MACHINE_TAG_PREFIX: &str = "ladderback-agent:";
+
+/// Whether `tags` hold a tag under [`EARLIER_MACHINE_TAG_PREFIX`].
+pub fn carries_earlier_machine_tag(tags: &[String]) -> bool {
+    tags.iter()
+        .any(|tag| tag.starts_with(EARLIER_MACHINE_TAG_PREFIX))
+}
 
 /// A tag the user adds to a plan's snapshots. It never starts with
 /// [`RESERVED_TAG_PREFIX`], in any case, so it can't make a snapshot look like

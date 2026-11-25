@@ -11,6 +11,7 @@ use std::collections::BTreeSet;
 
 use super::others_snapshots::recent;
 use super::{OwnerTag, Ownership, Snapshot};
+use crate::execution::plan_tags::carries_earlier_machine_tag;
 use crate::execution::{Warning, WarningKind};
 use crate::planning::AgentConfig;
 use crate::{AgentId, RepositoryAlias, SignedDuration, Timestamp};
@@ -46,7 +47,9 @@ impl OtherHosts {
     /// `OTHER_AGENT_RECENCY` up to `now` (or later, by a clock ahead of
     /// this one), whatever host it records, since two machines can share one
     /// name; so is one whose agent tags disagree, which this agent's tag
-    /// alone no longer proves was made here. Else it is this host's when its
+    /// alone no longer proves was made here, and one that still carries an
+    /// earlier build's `ladderback-agent:` tag, which names no machine this
+    /// build reads (decision 163). Else it is this host's when its
     /// host is one this agent records: the machine's own name, the agent's
     /// `hostname`, or the `host` of any of its plans. Only a repository whose
     /// entry asks for `local` maintenance has any.
@@ -76,10 +79,15 @@ impl OtherHosts {
         let own = agent.as_uuid().hyphenated().to_string();
         let others: BTreeSet<&str> = snapshots
             .into_iter()
-            .filter(|snapshot| match snapshot.agent() {
-                OwnerTag::One(tagger) if tagger == own => false,
-                OwnerTag::One(_) | OwnerTag::Disagree if recent(snapshot.time, now) => true,
-                _ => !this_host.contains(snapshot.hostname.as_str()),
+            .filter(|snapshot| {
+                if carries_earlier_machine_tag(&snapshot.tags) && recent(snapshot.time, now) {
+                    return true;
+                }
+                match snapshot.agent() {
+                    OwnerTag::One(tagger) if tagger == own => false,
+                    OwnerTag::One(_) | OwnerTag::Disagree if recent(snapshot.time, now) => true,
+                    _ => !this_host.contains(snapshot.hostname.as_str()),
+                }
             })
             .map(|snapshot| snapshot.hostname.as_str())
             .collect();
@@ -399,6 +407,30 @@ mod tests {
                 other_hosts_among(&config, &[disagreeing]),
                 [MACHINE],
                 "this agent's tag alone no longer proves it was made here: {tags:?}"
+            );
+        }
+    }
+
+    /// A recent snapshot an earlier build tagged `ladderback-agent:` names
+    /// no machine this build reads, so it counts as another machine's until
+    /// it is retagged, whatever machine it names and host it records: read
+    /// only to warn, never as this agent's (§16, decision 163).
+    #[test]
+    fn a_recent_snapshot_an_earlier_build_tagged_is_another_hosts() {
+        let config = config(Maintenance::Local, None, [None, None]);
+        for named in [agent(), another_agent()] {
+            let earlier = Snapshot {
+                tags: vec![
+                    format!("{PLAN_TAG_PREFIX}home"),
+                    format!("ladderback-agent:{}", named.as_uuid().hyphenated()),
+                ],
+                time: now(),
+                ..snapshot(1, MACHINE)
+            };
+            assert_eq!(
+                other_hosts_among(&config, &[earlier]),
+                [MACHINE],
+                "{named:?}"
             );
         }
     }
