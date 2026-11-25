@@ -391,9 +391,6 @@ fn run_events(
             return Ok(Exit::Reported { failed: true });
         }
     };
-    // What follows the spec's line is a prune's one answer: a few bytes,
-    // and nothing past them is read (decision 161).
-    input.get_mut().set_limit(MAX_ANSWER_BYTES as u64 + 1);
     // From here on, the secrets of the job never reach the stream (I4).
     if let Some(repository) = repository_of(&spec.job) {
         events.redact_with(repository.redactor());
