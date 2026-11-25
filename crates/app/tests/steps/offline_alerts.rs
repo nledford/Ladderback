@@ -29,6 +29,7 @@ const OPS_URL: &str = "https://ops.example/hook";
 
 /// The hub's notification rules and what they were sent.
 pub(super) struct Alerting {
+    config: Arc<InMemoryConfigStore>,
     notify: Arc<Notify>,
     notifier: Arc<RecordingNotifier>,
 }
@@ -46,15 +47,14 @@ fn sent(agent: &Agent) -> Vec<Notification> {
     alerting(agent).notifier.delivered()
 }
 
-#[given(regex = r#"^the hub has a rule that sends "([^"]+)" to the webhook channel "([^"]+)"$"#)]
-async fn hub_rule(agent: &mut Agent, events: String, channel: String) {
+/// A configuration whose one rule, "machines", sends `events` to the
+/// webhook channel `channel`.
+fn rule(events: &str, channel: &str) -> AgentConfig {
     let kinds: BTreeSet<EventKind> = events
         .split(", ")
         .map(|name| EventKind::parse(name).expect("an event"))
         .collect();
-    let channel = ChannelName::parse(&channel).unwrap();
-    let secrets = Arc::new(FakeSecrets::new());
-    secrets.set_env("DEMO_OPS_URL", OPS_URL);
+    let channel = ChannelName::parse(channel).unwrap();
     let notifications = Notifications::new(
         BTreeMap::from([(
             channel.clone(),
@@ -71,7 +71,7 @@ async fn hub_rule(agent: &mut Agent, events: String, channel: String) {
         )]),
     )
     .unwrap();
-    let config = AgentConfig::new(
+    AgentConfig::new(
         AgentSettings::default(),
         Hooks::default(),
         BTreeMap::new(),
@@ -79,17 +79,37 @@ async fn hub_rule(agent: &mut Agent, events: String, channel: String) {
     )
     .unwrap()
     .with_notifications(notifications)
-    .unwrap();
-    let store = InMemoryConfigStore::new();
-    store.save(&config).await.unwrap();
+    .unwrap()
+}
+
+#[given(regex = r#"^the hub has a rule that sends "([^"]+)" to the webhook channel "([^"]+)"$"#)]
+async fn hub_rule(agent: &mut Agent, events: String, channel: String) {
+    let secrets = Arc::new(FakeSecrets::new());
+    secrets.set_env("DEMO_OPS_URL", OPS_URL);
+    let config = Arc::new(InMemoryConfigStore::new());
+    config.save(&rule(&events, &channel)).await.unwrap();
     let notifier = Arc::new(RecordingNotifier::new());
     let notify = Arc::new(Notify::new(
-        Arc::new(store),
+        config.clone(),
         Arc::new(InMemoryOperationStore::new()),
         secrets,
         notifier.clone(),
     ));
-    agent.pairing.alerts = Some(Alerting { notify, notifier });
+    agent.pairing.alerts = Some(Alerting {
+        config,
+        notify,
+        notifier,
+    });
+}
+
+#[given(regex = r#"^the hub's rule for "([^"]+)" is changed to send only "([^"]+)"$"#)]
+#[when(regex = r#"^the hub's rule for "([^"]+)" is changed to send only "([^"]+)"$"#)]
+async fn rule_changed(agent: &mut Agent, channel: String, events: String) {
+    alerting(agent)
+        .config
+        .save(&rule(&events, &channel))
+        .await
+        .unwrap();
 }
 
 /// The hub watches its machines once, as its daemon does every 30
@@ -123,10 +143,13 @@ async fn starts_again(agent: &mut Agent) {
     is_connected(agent).await;
 }
 
+/// The hub's daemon starts again, and watches its machines at once, as its
+/// first tick does.
 #[when("the hub's daemon restarts")]
 async fn hub_restarts(agent: &mut Agent) {
     let restarted = agent.pairing.hub().restarted().await;
     agent.pairing.hub = Some(restarted);
+    watch(agent).await;
 }
 
 #[then(regex = r#"^"([^"]+)" was sent nothing$"#)]
@@ -193,7 +216,10 @@ fn sent_offline_then_online(
     to_ops(&sent);
     let kinds: Vec<&str> = sent.iter().map(|sent| sent.event.kind.name()).collect();
     assert_eq!(kinds, [offline.as_str(), online.as_str()]);
-    let back = &sent[1].event;
+    let [_, back] = sent.as_slice() else {
+        panic!("two notifications: {sent:?}");
+    };
+    let back = &back.event;
     assert_eq!(
         back.machine.as_ref().map(|machine| machine.as_str()),
         Some(hostname.as_str())

@@ -51,6 +51,16 @@ Feature: The hub alerts when a paired machine stays offline
     And the hub watches its machines
     Then "ops" was sent nothing
 
+  Scenario: An alert no rule sent goes to the first rule that sends it, while the machine stays offline
+    Given the hub's rule for "ops" is changed to send only "backup.failed"
+    When the agent stops sending anything
+    And 90 seconds pass on the hub's clock
+    And the hub watches its machines for 15 minutes
+    Then "ops" was sent nothing
+    When the hub's rule for "ops" is changed to send only "machine.offline, machine.online"
+    And the hub watches its machines
+    Then "ops" was sent "machine.offline" for "laptop", offline since 15 minutes ago
+
   Scenario: Removing an offline machine cancels its alert
     When the agent stops sending anything
     And 90 seconds pass on the hub's clock
