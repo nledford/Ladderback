@@ -69,7 +69,7 @@ The design is split by topic. A `§N` or `§N.N` mentioned anywhere in the repos
   - [13.13 Formatting](development.md#1313-formatting)
 - [14. Milestones](roadmap.md#14-milestones)
 - [15. Risks](roadmap.md#15-risks)
-- [16. Decisions](roadmap.md#16-decisions): the index; each decision is its own file in [decisions/](decisions/README.md)
+- [16. Decisions](roadmap.md#16-decisions): where the decisions are and how to list them; each decision is its own file in [decisions/](decisions/README.md)
 - [17. Open questions](roadmap.md#17-open-questions)
 
 ---

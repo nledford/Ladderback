@@ -29,6 +29,10 @@ const CONFLICT = /^(<{7}|>{7}|\|{7})( |$)|^={7}$/;
 const FENCE = /^(`{3,}|~{3,})/;
 const SECTION = "## 16. Decisions";
 const TABLE_HEAD = ["| # | Question |", "|---|---|"];
+// A link to a decision file in a line with a cell separator: a table row,
+// indented or not, with a leading pipe or not, linked as `decisions/` or
+// `./decisions/`. §16's own prose links decisions too, but has no pipe.
+const ROW_LINK = /\]\((\.\/)?decisions\/\d+-/;
 
 /** The lines of `markdown` outside fenced code, with their 1-based numbers. */
 export function proseLines(markdown: string): { line: string; number: number }[] {
@@ -98,19 +102,25 @@ export function renderIndex(decisions: readonly Decision[]): { lines: string[]; 
   return { lines: [...TABLE_HEAD, ...rows], problems };
 }
 
-/** The 1-based line of the first row in `roadmap`'s §16 that links a decision file, if any. */
-export function indexRowIn(roadmap: string): number | null {
+/** What is wrong with `roadmap` for the decisions, if anything: a conflict
+ * marker anywhere, no §16 heading (so its check can't run), or a table row in
+ * §16 that lists a decision again. */
+export function roadmapProblem(roadmap: string): string | null {
+  const conflict = conflictLine(roadmap);
+  if (conflict !== null) {
+    return `docs/design/roadmap.md:${conflict}: a merge-conflict marker`;
+  }
   const lines = proseLines(roadmap);
-  const section = lines.findIndex(({ line }) => line === SECTION);
+  const section = lines.findIndex(({ line }) => line.trimEnd() === SECTION);
   if (section < 0) {
-    return null;
+    return `docs/design/roadmap.md: no "${SECTION}" heading, so the check that it lists no decision in a table can't run: restore the heading, or change SECTION in scripts/decision-index.ts with it`;
   }
   for (const { line, number } of lines.slice(section + 1)) {
     if (line.startsWith("## ")) {
       return null;
     }
-    if (line.startsWith("|") && line.includes("](decisions/")) {
-      return number;
+    if (line.includes("|") && ROW_LINK.test(line)) {
+      return `docs/design/roadmap.md:${number}: §16 lists a decision in a table again: the decision files are the index (decision 162), so delete the table; \`just decision-index\` prints it`;
     }
   }
   return null;
@@ -135,12 +145,9 @@ if (process.argv[1] && import.meta.url === pathToFileURL(realpathSync(process.ar
   }
   const index = renderIndex(decisions);
   problems.push(...index.problems);
-  const roadmap = readFileSync(roadmapPath, "utf8");
-  const row = indexRowIn(roadmap);
-  if (row !== null) {
-    problems.push(
-      `docs/design/roadmap.md:${row}: §16 lists a decision in a table again: the decision files are the index (decision 162), so delete the table; \`just decision-index\` prints it`,
-    );
+  const roadmapIssue = roadmapProblem(readFileSync(roadmapPath, "utf8"));
+  if (roadmapIssue !== null) {
+    problems.push(roadmapIssue);
   }
   if (problems.length > 0) {
     process.stderr.write(`${problems.join("\n")}\nerror: the decision files have the problems above\n`);

@@ -12,8 +12,8 @@ The files already held everything the table did: the number in the name and the 
 
 1. **No table in §16.** §16 says where the decisions are, how to list them, and when the early ones were recorded.
 2. **`just decision-index` prints the table** in number order, a row per decision, a superseded one marked so, as the committed table was.
-3. **`just lint` keeps checking the files,** as it did: a bad name or heading, a conflict marker and a number two files share each fail it. Two branches that took the same number still meet the duplicate check when the second is updated from `main`, and the branch that merges second renumbers (§13.5, rule 8).
-4. **A row linking a decision in §16 fails `just lint`,** so a branch opened before this change, which still writes the table, can't bring it back in a merge.
+3. **`just lint` keeps checking the files,** as it did: a bad name or heading, a conflict marker and a number two files share each fail it. The committed table also made two branches that took one number conflict, which kept the second from merging; without it their paths differ, so §13.8 now counts a branch that adds a decision file as sharing a file with `main` whenever `main` has added one since their merge base. That branch is updated, `just lint` sees both files, and the one that merges second renumbers (§13.5, rule 8). The merge train follows the same rule.
+4. **`just lint` also refuses, in `roadmap.md`,** a conflict marker anywhere, a §16 heading it can't find (so the check can't pass by not running), and any table line in §16 that links a decision, so a branch opened before this change, which still writes the table, can't bring it back in a merge.
 
 ## What it costs
 
