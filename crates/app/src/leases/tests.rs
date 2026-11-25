@@ -273,3 +273,60 @@ async fn i1_a_watch_keeps_the_lease_a_grant_took_and_the_grant_keeps_the_pauses(
     assert_eq!(kept.pauses().count(), 0);
     assert_eq!(kept.leases().count(), 1);
 }
+
+/// A machine that isn't paired has no hub to hold its prune; a paired one
+/// that heard no answer yet, or whose pin can't be read, holds them all
+/// (§16, decision 166).
+#[tokio::test]
+async fn a_prune_is_held_by_a_hub_only_and_by_one_never_heard() {
+    let lone = machine(Arc::new(InMemoryIdentity::default()));
+    lone.leases.heard_holds(None);
+    assert!(!lone.leases.prune_held(Some(&repository('a'))).await);
+    assert!(!lone.leases.prune_held(None).await);
+
+    let fresh = machine(paired().await);
+    assert!(fresh.leases.prune_held(Some(&repository('a'))).await);
+
+    let unreadable = machine(Arc::new(InMemoryIdentity::unreadable(
+        IdentityError::Damaged {
+            file: KeyFile::HubPin,
+        },
+    )));
+    unreadable.leases.heard_holds(Some(Vec::new()));
+    assert!(unreadable.leases.prune_held(Some(&repository('a'))).await);
+}
+
+/// The hub's latest answer holds the prunes it names, every prune when it
+/// didn't say, and stands 90 seconds on either clock; a repository whose
+/// ID isn't known is held.
+#[tokio::test]
+async fn the_hubs_latest_answer_holds_a_prune_while_it_stands() {
+    let machine = machine(paired().await);
+    machine.leases.heard_holds(Some(vec![repository('b')]));
+    assert!(!machine.leases.prune_held(Some(&repository('a'))).await);
+    assert!(machine.leases.prune_held(Some(&repository('b'))).await);
+    assert!(machine.leases.prune_held(None).await);
+
+    machine.leases.heard_holds(None);
+    assert!(machine.leases.prune_held(Some(&repository('a'))).await);
+
+    machine.leases.heard_holds(Some(Vec::new()));
+    machine.clock.advance(SignedDuration::from_secs(89));
+    assert!(!machine.leases.prune_held(Some(&repository('a'))).await);
+    machine.clock.advance(SignedDuration::from_secs(1));
+    assert!(machine.leases.prune_held(Some(&repository('a'))).await);
+
+    machine.leases.heard_holds(Some(Vec::new()));
+    machine.clock.suspend(SignedDuration::from_secs(90));
+    assert!(
+        machine.leases.prune_held(Some(&repository('a'))).await,
+        "the wall clock passed 90 seconds while asleep"
+    );
+
+    machine.leases.heard_holds(Some(Vec::new()));
+    machine.clock.set_back(SignedDuration::from_secs(1));
+    assert!(
+        machine.leases.prune_held(Some(&repository('a'))).await,
+        "the wall clock went back"
+    );
+}

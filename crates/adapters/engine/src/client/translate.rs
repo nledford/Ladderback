@@ -402,6 +402,7 @@ pub(super) fn translate(event: WorkerEvent, redactor: &Redactor) -> Option<Engin
                 | ErrorCode::MaintenanceBusy
                 | ErrorCode::MaintenanceNotOwner
                 | ErrorCode::MaintenanceNoLease
+                | ErrorCode::MaintenancePruneHeld
                 | ErrorCode::RetentionKeepsNothing
                 | ErrorCode::MaintenanceKindUnknown
                 | ErrorCode::AdoptionNoMatch

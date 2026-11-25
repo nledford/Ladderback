@@ -450,22 +450,116 @@ async fn machines_that_lapsed_unlisted_leave_room_for_a_new_one() {
     assert_eq!(ids, [agent_id(21)]);
 }
 
-/// The hub answers a machine's heartbeat with its own, and refuses a
-/// payload that isn't one (decision 159).
-#[tokio::test]
-async fn a_heartbeat_is_answered_and_one_that_isnt_is_refused() {
+fn repository(byte: u8) -> domain::RepositoryId {
+    domain::RepositoryId::parse(&format!("{byte:02x}").repeat(32)).unwrap()
+}
+
+fn backing_up(n: u128, to: u8) -> domain::maintenance::RunningBackup {
+    domain::maintenance::RunningBackup {
+        op_id: OperationId::from_uuid(Uuid::from_u128(n)),
+        repository: Some(repository(to)),
+    }
+}
+
+/// Machines 1 and 2, paired and approved, each with a live connection.
+async fn two_online() -> Hub {
     let hub = hub();
-    assert_eq!(
+    for n in [1, 2] {
+        paired(&hub, n).await;
+        approve(&hub, n).await;
         hub.pairing
-            .take_heartbeat(&crate::pairing::wire::heartbeat_payload()),
-        Ok(Some((
-            domain::fleet::heartbeat_ack_kind(),
-            crate::pairing::wire::heartbeat_ack_payload()
-        )))
+            .went_live(agent_id(n), n as u64, Box::new(|| {}))
+            .await;
+    }
+    hub
+}
+
+/// What the hub answers machine `n`'s heartbeat that names `running`.
+fn beat(
+    hub: &Hub,
+    n: u128,
+    running: Option<&[domain::maintenance::RunningBackup]>,
+) -> super::Answered {
+    hub.pairing.take_heartbeat(
+        agent_id(n),
+        &crate::pairing::wire::heartbeat_payload(running),
+    )
+}
+
+fn holding(held: Option<&[domain::RepositoryId]>) -> super::Answered {
+    Ok(Some((
+        domain::fleet::heartbeat_ack_kind(),
+        crate::pairing::wire::heartbeat_ack_payload(held),
+    )))
+}
+
+/// The hub answers a machine's heartbeat with the prunes it holds for it:
+/// none it can tell while another machine's heartbeat hasn't said what it
+/// runs, then the repository another machine is backing up to; and it
+/// refuses a payload that isn't a heartbeat (decisions 159 and 166).
+#[tokio::test]
+async fn a_heartbeat_is_answered_with_the_prunes_the_hub_holds_for_its_machine() {
+    let hub = two_online().await;
+    assert_eq!(
+        beat(&hub, 2, Some(&[backing_up(7, 3)])),
+        holding(None),
+        "machine 1 hasn't said what it runs"
+    );
+    assert_eq!(beat(&hub, 1, Some(&[])), holding(Some(&[repository(3)])));
+    assert_eq!(
+        beat(&hub, 2, Some(&[backing_up(7, 3)])),
+        holding(Some(&[])),
+        "a machine's own backups hold none of its prunes"
+    );
+    assert_eq!(beat(&hub, 2, Some(&[])), holding(Some(&[])));
+    assert_eq!(
+        beat(&hub, 1, Some(&[])),
+        holding(Some(&[])),
+        "the backup finished"
+    );
+    assert_eq!(beat(&hub, 2, None), holding(Some(&[])));
+    assert_eq!(
+        beat(&hub, 1, Some(&[])),
+        holding(None),
+        "machine 2 no longer says what it runs"
     );
     assert_eq!(
-        hub.pairing.take_heartbeat(b"not a heartbeat"),
+        hub.pairing.take_heartbeat(agent_id(1), b"not a heartbeat"),
         Err(super::MessageRefused::Unexpected)
+    );
+}
+
+/// A machine that went offline holds no prune, and one that connects again
+/// holds every prune until its heartbeat says what it runs. A heartbeat
+/// taken as the connection's first message, before it went live, counts.
+#[tokio::test]
+async fn a_machine_offline_holds_no_prune_and_one_back_holds_until_it_says() {
+    let hub = two_online().await;
+    hub.pairing.heard_running(agent_id(1), Some(Vec::new()));
+    hub.pairing
+        .heard_running(agent_id(2), Some(vec![backing_up(7, 3)]));
+    assert_eq!(
+        hub.pairing.prunes_held_for(agent_id(1)),
+        Some(vec![repository(3)])
+    );
+
+    hub.pairing.went_away(agent_id(2), 2).await;
+    assert_eq!(hub.pairing.prunes_held_for(agent_id(1)), Some(Vec::new()));
+
+    hub.pairing.went_live(agent_id(2), 3, Box::new(|| {})).await;
+    assert_eq!(
+        hub.pairing.prunes_held_for(agent_id(1)),
+        None,
+        "back online, it hasn't said what it runs"
+    );
+
+    hub.pairing.went_away(agent_id(2), 3).await;
+    hub.pairing
+        .heard_running(agent_id(2), Some(vec![backing_up(8, 4)]));
+    hub.pairing.went_live(agent_id(2), 4, Box::new(|| {})).await;
+    assert_eq!(
+        hub.pairing.prunes_held_for(agent_id(1)),
+        Some(vec![repository(4)])
     );
 }
 

@@ -6,11 +6,16 @@
 //! it is paired: one that hasn't heard a grant yet, or can't reach its hub
 //! once its lease ran out, maintains nothing. A machine that isn't paired
 //! maintains what it asks for, as before. Backups and previews never ask.
+//!
+//! It also keeps the hub's latest answer to its heartbeat, which says the
+//! prunes the hub holds while another machine is backing up (§7.3, layer 2;
+//! §16, decision 166), in memory only: a paired machine starts no prune the
+//! answer holds, nor one when it heard no answer in the last 90 seconds.
 
 use std::sync::{Arc, Mutex, PoisonError};
 
 use domain::maintenance::{
-    EpochLower, LeaseEpoch, NoLease, Ownership, RepoGrants, RepositoryReport,
+    EpochLower, LeaseEpoch, NoLease, Ownership, PruneHolds, RepoGrants, RepositoryReport,
 };
 use domain::{RepositoryAlias, RepositoryId, SignedDuration, Timestamp};
 
@@ -25,6 +30,9 @@ pub struct MaintenanceLeases {
     /// When this process last took its hub's grants, on the machine's wall
     /// clock and on its monotonic clock.
     taken: Mutex<Option<(Timestamp, SignedDuration)>>,
+    /// The hub's latest answer to this process's heartbeat, and when it
+    /// came; none before the first.
+    holds: Mutex<Option<PruneHolds>>,
 }
 
 impl MaintenanceLeases {
@@ -38,7 +46,38 @@ impl MaintenanceLeases {
             cache,
             clock,
             taken: Mutex::new(None),
+            holds: Mutex::new(None),
         }
+    }
+
+    /// Keeps `held`, the prunes the hub's answer to a heartbeat holds, as
+    /// of now, in place of the answer before: `None` when the answer
+    /// didn't say, which holds every prune (§16, decision 166).
+    pub fn heard_holds(&self, held: Option<Vec<RepositoryId>>) {
+        let heard = PruneHolds::heard(held, self.clock.now(), self.clock.monotonic());
+        *self.holds.lock().unwrap_or_else(PoisonError::into_inner) = Some(heard);
+    }
+
+    /// Whether the hub holds this machine's prune of `repository`, known by
+    /// its ID when its entry recorded one, now: never while it isn't
+    /// paired; while it is, when the hub's latest answer holds it or
+    /// didn't say, or no answer came in the last
+    /// [`HOLDS_STAND_FOR`](domain::maintenance::HOLDS_STAND_FOR). A
+    /// repository whose ID isn't known, or a pin that can't be read, is
+    /// held, as the lease check refuses them.
+    pub async fn prune_held(&self, repository: Option<&RepositoryId>) -> bool {
+        match self.identity.pin().await {
+            Ok(None) => return false,
+            Err(_) => return true,
+            Ok(Some(_)) => {}
+        }
+        let Some(repository) = repository else {
+            return true;
+        };
+        let holds = self.holds.lock().unwrap_or_else(PoisonError::into_inner);
+        holds
+            .as_ref()
+            .is_none_or(|holds| holds.holds(repository, self.clock.now(), self.clock.monotonic()))
     }
 
     /// The machine's time a lease is judged at: its wall clock, but never

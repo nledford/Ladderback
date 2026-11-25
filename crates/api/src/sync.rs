@@ -15,7 +15,7 @@ mod live;
 
 pub use live::{
     HeartbeatAckPayload, HeartbeatPayload, LastRunPayload, PlanPayload, PlansAckPayload,
-    PlansPayload, ProgressPayload,
+    PlansPayload, ProgressPayload, RunningOpPayload,
 };
 
 /// The handshake's path.

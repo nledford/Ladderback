@@ -458,6 +458,7 @@ fn told_failure(reason: &FailureReason) -> Option<SnapshotsError> {
         M::UnknownRepository
         | M::NotOwner
         | M::NoLease
+        | M::PruneHeld
         | M::UnknownPlan { .. }
         | M::Busy { .. }
         | M::KeepsNothing { .. }
