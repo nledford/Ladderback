@@ -261,10 +261,29 @@ impl Field {
     }
 }
 
-/// The hint under `field` in the form of `plan`.
+/// The hint under `field` in the form of `plan`. The cron field of a plan
+/// that runs at an interval (`every`), which the form has no field for, says
+/// how often it runs and that the field left empty keeps that, so the empty
+/// field never reads as no schedule (#1527). The interval is said as a length
+/// of time, or as the file writes it when the form can't read it.
 pub(crate) fn hint_of(field: Field, plan: &PlanDto) -> Said {
-    let _ = (field, plan);
-    todo!()
+    match (field, interval_of(&plan.0)) {
+        (Field::Cron, Some(every)) => {
+            let every = match every.parse::<jiff::SignedDuration>() {
+                Ok(duration) if !duration.is_negative() => {
+                    MsgArg::DurationMs(u64::try_from(duration.as_millis()).unwrap_or(u64::MAX))
+                }
+                _ => MsgArg::Text(every.to_owned()),
+            };
+            (msg::UI_PLAN_CRON_HINT_EVERY, vec![("every", every)])
+        }
+        _ => field.hint(),
+    }
+}
+
+/// The interval `plan` runs at, as the file writes it, if it runs at one.
+fn interval_of(plan: &Map<String, Value>) -> Option<&str> {
+    plan.get("schedule")?.as_object()?.get("every")?.as_str()
 }
 
 /// A list entry as its line shows it: text as it is, a hook written as a
@@ -432,8 +451,9 @@ fn write(plan: &mut Map<String, Value>, field: Field, value: Option<Value>) {
 }
 
 /// Writes a schedule typed into the cron field: it replaces an interval
-/// (`every`), as a schedule holds one or the other, and nothing removes the
-/// whole schedule.
+/// (`every`), as a schedule holds one or the other. A field emptied removes
+/// the whole schedule only when it held a cron schedule: over an interval,
+/// which the field never showed, an empty field keeps the interval (#1527).
 fn write_cron(plan: &mut Map<String, Value>, value: Option<Value>) {
     match value {
         Some(value) => {
@@ -443,7 +463,9 @@ fn write_cron(plan: &mut Map<String, Value>, value: Option<Value>) {
             write(plan, Field::Cron, Some(value));
         }
         None => {
-            plan.remove("schedule");
+            if Field::Cron.value(plan).is_some() {
+                plan.remove("schedule");
+            }
         }
     }
 }
