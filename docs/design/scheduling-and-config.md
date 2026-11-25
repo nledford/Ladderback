@@ -70,6 +70,11 @@ check-for-updates = true         # the daily release check (§5, §10.7); false 
 restore-folder = "/srv/restores" # where restores into a new folder go (§10.4); absolute; defaults to ~/ladderback-restore
 dry-run-allowlist = []           # folders a plan dry run may read (§16, decision 89); absolute; set by a person only
 
+[serve]                          # optional; what `serve` starts with, each key overridden by its flag (§16, decisions 136 and 167)
+listen = "0.0.0.0:9898"          # --listen; defaults to 127.0.0.1:9898; beyond loopback only with an allowed host (§10.1)
+allowed-hosts = ["nas.example"]  # --allowed-host, which replaces the whole list; checked at start
+hub = true                       # --hub / --hub=false; turned off, it stays on while machines are paired (decision 167)
+
 [without-token]                  # optional; what AI agents may do without an API token while sign-in is off (§10.1, decision 127)
 backup-runs = "none"             # a row as an API token has it: "none" or its one level; a row left out keeps its default
 daemon-log = "read"              # defaults: backups, backup-runs, previews and configuration on; the rest off

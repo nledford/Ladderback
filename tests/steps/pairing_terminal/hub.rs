@@ -342,7 +342,7 @@ async fn hub_holds_zone(agent: &mut Agent, zone: String) {
 }
 
 /// The hub's key files the first start makes.
-const HUB_KEY_FILES: [&str; 3] = ["hub-key", "hub-recovery-key", "hub-recovery-seed"];
+pub(super) const HUB_KEY_FILES: [&str; 3] = ["hub-key", "hub-recovery-key", "hub-recovery-seed"];
 
 #[when("the hub starts for the first time")]
 async fn hub_starts_first_time(agent: &mut Agent) {

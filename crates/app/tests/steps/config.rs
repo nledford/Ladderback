@@ -91,6 +91,7 @@ impl From<InvalidValue> for Refusal {
             ValueKind::NotificationTemplate => "notification-template",
             ValueKind::ChannelUsername => "channel-username",
             ValueKind::PermissionLevel => "permission-level",
+            ValueKind::ListenAddress => "listen",
         };
         Self {
             kind,

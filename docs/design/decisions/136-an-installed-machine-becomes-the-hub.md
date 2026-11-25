@@ -4,6 +4,8 @@
 
 **Amended 2026-11-21 (#1206):** "Become a hub" asks whether a hub already exists and, if so, takes that hub's pairing token so the machine pairs first and can be promoted later. No network discovery is built. Points 7 and 9 below.
 
+**Amended 2026-11-25 (#1202):** [decision 167](167-hub-mode-in-the-serve-table.md) names the keys, the `[serve]` table's `hub`, `listen` and `allowed-hosts`, and replaces point 5's refusal: hub mode turned off while machines are paired stays on, and the daemon names them.
+
 ## Why
 
 - **Becoming the hub changes a mode, not an install.** The hub is a machine running in hub mode ([architecture.md](../architecture.md)), and from M8's release every build has the hub's code (decision 122). A machine that becomes the hub in place keeps its plans, its snapshots' host and paths, its secrets and its data folder: nothing is copied.

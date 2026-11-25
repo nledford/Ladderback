@@ -4,6 +4,7 @@
 
 use std::collections::{BTreeMap, BTreeSet};
 use std::error::Error;
+use std::net::{Ipv4Addr, SocketAddr, SocketAddrV4};
 
 use crate::access::permissions::Permissions;
 use crate::notifications::{ChannelName, Notifications, RuleName};
@@ -97,6 +98,35 @@ pub enum UpdateCheck {
     Off,
 }
 
+/// The address `serve` listens on when neither `[serve] listen` nor
+/// `--listen` says another: this machine only (§10.1, decision 87).
+pub const DEFAULT_LISTEN: SocketAddr = SocketAddr::V4(SocketAddrV4::new(Ipv4Addr::LOCALHOST, 9898));
+
+/// What `ladderback serve` starts with: the `[serve]` table of §6.1, read at
+/// start, each overridden by the flag of the same name (§16, decisions 136
+/// and 167).
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct ServeSettings {
+    /// The address it listens on, when it isn't [`DEFAULT_LISTEN`].
+    pub listen: Option<SocketAddr>,
+    /// The host names besides loopback its web UI answers to, as
+    /// `--allowed-host` gives them; each is checked at start, as the flag's
+    /// are.
+    pub allowed_hosts: Vec<String>,
+    /// Whether it serves as the hub (decision 136).
+    pub hub: bool,
+}
+
+impl ServeSettings {
+    /// The address `text` names for [`listen`](Self::listen): an IP address
+    /// with a port, such as `[::]:9898` or `192.0.2.10:9898`, as `--listen`
+    /// takes it.
+    pub fn parse_listen(text: &str) -> Result<SocketAddr, InvalidValue> {
+        text.parse()
+            .map_err(|_| InvalidValue::new(ValueKind::ListenAddress, text))
+    }
+}
+
 /// A rule that only the whole configuration can break. `index` is the
 /// position of the plan in the list, from 0, so that a message can say
 /// which of a long list it means.
@@ -181,6 +211,8 @@ pub struct AgentConfig {
     /// What AI agents may do without a token: the `[without-token]` table
     /// (§16, decision 127).
     without_token: Permissions,
+    /// What `serve` starts with: the `[serve]` table (§16, decision 167).
+    serve: ServeSettings,
 }
 
 impl AgentConfig {
@@ -237,6 +269,7 @@ impl AgentConfig {
             plans,
             notifications: Notifications::default(),
             without_token: Permissions::default(),
+            serve: ServeSettings::default(),
         })
     }
 
@@ -266,7 +299,8 @@ impl AgentConfig {
     /// The configuration with `agent`, `hooks`, `repositories` and `plans`
     /// in place of its own, checked whole as [`AgentConfig::new`] and
     /// [`AgentConfig::with_notifications`] check a loaded one, its
-    /// notification rules and what AI agents may do without a token kept.
+    /// notification rules, what AI agents may do without a token and what
+    /// `serve` starts with kept.
     /// Every change that rebuilds a configuration from its parts goes
     /// through here, so a change to one part never resets another it doesn't
     /// touch to its default.
@@ -281,6 +315,7 @@ impl AgentConfig {
             .with_notifications(self.notifications.clone())?;
         Ok(Self {
             without_token: self.without_token,
+            serve: self.serve.clone(),
             ..rebuilt
         })
     }
@@ -317,6 +352,22 @@ impl AgentConfig {
     pub fn with_without_token(&self, permissions: Permissions) -> Self {
         Self {
             without_token: permissions,
+            ..self.clone()
+        }
+    }
+
+    /// What `serve` starts with, before its flags override it (§16,
+    /// decisions 136 and 167).
+    pub fn serve(&self) -> &ServeSettings {
+        &self.serve
+    }
+
+    /// This configuration with `serve` as what `serve` starts with, the rest
+    /// as it is.
+    #[must_use]
+    pub fn with_serve(&self, serve: ServeSettings) -> Self {
+        Self {
+            serve,
             ..self.clone()
         }
     }
@@ -1466,6 +1517,32 @@ mod tests {
         let removed = before.remove_plan(&id("docs")).unwrap();
         for after in [added, changed, removed] {
             assert_eq!(after.without_token(), no_backup_runs());
+        }
+    }
+
+    /// A plan added, changed or removed, or the parts replaced, as the
+    /// pages' edits and approved proposals do, leaves what `serve` starts
+    /// with as the person wrote it: an edit never turns hub mode off.
+    #[test]
+    fn a_change_of_the_other_parts_keeps_what_serve_starts_with() {
+        let serve = ServeSettings {
+            listen: Some("[::]:9898".parse().unwrap()),
+            allowed_hosts: vec!["files.example".to_owned()],
+            hub: true,
+        };
+        let before = with_plans(&["home", "docs"], &[]).with_serve(serve.clone());
+        let added = before.add_plan(plan("media", "nas")).unwrap();
+        let removed = before.remove_plan(&id("docs")).unwrap();
+        let replaced = before
+            .replacing(
+                AgentSettings::default(),
+                Hooks::default(),
+                repositories(&["nas"]),
+                vec![plan("home", "nas")],
+            )
+            .unwrap();
+        for after in [added, removed, replaced] {
+            assert_eq!(after.serve(), &serve);
         }
     }
 

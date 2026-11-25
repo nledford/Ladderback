@@ -62,15 +62,21 @@ struct Cli {
 #[derive(Subcommand)]
 enum Command {
     Serve {
-        #[arg(long, default_value = "127.0.0.1:9898")]
-        listen: SocketAddr,
+        #[arg(long)]
+        listen: Option<SocketAddr>,
         #[arg(long = "allowed-host", value_name = "NAME")]
         allowed_hosts: Vec<String>,
         #[arg(long)]
         service_managed: bool,
         #[cfg(feature = "hub")]
-        #[arg(long)]
-        hub: bool,
+        #[arg(
+            long,
+            num_args = 0..=1,
+            require_equals = true,
+            default_missing_value = "true",
+            value_name = "ON"
+        )]
+        hub: Option<bool>,
     },
     ImportProfile {
         file: std::path::PathBuf,
@@ -577,11 +583,11 @@ impl Session {
 }
 
 fn serve(
-    listen: SocketAddr,
+    listen: Option<SocketAddr>,
     allowed_hosts: Vec<String>,
     service_managed: bool,
     plain: bool,
-    #[cfg(feature = "hub")] hub: bool,
+    #[cfg(feature = "hub")] hub: Option<bool>,
 ) -> ExitCode {
     // Before the log, so that it holds the start and every line after it.
     let recent_log: Arc<dyn app::ports::RecentLogStore> =
@@ -610,11 +616,11 @@ fn serve(
 /// starts it again on (decision 94).
 fn run_daemon(
     localizer: &Localizer,
-    listen: SocketAddr,
+    listen: Option<SocketAddr>,
     allowed_hosts: Vec<String>,
     service_managed: bool,
     recent_log: Arc<dyn app::ports::RecentLogStore>,
-    #[cfg(feature = "hub")] hub: bool,
+    #[cfg(feature = "hub")] hub: Option<bool>,
 ) -> io::Result<ExitCode> {
     // Checked here, not by the argument parser, so that the refusal is said
     // in the catalog's words and the person's language (§8.4). Exit status 2
@@ -633,6 +639,17 @@ fn run_daemon(
             }
         }
     }
+    let runtime = match tokio::runtime::Runtime::new() {
+        Ok(runtime) => runtime,
+        Err(error) => {
+            say(
+                localizer,
+                msg::CLI_CANNOT_START_RUNTIME,
+                &[("detail", text(error))],
+            )?;
+            return Ok(ExitCode::FAILURE);
+        }
+    };
     // Sign-in is decided once, at start, by whether an admin password is
     // kept (§10.1, decisions 70 and 87); beyond loopback the daemon needs a
     // host name, with sign-in on or off.
@@ -647,51 +664,21 @@ fn run_daemon(
         }
     };
     let sign_in_on = sign_in.is_on();
-    let exposure = match http_adapter::startup_rule(listen, &hosts) {
-        Ok(exposure) => exposure,
-        Err(http_adapter::StartupRefusal::NoAllowedHost(address)) => {
-            say(
-                localizer,
-                msg::CLI_REFUSE_NO_ALLOWED_HOST,
-                &[("address", text(address))],
-            )?;
-            return Ok(ExitCode::FAILURE);
-        }
-    };
-    if exposure == http_adapter::Exposure::Loopback && !sign_in_on {
-        log::warn!(
-            "sign-in is off: anyone on this machine can use Ladderback; set an admin password with `ladderback set-password`"
-        );
-    }
-    let proxied: Vec<String> = http_adapter::proxied_hosts(&hosts)
-        .into_iter()
-        .map(str::to_owned)
-        .collect();
-    let runtime = match tokio::runtime::Runtime::new() {
-        Ok(runtime) => runtime,
-        Err(error) => {
-            say(
-                localizer,
-                msg::CLI_CANNOT_START_RUNTIME,
-                &[("detail", text(error))],
-            )?;
-            return Ok(ExitCode::FAILURE);
-        }
-    };
     // Before the listener: a daemon that cannot serve must not print that it
     // is listening. By the time it is handed back it has locked the data
     // folder and ended what an earlier run left unfinished, so no request is
-    // served before the log says what really happened (§4.2, §9).
+    // served before the log says what really happened (§4.2, §9). It reads
+    // the configuration under that lock, `[serve]` with the rest.
     let composition::Daemon {
-        state,
+        mut state,
         log: operation_log,
         lock,
         background,
         workers,
+        serve: configured,
     } = match runtime.block_on(composition::startup::daemon(
         sign_in,
         Arc::clone(&random),
-        exposure,
         service_managed,
         recent_log,
     )) {
@@ -701,6 +688,74 @@ fn run_daemon(
             return Ok(ExitCode::FAILURE);
         }
     };
+    // A start that stops from here on closes the log and lets go of the
+    // lock, as every refusal after the lock does.
+    let stop = |said: io::Result<()>| -> io::Result<ExitCode> {
+        runtime.block_on(operation_log.close());
+        said.map(|()| ExitCode::FAILURE)
+    };
+    // What the flags leave unsaid comes from the `[serve]` table of
+    // config.toml, so the service `install-service` writes runs as it says
+    // with no flag of its own (§16, decision 167). Its host names are
+    // checked as the flag's are, and refused in words that name the file.
+    let listen = listen
+        .or(configured.listen)
+        .unwrap_or(domain::planning::DEFAULT_LISTEN);
+    if hosts.is_empty() {
+        for name in configured.allowed_hosts {
+            match http_adapter::validate_host_name(&name) {
+                Ok(host) => hosts.push(host),
+                Err(refusal) => {
+                    return stop(say(
+                        localizer,
+                        msg::CLI_INVALID_ALLOWED_HOST_CONFIG,
+                        &[("name", text(refusal.0))],
+                    ));
+                }
+            }
+        }
+    }
+    let exposure = match http_adapter::startup_rule(listen, &hosts) {
+        Ok(exposure) => exposure,
+        Err(http_adapter::StartupRefusal::NoAllowedHost(address)) => {
+            return stop(say(
+                localizer,
+                msg::CLI_REFUSE_NO_ALLOWED_HOST,
+                &[("address", text(address))],
+            ));
+        }
+    };
+    state.exposure = exposure;
+    if exposure == http_adapter::Exposure::Loopback && !sign_in_on {
+        log::warn!(
+            "sign-in is off: anyone on this machine can use Ladderback; set an admin password with `ladderback set-password`"
+        );
+    }
+    let proxied: Vec<String> = http_adapter::proxied_hosts(&hosts)
+        .into_iter()
+        .map(str::to_owned)
+        .collect();
+    #[cfg(not(feature = "hub"))]
+    if configured.hub {
+        log::warn!(
+            "hub mode is on in config.toml, but this build has no hub: it serves as a machine"
+        );
+    }
+    // Hub mode turned off, by config.toml or `--hub=false`, stays on while
+    // machines are paired with this hub, so none of them loses its hub and
+    // this machine's backups go on: the daemon says which machines keep it
+    // on, to be removed first (§16, decision 167).
+    #[cfg(feature = "hub")]
+    let hub = hub.unwrap_or(configured.hub)
+        || match hub::hub_mode_kept_on(
+            localizer,
+            &runtime,
+            operation_log.store.as_ref(),
+            platform::dirs::data_dir().as_deref(),
+        ) {
+            Ok(kept_on) => kept_on,
+            Err(error) => return stop(Err(error)),
+        };
     // `serve --hub` serves its built-in TLS on this listener, whose
     // sessions carry the pairing handshake at `/sync/v1` with the binding
     // to the session (decision 120), and the page's pairing tokens under
@@ -710,8 +765,6 @@ fn run_daemon(
     // fails closed ("The hub key"): the door serves only this machine, on
     // loopback, `/sync/v1` refuses every machine, and the log says why and
     // how to fix it; the daemon, and this machine's own backups, go on.
-    #[cfg(feature = "hub")]
-    let mut state = state;
     #[cfg(feature = "hub")]
     let mut front_door: Option<Option<tls_adapter::HubListener>> = None;
     #[cfg(feature = "hub")]

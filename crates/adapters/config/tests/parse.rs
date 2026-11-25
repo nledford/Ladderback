@@ -10,8 +10,8 @@ use config_adapter::{MigrationError, Schemas};
 use domain::planning::{
     AgentSettings, Cadence, Concurrency, CronExpression, GroupBy, HookEntry, Hooks, Hostname,
     Interval, KeepCount, KeepWithin, Locale, Maintenance, Nice, OnFailure, Overlap, Plan,
-    RetentionPolicy, RetryPolicy, Schedule, ScheduleZone, Source, SourceFilter, ValueKind,
-    Violation,
+    RetentionPolicy, RetryPolicy, Schedule, ScheduleZone, ServeSettings, Source, SourceFilter,
+    ValueKind, Violation,
 };
 use domain::secrets::{
     CommandLine, FileRead, KeyringEntry, MAX_LOCATION_BYTES, MAX_OPTION_VALUE_BYTES, MAX_OPTIONS,
@@ -86,6 +86,30 @@ fn the_agent_table_is_read() {
             ])
             .expect("an allowlist"),
         }
+    );
+}
+
+/// The `[serve]` table: what `serve` starts with before its flags override
+/// it (§16, decisions 136 and 167). It is written back as it was read, so a
+/// page's save never drops hub mode.
+#[test]
+fn the_serve_table_is_read_and_written_back() {
+    let text = "schema = 1\n\n[serve]\nlisten = \"[::]:9898\"\n\
+                allowed-hosts = [\"files.example\", \"192.0.2.10\"]\nhub = true\n";
+    let config = parsed(text).expect("valid").config;
+    assert_eq!(
+        config.serve(),
+        &ServeSettings {
+            listen: Some("[::]:9898".parse().expect("an address")),
+            allowed_hosts: vec!["files.example".to_owned(), "192.0.2.10".to_owned()],
+            hub: true,
+        }
+    );
+    let file = std::path::Path::new(FILE);
+    let written = config_adapter::render(file, &config).expect("written");
+    assert_eq!(
+        parsed(&written).expect("what was written is valid").config,
+        config
     );
 }
 
@@ -669,6 +693,18 @@ fn a_value_the_model_refuses_is_reported_with_its_key_and_its_place() {
             "without-token.daemon-log",
             ValueKind::PermissionLevel,
             "\"off\"",
+        ),
+        refused(
+            "schema = 1\n\n[serve]\nlisten = \"files.example:9898\"\n".to_owned(),
+            "serve.listen",
+            ValueKind::ListenAddress,
+            "\"files.example:9898\"",
+        ),
+        refused(
+            "schema = 1\n\n[serve]\nlisten = \"127.0.0.1\"\n".to_owned(),
+            "serve.listen",
+            ValueKind::ListenAddress,
+            "\"127.0.0.1\"",
         ),
         refused(
             base_with("retry = { attempts = 0, backoff = \"10m\" }\n"),

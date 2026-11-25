@@ -28,7 +28,17 @@ struct Daemon {
 
 impl Daemon {
     fn start() -> Self {
+        Self::start_with(None)
+    }
+
+    /// A daemon whose `config.toml` holds `config`, when given.
+    fn start_with(config: Option<&str>) -> Self {
         let scratch = tempfile::tempdir().expect("a scratch folder for the daemon");
+        if let Some(config) = config {
+            let folder = testkit::daemon::config_dir(scratch.path());
+            std::fs::create_dir_all(&folder).expect("a config folder");
+            std::fs::write(folder.join("config.toml"), config).expect("a config.toml");
+        }
         let mut command = Command::new(LADDERBACK);
         testkit::daemon::isolate(&mut command, scratch.path());
         command
@@ -144,6 +154,16 @@ fn the_sync_routes_get_the_request_checks() {
             "{target}"
         );
     }
+}
+
+/// Hub mode in `config.toml` is read by a build without the hub too, so a
+/// configuration copied from a hub still loads; the daemon serves as a
+/// machine, and the agent routes stay unserved (§16, decisions 122 and 167).
+#[test]
+fn hub_mode_in_the_config_serves_no_hub_without_the_hub() {
+    let daemon = Daemon::start_with(Some("schema = 1\n\n[serve]\nhub = true\n"));
+    assert_eq!(daemon.status_of("/sync/v1", "127.0.0.1"), 404);
+    assert_eq!(daemon.status_of("/api/v1/log", "127.0.0.1"), 200);
 }
 
 /// The hub's commands are refused by the argument parser, before anything
