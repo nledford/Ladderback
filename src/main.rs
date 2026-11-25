@@ -933,6 +933,9 @@ fn run_daemon(
         // into, so both judge a lease by one floor (§7.3, I1).
         #[cfg(feature = "hub")]
         let leases = background.leases();
+        // And the backups it runs, which each heartbeat names (decision 166).
+        #[cfg(feature = "hub")]
+        let running = background.running();
         // A hub watches its machines for offline alerts beside the
         // scheduler (§11, decision 168).
         #[cfg(feature = "hub")]
@@ -951,6 +954,7 @@ fn run_daemon(
                     config,
                     listings,
                     leases,
+                    running,
                 },
                 standing,
                 Some(plans),

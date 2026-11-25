@@ -207,6 +207,12 @@ impl Background {
         self.runner.leases.clone()
     }
 
+    /// The runner whose backups run, for a test of what the daemon wires.
+    #[cfg(all(test, feature = "hub"))]
+    pub(super) fn runner(&self) -> &PlanRunner {
+        &self.runner
+    }
+
     /// What the daemon's orderly stop freezes: every run of an operation,
     /// whoever started it (decision 92).
     pub(crate) fn runs(&self) -> runs::Runs {
@@ -262,6 +268,13 @@ impl Background {
                 }
             }
         }))
+    }
+
+    /// The backups this daemon runs, which a paired machine's heartbeat
+    /// names (§16, decision 166).
+    #[cfg(feature = "hub")]
+    pub(crate) fn running(&self) -> Arc<app::running::RunningBackups> {
+        Arc::clone(&self.runner.running)
     }
 
     /// What a paired machine tells its hub of its plans (§7.2): their
@@ -804,6 +817,7 @@ async fn state_over(
         full_disk_access,
         machine: standing,
         leases: leases.clone(),
+        running: Arc::new(app::running::RunningBackups::new()),
     });
     // `~/ladderback-restore`. With no home folder, or one that isn't
     // UTF-8, there is none: a restore to a new folder then needs

@@ -10,9 +10,10 @@ use std::sync::atomic::{AtomicBool, Ordering};
 
 use api::sync::AgentFrame;
 use app::fakes::{
-    FakeClock, FakeSigning, InMemoryAgentRegistry, InMemoryIdentity, InMemoryReportInbox,
-    LoopbackHubConnector, SeededRandom,
+    FakeClock, FakeSigning, InMemoryAgentRegistry, InMemoryIdentity, InMemoryOwnershipRegistry,
+    InMemoryReportInbox, LoopbackHubConnector, SeededRandom,
 };
+use app::ownership::RepositoryOwners;
 use app::pairing::{
     AgentPairing, AgentPairingError, ChallengeRefused, ConnectFailure, ConnectToHub, Connected,
     HubKeys, HubPairing, PairFailure, PairWithHub, PairedHub,
@@ -29,6 +30,8 @@ use super::Agent;
 
 #[path = "pairing_dialog.rs"]
 mod dialog;
+#[path = "held_prunes.rs"]
+mod held_prunes;
 #[path = "hub_plans.rs"]
 mod hub_plans;
 #[path = "offline_alerts.rs"]
@@ -67,7 +70,8 @@ impl Hub {
     }
 
     /// A hub whose sign-in by the admin password is on when `access` is
-    /// given.
+    /// given. It decides which machine maintains each repository its
+    /// machines report, as a real hub does.
     async fn with_access(seed: u64, access: Option<Arc<app::access::Access>>) -> Self {
         let registry = Arc::new(InMemoryAgentRegistry::new());
         let identity = Arc::new(InMemoryIdentity::default());
@@ -83,7 +87,12 @@ impl Hub {
             clock.clone(),
             "0.5.0-hub".to_owned(),
         )
-        .with_inbox(inbox.clone());
+        .with_inbox(inbox.clone())
+        .with_owners(Arc::new(RepositoryOwners::new(
+            registry.clone(),
+            Arc::new(InMemoryOwnershipRegistry::new()),
+            clock.clone(),
+        )));
         let events = Arc::new(app::event_bus::BroadcastEventBus::new());
         let heard = Arc::new(std::sync::Mutex::new(
             app::ports::EventBus::subscribe(&*events).await,
@@ -256,6 +265,9 @@ pub struct PairingWorld {
     /// The sync of the first agent's plans and progress
     /// (`fleet/plans_and_progress.feature`).
     live: hub_plans::LiveWorld,
+    /// Two machines' prunes and backups through their syncs
+    /// (`maintenance/prune_guard.feature`).
+    held: held_prunes::HeldWorld,
     /// The first agent's machine ID before it took a new one
     /// (`fleet/removed_new_id.feature`).
     old_id: Option<AgentId>,

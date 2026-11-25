@@ -48,6 +48,7 @@ pub mod recovery;
 pub mod repositories;
 pub mod restore;
 pub mod retry;
+pub mod running;
 pub mod schedule;
 pub mod secrets;
 pub mod snapshots;

@@ -30,6 +30,7 @@ use crate::machine::MachineStanding;
 use crate::others_snapshots::{ListingsDue, OthersSnapshots};
 use crate::pairing::{AgentChannel, ChannelError, ConnectFailure, ConnectToHub, Connected};
 use crate::ports::{Appended, Clock, ConfigError, ConfigStore, OperationStore, Outbox, StoreError};
+use crate::running::RunningBackups;
 
 mod live;
 
@@ -170,6 +171,9 @@ pub struct SyncWithHub {
     told: Mutex<Told>,
     /// The listings run before each session, when the sync is given them.
     listings: Option<Arc<ListingsDue>>,
+    /// The backups the machine runs, which each heartbeat names; without
+    /// them, a heartbeat says it can't tell.
+    running: Option<Arc<RunningBackups>>,
 }
 
 /// What a session needs to ask for the machine's leases: the repositories
@@ -219,6 +223,7 @@ impl SyncWithHub {
             progress: None,
             told: Mutex::new(Told::default()),
             listings: None,
+            running: None,
         }
     }
 
@@ -268,6 +273,15 @@ impl SyncWithHub {
     #[must_use]
     pub fn with_listings(mut self, listings: Arc<ListingsDue>) -> Self {
         self.listings = Some(listings);
+        self
+    }
+
+    /// Each heartbeat naming the backups `running` holds, so the hub holds
+    /// another machine's prune of their repositories meanwhile (§7.3,
+    /// layer 2; §16, decision 166).
+    #[must_use]
+    pub fn with_running(mut self, running: Arc<RunningBackups>) -> Self {
+        self.running = Some(running);
         self
     }
 
@@ -739,21 +753,26 @@ impl SyncWithHub {
         }
     }
 
-    /// Sends a heartbeat on `channel` and waits for the hub's answer; the
-    /// next is due [`HEARTBEAT_EVERY`] after.
+    /// Sends a heartbeat on `channel`, naming the backups the machine runs,
+    /// and waits for the hub's answer, whose prunes held the machine's
+    /// leases keep; the next is due [`HEARTBEAT_EVERY`] after.
     async fn beat(
         &self,
         channel: &mut AgentChannel,
         beat_at: &mut SignedDuration,
     ) -> Result<(), SyncFailure> {
+        let running = self.running.as_ref().and_then(|running| running.listed());
         channel
-            .send_heartbeat()
+            .send_heartbeat(running.as_deref())
             .await
             .map_err(SyncFailure::Channel)?;
-        channel
+        let held = channel
             .receive_heartbeat_ack()
             .await
             .map_err(SyncFailure::Channel)?;
+        if let Some(leasing) = &self.leases {
+            leasing.leases.heard_holds(held);
+        }
         *beat_at = self.clock.monotonic().saturating_add(HEARTBEAT_EVERY);
         Ok(())
     }
