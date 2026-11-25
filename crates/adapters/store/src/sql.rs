@@ -493,6 +493,11 @@ pub(crate) mod hub {
     /// one it held. Parameters: the zone, the agent ID.
     pub(crate) const RECORD_ZONE: &str = "UPDATE agents SET zone = ? WHERE id = ?";
 
+    /// Keeps when the hub last heard from an agent: when its live
+    /// connection ended (decision 159). Parameters: the time in
+    /// milliseconds, the agent ID.
+    pub(crate) const RECORD_SEEN: &str = "UPDATE agents SET last_seen = ? WHERE id = ?";
+
     /// The machine fingerprint held under one agent ID (decision 150).
     /// Parameter: the agent ID.
     pub(crate) const AGENT_MACHINE: &str = "SELECT machine FROM agents WHERE id = ?";

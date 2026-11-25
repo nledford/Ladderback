@@ -342,16 +342,20 @@ impl HubLink for LoopLink {
                 return Ok(());
             }
         };
+        // A connection goes live at its first message after the `Welcome`
+        // that the hub takes, as the hub's transport has it.
+        let syncing = session.syncing_agent();
         let step = self.hub.step(session, &read).await;
-        let went_live = session.syncing_agent().filter(|_| {
+        let taken = matches!(step, HubStep::Reply(_) | HubStep::Wait);
+        let went_live = syncing.filter(|_| {
             let mut live = self
                 .held
                 .live
                 .lock()
                 .unwrap_or_else(PoisonError::into_inner);
-            let first = live.is_none();
+            let first = taken && live.is_none();
             if first {
-                *live = session.syncing_agent();
+                *live = syncing;
             }
             first
         });

@@ -296,10 +296,6 @@ impl AgentRegistry for InMemoryAgentRegistry {
         Ok(decided)
     }
 
-    async fn record_seen(&self, _agent_id: AgentId, _now: Timestamp) -> Result<(), StoreError> {
-        todo!()
-    }
-
     async fn record_zone(
         &self,
         agent_id: AgentId,
@@ -312,6 +308,18 @@ impl AgentRegistry for InMemoryAgentRegistry {
             .find(|agent| agent.agent_id == agent_id)
         {
             agent.zone = zone.cloned();
+        }
+        Ok(())
+    }
+
+    async fn record_seen(&self, agent_id: AgentId, now: Timestamp) -> Result<(), StoreError> {
+        if let Some(agent) = self
+            .kept()
+            .agents
+            .iter_mut()
+            .find(|agent| agent.agent_id == agent_id)
+        {
+            agent.last_seen = now;
         }
         Ok(())
     }

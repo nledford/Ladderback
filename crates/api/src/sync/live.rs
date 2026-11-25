@@ -47,9 +47,9 @@ pub struct PlansAckPayload {}
 pub struct HeartbeatPayload {}
 
 /// The payload of the hub's `HeartbeatAck`: it heard the heartbeat. Empty;
-/// the signed message's place in the session says which it answers.
+/// the signed message's place in the session says which it answers. A
+/// field a later release adds is read past.
 #[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(deny_unknown_fields)]
 pub struct HeartbeatAckPayload {}
 
 /// The payload of the agent's `Progress`: the latest progress of the

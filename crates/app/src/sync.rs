@@ -395,7 +395,7 @@ impl SyncWithHub {
     /// One session: lists the repositories whose listing is due, if the
     /// sync is given its listings, before it connects, so no connection
     /// waits on a repository; then connects and tells the hub what
-    /// [`Self::tell`] does, leases included. A pending agent sends nothing.
+    /// `tell` does, leases included. A pending agent sends nothing.
     pub async fn sync_once(&self) -> Result<Synced, SyncFailure> {
         if let Some(listings) = &self.listings {
             listings.list().await;
@@ -578,19 +578,20 @@ impl SyncWithHub {
     }
 
     /// A connection held for as long as the agent runs: it connects at
-    /// once, and while the hub holds it approved, every [`POLL`] tells the
-    /// hub what [`Self::tell`] does whenever its outbox holds a report the
-    /// hub hasn't acknowledged, a progress is due, or its plans changed
+    /// once, and while the hub holds it approved, it sends a heartbeat at
+    /// once and every [`HEARTBEAT_EVERY`] after, and every [`POLL`] tells
+    /// the hub what `tell` does whenever its outbox holds a report
+    /// the hub hasn't acknowledged, a progress is due, or its plans changed
     /// when it read them, every [`PLANS_CHECK`]. A sync that asks for the
-    /// machine's leases lists what is due and asks at the first look and
-    /// once [`GRANTS_EVERY`] has passed since the last that held, on the
-    /// machine's clock. A heartbeat goes out every [`HEARTBEAT_EVERY`] from
-    /// the connection's start, listings or not, so a connection that
-    /// dropped is found at the next one at the latest. A failed connection,
-    /// or one the hub holds pending, is tried again after [`backoff`],
-    /// which starts over once the hub answered anything on a connection. It
-    /// never touches the agent's operations, so an agent that can't reach
-    /// its hub backs up on schedule all the same.
+    /// machine's leases lists what is due and asks at each connection's
+    /// first look and once [`GRANTS_EVERY`] has passed since the last that
+    /// held, on the machine's clock. Heartbeats go on through the listings,
+    /// so a connection that dropped is found at the next one at the latest.
+    /// A failed connection, or one the hub holds pending, is tried again
+    /// after [`backoff`], which starts over once the hub answered a
+    /// heartbeat on a connection. It never touches the agent's operations,
+    /// so an agent that can't reach its hub backs up on schedule all the
+    /// same.
     pub async fn run(&self) {
         let mut wait = None;
         // Each streak of failures is logged once, at its first.
@@ -599,12 +600,16 @@ impl SyncWithHub {
         loop {
             let failure = match self.open().await {
                 Ok(Some((connected, channel))) => {
-                    let failure = self.hold(&connected, channel, &mut holding).await;
+                    let ended = self.hold(&connected, channel, &mut holding).await;
                     if std::mem::take(&mut holding.answered) {
+                        // A connection that held ending is no failure: the
+                        // agent connects again after the first backoff.
+                        log::info!("the connection to the hub ended; connecting again: {ended:?}");
                         wait = None;
-                        failing = false;
+                        None
+                    } else {
+                        Some(ended)
                     }
-                    Some(failure)
                 }
                 Ok(None) => None,
                 Err(failure) => Some(failure),
@@ -619,41 +624,57 @@ impl SyncWithHub {
         }
     }
 
-    /// Holds the approved connection `channel` until it fails, telling the
-    /// hub what is due every [`POLL`] and sending a heartbeat every
-    /// [`HEARTBEAT_EVERY`]; why it ended.
+    /// Holds the approved connection `channel` until it fails: a heartbeat
+    /// at once, so the hub shows the machine online, then what is due every
+    /// [`POLL`] and a heartbeat every [`HEARTBEAT_EVERY`]; why it ended.
     async fn hold(
         &self,
         connected: &Connected,
         mut channel: AgentChannel,
         holding: &mut Holding,
     ) -> SyncFailure {
-        let mut beat_at = self.clock.monotonic().saturating_add(HEARTBEAT_EVERY);
+        let mut beat_at = self.clock.monotonic();
+        if let Err(failure) = self.beat(&mut channel, &mut beat_at).await {
+            return failure;
+        }
+        holding.answered = true;
+        // Each connection asks for the leases at its first look.
+        let mut leased_at = None;
         loop {
             if let Err(failure) = self
-                .tell_due(connected, &mut channel, &mut beat_at, holding)
+                .tell_due(
+                    connected,
+                    &mut channel,
+                    &mut beat_at,
+                    &mut leased_at,
+                    holding,
+                )
                 .await
             {
                 return failure;
             }
-            if self.clock.monotonic() >= beat_at {
-                if let Err(failure) = self.beat(&mut channel, &mut beat_at).await {
-                    return failure;
-                }
-                holding.answered = true;
+            if self.clock.monotonic() >= beat_at
+                && let Err(failure) = self.beat(&mut channel, &mut beat_at).await
+            {
+                return failure;
             }
             let left = beat_at.saturating_sub(self.clock.monotonic());
             self.clock.sleep(POLL.min(left)).await;
         }
     }
 
-    /// Tells the hub what is due on `channel`, if anything: the leases'
-    /// listings run while the heartbeat at `beat_at` goes on.
+    /// Tells the hub what is due on `channel`, if anything: the leases,
+    /// when [`GRANTS_EVERY`] passed since `leased_at`, after the listings
+    /// they need, which run while the heartbeat at `beat_at` goes on. A
+    /// configuration the machine can't read skips the leases, with a
+    /// warning, and keeps the connection: it is the machine's trouble, not
+    /// the hub's.
     async fn tell_due(
         &self,
         connected: &Connected,
         channel: &mut AgentChannel,
         beat_at: &mut SignedDuration,
+        leased_at: &mut Option<Timestamp>,
         holding: &mut Holding,
     ) -> Result<(), SyncFailure> {
         let waiting = match self.outbox.unacknowledged(None, 1).await {
@@ -672,22 +693,31 @@ impl SyncWithHub {
         let started = self.clock.now();
         // A clock set back counts as time passed, so a lease is still
         // renewed.
-        let leases_due = self.leases.is_some()
-            && holding
-                .leased_at
-                .is_none_or(|at| started.duration_since(at).abs() >= GRANTS_EVERY);
-        if leases_due && let Some(listings) = &self.listings {
-            self.beating_while(channel, beat_at, listings.list())
-                .await?;
+        let leases_due =
+            leased_at.is_none_or(|at| started.duration_since(at).abs() >= GRANTS_EVERY);
+        if leases_due && let Some(leasing) = &self.leases {
+            if let Some(listings) = &self.listings {
+                self.beating_while(channel, beat_at, listings.list())
+                    .await?;
+            }
+            match self.exchange_leases(leasing, connected, channel).await {
+                Ok(()) => {
+                    holding.unconfigured = false;
+                    *leased_at = Some(started);
+                }
+                Err(SyncFailure::Config(error)) => {
+                    if !holding.unconfigured {
+                        log::warn!("the leases weren't asked for: {error:?}");
+                    }
+                    holding.unconfigured = true;
+                }
+                Err(failure) => return Err(failure),
+            }
         }
-        if !waiting && !leases_due && !self.live_due().await {
+        if !waiting && !self.live_due().await {
             return Ok(());
         }
-        self.tell(connected, channel, leases_due).await?;
-        holding.answered = true;
-        if leases_due {
-            holding.leased_at = Some(started);
-        }
+        self.tell(connected, channel, false).await?;
         Ok(())
     }
 
@@ -732,12 +762,13 @@ impl SyncWithHub {
 /// What the sync loop keeps from one connection to the next.
 #[derive(Default)]
 struct Holding {
-    /// When the leases were last asked for, for their cadence.
-    leased_at: Option<Timestamp>,
     /// Whether the outbox couldn't be read at the last look, so a streak
     /// of failed reads is logged once.
     unreadable: bool,
-    /// Whether the hub answered anything on the connection held now.
+    /// Whether the configuration couldn't be read for the leases at the
+    /// last try, so a streak of those is logged once.
+    unconfigured: bool,
+    /// Whether the hub answered a heartbeat on the connection held now.
     answered: bool,
 }
 

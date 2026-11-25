@@ -396,10 +396,6 @@ impl AgentRegistry for SqliteStore {
         Ok(decided)
     }
 
-    async fn record_seen(&self, _agent_id: AgentId, _now: Timestamp) -> Result<(), StoreError> {
-        todo!()
-    }
-
     async fn record_zone(
         &self,
         agent_id: AgentId,
@@ -409,6 +405,18 @@ impl AgentRegistry for SqliteStore {
         let mut conn = self.pool.acquire().await.map_err(unavailable)?;
         sqlx::query(sql::RECORD_ZONE)
             .bind(zone.map(MachineZone::as_str))
+            .bind(row::agent_id_text(agent_id))
+            .execute(&mut *conn)
+            .await
+            .map_err(unavailable)?;
+        Ok(())
+    }
+
+    async fn record_seen(&self, agent_id: AgentId, now: Timestamp) -> Result<(), StoreError> {
+        let _call = self.call().await;
+        let mut conn = self.pool.acquire().await.map_err(unavailable)?;
+        sqlx::query(sql::RECORD_SEEN)
+            .bind(now.as_millisecond())
             .bind(row::agent_id_text(agent_id))
             .execute(&mut *conn)
             .await

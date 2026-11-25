@@ -128,7 +128,7 @@ mod served {
     use std::time::Duration;
 
     use api::sync::{AgentFrame, MAX_FRAME_BYTES, PATH};
-    use app::pairing::{HubPairing, HubSession, HubStep, PROTOCOL_ERROR};
+    use app::pairing::{CloseConnection, HubPairing, HubSession, HubStep, PROTOCOL_ERROR};
     use axum::Router;
     use axum::extract::ws::{CloseFrame, Message, WebSocket, WebSocketUpgrade, close_code};
     use axum::extract::{ConnectInfo, Extension};
@@ -306,6 +306,14 @@ mod served {
         evicted: Arc<Notify>,
     }
 
+    /// An approved agent's connection until it goes live: the agent, the
+    /// connection's number, and what closes it, taken when it goes live.
+    struct Live {
+        agent: AgentId,
+        id: u64,
+        close: Option<CloseConnection>,
+    }
+
     /// How a connection ends.
     enum End {
         /// The pairing was answered.
@@ -351,15 +359,20 @@ mod served {
             let end = match handshake {
                 Handshake::Ended(end) => end,
                 Handshake::Syncing(agent, mut session) => {
-                    // The machine is online while this connection lasts; a
-                    // newer one of the agent replaces it and closes it.
+                    // The machine is online from this connection's first
+                    // message after the `Welcome` until it ends: a terminal's
+                    // `hub-status`, which sends none, never replaces the
+                    // daemon's. A newer one of the agent replaces it and
+                    // closes it.
                     let replaced = Arc::new(Notify::new());
                     let close = Arc::clone(&replaced);
-                    self.pairing
-                        .went_live(agent, id, Box::new(move || close.notify_one()))
-                        .await;
+                    let live = Live {
+                        agent,
+                        id,
+                        close: Some(Box::new(move || close.notify_one())),
+                    };
                     let end = tokio::select! {
-                        end = self.sync(&mut socket, &mut session) => end,
+                        end = self.sync(&mut socket, &mut session, live) => end,
                         () = replaced.notified() => End::Dropped,
                     };
                     self.pairing.went_away(agent, id).await;
@@ -457,15 +470,25 @@ mod served {
         /// An approved agent's reports after its handshake, under no bound
         /// but the idle one, which covers reading each frame and answering
         /// it, so an agent that stops reading is let go of too. The agent
-        /// holds the connection, with a heartbeat every 30 seconds.
-        async fn sync(&self, socket: &mut WebSocket, session: &mut HubSession) -> End {
+        /// holds the connection, with a heartbeat every 30 seconds; the
+        /// first message the hub takes makes the connection `live`.
+        async fn sync(
+            &self,
+            socket: &mut WebSocket,
+            session: &mut HubSession,
+            mut live: Live,
+        ) -> End {
             loop {
                 let frame = async {
                     let read = next(socket).await;
                     self.take(socket, session, read).await
                 };
                 match tokio::time::timeout(self.bounds.idle_within, frame).await {
-                    Ok(None) => {}
+                    Ok(None) => {
+                        if let Some(close) = live.close.take() {
+                            self.pairing.went_live(live.agent, live.id, close).await;
+                        }
+                    }
                     Ok(Some(end)) => return end,
                     Err(_) => return End::Dropped,
                 }
