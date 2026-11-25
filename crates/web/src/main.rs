@@ -357,7 +357,7 @@ fn Account(
     sign_out_failed: RwSignal<bool>,
 ) -> impl IntoView {
     move || {
-        (standing.get() == Standing::SignedIn).then(|| {
+        standing.get().offers_sign_out().then(|| {
             view! { <SignOut localizer=Arc::clone(&localizer) standing=standing failed=sign_out_failed /> }
         })
     }
