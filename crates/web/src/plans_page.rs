@@ -31,7 +31,7 @@ use crate::plans::{
     ADD_ID, DELETE_BODY_ID, FORM_HEADING_ID, Field, Kind, NEXT_RUN_EVERY, NEXT_RUN_TRIES,
     PLANS_PATH, PlanForm, READ_PATIENCE, REPOSITORIES_PATH, Said, awaits_next_run, change_id,
     change_label, delete_id, delete_label, delete_successor, delete_title, deleted, error_of,
-    form_change_heading, new_plan, plan_path, refusal_of, saved, saved_id,
+    form_change_heading, hint_of, new_plan, plan_path, refusal_of, saved, saved_id,
 };
 use crate::repositories::Sentence;
 use crate::routes::{
@@ -544,6 +544,8 @@ fn PlanEditor(
 ) -> impl IntoView {
     let Open { id, base, opener } = open;
     let inputs = Inputs::of(&PlanForm::of(&base));
+    // The hints are said of the plan as it came, which the save takes along.
+    let shown = base.clone();
     let busy = RwSignal::new(false);
     let heading_ref = NodeRef::<leptos::html::H2>::new();
     Effect::new(move |_| {
@@ -636,7 +638,7 @@ fn PlanEditor(
 
     let field_view = |field: Field| {
         let label = say(&localizer, field.label());
-        let hint = say(&localizer, field.hint());
+        let hint = say(&localizer, hint_of(field, &shown));
         let Some((value, error)) = inputs.input(field) else {
             return ().into_any();
         };

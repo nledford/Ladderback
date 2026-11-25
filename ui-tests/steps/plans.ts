@@ -5,6 +5,8 @@
 // as in every journey, or by a plan's ID, which is data no catalog changes.
 
 import assert from "node:assert/strict";
+import { readFile } from "node:fs/promises";
+import path from "node:path";
 
 import { Given, Then, When } from "@cucumber/cucumber";
 import type { Request, Route } from "playwright";
@@ -167,6 +169,19 @@ Then("the row {string} of the table {string} shows a next run", async function (
     },
     ({ planned, given }) => planned !== null && given.includes(planned),
   );
+});
+
+// The configuration file the scenario's daemon saved still gives the plan
+// its interval: what a save keeps is what the next start of the daemon reads.
+Then("the plan {string} still runs every {string}", async function (this: BrowserWorld, plan: string, every: string) {
+  assert.ok(this.ownServer, "this scenario's daemon was never started");
+  const config = await readFile(path.join(this.ownServer.scratch, "config", "config.toml"), "utf8");
+  const table = config
+    .split(/^\[\[plans\]\]$/m)
+    .slice(1)
+    .find((each) => each.includes(`id = ${JSON.stringify(plan)}`));
+  assert.ok(table, `the configuration file has no plan ${plan}:\n${config}`);
+  assert.ok(table.includes(`every = ${JSON.stringify(every)}`), `the plan ${plan} doesn't run every ${every}:\n${table}`);
 });
 
 // For a page whose buttons a pseudolocale named: the first button of the row

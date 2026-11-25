@@ -112,6 +112,81 @@ fn an_emptied_schedule_removes_the_whole_schedule() {
 }
 
 #[test]
+fn a_cron_field_left_blank_over_an_interval_keeps_the_interval() {
+    let base = json!({ "id": "home", "schedule": { "every": "1h", "jitter": "5m" } });
+    for typed in ["", "  ", "\n"] {
+        let sent = sent(&base, |form| form.set_text(Field::Cron, typed.to_owned()));
+        assert_eq!(sent, base, "{typed:?}");
+    }
+}
+
+#[test]
+fn the_cron_field_of_a_plan_on_an_interval_says_how_often_it_runs_and_that_empty_keeps_it() {
+    let base = plan(json!({ "id": "home", "schedule": { "every": "1h 30m" } }));
+    assert_eq!(
+        hint_of(Field::Cron, &base),
+        (
+            msg::UI_PLAN_CRON_HINT_EVERY,
+            vec![("every", MsgArg::DurationMs(5_400_000))]
+        )
+    );
+}
+
+#[test]
+fn an_interval_the_form_cannot_read_is_said_as_it_is_written() {
+    let base = plan(json!({ "id": "home", "schedule": { "every": "2 fortnights" } }));
+    assert_eq!(
+        hint_of(Field::Cron, &base),
+        (
+            msg::UI_PLAN_CRON_HINT_EVERY,
+            vec![("every", MsgArg::Text("2 fortnights".to_owned()))]
+        )
+    );
+}
+
+#[test]
+fn an_interval_is_said_as_a_length_of_time_only_when_its_words_say_all_of_it() {
+    let said = |every: &str| {
+        let base = plan(json!({ "id": "home", "schedule": { "every": every } }));
+        hint_of(Field::Cron, &base).1
+    };
+    for (every, ms) in [
+        ("500ms", 500),
+        ("90s", 90_000),
+        ("59m 59s", 3_599_000),
+        ("1h", 3_600_000),
+        ("23h 59m", 86_340_000),
+        ("36h", 129_600_000),
+    ] {
+        assert_eq!(
+            said(every),
+            vec![("every", MsgArg::DurationMs(ms))],
+            "{every}"
+        );
+    }
+    // The catalog's `duration` shows the two largest units that apply, so
+    // these would read as a shorter interval than the plan's.
+    for every in ["1m 500ms", "1h 0m 30s", "24h 30m", "-1h"] {
+        assert_eq!(
+            said(every),
+            vec![("every", MsgArg::Text(every.to_owned()))],
+            "{every}"
+        );
+    }
+}
+
+#[test]
+fn every_other_hint_is_the_fields_own() {
+    let every = plan(json!({ "id": "home", "schedule": { "every": "1h" } }));
+    assert_eq!(hint_of(Field::Cron, &plan(home())), Field::Cron.hint());
+    assert_eq!(
+        hint_of(Field::Cron, &plan(json!({ "id": "home" }))),
+        Field::Cron.hint()
+    );
+    assert_eq!(hint_of(Field::KeepLast, &every), Field::KeepLast.hint());
+}
+
+#[test]
 fn lines_are_sent_each_trimmed_and_blank_ones_left_out() {
     let sent = sent(&home(), |form| {
         form.set_text(Field::Sources, " /srv/a \n\n/srv/b\n".to_owned());
