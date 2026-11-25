@@ -363,6 +363,7 @@ impl Catalog for DemoCatalog {
                 repository: "/srv/demo/repo".to_owned(),
                 repo_hot: None,
                 password: api::PasswordSourceDto::Inline,
+                maintenance: api::RepositoryMaintenanceDto::Local,
                 maintained_here: true,
                 maintenance_paused_since: None,
                 create_offered: false,
@@ -1706,7 +1707,7 @@ async fn the_plans_and_repositories_are_listed() {
     assert_eq!(repositories.status(), StatusCode::OK);
     assert_eq!(
         body(repositories).await,
-        r#"{"repositories":[{"alias":"demo","repository":"/srv/demo/repo","password":{"source":"inline"},"maintained-here":true}]}"#
+        r#"{"repositories":[{"alias":"demo","repository":"/srv/demo/repo","password":{"source":"inline"},"maintenance":"local","maintained-here":true}]}"#
     );
 }
 

@@ -1066,8 +1066,9 @@ fn tools() -> Vec<Tool> {
         Tool::new(
             LIST_REPOSITORIES,
             "The configured repositories, a page at a time: each with its location, \
-             credentials masked, where its password comes from, whether it is maintained \
-             here and its configuration warnings. Never a secret.",
+             credentials masked, where its password comes from, who its entry asks to \
+             maintain it, whether it is maintained here and its configuration warnings. \
+             Never a secret.",
             input_schema::<ListArguments>(),
         )
         .with_title("List repositories")

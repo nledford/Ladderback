@@ -228,6 +228,34 @@ fn a_listed_repository_says_whether_this_agent_maintains_it() {
     }
 }
 
+#[test]
+fn a_listed_repository_says_who_its_entry_asks_to_maintain_it() {
+    let settings = demo_settings(SecretRef::Env("DEMO_PASSWORD".to_owned()));
+    let alias = RepositoryAlias::parse("demo").expect("an alias");
+    for (maintenance, asked, wire) in [
+        (
+            domain::planning::Maintenance::Local,
+            api::RepositoryMaintenanceDto::Local,
+            "local",
+        ),
+        (
+            domain::planning::Maintenance::Hub,
+            api::RepositoryMaintenanceDto::Hub,
+            "hub",
+        ),
+        (
+            domain::planning::Maintenance::None,
+            api::RepositoryMaintenanceDto::None,
+            "none",
+        ),
+    ] {
+        let row = repository_row(&alias, &settings, maintenance, false);
+        assert_eq!(row.maintenance, asked, "{maintenance:?}");
+        let json = serde_json::to_value(&row).expect("a row is JSON");
+        assert_eq!(json["maintenance"], wire, "{maintenance:?}");
+    }
+}
+
 /// An entry `nas` reached at `rest:http://lan.example.lan/r` with a user
 /// and password written in it and a key by reference, then at
 /// `/srv/public` with a key written in the file.
