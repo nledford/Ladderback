@@ -1364,6 +1364,10 @@ warning-profile-command-imported = The import added a command at { $key } that r
 # An import left the profile's global hooks out, because the configuration already had plans or repositories.
 warning-profile-global-hooks-left-out = The profile's global hooks were left out, because they would also run around the plans and repositories the configuration already has. To have them, add them to this { -machine }'s hooks yourself.
 
+# An import added a plan with no schedule, as a rustic profile has none, so it runs only when someone starts it. The schedule line is what a person types in config.toml: keep it as it is.
+# $plan (text): the plan's ID, such as home.
+warning-profile-plan-unscheduled = The plan { $plan } has no schedule, so it runs only when you start it. Give it one on the Plans page, or with a line such as { "schedule = { cron = \"0 * * * *\" }" } in its entry in { "config.toml" }.
+
 # A notification of an event was not delivered to its channel, and is not tried again.
 # $event (text): the event's name, such as backup.failed. Keep it as it is.
 # $rule (text): the rule's name in the configuration. Keep it as it is.

@@ -714,3 +714,16 @@ fn export_notes_option(agent: &mut Agent, option: String, variable: String) {
         "no notice for {option:?} in {notices:?}"
     );
 }
+
+#[then(expr = "the import notes that the plan {string} has no schedule")]
+fn notes_unscheduled(agent: &mut Agent, plan: String) {
+    let notices = match agent.interop.imported() {
+        Ok(imported) => &imported.notices,
+        Err(error) => panic!("the import was refused: {error:?}"),
+    };
+    let unscheduled = ProfileNotice::PlanUnscheduled { plan };
+    assert!(
+        notices.contains(&unscheduled),
+        "no {unscheduled:?} in {notices:?}"
+    );
+}

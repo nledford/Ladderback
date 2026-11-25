@@ -18,6 +18,12 @@ Feature: Import a rustic profile
       And the configuration now holds the plan "home"
       And the configuration now holds the plan "docs"
 
+    Scenario: An imported plan has no schedule, and the import says so
+      Given a profile holding the plan "home"
+      When the owner imports the profile as the repository "nas"
+      Then the import succeeds
+      And the import notes that the plan "home" has no schedule
+
     Scenario: A plan the configuration already has is refused
       Given the configuration holds the repository "cloud"
       And the configuration holds the plan "home" for the repository "cloud"
@@ -271,6 +277,22 @@ Feature: Import a rustic profile
         | plans.home.exclude-if-present          | [".nobackup", "CACHEDIR.TAG"] |
         | plans.docs.git-ignore                  | true                          |
         | plans.docs.exclude-if-present          | [".skip"]                     |
+
+    Scenario: A plan has no schedule until one is given, and the import ends by saying how to give it one
+      Given a rustic profile "nas.toml" holding:
+        """
+        [repository]
+        repository = "{scratch}/repo"
+        password-file = "{scratch}/password"
+
+        [[backup.snapshots]]
+        name = "home"
+        sources = ["/home/demo"]
+        """
+      When the owner imports the profile "nas.toml"
+      Then the import succeeds
+      And the saved config doesn't set "plans.home.schedule"
+      And the import ends by warning that the plan "home" runs only when it is started, and how to give it a schedule
 
     Scenario: A repository alias is the profile's file name, made into a slug
       Given a rustic profile "Laptop Profile.toml" holding:

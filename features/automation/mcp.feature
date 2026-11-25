@@ -480,6 +480,7 @@ Feature: AI agents and scripts use Ladderback through MCP
     Then the preview adds the repository "nas" and the plan "laptop"
     And the preview carries the notice "profile-command-imported"
     And the preview carries the notice "profile-global-hooks-left-out"
+    And the preview carries the notice "profile-plan-unscheduled"
 
   Scenario: A profile that isn't TOML is refused without its text
     Given an MCP server running in a scratch folder
