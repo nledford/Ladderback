@@ -20,4 +20,4 @@ The dashboard shows a machine offline once its connection ends, 90 seconds after
 - A laptop asleep over 15 minutes sends `machine.offline`, and `machine.online` when it wakes.
 - A machine that never connected after its approval is alerted 15 minutes after the hub's first watch that found it offline.
 - `machine.offline` pings a healthchecks channel's `fail` URL, and `machine.online` its success URL.
-- A build without the hub accepts `machine.offline` and `machine.online` in `config.toml` and never sends them, as it accepts `repo.maintenance_paused`; the hub feature is deleted before the MVP's release (#1366).
+- A build without the hub accepts `machine.offline`, `machine.online` and `{machine}` in `config.toml` and never sends them, as it accepts `repo.maintenance_paused`. This departs from [decision 122](122-hub-out-of-releases-until-m8.md), which refuses a hub-only event in a release; the maintainer accepted it on 2026-11-25, since the hub feature's gate is deleted before the MVP's release (#1366). The webhook's `machine` key follows decision 122: only a machine's event has it.
