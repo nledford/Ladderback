@@ -1,4 +1,6 @@
 use std::collections::BTreeMap;
+use std::pin::Pin;
+use std::task::{Context, Poll};
 use std::time::Duration;
 
 use async_trait::async_trait;
@@ -638,6 +640,96 @@ pub enum EngineEvent {
     /// The next piece of a dump, at most `PIECE_BYTES` long: the entry's
     /// own bytes, never text to mask.
     Piece(Vec<u8>),
+    /// A prune has worked out its plan and asks, before it deletes or
+    /// rewrites anything, whether it may (§7.3; §16, decision 161). It
+    /// deletes only once [`DeletionAsk::answer`] says
+    /// [`Deletion::Permitted`]; a question dropped unanswered refuses.
+    DeletionAsked(DeletionAsk),
+}
+
+/// Whether a prune that asked may delete.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Deletion {
+    /// The prune goes on with the plan it worked out.
+    Permitted,
+    /// The prune deletes nothing and fails with
+    /// `FailureReason::LeaseLapsed`.
+    Refused,
+}
+
+/// A prune's question before it deletes, which whoever plays the job's
+/// events answers once. Copies share the one answer: the first given
+/// counts. Dropped unanswered, every copy of it, it answers
+/// [`Deletion::Refused`], so an event consumer that doesn't know the
+/// question never lets a prune delete.
+#[derive(Clone)]
+pub struct DeletionAsk(());
+
+impl DeletionAsk {
+    /// A question, and the answer it gets, for the engine to wait on.
+    pub fn new() -> (Self, DeletionAnswer) {
+        todo!()
+    }
+
+    /// Answers the question; an answer after the first changes nothing.
+    pub fn answer(&self, _deletion: Deletion) {
+        todo!()
+    }
+}
+
+impl PartialEq for DeletionAsk {
+    fn eq(&self, _other: &Self) -> bool {
+        todo!()
+    }
+}
+
+impl Eq for DeletionAsk {}
+
+impl std::fmt::Debug for DeletionAsk {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str("DeletionAsk")
+    }
+}
+
+/// The answer a [`DeletionAsk`] gets: [`Deletion::Refused`] when it is
+/// dropped unanswered.
+pub struct DeletionAnswer(());
+
+impl Future for DeletionAnswer {
+    type Output = Deletion;
+
+    fn poll(self: Pin<&mut Self>, _cx: &mut Context<'_>) -> Poll<Deletion> {
+        todo!()
+    }
+}
+
+#[cfg(test)]
+mod deletion_tests {
+    use futures::FutureExt;
+
+    use super::{Deletion, DeletionAsk};
+
+    /// A question no one answers refuses, so an event consumer that drops
+    /// it never lets a prune delete (decision 161).
+    #[test]
+    fn a_question_dropped_unanswered_refuses() {
+        let (ask, answer) = DeletionAsk::new();
+        let copy = ask.clone();
+        drop(ask);
+        drop(copy);
+        assert_eq!(answer.now_or_never(), Some(Deletion::Refused));
+    }
+
+    /// Copies share the one answer: the first given counts.
+    #[test]
+    fn the_first_answer_counts() {
+        let (ask, answer) = DeletionAsk::new();
+        let copy = ask.clone();
+        assert_eq!(copy, ask);
+        copy.answer(Deletion::Permitted);
+        ask.answer(Deletion::Refused);
+        assert_eq!(answer.now_or_never(), Some(Deletion::Permitted));
+    }
 }
 
 /// One progress bar's change; `key` tells concurrent bars apart. A bar names

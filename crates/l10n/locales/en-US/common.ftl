@@ -745,6 +745,13 @@ error-maintenance-not-owner = This { -machine } does not maintain the repository
 # $alias (text): the repository's alias, such as demo.
 error-maintenance-no-lease = This { -machine } is paired with a { -hub } and holds no lease on the repository { $alias } from it, so nothing in it was changed. Check that the { -hub } can be reached and lets this { -machine } maintain the repository, then try again.
 
+# A prune worked out what it would delete, then asked before deleting anything
+# whether this machine may still maintain the repository, and wasn't let go
+# on: this machine is paired with a hub and its lease on the repository ran
+# out or was moved meanwhile, or the daemon didn't answer in time. Nothing was
+# deleted.
+error-maintenance-lease-lapsed = The prune stopped before deleting anything: this { -machine } is paired with a { -hub }, and its lease on the { -repository } lapsed while the prune worked out what to delete. Nothing was deleted. Check that the { -hub } can be reached and still lets this { -machine } maintain the { -repository }, then prune again.
+
 # The plan's retention policy would keep nothing, so the forget was refused
 # before anything was removed.
 # $plan (text): the plan's ID, such as home.

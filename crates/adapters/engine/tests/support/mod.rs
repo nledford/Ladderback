@@ -10,8 +10,8 @@ use std::path::{Path, PathBuf};
 use std::time::{Duration, SystemTime};
 
 use app::ports::{
-    BackupJob, BackupSummary, CheckJob, Engine, EngineEvent, EngineResult, Job, PruneJob,
-    RepositoryAccess, RunningJob,
+    BackupJob, BackupSummary, CheckJob, Deletion, Engine, EngineEvent, EngineResult, Job,
+    PruneJob, RepositoryAccess, RunningJob,
 };
 use domain::execution::deadline::KeepDelete;
 use domain::execution::plan_tags::{PlanTags, UserTag};
@@ -284,14 +284,28 @@ pub fn check_job(location: &Location, read_data: bool) -> Job {
     })
 }
 
-/// Runs a job to its end and returns every event.
+/// Runs a job to its end and returns every event, letting a prune that asks
+/// delete.
 pub async fn run_to_end(engine: &WorkerEngine, job: Job) -> Vec<EngineEvent> {
+    run_answering(engine, job, Deletion::Permitted).await
+}
+
+/// Runs a job to its end and returns every event, answering a prune that
+/// asks before it deletes with `deletion`.
+pub async fn run_answering(
+    engine: &WorkerEngine,
+    job: Job,
+    deletion: Deletion,
+) -> Vec<EngineEvent> {
     let RunningJob {
         mut events,
         control,
     } = engine.run(op(), job).await.unwrap();
     let mut all = Vec::new();
     while let Some(event) = events.next().await {
+        if let EngineEvent::DeletionAsked(ask) = &event {
+            ask.answer(deletion);
+        }
         all.push(event);
     }
     drop(control);

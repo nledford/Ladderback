@@ -32,7 +32,7 @@ mod watchdog;
 pub(crate) use convert::backup_options;
 
 use std::cell::RefCell;
-use std::io::{self, Read, Write};
+use std::io::{self, BufRead, Read, Write};
 use std::path::{Path, PathBuf};
 use std::process::ExitCode;
 use std::sync::Arc;
@@ -44,8 +44,8 @@ use domain::{OperationId, RepositoryId, SignedDuration, Timestamp};
 
 use crate::cache_lock::CacheLock;
 use crate::job::{
-    JobKind, JobSpec, Level, MAX_MESSAGE_BYTES, MAX_MESSAGE_READ, OpResult, RepositorySpec,
-    WorkerEvent, exit_code,
+    DeleteAnswer, JobKind, JobSpec, Level, MAX_MESSAGE_BYTES, MAX_MESSAGE_READ, OpResult,
+    RepositorySpec, WorkerEvent, exit_code,
 };
 use cancel::{AfterCancel, Cancel, Cause};
 use convert::JobError;
@@ -195,6 +195,9 @@ pub(crate) struct Process {
     /// How long a backup stopped while it archives may wind down before the
     /// worker exits anyway: [`WIND_DOWN_LIMIT`] but in tests.
     wind_down_limit: Duration,
+    /// How long a prune waits for the daemon's answer before it deletes
+    /// nothing: [`ANSWER_WAIT`] but in tests.
+    answer_wait: Duration,
 }
 
 impl Process {
@@ -207,6 +210,7 @@ impl Process {
             }),
             cancel: Cancel::default(),
             wind_down_limit: WIND_DOWN_LIMIT,
+            answer_wait: ANSWER_WAIT,
         }
     }
 }
@@ -235,6 +239,9 @@ pub(crate) struct Context {
     watchdog: RefCell<Option<Watchdog>>,
     /// Held until the worker ends: see [`Context::lock_cache`].
     cache_lock: RefCell<Option<CacheLock>>,
+    /// The rest of stdin, after the job spec's line, where a prune reads its
+    /// one answer: see [`Context::ask_to_delete`].
+    answers: RefCell<Option<Box<dyn BufRead + Send>>>,
 }
 
 impl Context {
@@ -248,7 +255,25 @@ impl Context {
             process,
             watchdog: RefCell::new(None),
             cache_lock: RefCell::new(None),
+            answers: RefCell::new(None),
         }
+    }
+
+    /// This context, reading the daemon's answers from `answers`.
+    fn with_answers(self, answers: Box<dyn BufRead + Send>) -> Self {
+        *self.answers.borrow_mut() = Some(answers);
+        self
+    }
+
+    /// Asks the daemon, with [`WorkerEvent::ReadyToDelete`], whether the
+    /// prune may delete, and waits at most the process's answer wait for its
+    /// one line on stdin (§16, decision 161). No answer, a closed stdin or a
+    /// line that is no [`DeleteAnswer`] is `None`, as is a second question:
+    /// the caller deletes nothing on anything but
+    /// [`DeleteAnswer::Delete`]. Fails only when the question can't be
+    /// written.
+    pub(crate) fn ask_to_delete(&self) -> io::Result<Option<DeleteAnswer>> {
+        todo!()
     }
 
     /// Takes `dir` as this worker's cache until the worker ends. Two workers
@@ -358,7 +383,8 @@ fn run_events(input: impl Read, events: Events, pid: u32, process: Process) -> i
         level: Level::Debug,
         message: "job accepted".to_owned(),
     })?;
-    let ctx = Context::new(events.clone(), &spec, pid, process);
+    let ctx =
+        Context::new(events.clone(), &spec, pid, process).with_answers(Box::new(io::empty()));
     let outcome = match &spec.job {
         JobKind::Fake(job) => fake::run(&ctx, job),
         JobKind::Identify(repository) => jobs::identify(&ctx, repository),
@@ -451,6 +477,12 @@ fn repository_of(job: &JobKind) -> Option<&RepositorySpec> {
 /// 35 s) is longer, so a stopped worker ends here, not on the daemon's
 /// SIGKILL (decision 50).
 pub(crate) const WIND_DOWN_LIMIT: Duration = Duration::from_secs(30);
+
+/// How long a prune waits for the daemon's answer to its question before
+/// it deletes nothing. The daemon answers from what it holds, at once; this
+/// bounds a daemon that stalls, so a prune never deletes on an answer that
+/// comes long after the lease was checked (§16, decision 161).
+pub(crate) const ANSWER_WAIT: Duration = Duration::from_secs(60);
 
 /// How long the worker waits for a line being written before it ends the
 /// stream: a writer stuck on a full pipe must not hold its exit back.
@@ -769,6 +801,7 @@ mod tests {
             }),
             cancel: Cancel::default(),
             wind_down_limit: WIND_DOWN_LIMIT,
+            answer_wait: ANSWER_WAIT,
         };
         let (events, capture) = capture();
         let input = serde_json::to_vec(&fake_spec(Some(SignedDuration::ZERO), 3)).unwrap();
@@ -813,6 +846,7 @@ mod tests {
             }),
             cancel: Cancel::default(),
             wind_down_limit: WIND_DOWN_LIMIT,
+            answer_wait: ANSWER_WAIT,
         };
         let (events, capture) = capture();
         let spec = fake_spec(Some(SignedDuration::from_secs(60)), 0);
@@ -854,6 +888,7 @@ mod tests {
             }),
             cancel: Cancel::default(),
             wind_down_limit: WIND_DOWN_LIMIT,
+            answer_wait: ANSWER_WAIT,
         };
         (process, terminated)
     }
@@ -1037,6 +1072,7 @@ mod tests {
             }),
             cancel: Cancel::default(),
             wind_down_limit: WIND_DOWN_LIMIT,
+            answer_wait: ANSWER_WAIT,
         };
         let spec = JobSpec {
             op_id: OperationId::from_uuid(domain::Uuid::from_u128(9)),
@@ -1287,5 +1323,101 @@ mod tests {
             served.get(),
             crate::job::MAX_MESSAGE_BYTES
         );
+    }
+
+    /// A job spec is one line: what follows it on stdin is a prune's answer,
+    /// never part of the job (decision 161).
+    #[test]
+    fn a_job_spec_is_read_up_to_its_newline() {
+        let mut input = serde_json::to_vec(&fake_spec(None, 0)).unwrap();
+        input.extend_from_slice(b"\n{\"answer\":\"delete\"}\n");
+        let (events, _capture) = capture();
+        let exit = run_events(io::Cursor::new(input), events, 42, Process::real(PROGRAM)).unwrap();
+        assert_eq!(exit, Exit::Reported { failed: false });
+    }
+
+    /// A prune's context that reads the daemon's answers from `answers` and
+    /// waits `wait` for one.
+    fn asking(
+        answers: impl BufRead + Send + 'static,
+        wait: Duration,
+    ) -> (Context, super::events::testing::Capture) {
+        let (events, capture) = capture();
+        let mut process = Process::real(PROGRAM);
+        process.answer_wait = wait;
+        let ctx = Context::new(events, &fake_spec(None, 0), 1, process)
+            .with_answers(Box::new(answers));
+        (ctx, capture)
+    }
+
+    /// The answers, one line each, as the daemon writes them.
+    fn lines(text: &str) -> io::Cursor<Vec<u8>> {
+        io::Cursor::new(text.as_bytes().to_vec())
+    }
+
+    #[test]
+    fn a_prune_asks_before_it_deletes_and_hears_the_answer() {
+        for (line, answer) in [
+            ("{\"answer\":\"delete\"}\n", DeleteAnswer::Delete),
+            ("{\"answer\":\"delete_nothing\"}\n", DeleteAnswer::DeleteNothing),
+        ] {
+            let (ctx, capture) = asking(lines(line), Duration::from_secs(5));
+            assert_eq!(ctx.ask_to_delete().unwrap(), Some(answer));
+            assert_eq!(capture.parsed(), [WorkerEvent::ReadyToDelete]);
+        }
+    }
+
+    /// A closed stdin, a line that is no answer, and one past the cap, even
+    /// one that parses, are no answer: the prune deletes nothing.
+    #[test]
+    fn anything_but_an_answer_line_is_no_answer() {
+        let mut too_long = "{\"answer\":\"delete\"}".to_owned();
+        too_long.extend(std::iter::repeat_n(' ', crate::job::MAX_ANSWER_BYTES));
+        too_long.push('\n');
+        for answers in [
+            "",
+            "{\"answer\":\"maybe\"}\n",
+            "delete\n",
+            too_long.as_str(),
+        ] {
+            let (ctx, capture) = asking(lines(answers), Duration::from_secs(5));
+            assert_eq!(ctx.ask_to_delete().unwrap(), None, "{answers:?}");
+            assert_eq!(capture.parsed(), [WorkerEvent::ReadyToDelete]);
+        }
+    }
+
+    #[test]
+    fn a_prune_asks_only_once() {
+        let (ctx, _capture) = asking(
+            lines("{\"answer\":\"delete\"}\n{\"answer\":\"delete\"}\n"),
+            Duration::from_secs(5),
+        );
+        assert_eq!(ctx.ask_to_delete().unwrap(), Some(DeleteAnswer::Delete));
+        assert_eq!(ctx.ask_to_delete().unwrap(), None);
+    }
+
+    /// A stdin that says nothing until the test ends.
+    struct Silent(mpsc::Receiver<()>);
+
+    impl Read for Silent {
+        fn read(&mut self, _buf: &mut [u8]) -> io::Result<usize> {
+            let _ = self.0.recv();
+            Ok(0)
+        }
+    }
+
+    /// A daemon that doesn't answer in time is no answer: the prune waits
+    /// its bound, not for the daemon.
+    #[test]
+    fn a_prune_that_hears_nothing_in_time_hears_no_answer() {
+        let (_held, silent) = mpsc::channel();
+        let (ctx, capture) = asking(
+            io::BufReader::new(Silent(silent)),
+            Duration::from_millis(50),
+        );
+        let began = std::time::Instant::now();
+        assert_eq!(ctx.ask_to_delete().unwrap(), None);
+        assert!(began.elapsed() < Duration::from_secs(5));
+        assert_eq!(capture.parsed(), [WorkerEvent::ReadyToDelete]);
     }
 }

@@ -1,11 +1,14 @@
 //! The worker protocol. Only the daemon and the worker speak it, and both
 //! link this crate, so it isn't part of the published `api`.
 //!
-//! The daemon writes one [`JobSpec`] as JSON to the worker's stdin and closes
-//! it. The worker answers with one [`WorkerEvent`] per line on stdout, and
-//! ends the stream with a [`WorkerEvent::Result`] or a [`WorkerEvent::Failed`].
-//! The job carries the repository password and every secret its settings
-//! resolved to, so it travels over stdin only: never as an argument, in the
+//! The daemon writes one [`JobSpec`] as one line of JSON to the worker's
+//! stdin. For every job but a prune it then closes it; a prune's stays open
+//! for the one [`DeleteAnswer`] line the daemon writes when the prune asks,
+//! with [`WorkerEvent::ReadyToDelete`], whether it may delete. The worker
+//! answers with one [`WorkerEvent`] per line on stdout, and ends the stream
+//! with a [`WorkerEvent::Result`] or a [`WorkerEvent::Failed`]. The job
+//! carries the repository password and every secret its settings resolved
+//! to, so it travels over stdin only: never as an argument, in the
 //! environment or in a file (invariant I4).
 
 use std::collections::BTreeMap;
@@ -454,6 +457,11 @@ pub enum WorkerEvent {
     Piece {
         bytes: String,
     },
+    /// A prune has worked out its plan and, before it deletes or rewrites
+    /// anything, waits for the daemon's [`DeleteAnswer`] on its stdin
+    /// (technical design §7.3; §16, decision 161). Only a prune sends it,
+    /// once; with no answer in time, it deletes nothing.
+    ReadyToDelete,
     Result(OpResult),
     Failed {
         code: ErrorCode,
@@ -461,6 +469,21 @@ pub enum WorkerEvent {
         detail: Option<String>,
     },
 }
+
+/// The daemon's answer to a [`WorkerEvent::ReadyToDelete`]: one JSON line on
+/// the prune's stdin, after its job spec's line.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(tag = "answer", rename_all = "snake_case")]
+pub enum DeleteAnswer {
+    /// The machine may still maintain the repository: delete as planned.
+    Delete,
+    /// It may no longer: delete nothing.
+    DeleteNothing,
+}
+
+/// The longest answer line the worker reads, its newline aside: the longest
+/// answer is 27 bytes, and a longer line is no answer.
+pub(crate) const MAX_ANSWER_BYTES: usize = 64;
 
 impl WorkerEvent {
     /// The last line of a stream: after it the worker writes nothing more.
@@ -1100,5 +1123,6 @@ mod tests {
         assert!(failed.is_final());
         assert!(result.is_final());
         assert!(!log.is_final());
+        assert!(!WorkerEvent::ReadyToDelete.is_final());
     }
 }

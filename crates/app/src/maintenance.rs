@@ -1439,6 +1439,7 @@ impl RunMaintenance {
                         EngineEvent::Started { .. }
                         | EngineEvent::Dumping(_)
                         | EngineEvent::Piece(_) => {}
+                        EngineEvent::DeletionAsked(_) => todo!(),
                         EngineEvent::Progress(_) => {
                             let _ = operation.report_progress();
                         }

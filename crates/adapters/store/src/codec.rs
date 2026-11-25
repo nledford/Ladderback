@@ -246,6 +246,7 @@ pub(crate) fn encode_failure(
         FailureReason::RestoreTargetUnwritable => ("restore-target-unwritable", Vec::new(), None),
         FailureReason::NoLocationRuleHolds => ("no-location-rule-holds", Vec::new(), None),
         FailureReason::PasswordNotAccepted => ("password-not-accepted", Vec::new(), None),
+        FailureReason::LeaseLapsed => todo!(),
         FailureReason::SecretRefused { field, refusal } => (
             refusal.code(),
             std::iter::once(("field", MsgArg::Text(field.clone())))
@@ -825,6 +826,22 @@ mod tests {
             Err(bad) => panic!("the written columns decode: {} {}", bad.column, bad.why),
         };
         assert_eq!(back, FailureReason::RepositoryReplaced);
+    }
+
+    /// A persisted `maintenance-lease-lapsed` failure reads back as the
+    /// typed reason: no arguments, no detail (decision 161).
+    #[test]
+    fn lease_lapsed_round_trips() {
+        let columns = encode_failure(&FailureReason::LeaseLapsed)
+            .expect("a failure with no arguments encodes");
+        assert_eq!(columns.code, "maintenance-lease-lapsed");
+        assert_eq!(columns.args, "[]");
+        assert_eq!(columns.detail, None);
+        let back = match decode_failure(Some(columns.code), Some(&columns.args), columns.detail) {
+            Ok(reason) => reason,
+            Err(bad) => panic!("the written columns decode: {} {}", bad.column, bad.why),
+        };
+        assert_eq!(back, FailureReason::LeaseLapsed);
     }
 
     /// Encodes `reason` and decodes what it wrote.

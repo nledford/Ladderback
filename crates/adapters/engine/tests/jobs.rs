@@ -8,7 +8,8 @@ use std::fs::{self, File, FileTimes};
 use std::time::{Duration, SystemTime};
 
 use app::ports::{
-    Engine, EngineEvent, EngineResult, ForgetJob, Job, OperationStep, ProgressEvent, RunningJob,
+    Deletion, Engine, EngineEvent, EngineResult, ForgetJob, Job, OperationStep, ProgressEvent,
+    RunningJob,
 };
 use domain::SignedDuration;
 use domain::execution::plan_tags::{AGENT_TAG_PREFIX, PLAN_TAG_PREFIX};
@@ -537,6 +538,67 @@ async fn a_prune_plan_reports_what_a_prune_would_do_and_changes_nothing() {
         panic!("not a prune result: {events:?}");
     };
     assert_eq!(pruned.packs_marked, plan.packs_marked);
+}
+
+/// A prune works out its plan and asks before it deletes: told no, it
+/// deletes, marks and rewrites nothing, and fails saying the lease lapsed
+/// (I1, I2; §16, decision 161).
+#[tokio::test]
+async fn i1_a_prune_told_to_delete_nothing_deletes_nothing() {
+    let scratch = Scratch::new();
+    let location = scratch.local();
+    location.init();
+    let engine = engine();
+    write_file(scratch.source().join("a.txt"), b"the first contents");
+    let first = run_to_end(
+        &engine,
+        backup_job(&location, &scratch.source(), "daily", HOUR),
+    )
+    .await;
+    let first = backed_up(&first).snapshot.clone();
+    write_file(
+        scratch.source().join("a.txt"),
+        b"contents the first snapshot never held",
+    );
+    run_to_end(
+        &engine,
+        backup_job(&location, &scratch.source(), "daily", HOUR),
+    )
+    .await;
+    run_to_end(
+        &engine,
+        Job::Forget(ForgetJob {
+            repository: location.access(PASSWORD),
+            ids: vec![first],
+        }),
+    )
+    .await;
+    let before = pack_files(&scratch.repo_dir());
+
+    let events = run_answering(&engine, prune_job(&location), Deletion::Refused).await;
+    assert!(
+        events
+            .iter()
+            .any(|event| matches!(event, EngineEvent::DeletionAsked(_))),
+        "the prune never asked: {events:?}"
+    );
+    assert_eq!(
+        events.last(),
+        Some(&EngineEvent::Failed(FailureReason::LeaseLapsed)),
+        "{events:?}"
+    );
+    assert_eq!(
+        before,
+        pack_files(&scratch.repo_dir()),
+        "a prune told to delete nothing changed the repository"
+    );
+
+    // Told yes, the same prune deletes as before.
+    let events = run_to_end(&engine, prune_job(&location)).await;
+    let EngineResult::Prune(pruned) = succeeded(&events) else {
+        panic!("not a prune result: {events:?}");
+    };
+    assert!(pruned.packs_marked >= 1, "{pruned:?}");
 }
 
 #[tokio::test]

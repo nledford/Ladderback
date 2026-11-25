@@ -999,6 +999,7 @@ fn an_operation_unfinished_cancelled_or_failed_for_its_own_reason_tells_nothing(
             detail: "worker not found".to_owned(),
         }),
         failed(FailureReason::RepositoryExists),
+        failed(FailureReason::LeaseLapsed),
     ] {
         assert_eq!(status.repository_reading(), None, "{status:?}");
     }

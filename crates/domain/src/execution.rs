@@ -105,7 +105,8 @@ impl OperationStatus {
                 | Why::PlanMoved
                 | Why::ConfigUnusable
                 | Why::KeyFilesNotLeftOut
-                | Why::RestoreTargetUnwritable => None,
+                | Why::RestoreTargetUnwritable
+                | Why::LeaseLapsed => None,
             },
             Self::Queued | Self::Running | Self::Cancelled => None,
         }
@@ -247,6 +248,12 @@ pub enum FailureReason {
         field: String,
         refusal: refusal::SettingRefusal,
     },
+    /// A prune worked out its plan and then, before it deleted or rewrote
+    /// anything, wasn't let go on: this paired machine no longer held a live
+    /// lease on the repository from its hub, or the daemon didn't answer the
+    /// prune's question in time (§7.3; §16, decision 161). Nothing was
+    /// deleted.
+    LeaseLapsed,
 }
 
 impl FailureReason {
@@ -281,6 +288,7 @@ impl FailureReason {
             Self::NoLocationRuleHolds => "no-location-rule-holds",
             Self::PasswordNotAccepted => "password-not-accepted",
             Self::SecretRefused { refusal, .. } => refusal.code(),
+            Self::LeaseLapsed => "maintenance-lease-lapsed",
         }
     }
 }

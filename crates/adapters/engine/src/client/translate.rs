@@ -241,6 +241,8 @@ pub(super) fn translate(event: WorkerEvent, redactor: &Redactor) -> Option<Engin
         }),
         // `Reading` decodes a piece's bytes before an event reaches here.
         WorkerEvent::Piece { .. } => return None,
+        // `Reading` answers a prune's question before an event reaches here.
+        WorkerEvent::ReadyToDelete => return None,
         WorkerEvent::Failed { code, args, detail } => {
             let detail = redactor.redact_clipped(&detail.unwrap_or_default(), TRUNCATED);
             EngineEvent::Failed(match code {
@@ -393,6 +395,7 @@ pub(super) fn translate(event: WorkerEvent, redactor: &Redactor) -> Option<Engin
                 | ErrorCode::MaintenanceBusy
                 | ErrorCode::MaintenanceNotOwner
                 | ErrorCode::MaintenanceNoLease
+                | ErrorCode::MaintenanceLeaseLapsed
                 | ErrorCode::RetentionKeepsNothing
                 | ErrorCode::MaintenanceKindUnknown
                 | ErrorCode::AdoptionNoMatch

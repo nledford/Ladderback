@@ -194,6 +194,7 @@ code_messages!(ERRORS, error_message, ErrorCode {
     HubUnavailable => msg::ERROR_HUB_UNAVAILABLE,
     MaintenanceNotOwner => msg::ERROR_MAINTENANCE_NOT_OWNER,
     MaintenanceNoLease => msg::ERROR_MAINTENANCE_NO_LEASE,
+    MaintenanceLeaseLapsed => msg::ERROR_MAINTENANCE_LEASE_LAPSED,
     RetentionKeepsNothing => msg::ERROR_RETENTION_KEEPS_NOTHING,
     MaintenanceKindUnknown => msg::ERROR_MAINTENANCE_KIND_UNKNOWN,
     AdoptionNoMatch => msg::ERROR_ADOPTION_NO_MATCH,
