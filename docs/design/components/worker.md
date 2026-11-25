@@ -5,8 +5,9 @@ This section decides what runs in a worker process, how the daemon talks to it, 
 Each operation (backup, forget, prune, check, restore, ls, dump, stats) runs in a **child process**:
 
 ```
-daemon ──stdin: JobSpec (JSON)──► ladderback worker
+daemon ──stdin: JobSpec (one JSON line)──► ladderback worker
 daemon ◄─stdout: NDJSON Event stream── (progress, log, warning, result)
+daemon ──stdin: DeleteAnswer (a prune's one line)──► ladderback worker
 daemon ──SIGTERM → (grace) → SIGKILL──► cancel
 ```
 
@@ -75,7 +76,7 @@ enum WorkerEvent {
 
 `ProgressBars` is implemented by `EventProgressBars`, which writes these events. Per-file errors raised through `Progress::error` become **warnings**, so an operation can end as `Succeeded`, `SucceededWithWarnings` or `Failed` (§3.1). The worker builds a `Redactor` (§3.1) from its `JobSpec`'s repository and `repo_hot`, password, options, `options_hot`, `options_cold` and resolved secrets (`RepositorySpec.secrets`, copied from `RepositoryAccess.secrets`) and passes every `Log`, `Warning` and error through it (I4); §10.2 lists what it masks. A worker stopped by its watchdog emits nothing more; the daemon records the operation as `Failed { reason: DeadlinePassed }`.
 
-**Message cap.** The daemon reads the worker's stdout one line at a time and the worker reads its stdin to the end, and each side reads at most `MAX_MESSAGE_BYTES` (1 MiB, in `engine::job`) of a message plus one byte to tell it from a longer one (§13.5, rule 2).
+**Message cap.** The daemon reads the worker's stdout one line at a time and the worker reads the `JobSpec` from its stdin as one line, and each side reads at most `MAX_MESSAGE_BYTES` (1 MiB, in `engine::job`) of a message plus one byte to tell it from a longer one (§13.5, rule 2). The daemon closes a worker's stdin after the spec, but a prune's: a prune that has worked out its plan asks with `ready_to_delete` and reads one answer line of at most 64 bytes, `delete` or `delete_nothing`, waiting at most 60 seconds; anything else deletes nothing (§7.3, decision 161).
 
 An event line past the cap fails the operation as `EngineFailed` with the cap in its detail, and the daemon kills the worker; a worker answers a `JobSpec` past the cap with `InvalidJobSpec`; the daemon refuses to start a worker for a spec it would reject. A line that never ends therefore never grows a buffer past the cap.
 
