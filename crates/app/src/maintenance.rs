@@ -1494,18 +1494,25 @@ impl RunMaintenance {
                         | EngineEvent::Piece(_) => {}
                         // A prune at its first delete asks, and is answered
                         // as the run started, under the same lease. A cancel
-                        // that is already there
-                        // is honoured instead: the client was told it was
-                        // accepted, so the prune is told no and stopped.
+                        // there before the answer is given, already or once
+                        // the lease is checked, is honoured instead: the
+                        // client was told it was accepted, so the prune is
+                        // told no and stopped.
                         EngineEvent::DeletionAsked(ask) => {
-                            if futures::poll!(cancel.as_mut()).is_ready() {
+                            let answer = if futures::poll!(cancel.as_mut()).is_ready() {
+                                None
+                            } else {
+                                let answer = self.deletion(operation, repository, lease).await;
+                                futures::poll!(cancel.as_mut()).is_pending().then_some(answer)
+                            };
+                            let Some(answer) = answer else {
                                 ask.answer(Deletion::Refused);
                                 control.stop().await;
                                 note_partial(operation, done, total);
                                 let _ = operation.cancel(self.clock.now());
                                 return Played::Ended;
-                            }
-                            ask.answer(self.deletion(operation, repository, lease).await);
+                            };
+                            ask.answer(answer);
                         }
                         EngineEvent::Progress(_) => {
                             let _ = operation.report_progress();
