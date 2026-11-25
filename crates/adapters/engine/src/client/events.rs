@@ -427,7 +427,7 @@ mod tests {
     use std::time::Instant;
 
     use api::WarningCode;
-    use app::ports::RunningJob;
+    use app::ports::{Engine as _, Job, RunningJob};
     use domain::{OperationId, Uuid};
     use futures::StreamExt;
 
@@ -1132,5 +1132,82 @@ mod tests {
             events.is_empty(),
             "a stopped job's events ended with {events:?}"
         );
+    }
+
+    /// A stand-in prune that asks before it deletes and ends by what it
+    /// heard on its stdin: `maintenance-lease-lapsed` on no, and
+    /// `repository-replaced`, a code the test can tell apart, on yes.
+    const ASKING_PRUNE: &str = r#"read -r spec
+echo '{"event":"ready_to_delete"}'
+read -r answer
+case "$answer" in
+  '{"answer":"delete"}') code=repository-replaced ;;
+  *) code=maintenance-lease-lapsed ;;
+esac
+printf '{"event":"failed","code":"%s","args":[],"detail":null}\n' "$code""#;
+
+    fn prune_job() -> Job {
+        Job::Prune(app::ports::PruneJob {
+            repository: access(),
+            keep_delete: domain::execution::deadline::KeepDelete::MIN,
+        })
+    }
+
+    /// The prune's events after it asked, answered with `deletion`, or with
+    /// the question dropped unanswered when `None`.
+    async fn prune_answered(deletion: Option<Deletion>) -> Vec<EngineEvent> {
+        let engine = WorkerEngine::new("sh", ["-c", ASKING_PRUNE]);
+        let op = OperationId::from_uuid(Uuid::from_u128(1));
+        let mut events = engine.run(op, prune_job()).await.unwrap().events;
+        tokio::time::timeout(Duration::from_secs(10), async {
+            let Some(EngineEvent::DeletionAsked(ask)) = events.next().await else {
+                panic!("the prune's question wasn't passed on");
+            };
+            match deletion {
+                Some(deletion) => ask.answer(deletion),
+                None => drop(ask),
+            }
+            events.collect::<Vec<_>>().await
+        })
+        .await
+        .expect("the prune's events ended")
+    }
+
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn a_prune_told_it_may_delete_hears_delete_on_its_stdin() {
+        assert_matches!(
+            prune_answered(Some(Deletion::Permitted)).await.as_slice(),
+            [EngineEvent::Failed(FailureReason::RepositoryReplaced)]
+        );
+    }
+
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn a_prune_refused_or_left_unanswered_hears_no_delete() {
+        for deletion in [Some(Deletion::Refused), None] {
+            assert_matches!(
+                prune_answered(deletion).await.as_slice(),
+                [EngineEvent::Failed(FailureReason::LeaseLapsed)],
+                "{deletion:?}"
+            );
+        }
+    }
+
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn a_worker_that_asks_to_delete_outside_a_prune_breaks_the_protocol() {
+        let events = answered(
+            fake_job(),
+            None,
+            "",
+            &[r#"{"event":"ready_to_delete"}"#.to_owned()],
+        )
+        .await;
+        let [EngineEvent::Failed(FailureReason::EngineFailed { detail })] = events.as_slice()
+        else {
+            panic!("expected one engine failure, got {events:?}");
+        };
+        assert!(detail.contains("outside a prune"), "{detail}");
     }
 }
