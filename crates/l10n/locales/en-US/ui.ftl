@@ -3705,6 +3705,10 @@ ui-machines-second-computer-untimed = The { -hub } refused another computer as {
 # $hostname (text): the machine's hostname.
 ui-machines-second-computer-ways-back = The { -hub } refused another computer as { $hostname }. If the refused computer is the copy, take a new machine ID on its start page and pair it again. If it should keep this ID, stop { -brand-name } on the computer the { -hub } took or give that one a new ID, then stop the { -hub }'s daemon and run this at the { -hub }'s terminal:
 
+# Said politely when a read of the list, while the Machines tab is open, brings in a refusal the page didn't show, or when the tab's live updates resume after one came: the warning it brings is no live region, so this tells a screen reader of it.
+# $hostname (text): the machine's hostname.
+ui-machines-second-computer-said = The { -hub } refused another computer as { $hostname }. Its warning is above the tables.
+
 # The button that opens the review of approving a waiting machine, and the review's button that approves it.
 # $hostname (text): the machine's hostname.
 ui-machines-approve = Approve { $hostname }

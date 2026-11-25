@@ -189,6 +189,14 @@ impl Listed {
             }
         });
     }
+
+    /// The hostnames of the machines a read that answered while the lists
+    /// were paused flagged for a refused second computer, which the copy
+    /// didn't: what the resume says, beside how many started waiting. None
+    /// when the lists aren't paused or the copy listed no machine yet.
+    pub(crate) fn refused_while_paused(self) -> Vec<String> {
+        todo!()
+    }
 }
 
 /// The machines of `agents` whose status is `status`, in their order.
@@ -348,6 +356,16 @@ fn refused_seconds_ago(row: &HubAgentDto, at: &str) -> Option<u64> {
         .checked_mul(1000)?
         .checked_add(since)?;
     Some(u64::try_from(now.saturating_sub(at) / 1000).unwrap_or(0))
+}
+
+/// The hostnames of the machines in `now` the hub refused a second computer
+/// for that `before` didn't flag, in `now`'s order: what the page says when
+/// a read brings in a warning (the warning is no live region). A later
+/// refusal for a machine already flagged brings no new warning, so isn't
+/// said again.
+pub(crate) fn newly_refused(before: &[HubAgentDto], now: &[HubAgentDto]) -> Vec<String> {
+    let _ = (before, now);
+    todo!()
 }
 
 /// How many changes `agents` and `state` hold that `held` doesn't: each
@@ -706,7 +724,7 @@ mod tests {
     }
 
     /// What the note says after how long ago: where the ways back are.
-    const POINTER: &str = "The ways back are in the warning about demo-laptop above the tables.";
+    const POINTER: &str = "Its warning above the tables says what to do.";
 
     /// How long ago is the hub's: from when the row's status began and how
     /// long ago that was, never the browser's clock, in whole seconds as the
@@ -794,11 +812,12 @@ mod tests {
         let ways = |hostname: &str| {
             (
                 format!(
-                    "The hub refused another computer as {hostname}. If the refused computer is \
-                     the copy, take a new machine ID on its start page and pair it again. If it \
-                     should keep this ID, stop Ladderback on the computer the hub took or give \
-                     that one a new ID, then stop the hub's daemon and run this at the hub's \
-                     terminal:"
+                    "The hub refused another computer as {hostname}. This warning stays until \
+                     the command below has run, whichever way back is taken. If the refused \
+                     computer is the copy, take a new machine ID on its start page, restart \
+                     Ladderback and pair it again. If it should keep this ID, stop Ladderback \
+                     on the computer the hub took or give that one a new ID, then stop the \
+                     hub's daemon and run this at the hub's terminal:"
                 ),
                 format!("ladderback pairing-token --forget-computer {hostname}"),
             )
@@ -950,6 +969,79 @@ mod tests {
         assert_eq!(
             hostnames(listed, AgentStatusDto::Approved),
             ["demo-macbook"]
+        );
+    }
+
+    /// The machine `hostname`, approved, flagged for a second computer the
+    /// hub refused `at`, when given.
+    fn flagged(hostname: &str, at: Option<&str>) -> HubAgentDto {
+        let mut row = agent(hostname, AgentStatusDto::Approved, 60);
+        row.second_machine_at = at.map(str::to_owned);
+        row
+    }
+
+    /// A read says only the machines it newly flags: not one already
+    /// flagged, even refused again since, and not one whose flag went.
+    #[test]
+    fn a_read_says_only_the_machines_it_newly_flags() {
+        let before = [
+            flagged("demo-laptop", Some("2026-11-21T09:00:00Z")),
+            flagged("demo-desktop", None),
+            flagged("demo-server", Some("2026-11-21T09:00:00Z")),
+        ];
+        let now = [
+            flagged("demo-laptop", Some("2026-11-21T09:30:00Z")),
+            flagged("demo-desktop", Some("2026-11-21T09:40:00Z")),
+            flagged("demo-server", None),
+            flagged("demo-tablet", Some("2026-11-21T09:50:00Z")),
+        ];
+        assert_eq!(
+            newly_refused(&before, &now),
+            ["demo-desktop", "demo-tablet"]
+        );
+        assert!(newly_refused(&now, &now).is_empty());
+    }
+
+    /// The resume says each machine a read flagged while the lists were
+    /// paused; lists that aren't paused, or a copy taken before any read
+    /// answered, say none.
+    #[test]
+    fn a_refusal_while_paused_is_told_on_resume() {
+        let listed = listed(vec![flagged("demo-laptop", None)]);
+        assert!(listed.refused_while_paused().is_empty());
+        listed.pause();
+        listed
+            .agents
+            .set(vec![flagged("demo-laptop", Some("2026-11-21T10:00:30Z"))]);
+        assert_eq!(listed.refused_while_paused(), ["demo-laptop"]);
+
+        let early = Listed::new();
+        early.pause();
+        early
+            .agents
+            .set(vec![flagged("demo-laptop", Some("2026-11-21T10:00:30Z"))]);
+        early.state.set(State::Ready);
+        assert!(early.refused_while_paused().is_empty());
+    }
+
+    /// An approval made on the page keeps how long ago the hub refused a
+    /// second computer: the row's now stays the hub's, not when the machine
+    /// started waiting.
+    #[test]
+    fn an_approval_on_the_page_keeps_how_long_ago_a_refusal_was() {
+        // Waiting since 10:00:00, read 3600 s later (11:00:00); refused at 10:30:00.
+        let mut desktop = agent("demo-desktop", AgentStatusDto::Pending, 3600);
+        desktop.second_machine_at = Some("2026-11-21T10:30:00Z".to_owned());
+        let listed = listed(vec![desktop]);
+        listed.pause();
+        listed.approved("agent-demo-desktop");
+        let approved = listed.of(AgentStatusDto::Approved).get_untracked();
+        let note = approved.first().and_then(second_computer);
+        assert_eq!(
+            note.as_ref().map(said),
+            Some(format!(
+                "The hub refused another computer as demo-desktop 30 min 0 s ago. {POINTER}"
+            ))
         );
     }
 }
