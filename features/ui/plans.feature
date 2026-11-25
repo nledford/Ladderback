@@ -92,6 +92,22 @@ Feature: Plans page
     And the table "Plans" has a row "demo-home" that shows "demo"
     And the page has no accessibility violations
 
+  Scenario: A plan that runs at an interval says so at its empty cron field, and keeps it when saved unchanged
+    Given a demo plan "demo-home" that runs every "1h" with a scratch repository
+    When I open the address "/plans"
+    And I skip to the content
+    And I press Tab until focus is on the button "Change demo-home"
+    And I press Enter
+    Then focus is on the heading "Change the plan demo-home"
+    And the field "Cron schedule" is described by "as its configuration file sets it. A cron schedule typed here replaces that interval; left empty, the plan keeps it."
+    When I press Tab until focus is on the button "Save the plan"
+    And I press Enter
+    Then the polite region comes to contain "The plan demo-home is saved."
+    And the button "Save the plan" leaves the page
+    And the plan "demo-home" still runs every "1h"
+    And the row "demo-home" of the table "Plans" shows a next run
+    And the page has no accessibility violations
+
   Scenario: A saved plan is answered in a toast, and focus returns to the button that opened the form
     Given a demo plan "demo-home" with a scratch repository
     When I open the address "/plans"

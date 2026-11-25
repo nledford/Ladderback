@@ -16,6 +16,7 @@ mod machine;
 mod outbox;
 mod pin;
 mod plans;
+mod presence;
 mod registry;
 mod reported;
 mod route;
@@ -57,6 +58,7 @@ pub use plans::{
     LastRun, LastRunOutcome, MAX_PLANS_REPORTED, PlansReport, ReportedPlan, ReportedProgress,
     plans_ack_kind, plans_kind, progress_kind, progress_shown,
 };
+pub use presence::{HEARTBEAT_EVERY, SILENCE_LIMIT, heartbeat_ack_kind, heartbeat_kind};
 pub use registry::{
     AgentRecord, AgentStatus, ApprovalRefused, HostnameKey, HostnameSkeleton, LONGEST_TOKEN_LIFE,
     ListedAgent, Lookalike, PENDING_LIFE, PENDING_LIMIT, PairRefusal, PairRequest, Pairing,

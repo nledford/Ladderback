@@ -622,13 +622,15 @@ impl app::ports::HubLink for PlainLink {
 }
 
 /// A hub that keeps reports, served on loopback under `bounds`, and an
-/// agent it approved: what connects that agent, its ID and its hostname.
+/// agent it approved: what connects that agent, its ID, its hostname and
+/// the hub's pairing.
 async fn approved_agent(
     bounds: Bounds,
 ) -> (
     app::pairing::ConnectToHub,
     domain::AgentId,
     domain::fleet::Hostname,
+    Arc<HubPairing>,
 ) {
     use app::pairing::{AgentPairing, ConnectToHub, PairWithHub};
     use app::ports::AgentRegistry as _;
@@ -683,7 +685,7 @@ async fn approved_agent(
         "0.0.0-agent".to_owned(),
         None,
     );
-    (connecting, agent, hostname)
+    (connecting, agent, hostname, pairing)
 }
 
 /// A report of a start at `seq` of one epoch.
@@ -716,7 +718,7 @@ async fn a_syncing_connection_outlives_the_handshake_bound_until_it_is_idle() {
         idle_within: idle,
         ..Bounds::DECIDED
     };
-    let (connecting, agent, hostname) = approved_agent(bounds).await;
+    let (connecting, agent, hostname, _) = approved_agent(bounds).await;
     let (connected, mut channel) = connecting
         .connect_channel(agent, hostname, None)
         .await
@@ -743,21 +745,29 @@ async fn a_syncing_connection_outlives_the_handshake_bound_until_it_is_idle() {
 }
 
 /// One live connection per agent ID (decision 120): an agent's new session
-/// closes its older one, which takes no report after it, and the older
-/// one's end leaves the newer one live, so the next session closes it.
+/// closes its older one at its first message, so the older takes no report
+/// after it, and the older one's end leaves the newer one live, so the
+/// next session closes it. A session that sends nothing, as a terminal's
+/// `hub-status`, closes none (§16, decision 159).
 #[tokio::test]
 async fn a_new_session_of_an_agent_closes_its_older_one() {
     use domain::fleet::Ack;
 
-    let (connecting, agent, hostname) = approved_agent(Bounds::DECIDED).await;
+    let (connecting, agent, hostname, _) = approved_agent(Bounds::DECIDED).await;
     let (_, mut older) = connecting
         .connect_channel(agent, hostname.clone(), None)
         .await
         .unwrap();
+    older.send_heartbeat().await.unwrap();
+    older.receive_heartbeat_ack().await.unwrap();
     let (_, mut newer) = connecting
         .connect_channel(agent, hostname.clone(), None)
         .await
         .unwrap();
+    older.send_heartbeat().await.unwrap();
+    older.receive_heartbeat_ack().await.unwrap();
+    newer.send_heartbeat().await.unwrap();
+    newer.receive_heartbeat_ack().await.unwrap();
     // The send may fail or not, depending on when the close arrives; no
     // `Ack` answers it either way.
     let _ = older.send_report(&report(1)).await;
@@ -775,11 +785,66 @@ async fn a_new_session_of_an_agent_closes_its_older_one() {
             seq: entry.seq,
         }
     );
-    let (_, _newest) = connecting
+    let (_, mut newest) = connecting
         .connect_channel(agent, hostname, None)
         .await
         .unwrap();
+    newest.send_heartbeat().await.unwrap();
+    newest.receive_heartbeat_ack().await.unwrap();
     let _ = newer.send_report(&report(3)).await;
     let answer = tokio::time::timeout(PATIENCE, newer.receive_ack()).await;
     assert!(matches!(answer, Ok(Err(_))), "{answer:?}");
+}
+
+/// Whether the hub shows `agent` online once its tasks had their turn: at
+/// most `turns` yields, while time stands still.
+async fn shown_online(pairing: &HubPairing, agent: domain::AgentId, turns: usize) -> bool {
+    for _ in 0..turns {
+        tokio::task::yield_now().await;
+    }
+    pairing.is_online(agent)
+}
+
+/// The hub shows an approved agent online from its connection's first
+/// message after the `Welcome`, so a connection that sends none, as a
+/// terminal's `hub-status`, shows nothing, and closes the connection once
+/// the agent sent nothing for 90 seconds, three heartbeats missed: a
+/// heartbeat starts the 90 seconds over, and at their end the machine shows
+/// offline (§7.2; §16, decision 159). The waits are on tokio's paused
+/// clock, moved only while no frame is in flight; the frames themselves
+/// cross on real time.
+#[tokio::test]
+async fn a_connection_silent_for_90_seconds_is_closed_and_its_machine_shown_offline() {
+    let (connecting, agent, hostname, pairing) = approved_agent(Bounds::DECIDED).await;
+    let (_, mut channel) = connecting
+        .connect_channel(agent, hostname, None)
+        .await
+        .unwrap();
+    assert!(
+        !shown_online(&pairing, agent, 100).await,
+        "online before its first message"
+    );
+    channel.send_heartbeat().await.unwrap();
+    channel.receive_heartbeat_ack().await.unwrap();
+    let started = std::time::Instant::now();
+    while !pairing.is_online(agent) {
+        assert!(started.elapsed() < PATIENCE, "the agent never came online");
+        tokio::time::sleep(Duration::from_millis(10)).await;
+    }
+    tokio::time::pause();
+    tokio::time::advance(Duration::from_secs(60)).await;
+    assert!(shown_online(&pairing, agent, 100).await);
+    tokio::time::resume();
+    channel.send_heartbeat().await.unwrap();
+    channel.receive_heartbeat_ack().await.unwrap();
+    // 89 seconds after the heartbeat, 149 after the connection began.
+    tokio::time::pause();
+    tokio::time::advance(Duration::from_secs(89)).await;
+    assert!(shown_online(&pairing, agent, 100).await);
+    // tokio's timers round up to the next millisecond.
+    tokio::time::advance(Duration::from_secs(1) + Duration::from_millis(2)).await;
+    assert!(!shown_online(&pairing, agent, 100).await);
+    tokio::time::resume();
+    let closed = tokio::time::timeout(PATIENCE, channel.receive_heartbeat_ack()).await;
+    assert!(matches!(closed, Ok(Err(_))), "{closed:?}");
 }

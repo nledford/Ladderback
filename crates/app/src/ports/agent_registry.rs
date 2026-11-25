@@ -87,6 +87,12 @@ pub trait AgentRegistry: Send + Sync {
         zone: Option<&MachineZone>,
     ) -> Result<(), StoreError>;
 
+    /// Keeps `now` as when the hub last heard from the agent registered
+    /// under `agent_id`: when its live connection ended, so a machine that
+    /// held one for days shows when it went away, not when it connected
+    /// (§16, decision 159). An ID it doesn't hold changes nothing.
+    async fn record_seen(&self, agent_id: AgentId, now: Timestamp) -> Result<(), StoreError>;
+
     /// Compares `presented`, the machine fingerprint the `Hello` of the
     /// agent registered under `agent_id` carried, with the one it holds,
     /// by [`MachineCheck::of`], and keeps what the answer asks in the same

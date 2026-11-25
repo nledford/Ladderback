@@ -9,7 +9,12 @@ use crate::{Agent, blocking};
 
 /// A request to the serving hub as its page sends it, over plain HTTP on
 /// loopback with sign-in off: the status and body of its answer.
-async fn page_asks(agent: &Agent, method: &str, path: &str, body: String) -> (u16, String) {
+pub(super) async fn page_asks(
+    agent: &Agent,
+    method: &str,
+    path: &str,
+    body: String,
+) -> (u16, String) {
     let address = agent.pairing_terminal.address.expect("a serving hub");
     let request = Request {
         method: method.to_owned(),

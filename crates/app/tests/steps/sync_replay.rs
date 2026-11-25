@@ -35,7 +35,7 @@ pub(super) struct SyncWorld {
 pub(super) struct Side {
     outbox: Arc<InMemoryOutbox>,
     record: RecordReports,
-    connector: Arc<LoopbackHubConnector>,
+    pub(super) connector: Arc<LoopbackHubConnector>,
     /// The reports recorded, in order.
     pub(super) recorded: Vec<AgentReport>,
     /// How many reports were kept while the hub couldn't be reached.
@@ -45,7 +45,7 @@ pub(super) struct Side {
     /// Each sync's outcome, in order.
     pub(super) synced: Vec<Result<Synced, SyncFailure>>,
     /// The sync loop, once the agent keeps syncing.
-    running: Option<Running>,
+    pub(super) running: Option<Running>,
     /// Where the machine stands, which its syncs tell what the hub made of
     /// it, when a scenario follows it.
     pub(super) standing: Option<Arc<MachineStanding>>,
@@ -53,19 +53,19 @@ pub(super) struct Side {
 
 /// How many of the sync loop's waits a step moves through before it gives
 /// up on what it waits for.
-const WAKES: usize = 20;
+pub(super) const WAKES: usize = 20;
 
 /// The agent's sync loop, running beside its operations as the daemon runs
 /// it, stopped with the scenario.
-struct Running {
-    clock: Arc<FakeClock>,
-    task: tokio::task::JoinHandle<()>,
+pub(super) struct Running {
+    pub(super) clock: Arc<FakeClock>,
+    pub(super) task: tokio::task::JoinHandle<()>,
 }
 
 impl Running {
     /// Once the loop waits on its clock, moves the clock to the end of that
     /// wait; `false` when it never waits, as a loop that stopped.
-    async fn wake(&self) -> bool {
+    pub(super) async fn wake(&self) -> bool {
         for _ in 0..1_000 {
             if let Some(next) = self.clock.until_next_sleeper() {
                 self.clock.advance(next);
@@ -74,6 +74,17 @@ impl Running {
             tokio::time::sleep(std::time::Duration::from_millis(1)).await;
         }
         false
+    }
+
+    /// Waits until the loop sleeps on its clock again, done with what its
+    /// last wake made due.
+    pub(super) async fn settle(&self) {
+        for _ in 0..1_000 {
+            if self.clock.sleepers() > 0 {
+                return;
+            }
+            tokio::time::sleep(std::time::Duration::from_millis(1)).await;
+        }
     }
 }
 

@@ -112,13 +112,16 @@ impl Fleet {
 }
 
 /// Whether `event` asks the dashboard to read its machines again: a
-/// machine was approved or removed, or the hub took one of a machine's
-/// reports, its plans or its running operation's progress.
+/// machine was approved or removed, came online or went offline, or the
+/// hub took one of a machine's reports, its plans or its running
+/// operation's progress.
 pub(crate) fn reads_again(event: &UiEvent) -> bool {
     matches!(
         event,
         UiEvent::AgentApproved { .. }
             | UiEvent::AgentRemoved { .. }
+            | UiEvent::AgentOnline { .. }
+            | UiEvent::AgentOffline { .. }
             | UiEvent::AgentReported { .. }
             | UiEvent::AgentPlans { .. }
             | UiEvent::AgentProgress { .. }
@@ -183,6 +186,17 @@ pub(crate) fn no_plans(plans: Option<&MachinePlansDto>) -> MessageId {
     match plans {
         Some(_) => msg::UI_DASHBOARD_PLANS_NONE,
         None => msg::UI_DASHBOARD_NO_PLANS,
+    }
+}
+
+/// What a machine's section says of its connection: that it is online now,
+/// while the hub holds its connection, or when it last connected (§16,
+/// decision 159).
+pub(crate) fn connection_line(online: bool) -> MessageId {
+    if online {
+        msg::UI_DASHBOARD_ONLINE_NOW
+    } else {
+        msg::UI_DASHBOARD_LAST_CONNECTED
     }
 }
 

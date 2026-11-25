@@ -9,9 +9,9 @@ use domain::fleet::{
     Nonce, Pair, PairAnswer, PairRefusal, PairRequest, Paired, PairingToken, PayloadDigest, Proof,
     ProofRefusal, ProofRequest, PublicKey, Refused, RemovalRefused, ReportSeq, SeedFile,
     SignedMessage, SigningSeed, TokenId, TokenRecord, TokenTls, TokenUse, Tombstone,
-    UNUSED_TOKEN_LIMIT, Welcome, WireName, ack_kind, grants_kind, hello_kind, list_agents,
-    plans_kind, progress_kind, release_kind, released_kind, report_kind, repos_kind, token_life,
-    welcome_kind, withheld_kind,
+    UNUSED_TOKEN_LIMIT, Welcome, WireName, ack_kind, grants_kind, heartbeat_kind, hello_kind,
+    list_agents, plans_kind, progress_kind, release_kind, released_kind, report_kind, repos_kind,
+    token_life, welcome_kind, withheld_kind,
 };
 use domain::{AgentId, SignedDuration, TimeZoneDatabase, Timestamp};
 
@@ -31,6 +31,7 @@ mod fleet;
 mod lease_proof;
 mod live;
 mod logged;
+mod presence;
 #[cfg(test)]
 mod tests;
 
@@ -40,6 +41,7 @@ pub use dialog::{
 pub use fleet::Machine;
 pub use lease_proof::{proven_floors, signed_grants};
 pub use live::{progress_dto, time_of};
+pub use presence::CloseConnection;
 
 /// The hub's side of pairing: its keys, its tokens, and its answers to an
 /// agent's `Connect` and `Pair`.
@@ -78,6 +80,8 @@ pub struct HubPairing {
     /// Serializes ownership decisions and grant signing, so recovery cannot
     /// begin between the recovery check and the signed answer.
     granting: futures::lock::Mutex<()>,
+    /// The approved machines whose sync connection the hub holds.
+    presence: presence::Presence,
 }
 
 /// The hub's answer to a proved agent's `Hello`.
@@ -235,6 +239,7 @@ impl HubPairing {
             warned_second: Mutex::default(),
             warned_recovering: Mutex::default(),
             granting: futures::lock::Mutex::new(()),
+            presence: presence::Presence::default(),
         }
     }
 
@@ -456,7 +461,8 @@ impl HubPairing {
 
     /// Removes the agent `agent_id` registered with `agent_key`, now,
     /// pending (a rejection) or approved, keeps its tombstone, logs the
-    /// removal and tells the browsers (decision 154).
+    /// removal, closes the agent's live connection and tells the browsers
+    /// (decision 154; §16, decision 159).
     pub(super) async fn remove_now(
         &self,
         agent_id: AgentId,
@@ -468,6 +474,7 @@ impl HubPairing {
             .await?;
         if let Ok(tombstone) = &removed {
             log::info!("{}", logged::removed(tombstone));
+            self.let_go(agent_id);
             self.tell(fleet::removed(tombstone)).await;
         }
         Ok(removed)
@@ -848,6 +855,8 @@ impl HubPairing {
         } else if message.kind == progress_kind() {
             self.take_progress(syncing.agent_id, &message.payload)
                 .await?
+        } else if message.kind == heartbeat_kind() {
+            self.take_heartbeat(&message.payload)
         } else {
             return Ok(Ok(None));
         };

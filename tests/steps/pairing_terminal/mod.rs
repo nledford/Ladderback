@@ -1,13 +1,15 @@
 //! Steps for `features/fleet/pairing_from_a_terminal.feature`,
 //! `features/fleet/approving_from_a_terminal.feature`,
 //! `features/fleet/hub_status_from_a_terminal.feature`, the `@e2e`
-//! scenarios of `features/fleet/approving_on_the_hubs_page.feature` and
-//! `features/fleet/following_the_hub.feature` and the terminal scenarios of
+//! scenarios of `features/fleet/approving_on_the_hubs_page.feature`,
+//! `features/fleet/following_the_hub.feature` and
+//! `features/fleet/staying_connected.feature` and the terminal scenarios of
 //! `features/fleet/machine_zone.feature`: the hub's
 //! `ladderback pairing-token`, `ladderback serve --hub` and the routes its
-//! page approves through, and a machine's `ladderback pair` and
-//! `ladderback hub-status`, each a real process on folders of its own, and
-//! the scenarios of `features/fleet/hub_keys_at_start.feature`.
+//! page approves through, and a machine's `ladderback pair`,
+//! `ladderback hub-status` and `ladderback serve`, each a real process on
+//! folders of its own, and the scenarios of
+//! `features/fleet/hub_keys_at_start.feature`.
 
 use std::io::Write as _;
 use std::net::SocketAddr;
@@ -22,6 +24,7 @@ mod hub;
 mod hub_page;
 mod hub_terminal;
 mod machine_terminal;
+mod staying_connected;
 
 /// What the scenarios keep between steps.
 #[derive(Debug, Default)]
@@ -52,6 +55,9 @@ pub struct PairingTerminal {
     page_answer: Option<(u16, String)>,
     /// What a hub that didn't start said before it ended.
     refused_start: Option<String>,
+    /// The machine's daemon, ended when the scenario ends or a step stops
+    /// it.
+    machine: Option<Owned>,
 }
 
 /// What a command said, and whether it succeeded.

@@ -91,9 +91,12 @@ pub enum UiEvent {
         attempts: u32,
         at: String,
     },
-    /// An agent joined the fleet.
+    /// The machine `agent` came online at `at` (RFC 3339): the hub holds
+    /// its sync connection (§7.2; §16, decision 159). A page that shows the
+    /// hub's machines reads them again on hearing it.
     AgentOnline { agent: String, at: String },
-    /// An agent left the fleet.
+    /// The machine `agent` went offline at `at`: the hub let go of its sync
+    /// connection, which closed or sent nothing for 90 seconds.
     AgentOffline { agent: String, at: String },
     /// A machine paired with this hub and waits for a person's approval
     /// (§16, decision 121, "Waiting for approval"). Told only to a browser

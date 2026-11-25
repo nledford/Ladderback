@@ -312,6 +312,18 @@ impl AgentRegistry for InMemoryAgentRegistry {
         Ok(())
     }
 
+    async fn record_seen(&self, agent_id: AgentId, now: Timestamp) -> Result<(), StoreError> {
+        if let Some(agent) = self
+            .kept()
+            .agents
+            .iter_mut()
+            .find(|agent| agent.agent_id == agent_id)
+        {
+            agent.last_seen = now;
+        }
+        Ok(())
+    }
+
     async fn check_machine(
         &self,
         agent_id: AgentId,

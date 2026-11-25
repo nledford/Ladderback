@@ -28,7 +28,8 @@ use crate::ports::OutboxEntry;
 mod live;
 
 pub use live::{
-    plans_ack_payload, plans_payload, progress_payload, read_plans, read_plans_ack, read_progress,
+    heartbeat_ack_payload, heartbeat_payload, plans_ack_payload, plans_payload, progress_payload,
+    read_heartbeat, read_heartbeat_ack, read_plans, read_plans_ack, read_progress,
 };
 
 /// What an agent's frame holds, read.

@@ -242,6 +242,7 @@ fn machine_dto(machine: &Machine) -> api::HubMachineDto {
         agent_id: record.agent_id.as_uuid().to_string(),
         hostname: record.hostname.as_str().to_owned(),
         last_seen: record.last_seen.to_string(),
+        online: machine.online,
         zone: record.zone.as_ref().map(|zone| zone.as_str().to_owned()),
         reports_dropped: machine.reports_dropped,
         operations: machine

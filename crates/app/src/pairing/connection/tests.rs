@@ -757,8 +757,15 @@ async fn the_sync_loop_logs_a_streak_of_failures_once() {
     assert_eq!(warned.len(), 1, "{warned:?}");
     assert!(warned[0].starts_with("the agent's reports didn't reach its hub"));
 
+    // The loop reads its outbox once it holds a connection, so this one
+    // reaches a hub that approved it.
+    let hub = keeping_reports(2);
+    let identity = approved(&hub).await;
     let sync = SyncWithHub::new(
-        connecting(identity, connector),
+        connecting(
+            identity,
+            Arc::new(LoopbackHubConnector::to(hub.pairing.clone())),
+        ),
         Arc::new(UnreadableOutbox),
         clock.clone(),
         agent_id(1),
@@ -2390,6 +2397,98 @@ async fn i1_the_sync_loop_asks_for_grants_at_its_start_and_every_15_minutes() {
         first.checked_add(GRANTS_EVERY).ok(),
         "{ends:?}"
     );
+}
+
+/// A configuration the agent can't read is its own trouble, not its
+/// hub's: the sync loop asks for no leases but keeps its one connection,
+/// with its heartbeats, so the machine stays online (§7.2; §16, decision
+/// 159).
+#[tokio::test]
+async fn an_unreadable_configuration_keeps_the_connection_to_the_hub() {
+    use domain::fleet::OutboxEpoch;
+    use domain::planning::{AgentConfig, RepositoryConfig};
+    use domain::{RepositoryAlias, RepositoryId};
+
+    use crate::ports::{ConfigError, ConfigStore, RecordError};
+    use crate::sync::{POLL, SyncWithHub};
+
+    struct Unreadable;
+
+    #[async_trait]
+    impl ConfigStore for Unreadable {
+        async fn load(&self) -> Result<AgentConfig, ConfigError> {
+            Err(ConfigError::Unavailable {
+                file: "ladderback.toml".to_owned(),
+                detail: "unreadable".to_owned(),
+            })
+        }
+
+        async fn save(&self, _: &AgentConfig) -> Result<(), ConfigError> {
+            Ok(())
+        }
+
+        async fn record_id(
+            &self,
+            _: &RepositoryAlias,
+            _: &RepositoryConfig,
+            _: &RepositoryId,
+        ) -> Result<(), RecordError> {
+            Ok(())
+        }
+    }
+
+    let start = Timestamp::from_second(1_800_000_000).unwrap();
+    let Leasing {
+        hub,
+        leases,
+        operations,
+        others,
+        identity,
+        machine_clock,
+        ..
+    } = leasing(start).await;
+    let connector = Arc::new(LoopbackHubConnector::to(hub.pairing.clone()));
+    let sync = SyncWithHub::new(
+        connecting(identity, connector.clone()),
+        Arc::new(crate::fakes::InMemoryOutbox::new(OutboxEpoch::from_uuid(
+            Uuid::from_u128(0xe1),
+        ))),
+        machine_clock.clone(),
+        agent_id(1),
+        hostname(1),
+        None,
+    )
+    .with_leases(Arc::new(Unreadable), leases, operations, others);
+    let (stop, stopped) = tokio::sync::oneshot::channel::<()>();
+    let runner = std::thread::spawn(move || {
+        let runtime = tokio::runtime::Builder::new_current_thread()
+            .build()
+            .unwrap();
+        runtime.block_on(async {
+            tokio::select! {
+                () = sync.run() => unreachable!("the sync loop runs until it is stopped"),
+                _ = stopped => {}
+            }
+        });
+    });
+    // A minute of polls, two heartbeats among them.
+    let polls = 60 / POLL.as_secs();
+    for _ in 0..polls {
+        let mut slept = false;
+        for _ in 0..1_000 {
+            if let Some(next) = machine_clock.until_next_sleeper() {
+                machine_clock.advance(next);
+                slept = true;
+                break;
+            }
+            tokio::time::sleep(std::time::Duration::from_millis(1)).await;
+        }
+        assert!(slept, "the sync loop stopped waiting");
+    }
+    stop.send(()).unwrap();
+    runner.join().unwrap();
+    assert_eq!(connector.routes().len(), 1, "one connection held");
+    assert!(hub.pairing.is_online(agent_id(1)));
 }
 
 /// An approved agent's session asks for its leases: the hub grants the
