@@ -137,7 +137,7 @@ fn the_viewers_offset_is_the_one_the_browsers_clock_had_at_that_instant() {
 #[cfg(feature = "hub")]
 #[wasm_bindgen_test]
 fn a_pairing_tokens_lapse_time_is_the_viewers_reading_beside_the_viewers_offset() {
-    use crate::settings::agents::{lapsed, lapses};
+    use crate::pairing::{lapsed, lapses};
     let localizer = Localizer::new(&["en-US".parse().unwrap()]);
     let viewer = l10n::viewer_zone();
     let fold = |text: String| text.replace(['\u{202f}', '\u{a0}'], " ");
