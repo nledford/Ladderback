@@ -38,16 +38,29 @@ impl RunningBackups {
         op_id: OperationId,
         repository: Option<RepositoryId>,
     ) -> BackupRunning {
-        let _ = (op_id, repository);
-        todo!()
+        self.kept().insert(op_id, repository);
+        BackupRunning {
+            op_id,
+            backups: Arc::clone(self),
+        }
     }
 
-    /// The backups running now, oldest first; `None` when there are more
-    /// than a heartbeat names ([`MAX_RUNNING_BACKUPS`]), which the hub
-    /// reads as "can't tell".
+    /// The backups running now, in the order of their IDs; `None` when
+    /// there are more than a heartbeat names ([`MAX_RUNNING_BACKUPS`]),
+    /// which the hub reads as "can't tell".
     pub fn listed(&self) -> Option<Vec<RunningBackup>> {
-        let _ = MAX_RUNNING_BACKUPS;
-        todo!()
+        let kept = self.kept();
+        if kept.len() > MAX_RUNNING_BACKUPS {
+            return None;
+        }
+        Some(
+            kept.iter()
+                .map(|(op_id, repository)| RunningBackup {
+                    op_id: *op_id,
+                    repository: repository.clone(),
+                })
+                .collect(),
+        )
     }
 
     fn kept(&self) -> std::sync::MutexGuard<'_, BTreeMap<OperationId, Option<RepositoryId>>> {
@@ -59,8 +72,9 @@ impl BackupRunning {
     /// The engine opened `repository`: the backup is named with it from
     /// now on.
     pub fn opened(&self, repository: RepositoryId) {
-        let _ = repository;
-        todo!()
+        if let Some(kept) = self.backups.kept().get_mut(&self.op_id) {
+            *kept = Some(repository);
+        }
     }
 }
 

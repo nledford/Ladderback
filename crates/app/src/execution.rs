@@ -445,6 +445,15 @@ impl RunOperation {
             (Some(check), Job::Backup(_)) => Some(check.check().await),
             _ => None,
         };
+        // Named from before the engine is asked until the run ends, so a
+        // heartbeat meanwhile holds other machines' prunes of the
+        // repository (decision 166).
+        let backing_up = match (&self.running, &job) {
+            (Some(running), Job::Backup(backup)) => {
+                Some(running.begin(run.operation.id(), backup.repository.id.clone()))
+            }
+            _ => None,
+        };
         let RunningJob {
             events,
             mut control,
@@ -482,6 +491,9 @@ impl RunOperation {
                         EngineEvent::Started { repository, .. } => repository.clone(),
                         _ => None,
                     };
+                    if let (Some(backing_up), Some(opened)) = (&backing_up, &opened) {
+                        backing_up.opened(opened.clone());
+                    }
                     self.arm_deadline(&event, budget, &mut deadline, &mut timer);
                     self.keep_result(run, &event).await;
                     self.apply(run, event, &ruled, found);
