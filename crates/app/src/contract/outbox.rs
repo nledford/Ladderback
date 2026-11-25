@@ -502,8 +502,12 @@ async fn the_epoch_just_taken_is_kept_however_the_clock_moved(harness: &dyn Repo
         Some(Ingest::Duplicate),
         "the epoch just taken is kept"
     );
+    // Another report at the first epoch's place: the place is free again,
+    // and the report is not one the hub holds (#1513).
+    let mut at_first = entry(*first, 1);
+    at_first.report.op_id = op(0xf125);
     assert_eq!(
-        taken_at(inbox, AGENT, &entry(*first, 1), later).await,
+        taken_at(inbox, AGENT, &at_first, later).await,
         Some(Ingest::New),
         "the first epoch of those taken at once gave way"
     );
@@ -606,6 +610,21 @@ async fn an_operations_report_is_held_once_across_machines(harness: &dyn ReportI
         taken(inbox, OTHER_AGENT, &again).await,
         Some(Ingest::Duplicate),
         "the report sent again under another machine ID"
+    );
+    // The duplicate still raises that machine's watermark: a report of
+    // another operation at an earlier place is one it already sent.
+    let earlier = OutboxEntry {
+        epoch: OTHER_EPOCH,
+        seq: seq(3),
+        report: AgentReport {
+            op_id: op(0x1513),
+            ..first.report.clone()
+        },
+    };
+    assert_eq!(
+        taken(inbox, OTHER_AGENT, &earlier).await,
+        Some(Ingest::Duplicate),
+        "the duplicate raised the other machine's watermark"
     );
     let started = OutboxEntry {
         seq: seq(5),

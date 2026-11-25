@@ -92,7 +92,7 @@ async fn an_operation_a_closed_store_left_running_is_ended_and_a_queued_one_hand
 async fn queued_operations_come_back_oldest_first_and_an_unreadable_one_is_reported() {
     let scratch = Scratch::new();
     let store = scratch.open().await;
-    let mut raw = scratch.raw().await;
+    let mut raw = scratch.unchecked().await;
     save(&store, &queued_backup(0x22), None).await;
     save(&store, &queued_backup(0x20), None).await;
     save(&store, &queued_backup(0x21), None).await;

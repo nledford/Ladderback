@@ -248,14 +248,9 @@ async fn removing_a_machine_forgets_its_current_state_and_keeps_its_history_and_
         decided.first().map(|decision| &decision.outcome),
         Some(ClaimOutcome::Granted(_))
     );
+    // The other machine uses the repository too, and waits for the lease.
     store
-        .report(
-            kept,
-            &RepositoryReports::new(Vec::new()),
-            &[],
-            at(0),
-            &StartWindow::default(),
-        )
+        .report(kept, &reports, &[], at(0), &StartWindow::default())
         .await
         .expect("the other machine's report is decided");
     let lease_before = store
@@ -270,6 +265,35 @@ async fn removing_a_machine_forgets_its_current_state_and_keeps_its_history_and_
         .await
         .expect("the removal is stored");
     assert!(removal.is_ok(), "the machine is removed: {removal:?}");
+
+    // A message of the removed machine that was on its way: the hub keeps
+    // nothing of it and decides nothing, as the removal leaves no state,
+    // and says so as no failure of the store (decision 165).
+    let late_plans = PlansReport::from_parts(Vec::new(), 0).expect("a snapshot of plans");
+    store
+        .keep_plans(removed, &late_plans)
+        .await
+        .expect("plans of a removed machine are no store failure");
+    let late_progress = ReportedProgress {
+        op_id: id(9),
+        step: None,
+        unit: WireName::parse("bytes").expect("a unit"),
+        current: 2,
+        total: None,
+        at: EpochSeconds::from_seconds(1_800_000_001),
+    };
+    store
+        .keep_progress(removed, &late_progress)
+        .await
+        .expect("progress of a removed machine is no store failure");
+    let late = store
+        .report(removed, &reports, &[], at(6), &StartWindow::default())
+        .await
+        .expect("a report of a removed machine is no store failure");
+    assert!(
+        late.is_empty(),
+        "nothing is decided for a removed machine: {late:?}"
+    );
 
     for (table, held) in [
         ("sync_plans", 0),

@@ -53,6 +53,18 @@ impl Scratch {
         raw_connection(&self.path()).await
     }
 
+    /// A connection of our own that ignores the schema's CHECKs, as a later
+    /// version that relaxed one could write: the rows the store must still
+    /// report as unreadable, never read as a default.
+    pub async fn unchecked(&self) -> SqliteConnection {
+        let mut conn = self.raw().await;
+        sqlx::query("PRAGMA ignore_check_constraints = ON")
+            .execute(&mut conn)
+            .await
+            .expect("the CHECKs are ignored");
+        conn
+    }
+
     /// A connection of our own that never waits for the write lock: it
     /// tells whether a call of the store's holds it, with
     /// [`take_write_lock`].
@@ -397,7 +409,6 @@ pub fn detail_of(op: &Operation, result: Option<&EngineResult>) -> OperationDeta
 /// One operation's columns as the database holds them.
 #[derive(Debug, PartialEq)]
 pub struct Stored {
-    pub agent_id: String,
     pub kind: String,
     pub plan_id: Option<String>,
     pub repo_uuid: Option<String>,
@@ -414,9 +425,7 @@ pub struct Stored {
     pub warning_count: i64,
 }
 
-/// The raw row of operation `n`; the operation must be there. A database
-/// before version 29 names the machine's column `agent_id` (§16, decision
-/// 163), and the migration tests read those too.
+/// The raw row of operation `n`; the operation must be there.
 pub async fn stored_row(conn: &mut SqliteConnection, n: u128) -> Stored {
     let row = sqlx::query("SELECT * FROM operations WHERE id = ?1")
         .bind(id_text(n))
@@ -424,10 +433,6 @@ pub async fn stored_row(conn: &mut SqliteConnection, n: u128) -> Stored {
         .await
         .expect("the operation has a row");
     Stored {
-        agent_id: row
-            .try_get("machine_id")
-            .or_else(|_| row.try_get("agent_id"))
-            .expect("the machine's column"),
         kind: row.get("kind"),
         plan_id: row.get("plan_id"),
         repo_uuid: row.get("repo_uuid"),

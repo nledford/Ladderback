@@ -61,6 +61,23 @@ use crate::summary::Summary;
 /// The migrations this build ships, embedded when the crate is compiled (§8.3).
 static MIGRATOR: Migrator = sqlx::migrate!("../../../migrations");
 
+/// The last migration a database holds of the set before the baseline
+/// schema (§16, decision 165), found by the checksum sqlx recorded for that
+/// set's first: `None` for a new database, or one the baseline made. It only
+/// reads, so a database it finds is left as it was.
+async fn old_set(pool: &SqlitePool) -> Result<Option<i64>, sqlx::Error> {
+    let recorded: bool = sqlx::query_scalar(sql::HAS_MIGRATIONS)
+        .fetch_one(pool)
+        .await?;
+    if !recorded {
+        return Ok(None);
+    }
+    sqlx::query_scalar(sql::OLD_SET_VERSION)
+        .bind(sql::OLD_SET_FIRST_CHECKSUM)
+        .fetch_one(pool)
+        .await
+}
+
 /// How long a statement waits for another connection's write lock.
 const BUSY_TIMEOUT: Duration = Duration::from_secs(5);
 
@@ -70,10 +87,6 @@ const ACQUIRE_TIMEOUT: Duration = Duration::from_secs(10);
 /// Connections in the pool: enough for readers beside a writer, few enough
 /// that a burst of calls queues instead of piling locks on the file.
 const MAX_CONNECTIONS: u32 = 4;
-
-/// The `agent_id` of every operation this agent ran (§9: agents the hub knows
-/// have registry IDs).
-const LOCAL_AGENT: &str = "local";
 
 /// Why the database couldn't be opened.
 #[derive(Debug)]
@@ -124,8 +137,10 @@ impl SqliteStore {
     ///
     /// The directory must exist: the data directory is the caller's to create.
     /// A database that holds a migration this build doesn't ship, because a
-    /// newer version wrote it, is refused with [`OpenError::NewerSchema`] and
-    /// left as it was. A failed open leaves no connection behind.
+    /// newer version wrote it, is refused with [`OpenError::NewerSchema`], and
+    /// one the migrations before the baseline schema left, with
+    /// [`OpenError::OldSchema`]; either is left as it was. A failed open
+    /// leaves no connection behind.
     pub async fn open(path: &Path) -> Result<Self, OpenError> {
         let options = SqliteConnectOptions::new()
             .filename(path)
@@ -146,14 +161,21 @@ impl SqliteStore {
             .map_err(|error| OpenError::Database {
                 detail: cap(error.to_string()),
             })?;
-        if let Err(error) = MIGRATOR.run(&pool).await {
-            pool.close().await;
-            return Err(match error {
+        let migrated = match old_set(&pool).await {
+            Ok(Some(version)) => Err(OpenError::OldSchema { version }),
+            Ok(None) => MIGRATOR.run(&pool).await.map_err(|error| match error {
                 MigrateError::VersionMissing(version) => OpenError::NewerSchema { version },
                 other => OpenError::Migration {
                     detail: cap(other.to_string()),
                 },
-            });
+            }),
+            Err(error) => Err(OpenError::Migration {
+                detail: cap(error.to_string()),
+            }),
+        };
+        if let Err(error) = migrated {
+            pool.close().await;
+            return Err(error);
         }
         Ok(Self {
             pool,
@@ -257,6 +279,18 @@ fn unavailable(error: sqlx::Error) -> StoreError {
     }
 }
 
+/// Whether `error` is SQLite refusing a row of a machine `machines` no
+/// longer holds: the hub removed it while its message was on its way. The
+/// removal deletes the machine's current state (decision 165), so a write
+/// refused this way leaves what one just before the removal would have.
+#[cfg(feature = "hub")]
+fn machine_gone(error: &sqlx::Error) -> bool {
+    matches!(
+        error,
+        sqlx::Error::Database(db) if db.kind() == sqlx::error::ErrorKind::ForeignKeyViolation
+    )
+}
+
 /// An operation that can't be put in its columns: not expected of any
 /// operation, but reported rather than assumed.
 fn encoding(error: impl Display) -> StoreError {
@@ -317,7 +351,6 @@ async fn write(
     let target = operation.target();
     sqlx::query(sql::UPSERT_OPERATION)
         .bind(id)
-        .bind(LOCAL_AGENT)
         .bind(codec::kind_text(operation.kind()))
         .bind(target.plan.as_ref().map(PlanId::as_str))
         .bind(target.repository.as_ref().map(RepositoryId::as_str))

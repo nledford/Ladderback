@@ -418,13 +418,18 @@ async fn a_queued_row_that_cannot_be_read_is_logged_by_its_code_alone() {
         .expect("the queued backup is saved");
     earlier.close().await;
     // A value the row can't hold, which the store's own account of the
-    // row repeats: it is the row's, so nobody has checked it (I4).
+    // row repeats: it is the row's, so nobody has checked it (I4). It is
+    // written past the schema's CHECK, as a later version could.
     let canary = "canary-7f3a-not-a-trigger";
     let mut raw = sqlx::sqlite::SqliteConnectOptions::new()
         .filename(&database)
         .connect()
         .await
         .expect("a raw connection to the log");
+    sqlx::query("PRAGMA ignore_check_constraints = ON")
+        .execute(&mut raw)
+        .await
+        .expect("the CHECKs are ignored");
     sqlx::query("UPDATE operations SET trigger = ?")
         .bind(canary)
         .execute(&mut raw)

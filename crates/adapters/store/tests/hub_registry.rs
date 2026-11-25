@@ -161,11 +161,6 @@ fn agent_cases() -> Vec<(&'static str, &'static str, String)> {
             "UPDATE machines SET counter = '18446744073709551616'".to_owned(),
         ),
         (
-            "a time that isn't a number",
-            "last_seen",
-            "UPDATE machines SET last_seen = 'soon'".to_owned(),
-        ),
-        (
             "a zone not shaped like a zone name",
             "zone",
             "UPDATE machines SET zone = '../etc/localtime'".to_owned(),
@@ -192,11 +187,6 @@ fn token_cases() -> Vec<(&'static str, &'static str, String)> {
                 "UPDATE pairing_tokens SET hub_key = {}",
                 small_order_literal()
             ),
-        ),
-        (
-            "a time that isn't a number",
-            "made_at",
-            "UPDATE pairing_tokens SET made_at = 'earlier'".to_owned(),
         ),
     ]
 }
