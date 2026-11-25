@@ -516,9 +516,11 @@ Feature: The command line's output
       And standard output is not open
       When the owner runs "<command line>"
       Then the command exits with status 0
-      And standard error is empty
+      And standard error has <stderr>
 
+      # Without --json, the one line is the notice that the plan "docs" has
+      # no schedule (#1610); the JSON document carries it instead.
       Examples:
-        | command line                   |
-        | import-profile nas.toml        |
-        | import-profile nas.toml --json |
+        | command line                   | stderr  |
+        | import-profile nas.toml        | 1 line  |
+        | import-profile nas.toml --json | 0 lines |
