@@ -125,6 +125,25 @@ Feature: Repositories page
     And the page doesn't show "demo-password"
     And the page has no accessibility violations
 
+  # Who maintains a repository is the fact that keeps a shared one safe:
+  # exactly one place may forget and prune it (I1). Each row says so in
+  # words under where its password comes from, never by color alone, and a
+  # screen reader hears it with the row's cell (#1548).
+  Scenario: Each repository's row says in words who maintains it
+    Given a daemon with these repositories:
+      | repository | maintained by |
+      | photos     | this machine  |
+      | music      | the hub       |
+      | notes      | no one        |
+    When I open the address "/repositories"
+    Then the row "photos" of the table "Repositories" says "Maintained from this machine." in its "Password" column to a screen reader
+    And the row "music" of the table "Repositories" says "Left to the hub to maintain." in its "Password" column to a screen reader
+    And the row "notes" of the table "Repositories" says "No one maintains it from here." in its "Password" column to a screen reader
+    And the row "photos" of the table "Repositories" doesn't say "No one maintains it from here." in its "Password" column to a screen reader
+    And the row "music" of the table "Repositories" doesn't say "Maintained from this machine." in its "Password" column to a screen reader
+    And the row "notes" of the table "Repositories" doesn't say "Maintained from this machine." in its "Password" column to a screen reader
+    And the page has no accessibility violations
+
   Scenario: The Repositories link in the navigation moves focus to the page's heading
     When I open the web UI
     And I press Tab until focus is on the link "Repositories"

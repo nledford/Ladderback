@@ -12,6 +12,7 @@ import { tmpdir } from "node:os";
 import path from "node:path";
 import { promisify } from "node:util";
 
+import type { DataTable } from "@cucumber/cucumber";
 import { Given, Then, When } from "@cucumber/cucumber";
 
 import { focusComesTo, journey, namePattern } from "../support/keyboard.ts";
@@ -40,6 +41,44 @@ Given("a daemon with a scratch demo repository and no repositories", async funct
   await cp(fixtureRepo, path.join(scratch, "repo"), { recursive: true });
   const configDir = path.join(scratch, "config");
   await mkdir(configDir);
+  const { child, url } = await startServer(scratch, {
+    LADDERBACK_CONFIG_DIR: configDir,
+    LADDERBACK_DATA_DIR: path.join(scratch, "data"),
+    LADDERBACK_CACHE_DIR: path.join(scratch, "cache"),
+  });
+  this.ownServer = { child, scratch };
+  this.baseUrl = url;
+});
+
+// Who each repository's entry asks to maintain it (§7.3), by the words a
+// scenario reads: `local`, `hub`, or no `maintenance` setting at all, which
+// asks nobody.
+const MAINTAINED_BY: Record<string, string | undefined> = {
+  "this machine": 'maintenance = "local"',
+  "the hub": 'maintenance = "hub"',
+  "no one": undefined,
+};
+
+// A daemon of the scenario's own whose config names each repository of the
+// table, under a folder of its own in the scratch folder, with the
+// maintenance its row asks for. Only the list is read, so no repository is
+// made. The After hook of live.ts stops the daemon and removes the folder.
+Given("a daemon with these repositories:", async function (this: BrowserWorld, table: DataTable) {
+  const scratch = await mkdtemp(path.join(tmpdir(), "ladderback-ui-repos-"));
+  const configDir = path.join(scratch, "config");
+  await mkdir(configDir);
+  const entries = table.hashes().flatMap(({ repository, "maintained by": by }) => {
+    assert.ok(repository && by !== undefined && by in MAINTAINED_BY, `no repository or maintainer in the row ${repository} | ${by}`);
+    const setting = MAINTAINED_BY[by];
+    return [
+      `[repositories.${repository}]`,
+      `repository = ${JSON.stringify(path.join(scratch, repository))}`,
+      'password-env = "DEMO_PASSWORD"',
+      ...(setting === undefined ? [] : [setting]),
+      "",
+    ];
+  });
+  await writeFile(path.join(configDir, "config.toml"), ["schema = 1", "", ...entries].join("\n"));
   const { child, url } = await startServer(scratch, {
     LADDERBACK_CONFIG_DIR: configDir,
     LADDERBACK_DATA_DIR: path.join(scratch, "data"),

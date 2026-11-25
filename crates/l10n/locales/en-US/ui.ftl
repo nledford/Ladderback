@@ -917,6 +917,43 @@ ui-gallery-disclosure-menu-log = Demo menu link to the log
 # it does nothing.
 ui-gallery-disclosure-menu-after = Demo after the menu
 
+# The heading of the gallery's navigation bar demo (§4.5): a brand, a few
+# pages' links and a group of rows behind a button, one line where they fit
+# and behind a hamburger where they don't, as the header's.
+ui-gallery-navigation-bar-heading = Navigation bar
+
+# The name of the demo's navigation, told apart from the header's.
+ui-gallery-navigation-bar-label = Demo navigation
+
+# The demo's brand: a link to the start page.
+ui-gallery-navigation-bar-brand = Demo brand
+
+# The name of the demo's hamburger button, told apart from the header's
+# Menu button.
+ui-gallery-navigation-bar-menu = Demo menu
+
+# A page of the demo's navigation: a link to the gallery itself, the page
+# the reader is on.
+ui-gallery-navigation-bar-here = Demo bar link to this page
+
+# A page of the demo's navigation: a link to the Plans page.
+ui-gallery-navigation-bar-plans = Demo bar link to the plans
+
+# The words of the button of the demo's group of rows, as the header's
+# Settings button.
+ui-gallery-navigation-bar-group = Demo more pages
+
+# The group's page: a link to the Log page.
+ui-gallery-navigation-bar-log = Demo bar link to the log
+
+# The group's last row, under a hairline: a button, which does nothing in
+# the demo.
+ui-gallery-navigation-bar-action = Demo bar action
+
+# A button after the demo's navigation bar, where focus goes when it leaves
+# the bar; it does nothing.
+ui-gallery-navigation-bar-after = Demo after the bar
+
 # The heading of the gallery's steps demo (§4.5): a process's steps in
 # order, each with its state, and where the process has reached.
 ui-gallery-steps-heading = Steps
@@ -2752,6 +2789,18 @@ ui-password-env = Read from the environment variable { $name }
 # A password source: a program prints the password.
 # $program (text): the program's name. It is shown as it came.
 ui-password-command = Read from the output of { $program }
+
+# A muted note on a repository's row, under where its password comes from: its entry asks this machine to maintain it, that is to forget, prune and check it and adopt history into it (`maintenance = "local"`).
+ui-repository-maintained-here = Maintained from this { -machine }.
+
+# A muted note on a repository's row: its entry asks this machine to maintain it, but this paired machine holds no lease on it from its hub, so its maintenance is paused (the Snapshots page says since when).
+ui-repository-maintained-here-paused = Maintained from this { -machine }, but paused: it holds no lease on this repository from its { -hub }.
+
+# A muted note on a repository's row: its entry leaves it to the hub to maintain (`maintenance = "hub"`), so this machine doesn't. It says what the entry asks, not that the hub maintains it: the hub may not have taken it on.
+ui-repository-maintained-by-hub = Left to the { -hub } to maintain.
+
+# A muted note on a repository's row: its entry asks nobody to maintain it (`maintenance = "none"`, or no setting), so neither this machine nor the hub forgets, prunes or checks it. Another machine or a program outside Ladderback may still do it.
+ui-repository-maintained-by-nobody = No one maintains it from here.
 
 # The heading of the form that tests, connects or creates a repository.
 ui-repositories-form-heading = Test, connect or create a repository

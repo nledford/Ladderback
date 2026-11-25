@@ -835,6 +835,7 @@ pub(super) fn repository_row(
 ) -> api::RepositoryDto {
     api::RepositoryDto {
         alias: alias.as_str().to_owned(),
+        maintenance: maintenance_requested(maintenance),
         maintained_here: domain::maintenance::Ownership::owned_here(maintenance),
         maintenance_paused_since: None,
         create_offered,
@@ -870,5 +871,16 @@ pub(super) fn repository_row(
             })
             .collect(),
         locations: Vec::new(),
+    }
+}
+
+/// Who a repository's entry asks to maintain it, on the wire (§7.3).
+fn maintenance_requested(
+    maintenance: domain::planning::Maintenance,
+) -> api::RepositoryMaintenanceDto {
+    match maintenance {
+        domain::planning::Maintenance::Local => api::RepositoryMaintenanceDto::Local,
+        domain::planning::Maintenance::Hub => api::RepositoryMaintenanceDto::Hub,
+        domain::planning::Maintenance::None => api::RepositoryMaintenanceDto::None,
     }
 }

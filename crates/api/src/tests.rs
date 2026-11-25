@@ -103,6 +103,7 @@ fn a_repository_row_carries_its_warnings_as_a_code_and_arguments_and_leaves_none
         repository: "/srv/demo/repo".to_owned(),
         repo_hot: None,
         password: PasswordSourceDto::Inline,
+        maintenance: RepositoryMaintenanceDto::Local,
         maintained_here: true,
         maintenance_paused_since: None,
         create_offered: true,
@@ -115,16 +116,13 @@ fn a_repository_row_carries_its_warnings_as_a_code_and_arguments_and_leaves_none
     let json = serde_json::to_string(&row).unwrap();
     assert_eq!(
         json,
-        r#"{"alias":"demo","repository":"/srv/demo/repo","password":{"source":"inline"},"maintained-here":true,"create-offered":true,"warnings":[{"code":"config-inline-secret","args":{"field":{"type":"text","value":"password"}}}]}"#
+        r#"{"alias":"demo","repository":"/srv/demo/repo","password":{"source":"inline"},"maintenance":"local","maintained-here":true,"create-offered":true,"warnings":[{"code":"config-inline-secret","args":{"field":{"type":"text","value":"password"}}}]}"#
     );
     assert_eq!(serde_json::from_str::<RepositoryDto>(&json).unwrap(), row);
     let bare = r#"{"alias":"demo","repository":"/x","password":{"source":"inline"}}"#;
-    assert!(
-        serde_json::from_str::<RepositoryDto>(bare)
-            .unwrap()
-            .warnings
-            .is_empty()
-    );
+    let bare = serde_json::from_str::<RepositoryDto>(bare).unwrap();
+    assert!(bare.warnings.is_empty());
+    assert_eq!(bare.maintenance, RepositoryMaintenanceDto::None);
 }
 
 #[test]
@@ -882,7 +880,7 @@ mod catalog_dto_tests {
 
     use super::{
         MsgArg, PasswordSourceDto, PlanSummaryDto, PlansDto, RepositoriesDto, RepositoryDto,
-        SnapshotDto, SnapshotsDto, WarningCode, WarningDto,
+        RepositoryMaintenanceDto, SnapshotDto, SnapshotsDto, WarningCode, WarningDto,
     };
 
     #[test]
@@ -927,6 +925,7 @@ mod catalog_dto_tests {
                 repository: "/srv/demo/repo".to_owned(),
                 repo_hot: None,
                 password: PasswordSourceDto::Inline,
+                maintenance: RepositoryMaintenanceDto::None,
                 maintained_here: false,
                 maintenance_paused_since: None,
                 create_offered: false,
@@ -936,7 +935,7 @@ mod catalog_dto_tests {
         };
         assert_eq!(
             to_string(&repositories).unwrap(),
-            r#"{"repositories":[{"alias":"demo","repository":"/srv/demo/repo","password":{"source":"inline"},"maintained-here":false}]}"#
+            r#"{"repositories":[{"alias":"demo","repository":"/srv/demo/repo","password":{"source":"inline"},"maintenance":"none","maintained-here":false}]}"#
         );
         assert_eq!(
             from_str::<RepositoriesDto>(&to_string(&repositories).unwrap()).unwrap(),
@@ -981,6 +980,7 @@ mod catalog_dto_tests {
             repository: "rest:https://u:***@nas.example/repo".to_owned(),
             repo_hot: Some("/mnt/hot".to_owned()),
             password: PasswordSourceDto::Inline,
+            maintenance: RepositoryMaintenanceDto::Hub,
             maintained_here: false,
             maintenance_paused_since: None,
             create_offered: false,
@@ -989,7 +989,7 @@ mod catalog_dto_tests {
         };
         assert_eq!(
             to_string(&row).unwrap(),
-            r#"{"alias":"nas","repository":"rest:https://u:***@nas.example/repo","repo-hot":"/mnt/hot","password":{"source":"inline"},"maintained-here":false}"#
+            r#"{"alias":"nas","repository":"rest:https://u:***@nas.example/repo","repo-hot":"/mnt/hot","password":{"source":"inline"},"maintenance":"hub","maintained-here":false}"#
         );
     }
 
