@@ -378,6 +378,55 @@ async fn a_log_that_cannot_be_recovered_stops_the_start_and_keeps_what_it_held()
     );
 }
 
+/// A log the migrations before the baseline schema left (decision 165) is
+/// refused by name, with its last migration, and nothing is written to it.
+#[tokio::test]
+async fn a_log_from_before_the_baseline_schema_is_refused_as_old() {
+    use sqlx::{ConnectOptions, Connection};
+    let scratch = tempfile::tempdir().expect("a scratch dir");
+    let (config, data) = own_folders(scratch.path());
+    std::fs::create_dir_all(&data).expect("the data folder");
+    let database = data.join("ladderback.db");
+    let mut raw = sqlx::sqlite::SqliteConnectOptions::new()
+        .filename(&database)
+        .create_if_missing(true)
+        .connect()
+        .await
+        .expect("the old log is created");
+    sqlx::raw_sql(include_str!(
+        "../../../crates/adapters/store/tests/fixtures/at-0029.sql"
+    ))
+    .execute(&mut raw)
+    .await
+    .expect("the old log is filled");
+    // In WAL mode, as the store keeps every log.
+    sqlx::query("PRAGMA journal_mode = WAL")
+        .execute(&mut raw)
+        .await
+        .expect("the old log is in WAL mode");
+    raw.close().await.expect("the old log is closed");
+    let before = std::fs::read(&database).expect("the old log is read");
+
+    let refused = daemon_at(Some(config), Some(data), None)
+        .await
+        .err()
+        .expect("an old log refuses the start");
+    assert_eq!(refused.message, msg::CLI_STORE_OLD_SCHEMA);
+    assert!(
+        refused
+            .args
+            .iter()
+            .any(|(name, value)| *name == "version" && *value == MsgArg::Text("29".to_owned())),
+        "the refusal names the last migration: {:?}",
+        refused.args
+    );
+    assert_eq!(
+        std::fs::read(&database).expect("the old log is read again"),
+        before,
+        "the old log is left as it was"
+    );
+}
+
 #[tokio::test]
 async fn a_start_refused_once_the_log_is_open_closes_the_log_before_it_returns() {
     let scratch = tempfile::tempdir().expect("a scratch dir");
