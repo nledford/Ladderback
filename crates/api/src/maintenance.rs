@@ -31,9 +31,9 @@ pub struct PlanGroupDto {
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "kebab-case")]
 pub struct OrphanedGroupDto {
-    /// The `ladderback-agent:` tag's text, `null` when the snapshots carry
+    /// The `ladderback-machine:` tag's text, `null` when the snapshots carry
     /// none, or two that disagree.
-    pub agent: Option<String>,
+    pub machine: Option<String>,
     /// The `ladderback-plan:` tag's text, `null` when the snapshots carry
     /// none, or two that disagree.
     pub plan: Option<String>,
@@ -112,12 +112,12 @@ impl PlanGroupDto {
 }
 
 impl OrphanedGroupDto {
-    /// The orphaned group of `agent` and `plan`, which holds `snapshots`,
+    /// The orphaned group of `machine` and `plan`, which holds `snapshots`,
     /// newest first, and may be adopted into `adopt_into`: `count` is all of
     /// the snapshots and at most [`MAX_GROUP_SNAPSHOTS`] are listed. `dto`
     /// shows one snapshot, or `None` for one the wire can't carry.
     pub fn new<T>(
-        agent: Option<String>,
+        machine: Option<String>,
         plan: Option<String>,
         snapshots: &[T],
         adopt_into: Vec<String>,
@@ -125,7 +125,7 @@ impl OrphanedGroupDto {
     ) -> Self {
         let (count, snapshots) = listed(snapshots, MAX_GROUP_SNAPSHOTS, dto);
         Self {
-            agent,
+            machine,
             plan,
             count,
             snapshots,
@@ -319,8 +319,8 @@ impl MaintenancePreviewDto {
 pub enum AdoptionFromDto {
     /// The orphaned group these two tags name.
     Orphaned {
-        /// The `ladderback-agent:` tag's text.
-        agent: String,
+        /// The `ladderback-machine:` tag's text.
+        machine: String,
         /// The `ladderback-plan:` tag's text.
         plan: String,
     },
@@ -336,14 +336,14 @@ pub enum AdoptionFromDto {
 #[derive(Deserialize)]
 #[serde(rename_all = "kebab-case", tag = "from", deny_unknown_fields)]
 enum AdoptionFromWire {
-    Orphaned { agent: String, plan: String },
+    Orphaned { machine: String, plan: String },
     Unmanaged {},
 }
 
 impl From<AdoptionFromWire> for AdoptionFromDto {
     fn from(wire: AdoptionFromWire) -> Self {
         match wire {
-            AdoptionFromWire::Orphaned { agent, plan } => Self::Orphaned { agent, plan },
+            AdoptionFromWire::Orphaned { machine, plan } => Self::Orphaned { machine, plan },
             AdoptionFromWire::Unmanaged {} => Self::Unmanaged,
         }
     }

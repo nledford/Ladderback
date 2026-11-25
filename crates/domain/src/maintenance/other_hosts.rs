@@ -126,7 +126,7 @@ mod tests {
     use std::collections::BTreeMap;
 
     use super::*;
-    use crate::execution::plan_tags::{AGENT_TAG_PREFIX, PLAN_TAG_PREFIX};
+    use crate::execution::plan_tags::{MACHINE_TAG_PREFIX, PLAN_TAG_PREFIX};
     use crate::planning::{
         AgentSettings, GroupBy, Hooks, Hostname, Maintenance, Plan, RepositoryConfig,
         RepositorySettings, Source,
@@ -250,7 +250,7 @@ mod tests {
         Snapshot {
             tags: vec![
                 format!("{PLAN_TAG_PREFIX}home"),
-                format!("{AGENT_TAG_PREFIX}{}", agent.as_uuid().hyphenated()),
+                format!("{MACHINE_TAG_PREFIX}{}", agent.as_uuid().hyphenated()),
             ],
             time,
             ..snapshot(number, host)
@@ -386,7 +386,7 @@ mod tests {
     fn a_recent_snapshot_whose_agent_tags_disagree_is_another_agents_whichever_comes_first() {
         let config = config(Maintenance::Local, None, [None, None]);
         let agent_tag =
-            |agent: &AgentId| format!("{AGENT_TAG_PREFIX}{}", agent.as_uuid().hyphenated());
+            |agent: &AgentId| format!("{MACHINE_TAG_PREFIX}{}", agent.as_uuid().hyphenated());
         for tags in [
             vec![agent_tag(&agent()), agent_tag(&another_agent())],
             vec![agent_tag(&another_agent()), agent_tag(&agent())],

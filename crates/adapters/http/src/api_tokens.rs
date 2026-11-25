@@ -155,14 +155,14 @@ pub(crate) fn event_shown(
 ) -> Option<api::UiEvent> {
     let of_machines = matches!(
         event,
-        api::UiEvent::AgentPending { .. }
-            | api::UiEvent::AgentApproved { .. }
-            | api::UiEvent::AgentRemoved { .. }
-            | api::UiEvent::AgentOnline { .. }
-            | api::UiEvent::AgentOffline { .. }
-            | api::UiEvent::AgentReported { .. }
-            | api::UiEvent::AgentPlans { .. }
-            | api::UiEvent::AgentProgress { .. }
+        api::UiEvent::MachinePending { .. }
+            | api::UiEvent::MachineApproved { .. }
+            | api::UiEvent::MachineRemoved { .. }
+            | api::UiEvent::MachineOnline { .. }
+            | api::UiEvent::MachineOffline { .. }
+            | api::UiEvent::MachineReported { .. }
+            | api::UiEvent::MachinePlans { .. }
+            | api::UiEvent::MachineProgress { .. }
     );
     (machines || !of_machines).then(|| contents_shown(permissions, event))
 }

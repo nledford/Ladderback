@@ -32,7 +32,7 @@ pub(super) async fn page_asks(
 
 /// The machines the hub's page lists.
 pub(super) async fn listed_machines(agent: &Agent) -> api::HubAgentsDto {
-    let (status, body) = page_asks(agent, "GET", api::HUB_AGENTS_PATH, String::new()).await;
+    let (status, body) = page_asks(agent, "GET", api::HUB_MACHINES_PATH, String::new()).await;
     assert_eq!(status, 200, "{body}");
     serde_json::from_str(&body).unwrap_or_else(|error| panic!("{error}: {body}"))
 }
@@ -51,7 +51,7 @@ async fn read_hub_key(agent: &mut Agent) -> api::HubDto {
 /// `confirmation`, and keeps the hub's answer.
 async fn page_approves(agent: &mut Agent, agent_id: &str, key: String, confirmation: String) {
     let body = serde_json::to_string(&api::ApproveAgentDto { key, confirmation }).expect("JSON");
-    let path = api::agent_approval_path(agent_id);
+    let path = api::machine_approval_path(agent_id);
     let answer = page_asks(agent, "POST", &path, body).await;
     agent.pairing_terminal.page_answer = Some(answer);
 }
@@ -66,11 +66,11 @@ async fn approves_on_the_page(agent: &mut Agent, hostname: &str) {
 async fn approves_on_the_page_with(agent: &mut Agent, hostname: &str, confirmation: String) {
     let listed = listed_machines(agent).await;
     let machine = listed
-        .agents
+        .machines
         .into_iter()
         .find(|machine| machine.hostname == hostname)
         .unwrap_or_else(|| panic!("the page lists {hostname}"));
-    page_approves(agent, &machine.agent_id, machine.key, confirmation).await;
+    page_approves(agent, &machine.machine_id, machine.key, confirmation).await;
 }
 
 fn page_answer(agent: &Agent) -> &(u16, String) {
@@ -83,7 +83,7 @@ fn page_answer(agent: &Agent) -> &(u16, String) {
 
 #[when("the person reads the machines on the hub's page")]
 async fn reads_machines(agent: &mut Agent) {
-    let (status, body) = page_asks(agent, "GET", api::HUB_AGENTS_PATH, String::new()).await;
+    let (status, body) = page_asks(agent, "GET", api::HUB_MACHINES_PATH, String::new()).await;
     agent.pairing_terminal.page_answer = Some((status, body));
 }
 
@@ -92,7 +92,7 @@ fn page_lists_waiting(agent: &mut Agent, hostname: String) {
     let (status, body) = page_answer(agent);
     assert_eq!(*status, 200, "{body}");
     let listed: api::HubAgentsDto = serde_json::from_str(body).expect("the machines");
-    let [machine] = listed.agents.as_slice() else {
+    let [machine] = listed.machines.as_slice() else {
         panic!("one machine: {body}");
     };
     assert_eq!(machine.hostname, hostname);

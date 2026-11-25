@@ -8,7 +8,7 @@
 
 use super::other_hosts::OTHER_AGENT_RECENCY;
 use super::{OwnerTag, owner_tag};
-use crate::execution::plan_tags::AGENT_TAG_PREFIX;
+use crate::execution::plan_tags::MACHINE_TAG_PREFIX;
 use crate::{AgentId, SignedDuration, Timestamp};
 
 /// How long a listing's answer stands (decision 156): a repository last
@@ -33,7 +33,7 @@ pub struct OtherAgentsSnapshots {
 impl OtherAgentsSnapshots {
     /// Among `snapshots`, each its time and its tags, as the agent `agent`
     /// listed them. A snapshot is another agent's when its
-    /// `ladderback-agent:` tags name another agent, or disagree, which
+    /// `ladderback-machine:` tags name another agent, or disagree, which
     /// `agent`'s tag alone no longer proves was made here. One they name
     /// `agent` in, as the history of an earlier installation once adopted
     /// into a plan of this agent, and one no agent tagged, aren't.
@@ -44,7 +44,7 @@ impl OtherAgentsSnapshots {
         let own = agent.as_uuid().hyphenated().to_string();
         let newest = snapshots
             .into_iter()
-            .filter(|(_, tags)| match owner_tag(tags, AGENT_TAG_PREFIX) {
+            .filter(|(_, tags)| match owner_tag(tags, MACHINE_TAG_PREFIX) {
                 OwnerTag::One(tagger) => tagger != own,
                 OwnerTag::Disagree => true,
                 OwnerTag::Absent => false,
@@ -99,7 +99,7 @@ mod tests {
     fn tags_of(agent: &AgentId) -> Vec<String> {
         vec![
             format!("{PLAN_TAG_PREFIX}home"),
-            format!("{AGENT_TAG_PREFIX}{}", agent.as_uuid().hyphenated()),
+            format!("{MACHINE_TAG_PREFIX}{}", agent.as_uuid().hyphenated()),
         ]
     }
 
@@ -143,7 +143,7 @@ mod tests {
     fn a_snapshot_whose_agent_tags_disagree_is_another_agents_even_naming_this_one() {
         let mut tags = tags_of(&agent());
         tags.push(format!(
-            "{AGENT_TAG_PREFIX}{}",
+            "{MACHINE_TAG_PREFIX}{}",
             another_agent().as_uuid().hyphenated()
         ));
         assert!(recent(&[(now() - days(3), tags)]));

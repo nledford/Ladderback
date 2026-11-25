@@ -101,7 +101,7 @@ pub struct Pair {
 }
 
 /// The agent's proof, once the hub's `Challenge` has proved the hub: its
-/// connection counter and the `agent-proof` message signed by its agent key.
+/// connection counter and the `machine-proof` message signed by its agent key.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct Proof {
     pub counter: u64,

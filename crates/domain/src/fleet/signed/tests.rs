@@ -225,7 +225,10 @@ fn the_machines_messages_are_labelled_for_the_machine() {
         .collect();
     assert!(labels.contains(&"machine-proof"), "{labels:?}");
     assert!(labels.contains(&"machine-signed"), "{labels:?}");
-    assert!(!labels.iter().any(|label| label.contains("agent")), "{labels:?}");
+    assert!(
+        !labels.iter().any(|label| label.contains("agent")),
+        "{labels:?}"
+    );
 }
 
 /// The hub proof and the agent proof share a field prefix; their labels

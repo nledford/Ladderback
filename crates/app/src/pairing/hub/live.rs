@@ -33,8 +33,8 @@ impl HubPairing {
             return Ok(Err(MessageRefused::Unexpected));
         };
         inbox.keep_plans(agent, &plans).await?;
-        self.tell(UiEvent::AgentPlans {
-            agent: agent.as_uuid().to_string(),
+        self.tell(UiEvent::MachinePlans {
+            machine: agent.as_uuid().to_string(),
         })
         .await;
         Ok(Ok(Some((plans_ack_kind(), plans_ack_payload()))))
@@ -51,8 +51,8 @@ impl HubPairing {
             return Ok(Err(MessageRefused::Unexpected));
         };
         inbox.keep_progress(agent, &progress).await?;
-        self.tell(UiEvent::AgentProgress {
-            agent: agent.as_uuid().to_string(),
+        self.tell(UiEvent::MachineProgress {
+            machine: agent.as_uuid().to_string(),
             progress: progress_dto(&progress),
         })
         .await;

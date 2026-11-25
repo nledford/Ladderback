@@ -8,8 +8,8 @@ use crate::{AgentId, PlanId, SnapshotId};
 pub const RESERVED_TAG_PREFIX: &str = "ladderback-";
 /// The tag prefix naming the plan that made a snapshot.
 pub const PLAN_TAG_PREFIX: &str = "ladderback-plan:";
-/// The tag prefix naming the agent that made a snapshot.
-pub const AGENT_TAG_PREFIX: &str = "ladderback-agent:";
+/// The tag prefix naming the machine that made a snapshot.
+pub const MACHINE_TAG_PREFIX: &str = "ladderback-machine:";
 
 /// A tag the user adds to a plan's snapshots. It never starts with
 /// [`RESERVED_TAG_PREFIX`], in any case, so it can't make a snapshot look like
@@ -49,7 +49,7 @@ impl std::fmt::Display for ReservedTag {
 
 impl std::error::Error for ReservedTag {}
 
-/// `ladderback-plan:<plan>` and `ladderback-agent:<agent>`: every Ladderback backup
+/// `ladderback-plan:<plan>` and `ladderback-machine:<machine>`: every Ladderback backup
 /// carries both, and they make the snapshot managed by that plan.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct PlanTags {
@@ -74,7 +74,7 @@ impl PlanTags {
     pub fn tags(&self) -> [String; 2] {
         [
             format!("{PLAN_TAG_PREFIX}{}", self.plan.as_str()),
-            format!("{AGENT_TAG_PREFIX}{}", self.agent.as_uuid().hyphenated()),
+            format!("{MACHINE_TAG_PREFIX}{}", self.agent.as_uuid().hyphenated()),
         ]
     }
 

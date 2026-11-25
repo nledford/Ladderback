@@ -380,7 +380,7 @@ pub(crate) enum Owner<'a> {
 
 impl<'a> Owner<'a> {
     pub(crate) fn of(group: &'a OrphanedGroupDto) -> Owner<'a> {
-        match (group.agent.as_deref(), group.plan.as_deref()) {
+        match (group.machine.as_deref(), group.plan.as_deref()) {
             (Some(agent), Some(plan)) => Owner::Both { agent, plan },
             (None, Some(plan)) => Owner::Plan(plan),
             (Some(agent), None) => Owner::Agent(agent),
@@ -400,7 +400,7 @@ pub(crate) fn adopt_orphaned(
         Owner::Both { agent, plan } => Some(adoption(
             into,
             AdoptionFromDto::Orphaned {
-                agent: agent.to_owned(),
+                machine: agent.to_owned(),
                 plan: plan.to_owned(),
             },
         )),
@@ -1011,7 +1011,7 @@ mod tests {
     #[test]
     fn an_adoption_request_names_its_plan_and_group() {
         let from = AdoptionFromDto::Orphaned {
-            agent: "ladderback-machine:other".to_owned(),
+            machine: "ladderback-machine:other".to_owned(),
             plan: "ladderback-plan:old".to_owned(),
         };
         assert_eq!(
@@ -1313,7 +1313,7 @@ mod tests {
     #[test]
     fn an_adoption_starts_with_its_selection_and_keeps_its_plan_and_group() {
         let from = AdoptionFromDto::Orphaned {
-            agent: "ladderback-machine:other".to_owned(),
+            machine: "ladderback-machine:other".to_owned(),
             plan: "ladderback-plan:old".to_owned(),
         };
         let request = adoption("home", from.clone());
@@ -1664,7 +1664,7 @@ mod tests {
 
     fn orphaned(agent: Option<&str>, plan: Option<&str>) -> OrphanedGroupDto {
         OrphanedGroupDto {
-            agent: agent.map(str::to_owned),
+            machine: agent.map(str::to_owned),
             plan: plan.map(str::to_owned),
             count: 2,
             snapshots: vec![snapshot(1), snapshot(2)],
@@ -1789,7 +1789,7 @@ mod tests {
             Some(adoption(
                 "home",
                 AdoptionFromDto::Orphaned {
-                    agent: "agent-a".to_owned(),
+                    machine: "agent-a".to_owned(),
                     plan: "old".to_owned(),
                 }
             ))
@@ -2045,7 +2045,7 @@ mod tests {
                 .collect(),
             orphaned: (0..orphaned)
                 .map(|_| OrphanedGroupDto {
-                    agent: Some("laptop".to_owned()),
+                    machine: Some("laptop".to_owned()),
                     plan: Some("old".to_owned()),
                     count: 0,
                     snapshots: Vec::new(),

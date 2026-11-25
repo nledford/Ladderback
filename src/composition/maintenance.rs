@@ -88,9 +88,10 @@ fn kind_of(request: MaintenanceRequest) -> Result<MaintenanceKind, MaintenanceRe
             };
             MaintenanceKind::Adopt(Adoption {
                 from: match from {
-                    api::AdoptionFromDto::Orphaned { agent, plan } => {
-                        AdoptionSource::Orphaned { agent, plan }
-                    }
+                    api::AdoptionFromDto::Orphaned {
+                        machine: agent,
+                        plan,
+                    } => AdoptionSource::Orphaned { agent, plan },
                     api::AdoptionFromDto::Unmanaged => AdoptionSource::Unmanaged,
                 },
                 into: into_plan,
@@ -766,7 +767,7 @@ mod tests {
                     },
                 ],
                 orphaned: vec![api::OrphanedGroupDto {
-                    agent: Some("agent-2".to_owned()),
+                    machine: Some("agent-2".to_owned()),
                     plan: None,
                     count: 1,
                     snapshots: vec![shown(3)],
@@ -954,7 +955,7 @@ mod tests {
             kind_of(MaintenanceRequest::Adopt {
                 into: "home".to_owned(),
                 from: api::AdoptionFromDto::Orphaned {
-                    agent: "agent-2".to_owned(),
+                    machine: "agent-2".to_owned(),
                     plan: "old".to_owned(),
                 },
             }),

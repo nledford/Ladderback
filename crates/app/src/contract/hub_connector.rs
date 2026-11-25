@@ -53,8 +53,8 @@ fn pairing() -> Arc<HubPairing> {
 /// link's session allows.
 fn connect(link: &dyn HubLink) -> AgentFrame {
     AgentFrame::Connect {
-        agent_id: "00000000-0000-0000-0000-000000000001".to_owned(),
-        agent_nonce: "A".repeat(43),
+        machine_id: "00000000-0000-0000-0000-000000000001".to_owned(),
+        machine_nonce: "A".repeat(43),
         binding_kind: u8::from(link.exporter().is_some()),
     }
 }
@@ -86,12 +86,12 @@ fn a_pair_no_challenge_was_made_for() -> AgentFrame {
     let encoded = |bytes: &[u8]| URL_SAFE_NO_PAD.encode(bytes);
     AgentFrame::Pair {
         pairing_key: encoded(&[7; 32]),
-        agent_key: encoded(&[8; 32]),
+        machine_key: encoded(&[8; 32]),
         counter: 0,
         hostname: "laptop".to_owned(),
         zone: None,
         pairing_signature: encoded(&[9; 64]),
-        agent_signature: encoded(&[10; 64]),
+        machine_signature: encoded(&[10; 64]),
     }
 }
 

@@ -1047,10 +1047,10 @@ mod catalog_dto_tests {
 fn a_machines_removal_has_a_path_of_its_own() {
     let id = "0194f3a2-6b1c-7d2e-8f30-415263748596";
     assert_eq!(
-        agent_removal_path(id),
+        machine_removal_path(id),
         "/api/v1/hub/machines/0194f3a2-6b1c-7d2e-8f30-415263748596/removal"
     );
-    assert_ne!(agent_removal_path(id), agent_approval_path(id));
+    assert_ne!(machine_removal_path(id), machine_approval_path(id));
 }
 
 /// The hub's page reads and changes its machines under `machines`, and its
@@ -1058,9 +1058,12 @@ fn a_machines_removal_has_a_path_of_its_own() {
 /// `machine-id` (§16, decision 163).
 #[test]
 fn the_hubs_machines_go_by_machine_on_the_wire() {
-    assert_eq!(HUB_AGENTS_PATH, "/api/v1/hub/machines");
-    assert_eq!(agent_approval_path("m"), "/api/v1/hub/machines/m/approval");
-    assert_eq!(HUB_MACHINES_PATH, "/api/v1/hub/dashboard");
+    assert_eq!(HUB_MACHINES_PATH, "/api/v1/hub/machines");
+    assert_eq!(
+        machine_approval_path("m"),
+        "/api/v1/hub/machines/m/approval"
+    );
+    assert_eq!(HUB_DASHBOARD_PATH, "/api/v1/hub/dashboard");
     let listed = serde_json::json!({"machines": [{
         "machine-id": "m", "hostname": "h", "key": "k", "fingerprint": "f",
         "status": "pending", "since": "s", "seconds-ago": 1,

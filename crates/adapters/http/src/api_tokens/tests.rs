@@ -2378,31 +2378,31 @@ fn machine_events() -> [api::UiEvent; 6] {
     let agent = "018f0000-0000-7000-8000-0000000000a1".to_owned();
     let at = "2026-11-09T10:00:00Z".to_owned();
     [
-        api::UiEvent::AgentPending {
-            agent: agent.clone(),
+        api::UiEvent::MachinePending {
+            machine: agent.clone(),
             hostname: "laptop".to_owned(),
             at: at.clone(),
         },
-        api::UiEvent::AgentApproved {
-            agent: agent.clone(),
+        api::UiEvent::MachineApproved {
+            machine: agent.clone(),
             hostname: "laptop".to_owned(),
             at: at.clone(),
         },
-        api::UiEvent::AgentRemoved {
-            agent: agent.clone(),
+        api::UiEvent::MachineRemoved {
+            machine: agent.clone(),
             hostname: "laptop".to_owned(),
             at: at.clone(),
         },
-        api::UiEvent::AgentOnline {
-            agent: agent.clone(),
+        api::UiEvent::MachineOnline {
+            machine: agent.clone(),
             at: at.clone(),
         },
-        api::UiEvent::AgentOffline {
-            agent: agent.clone(),
+        api::UiEvent::MachineOffline {
+            machine: agent.clone(),
             at,
         },
-        api::UiEvent::AgentReported {
-            agent,
+        api::UiEvent::MachineReported {
+            machine: agent,
             operation: "018f0000-0000-7000-8000-000000000001".to_owned(),
             outcome: api::MachineOutcomeDto::Failed,
         },

@@ -69,15 +69,15 @@ fn each_event_serializes_with_its_kebab_case_type() {
             "operation-failed",
         ),
         (
-            UiEvent::AgentOnline {
-                agent: "demo".into(),
+            UiEvent::MachineOnline {
+                machine: "demo".into(),
                 at: "2026-11-09T10:00:00Z".into(),
             },
             "machine-online",
         ),
         (
-            UiEvent::AgentOffline {
-                agent: "demo".into(),
+            UiEvent::MachineOffline {
+                machine: "demo".into(),
                 at: "2026-11-09T10:00:00Z".into(),
             },
             "machine-offline",
@@ -201,12 +201,12 @@ fn every_event_round_trips_through_its_wire_form() {
             args: Vec::new(),
             finished_at: "2026-11-09T10:05:00Z".into(),
         },
-        UiEvent::AgentOnline {
-            agent: "demo".into(),
+        UiEvent::MachineOnline {
+            machine: "demo".into(),
             at: "2026-11-09T10:00:00Z".into(),
         },
-        UiEvent::AgentOffline {
-            agent: "demo".into(),
+        UiEvent::MachineOffline {
+            machine: "demo".into(),
             at: "2026-11-09T10:00:00Z".into(),
         },
         retrying(),

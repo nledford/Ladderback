@@ -6,7 +6,7 @@
 use std::collections::BTreeSet;
 use std::io;
 
-use domain::execution::plan_tags::{AGENT_TAG_PREFIX, PLAN_TAG_PREFIX};
+use domain::execution::plan_tags::{MACHINE_TAG_PREFIX, PLAN_TAG_PREFIX};
 
 use rustic_core::repofile::SnapshotFile;
 
@@ -73,7 +73,7 @@ pub(crate) fn snapshot_result(snapshot: &SnapshotFile) -> Result<SnapshotResult,
     // tags it keeps more than two different ones, so two of one kind that
     // disagree are among them.
     let names_owner =
-        |tag: &&String| tag.starts_with(PLAN_TAG_PREFIX) || tag.starts_with(AGENT_TAG_PREFIX);
+        |tag: &&String| tag.starts_with(PLAN_TAG_PREFIX) || tag.starts_with(MACHINE_TAG_PREFIX);
     let mut seen = BTreeSet::new();
     let owners = snapshot
         .tags

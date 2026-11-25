@@ -391,11 +391,11 @@ impl PairRefusal {
             Self::TokenExpired => "token-expired",
             Self::TokenRevoked => "token-revoked",
             Self::HostnameTaken { .. } => "hostname-taken",
-            Self::AgentKeyMismatch => "agent-key-mismatch",
+            Self::AgentKeyMismatch => "machine-key-mismatch",
             Self::HubKeyMismatch => "hub-key-mismatch",
             Self::PendingLimit => "pending-limit",
-            Self::AgentRemoved => "agent-removed",
-            Self::AgentKeyRemoved => "agent-key-removed",
+            Self::AgentRemoved => "machine-removed",
+            Self::AgentKeyRemoved => "machine-key-removed",
         })
     }
 }

@@ -11,7 +11,7 @@ use app::ports::{
     Engine, EngineEvent, EngineResult, ForgetJob, Job, OperationStep, ProgressEvent, RunningJob,
 };
 use domain::SignedDuration;
-use domain::execution::plan_tags::{AGENT_TAG_PREFIX, PLAN_TAG_PREFIX};
+use domain::execution::plan_tags::{MACHINE_TAG_PREFIX, PLAN_TAG_PREFIX};
 use domain::execution::{FailureReason, Warning, WarningKind};
 use domain::secrets::SecretValue;
 use futures::StreamExt;
@@ -95,7 +95,7 @@ async fn a_backup_writes_a_snapshot_with_the_plan_tags_extra_tags_and_label() {
         "{tags:?}"
     );
     assert!(
-        tags.iter().any(|t| t.starts_with(AGENT_TAG_PREFIX)),
+        tags.iter().any(|t| t.starts_with(MACHINE_TAG_PREFIX)),
         "{tags:?}"
     );
     assert!(tags.contains(&"extra".to_owned()), "{tags:?}");

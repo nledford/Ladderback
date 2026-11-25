@@ -66,9 +66,9 @@ impl Snapshot {
         owner_tag(&self.tags, plan_tags::PLAN_TAG_PREFIX)
     }
 
-    /// The agent this snapshot's `ladderback-agent:` tags name.
+    /// The agent this snapshot's `ladderback-machine:` tags name.
     pub fn agent(&self) -> OwnerTag<'_> {
-        owner_tag(&self.tags, plan_tags::AGENT_TAG_PREFIX)
+        owner_tag(&self.tags, plan_tags::MACHINE_TAG_PREFIX)
     }
 }
 
@@ -82,7 +82,7 @@ fn owner_tag<'a>(tags: &'a [String], prefix: &str) -> OwnerTag<'a> {
     }
 }
 
-/// What a snapshot's owner tags of one kind, `ladderback-agent:` or
+/// What a snapshot's owner tags of one kind, `ladderback-machine:` or
 /// `ladderback-plan:`, say about who owns it. Tags are compared exactly, so
 /// two that differ only in case or spacing disagree.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]

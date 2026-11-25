@@ -966,7 +966,7 @@ async fn only_a_signed_identity_conflict_stands_the_machine_refused() {
     assert_eq!(standing.get(), Standing::Same);
 }
 
-/// Only the paired hub's signed `agent-removed` stands the machine removed
+/// Only the paired hub's signed `machine-removed` stands the machine removed
 /// by its hub, so it may take a new machine ID: the same refusal with a
 /// signature the hub didn't make leaves it as it was (#1489).
 #[tokio::test]
@@ -2544,7 +2544,7 @@ async fn i1_a_session_takes_the_hubs_grants_on_its_time_and_releases_what_isnt_a
 
 /// A snapshot the agent `agent` tagged, made at `time`.
 fn tagged_by(agent: AgentId, time: Timestamp) -> crate::ports::SnapshotSummary {
-    use domain::execution::plan_tags::{AGENT_TAG_PREFIX, PLAN_TAG_PREFIX};
+    use domain::execution::plan_tags::{MACHINE_TAG_PREFIX, PLAN_TAG_PREFIX};
 
     crate::ports::SnapshotSummary {
         id: domain::SnapshotId::parse(&"5".repeat(64)).unwrap(),
@@ -2554,7 +2554,7 @@ fn tagged_by(agent: AgentId, time: Timestamp) -> crate::ports::SnapshotSummary {
         label: String::new(),
         tags: vec![
             format!("{PLAN_TAG_PREFIX}home"),
-            format!("{AGENT_TAG_PREFIX}{}", agent.as_uuid().hyphenated()),
+            format!("{MACHINE_TAG_PREFIX}{}", agent.as_uuid().hyphenated()),
         ],
         paths: vec!["/home/demo".to_owned()],
         paths_truncated: false,

@@ -438,13 +438,13 @@ pub(super) fn translate(event: WorkerEvent, redactor: &Redactor) -> Option<Engin
                 | ErrorCode::TokenMalformed
                 | ErrorCode::TokenUnsupported
                 | ErrorCode::HostnameTaken
-                | ErrorCode::AgentKeyMismatch
+                | ErrorCode::MachineKeyMismatch
                 | ErrorCode::HubKeyMismatch
                 | ErrorCode::HubProofInvalid
                 | ErrorCode::ProofRefused
                 | ErrorCode::PendingLimit
-                | ErrorCode::AgentRemoved
-                | ErrorCode::AgentKeyRemoved
+                | ErrorCode::MachineRemoved
+                | ErrorCode::MachineKeyRemoved
                 | ErrorCode::BindingUnavailable
                 | ErrorCode::IdentityConflict
                 | ErrorCode::HubUnreachable
@@ -461,8 +461,8 @@ pub(super) fn translate(event: WorkerEvent, redactor: &Redactor) -> Option<Engin
                 | ErrorCode::PairingTokenLife
                 | ErrorCode::PairingTokenLimit
                 | ErrorCode::PairingTokenUnknown
-                | ErrorCode::AgentUnknown
-                | ErrorCode::AgentApprovedAlready
+                | ErrorCode::MachineUnknown
+                | ErrorCode::MachineApprovedAlready
                 | ErrorCode::HubUnavailable
                 | ErrorCode::Unknown => FailureReason::EngineFailed { detail },
             })

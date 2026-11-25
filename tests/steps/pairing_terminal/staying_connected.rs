@@ -48,7 +48,7 @@ async fn hub_soon_shows(agent: &mut Agent, hostname: String, shown: String) {
     let started = Instant::now();
     let mut last = String::new();
     while started.elapsed() < SHOWN_WITHIN {
-        let (status, body) = page_asks(agent, "GET", api::HUB_MACHINES_PATH, String::new()).await;
+        let (status, body) = page_asks(agent, "GET", api::HUB_DASHBOARD_PATH, String::new()).await;
         assert_eq!(status, 200, "{body}");
         let machines: api::HubMachinesDto =
             serde_json::from_str(&body).unwrap_or_else(|error| panic!("{error}: {body}"));

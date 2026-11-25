@@ -211,7 +211,10 @@ fn a_plan_with_nothing_set_is_written_with_what_scopes_it() {
     assert_has(
         &text,
         "backup.snapshots.0.tags",
-        strings(&["ladderback-plan:home", &format!("ladderback-machine:{AGENT}")]),
+        strings(&[
+            "ladderback-plan:home",
+            &format!("ladderback-machine:{AGENT}"),
+        ]),
     );
     assert_has(&text, "forget.group-by", string(""));
     assert_has(

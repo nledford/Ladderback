@@ -6,7 +6,7 @@
 use app::ports::Clock;
 use cucumber::{given, then};
 use domain::execution::WarningKind;
-use domain::execution::plan_tags::{AGENT_TAG_PREFIX, PLAN_TAG_PREFIX};
+use domain::execution::plan_tags::{MACHINE_TAG_PREFIX, PLAN_TAG_PREFIX};
 use domain::maintenance::OtherHosts;
 use domain::planning::{Hostname, KeepCount, Maintenance, Plan, Source};
 use domain::{PlanId, RepositoryAlias, SignedDuration};
@@ -61,7 +61,7 @@ fn tags_of(whose: &str, plan: &str) -> [String; 2] {
     };
     [
         format!("{PLAN_TAG_PREFIX}{plan}"),
-        format!("{AGENT_TAG_PREFIX}{}", by.as_uuid().hyphenated()),
+        format!("{MACHINE_TAG_PREFIX}{}", by.as_uuid().hyphenated()),
     ]
 }
 

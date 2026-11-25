@@ -146,7 +146,7 @@ impl Listed {
     /// removal answers the reader's own press, so its row leaves its table
     /// before the review closes, paused or not.
     pub(crate) fn removed(self, agent_id: &str) {
-        let keep = |agent: &HubAgentDto| agent.agent_id != agent_id;
+        let keep = |agent: &HubAgentDto| agent.machine_id != agent_id;
         self.agents.update(|agents| agents.retain(keep));
         if self.held.with_untracked(Option::is_some) {
             self.held.update(|held| {
@@ -169,7 +169,7 @@ impl Listed {
         let now = self.agents.with_untracked(|agents| {
             agents
                 .iter()
-                .find(|agent| agent.agent_id == agent_id)
+                .find(|agent| agent.machine_id == agent_id)
                 .cloned()
         });
         self.held.update(|held| {
@@ -179,12 +179,12 @@ impl Listed {
                         for row in held
                             .agents
                             .iter_mut()
-                            .filter(|row| row.agent_id == agent_id)
+                            .filter(|row| row.machine_id == agent_id)
                         {
                             row.clone_from(now);
                         }
                     }
-                    None => held.agents.retain(|row| row.agent_id != agent_id),
+                    None => held.agents.retain(|row| row.machine_id != agent_id),
                 }
             }
         });
@@ -228,7 +228,10 @@ pub(crate) fn shown_ms(seconds: u64) -> u64 {
 /// after), so how long ago the hub refused a second computer still reads
 /// right. A `since` the page can't read is kept as it is.
 fn mark_approved(agents: &mut [HubAgentDto], agent_id: &str) {
-    for agent in agents.iter_mut().filter(|agent| agent.agent_id == agent_id) {
+    for agent in agents
+        .iter_mut()
+        .filter(|agent| agent.machine_id == agent_id)
+    {
         let now = agent
             .since
             .parse::<jiff::Timestamp>()
@@ -252,7 +255,7 @@ fn mark_approved(agents: &mut [HubAgentDto], agent_id: &str) {
 /// does, so only whether it refused one counts.
 fn reads_the_same(a: &HubAgentDto, b: &HubAgentDto) -> bool {
     let HubAgentDto {
-        agent_id,
+        machine_id: agent_id,
         hostname,
         key,
         fingerprint,
@@ -262,7 +265,7 @@ fn reads_the_same(a: &HubAgentDto, b: &HubAgentDto) -> bool {
         looks_like,
         second_machine_at,
     } = a;
-    *agent_id == b.agent_id
+    *agent_id == b.machine_id
         && *hostname == b.hostname
         && *key == b.key
         && *fingerprint == b.fingerprint
@@ -279,11 +282,11 @@ fn notes_the_same(a: Option<&LookalikeDto>, b: Option<&LookalikeDto>) -> bool {
         (None, None) => true,
         (Some(a), Some(b)) => {
             let LookalikeDto {
-                agent_id,
+                machine_id: agent_id,
                 hostname,
                 last_seen: _,
             } = a;
-            *agent_id == b.agent_id && *hostname == b.hostname
+            *agent_id == b.machine_id && *hostname == b.hostname
         }
         _ => false,
     }
@@ -391,7 +394,7 @@ pub(crate) fn newly_refused(before: &[HubAgentDto], now: &[HubAgentDto]) -> Vec<
         .filter(|row| {
             !before
                 .iter()
-                .any(|was| was.agent_id == row.agent_id && was.second_machine_at.is_some())
+                .any(|was| was.machine_id == row.machine_id && was.second_machine_at.is_some())
         })
         .map(|row| row.hostname.clone())
         .collect()
@@ -412,7 +415,7 @@ fn changes_since(held: &Held, agents: &[HubAgentDto], state: State) -> usize {
             !held
                 .agents
                 .iter()
-                .any(|before| before.agent_id == now.agent_id)
+                .any(|before| before.machine_id == now.machine_id)
         })
         .count();
     changed_or_gone
@@ -429,7 +432,7 @@ fn started_waiting(held: &[HubAgentDto], agents: &[HubAgentDto]) -> usize {
         .filter(|now| {
             !held
                 .iter()
-                .any(|before| before.agent_id == now.agent_id && waiting(before))
+                .any(|before| before.machine_id == now.machine_id && waiting(before))
         })
         .count()
 }
@@ -449,8 +452,8 @@ pub(crate) enum Heard {
 /// What the Machines tab does on hearing `event`.
 pub(crate) fn heard(event: &UiEvent) -> Heard {
     match event {
-        UiEvent::AgentPending { hostname, .. } => Heard::Waiting(hostname.clone()),
-        UiEvent::AgentApproved { .. } | UiEvent::AgentRemoved { .. } => Heard::ReadAgain,
+        UiEvent::MachinePending { hostname, .. } => Heard::Waiting(hostname.clone()),
+        UiEvent::MachineApproved { .. } | UiEvent::MachineRemoved { .. } => Heard::ReadAgain,
         _ => Heard::Nothing,
     }
 }
@@ -464,7 +467,7 @@ mod tests {
 
     fn agent(hostname: &str, status: AgentStatusDto, seconds_ago: u64) -> HubAgentDto {
         HubAgentDto {
-            agent_id: format!("agent-{hostname}"),
+            machine_id: format!("agent-{hostname}"),
             hostname: hostname.to_owned(),
             key: format!("key-{hostname}"),
             fingerprint: format!("fingerprint-{hostname}"),
@@ -499,36 +502,36 @@ mod tests {
     #[test]
     fn a_machine_starting_to_wait_is_read_and_said_and_an_approval_is_read() {
         let at = || "2026-11-21T10:00:00Z".to_owned();
-        let pending = UiEvent::AgentPending {
-            agent: "agent-demo-laptop".to_owned(),
+        let pending = UiEvent::MachinePending {
+            machine: "agent-demo-laptop".to_owned(),
             hostname: "demo-laptop".to_owned(),
             at: at(),
         };
         assert_eq!(heard(&pending), Heard::Waiting("demo-laptop".to_owned()));
-        let approved = UiEvent::AgentApproved {
-            agent: "agent-demo-laptop".to_owned(),
+        let approved = UiEvent::MachineApproved {
+            machine: "agent-demo-laptop".to_owned(),
             hostname: "demo-laptop".to_owned(),
             at: at(),
         };
         assert_eq!(heard(&approved), Heard::ReadAgain);
-        let removed = UiEvent::AgentRemoved {
-            agent: "agent-demo-laptop".to_owned(),
+        let removed = UiEvent::MachineRemoved {
+            machine: "agent-demo-laptop".to_owned(),
             hostname: "demo-laptop".to_owned(),
             at: at(),
         };
         assert_eq!(heard(&removed), Heard::ReadAgain);
         for other in [
-            UiEvent::AgentReported {
-                agent: "agent-demo-laptop".to_owned(),
+            UiEvent::MachineReported {
+                machine: "agent-demo-laptop".to_owned(),
                 operation: "op-1".to_owned(),
                 outcome: api::MachineOutcomeDto::Running,
             },
-            UiEvent::AgentOnline {
-                agent: "agent-demo-laptop".to_owned(),
+            UiEvent::MachineOnline {
+                machine: "agent-demo-laptop".to_owned(),
                 at: at(),
             },
-            UiEvent::AgentOffline {
-                agent: "agent-demo-laptop".to_owned(),
+            UiEvent::MachineOffline {
+                machine: "agent-demo-laptop".to_owned(),
                 at: at(),
             },
         ] {
@@ -682,7 +685,7 @@ mod tests {
             |row| row.status = AgentStatusDto::Approved,
             |row| {
                 row.looks_like = Some(LookalikeDto {
-                    agent_id: "agent-demo-macbook".to_owned(),
+                    machine_id: "agent-demo-macbook".to_owned(),
                     hostname: "demo-macbook".to_owned(),
                     last_seen: "2026-11-21T09:00:00Z".to_owned(),
                 });
@@ -699,7 +702,7 @@ mod tests {
         }
         let mut seen_again = laptop.clone();
         seen_again.looks_like = Some(LookalikeDto {
-            agent_id: "agent-demo-macbook".to_owned(),
+            machine_id: "agent-demo-macbook".to_owned(),
             hostname: "demo-macbook".to_owned(),
             last_seen: "2026-11-21T09:00:00Z".to_owned(),
         });
@@ -715,14 +718,14 @@ mod tests {
             0
         );
         if let Some(like) = seen_again.looks_like.as_mut() {
-            like.agent_id = "agent-other".to_owned();
+            like.machine_id = "agent-other".to_owned();
         }
         assert_eq!(
             changes_since(&noted, &[seen_again, macbook.clone()], State::Ready),
             1
         );
         let mut renamed = laptop;
-        renamed.agent_id = "agent-other".to_owned();
+        renamed.machine_id = "agent-other".to_owned();
         assert_eq!(changes_since(&held, &[renamed, macbook], State::Ready), 2);
     }
 

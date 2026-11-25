@@ -57,8 +57,8 @@ async fn open(address: &str) -> Socket {
 fn connect(binding_kind: u8) -> Message {
     Message::text(
         AgentFrame::Connect {
-            agent_id: "00000000-0000-0000-0000-000000000001".to_owned(),
-            agent_nonce: "A".repeat(43),
+            machine_id: "00000000-0000-0000-0000-000000000001".to_owned(),
+            machine_nonce: "A".repeat(43),
             binding_kind,
         }
         .to_text(),
@@ -109,7 +109,7 @@ async fn a_refused_proof_reaches_an_agent_that_sent_its_hello_after_it() {
     };
     let proof = AgentFrame::Proof {
         counter: 1,
-        agent_proof: "A".repeat(86),
+        machine_proof: "A".repeat(86),
     };
     let hello = AgentFrame::Signed {
         kind: "hello".to_owned(),

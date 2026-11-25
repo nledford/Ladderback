@@ -99,7 +99,7 @@ async fn gains_foreign(agent: &mut Agent, count: u64, plan: String) {
 fn only_the_agent_tag(agent: &mut Agent, count: u64) {
     let tags = [format!(
         "{}{}",
-        domain::execution::plan_tags::AGENT_TAG_PREFIX,
+        domain::execution::plan_tags::MACHINE_TAG_PREFIX,
         other_agent().as_uuid().hyphenated()
     )];
     agent.forget.snapshots_tagged(count, &tags, "/home/demo");

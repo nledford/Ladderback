@@ -80,8 +80,8 @@ impl HubPairing {
 pub(super) fn waiting(pairing: &Pairing, at: Timestamp) -> Option<UiEvent> {
     let record = pairing.record();
     let again = matches!(pairing, Pairing::Repeated(_));
-    (record.is_pending() && !again).then(|| UiEvent::AgentPending {
-        agent: record.agent_id.as_uuid().to_string(),
+    (record.is_pending() && !again).then(|| UiEvent::MachinePending {
+        machine: record.agent_id.as_uuid().to_string(),
         hostname: record.hostname.to_string(),
         at: at.to_string(),
     })
@@ -89,8 +89,8 @@ pub(super) fn waiting(pairing: &Pairing, at: Timestamp) -> Option<UiEvent> {
 
 /// What the browsers hear of `agent`, approved at `at`.
 pub(super) fn approved(agent: &AgentRecord, at: Timestamp) -> UiEvent {
-    UiEvent::AgentApproved {
-        agent: agent.agent_id.as_uuid().to_string(),
+    UiEvent::MachineApproved {
+        machine: agent.agent_id.as_uuid().to_string(),
         hostname: agent.hostname.to_string(),
         at: at.to_string(),
     }
@@ -99,8 +99,8 @@ pub(super) fn approved(agent: &AgentRecord, at: Timestamp) -> UiEvent {
 /// What the browsers hear of the agent `tombstone` keeps, which a person
 /// has just removed or rejected.
 pub(super) fn removed(tombstone: &Tombstone) -> UiEvent {
-    UiEvent::AgentRemoved {
-        agent: tombstone.agent_id.as_uuid().to_string(),
+    UiEvent::MachineRemoved {
+        machine: tombstone.agent_id.as_uuid().to_string(),
         hostname: tombstone.hostname.to_string(),
         at: tombstone.removed_at.to_string(),
     }
@@ -108,8 +108,8 @@ pub(super) fn removed(tombstone: &Tombstone) -> UiEvent {
 
 /// What the browsers hear of `report`, taken from `agent`.
 pub(super) fn reported(agent: AgentId, report: &AgentReport) -> UiEvent {
-    UiEvent::AgentReported {
-        agent: agent.as_uuid().to_string(),
+    UiEvent::MachineReported {
+        machine: agent.as_uuid().to_string(),
         operation: report.op_id.as_uuid().to_string(),
         outcome: match report.happening {
             Happening::Started => MachineOutcomeDto::Running,

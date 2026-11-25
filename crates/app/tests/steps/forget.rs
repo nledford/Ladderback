@@ -14,7 +14,7 @@ use async_trait::async_trait;
 use cucumber::{given, then, when};
 use domain::execution::OperationStatus;
 use domain::execution::plan_tags;
-use domain::execution::plan_tags::{AGENT_TAG_PREFIX, PLAN_TAG_PREFIX};
+use domain::execution::plan_tags::{MACHINE_TAG_PREFIX, PLAN_TAG_PREFIX};
 use domain::execution::{Operation, OperationKind, Target, Trigger, WarningKind};
 use domain::planning::{
     AgentConfig, AgentSettings, GroupBy, Hooks, Hostname, Maintenance, Plan, RepositoryConfig,
@@ -375,7 +375,7 @@ impl ForgetWorld {
     pub fn backed_up(&mut self, count: u64, plan: &str, agent: &AgentId) {
         let tags = [
             format!("{PLAN_TAG_PREFIX}{plan}"),
-            format!("{AGENT_TAG_PREFIX}{}", agent.as_uuid().hyphenated()),
+            format!("{MACHINE_TAG_PREFIX}{}", agent.as_uuid().hyphenated()),
         ];
         for _ in 0..count {
             let time = at(i64::try_from((self.made + 1) * 3_600).expect("an hour"));
@@ -394,7 +394,7 @@ impl ForgetWorld {
         let tags = match &plan {
             Some((plan, agent)) => vec![
                 format!("{PLAN_TAG_PREFIX}{plan}"),
-                format!("{AGENT_TAG_PREFIX}{}", agent.as_uuid().hyphenated()),
+                format!("{MACHINE_TAG_PREFIX}{}", agent.as_uuid().hyphenated()),
             ],
             None => Vec::new(),
         };
@@ -456,7 +456,7 @@ impl ForgetWorld {
             .filter(|snapshot| {
                 snapshot.tags.contains(&format!("{PLAN_TAG_PREFIX}{plan}"))
                     && snapshot.tags.contains(&format!(
-                        "{AGENT_TAG_PREFIX}{}",
+                        "{MACHINE_TAG_PREFIX}{}",
                         agent.as_uuid().hyphenated()
                     ))
             })
@@ -501,14 +501,17 @@ impl ForgetWorld {
     /// with it and this agent, and with no other plan or agent.
     pub fn plan_snapshots(&self, plan: &str) -> Vec<SnapshotId> {
         let plan_tag = format!("{PLAN_TAG_PREFIX}{plan}");
-        let agent_tag = format!("{AGENT_TAG_PREFIX}{}", self_agent().as_uuid().hyphenated());
+        let agent_tag = format!(
+            "{MACHINE_TAG_PREFIX}{}",
+            self_agent().as_uuid().hyphenated()
+        );
         self.snapshots
             .iter()
             .filter(|snapshot| {
                 snapshot.tags.contains(&plan_tag)
                     && snapshot.tags.contains(&agent_tag)
                     && snapshot.tags.iter().all(|tag| {
-                        !(tag.starts_with(PLAN_TAG_PREFIX) || tag.starts_with(AGENT_TAG_PREFIX))
+                        !(tag.starts_with(PLAN_TAG_PREFIX) || tag.starts_with(MACHINE_TAG_PREFIX))
                             || tag == &plan_tag
                             || tag == &agent_tag
                     })
@@ -907,7 +910,10 @@ async fn another_agents_snapshots(agent: &mut Agent, count: u64, plan: String) {
 fn own_tags(plan: &str) -> Vec<String> {
     vec![
         format!("{PLAN_TAG_PREFIX}{plan}"),
-        format!("{AGENT_TAG_PREFIX}{}", self_agent().as_uuid().hyphenated()),
+        format!(
+            "{MACHINE_TAG_PREFIX}{}",
+            self_agent().as_uuid().hyphenated()
+        ),
     ]
 }
 
@@ -932,7 +938,7 @@ async fn snapshots_of_two_plans(agent: &mut Agent, count: u64, plan: String, sec
 async fn snapshots_of_two_agents(agent: &mut Agent, count: u64, plan: String) {
     let mut tags = own_tags(&plan);
     tags.push(format!(
-        "{AGENT_TAG_PREFIX}{}",
+        "{MACHINE_TAG_PREFIX}{}",
         other_agent().as_uuid().hyphenated()
     ));
     agent.forget.snapshots_tagged(count, &tags, "/home/demo");
@@ -1246,14 +1252,17 @@ async fn untagged_survive(agent: &mut Agent, count: usize) {
 #[then(expr = "the repository still holds the {int} snapshots the other agent's plan holds")]
 async fn other_agents_survive(agent: &mut Agent, count: usize) {
     let removed = agent.forget.removed();
-    let own = format!("{AGENT_TAG_PREFIX}{}", self_agent().as_uuid().hyphenated());
+    let own = format!(
+        "{MACHINE_TAG_PREFIX}{}",
+        self_agent().as_uuid().hyphenated()
+    );
     let other: Vec<SnapshotId> = agent
         .forget
         .snapshots
         .iter()
         .filter(|snapshot| {
             snapshot.tags.iter().any(|tag| {
-                tag.starts_with(AGENT_TAG_PREFIX)
+                tag.starts_with(MACHINE_TAG_PREFIX)
                     && tag != &own
                     && snapshot
                         .tags
@@ -1288,7 +1297,7 @@ async fn disagreeing_survive(agent: &mut Agent, count: usize) {
         .snapshots
         .iter()
         .filter(|snapshot| {
-            disagree(snapshot, PLAN_TAG_PREFIX) || disagree(snapshot, AGENT_TAG_PREFIX)
+            disagree(snapshot, PLAN_TAG_PREFIX) || disagree(snapshot, MACHINE_TAG_PREFIX)
         })
         .map(|snapshot| snapshot.id.clone())
         .collect();

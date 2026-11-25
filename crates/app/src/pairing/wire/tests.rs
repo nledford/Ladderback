@@ -187,8 +187,8 @@ fn a_paired_answer_with_a_hostname_out_of_shape_is_refused() {
 #[test]
 fn a_frame_holds_its_fields_as_the_wire_defines_them() {
     let AgentFrame::Connect {
-        agent_id,
-        agent_nonce,
+        machine_id: agent_id,
+        machine_nonce: agent_nonce,
         binding_kind,
     } = connect_frame(&connect())
     else {
@@ -224,7 +224,11 @@ fn a_connect_with_a_field_out_of_shape_is_refused() {
     let nonce = |text: &str| {
         let text = text.to_owned();
         connect_with(move |frame| {
-            if let AgentFrame::Connect { agent_nonce, .. } = frame {
+            if let AgentFrame::Connect {
+                machine_nonce: agent_nonce,
+                ..
+            } = frame
+            {
                 *agent_nonce = text;
             }
         })
@@ -239,7 +243,11 @@ fn a_connect_with_a_field_out_of_shape_is_refused() {
         // The last character carries bits past the 32 bytes.
         nonce(&format!("{}F", good.get(..good.len() - 1).unwrap())),
         connect_with(|frame| {
-            if let AgentFrame::Connect { agent_id, .. } = frame {
+            if let AgentFrame::Connect {
+                machine_id: agent_id,
+                ..
+            } = frame
+            {
                 *agent_id = "nas".to_owned();
             }
         }),
@@ -264,7 +272,11 @@ fn a_pair_with_a_field_out_of_shape_is_refused() {
     };
     for frame in [
         with(|frame| {
-            if let AgentFrame::Pair { agent_key, .. } = frame {
+            if let AgentFrame::Pair {
+                machine_key: agent_key,
+                ..
+            } = frame
+            {
                 *agent_key = "A".repeat(43);
             }
         }),
@@ -530,7 +542,7 @@ fn an_envelope_or_proof_out_of_shape_is_refused() {
     for frame in [
         AgentFrame::Proof {
             counter: 1,
-            agent_proof: "short".to_owned(),
+            machine_proof: "short".to_owned(),
         },
         AgentFrame::Signed {
             kind: "Hello".to_owned(),

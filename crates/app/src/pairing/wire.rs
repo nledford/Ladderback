@@ -57,8 +57,8 @@ pub struct WireRefused;
 
 pub fn connect_frame(connect: &Connect) -> AgentFrame {
     AgentFrame::Connect {
-        agent_id: connect.agent_id.as_uuid().hyphenated().to_string(),
-        agent_nonce: encoded(connect.agent_nonce.as_bytes()),
+        machine_id: connect.agent_id.as_uuid().hyphenated().to_string(),
+        machine_nonce: encoded(connect.agent_nonce.as_bytes()),
         binding_kind: connect.binding_kind.byte(),
     }
 }
@@ -66,12 +66,12 @@ pub fn connect_frame(connect: &Connect) -> AgentFrame {
 pub fn pair_frame(pair: &Pair) -> AgentFrame {
     AgentFrame::Pair {
         pairing_key: encoded(pair.pairing_key.as_bytes()),
-        agent_key: encoded(pair.agent_key.as_bytes()),
+        machine_key: encoded(pair.agent_key.as_bytes()),
         counter: pair.counter,
         hostname: pair.hostname.as_str().to_owned(),
         zone: pair.zone.as_ref().map(|zone| zone.as_str().to_owned()),
         pairing_signature: encoded(pair.pairing_signature.as_bytes()),
-        agent_signature: encoded(pair.agent_signature.as_bytes()),
+        machine_signature: encoded(pair.agent_signature.as_bytes()),
     }
 }
 
@@ -109,7 +109,7 @@ pub fn answer_frame(answer: &PairAnswer) -> HubFrame {
 pub fn proof_frame(proof: &Proof) -> AgentFrame {
     AgentFrame::Proof {
         counter: proof.counter,
-        agent_proof: encoded(proof.agent_proof.as_bytes()),
+        machine_proof: encoded(proof.agent_proof.as_bytes()),
     }
 }
 
@@ -135,7 +135,7 @@ pub fn hub_envelope_frame(envelope: &HubEnvelope) -> HubFrame {
 /// The bytes of `hello`'s payload, which the agent signs.
 pub fn hello_payload(hello: &Hello) -> Vec<u8> {
     HelloPayload {
-        agent_version: hello.agent_version.clone(),
+        machine_version: hello.agent_version.clone(),
         hostname: hello.hostname.as_str().to_owned(),
         protocols: range(hello.protocols),
         clock: hello.clock.seconds(),
@@ -149,7 +149,7 @@ pub fn hello_payload(hello: &Hello) -> Vec<u8> {
 pub fn read_hello(bytes: &[u8]) -> Result<Hello, WireRefused> {
     let payload = HelloPayload::from_bytes(bytes).map_err(|_| WireRefused)?;
     Ok(Hello {
-        agent_version: payload.agent_version,
+        agent_version: payload.machine_version,
         hostname: Hostname::parse(&payload.hostname).map_err(|_| WireRefused)?,
         protocols: protocols(payload.protocols)?,
         clock: EpochSeconds::from_seconds(payload.clock),
@@ -167,7 +167,7 @@ pub fn welcome_payload(welcome: &Welcome) -> Vec<u8> {
     WelcomePayload {
         protocol: welcome.protocol,
         hub_protocols: range(welcome.hub_protocols),
-        agent_protocols: range(welcome.agent_protocols),
+        machine_protocols: range(welcome.agent_protocols),
         generation: welcome.generation,
         hub_handshakes: welcome.hub_handshakes.bits(),
         hub_version: welcome.hub_version.clone(),
@@ -183,7 +183,7 @@ pub fn read_welcome(bytes: &[u8]) -> Result<Welcome, WireRefused> {
     Ok(Welcome {
         protocol: payload.protocol,
         hub_protocols: protocols(payload.hub_protocols)?,
-        agent_protocols: protocols(payload.agent_protocols)?,
+        agent_protocols: protocols(payload.machine_protocols)?,
         generation: payload.generation,
         hub_handshakes: Handshakes::from_bits(payload.hub_handshakes),
         hub_version: payload.hub_version,
@@ -482,8 +482,8 @@ const fn approval_of(status: AgentApproval) -> Approval {
 pub fn agent_message(frame: &AgentFrame) -> Result<AgentMessage, WireRefused> {
     match frame {
         AgentFrame::Connect {
-            agent_id,
-            agent_nonce,
+            machine_id: agent_id,
+            machine_nonce: agent_nonce,
             binding_kind,
         } => Ok(AgentMessage::Connect(Connect {
             agent_id: AgentId::from_uuid(Uuid::try_parse(agent_id).map_err(|_| WireRefused)?),
@@ -492,12 +492,12 @@ pub fn agent_message(frame: &AgentFrame) -> Result<AgentMessage, WireRefused> {
         })),
         AgentFrame::Pair {
             pairing_key,
-            agent_key,
+            machine_key: agent_key,
             counter,
             hostname,
             zone: sent_zone,
             pairing_signature,
-            agent_signature,
+            machine_signature: agent_signature,
         } => Ok(AgentMessage::Pair(Pair {
             pairing_key: key(pairing_key)?,
             agent_key: key(agent_key)?,
@@ -509,7 +509,7 @@ pub fn agent_message(frame: &AgentFrame) -> Result<AgentMessage, WireRefused> {
         })),
         AgentFrame::Proof {
             counter,
-            agent_proof,
+            machine_proof: agent_proof,
         } => Ok(AgentMessage::Proof(Proof {
             counter: *counter,
             agent_proof: signature(agent_proof)?,

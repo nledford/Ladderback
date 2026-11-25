@@ -35,7 +35,10 @@ pub struct AdoptE2e {
 /// The two tags a snapshot of this agent's plan carries.
 pub(crate) fn plan_tags(agent: &Agent, plan: &str) -> [String; 2] {
     [
-        format!("ladderback-machine:{}", agent.agent_id.as_uuid().hyphenated()),
+        format!(
+            "ladderback-machine:{}",
+            agent.agent_id.as_uuid().hyphenated()
+        ),
         format!("ladderback-plan:{plan}"),
     ]
 }
@@ -218,7 +221,10 @@ async fn adopt(agent: &mut Agent, plan: String) {
 async fn tagged(agent: &mut Agent) {
     let plan = agent.backup.plan.clone().expect("a plan");
     let plan_tag = format!("ladderback-plan:{}", plan.as_str());
-    let agent_tag = format!("ladderback-machine:{}", agent.agent_id.as_uuid().hyphenated());
+    let agent_tag = format!(
+        "ladderback-machine:{}",
+        agent.agent_id.as_uuid().hyphenated()
+    );
     let after = snapshots_of(agent).await;
     assert_eq!(
         after.len(),

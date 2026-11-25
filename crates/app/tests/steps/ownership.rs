@@ -36,7 +36,7 @@ use app::ports::{
 use app::secrets::ResolveRepository;
 use app::snapshots::ListSnapshots;
 use cucumber::{given, then, when};
-use domain::execution::plan_tags::{AGENT_TAG_PREFIX, PLAN_TAG_PREFIX};
+use domain::execution::plan_tags::{MACHINE_TAG_PREFIX, PLAN_TAG_PREFIX};
 use domain::fleet::{
     AgentRecord, AgentStatus, Fingerprint, GENERATION, Hostname, HubAddress, HubPin, PublicKey,
     SeedFile, TokenTls,
@@ -674,7 +674,7 @@ fn snapshot_of(agent: AgentId, time: Timestamp) -> SnapshotSummary {
         label: String::new(),
         tags: vec![
             format!("{PLAN_TAG_PREFIX}home"),
-            format!("{AGENT_TAG_PREFIX}{}", agent.as_uuid().hyphenated()),
+            format!("{MACHINE_TAG_PREFIX}{}", agent.as_uuid().hyphenated()),
         ],
         paths: vec!["/home/demo".to_owned()],
         paths_truncated: false,

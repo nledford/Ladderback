@@ -330,11 +330,11 @@ pub enum HookLevel {
 }
 
 impl HookLevel {
-    /// The level's name on the wire and in the operation log: `agent`,
+    /// The level's name on the wire and in the operation log: `machine`,
     /// `repository` or `plan`.
     pub fn code(self) -> &'static str {
         match self {
-            Self::Agent => "agent",
+            Self::Agent => "machine",
             Self::Repository => "repository",
             Self::Plan => "plan",
         }

@@ -1,7 +1,7 @@
 use super::*;
 use crate::AgentId;
 use crate::Uuid;
-use crate::execution::plan_tags::{AGENT_TAG_PREFIX, PLAN_TAG_PREFIX};
+use crate::execution::plan_tags::{MACHINE_TAG_PREFIX, PLAN_TAG_PREFIX};
 use crate::planning::KeepCount;
 
 fn agent() -> AgentId {
@@ -36,7 +36,7 @@ fn second_back(number: i64) -> i64 {
 fn tagged(plan: &str, agent: &AgentId, number: i64) -> Snapshot {
     let tags = vec![
         format!("{PLAN_TAG_PREFIX}{plan}"),
-        format!("{AGENT_TAG_PREFIX}{}", agent.as_uuid().hyphenated()),
+        format!("{MACHINE_TAG_PREFIX}{}", agent.as_uuid().hyphenated()),
     ];
     snapshot(number, &tags)
 }
@@ -204,7 +204,7 @@ fn other_text() -> String {
 
 #[test]
 fn two_plan_tags_that_disagree_orphan_the_snapshot_and_a_repeated_one_does_not() {
-    let own = format!("{AGENT_TAG_PREFIX}{}", own_text());
+    let own = format!("{MACHINE_TAG_PREFIX}{}", own_text());
     let home = format!("{PLAN_TAG_PREFIX}home");
     let photos = format!("{PLAN_TAG_PREFIX}photos");
     let snapshots = vec![
@@ -232,8 +232,8 @@ fn two_plan_tags_that_disagree_orphan_the_snapshot_and_a_repeated_one_does_not()
 
 #[test]
 fn two_agent_tags_that_disagree_orphan_the_snapshot_even_when_one_is_this_agents() {
-    let own = format!("{AGENT_TAG_PREFIX}{}", own_text());
-    let other = format!("{AGENT_TAG_PREFIX}{}", other_text());
+    let own = format!("{MACHINE_TAG_PREFIX}{}", own_text());
+    let other = format!("{MACHINE_TAG_PREFIX}{}", other_text());
     let home = format!("{PLAN_TAG_PREFIX}home");
     let snapshots = vec![
         snapshot(1, &[home.clone(), own.clone(), other.clone()]),
@@ -250,7 +250,7 @@ fn two_agent_tags_that_disagree_orphan_the_snapshot_even_when_one_is_this_agents
 
 #[test]
 fn owner_tags_that_differ_only_in_case_or_spacing_disagree() {
-    let own = format!("{AGENT_TAG_PREFIX}{}", own_text());
+    let own = format!("{MACHINE_TAG_PREFIX}{}", own_text());
     let home = format!("{PLAN_TAG_PREFIX}home");
     let snapshots = vec![
         snapshot(
@@ -263,7 +263,7 @@ fn owner_tags_that_differ_only_in_case_or_spacing_disagree() {
         ),
         snapshot(
             3,
-            &[home, own, format!("{AGENT_TAG_PREFIX} {}", own_text())],
+            &[home, own, format!("{MACHINE_TAG_PREFIX} {}", own_text())],
         ),
     ];
     let partition =
@@ -282,8 +282,8 @@ fn owner_tags_that_disagree_on_both_kinds_are_still_orphaned_not_unmanaged() {
     let snapshots = vec![snapshot(
         1,
         &[
-            format!("{AGENT_TAG_PREFIX}{}", own_text()),
-            format!("{AGENT_TAG_PREFIX}{}", other_text()),
+            format!("{MACHINE_TAG_PREFIX}{}", own_text()),
+            format!("{MACHINE_TAG_PREFIX}{}", other_text()),
             format!("{PLAN_TAG_PREFIX}home"),
             format!("{PLAN_TAG_PREFIX}photos"),
         ],

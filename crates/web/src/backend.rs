@@ -178,14 +178,14 @@ impl OperationsState {
             // reports, a retry planned and a proposal's status are no row of
             // this table: the retry is one once it is queued. A cancel is
             // the settle-poll's, which the page that cancelled runs (§4.4).
-            UiEvent::AgentOnline { .. }
-            | UiEvent::AgentOffline { .. }
-            | UiEvent::AgentPending { .. }
-            | UiEvent::AgentApproved { .. }
-            | UiEvent::AgentRemoved { .. }
-            | UiEvent::AgentReported { .. }
-            | UiEvent::AgentPlans { .. }
-            | UiEvent::AgentProgress { .. }
+            UiEvent::MachineOnline { .. }
+            | UiEvent::MachineOffline { .. }
+            | UiEvent::MachinePending { .. }
+            | UiEvent::MachineApproved { .. }
+            | UiEvent::MachineRemoved { .. }
+            | UiEvent::MachineReported { .. }
+            | UiEvent::MachinePlans { .. }
+            | UiEvent::MachineProgress { .. }
             | UiEvent::BackupRetrying { .. }
             | UiEvent::OperationCancelled { .. }
             | UiEvent::ProposalChanged { .. } => {}
@@ -1431,12 +1431,12 @@ mod tests {
                 code: WarningCode::SourceUnreadable,
                 args: Vec::new(),
             },
-            UiEvent::AgentOnline {
-                agent: "demo-agent".to_owned(),
+            UiEvent::MachineOnline {
+                machine: "demo-agent".to_owned(),
                 at: "2026-11-09T10:00:00Z".to_owned(),
             },
-            UiEvent::AgentOffline {
-                agent: "demo-agent".to_owned(),
+            UiEvent::MachineOffline {
+                machine: "demo-agent".to_owned(),
                 at: "2026-11-09T10:00:00Z".to_owned(),
             },
         ] {

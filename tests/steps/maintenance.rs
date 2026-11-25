@@ -485,7 +485,7 @@ fn groups_name_orphaned(agent: &mut Agent, count: u64, plan: String, into: Strin
         panic!("one orphaned group: {:?}", groups.orphaned);
     };
     assert_eq!(
-        group.agent.as_deref(),
+        group.machine.as_deref(),
         Some(test_agent_text(agent).as_str())
     );
     assert_eq!(group.plan.as_deref(), Some(plan.as_str()));

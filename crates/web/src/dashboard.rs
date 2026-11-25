@@ -118,13 +118,13 @@ impl Fleet {
 pub(crate) fn reads_again(event: &UiEvent) -> bool {
     matches!(
         event,
-        UiEvent::AgentApproved { .. }
-            | UiEvent::AgentRemoved { .. }
-            | UiEvent::AgentOnline { .. }
-            | UiEvent::AgentOffline { .. }
-            | UiEvent::AgentReported { .. }
-            | UiEvent::AgentPlans { .. }
-            | UiEvent::AgentProgress { .. }
+        UiEvent::MachineApproved { .. }
+            | UiEvent::MachineRemoved { .. }
+            | UiEvent::MachineOnline { .. }
+            | UiEvent::MachineOffline { .. }
+            | UiEvent::MachineReported { .. }
+            | UiEvent::MachinePlans { .. }
+            | UiEvent::MachineProgress { .. }
     )
 }
 
@@ -152,7 +152,7 @@ pub(crate) fn changes_since(held: &[HubMachineDto], now: &[HubMachineDto]) -> us
         .filter(|machine| {
             !held
                 .iter()
-                .any(|before| before.agent_id == machine.agent_id)
+                .any(|before| before.machine_id == machine.machine_id)
         })
         .count();
     went_or_changed + came

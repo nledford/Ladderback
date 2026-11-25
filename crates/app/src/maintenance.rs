@@ -100,7 +100,7 @@ pub enum AdoptionSource {
     /// The orphaned group these two tags name: another agent's plan, or a
     /// plan this configuration no longer has.
     Orphaned {
-        /// The `ladderback-agent:` tag's text.
+        /// The `ladderback-machine:` tag's text.
         agent: String,
         /// The `ladderback-plan:` tag's text.
         plan: String,

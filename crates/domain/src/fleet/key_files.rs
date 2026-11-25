@@ -48,7 +48,7 @@ impl KeyFile {
     /// The file's name in the data folder.
     pub const fn file_name(self) -> &'static str {
         match self {
-            Self::AgentKey => "agent-key",
+            Self::AgentKey => "machine-key",
             Self::HubKey => "hub-key",
             Self::HubTlsKey => "hub-tls-key",
             Self::RecoveryKey => "hub-recovery-key",

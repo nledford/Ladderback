@@ -39,13 +39,13 @@ use crate::AppState;
 /// The path of one pairing token the page cancels: `DELETE`.
 const PAIRING_TOKEN_PATH: &str = "/api/v1/hub/pairing-tokens/{id}";
 
-/// The path the page approves one waiting agent at: `POST`, as
-/// [`api::agent_approval_path`] names it.
-const AGENT_APPROVAL_PATH: &str = "/api/v1/hub/agents/{id}/approval";
+/// The path the page approves one waiting machine at: `POST`, as
+/// [`api::machine_approval_path`] names it.
+const MACHINE_APPROVAL_PATH: &str = "/api/v1/hub/machines/{id}/approval";
 
-/// The path the page rejects or removes one agent at: `POST`, as
-/// [`api::agent_removal_path`] names it.
-const AGENT_REMOVAL_PATH: &str = "/api/v1/hub/agents/{id}/removal";
+/// The path the page rejects or removes one machine at: `POST`, as
+/// [`api::machine_removal_path`] names it.
+const MACHINE_REMOVAL_PATH: &str = "/api/v1/hub/machines/{id}/removal";
 
 /// `routes` with the hub's own.
 pub(crate) fn routes(routes: Router<AppState>) -> Router<AppState> {
@@ -53,10 +53,10 @@ pub(crate) fn routes(routes: Router<AppState>) -> Router<AppState> {
         .route(api::HUB_PATH, axum::routing::get(hub))
         .route(api::PAIRING_TOKENS_PATH, axum::routing::post(make_token))
         .route(PAIRING_TOKEN_PATH, axum::routing::delete(cancel_token))
-        .route(api::HUB_AGENTS_PATH, axum::routing::get(agents))
-        .route(api::HUB_MACHINES_PATH, axum::routing::get(machines))
-        .route(AGENT_APPROVAL_PATH, axum::routing::post(approve))
-        .route(AGENT_REMOVAL_PATH, axum::routing::post(remove))
+        .route(api::HUB_MACHINES_PATH, axum::routing::get(agents))
+        .route(api::HUB_DASHBOARD_PATH, axum::routing::get(machines))
+        .route(MACHINE_APPROVAL_PATH, axum::routing::post(approve))
+        .route(MACHINE_REMOVAL_PATH, axum::routing::post(remove))
         .route(api::HUB_RECOVERY_PATH, axum::routing::get(recovery))
         .route(
             api::HUB_RECOVERY_CONFIRMATION_PATH,
@@ -210,7 +210,7 @@ async fn agents(State(state): State<AppState>) -> Response {
     };
     match pairing.agents_listed().await {
         Ok(listed) => axum::Json(api::HubAgentsDto {
-            agents: listed
+            machines: listed
                 .agents
                 .iter()
                 .map(|agent| agent_dto(agent, listed.at))
@@ -239,7 +239,7 @@ async fn machines(State(state): State<AppState>) -> Response {
 fn machine_dto(machine: &Machine) -> api::HubMachineDto {
     let record = &machine.record;
     api::HubMachineDto {
-        agent_id: record.agent_id.as_uuid().to_string(),
+        machine_id: record.agent_id.as_uuid().to_string(),
         hostname: record.hostname.as_str().to_owned(),
         last_seen: record.last_seen.to_string(),
         online: machine.online,
@@ -311,7 +311,7 @@ async fn approve(
     let beyond = beyond_loopback(request.headers(), peer);
     // No agent ID was ever made from a path that isn't one.
     let Ok(agent_id) = Uuid::parse_str(&id).map(AgentId::from_uuid) else {
-        return crate::refused(StatusCode::NOT_FOUND, ErrorCode::AgentUnknown);
+        return crate::refused(StatusCode::NOT_FOUND, ErrorCode::MachineUnknown);
     };
     // Bounded by the API's body limit, as a token's ask is.
     let Ok(body) = axum::body::to_bytes(request.into_body(), usize::MAX).await else {
@@ -341,10 +341,10 @@ async fn approve(
             axum::Json(agent_dto(&listed, at)).into_response()
         }
         Ok(Err(ApprovalRefused::Unknown)) => {
-            crate::refused(StatusCode::NOT_FOUND, ErrorCode::AgentUnknown)
+            crate::refused(StatusCode::NOT_FOUND, ErrorCode::MachineUnknown)
         }
         Ok(Err(ApprovalRefused::AlreadyApproved)) => {
-            crate::refused(StatusCode::CONFLICT, ErrorCode::AgentApprovedAlready)
+            crate::refused(StatusCode::CONFLICT, ErrorCode::MachineApprovedAlready)
         }
         Err(refused) => ask_refusal(refused),
     }
@@ -410,7 +410,7 @@ async fn remove(
     let beyond = beyond_loopback(request.headers(), peer);
     // No agent ID was ever made from a path that isn't one.
     let Ok(agent_id) = Uuid::parse_str(&id).map(AgentId::from_uuid) else {
-        return crate::refused(StatusCode::NOT_FOUND, ErrorCode::AgentUnknown);
+        return crate::refused(StatusCode::NOT_FOUND, ErrorCode::MachineUnknown);
     };
     // Bounded by the API's body limit, as an approval's is.
     let Ok(body) = axum::body::to_bytes(request.into_body(), usize::MAX).await else {
@@ -430,7 +430,7 @@ async fn remove(
     match pairing.remove_asked(ask).await {
         Ok(Ok(_)) => StatusCode::NO_CONTENT.into_response(),
         Ok(Err(RemovalRefused::Unknown)) => {
-            crate::refused(StatusCode::NOT_FOUND, ErrorCode::AgentUnknown)
+            crate::refused(StatusCode::NOT_FOUND, ErrorCode::MachineUnknown)
         }
         Err(refused) => ask_refusal(refused),
     }
@@ -455,7 +455,7 @@ fn agent_dto(listed: &ListedAgent, now: Timestamp) -> api::HubAgentDto {
     // A clock set back shows no wait rather than a negative one.
     let seconds_ago = u64::try_from(since.duration_until(now).as_secs()).unwrap_or(0);
     api::HubAgentDto {
-        agent_id: record.agent_id.as_uuid().to_string(),
+        machine_id: record.agent_id.as_uuid().to_string(),
         hostname: record.hostname.as_str().to_owned(),
         key: record.key.to_hex(),
         fingerprint: Fingerprint::of_key(&record.key).to_string(),
@@ -463,7 +463,7 @@ fn agent_dto(listed: &ListedAgent, now: Timestamp) -> api::HubAgentDto {
         since: since.to_string(),
         seconds_ago,
         looks_like: listed.looks_like.as_ref().map(|like| api::LookalikeDto {
-            agent_id: like.agent_id.as_uuid().to_string(),
+            machine_id: like.agent_id.as_uuid().to_string(),
             hostname: like.hostname.as_str().to_owned(),
             last_seen: like.last_seen.to_string(),
         }),

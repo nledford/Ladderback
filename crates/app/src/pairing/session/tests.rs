@@ -81,7 +81,7 @@ async fn a_message_out_of_turn_closes_the_connection() {
 
     let mut session = hub.pairing.session(None).await.unwrap();
     let AgentFrame::Connect {
-        agent_nonce,
+        machine_nonce: agent_nonce,
         binding_kind,
         ..
     } = connect_of(0)
@@ -89,8 +89,8 @@ async fn a_message_out_of_turn_closes_the_connection() {
         panic!("a Connect frame")
     };
     let unreadable = AgentFrame::Connect {
-        agent_id: "not-a-uuid".to_owned(),
-        agent_nonce,
+        machine_id: "not-a-uuid".to_owned(),
+        machine_nonce: agent_nonce,
         binding_kind,
     };
     let step = hub.pairing.step(&mut session, &unreadable).await;

@@ -3,8 +3,8 @@ use super::*;
 #[test]
 fn a_connect_is_json_named_by_its_type() {
     let frame = AgentFrame::Connect {
-        agent_id: "0194f6a2-0000-7000-8000-000000000001".into(),
-        agent_nonce: "AAAA".into(),
+        machine_id: "0194f6a2-0000-7000-8000-000000000001".into(),
+        machine_nonce: "AAAA".into(),
         binding_kind: 1,
     };
     assert_eq!(
@@ -45,7 +45,11 @@ fn the_handshake_names_the_machine_on_the_wire() {
 /// (§16, decision 163), and the old `agent-` codes are none of them.
 #[test]
 fn the_refusals_name_the_machine_on_the_wire() {
-    for code in ["machine-key-mismatch", "machine-removed", "machine-key-removed"] {
+    for code in [
+        "machine-key-mismatch",
+        "machine-removed",
+        "machine-key-removed",
+    ] {
         assert_ne!(refusal_code(code), ErrorCode::Unknown, "{code}");
         assert_eq!(code_name(refusal_code(code)), code);
     }
@@ -58,12 +62,12 @@ fn the_refusals_name_the_machine_on_the_wire() {
 fn every_frame_reads_back_as_written() {
     let agent = [AgentFrame::Pair {
         pairing_key: "pk".into(),
-        agent_key: "ak".into(),
+        machine_key: "ak".into(),
         counter: u64::MAX,
         hostname: "Nick's NAS \u{e9}".into(),
         zone: Some("America/Chicago".into()),
         pairing_signature: "ps".into(),
-        agent_signature: "as".into(),
+        machine_signature: "as".into(),
     }];
     for frame in agent {
         assert_eq!(AgentFrame::from_text(&frame.to_text()), Ok(frame));
@@ -151,12 +155,12 @@ fn a_refusal_names_its_error_code() {
         ("token-expired", ErrorCode::TokenExpired),
         ("token-revoked", ErrorCode::TokenRevoked),
         ("hostname-taken", ErrorCode::HostnameTaken),
-        ("machine-key-mismatch", ErrorCode::AgentKeyMismatch),
+        ("machine-key-mismatch", ErrorCode::MachineKeyMismatch),
         ("hub-key-mismatch", ErrorCode::HubKeyMismatch),
         ("proof-refused", ErrorCode::ProofRefused),
         ("pending-limit", ErrorCode::PendingLimit),
-        ("machine-removed", ErrorCode::AgentRemoved),
-        ("machine-key-removed", ErrorCode::AgentKeyRemoved),
+        ("machine-removed", ErrorCode::MachineRemoved),
+        ("machine-key-removed", ErrorCode::MachineKeyRemoved),
         ("binding-unavailable", ErrorCode::BindingUnavailable),
         ("identity-conflict", ErrorCode::IdentityConflict),
         ("a-code-of-a-later-hub", ErrorCode::Unknown),
