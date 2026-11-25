@@ -36,6 +36,7 @@ fn a_backup_leaves_out_the_secret_key_files_and_what_is_staged_beside_them() {
             "!/home/demo/.local/share/ladderback/hub-tls-key*",
             "!/home/demo/.local/share/ladderback/hub-recovery-seed*",
             "!/home/demo/.local/share/ladderback/machine-key*",
+            "!/home/demo/.local/share/ladderback/agent-key*",
         ]
     );
 }
@@ -96,6 +97,22 @@ fn the_machines_key_file_is_machine_key() {
     assert_eq!(KeyFile::AgentKey.file_name(), "machine-key");
     assert!(is_left_out(b"machine-key"));
     assert!(is_left_out(b"machine-key.0123.tmp"));
+}
+
+/// The key an earlier build kept as `agent-key`, and what it staged beside
+/// it, stays out of a backup when a data folder still holds it (I4,
+/// decisions 120 and 163); nothing reads it.
+#[test]
+fn the_key_an_earlier_build_left_as_agent_key_is_left_out() {
+    for name in [&b"agent-key"[..], b"Agent-Key", b"agent-key.0123.tmp"] {
+        assert!(is_left_out(name), "{}", name.escape_ascii());
+    }
+    assert!(
+        KeyFile::ALL
+            .iter()
+            .all(|file| !file.file_name().starts_with("agent")),
+        "no key file is read as agent-key"
+    );
 }
 
 #[test]
