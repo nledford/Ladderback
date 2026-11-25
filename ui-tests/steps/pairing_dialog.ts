@@ -15,7 +15,7 @@ import { Given, Then, When } from "@cucumber/cucumber";
 import type { BrowserContext, Locator, Request } from "playwright";
 
 import { expect } from "../support/expect.ts";
-import { journey, namePattern, pressUntilFocused } from "../support/keyboard.ts";
+import { focusComesTo, journey, namePattern, pressUntilFocused } from "../support/keyboard.ts";
 import { patienceMs, untilSettled } from "../support/patience.ts";
 import { type BrowserWorld, binary, binaryEnv, fixtureRepo, startServer } from "../support/world.ts";
 import { pressUntilFocusIsOn } from "./accessibility.ts";
@@ -201,8 +201,14 @@ When("I make a pairing token on the Machines tab", async function (this: Browser
 
 // Back on the form once a dialog closed, without opening the page again:
 // the fingerprint typed in its field, which is before the button, then the
-// form sent again.
+// form sent again. The closing dialog hands focus back to its button a frame
+// later; a walk started before then has focus move under its first check.
 When("I make another pairing token", async function (this: BrowserWorld) {
+  await focusComesTo(
+    this.page,
+    this.page.getByRole("button", { name: namePattern("Make a pairing token") }),
+    'the button "Make a pairing token"',
+  );
   const fingerprint = await hubFingerprint(this);
   await pressUntilFocusIsOn(this, "Shift+Tab", "textbox", "Hub key fingerprint");
   await this.page.keyboard.type(fingerprint);
