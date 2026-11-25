@@ -22,7 +22,8 @@
 - A copy that keeps the machine identifier, such as a cloned virtual machine whose `/etc/machine-id` was cloned too, has the same fingerprint and is taken as the same computer. Decision 144 can't tell it either.
 - Two copies of one data folder on one computer, such as two users or two containers sharing the identifier, have one fingerprint and are taken as one machine.
 - A computer whose identifier changes, by a reinstall on Linux or a new logic board on a Mac, is refused as a second computer; forgetting the computer the hub took is the way on.
-- No event tells the hub's page of a refusal: Settings → Machines shows one from its next read of the list, on another of the hub's events or when its events stream opens again.
+- No event tells the hub's page of a refusal: Settings → Machines shows one from its next read of the list, on another of the hub's events or when its events stream opens again. That read says the new warning politely, or the resume does when the tables were paused, since the warning is no live region.
+- Only forgetting the computer the hub took clears its flag: after the copy took a new ID, the warning stays until the command runs, which is safe then, and says so.
 - The command runs only with the hub stopped; the running hub's Settings can't forget a computer yet.
 - A `Hello` with no fingerprint, from a computer whose identifier can't be read, is taken beside the computer the hub holds: two such computers under one ID take turns, as before this decision.
 - The `refused-by-hub` standing isn't kept across a restart: a refused machine stands as usual from its start until its first session with the hub is refused again, so its start page shows nothing until then.

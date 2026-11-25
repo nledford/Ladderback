@@ -195,7 +195,15 @@ impl Listed {
     /// didn't: what the resume says, beside how many started waiting. None
     /// when the lists aren't paused or the copy listed no machine yet.
     pub(crate) fn refused_while_paused(self) -> Vec<String> {
-        todo!()
+        self.held.with_untracked(|held| {
+            held.as_ref()
+                .filter(|held| held.state == State::Ready)
+                .map(|held| {
+                    self.agents
+                        .with_untracked(|agents| newly_refused(&held.agents, agents))
+                })
+                .unwrap_or_default()
+        })
     }
 }
 
@@ -215,9 +223,23 @@ pub(crate) fn shown_ms(seconds: u64) -> u64 {
     seconds.max(1).saturating_mul(1000)
 }
 
-/// Marks `agent_id` approved just now.
+/// Marks `agent_id` approved just now, by the hub's clock as the row read
+/// it: its status begins at the row's now (when it began and `seconds_ago`
+/// after), so how long ago the hub refused a second computer still reads
+/// right. A `since` the page can't read is kept as it is.
 fn mark_approved(agents: &mut [HubAgentDto], agent_id: &str) {
     for agent in agents.iter_mut().filter(|agent| agent.agent_id == agent_id) {
+        let now = agent
+            .since
+            .parse::<jiff::Timestamp>()
+            .ok()
+            .and_then(|since| {
+                let ago = i64::try_from(agent.seconds_ago).ok()?;
+                since.checked_add(jiff::SignedDuration::from_secs(ago)).ok()
+            });
+        if let Some(now) = now {
+            agent.since = now.to_string();
+        }
         agent.status = AgentStatusDto::Approved;
         agent.seconds_ago = 0;
     }
@@ -364,8 +386,15 @@ fn refused_seconds_ago(row: &HubAgentDto, at: &str) -> Option<u64> {
 /// refusal for a machine already flagged brings no new warning, so isn't
 /// said again.
 pub(crate) fn newly_refused(before: &[HubAgentDto], now: &[HubAgentDto]) -> Vec<String> {
-    let _ = (before, now);
-    todo!()
+    now.iter()
+        .filter(|row| row.second_machine_at.is_some())
+        .filter(|row| {
+            !before
+                .iter()
+                .any(|was| was.agent_id == row.agent_id && was.second_machine_at.is_some())
+        })
+        .map(|row| row.hostname.clone())
+        .collect()
 }
 
 /// How many changes `agents` and `state` hold that `held` doesn't: each

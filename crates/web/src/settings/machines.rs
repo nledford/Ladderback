@@ -53,7 +53,9 @@ use crate::components::{
     focus_element, hand_focus_when_gone,
 };
 use crate::live::{reply, say};
-use crate::machines_list::{Heard, Listed, WaysBack, heard, second_computer, shown_ms, ways_back};
+use crate::machines_list::{
+    Heard, Listed, WaysBack, heard, newly_refused, second_computer, shown_ms, ways_back,
+};
 use crate::pause;
 use crate::repositories::Sentence;
 use crate::routes::{refused_sentence, text_with};
@@ -165,15 +167,39 @@ fn land(listed: Listed, read: Option<HubAgentsDto>) -> bool {
     waiting
 }
 
-/// Reads the list into `listed`, paced by `rereads` (`ws::reread_hub`).
-fn read(listed: Listed, rereads: StoredValue<Rereads>, visit: &Visit) {
+/// Reads the list into `listed`, paced by `rereads` (`ws::reread_hub`). A
+/// read that brings in a refused second computer the tables didn't show is
+/// said politely, unless the tables are paused, whose resume says it, or it
+/// is the first answer, whose warnings are the page's own.
+fn read(listed: Listed, rereads: StoredValue<Rereads>, visit: &Visit, localizer: &Arc<Localizer>) {
+    let localizer = Arc::clone(localizer);
     ws::reread_hub(
         format!("{}{HUB_AGENTS_PATH}", ws::origin()),
         rereads,
         visit,
         (READ_PATIENCE, ASK_AGAIN),
-        move |read| land(listed, read),
+        move |read| {
+            let before = (listed.state.try_get_untracked() == Some(State::Ready)
+                && !listed.paused_untracked())
+            .then(|| listed.agents.try_get_untracked())
+            .flatten();
+            let waiting = land(listed, read);
+            if let Some(before) = before {
+                let now = listed.agents.try_get_untracked().unwrap_or_default();
+                say_refused(&localizer, newly_refused(&before, &now));
+            }
+            waiting
+        },
     );
+}
+
+/// Says politely, one by one, that the hub refused a second computer as each
+/// of `hostnames`: the warnings they bring are no live region (A3).
+fn say_refused(localizer: &Localizer, hostnames: Vec<String>) {
+    for hostname in hostnames {
+        let words = of_machine(localizer, msg::UI_MACHINES_SECOND_COMPUTER_SAID, &hostname);
+        say(Politeness::Polite, &words);
+    }
 }
 
 /// Reads the list into `listed` now, and again when the events stream
@@ -185,22 +211,23 @@ fn follow(localizer: &Arc<Localizer>, listed: Listed) {
     let rereads = StoredValue::new(Rereads::default());
     let (visit, departure) = Visit::begin();
     on_cleanup(move || drop(departure));
-    read(listed, rereads, &visit);
+    read(listed, rereads, &visit, localizer);
     let localizer = Arc::clone(localizer);
     let (opening, hearing) = (visit.clone(), visit.clone());
+    let (opened, heard_by) = (Arc::clone(&localizer), Arc::clone(&localizer));
     ws::listen(
         &ws::origin(),
         &visit,
-        move || read(listed, rereads, &opening),
+        move || read(listed, rereads, &opening, &opened),
         move |event| match heard(&event) {
             Heard::Nothing => {}
-            Heard::ReadAgain => read(listed, rereads, &hearing),
+            Heard::ReadAgain => read(listed, rereads, &hearing, &heard_by),
             Heard::Waiting(hostname) => {
                 if !listed.paused_untracked() {
                     let words = of_machine(&localizer, msg::UI_MACHINES_STARTED_WAITING, &hostname);
                     say(Politeness::Polite, &words);
                 }
-                read(listed, rereads, &hearing);
+                read(listed, rereads, &hearing, &heard_by);
             }
         },
     );
@@ -221,6 +248,7 @@ pub(crate) fn Machines(localizer: Arc<Localizer>, step_up: StepUp) -> impl IntoV
     let banner_localizer = Arc::clone(&localizer);
     let resume_localizer = Arc::clone(&localizer);
     let on_resume = Callback::new(move |()| {
+        say_refused(&resume_localizer, listed.refused_while_paused());
         let words = listed.resume();
         text_with(&resume_localizer, words.id, &words.args)
     });
@@ -885,7 +913,7 @@ fn ways_back_alert(localizer: &Arc<Localizer>, ways: WaysBack) -> impl IntoView 
         <Alert localizer=Arc::clone(localizer) tone=AlertTone::Warning>
             <p>{words}</p>
             <p>
-                <code dir="ltr" translate="no">
+                <code class="font-mono" dir="ltr" translate="no">
                     {command}
                 </code>
             </p>
