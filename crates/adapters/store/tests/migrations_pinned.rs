@@ -154,6 +154,11 @@ const PINNED: &[(i64, &str, &str)] = &[
         "hub recovery",
         "7efa8f45b6d54e285c3bb5e49fa9350f6ece7978f1ea3372181a7d6f459d451d0a26aa062f547b97da0aa585b9ae2a64",
     ),
+    (
+        29,
+        "machine names",
+        "9f8d1ada8704978a98c24d7f1e4cfa9fe8eee7521a548f522b1b103acfab240b125e6b9a67302dfb919ffc69a4d23e67",
+    ),
 ];
 
 /// The migration's file name, as `sqlx::migrate!` reads it: sqlx turns the

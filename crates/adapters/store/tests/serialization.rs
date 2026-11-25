@@ -29,7 +29,7 @@ async fn insert_text(
     repository: Option<&str>,
 ) -> Result<(), sqlx::Error> {
     sqlx::query(
-        r#"INSERT INTO operations (id, agent_id, kind, "trigger", status, repo_uuid, queued_at)
+        r#"INSERT INTO operations (id, machine_id, kind, "trigger", status, repo_uuid, queued_at)
            VALUES (?1, 'local', ?2, 'manual', ?3, ?4, 1800000000000)"#,
     )
     .bind(id)

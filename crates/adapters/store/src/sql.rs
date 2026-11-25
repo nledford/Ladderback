@@ -24,13 +24,13 @@ macro_rules! select_operations {
 /// `error_args`, `error_detail`, `warning_count`, `repo_alias`, `location_no`,
 /// `locations_json`, `token_id`, `token_label`, `entry`, `restored_to`.
 pub(crate) const UPSERT_OPERATION: &str = concat!(
-    "INSERT INTO operations (id, agent_id, kind, plan_id, repo_uuid, \"trigger\", status, ",
+    "INSERT INTO operations (id, machine_id, kind, plan_id, repo_uuid, \"trigger\", status, ",
     "queued_at, started_at, finished_at, snapshot_id, summary_json, error_code, error_args, ",
     "error_detail, warning_count, repo_alias, location_no, locations_json, token_id, ",
     "token_label, entry, restored_to) ",
     "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) ",
     "ON CONFLICT(id) DO UPDATE SET ",
-    "agent_id = excluded.agent_id, kind = excluded.kind, plan_id = excluded.plan_id, ",
+    "machine_id = excluded.machine_id, kind = excluded.kind, plan_id = excluded.plan_id, ",
     "repo_uuid = excluded.repo_uuid, \"trigger\" = excluded.\"trigger\", ",
     "status = excluded.status, queued_at = excluded.queued_at, ",
     "started_at = excluded.started_at, finished_at = excluded.finished_at, ",
@@ -392,7 +392,7 @@ pub(crate) mod hub {
         ($($clause:literal),+ $(,)?) => {
             concat!(
                 "SELECT pairing_key, hub_key, kind, made_at, expires_at, state, ",
-                "used_agent_id, used_agent_key FROM pairing_tokens",
+                "used_machine_id, used_machine_key FROM pairing_tokens",
                 $($clause),+
             )
         };
@@ -403,7 +403,7 @@ pub(crate) mod hub {
         ($($clause:literal),+ $(,)?) => {
             concat!(
                 "SELECT id, pubkey, hostname, status, status_at, counter, last_seen, zone ",
-                "FROM agents",
+                "FROM machines",
                 $($clause),+
             )
         };
@@ -417,7 +417,7 @@ pub(crate) mod hub {
     /// `select_tokens!`.
     pub(crate) const INSERT_TOKEN: &str = concat!(
         "INSERT INTO pairing_tokens (pairing_key, hub_key, kind, made_at, expires_at, state, ",
-        "used_agent_id, used_agent_key) VALUES (?, ?, ?, ?, ?, ?, ?, ?)"
+        "used_machine_id, used_machine_key) VALUES (?, ?, ?, ?, ?, ?, ?, ?)"
     );
 
     /// The tokens unused at a moment, oldest first. Parameter: the moment.
@@ -448,14 +448,14 @@ pub(crate) mod hub {
     /// Spends a token on a pairing. Parameters: the agent ID, the agent
     /// key, the token's pairing key.
     pub(crate) const SPEND_TOKEN: &str = concat!(
-        "UPDATE pairing_tokens SET state = 'used', used_agent_id = ?, used_agent_key = ? ",
+        "UPDATE pairing_tokens SET state = 'used', used_machine_id = ?, used_machine_key = ? ",
         "WHERE pairing_key = ?"
     );
 
     /// The tokens spent on an agent ID and key. Parameters: the agent ID,
     /// the agent key.
     pub(crate) const SPENT_TOKENS: &str =
-        select_tokens!(" WHERE state = 'used' AND used_agent_id = ? AND used_agent_key = ?");
+        select_tokens!(" WHERE state = 'used' AND used_machine_id = ? AND used_machine_key = ?");
 
     /// The agent with an ID. Parameter: the ID.
     pub(crate) const AGENT: &str = select_agents!(" WHERE id = ?");
@@ -465,10 +465,10 @@ pub(crate) mod hub {
 
     /// How many agents wait for approval.
     pub(crate) const COUNT_PENDING_AGENTS: &str =
-        "SELECT COUNT(*) FROM agents WHERE status = 'pending'";
+        "SELECT COUNT(*) FROM machines WHERE status = 'pending'";
 
     /// How many agents are registered, pending or approved.
-    pub(crate) const COUNT_AGENTS: &str = "SELECT COUNT(*) FROM agents";
+    pub(crate) const COUNT_AGENTS: &str = "SELECT COUNT(*) FROM machines";
 
     /// Every agent, oldest first.
     pub(crate) const ALL_AGENTS: &str = select_agents!(" ORDER BY rowid");
@@ -476,7 +476,7 @@ pub(crate) mod hub {
     /// Keeps a new agent. Parameters, in order: `id`, `pubkey`, `hostname`,
     /// `hostname_key`, `status`, `status_at`, `counter`, `last_seen`, `zone`.
     pub(crate) const INSERT_AGENT: &str = concat!(
-        "INSERT INTO agents (id, pubkey, hostname, hostname_key, status, status_at, counter, ",
+        "INSERT INTO machines (id, pubkey, hostname, hostname_key, status, status_at, counter, ",
         "last_seen, zone) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)"
     );
 
@@ -485,62 +485,62 @@ pub(crate) mod hub {
     /// `hostname_key`, `status`, `status_at`, `counter`, `last_seen`,
     /// `zone`, `id`.
     pub(crate) const UPDATE_AGENT: &str = concat!(
-        "UPDATE agents SET pubkey = ?, hostname = ?, hostname_key = ?, status = ?, ",
+        "UPDATE machines SET pubkey = ?, hostname = ?, hostname_key = ?, status = ?, ",
         "status_at = ?, counter = ?, last_seen = ?, zone = ? WHERE id = ?"
     );
 
     /// Keeps the machine zone an agent reported, NULL for none, over the
     /// one it held. Parameters: the zone, the agent ID.
-    pub(crate) const RECORD_ZONE: &str = "UPDATE agents SET zone = ? WHERE id = ?";
+    pub(crate) const RECORD_ZONE: &str = "UPDATE machines SET zone = ? WHERE id = ?";
 
     /// Keeps when the hub last heard from an agent: when its live
     /// connection ended (decision 159). Parameters: the time in
     /// milliseconds, the agent ID.
-    pub(crate) const RECORD_SEEN: &str = "UPDATE agents SET last_seen = ? WHERE id = ?";
+    pub(crate) const RECORD_SEEN: &str = "UPDATE machines SET last_seen = ? WHERE id = ?";
 
     /// The machine fingerprint held under one agent ID (decision 150).
     /// Parameter: the agent ID.
-    pub(crate) const AGENT_MACHINE: &str = "SELECT machine FROM agents WHERE id = ?";
+    pub(crate) const AGENT_MACHINE: &str = "SELECT machine FROM machines WHERE id = ?";
 
     /// Keeps the first machine fingerprint heard under an agent ID.
     /// Parameters: the fingerprint, the agent ID.
-    pub(crate) const CLAIM_MACHINE: &str = "UPDATE agents SET machine = ? WHERE id = ?";
+    pub(crate) const CLAIM_MACHINE: &str = "UPDATE machines SET machine = ? WHERE id = ?";
 
     /// Keeps when a second computer was last refused under an agent ID.
     /// Parameters: the time in Unix milliseconds, the agent ID.
     pub(crate) const REFUSE_SECOND_MACHINE: &str =
-        "UPDATE agents SET second_machine_at = ? WHERE id = ?";
+        "UPDATE machines SET second_machine_at = ? WHERE id = ?";
 
     /// Every agent under whose ID a second computer was refused, oldest
     /// agent first.
     pub(crate) const SECOND_MACHINES: &str = concat!(
-        "SELECT id, second_machine_at FROM agents ",
+        "SELECT id, second_machine_at FROM machines ",
         "WHERE second_machine_at IS NOT NULL ORDER BY rowid"
     );
 
     /// Forgets the machine fingerprint held under an agent ID, and its last
     /// refusal. Parameter: the agent ID.
     pub(crate) const FORGET_MACHINE: &str =
-        "UPDATE agents SET machine = NULL, second_machine_at = NULL WHERE id = ?";
+        "UPDATE machines SET machine = NULL, second_machine_at = NULL WHERE id = ?";
 
     /// Drops the agent under an ID. Parameter: the agent ID.
-    pub(crate) const DELETE_AGENT: &str = "DELETE FROM agents WHERE id = ?";
+    pub(crate) const DELETE_AGENT: &str = "DELETE FROM machines WHERE id = ?";
 
     /// Keeps the tombstone of a removed agent, over any kept under its ID.
     /// Parameters, in order: `id`, `pubkey`, `hostname`, `removed_at`.
     pub(crate) const KEEP_TOMBSTONE: &str = concat!(
-        "INSERT OR REPLACE INTO agent_tombstones (id, pubkey, hostname, removed_at) ",
+        "INSERT OR REPLACE INTO machine_tombstones (id, pubkey, hostname, removed_at) ",
         "VALUES (?, ?, ?, ?)"
     );
 
     /// The tombstone kept under an agent ID. Parameter: the agent ID.
     pub(crate) const TOMBSTONE: &str =
-        "SELECT id, pubkey, hostname, removed_at FROM agent_tombstones WHERE id = ?";
+        "SELECT id, pubkey, hostname, removed_at FROM machine_tombstones WHERE id = ?";
 
     /// A tombstone kept with an agent key, under any agent ID, the oldest
     /// first. Parameter: the agent key's bytes.
     pub(crate) const TOMBSTONE_BY_KEY: &str = concat!(
-        "SELECT id, pubkey, hostname, removed_at FROM agent_tombstones ",
+        "SELECT id, pubkey, hostname, removed_at FROM machine_tombstones ",
         "WHERE pubkey = ? ORDER BY removed_at, rowid LIMIT 1"
     );
 

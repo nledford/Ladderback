@@ -33,29 +33,29 @@ const GIVEN: &str = "UPDATE sync_outbox_meta SET last_seq = ? WHERE id = 1";
 const WAITING: &str = "SELECT seq, op_id, happening, code, at FROM sync_outbox \
      WHERE seq > ? ORDER BY seq LIMIT ?";
 const ACKNOWLEDGE: &str = "DELETE FROM sync_outbox WHERE seq <= ?";
-const WATERMARK: &str = "SELECT seq FROM sync_watermarks WHERE agent_id = ? AND epoch = ?";
-const RAISE: &str = "INSERT INTO sync_watermarks (agent_id, epoch, seq, ingested_at) \
-     VALUES (?, ?, ?, ?) ON CONFLICT (agent_id, epoch) \
+const WATERMARK: &str = "SELECT seq FROM sync_watermarks WHERE machine_id = ? AND epoch = ?";
+const RAISE: &str = "INSERT INTO sync_watermarks (machine_id, epoch, seq, ingested_at) \
+     VALUES (?, ?, ?, ?) ON CONFLICT (machine_id, epoch) \
      DO UPDATE SET seq = excluded.seq, ingested_at = excluded.ingested_at";
-const TAKE: &str = "INSERT INTO sync_reports (agent_id, epoch, seq, op_id, happening, code, at) \
+const TAKE: &str = "INSERT INTO sync_reports (machine_id, epoch, seq, op_id, happening, code, at) \
      VALUES (?, ?, ?, ?, ?, ?, ?)";
 /// The agent's newest epochs by when the hub last took one of each, the
 /// one just taken always among them, however the hub's clock moved.
-const FORGET_EPOCHS: &str = "DELETE FROM sync_watermarks WHERE agent_id = ?1 AND epoch NOT IN \
-     (SELECT epoch FROM sync_watermarks WHERE agent_id = ?1 \
+const FORGET_EPOCHS: &str = "DELETE FROM sync_watermarks WHERE machine_id = ?1 AND epoch NOT IN \
+     (SELECT epoch FROM sync_watermarks WHERE machine_id = ?1 \
       ORDER BY (epoch = ?3) DESC, ingested_at DESC, rowid DESC LIMIT ?2)";
-const TALLY: &str = "INSERT INTO sync_report_tallies (agent_id, held, dropped) VALUES (?, 1, 0) \
-     ON CONFLICT (agent_id) DO UPDATE SET held = held + 1 RETURNING held";
+const TALLY: &str = "INSERT INTO sync_report_tallies (machine_id, held, dropped) \
+     VALUES (?, 1, 0) ON CONFLICT (machine_id) DO UPDATE SET held = held + 1 RETURNING held";
 const FORGET_OLDEST: &str = "DELETE FROM sync_reports WHERE id IN \
-     (SELECT id FROM sync_reports WHERE agent_id = ?1 ORDER BY id LIMIT ?2)";
+     (SELECT id FROM sync_reports WHERE machine_id = ?1 ORDER BY id LIMIT ?2)";
 const COUNT_DROPS: &str = "UPDATE sync_report_tallies \
-     SET held = held - ?2, dropped = dropped + ?2 WHERE agent_id = ?1 RETURNING dropped";
+     SET held = held - ?2, dropped = dropped + ?2 WHERE machine_id = ?1 RETURNING dropped";
 const REPORTS: &str = "SELECT epoch, seq, op_id, happening, code, at FROM sync_reports \
-     WHERE agent_id = ? ORDER BY id";
+     WHERE machine_id = ? ORDER BY id";
 /// An agent's newest reports, newest first; the caller turns them round.
 const LATEST: &str = "SELECT op_id, happening, code, at FROM sync_reports \
-     WHERE agent_id = ? ORDER BY id DESC LIMIT ?";
-const DROPPED: &str = "SELECT dropped FROM sync_report_tallies WHERE agent_id = ?";
+     WHERE machine_id = ? ORDER BY id DESC LIMIT ?";
+const DROPPED: &str = "SELECT dropped FROM sync_report_tallies WHERE machine_id = ?";
 
 #[async_trait]
 impl Outbox for SqliteStore {

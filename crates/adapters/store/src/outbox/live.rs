@@ -14,20 +14,20 @@ use super::corrupt;
 use crate::row::agent_id_text;
 use crate::{SqliteStore, unavailable};
 
-const FORGET_PLANS: &str = "DELETE FROM sync_plans WHERE agent_id = ?";
+const FORGET_PLANS: &str = "DELETE FROM sync_plans WHERE machine_id = ?";
 const KEEP_PLAN: &str = "INSERT INTO sync_plans \
-     (agent_id, place, plan_id, last_at, last_outcome, next_run) VALUES (?, ?, ?, ?, ?, ?)";
-const KEEP_SNAPSHOT: &str = "INSERT INTO sync_plan_snapshots (agent_id, left_out) VALUES (?, ?) \
-     ON CONFLICT (agent_id) DO UPDATE SET left_out = excluded.left_out";
-const SNAPSHOT: &str = "SELECT left_out FROM sync_plan_snapshots WHERE agent_id = ?";
+     (machine_id, place, plan_id, last_at, last_outcome, next_run) VALUES (?, ?, ?, ?, ?, ?)";
+const KEEP_SNAPSHOT: &str = "INSERT INTO sync_plan_snapshots (machine_id, left_out) \
+     VALUES (?, ?) ON CONFLICT (machine_id) DO UPDATE SET left_out = excluded.left_out";
+const SNAPSHOT: &str = "SELECT left_out FROM sync_plan_snapshots WHERE machine_id = ?";
 const PLANS: &str = "SELECT plan_id, last_at, last_outcome, next_run FROM sync_plans \
-     WHERE agent_id = ? ORDER BY place";
+     WHERE machine_id = ? ORDER BY place";
 const KEEP_PROGRESS: &str = "INSERT INTO sync_progress \
-     (agent_id, op_id, step, unit, current, total, at) VALUES (?, ?, ?, ?, ?, ?, ?) \
-     ON CONFLICT (agent_id) DO UPDATE SET op_id = excluded.op_id, step = excluded.step, \
+     (machine_id, op_id, step, unit, current, total, at) VALUES (?, ?, ?, ?, ?, ?, ?) \
+     ON CONFLICT (machine_id) DO UPDATE SET op_id = excluded.op_id, step = excluded.step, \
      unit = excluded.unit, current = excluded.current, total = excluded.total, at = excluded.at";
 const PROGRESS: &str =
-    "SELECT op_id, step, unit, current, total, at FROM sync_progress WHERE agent_id = ?";
+    "SELECT op_id, step, unit, current, total, at FROM sync_progress WHERE machine_id = ?";
 
 /// One transaction, so a reader finds the snapshot before or after, whole.
 pub(super) async fn keep_plans(

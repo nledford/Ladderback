@@ -1128,7 +1128,10 @@ async fn a_database_at_version_28_names_its_machines_machine_and_keeps_every_row
             plan_hook_failed,
         ]
     );
-    let read = store.get(id(0x81)).await.expect("the failed hook reads back");
+    let read = store
+        .get(id(0x81))
+        .await
+        .expect("the failed hook reads back");
     assert!(read.is_some(), "the failed hook is in the log");
     assert_eq!(applied_versions(&mut raw).await.last(), Some(&(29, true)));
 }
