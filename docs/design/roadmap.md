@@ -243,6 +243,7 @@ Decisions 1–6 recorded 2026-11-08. Decisions 7–12 recorded 2026-11-08 after 
 | [157](decisions/157-the-hubs-start-window-runs-on-its-monotonic-clock.md) | The hub's start window waits on every agent whose last report named a repository, for 7 days and an hour on its monotonic clock |
 | [158](decisions/158-maintenance-paused.md) | A paired machine shows when its maintenance paused for want of a lease, and tells it after 14 days |
 | [159](decisions/159-long-lived-hub-connections.md) | An approved machine keeps one hub connection while it runs |
+| [160](decisions/160-the-navigation-bar-is-a-shared-component.md) | The navigation bar is a shared component, and below 54rem its panel stands over the page |
 
 ## 17. Open questions
 
