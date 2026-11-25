@@ -398,6 +398,7 @@ fn in_process(daemon: Daemon, scratch: Option<Scratch>) -> (::mcp::Server, Held)
         lock,
         background,
         workers,
+        serve: _,
     } = daemon;
     let server = ::mcp::Server::new(
         Arc::new(InProcess::over(&state)),

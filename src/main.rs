@@ -650,43 +650,6 @@ fn run_daemon(
             return Ok(ExitCode::FAILURE);
         }
     };
-    // What the flags leave unsaid comes from the `[serve]` table of
-    // config.toml, so the service `install-service` writes runs as it says
-    // with no flag of its own (§16, decision 167). Its host names are
-    // checked as the flag's are, and refused in words that name the file.
-    let configured = match runtime.block_on(composition::startup::serve_settings()) {
-        Ok(configured) => configured,
-        Err(refused) => {
-            say(localizer, refused.message, &refused.args)?;
-            return Ok(ExitCode::FAILURE);
-        }
-    };
-    let listen = listen
-        .or(configured.listen)
-        .unwrap_or(domain::planning::DEFAULT_LISTEN);
-    if hosts.is_empty() {
-        for name in configured.allowed_hosts {
-            match http_adapter::validate_host_name(&name) {
-                Ok(host) => hosts.push(host),
-                Err(refusal) => {
-                    say(
-                        localizer,
-                        msg::CLI_INVALID_ALLOWED_HOST_CONFIG,
-                        &[("name", text(refusal.0))],
-                    )?;
-                    return Ok(ExitCode::FAILURE);
-                }
-            }
-        }
-    }
-    #[cfg(feature = "hub")]
-    let hub = hub.unwrap_or(configured.hub);
-    #[cfg(not(feature = "hub"))]
-    if configured.hub {
-        log::warn!(
-            "hub mode is on in config.toml, but this build has no hub: it serves as a machine"
-        );
-    }
     // Sign-in is decided once, at start, by whether an admin password is
     // kept (§10.1, decisions 70 and 87); beyond loopback the daemon needs a
     // host name, with sign-in on or off.
@@ -701,40 +664,21 @@ fn run_daemon(
         }
     };
     let sign_in_on = sign_in.is_on();
-    let exposure = match http_adapter::startup_rule(listen, &hosts) {
-        Ok(exposure) => exposure,
-        Err(http_adapter::StartupRefusal::NoAllowedHost(address)) => {
-            say(
-                localizer,
-                msg::CLI_REFUSE_NO_ALLOWED_HOST,
-                &[("address", text(address))],
-            )?;
-            return Ok(ExitCode::FAILURE);
-        }
-    };
-    if exposure == http_adapter::Exposure::Loopback && !sign_in_on {
-        log::warn!(
-            "sign-in is off: anyone on this machine can use Ladderback; set an admin password with `ladderback set-password`"
-        );
-    }
-    let proxied: Vec<String> = http_adapter::proxied_hosts(&hosts)
-        .into_iter()
-        .map(str::to_owned)
-        .collect();
     // Before the listener: a daemon that cannot serve must not print that it
     // is listening. By the time it is handed back it has locked the data
     // folder and ended what an earlier run left unfinished, so no request is
-    // served before the log says what really happened (§4.2, §9).
+    // served before the log says what really happened (§4.2, §9). It reads
+    // the configuration under that lock, `[serve]` with the rest.
     let composition::Daemon {
-        state,
+        mut state,
         log: operation_log,
         lock,
         background,
         workers,
+        serve: configured,
     } = match runtime.block_on(composition::startup::daemon(
         sign_in,
         Arc::clone(&random),
-        exposure,
         service_managed,
         recent_log,
     )) {
@@ -744,20 +688,73 @@ fn run_daemon(
             return Ok(ExitCode::FAILURE);
         }
     };
+    // A start that stops from here on closes the log and lets go of the
+    // lock, as every refusal after the lock does.
+    let stop = |said: io::Result<()>| -> io::Result<ExitCode> {
+        runtime.block_on(operation_log.close());
+        said.map(|()| ExitCode::FAILURE)
+    };
+    // What the flags leave unsaid comes from the `[serve]` table of
+    // config.toml, so the service `install-service` writes runs as it says
+    // with no flag of its own (§16, decision 167). Its host names are
+    // checked as the flag's are, and refused in words that name the file.
+    let listen = listen
+        .or(configured.listen)
+        .unwrap_or(domain::planning::DEFAULT_LISTEN);
+    if hosts.is_empty() {
+        for name in configured.allowed_hosts {
+            match http_adapter::validate_host_name(&name) {
+                Ok(host) => hosts.push(host),
+                Err(refusal) => {
+                    return stop(say(
+                        localizer,
+                        msg::CLI_INVALID_ALLOWED_HOST_CONFIG,
+                        &[("name", text(refusal.0))],
+                    ));
+                }
+            }
+        }
+    }
+    let exposure = match http_adapter::startup_rule(listen, &hosts) {
+        Ok(exposure) => exposure,
+        Err(http_adapter::StartupRefusal::NoAllowedHost(address)) => {
+            return stop(say(
+                localizer,
+                msg::CLI_REFUSE_NO_ALLOWED_HOST,
+                &[("address", text(address))],
+            ));
+        }
+    };
+    state.exposure = exposure;
+    if exposure == http_adapter::Exposure::Loopback && !sign_in_on {
+        log::warn!(
+            "sign-in is off: anyone on this machine can use Ladderback; set an admin password with `ladderback set-password`"
+        );
+    }
+    let proxied: Vec<String> = http_adapter::proxied_hosts(&hosts)
+        .into_iter()
+        .map(str::to_owned)
+        .collect();
+    #[cfg(not(feature = "hub"))]
+    if configured.hub {
+        log::warn!(
+            "hub mode is on in config.toml, but this build has no hub: it serves as a machine"
+        );
+    }
     // Hub mode turned off, by config.toml or `--hub=false`, stays on while
     // machines are paired with this hub, so none of them loses its hub and
     // this machine's backups go on: the daemon says which machines keep it
     // on, to be removed first (§16, decision 167).
     #[cfg(feature = "hub")]
-    let hub = hub
-        || match runtime.block_on(hub::paired_keeping_hub_mode_on(
+    let hub = hub.unwrap_or(configured.hub)
+        || match hub::hub_mode_kept_on(
+            localizer,
+            &runtime,
             operation_log.store.as_ref(),
-        )) {
-            None => false,
-            Some(paired) => {
-                hub::say_hub_mode_kept_on(localizer, &paired)?;
-                true
-            }
+            platform::dirs::data_dir().as_deref(),
+        ) {
+            Ok(kept_on) => kept_on,
+            Err(error) => return stop(Err(error)),
         };
     // `serve --hub` serves its built-in TLS on this listener, whose
     // sessions carry the pairing handshake at `/sync/v1` with the binding
@@ -768,8 +765,6 @@ fn run_daemon(
     // fails closed ("The hub key"): the door serves only this machine, on
     // loopback, `/sync/v1` refuses every machine, and the log says why and
     // how to fix it; the daemon, and this machine's own backups, go on.
-    #[cfg(feature = "hub")]
-    let mut state = state;
     #[cfg(feature = "hub")]
     let mut front_door: Option<Option<tls_adapter::HubListener>> = None;
     #[cfg(feature = "hub")]

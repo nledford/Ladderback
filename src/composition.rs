@@ -193,6 +193,9 @@ pub(crate) struct Daemon {
     pub(crate) lock: DataDirLock,
     pub(crate) background: Background,
     pub(crate) workers: engine::Workers,
+    /// What `serve` starts with, from the `[serve]` table of config.toml,
+    /// read under the lock (§16, decision 167).
+    pub(crate) serve: domain::planning::ServeSettings,
 }
 
 /// How long the daemon waits for the operation log to close once it stops

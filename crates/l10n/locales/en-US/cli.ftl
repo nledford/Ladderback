@@ -91,13 +91,20 @@ cli-invalid-allowed-host = “{ $name }” is not a host name or an address with
 # `allowed-hosts`, `[serve]`, `config.toml`, `nas.example.com`, `192.168.1.5` and `[fd00::1]` are typed as they are: keep them string literals.
 cli-invalid-allowed-host-config = “{ $name }” in { "allowed-hosts" } in the { "[serve]" } table of { "config.toml" } is not a host name or an address without a port. Give a name such as { "nas.example.com" }, or an address such as { "192.168.1.5" } or { "[fd00::1]" }.
 
-# Hub mode was turned off, by `hub = false` (or no `hub`) in the `[serve]` table of config.toml or by `--hub=false`, but machines are paired with this hub. It stays the hub, so none of them loses its hub; the lines that follow name each machine (cli-warn-hub-mode-paired-machine). Printed by the daemon itself, before it serves.
-# $count (count): how many machines are paired.
-# `[serve]`, `config.toml` and `hub = false` are typed as they are: keep them string literals. "Settings" is the web UI's page of that name, and "Machines" its tab.
+# Hub mode was turned off, by the `[serve]` table of config.toml or by `--hub=false`, but machines are paired with this hub. It stays the hub, so none of them loses its hub; the lines that follow name each machine (cli-warn-hub-mode-paired-machine). Printed by the daemon itself, before it serves.
+# $count (count): how many machines are paired. "Settings" is the web UI's page of that name, and "Machines" its tab.
 cli-warn-hub-mode-kept-on = { $count ->
-    [one] warning: hub mode stays on: { $count } { -machine } is paired with this { -hub } and would lose its { -hub }. Remove it in the web UI's Settings, on the Machines tab, and hub mode turns off as { "hub = false" } in the { "[serve]" } table of { "config.toml" } says at the next start:
-   *[other] warning: hub mode stays on: { $count } { -machine(form: "other") } are paired with this { -hub } and would lose their { -hub }. Remove them in the web UI's Settings, on the Machines tab, and hub mode turns off as { "hub = false" } in the { "[serve]" } table of { "config.toml" } says at the next start:
+    [one] warning: hub mode stays on: { $count } { -machine } is paired with this { -hub } and would lose its { -hub }. Remove it in the web UI's Settings, on the Machines tab, and hub mode turns off at the next start:
+   *[other] warning: hub mode stays on: { $count } { -machine(form: "other") } are paired with this { -hub } and would lose their { -hub }. Remove them in the web UI's Settings, on the Machines tab, and hub mode turns off at the next start:
 }
+
+# Hub mode was turned off, but the machines paired with this hub couldn't be read. Its hub key shows it was a hub, so it stays one: no paired machine loses its hub to a failed read. Printed by the daemon itself, before it serves.
+# $detail (text): the database's message. It is shown as it came.
+cli-warn-hub-mode-unread-kept-on = warning: hub mode stays on: the { -machine(form: "other") } paired with this { -hub } couldn't be read ({ $detail }). Start { -brand-name } again, and hub mode turns off once they can be read and none is paired.
+
+# Hub mode was turned off and the machines paired with this hub couldn't be read, but it holds no hub key, so it was never a hub and starts as a machine that isn't one. Printed by the daemon itself, before it serves.
+# $detail (text): the database's message. It is shown as it came.
+cli-warn-hub-mode-unread-off = warning: the { -machine(form: "other") } paired with this { -machine } couldn't be read ({ $detail }). It has never been a { -hub }, so hub mode is off.
 
 # One machine paired with the hub that kept hub mode on, under cli-warn-hub-mode-kept-on.
 # $hostname (text): the machine's hostname as the hub registered it. It is shown as it is.
@@ -748,7 +755,7 @@ cli-help-serve-allowed-host = A host name or address, without a port, that the w
 cli-help-serve-service-managed = Set by the service files { "install-service" } writes: a service manager runs { -brand-name } and starts it again when it exits with the restart status, so Settings offers a restart
 
 # What `serve --hub` does. `/sync/`, `--hub=false`, `hub`, `[serve]` and `config.toml` are typed as they are: keep them string literals.
-cli-help-serve-hub = Serve the { -hub }'s routes for paired { -machine(form: "other") } under { "/sync/" } as well, so that other { -machine(form: "other") } can pair with this one; { "--hub=false" } turns it off. In place of { "hub" } in the { "[serve]" } table of { "config.toml" }
+cli-help-serve-hub = Serve the { -hub }'s routes for paired { -machine(form: "other") } under { "/sync/" } as well, so that other { -machine(form: "other") } can pair with this one. This flag replaces { "hub" } in the { "[serve]" } table of { "config.toml" }; { "--hub=false" } turns hub mode off once no { -machine } is paired
 
 # What `import-profile` does.
 cli-help-import-profile = Add the { -repository } and the plans of a rustic profile to the configuration
