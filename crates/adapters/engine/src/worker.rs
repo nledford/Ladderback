@@ -112,6 +112,21 @@ pub fn main(program: &'static str) -> ExitCode {
     };
     #[cfg(not(unix))]
     let stream = io::stdout();
+    // Descriptor 0 stops being the daemon's pipe too: a prune's answer comes
+    // on it, and a program the worker starts must neither take it nor wait
+    // on it (decision 161). Kept, the job still runs, as it did before.
+    #[cfg(unix)]
+    let input: Box<dyn Read + Send> = match stdio::detach_stdin() {
+        Ok(input) => Box::new(input),
+        Err(error) => {
+            say(&format!(
+                "cannot keep stdin from the programs the worker starts: {error}"
+            ));
+            Box::new(io::stdin())
+        }
+    };
+    #[cfg(not(unix))]
+    let input = io::stdin();
     // Rustic's progress and log callbacks have nobody to tell about a stream
     // that can't be written, so the worker gives itself up: the daemon is gone.
     let events =
@@ -129,7 +144,7 @@ pub fn main(program: &'static str) -> ExitCode {
             "cannot handle SIGTERM or SIGHUP, so a stop can't wind the job down and the daemon's death is noticed only at the next event: {error}"
         ));
     }
-    match run_events(io::stdin(), events, std::process::id(), process) {
+    match run_events(input, events, std::process::id(), process) {
         // An abrupt exit may use any code, including ones outside u8.
         Ok(exit) => std::process::exit(exit.code()),
         Err(error) => {

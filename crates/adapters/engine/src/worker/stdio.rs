@@ -32,7 +32,10 @@ pub(crate) fn detach_stdout() -> io::Result<File> {
 /// pipe.
 #[cfg(unix)]
 pub(crate) fn detach_stdin() -> io::Result<File> {
-    todo!()
+    let answers = File::from(io::stdin().as_fd().try_clone_to_owned()?);
+    let null = File::open("/dev/null")?;
+    nix::unistd::dup2_stdin(&null)?;
+    Ok(answers)
 }
 
 #[cfg(test)]
