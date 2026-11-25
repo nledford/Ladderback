@@ -98,13 +98,13 @@ async fn hub_starts_with_flags(agent: &mut Agent, flags: String) {
     hub_starts_with(agent, &args).await;
 }
 
-#[when("the hub restarts with hub mode off in its config.toml")]
-async fn hub_restarts_with_hub_mode_off(agent: &mut Agent) {
+/// Ends the serving hub, writes its `config.toml` and starts it again with
+/// `args`, keeping what came of it, a hub or a refusal.
+async fn restart(agent: &mut Agent, args: &[&str]) {
     // Dropping the daemon ends it and waits for it.
     agent.pairing_terminal.hub = None;
-    agent.pairing_terminal.serve_table.hub = Some(false);
     write_config(agent);
-    let (child, outcome, log) = start(agent.scratch(), Some(&hub_root(agent)), &[], None).await;
+    let (child, outcome, log) = start(agent.scratch(), Some(&hub_root(agent)), args, None).await;
     agent.pairing_terminal.hub_log = Some(log);
     match outcome {
         Outcome::Listening(address) => {
@@ -115,6 +115,47 @@ async fn hub_restarts_with_hub_mode_off(agent: &mut Agent) {
             assert!(!status.success(), "{status}: {said}");
             agent.pairing_terminal.refused_start = Some(said);
         }
+    }
+}
+
+#[when("the hub restarts with hub mode off in its config.toml")]
+async fn hub_restarts_with_hub_mode_off(agent: &mut Agent) {
+    agent.pairing_terminal.serve_table.hub = Some(false);
+    restart(agent, &[]).await;
+}
+
+#[when(expr = "the hub restarts with {string} over hub mode on in its config.toml")]
+async fn hub_restarts_with_flag_over_config(agent: &mut Agent, flag: String) {
+    agent.pairing_terminal.serve_table.hub = Some(true);
+    restart(agent, &[flag.as_str()]).await;
+}
+
+#[when("the hub tries to start with no command-line flag")]
+async fn hub_tries_to_start(agent: &mut Agent) {
+    restart(agent, &[]).await;
+}
+
+#[given(expr = "the hub's config.toml allows the host name {string}")]
+fn config_allows(agent: &mut Agent, name: String) {
+    agent.pairing_terminal.serve_table.allowed_hosts.push(name);
+    write_config(agent);
+}
+
+#[given(expr = "the hub's config.toml listens on {string}")]
+fn config_listens_on(agent: &mut Agent, address: String) {
+    agent.pairing_terminal.serve_table.listen = Some(address.parse().expect("an address"));
+    write_config(agent);
+}
+
+#[then(expr = "the hub doesn't start, and says {string} in config.toml is the cause")]
+fn refused_naming_config(agent: &mut Agent, key: String) {
+    let said = agent
+        .pairing_terminal
+        .refused_start
+        .as_deref()
+        .expect("a hub that didn't start");
+    for expected in [key.as_str(), "[serve]", "config.toml"] {
+        assert!(said.contains(expected), "{expected}: {said}");
     }
 }
 
@@ -201,7 +242,7 @@ fn hub_mode_kept_on(agent: &mut Agent, hostname: String) {
         "hub mode stays on",
         hostname.as_str(),
         "paired",
-        "[serve]",
+        "Settings",
     ] {
         assert!(said.contains(expected), "{expected}: {said}");
     }

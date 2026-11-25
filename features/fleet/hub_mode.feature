@@ -38,6 +38,23 @@ Feature: Hub mode in config.toml
     When the hub restarts with hub mode off in its config.toml
     Then the hub still starts as the hub, and says hub mode stays on while "e2e-laptop" is paired
 
+  Scenario: --hub=false keeps hub mode on as well while a machine is paired
+    Given a hub with a pairing token made at its terminal
+    And the hub is serving on loopback
+    And a machine named "e2e-laptop" paired with the token from its terminal
+    When the hub restarts with "--hub=false" over hub mode on in its config.toml
+    Then the hub still starts as the hub, and says hub mode stays on while "e2e-laptop" is paired
+
+  Scenario: A host name in config.toml that no browser could send stops the start, naming the file
+    Given the hub's config.toml allows the host name "files.example:9898"
+    When the hub tries to start with no command-line flag
+    Then the hub doesn't start, and says "allowed-hosts" in config.toml is the cause
+
+  Scenario: An address beyond loopback in config.toml with no allowed host name stops the start
+    Given the hub's config.toml listens on "0.0.0.0:0"
+    When the hub tries to start with no command-line flag
+    Then the hub doesn't start, and says "allowed-hosts" in config.toml is the cause
+
   Scenario: Hub mode turns off while no machine is paired
     Given a hub with a pairing token made at its terminal
     And the hub is serving on loopback
