@@ -236,3 +236,156 @@ async fn an_outbox_full_of_ends_refuses_a_report_and_says_so() {
         )]
     );
 }
+
+/// A schedule store the agent's database can't read.
+struct UnreadableSchedules;
+
+fn locked() -> StoreError {
+    StoreError::Unavailable {
+        detail: "the database is locked".to_owned(),
+    }
+}
+
+#[async_trait::async_trait]
+impl crate::ports::ScheduleStore for UnreadableSchedules {
+    async fn planned_runs(&self) -> Result<Vec<crate::ports::PlannedRun>, StoreError> {
+        Err(locked())
+    }
+
+    async fn plan_run(&self, _: &crate::ports::PlannedRun) -> Result<(), StoreError> {
+        Err(locked())
+    }
+
+    async fn unplan(&self, _: &domain::PlanId) -> Result<(), StoreError> {
+        Err(locked())
+    }
+
+    async fn pending_retries(&self) -> Result<Vec<crate::ports::PendingRetry>, StoreError> {
+        Err(locked())
+    }
+
+    async fn keep_retry(&self, _: &crate::ports::PendingRetry) -> Result<(), StoreError> {
+        Err(locked())
+    }
+
+    async fn drop_retry(&self, _: &domain::PlanId) -> Result<(), StoreError> {
+        Err(locked())
+    }
+
+    async fn release_check(&self) -> Result<Option<crate::ports::ReleaseCheck>, StoreError> {
+        Err(locked())
+    }
+
+    async fn keep_release_check(&self, _: &crate::ports::ReleaseCheck) -> Result<(), StoreError> {
+        Err(locked())
+    }
+}
+
+/// A sync on `clock` that never reaches a hub, reading its plans from
+/// `schedules` when given them.
+fn sync_reading(
+    clock: Arc<crate::fakes::FakeClock>,
+    schedules: Option<Arc<dyn crate::ports::ScheduleStore>>,
+) -> SyncWithHub {
+    use crate::fakes::{
+        FakeSigning, InMemoryConfigStore, InMemoryIdentity, InMemoryOperationStore,
+        LoopbackHubConnector, SeededRandom,
+    };
+
+    let connect = ConnectToHub::new(
+        Arc::new(InMemoryIdentity::default()),
+        Arc::new(FakeSigning),
+        Arc::new(SeededRandom::new(77)),
+        clock.clone(),
+        Arc::new(LoopbackHubConnector::unanswered()),
+        "0.5.0-agent".to_owned(),
+        None,
+    );
+    let sync = SyncWithHub::new(
+        connect,
+        Arc::new(InMemoryOutbox::new(OutboxEpoch::from_uuid(
+            Uuid::from_u128(3),
+        ))),
+        clock.clone(),
+        AgentId::from_uuid(Uuid::from_u128(1)),
+        Hostname::parse("laptop-1").unwrap(),
+        None,
+    );
+    match schedules {
+        Some(schedules) => sync.with_plans(ReadPlans::new(
+            crate::status::ReadStatus::new(
+                Arc::new(InMemoryConfigStore::new()),
+                Arc::new(InMemoryOperationStore::new()),
+                clock,
+                domain::TimeZone::UTC,
+            ),
+            schedules,
+        )),
+        None => sync,
+    }
+}
+
+fn a_clock() -> Arc<crate::fakes::FakeClock> {
+    Arc::new(crate::fakes::FakeClock::new(
+        Timestamp::from_second(1_800_000_030).unwrap(),
+    ))
+}
+
+/// A sync given no plans never reads them, and so never tells of them.
+#[tokio::test]
+async fn a_sync_given_no_plans_has_none_due() {
+    let sync = sync_reading(a_clock(), None);
+    assert!(!sync.plans_due());
+    assert!(!sync.live_due().await);
+}
+
+/// Plans are due at once, then again only once [`PLANS_CHECK`] passed
+/// since they were read: not a millisecond before.
+#[tokio::test]
+async fn plans_are_due_at_first_and_then_every_plans_check() {
+    let clock = a_clock();
+    let sync = sync_reading(
+        clock.clone(),
+        Some(Arc::new(crate::fakes::InMemoryScheduleStore::new())),
+    );
+    assert!(sync.plans_due(), "never read yet");
+    assert!(sync.plans_to_tell().await.is_some(), "the hub holds none");
+    assert!(!sync.plans_due(), "just read");
+    clock.advance(PLANS_CHECK - SignedDuration::from_millis(1));
+    assert!(!sync.plans_due(), "a millisecond short");
+    clock.advance(SignedDuration::from_millis(1));
+    assert!(sync.plans_due());
+}
+
+/// Plans the hub doesn't hold yet make no live session before
+/// [`PLANS_CHECK`] passed since they were read.
+#[tokio::test]
+async fn changed_plans_wait_for_the_plans_check_before_a_live_session() {
+    let clock = a_clock();
+    let sync = sync_reading(
+        clock.clone(),
+        Some(Arc::new(crate::fakes::InMemoryScheduleStore::new())),
+    );
+    assert!(sync.live_due().await, "plans never told");
+    assert!(!sync.live_due().await, "read just now");
+    clock.advance(PLANS_CHECK);
+    assert!(sync.live_due().await);
+}
+
+/// A streak of plans that don't read is logged once, at its first.
+#[tokio::test]
+async fn plans_that_dont_read_are_logged_once_a_streak() {
+    let sync = sync_reading(a_clock(), Some(Arc::new(UnreadableSchedules)));
+    crate::test_log::capture_the_log();
+    for _ in 0..3 {
+        assert!(sync.plans_to_tell().await.is_none());
+    }
+    let logged = crate::test_log::logged_by("app::sync");
+    assert_eq!(logged.len(), 1, "{logged:?}");
+    assert!(
+        logged
+            .first()
+            .is_some_and(|(_, line)| line.starts_with("the plans for the hub couldn't be read")),
+        "{logged:?}"
+    );
+}

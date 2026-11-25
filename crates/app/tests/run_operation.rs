@@ -1757,15 +1757,19 @@ async fn a_resumed_backup_refused_before_it_runs_is_written_once_as_failed_and_a
             source: "/srv/demo-password".to_owned(),
         },
     };
-    let finished = RunOperation::new(
-        engine.clone(),
-        Arc::new(FakeClock::new(t(9))),
-        store.clone(),
-    )
-    .with_events(bus)
-    .end_resumed(queued, reason.clone())
-    .await
-    .finished;
+    // An auto-advancing clock, so a wait before the first write moves it
+    // and fails the test at once instead of hanging on a stopped clock.
+    let clock = Arc::new(FakeClock::auto_advancing(t(9)));
+    let finished = RunOperation::new(engine.clone(), clock.clone(), store.clone())
+        .with_events(bus)
+        .end_resumed(queued, reason.clone())
+        .await
+        .finished;
+    assert_eq!(
+        app::ports::Clock::now(&*clock),
+        t(9),
+        "the first write waited for nothing"
+    );
 
     let failed = OperationStatus::Failed { reason };
     assert_eq!(finished.operation.id(), id());

@@ -1041,6 +1041,30 @@ mod tests {
         );
     }
 
+    /// Where `home`'s next run is planned once its run due at 03:00, on a
+    /// schedule an hour of jitter spreads, took `took` to start.
+    async fn jittered_next_after_a_start_taking(took: SignedDuration) -> Option<Timestamp> {
+        let clock = Arc::new(FakeClock::new(at("2026-06-10T03:00:00Z")));
+        let mut scheduler = scheduler("2026-06-10T03:00:00Z", Arc::new(Started::default()));
+        scheduler.clock = clock.clone();
+        scheduler.runs = Arc::new(SlowStart(clock, took));
+        let mut planned = home_planned_for("2026-06-10T03:00:00Z");
+        if let Some(held) = planned.get_mut(&home()) {
+            held.schedule = daily().with_jitter(SignedDuration::from_hours(1)).unwrap();
+        }
+        scheduler.start_due(&mut planned).await;
+        planned[&home()].next.as_ref().map(|next| next.at)
+    }
+
+    #[tokio::test]
+    async fn a_start_that_ends_before_the_following_run_keeps_it_as_planned() {
+        // Planned again, it would take a new share of the jitter.
+        assert_eq!(
+            jittered_next_after_a_start_taking(SignedDuration::from_mins(1)).await,
+            jittered_next_after_a_start_taking(SignedDuration::ZERO).await
+        );
+    }
+
     #[tokio::test]
     async fn a_run_a_second_away_waits() {
         let runs = Arc::new(Started::default());

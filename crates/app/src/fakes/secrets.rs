@@ -606,4 +606,46 @@ mod tests {
         secrets.remove_keyring_service();
         assert_eq!(secrets.activation().await, KeyringActivation::Absent);
     }
+
+    /// A keyring locked for its first reads fails each of them as locked,
+    /// says it is locked before them, and gives the entry from the next.
+    #[tokio::test]
+    async fn a_keyring_locked_for_its_first_reads_gives_the_entry_at_the_next() {
+        let secrets = FakeSecrets::new();
+        let entry = KeyringEntry::parse("ladderback-demo/nas").unwrap();
+        secrets.set_keyring_entry(&entry, "canary-secret");
+        secrets.lock_keyring_for_reads(1);
+        assert_eq!(secrets.keyring_lock().await, KeyringLock::Locked);
+        let secret = SecretRef::Keyring(entry);
+        let first = secrets.resolve(&secret).await;
+        assert!(
+            matches!(
+                first,
+                Err(SecretError {
+                    problem: Problem::KeyringUnavailable {
+                        cause: KeyringCause::Locked,
+                        ..
+                    },
+                    ..
+                })
+            ),
+            "{first:?}"
+        );
+        let next = secrets.resolve(&secret).await;
+        assert!(next.is_ok(), "{next:?}");
+    }
+
+    /// A keyring service started at a time answers from that time on, and
+    /// not before.
+    #[tokio::test]
+    async fn a_keyring_service_answers_from_the_moment_it_starts() {
+        let start = domain::Timestamp::from_second(1_800_000_000).unwrap();
+        let clock = Arc::new(crate::fakes::FakeClock::new(start));
+        let secrets = FakeSecrets::new();
+        let wait = domain::SignedDuration::from_secs(60);
+        secrets.start_keyring_service_at(clock.clone(), start + wait);
+        assert_eq!(secrets.keyring_lock().await, KeyringLock::Unknown);
+        clock.advance(wait);
+        assert_eq!(secrets.keyring_lock().await, KeyringLock::Unlocked);
+    }
 }

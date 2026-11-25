@@ -973,15 +973,18 @@ fn set_length(access: &Access, length: SessionLength) -> Result<(), StoreError> 
 }
 
 /// Uses the session of `token` every 11 hours for `days` days, so its idle
-/// limit never ends it; whether it was live at each use.
+/// limit never ends it; whether it was live at each use. The uses are
+/// counted rather than read off the clock, so a clock that doesn't move
+/// fails the test instead of hanging it.
 fn used_every_eleven_hours(access: &Access, clock: &FakeClock, token: &Token, days: i64) -> bool {
-    let end = clock.now() + SignedDuration::from_hours(days * 24);
+    let hours = days * 24;
+    let uses = (hours - 1) / 11;
     let mut live_throughout = true;
-    while clock.now() + SignedDuration::from_hours(11) < end {
+    for _ in 0..uses {
         clock.advance(SignedDuration::from_hours(11));
         live_throughout &= live(access, token).is_some();
     }
-    clock.advance(end.duration_since(clock.now()));
+    clock.advance(SignedDuration::from_hours(hours - uses * 11));
     live_throughout && live(access, token).is_some()
 }
 

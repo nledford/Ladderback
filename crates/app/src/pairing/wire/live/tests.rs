@@ -183,3 +183,11 @@ fn a_progress_with_a_field_that_isnt_one_is_refused() {
         assert_eq!(read_progress(text.as_bytes()), Err(WireRefused), "{text}");
     }
 }
+
+/// A `HeartbeatAck` reads back from its payload, and bytes that hold none
+/// are refused.
+#[test]
+fn a_heartbeat_ack_reads_back_and_other_bytes_are_refused() {
+    assert_eq!(read_heartbeat_ack(&heartbeat_ack_payload()), Ok(()));
+    assert_eq!(read_heartbeat_ack(b"not json"), Err(WireRefused));
+}

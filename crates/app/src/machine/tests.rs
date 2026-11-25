@@ -94,3 +94,21 @@ fn a_machine_its_hub_removed_may_take_a_new_id_and_maintains_as_before() {
     assert!(!Standing::NewIdTaken.offers_new_id());
     assert!(!Standing::Unread.offers_new_id());
 }
+
+/// Taking a new ID answers where the machine it was given stands now, as
+/// its hub moves it.
+#[test]
+fn taking_a_new_id_reads_where_the_machine_stands_now() {
+    use crate::fakes::{FakeThisMachine, InMemoryConfigStore, InMemoryOperationStore};
+
+    let standing = Arc::new(MachineStanding::new(Standing::Same));
+    let take = TakeNewId::new(
+        Arc::new(FakeThisMachine::new(Some("this-computer"))),
+        Arc::clone(&standing),
+        Arc::new(InMemoryConfigStore::default()),
+        Arc::new(InMemoryOperationStore::default()),
+        Arc::default(),
+    );
+    standing.hub_refused();
+    assert_eq!(take.standing(), Standing::RefusedByHub);
+}

@@ -513,7 +513,12 @@ mod tests {
             "a second short of the timeout, it still waits"
         );
         clock.advance(SignedDuration::from_secs(1));
-        assert_eq!(read.await, Err(StatsError::TimedOut));
+        // Polled once rather than awaited: a clock whose time doesn't move
+        // fails the test instead of hanging it.
+        assert_eq!(
+            poll!(&mut read),
+            std::task::Poll::Ready(Err(StatsError::TimedOut))
+        );
         assert_eq!(history(&readings).await, Vec::new());
     }
 

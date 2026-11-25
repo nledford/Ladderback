@@ -757,3 +757,36 @@ fn a_legacy_grant_without_a_signature_reads_as_unproved() {
     assert_eq!(grants.grants.len(), 1);
     assert_eq!(grants.grants[0].signature.as_bytes(), &[0; SIGNATURE_BYTES]);
 }
+
+/// A `GrantsWithheld` reads back from its payload, and bytes that hold none
+/// are refused.
+#[test]
+fn a_withheld_payload_reads_back_and_other_bytes_are_refused() {
+    assert_eq!(read_withheld(&withheld_payload()), Ok(()));
+    assert_eq!(read_withheld(b"not json"), Err(WireRefused));
+}
+
+/// A signed message's payload is read up to a frame's size, and one longer
+/// is refused unread, however well it decodes.
+#[test]
+fn a_signed_payload_is_read_up_to_a_frames_size() {
+    let frame = |payload: String| HubFrame::Signed {
+        kind: "Welcome".to_owned(),
+        seq: 1,
+        expires_at: 1,
+        payload,
+        signature: encoded(signature(0x66).as_bytes()),
+    };
+    let longest = hub_message(&frame("A".repeat(MAX_FRAME_BYTES)));
+    assert!(
+        matches!(
+            &longest,
+            Ok(HubMessage::Signed(envelope)) if envelope.payload.len() == MAX_FRAME_BYTES / 4 * 3
+        ),
+        "{longest:?}"
+    );
+    assert_eq!(
+        hub_message(&frame("A".repeat(MAX_FRAME_BYTES + 4))),
+        Err(WireRefused)
+    );
+}
