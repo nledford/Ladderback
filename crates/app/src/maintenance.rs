@@ -47,9 +47,9 @@ use crate::announce::{announce_end, announce_start};
 use crate::execution::Finished;
 use crate::log_write::save_within_bound;
 use crate::ports::{
-    CheckJob, Clock, ConfigError, ConfigStore, Engine, EngineError, EngineEvent, EngineResult,
-    EventBus, ForgetJob, Job, MAX_JOB_IDS, NormalizeSources, OperationStore, PruneJob,
-    RepositoryAccess, Retention, RetentionError, RewriteJob, RunningJob, SnapshotSummary,
+    CheckJob, Clock, ConfigError, ConfigStore, Deletion, Engine, EngineError, EngineEvent,
+    EngineResult, EventBus, ForgetJob, Job, MAX_JOB_IDS, NormalizeSources, OperationStore,
+    PruneJob, RepositoryAccess, Retention, RetentionError, RewriteJob, RunningJob, SnapshotSummary,
     SourcesError, Start, StoreError,
 };
 use crate::reads::ReadTurns;
@@ -1028,17 +1028,38 @@ impl RunMaintenance {
             return Ok(());
         };
         leases.permits(repository).await.map_err(|why| {
-            let because = match why {
-                NoLease::NoneHeld => "it holds no lease on the repository from its hub",
-                NoLease::RanOut => "its lease on the repository ran out on the hub's time",
-            };
             log::warn!(
                 "maintenance of {} refused (maintenance-no-lease): this machine is paired \
-                 with a hub and {because}",
-                alias.as_str()
+                 with a hub and {}",
+                alias.as_str(),
+                no_lease_because(&why)
             );
             MaintenanceError::NoLease(why)
         })
+    }
+
+    /// Whether a prune that has worked out its plan may delete: while this
+    /// machine may still maintain `repository`, judged again now as when
+    /// the run started, never renewed (§7.3; §16, decision 161). A
+    /// machine that isn't paired always may. A refusal is logged with why.
+    async fn deletion(&self, operation: &Operation, repository: Option<&RepositoryId>) -> Deletion {
+        let Some(leases) = &self.leases else {
+            return Deletion::Permitted;
+        };
+        match leases.permits(repository).await {
+            Ok(()) => Deletion::Permitted,
+            Err(why) => {
+                log::warn!(
+                    "prune of {} deletes nothing (maintenance-lease-lapsed): this machine is \
+                     paired with a hub and {}",
+                    operation
+                        .repository_alias()
+                        .map_or("the repository", RepositoryAlias::as_str),
+                    no_lease_because(&why)
+                );
+                Deletion::Refused
+            }
+        }
     }
 
     /// The repository's snapshots, from one listing.
@@ -1333,6 +1354,8 @@ impl RunMaintenance {
                 let _ = operation.cancel(self.clock.now());
                 break;
             }
+            // The repository a prune's question is answered for.
+            let repository = job.access().and_then(|access| access.id.clone());
             let running = match self.engine.run(operation.id(), job).await {
                 Ok(running) => running,
                 Err(error) => {
@@ -1349,6 +1372,7 @@ impl RunMaintenance {
                     done.as_ref(),
                     total,
                     &ruled,
+                    repository.as_ref(),
                 )
                 .await
             {
@@ -1396,7 +1420,11 @@ impl RunMaintenance {
     /// the operation ends: failed, or cancelled. `done` is what the jobs
     /// before this one finished, `total` how many snapshots the whole run
     /// names, and `ruled` the positions of the repository's locations that
-    /// have a rule.
+    /// have a rule. A prune's question is answered for `repository`.
+    #[expect(
+        clippy::too_many_arguments,
+        reason = "one run's state, passed down from `execute` alone"
+    )]
     async fn play(
         &self,
         operation: &mut Operation,
@@ -1405,6 +1433,7 @@ impl RunMaintenance {
         done: Option<&EngineResult>,
         total: usize,
         ruled: &[u8],
+        repository: Option<&RepositoryId>,
     ) -> Played {
         let RunningJob {
             events,
@@ -1439,7 +1468,11 @@ impl RunMaintenance {
                         EngineEvent::Started { .. }
                         | EngineEvent::Dumping(_)
                         | EngineEvent::Piece(_) => {}
-                        EngineEvent::DeletionAsked(_) => todo!(),
+                        // A prune that worked out its plan asks before it
+                        // deletes, and is answered as the run started.
+                        EngineEvent::DeletionAsked(ask) => {
+                            ask.answer(self.deletion(operation, repository).await);
+                        }
                         EngineEvent::Progress(_) => {
                             let _ = operation.report_progress();
                         }
@@ -1494,6 +1527,14 @@ enum Played {
     Reported(EngineResult),
     /// The operation ended: failed, or cancelled.
     Ended,
+}
+
+/// Why a paired machine may not maintain a repository, as its log says.
+fn no_lease_because(why: &NoLease) -> &'static str {
+    match why {
+        NoLease::NoneHeld => "it holds no lease on the repository from its hub",
+        NoLease::RanOut => "its lease on the repository ran out on the hub's time",
+    }
 }
 
 /// The job as the engine jobs that do it: a forget or rewrite is cut into

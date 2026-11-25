@@ -24,6 +24,7 @@ use super::find::{self, Child, Root, Trees};
 use super::listing;
 use super::repository::{self as location, new_repository, open, repository_id};
 use super::{Context, Done};
+use crate::job::DeleteAnswer;
 use crate::job::{
     BackupJobSpec, BrowseJobSpec, CheckJobSpec, FindJobSpec, FolderResult, ForgetJobSpec,
     ForgetResult, OpResult, ProbeResult, PruneJobSpec, RepositorySpec, StatsResult, WorkerEvent,
@@ -454,12 +455,29 @@ pub(crate) fn backup(ctx: &Context, job: &BackupJobSpec) -> Result<Done, JobErro
     Ok(Done::Reported)
 }
 
+/// Prunes with the plan it works out, once the daemon answers that this
+/// machine may still maintain the repository. On no, or with no answer in
+/// time, it deletes, marks and rewrites nothing, and the plan isn't worked
+/// out again (§7.3; §16, decision 161).
 pub(crate) fn prune(ctx: &Context, job: &PruneJobSpec) -> Result<Done, JobError> {
     let options = prune_options(job.keep_delete)?;
     let repository = open(ctx, &job.repo)?;
     let id = repository_id(&repository)?;
     ctx.start(None, Some(&id))?;
     let plan = repository.prune_plan(&options)?;
+    let lapsed = |detail: &str| JobError::Failed {
+        code: api::ErrorCode::MaintenanceLeaseLapsed,
+        detail: detail.to_owned(),
+    };
+    match ctx.ask_to_delete()? {
+        Some(DeleteAnswer::Delete) => {}
+        Some(DeleteAnswer::DeleteNothing) => {
+            return Err(lapsed(
+                "the daemon answered that this machine may no longer maintain the repository",
+            ));
+        }
+        None => return Err(lapsed("the daemon didn't answer in time")),
+    }
     let result = prune_result(id, &plan.stats);
     repository.prune(&options, plan)?;
     Ok(Done::Result(OpResult::Prune(result)))

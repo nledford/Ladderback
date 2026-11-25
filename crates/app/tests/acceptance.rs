@@ -71,10 +71,10 @@ mod pairing_steps;
 mod plans_steps;
 #[path = "steps/proposals.rs"]
 mod proposals_steps;
-#[path = "steps/recent_log.rs"]
-mod recent_log_steps;
 #[path = "steps/prune_guard.rs"]
 mod prune_guard_steps;
+#[path = "steps/recent_log.rs"]
+mod recent_log_steps;
 #[path = "steps/recovery.rs"]
 mod recovery_steps;
 #[path = "steps/repositories.rs"]

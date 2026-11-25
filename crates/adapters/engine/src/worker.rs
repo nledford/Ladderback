@@ -44,8 +44,8 @@ use domain::{OperationId, RepositoryId, SignedDuration, Timestamp};
 
 use crate::cache_lock::CacheLock;
 use crate::job::{
-    DeleteAnswer, JobKind, JobSpec, Level, MAX_MESSAGE_BYTES, MAX_MESSAGE_READ, OpResult,
-    RepositorySpec, WorkerEvent, exit_code,
+    DeleteAnswer, JobKind, JobSpec, Level, MAX_ANSWER_BYTES, MAX_MESSAGE_BYTES, MAX_MESSAGE_READ,
+    OpResult, RepositorySpec, WorkerEvent, exit_code,
 };
 use cancel::{AfterCancel, Cancel, Cause};
 use convert::JobError;
@@ -129,7 +129,7 @@ pub fn main(program: &'static str) -> ExitCode {
             "cannot handle SIGTERM or SIGHUP, so a stop can't wind the job down and the daemon's death is noticed only at the next event: {error}"
         ));
     }
-    match run_events(io::stdin().lock(), events, std::process::id(), process) {
+    match run_events(io::stdin(), events, std::process::id(), process) {
         // An abrupt exit may use any code, including ones outside u8.
         Ok(exit) => std::process::exit(exit.code()),
         Err(error) => {
@@ -175,7 +175,7 @@ fn die_with_the_daemon() {
 /// Unlike [`main`], this leaves the process alone: no logger, no signal
 /// handler. A job with a deadline still exits the process when it passes.
 pub fn run(
-    input: impl Read,
+    input: impl Read + Send + 'static,
     output: impl Write + Send + 'static,
     pid: u32,
     program: &'static str,
@@ -273,7 +273,23 @@ impl Context {
     /// [`DeleteAnswer::Delete`]. Fails only when the question can't be
     /// written.
     pub(crate) fn ask_to_delete(&self) -> io::Result<Option<DeleteAnswer>> {
-        todo!()
+        let Some(answers) = self.answers.borrow_mut().take() else {
+            return Ok(None);
+        };
+        self.events.emit(&WorkerEvent::ReadyToDelete)?;
+        // Read on a thread of its own, so that a daemon that never answers
+        // holds the prune no longer than the wait: the thread ends with the
+        // worker.
+        let (sender, answer) = std::sync::mpsc::sync_channel(1);
+        let reading = std::thread::Builder::new()
+            .name("delete-answer".to_owned())
+            .spawn(move || {
+                let _ = sender.send(read_answer(answers));
+            });
+        if reading.is_err() {
+            return Ok(None);
+        }
+        Ok(answer.recv_timeout(self.process.answer_wait).ok().flatten())
     }
 
     /// Takes `dir` as this worker's cache until the worker ends. Two workers
@@ -342,19 +358,27 @@ impl Context {
     }
 }
 
-fn run_events(input: impl Read, events: Events, pid: u32, process: Process) -> io::Result<Exit> {
-    // A job spec is a few kilobytes; one past the protocol's message cap is
-    // refused, and never read past the cap.
-    let mut raw = String::new();
+fn run_events(
+    input: impl Read + Send + 'static,
+    events: Events,
+    pid: u32,
+    process: Process,
+) -> io::Result<Exit> {
+    // A job spec is one line of a few kilobytes; one past the protocol's
+    // message cap is refused, and never read past the cap.
+    let mut input = io::BufReader::new(input.take(MAX_MESSAGE_READ));
+    let mut raw = Vec::new();
     let spec = match input
-        .take(MAX_MESSAGE_READ)
-        .read_to_string(&mut raw)
+        .read_until(b'\n', &mut raw)
         .map_err(|e| e.to_string())
         .and_then(|_| {
+            if raw.last() == Some(&b'\n') {
+                raw.pop();
+            }
             if raw.len() > MAX_MESSAGE_BYTES {
                 Err(format!("job spec exceeds {MAX_MESSAGE_BYTES} bytes"))
             } else {
-                serde_json::from_str::<JobSpec>(&raw).map_err(|e| e.to_string())
+                serde_json::from_slice::<JobSpec>(&raw).map_err(|e| e.to_string())
             }
         }) {
         Ok(spec) => spec,
@@ -367,6 +391,9 @@ fn run_events(input: impl Read, events: Events, pid: u32, process: Process) -> i
             return Ok(Exit::Reported { failed: true });
         }
     };
+    // What follows the spec's line is a prune's one answer: a few bytes,
+    // and nothing past them is read (decision 161).
+    input.get_mut().set_limit(MAX_ANSWER_BYTES as u64 + 1);
     // From here on, the secrets of the job never reach the stream (I4).
     if let Some(repository) = repository_of(&spec.job) {
         events.redact_with(repository.redactor());
@@ -383,8 +410,7 @@ fn run_events(input: impl Read, events: Events, pid: u32, process: Process) -> i
         level: Level::Debug,
         message: "job accepted".to_owned(),
     })?;
-    let ctx =
-        Context::new(events.clone(), &spec, pid, process).with_answers(Box::new(io::empty()));
+    let ctx = Context::new(events.clone(), &spec, pid, process).with_answers(Box::new(input));
     let outcome = match &spec.job {
         JobKind::Fake(job) => fake::run(&ctx, job),
         JobKind::Identify(repository) => jobs::identify(&ctx, repository),
@@ -434,6 +460,23 @@ fn run_events(input: impl Read, events: Events, pid: u32, process: Process) -> i
         }
         Err(JobError::Events(error)) => Err(error),
     }
+}
+
+/// The daemon's one answer line, or `None` for anything else: the end of
+/// stdin, a line past [`MAX_ANSWER_BYTES`], or one that is no answer.
+fn read_answer(answers: impl BufRead) -> Option<DeleteAnswer> {
+    let mut line = Vec::new();
+    answers
+        .take(MAX_ANSWER_BYTES as u64 + 1)
+        .read_until(b'\n', &mut line)
+        .ok()?;
+    if line.last() == Some(&b'\n') {
+        line.pop();
+    }
+    if line.len() > MAX_ANSWER_BYTES {
+        return None;
+    }
+    serde_json::from_slice(&line).ok()
 }
 
 /// How a job the cancel ended exits: as the cancel's first cause says. A
@@ -574,7 +617,7 @@ mod tests {
     fn a_worker_says_it_took_its_job_before_it_starts_the_work() {
         let (events, capture) = capture();
         let input = serde_json::to_vec(&fake_spec(None, 1)).unwrap();
-        run_events(input.as_slice(), events, 42, Process::real(PROGRAM)).unwrap();
+        run_events(io::Cursor::new(input), events, 42, Process::real(PROGRAM)).unwrap();
         let events = capture.parsed();
         let [
             WorkerEvent::Log { level, .. },
@@ -609,7 +652,7 @@ mod tests {
         };
         let (events, capture) = capture();
         let input = serde_json::to_vec(&spec).unwrap();
-        let exit = run_events(input.as_slice(), events, 1, Process::real(PROGRAM)).unwrap();
+        let exit = run_events(io::Cursor::new(input), events, 1, Process::real(PROGRAM)).unwrap();
         assert_eq!(exit.code(), 1);
         let events = capture.parsed();
         assert_matches!(
@@ -650,7 +693,13 @@ mod tests {
             };
             let (events, _capture) = capture();
             let input = serde_json::to_vec(&spec).unwrap();
-            run_events(input.as_slice(), events.clone(), 1, Process::real(PROGRAM)).unwrap();
+            run_events(
+                io::Cursor::new(input),
+                events.clone(),
+                1,
+                Process::real(PROGRAM),
+            )
+            .unwrap();
             events.logs_backend_at_debug()
         };
         assert!(logs_at_debug(JobKind::Probe), "a probe");
@@ -662,7 +711,7 @@ mod tests {
         let spec = fake_spec(None, 2);
         let (events, capture) = capture();
         let input = serde_json::to_vec(&spec).unwrap();
-        let exit = run_events(input.as_slice(), events, 42, Process::real(PROGRAM)).unwrap();
+        let exit = run_events(io::Cursor::new(input), events, 42, Process::real(PROGRAM)).unwrap();
         assert_eq!(exit, Exit::Reported { failed: false });
         let events = capture.parsed();
         let Some(WorkerEvent::Started { op_id, pid, .. }) = events
@@ -725,7 +774,7 @@ mod tests {
         };
         let (events, capture) = capture();
         let input = serde_json::to_vec(&spec).unwrap();
-        let exit = run_events(input.as_slice(), events, 1, process).unwrap();
+        let exit = run_events(io::Cursor::new(input), events, 1, process).unwrap();
         (exit, capture.parsed())
     }
 
@@ -805,7 +854,7 @@ mod tests {
         };
         let (events, capture) = capture();
         let input = serde_json::to_vec(&fake_spec(Some(SignedDuration::ZERO), 3)).unwrap();
-        run_events(input.as_slice(), events, 1, process).unwrap();
+        run_events(io::Cursor::new(input), events, 1, process).unwrap();
         assert_eq!(
             terminated.try_recv(),
             Ok(crate::job::exit_code::DEADLINE_PASSED)
@@ -1095,8 +1144,9 @@ mod tests {
         };
         let (events, capture) = capture();
         let input = serde_json::to_vec(&spec).unwrap();
-        let running =
-            std::thread::spawn(move || run_events(input.as_slice(), events, 1, process).unwrap());
+        let running = std::thread::spawn(move || {
+            run_events(io::Cursor::new(input), events, 1, process).unwrap()
+        });
         while packs_in(&repo) < 2 {
             assert!(
                 !running.is_finished(),
@@ -1162,7 +1212,7 @@ mod tests {
         };
         let (events, capture) = capture();
         let input = serde_json::to_vec(&spec).unwrap();
-        let exit = run_events(input.as_slice(), events, 1, Process::real(PROGRAM)).unwrap();
+        let exit = run_events(io::Cursor::new(input), events, 1, Process::real(PROGRAM)).unwrap();
         assert_eq!(exit.code(), 1);
         capture.text()
     }
@@ -1276,7 +1326,7 @@ mod tests {
         // Trailing whitespace is still valid JSON.
         input.resize(crate::job::MAX_MESSAGE_BYTES + 1, b' ');
         let (events, capture) = capture();
-        let exit = run_events(input.as_slice(), events, 42, Process::real(PROGRAM)).unwrap();
+        let exit = run_events(io::Cursor::new(input), events, 42, Process::real(PROGRAM)).unwrap();
         assert_eq!(exit.code(), 1);
         invalid_spec_failure(&capture.parsed());
     }
@@ -1286,41 +1336,42 @@ mod tests {
         let mut input = serde_json::to_vec(&fake_spec(None, 0)).unwrap();
         input.resize(crate::job::MAX_MESSAGE_BYTES, b' ');
         let (events, _capture) = capture();
-        let exit = run_events(input.as_slice(), events, 42, Process::real(PROGRAM)).unwrap();
+        let exit = run_events(io::Cursor::new(input), events, 42, Process::real(PROGRAM)).unwrap();
         assert_eq!(exit, Exit::Reported { failed: false });
     }
 
     /// Serves up to 64 MiB of spaces and counts how much was asked for.
-    struct Endless<'a> {
-        served: &'a std::cell::Cell<usize>,
+    struct Endless {
+        served: Arc<std::sync::atomic::AtomicUsize>,
         left: usize,
     }
 
-    impl Read for Endless<'_> {
+    impl Read for Endless {
         fn read(&mut self, buf: &mut [u8]) -> io::Result<usize> {
             let n = buf.len().min(self.left);
             buf[..n].fill(b' ');
             self.left -= n;
-            self.served.set(self.served.get() + n);
+            self.served
+                .fetch_add(n, std::sync::atomic::Ordering::SeqCst);
             Ok(n)
         }
     }
 
     #[test]
     fn a_job_spec_that_never_ends_is_not_read_past_the_cap() {
-        let served = std::cell::Cell::new(0);
+        let served = Arc::new(std::sync::atomic::AtomicUsize::new(0));
         let input = Endless {
-            served: &served,
+            served: Arc::clone(&served),
             left: 64 << 20,
         };
         let (events, capture) = capture();
         let exit = run_events(input, events, 42, Process::real(PROGRAM)).unwrap();
         assert_eq!(exit.code(), 1);
         invalid_spec_failure(&capture.parsed());
+        let served = served.load(std::sync::atomic::Ordering::SeqCst);
         assert!(
-            served.get() <= crate::job::MAX_MESSAGE_BYTES + 1,
-            "read {} bytes of a job spec capped at {}",
-            served.get(),
+            served <= crate::job::MAX_MESSAGE_BYTES + 1,
+            "read {served} bytes of a job spec capped at {}",
             crate::job::MAX_MESSAGE_BYTES
         );
     }
@@ -1345,8 +1396,8 @@ mod tests {
         let (events, capture) = capture();
         let mut process = Process::real(PROGRAM);
         process.answer_wait = wait;
-        let ctx = Context::new(events, &fake_spec(None, 0), 1, process)
-            .with_answers(Box::new(answers));
+        let ctx =
+            Context::new(events, &fake_spec(None, 0), 1, process).with_answers(Box::new(answers));
         (ctx, capture)
     }
 
@@ -1359,7 +1410,10 @@ mod tests {
     fn a_prune_asks_before_it_deletes_and_hears_the_answer() {
         for (line, answer) in [
             ("{\"answer\":\"delete\"}\n", DeleteAnswer::Delete),
-            ("{\"answer\":\"delete_nothing\"}\n", DeleteAnswer::DeleteNothing),
+            (
+                "{\"answer\":\"delete_nothing\"}\n",
+                DeleteAnswer::DeleteNothing,
+            ),
         ] {
             let (ctx, capture) = asking(lines(line), Duration::from_secs(5));
             assert_eq!(ctx.ask_to_delete().unwrap(), Some(answer));

@@ -246,7 +246,7 @@ pub(crate) fn encode_failure(
         FailureReason::RestoreTargetUnwritable => ("restore-target-unwritable", Vec::new(), None),
         FailureReason::NoLocationRuleHolds => ("no-location-rule-holds", Vec::new(), None),
         FailureReason::PasswordNotAccepted => ("password-not-accepted", Vec::new(), None),
-        FailureReason::LeaseLapsed => todo!(),
+        FailureReason::LeaseLapsed => ("maintenance-lease-lapsed", Vec::new(), None),
         FailureReason::SecretRefused { field, refusal } => (
             refusal.code(),
             std::iter::once(("field", MsgArg::Text(field.clone())))
@@ -374,6 +374,7 @@ pub(crate) fn decode_failure(
         "restore-target-unwritable" => Ok(FailureReason::RestoreTargetUnwritable),
         "no-location-rule-holds" => Ok(FailureReason::NoLocationRuleHolds),
         "password-not-accepted" => Ok(FailureReason::PasswordNotAccepted),
+        "maintenance-lease-lapsed" => Ok(FailureReason::LeaseLapsed),
         "hook-failed" => Ok(FailureReason::HookFailed {
             hook: hook_place(&args)?,
             ended: hook_end(&args)?,

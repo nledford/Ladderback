@@ -260,6 +260,10 @@ pub(super) fn translate(event: WorkerEvent, redactor: &Redactor) -> Option<Engin
                 // spec named (§7.3): nothing there was read or written. As
                 // with `RepositoryExists`, the code says it all.
                 ErrorCode::RepositoryReplaced => FailureReason::RepositoryReplaced,
+                // A prune worked out its plan and was told, or found with no
+                // answer, that it may no longer delete: nothing was
+                // (decision 161).
+                ErrorCode::MaintenanceLeaseLapsed => FailureReason::LeaseLapsed,
                 ErrorCode::RepositoryNotFound => FailureReason::RepositoryNotFound,
                 // A server refused the credentials (decision 85): nothing was
                 // read or written. The worker names the half whose server
@@ -395,7 +399,6 @@ pub(super) fn translate(event: WorkerEvent, redactor: &Redactor) -> Option<Engin
                 | ErrorCode::MaintenanceBusy
                 | ErrorCode::MaintenanceNotOwner
                 | ErrorCode::MaintenanceNoLease
-                | ErrorCode::MaintenanceLeaseLapsed
                 | ErrorCode::RetentionKeepsNothing
                 | ErrorCode::MaintenanceKindUnknown
                 | ErrorCode::AdoptionNoMatch

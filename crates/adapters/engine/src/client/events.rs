@@ -5,19 +5,24 @@ use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::Duration;
 
-use app::ports::{EngineEvent, EngineResult, SnapshotSummary};
+use app::ports::{
+    Deletion, DeletionAnswer, DeletionAsk, EngineEvent, EngineResult, SnapshotSummary,
+};
 use base64::Engine as _;
 use base64::engine::general_purpose::STANDARD;
 use domain::execution::FailureReason;
 use domain::restore::download::PIECE_BYTES;
 use domain::secrets::Redactor;
-use tokio::io::{AsyncBufReadExt, BufReader};
+use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
+use tokio::process::ChildStdin;
 use tokio::sync::{mpsc, watch};
 
 use super::DRAIN_AFTER_EXIT;
 use super::stop::{Exited, ForEvents, Order, deadline_after};
 use super::translate::translate;
-use crate::job::{MAX_LISTED_BYTES, MAX_LISTED_SNAPSHOTS, OpResult, WorkerEvent, exit_code};
+use crate::job::{
+    DeleteAnswer, MAX_LISTED_BYTES, MAX_LISTED_SNAPSHOTS, OpResult, WorkerEvent, exit_code,
+};
 
 /// The events of one job, read from the worker's stdout.
 pub(super) struct Reading {
@@ -43,6 +48,9 @@ pub(super) struct Reading {
     pub(super) first_line_by: Option<tokio::time::Instant>,
     /// The listing the worker has sent so far, when the job is one.
     pub(super) listing: Listing,
+    /// A prune's stdin, where the one answer to its question goes: `None`
+    /// for any other job, and once the prune has asked (decision 161).
+    pub(super) answer_to: Option<ChildStdin>,
 }
 
 /// A repository's listing as it arrives: the `snapshots` events of a worker
@@ -207,6 +215,15 @@ impl Reading {
                     Ok(piece) => (EngineEvent::Piece(piece), self),
                     Err(detail) => (self.broken(detail), self),
                 });
+            }
+            if matches!(event, WorkerEvent::ReadyToDelete) {
+                let Some(stdin) = self.answer_to.take() else {
+                    let detail = "the worker asked to delete outside a prune, or twice";
+                    return Some((self.broken(detail.to_owned()), self));
+                };
+                let (ask, answer) = DeletionAsk::new();
+                tokio::spawn(tell_deletion(stdin, answer, self.exited.clone()));
+                return Some((EngineEvent::DeletionAsked(ask), self));
             }
             if let Some(event) = translate(event, &self.redactor) {
                 if matches!(event, EngineEvent::Succeeded(_) | EngineEvent::Failed(_)) {
@@ -374,6 +391,29 @@ async fn read_line(reader: &mut BufReader<ForEvents>, line: &mut Vec<u8>) -> std
             return Ok(Line::Complete);
         }
     }
+}
+
+/// Writes the answer a prune's question gets to its stdin as one line, and
+/// closes it; nothing once the worker has exited. A write that fails leaves
+/// the prune with no answer, on which it deletes nothing.
+async fn tell_deletion(
+    mut stdin: ChildStdin,
+    answer: DeletionAnswer,
+    mut exited: watch::Receiver<Exited>,
+) {
+    let deletion = tokio::select! {
+        deletion = answer => deletion,
+        () = worker_exited(&mut exited) => return,
+    };
+    let answer = match deletion {
+        Deletion::Permitted => DeleteAnswer::Delete,
+        Deletion::Refused => DeleteAnswer::DeleteNothing,
+    };
+    let Ok(mut line) = serde_json::to_vec(&answer) else {
+        return;
+    };
+    line.push(b'\n');
+    let _ = stdin.write_all(&line).await;
 }
 
 /// Resolves once the worker has exited.

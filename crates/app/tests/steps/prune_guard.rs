@@ -16,7 +16,9 @@ use domain::planning::{
     AgentConfig, AgentSettings, GroupBy, Hooks, Maintenance, RepositoryConfig, RepositorySettings,
 };
 use domain::secrets::{SecretRef, SecretValue};
-use domain::{AgentId, OperationId, RepositoryAlias, RepositoryId, SignedDuration, Timestamp, Uuid};
+use domain::{
+    AgentId, OperationId, RepositoryAlias, RepositoryId, SignedDuration, Timestamp, Uuid,
+};
 use futures::StreamExt;
 
 use super::Agent;
@@ -88,7 +90,10 @@ async fn prune(agent: &mut Agent) {
     let world = &mut agent.prune_guard;
     let clock = Arc::new(FakeClock::new(start()));
     let configs = Arc::new(InMemoryConfigStore::new());
-    configs.save(&config()).await.expect("the configuration saves");
+    configs
+        .save(&config())
+        .await
+        .expect("the configuration saves");
     let identity = Arc::new(InMemoryIdentity::default());
     let leases = Arc::new(MaintenanceLeases::new(
         identity.clone(),
@@ -229,10 +234,12 @@ impl JobControl for Nothing {
 impl Engine for Pruning {
     async fn run(&self, _op: OperationId, job: Job) -> Result<RunningJob, EngineError> {
         let events = match job {
-            Job::Identify(_) => futures::stream::iter([EngineEvent::Succeeded(
-                EngineResult::Repository { id: repository() },
-            )])
-            .boxed(),
+            Job::Identify(_) => {
+                futures::stream::iter([EngineEvent::Succeeded(EngineResult::Repository {
+                    id: repository(),
+                })])
+                .boxed()
+            }
             Job::Ls(_) => {
                 futures::stream::iter([EngineEvent::Succeeded(EngineResult::Snapshots(Vec::new()))])
                     .boxed()

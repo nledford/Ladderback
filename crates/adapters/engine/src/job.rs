@@ -1125,4 +1125,25 @@ mod tests {
         assert!(!log.is_final());
         assert!(!WorkerEvent::ReadyToDelete.is_final());
     }
+
+    /// A prune's question and the daemon's answers are one short line each,
+    /// and the longest answer fits the worker's cap (decision 161).
+    #[test]
+    fn a_prune_asks_and_is_answered_in_one_short_line() {
+        assert_eq!(
+            serde_json::to_string(&WorkerEvent::ReadyToDelete).unwrap(),
+            r#"{"event":"ready_to_delete"}"#
+        );
+        for (answer, line) in [
+            (DeleteAnswer::Delete, r#"{"answer":"delete"}"#),
+            (
+                DeleteAnswer::DeleteNothing,
+                r#"{"answer":"delete_nothing"}"#,
+            ),
+        ] {
+            assert_eq!(serde_json::to_string(&answer).unwrap(), line);
+            assert!(line.len() <= MAX_ANSWER_BYTES);
+            assert_eq!(serde_json::from_str::<DeleteAnswer>(line).unwrap(), answer);
+        }
+    }
 }

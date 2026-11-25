@@ -1,5 +1,6 @@
 use std::collections::BTreeMap;
 use std::pin::Pin;
+use std::sync::{Arc, Mutex, PoisonError};
 use std::task::{Context, Poll};
 use std::time::Duration;
 
@@ -16,6 +17,7 @@ use domain::{
     Offset, OperationId, PlanId, RepositoryAlias, RepositoryId, SignedDuration, SnapshotId,
     Timestamp,
 };
+use futures::channel::oneshot;
 use futures::stream::BoxStream;
 
 /// Runs operations against a repository and reports what happens as a stream
@@ -663,23 +665,34 @@ pub enum Deletion {
 /// [`Deletion::Refused`], so an event consumer that doesn't know the
 /// question never lets a prune delete.
 #[derive(Clone)]
-pub struct DeletionAsk(());
+pub struct DeletionAsk(Arc<Mutex<Option<oneshot::Sender<Deletion>>>>);
 
 impl DeletionAsk {
     /// A question, and the answer it gets, for the engine to wait on.
     pub fn new() -> (Self, DeletionAnswer) {
-        todo!()
+        let (sender, receiver) = oneshot::channel();
+        (
+            Self(Arc::new(Mutex::new(Some(sender)))),
+            DeletionAnswer(receiver),
+        )
     }
 
     /// Answers the question; an answer after the first changes nothing.
-    pub fn answer(&self, _deletion: Deletion) {
-        todo!()
+    pub fn answer(&self, deletion: Deletion) {
+        // The lock only guards a take: one a panic interrupted left the
+        // sender as it was.
+        let sender = self.0.lock().unwrap_or_else(PoisonError::into_inner).take();
+        if let Some(sender) = sender {
+            // An engine that stopped waiting has nothing left to delete.
+            let _ = sender.send(deletion);
+        }
     }
 }
 
+/// Copies of one question are equal; two questions never are.
 impl PartialEq for DeletionAsk {
-    fn eq(&self, _other: &Self) -> bool {
-        todo!()
+    fn eq(&self, other: &Self) -> bool {
+        Arc::ptr_eq(&self.0, &other.0)
     }
 }
 
@@ -693,13 +706,15 @@ impl std::fmt::Debug for DeletionAsk {
 
 /// The answer a [`DeletionAsk`] gets: [`Deletion::Refused`] when it is
 /// dropped unanswered.
-pub struct DeletionAnswer(());
+pub struct DeletionAnswer(oneshot::Receiver<Deletion>);
 
 impl Future for DeletionAnswer {
     type Output = Deletion;
 
-    fn poll(self: Pin<&mut Self>, _cx: &mut Context<'_>) -> Poll<Deletion> {
-        todo!()
+    fn poll(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Deletion> {
+        Pin::new(&mut self.0)
+            .poll(cx)
+            .map(|answered| answered.unwrap_or(Deletion::Refused))
     }
 }
 

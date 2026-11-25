@@ -67,7 +67,10 @@ impl Engine for WorkerEngine {
         let environment = environment::scrubbed(self.base_environment());
         refuse_too_much_to_mask(&job, &environment)?;
         let redactor = job_redactor(&job, proxy_credentials(&environment));
-        let spec = serde_json::to_vec(&JobSpec {
+        // A prune asks on its stdout before it deletes, and is answered on
+        // its stdin (§16, decision 161).
+        let prune = matches!(job, Job::Prune(_));
+        let mut spec = serde_json::to_vec(&JobSpec {
             op_id: op,
             cache_dir: slot.as_ref().map(|slot| slot.dir.clone()),
             watchdog_interval_ms: u64::try_from(self.watchdog_interval.as_millis())
@@ -81,6 +84,8 @@ impl Engine for WorkerEngine {
                 detail: format!("job spec exceeds {MAX_MESSAGE_BYTES} bytes"),
             });
         }
+        // The spec is one line: JSON holds no raw newline.
+        spec.push(b'\n');
         let mut command = Command::new(&self.program);
         command
             .args(&self.args)
@@ -129,8 +134,9 @@ impl Engine for WorkerEngine {
                 return Err(EngineError::StartTimedOut);
             }
         }
-        // Closing stdin tells the worker the job spec is complete.
-        drop(stdin);
+        // Closing stdin tells the worker that nothing follows its job; a
+        // prune's stays open for the one answer it may get.
+        let answer_to = prune.then_some(stdin);
         let Some(stdout) = child.stdout.take() else {
             return Err(failed_to_start(&self.program, "the worker has no stdout"));
         };
@@ -176,6 +182,7 @@ impl Engine for WorkerEngine {
             exit_timeout: self.exit_timeout,
             first_line_by,
             listing: Listing::default(),
+            answer_to,
         };
         Ok(RunningJob {
             events: stream::unfold(reading, Reading::next).boxed(),

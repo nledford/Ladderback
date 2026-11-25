@@ -10,8 +10,8 @@ use std::path::{Path, PathBuf};
 use std::time::{Duration, SystemTime};
 
 use app::ports::{
-    BackupJob, BackupSummary, CheckJob, Deletion, Engine, EngineEvent, EngineResult, Job,
-    PruneJob, RepositoryAccess, RunningJob,
+    BackupJob, BackupSummary, CheckJob, Deletion, Engine, EngineEvent, EngineResult, Job, PruneJob,
+    RepositoryAccess, RunningJob,
 };
 use domain::execution::deadline::KeepDelete;
 use domain::execution::plan_tags::{PlanTags, UserTag};
