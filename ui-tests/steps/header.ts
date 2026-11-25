@@ -259,7 +259,7 @@ Then("the pages' links are hidden", async function (this: BrowserWorld) {
 // Shown, the links stand under the brand's line, each tall enough for a
 // finger.
 Then(
-  "the pages' links are shown below the brand's line, each at least {int} rem tall",
+  "the pages' links are shown below the brand's line, each at least {float} rem tall",
   async function (this: BrowserWorld, least: number) {
     const banner = this.page.getByRole("banner");
     const navigation = banner.getByRole("navigation");
@@ -343,34 +343,6 @@ Then("the menu panel is a bordered box with rounded corners, under the brand's l
   );
 });
 
-// One row for each page and one for Sign out, in the order of Tab, each a
-// block as wide as the panel's inside and tall enough for a finger.
-Then(
-  "the menu panel's rows are these, in order, each at least {int} rem tall and as wide as the panel:",
-  async function (this: BrowserWorld, least: number, table: DataTable) {
-    const wanted = (table.hashes() as { row: string }[]).map(({ row }) => row);
-    const rem = await this.page.evaluate(() => Number.parseFloat(getComputedStyle(document.documentElement).fontSize));
-    const rows = await menuPanel(this).evaluate((panel) => {
-      const inside = panel.clientWidth;
-      return Array.from(panel.querySelectorAll("nav a, .site-account button")).map((row) => {
-        const rect = row.getBoundingClientRect();
-        return { name: (row.textContent ?? "").trim(), height: rect.height, width: rect.width, inside };
-      });
-    });
-    assert.deepEqual(
-      rows.map((row) => row.name),
-      wanted,
-      "the panel's rows",
-    );
-    const short = rows.filter((row) => row.height < least * rem - 0.5).map((row) => `${row.name}: ${row.height.toFixed(1)}px`);
-    assert.deepEqual(short, [], `rows under ${least}rem`);
-    const narrow = rows
-      .filter((row) => row.width < row.inside - 1)
-      .map((row) => `${row.name}: ${row.width.toFixed(1)}px of ${row.inside}px`);
-    assert.deepEqual(narrow, [], "rows narrower than the panel");
-  },
-);
-
 // The current page is told by its weight and by a bar at its inline start,
 // which no other row has, so the rows' words stay aligned.
 Then(
@@ -431,3 +403,23 @@ Then(
     assert.ok(bar >= least, `the bar of the link "${name}" is ${bar.toFixed(2)}:1 against what it lies on`);
   },
 );
+
+// Focus on the box that holds the page's error alert containing `needle`,
+// which takes focus from the script alone (`tabindex="-1"`), as a failed
+// sign-out hands it there: never a stop for Tab.
+Then("focus is on the error alert containing {string}", async function (this: BrowserWorld, needle: string) {
+  await expect
+    .poll(() =>
+      this.page.evaluate((words) => {
+        const active = document.activeElement;
+        const alert = active?.querySelector(".alert.tone-error");
+        return (
+          active?.getAttribute("tabindex") === "-1" &&
+          alert !== null &&
+          alert !== undefined &&
+          (alert.textContent ?? "").replace(/[\u2068\u2069]/g, "").includes(words)
+        );
+      }, needle),
+    )
+    .toBe(true);
+});
