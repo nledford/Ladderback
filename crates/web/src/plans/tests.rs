@@ -145,6 +145,37 @@ fn an_interval_the_form_cannot_read_is_said_as_it_is_written() {
 }
 
 #[test]
+fn an_interval_is_said_as_a_length_of_time_only_when_its_words_say_all_of_it() {
+    let said = |every: &str| {
+        let base = plan(json!({ "id": "home", "schedule": { "every": every } }));
+        hint_of(Field::Cron, &base).1
+    };
+    for (every, ms) in [
+        ("500ms", 500),
+        ("90s", 90_000),
+        ("59m 59s", 3_599_000),
+        ("1h", 3_600_000),
+        ("23h 59m", 86_340_000),
+        ("36h", 129_600_000),
+    ] {
+        assert_eq!(
+            said(every),
+            vec![("every", MsgArg::DurationMs(ms))],
+            "{every}"
+        );
+    }
+    // The catalog's `duration` shows the two largest units that apply, so
+    // these would read as a shorter interval than the plan's.
+    for every in ["1m 500ms", "1h 0m 30s", "24h 30m", "-1h"] {
+        assert_eq!(
+            said(every),
+            vec![("every", MsgArg::Text(every.to_owned()))],
+            "{every}"
+        );
+    }
+}
+
+#[test]
 fn every_other_hint_is_the_fields_own() {
     let every = plan(json!({ "id": "home", "schedule": { "every": "1h" } }));
     assert_eq!(hint_of(Field::Cron, &plan(home())), Field::Cron.hint());

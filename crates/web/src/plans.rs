@@ -264,19 +264,13 @@ impl Field {
 /// The hint under `field` in the form of `plan`. The cron field of a plan
 /// that runs at an interval (`every`), which the form has no field for, says
 /// how often it runs and that the field left empty keeps that, so the empty
-/// field never reads as no schedule (#1527). The interval is said as a length
-/// of time, or as the file writes it when the form can't read it.
+/// field never reads as no schedule (#1527).
 pub(crate) fn hint_of(field: Field, plan: &PlanDto) -> Said {
     match (field, interval_of(&plan.0)) {
-        (Field::Cron, Some(every)) => {
-            let every = match every.parse::<jiff::SignedDuration>() {
-                Ok(duration) if !duration.is_negative() => {
-                    MsgArg::DurationMs(u64::try_from(duration.as_millis()).unwrap_or(u64::MAX))
-                }
-                _ => MsgArg::Text(every.to_owned()),
-            };
-            (msg::UI_PLAN_CRON_HINT_EVERY, vec![("every", every)])
-        }
+        (Field::Cron, Some(every)) => (
+            msg::UI_PLAN_CRON_HINT_EVERY,
+            vec![("every", said_interval(every))],
+        ),
         _ => field.hint(),
     }
 }
@@ -284,6 +278,34 @@ pub(crate) fn hint_of(field: Field, plan: &PlanDto) -> Said {
 /// The interval `plan` runs at, as the file writes it, if it runs at one.
 fn interval_of(plan: &Map<String, Value>) -> Option<&str> {
     plan.get("schedule")?.as_object()?.get("every")?.as_str()
+}
+
+/// An interval as the hint says it: a length of time, when the catalog's
+/// `duration`, which shows only the two largest units that apply, says all
+/// of it; otherwise, and for text the form can't read, as the file writes
+/// it, so the hint never states a shorter interval than the plan's.
+fn said_interval(every: &str) -> MsgArg {
+    const SECOND: u64 = 1_000;
+    const HOUR: u64 = 3_600 * SECOND;
+    const DAY: u64 = 24 * HOUR;
+    let whole = every
+        .parse::<jiff::SignedDuration>()
+        .ok()
+        .and_then(|duration| u64::try_from(duration.as_millis()).ok())
+        .filter(|&ms| {
+            // The smallest unit the `duration` message shows at this length.
+            let unit = match ms {
+                0..SECOND => 1,
+                SECOND..HOUR => SECOND,
+                HOUR..DAY => 60 * SECOND,
+                DAY.. => HOUR,
+            };
+            ms % unit == 0
+        });
+    match whole {
+        Some(ms) => MsgArg::DurationMs(ms),
+        None => MsgArg::Text(every.to_owned()),
+    }
 }
 
 /// A list entry as its line shows it: text as it is, a hook written as a
