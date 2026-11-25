@@ -13,6 +13,7 @@ use platform::data_dir_lock::DataDirLock;
 use testkit::service_manager::FakeServiceManagers;
 
 use super::interop_steps::{ran, run};
+use super::request_checks_steps::{Outcome, start};
 use super::{Agent, LADDERBACK, events_steps};
 
 #[derive(Debug, Default)]
@@ -165,6 +166,65 @@ fn file_runs_the_link(agent: &mut Agent) {
         text.contains(&format!("{link}\"")) || text.contains(&format!("{link}<")),
         "the service file doesn't run {link}:\n{text}"
     );
+}
+
+#[given("config.toml turns hub mode on, listening on a free port on loopback")]
+fn config_in_hub_mode(agent: &mut Agent) {
+    let folder = agent.scratch().join("config");
+    std::fs::create_dir_all(&folder).expect("the config folder");
+    std::fs::write(
+        folder.join("config.toml"),
+        "schema = 1\n\n[serve]\nlisten = \"127.0.0.1:0\"\nhub = true\n",
+    )
+    .expect("config.toml");
+}
+
+/// The words the service file runs the program with, after its path: the
+/// plist's `ProgramArguments` past the first, or the unit's `ExecStart`
+/// past the quoted path.
+fn service_arguments(agent: &Agent) -> Vec<String> {
+    let text = service_text(agent);
+    if cfg!(target_os = "macos") {
+        let array = text
+            .split("<key>ProgramArguments</key>")
+            .nth(1)
+            .and_then(|rest| rest.split("</array>").next())
+            .unwrap_or_else(|| panic!("no ProgramArguments:\n{text}"));
+        array
+            .split("<string>")
+            .skip(2)
+            .filter_map(|word| word.split("</string>").next())
+            .map(str::to_owned)
+            .collect()
+    } else {
+        let line = text
+            .lines()
+            .find(|line| line.starts_with("ExecStart="))
+            .unwrap_or_else(|| panic!("no ExecStart:\n{text}"));
+        line.rsplit_once('"')
+            .map(|(_, words)| words.split_whitespace().map(str::to_owned).collect())
+            .unwrap_or_else(|| panic!("no quoted program in {line}"))
+    }
+}
+
+/// Runs what the service file runs, in the scenario's folders, as the
+/// service manager would start it: the daemon must listen, and serve as the
+/// hub, whose first start makes its hub key.
+#[then("the program the service file runs starts as the hub")]
+async fn service_program_starts_the_hub(agent: &mut Agent) {
+    let words = service_arguments(agent);
+    let (command, args) = words.split_first().expect("a command in the service file");
+    assert_eq!(command, "serve", "{words:?}");
+    let args: Vec<&str> = args.iter().map(String::as_str).collect();
+    let scratch = agent.scratch().to_owned();
+    let (_child, outcome, _) = start(&scratch, Some(&scratch), &args, None).await;
+    assert_matches!(
+        outcome,
+        Outcome::Listening(_),
+        "the service's daemon didn't start"
+    );
+    let key = testkit::daemon::data_dir(&scratch).join("hub-key");
+    assert!(key.is_file(), "no hub key in {}", key.display());
 }
 
 #[then("the service runs")]

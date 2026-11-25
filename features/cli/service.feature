@@ -51,6 +51,18 @@ Feature: Install the agent as a service
       Then the command exits with status 0
       And the service file runs the program by the link
 
+    Scenario: On a machine in hub mode, the service runs the hub with no flag of its own
+      Hub mode is a setting of config.toml that `serve` reads at start, so
+      the service file is the same on a hub as on any other machine, and
+      turning hub mode on or off needs no new service file (decisions 136
+      and 167).
+
+      Given config.toml turns hub mode on, listening on a free port on loopback
+      When the owner runs "install-service"
+      Then the command exits with status 0
+      And the service file runs this program's "serve --service-managed"
+      And the program the service file runs starts as the hub
+
     Scenario: Installing over an installed service replaces its file and starts it again
       Given the service is installed
       When the owner runs "install-service"
