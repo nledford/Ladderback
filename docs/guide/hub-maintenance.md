@@ -24,6 +24,12 @@ Once maintenance of a repository has been paused for 14 days, the machine sends 
 
 `maintenance = "hub"` in a repository's entry leaves it to the hub, and the Repositories page says **Left to the hub to maintain.** The hub doesn't maintain repositories itself yet, so nothing maintains such a repository.
 
+## When a prune waits for another machine's backup
+
+A prune deletes data that a backup still running elsewhere may be about to use. So on a paired machine, the hub holds a repository's prune while another machine connected to it is backing up to that repository, and the machine refuses the prune before changing anything, with the code `maintenance-prune-held`. For a repository named `demo`, it says: **Another machine may be backing up to the repository demo, so the hub holds its prune, and nothing was changed.** Start the prune again with **Prune unused data** once that backup has finished; a held prune isn't queued.
+
+The hub learns what each machine runs from the heartbeat it sends every 30 seconds. When it can't tell, it holds the prune rather than guess: for up to 30 seconds after the hub starts, while a machine runs more than 16 backups at once, and when this machine hasn't heard from its hub in the last 90 seconds. Update the hub and its machines together: a hub from before this check holds every prune.
+
 ## After the hub restarts
 
 After any start, the hub gives no repository to another machine until every machine that used it has reported since, or 7 days and an hour have passed. The machine that holds the lease keeps it, renewed as before. A machine that was off when the hub restarted therefore doesn't lose its repositories.
