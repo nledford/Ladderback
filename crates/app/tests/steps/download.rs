@@ -84,8 +84,14 @@ impl OperationStore for SlowLog {
         result: Option<&EngineResult>,
     ) -> Result<(), StoreError> {
         // A held write answers once the log is let go, as a busy disk
-        // catches up.
-        let _ = self.held.subscribe().wait_for(|held| !held).await;
+        // catches up. One not held answers at once, as the log it wraps
+        // does, without waiting on the watch: that wait yields once the
+        // runner's task has spent its tokio budget, and the scenarios'
+        // auto-advancing clock gives up any write that yields at all.
+        let mut held = self.held.subscribe();
+        if *held.borrow_and_update() {
+            let _ = held.wait_for(|held| !held).await;
+        }
         self.inner.save(operation, result).await
     }
 
@@ -604,7 +610,27 @@ async fn hangs_up_while_written(agent: &mut Agent, seconds: i64) {
 
 #[when("the agent gives up the downloads whose minute ran out")]
 async fn gives_up_expired(agent: &mut Agent) {
-    agent.downloads().await.give_up_expired().await;
+    let downloads = agent.downloads().await;
+    // The runner polls every scenario on its one task, so in a full run
+    // the agent can come to these writes with that task's tokio budget
+    // spent by the scenarios beside it. Spent here, the scenario holds
+    // however many run beside it.
+    spend_tokio_budget().await;
+    downloads.give_up_expired().await;
+}
+
+/// Spends what is left of this task's tokio budget, so the next wait on a
+/// tokio resource yields once before it answers, as it does when other
+/// scenarios polled on the runner's task spent the budget first.
+async fn spend_tokio_budget() {
+    // The budget is 128 units; the bound only keeps an unbudgeted task
+    // from spinning here.
+    for _ in 0..u8::MAX {
+        if !tokio::task::coop::has_budget_remaining() {
+            return;
+        }
+        tokio::task::coop::consume_budget().await;
+    }
 }
 
 #[when(expr = "{int} seconds pass while the history is slow to write")]
