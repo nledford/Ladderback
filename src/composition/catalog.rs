@@ -875,6 +875,12 @@ pub(super) fn repository_row(
 }
 
 /// Who a repository's entry asks to maintain it, on the wire (§7.3).
-fn maintenance_requested(maintenance: domain::planning::Maintenance) -> api::RepositoryMaintenanceDto {
-    todo!()
+fn maintenance_requested(
+    maintenance: domain::planning::Maintenance,
+) -> api::RepositoryMaintenanceDto {
+    match maintenance {
+        domain::planning::Maintenance::Local => api::RepositoryMaintenanceDto::Local,
+        domain::planning::Maintenance::Hub => api::RepositoryMaintenanceDto::Hub,
+        domain::planning::Maintenance::None => api::RepositoryMaintenanceDto::None,
+    }
 }

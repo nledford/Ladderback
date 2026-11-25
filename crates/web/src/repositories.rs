@@ -555,7 +555,11 @@ pub(crate) fn password_source(
 /// The note that says who a configured repository's entry asks to maintain
 /// it (§7.3), in words rather than a color.
 pub(crate) fn maintainer_note(maintenance: RepositoryMaintenanceDto) -> MessageId {
-    todo!()
+    match maintenance {
+        RepositoryMaintenanceDto::Local => msg::UI_REPOSITORY_MAINTAINED_HERE,
+        RepositoryMaintenanceDto::Hub => msg::UI_REPOSITORY_MAINTAINED_BY_HUB,
+        RepositoryMaintenanceDto::None => msg::UI_REPOSITORY_MAINTAINED_BY_NOBODY,
+    }
 }
 
 /// The notes a repository's row carries, one per warning, as the catalog

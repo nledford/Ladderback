@@ -958,7 +958,7 @@
       "openWorldHint": false,
       "readOnlyHint": true
     },
-    "description": "The configured repositories, a page at a time: each with its location, credentials masked, where its password comes from, whether it is maintained here and its configuration warnings. Never a secret.",
+    "description": "The configured repositories, a page at a time: each with its location, credentials masked, where its password comes from, who its entry asks to maintain it, whether it is maintained here and its configuration warnings. Never a secret.",
     "inputSchema": {
       "$schema": "https://json-schema.org/draft/2020-12/schema",
       "additionalProperties": false,
