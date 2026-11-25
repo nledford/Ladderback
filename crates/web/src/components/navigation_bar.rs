@@ -224,6 +224,9 @@ pub fn NavigationBar(
                     </nav>
                 </div>
             }
+            // Erased, as is the bar's own view below: their types nest too
+            // deep for the compiler's query limit in the wasm test build.
+            .into_any()
         })
     };
 
@@ -236,6 +239,7 @@ pub fn NavigationBar(
             {panel}
         </div>
     }
+    .into_any()
 }
 
 /// One list item for each page, its link standing alone in the color of
