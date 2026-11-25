@@ -767,6 +767,10 @@ fn run_daemon(
     // how to fix it; the daemon, and this machine's own backups, go on.
     #[cfg(feature = "hub")]
     let mut front_door: Option<Option<tls_adapter::HubListener>> = None;
+    // The hub's pairing, which its watch of its machines for offline
+    // alerts reads once the daemon listens (decision 168).
+    #[cfg(feature = "hub")]
+    let mut watched: Option<Arc<app::pairing::HubPairing>> = None;
     #[cfg(feature = "hub")]
     if hub && let Some(data_dir) = platform::dirs::data_dir() {
         // It tells the page's browsers of its machines as they pair, are
@@ -789,7 +793,9 @@ fn run_daemon(
             http_adapter::SignIn::On(access) => pairing.with_access(Arc::clone(access)),
             http_adapter::SignIn::Off { .. } => pairing,
         };
-        state.sync = http_adapter::SyncHub::serving(Arc::new(pairing));
+        let pairing = Arc::new(pairing);
+        watched = Some(Arc::clone(&pairing));
+        state.sync = http_adapter::SyncHub::serving(pairing);
         let names = certificate_names(listen, &hosts);
         let served = runtime
             .block_on(hub::hub_tls_key(&data_dir).start(operation_log.store.as_ref()))
@@ -927,6 +933,10 @@ fn run_daemon(
         // into, so both judge a lease by one floor (§7.3, I1).
         #[cfg(feature = "hub")]
         let leases = background.leases();
+        // A hub watches its machines for offline alerts beside the
+        // scheduler (§11, decision 168).
+        #[cfg(feature = "hub")]
+        let watching = watched.and_then(|pairing| background.watch_machines(pairing));
         let scheduled = tokio::spawn(background.run(random));
         // A paired machine's reports to its hub run beside the scheduler
         // and never hold it up (§7.2).
@@ -987,6 +997,10 @@ fn run_daemon(
         #[cfg(feature = "hub")]
         if let Some(reporting) = &reporting {
             reporting.abort();
+        }
+        #[cfg(feature = "hub")]
+        if let Some(watching) = &watching {
+            watching.abort();
         }
         let workers_stopped = workers.stop();
         runs.freeze();
