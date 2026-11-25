@@ -1321,6 +1321,26 @@ mod tests {
         );
     }
 
+    #[tokio::test]
+    async fn only_a_plan_without_a_schedule_is_said_to_have_none() {
+        let config = Arc::new(InMemoryConfigStore::new());
+        let mut scheduled = plan("docs", None);
+        scheduled.schedule = Some(domain::planning::Schedule::new(
+            domain::planning::Interval::new(domain::SignedDuration::from_hours(6))
+                .expect("an interval"),
+        ));
+        let read = profile(vec![plan("home", None), scheduled], Hooks::default());
+        let imported = ImportProfile::new(
+            Arc::new(FakeProfileReader::new(Ok(read))),
+            config,
+            Arc::new(FakeSources),
+        )
+        .preview("content", "[repository]", alias("nas"))
+        .await
+        .expect("previewed");
+        assert_eq!(imported.notices, [unscheduled("home")]);
+    }
+
     fn line(text: &str) -> CommandLine {
         CommandLine::parse(text).expect("a command line")
     }
