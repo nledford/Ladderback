@@ -159,27 +159,34 @@ a {
    header's content stands in the page's frame (`.site-header`, whose width
    class is the frame's own, `page_width.rs`, as `<main>`'s is), 1rem from the
    frame's inline edges as `<main>`'s content is, so the product's name
-   starts where each page's heading does. In the frame, one line where it
-   fits (decision 152): the brand at its start, which takes the room the
-   navigation leaves, and at its end the navigation, the pages used most
-   and the Settings menu's button. Where the line doesn't fit, as with a
-   longer language or larger text, the navigation moves whole onto a line of
-   its own under the brand, at that line's end, and its own list wraps only
-   when even that line is too short. Every part of the line stands on one
-   baseline, no part is taller than the links and nothing lies under them:
-   the Settings menu's panel stands over the page, not in the header, so the
-   header is as tall signed in as with sign-in off. The running version is
-   the footer's (`components/footer.rs`).
+   starts where each page's heading does. In the frame, the navigation bar
+   (`components/navigation_bar.rs`), then the available update's banner on a
+   line of its own. The running version is the footer's
+   (`components/footer.rs`). */
+.site-header {
+  padding-inline: 1rem;
+}
+
+/* The navigation bar: one line where it fits (decision 152), the brand at
+   its start, which takes the room the navigation leaves, and at its end the
+   navigation, the pages used most and the group's (Settings) button. Where
+   the line doesn't fit, as with a longer language or larger text, the
+   navigation moves whole onto a line of its own under the brand, at that
+   line's end, and its own list wraps only when even that line is too short.
+   Every part of the line stands on one baseline, no part is taller than the
+   links and nothing lies under them: the group's panel, and below 54rem the
+   bar's own, stand over the page (decision 160), so the bar is as tall
+   with either open as with both closed.
 
    The line stands on its parts' last baselines, in every engine: WebKit
    takes a flex container's first baseline from its first item, and a
    button's first baseline can be its icon's foot rather than its words'. */
-.site-header {
+.navigation-bar {
+  position: relative;
   display: flex;
   flex-wrap: wrap;
   align-items: baseline;
   align-items: last baseline;
-  padding-inline: 1rem;
 }
 
 .brand {
@@ -234,21 +241,22 @@ a {
   }
 }
 
-/* Sign out, the Settings menu's last row, under the pages' links and a
-   hairline: a row as tall as theirs, its icon where their words start. It
+/* The group's last rows (Sign out in the header), under its pages' links and
+   a hairline (`.navigation-bar-end`, which draws nothing when it holds
+   nothing): a row as tall as theirs, its icon where their words start. It
    may be narrower than its longest unbreakable run, as a flex item is not
    unless told, so with larger text it never pushes the page sideways
    (1.4.10). The button's own look is `Button`'s; only the size it takes
    and where its content starts are set here, through the properties it
    reads. */
-.site-account {
+.navigation-bar-end {
   display: block;
   min-inline-size: 0;
   margin-block-start: 0.25rem;
   border-block-start: 1px solid var(--field-edge);
 }
 
-.site-account .button {
+.navigation-bar-end .button {
   inline-size: 100%;
   justify-content: flex-start;
   --control-height: max(2.75rem, 2em);
@@ -256,24 +264,24 @@ a {
 }
 
 /* The available update's link, in its banner on a line of its own under the
-   pages' links and Sign out (`basis-full`); its padding is the link's. */
+   navigation bar; its padding is the link's. */
 .site-update a {
   display: inline-block;
   padding-block: 0.25rem;
 }
 
-/* The pages' links (`Link`, standing alone), in the header of every page,
-   then the Settings menu (`DisclosureMenu`). `Link` draws the current page
-   bold with a bar at its start, which is more than its color (§4.5, A2);
-   here the bar takes 3px of the link's inline padding, so its words stay
-   where they were. The navigation stands at the header's line's end, and
-   on a line of its own, at that line's end too. */
-.site-nav {
+/* The bar's pages' links (`Link`, standing alone), then the group's
+   disclosure menu (`DisclosureMenu`). `Link` draws the current page bold
+   with a bar at its start, which is more than its color (§4.5, A2); here
+   the bar takes 3px of the link's inline padding, so its words stay where
+   they were. The navigation stands at the bar's line's end, and on a line
+   of its own, at that line's end too. */
+.navigation-bar-nav {
   margin-inline-start: auto;
   min-inline-size: 0;
 }
 
-.site-nav ul {
+.navigation-bar-nav ul {
   display: flex;
   flex-wrap: wrap;
   justify-content: flex-end;
@@ -283,84 +291,93 @@ a {
   padding: 0;
 }
 
-.site-nav a {
+.navigation-bar-nav a {
   display: inline-block;
   padding: 0.25rem 0.5rem;
 }
 
-.site-nav a[aria-current="page"] {
+.navigation-bar-nav a[aria-current="page"] {
   padding-inline-start: calc(0.5rem - 3px);
 }
 
-/* The Settings menu's button marks the current page's group bold, as a
+/* The disclosure menu's button marks the current page's group bold, as a
    current link is: the base rule gives every button the font of the text
    around it (`font: inherit`), which outranks a utility. */
 .disclosure-menu-button[aria-current="true"] {
   font-weight: 700;
 }
 
-/* From 54rem up the Settings menu's panel stands over the page under its
-   button, its rows the list's links, each a block 2.75rem tall, a row of
-   its own rather than a link of the header's line. */
+/* From 54rem up the group's panel stands over the page under its button,
+   its rows the list's links, each a block 2.75rem tall, a row of its own
+   rather than a link of the bar's line. */
 @media (width >= 54rem) {
-  .site-nav .disclosure-menu-panel ul {
+  .navigation-bar-nav .disclosure-menu-panel ul {
     display: block;
   }
 
-  .site-nav .disclosure-menu-panel a {
+  .navigation-bar-nav .disclosure-menu-panel a {
     display: flex;
     align-items: center;
     min-block-size: 2.75rem;
     padding: 0 1rem;
   }
 
-  .site-nav .disclosure-menu-panel a[aria-current="page"] {
+  .navigation-bar-nav .disclosure-menu-panel a[aria-current="page"] {
     padding-inline-start: calc(1rem - 3px);
   }
 }
 
-/* Below 54rem the pages' links and the Settings menu's button no longer fit
-   on the brand's line, so every page and Sign out sit in a panel
-   (`.site-menu`) behind the menu button (`.site-menu-button`, a hamburger),
-   which ends the brand's line: the header is that line and, shown, the
-   panel under it, in the page's flow (no overlay, no focus trap). The
-   Settings menu's button isn't drawn there, and its panel's rows are rows of
-   this panel, after the pages', always shown: no menu in a menu (decision
-   152). The panel is a bordered box in the page's own color on the
-   header's Ledger Gray band, its corners the small radius; its rows are
-   full-width blocks at least 3rem tall, a finger's target, with 1rem of
+/* Below 54rem the pages' links and the group's button no longer fit on the
+   brand's line, so every page and the group's rows sit in a panel
+   (`.navigation-bar-panel`) behind the hamburger (`.navigation-bar-button`),
+   which ends the brand's line: the bar is that line. Shown, the panel
+   stands over the page under it, as the group's panel does from 54rem up
+   (decision 160): opening and closing it moves nothing on the page, and it
+   closes as that one does, on Escape, a row chosen, focus leaving the bar
+   or a press outside it. No overlay, no focus trap. The group's button
+   isn't drawn there, and its panel's rows are rows of this panel, after
+   the pages', always shown: no menu in a menu (decision 152).
+
+   The panel is a bordered box in the page's own color, the width of the
+   bar, its corners the small radius. Its rows stand in as many columns as
+   its width holds at 10em each (two at 390 px with the browser's own text
+   size, one at 320 px with 200 % text), the group's rows starting a row of
+   their own, each at least 2.75rem tall, a finger's target, with 1rem of
    inline padding. A row tints to Ledger Gray under the pointer; the current
    page is told by its weight and a 3px bar at its inline start in the
    text's own color, a border so it stays under forced colors (which draw it
    in the system's text color), and is the only row with one, so the rows'
-   words stay aligned. Sign out ends the panel under a hairline, a row as
-   tall as the links. The focus ring is drawn inside a row, where the
-   panel's clipping can't cut it. The rules stay here rather than as
-   Tailwind utilities: the navigation's and the header's base rules live
-   outside Tailwind's layers (#931), where a utility could not override
-   them, so the narrow screen's rules lie beside them, in one block with one
-   breakpoint. From 54rem up none of this applies: the button isn't drawn
-   and the panel, which draws no box of its own (`display: contents`),
-   leaves the navigation on the header's line, always shown, whatever the
-   button was last pressed to do. */
-.site-menu {
+   words stay aligned. The group's last rows end the panel under a hairline,
+   as tall as the links. The focus ring is drawn inside a row, where the
+   panel's clipping can't cut it.
+
+   The rules stay here rather than as Tailwind utilities: the navigation's
+   and the header's base rules live outside Tailwind's layers (#931), where
+   a utility could not override them, so the narrow screen's rules lie
+   beside them, in one block with one breakpoint. From 54rem up none of
+   this applies: the button isn't drawn and the panel, which draws no box of
+   its own (`display: contents`), leaves the navigation on the bar's line,
+   always shown, whatever the button was last pressed to do. */
+.navigation-bar-panel {
   display: contents;
 }
 
-.site-menu-button {
+.navigation-bar-button {
   display: none;
 }
 
 @media (width < 54rem) {
-  .site-menu-button {
+  .navigation-bar-button {
     display: flex;
     margin-inline-start: auto;
   }
 
-  .site-menu {
+  .navigation-bar-panel {
     display: block;
-    flex-basis: 100%;
-    min-inline-size: 0;
+    position: absolute;
+    inset-block-start: 100%;
+    inset-inline: 0;
+    z-index: 10;
     margin-block-start: 0.25rem;
     border: 1px solid var(--field-edge);
     border-radius: var(--radius-small);
@@ -368,29 +385,35 @@ a {
     overflow: clip;
   }
 
-  .site-menu.site-menu-closed {
+  .navigation-bar-panel.navigation-bar-closed {
     display: none;
   }
 
-  .site-menu :focus-visible {
+  .navigation-bar-panel :focus-visible {
     outline-offset: -3px;
   }
 
-  .site-nav {
+  .navigation-bar-nav {
     margin-inline-start: 0;
   }
 
-  .site-nav ul {
-    display: block;
+  .navigation-bar-nav ul {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(min(100%, 10em), 1fr));
+    gap: 0;
   }
 
-  .site-nav .disclosure-menu-button {
+  .navigation-bar-group {
+    grid-column: 1 / -1;
+  }
+
+  .navigation-bar-nav .disclosure-menu-button {
     display: none;
   }
 
-  /* The Settings menu's panel, shown whatever its button last did, as a
-     part of this panel: no box, no place of its own, no width of its own. */
-  .site-nav .disclosure-menu-panel {
+  /* The group's panel, shown whatever its button last did, as a part of
+     this panel: no box, no place of its own, no width of its own. */
+  .navigation-bar-nav .disclosure-menu-panel {
     display: block;
     position: static;
     margin: 0;
@@ -402,26 +425,24 @@ a {
     max-inline-size: none;
   }
 
-  .site-nav a {
-    display: block;
-    padding: 0.75rem 1rem;
+  .navigation-bar-nav a {
+    display: flex;
+    align-items: center;
+    min-block-size: 2.75rem;
+    padding: 0.25rem 1rem;
   }
 
-  .site-nav a:hover {
+  .navigation-bar-nav a:hover {
     background: var(--surface);
   }
 
-  .site-nav a[aria-current="page"] {
+  .navigation-bar-nav a[aria-current="page"] {
     border-inline-start: 3px solid var(--fg);
     padding-inline-start: calc(1rem - 3px);
   }
 
-  .site-account {
+  .navigation-bar-end {
     margin-block-start: 0;
-  }
-
-  .site-account .button {
-    --control-height: max(3rem, 2em);
   }
 }
 
@@ -684,10 +705,10 @@ main:focus {
     color: LinkText;
   }
 
-  /* The narrow header's rows draw their bar in `--fg` by a rule of their
-     own, which this one must outrank. */
+  /* The narrow navigation bar's rows draw their bar in `--fg` by a rule of
+     their own, which this one must outrank. */
   .link-alone[aria-current="page"],
-  .site-nav a.link-alone[aria-current="page"] {
+  .navigation-bar-nav a.link-alone[aria-current="page"] {
     border-inline-start-color: CanvasText;
   }
 }

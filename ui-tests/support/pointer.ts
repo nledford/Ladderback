@@ -66,6 +66,14 @@ export function pointer(page: Page) {
       await page.mouse.down();
     },
 
+    /** Moves the pointer to the point `x`, `y` of the viewport and presses
+     *  there, still pressed: a press on what a locator can't name, such as
+     *  a band beside a panel. `letGo` ends it. */
+    async holdAt(x: number, y: number): Promise<void> {
+      await moveTo(x, y);
+      await page.mouse.down();
+    },
+
     /** Moves the pointer to the point `x`, `y` of the viewport. */
     moveTo,
 

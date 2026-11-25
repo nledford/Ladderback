@@ -252,8 +252,8 @@ These rules keep the daemon running and the workspace safe to work in. Rules 1 t
    Left out: `too_many_lines`, which mostly flags exhaustive `match`es over closed enums; `missing_docs`, a decision of its own; and `arithmetic_side_effects`, which flags all arithmetic, not only input-derived numbers.
 
 8. **Decisions.** How a §16 decision is filed and numbered:
-   - **Decision files.** A §16 decision is a file, `docs/design/decisions/NN-<slug>.md`, whose row in the index in §16 `just decision-index` writes from its number and heading (`just lint` fails when the index doesn't match the files, or two files share a number).
-   - **Numbers.** A decision gets its number when its branch rebases before merging, the next after the highest on `main`. Branches open at the same time can't see each other's decisions, so a number taken earlier can clash, and the branch that merges second renumbers its file and every reference to it. A conflict in the index is resolved by taking either side and running `just decision-index`.
+   - **Decision files.** A §16 decision is a file, `docs/design/decisions/NN-<slug>.md`, and its heading, `# Decision NN: <question>`, is its entry in the index: §16 keeps no table of them (decision 162). `just decision-index` prints the index; `just lint` fails on a bad name or heading, two files with one number, or a row linking a decision in §16.
+   - **Numbers.** A decision gets its number when its branch rebases before merging, the next after the highest on `main`. Branches open at the same time can't see each other's decisions, so a number taken earlier can clash, and the branch that merges second renumbers its file and every reference to it. Two decision files never share a path, so a branch that adds one is updated from `main` before it merges whenever `main` has added one since their merge base (§13.8), and `just lint` then fails it until it renumbers.
 
 ### 13.6 Dependency checks
 
@@ -360,6 +360,8 @@ Keep the chain short: at most three pull requests, and two where possible. Every
 **Hotfixes go through pull requests too.** Nobody pushes to `main` directly; the ruleset allows no direct push. A bad merge is first undone with a revert pull request, then fixed properly. A hotfix is an ordinary pull request with every required check.
 
 **Up to date only where it matters.** The ruleset requires a pull request's required checks to have passed on its head, but no longer requires its branch to contain `main` (maintainer, 2026-11-18): a run waited longer for runners than it ran, and updating every branch after each merge ran CI again for nothing. Two pull requests that each pass alone can still break `main` together, as #905 with #909 and #914 with #922 did, and both pairs changed a file in common. So before merging a branch behind `main`, compare the files it changes with those `main` has changed since their merge base. When they share one, or the comparison fails, update the branch (`gh pr update-branch <n>` or a rebase) and let its checks run again; when they share none, merge it as it stands. `main`'s own run after each merge is the safety net.
+
+A branch that adds a file under `docs/design/decisions/` counts as sharing a file with `main` whenever `main` has added one there since their merge base, though the two paths differ: two decisions can take one number (rule 8 of §13.5), and only a tree that holds both shows the clash to `just lint` ([decision 162](decisions/162-the-decision-files-are-the-index.md)). Update it and let its checks run again.
 
 **Break-glass.** Only the maintainer may merge a pull request whose required checks fail, through the ruleset's pull-request-only bypass, and only when a check can't pass for a reason outside the change: a GitHub Actions outage, a broken action or toolchain release, or a yanked crate. Each use gets an issue that says why, and fixing that check comes next. Agents never use the bypass.
 

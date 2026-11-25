@@ -1,19 +1,18 @@
-// The index of decisions in docs/design/roadmap.md §16, generated from the
-// decision files: one row per docs/design/decisions/NN-<slug>.md, its number
-// and its heading (`# Decision NN: <question>`), in number order.
+// The decisions of docs/design/roadmap.md §16, one file each in
+// docs/design/decisions/NN-<slug>.md with `# Decision NN: <question>` as its
+// heading. The files are the index: §16 keeps no table of them (decision 162).
+// A committed table took a row from every pull request that recorded a
+// decision, so any two open ones conflicted at its end, and each conflict
+// stopped GitHub's update of the branch until someone merged by hand.
 //
-// When every pull request that recorded a decision added its row by hand, two
-// open ones always added a row at the same place, so each merge made the
-// others conflict. Generated, the table's conflict resolves the same way every
-// time: take either side, then write the table again.
-//
-// Usage: node scripts/decision-index.ts [--write]
-// Without --write, exits 1 when the table differs from the decision files (or
-// a file's name, heading or number is wrong), naming the problem on standard
-// error. With --write, replaces the table and exits 0, or 1 on a bad file.
+// Usage: node scripts/decision-index.ts [--print]
+// Checks every decision file (its name, heading and number, no two files with
+// one number, no conflict marker) and that §16 holds no index row again,
+// exiting 1 and naming each problem on standard error. With --print, it then
+// prints the index, one Markdown row per decision in number order.
 // Runs from any directory.
 
-import { readdirSync, readFileSync, realpathSync, writeFileSync } from "node:fs";
+import { readdirSync, readFileSync, realpathSync } from "node:fs";
 import path from "node:path";
 import { pathToFileURL } from "node:url";
 
@@ -30,6 +29,10 @@ const CONFLICT = /^(<{7}|>{7}|\|{7})( |$)|^={7}$/;
 const FENCE = /^(`{3,}|~{3,})/;
 const SECTION = "## 16. Decisions";
 const TABLE_HEAD = ["| # | Question |", "|---|---|"];
+// A link to a decision file in a line with a cell separator: a table row,
+// indented or not, with a leading pipe or not, linked as `decisions/` or
+// `./decisions/`. §16's own prose links decisions too, but has no pipe.
+const ROW_LINK = /\]\((\.\/)?decisions\/\d+-/;
 
 /** The lines of `markdown` outside fenced code, with their 1-based numbers. */
 export function proseLines(markdown: string): { line: string; number: number }[] {
@@ -99,29 +102,28 @@ export function renderIndex(decisions: readonly Decision[]): { lines: string[]; 
   return { lines: [...TABLE_HEAD, ...rows], problems };
 }
 
-/** `roadmap` with §16's table replaced by `table`, or why it can't be. */
-export function replaceIndex(roadmap: string, table: readonly string[]): { text: string } | string {
+/** What is wrong with `roadmap` for the decisions, if anything: a conflict
+ * marker anywhere, no §16 heading (so its check can't run), or a table row in
+ * §16 that lists a decision again. */
+export function roadmapProblem(roadmap: string): string | null {
   const conflict = conflictLine(roadmap);
   if (conflict !== null) {
-    return `docs/design/roadmap.md:${conflict}: a merge-conflict marker: take either side of the conflict, then run \`just decision-index\``;
+    return `docs/design/roadmap.md:${conflict}: a merge-conflict marker`;
   }
-  const lines = roadmap.split(/\r?\n/);
-  const section = lines.indexOf(SECTION);
-  const start = lines.findIndex((line, i) => section >= 0 && i > section && line === TABLE_HEAD[0]);
-  const found = lines.findIndex((line, i) => section >= 0 && i > section && line.startsWith("## "));
-  const next = found < 0 ? lines.length : found;
-  if (start < 0 || start > next) {
-    return `docs/design/roadmap.md: no "${TABLE_HEAD[0]}" table under "${SECTION}"`;
+  const lines = proseLines(roadmap);
+  const section = lines.findIndex(({ line }) => line.trimEnd() === SECTION);
+  if (section < 0) {
+    return `docs/design/roadmap.md: no "${SECTION}" heading, so the check that it lists no decision in a table can't run: restore the heading, or change SECTION in scripts/decision-index.ts with it`;
   }
-  let end = start;
-  while (end < lines.length && lines[end]?.startsWith("|")) {
-    end++;
+  for (const { line, number } of lines.slice(section + 1)) {
+    if (line.startsWith("## ")) {
+      return null;
+    }
+    if (line.includes("|") && ROW_LINK.test(line)) {
+      return `docs/design/roadmap.md:${number}: §16 lists a decision in a table again: the decision files are the index (decision 162), so delete the table; \`just decision-index\` prints it`;
+    }
   }
-  const stray = lines.findIndex((line, i) => i >= end && i < next && line.startsWith("|"));
-  if (stray >= 0) {
-    return `docs/design/roadmap.md:${stray + 1}: a table row after the §16 index: the index is one table, with no blank line in it`;
-  }
-  return { text: [...lines.slice(0, start), ...table, ...lines.slice(end)].join("\n") };
+  return null;
 }
 
 // Run as a script, not imported (the real path: `import.meta.url` is one).
@@ -143,27 +145,17 @@ if (process.argv[1] && import.meta.url === pathToFileURL(realpathSync(process.ar
   }
   const index = renderIndex(decisions);
   problems.push(...index.problems);
-  const roadmap = readFileSync(roadmapPath, "utf8");
-  const replaced = replaceIndex(roadmap, index.lines);
-  if (typeof replaced === "string") {
-    problems.push(replaced);
+  const roadmapIssue = roadmapProblem(readFileSync(roadmapPath, "utf8"));
+  if (roadmapIssue !== null) {
+    problems.push(roadmapIssue);
   }
-  if (problems.length > 0 || typeof replaced === "string") {
-    process.stderr.write(
-      `${problems.join("\n")}\nerror: the §16 decision index can't be checked or written until the problems above are fixed\n`,
-    );
+  if (problems.length > 0) {
+    process.stderr.write(`${problems.join("\n")}\nerror: the decision files have the problems above\n`);
     process.exit(1);
   }
-  const written = replaced.text;
-  if (written === roadmap) {
-    process.stdout.write(`ok: the §16 index lists all ${decisions.length} decisions\n`);
-  } else if (process.argv.includes("--write")) {
-    writeFileSync(roadmapPath, written ?? roadmap);
-    process.stdout.write(`wrote the §16 index: ${decisions.length} decisions\n`);
+  if (process.argv.includes("--print")) {
+    process.stdout.write(`${index.lines.join("\n")}\n`);
   } else {
-    process.stderr.write(
-      "error: the §16 index in docs/design/roadmap.md doesn't match the decision files: run `just decision-index` and commit the result (on a conflict in the table, take either side first)\n",
-    );
-    process.exit(1);
+    process.stdout.write(`ok: ${decisions.length} decision files, each with a number of its own\n`);
   }
 }

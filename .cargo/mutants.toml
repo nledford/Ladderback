@@ -320,23 +320,6 @@ exclude_re = [
     # of the walk are not excluded and are caught. Named by line, so a moved
     # line brings the mutant back to judge.
     'crates/app/src/proposals/diff\.rs:174:65: replace \+ with \* in middle$',
-    # The header's menu glue in `main.rs` (decision 143) reads the DOM, so on
-    # the host it never runs; what it decides lives in `navigation.rs` and
-    # stays mutated. `@ui` scenarios catch these four, each failing with the
-    # mutant applied by hand (Chromium):
-    # - `menu_button_is_drawn` -> true: "Escape in the header with the window
-    #   widened past 54rem leaves the Menu button as it was"; -> false: "The
-    #   Menu button shows the pages' links ..." (Escape no longer hides the
-    #   panel).
-    # - `delete !` before `navigation::escape_closes`: the same Escape
-    #   scenario past 54rem.
-    # - `delete !` before `tooltip_shown`: "The Menu button shows the pages'
-    #   links ..." (with no tooltip showing, Escape no longer closes the
-    #   panel). The scenario past 54rem never reaches this line.
-    # Named by line, so a moved line brings the mutant back to judge.
-    'crates/web/src/main\.rs:461:5: replace menu_button_is_drawn -> bool with (true|false)$',
-    'crates/web/src/main\.rs:615:12: delete ! in App$',
-    'crates/web/src/main\.rs:633:12: delete ! in App$',
 ]
 # A mutant that makes a test hang is caught, but slowly; fail fast instead.
 timeout_multiplier = 3.0
