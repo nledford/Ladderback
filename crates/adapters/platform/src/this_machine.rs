@@ -269,7 +269,7 @@ mod tests {
     #[test]
     fn a_new_machine_id_replaces_the_one_in_the_data_folder() {
         let dir = tempfile::tempdir().unwrap();
-        let file = dir.path().join("machine-id");
+        let file = dir.path().join("etc-machine-id");
         std::fs::write(&file, "here\n").unwrap();
         let old = agent_id::load_or_create(dir.path()).unwrap();
         let machine = SystemMachine::reading(dir.path(), &file);
@@ -282,7 +282,7 @@ mod tests {
     fn a_record_that_holds_no_identifier_is_an_error() {
         let dir = tempfile::tempdir().unwrap();
         std::fs::write(dir.path().join(super::MACHINE_IDENTIFIER_FILE), " \n").unwrap();
-        let machine = SystemMachine::reading(dir.path(), &dir.path().join("machine-id"));
+        let machine = SystemMachine::reading(dir.path(), &dir.path().join("etc-machine-id"));
         assert!(machine.recorded().is_err());
     }
 

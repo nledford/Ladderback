@@ -517,12 +517,12 @@ try *args: build
             rm -rf "$scratch/repo.partial" "$scratch/sources"
             # The ID the daemon would choose, chosen first, so the history is
             # this machine's own; an ID kept from an earlier run stays.
-            if [ ! -s "$scratch/data/agent-id" ]; then
-                echo 0190a1b2-c3d4-7e5f-8a6b-7c8d9e0f1a2b > "$scratch/data/agent-id"
+            if [ ! -s "$scratch/data/machine-id" ]; then
+                echo 0190a1b2-c3d4-7e5f-8a6b-7c8d9e0f1a2b > "$scratch/data/machine-id"
             fi
             echo "try: building the demo history; it takes about a minute" >&2
             plans="$(cargo run --quiet --manifest-path "{{ root }}/Cargo.toml" --package engine --features history-fixture --example history-fixture -- \
-                "{{ root }}/tests/fixtures/history/rich.toml" "$scratch/repo.partial" "$scratch/sources" "$(cat "$scratch/data/agent-id")")"
+                "{{ root }}/tests/fixtures/history/rich.toml" "$scratch/repo.partial" "$scratch/sources" "$(cat "$scratch/data/machine-id")")"
             # The canary the builder sets, in a file: a password written in
             # config.toml would show the daemon's warning on every page. The
             # machine's host name is the one the declaration's snapshots carry.
