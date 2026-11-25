@@ -7,6 +7,7 @@ fn machine(hostname: &str, last_seen: &str) -> HubMachineDto {
         agent_id: format!("agent-{hostname}"),
         hostname: hostname.to_owned(),
         last_seen: last_seen.to_owned(),
+        online: false,
         zone: None,
         reports_dropped: 0,
         operations: Vec::new(),
@@ -51,10 +52,6 @@ fn an_approval_and_a_report_read_the_machines_again() {
             hostname: "demo-laptop".to_owned(),
             at: AT.to_owned(),
         },
-        UiEvent::AgentOnline {
-            agent: agent(),
-            at: AT.to_owned(),
-        },
         UiEvent::ProposalChanged {
             proposal: "p1".to_owned(),
             status: api::ProposalStatusDto::Pending,
@@ -73,6 +70,21 @@ fn new_plans_and_new_progress_read_the_machines_again() {
     assert!(reads_again(&UiEvent::AgentProgress {
         agent: agent(),
         progress: progress(AT),
+    }));
+}
+
+/// A machine coming online or going offline reads the machines again, so
+/// the page shows whether the hub holds its connection (decision 159).
+#[test]
+fn a_machine_coming_online_or_going_offline_reads_the_machines_again() {
+    let agent = || "agent-demo-laptop".to_owned();
+    assert!(reads_again(&UiEvent::AgentOnline {
+        agent: agent(),
+        at: AT.to_owned(),
+    }));
+    assert!(reads_again(&UiEvent::AgentOffline {
+        agent: agent(),
+        at: AT.to_owned(),
     }));
 }
 
@@ -196,6 +208,14 @@ fn a_machine_with_no_plans_tells_none_reported_from_none_yet() {
         left_out: 0,
     };
     assert_eq!(no_plans(Some(&none)), msg::UI_DASHBOARD_PLANS_NONE);
+}
+
+/// A machine whose connection the hub holds says it is online now; any
+/// other says when it last connected (§16, decision 159).
+#[test]
+fn a_machine_holding_its_connection_reads_online_now_and_any_other_when_it_last_connected() {
+    assert_eq!(connection_line(true), msg::UI_DASHBOARD_ONLINE_NOW);
+    assert_eq!(connection_line(false), msg::UI_DASHBOARD_LAST_CONNECTED);
 }
 
 /// A machine's time reads in the viewer's zone alone when the zones match

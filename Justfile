@@ -156,8 +156,9 @@ clippy:
 # tests (`scripts/*.test.ts`, under Node's built-in runner), the journey lint,
 # the check that every path AGENTS.md and CLAUDE.md name exists, the check that
 # no paragraph in docs/ runs over 150 words, the user docs site's build and
-# link check (`docs-site`), the checks that the §16 decision index matches
-# the decision files and §4.5's index the component contract files, and
+# link check (`docs-site`), the check of the §16 decision files (good names
+# and headings, a number each, no table of them in §16; decision 162) and that
+# §4.5's index matches the component contract files, and
 # rustdoc on every crate, private items
 # included, with warnings as errors, so a doc comment's broken link or
 # malformed markup fails. Rustdoc sees only the items built for the host and,
@@ -182,14 +183,13 @@ lint: _ui-deps _shellcheck-pinned clippy docs-site
     node scripts/component-index.ts
     RUSTDOCFLAGS="-D warnings" cargo doc --workspace --no-deps --document-private-items
 
-# Write the index of decisions in docs/design/roadmap.md §16 from the files in
-# docs/design/decisions/, one row per file, its number and its heading. After
-# adding or renumbering a decision, and to resolve a conflict in the table:
-# take either side, then run this.
-[doc('Write the §16 decision index from docs/design/decisions/.')]
+# Print the index of the §16 decisions, one Markdown row per file in
+# docs/design/decisions/ in number order, after checking the files as `lint`
+# does. The index isn't committed: the files are it (decision 162).
+[doc('Print the §16 decision index from docs/design/decisions/.')]
 [group('quality')]
 decision-index:
-    node scripts/decision-index.ts --write
+    node scripts/decision-index.ts --print
 
 # Write the index of the shared components' accessibility contracts in
 # docs/design/components/accessibility.md (§4.5) from the files in

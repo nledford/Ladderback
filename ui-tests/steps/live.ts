@@ -69,14 +69,15 @@ export function table(world: BrowserWorld, name: string): Locator {
  *  scratch folder, starts a daemon on it, and points the scenario's pages at
  *  that daemon. `env` is added to the daemon's environment, as `TZ` for the
  *  zone its clock runs in, which its workers inherit. A plan `schedules`
- *  names runs on that cron expression, a plan in `iglobs` has those
- *  globs, and `after` is written at the end, after the plans. */
+ *  names runs on that schedule, a cron expression or an interval (`every`),
+ *  a plan in `iglobs` has those globs, and `after` is written at the end,
+ *  after the plans. */
 export async function serveDemoPlans(
   world: BrowserWorld,
   plans: readonly string[],
   size: keyof typeof SOURCE_FILES,
   env: Record<string, string> = {},
-  schedules: Readonly<Record<string, string>> = {},
+  schedules: Readonly<Record<string, { cron: string } | { every: string }>> = {},
   iglobs: Readonly<Record<string, readonly string[]>> = {},
   after: readonly string[] = [],
 ): Promise<void> {
@@ -102,7 +103,7 @@ export async function serveDemoPlans(
       `id = ${JSON.stringify(plan)}`,
       'repository = "demo"',
       `sources = [${JSON.stringify(source)}]`,
-      ...(plan in schedules ? [`schedule = { cron = ${JSON.stringify(schedules[plan])} }`] : []),
+      ...scheduleLines(schedules[plan]),
       ...(plan in iglobs ? [`iglobs = ${JSON.stringify(iglobs[plan])}`] : []),
       "",
     ]),
@@ -121,6 +122,14 @@ export async function serveDemoPlans(
   world.baseUrl = url;
 }
 
+/** A plan's schedule as the configuration file writes it, if it has one. */
+function scheduleLines(schedule: { cron: string } | { every: string } | undefined): string[] {
+  if (schedule === undefined) return [];
+  return "cron" in schedule
+    ? [`schedule = { cron = ${JSON.stringify(schedule.cron)} }`]
+    : [`schedule = { every = ${JSON.stringify(schedule.every)} }`];
+}
+
 // The scenario's own daemon stops, killed if it doesn't within its grace, and
 // its scratch folder goes even then (`tearDown`).
 After(async function (this: BrowserWorld) {
@@ -135,6 +144,13 @@ Given("a demo plan {string} with a scratch repository", async function (this: Br
 Given("a demo plan {string} with a big scratch repository", async function (this: BrowserWorld, plan: string) {
   await serveDemoPlans(this, [plan], "big");
 });
+
+Given(
+  "a demo plan {string} that runs every {string} with a scratch repository",
+  async function (this: BrowserWorld, plan: string, every: string) {
+    await serveDemoPlans(this, [plan], "small", {}, { [plan]: { every } });
+  },
+);
 
 // Two plans that back up the same source into the same repository: only
 // their names tell them apart.
@@ -170,7 +186,7 @@ export async function plannedRun(world: BrowserWorld, plan: string): Promise<str
 Given(
   "a demo plan {string} on the schedule {string} and a demo plan {string} without one",
   async function (this: BrowserWorld, scheduled: string, cron: string, unscheduled: string) {
-    await serveDemoPlans(this, [scheduled, unscheduled], "tiny", {}, { [scheduled]: cron });
+    await serveDemoPlans(this, [scheduled, unscheduled], "tiny", {}, { [scheduled]: { cron } });
     await untilStepLimit(
       `the daemon planned a run of ${scheduled}`,
       () => plannedRun(this, scheduled),

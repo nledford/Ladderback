@@ -49,7 +49,9 @@ app = { workspace = true, features = ["fakes"] }
 serde_json.workspace = true
 tempfile.workspace = true
 testkit.workspace = true
-tokio = { workspace = true, features = ["macros", "net", "rt-multi-thread", "time"] }
+# `test-util`: the hub's 90-second silence bound, waited out on a paused
+# clock (§16, decision 159).
+tokio = { workspace = true, features = ["macros", "net", "rt-multi-thread", "test-util", "time"] }
 tokio-tungstenite = { workspace = true }
 uuid.workspace = true
 

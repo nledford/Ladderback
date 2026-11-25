@@ -412,6 +412,18 @@ impl AgentRegistry for SqliteStore {
         Ok(())
     }
 
+    async fn record_seen(&self, agent_id: AgentId, now: Timestamp) -> Result<(), StoreError> {
+        let _call = self.call().await;
+        let mut conn = self.pool.acquire().await.map_err(unavailable)?;
+        sqlx::query(sql::RECORD_SEEN)
+            .bind(now.as_millisecond())
+            .bind(row::agent_id_text(agent_id))
+            .execute(&mut *conn)
+            .await
+            .map_err(unavailable)?;
+        Ok(())
+    }
+
     /// One transaction, the write lock taken up front, so of two machines'
     /// first `Hello`s at once the second sees the first's fingerprint.
     async fn check_machine(

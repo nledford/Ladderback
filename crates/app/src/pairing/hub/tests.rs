@@ -449,3 +449,136 @@ async fn machines_that_lapsed_unlisted_leave_room_for_a_new_one() {
         .collect();
     assert_eq!(ids, [agent_id(21)]);
 }
+
+/// The hub answers a machine's heartbeat with its own, and refuses a
+/// payload that isn't one (decision 159).
+#[tokio::test]
+async fn a_heartbeat_is_answered_and_one_that_isnt_is_refused() {
+    let hub = hub();
+    assert_eq!(
+        hub.pairing
+            .take_heartbeat(&crate::pairing::wire::heartbeat_payload()),
+        Ok(Some((
+            domain::fleet::heartbeat_ack_kind(),
+            crate::pairing::wire::heartbeat_ack_payload()
+        )))
+    );
+    assert_eq!(
+        hub.pairing.take_heartbeat(b"not a heartbeat"),
+        Err(super::MessageRefused::Unexpected)
+    );
+}
+
+/// Counts the times what closes a connection was called.
+fn closer(closed: &Arc<Mutex<u32>>) -> super::CloseConnection {
+    let closed = closed.clone();
+    Box::new(move || *closed.lock().unwrap() += 1)
+}
+
+/// A machine is online from its connection going live until that one
+/// goes away; a newer connection replaces it and closes the older, whose
+/// end then leaves the machine online. The browsers hear each change once.
+#[tokio::test]
+async fn a_machine_is_online_while_the_hub_holds_its_one_live_connection() {
+    let hub = hub();
+    paired(&hub, 1).await;
+    approve(&hub, 1).await;
+    hub.told.taken();
+    let agent = agent_id(1);
+    let older = Arc::new(Mutex::new(0));
+    let newer = Arc::new(Mutex::new(0));
+    assert!(!hub.pairing.is_online(agent));
+
+    hub.pairing.went_live(agent, 1, closer(&older)).await;
+    assert!(hub.pairing.is_online(agent));
+    assert!(hub.pairing.machines().await.unwrap()[0].online);
+    let online = UiEvent::AgentOnline {
+        agent: agent.as_uuid().to_string(),
+        at: now(),
+    };
+    assert_eq!(hub.told.taken(), [online]);
+
+    hub.pairing.went_live(agent, 2, closer(&newer)).await;
+    assert_eq!(*older.lock().unwrap(), 1, "the older connection is closed");
+    hub.pairing.went_away(agent, 1).await;
+    assert!(hub.pairing.is_online(agent), "the newer one still holds");
+    assert_eq!(hub.told.taken(), []);
+
+    hub.pairing.went_away(agent, 2).await;
+    assert!(!hub.pairing.is_online(agent));
+    assert!(!hub.pairing.machines().await.unwrap()[0].online);
+    assert_eq!(
+        *newer.lock().unwrap(),
+        0,
+        "a connection that ended isn't closed again"
+    );
+    assert_eq!(
+        hub.told.taken(),
+        [UiEvent::AgentOffline {
+            agent: agent.as_uuid().to_string(),
+            at: now(),
+        }]
+    );
+    hub.pairing.went_away(agent, 2).await;
+    assert_eq!(hub.told.taken(), [], "an end heard twice is told once");
+}
+
+/// A machine a person removes is let go of at once: the hub closes the
+/// connection it holds, so the machine sends nothing more on one it proved
+/// before its removal (decision 154; §16, decision 159).
+#[tokio::test]
+async fn a_removed_machines_live_connection_is_closed() {
+    let hub = hub();
+    paired(&hub, 1).await;
+    approve(&hub, 1).await;
+    let agent = agent_id(1);
+    let closed = Arc::new(Mutex::new(0));
+    hub.pairing.went_live(agent, 1, closer(&closed)).await;
+    let key = hub.registry.agent(agent).await.unwrap().unwrap().key;
+    let removed = hub.pairing.remove_asked(removal(1, key, false)).await;
+    assert!(matches!(removed, Ok(Ok(_))), "{removed:?}");
+    assert_eq!(*closed.lock().unwrap(), 1, "its connection is closed");
+    assert!(!hub.pairing.is_online(agent));
+}
+
+/// A machine removed while its connection made its handshake is let go
+/// of as that connection goes live: the hub closes it at once, and the
+/// machine is never shown online (decision 154; §16, decision 159).
+#[tokio::test]
+async fn a_machine_removed_during_its_handshake_is_let_go_of_as_it_goes_live() {
+    let hub = hub();
+    paired(&hub, 1).await;
+    approve(&hub, 1).await;
+    let agent = agent_id(1);
+    let key = hub.registry.agent(agent).await.unwrap().unwrap().key;
+    let removed = hub.pairing.remove_asked(removal(1, key, false)).await;
+    assert!(matches!(removed, Ok(Ok(_))), "{removed:?}");
+    hub.told.taken();
+    let closed = Arc::new(Mutex::new(0));
+    hub.pairing.went_live(agent, 1, closer(&closed)).await;
+    assert_eq!(*closed.lock().unwrap(), 1, "its connection is closed");
+    assert!(!hub.pairing.is_online(agent));
+    assert_eq!(hub.told.taken(), [], "the browsers hear nothing");
+}
+
+/// When a machine's live connection ends, the hub keeps that time as when
+/// it last heard from the machine, which the dashboard shows as when it
+/// last connected; an older connection's end keeps nothing (§16, decision
+/// 159).
+#[tokio::test]
+async fn the_end_of_a_live_connection_is_kept_as_when_the_machine_was_last_heard_from() {
+    let hub = hub();
+    paired(&hub, 1).await;
+    approve(&hub, 1).await;
+    let agent = agent_id(1);
+    let earlier = Timestamp::from_second(NOW - 3600).unwrap();
+    let last_seen = async || hub.registry.agent(agent).await.unwrap().unwrap().last_seen;
+    hub.pairing
+        .went_live(agent, 1, closer(&Arc::default()))
+        .await;
+    hub.registry.record_seen(agent, earlier).await.unwrap();
+    hub.pairing.went_away(agent, 2).await;
+    assert_eq!(last_seen().await, earlier, "not its live connection");
+    hub.pairing.went_away(agent, 1).await;
+    assert_eq!(last_seen().await, Timestamp::from_second(NOW).unwrap());
+}
