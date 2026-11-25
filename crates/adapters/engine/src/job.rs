@@ -457,10 +457,11 @@ pub enum WorkerEvent {
     Piece {
         bytes: String,
     },
-    /// A prune has worked out its plan and, before it deletes or rewrites
-    /// anything, waits for the daemon's [`DeleteAnswer`] on its stdin
-    /// (technical design §7.3; §16, decision 161). Only a prune sends it,
-    /// once; with no answer in time, it deletes nothing.
+    /// A prune has come to its first delete, past its plan, warm-up and
+    /// repack, and waits for the daemon's [`DeleteAnswer`] on its stdin
+    /// before it removes anything (technical design §7.3; §16, decision
+    /// 161). Only a prune sends it, once; with no answer in time, it
+    /// deletes nothing.
     ReadyToDelete,
     Result(OpResult),
     Failed {

@@ -1038,7 +1038,7 @@ impl RunMaintenance {
         })
     }
 
-    /// Whether a prune that has worked out its plan may delete: while this
+    /// Whether a prune that has come to its first delete may delete: while this
     /// machine may still maintain `repository`, judged again now as when
     /// the run started, never renewed (§7.3; §16, decision 161). A
     /// machine that isn't paired always may. A refusal is logged with why.

@@ -642,10 +642,10 @@ pub enum EngineEvent {
     /// The next piece of a dump, at most `PIECE_BYTES` long: the entry's
     /// own bytes, never text to mask.
     Piece(Vec<u8>),
-    /// A prune has worked out its plan and asks, before it deletes or
-    /// rewrites anything, whether it may (§7.3; §16, decision 161). It
-    /// deletes only once [`DeletionAsk::answer`] says
-    /// [`Deletion::Permitted`]; a question dropped unanswered refuses.
+    /// A prune has come to its first delete, past its plan and any repack,
+    /// and asks whether it may (§7.3; §16, decision 161). It deletes only
+    /// once [`DeletionAsk::answer`] says [`Deletion::Permitted`]; a
+    /// question dropped unanswered refuses.
     DeletionAsked(DeletionAsk),
 }
 

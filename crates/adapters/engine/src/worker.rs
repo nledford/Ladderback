@@ -47,7 +47,7 @@ use crate::job::{
     DeleteAnswer, JobKind, JobSpec, Level, MAX_ANSWER_BYTES, MAX_MESSAGE_BYTES, MAX_MESSAGE_READ,
     OpResult, RepositorySpec, WorkerEvent, exit_code,
 };
-use cancel::{AfterCancel, Cancel, Cause};
+use cancel::{AfterCancel, Cancel, Cause, DeleteGate};
 use convert::JobError;
 use events::Events;
 use watchdog::{Terminate, WallClock, Watchdog};
@@ -240,7 +240,7 @@ pub(crate) struct Context {
     /// Held until the worker ends: see [`Context::lock_cache`].
     cache_lock: RefCell<Option<CacheLock>>,
     /// The rest of stdin, after the job spec's line, where a prune reads its
-    /// one answer: see [`Context::ask_to_delete`].
+    /// one answer: see [`Context::delete_gate`].
     answers: RefCell<Option<Box<dyn BufRead + Send>>>,
 }
 
@@ -265,31 +265,16 @@ impl Context {
         self
     }
 
-    /// Asks the daemon, with [`WorkerEvent::ReadyToDelete`], whether the
-    /// prune may delete, and waits at most the process's answer wait for its
-    /// one line on stdin (§16, decision 161). No answer, a closed stdin or a
-    /// line that is no [`DeleteAnswer`] is `None`, as is a second question:
-    /// the caller deletes nothing on anything but
-    /// [`DeleteAnswer::Delete`]. Fails only when the question can't be
-    /// written.
-    pub(crate) fn ask_to_delete(&self) -> io::Result<Option<DeleteAnswer>> {
-        let Some(answers) = self.answers.borrow_mut().take() else {
-            return Ok(None);
-        };
-        self.events.emit(&WorkerEvent::ReadyToDelete)?;
-        // Read on a thread of its own, so that a daemon that never answers
-        // holds the prune no longer than the wait: the thread ends with the
-        // worker.
-        let (sender, answer) = std::sync::mpsc::sync_channel(1);
-        let reading = std::thread::Builder::new()
-            .name("delete-answer".to_owned())
-            .spawn(move || {
-                let _ = sender.send(read_answer(answers));
-            });
-        if reading.is_err() {
-            return Ok(None);
-        }
-        Ok(answer.recv_timeout(self.process.answer_wait).ok().flatten())
+    /// The gate a prune's backends ask at their first removal (§16,
+    /// decision 161): it asks the daemon, with
+    /// [`WorkerEvent::ReadyToDelete`], whether the prune may delete, and
+    /// waits at most the process's answer wait for its one line on stdin.
+    /// The gate of a second call hears no answer.
+    pub(crate) fn delete_gate(&self) -> DeleteGate {
+        let answers = self.answers.borrow_mut().take();
+        let events = self.events.clone();
+        let wait = self.process.answer_wait;
+        DeleteGate::new(move || ask_to_delete(&events, answers?, wait))
     }
 
     /// Takes `dir` as this worker's cache until the worker ends. Two workers
@@ -460,6 +445,30 @@ fn run_events(
         }
         Err(JobError::Events(error)) => Err(error),
     }
+}
+
+/// Asks the daemon, with [`WorkerEvent::ReadyToDelete`], whether the prune
+/// may delete, and waits at most `wait` for its answer on `answers` (§16,
+/// decision 161). No answer in time, a closed stdin, a line that is no
+/// [`DeleteAnswer`], or a question that can't be written is `None`: the
+/// prune deletes nothing on anything but [`DeleteAnswer::Delete`].
+fn ask_to_delete(
+    events: &Events,
+    answers: Box<dyn BufRead + Send>,
+    wait: Duration,
+) -> Option<DeleteAnswer> {
+    events.emit(&WorkerEvent::ReadyToDelete).ok()?;
+    // Read on a thread of its own, so that a daemon that never answers
+    // holds the prune no longer than the wait: the thread ends with the
+    // worker.
+    let (sender, answer) = std::sync::mpsc::sync_channel(1);
+    std::thread::Builder::new()
+        .name("delete-answer".to_owned())
+        .spawn(move || {
+            let _ = sender.send(read_answer(answers));
+        })
+        .ok()?;
+    answer.recv_timeout(wait).ok().flatten()
 }
 
 /// The daemon's one answer line, or `None` for anything else: the end of
@@ -1406,6 +1415,13 @@ mod tests {
         io::Cursor::new(text.as_bytes().to_vec())
     }
 
+    /// What the gate of `ctx` hears at a prune's first removal.
+    fn asked(ctx: &Context) -> Option<DeleteAnswer> {
+        let gate = ctx.delete_gate();
+        gate.admits_removal();
+        gate.heard().flatten()
+    }
+
     #[test]
     fn a_prune_asks_before_it_deletes_and_hears_the_answer() {
         for (line, answer) in [
@@ -1416,7 +1432,7 @@ mod tests {
             ),
         ] {
             let (ctx, capture) = asking(lines(line), Duration::from_secs(5));
-            assert_eq!(ctx.ask_to_delete().unwrap(), Some(answer));
+            assert_eq!(asked(&ctx), Some(answer));
             assert_eq!(capture.parsed(), [WorkerEvent::ReadyToDelete]);
         }
     }
@@ -1435,19 +1451,22 @@ mod tests {
             too_long.as_str(),
         ] {
             let (ctx, capture) = asking(lines(answers), Duration::from_secs(5));
-            assert_eq!(ctx.ask_to_delete().unwrap(), None, "{answers:?}");
+            assert_eq!(asked(&ctx), None, "{answers:?}");
             assert_eq!(capture.parsed(), [WorkerEvent::ReadyToDelete]);
         }
     }
 
+    /// A second gate has no stdin to read, so it asks nothing and hears no
+    /// answer.
     #[test]
     fn a_prune_asks_only_once() {
-        let (ctx, _capture) = asking(
+        let (ctx, capture) = asking(
             lines("{\"answer\":\"delete\"}\n{\"answer\":\"delete\"}\n"),
             Duration::from_secs(5),
         );
-        assert_eq!(ctx.ask_to_delete().unwrap(), Some(DeleteAnswer::Delete));
-        assert_eq!(ctx.ask_to_delete().unwrap(), None);
+        assert_eq!(asked(&ctx), Some(DeleteAnswer::Delete));
+        assert_eq!(asked(&ctx), None);
+        assert_eq!(capture.parsed(), [WorkerEvent::ReadyToDelete]);
     }
 
     /// A stdin that says nothing until the test ends.
@@ -1470,7 +1489,7 @@ mod tests {
             Duration::from_millis(50),
         );
         let began = std::time::Instant::now();
-        assert_eq!(ctx.ask_to_delete().unwrap(), None);
+        assert_eq!(asked(&ctx), None);
         assert!(began.elapsed() < Duration::from_secs(5));
         assert_eq!(capture.parsed(), [WorkerEvent::ReadyToDelete]);
     }

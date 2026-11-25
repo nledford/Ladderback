@@ -141,7 +141,7 @@ impl DeleteGate {
 
     /// Whether a removal may go on: asks on the first call, holding the
     /// lock so removals on other threads wait for the one answer.
-    fn admits_removal(&self) -> bool {
+    pub(crate) fn admits_removal(&self) -> bool {
         let mut state = self.state.lock().unwrap_or_else(PoisonError::into_inner);
         let answer = match std::mem::replace(&mut *state, Gate::Heard(None)) {
             Gate::Unasked(ask) => ask(),

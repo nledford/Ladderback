@@ -1,7 +1,7 @@
 //! Steps for `features/maintenance/prune_guard.feature`: a maintenance run
 //! prunes against an engine that plays the worker's part. It works out its
-//! plan, taking the scenario's time on the clock, asks before it deletes,
-//! and deletes only on yes (§7.3; §16, decision 161).
+//! plan and repacks, each taking the scenario's time on the clock, asks at
+//! its first delete, and deletes only on yes (§7.3; §16, decision 161).
 
 use std::collections::BTreeMap;
 use std::sync::Arc;
@@ -59,6 +59,9 @@ pub struct PruneGuardWorld {
     lease_lasts: Option<SignedDuration>,
     /// How long the prune takes to work out its plan.
     planning_takes: SignedDuration,
+    /// How long the prune then takes to warm up and repack, before its
+    /// first delete.
+    repacking_takes: SignedDuration,
     deleted: Arc<AtomicBool>,
     finished: Option<Finished>,
 }
@@ -74,10 +77,11 @@ fn paired_and_leased(agent: &mut Agent) {
     agent.prune_guard.paired = true;
 }
 
-#[given("the lease runs out while the prune works out its plan")]
+#[given("the lease runs out while the prune repacks, after it worked out its plan")]
 fn lease_runs_out(agent: &mut Agent) {
     agent.prune_guard.lease_lasts = Some(SignedDuration::from_mins(30));
-    agent.prune_guard.planning_takes = SignedDuration::from_hours(1);
+    agent.prune_guard.planning_takes = SignedDuration::from_mins(10);
+    agent.prune_guard.repacking_takes = SignedDuration::from_hours(3);
 }
 
 #[given("this machine isn't paired with a hub")]
@@ -133,6 +137,7 @@ async fn prune(agent: &mut Agent) {
         Arc::new(Pruning {
             clock: clock.clone(),
             planning_takes: world.planning_takes,
+            repacking_takes: world.repacking_takes,
             deleted: Arc::clone(&world.deleted),
         }),
         clock,
@@ -216,10 +221,12 @@ fn config() -> AgentConfig {
 }
 
 /// An engine that identifies the repository, lists no snapshots, and prunes
-/// as the worker does: it works out its plan, asks, and deletes only on yes.
+/// as the worker does: it works out its plan, repacks, asks at its first
+/// delete, and deletes only on yes.
 struct Pruning {
     clock: Arc<FakeClock>,
     planning_takes: SignedDuration,
+    repacking_takes: SignedDuration,
     deleted: Arc<AtomicBool>,
 }
 
@@ -245,14 +252,17 @@ impl Engine for Pruning {
                     .boxed()
             }
             Job::Prune(_) => {
-                let (clock, planning_takes, deleted) = (
+                let (clock, planning_takes, repacking_takes, deleted) = (
                     Arc::clone(&self.clock),
                     self.planning_takes,
+                    self.repacking_takes,
                     Arc::clone(&self.deleted),
                 );
                 futures::stream::once(async move {
-                    // The plan takes its time; then the prune asks.
+                    // The plan and the repack take their time; then the
+                    // prune asks.
                     clock.advance(planning_takes);
+                    clock.advance(repacking_takes);
                     let (ask, answer) = DeletionAsk::new();
                     let asked = futures::stream::iter([EngineEvent::DeletionAsked(ask)]);
                     let ended = futures::stream::once(async move {
