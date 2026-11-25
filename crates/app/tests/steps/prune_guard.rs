@@ -11,7 +11,7 @@ use async_trait::async_trait;
 use cucumber::{given, then, when};
 use domain::execution::{FailureReason, OperationStatus};
 use domain::fleet::{HubAddress, HubPin, PublicKey, Signature, TokenTls};
-use domain::maintenance::{Grant, LeaseEpoch, RepoGrants};
+use domain::maintenance::{Grant, HeldLeases, LeaseEpoch, RepoGrants};
 use domain::planning::{
     AgentConfig, AgentSettings, GroupBy, Hooks, Maintenance, RepositoryConfig, RepositorySettings,
 };
@@ -19,8 +19,9 @@ use domain::secrets::{SecretRef, SecretValue};
 use domain::{
     AgentId, OperationId, RepositoryAlias, RepositoryId, SignedDuration, Timestamp, Uuid,
 };
-use futures::StreamExt;
 use futures::channel::oneshot;
+use futures::future::BoxFuture;
+use futures::{FutureExt, StreamExt};
 
 use super::Agent;
 use app::execution::Finished;
@@ -31,8 +32,8 @@ use app::fakes::{
 use app::leases::MaintenanceLeases;
 use app::maintenance::{MaintenanceKind, RunMaintenance};
 use app::ports::{
-    ConfigStore, Deletion, DeletionAsk, Engine, EngineError, EngineEvent, EngineResult, Identity,
-    Job, JobControl, PruneSummary, RunningJob,
+    Clock, ConfigStore, Deletion, DeletionAsk, Engine, EngineError, EngineEvent, EngineResult,
+    Identity, Job, JobControl, LeaseCache, PruneSummary, RunningJob, StoreError,
 };
 use app::secrets::ResolveRepository;
 
@@ -65,6 +66,12 @@ pub struct PruneGuardWorld {
     repacking_takes: SignedDuration,
     /// Whether the run is cancelled just as the prune asks.
     cancel_as_it_asks: bool,
+    /// Whether the run is cancelled while the daemon checks the lease, once
+    /// the prune asked.
+    cancel_during_check: bool,
+    /// Whether the hub grants the repository again, at a new epoch, while
+    /// the prune repacks.
+    granted_again: bool,
     deleted: Arc<AtomicBool>,
     finished: Option<Finished>,
 }
@@ -97,6 +104,19 @@ fn cancelled_as_it_asks(agent: &mut Agent) {
     agent.prune_guard.cancel_as_it_asks = true;
 }
 
+#[given("the prune is cancelled while the daemon checks whether it may delete")]
+fn cancelled_during_check(agent: &mut Agent) {
+    agent.prune_guard.cancel_during_check = true;
+}
+
+#[given(
+    "the lease runs out while the prune repacks, and the hub grants this machine a new one before the prune asks"
+)]
+fn granted_again(agent: &mut Agent) {
+    lease_runs_out(agent);
+    agent.prune_guard.granted_again = true;
+}
+
 #[when("this machine prunes the repository")]
 async fn prune(agent: &mut Agent) {
     let world = &mut agent.prune_guard;
@@ -107,9 +127,20 @@ async fn prune(agent: &mut Agent) {
         .await
         .expect("the configuration saves");
     let identity = Arc::new(InMemoryIdentity::default());
+    let asked = Arc::new(AtomicBool::new(false));
+    let (fire, cancel) = oneshot::channel::<()>();
+    let (fire_as_it_asks, fire_during_check) = if world.cancel_during_check {
+        (None, Some(fire))
+    } else {
+        (world.cancel_as_it_asks.then_some(fire), None)
+    };
     let leases = Arc::new(MaintenanceLeases::new(
         identity.clone(),
-        Arc::new(InMemoryLeaseCache::default()),
+        Arc::new(CancelledDuringCheck {
+            kept: InMemoryLeaseCache::default(),
+            asked: Arc::clone(&asked),
+            fire: Mutex::new(fire_during_check),
+        }),
         clock.clone(),
     ));
     if world.paired {
@@ -126,29 +157,34 @@ async fn prune(agent: &mut Agent) {
         let lasts = world
             .lease_lasts
             .unwrap_or(SignedDuration::from_hours(7 * 24));
-        let grants = RepoGrants {
-            generation: 1,
-            signed_at: start(),
-            grants: vec![Grant {
-                repository: repository(),
-                epoch: LeaseEpoch::new(1).expect("an epoch"),
-                expires_at: start().checked_add(lasts).expect("a time"),
-                signature: Signature::from_bytes([0; 64]).expect("a signature"),
-            }],
-        };
         leases
-            .take(&grants, 0, start())
+            .take(&granted(1, 1, start(), lasts), 0, start())
             .await
             .expect("the grants are kept");
     }
-    let (fire, cancel) = oneshot::channel::<()>();
+    // Past the first lease's end and the hub's hour of grace, the hub
+    // grants the repository again, at the next epoch but one: another
+    // machine may have held it meanwhile.
+    let during_repack = world.granted_again.then(|| {
+        let (leases, clock) = (Arc::clone(&leases), Arc::clone(&clock));
+        async move {
+            let now = clock.now();
+            leases
+                .take(&granted(2, 3, now, SignedDuration::from_hours(7 * 24)), 0, now)
+                .await
+                .expect("the new grant is kept");
+        }
+        .boxed()
+    });
     let use_case = RunMaintenance::new(
         Arc::new(Pruning {
             clock: clock.clone(),
             planning_takes: world.planning_takes,
             repacking_takes: world.repacking_takes,
             deleted: Arc::clone(&world.deleted),
-            cancel_as_it_asks: Mutex::new(world.cancel_as_it_asks.then_some(fire)),
+            cancel_as_it_asks: Mutex::new(fire_as_it_asks),
+            asked,
+            during_repack: Mutex::new(during_repack),
         }),
         clock,
         Arc::new(InMemoryOperationStore::new()),
@@ -178,6 +214,21 @@ async fn prune(agent: &mut Agent) {
         }
     };
     world.finished = Some(use_case.execute(prepared, cancel).await);
+}
+
+/// The hub's grants of `generation`: the repository at `epoch`, signed at
+/// `at` and lasting `lasts`.
+fn granted(generation: u64, epoch: u64, at: Timestamp, lasts: SignedDuration) -> RepoGrants {
+    RepoGrants {
+        generation,
+        signed_at: at,
+        grants: vec![Grant {
+            repository: repository(),
+            epoch: LeaseEpoch::new(epoch).expect("an epoch"),
+            expires_at: at.checked_add(lasts).expect("a time"),
+            signature: Signature::from_bytes([0; 64]).expect("a signature"),
+        }],
+    }
 }
 
 #[then("the prune deleted nothing")]
@@ -255,6 +306,42 @@ struct Pruning {
     deleted: Arc<AtomicBool>,
     /// Fired as the prune asks, when the scenario cancels then.
     cancel_as_it_asks: Mutex<Option<oneshot::Sender<()>>>,
+    /// Set as the prune asks.
+    asked: Arc<AtomicBool>,
+    /// What happens on the hub's side while the prune repacks.
+    during_repack: Mutex<Option<BoxFuture<'static, ()>>>,
+}
+
+/// A lease cache that fires the run's cancel when it is read once the
+/// prune asked: a cancel that comes while the daemon checks the lease.
+struct CancelledDuringCheck {
+    kept: InMemoryLeaseCache,
+    asked: Arc<AtomicBool>,
+    fire: Mutex<Option<oneshot::Sender<()>>>,
+}
+
+#[async_trait]
+impl LeaseCache for CancelledDuringCheck {
+    async fn load(&self) -> Result<HeldLeases, StoreError> {
+        if self.asked.load(Ordering::SeqCst)
+            && let Some(fire) = self
+                .fire
+                .lock()
+                .unwrap_or_else(PoisonError::into_inner)
+                .take()
+        {
+            let _ = fire.send(());
+        }
+        self.kept.load().await
+    }
+
+    async fn save(&self, leases: &HeldLeases) -> Result<(), StoreError> {
+        self.kept.save(leases).await
+    }
+
+    async fn save_pauses(&self, leases: &HeldLeases) -> Result<(), StoreError> {
+        self.kept.save_pauses(leases).await
+    }
 }
 
 struct Nothing;
@@ -279,14 +366,20 @@ impl Engine for Pruning {
                     .boxed()
             }
             Job::Prune(_) => {
-                let (clock, planning_takes, repacking_takes, deleted) = (
+                let (clock, planning_takes, repacking_takes, deleted, asked) = (
                     Arc::clone(&self.clock),
                     self.planning_takes,
                     self.repacking_takes,
                     Arc::clone(&self.deleted),
+                    Arc::clone(&self.asked),
                 );
                 let cancel = self
                     .cancel_as_it_asks
+                    .lock()
+                    .unwrap_or_else(PoisonError::into_inner)
+                    .take();
+                let during_repack = self
+                    .during_repack
                     .lock()
                     .unwrap_or_else(PoisonError::into_inner)
                     .take();
@@ -295,9 +388,13 @@ impl Engine for Pruning {
                     // prune asks.
                     clock.advance(planning_takes);
                     clock.advance(repacking_takes);
+                    if let Some(during_repack) = during_repack {
+                        during_repack.await;
+                    }
                     if let Some(cancel) = cancel {
                         let _ = cancel.send(());
                     }
+                    asked.store(true, Ordering::SeqCst);
                     let (ask, answer) = DeletionAsk::new();
                     let asked = futures::stream::iter([EngineEvent::DeletionAsked(ask)]);
                     let ended = futures::stream::once(async move {
