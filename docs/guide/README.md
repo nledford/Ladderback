@@ -16,5 +16,7 @@ This guide is in two parts. **Using Ladderback** is for everyone: install it, th
 - [Moving a repository's password out of config.toml](secrets.md): the system keyring, a password file or an environment variable.
 - [Sign-in and remote access](remote-access.md): setting an admin password, `--listen` and `--allowed-host`, and TLS behind a reverse proxy.
 - [API tokens and AI agents](api-tokens.md): which permissions to give a program or an AI agent, and what AI agents may do without a token.
+- [The hub](hub.md): turning a machine into the hub, pairing and approving machines, the Dashboard, removing a machine, and upgrading before 1.0.
+- [Maintenance with a hub](hub-maintenance.md): how the hub lets one machine at a time maintain each repository, and when maintenance pauses.
 
 The [README](https://github.com/nledford/Ladderback/blob/main/README.md) has what Ladderback does today and what comes next.

@@ -46,7 +46,7 @@ Mount them in place of the volumes, as in `-v ~/ladderback/data:/var/lib/ladderb
 
 A container has no keyring, so keep a repository's password in a file, such as a Docker secret under `/run/secrets`, in an environment variable or behind a command ([Secrets](secrets.md)). A repository on a local path needs a volume or a folder on the host mounted at that path, as `/srv/photos` is above: one written anywhere else lives in the container and goes when the container is removed.
 
-On macOS, Docker runs Linux in a virtual machine, so Ladderback there sees only the folders shared with it and gets no Full Disk Access, Photos library or keychain: use the [install script](install-macos.md). From the MVP's release, the same image runs the hub with `serve --hub --listen 0.0.0.0:9898 --allowed-host <name>` in place of the command above; this guide will say how to pair machines with it then.
+On macOS, Docker runs Linux in a virtual machine, so Ladderback there sees only the folders shared with it and gets no Full Disk Access, Photos library or keychain: use the [install script](install-macos.md). From the MVP's release, the same image runs the hub with `serve --hub --listen 0.0.0.0:9898 --allowed-host <name>` in place of the command above; [The hub](hub.md) says how to pair machines with a hub.
 
 ## Updating and removing
 
