@@ -108,7 +108,7 @@ A machine pairs with one hub, and refuses another hub's token while it is paired
 2. Run `ladderback unpair`. It names the hub by its address and key fingerprint and asks before it changes anything; with no terminal to ask on, `--yes` answers.
 3. Start Ladderback again as you started it before.
 
-The machine drops the leases it held from that hub and forgets the hub's key. It then maintains each repository whose maintenance is set to this machine, as a machine with no hub does, and `ladderback pair` pairs it with any hub's token. The hub isn't told: a hub that still runs lists the machine until you remove it on its **Machines** tab, and gives the repositories the machine maintained to no other machine before the leases it held run out.
+The machine drops the leases it held from that hub and forgets the hub's key. It then maintains each repository whose maintenance is set to this machine, as a machine with no hub does, and `ladderback pair` pairs it with any hub's token. The hub isn't told: a hub that still runs lists the machine, and alerts that it is offline, until you remove it on its **Machines** tab, and gives the repositories the machine maintained to no other machine before the leases it held run out. After that, if another of its machines also maintains one of them, two machines do: turn maintenance off on one of them.
 
 ## Upgrading before 1.0
 
@@ -116,7 +116,6 @@ Until 1.0.0, a release may change how machines and the hub talk to each other, a
 
 ## Known limits
 
-- **No alert when a machine goes offline yet.** The Dashboard shows when each machine last connected, but nothing tells you when one stops ([#570](https://github.com/nledford/Ladderback/issues/570)).
 - **Losing the hub's machine.** Machines keep backing up, and within 7 days their leases run out, after which they maintain nothing ([Maintenance with a hub](hub-maintenance.md)). There is no way yet to recover the hub ([#1466](https://github.com/nledford/Ladderback/issues/1466)): pair its machines with a new one once each has left the old one ([Leaving a hub](#leaving-a-hub)). Keep your copy of the hub's key files ([Keeping the hub's keys](#keeping-the-hubs-keys)).
-- **A removed machine doesn't leave its hub by itself.** It keeps its hub's key and maintains nothing once its leases run out, until you take a new machine ID or run `ladderback unpair` on it ([Leaving a hub](#leaving-a-hub)).
+- **A removed machine doesn't leave its hub by itself.** It keeps its hub's key and maintains nothing once its leases run out, until you run `ladderback unpair` on it, or take a new machine ID and pair it again ([Leaving a hub](#leaving-a-hub)).
 - **Pairing tokens at the hub's terminal.** Listing and revoking the unused tokens work only while the hub's Ladderback is stopped. A token made in the web UI is canceled by closing its dialog.
