@@ -1267,6 +1267,10 @@
               "default": false,
               "type": "boolean"
             },
+            "maintenance": {
+              "$ref": "#/$defs/RepositoryMaintenanceDto",
+              "default": "none"
+            },
             "maintenance-paused-since": {
               "type": [
                 "string",
@@ -1296,9 +1300,18 @@
             "alias",
             "repository",
             "password",
+            "maintenance",
             "maintained-here"
           ],
           "type": "object"
+        },
+        "RepositoryMaintenanceDto": {
+          "enum": [
+            "local",
+            "hub",
+            "none"
+          ],
+          "type": "string"
         },
         "WarningDto": {
           "properties": {

@@ -2753,6 +2753,15 @@ ui-password-env = Read from the environment variable { $name }
 # $program (text): the program's name. It is shown as it came.
 ui-password-command = Read from the output of { $program }
 
+# A muted note on a repository's row, under where its password comes from: its entry asks this machine to maintain it, that is to forget, prune and check it (`maintenance = "local"`).
+ui-repository-maintained-here = Maintained from this { -machine }.
+
+# A muted note on a repository's row: its entry asks the hub to maintain it (`maintenance = "hub"`), so this machine doesn't.
+ui-repository-maintained-by-hub = Maintained by the { -hub }.
+
+# A muted note on a repository's row: its entry asks nobody to maintain it (`maintenance = "none"`, or no setting), so neither this machine nor the hub forgets, prunes or checks it. Another machine or a program outside Ladderback may still do it.
+ui-repository-maintained-by-nobody = No one maintains it from here.
+
 # The heading of the form that tests, connects or creates a repository.
 ui-repositories-form-heading = Test, connect or create a repository
 

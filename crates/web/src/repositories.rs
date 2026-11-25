@@ -9,7 +9,8 @@ use std::collections::BTreeMap;
 use api::{
     ConnectRepositoryDto, ErrorCode, InitRepositoryDto, LocationAlternativeDto, LocationDto,
     LocationOptionDto, LocationTriedDto, LocationsTestDto, MsgArg, PasswordDto, PasswordSourceDto,
-    RepositoryIdDto, RepositoryInitDto, RepositorySettingsDto, TestRepositoryDto, WarningDto,
+    RepositoryIdDto, RepositoryInitDto, RepositoryMaintenanceDto, RepositorySettingsDto,
+    TestRepositoryDto, WarningDto,
 };
 use l10n::{Localizer, MessageId, msg};
 
@@ -549,6 +550,12 @@ pub(crate) fn password_source(
             (msg::UI_PASSWORD_COMMAND, vec![("program", text(program))])
         }
     }
+}
+
+/// The note that says who a configured repository's entry asks to maintain
+/// it (§7.3), in words rather than a color.
+pub(crate) fn maintainer_note(maintenance: RepositoryMaintenanceDto) -> MessageId {
+    todo!()
 }
 
 /// The notes a repository's row carries, one per warning, as the catalog
@@ -1225,6 +1232,26 @@ mod tests {
         ];
         for (source, id, args) in cases {
             assert_eq!(password_source(&source), (id, args), "{source:?}");
+        }
+    }
+
+    #[test]
+    fn a_repositorys_note_says_in_words_who_its_entry_asks_to_maintain_it() {
+        for (maintenance, id) in [
+            (
+                RepositoryMaintenanceDto::Local,
+                msg::UI_REPOSITORY_MAINTAINED_HERE,
+            ),
+            (
+                RepositoryMaintenanceDto::Hub,
+                msg::UI_REPOSITORY_MAINTAINED_BY_HUB,
+            ),
+            (
+                RepositoryMaintenanceDto::None,
+                msg::UI_REPOSITORY_MAINTAINED_BY_NOBODY,
+            ),
+        ] {
+            assert_eq!(maintainer_note(maintenance), id, "{maintenance:?}");
         }
     }
 
