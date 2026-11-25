@@ -387,6 +387,18 @@ async function pageShowsAlert(world: BrowserWorld, tone: string, needle: string)
   const heard = [...needle].map(escapeRegExp).join(ISOLATION);
   const alert = world.page.locator(`.alert.tone-${tone}`).filter({ hasText: new RegExp(heard) });
   await alert.first().waitFor({ state: "visible", timeout: patienceMs() });
+  // Shown means seen: nothing stands over it, such as a menu's panel laid
+  // over the page (decision 160). Its middle is checked, or the middle of
+  // its part inside the window where the window is shorter than it.
+  await alert.first().scrollIntoViewIfNeeded();
+  const covered = await alert.first().evaluate((element) => {
+    const box = element.getBoundingClientRect();
+    const top = Math.max(box.top, 0);
+    const bottom = Math.min(box.bottom, window.innerHeight);
+    const over = document.elementFromPoint(box.left + box.width / 2, (top + bottom) / 2);
+    return over === null || !element.contains(over);
+  });
+  assert.equal(covered, false, "something stands over the alert");
   const found = await alert.first().evaluate((element, live) => {
     const dialog = element.closest("dialog");
     const around = element.parentElement?.closest(live) ?? null;

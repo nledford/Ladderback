@@ -638,4 +638,22 @@ const SNAPSHOTS: Record<string, string> = {
 - button "Demo other pages"
 - button "Demo pages"
 - button "Demo after the menu"`,
+  // From 54rem, as the gallery opens, the bar is one line: the brand, then
+  // its navigation, the group's button closed at its end. The hamburger
+  // isn't drawn there, so a screen reader doesn't find it either.
+  "Navigation bar": `- heading "Navigation bar" [level=2]
+- paragraph:
+  - link "Demo brand":
+    - /url: /
+- navigation "Demo navigation":
+  - list:
+    - listitem:
+      - link "Demo bar link to this page":
+        - /url: /_gallery
+    - listitem:
+      - link "Demo bar link to the plans":
+        - /url: /plans
+    - listitem:
+      - button "Demo more pages"
+- button "Demo after the bar"`,
 };
