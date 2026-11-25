@@ -175,7 +175,9 @@ Feature: The header bar
     And I press Enter
     And I press Tab until focus is on the button "Sign out"
     And I press Enter
-    Then the page shows an error alert containing "did not answer"
+    Then focus is on the error alert containing "did not answer"
+    And the button "Settings" is collapsed
+    And the page shows an error alert containing "did not answer"
     And the assertive region comes to contain "did not answer"
     And the header keeps the height noted
     And the page doesn't scroll sideways
@@ -187,8 +189,10 @@ Feature: The header bar
       | 1280  | 720    | 100  | light colors |
 
   # Below 54rem Sign out is a row of the menu's panel, so the button shows the
-  # panel first; the failed sign-out leaves the panel open, where focus is.
-  Scenario: A sign-out that reaches no daemon from the menu below 54rem is an error alert said assertively, and leaves the menu open and the header's height as it was, at 320 pixels with 200 percent text in dark colors
+  # panel first. The panel stands over the top of the page, where the alert
+  # is, so the failed sign-out hands focus to the alert, which closes the
+  # panel: a sighted reader sees it, a screen reader lands on it (decision 160).
+  Scenario: A sign-out that reaches no daemon from the menu below 54rem is an error alert said assertively, which takes focus and closes the menu, and leaves the header's height as it was, at 320 pixels with 200 percent text in dark colors
     Given a viewport of 320 by 256 pixels
     And the reader sets the text size to 200 percent
     And the browser asks for "dark colors"
@@ -206,11 +210,11 @@ Feature: The header bar
     And the daemon has stopped
     And I press Tab until focus is on the button "Sign out"
     And I press Enter
-    Then the page shows an error alert containing "did not answer"
+    Then focus is on the error alert containing "did not answer"
+    And the button "Menu" is collapsed
+    And the page shows an error alert containing "did not answer"
     And the assertive region comes to contain "did not answer"
     And the header keeps the height noted
-    And the button "Menu" is expanded
-    And focus is on the button "Sign out"
     And the page doesn't scroll sideways
     And no text is clipped
     And the page has no accessibility violations
@@ -273,8 +277,9 @@ Feature: The header bar
       | 320   | 256    | 200  |
 
   # The panel holds the Settings menu's rows as rows of its own, after the
-  # pages', with no button of its own: no menu in a menu.
-  Scenario: The Menu button shows the pages' links, then Settings, Log and Sign out, as rows of a panel, Tab reaches each in order, and Escape hides them and returns focus to the button
+  # pages', with no button of its own: no menu in a menu. Its rows stand in
+  # as many columns as its width holds (decision 160), two here.
+  Scenario: The Menu button shows the pages' links, then Settings, Log and Sign out, as rows of a panel in two columns, Tab reaches each in order, and Escape hides them and returns focus to the button
     Given a viewport of 390 by 844 pixels
     And a daemon with sign-in on and the admin password "demo-admin-pass"
     When I open the address "/repositories"
@@ -290,7 +295,7 @@ Feature: The header bar
     And the link "Ladderback" and the button "Menu" share a line
     And the menu panel is a bordered box with rounded corners, under the brand's line
     And the banner shows no button "Settings"
-    And the menu panel's rows are these, in order, each at least 3 rem tall and as wide as the panel:
+    And the rows of the panel of the button "Menu" are these, in order, in 2 columns, each at least 2.75 rem tall:
       | row             |
       | Operations      |
       | Plans           |
@@ -313,6 +318,98 @@ Feature: The header bar
     And focus is on the button "Menu"
     And the header is under 9 rem tall
     And the page has no accessibility violations
+
+  # The panel stands over the page, as the Settings menu's does, rather than
+  # in its flow (decision 160): opening it moves nothing on the page, and
+  # closing it moves nothing back.
+  Scenario: Opening the menu below 54rem moves nothing on the page: its panel stands over it
+    Given a viewport of 390 by 844 pixels
+    And a daemon with sign-in on and the admin password "demo-admin-pass"
+    When I open the address "/repositories"
+    And I skip to the content
+    And I press Tab until focus is on the textbox "Admin password"
+    And I type "demo-admin-pass"
+    And I press Enter
+    Then focus is on the heading "Repositories"
+    When I note where the main heading stands
+    And I press Shift+Tab until focus is on the button "Menu"
+    And I press Enter
+    Then the button "Menu" is expanded
+    And the main heading stands where it stood
+    And the panel of the button "Menu" covers the main heading
+    When I press Escape
+    Then the main heading stands where it stood
+    And the page has no accessibility violations
+
+  # A panel over the page closes once focus leaves the header's navigation,
+  # so it never covers what focus moved to (2.4.11), as the Settings menu's
+  # does (#1582).
+  Scenario: Tab past the menu's last row leaves it and closes it
+    Given a viewport of 390 by 844 pixels
+    And a daemon with sign-in on and the admin password "demo-admin-pass"
+    When I open the address "/repositories"
+    And I skip to the content
+    And I press Tab until focus is on the textbox "Admin password"
+    And I type "demo-admin-pass"
+    And I press Enter
+    Then focus is on the heading "Repositories"
+    When I press Shift+Tab until focus is on the button "Menu"
+    And I press Enter
+    And I press Tab until focus is on the button "Sign out"
+    And I press Tab
+    Then the button "Menu" is collapsed
+    And the pages' links are hidden
+
+  # On a touch screen, with no Escape, a press outside is how a reader who
+  # changed their mind closes the menu, as the Settings menu's (#1582). The
+  # press lands on the header's band, which takes no focus: focus goes
+  # nowhere, which leaves the menu open, so only the press closes it.
+  Scenario: A press of the pointer outside the open menu closes it
+    Given a viewport of 390 by 844 pixels
+    And a daemon with sign-in on and the admin password "demo-admin-pass"
+    When I open the address "/repositories"
+    And I skip to the content
+    And I press Tab until focus is on the textbox "Admin password"
+    And I type "demo-admin-pass"
+    And I press Enter
+    Then focus is on the heading "Repositories"
+    When I press Shift+Tab until focus is on the button "Menu"
+    And I press Enter
+    Then the button "Menu" is expanded
+    When I press the pointer on the header's band beside the panel of the button "Menu"
+    Then the button "Menu" is collapsed
+    And the pages' links are hidden
+
+  # At 320 pixels with 200 percent text the closed header leaves the page's
+  # heading on the first screen, and the open panel is one column of rows
+  # over the page (decision 160).
+  Scenario: At 320 by 568 pixels with 200 percent text the header leaves the main heading on the first screen, and the open menu is one column over the page
+    Given a viewport of 320 by 568 pixels
+    And the reader sets the text size to 200 percent
+    And a daemon with sign-in on and the admin password "demo-admin-pass"
+    When I open the address "/repositories"
+    And I skip to the content
+    And I press Tab until focus is on the textbox "Admin password"
+    And I type "demo-admin-pass"
+    And I press Enter
+    Then focus is on the heading "Repositories"
+    And the main heading is inside the window
+    When I note where the main heading stands
+    And I press Shift+Tab until focus is on the button "Menu"
+    And I press Enter
+    Then the rows of the panel of the button "Menu" are these, in order, in 1 column, each at least 2.75 rem tall:
+      | row             |
+      | Operations      |
+      | Plans           |
+      | Snapshots       |
+      | Repositories    |
+      | Pending changes |
+      | Settings        |
+      | Log             |
+      | Sign out        |
+    And the main heading stands where it stood
+    And the page doesn't scroll sideways
+    And no text is clipped
 
   # The panel's box and the current page's bar are what tell the reader where
   # the menu is and where they are, so they stay in the reader's colors.
@@ -357,7 +454,7 @@ Feature: The header bar
     Then focus is on the link "Pending changes"
     When the window narrows to 390 pixels
     Then the button "Menu" is expanded
-    And the pages' links are shown below the brand's line, each at least 3 rem tall
+    And the pages' links are shown below the brand's line, each at least 2.75 rem tall
     And the page has no accessibility violations
 
   Scenario: Choosing a page from the menu closes it again

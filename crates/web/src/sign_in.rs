@@ -426,20 +426,40 @@ pub(crate) fn SignOut(
     }
 }
 
+/// The box around a failed sign-out's alert, which takes focus from the
+/// script alone (`tabindex="-1"`, never a stop for Tab).
+const SIGN_OUT_FAILURE_ID: &str = "sign-out-failure";
+
 /// Shows, at the top of the page's main content, that a sign-out reached no
 /// daemon: an error alert, which [`SignOut`] says assertively, since it is
 /// no live region. Not beside Sign out: a line in the header would grow it,
-/// and one laid over the page would hide what is under it.
+/// and one laid over the page would hide what is under it. A new failure
+/// takes focus to the alert, so a screen reader lands on it, and focus
+/// leaving the header closes its menu, whose panel would stand over the
+/// alert below 54rem (decision 160). An alert already shown when this mounts
+/// keeps focus where it is.
 #[component]
 pub(crate) fn SignOutFailure(localizer: Arc<Localizer>, failed: RwSignal<bool>) -> impl IntoView {
     let unreachable = text(&localizer, msg::UI_SESSION_UNREACHABLE);
+    Effect::new(move |was: Option<bool>| {
+        let now = failed.get();
+        if now && was == Some(false) {
+            // After the alert is drawn: the effect can run before it.
+            request_animation_frame(|| {
+                crate::components::focus_element(SIGN_OUT_FAILURE_ID);
+            });
+        }
+        now
+    });
     move || {
         failed.get().then(|| {
             let words = unreachable.clone();
             view! {
-                <Alert localizer=Arc::clone(&localizer) tone=AlertTone::Error>
-                    {words}
-                </Alert>
+                <div id=SIGN_OUT_FAILURE_ID tabindex="-1">
+                    <Alert localizer=Arc::clone(&localizer) tone=AlertTone::Error>
+                        {words}
+                    </Alert>
+                </div>
             }
         })
     }
