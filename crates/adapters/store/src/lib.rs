@@ -100,7 +100,11 @@ impl std::error::Error for OpenError {}
 /// A few connections serve concurrent calls, and readers never wait for a
 /// writer. A write takes the database's write lock first and waits up to five
 /// seconds for it; a call that can't get a connection or the lock in time is
-/// [`StoreError::Unavailable`], never a hang.
+/// [`StoreError::Unavailable`], never a hang. A commit is on the disk before
+/// the call returns (`synchronous = FULL`), so what a caller acts on, a
+/// lease the hub grants or one a machine lets go of, survives an
+/// operating-system crash, and a power cut except on macOS, where it can
+/// still be in the drive's own cache (I1; §16, decision 164).
 #[derive(Debug)]
 pub struct SqliteStore {
     pool: SqlitePool,
@@ -122,7 +126,11 @@ impl SqliteStore {
             .filename(path)
             .create_if_missing(true)
             .journal_mode(SqliteJournalMode::Wal)
-            .synchronous(SqliteSynchronous::Normal)
+            // NORMAL would let a power cut take back a commit the hub has
+            // already sent as a lease. On macOS this still leaves a commit
+            // in the drive's own cache: `fullfsync` would flush it, at a
+            // cost decision 164 weighs.
+            .synchronous(SqliteSynchronous::Full)
             .busy_timeout(BUSY_TIMEOUT)
             .foreign_keys(true);
         let pool = SqlitePoolOptions::new()

@@ -123,6 +123,32 @@ async fn deleting_an_operation_deletes_its_warnings_and_only_its_own() {
     assert_eq!(found.map(|detail| detail.warnings.len()), Some(2));
 }
 
+/// Every connection the store opens commits with `synchronous = FULL`
+/// (`PRAGMA synchronous` is 2), so a commit is on the disk before the call
+/// returns, and a power cut or an operating-system crash can't take back a
+/// commit the caller acted on. The hub sends a lease only once its grant is
+/// stored, and a machine sends a release only once it has let go of the
+/// lease. Under `NORMAL` a grant could roll back after the machine kept it,
+/// and the hub could then grant the same epoch to another machine; a
+/// release could roll back after the hub gave the repository to another
+/// (I1; §7.3, decision 164). The setting is the connection's, not the
+/// file's, so only the store's own connections tell it: the test takes all
+/// of them at once.
+#[tokio::test]
+async fn every_connection_the_store_opens_waits_for_each_commit_to_reach_the_disk() {
+    let (_dir, store) = scratch_store().await;
+    let mut taken = Vec::new();
+    for _ in 0..MAX_CONNECTIONS {
+        let mut conn = store.pool.acquire().await.expect("a connection");
+        let synchronous: i64 = sqlx::query_scalar("PRAGMA synchronous")
+            .fetch_one(&mut *conn)
+            .await
+            .expect("the setting is readable");
+        assert_eq!(synchronous, 2, "the connection commits with FULL");
+        taken.push(conn);
+    }
+}
+
 /// The demo repository, which one maintenance operation at a time holds.
 fn demo_repository() -> RepositoryId {
     RepositoryId::parse(&"ab".repeat(32)).expect("a valid repository ID")
