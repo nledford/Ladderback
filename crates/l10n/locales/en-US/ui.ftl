@@ -3667,7 +3667,7 @@ ui-machines-key = Key fingerprint
 # The header of the column of how long each machine has waited for approval.
 ui-machines-waited = Waiting
 
-# The header of the column of a note on a waiting machine, as when its hostname looks like another machine's.
+# The header of the column of a note on a machine, as when its hostname looks like another machine's, or the hub refused a second computer under its machine ID.
 ui-machines-note = Note
 
 # The header of the column of each waiting machine's Approve button.
@@ -3691,6 +3691,23 @@ ui-machines-fingerprint = { $hostname }'s key fingerprint
 # The note on a waiting machine whose hostname looks like another machine's, as "demo-rnacbook" looks like "demo-macbook".
 # $hostname (text): the other machine's hostname.
 ui-machines-looks-like = Looks like { $hostname }
+
+# The note on a machine under whose machine ID the hub refused another computer that connected, as a copied data folder makes it do (decision 150): how long ago it last did, by the hub's clock, and that the machine's warning above the Machines tab's tables says what to do. Kept short: it stands in a narrow column.
+# $hostname (text): the machine's hostname.
+# $duration (duration): that length of time, such as 1 min 5 s.
+ui-machines-second-computer = The { -hub } refused another computer as { $hostname } { $duration } ago. Its warning above the tables says what to do.
+
+# The same note when the hub's times can't be read, so how long ago is unknown.
+# $hostname (text): the machine's hostname.
+ui-machines-second-computer-untimed = The { -hub } refused another computer as { $hostname }. Its warning above the tables says what to do.
+
+# The warning above the Machines tab's tables, one for each such machine: that it stays until the command has run (only forgetting the computer the hub took clears it), then the two ways back, a new machine ID on the refused computer when it is the copy, or, when it should keep the ID, forgetting at the hub the computer it took. The command follows the colon, on its own line, as it is typed.
+# $hostname (text): the machine's hostname.
+ui-machines-second-computer-ways-back = The { -hub } refused another computer as { $hostname }. This warning stays until the command below has run, whichever way back is taken. If the refused computer is the copy, take a new machine ID on its start page, restart { -brand-name } and pair it again. If it should keep this ID, stop { -brand-name } on the computer the { -hub } took or give that one a new ID, then stop the { -hub }'s daemon and run this at the { -hub }'s terminal:
+
+# Said politely when a read of the list, while the Machines tab is open, brings in a refusal the page didn't show, or when the tab's live updates resume after one came: the warning it brings is no live region, so this tells a screen reader of it.
+# $hostname (text): the machine's hostname.
+ui-machines-second-computer-said = The { -hub } refused another computer as { $hostname }. Its warning is above the tables.
 
 # The button that opens the review of approving a waiting machine, and the review's button that approves it.
 # $hostname (text): the machine's hostname.
