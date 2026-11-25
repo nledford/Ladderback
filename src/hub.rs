@@ -943,6 +943,10 @@ pub(crate) struct Maintained {
     pub(crate) config: Arc<dyn app::ports::ConfigStore>,
     pub(crate) listings: Arc<app::others_snapshots::ListingsDue>,
     pub(crate) leases: Arc<MaintenanceLeases>,
+    /// The backups this machine runs, which each heartbeat names so the
+    /// hub holds other machines' prunes of their repositories (§7.3, layer
+    /// 2; §16, decision 166).
+    pub(crate) running: Arc<app::running::RunningBackups>,
 }
 
 /// This machine's reports to its hub (§7.2): once it paired, a recorder
@@ -975,6 +979,7 @@ pub(crate) async fn reporting(
         config,
         listings,
         leases,
+        running,
     } = maintained;
     let identity = Arc::new(FileIdentity::in_data_dir(&data_dir));
     let mut early = Some(early);
@@ -1020,7 +1025,8 @@ pub(crate) async fn reporting(
     .with_leases(config, leases, store, Arc::clone(listings.seen()))
     .with_listings(listings)
     .with_standing(standing)
-    .with_progress(Arc::clone(&progress));
+    .with_progress(Arc::clone(&progress))
+    .with_running(running);
     if let Some(plans) = plans {
         syncing = syncing.with_plans(plans);
     }
@@ -1371,6 +1377,7 @@ mod tests {
                     Arc::<SqliteStore>::clone(&store),
                     Arc::new(SystemClock),
                 )),
+                running: Arc::default(),
             },
             Arc::default(),
             None,

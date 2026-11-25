@@ -1061,6 +1061,19 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn a_prune_the_hub_holds_is_told_as_the_route_answers_it() {
+        assert_eq!(
+            refusal(
+                &InMemoryConfigStore::new(),
+                &alias(),
+                MaintenanceError::PruneHeld
+            )
+            .await,
+            MaintenanceRefusal::PruneHeld
+        );
+    }
+
+    #[tokio::test]
     async fn every_refusal_of_the_use_case_is_told_as_the_route_answers_it() {
         let cases = [
             (

@@ -232,6 +232,13 @@ impl Background {
         Arc::clone(&self.leases)
     }
 
+    /// The backups this daemon runs, which a paired machine's heartbeat
+    /// names (§16, decision 166).
+    #[cfg(feature = "hub")]
+    pub(crate) fn running(&self) -> Arc<app::running::RunningBackups> {
+        Arc::clone(&self.runner.running)
+    }
+
     /// What a paired machine tells its hub of its plans (§7.2): their
     /// standing in the log this daemon keeps, and their planned runs.
     #[cfg(feature = "hub")]
@@ -766,6 +773,7 @@ async fn state_over(
         full_disk_access,
         machine: standing,
         leases: leases.clone(),
+        running: Arc::new(app::running::RunningBackups::new()),
     });
     // `~/ladderback-restore`. With no home folder, or one that isn't
     // UTF-8, there is none: a restore to a new folder then needs

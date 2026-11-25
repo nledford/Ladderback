@@ -874,6 +874,9 @@ fn run_daemon(
         // into, so both judge a lease by one floor (§7.3, I1).
         #[cfg(feature = "hub")]
         let leases = background.leases();
+        // And the backups it runs, which each heartbeat names (decision 166).
+        #[cfg(feature = "hub")]
+        let running = background.running();
         let scheduled = tokio::spawn(background.run(random));
         // A paired machine's reports to its hub run beside the scheduler
         // and never hold it up (§7.2).
@@ -888,6 +891,7 @@ fn run_daemon(
                     config,
                     listings,
                     leases,
+                    running,
                 },
                 standing,
                 Some(plans),
