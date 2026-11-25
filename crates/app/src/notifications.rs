@@ -195,6 +195,20 @@ impl Notify {
         (reports.len() < matched, reports)
     }
 
+    /// Tells the channels of every rule that sends a machine's `event`,
+    /// `machine.offline` or `machine.online` (§16, decision 168). Returns
+    /// whether a rule sends it, whether or not its channel took it, since
+    /// each notification is tried once (decision 74), and what there is to
+    /// report, as [`Self::tell`] does.
+    pub async fn tell_machine(&self, event: &Event) -> (bool, Vec<Report>) {
+        let config = match self.config.load().await {
+            Ok(config) => config,
+            Err(error) => return (false, vec![Report::ConfigUnavailable(error)]),
+        };
+        let sent = config.notifications().matching(event).next().is_some();
+        (sent, self.deliver(&config, event).await)
+    }
+
     /// Tells the event `news` is, as [`Self::tell`] does.
     async fn told(&self, news: News) -> Vec<Report> {
         let News {

@@ -3,7 +3,9 @@
 //! it runs and sends a heartbeat on it every [`HEARTBEAT_EVERY`], which the
 //! hub answers, so each side learns within a bound that the other is gone.
 //! The hub closes a connection that sent nothing for [`SILENCE_LIMIT`], and
-//! a machine is online while the hub holds its connection.
+//! a machine is online while the hub holds its connection. One offline for
+//! [`OFFLINE_ALERT_AFTER`] is alerted once, and its return after that alert
+//! told once ([`OfflineAlerts`]; decision 168).
 
 use std::collections::BTreeMap;
 
@@ -65,18 +67,28 @@ impl OfflineAlerts {
     /// `machine` went offline at `at`. One already offline stays offline
     /// since when it went.
     pub fn went_offline(&mut self, machine: AgentId, at: Timestamp) {
-        todo!("{machine:?} {at}")
+        self.offline.entry(machine).or_insert(Offline {
+            since: at,
+            alerted: false,
+        });
     }
 
     /// `machine` came online at `at`: its return is told at the next watch
     /// when the hub alerted it offline, and else never.
     pub fn came_online(&mut self, machine: AgentId, at: Timestamp) {
-        todo!("{machine:?} {at}")
+        if self
+            .offline
+            .remove(&machine)
+            .is_some_and(|offline| offline.alerted)
+        {
+            self.back.push((machine, at));
+        }
     }
 
     /// A person removed `machine`: nothing of it is told any more.
     pub fn removed(&mut self, machine: AgentId) {
-        todo!("{machine:?}")
+        self.offline.remove(&machine);
+        self.back.retain(|(back, _)| *back != machine);
     }
 
     /// A watch at `now` of the hub's approved machines, `approved`, each
@@ -86,14 +98,39 @@ impl OfflineAlerts {
     /// machine offline for [`OFFLINE_ALERT_AFTER`] is due once, and noted
     /// as alerted; each that came back after an alert is due once.
     pub fn due(&mut self, approved: &[(AgentId, bool)], now: Timestamp) -> DueAlerts {
-        todo!("{approved:?} {now}")
+        let online: BTreeMap<AgentId, bool> = approved.iter().copied().collect();
+        self.offline
+            .retain(|machine, _| online.get(machine) == Some(&false));
+        self.back
+            .retain(|(machine, _)| online.contains_key(machine));
+        for (machine, is_online) in approved {
+            if !is_online {
+                self.went_offline(*machine, now);
+            }
+        }
+        let mut offline = Vec::new();
+        for (machine, watched) in &mut self.offline {
+            if !watched.alerted && now.duration_since(watched.since) >= OFFLINE_ALERT_AFTER {
+                watched.alerted = true;
+                offline.push((*machine, watched.since));
+            }
+        }
+        DueAlerts {
+            offline,
+            online: std::mem::take(&mut self.back),
+        }
     }
 
     /// No rule took the alert of `machine` offline since `since`: it is
     /// due again at the next watch while the machine stays offline, and a
     /// return the alert would have announced is told to no one.
     pub fn untold(&mut self, machine: AgentId, since: Timestamp) {
-        todo!("{machine:?} {since}")
+        if let Some(watched) = self.offline.get_mut(&machine)
+            && watched.since == since
+        {
+            watched.alerted = false;
+        }
+        self.back.retain(|(back, _)| *back != machine);
     }
 }
 

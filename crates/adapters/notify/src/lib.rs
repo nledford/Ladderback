@@ -255,6 +255,7 @@ fn webhook_body(event: &Event, message: &str) -> serde_json::Value {
         "time": event.at.to_string(),
         "attempt": event.attempt.map(|attempt| attempt.number),
         "attempts": event.attempt.map(|attempt| attempt.of),
+        "machine": event.machine.as_ref().map(|machine| machine.as_str()),
     })
 }
 
@@ -355,7 +356,20 @@ fn default_message(localizer: &Localizer, event: &Event) -> String {
                 ),
             ],
         ),
-        EventKind::MachineOffline | EventKind::MachineOnline => todo!(),
+        EventKind::MachineOffline => (
+            msg::NOTIFY_MACHINE_OFFLINE,
+            vec![
+                ("machine", MsgArg::Text(machine(event))),
+                ("since", instant(event)),
+            ],
+        ),
+        EventKind::MachineOnline => (
+            msg::NOTIFY_MACHINE_ONLINE,
+            vec![
+                ("machine", MsgArg::Text(machine(event))),
+                ("at", instant(event)),
+            ],
+        ),
     };
     localizer.message(id, &args).text().to_owned()
 }
@@ -375,9 +389,26 @@ fn title(localizer: &Localizer, kind: EventKind) -> String {
         EventKind::CheckFailed => msg::NOTIFY_TITLE_CHECK_FAILED,
         EventKind::RestoreFailed => msg::NOTIFY_TITLE_RESTORE_FAILED,
         EventKind::RepoMaintenancePaused => msg::NOTIFY_TITLE_REPO_MAINTENANCE_PAUSED,
-        EventKind::MachineOffline | EventKind::MachineOnline => todo!(),
+        EventKind::MachineOffline => msg::NOTIFY_TITLE_MACHINE_OFFLINE,
+        EventKind::MachineOnline => msg::NOTIFY_TITLE_MACHINE_ONLINE,
     };
     localizer.message(id, &[]).text().to_owned()
+}
+
+/// The hostname of the machine `event` tells of.
+fn machine(event: &Event) -> String {
+    event
+        .machine
+        .as_ref()
+        .map_or_else(String::new, |machine| machine.as_str().to_owned())
+}
+
+/// When `event` happened, read in UTC with the zone's name.
+fn instant(event: &Event) -> MsgArg {
+    MsgArg::Timestamp {
+        utc_ms: event.at.as_millisecond(),
+        zone: None,
+    }
 }
 
 /// `text` as a header's value: as it is when it is printable ASCII, and

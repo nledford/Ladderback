@@ -83,7 +83,7 @@ pub enum Ping {
 
 impl EventKind {
     /// Every event, in the order rules list them.
-    pub const ALL: [Self; 10] = [
+    pub const ALL: [Self; 12] = [
         Self::BackupStarted,
         Self::BackupSucceeded,
         Self::BackupWarning,
@@ -94,6 +94,8 @@ impl EventKind {
         Self::CheckFailed,
         Self::RestoreFailed,
         Self::RepoMaintenancePaused,
+        Self::MachineOffline,
+        Self::MachineOnline,
     ];
 
     /// The event's name, as a rule, a template and a webhook's body say it:
@@ -110,7 +112,8 @@ impl EventKind {
             Self::CheckFailed => "check.failed",
             Self::RestoreFailed => "restore.failed",
             Self::RepoMaintenancePaused => "repo.maintenance_paused",
-            Self::MachineOffline | Self::MachineOnline => todo!(),
+            Self::MachineOffline => "machine.offline",
+            Self::MachineOnline => "machine.online",
         }
     }
 
@@ -126,15 +129,15 @@ impl EventKind {
     pub fn ping(self) -> Ping {
         match self {
             Self::BackupStarted => Ping::Start,
-            Self::BackupSucceeded | Self::BackupWarning => Ping::Success,
+            Self::BackupSucceeded | Self::BackupWarning | Self::MachineOnline => Ping::Success,
             Self::BackupFailed
             | Self::BackupRetrying
             | Self::ForgetFailed
             | Self::PruneFailed
             | Self::CheckFailed
             | Self::RestoreFailed
-            | Self::RepoMaintenancePaused => Ping::Fail,
-            Self::MachineOffline | Self::MachineOnline => todo!(),
+            | Self::RepoMaintenancePaused
+            | Self::MachineOffline => Ping::Fail,
         }
     }
 
@@ -296,13 +299,27 @@ impl Event {
     /// The event of the approved machine `machine` offline since `since`
     /// for [`OFFLINE_ALERT_AFTER`](crate::fleet::OFFLINE_ALERT_AFTER).
     pub fn machine_offline(machine: Hostname, since: Timestamp) -> Self {
-        todo!("{machine:?} {since}")
+        Self::of_machine(EventKind::MachineOffline, machine, since)
     }
 
     /// The event of the machine `machine`, alerted offline, back online
     /// at `at`.
     pub fn machine_online(machine: Hostname, at: Timestamp) -> Self {
-        todo!("{machine:?} {at}")
+        Self::of_machine(EventKind::MachineOnline, machine, at)
+    }
+
+    /// A machine's event: no operation, plan, repository or code.
+    fn of_machine(kind: EventKind, machine: Hostname, at: Timestamp) -> Self {
+        Self {
+            kind,
+            operation: None,
+            plan: None,
+            repository: None,
+            at,
+            codes: Vec::new(),
+            attempt: None,
+            machine: Some(machine),
+        }
     }
 
     fn of(kind: EventKind, subject: Subject<'_>, codes: Vec<&'static str>, at: Timestamp) -> Self {

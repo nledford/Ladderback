@@ -108,6 +108,7 @@ fn a_webhook_is_posted_every_fact_of_the_event() {
             "time": "2027-01-15T08:00:00Z",
             "attempt": null,
             "attempts": null,
+            "machine": null,
         })
     );
 }
