@@ -55,6 +55,7 @@ Ladderback's hard problems are domain rules, not CRUD: who may prune a repositor
 | Outbox | The agent's reports the hub hasn't acknowledged, kept in the agent's database in the order they happened, across restarts, while the hub is down or holds the agent pending. Each has a place that is never given again, under an epoch that names the outbox; a full outbox gives up its oldest start, never an end (§7.2) |
 | Pending agent | An agent that has paired and waits for a person to approve it on the hub. It has no grants, claims, leases or commands, and its reports are kept and not acted on (§7.1; §16, decision 120) |
 | Online | An approved machine whose sync connection its hub holds. The machine holds one connection while it runs and sends a heartbeat on it every 30 seconds; the hub closes a connection that sent nothing for 90 seconds, and the machine is then **offline**. The hub keeps this in memory, so after it restarts every machine is offline until it connects again (§7.2; §16, decision 159) |
+| Offline alert | The notification `machine.offline` the hub sends, once, when an approved machine has been offline for 15 minutes, and `machine.online` when that machine comes back. The hub keeps what it alerted in memory, so after it restarts a machine still offline is alerted 15 minutes after the start (§7.2, §11; §16, decision 168) |
 | Lookalike hostname | A pending agent's hostname whose UTS #39 skeleton is another agent's, as "lаptop" with a Cyrillic а, or "Iaptop" with a capital I, looks like "Laptop". The hub flags it on the pending row, naming the agent it looks like, rather than refusing it (§16, decision 120) |
 | Handover | A statement signed by the old hub key, or by the recovery key, naming the new one, which lets agents that pinned the old key follow a rotation or a recovery (§7.1; §16, decision 120) |
 | Epoch floor | The highest lease a machine has seen for a repository, ordered by recovery number, generation and epoch, kept in its data folder and reported in its heartbeat. A machine refuses a grant below its floor as `epoch-lower` and keeps its own lease until it expires. Nothing lowers the floor but pairing with a hub the machine doesn't pin, or with none pinned, which forgets every floor it kept, and a recovery handover outranks it (§7.3; §16, decisions 137 and 151) |
@@ -162,7 +163,7 @@ Ladderback's hard problems are domain rules, not CRUD: who may prune a repositor
 | `PruneRefused`, `ClaimRejected`, `MaintenancePaused { reason }` | Notifications (`prune.refused`, `repo.claim_rejected`, `repo.maintenance_paused`) |
 | `MaintenanceGranted`, `LeaseExpired` | Maintenance scheduling on the agent |
 | `UnmanagedGroupsFound` | Notifications (`repo.unmanaged_groups`), repository page |
-| `AgentPaired`, `AgentWentOffline` | Dashboard; notifications (`agent.offline`) |
+| `AgentPaired`, `AgentWentOffline` | Dashboard; notifications (`machine.offline` after 15 minutes, `machine.online` after an alert, decision 168) |
 
 The sync outbox (§7.2) persists the events the hub needs.
 
