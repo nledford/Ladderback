@@ -1271,3 +1271,81 @@ async fn a_proposal_read_whose_answer_is_lost_is_daemon_unreachable() {
         Err(ErrorDto::new(ErrorCode::DaemonUnreachable, [], None))
     );
 }
+
+/// A daemon whose folder and find routes answer with what they were asked:
+/// the folder's path names the repository, snapshot, folder, start and
+/// limit; the find's pattern names the repository and the query.
+fn a_daemon_that_echoes_contents_asked() -> Router {
+    use axum::extract::Path;
+    Router::new()
+        .route(
+            "/api/v1/repositories/{alias}/snapshots/{snapshot}/folder",
+            get(
+                |Path((alias, snapshot)): Path<(String, String)>,
+                 Query(query): Query<HashMap<String, String>>| async move {
+                    let asked = format!(
+                        "{alias} {snapshot} {:?} {:?} {:?}",
+                        query.get("path"),
+                        query.get("from"),
+                        query.get("limit")
+                    );
+                    axum::Json(json!({"path": asked, "entries": [], "total": 7}))
+                },
+            ),
+        )
+        .route(
+            "/api/v1/repositories/{alias}/find",
+            get(
+                |Path(alias): Path<String>, Query(query): Query<HashMap<String, String>>| async move {
+                    let asked = format!(
+                        "{alias} {:?} {:?} {:?} {:?}",
+                        query.get("pattern"),
+                        query.get("snapshots"),
+                        query.get("matches"),
+                        query.get("plan")
+                    );
+                    axum::Json(json!({"pattern": asked, "searched": [], "left-out": 2, "matches": []}))
+                },
+            ),
+        )
+}
+
+#[tokio::test]
+async fn a_folder_and_a_find_ask_the_daemon_for_what_they_were_given_and_read_its_answer() {
+    let connect = Connect::new(daemon(a_daemon_that_echoes_contents_asked()).await).unwrap();
+    let snapshot = SnapshotId::parse(&format!("{:064x}", 1)).unwrap();
+    let folder = connect
+        .folder(
+            "nas".to_owned(),
+            snapshot,
+            FolderPath::parse("home/docs").unwrap(),
+            5,
+            20,
+        )
+        .await
+        .unwrap();
+    assert_eq!(
+        folder.path,
+        format!(r#"nas {:064x} Some("home/docs") Some("5") Some("20")"#, 1)
+    );
+    assert_eq!(folder.total, 7);
+    let caps = SearchCaps::clamped(Some(3), Some(9));
+    let found = connect
+        .find(
+            "nas".to_owned(),
+            NamePattern::parse("*.txt").unwrap(),
+            Some(PlanId::parse("home").unwrap()),
+            caps,
+        )
+        .await
+        .unwrap();
+    assert_eq!(
+        found.pattern,
+        format!(
+            r#"nas Some("*.txt") Some("{}") Some("{}") Some("home")"#,
+            caps.snapshots(),
+            caps.matches()
+        )
+    );
+    assert_eq!(found.left_out, 2);
+}

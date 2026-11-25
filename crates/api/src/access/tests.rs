@@ -85,6 +85,11 @@ fn a_permissions_change_never_shows_the_password_in_debug() {
     assert_eq!(change.permissions.backups, PermissionLevelDto::Read);
     let shown = format!("{change:?}");
     assert!(!shown.contains("canary-password"), "{shown}");
+    assert!(
+        shown.starts_with("ChangeApiTokenPermissionsDto { permissions: "),
+        "{shown}"
+    );
+    assert!(shown.ends_with("current_password: [hidden] }"), "{shown}");
 }
 
 #[test]
