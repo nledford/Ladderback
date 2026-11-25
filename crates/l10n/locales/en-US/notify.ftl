@@ -55,6 +55,16 @@ notify-restore-failed = Restoring files from { $repository } failed ({ $code }).
 # $since (instant): since when maintenance is paused, read in UTC; the zone's name follows it.
 notify-repo-maintenance-paused = Maintenance of { $repository } from this { -machine } has been paused since { DATETIME($since) } { DATETIME($since, timeZoneName: "short") }, because it holds no lease on the repository from its { -hub }.
 
+# A machine paired with this hub has been offline for 15 minutes: the hub hasn't heard from it since (technical design §7.2, §11).
+# $machine (text): the hostname the machine paired under, such as laptop.
+# $since (instant): since when the machine is offline, read in UTC; the zone's name follows it.
+notify-machine-offline = The { -machine } { $machine } has been offline since { DATETIME($since) } { DATETIME($since, timeZoneName: "short") }.
+
+# A machine paired with this hub, which the hub told was offline, is online again (technical design §7.2, §11).
+# $machine (text): the hostname the machine paired under, such as laptop.
+# $at (instant): when the machine came back, read in UTC; the zone's name follows it.
+notify-machine-online = The { -machine } { $machine } came back online at { DATETIME($at) } { DATETIME($at, timeZoneName: "short") }.
+
 ### The title of a notification of each event (technical design §11): the
 ### line an ntfy topic shows above the message, on a phone's lock screen too.
 ### A short sentence that names what happened, with nothing of the event's
@@ -89,3 +99,9 @@ notify-title-restore-failed = Restore failed
 
 # The title of a notification that a paired machine's maintenance of a repository has been paused for 14 days for want of a lease from its hub.
 notify-title-repo-maintenance-paused = Maintenance paused
+
+# The title of a notification that a machine paired with this hub has been offline for 15 minutes.
+notify-title-machine-offline = Machine offline
+
+# The title of a notification that a machine paired with this hub, told as offline, is online again.
+notify-title-machine-online = Machine back online

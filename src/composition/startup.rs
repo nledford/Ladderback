@@ -186,6 +186,10 @@ pub(crate) struct Background {
     /// maintenance reads.
     #[cfg(feature = "hub")]
     leases: Arc<app::leases::MaintenanceLeases>,
+    /// What tells the notification rules, for the hub's offline alerts
+    /// (decision 168): none when no notification can be sent.
+    #[cfg(feature = "hub")]
+    notify: Option<Arc<Notify>>,
 }
 
 /// What the release check asks (decision 107): its feed, and the version it
@@ -236,6 +240,34 @@ impl Background {
     #[cfg(feature = "hub")]
     pub(crate) fn leases(&self) -> Arc<app::leases::MaintenanceLeases> {
         Arc::clone(&self.leases)
+    }
+
+    /// The hub's watch of its machines for offline alerts (§11; §16,
+    /// decision 168): every 30 seconds while the daemon runs, saying in the
+    /// log what telling an alert left to report. None when no notification
+    /// can be sent.
+    #[cfg(feature = "hub")]
+    pub(crate) fn watch_machines(
+        &self,
+        pairing: Arc<app::pairing::HubPairing>,
+    ) -> Option<tokio::task::JoinHandle<()>> {
+        let watch = app::pairing::WatchMachines::new(pairing, Arc::clone(self.notify.as_ref()?));
+        let localizer = l10n::Localizer::new(&l10n::PosixEnv::from_process().preferences());
+        Some(tokio::spawn(async move {
+            let every = app::pairing::MACHINES_WATCHED_EVERY
+                .as_secs()
+                .unsigned_abs();
+            let mut ticks = tokio::time::interval(std::time::Duration::from_secs(every));
+            // A hub that slept watches once on waking, not once per tick it
+            // missed.
+            ticks.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
+            loop {
+                ticks.tick().await;
+                for report in watch.watch().await {
+                    log::warn!("{}", report_line(&localizer, &report));
+                }
+            }
+        }))
     }
 
     /// The backups this daemon runs, which a paired machine's heartbeat
@@ -636,13 +668,16 @@ async fn state_over(
     // A build without the hub never pairs, so it holds no leases.
     #[cfg(not(feature = "hub"))]
     let leases = None;
-    notify_over(
+    let notify = notify_over(
         bus.as_ref(),
         Arc::clone(&config),
         Arc::clone(&store),
         leases.clone(),
     )
     .await;
+    // Only a hub watches its machines for offline alerts.
+    #[cfg(not(feature = "hub"))]
+    drop(notify);
     // Nothing has run yet, so an operation the log still shows as running was
     // left by a process that stopped. It ends as failed now, which also lets
     // go of the repository a running maintenance operation held (I7). A log
@@ -948,6 +983,8 @@ async fn state_over(
         listings_due,
         #[cfg(feature = "hub")]
         leases: held,
+        #[cfg(feature = "hub")]
+        notify,
     };
     Ok((
         AppState {
@@ -1072,19 +1109,21 @@ impl http_adapter::SettingsOpener for SystemSettings {
 /// grants (decision 158). A notification that wasn't delivered is said in
 /// the log by its warning code, never with a secret (I4), and an event the
 /// configuration couldn't be read for by the configuration's error code. A
-/// client that can't be built is said once, and nothing is sent.
+/// client that can't be built is said once, and nothing is sent. Returns
+/// what tells the rules, for the hub's offline alerts (decision 168); none
+/// when no client could be built.
 async fn notify_over(
     bus: &dyn EventBus,
     config: Arc<dyn ConfigStore>,
     store: Arc<dyn OperationStore>,
     leases: Option<Arc<app::leases::MaintenanceLeases>>,
-) {
+) -> Option<Arc<Notify>> {
     let localizer = || l10n::Localizer::new(&l10n::PosixEnv::from_process().preferences());
     let notifier = match HttpNotifier::new(localizer(), DELIVERY_TIMEOUT) {
         Ok(notifier) => notifier,
         Err(error) => {
             log::warn!("no notification is sent: {error}");
-            return;
+            return None;
         }
     };
     let notify = Arc::new(
@@ -1116,13 +1155,14 @@ async fn notify_over(
     // Subscribed before any run can start, so no news is missed.
     let news = bus.subscribe().await;
     let localizer = localizer();
+    let told = Arc::clone(&notify);
     tokio::spawn(async move {
-        notify
-            .run(news, |report| {
-                log::warn!("{}", report_line(&localizer, &report))
-            })
-            .await;
+        told.run(news, |report| {
+            log::warn!("{}", report_line(&localizer, &report))
+        })
+        .await;
     });
+    Some(notify)
 }
 
 /// What telling an event left to report, as the log says it, by its code: a
