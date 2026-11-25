@@ -203,6 +203,12 @@ impl Background {
         self.runner.leases.clone()
     }
 
+    /// The runner whose backups run, for a test of what the daemon wires.
+    #[cfg(all(test, feature = "hub"))]
+    pub(super) fn runner(&self) -> &PlanRunner {
+        &self.runner
+    }
+
     /// What the daemon's orderly stop freezes: every run of an operation,
     /// whoever started it (decision 92).
     pub(crate) fn runs(&self) -> runs::Runs {
