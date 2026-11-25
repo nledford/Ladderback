@@ -58,7 +58,10 @@ pub use plans::{
     LastRun, LastRunOutcome, MAX_PLANS_REPORTED, PlansReport, ReportedPlan, ReportedProgress,
     plans_ack_kind, plans_kind, progress_kind, progress_shown,
 };
-pub use presence::{HEARTBEAT_EVERY, SILENCE_LIMIT, heartbeat_ack_kind, heartbeat_kind};
+pub use presence::{
+    DueAlerts, HEARTBEAT_EVERY, OFFLINE_ALERT_AFTER, OfflineAlerts, SILENCE_LIMIT,
+    heartbeat_ack_kind, heartbeat_kind,
+};
 pub use registry::{
     AgentRecord, AgentStatus, ApprovalRefused, HostnameKey, HostnameSkeleton, HubModeOffRefused,
     LONGEST_TOKEN_LIFE, ListedAgent, Lookalike, PENDING_LIFE, PENDING_LIMIT, PairRefusal,

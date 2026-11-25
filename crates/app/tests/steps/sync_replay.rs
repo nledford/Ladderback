@@ -218,7 +218,7 @@ async fn hub_back(agent: &mut Agent) {
 }
 
 #[given("the agent keeps syncing with its hub while it runs")]
-async fn keeps_syncing(agent: &mut Agent) {
+pub(super) async fn keeps_syncing(agent: &mut Agent) {
     let machine = agent.pairing.first.take().expect("the first agent");
     let side = first(agent);
     let clock = Arc::new(FakeClock::new(

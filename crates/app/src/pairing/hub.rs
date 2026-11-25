@@ -31,6 +31,7 @@ mod fleet;
 mod lease_proof;
 mod live;
 mod logged;
+mod offline;
 mod presence;
 #[cfg(test)]
 mod tests;
@@ -41,6 +42,7 @@ pub use dialog::{
 pub use fleet::Machine;
 pub use lease_proof::{proven_floors, signed_grants};
 pub use live::{progress_dto, time_of};
+pub use offline::{MACHINES_WATCHED_EVERY, WatchMachines};
 pub use presence::CloseConnection;
 
 /// The hub's side of pairing: its keys, its tokens, and its answers to an

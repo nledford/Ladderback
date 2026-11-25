@@ -157,6 +157,7 @@ fn deliver_in_copy(expect: &str) {
                     at: Timestamp::UNIX_EPOCH,
                     codes: vec!["operation-failed"],
                     attempt: None,
+                    machine: None,
                 },
                 message: Message::Default,
                 locale: None,

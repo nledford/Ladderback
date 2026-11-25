@@ -23,6 +23,7 @@ use jiff::Timestamp;
 pub use template::{MAX_TEMPLATE_BYTES, Template};
 
 use crate::execution::{FailureReason, OperationKind, OperationStatus, Target, WarningKind};
+use crate::fleet::Hostname;
 use crate::planning::{InvalidValue, ValueKind, Violation, is_relative_program};
 use crate::secrets::SecretRef;
 use crate::{OperationId, PlanId, RepositoryAlias};
@@ -55,6 +56,12 @@ pub enum EventKind {
     /// want of a lease from its hub for 14 days (§7.3): told once per
     /// pause.
     RepoMaintenancePaused,
+    /// An approved machine has been offline for 15 minutes, as its hub
+    /// sees it (§7.2; §16, decision 168): told once per time it goes
+    /// offline.
+    MachineOffline,
+    /// A machine the hub alerted offline came back: told once per alert.
+    MachineOnline,
 }
 
 /// How an operation ended, as far as a notification tells it.
@@ -103,6 +110,7 @@ impl EventKind {
             Self::CheckFailed => "check.failed",
             Self::RestoreFailed => "restore.failed",
             Self::RepoMaintenancePaused => "repo.maintenance_paused",
+            Self::MachineOffline | Self::MachineOnline => todo!(),
         }
     }
 
@@ -126,6 +134,7 @@ impl EventKind {
             | Self::CheckFailed
             | Self::RestoreFailed
             | Self::RepoMaintenancePaused => Ping::Fail,
+            Self::MachineOffline | Self::MachineOnline => todo!(),
         }
     }
 
@@ -176,6 +185,8 @@ pub struct Event {
     pub codes: Vec<&'static str>,
     /// Which retry a `backup.retrying` tells of.
     pub attempt: Option<Attempt>,
+    /// The machine, by its hostname on the hub, of a machine's event.
+    pub machine: Option<Hostname>,
 }
 
 /// Which of a plan's retries a `backup.retrying` tells of: the `number`th
@@ -278,7 +289,20 @@ impl Event {
             at: since,
             codes: Vec::new(),
             attempt: None,
+            machine: None,
         }
+    }
+
+    /// The event of the approved machine `machine` offline since `since`
+    /// for [`OFFLINE_ALERT_AFTER`](crate::fleet::OFFLINE_ALERT_AFTER).
+    pub fn machine_offline(machine: Hostname, since: Timestamp) -> Self {
+        todo!("{machine:?} {since}")
+    }
+
+    /// The event of the machine `machine`, alerted offline, back online
+    /// at `at`.
+    pub fn machine_online(machine: Hostname, at: Timestamp) -> Self {
+        todo!("{machine:?} {at}")
     }
 
     fn of(kind: EventKind, subject: Subject<'_>, codes: Vec<&'static str>, at: Timestamp) -> Self {
@@ -290,6 +314,7 @@ impl Event {
             at,
             codes,
             attempt: None,
+            machine: None,
         }
     }
 }

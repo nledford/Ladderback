@@ -355,6 +355,7 @@ fn default_message(localizer: &Localizer, event: &Event) -> String {
                 ),
             ],
         ),
+        EventKind::MachineOffline | EventKind::MachineOnline => todo!(),
     };
     localizer.message(id, &args).text().to_owned()
 }
@@ -374,6 +375,7 @@ fn title(localizer: &Localizer, kind: EventKind) -> String {
         EventKind::CheckFailed => msg::NOTIFY_TITLE_CHECK_FAILED,
         EventKind::RestoreFailed => msg::NOTIFY_TITLE_RESTORE_FAILED,
         EventKind::RepoMaintenancePaused => msg::NOTIFY_TITLE_REPO_MAINTENANCE_PAUSED,
+        EventKind::MachineOffline | EventKind::MachineOnline => todo!(),
     };
     localizer.message(id, &[]).text().to_owned()
 }
