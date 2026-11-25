@@ -824,6 +824,14 @@ fn a_replaced_repository_codes_as_repository_replaced() {
 }
 
 #[test]
+fn a_prune_whose_lease_lapsed_codes_as_maintenance_lease_lapsed() {
+    assert_eq!(
+        FailureReason::LeaseLapsed.code(),
+        "maintenance-lease-lapsed"
+    );
+}
+
+#[test]
 fn a_refusal_of_the_credentials_codes_as_credentials_refused() {
     for half in [None, Some(RepositoryHalf::Cold), Some(RepositoryHalf::Hot)] {
         assert_eq!(
