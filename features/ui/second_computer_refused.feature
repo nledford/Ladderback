@@ -16,7 +16,7 @@ Feature: A machine whose ID the hub refused for a second computer says so on the
     Given a hub with sign-in off
     And a machine named "demo-laptop" <is listed> on the hub
     And the hub refused a second computer as "demo-laptop" 5 minutes ago
-    When I open the address "/settings#agents"
+    When I open the address "/settings#machines"
     And I skip to the content
     And I press Tab until focus is on the button "<button> demo-laptop"
     Then the row of "demo-laptop" in the table "<table>" says "The hub refused another computer as demo-laptop 5 min 0 s ago. Its warning above the tables says what to do."
@@ -35,7 +35,7 @@ Feature: A machine whose ID the hub refused for a second computer says so on the
     And a machine named "demo-desktop" waits for approval on the hub
     And the hub refused a second computer as "demo-laptop" 5 minutes ago
     And the hub refused a second computer as "demo-desktop" 2 minutes ago
-    When I open the address "/settings#agents"
+    When I open the address "/settings#machines"
     Then the row of "demo-desktop" in the table "Waiting for approval" says "The hub refused another computer as demo-desktop 2 min 0 s ago. Its warning above the tables says what to do."
     And the row of "demo-laptop" in the table "Approved machines" says "The hub refused another computer as demo-laptop 5 min 0 s ago. Its warning above the tables says what to do."
     And the warnings above the tables give the commands for "demo-desktop", then "demo-laptop"
@@ -45,7 +45,7 @@ Feature: A machine whose ID the hub refused for a second computer says so on the
     And a machine named "demo-laptop" is approved on the hub
     And a machine named "demo-desktop" is approved on the hub
     And the hub refused a second computer as "demo-laptop" 5 minutes ago
-    When I open the address "/settings#agents"
+    When I open the address "/settings#machines"
     Then the row of "demo-laptop" in the table "Approved machines" says "The hub refused another computer as demo-laptop 5 min 0 s ago."
     And the row of "demo-desktop" in the table "Approved machines" says nothing of a refused computer
     And the page shows no warning alert containing "The hub refused another computer as demo-desktop"
@@ -55,7 +55,7 @@ Feature: A machine whose ID the hub refused for a second computer says so on the
     And a machine named "demo-laptop" is approved on the hub
     And a machine named "demo-desktop" is approved on the hub
     And the hub refused a second computer as "demo-laptop" 5 minutes ago
-    When I open the address "/settings#agents"
+    When I open the address "/settings#machines"
     Then the page shows a warning alert containing "The hub refused another computer as demo-laptop."
     And the polite region never says "The hub refused another computer as demo-laptop. Its warning is above the tables."
     When the hub refused a second computer as "demo-desktop" 2 minutes ago
@@ -68,7 +68,7 @@ Feature: A machine whose ID the hub refused for a second computer says so on the
     And a machine named "demo-laptop" is approved on the hub
     And a machine named "demo-desktop" is approved on the hub
     And the hub refused a second computer as "demo-laptop" 5 minutes ago
-    When I open the address "/settings#agents"
+    When I open the address "/settings#machines"
     And I skip to the content
     And I press Tab until focus is on the button "Pause live updates"
     And I press Enter

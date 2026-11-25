@@ -84,7 +84,7 @@ fn told_removed(agent: &mut Agent) {
     let ConnectFailure::Refused(refused) = failure else {
         panic!("the agent wasn't told it was removed: {failure:?}");
     };
-    assert_eq!(refused.code.as_str(), "agent-removed");
+    assert_eq!(refused.code.as_str(), "machine-removed");
 }
 
 #[when("the agent pairs again with a new token")]

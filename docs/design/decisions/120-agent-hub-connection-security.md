@@ -914,3 +914,5 @@ These need leases, owners, the prune guard and commands, which M9 builds.
     When the hub sends the same command again after a disconnect
     Then the agent runs it once and answers with the first result
 ```
+
+**Amended by [decision 163](163-the-wire-and-stored-names-say-machine.md)** (2026-11-25, #1220): the frames' `agent_*` fields are `machine_*` (`machine_id`, `machine_nonce`, `machine_protocols`, `machine_version`), the signed labels `agent-proof` and `agent-signed` are `machine-proof` and `machine-signed`, the refusals `agent-key-mismatch`, `agent-removed` and `agent-key-removed` are `machine-key-mismatch`, `machine-removed` and `machine-key-removed`, and the key file `agent-key` is `machine-key`.

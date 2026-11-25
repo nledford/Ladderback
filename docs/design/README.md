@@ -124,7 +124,7 @@ Backrest wraps the `restic` CLI. Ladderback keeps its user-facing model (repos, 
 | Engine | Shells out to `restic` | Links `rustic_core`, runs each operation in a child process (§4.1) |
 | Forget with shared repos | Per-plan `restic forget` after each backup takes an exclusive lock and blocks other hosts' backups ([#244](https://github.com/garethgeorge/backrest/issues/244)) | One maintenance owner per repo; backups never wait for a lock (§7.3) |
 | Missed runs on laptops | Skipped unless the schedule uses the last-run clock ([#372](https://github.com/garethgeorge/backrest/issues/372)) | Catch-up by default (§5) |
-| Plan ↔ snapshot link | Tags `plan:<id>` and `created-by:<instance>` | Same idea: tags `ladderback-plan:<id>` and `ladderback-agent:<id>` (§7.3) |
+| Plan ↔ snapshot link | Tags `plan:<id>` and `created-by:<instance>` | Same idea: tags `ladderback-plan:<id>` and `ladderback-machine:<id>` (§7.3) |
 | Multi-host | Peer sync; shared repos are pushed to clients **including passwords and backend keys** | Hub and agents; the hub keeps its own secrets and agents never send theirs (§10.2) |
 | Secrets in config | Plaintext in `config.json`; `${VAR}` in repo URI, env and flags; a missing variable becomes empty | Command, keyring, file, env or inline sources; a missing reference fails the job (§10.2) |
 | Retention | Counts only | Full `KeepOptions`, including `keep-within-*` |

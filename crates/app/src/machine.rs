@@ -46,7 +46,7 @@ pub enum Standing {
     /// it refuses it. Its hub taking it again sets it back to [`Self::Same`].
     RefusedByHub,
     /// The hub this machine paired with removed it, or rejected it while it
-    /// waited for approval, signed (`agent-removed`): it never takes the
+    /// waited for approval, signed (`machine-removed`): it never takes the
     /// machine's ID again. Backups run, and the person may take a new
     /// machine ID and pair again under it. It maintains as before, as a
     /// machine its hub refused does: its hub grants it nothing.

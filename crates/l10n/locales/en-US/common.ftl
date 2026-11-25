@@ -123,14 +123,14 @@ error-engine-start-timed-out = The engine did not start the operation in time, s
 error-engine-exit-timed-out = The engine stopped reporting, so { -brand-name } ended its process. Check the repository, then run the operation again.
 
 # A before-hook whose `on-failure` is `error` failed, so the operation stopped before it began. What the hook wrote is never shown.
-# $level (text): whose run-before list holds the hook: agent (this machine's), repository or plan. The sender leaves it out for a failure an earlier version kept, and the program then supplies the text none.
+# $level (text): whose run-before list holds the hook: machine (this machine's), repository or plan. The sender leaves it out for a failure an earlier version kept, and the program then supplies the text none.
 # $position (text): the hook's place in that list, counted from 1. Left out with $level.
 # $ended (text): how it ended: exit, signal, timeout or not-started. The sender leaves it out for a failure an earlier version kept without it, and the program then supplies the text none.
 # $exit_code (text): its exit status, for an exit; otherwise none.
 # `run-before` and `on-failure` are configuration keys and `warn` a value of one, typed as they are: keep them string literals.
 error-hook-failed =
     { $level ->
-        [agent] { $position ->
+        [machine] { $position ->
             [none] A hook of this { -machine }'s { "run-before" } list failed, so { -brand-name } stopped the operation before it began.
            *[other] Hook { $position } of this { -machine }'s { "run-before" } list failed, so { -brand-name } stopped the operation before it began.
         }
@@ -599,14 +599,14 @@ error-token-unsupported = This token was made by a newer { -brand-name } than th
 error-hostname-taken = The { -hub } already has a { -machine } named { $hostname } (last seen { $last_seen }). If this is a different { -machine }, pair under another name: add { "--hostname" }. If it is the same { -machine } and its data folder was lost, don't rename it: remove the old { -machine } on the { -hub }, then pair with this same token.
 
 # The hub has another machine under this machine's ID.
-error-agent-key-mismatch = The { -hub } has another { -machine } under this { -machine }'s ID. Don't pair again; ask whoever runs the { -hub }.
+error-machine-key-mismatch = The { -hub } has another { -machine } under this { -machine }'s ID. Don't pair again; ask whoever runs the { -hub }.
 
 # The hub removed, or someone rejected, a machine that held this machine's
 # key, and refuses that key under any machine ID. A machine that takes a new
 # machine ID after its hub removed it makes a new key too, so this one holds
 # a removed machine's key, as a copy of its data folder would. The token
 # stays good.
-error-agent-key-removed = The { -hub } removed a { -machine } that held this { -machine }'s key, and refuses that key under any machine ID: this data folder may have been copied from that { -machine }. Ask whoever runs the { -hub } before you pair from it again.
+error-machine-key-removed = The { -hub } removed a { -machine } that held this { -machine }'s key, and refuses that key under any machine ID: this data folder may have been copied from that { -machine }. Ask whoever runs the { -hub } before you pair from it again.
 
 # The hub's key isn't the one this machine trusts or its token names. Nothing
 # of the token was sent.
@@ -631,7 +631,7 @@ error-pending-limit = The { -hub } already has 20 { -machine(form: "other") } wa
 # whose computer's identifier couldn't be read is never offered one; the
 # daemon's log says why. A paired machine maintains only under its hub's
 # lease, so it runs none.
-error-agent-removed = The { -hub } removed this { -machine }, or someone rejected it while it waited for approval, and no longer accepts its ID. It keeps backing up and runs no maintenance. To report to the { -hub } again, take a new machine ID from the start page, restart { -brand-name } and pair it again with a new token. If the start page offers no new machine ID, this computer's identifier couldn't be read: { -brand-name }'s log says why.
+error-machine-removed = The { -hub } removed this { -machine }, or someone rejected it while it waited for approval, and no longer accepts its ID. It keeps backing up and runs no maintenance. To report to the { -hub } again, take a new machine ID from the start page, restart { -brand-name } and pair it again with a new token. If the start page offers no new machine ID, this computer's identifier couldn't be read: { -brand-name }'s log says why.
 
 # The hub closed the connection before proving itself: it can't offer the
 # kind of connection this machine's token names, as when a proxy ends TLS in
@@ -721,10 +721,10 @@ error-pairing-token-unknown = That pairing token isn't waiting any more: it was 
 
 # No machine is registered under the agent ID and the key asked for, to
 # approve or to remove.
-error-agent-unknown = No { -machine } is registered under that ID with that key: it never paired, it was removed, rejected or dropped, or it holds another key now. Read the list again and compare the key with the one on the { -machine }'s own screen.
+error-machine-unknown = No { -machine } is registered under that ID with that key: it never paired, it was removed, rejected or dropped, or it holds another key now. Read the list again and compare the key with the one on the { -machine }'s own screen.
 
 # The machine asked to be approved is approved already.
-error-agent-approved-already = That { -machine } is approved already.
+error-machine-approved-already = That { -machine } is approved already.
 
 # The hub couldn't read or keep its key or its tokens.
 error-hub-unavailable = The { -hub } couldn't read or keep its key or its pairing tokens. Its log says why.

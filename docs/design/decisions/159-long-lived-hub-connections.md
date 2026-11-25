@@ -101,3 +101,5 @@ the owner prune guard (#573).
   switches stand in for wakeups. The machine's extra context switches,
   about 7 a second, are mostly its 2-second look at what is due; a longer
   look while idle is a later change if they matter.
+
+**Amended by [decision 163](163-the-wire-and-stored-names-say-machine.md)** (2026-11-25, #1220): the events `AgentOnline` and `AgentOffline` are `machine-online` and `machine-offline`, and the frames' `agent_*` fields are `machine_*`.

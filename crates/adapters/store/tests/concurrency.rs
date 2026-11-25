@@ -301,7 +301,7 @@ async fn begin_a_write_of_a_foreign_row(raw: &mut SqliteConnection, n: u128) {
         .await
         .expect("the write lock is taken");
     sqlx::query(
-        r#"INSERT INTO operations (id, agent_id, kind, "trigger", status, queued_at)
+        r#"INSERT INTO operations (id, machine_id, kind, "trigger", status, queued_at)
            VALUES (?1, 'local', 'backup', 'manual', 'queued', 1800000000000)"#,
     )
     .bind(id_text(n))

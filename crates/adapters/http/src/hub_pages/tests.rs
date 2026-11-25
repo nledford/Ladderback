@@ -660,7 +660,7 @@ fn approve(
     confirmation: &str,
 ) -> Request {
     let body = serde_json::json!({ "key": waiting.key.to_hex(), "confirmation": confirmation });
-    let path = api::agent_approval_path(&waiting.agent_id.as_uuid().to_string());
+    let path = api::machine_approval_path(&waiting.agent_id.as_uuid().to_string());
     build(Method::POST, &path, peer, headers, &body.to_string())
 }
 
@@ -687,12 +687,18 @@ async fn the_page_lists_each_agent_with_its_key_its_wait_its_lookalike_and_a_sec
             .unwrap();
     }
     let response = daemon
-        .send(build(Method::GET, api::HUB_AGENTS_PATH, LOOPBACK, &[], ""))
+        .send(build(
+            Method::GET,
+            api::HUB_MACHINES_PATH,
+            LOOPBACK,
+            &[],
+            "",
+        ))
         .await;
     assert_eq!(response.status(), StatusCode::OK);
     let listed: api::HubAgentsDto = serde_json::from_value(json(response).await).unwrap();
     let expected = |record: &AgentRecord, status, looks_like| api::HubAgentDto {
-        agent_id: record.agent_id.as_uuid().to_string(),
+        machine_id: record.agent_id.as_uuid().to_string(),
         hostname: record.hostname.as_str().to_owned(),
         key: record.key.to_hex(),
         fingerprint: Fingerprint::of_key(&record.key).to_string(),
@@ -706,14 +712,14 @@ async fn the_page_lists_each_agent_with_its_key_its_wait_its_lookalike_and_a_sec
         &waiting,
         api::AgentStatusDto::Pending,
         Some(api::LookalikeDto {
-            agent_id: approved.agent_id.as_uuid().to_string(),
+            machine_id: approved.agent_id.as_uuid().to_string(),
             hostname: "macbook".to_owned(),
             last_seen: earlier.to_string(),
         }),
     );
     flagged.second_machine_at = Some(earlier.to_string());
     assert_eq!(
-        listed.agents,
+        listed.machines,
         [
             expected(&approved, api::AgentStatusDto::Approved, None),
             flagged,
@@ -758,7 +764,7 @@ async fn the_page_shows_each_approved_machine_with_its_latest_operations() {
     let response = daemon
         .send(build(
             Method::GET,
-            api::HUB_MACHINES_PATH,
+            api::HUB_DASHBOARD_PATH,
             LOOPBACK,
             &[],
             "",
@@ -770,7 +776,7 @@ async fn the_page_shows_each_approved_machine_with_its_latest_operations() {
     assert_eq!(
         shown.machines,
         [api::HubMachineDto {
-            agent_id: approved.agent_id.as_uuid().to_string(),
+            machine_id: approved.agent_id.as_uuid().to_string(),
             hostname: "macbook".to_owned(),
             last_seen: approved.last_seen.to_string(),
             online: false,
@@ -827,7 +833,7 @@ async fn on_loopback_the_fingerprint_approves_the_agent_under_the_key_compared_o
         .await;
     assert_eq!(
         refusal(again).await,
-        (StatusCode::CONFLICT, "agent-approved-already".to_owned())
+        (StatusCode::CONFLICT, "machine-approved-already".to_owned())
     );
 }
 
@@ -851,17 +857,17 @@ async fn an_agent_or_key_that_never_paired_is_unknown_and_approves_nothing() {
                     .await
             )
             .await,
-            (StatusCode::NOT_FOUND, "agent-unknown".to_owned())
+            (StatusCode::NOT_FOUND, "machine-unknown".to_owned())
         );
     }
     let body = serde_json::json!({ "key": waiting.key.to_hex(), "confirmation": fingerprint });
-    let not_an_id = api::agent_approval_path("laptop");
+    let not_an_id = api::machine_approval_path("laptop");
     let not_an_id = build(Method::POST, &not_an_id, LOOPBACK, &[], &body.to_string());
     assert_eq!(
         refusal(daemon.send(not_an_id).await).await,
-        (StatusCode::NOT_FOUND, "agent-unknown".to_owned())
+        (StatusCode::NOT_FOUND, "machine-unknown".to_owned())
     );
-    let path = api::agent_approval_path(&waiting.agent_id.as_uuid().to_string());
+    let path = api::machine_approval_path(&waiting.agent_id.as_uuid().to_string());
     let not_a_key = serde_json::json!({ "key": "laptop", "confirmation": fingerprint }).to_string();
     let not_a_key = build(Method::POST, &path, LOOPBACK, &[], &not_a_key);
     assert_eq!(
@@ -912,7 +918,7 @@ async fn with_sign_in_on_only_a_session_lists_or_approves_and_confirms_with_the_
     // The hub key is made while no agent is registered, as on a real hub.
     daemon.pairing.as_ref().unwrap().hub_key().await.unwrap();
     daemon.registry.hold(waiting.clone());
-    for path in [api::HUB_AGENTS_PATH, api::HUB_MACHINES_PATH] {
+    for path in [api::HUB_MACHINES_PATH, api::HUB_DASHBOARD_PATH] {
         let list = build(Method::GET, path, LOOPBACK, &[], "");
         assert_eq!(daemon.send(list).await.status(), StatusCode::UNAUTHORIZED);
     }
@@ -935,8 +941,8 @@ async fn with_sign_in_on_only_a_session_lists_or_approves_and_confirms_with_the_
         .unwrap();
     let bearer = [("authorization", format!("Bearer {}", created.text.expose()))];
     for request in [
-        build(Method::GET, api::HUB_AGENTS_PATH, LOOPBACK, &bearer, ""),
         build(Method::GET, api::HUB_MACHINES_PATH, LOOPBACK, &bearer, ""),
+        build(Method::GET, api::HUB_DASHBOARD_PATH, LOOPBACK, &bearer, ""),
         approve(LOOPBACK, &bearer, &waiting, PASSWORD),
     ] {
         assert_eq!(
@@ -961,7 +967,7 @@ async fn with_sign_in_on_only_a_session_lists_or_approves_and_confirms_with_the_
 
 fn remove(peer: IpAddr, headers: &[(&str, String)], agent: &AgentRecord) -> Request {
     let body = serde_json::json!({ "key": agent.key.to_hex() });
-    let path = api::agent_removal_path(&agent.agent_id.as_uuid().to_string());
+    let path = api::machine_removal_path(&agent.agent_id.as_uuid().to_string());
     build(Method::POST, &path, peer, headers, &body.to_string())
 }
 
@@ -978,7 +984,7 @@ async fn on_loopback_a_waiting_or_approved_agent_is_removed_under_its_key_once()
     };
     assert_eq!(
         refusal(daemon.send(remove(LOOPBACK, &[], &rekeyed)).await).await,
-        (StatusCode::NOT_FOUND, "agent-unknown".to_owned()),
+        (StatusCode::NOT_FOUND, "machine-unknown".to_owned()),
         "another key removes nothing"
     );
     for removed in [&approved, &waiting] {
@@ -990,17 +996,17 @@ async fn on_loopback_a_waiting_or_approved_agent_is_removed_under_its_key_once()
         assert_eq!(tombstone.map(|kept| kept.key), Some(removed.key));
         assert_eq!(
             refusal(daemon.send(remove(LOOPBACK, &[], removed)).await).await,
-            (StatusCode::NOT_FOUND, "agent-unknown".to_owned())
+            (StatusCode::NOT_FOUND, "machine-unknown".to_owned())
         );
     }
-    let not_an_id = api::agent_removal_path("laptop");
+    let not_an_id = api::machine_removal_path("laptop");
     let body = serde_json::json!({ "key": waiting.key.to_hex() }).to_string();
     let not_an_id = build(Method::POST, &not_an_id, LOOPBACK, &[], &body);
     assert_eq!(
         refusal(daemon.send(not_an_id).await).await,
-        (StatusCode::NOT_FOUND, "agent-unknown".to_owned())
+        (StatusCode::NOT_FOUND, "machine-unknown".to_owned())
     );
-    let path = api::agent_removal_path(&waiting.agent_id.as_uuid().to_string());
+    let path = api::machine_removal_path(&waiting.agent_id.as_uuid().to_string());
     for body in [
         r#"{"key":"laptop"}"#,
         r#"{"key":"aa","confirmation":"x"}"#,

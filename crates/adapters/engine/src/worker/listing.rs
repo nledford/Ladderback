@@ -6,7 +6,7 @@
 use std::collections::BTreeSet;
 use std::io;
 
-use domain::execution::plan_tags::{AGENT_TAG_PREFIX, PLAN_TAG_PREFIX};
+use domain::execution::plan_tags::{MACHINE_TAG_PREFIX, PLAN_TAG_PREFIX};
 
 use rustic_core::repofile::SnapshotFile;
 
@@ -73,7 +73,7 @@ pub(crate) fn snapshot_result(snapshot: &SnapshotFile) -> Result<SnapshotResult,
     // tags it keeps more than two different ones, so two of one kind that
     // disagree are among them.
     let names_owner =
-        |tag: &&String| tag.starts_with(PLAN_TAG_PREFIX) || tag.starts_with(AGENT_TAG_PREFIX);
+        |tag: &&String| tag.starts_with(PLAN_TAG_PREFIX) || tag.starts_with(MACHINE_TAG_PREFIX);
     let mut seen = BTreeSet::new();
     let owners = snapshot
         .tags
@@ -225,18 +225,18 @@ mod tests {
     #[test]
     fn the_tags_that_name_an_owner_survive_a_cut_however_many_tags_come_first() {
         let mut tags = numbered("a", api::MAX_SNAPSHOT_TAGS + 10);
-        tags.push("ladderback-agent:0000".to_owned());
+        tags.push("ladderback-machine:0000".to_owned());
         tags.push("ladderback-plan:home".to_owned());
         let result = snapshot_result(&file(&[], &tags)).expect("converts");
         assert_eq!(result.tags.len(), api::MAX_SNAPSHOT_TAGS);
         assert!(result.tags_truncated);
-        assert!(result.tags.contains(&"ladderback-agent:0000".to_owned()));
+        assert!(result.tags.contains(&"ladderback-machine:0000".to_owned()));
         assert!(result.tags.contains(&"ladderback-plan:home".to_owned()));
     }
 
     #[test]
     fn owner_tags_that_disagree_survive_a_cut_however_many_ladderback_tags_come_first() {
-        let agent = "ladderback-agent:0000".to_owned();
+        let agent = "ladderback-machine:0000".to_owned();
         let home = "ladderback-plan:home".to_owned();
         let photos = "ladderback-plan:photos".to_owned();
         // 63 other `ladderback-` tags before the disagreeing plan tag.

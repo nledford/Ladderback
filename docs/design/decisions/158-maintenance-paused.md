@@ -21,3 +21,5 @@
 - A pause is told once. A person who doesn't act on the alert hears nothing more until the pause ends and a new one starts.
 - Scheduled maintenance doesn't exist yet (#974): today the pause stops runs asked for by hand, which answer `maintenance-no-lease` while the page warns.
 - The page reads the pause when the repository list is read; a pause that starts while the page is open shows on the next read.
+
+**Amended by [decision 163](163-the-wire-and-stored-names-say-machine.md)** (2026-11-25, #1220): the table `agent_maintenance_paused` is `machine_maintenance_paused` (migration `0029_machine_names.sql`).

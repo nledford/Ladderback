@@ -12,7 +12,7 @@ use uuid::Uuid;
 use domain::AgentId;
 
 /// The file in the data dir holding the agent ID.
-pub const AGENT_ID_FILE: &str = "agent-id";
+pub const MACHINE_ID_FILE: &str = "machine-id";
 
 /// More than an ID and some whitespace: anything longer is not an ID file,
 /// and is never read whole (technical design §13.5).
@@ -23,7 +23,7 @@ const MAX_ID_FILE_BYTES: u64 = 256;
 /// rather than [`load_or_create`]. A file that exists but doesn't hold an ID
 /// is an error.
 pub fn load(data_dir: &Path) -> io::Result<Option<AgentId>> {
-    match read_id_file(&data_dir.join(AGENT_ID_FILE)) {
+    match read_id_file(&data_dir.join(MACHINE_ID_FILE)) {
         Ok(text) => parse(&text).map(Some),
         Err(error) if error.kind() == io::ErrorKind::NotFound => Ok(None),
         Err(error) => Err(error),
@@ -37,13 +37,13 @@ pub fn load_or_create(data_dir: &Path) -> io::Result<AgentId> {
     if let Some(id) = load(data_dir)? {
         return Ok(id);
     }
-    let path = data_dir.join(AGENT_ID_FILE);
+    let path = data_dir.join(MACHINE_ID_FILE);
     fs::create_dir_all(data_dir)?;
     // Write the whole file under a private name, then link it into place:
     // the link fails if another process got there first, so concurrent first
     // starts agree on one ID and nobody ever reads a half-written file.
     let id = Uuid::now_v7();
-    let staged = data_dir.join(format!("{AGENT_ID_FILE}.{}.tmp", id.simple()));
+    let staged = data_dir.join(format!("{MACHINE_ID_FILE}.{}.tmp", id.simple()));
     let written = stage(&staged, id).and_then(|()| fs::hard_link(&staged, &path));
     let removed = fs::remove_file(&staged);
     match written {
@@ -123,7 +123,7 @@ mod tests {
     #[test]
     fn a_damaged_id_file_is_an_error_when_only_loaded() {
         let data = tempfile::tempdir().unwrap();
-        fs::write(data.path().join(AGENT_ID_FILE), "not an id").unwrap();
+        fs::write(data.path().join(MACHINE_ID_FILE), "not an id").unwrap();
         let error = load(data.path()).unwrap_err();
         assert_eq!(error.kind(), io::ErrorKind::InvalidData);
     }
@@ -164,15 +164,32 @@ mod tests {
     fn an_id_written_by_hand_is_accepted() {
         let data = tempfile::tempdir().unwrap();
         let text = "0190a6e4-7a3b-7c3d-8e4f-0123456789ab";
-        fs::write(data.path().join(AGENT_ID_FILE), format!("{text}\n")).unwrap();
+        fs::write(data.path().join(MACHINE_ID_FILE), format!("{text}\n")).unwrap();
         let id = load_or_create(data.path()).unwrap();
         assert_eq!(id.as_uuid().hyphenated().to_string(), text);
+    }
+
+    /// The ID lives in `machine-id` (§16, decision 163): a new one is kept
+    /// there, and an `agent-id` an earlier build left is never read.
+    #[test]
+    fn the_id_is_kept_in_machine_id() {
+        let data = tempfile::tempdir().unwrap();
+        let id = load_or_create(data.path()).unwrap();
+        let kept = fs::read_to_string(data.path().join("machine-id")).unwrap();
+        assert_eq!(kept.trim(), id.as_uuid().hyphenated().to_string());
+        let old = tempfile::tempdir().unwrap();
+        fs::write(
+            old.path().join("agent-id"),
+            "0190a6e4-7a3b-7c3d-8e4f-0123456789ab\n",
+        )
+        .unwrap();
+        assert_eq!(load(old.path()).unwrap(), None);
     }
 
     #[test]
     fn a_damaged_id_file_is_an_error_and_left_alone() {
         let data = tempfile::tempdir().unwrap();
-        let path = data.path().join(AGENT_ID_FILE);
+        let path = data.path().join(MACHINE_ID_FILE);
         fs::write(&path, "not an id").unwrap();
         let error = load_or_create(data.path()).unwrap_err();
         assert_eq!(error.kind(), io::ErrorKind::InvalidData);
@@ -193,6 +210,6 @@ mod tests {
             .unwrap()
             .map(|e| e.unwrap().file_name())
             .collect();
-        assert_eq!(leftovers, [AGENT_ID_FILE], "only the ID file remains");
+        assert_eq!(leftovers, [MACHINE_ID_FILE], "only the ID file remains");
     }
 }

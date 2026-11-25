@@ -318,7 +318,7 @@ pub(crate) fn unmanaged_caption(group: &UnmanagedGroupDto) -> Words {
 /// not name.
 pub(crate) fn adopt_orphaned(group: &OrphanedGroupDto, into: &str) -> Option<Adoption> {
     let request = maintenance::adopt_orphaned(group, into)?;
-    let (agent, plan) = (group.agent.as_deref()?, group.plan.as_deref()?);
+    let (agent, plan) = (group.machine.as_deref()?, group.plan.as_deref()?);
     Some(Adoption {
         label: words(
             msg::UI_ADOPT_ORPHANED,
@@ -465,7 +465,7 @@ mod tests {
 
     fn orphaned(agent: Option<&str>, plan: Option<&str>) -> OrphanedGroupDto {
         OrphanedGroupDto {
-            agent: agent.map(str::to_owned),
+            machine: agent.map(str::to_owned),
             plan: plan.map(str::to_owned),
             count: 0,
             snapshots: Vec::<SnapshotDto>::new(),
@@ -994,7 +994,7 @@ mod tests {
                 request: maintenance::adoption(
                     "home",
                     AdoptionFromDto::Orphaned {
-                        agent: "agent-a".to_owned(),
+                        machine: "agent-a".to_owned(),
                         plan: "old".to_owned(),
                     },
                 ),

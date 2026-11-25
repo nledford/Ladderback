@@ -100,11 +100,11 @@ Feature: Export a plan as a rustic profile
         | backup.snapshots.0.host               | "demo-laptop"                                                  |
         | backup.snapshots.0.git-ignore         | true                                                           |
         | backup.snapshots.0.exclude-if-present | [".nobackup"]                                                  |
-        | backup.snapshots.0.tags               | ["laptop", "ladderback-plan:home", "ladderback-agent:{agent}"] |
+        | backup.snapshots.0.tags               | ["laptop", "ladderback-plan:home", "ladderback-machine:{agent}"] |
         | forget.keep-last                      | 3                                                              |
         | forget.keep-daily                     | 7                                                              |
         | forget.group-by                       | ""                                                             |
-        | snapshot-filter.filter-tags           | ["ladderback-plan:home,ladderback-agent:{agent}"]              |
+        | snapshot-filter.filter-tags           | ["ladderback-plan:home,ladderback-machine:{agent}"]              |
       And the exported profile doesn't set "forget.prune"
       And the exported profile doesn't hold "schedule"
       And the exported profile doesn't hold "retry"
@@ -324,7 +324,7 @@ Feature: Export a plan as a rustic profile
       And the exported profile has:
         | key                         | value                                             |
         | forget.group-by             | ""                                                |
-        | snapshot-filter.filter-tags | ["ladderback-plan:home,ladderback-agent:{agent}"] |
+        | snapshot-filter.filter-tags | ["ladderback-plan:home,ladderback-machine:{agent}"] |
       And the exported profile doesn't set "forget.keep-last"
 
     Scenario: A repository address with a password in it is refused, naming the key and never the password

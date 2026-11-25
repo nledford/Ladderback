@@ -337,8 +337,8 @@ mod tests {
             within: Duration::from_millis(200),
         };
         let frame = AgentFrame::Connect {
-            agent_id: "00000000-0000-0000-0000-000000000001".to_owned(),
-            agent_nonce: "A".repeat(43),
+            machine_id: "00000000-0000-0000-0000-000000000001".to_owned(),
+            machine_nonce: "A".repeat(43),
             binding_kind: 0,
         };
         let sent = tokio::time::timeout(Duration::from_secs(2), link.send(&frame)).await;

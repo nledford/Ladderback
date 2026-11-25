@@ -16,7 +16,7 @@ Feature: Making a pairing token on the hub's page
   Scenario: A token is made by keyboard alone and shown once, with the hub key's fingerprint in full
     Given a hub with sign-in off
     And the page may use the clipboard
-    When I open the address "/settings#agents"
+    When I open the address "/settings#machines"
     And I skip to the content
     And I set the address machines will use to "https://hub.example:9443"
     And I press Tab until focus is on the textbox "Hub key fingerprint"
@@ -37,7 +37,7 @@ Feature: Making a pairing token on the hub's page
   Scenario: With sign-in off, the step-up asks for the hub key's fingerprint the hub's terminal printed, and takes it pasted
     Given a hub with sign-in off whose terminal printed its key's fingerprint
     And the page may use the clipboard
-    When I open the address "/settings#agents"
+    When I open the address "/settings#machines"
     Then the textbox "Hub key fingerprint" is described by the fingerprint the hub's terminal printed
     And the page doesn't show "Hub key ID"
     When I skip to the content
@@ -52,7 +52,7 @@ Feature: Making a pairing token on the hub's page
   Scenario: With sign-in on, the admin password confirms a token
     Given a hub with sign-in on and the admin password "demo-admin-pass"
     And the admin is signed in with "demo-admin-pass"
-    When I open the address "/settings#agents"
+    When I open the address "/settings#machines"
     And I skip to the content
     And I press Tab until focus is on the textbox "Admin password"
     And I type "demo-admin-pass"
@@ -63,7 +63,7 @@ Feature: Making a pairing token on the hub's page
 
   Scenario: With sign-in off, the Machines tab warns that a hub reached through a reverse proxy must turn sign-in on
     Given a hub with sign-in off
-    When I open the address "/settings#agents"
+    When I open the address "/settings#machines"
     Then the page shows a warning alert containing "reached through a reverse proxy must turn sign-in on"
     And the link "A hub behind a reverse proxy, in the guide on GitHub (goes to another site)" leads to the section "A hub behind a reverse proxy" of "docs/guide/remote-access.md" on main
     And the page has no accessibility violations
@@ -80,7 +80,7 @@ Feature: Making a pairing token on the hub's page
   Scenario: The announcer says the unused token was canceled, and the Machines tab has no live region of its own
     Given a hub with sign-in on and the admin password "demo-admin-pass"
     And the admin is signed in with "demo-admin-pass"
-    When I open the address "/settings#agents"
+    When I open the address "/settings#machines"
     And I skip to the content
     And I press Tab until focus is on the textbox "Admin password"
     And I type "demo-admin-pass"
@@ -93,7 +93,7 @@ Feature: Making a pairing token on the hub's page
 
   Scenario: With sign-in off, the Machines tab has no live region but the announcer's as it loads
     Given a hub with sign-in off
-    When I open the address "/settings#agents"
+    When I open the address "/settings#machines"
     And I skip to the content
     And I press Tab until focus is on the button "Copy the fingerprint"
     Then the page has no live region but the announcer's
@@ -102,7 +102,7 @@ Feature: Making a pairing token on the hub's page
   Scenario: Copy the fingerprint is answered through the announcer, and the Machines tab has no live region of its own
     Given a hub with sign-in off
     And the page may use the clipboard
-    When I open the address "/settings#agents"
+    When I open the address "/settings#machines"
     And I skip to the content
     And I press Tab until focus is on the button "Copy the fingerprint"
     And I press Enter
@@ -112,7 +112,7 @@ Feature: Making a pairing token on the hub's page
   Scenario: A browser that won't copy the ID is told to copy it by hand, through the announcer
     Given a hub with sign-in off
     And the browser refuses the page the clipboard
-    When I open the address "/settings#agents"
+    When I open the address "/settings#machines"
     And I skip to the content
     And I press Tab until focus is on the button "Copy the fingerprint"
     And I press Enter
@@ -121,7 +121,7 @@ Feature: Making a pairing token on the hub's page
 
   Scenario: With sign-in off, a wrong fingerprint is the field's own error, which focus reads once
     Given a hub with sign-in off
-    When I open the address "/settings#agents"
+    When I open the address "/settings#machines"
     And I skip to the content
     And I press Tab until focus is on the textbox "Hub key fingerprint"
     And I type "not-the-fingerprint"
@@ -137,7 +137,7 @@ Feature: Making a pairing token on the hub's page
   Scenario: With sign-in on, a wrong admin password is the field's own error, which focus reads once
     Given a hub with sign-in on and the admin password "demo-admin-pass"
     And the admin is signed in with "demo-admin-pass"
-    When I open the address "/settings#agents"
+    When I open the address "/settings#machines"
     And I skip to the content
     And I press Tab until focus is on the textbox "Admin password"
     And I type "not-the-password"
@@ -251,7 +251,7 @@ Feature: Making a pairing token on the hub's page
 
   Scenario: An address another machine can't use is warned of in its field's description, and the warning goes once it is one
     Given a hub with sign-in off
-    When I open the address "/settings#agents"
+    When I open the address "/settings#machines"
     Then the textbox "Address machines will use" warns "This address is loopback"
     When I set the address machines will use to "http://hub.example:8080"
     Then the textbox "Address machines will use" warns "This address is plain"
@@ -281,7 +281,7 @@ Feature: Making a pairing token on the hub's page
     Given a hub with sign-in on and the admin password "demo-admin-pass"
     And the admin is signed in with "demo-admin-pass"
     And the hub refuses each read of its key after the first
-    When I open the address "/settings#agents"
+    When I open the address "/settings#machines"
     And I skip to the content
     And I press Tab until focus is on the textbox "Admin password"
     And I type "demo-admin-pass"
@@ -291,7 +291,7 @@ Feature: Making a pairing token on the hub's page
 
   Scenario: The person chooses the hub's own certificate, and the dialog says the token pins it
     Given a hub with sign-in off
-    When I open the address "/settings#agents"
+    When I open the address "/settings#machines"
     And I skip to the content
     And I set the address machines will use to the hub's https address
     And I press Tab until focus is on the radio "A certificate authority's certificate"
@@ -305,7 +305,7 @@ Feature: Making a pairing token on the hub's page
 
   Scenario: A plain http address is offered no certificate, and the dialog names none
     Given a hub with sign-in off
-    When I open the address "/settings#agents"
+    When I open the address "/settings#machines"
     Then the textbox "Address machines will use" warns "This address is loopback"
     And the page offers no radio group "Certificate the token trusts"
     When I make a pairing token on the Machines tab

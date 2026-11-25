@@ -69,7 +69,7 @@ impl RawRow {
         Self {
             cells: vec![
                 ("id", id.into()),
-                ("agent_id", "local".into()),
+                ("machine_id", "local".into()),
                 ("kind", "backup".into()),
                 ("plan_id", "demo-home".into()),
                 ("repo_uuid", REPOSITORY_HEX.into()),
@@ -351,7 +351,7 @@ fn cases() -> Vec<Case> {
             error_of(
                 "hook-failed",
                 text(
-                    r#"[["level",{"type":"text","value":"machine"}],["position",{"type":"text","value":"1"}]]"#,
+                    r#"[["level",{"type":"text","value":"agent"}],["position",{"type":"text","value":"1"}]]"#,
                 ),
                 Cell::Null,
             ),

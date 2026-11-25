@@ -33,3 +33,5 @@
 - A run checks its lease before it takes its place in the operation log, so a session in that gap may release the lease of a run about to start. The gap is milliseconds; the release names a repository the configuration no longer asks this machine to maintain.
 - A clock set back while the daemon was stopped lengthens a lease by as much until a session takes its grants again, which the daemon asks for as it starts; one that can't reach its hub keeps the longer lease.
 - A scheduled forget, prune or check that is refused leaves only a log line. A machine whose leases lapsed, because it was away from a hub it can reach only on its LAN for over 7 days or its hub is gone, stops its scheduled maintenance silently. #1473 adds a visible paused state and an alert.
+
+**Amended by [decision 163](163-the-wire-and-stored-names-say-machine.md)** (2026-11-25, #1220): the tables `agent_leases` and `agent_epoch_floors` are `machine_leases` and `machine_epoch_floors` (migration `0029_machine_names.sql`).

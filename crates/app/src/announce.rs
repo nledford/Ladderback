@@ -548,7 +548,7 @@ mod tests {
                     ended: Some(HookEnd::Signalled),
                 },
                 C::HookFailed,
-                vec![text("agent"), text("1"), text("signal")],
+                vec![text("machine"), text("1"), text("signal")],
             ),
             (
                 F::HookFailed {

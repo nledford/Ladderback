@@ -24,7 +24,7 @@ fn good_key(byte: u8) -> PublicKey {
 
 async fn insert_agent(raw: &mut SqliteConnection, counter: &str) {
     sqlx::query(
-        "INSERT INTO agents (id, pubkey, hostname, hostname_key, status, status_at, counter, \
+        "INSERT INTO machines (id, pubkey, hostname, hostname_key, status, status_at, counter, \
          last_seen) VALUES (?, ?, 'Laptop', 'laptop', 'approved', ?, ?, ?)",
     )
     .bind(AGENT_ID)
@@ -93,7 +93,7 @@ async fn the_rows_the_cases_start_from_are_good() {
 
 async fn write_counter(raw: &mut SqliteConnection, counter: &str) -> Result<(), sqlx::Error> {
     sqlx::query(
-        "INSERT INTO agents (id, pubkey, hostname, hostname_key, status, status_at, counter, \
+        "INSERT INTO machines (id, pubkey, hostname, hostname_key, status, status_at, counter, \
          last_seen) VALUES (?, ?, 'laptop', 'laptop', 'pending', 0, ?, 0)",
     )
     .bind(AGENT_ID)
@@ -138,37 +138,37 @@ fn agent_cases() -> Vec<(&'static str, &'static str, String)> {
         (
             "an ID in upper case",
             "id",
-            "UPDATE agents SET id = '00000000-0000-0000-0000-00000000000A'".to_owned(),
+            "UPDATE machines SET id = '00000000-0000-0000-0000-00000000000A'".to_owned(),
         ),
         (
             "an ID that isn't a UUID",
             "id",
-            "UPDATE agents SET id = 'laptop'".to_owned(),
+            "UPDATE machines SET id = 'laptop'".to_owned(),
         ),
         (
             "a key no pairing accepts",
             "pubkey",
-            format!("UPDATE agents SET pubkey = {}", small_order_literal()),
+            format!("UPDATE machines SET pubkey = {}", small_order_literal()),
         ),
         (
             "an empty hostname",
             "hostname",
-            "UPDATE agents SET hostname = ''".to_owned(),
+            "UPDATE machines SET hostname = ''".to_owned(),
         ),
         (
             "a counter past the largest a u64 holds",
             "counter",
-            "UPDATE agents SET counter = '18446744073709551616'".to_owned(),
+            "UPDATE machines SET counter = '18446744073709551616'".to_owned(),
         ),
         (
             "a time that isn't a number",
             "last_seen",
-            "UPDATE agents SET last_seen = 'soon'".to_owned(),
+            "UPDATE machines SET last_seen = 'soon'".to_owned(),
         ),
         (
             "a zone not shaped like a zone name",
             "zone",
-            "UPDATE agents SET zone = '../etc/localtime'".to_owned(),
+            "UPDATE machines SET zone = '../etc/localtime'".to_owned(),
         ),
     ]
 }
@@ -210,7 +210,7 @@ async fn damage(raw: &mut SqliteConnection, statement: String, name: &str) {
 }
 
 async fn start_over(raw: &mut SqliteConnection) {
-    for statement in ["DELETE FROM agents", "DELETE FROM pairing_tokens"] {
+    for statement in ["DELETE FROM machines", "DELETE FROM pairing_tokens"] {
         sqlx::query(statement)
             .execute(&mut *raw)
             .await

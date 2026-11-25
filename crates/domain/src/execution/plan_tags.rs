@@ -8,8 +8,19 @@ use crate::{AgentId, PlanId, SnapshotId};
 pub const RESERVED_TAG_PREFIX: &str = "ladderback-";
 /// The tag prefix naming the plan that made a snapshot.
 pub const PLAN_TAG_PREFIX: &str = "ladderback-plan:";
-/// The tag prefix naming the agent that made a snapshot.
-pub const AGENT_TAG_PREFIX: &str = "ladderback-agent:";
+/// The tag prefix naming the machine that made a snapshot.
+pub const MACHINE_TAG_PREFIX: &str = "ladderback-machine:";
+/// The tag prefix an earlier build named the machine under, before
+/// [`MACHINE_TAG_PREFIX`] (§16, decision 163). It never makes a snapshot a
+/// plan's or this machine's: it is read only to fail closed, so a snapshot
+/// that still carries it counts as another machine's until it is retagged.
+pub const EARLIER_MACHINE_TAG_PREFIX: &str = "ladderback-agent:";
+
+/// Whether `tags` hold a tag under [`EARLIER_MACHINE_TAG_PREFIX`].
+pub fn carries_earlier_machine_tag(tags: &[String]) -> bool {
+    tags.iter()
+        .any(|tag| tag.starts_with(EARLIER_MACHINE_TAG_PREFIX))
+}
 
 /// A tag the user adds to a plan's snapshots. It never starts with
 /// [`RESERVED_TAG_PREFIX`], in any case, so it can't make a snapshot look like
@@ -49,7 +60,7 @@ impl std::fmt::Display for ReservedTag {
 
 impl std::error::Error for ReservedTag {}
 
-/// `ladderback-plan:<plan>` and `ladderback-agent:<agent>`: every Ladderback backup
+/// `ladderback-plan:<plan>` and `ladderback-machine:<machine>`: every Ladderback backup
 /// carries both, and they make the snapshot managed by that plan.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct PlanTags {
@@ -74,7 +85,7 @@ impl PlanTags {
     pub fn tags(&self) -> [String; 2] {
         [
             format!("{PLAN_TAG_PREFIX}{}", self.plan.as_str()),
-            format!("{AGENT_TAG_PREFIX}{}", self.agent.as_uuid().hyphenated()),
+            format!("{MACHINE_TAG_PREFIX}{}", self.agent.as_uuid().hyphenated()),
         ]
     }
 
@@ -127,7 +138,9 @@ mod tests {
     }
 
     const PLAN: &str = "ladderback-plan:home";
-    const AGENT: &str = "ladderback-agent:00000000-0000-0000-0000-000000000001";
+    const AGENT: &str = "ladderback-machine:00000000-0000-0000-0000-000000000001";
+    /// The prefix before §16, decision 163, which no build reads now.
+    const OLD_AGENT: &str = "ladderback-agent:00000000-0000-0000-0000-000000000001";
 
     #[test]
     fn a_plan_tags_its_snapshots_with_plan_and_agent() {
@@ -149,7 +162,7 @@ mod tests {
         }
         for tag in [
             "ladderback-plan:other",
-            "ladderback-agent:x",
+            "ladderback-machine:x",
             "ladderback-",
             "Ladderback-Plan:other",
         ] {
@@ -190,6 +203,16 @@ mod tests {
         let snapshots = [snapshot(4, 40, &[PLAN]), snapshot(5, 50, &[])];
         assert_eq!(tags().parent(&snapshots), None);
         assert_eq!(tags().parent(&[]), None);
+    }
+
+    /// A snapshot still tagged `ladderback-agent:` (before §16, decision
+    /// 163) belongs to no plan: it is no parent, and the plan's next backup
+    /// scans in full.
+    #[test]
+    fn a_snapshot_with_the_old_machine_tag_belongs_to_no_plan() {
+        let old = snapshot(1, 10, &[PLAN, OLD_AGENT]);
+        assert!(!tags().mark(&old));
+        assert_eq!(tags().parent(&[old]), None);
     }
 
     #[test]

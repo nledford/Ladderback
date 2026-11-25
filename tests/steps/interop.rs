@@ -329,7 +329,7 @@ async fn another_agents_snapshots(agent: &mut Agent, count: usize, plan: String)
     // Another agent: its own ID, which is never this agent's.
     let other = domain::AgentId::from_uuid(domain::Uuid::from_u128(0x07e5));
     let tags = [
-        format!("ladderback-agent:{}", other.as_uuid().hyphenated()),
+        format!("ladderback-machine:{}", other.as_uuid().hyphenated()),
         format!("ladderback-plan:{plan}"),
     ];
     for _ in 0..count {

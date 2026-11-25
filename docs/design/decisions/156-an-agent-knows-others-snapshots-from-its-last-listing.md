@@ -20,3 +20,5 @@
 - A snapshot whose tags were cut short (`tags_truncated`) is judged on the tags it kept, as the other-hosts warning judges it.
 - Within a day of a listing the value can be stale: another agent's backup made since the last listing isn't seen until the next. The hub's other check, another agent's report of the repository, still refuses a claim on a repository that agent reports.
 - Decision 151's consequence that `ReposSnapshot` always says `others_snapshots: false` no longer holds; decision 151 says so.
+
+**Amended by [decision 163](163-the-wire-and-stored-names-say-machine.md)** (2026-11-25, #1220): the tag it reads is `ladderback-machine:`, where it was `ladderback-agent:`.

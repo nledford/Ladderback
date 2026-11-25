@@ -124,9 +124,9 @@ impl HubPairing {
         let agent = agent.as_uuid().to_string();
         let at = self.clock.now().to_string();
         if online {
-            UiEvent::AgentOnline { agent, at }
+            UiEvent::MachineOnline { machine: agent, at }
         } else {
-            UiEvent::AgentOffline { agent, at }
+            UiEvent::MachineOffline { machine: agent, at }
         }
     }
 }

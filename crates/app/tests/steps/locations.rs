@@ -525,7 +525,7 @@ impl Engine for Sites {
                         tags: vec![
                             format!(
                                 "{}{}",
-                                domain::execution::plan_tags::AGENT_TAG_PREFIX,
+                                domain::execution::plan_tags::MACHINE_TAG_PREFIX,
                                 agent_id().as_uuid().hyphenated()
                             ),
                             format!("{}{PLAN}", domain::execution::plan_tags::PLAN_TAG_PREFIX),

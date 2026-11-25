@@ -153,7 +153,7 @@ fn hub_log_text(agent: &Agent) -> String {
 async fn log_says_paired(agent: &mut Agent, hostname: String) {
     let listed = listed_machines(agent).await;
     let machine = listed
-        .agents
+        .machines
         .into_iter()
         .find(|machine| machine.hostname == hostname)
         .unwrap_or_else(|| panic!("the page lists {hostname}"));
@@ -161,10 +161,10 @@ async fn log_says_paired(agent: &mut Agent, hostname: String) {
     let text = hub_log_text(agent);
     let lines: Vec<&str> = text
         .lines()
-        .filter(|line| line.contains(&machine.agent_id))
+        .filter(|line| line.contains(&machine.machine_id))
         .collect();
     let [line] = lines.as_slice() else {
-        panic!("one line names the agent {}: {text}", machine.agent_id);
+        panic!("one line names the agent {}: {text}", machine.machine_id);
     };
     assert_eq!(level_of(line), Some("INFO"), "{line}");
     for expected in [
@@ -190,7 +190,7 @@ fn log_holds_no_token(agent: &mut Agent) {
 async fn one_line_saying(agent: &Agent, hostname: &str, what: &str) {
     let listed = listed_machines(agent).await;
     let machine = listed
-        .agents
+        .machines
         .into_iter()
         .find(|machine| machine.hostname == hostname)
         .unwrap_or_else(|| panic!("the page lists {hostname}"));
@@ -198,12 +198,12 @@ async fn one_line_saying(agent: &Agent, hostname: &str, what: &str) {
     let text = hub_log_text(agent);
     let lines: Vec<&str> = text
         .lines()
-        .filter(|line| line.contains(&machine.agent_id) && line.contains(what))
+        .filter(|line| line.contains(&machine.machine_id) && line.contains(what))
         .collect();
     let [line] = lines.as_slice() else {
         panic!(
             "one line names the agent {} and {what:?}: {text}",
-            machine.agent_id
+            machine.machine_id
         );
     };
     assert_eq!(level_of(line), Some("INFO"), "{line}");

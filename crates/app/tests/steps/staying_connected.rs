@@ -204,8 +204,8 @@ fn presence_heard(agent: &mut Agent) -> (String, Vec<(&'static str, String)>) {
     let presence: Vec<_> = heard
         .into_iter()
         .filter_map(|event| match event {
-            UiEvent::AgentOnline { agent, .. } => Some(("online", agent)),
-            UiEvent::AgentOffline { agent, .. } => Some(("offline", agent)),
+            UiEvent::MachineOnline { machine: agent, .. } => Some(("online", agent)),
+            UiEvent::MachineOffline { machine: agent, .. } => Some(("offline", agent)),
             _ => None,
         })
         .collect();

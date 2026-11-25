@@ -917,3 +917,5 @@ Feature: Pairing a machine with its hub
     Then the hub shows the recovery key's fingerprint it derived before it changes anything
     And it recovers the hub
 ```
+
+**Amended by [decision 163](163-the-wire-and-stored-names-say-machine.md)** (2026-11-25, #1220): the refusals `agent-key-mismatch` and `agent-removed` are `machine-key-mismatch` and `machine-removed`, and the registry's paths are under `/api/v1/hub/machines`.

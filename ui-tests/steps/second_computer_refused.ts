@@ -46,14 +46,14 @@ Given(
     const given = new Map([[hostname, minutes]]);
     refusals.set(this, given);
     this.contextRoutes.push(async (context) => {
-      await context.route("**/api/v1/hub/agents", async (route) => {
+      await context.route("**/api/v1/hub/machines", async (route) => {
         if (route.request().method() !== "GET") {
           await route.fallback();
           return;
         }
         const answer = await route.fetch();
-        const body = (await answer.json()) as { agents?: Listed[] };
-        for (const agent of body.agents ?? []) {
+        const body = (await answer.json()) as { machines?: Listed[] };
+        for (const agent of body.machines ?? []) {
           const ago = given.get(agent.hostname);
           if (ago === undefined) continue;
           // The hub's now, as the page reads it: when the row's status began

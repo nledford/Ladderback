@@ -11,7 +11,7 @@ Feature: Rejecting a waiting machine, or removing an approved one, on the hub's 
     Given a hub with sign-in off
     And a machine named "demo-laptop" waits for approval on the hub
     And a machine named "demo-desktop" waits for approval on the hub
-    When I open the address "/settings#agents"
+    When I open the address "/settings#machines"
     And I skip to the content
     And I press Tab until focus is on the button "Reject demo-laptop"
     And I press Enter
@@ -29,7 +29,7 @@ Feature: Rejecting a waiting machine, or removing an approved one, on the hub's 
   Scenario: An approved machine is removed by keyboard alone, and focus goes to the approved machines' heading
     Given a hub with sign-in off
     And a machine named "demo-macbook" is approved on the hub
-    When I open the address "/settings#agents"
+    When I open the address "/settings#machines"
     And I skip to the content
     And I press Tab until focus is on the button "Remove demo-macbook"
     And I press Enter
@@ -47,7 +47,7 @@ Feature: Rejecting a waiting machine, or removing an approved one, on the hub's 
     Given a hub with sign-in off
     And the page's clock stands still from the start until a step moves it on
     And a machine named "demo-laptop" is approved on the hub
-    When I open the address "/settings#agents"
+    When I open the address "/settings#machines"
     Then the table "Approved machines" lists "demo-laptop" with the key fingerprint the machine showed
     When a person removes "demo-laptop" on another page of the hub
     Then the page says "No machine is approved yet."

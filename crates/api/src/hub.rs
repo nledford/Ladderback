@@ -136,18 +136,18 @@ impl std::fmt::Debug for PairingTokenDto {
 
 /// Where the page reads the machines the hub has registered: `GET`,
 /// answered with a [`HubAgentsDto`].
-pub const HUB_AGENTS_PATH: &str = "/api/v1/hub/agents";
+pub const HUB_MACHINES_PATH: &str = "/api/v1/hub/machines";
 
-/// Where the page approves the waiting agent `agent_id`: `POST` an
-/// [`ApproveAgentDto`], answered with the agent's [`HubAgentDto`].
-pub fn agent_approval_path(agent_id: &str) -> String {
-    format!("{HUB_AGENTS_PATH}/{agent_id}/approval")
+/// Where the page approves the waiting machine `machine_id`: `POST` an
+/// [`ApproveAgentDto`], answered with the machine's [`HubAgentDto`].
+pub fn machine_approval_path(machine_id: &str) -> String {
+    format!("{HUB_MACHINES_PATH}/{machine_id}/approval")
 }
 
-/// Where the page rejects the waiting agent `agent_id`, or removes it once
-/// approved: `POST` a [`RemoveAgentDto`], answered `204 No Content`.
-pub fn agent_removal_path(agent_id: &str) -> String {
-    format!("{HUB_AGENTS_PATH}/{agent_id}/removal")
+/// Where the page rejects the waiting machine `machine_id`, or removes it
+/// once approved: `POST` a [`RemoveAgentDto`], answered `204 No Content`.
+pub fn machine_removal_path(machine_id: &str) -> String {
+    format!("{HUB_MACHINES_PATH}/{machine_id}/removal")
 }
 
 /// Whether a registered agent waits for a person's approval or has it.
@@ -164,7 +164,7 @@ pub enum AgentStatusDto {
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "kebab-case", deny_unknown_fields)]
 pub struct LookalikeDto {
-    pub agent_id: String,
+    pub machine_id: String,
     pub hostname: String,
     pub last_seen: String,
 }
@@ -181,7 +181,7 @@ pub struct LookalikeDto {
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "kebab-case", deny_unknown_fields)]
 pub struct HubAgentDto {
-    pub agent_id: String,
+    pub machine_id: String,
     pub hostname: String,
     pub key: String,
     pub fingerprint: String,
@@ -198,12 +198,12 @@ pub struct HubAgentDto {
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "kebab-case", deny_unknown_fields)]
 pub struct HubAgentsDto {
-    pub agents: Vec<HubAgentDto>,
+    pub machines: Vec<HubAgentDto>,
 }
 
 /// Where the hub's dashboard reads its approved machines and their latest
 /// operations (§4.3, #569): `GET`, answered with a [`HubMachinesDto`].
-pub const HUB_MACHINES_PATH: &str = "/api/v1/hub/machines";
+pub const HUB_DASHBOARD_PATH: &str = "/api/v1/hub/dashboard";
 
 /// How a machine's operation came out, as far as the hub heard.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
@@ -242,7 +242,7 @@ pub struct MachineOperationDto {
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "kebab-case", deny_unknown_fields)]
 pub struct HubMachineDto {
-    pub agent_id: String,
+    pub machine_id: String,
     pub hostname: String,
     pub last_seen: String,
     #[serde(default)]

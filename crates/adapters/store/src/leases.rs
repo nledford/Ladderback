@@ -17,19 +17,19 @@ use sqlx::{Connection, Row};
 
 use crate::{SqliteStore, unavailable};
 
-const LEASES: &str = "SELECT repo_id, epoch, ends_at FROM agent_leases";
+const LEASES: &str = "SELECT repo_id, epoch, ends_at FROM machine_leases";
 
 const FLOORS: &str = "SELECT repo_id, recovery_number, generation, epoch, expires_at, signature \
-     FROM agent_epoch_floors";
+     FROM machine_epoch_floors";
 
-const PAUSES: &str = "SELECT repo_id, since, alerted FROM agent_maintenance_paused";
+const PAUSES: &str = "SELECT repo_id, since, alerted FROM machine_maintenance_paused";
 
 const KEEP_PAUSE: &str =
-    "INSERT INTO agent_maintenance_paused (repo_id, since, alerted) VALUES (?1, ?2, ?3)";
+    "INSERT INTO machine_maintenance_paused (repo_id, since, alerted) VALUES (?1, ?2, ?3)";
 
-const KEEP_LEASE: &str = "INSERT INTO agent_leases (repo_id, epoch, ends_at) VALUES (?1, ?2, ?3)";
+const KEEP_LEASE: &str = "INSERT INTO machine_leases (repo_id, epoch, ends_at) VALUES (?1, ?2, ?3)";
 
-const KEEP_FLOOR: &str = "INSERT INTO agent_epoch_floors \
+const KEEP_FLOOR: &str = "INSERT INTO machine_epoch_floors \
      (repo_id, recovery_number, generation, epoch, expires_at, signature) \
      VALUES (?1, ?2, ?3, ?4, ?5, ?6)";
 
@@ -107,11 +107,11 @@ impl LeaseCache for SqliteStore {
             .begin_with("BEGIN IMMEDIATE")
             .await
             .map_err(unavailable)?;
-        sqlx::query("DELETE FROM agent_leases")
+        sqlx::query("DELETE FROM machine_leases")
             .execute(&mut *tx)
             .await
             .map_err(unavailable)?;
-        sqlx::query("DELETE FROM agent_epoch_floors")
+        sqlx::query("DELETE FROM machine_epoch_floors")
             .execute(&mut *tx)
             .await
             .map_err(unavailable)?;
@@ -147,7 +147,7 @@ impl LeaseCache for SqliteStore {
             .begin_with("BEGIN IMMEDIATE")
             .await
             .map_err(unavailable)?;
-        sqlx::query("DELETE FROM agent_maintenance_paused")
+        sqlx::query("DELETE FROM machine_maintenance_paused")
             .execute(&mut *tx)
             .await
             .map_err(unavailable)?;

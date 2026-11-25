@@ -242,3 +242,29 @@ fn a_failure_read_by_position_takes_the_first_text_after_the_declared_ones_as_it
         ErrorDto::new(ErrorCode::OperationFailed, [], None)
     );
 }
+
+/// The codes that name one of a hub's machines say `machine` on the wire
+/// (§16, decision 163), and their old `agent-` names read as no code.
+#[test]
+fn the_codes_that_name_a_machine_say_machine_on_the_wire() {
+    for code in [
+        "machine-key-mismatch",
+        "machine-removed",
+        "machine-key-removed",
+        "machine-unknown",
+        "machine-approved-already",
+    ] {
+        let read: ErrorCode = from_str(&format!("\"{code}\"")).unwrap();
+        assert_eq!(to_value(read).unwrap(), json!(code));
+    }
+    for code in [
+        "agent-key-mismatch",
+        "agent-removed",
+        "agent-key-removed",
+        "agent-unknown",
+        "agent-approved-already",
+    ] {
+        let read: ErrorCode = from_str(&format!("\"{code}\"")).unwrap();
+        assert_eq!(read, ErrorCode::Unknown, "{code}");
+    }
+}

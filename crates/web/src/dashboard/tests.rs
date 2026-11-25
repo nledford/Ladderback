@@ -4,7 +4,7 @@ use super::*;
 
 fn machine(hostname: &str, last_seen: &str) -> HubMachineDto {
     HubMachineDto {
-        agent_id: format!("agent-{hostname}"),
+        machine_id: format!("agent-{hostname}"),
         hostname: hostname.to_owned(),
         last_seen: last_seen.to_owned(),
         online: false,
@@ -28,27 +28,27 @@ const AT_MS: i64 = 1_795_248_000_000;
 #[test]
 fn an_approval_and_a_report_read_the_machines_again() {
     let agent = || "agent-demo-laptop".to_owned();
-    assert!(reads_again(&UiEvent::AgentApproved {
-        agent: agent(),
+    assert!(reads_again(&UiEvent::MachineApproved {
+        machine: agent(),
         hostname: "demo-laptop".to_owned(),
         at: AT.to_owned(),
     }));
-    assert!(reads_again(&UiEvent::AgentReported {
-        agent: agent(),
+    assert!(reads_again(&UiEvent::MachineReported {
+        machine: agent(),
         operation: "op-1".to_owned(),
         outcome: MachineOutcomeDto::Succeeded,
     }));
     assert!(
-        reads_again(&UiEvent::AgentRemoved {
-            agent: agent(),
+        reads_again(&UiEvent::MachineRemoved {
+            machine: agent(),
             hostname: "demo-laptop".to_owned(),
             at: AT.to_owned(),
         }),
         "a removed machine leaves the dashboard"
     );
     for other in [
-        UiEvent::AgentPending {
-            agent: agent(),
+        UiEvent::MachinePending {
+            machine: agent(),
             hostname: "demo-laptop".to_owned(),
             at: AT.to_owned(),
         },
@@ -66,9 +66,9 @@ fn an_approval_and_a_report_read_the_machines_again() {
 #[test]
 fn new_plans_and_new_progress_read_the_machines_again() {
     let agent = || "agent-demo-laptop".to_owned();
-    assert!(reads_again(&UiEvent::AgentPlans { agent: agent() }));
-    assert!(reads_again(&UiEvent::AgentProgress {
-        agent: agent(),
+    assert!(reads_again(&UiEvent::MachinePlans { machine: agent() }));
+    assert!(reads_again(&UiEvent::MachineProgress {
+        machine: agent(),
         progress: progress(AT),
     }));
 }
@@ -78,12 +78,12 @@ fn new_plans_and_new_progress_read_the_machines_again() {
 #[test]
 fn a_machine_coming_online_or_going_offline_reads_the_machines_again() {
     let agent = || "agent-demo-laptop".to_owned();
-    assert!(reads_again(&UiEvent::AgentOnline {
-        agent: agent(),
+    assert!(reads_again(&UiEvent::MachineOnline {
+        machine: agent(),
         at: AT.to_owned(),
     }));
-    assert!(reads_again(&UiEvent::AgentOffline {
-        agent: agent(),
+    assert!(reads_again(&UiEvent::MachineOffline {
+        machine: agent(),
         at: AT.to_owned(),
     }));
 }

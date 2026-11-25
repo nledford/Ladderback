@@ -18,7 +18,7 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use api::{
-    HUB_MACHINES_PATH, HubMachineDto, HubMachinesDto, IanaZone, MachineOperationDto,
+    HUB_DASHBOARD_PATH, HubMachineDto, HubMachinesDto, IanaZone, MachineOperationDto,
     MachinePlanDto, MsgArg,
 };
 use l10n::{Localizer, msg};
@@ -114,7 +114,7 @@ fn land(fleet: Fleet, read: Option<HubMachinesDto>) -> bool {
 /// Reads the machines into `fleet`, paced by `rereads` (`ws::reread_hub`).
 fn read(fleet: Fleet, rereads: StoredValue<Rereads>, visit: &Visit) {
     ws::reread_hub(
-        format!("{}{HUB_MACHINES_PATH}", ws::origin()),
+        format!("{}{HUB_DASHBOARD_PATH}", ws::origin()),
         rereads,
         visit,
         (READ_PATIENCE, ASK_AGAIN),
@@ -196,7 +196,7 @@ fn Dashboard(localizer: Arc<Localizer>) -> impl IntoView {
                 view! {
                     <For
                         each=move || shown.get()
-                        key=|machine: &HubMachineDto| machine.agent_id.clone()
+                        key=|machine: &HubMachineDto| machine.machine_id.clone()
                         children=move |machine: HubMachineDto| {
                             machine_section(&localizer, shown, machine, viewer.clone())
                         }
@@ -220,7 +220,9 @@ fn machine_section(
     viewer: Option<IanaZone>,
 ) -> impl IntoView + use<> {
     let HubMachineDto {
-        agent_id, hostname, ..
+        machine_id: agent_id,
+        hostname,
+        ..
     } = first;
     let heading_id = format!("dashboard-machine-{agent_id}");
     let labelled_by = heading_id.clone();
@@ -229,7 +231,7 @@ fn machine_section(
         shown.with(|machines| {
             machines
                 .iter()
-                .find(|machine| machine.agent_id == agent_id)
+                .find(|machine| machine.machine_id == agent_id)
                 .cloned()
         })
     });

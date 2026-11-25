@@ -330,11 +330,11 @@ impl SignedMessage<'_> {
     pub const fn label(&self) -> &'static str {
         match self {
             Self::HubProof { .. } => "hub-proof",
-            Self::AgentProof { .. } => "agent-proof",
+            Self::AgentProof { .. } => "machine-proof",
             Self::Pair { .. } => "pair",
             Self::Paired { .. } => "paired",
             Self::HubMessage { .. } => "hub-signed",
-            Self::AgentMessage { .. } => "agent-signed",
+            Self::AgentMessage { .. } => "machine-signed",
             Self::Refusal { .. } => "hub-refused",
             Self::Handover { .. } => "handover",
             Self::RecoveryHandover { .. } => "recovery-handover",

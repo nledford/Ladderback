@@ -637,7 +637,7 @@ impl HubPairing {
     /// The hub's answer to a paired agent's `proof`: the agent's record,
     /// seen now with the greater counter, when the proof holds under the
     /// key it registered for a binding kind it paired with; a signed
-    /// `agent-removed` when a person removed the agent and the proof holds
+    /// `machine-removed` when a person removed the agent and the proof holds
     /// under the key its tombstone keeps (decision 154); one signed
     /// `proof-refused` for every other cause (decision 120, "The
     /// handshake").

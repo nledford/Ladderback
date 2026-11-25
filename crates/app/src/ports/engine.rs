@@ -499,7 +499,7 @@ pub struct RewriteJob {
     pub repository: RepositoryAccess,
     /// The snapshots to rewrite, each of them one the selection named.
     pub ids: Vec<SnapshotId>,
-    /// `ladderback-plan:<id>` and `ladderback-agent:<id>`: what the rewritten
+    /// `ladderback-plan:<id>` and `ladderback-machine:<id>`: what the rewritten
     /// snapshots carry instead of the `ladderback-*` tags they had.
     pub tags: PlanTags,
 }

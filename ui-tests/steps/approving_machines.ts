@@ -123,11 +123,11 @@ Given("a machine named {string} waits for approval on the hub", async function (
 });
 
 /** The agent ID and key the hub lists for the machine named `hostname`. */
-export async function listedMachine(world: BrowserWorld, hostname: string): Promise<{ "agent-id": string; key: string }> {
-  const listed = await askHub(world, "/api/v1/hub/agents");
+export async function listedMachine(world: BrowserWorld, hostname: string): Promise<{ "machine-id": string; key: string }> {
+  const listed = await askHub(world, "/api/v1/hub/machines");
   assert.equal(listed.status, 200, `the hub listed no machines: ${listed.text}`);
-  const { agents } = JSON.parse(listed.text) as { agents: { "agent-id": string; hostname: string; key: string }[] };
-  const machine = agents.find((agent) => agent.hostname === hostname);
+  const { machines } = JSON.parse(listed.text) as { machines: { "machine-id": string; hostname: string; key: string }[] };
+  const machine = machines.find((agent) => agent.hostname === hostname);
   assert.ok(machine, `the hub lists no ${hostname}`);
   return machine;
 }
@@ -136,7 +136,7 @@ export async function listedMachine(world: BrowserWorld, hostname: string): Prom
  *  another page of the hub, with the step-up. */
 export async function approveMachine(world: BrowserWorld, hostname: string): Promise<void> {
   const machine = await listedMachine(world, hostname);
-  const approved = await askHub(world, `/api/v1/hub/agents/${machine["agent-id"]}/approval`, {
+  const approved = await askHub(world, `/api/v1/hub/machines/${machine["machine-id"]}/approval`, {
     key: machine.key,
     confirmation: await hubFingerprint(world),
   });
@@ -154,7 +154,7 @@ When("a person approves {string} on another page of the hub", async function (th
 
 When("a person removes {string} on another page of the hub", async function (this: BrowserWorld, hostname: string) {
   const machine = await listedMachine(this, hostname);
-  const removed = await askHub(this, `/api/v1/hub/agents/${machine["agent-id"]}/removal`, { key: machine.key });
+  const removed = await askHub(this, `/api/v1/hub/machines/${machine["machine-id"]}/removal`, { key: machine.key });
   assert.equal(removed.status, 204, `the hub removed nothing: ${removed.text}`);
 });
 

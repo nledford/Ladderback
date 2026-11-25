@@ -22,3 +22,5 @@ Every build between two releases said the last release's version: on 2026-11-13 
 Left out: `git describe` output (`0.2.0-14-g3f937cf`), which reads as a pre-release and sorts before `0.2.0` in SemVer; the build time, which makes two builds of one commit differ; and the version in the page's own wasm, which can't name the daemon it talks to.
 
 **Amended 2026-11-22 (decision 142):** the web UI shows the daemon's build in its footer, not its header.
+
+**Amended by [decision 163](163-the-wire-and-stored-names-say-machine.md)** (2026-11-25, #1220): `Hello.agent_version` is `Hello.machine_version`.

@@ -158,10 +158,10 @@ fn an_adoption_request_names_its_destination_source_and_selection() {
     for (from, wire) in [
         (
             AdoptionFromDto::Orphaned {
-                agent: "agent-1".to_owned(),
+                machine: "machine-1".to_owned(),
                 plan: "old-home".to_owned(),
             },
-            json!({"from": "orphaned", "agent": "agent-1", "plan": "old-home"}),
+            json!({"from": "orphaned", "machine": "machine-1", "plan": "old-home"}),
         ),
         (AdoptionFromDto::Unmanaged, json!({"from": "unmanaged"})),
     ] {
@@ -190,14 +190,26 @@ fn an_adoption_request_names_its_destination_source_and_selection() {
 #[test]
 fn a_source_that_is_no_kind_of_group_is_not_read() {
     assert!(from_str::<AdoptionFromDto>(r#"{"from":"somewhere"}"#).is_err());
-    assert!(from_str::<AdoptionFromDto>(r#"{"agent":"a","plan":"p"}"#).is_err());
+    assert!(from_str::<AdoptionFromDto>(r#"{"machine":"a","plan":"p"}"#).is_err());
+}
+
+/// An orphaned group and an adoption from one name the machine whose tag
+/// they carry as `machine` (§16, decision 163); `agent` is no key of theirs.
+#[test]
+fn an_orphaned_group_names_its_machine_on_the_wire() {
+    assert!(from_str::<AdoptionFromDto>(r#"{"from":"orphaned","agent":"a","plan":"p"}"#).is_err());
+    let group = json!({
+        "machine": "m", "plan": null, "count": 0, "snapshots": [], "adopt-into": [],
+    });
+    let read: OrphanedGroupDto = serde_json::from_value(group.clone()).unwrap();
+    assert_eq!(to_value(read).unwrap(), group);
 }
 
 #[test]
 fn a_source_with_a_key_its_kind_does_not_know_is_not_read() {
     for body in [
-        r#"{"kind":"adopt","into":"demo-home","from":{"from":"unmanaged","agent":"a"}}"#,
-        r#"{"kind":"adopt","into":"demo-home","from":{"from":"orphaned","agent":"a","plan":"p","extra":1}}"#,
+        r#"{"kind":"adopt","into":"demo-home","from":{"from":"unmanaged","machine":"a"}}"#,
+        r#"{"kind":"adopt","into":"demo-home","from":{"from":"orphaned","machine":"a","plan":"p","extra":1}}"#,
     ] {
         assert!(from_str::<MaintenanceRequestDto>(body).is_err(), "{body}");
     }
@@ -212,7 +224,7 @@ fn the_groups_carry_their_own_field_names_and_read_back() {
             snapshots: vec![snapshot()],
         }],
         orphaned: vec![OrphanedGroupDto {
-            agent: Some("agent-1".to_owned()),
+            machine: Some("agent-1".to_owned()),
             plan: None,
             count: 1,
             snapshots: vec![snapshot()],
@@ -294,7 +306,7 @@ fn a_group_lists_its_first_snapshots_and_counts_them_all() {
         vec!["demo-home".to_owned()],
         numbered,
     );
-    assert_eq!(orphaned.agent.as_deref(), Some("agent-1"));
+    assert_eq!(orphaned.machine.as_deref(), Some("agent-1"));
     assert_eq!(orphaned.plan, None);
     assert_eq!(orphaned.adopt_into, ["demo-home"]);
     assert_eq!(orphaned.count, 501);

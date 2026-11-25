@@ -162,8 +162,8 @@ async fn a_machine_that_pairs_and_is_approved_is_told() {
     paired(&hub, 1).await;
     assert_eq!(
         hub.told.taken(),
-        [UiEvent::AgentPending {
-            agent: agent_id(1).as_uuid().to_string(),
+        [UiEvent::MachinePending {
+            machine: agent_id(1).as_uuid().to_string(),
             hostname: "laptop-1".to_owned(),
             at: now(),
         }]
@@ -171,8 +171,8 @@ async fn a_machine_that_pairs_and_is_approved_is_told() {
     approve(&hub, 1).await;
     assert_eq!(
         hub.told.taken(),
-        [UiEvent::AgentApproved {
-            agent: agent_id(1).as_uuid().to_string(),
+        [UiEvent::MachineApproved {
+            machine: agent_id(1).as_uuid().to_string(),
             hostname: "laptop-1".to_owned(),
             at: now(),
         }]
@@ -227,8 +227,8 @@ async fn each_report_taken_is_told_once() {
         .taken()
         .into_iter()
         .filter_map(|event| match event {
-            UiEvent::AgentReported {
-                agent,
+            UiEvent::MachineReported {
+                machine: agent,
                 operation,
                 outcome,
             } => Some((agent, operation, outcome)),
@@ -367,8 +367,8 @@ async fn a_removed_machine_is_told_and_a_refused_removal_is_not() {
         assert!(matches!(removed, Ok(Ok(_))), "{removed:?}");
         assert_eq!(
             hub.told.taken(),
-            [UiEvent::AgentRemoved {
-                agent: agent_id(n).as_uuid().to_string(),
+            [UiEvent::MachineRemoved {
+                machine: agent_id(n).as_uuid().to_string(),
                 hostname: format!("laptop-{n}"),
                 at: now(),
             }]
@@ -492,8 +492,8 @@ async fn a_machine_is_online_while_the_hub_holds_its_one_live_connection() {
     hub.pairing.went_live(agent, 1, closer(&older)).await;
     assert!(hub.pairing.is_online(agent));
     assert!(hub.pairing.machines().await.unwrap()[0].online);
-    let online = UiEvent::AgentOnline {
-        agent: agent.as_uuid().to_string(),
+    let online = UiEvent::MachineOnline {
+        machine: agent.as_uuid().to_string(),
         at: now(),
     };
     assert_eq!(hub.told.taken(), [online]);
@@ -514,8 +514,8 @@ async fn a_machine_is_online_while_the_hub_holds_its_one_live_connection() {
     );
     assert_eq!(
         hub.told.taken(),
-        [UiEvent::AgentOffline {
-            agent: agent.as_uuid().to_string(),
+        [UiEvent::MachineOffline {
+            machine: agent.as_uuid().to_string(),
             at: now(),
         }]
     );

@@ -34,9 +34,9 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use api::{
-    AgentStatusDto, ApproveAgentDto, EndRecoveryDto, ErrorCode, HUB_AGENTS_PATH,
+    AgentStatusDto, ApproveAgentDto, EndRecoveryDto, ErrorCode, HUB_MACHINES_PATH,
     HUB_RECOVERY_CONFIRMATION_PATH, HUB_RECOVERY_PATH, HubAgentDto, HubAgentsDto, HubRecoveryDto,
-    MsgArg, RemoveAgentDto, agent_approval_path, agent_removal_path,
+    MsgArg, RemoveAgentDto, machine_approval_path, machine_removal_path,
 };
 use l10n::{Localizer, msg};
 use leptos::prelude::*;
@@ -153,7 +153,7 @@ fn of_machine(localizer: &Localizer, id: l10n::MessageId, hostname: &str) -> Str
 /// answer while none has. Whether the tab still waits for its first answer.
 fn land(listed: Listed, read: Option<HubAgentsDto>) -> bool {
     if let Some(read) = read {
-        let _ = listed.agents.try_set(read.agents);
+        let _ = listed.agents.try_set(read.machines);
         let _ = listed.state.try_set(State::Ready);
         return false;
     }
@@ -174,7 +174,7 @@ fn land(listed: Listed, read: Option<HubAgentsDto>) -> bool {
 fn read(listed: Listed, rereads: StoredValue<Rereads>, visit: &Visit, localizer: &Arc<Localizer>) {
     let localizer = Arc::clone(localizer);
     ws::reread_hub(
-        format!("{}{HUB_AGENTS_PATH}", ws::origin()),
+        format!("{}{HUB_MACHINES_PATH}", ws::origin()),
         rereads,
         visit,
         (READ_PATIENCE, ASK_AGAIN),
@@ -287,7 +287,11 @@ pub(crate) fn Machines(localizer: Arc<Localizer>, step_up: StepUp) -> impl IntoV
         busy.set(true);
         let localizer = Arc::clone(&approve_localizer);
         spawn_local(async move {
-            let url = format!("{}{}", ws::origin(), agent_approval_path(&agent.agent_id));
+            let url = format!(
+                "{}{}",
+                ws::origin(),
+                machine_approval_path(&agent.machine_id)
+            );
             let answer = ws::post(&url, &ask).await;
             if busy.try_set(false).is_some() {
                 // The tab was left while the approval was on its way.
@@ -295,7 +299,7 @@ pub(crate) fn Machines(localizer: Arc<Localizer>, step_up: StepUp) -> impl IntoV
             }
             match answer {
                 Some(Posted::Done(_)) => {
-                    listed.approved(&agent.agent_id);
+                    listed.approved(&agent.machine_id);
                     let words = of_machine(&localizer, msg::UI_MACHINES_APPROVED, &agent.hostname);
                     // Said through the announcer: the line below is set
                     // while the modal still makes it inert, so it changes
@@ -320,9 +324,9 @@ pub(crate) fn Machines(localizer: Arc<Localizer>, step_up: StepUp) -> impl IntoV
                     // tab approved it, or it paired again under a new key.
                     // The refusal answers the reader, so that row shows as
                     // this read of it finds it, even while paused.
-                    let url = format!("{}{HUB_AGENTS_PATH}", ws::origin());
+                    let url = format!("{}{HUB_MACHINES_PATH}", ws::origin());
                     land(listed, ws::poll::<HubAgentsDto>(&url, READ_PATIENCE).await);
-                    listed.refused(&agent.agent_id);
+                    listed.refused(&agent.machine_id);
                 }
                 None => problem.set(Some(Sentence::new(
                     &text(&localizer, msg::UI_PAIRING_UNANSWERED),
@@ -356,7 +360,11 @@ pub(crate) fn Machines(localizer: Arc<Localizer>, step_up: StepUp) -> impl IntoV
         leave_busy.set(true);
         let localizer = Arc::clone(&leave_localizer);
         spawn_local(async move {
-            let url = format!("{}{}", ws::origin(), agent_removal_path(&agent.agent_id));
+            let url = format!(
+                "{}{}",
+                ws::origin(),
+                machine_removal_path(&agent.machine_id)
+            );
             let answer = ws::post(&url, &ask).await;
             if leave_busy.try_set(false).is_some() {
                 // The tab was left while the removal was on its way.
@@ -364,7 +372,7 @@ pub(crate) fn Machines(localizer: Arc<Localizer>, step_up: StepUp) -> impl IntoV
             }
             match answer {
                 Some(Posted::Done(_)) => {
-                    listed.removed(&agent.agent_id);
+                    listed.removed(&agent.machine_id);
                     let done = LeaveWords::of(&agent.status).done;
                     let words = of_machine(&localizer, done, &agent.hostname);
                     // Said through the announcer, as an approval is.
@@ -382,9 +390,9 @@ pub(crate) fn Machines(localizer: Arc<Localizer>, step_up: StepUp) -> impl IntoV
                     )));
                     // Another tab removed it, or it paired again under a
                     // new key: the row shows as this read finds it.
-                    let url = format!("{}{HUB_AGENTS_PATH}", ws::origin());
+                    let url = format!("{}{HUB_MACHINES_PATH}", ws::origin());
                     land(listed, ws::poll::<HubAgentsDto>(&url, READ_PATIENCE).await);
-                    listed.refused(&agent.agent_id);
+                    listed.refused(&agent.machine_id);
                 }
                 None => leave_problem.set(Some(Sentence::new(
                     &text(&localizer, msg::UI_PAIRING_UNANSWERED),
@@ -461,7 +469,7 @@ pub(crate) fn Machines(localizer: Arc<Localizer>, step_up: StepUp) -> impl IntoV
             row_header=waiting_header
             columns=waiting_columns
             rows=listed.of(AgentStatusDto::Pending)
-            key=|row: &HubAgentDto| row.agent_id.clone()
+            key=|row: &HubAgentDto| row.machine_id.clone()
             state=listed.shown_state()
             sentences=Sentences {
                 loading: t(msg::UI_MACHINES_LOADING),
@@ -477,7 +485,7 @@ pub(crate) fn Machines(localizer: Arc<Localizer>, step_up: StepUp) -> impl IntoV
             row_header=approved_header
             columns=approved_columns
             rows=listed.of(AgentStatusDto::Approved)
-            key=|row: &HubAgentDto| row.agent_id.clone()
+            key=|row: &HubAgentDto| row.machine_id.clone()
             state=listed.shown_state()
             sentences=Sentences {
                 loading: t(msg::UI_MACHINES_LOADING),
@@ -692,7 +700,7 @@ fn review(localizer: &Arc<Localizer>, agent: HubAgentDto, review: Review) -> imp
     let label = of_machine(localizer, msg::UI_MACHINES_APPROVE, hostname);
     let body = of_machine(localizer, msg::UI_MACHINES_REVIEW_BODY, hostname);
     let fingerprint_name = of_machine(localizer, msg::UI_MACHINES_FINGERPRINT, hostname);
-    let returns_to = approve_id(&agent.agent_id);
+    let returns_to = approve_id(&agent.machine_id);
     let working = Working {
         active: review.busy.into(),
         status: of_machine(localizer, msg::UI_MACHINES_APPROVING, hostname),
@@ -770,7 +778,7 @@ fn leave_review(
                 tone: Tone::Error,
                 action: review.leave,
             })
-            returns_to=leave_id(&agent.agent_id)
+            returns_to=leave_id(&agent.machine_id)
             described_by=LEAVE_BODY_ID.to_owned()
             working=working
             fallback=words.heading.to_owned()
@@ -795,7 +803,7 @@ fn leave_button(
     let (hostname, agent_id, words) = row.with_untracked(|row| {
         (
             row.hostname.clone(),
-            row.agent_id.clone(),
+            row.machine_id.clone(),
             LeaveWords::of(&row.status),
         )
     });
@@ -834,7 +842,7 @@ fn agent_id_column(localizer: &Localizer) -> Column<HubAgentDto> {
         text(localizer, msg::UI_MACHINES_AGENT_ID),
         Rem::tenths(70),
         |row: Signal<HubAgentDto>| {
-            view! { <bdi>{move || row.with(|row| row.agent_id.clone())}</bdi> }.into_any()
+            view! { <bdi>{move || row.with(|row| row.machine_id.clone())}</bdi> }.into_any()
         },
     )
 }
@@ -971,7 +979,7 @@ fn waiting_columns(
             // replaces the button focus is on; focus goes to the heading
             // when its row leaves the table.
             let (hostname, agent_id) =
-                row.with_untracked(|row| (row.hostname.clone(), row.agent_id.clone()));
+                row.with_untracked(|row| (row.hostname.clone(), row.machine_id.clone()));
             let label = of_machine(&labels, msg::UI_MACHINES_APPROVE, &hostname);
             let button = NodeRef::<leptos::html::Button>::new();
             hand_focus_when_gone(button, WAITING_HEADING_ID.to_owned());

@@ -3,7 +3,7 @@ use std::sync::Arc;
 
 use async_trait::async_trait;
 use domain::execution::FailureReason;
-use domain::execution::plan_tags::{AGENT_TAG_PREFIX, PLAN_TAG_PREFIX};
+use domain::execution::plan_tags::{MACHINE_TAG_PREFIX, PLAN_TAG_PREFIX};
 use domain::maintenance::RepositoryReport;
 use domain::planning::{
     AgentConfig, AgentSettings, GroupBy, Hooks, Maintenance, RepositoryConfig, RepositorySettings,
@@ -71,7 +71,7 @@ fn made_by(agent: &AgentId, time: Timestamp) -> SnapshotSummary {
         label: String::new(),
         tags: vec![
             format!("{PLAN_TAG_PREFIX}home"),
-            format!("{AGENT_TAG_PREFIX}{}", agent.as_uuid().hyphenated()),
+            format!("{MACHINE_TAG_PREFIX}{}", agent.as_uuid().hyphenated()),
         ],
         paths: vec!["/home/demo".to_owned()],
         paths_truncated: false,

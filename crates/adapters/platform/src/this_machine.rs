@@ -11,7 +11,7 @@ use app::ports::{MachineError, ThisMachine};
 use domain::fleet::{MAX_MACHINE_IDENTIFIER_BYTES, MachineIdentifier};
 use domain::{AgentId, Uuid};
 
-use crate::agent_id::{self, AGENT_ID_FILE, sync_dir};
+use crate::agent_id::{self, MACHINE_ID_FILE, sync_dir};
 
 /// The file in the data folder holding the recorded machine identifier.
 pub const MACHINE_IDENTIFIER_FILE: &str = "machine-identifier";
@@ -90,10 +90,14 @@ impl ThisMachine for SystemMachine {
     /// ID beside this computer's, which it would take for its own.
     fn renew(&self, identifier: &MachineIdentifier) -> Result<AgentId, MachineError> {
         let id = Uuid::now_v7();
-        replace(&self.data_dir, AGENT_ID_FILE, &id.hyphenated().to_string())?;
+        replace(
+            &self.data_dir,
+            MACHINE_ID_FILE,
+            &id.hyphenated().to_string(),
+        )?;
         self.record(identifier)?;
         agent_id::load(&self.data_dir)
-            .map_err(|error| failed(&self.data_dir.join(AGENT_ID_FILE), error))?
+            .map_err(|error| failed(&self.data_dir.join(MACHINE_ID_FILE), error))?
             .ok_or_else(|| MachineError {
                 detail: "the new machine ID was written and is gone".to_owned(),
             })
@@ -265,7 +269,7 @@ mod tests {
     #[test]
     fn a_new_machine_id_replaces_the_one_in_the_data_folder() {
         let dir = tempfile::tempdir().unwrap();
-        let file = dir.path().join("machine-id");
+        let file = dir.path().join("etc-machine-id");
         std::fs::write(&file, "here\n").unwrap();
         let old = agent_id::load_or_create(dir.path()).unwrap();
         let machine = SystemMachine::reading(dir.path(), &file);
@@ -278,7 +282,7 @@ mod tests {
     fn a_record_that_holds_no_identifier_is_an_error() {
         let dir = tempfile::tempdir().unwrap();
         std::fs::write(dir.path().join(super::MACHINE_IDENTIFIER_FILE), " \n").unwrap();
-        let machine = SystemMachine::reading(dir.path(), &dir.path().join("machine-id"));
+        let machine = SystemMachine::reading(dir.path(), &dir.path().join("etc-machine-id"));
         assert!(machine.recorded().is_err());
     }
 

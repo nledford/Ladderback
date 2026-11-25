@@ -625,7 +625,7 @@ pub enum ErrorCode {
     /// token stays good.
     HostnameTaken,
     /// The hub has another key under this agent's ID.
-    AgentKeyMismatch,
+    MachineKeyMismatch,
     /// The hub's key isn't the one the agent trusts, or the one its token
     /// names: nothing of the token was sent.
     HubKeyMismatch,
@@ -640,11 +640,11 @@ pub enum ErrorCode {
     /// The hub removed this machine, or a person rejected it while it
     /// waited: it refuses its connections and an ordinary token under its
     /// ID. The machine keeps backing up and runs no maintenance.
-    AgentRemoved,
+    MachineRemoved,
     /// The hub removed, or a person rejected, a machine that held this
     /// machine's agent key: it refuses the key under any machine ID. The
     /// token stays good.
-    AgentKeyRemoved,
+    MachineKeyRemoved,
     /// The hub closed the connection because it can't offer the binding
     /// the agent's token names, before it proved itself.
     BindingUnavailable,
@@ -700,9 +700,9 @@ pub enum ErrorCode {
     PairingTokenUnknown,
     /// No machine waits for approval under the agent ID and the key asked
     /// for: it never paired, it was dropped, or it holds another key now.
-    AgentUnknown,
+    MachineUnknown,
     /// The machine asked to be approved is approved already.
-    AgentApprovedAlready,
+    MachineApprovedAlready,
     /// The hub couldn't read or keep its key or its tokens.
     HubUnavailable,
     #[serde(other)]
@@ -1701,13 +1701,13 @@ impl ErrorCode {
             | Self::TokenRevoked
             | Self::TokenMalformed
             | Self::TokenUnsupported
-            | Self::AgentKeyMismatch
+            | Self::MachineKeyMismatch
             | Self::HubKeyMismatch
             | Self::HubProofInvalid
             | Self::ProofRefused
             | Self::PendingLimit
-            | Self::AgentRemoved
-            | Self::AgentKeyRemoved
+            | Self::MachineRemoved
+            | Self::MachineKeyRemoved
             | Self::BindingUnavailable
             | Self::IdentityConflict
             | Self::PlainAddress
@@ -1720,8 +1720,8 @@ impl ErrorCode {
             | Self::PairingTokenLife
             | Self::PairingTokenLimit
             | Self::PairingTokenUnknown
-            | Self::AgentUnknown
-            | Self::AgentApprovedAlready
+            | Self::MachineUnknown
+            | Self::MachineApprovedAlready
             | Self::HubUnavailable
             | Self::Unknown => &[],
         }

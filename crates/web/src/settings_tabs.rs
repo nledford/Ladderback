@@ -64,7 +64,7 @@ impl Section {
             Self::ApiTokens => "api-tokens",
             Self::AiAgents => "ai-agents",
             #[cfg(feature = "hub")]
-            Self::Agents => "agents",
+            Self::Agents => "machines",
             Self::DryRunAllowlist => "dry-run-allowlist",
             Self::Restart => "restart",
         }
@@ -140,7 +140,7 @@ mod tests {
                 "api-tokens",
                 "ai-agents",
                 #[cfg(feature = "hub")]
-                "agents",
+                "machines",
                 "dry-run-allowlist",
                 "restart"
             ]

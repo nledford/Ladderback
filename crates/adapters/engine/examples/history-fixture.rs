@@ -2,7 +2,7 @@
 //! repository, for screenshots and demos; `just try --demo` runs it.
 //!
 //! ```text
-//! history-fixture <declaration> <repository> <sources> <agent-id>
+//! history-fixture <declaration> <repository> <sources> <machine-id>
 //! ```
 //!
 //! The repository folder must not hold a repository yet. Its password is the
@@ -34,7 +34,7 @@ fn run() -> Result<(), String> {
     let args: Vec<String> = std::env::args().skip(1).collect();
     let [declaration, repository, sources, agent] = args.as_slice() else {
         return Err(
-            "usage: history-fixture <declaration> <repository> <sources> <agent-id>".to_owned(),
+            "usage: history-fixture <declaration> <repository> <sources> <machine-id>".to_owned(),
         );
     };
     let text =

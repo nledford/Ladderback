@@ -3,27 +3,71 @@ use super::*;
 #[test]
 fn a_connect_is_json_named_by_its_type() {
     let frame = AgentFrame::Connect {
-        agent_id: "0194f6a2-0000-7000-8000-000000000001".into(),
-        agent_nonce: "AAAA".into(),
+        machine_id: "0194f6a2-0000-7000-8000-000000000001".into(),
+        machine_nonce: "AAAA".into(),
         binding_kind: 1,
     };
     assert_eq!(
         frame.to_text(),
-        r#"{"type":"connect","agent_id":"0194f6a2-0000-7000-8000-000000000001","agent_nonce":"AAAA","binding_kind":1}"#
+        r#"{"type":"connect","machine_id":"0194f6a2-0000-7000-8000-000000000001","machine_nonce":"AAAA","binding_kind":1}"#
     );
     assert_eq!(AgentFrame::from_text(&frame.to_text()), Ok(frame));
+}
+
+/// Every handshake field that names the machine says `machine` on the wire
+/// (§16, decision 163): the frames and payloads read and write these names
+/// and no others.
+#[test]
+fn the_handshake_names_the_machine_on_the_wire() {
+    for text in [
+        r#"{"type":"connect","machine_id":"x","machine_nonce":"y","binding_kind":0}"#,
+        r#"{"type":"pair","pairing_key":"pk","machine_key":"mk","counter":1,"hostname":"nas","pairing_signature":"ps","machine_signature":"ms"}"#,
+        r#"{"type":"proof","counter":1,"machine_proof":"p"}"#,
+    ] {
+        let frame = AgentFrame::from_text(text).unwrap();
+        assert_eq!(frame.to_text(), text);
+    }
+    let hello = br#"{"machine_version":"v","hostname":"nas","protocols":[1,1],"clock":1}"#;
+    let read = HelloPayload::from_bytes(hello).unwrap();
+    assert_eq!(read.to_bytes(), hello.to_vec());
+    let welcome = br#"{"protocol":1,"hub_protocols":[1,1],"machine_protocols":[1,1],"generation":1,"hub_handshakes":1,"hub_version":"v","signed_at":1,"status":"approved"}"#;
+    let read = WelcomePayload::from_bytes(welcome).unwrap();
+    assert_eq!(read.to_bytes(), welcome.to_vec());
+    for text in [
+        r#"{"type":"connect","agent_id":"x","agent_nonce":"y","binding_kind":0}"#,
+        r#"{"type":"proof","counter":1,"agent_proof":"p"}"#,
+    ] {
+        assert_eq!(AgentFrame::from_text(text), Err(UnreadableFrame), "{text}");
+    }
+}
+
+/// The handshake's refusals that name the machine go by `machine-` codes
+/// (§16, decision 163), and the old `agent-` codes are none of them.
+#[test]
+fn the_refusals_name_the_machine_on_the_wire() {
+    for code in [
+        "machine-key-mismatch",
+        "machine-removed",
+        "machine-key-removed",
+    ] {
+        assert_ne!(refusal_code(code), ErrorCode::Unknown, "{code}");
+        assert_eq!(code_name(refusal_code(code)), code);
+    }
+    for code in ["agent-key-mismatch", "agent-removed", "agent-key-removed"] {
+        assert_eq!(refusal_code(code), ErrorCode::Unknown, "{code}");
+    }
 }
 
 #[test]
 fn every_frame_reads_back_as_written() {
     let agent = [AgentFrame::Pair {
         pairing_key: "pk".into(),
-        agent_key: "ak".into(),
+        machine_key: "ak".into(),
         counter: u64::MAX,
         hostname: "Nick's NAS \u{e9}".into(),
         zone: Some("America/Chicago".into()),
         pairing_signature: "ps".into(),
-        agent_signature: "as".into(),
+        machine_signature: "as".into(),
     }];
     for frame in agent {
         assert_eq!(AgentFrame::from_text(&frame.to_text()), Ok(frame));
@@ -89,16 +133,16 @@ fn a_frame_that_is_no_message_is_unreadable() {
         "not json",
         "{}",
         r#"{"type":"hello"}"#,
-        r#"{"type":"connect","agent_id":"x","agent_nonce":"y"}"#,
-        r#"{"type":"connect","agent_id":"x","agent_nonce":"y","binding_kind":256}"#,
-        r#"{"type":"connect","agent_id":"x","agent_nonce":"y","binding_kind":-1}"#,
+        r#"{"type":"connect","machine_id":"x","machine_nonce":"y"}"#,
+        r#"{"type":"connect","machine_id":"x","machine_nonce":"y","binding_kind":256}"#,
+        r#"{"type":"connect","machine_id":"x","machine_nonce":"y","binding_kind":-1}"#,
         r#"{"type":"challenge","hub_nonce":"n","hub_key":"k","hub_handshakes":1,"hub_proof":"p"}"#,
     ] {
         assert_eq!(AgentFrame::from_text(text), Err(UnreadableFrame), "{text}");
     }
     assert_eq!(
         HubFrame::from_text(
-            r#"{"type":"connect","agent_id":"x","agent_nonce":"y","binding_kind":0}"#
+            r#"{"type":"connect","machine_id":"x","machine_nonce":"y","binding_kind":0}"#
         ),
         Err(UnreadableFrame)
     );
@@ -111,12 +155,12 @@ fn a_refusal_names_its_error_code() {
         ("token-expired", ErrorCode::TokenExpired),
         ("token-revoked", ErrorCode::TokenRevoked),
         ("hostname-taken", ErrorCode::HostnameTaken),
-        ("agent-key-mismatch", ErrorCode::AgentKeyMismatch),
+        ("machine-key-mismatch", ErrorCode::MachineKeyMismatch),
         ("hub-key-mismatch", ErrorCode::HubKeyMismatch),
         ("proof-refused", ErrorCode::ProofRefused),
         ("pending-limit", ErrorCode::PendingLimit),
-        ("agent-removed", ErrorCode::AgentRemoved),
-        ("agent-key-removed", ErrorCode::AgentKeyRemoved),
+        ("machine-removed", ErrorCode::MachineRemoved),
+        ("machine-key-removed", ErrorCode::MachineKeyRemoved),
         ("binding-unavailable", ErrorCode::BindingUnavailable),
         ("identity-conflict", ErrorCode::IdentityConflict),
         ("a-code-of-a-later-hub", ErrorCode::Unknown),
@@ -216,7 +260,7 @@ fn a_paired_status_this_build_doesnt_know_reads_as_none() {
     }
     let welcome = |status: &str| {
         format!(
-            r#"{{"hub_protocols":[1,1],"agent_protocols":[1,1],"generation":1,"hub_handshakes":1,"hub_version":"v","signed_at":1,"status":"{status}"}}"#
+            r#"{{"hub_protocols":[1,1],"machine_protocols":[1,1],"generation":1,"hub_handshakes":1,"hub_version":"v","signed_at":1,"status":"{status}"}}"#
         )
     };
     assert!(WelcomePayload::from_bytes(welcome("pending").as_bytes()).is_ok());

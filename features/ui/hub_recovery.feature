@@ -8,7 +8,7 @@ Feature: Ending hub recovery mode from the Machines page
   Scenario: A person ends recovery mode by keyboard alone
     Given a hub with sign-in off
     And the hub is in recovery mode
-    When I open the address "/settings#agents"
+    When I open the address "/settings#machines"
     And I skip to the content
     Then the page says "A machine showed this hub a newer lease than it counts, as after a restore from an older backup. Until you confirm the hub that granted it is stopped or gone, this hub grants and renews no lease, so two copies of the hub can't give one repository to two machines."
     When I press Tab until focus is on the button "End recovery mode"

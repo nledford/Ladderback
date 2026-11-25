@@ -48,7 +48,7 @@ impl KeyFile {
     /// The file's name in the data folder.
     pub const fn file_name(self) -> &'static str {
         match self {
-            Self::AgentKey => "agent-key",
+            Self::AgentKey => "machine-key",
             Self::HubKey => "hub-key",
             Self::HubTlsKey => "hub-tls-key",
             Self::RecoveryKey => "hub-recovery-key",
@@ -79,8 +79,24 @@ pub const LEFT_OUT_OF_BACKUPS: [KeyFile; 4] = [
     KeyFile::AgentKey,
 ];
 
-/// The globs that leave [`LEFT_OUT_OF_BACKUPS`] out of a backup that walks
-/// the data folder at `folder`, an absolute path as the backup walks it. Each
+/// The name an earlier build kept the machine's secret key under, before
+/// it was `machine-key` (§16, decision 163). It is never read: a backup
+/// only leaves it out, so a key an upgrade left behind stays out of the
+/// repository as it did before (I4, decision 120).
+const EARLIER_MACHINE_KEY_FILE: &str = "agent-key";
+
+/// The names a backup of the data folder leaves out: those of
+/// [`LEFT_OUT_OF_BACKUPS`], then [`EARLIER_MACHINE_KEY_FILE`].
+fn left_out_names() -> impl Iterator<Item = &'static str> {
+    LEFT_OUT_OF_BACKUPS
+        .iter()
+        .map(|file| file.file_name())
+        .chain([EARLIER_MACHINE_KEY_FILE])
+}
+
+/// The globs that leave [`LEFT_OUT_OF_BACKUPS`], and the key an earlier
+/// build kept as `agent-key`, out of a backup that walks the
+/// data folder at `folder`, an absolute path as the backup walks it. Each
 /// also leaves out every name that starts with the file's, which is what a
 /// write stages beside it (`hub-key.<id>.tmp`) and a rotation makes
 /// (`hub-key.new`). In rustic's globs (gitignore's rules, §6.1) a leading
@@ -89,9 +105,8 @@ pub const LEFT_OUT_OF_BACKUPS: [KeyFile; 4] = [
 /// escaped so none is read as a pattern.
 pub fn left_out_globs(folder: &str) -> Vec<String> {
     let folder = escape_glob(folder.trim_end_matches('/'));
-    LEFT_OUT_OF_BACKUPS
-        .iter()
-        .map(|file| format!("!{folder}/{}*", file.file_name()))
+    left_out_names()
+        .map(|name| format!("!{folder}/{name}*"))
         .collect()
 }
 
@@ -100,8 +115,8 @@ pub fn left_out_globs(folder: &str) -> Vec<String> {
 /// `iglob` reads it. The name's bytes, as the file system gives them, so a
 /// name that isn't UTF-8 is judged too.
 pub fn is_left_out(name: &[u8]) -> bool {
-    LEFT_OUT_OF_BACKUPS.iter().any(|file| {
-        let prefix = file.file_name().as_bytes();
+    left_out_names().any(|file| {
+        let prefix = file.as_bytes();
         name.get(..prefix.len())
             .is_some_and(|start| start.eq_ignore_ascii_case(prefix))
     })

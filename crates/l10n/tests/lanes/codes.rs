@@ -503,6 +503,25 @@ fn an_engine_that_left_no_exit_status_is_not_said_to_have_been_signalled() {
     assert!(sent.text().contains("exit status 3"), "{sent}");
 }
 
+/// A failed hook of the machine's own list says so, by the level code
+/// `machine` (§16, decision 163), not the plan's words a level the message
+/// doesn't know would fall back to.
+#[test]
+fn a_hook_failed_at_the_machine_level_names_the_machines_list() {
+    let localizer = english();
+    let args = [
+        ("level", MsgArg::Text("machine".to_owned())),
+        ("position", MsgArg::Text("2".to_owned())),
+    ];
+    let failed = localizer.error(ErrorCode::HookFailed, &args, None);
+    assert!(failed.problems().is_empty(), "{:?}", failed.problems());
+    assert!(
+        failed.text().contains("Hook 2 of this machine's"),
+        "{failed}"
+    );
+    assert!(!failed.text().contains("plan"), "{failed}");
+}
+
 #[test]
 fn each_plan_problem_has_its_own_words_naming_the_field() {
     use api::PlanProblem::{

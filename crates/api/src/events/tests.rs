@@ -69,18 +69,18 @@ fn each_event_serializes_with_its_kebab_case_type() {
             "operation-failed",
         ),
         (
-            UiEvent::AgentOnline {
-                agent: "demo".into(),
+            UiEvent::MachineOnline {
+                machine: "demo".into(),
                 at: "2026-11-09T10:00:00Z".into(),
             },
-            "agent-online",
+            "machine-online",
         ),
         (
-            UiEvent::AgentOffline {
-                agent: "demo".into(),
+            UiEvent::MachineOffline {
+                machine: "demo".into(),
                 at: "2026-11-09T10:00:00Z".into(),
             },
-            "agent-offline",
+            "machine-offline",
         ),
         (retrying(), "backup-retrying"),
     ] {
@@ -147,6 +147,35 @@ fn the_fields_of_each_event_carry_their_own_names() {
     );
 }
 
+/// Every event about one of the hub's machines is `machine-` and names it
+/// in its `machine` field (§16, decision 163); the old `agent-` events are
+/// none.
+#[test]
+fn the_events_of_the_hubs_machines_name_the_machine() {
+    let progress = serde_json::json!({
+        "operation": "op", "unit": "count", "current": 1, "at": "2026-11-09T10:00:00Z",
+    });
+    for wire in [
+        serde_json::json!({"type": "machine-online", "machine": "m", "at": "t"}),
+        serde_json::json!({"type": "machine-offline", "machine": "m", "at": "t"}),
+        serde_json::json!({"type": "machine-pending", "machine": "m", "hostname": "h", "at": "t"}),
+        serde_json::json!({"type": "machine-approved", "machine": "m", "hostname": "h", "at": "t"}),
+        serde_json::json!({"type": "machine-removed", "machine": "m", "hostname": "h", "at": "t"}),
+        serde_json::json!({"type": "machine-reported", "machine": "m", "operation": "op", "outcome": "running"}),
+        serde_json::json!({"type": "machine-plans", "machine": "m"}),
+        serde_json::json!({"type": "machine-progress", "machine": "m", "progress": progress}),
+    ] {
+        let event = from_value::<UiEvent>(wire.clone()).unwrap();
+        assert_eq!(to_value(&event).unwrap(), wire);
+    }
+    for wire in [
+        serde_json::json!({"type": "agent-online", "agent": "m", "at": "t"}),
+        serde_json::json!({"type": "agent-plans", "agent": "m"}),
+    ] {
+        assert!(from_value::<UiEvent>(wire).is_err());
+    }
+}
+
 #[test]
 fn every_event_round_trips_through_its_wire_form() {
     let events = [
@@ -172,12 +201,12 @@ fn every_event_round_trips_through_its_wire_form() {
             args: Vec::new(),
             finished_at: "2026-11-09T10:05:00Z".into(),
         },
-        UiEvent::AgentOnline {
-            agent: "demo".into(),
+        UiEvent::MachineOnline {
+            machine: "demo".into(),
             at: "2026-11-09T10:00:00Z".into(),
         },
-        UiEvent::AgentOffline {
-            agent: "demo".into(),
+        UiEvent::MachineOffline {
+            machine: "demo".into(),
             at: "2026-11-09T10:00:00Z".into(),
         },
         retrying(),

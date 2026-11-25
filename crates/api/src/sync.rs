@@ -32,25 +32,25 @@ pub enum AgentFrame {
     /// Who the agent says it is, its fresh nonce, and the binding kind it
     /// signs under (0 none, 1 `tls-exporter`).
     Connect {
-        agent_id: String,
-        agent_nonce: String,
+        machine_id: String,
+        machine_nonce: String,
         binding_kind: u8,
     },
     /// The pairing, in place of `Proof`. `zone` is the agent's IANA time
     /// zone name, absent when its zone has no such name.
     Pair {
         pairing_key: String,
-        agent_key: String,
+        machine_key: String,
         counter: u64,
         hostname: String,
         #[serde(default, skip_serializing_if = "Option::is_none")]
         zone: Option<String>,
         pairing_signature: String,
-        agent_signature: String,
+        machine_signature: String,
     },
-    /// A paired agent's proof: its connection counter and `agent-proof`
+    /// A paired agent's proof: its connection counter and `machine-proof`
     /// signed with its agent key.
-    Proof { counter: u64, agent_proof: String },
+    Proof { counter: u64, machine_proof: String },
     /// A signed message after the proofs (decision 120, "Signed messages
     /// after the handshake"): `payload` is the message's JSON bytes.
     Signed {
@@ -114,7 +114,7 @@ pub enum HubFrame {
 /// The payload of the agent's `Hello`.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct HelloPayload {
-    pub agent_version: String,
+    pub machine_version: String,
     pub hostname: String,
     /// The lowest and the highest protocol the agent speaks.
     pub protocols: [u64; 2],
@@ -138,7 +138,7 @@ pub struct WelcomePayload {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub protocol: Option<u64>,
     pub hub_protocols: [u64; 2],
-    pub agent_protocols: [u64; 2],
+    pub machine_protocols: [u64; 2],
     pub generation: u64,
     pub hub_handshakes: u64,
     pub hub_version: String,
@@ -385,12 +385,12 @@ pub fn refusal_code(code: &str) -> ErrorCode {
             | ErrorCode::TokenExpired
             | ErrorCode::TokenRevoked
             | ErrorCode::HostnameTaken
-            | ErrorCode::AgentKeyMismatch
+            | ErrorCode::MachineKeyMismatch
             | ErrorCode::HubKeyMismatch
             | ErrorCode::ProofRefused
             | ErrorCode::PendingLimit
-            | ErrorCode::AgentRemoved
-            | ErrorCode::AgentKeyRemoved
+            | ErrorCode::MachineRemoved
+            | ErrorCode::MachineKeyRemoved
             | ErrorCode::BindingUnavailable
             | ErrorCode::IdentityConflict
     ) {

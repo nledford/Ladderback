@@ -89,8 +89,8 @@ pub(crate) fn pairing_token(row: &SqliteRow) -> Result<TokenRecord, StoreError> 
         .and_then(BindingKind::from_byte)
         .ok_or_else(|| reader.corrupt("kind", format!("{kind} is not a binding kind")))?;
     let state_text = reader.required_text("state")?;
-    let agent_id = reader.agent_id("used_agent_id")?;
-    let agent_key = reader.key("used_agent_key")?;
+    let agent_id = reader.agent_id("used_machine_id")?;
+    let agent_key = reader.key("used_machine_key")?;
     let state = match (state_text.as_str(), agent_id, agent_key) {
         ("unused", None, None) => TokenUse::Unused,
         ("revoked", None, None) => TokenUse::Revoked,
@@ -102,7 +102,7 @@ pub(crate) fn pairing_token(row: &SqliteRow) -> Result<TokenRecord, StoreError> 
             return Err(reader.corrupt(
                 "state",
                 format!(
-                    "{} doesn't agree with used_agent_id and used_agent_key",
+                    "{} doesn't agree with used_machine_id and used_machine_key",
                     shown(&state_text)
                 ),
             ));

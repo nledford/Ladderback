@@ -68,13 +68,13 @@ Feature: Approving a machine on the running hub's page
     And a machine named "e2e-laptop" paired with the token from its terminal
     And the person approved "e2e-laptop" on the hub's page
     When the person approves "e2e-laptop" on the hub's page, confirming with the hub key's fingerprint
-    Then the hub refuses with the code "agent-approved-already"
+    Then the hub refuses with the code "machine-approved-already"
 
   @e2e
   Scenario: The hub's page approves no machine that never paired
     Given the hub is serving on loopback
     When the person approves an agent ID that never paired on the hub's page, confirming with the hub key's fingerprint
-    Then the hub refuses with the code "agent-unknown"
+    Then the hub refuses with the code "machine-unknown"
 
   @e2e
   Scenario: The hub's page shows the hub key as the fingerprint its terminal printed, and no other ID

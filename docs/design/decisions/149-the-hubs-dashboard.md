@@ -21,3 +21,5 @@ The dashboard is the hub's main page, but the header's links are the same on eve
 - A machine that starts waiting is announced politely while any tab of Settings shows, not only the Machines tab: the person is in Settings, where approving it is one tab away.
 - A read that fails after one that answered keeps the machines shown and says nothing; the next event or the stream's next opening reads again.
 - The rest of §4.4's card (overdue plans, recent failures) and a machine's own page are still to come; plans, their next runs and live progress came with #1440 (§7.2). Removing or rejecting a machine, and its event, wait for #1439.
+
+**Amended by [decision 163](163-the-wire-and-stored-names-say-machine.md)** (2026-11-25, #1220): the dashboard's read is `GET /api/v1/hub/dashboard`, where it was `GET /api/v1/hub/machines`, which the registry now takes, and the events `AgentOnline`, `AgentOffline`, `AgentPending`, `AgentApproved` and `AgentReported` are `machine-online`, `machine-offline`, `machine-pending`, `machine-approved` and `machine-reported` (`MachineOnline` and the rest), each naming its machine in `machine`.

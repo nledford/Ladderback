@@ -85,7 +85,7 @@ Feature: The hub's dashboard of its approved machines
 
   Scenario: The Machines tab leads to the dashboard
     Given a hub with sign-in off
-    When I open the address "/settings#agents"
+    When I open the address "/settings#machines"
     And I skip to the content
     And I press Tab until focus is on the link "See the approved machines' latest operations"
     And I press Enter

@@ -20,15 +20,15 @@ use sqlx::{Connection, Row, SqliteConnection};
 use crate::row::agent_id_text;
 use crate::{SqliteStore, unavailable};
 
-const FORGET_REPORT: &str = "DELETE FROM ownership_reports WHERE agent_id = ?1";
+const FORGET_REPORT: &str = "DELETE FROM ownership_reports WHERE machine_id = ?1";
 
 const TAKE_REPORT: &str =
-    "INSERT INTO ownership_reports (agent_id, repo_id, reported_at) VALUES (?1, ?2, ?3)";
+    "INSERT INTO ownership_reports (machine_id, repo_id, reported_at) VALUES (?1, ?2, ?3)";
 
 const OTHERS_REPORTS: &str =
-    "SELECT reported_at FROM ownership_reports WHERE repo_id = ?1 AND agent_id <> ?2";
+    "SELECT reported_at FROM ownership_reports WHERE repo_id = ?1 AND machine_id <> ?2";
 
-const USES: &str = "SELECT agent_id, repo_id FROM ownership_reports";
+const USES: &str = "SELECT machine_id, repo_id FROM ownership_reports";
 
 const OWNER: &str = "SELECT last_epoch, holder, epoch, expires_at \
      FROM repository_owners WHERE repo_id = ?1";
@@ -160,12 +160,12 @@ impl OwnershipRegistry for SqliteStore {
             .map_err(unavailable)?;
         rows.iter()
             .map(|row| {
-                let agent: String = row.try_get("agent_id").map_err(unavailable)?;
+                let agent: String = row.try_get("machine_id").map_err(unavailable)?;
                 let repository: String = row.try_get("repo_id").map_err(unavailable)?;
                 Ok((
                     Uuid::try_parse(&agent)
                         .map(AgentId::from_uuid)
-                        .map_err(|_| corrupt("agent_id"))?,
+                        .map_err(|_| corrupt("machine_id"))?,
                     RepositoryId::parse(&repository).map_err(|_| corrupt("repo_id"))?,
                 ))
             })

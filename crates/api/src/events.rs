@@ -91,52 +91,52 @@ pub enum UiEvent {
         attempts: u32,
         at: String,
     },
-    /// The machine `agent` came online at `at` (RFC 3339): the hub holds
+    /// The machine `machine` came online at `at` (RFC 3339): the hub holds
     /// its sync connection (§7.2; §16, decision 159). A page that shows the
     /// hub's machines reads them again on hearing it.
-    AgentOnline { agent: String, at: String },
-    /// The machine `agent` went offline at `at`: the hub let go of its sync
-    /// connection, which closed or sent nothing for 90 seconds.
-    AgentOffline { agent: String, at: String },
+    MachineOnline { machine: String, at: String },
+    /// The machine `machine` went offline at `at`: the hub let go of its
+    /// sync connection, which closed or sent nothing for 90 seconds.
+    MachineOffline { machine: String, at: String },
     /// A machine paired with this hub and waits for a person's approval
     /// (§16, decision 121, "Waiting for approval"). Told only to a browser
     /// that sees the hub's machines; a page that lists them reads them
     /// again on hearing it.
-    AgentPending {
-        agent: String,
+    MachinePending {
+        machine: String,
         hostname: String,
         at: String,
     },
-    /// A person approved the machine `agent`.
-    AgentApproved {
-        agent: String,
+    /// A person approved the machine `machine`.
+    MachineApproved {
+        machine: String,
         hostname: String,
         at: String,
     },
-    /// A person removed the machine `agent`, or rejected it while it
+    /// A person removed the machine `machine`, or rejected it while it
     /// waited (§16, decision 120, "Removing, re-keying and recovering an
     /// agent"). A page that lists the hub's machines reads them again on
     /// hearing it.
-    AgentRemoved {
-        agent: String,
+    MachineRemoved {
+        machine: String,
         hostname: String,
         at: String,
     },
-    /// The hub took a report of the machine `agent`'s operation `operation`
-    /// (§7.2): that it started, or how it ended. A page that shows the
-    /// machine's operations reads them again on hearing it.
-    AgentReported {
-        agent: String,
+    /// The hub took a report of the machine `machine`'s operation
+    /// `operation` (§7.2): that it started, or how it ended. A page that
+    /// shows the machine's operations reads them again on hearing it.
+    MachineReported {
+        machine: String,
         operation: String,
         outcome: crate::MachineOutcomeDto,
     },
-    /// The hub took a snapshot of the machine `agent`'s plans (§7.2). A
+    /// The hub took a snapshot of the machine `machine`'s plans (§7.2). A
     /// page that shows the machine's plans reads them again on hearing it.
-    AgentPlans { agent: String },
-    /// The hub took the latest progress of the machine `agent`'s running
+    MachinePlans { machine: String },
+    /// The hub took the latest progress of the machine `machine`'s running
     /// operation (§7.2), which a page that shows it shows as it comes.
-    AgentProgress {
-        agent: String,
+    MachineProgress {
+        machine: String,
         progress: crate::MachineProgressDto,
     },
     /// A proposal's status changed (decision 89, point 14): facts only,

@@ -9,7 +9,7 @@ use proptest::prelude::*;
 use proptest::sample::{select, subsequence};
 
 use super::{ForgetPreview, ForgetSelection, ManagedPlan, Partition, Snapshot};
-use crate::execution::plan_tags::{AGENT_TAG_PREFIX, PLAN_TAG_PREFIX};
+use crate::execution::plan_tags::{MACHINE_TAG_PREFIX, PLAN_TAG_PREFIX};
 use crate::planning::RetentionPolicy;
 use crate::{AgentId, PlanId, SnapshotId, Timestamp, Uuid};
 
@@ -54,7 +54,7 @@ fn tag() -> impl Strategy<Value = String> {
         .map(|&plan| plan.to_owned())
         .collect();
     prop_oneof![
-        select(agents).prop_map(|agent| format!("{AGENT_TAG_PREFIX}{agent}")),
+        select(agents).prop_map(|agent| format!("{MACHINE_TAG_PREFIX}{agent}")),
         select(plans).prop_map(|plan| format!("{PLAN_TAG_PREFIX}{plan}")),
         select(vec!["daily", "ladderback-other:x", "ladderback-plan"]).prop_map(str::to_owned),
     ]
@@ -82,7 +82,7 @@ fn snapshots() -> impl Strategy<Value = Vec<Snapshot>> {
     )
         .prop_map(|(plan, mut tags, agent_first)| {
             let mut owner = vec![
-                format!("{AGENT_TAG_PREFIX}{}", own_text()),
+                format!("{MACHINE_TAG_PREFIX}{}", own_text()),
                 format!("{PLAN_TAG_PREFIX}{plan}"),
             ];
             if !agent_first {
@@ -170,7 +170,7 @@ fn agreed_tag<'a>(snapshot: &'a Snapshot, prefix: &str) -> Option<&'a str> {
 /// The agent and plan `snapshot`'s tags name, each only if its tags agree.
 fn owner_tags(snapshot: &Snapshot) -> (Option<&str>, Option<&str>) {
     (
-        agreed_tag(snapshot, AGENT_TAG_PREFIX),
+        agreed_tag(snapshot, MACHINE_TAG_PREFIX),
         agreed_tag(snapshot, PLAN_TAG_PREFIX),
     )
 }
@@ -193,7 +193,7 @@ fn tagged(snapshot: &Snapshot) -> bool {
     snapshot
         .tags
         .iter()
-        .any(|tag| tag.starts_with(AGENT_TAG_PREFIX) || tag.starts_with(PLAN_TAG_PREFIX))
+        .any(|tag| tag.starts_with(MACHINE_TAG_PREFIX) || tag.starts_with(PLAN_TAG_PREFIX))
 }
 
 /// Every snapshot of every group, by ID.

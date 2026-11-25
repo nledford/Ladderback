@@ -588,7 +588,7 @@ cli-pairing-token-forget-unknown = no { -machine } named { $hostname } has paire
 cli-hub-command-failed = the command failed: { $detail }
 
 # A key file in the data folder was refused because other users of this machine can read or change it. It was not used and was left as it is.
-# $file (text): the file's name in the data folder, such as agent-key.
+# $file (text): the file's name in the data folder, such as machine-key.
 # $mode (text): the file's permissions in octal, such as 0644.
 # The command is typed as it is: keep it a string literal.
 cli-key-file-exposed = the key file { $file } in the data folder was not used, because other users of this machine can read or change it (permissions { $mode }). If you copied or restored it yourself, run { "chmod 600" } on it and try again; if you didn't, someone else may hold this key.

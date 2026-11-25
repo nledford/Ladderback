@@ -8,7 +8,7 @@ use std::collections::BTreeMap;
 use std::ops::Range;
 
 use app::ports::{Position, ProfileError, ProfileProblem};
-use domain::execution::plan_tags::{AGENT_TAG_PREFIX, PLAN_TAG_PREFIX};
+use domain::execution::plan_tags::{MACHINE_TAG_PREFIX, PLAN_TAG_PREFIX};
 use domain::planning::{
     GlobFile, GroupBy, HookEntry, Hooks, Hostname, InvalidValue, KeepCount, KeepWithin, OnFailure,
     RetentionPolicy, Source, ValueKind, check_location, check_option_value, check_options,
@@ -404,7 +404,7 @@ fn is_own_filter(reader: &Reader<'_, '_>, path: &Path) -> bool {
     matches!(
         (tags.next(), tags.next(), tags.next()),
         (Some(plan), Some(agent), None)
-            if plan.starts_with(PLAN_TAG_PREFIX) && agent.starts_with(AGENT_TAG_PREFIX)
+            if plan.starts_with(PLAN_TAG_PREFIX) && agent.starts_with(MACHINE_TAG_PREFIX)
     )
 }
 

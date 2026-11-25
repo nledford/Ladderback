@@ -471,7 +471,7 @@ mod tests {
             tags,
             [
                 "a,b",
-                "ladderback-agent:00000000-0000-0000-0000-000000000001",
+                "ladderback-machine:00000000-0000-0000-0000-000000000001",
                 "ladderback-plan:home",
             ]
         );

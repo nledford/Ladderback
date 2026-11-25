@@ -518,7 +518,7 @@ async fn operations_without_status(agent: &mut Agent) {
 async fn log_holds_status(agent: &mut Agent, status: String) {
     let mut connection = connect(agent).await;
     sqlx::query(
-        "INSERT INTO operations (id, agent_id, kind, trigger, status, queued_at) \
+        "INSERT INTO operations (id, machine_id, kind, trigger, status, queued_at) \
          VALUES ('01890000-0000-7000-8000-000000000001', 'local', 'backup', 'manual', ?, 0)",
     )
     .bind(status)

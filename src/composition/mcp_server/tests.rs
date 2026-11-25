@@ -864,7 +864,7 @@ fn snapshot(n: u8, plan: &str, host: &str) -> api::SnapshotDto {
         "offset": "-06:00",
         "hostname": host,
         "label": "",
-        "tags": ["nightly", format!("ladderback-plan:{plan}"), "ladderback-agent:demo"],
+        "tags": ["nightly", format!("ladderback-plan:{plan}"), "ladderback-machine:demo"],
         "paths": ["/home/demo"],
     }))
     .expect("a snapshot")

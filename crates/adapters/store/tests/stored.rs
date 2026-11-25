@@ -355,7 +355,7 @@ fn failures() -> Vec<(
                 ended: Some(HookEnd::Signalled),
             },
             "hook-failed",
-            r#"[["level",{"type":"text","value":"agent"}],["position",{"type":"text","value":"1"}],["ended",{"type":"text","value":"signal"}]]"#,
+            r#"[["level",{"type":"text","value":"machine"}],["position",{"type":"text","value":"1"}],["ended",{"type":"text","value":"signal"}]]"#,
             None,
         ),
         (
