@@ -4,7 +4,7 @@
 
 **Amended by decision 156** (2026-11-23, #1465): `ReposSnapshot` says `others_snapshots: true` for a repository whose last listing, at most a day old, held another agent's recent snapshot, and for one with no such listing, and the agent lists each repository it maintains before a sync when it has none, so the consequence below that it always says `false` no longer holds.
 
-**Amended by decision 161** (2026-11-24, #1482): a prune asks the daemon before it deletes, and the daemon checks the lease again, so the consequence below that a prune can run past the hub's hour of grace now holds only for a deletion already begun.
+**Amended by decision 161** (2026-11-24, #1482): a prune asks the daemon at its first delete, after its warm-up and repack, and the daemon checks the lease again, so the consequence below that a prune can run past the hub's hour of grace now holds only for a deletion already begun.
 
 ## Why
 
@@ -29,7 +29,7 @@
 - A configuration the machine can't read ends the session (`SyncFailure::Config`) before anything is asked, and the leases it holds stay as they were until they run out.
 - A hub that doesn't decide ownership answers neither `ReposSnapshot` nor `ReleaseAck`. The machine then waits the 15 seconds it gives each answer, the session fails, and it holds no lease from that hub.
 - `ReposSnapshot` names at most 9 repositories, the first by ID, so the floor proofs and `RepoGrants` fit a 4096-byte frame. A machine that uses more holds no lease on the others.
-- The lease is checked when a run starts, and a prune checks it again before it deletes ([decision 161](161-a-prune-asks-before-it-deletes.md)): one whose lease lapsed while it worked out its plan deletes nothing and fails with `maintenance-lease-lapsed`. A deletion already begun finishes. A forget, a check or an adoption is checked only at its start.
+- The lease is checked when a run starts, and a prune checks it again at its first delete, after its warm-up and repack ([decision 161](161-a-prune-asks-before-it-deletes.md)): one whose lease lapsed while it ran deletes nothing and fails with `maintenance-lease-lapsed`. A deletion already begun finishes. A forget, a check or an adoption is checked only at its start.
 - A run checks its lease before it takes its place in the operation log, so a session in that gap may release the lease of a run about to start. The gap is milliseconds; the release names a repository the configuration no longer asks this machine to maintain.
 - A clock set back while the daemon was stopped lengthens a lease by as much until a session takes its grants again, which the daemon asks for as it starts; one that can't reach its hub keeps the longer lease.
 - A scheduled forget, prune or check that is refused leaves only a log line. A machine whose leases lapsed, because it was away from a hub it can reach only on its LAN for over 7 days or its hub is gone, stops its scheduled maintenance silently. #1473 adds a visible paused state and an alert.

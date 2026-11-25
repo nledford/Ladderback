@@ -547,8 +547,10 @@ pub(crate) const WIND_DOWN_LIMIT: Duration = Duration::from_secs(30);
 
 /// How long a prune waits for the daemon's answer to its question before
 /// it deletes nothing. The daemon answers from what it holds, at once; this
-/// bounds a daemon that stalls, so a prune never deletes on an answer that
-/// comes long after the lease was checked (§16, decision 161).
+/// bounds a daemon that stalls. It runs on the monotonic clock, which stops
+/// while the computer sleeps, so it doesn't bound a daemon suspended
+/// between its check and its answer: that window is accepted (§16,
+/// decision 161).
 pub(crate) const ANSWER_WAIT: Duration = Duration::from_secs(60);
 
 /// How long the worker waits for a line being written before it ends the
