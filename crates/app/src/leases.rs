@@ -54,8 +54,8 @@ impl MaintenanceLeases {
     /// of now, in place of the answer before: `None` when the answer
     /// didn't say, which holds every prune (§16, decision 166).
     pub fn heard_holds(&self, held: Option<Vec<RepositoryId>>) {
-        let _ = held;
-        todo!()
+        let heard = PruneHolds::heard(held, self.clock.now(), self.clock.monotonic());
+        *self.holds.lock().unwrap_or_else(PoisonError::into_inner) = Some(heard);
     }
 
     /// Whether the hub holds this machine's prune of `repository`, known by
@@ -66,8 +66,18 @@ impl MaintenanceLeases {
     /// repository whose ID isn't known, or a pin that can't be read, is
     /// held, as the lease check refuses them.
     pub async fn prune_held(&self, repository: Option<&RepositoryId>) -> bool {
-        let _ = repository;
-        todo!()
+        match self.identity.pin().await {
+            Ok(None) => return false,
+            Err(_) => return true,
+            Ok(Some(_)) => {}
+        }
+        let Some(repository) = repository else {
+            return true;
+        };
+        let holds = self.holds.lock().unwrap_or_else(PoisonError::into_inner);
+        holds
+            .as_ref()
+            .is_none_or(|holds| holds.holds(repository, self.clock.now(), self.clock.monotonic()))
     }
 
     /// The machine's time a lease is judged at: its wall clock, but never
