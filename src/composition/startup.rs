@@ -25,7 +25,7 @@ use async_trait::async_trait;
 use config_adapter::FileConfigStore;
 use domain::RepositoryId;
 use domain::execution::locations::LocationOutcome;
-use domain::planning::{NotRecorded, RestoreFolder};
+use domain::planning::{NotRecorded, RestoreFolder, ServeSettings};
 use domain::updates::Version;
 use engine::{Recorded, RemovedKind, WorkerEngine};
 use hooks::ProcessHookRunner;
@@ -437,6 +437,20 @@ pub(super) async fn resume_queued(
         .with_events(events)
         .resume(queued, config.as_ref(), &unlock_of, runs, SystemClock.now())
         .await;
+}
+
+/// The `[serve]` table of `config.toml`: what `serve` starts with before its
+/// flags override it (§16, decision 167). It is read before the daemon
+/// starts, as the address and host names decide who can reach it before
+/// the data folder is locked; `daemon` reads the file again whole, and a
+/// file it can't read is refused there in the same words as here.
+pub(crate) async fn serve_settings() -> Result<ServeSettings, Refused> {
+    let config_dir = dirs::config_dir().ok_or_else(|| plain(msg::CLI_NO_CONFIG_DIR))?;
+    FileConfigStore::new(config_dir.join("config.toml"), Arc::new(SystemClock))
+        .load()
+        .await
+        .map(|loaded| loaded.serve().clone())
+        .map_err(config_refused)
 }
 
 /// What the daemon's router runs against (§4.2), with `sign_in` deciding who

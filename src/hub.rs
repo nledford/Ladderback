@@ -90,6 +90,54 @@ pub(crate) fn hub_pairing(data_dir: &Path, store: Arc<SqliteStore>) -> HubPairin
     )))
 }
 
+/// The hostnames of the machines paired with this hub, when there are any:
+/// they keep hub mode on though config.toml or `--hub=false` turns it off
+/// (§16, decision 167). A registry that can't be read keeps it on too, with
+/// no name to give, so no machine loses its hub to a failed read.
+pub(crate) async fn paired_keeping_hub_mode_on(store: &SqliteStore) -> Option<Vec<String>> {
+    match store.agents().await {
+        Ok(records) => domain::fleet::decide_hub_mode_off(&records, Timestamp::now())
+            .err()
+            .map(|refused| {
+                refused
+                    .paired
+                    .iter()
+                    .map(|hostname| hostname.as_str().to_owned())
+                    .collect()
+            }),
+        Err(error) => {
+            log::warn!(
+                "hub mode stays on: the machines paired with this hub couldn't be read ({error})"
+            );
+            Some(Vec::new())
+        }
+    }
+}
+
+/// Says that hub mode stays on, and which paired machines keep it on, one
+/// line each, for them to be removed first (§16, decision 167).
+pub(crate) fn say_hub_mode_kept_on(localizer: &Localizer, paired: &[String]) -> io::Result<()> {
+    if paired.is_empty() {
+        return Ok(());
+    }
+    say(
+        localizer,
+        msg::CLI_WARN_HUB_MODE_KEPT_ON,
+        &[(
+            "count",
+            MsgArg::Count(u64::try_from(paired.len()).unwrap_or(u64::MAX)),
+        )],
+    )?;
+    for hostname in paired {
+        say(
+            localizer,
+            msg::CLI_WARN_HUB_MODE_PAIRED_MACHINE,
+            &[("hostname", text(hostname))],
+        )?;
+    }
+    Ok(())
+}
+
 /// The hub's TLS key in `data_dir`, from which its built-in TLS serves a
 /// certificate (§16, decision 120, "The hub key").
 pub(crate) fn hub_tls_key(data_dir: &Path) -> HubTlsKey {

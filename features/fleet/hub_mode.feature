@@ -5,9 +5,10 @@ Feature: Hub mode in config.toml
   it at and the host names they reach it by. `ladderback serve` reads them
   at start, so the service `install-service` writes runs the hub with no
   flag of its own, and a command-line flag overrides each of them. Hub mode
-  is refused off while a machine is paired with the hub, naming each
-  machine: it would lose its hub (technical design §16, decisions 136 and
-  167).
+  turned off stays on while a machine is paired with the hub, and the hub
+  names each such machine: it would lose its hub, and a hub that refused to
+  start would stop this machine's backups too (technical design §16,
+  decisions 136 and 167).
 
   Scenario: A machine whose config.toml turns hub mode on starts as the hub
     Given the hub's config.toml turns hub mode on
@@ -30,12 +31,12 @@ Feature: Hub mode in config.toml
     And the hub refuses a request for the host name "files.example"
     And the hub's data folder holds no hub key
 
-  Scenario: Hub mode is refused off while a machine is paired, naming it
+  Scenario: Hub mode turned off stays on while a machine is paired, naming it
     Given a hub with a pairing token made at its terminal
     And the hub is serving on loopback
     And a machine named "e2e-laptop" paired with the token from its terminal
     When the hub restarts with hub mode off in its config.toml
-    Then the hub doesn't start, and says hub mode can't be off while "e2e-laptop" is paired
+    Then the hub still starts as the hub, and says hub mode stays on while "e2e-laptop" is paired
 
   Scenario: Hub mode turns off while no machine is paired
     Given a hub with a pairing token made at its terminal

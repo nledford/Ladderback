@@ -1,6 +1,6 @@
 //! Steps for `features/fleet/hub_mode.feature`: hub mode, the address and
 //! the allowed host names in the hub's `config.toml`, the flags of `serve`
-//! over them, and hub mode refused off while a machine is paired.
+//! over them, and hub mode turned off kept on while a machine is paired.
 
 use std::net::SocketAddr;
 
@@ -176,20 +176,8 @@ fn no_hub_key(agent: &mut Agent) {
     }
 }
 
-#[then(expr = "the hub doesn't start, and says hub mode can't be off while {string} is paired")]
-fn refused_hub_mode_off(agent: &mut Agent, hostname: String) {
-    let said = agent
-        .pairing_terminal
-        .refused_start
-        .as_deref()
-        .expect("a hub that didn't start");
-    for expected in ["hub mode", hostname.as_str(), "paired", "[serve]"] {
-        assert!(said.contains(expected), "{expected}: {said}");
-    }
-}
-
-#[then("the hub starts as a machine that isn't a hub")]
-fn starts_as_a_machine(agent: &mut Agent) {
+/// The daemon's log, from the hub that started.
+fn started_log(agent: &Agent) -> String {
     assert!(
         agent.pairing_terminal.refused_start.is_none(),
         "{:?}",
@@ -200,6 +188,27 @@ fn starts_as_a_machine(agent: &mut Agent) {
         .hub_log
         .as_ref()
         .expect("the daemon's log");
-    let text = std::fs::read_to_string(log).expect("the daemon's log");
+    std::fs::read_to_string(log).expect("the daemon's log")
+}
+
+#[then(
+    expr = "the hub still starts as the hub, and says hub mode stays on while {string} is paired"
+)]
+fn hub_mode_kept_on(agent: &mut Agent, hostname: String) {
+    let said = started_log(agent);
+    for expected in [
+        "serving the hub's pairing",
+        "hub mode stays on",
+        hostname.as_str(),
+        "paired",
+        "[serve]",
+    ] {
+        assert!(said.contains(expected), "{expected}: {said}");
+    }
+}
+
+#[then("the hub starts as a machine that isn't a hub")]
+fn starts_as_a_machine(agent: &mut Agent) {
+    let text = started_log(agent);
     assert!(!text.contains("serving the hub's pairing"), "{text}");
 }
