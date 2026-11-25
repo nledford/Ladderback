@@ -137,9 +137,11 @@ Feature: Repositories page
       | notes      | no one        |
     When I open the address "/repositories"
     Then the row "photos" of the table "Repositories" says "Maintained from this machine." in its "Password" column to a screen reader
-    And the row "music" of the table "Repositories" says "Maintained by the hub." in its "Password" column to a screen reader
+    And the row "music" of the table "Repositories" says "Left to the hub to maintain." in its "Password" column to a screen reader
     And the row "notes" of the table "Repositories" says "No one maintains it from here." in its "Password" column to a screen reader
     And the row "photos" of the table "Repositories" doesn't say "No one maintains it from here." in its "Password" column to a screen reader
+    And the row "music" of the table "Repositories" doesn't say "Maintained from this machine." in its "Password" column to a screen reader
+    And the row "notes" of the table "Repositories" doesn't say "Maintained from this machine." in its "Password" column to a screen reader
     And the page has no accessibility violations
 
   Scenario: The Repositories link in the navigation moves focus to the page's heading

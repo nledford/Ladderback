@@ -553,9 +553,11 @@ pub(crate) fn password_source(
 }
 
 /// The note that says who a configured repository's entry asks to maintain
-/// it (§7.3), in words rather than a color.
-pub(crate) fn maintainer_note(maintenance: RepositoryMaintenanceDto) -> MessageId {
+/// it (§7.3), in words rather than a color: for this machine, whether its
+/// maintenance is `paused` for want of a lease from its hub (decision 158).
+pub(crate) fn maintainer_note(maintenance: RepositoryMaintenanceDto, paused: bool) -> MessageId {
     match maintenance {
+        RepositoryMaintenanceDto::Local if paused => msg::UI_REPOSITORY_MAINTAINED_HERE_PAUSED,
         RepositoryMaintenanceDto::Local => msg::UI_REPOSITORY_MAINTAINED_HERE,
         RepositoryMaintenanceDto::Hub => msg::UI_REPOSITORY_MAINTAINED_BY_HUB,
         RepositoryMaintenanceDto::None => msg::UI_REPOSITORY_MAINTAINED_BY_NOBODY,
@@ -1241,21 +1243,33 @@ mod tests {
 
     #[test]
     fn a_repositorys_note_says_in_words_who_its_entry_asks_to_maintain_it() {
-        for (maintenance, id) in [
+        for (maintenance, paused, id) in [
             (
                 RepositoryMaintenanceDto::Local,
+                false,
                 msg::UI_REPOSITORY_MAINTAINED_HERE,
             ),
             (
+                RepositoryMaintenanceDto::Local,
+                true,
+                msg::UI_REPOSITORY_MAINTAINED_HERE_PAUSED,
+            ),
+            (
                 RepositoryMaintenanceDto::Hub,
+                false,
                 msg::UI_REPOSITORY_MAINTAINED_BY_HUB,
             ),
             (
                 RepositoryMaintenanceDto::None,
+                false,
                 msg::UI_REPOSITORY_MAINTAINED_BY_NOBODY,
             ),
         ] {
-            assert_eq!(maintainer_note(maintenance), id, "{maintenance:?}");
+            assert_eq!(
+                maintainer_note(maintenance, paused),
+                id,
+                "{maintenance:?} {paused}"
+            );
         }
     }
 

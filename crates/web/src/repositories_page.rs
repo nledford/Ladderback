@@ -625,7 +625,10 @@ fn place_view(
 fn password_view(localizer: &Localizer, row: &RepositoryDto) -> AnyView {
     let (id, args) = password_source(&row.password);
     let password = text_with(localizer, id, &args);
-    let maintainer = text(localizer, maintainer_note(row.maintenance));
+    let maintainer = text(
+        localizer,
+        maintainer_note(row.maintenance, row.maintenance_paused_since.is_some()),
+    );
     let notes = repository_notes(localizer, &row.warnings);
     view! {
         <div>{runs_view(&password)}</div>
