@@ -313,6 +313,10 @@ fn the_longest_heartbeat_and_answer_fit_one_frame() {
     let held: Vec<_> = (0..MAX_RUNNING_BACKUPS)
         .map(|n| repository(u8::try_from(n).unwrap()))
         .collect();
+    assert_eq!(
+        read_heartbeat_ack(&heartbeat_ack_payload(Some(&held))),
+        Ok(Some(held.clone()))
+    );
     let answer = hub_envelope_frame(&HubEnvelope {
         kind: heartbeat_ack_kind(),
         seq: u64::MAX,
