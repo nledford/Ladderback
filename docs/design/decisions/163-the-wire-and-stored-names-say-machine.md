@@ -29,7 +29,7 @@ Left alone: the `[agent]` table of `config.toml`, "launchd agent", the AI agent 
 Upgrading takes four steps, and the hub and every machine paired with it are upgraded together, since an old build and a new one refuse each other's signatures and codes:
 
 1. Stop the service.
-2. In the data folder (on macOS `~/Library/Application Support/ladderback`), rename `agent-id` to `machine-id` and `agent-key` to `machine-key`. A machine that starts without them takes a new machine ID and key, as a new machine does, and must pair again.
+2. In the data folder (on macOS `~/Library/Application Support/ladderback`), rename `agent-id` to `machine-id` and `agent-key` to `machine-key`, both together: a `machine-key` without its `machine-id` makes the daemon take a new machine ID with the old key. Then delete any leftovers an earlier build staged beside them (`agent-key.*`, `agent-id.*.tmp`). A machine that starts without either file takes a new machine ID and key, as a new machine does, and must pair again.
 3. Retag the snapshots this machine made with rustic, replacing `ladderback-agent:<id>` with `ladderback-machine:<id>`: `rustic tag --filter-tags ladderback-agent:<id> --add ladderback-machine:<id> --remove ladderback-agent:<id> --dry-run`, then again without `--dry-run`. Retag every machine that backs up to a shared repository, not just one.
 4. Start the service. The database migrates itself.
 
