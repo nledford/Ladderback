@@ -543,6 +543,9 @@ impl RunMaintenance {
         let config = self.maintained(alias).await?;
         let (access, secret_warnings) = self.identified(op, &config, alias).await?;
         self.leased(alias, access.id.as_ref()).await?;
+        if matches!(kind, MaintenanceKind::Prune) {
+            self.unheld(alias, access.id.as_ref()).await?;
+        }
 
         let (other_hosts, partition, job) = match kind {
             MaintenanceKind::Forget => {
@@ -648,6 +651,9 @@ impl RunMaintenance {
         // The repository the job opens is the one whose lease it needs.
         let opened = job.access().and_then(|access| access.id.as_ref());
         let lease = self.leased(&alias, opened).await?;
+        if matches!(job, Job::Prune(_)) {
+            self.unheld(&alias, opened).await?;
+        }
         let mut operation = Operation::queue(
             id,
             job.kind(),
@@ -1047,6 +1053,30 @@ impl RunMaintenance {
             );
             MaintenanceError::NoLease(why)
         })
+    }
+
+    /// Refuses a prune of `repository` the hub holds, as another machine
+    /// may be backing up to it (§7.3, layer 2; §16, decision 166): checked
+    /// at the start only, as a backup that starts later reads the index the
+    /// prune left. A machine that isn't paired is never held. A refusal is
+    /// logged.
+    async fn unheld(
+        &self,
+        alias: &RepositoryAlias,
+        repository: Option<&RepositoryId>,
+    ) -> Result<(), MaintenanceError> {
+        let Some(leases) = &self.leases else {
+            return Ok(());
+        };
+        if leases.prune_held(repository).await {
+            log::warn!(
+                "prune of {} refused (maintenance-prune-held): this machine is paired with a \
+                 hub, and another machine may be backing up to the repository",
+                alias.as_str()
+            );
+            return Err(MaintenanceError::PruneHeld);
+        }
+        Ok(())
     }
 
     /// Whether a prune that has come to its first delete may delete: while
