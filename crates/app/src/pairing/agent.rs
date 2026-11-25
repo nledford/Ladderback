@@ -429,6 +429,16 @@ impl AgentPairing {
         })
     }
 
+    /// Leaves the hub this machine pins, as `ladderback unpair` does
+    /// (decision 169): drops every lease and epoch floor it took, then
+    /// forgets the pin, so the machine stands alone and maintains its own
+    /// repositories again. The leases go first: a machine that can't drop
+    /// them keeps its pin, so it never stands alone with a lease of the
+    /// hub it left (I1). Done when it pins no hub.
+    pub async fn leave(&self) -> Result<(), AgentPairingError> {
+        todo!()
+    }
+
     /// The agent key's seed, made the first time the agent pairs.
     async fn agent_seed(&self) -> Result<SigningSeed, AgentPairingError> {
         if let Some(seed) = self.identity.seed(SeedFile::AgentKey).await? {

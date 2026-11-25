@@ -1757,4 +1757,28 @@ mod tests {
             assert_eq!(code, ErrorCode::HubConnectionLost, "{reason}");
         }
     }
+
+    /// A machine pinned to another hub is told so in words of their own,
+    /// naming both hubs' key fingerprints and the command that leaves the
+    /// hub it pins, never in the error's debug text (#1637; decision 169).
+    #[test]
+    fn a_pin_on_another_hub_names_both_keys_and_the_way_out() {
+        let key = |byte| domain::fleet::PublicKey::from_bytes([byte; 32]).expect("a key");
+        let failure = PairFailure::Pairing(AgentPairingError::PinnedToAnotherHub {
+            pinned: key(7),
+            token: key(9),
+        });
+        let (code, args, detail) = failed(&failure, "https://hub.example");
+        assert_ne!(code, ErrorCode::Unknown);
+        assert_eq!(detail, None);
+        let localizer = Localizer::new(&["en-US".parse().expect("a locale")]);
+        let said = refusal_line(&localizer, code, &args, None);
+        for expected in [
+            Fingerprint::of_key(&key(7)).to_string(),
+            Fingerprint::of_key(&key(9)).to_string(),
+            "ladderback unpair".to_owned(),
+        ] {
+            assert!(said.contains(&expected), "{expected}: {said}");
+        }
+    }
 }

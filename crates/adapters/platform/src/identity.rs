@@ -168,6 +168,10 @@ impl Identity for FileIdentity {
         .await
     }
 
+    async fn forget_pin(&self) -> Result<(), IdentityError> {
+        todo!()
+    }
+
     async fn begin_attempt(&self) -> Result<Attempt, IdentityError> {
         let in_process = Arc::clone(&self.attempts)
             .try_lock_owned()

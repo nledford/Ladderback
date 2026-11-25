@@ -218,6 +218,10 @@ impl Identity for SlowIdentity {
         self.files.write_pin(pin).await
     }
 
+    async fn forget_pin(&self) -> Result<(), IdentityError> {
+        self.files.forget_pin().await
+    }
+
     async fn begin_attempt(&self) -> Result<Attempt, IdentityError> {
         self.files.begin_attempt().await
     }

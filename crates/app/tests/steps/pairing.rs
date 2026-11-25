@@ -34,6 +34,8 @@ mod dialog;
 mod held_prunes;
 #[path = "hub_plans.rs"]
 mod hub_plans;
+#[path = "leaving.rs"]
+mod leaving;
 #[path = "offline_alerts.rs"]
 mod offline_alerts;
 #[path = "removed_new_id.rs"]
@@ -168,7 +170,8 @@ impl Hub {
 }
 
 /// One machine: its key files, its agent ID, its hostname, the machine
-/// zone it reports and the identifier of the computer it runs on.
+/// zone it reports, the identifier of the computer it runs on, and the
+/// leases and epoch floors it keeps.
 #[derive(Clone)]
 struct Machine {
     identity: Arc<InMemoryIdentity>,
@@ -177,6 +180,7 @@ struct Machine {
     zone: Option<MachineZone>,
     seed: u64,
     identifier: Option<MachineIdentifier>,
+    leases: Arc<app::fakes::InMemoryLeaseCache>,
 }
 
 impl Machine {
@@ -188,6 +192,7 @@ impl Machine {
             zone: None,
             seed: n * 1_000_000,
             identifier: MachineIdentifier::parse(&format!("{n:032x}")).ok(),
+            leases: Arc::default(),
         }
     }
 
@@ -196,7 +201,7 @@ impl Machine {
             self.identity.clone(),
             Arc::new(FakeSigning),
             Arc::new(SeededRandom::new(self.seed)),
-            Arc::new(app::fakes::InMemoryLeaseCache::default()),
+            self.leases.clone(),
         )
     }
 
@@ -274,6 +279,11 @@ pub struct PairingWorld {
     /// The hub's notification rules for its offline alerts
     /// (`fleet/offline_alerts.feature`).
     alerts: Option<offline_alerts::Alerting>,
+    /// The hub the first agent paired with after its own
+    /// (`fleet/leaving_a_hub.feature`).
+    other_hub: Option<Hub>,
+    /// How the first agent's last leaving of its hub ended.
+    left: Option<Result<(), AgentPairingError>>,
 }
 
 impl std::fmt::Debug for PairingWorld {

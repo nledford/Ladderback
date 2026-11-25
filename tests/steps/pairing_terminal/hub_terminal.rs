@@ -13,7 +13,7 @@ use crate::Agent;
 
 /// The address a token is made for: loopback, which the scenarios' machines
 /// replace with the port the hub serves on.
-const TOKEN_ADDRESS: &str = "http://127.0.0.1:9";
+pub(super) const TOKEN_ADDRESS: &str = "http://127.0.0.1:9";
 
 /// The same over the hub's built-in TLS, whose certificate a token for it
 /// pins.
@@ -34,7 +34,7 @@ async fn another_token_made(agent: &mut Agent) {
     make_token(agent, TOKEN_ADDRESS).await;
 }
 
-async fn make_token(agent: &mut Agent, address: &str) {
+pub(super) async fn make_token(agent: &mut Agent, address: &str) {
     let said = ladderback(
         hub_root(agent),
         &["pairing-token", "--address", address],
