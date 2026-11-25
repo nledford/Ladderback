@@ -13,6 +13,7 @@ use std::sync::{Mutex, PoisonError};
 use api::UiEvent;
 use domain::AgentId;
 use domain::fleet::AgentStatus;
+use domain::maintenance::RunningBackup;
 
 use super::HubPairing;
 
@@ -20,10 +21,14 @@ use super::HubPairing;
 pub type CloseConnection = Box<dyn FnOnce() + Send>;
 
 /// The live connection of each online machine: the transport's number for
-/// it, and what closes it.
+/// it, and what closes it; and what each machine's latest heartbeat said
+/// it runs, which the prune guard reads (decision 166).
 #[derive(Default)]
 pub(super) struct Presence {
     live: Mutex<HashMap<AgentId, (u64, CloseConnection)>>,
+    /// The backups each machine's latest heartbeat named; a machine whose
+    /// heartbeat didn't say, or that sent none yet, has none here.
+    pub(super) running: Mutex<HashMap<AgentId, Vec<RunningBackup>>>,
     /// Held from a change of the table until the browsers heard it, so
     /// they hear a machine come online and go offline in the order the
     /// table changed.

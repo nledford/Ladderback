@@ -1,12 +1,15 @@
 //! What the hub takes of a machine live (technical design §7.2; #1440):
 //! the snapshot of its plans, which it keeps and acknowledges, the
 //! progress of an operation it runs, which it keeps and doesn't answer,
-//! and its heartbeat, which it answers (decision 159). Each snapshot and
-//! progress is kept in place of the one before and told to the browsers.
+//! and its heartbeat, which says the backups it runs and which the hub
+//! answers with the prunes it holds for it (decisions 159 and 166). Each
+//! snapshot and progress is kept in place of the one before and told to
+//! the browsers.
 
 use api::{MachineProgressDto, OperationStep, ProgressUnit, UiEvent};
 use domain::fleet::{EpochSeconds, ReportedProgress, WireName, heartbeat_ack_kind, plans_ack_kind};
-use domain::{AgentId, Timestamp};
+use domain::maintenance::RunningBackup;
+use domain::{AgentId, RepositoryId, Timestamp};
 
 use super::{Answered, HubPairing, HubPairingError, MessageRefused};
 use crate::pairing::wire::{
@@ -14,12 +17,37 @@ use crate::pairing::wire::{
 };
 
 impl HubPairing {
-    /// Answers `payload`, the machine's heartbeat, with a `HeartbeatAck`.
-    pub(super) fn take_heartbeat(&self, payload: &[u8]) -> Answered {
-        match read_heartbeat(payload) {
-            Ok(()) => Ok(Some((heartbeat_ack_kind(), heartbeat_ack_payload()))),
-            Err(_) => Err(MessageRefused::Unexpected),
-        }
+    /// Keeps what `agent`'s heartbeat `payload` says it runs, and answers
+    /// with a `HeartbeatAck` naming the prunes the hub holds for it.
+    pub(super) fn take_heartbeat(&self, agent: AgentId, payload: &[u8]) -> Answered {
+        let Ok(running) = read_heartbeat(payload) else {
+            return Err(MessageRefused::Unexpected);
+        };
+        self.heard_running(agent, running);
+        let held = self.prunes_held_for(agent);
+        Ok(Some((
+            heartbeat_ack_kind(),
+            heartbeat_ack_payload(held.as_deref()),
+        )))
+    }
+
+    /// Keeps `running`, the backups `agent`'s latest heartbeat says it
+    /// runs, in place of what the one before said: `None` when it didn't
+    /// say, which holds every other machine's prune while `agent` is
+    /// online (§16, decision 166).
+    pub fn heard_running(&self, agent: AgentId, running: Option<Vec<RunningBackup>>) {
+        let _ = (agent, running);
+        todo!()
+    }
+
+    /// The repositories whose prune the hub holds for `agent`, now: those
+    /// another machine it holds a connection of is backing up to, or
+    /// `None` when it can't tell which, which holds every prune
+    /// (`domain::maintenance::held_prunes`). A machine offline holds
+    /// nothing.
+    pub fn prunes_held_for(&self, agent: AgentId) -> Option<Vec<RepositoryId>> {
+        let _ = agent;
+        todo!()
     }
 
     /// Keeps `agent`'s snapshot of its plans in place of the one before,

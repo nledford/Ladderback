@@ -1912,3 +1912,104 @@ async fn a_resumed_backups_end_the_log_never_takes_is_not_announced() {
     );
     assert!(page.next().now_or_never().is_none(), "nothing is announced");
 }
+
+/// A backup to a repository whose ID its entry doesn't record yet.
+fn first_backup_job() -> Job {
+    use app::ports::BackupJob;
+    use domain::execution::plan_tags::PlanTags;
+    use domain::planning::SourceFilter;
+    use domain::{AgentId, PlanId};
+
+    Job::Backup(BackupJob {
+        repository: RepositoryAccess {
+            repository: "/srv/demo/repo".to_owned(),
+            repo_hot: None,
+            password: SecretValue::new("demo-password"),
+            options: BTreeMap::new(),
+            options_hot: BTreeMap::new(),
+            options_cold: BTreeMap::new(),
+            secrets: Vec::new(),
+            id: None,
+            entry: None,
+        },
+        sources: vec!["/home/demo".to_owned()],
+        tags: PlanTags::new(
+            PlanId::parse("demo-plan").unwrap(),
+            AgentId::from_uuid(Uuid::from_u128(9)),
+        ),
+        extra_tags: Vec::new(),
+        label: None,
+        host: None,
+        filter: SourceFilter::default(),
+        left_out: Vec::new(),
+        deadline_budget: SignedDuration::from_hours(1),
+    })
+}
+
+/// A backup is among the backups a heartbeat names from before its engine
+/// is asked until it ends, with no repository until its engine says which
+/// it opened (§7.3, layer 2; §16, decision 166). Other jobs aren't.
+#[tokio::test]
+async fn a_backup_is_named_running_from_its_start_to_its_end() {
+    use app::running::RunningBackups;
+    use domain::maintenance::RunningBackup;
+
+    let engine = Arc::new(Live::new());
+    let running = Arc::new(RunningBackups::new());
+    let use_case = RunOperation::new(
+        engine.clone(),
+        Arc::new(FakeClock::new(t(0))),
+        Arc::new(InMemoryOperationStore::new()),
+    )
+    .with_running(running.clone());
+    let named = |repository| {
+        Some(vec![RunningBackup {
+            op_id: id(),
+            repository,
+        }])
+    };
+    // Gives the run its turns until `listed` changes from `was`, a bounded
+    // number of times.
+    let after = |was: Option<Vec<RunningBackup>>| {
+        let running = running.clone();
+        async move {
+            for _ in 0..1_000 {
+                if running.listed() != was {
+                    return running.listed();
+                }
+                tokio::task::yield_now().await;
+            }
+            panic!("the running backups stayed {was:?}");
+        }
+    };
+    let watch = async {
+        assert_eq!(
+            after(Some(Vec::new())).await,
+            named(None),
+            "named before it opened"
+        );
+        engine.send(EngineEvent::Started {
+            index_read_at: t(0),
+            repository: Some(repository()),
+        });
+        assert_eq!(after(named(None)).await, named(Some(repository())));
+        engine.send(succeeded());
+    };
+    let (finished, ()) = futures::join!(
+        use_case.run(id(), Trigger::Manual, first_backup_job(), future::pending()),
+        watch
+    );
+    assert!(finished.operation.status().is_finished());
+    assert_eq!(running.listed(), Some(Vec::new()), "gone once it ended");
+
+    let scripted = RunOperation::new(
+        Arc::new(Scripted::new(vec![started(), succeeded()])),
+        Arc::new(FakeClock::new(t(0))),
+        Arc::new(InMemoryOperationStore::new()),
+    )
+    .with_running(running.clone());
+    scripted
+        .run(id(), Trigger::Manual, identify_job(), future::pending())
+        .await;
+    assert_eq!(running.listed(), Some(Vec::new()), "an identify isn't");
+}

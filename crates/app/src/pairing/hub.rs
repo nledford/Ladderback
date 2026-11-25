@@ -856,7 +856,7 @@ impl HubPairing {
             self.take_progress(syncing.agent_id, &message.payload)
                 .await?
         } else if message.kind == heartbeat_kind() {
-            self.take_heartbeat(&message.payload)
+            self.take_heartbeat(syncing.agent_id, &message.payload)
         } else {
             return Ok(Ok(None));
         };

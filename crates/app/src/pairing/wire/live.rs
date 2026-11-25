@@ -1,9 +1,11 @@
 //! What the agent tells its hub live (§7.2, #1440) between the core's types
 //! and their signed payloads: a snapshot of its plans, the hub's answer to
 //! it, a running operation's progress, and the heartbeat that holds its
-//! connection open and the hub's answer to it (decision 159). A field that
+//! connection open and says the backups it runs, and the hub's answer to
+//! it, which says the prunes it holds (decisions 159 and 166). A field that
 //! doesn't hold what it must refuses the whole payload.
 
+use super::{WireRefused, uuid};
 use api::sync::{
     HeartbeatAckPayload, HeartbeatPayload, LastRunPayload, PlanPayload, PlansAckPayload,
     PlansPayload, ProgressPayload,
@@ -11,9 +13,8 @@ use api::sync::{
 use domain::fleet::{
     EpochSeconds, LastRun, LastRunOutcome, PlansReport, ReportedPlan, ReportedProgress, WireName,
 };
-use domain::{OperationId, PlanId, Timestamp};
-
-use super::{WireRefused, uuid};
+use domain::maintenance::RunningBackup;
+use domain::{OperationId, PlanId, RepositoryId, Timestamp};
 
 /// The bytes of `report`'s payload, which the agent signs.
 pub fn plans_payload(report: &PlansReport) -> Vec<u8> {
@@ -76,28 +77,34 @@ pub fn read_plans_ack(bytes: &[u8]) -> Result<(), WireRefused> {
         .map_err(|_| WireRefused)
 }
 
-/// The bytes of the agent's `Heartbeat`, which it signs.
-pub fn heartbeat_payload() -> Vec<u8> {
-    HeartbeatPayload {}.to_bytes()
+/// The bytes of the agent's `Heartbeat`, which it signs: `running`, the
+/// backups it runs, or none when it can't tell.
+pub fn heartbeat_payload(running: Option<&[RunningBackup]>) -> Vec<u8> {
+    let _ = running;
+    HeartbeatPayload::default().to_bytes()
 }
 
-/// Whether a payload's bytes hold a `Heartbeat`.
-pub fn read_heartbeat(bytes: &[u8]) -> Result<(), WireRefused> {
-    HeartbeatPayload::from_bytes(bytes)
-        .map(|_| ())
-        .map_err(|_| WireRefused)
+/// The backups a `Heartbeat`'s bytes say the agent runs: none when it
+/// doesn't say. An operation of another kind is passed over, and more than
+/// `MAX_RUNNING_BACKUPS` operations or an ID that isn't one refuses it.
+pub fn read_heartbeat(bytes: &[u8]) -> Result<Option<Vec<RunningBackup>>, WireRefused> {
+    let _ = bytes;
+    todo!()
 }
 
-/// The bytes of the hub's `HeartbeatAck`, which it signs.
-pub fn heartbeat_ack_payload() -> Vec<u8> {
-    HeartbeatAckPayload {}.to_bytes()
+/// The bytes of the hub's `HeartbeatAck`, which it signs: `held`, the
+/// repositories whose prune it holds, or none when it can't tell.
+pub fn heartbeat_ack_payload(held: Option<&[RepositoryId]>) -> Vec<u8> {
+    let _ = held;
+    HeartbeatAckPayload::default().to_bytes()
 }
 
-/// Whether a payload's bytes hold a `HeartbeatAck`.
-pub fn read_heartbeat_ack(bytes: &[u8]) -> Result<(), WireRefused> {
-    HeartbeatAckPayload::from_bytes(bytes)
-        .map(|_| ())
-        .map_err(|_| WireRefused)
+/// The repositories a `HeartbeatAck`'s bytes say the hub holds the prune
+/// of: none when it doesn't say. More than `MAX_RUNNING_BACKUPS`, or an ID
+/// that isn't one, refuses it.
+pub fn read_heartbeat_ack(bytes: &[u8]) -> Result<Option<Vec<RepositoryId>>, WireRefused> {
+    let _ = bytes;
+    todo!()
 }
 
 /// The bytes of `progress`'s payload, which the agent signs.

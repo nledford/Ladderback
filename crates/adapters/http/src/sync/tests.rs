@@ -758,15 +758,15 @@ async fn a_new_session_of_an_agent_closes_its_older_one() {
         .connect_channel(agent, hostname.clone(), None)
         .await
         .unwrap();
-    older.send_heartbeat().await.unwrap();
+    older.send_heartbeat(Some(&[])).await.unwrap();
     older.receive_heartbeat_ack().await.unwrap();
     let (_, mut newer) = connecting
         .connect_channel(agent, hostname.clone(), None)
         .await
         .unwrap();
-    older.send_heartbeat().await.unwrap();
+    older.send_heartbeat(Some(&[])).await.unwrap();
     older.receive_heartbeat_ack().await.unwrap();
-    newer.send_heartbeat().await.unwrap();
+    newer.send_heartbeat(Some(&[])).await.unwrap();
     newer.receive_heartbeat_ack().await.unwrap();
     // The send may fail or not, depending on when the close arrives; no
     // `Ack` answers it either way.
@@ -789,7 +789,7 @@ async fn a_new_session_of_an_agent_closes_its_older_one() {
         .connect_channel(agent, hostname, None)
         .await
         .unwrap();
-    newest.send_heartbeat().await.unwrap();
+    newest.send_heartbeat(Some(&[])).await.unwrap();
     newest.receive_heartbeat_ack().await.unwrap();
     let _ = newer.send_report(&report(3)).await;
     let answer = tokio::time::timeout(PATIENCE, newer.receive_ack()).await;
@@ -824,7 +824,7 @@ async fn a_connection_silent_for_90_seconds_is_closed_and_its_machine_shown_offl
         !shown_online(&pairing, agent, 100).await,
         "online before its first message"
     );
-    channel.send_heartbeat().await.unwrap();
+    channel.send_heartbeat(Some(&[])).await.unwrap();
     channel.receive_heartbeat_ack().await.unwrap();
     let started = std::time::Instant::now();
     while !pairing.is_online(agent) {
@@ -835,7 +835,7 @@ async fn a_connection_silent_for_90_seconds_is_closed_and_its_machine_shown_offl
     tokio::time::advance(Duration::from_secs(60)).await;
     assert!(shown_online(&pairing, agent, 100).await);
     tokio::time::resume();
-    channel.send_heartbeat().await.unwrap();
+    channel.send_heartbeat(Some(&[])).await.unwrap();
     channel.receive_heartbeat_ack().await.unwrap();
     // 89 seconds after the heartbeat, 149 after the connection began.
     tokio::time::pause();

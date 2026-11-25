@@ -23,6 +23,7 @@ use crate::ports::{
     HookRunner, HookSetup, HookStatus, Job, JobControl, OperationStore, RunningJob, StoreError,
 };
 use crate::queue::Place;
+use crate::running::RunningBackups;
 
 /// Runs one operation on the engine and records its lifecycle in the
 /// operation log: queued now, running once the engine starts, then finished
@@ -55,6 +56,8 @@ pub struct RunOperation {
     hooks: Option<HookPlan>,
     events: Option<Arc<dyn EventBus>>,
     full_disk_access: Option<Arc<FullDiskAccessCheck>>,
+    /// The backups the machine runs, which its heartbeat names.
+    running: Option<Arc<RunningBackups>>,
 }
 
 /// The runner and the three levels of hooks one run wraps (§6.1).
@@ -166,6 +169,7 @@ impl RunOperation {
             hooks: None,
             events: None,
             full_disk_access: None,
+            running: None,
         }
     }
 
@@ -191,6 +195,15 @@ impl RunOperation {
     /// grant's own warning.
     pub fn with_full_disk_access(mut self, check: Arc<FullDiskAccessCheck>) -> Self {
         self.full_disk_access = Some(check);
+        self
+    }
+
+    /// Names each backup among `running` from before its engine is asked
+    /// until it ends, with the repository its engine opened once it says,
+    /// so the machine's heartbeat tells its hub (§7.3, layer 2; §16,
+    /// decision 166).
+    pub fn with_running(mut self, running: Arc<RunningBackups>) -> Self {
+        self.running = Some(running);
         self
     }
 

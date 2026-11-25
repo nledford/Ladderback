@@ -25,6 +25,7 @@ mod other_hosts;
 mod others_snapshots;
 #[cfg(test)]
 mod properties;
+mod prune_guard;
 mod recovery;
 mod start_window;
 mod stats;
@@ -39,6 +40,9 @@ pub use lease::{
 };
 pub use other_hosts::{MAX_NAMED_OTHER_HOSTS, OtherHosts};
 pub use others_snapshots::{LISTING_LASTS, OtherAgentsSnapshots, listing_stands};
+pub use prune_guard::{
+    HOLDS_STAND_FOR, MAX_RUNNING_BACKUPS, PruneHolds, RunningBackup, held_prunes,
+};
 pub use recovery::{HubRecovery, ProvenFloor, ReportedFloor};
 pub use start_window::{START_WINDOW, StartWindow};
 pub use stats::{READINGS_KEPT_FOR, RepositoryStats, StatsReading};

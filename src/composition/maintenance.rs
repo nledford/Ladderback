@@ -529,6 +529,7 @@ pub(super) async fn refusal(
         MaintenanceError::UnknownRepository => MaintenanceRefusal::UnknownRepository,
         MaintenanceError::NotOwner => MaintenanceRefusal::NotOwner,
         MaintenanceError::NoLease(_) => MaintenanceRefusal::NoLease,
+        MaintenanceError::PruneHeld => MaintenanceRefusal::PruneHeld,
         // The configuration is refused as a save of it is (#347).
         MaintenanceError::Unavailable(error) => app::ports::config_unusable(*error, unavailable),
         MaintenanceError::Resolve(error) => secret_refused(config, repository, &error).await,
