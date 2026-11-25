@@ -1,16 +1,27 @@
 //! What the hub takes of a machine live (technical design §7.2; #1440):
-//! the snapshot of its plans, which it keeps and acknowledges, and the
-//! progress of an operation it runs, which it keeps and doesn't answer.
-//! Each is kept in place of the one before and told to the browsers.
+//! the snapshot of its plans, which it keeps and acknowledges, the
+//! progress of an operation it runs, which it keeps and doesn't answer,
+//! and its heartbeat, which it answers (decision 159). Each snapshot and
+//! progress is kept in place of the one before and told to the browsers.
 
 use api::{MachineProgressDto, OperationStep, ProgressUnit, UiEvent};
-use domain::fleet::{EpochSeconds, ReportedProgress, WireName, plans_ack_kind};
+use domain::fleet::{EpochSeconds, ReportedProgress, WireName, heartbeat_ack_kind, plans_ack_kind};
 use domain::{AgentId, Timestamp};
 
 use super::{Answered, HubPairing, HubPairingError, MessageRefused};
-use crate::pairing::wire::{plans_ack_payload, read_plans, read_progress};
+use crate::pairing::wire::{
+    heartbeat_ack_payload, plans_ack_payload, read_heartbeat, read_plans, read_progress,
+};
 
 impl HubPairing {
+    /// Answers `payload`, the machine's heartbeat, with a `HeartbeatAck`.
+    pub(super) fn take_heartbeat(&self, payload: &[u8]) -> Answered {
+        match read_heartbeat(payload) {
+            Ok(()) => Ok(Some((heartbeat_ack_kind(), heartbeat_ack_payload()))),
+            Err(_) => Err(MessageRefused::Unexpected),
+        }
+    }
+
     /// Keeps `agent`'s snapshot of its plans in place of the one before,
     /// tells the browsers, and answers with a `PlansAck`.
     pub(super) async fn take_plans(

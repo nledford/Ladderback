@@ -37,6 +37,8 @@ mod removed_new_id;
 mod removing;
 #[path = "second_machine.rs"]
 mod second_machine;
+#[path = "staying_connected.rs"]
+mod staying_connected;
 #[path = "sync_replay.rs"]
 mod sync_replay;
 
@@ -50,6 +52,10 @@ struct Hub {
     keys: HubKeys,
     /// The reports it took of its agents.
     inbox: Arc<InMemoryReportInbox>,
+    /// Where it tells its browsers of its machines.
+    events: Arc<app::event_bus::BroadcastEventBus>,
+    /// What a browser of the hub heard and the steps haven't read.
+    heard: Arc<std::sync::Mutex<futures::stream::BoxStream<'static, api::UiEvent>>>,
 }
 
 impl Hub {
@@ -74,6 +80,11 @@ impl Hub {
             "0.5.0-hub".to_owned(),
         )
         .with_inbox(inbox.clone());
+        let events = Arc::new(app::event_bus::BroadcastEventBus::new());
+        let heard = Arc::new(std::sync::Mutex::new(
+            app::ports::EventBus::subscribe(&*events).await,
+        ));
+        let pairing = pairing.with_events(events.clone());
         let pairing = Arc::new(match access {
             Some(access) => pairing.with_access(access),
             None => pairing,
@@ -85,6 +96,8 @@ impl Hub {
             pairing,
             keys,
             inbox,
+            events,
+            heard,
         }
     }
 
@@ -109,7 +122,8 @@ impl Hub {
                 self.clock.clone(),
                 "0.5.0-hub".to_owned(),
             )
-            .with_inbox(self.inbox.clone()),
+            .with_inbox(self.inbox.clone())
+            .with_events(self.events.clone()),
         );
         let keys = pairing.keys().await.expect("the hub's new keys");
         assert_ne!(keys.key(), self.keys.key());
@@ -119,6 +133,8 @@ impl Hub {
             pairing,
             keys,
             inbox: self.inbox.clone(),
+            events: self.events.clone(),
+            heard: self.heard.clone(),
         }
     }
 }
@@ -385,7 +401,7 @@ impl PairingWorld {
 
     /// The connector to `hub`, which answers only where the world says.
     fn connector_to(&self, hub: &Hub) -> Arc<LoopbackHubConnector> {
-        let connector = LoopbackHubConnector::to(hub.pairing.clone());
+        let connector = LoopbackHubConnector::to(hub.pairing.clone()).watching(hub.clock.clone());
         Arc::new(match self.only_at {
             Some((host, port)) => connector.only_at(host, port),
             None => connector,

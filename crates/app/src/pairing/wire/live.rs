@@ -1,9 +1,13 @@
 //! What the agent tells its hub live (§7.2, #1440) between the core's types
 //! and their signed payloads: a snapshot of its plans, the hub's answer to
-//! it, and a running operation's progress. A field that doesn't hold what
-//! it must refuses the whole payload.
+//! it, a running operation's progress, and the heartbeat that holds its
+//! connection open and the hub's answer to it (decision 159). A field that
+//! doesn't hold what it must refuses the whole payload.
 
-use api::sync::{LastRunPayload, PlanPayload, PlansAckPayload, PlansPayload, ProgressPayload};
+use api::sync::{
+    HeartbeatAckPayload, HeartbeatPayload, LastRunPayload, PlanPayload, PlansAckPayload,
+    PlansPayload, ProgressPayload,
+};
 use domain::fleet::{
     EpochSeconds, LastRun, LastRunOutcome, PlansReport, ReportedPlan, ReportedProgress, WireName,
 };
@@ -68,6 +72,30 @@ pub fn plans_ack_payload() -> Vec<u8> {
 /// Whether a payload's bytes hold a `PlansAck`.
 pub fn read_plans_ack(bytes: &[u8]) -> Result<(), WireRefused> {
     PlansAckPayload::from_bytes(bytes)
+        .map(|_| ())
+        .map_err(|_| WireRefused)
+}
+
+/// The bytes of the agent's `Heartbeat`, which it signs.
+pub fn heartbeat_payload() -> Vec<u8> {
+    HeartbeatPayload {}.to_bytes()
+}
+
+/// Whether a payload's bytes hold a `Heartbeat`.
+pub fn read_heartbeat(bytes: &[u8]) -> Result<(), WireRefused> {
+    HeartbeatPayload::from_bytes(bytes)
+        .map(|_| ())
+        .map_err(|_| WireRefused)
+}
+
+/// The bytes of the hub's `HeartbeatAck`, which it signs.
+pub fn heartbeat_ack_payload() -> Vec<u8> {
+    HeartbeatAckPayload {}.to_bytes()
+}
+
+/// Whether a payload's bytes hold a `HeartbeatAck`.
+pub fn read_heartbeat_ack(bytes: &[u8]) -> Result<(), WireRefused> {
+    HeartbeatAckPayload::from_bytes(bytes)
         .map(|_| ())
         .map_err(|_| WireRefused)
 }

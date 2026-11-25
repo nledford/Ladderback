@@ -3835,9 +3835,9 @@ ui-machines-recovery-ended = Recovery mode ended. This { -hub } grants leases ag
 # Said in the review when the step-up is wrong: recovery mode didn't end.
 ui-machines-recovery-step-up-failed = That isn't right, so recovery mode didn't end. Try again.
 
-## The hub's dashboard (#569): each approved machine, when it last connected,
-## the reports the hub let go of, and its latest operations, as its reports
-## told them.
+## The hub's dashboard (#569): each approved machine, whether it is online
+## now or when it last connected, the reports the hub let go of, and its
+## latest operations, as its reports told them.
 
 # The dashboard's heading.
 ui-dashboard-heading = Dashboard
@@ -3846,7 +3846,7 @@ ui-dashboard-heading = Dashboard
 ui-dashboard-title = Dashboard – { -brand-name }
 
 # What the dashboard shows, under its heading.
-ui-dashboard-intro = Each approved { -machine }'s latest operations, as it reported them to this { -hub }. A { -machine } connects only to send its reports, so this page shows when it last connected, not whether it is online.
+ui-dashboard-intro = Each approved { -machine }'s latest operations, as it reported them to this { -hub }. A { -machine } stays connected to the { -hub } while it runs, so this page shows that it is online now, or when it last connected.
 
 # Shown while the dashboard's first read of the machines is on its way.
 ui-dashboard-loading = Loading the { -machine(form: "other") }…
@@ -3860,6 +3860,10 @@ ui-dashboard-unreachable = The { -hub } didn't answer, so its { -machine(form: "
 # When the machine last connected to the hub.
 # $when (string): the time, as ui-instant or ui-dashboard-time-elsewhere writes it.
 ui-dashboard-last-connected = Last connected { $when }.
+
+# Shown in place of ui-dashboard-last-connected while the hub holds the machine's connection.
+# $when (string): when the machine last connected, which this message doesn't show.
+ui-dashboard-online-now = Online now.
 
 # An instant in the viewer's zone, then in the machine's own zone, which differs (#115), written as ui-instant writes one.
 # $time (instant): the instant in the viewer's zone.

@@ -71,6 +71,7 @@ async fn proofs_approvals_and_machines(harness: &dyn AgentRegistryHarness) {
     racing_approvals_approve_once(harness).await;
     the_tls_key_is_recorded_once_and_outlives_the_hub(harness).await;
     the_machine_zone_an_agent_reported_last_is_kept(harness).await;
+    when_the_hub_last_heard_from_an_agent_is_kept(harness).await;
     the_first_machine_is_kept_and_a_second_is_refused_and_listed(harness).await;
     a_refused_second_machine_leaves_the_first_taken(harness).await;
     a_machine_that_tells_no_fingerprint_changes_nothing(harness).await;
@@ -939,6 +940,37 @@ async fn prove_and_approve(
     assert!(matches!(proven, Some(Ok(_))), "{proven:?}");
     let approved = approve(registry, request, at(30)).await;
     assert!(matches!(approved, Some(Ok(_))), "{approved:?}");
+}
+
+/// When the hub last heard from an agent, the end of its live connection,
+/// is kept over the time of its last proof and outlives the hub; an ID it
+/// doesn't hold changes nothing (§16, decision 159).
+async fn when_the_hub_last_heard_from_an_agent_is_kept(harness: &dyn AgentRegistryHarness) {
+    let (Some(spent), Some(request)) = (token(1, 0), request(1, 1, "laptop")) else {
+        return;
+    };
+    let registry = harness.empty().await;
+    add(registry.as_ref(), &spent).await;
+    let paired = pair(registry.as_ref(), &request, at(10)).await;
+    let Some(Ok(Pairing::New(record))) = paired else {
+        assert!(paired.is_none(), "paired: {paired:?}");
+        return;
+    };
+    ok(
+        registry.record_seen(request.agent_id, at(40)).await,
+        "recording when the agent was heard from",
+    );
+    let heard = AgentRecord {
+        last_seen: at(40),
+        ..record
+    };
+    let reopened = harness.reopened().await;
+    assert_eq!(agents(reopened.as_ref()).await, vec![heard.clone()]);
+    ok(
+        reopened.record_seen(agent_id(9), at(50)).await,
+        "recording when no agent was heard from",
+    );
+    assert_eq!(agents(reopened.as_ref()).await, vec![heard]);
 }
 
 /// The first record of the TLS key stands: a second, of another key, is
