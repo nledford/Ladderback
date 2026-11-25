@@ -264,7 +264,11 @@ exclude_re = [
     # offset onto the wire, or `KeyringEntry`) says something a test can check,
     # so its mutants are judged. A new error type joins this list only when its
     # Display is there for `Error` alone.
-    "<impl std::fmt::Display for (ClientUnavailable|SessionFailed|ClientError|OpenError|InvalidZone|InvalidZoneName|InvalidOffset|InvalidSnapshot|InvalidOperation|ConfigError|StoreError|ProfileError|ExportRefusal|SourcesError|ResolveError|LifecycleError|KeepDeleteTooShort|ReservedTag|InvalidId|InvalidValue|Violation|NoNextRun|CommandLineError|SecretError|NotAKeyringEntry|TemplateError)>",
+    "<impl std::fmt::Display for (ClientUnavailable|SessionFailed|ClientError|OpenError|InvalidZone|InvalidOffset|InvalidSnapshot|InvalidOperation|ConfigError|StoreError|ProfileError|ExportRefusal|SourcesError|ResolveError|LifecycleError|KeepDeleteTooShort|ReservedTag|InvalidId|InvalidValue|Violation|NoNextRun|CommandLineError|SecretError|NotAKeyringEntry|TemplateError)>",
+    # `InvalidZoneName` is such an error too, written `fmt::Display`: the
+    # store maps it to its own corrupt-row text and the wire to its refusal,
+    # so its Display is there for `Error` alone.
+    "<impl fmt::Display for InvalidZoneName>",
     # `web`'s `main` mounts the app into the page's `#app` through `web-sys`,
     # which only works in a browser: on the host the mutant builds and nothing
     # calls `main`. The `@ui` scenarios run it in Chromium, where a `main` that
@@ -381,13 +385,6 @@ exclude_re = [
     # mutant is caught only as a timeout. Named by line, so a moved line brings
     # the mutant back to judge.
     'crates/domain/src/secrets/template\.rs:126:15: delete ! in Template::parse$',
-    # The copied data folder notice's offer to a machine its hub refused is
-    # DOM glue of the start page: its body is the one that names the command
-    # that forgets a computer, which the `@ui` scenario "A machine its hub
-    # refused is told, and takes a new ID by keyboard alone" of
-    # `features/ui/copied_data_folder.feature` checks in Chromium. Named by
-    # line, so a moved line brings the mutant back to judge.
-    'crates/web/src/copied_data_folder\.rs:116:9: delete field body from struct Offer expression in CopiedDataFolder$',
     # `App`'s read of the hub's key drops an answer read in a standing the
     # page has since left. It is a browser effect (`spawn_local`, signals);
     # a guard of `!=` drops every current answer, so a hub never shows its
