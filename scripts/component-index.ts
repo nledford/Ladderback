@@ -8,7 +8,8 @@
 // kept by hand, two open branches would add a row at the same place, and each
 // merge would make the others conflict. Generated, the table's conflict
 // resolves the same way every time: take either side, then write the table
-// again, as with the §16 index (scripts/decision-index.ts).
+// again. (The §16 decisions went further and keep no table at all: decision
+// 162; scripts/decision-index.ts still lends its conflict-marker check.)
 //
 // Usage: node scripts/component-index.ts [--write]
 // Without --write, exits 1 when the table differs from the contract files (or

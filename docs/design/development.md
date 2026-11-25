@@ -252,8 +252,8 @@ These rules keep the daemon running and the workspace safe to work in. Rules 1 t
    Left out: `too_many_lines`, which mostly flags exhaustive `match`es over closed enums; `missing_docs`, a decision of its own; and `arithmetic_side_effects`, which flags all arithmetic, not only input-derived numbers.
 
 8. **Decisions.** How a §16 decision is filed and numbered:
-   - **Decision files.** A §16 decision is a file, `docs/design/decisions/NN-<slug>.md`, whose row in the index in §16 `just decision-index` writes from its number and heading (`just lint` fails when the index doesn't match the files, or two files share a number).
-   - **Numbers.** A decision gets its number when its branch rebases before merging, the next after the highest on `main`. Branches open at the same time can't see each other's decisions, so a number taken earlier can clash, and the branch that merges second renumbers its file and every reference to it. A conflict in the index is resolved by taking either side and running `just decision-index`.
+   - **Decision files.** A §16 decision is a file, `docs/design/decisions/NN-<slug>.md`, and its heading, `# Decision NN: <question>`, is its entry in the index: §16 keeps no table of them (decision 162). `just decision-index` prints the index; `just lint` fails on a bad name or heading, two files with one number, or a row linking a decision in §16.
+   - **Numbers.** A decision gets its number when its branch rebases before merging, the next after the highest on `main`. Branches open at the same time can't see each other's decisions, so a number taken earlier can clash, and the branch that merges second renumbers its file and every reference to it; `just lint` fails the second until it does.
 
 ### 13.6 Dependency checks
 
