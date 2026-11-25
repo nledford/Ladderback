@@ -143,6 +143,9 @@ pub enum ProfileNotice {
     /// already had plans or repositories, around whose jobs they would have
     /// run too.
     GlobalHooksLeftOut,
+    /// An import added the plan `plan` with no schedule, as every rustic
+    /// profile has none: it runs only when it is started (#1610).
+    PlanUnscheduled { plan: String },
 }
 
 /// Why a profile couldn't be read. `file` is the path as the user gave it, or

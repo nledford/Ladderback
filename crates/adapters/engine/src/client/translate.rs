@@ -102,6 +102,7 @@ pub(super) fn translate(event: WorkerEvent, redactor: &Redactor) -> Option<Engin
                 | WarningCode::ProfileCommandLeftOut
                 | WarningCode::ProfileCommandImported
                 | WarningCode::ProfileGlobalHooksLeftOut
+                | WarningCode::ProfilePlanUnscheduled
                 | WarningCode::LocationPlainHttpCredentials
                 | WarningCode::LocationEveryRuled
                 | WarningCode::LocationLastRuledNoRetry
@@ -241,6 +242,8 @@ pub(super) fn translate(event: WorkerEvent, redactor: &Redactor) -> Option<Engin
         }),
         // `Reading` decodes a piece's bytes before an event reaches here.
         WorkerEvent::Piece { .. } => return None,
+        // `Reading` answers a prune's question before an event reaches here.
+        WorkerEvent::ReadyToDelete => return None,
         WorkerEvent::Failed { code, args, detail } => {
             let detail = redactor.redact_clipped(&detail.unwrap_or_default(), TRUNCATED);
             EngineEvent::Failed(match code {
@@ -258,6 +261,12 @@ pub(super) fn translate(event: WorkerEvent, redactor: &Redactor) -> Option<Engin
                 // spec named (§7.3): nothing there was read or written. As
                 // with `RepositoryExists`, the code says it all.
                 ErrorCode::RepositoryReplaced => FailureReason::RepositoryReplaced,
+                // A prune came to its first delete and was told it may no
+                // longer delete: nothing was (decision 161).
+                ErrorCode::MaintenanceLeaseLapsed => FailureReason::LeaseLapsed,
+                // It asked and had no answer in time: nothing was deleted,
+                // and nothing says the lease lapsed (decision 161).
+                ErrorCode::MaintenanceDeletionUnanswered => FailureReason::DeletionUnanswered,
                 ErrorCode::RepositoryNotFound => FailureReason::RepositoryNotFound,
                 // A server refused the credentials (decision 85): nothing was
                 // read or written. The worker names the half whose server
@@ -773,6 +782,32 @@ mod tests {
                     half
                 })),
                 "{said:?}"
+            );
+        }
+    }
+
+    /// A prune told no and one that had no answer stay apart: only the first
+    /// says the lease lapsed (decision 161).
+    #[test]
+    fn a_prune_stopped_at_its_first_delete_keeps_why() {
+        for (code, reason) in [
+            (
+                ErrorCode::MaintenanceLeaseLapsed,
+                FailureReason::LeaseLapsed,
+            ),
+            (
+                ErrorCode::MaintenanceDeletionUnanswered,
+                FailureReason::DeletionUnanswered,
+            ),
+        ] {
+            let event = WorkerEvent::Failed {
+                code,
+                args: Vec::new(),
+                detail: Some("the daemon didn't answer in time".to_owned()),
+            };
+            assert_eq!(
+                translate(event, &Redactor::default()),
+                Some(EngineEvent::Failed(reason))
             );
         }
     }

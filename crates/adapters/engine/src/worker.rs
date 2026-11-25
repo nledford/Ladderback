@@ -32,7 +32,7 @@ mod watchdog;
 pub(crate) use convert::backup_options;
 
 use std::cell::RefCell;
-use std::io::{self, Read, Write};
+use std::io::{self, BufRead, Read, Write};
 use std::path::{Path, PathBuf};
 use std::process::ExitCode;
 use std::sync::Arc;
@@ -44,10 +44,10 @@ use domain::{OperationId, RepositoryId, SignedDuration, Timestamp};
 
 use crate::cache_lock::CacheLock;
 use crate::job::{
-    JobKind, JobSpec, Level, MAX_MESSAGE_BYTES, MAX_MESSAGE_READ, OpResult, RepositorySpec,
-    WorkerEvent, exit_code,
+    DeleteAnswer, JobKind, JobSpec, Level, MAX_ANSWER_BYTES, MAX_MESSAGE_BYTES, MAX_MESSAGE_READ,
+    OpResult, RepositorySpec, WorkerEvent, exit_code,
 };
-use cancel::{AfterCancel, Cancel, Cause};
+use cancel::{AfterCancel, Cancel, Cause, DeleteGate};
 use convert::JobError;
 use events::Events;
 use watchdog::{Terminate, WallClock, Watchdog};
@@ -112,6 +112,21 @@ pub fn main(program: &'static str) -> ExitCode {
     };
     #[cfg(not(unix))]
     let stream = io::stdout();
+    // Descriptor 0 stops being the daemon's pipe too: a prune's answer comes
+    // on it, and a program the worker starts must neither take it nor wait
+    // on it (decision 161). Kept, the job still runs, as it did before.
+    #[cfg(unix)]
+    let input: Box<dyn Read + Send> = match stdio::detach_stdin() {
+        Ok(input) => Box::new(input),
+        Err(error) => {
+            say(&format!(
+                "cannot keep stdin from the programs the worker starts: {error}"
+            ));
+            Box::new(io::stdin())
+        }
+    };
+    #[cfg(not(unix))]
+    let input = io::stdin();
     // Rustic's progress and log callbacks have nobody to tell about a stream
     // that can't be written, so the worker gives itself up: the daemon is gone.
     let events =
@@ -129,7 +144,7 @@ pub fn main(program: &'static str) -> ExitCode {
             "cannot handle SIGTERM or SIGHUP, so a stop can't wind the job down and the daemon's death is noticed only at the next event: {error}"
         ));
     }
-    match run_events(io::stdin().lock(), events, std::process::id(), process) {
+    match run_events(input, events, std::process::id(), process) {
         // An abrupt exit may use any code, including ones outside u8.
         Ok(exit) => std::process::exit(exit.code()),
         Err(error) => {
@@ -175,7 +190,7 @@ fn die_with_the_daemon() {
 /// Unlike [`main`], this leaves the process alone: no logger, no signal
 /// handler. A job with a deadline still exits the process when it passes.
 pub fn run(
-    input: impl Read,
+    input: impl Read + Send + 'static,
     output: impl Write + Send + 'static,
     pid: u32,
     program: &'static str,
@@ -195,6 +210,9 @@ pub(crate) struct Process {
     /// How long a backup stopped while it archives may wind down before the
     /// worker exits anyway: [`WIND_DOWN_LIMIT`] but in tests.
     wind_down_limit: Duration,
+    /// How long a prune waits for the daemon's answer before it deletes
+    /// nothing: [`ANSWER_WAIT`] but in tests.
+    answer_wait: Duration,
 }
 
 impl Process {
@@ -207,6 +225,7 @@ impl Process {
             }),
             cancel: Cancel::default(),
             wind_down_limit: WIND_DOWN_LIMIT,
+            answer_wait: ANSWER_WAIT,
         }
     }
 }
@@ -235,6 +254,9 @@ pub(crate) struct Context {
     watchdog: RefCell<Option<Watchdog>>,
     /// Held until the worker ends: see [`Context::lock_cache`].
     cache_lock: RefCell<Option<CacheLock>>,
+    /// The rest of stdin, after the job spec's line, where a prune reads its
+    /// one answer: see [`Context::delete_gate`].
+    answers: RefCell<Option<Box<dyn BufRead + Send>>>,
 }
 
 impl Context {
@@ -248,7 +270,26 @@ impl Context {
             process,
             watchdog: RefCell::new(None),
             cache_lock: RefCell::new(None),
+            answers: RefCell::new(None),
         }
+    }
+
+    /// This context, reading the daemon's answers from `answers`.
+    fn with_answers(self, answers: Box<dyn BufRead + Send>) -> Self {
+        *self.answers.borrow_mut() = Some(answers);
+        self
+    }
+
+    /// The gate a prune's backends ask at their first removal (§16,
+    /// decision 161): it asks the daemon, with
+    /// [`WorkerEvent::ReadyToDelete`], whether the prune may delete, and
+    /// waits at most the process's answer wait for its one line on stdin.
+    /// The gate of a second call hears no answer.
+    pub(crate) fn delete_gate(&self) -> DeleteGate {
+        let answers = self.answers.borrow_mut().take();
+        let events = self.events.clone();
+        let wait = self.process.answer_wait;
+        DeleteGate::new(move || ask_to_delete(&events, answers?, wait))
     }
 
     /// Takes `dir` as this worker's cache until the worker ends. Two workers
@@ -317,19 +358,27 @@ impl Context {
     }
 }
 
-fn run_events(input: impl Read, events: Events, pid: u32, process: Process) -> io::Result<Exit> {
-    // A job spec is a few kilobytes; one past the protocol's message cap is
-    // refused, and never read past the cap.
-    let mut raw = String::new();
+fn run_events(
+    input: impl Read + Send + 'static,
+    events: Events,
+    pid: u32,
+    process: Process,
+) -> io::Result<Exit> {
+    // A job spec is one line of a few kilobytes; one past the protocol's
+    // message cap is refused, and never read past the cap.
+    let mut input = io::BufReader::new(input.take(MAX_MESSAGE_READ));
+    let mut raw = Vec::new();
     let spec = match input
-        .take(MAX_MESSAGE_READ)
-        .read_to_string(&mut raw)
+        .read_until(b'\n', &mut raw)
         .map_err(|e| e.to_string())
         .and_then(|_| {
+            if raw.last() == Some(&b'\n') {
+                raw.pop();
+            }
             if raw.len() > MAX_MESSAGE_BYTES {
                 Err(format!("job spec exceeds {MAX_MESSAGE_BYTES} bytes"))
             } else {
-                serde_json::from_str::<JobSpec>(&raw).map_err(|e| e.to_string())
+                serde_json::from_slice::<JobSpec>(&raw).map_err(|e| e.to_string())
             }
         }) {
         Ok(spec) => spec,
@@ -358,7 +407,7 @@ fn run_events(input: impl Read, events: Events, pid: u32, process: Process) -> i
         level: Level::Debug,
         message: "job accepted".to_owned(),
     })?;
-    let ctx = Context::new(events.clone(), &spec, pid, process);
+    let ctx = Context::new(events.clone(), &spec, pid, process).with_answers(Box::new(input));
     let outcome = match &spec.job {
         JobKind::Fake(job) => fake::run(&ctx, job),
         JobKind::Identify(repository) => jobs::identify(&ctx, repository),
@@ -410,6 +459,47 @@ fn run_events(input: impl Read, events: Events, pid: u32, process: Process) -> i
     }
 }
 
+/// Asks the daemon, with [`WorkerEvent::ReadyToDelete`], whether the prune
+/// may delete, and waits at most `wait` for its answer on `answers` (§16,
+/// decision 161). No answer in time, a closed stdin, a line that is no
+/// [`DeleteAnswer`], or a question that can't be written is `None`: the
+/// prune deletes nothing on anything but [`DeleteAnswer::Delete`].
+fn ask_to_delete(
+    events: &Events,
+    answers: Box<dyn BufRead + Send>,
+    wait: Duration,
+) -> Option<DeleteAnswer> {
+    events.emit(&WorkerEvent::ReadyToDelete).ok()?;
+    // Read on a thread of its own, so that a daemon that never answers
+    // holds the prune no longer than the wait: the thread ends with the
+    // worker.
+    let (sender, answer) = std::sync::mpsc::sync_channel(1);
+    std::thread::Builder::new()
+        .name("delete-answer".to_owned())
+        .spawn(move || {
+            let _ = sender.send(read_answer(answers));
+        })
+        .ok()?;
+    answer.recv_timeout(wait).ok().flatten()
+}
+
+/// The daemon's one answer line, or `None` for anything else: the end of
+/// stdin, a line past [`MAX_ANSWER_BYTES`], or one that is no answer.
+fn read_answer(answers: impl BufRead) -> Option<DeleteAnswer> {
+    let mut line = Vec::new();
+    answers
+        .take(MAX_ANSWER_BYTES as u64 + 1)
+        .read_until(b'\n', &mut line)
+        .ok()?;
+    if line.last() == Some(&b'\n') {
+        line.pop();
+    }
+    if line.len() > MAX_ANSWER_BYTES {
+        return None;
+    }
+    serde_json::from_slice(&line).ok()
+}
+
 /// How a job the cancel ended exits: as the cancel's first cause says. A
 /// deadline's failure the watchdog couldn't write, because another line
 /// was being written then, goes out now as the stream's last line.
@@ -451,6 +541,14 @@ fn repository_of(job: &JobKind) -> Option<&RepositorySpec> {
 /// 35 s) is longer, so a stopped worker ends here, not on the daemon's
 /// SIGKILL (decision 50).
 pub(crate) const WIND_DOWN_LIMIT: Duration = Duration::from_secs(30);
+
+/// How long a prune waits for the daemon's answer to its question before
+/// it deletes nothing. The daemon answers from what it holds, at once; this
+/// bounds a daemon that stalls. It runs on the monotonic clock, which stops
+/// while the computer sleeps, so it doesn't bound a daemon suspended
+/// between its check and its answer: that window is accepted (§16,
+/// decision 161).
+pub(crate) const ANSWER_WAIT: Duration = Duration::from_secs(60);
 
 /// How long the worker waits for a line being written before it ends the
 /// stream: a writer stuck on a full pipe must not hold its exit back.
@@ -542,7 +640,7 @@ mod tests {
     fn a_worker_says_it_took_its_job_before_it_starts_the_work() {
         let (events, capture) = capture();
         let input = serde_json::to_vec(&fake_spec(None, 1)).unwrap();
-        run_events(input.as_slice(), events, 42, Process::real(PROGRAM)).unwrap();
+        run_events(io::Cursor::new(input), events, 42, Process::real(PROGRAM)).unwrap();
         let events = capture.parsed();
         let [
             WorkerEvent::Log { level, .. },
@@ -577,7 +675,7 @@ mod tests {
         };
         let (events, capture) = capture();
         let input = serde_json::to_vec(&spec).unwrap();
-        let exit = run_events(input.as_slice(), events, 1, Process::real(PROGRAM)).unwrap();
+        let exit = run_events(io::Cursor::new(input), events, 1, Process::real(PROGRAM)).unwrap();
         assert_eq!(exit.code(), 1);
         let events = capture.parsed();
         assert_matches!(
@@ -618,7 +716,13 @@ mod tests {
             };
             let (events, _capture) = capture();
             let input = serde_json::to_vec(&spec).unwrap();
-            run_events(input.as_slice(), events.clone(), 1, Process::real(PROGRAM)).unwrap();
+            run_events(
+                io::Cursor::new(input),
+                events.clone(),
+                1,
+                Process::real(PROGRAM),
+            )
+            .unwrap();
             events.logs_backend_at_debug()
         };
         assert!(logs_at_debug(JobKind::Probe), "a probe");
@@ -630,7 +734,7 @@ mod tests {
         let spec = fake_spec(None, 2);
         let (events, capture) = capture();
         let input = serde_json::to_vec(&spec).unwrap();
-        let exit = run_events(input.as_slice(), events, 42, Process::real(PROGRAM)).unwrap();
+        let exit = run_events(io::Cursor::new(input), events, 42, Process::real(PROGRAM)).unwrap();
         assert_eq!(exit, Exit::Reported { failed: false });
         let events = capture.parsed();
         let Some(WorkerEvent::Started { op_id, pid, .. }) = events
@@ -693,7 +797,7 @@ mod tests {
         };
         let (events, capture) = capture();
         let input = serde_json::to_vec(&spec).unwrap();
-        let exit = run_events(input.as_slice(), events, 1, process).unwrap();
+        let exit = run_events(io::Cursor::new(input), events, 1, process).unwrap();
         (exit, capture.parsed())
     }
 
@@ -769,10 +873,11 @@ mod tests {
             }),
             cancel: Cancel::default(),
             wind_down_limit: WIND_DOWN_LIMIT,
+            answer_wait: ANSWER_WAIT,
         };
         let (events, capture) = capture();
         let input = serde_json::to_vec(&fake_spec(Some(SignedDuration::ZERO), 3)).unwrap();
-        run_events(input.as_slice(), events, 1, process).unwrap();
+        run_events(io::Cursor::new(input), events, 1, process).unwrap();
         assert_eq!(
             terminated.try_recv(),
             Ok(crate::job::exit_code::DEADLINE_PASSED)
@@ -813,6 +918,7 @@ mod tests {
             }),
             cancel: Cancel::default(),
             wind_down_limit: WIND_DOWN_LIMIT,
+            answer_wait: ANSWER_WAIT,
         };
         let (events, capture) = capture();
         let spec = fake_spec(Some(SignedDuration::from_secs(60)), 0);
@@ -854,6 +960,7 @@ mod tests {
             }),
             cancel: Cancel::default(),
             wind_down_limit: WIND_DOWN_LIMIT,
+            answer_wait: ANSWER_WAIT,
         };
         (process, terminated)
     }
@@ -1037,6 +1144,7 @@ mod tests {
             }),
             cancel: Cancel::default(),
             wind_down_limit: WIND_DOWN_LIMIT,
+            answer_wait: ANSWER_WAIT,
         };
         let spec = JobSpec {
             op_id: OperationId::from_uuid(domain::Uuid::from_u128(9)),
@@ -1059,8 +1167,9 @@ mod tests {
         };
         let (events, capture) = capture();
         let input = serde_json::to_vec(&spec).unwrap();
-        let running =
-            std::thread::spawn(move || run_events(input.as_slice(), events, 1, process).unwrap());
+        let running = std::thread::spawn(move || {
+            run_events(io::Cursor::new(input), events, 1, process).unwrap()
+        });
         while packs_in(&repo) < 2 {
             assert!(
                 !running.is_finished(),
@@ -1126,7 +1235,7 @@ mod tests {
         };
         let (events, capture) = capture();
         let input = serde_json::to_vec(&spec).unwrap();
-        let exit = run_events(input.as_slice(), events, 1, Process::real(PROGRAM)).unwrap();
+        let exit = run_events(io::Cursor::new(input), events, 1, Process::real(PROGRAM)).unwrap();
         assert_eq!(exit.code(), 1);
         capture.text()
     }
@@ -1240,7 +1349,7 @@ mod tests {
         // Trailing whitespace is still valid JSON.
         input.resize(crate::job::MAX_MESSAGE_BYTES + 1, b' ');
         let (events, capture) = capture();
-        let exit = run_events(input.as_slice(), events, 42, Process::real(PROGRAM)).unwrap();
+        let exit = run_events(io::Cursor::new(input), events, 42, Process::real(PROGRAM)).unwrap();
         assert_eq!(exit.code(), 1);
         invalid_spec_failure(&capture.parsed());
     }
@@ -1250,42 +1359,222 @@ mod tests {
         let mut input = serde_json::to_vec(&fake_spec(None, 0)).unwrap();
         input.resize(crate::job::MAX_MESSAGE_BYTES, b' ');
         let (events, _capture) = capture();
-        let exit = run_events(input.as_slice(), events, 42, Process::real(PROGRAM)).unwrap();
+        let exit = run_events(io::Cursor::new(input), events, 42, Process::real(PROGRAM)).unwrap();
         assert_eq!(exit, Exit::Reported { failed: false });
     }
 
     /// Serves up to 64 MiB of spaces and counts how much was asked for.
-    struct Endless<'a> {
-        served: &'a std::cell::Cell<usize>,
+    struct Endless {
+        served: Arc<std::sync::atomic::AtomicUsize>,
         left: usize,
     }
 
-    impl Read for Endless<'_> {
+    impl Read for Endless {
         fn read(&mut self, buf: &mut [u8]) -> io::Result<usize> {
             let n = buf.len().min(self.left);
             buf[..n].fill(b' ');
             self.left -= n;
-            self.served.set(self.served.get() + n);
+            self.served
+                .fetch_add(n, std::sync::atomic::Ordering::SeqCst);
             Ok(n)
         }
     }
 
     #[test]
     fn a_job_spec_that_never_ends_is_not_read_past_the_cap() {
-        let served = std::cell::Cell::new(0);
+        let served = Arc::new(std::sync::atomic::AtomicUsize::new(0));
         let input = Endless {
-            served: &served,
+            served: Arc::clone(&served),
             left: 64 << 20,
         };
         let (events, capture) = capture();
         let exit = run_events(input, events, 42, Process::real(PROGRAM)).unwrap();
         assert_eq!(exit.code(), 1);
         invalid_spec_failure(&capture.parsed());
+        let served = served.load(std::sync::atomic::Ordering::SeqCst);
         assert!(
-            served.get() <= crate::job::MAX_MESSAGE_BYTES + 1,
-            "read {} bytes of a job spec capped at {}",
-            served.get(),
+            served <= crate::job::MAX_MESSAGE_BYTES + 1,
+            "read {served} bytes of a job spec capped at {}",
             crate::job::MAX_MESSAGE_BYTES
         );
+    }
+
+    /// A job spec is one line: what follows it on stdin is a prune's answer,
+    /// never part of the job (decision 161).
+    #[test]
+    fn a_job_spec_is_read_up_to_its_newline() {
+        let mut input = serde_json::to_vec(&fake_spec(None, 0)).unwrap();
+        input.extend_from_slice(b"\n{\"answer\":\"delete\"}\n");
+        let (events, _capture) = capture();
+        let exit = run_events(io::Cursor::new(input), events, 42, Process::real(PROGRAM)).unwrap();
+        assert_eq!(exit, Exit::Reported { failed: false });
+    }
+
+    /// A prune's context that reads the daemon's answers from `answers` and
+    /// waits `wait` for one.
+    fn asking(
+        answers: impl BufRead + Send + 'static,
+        wait: Duration,
+    ) -> (Context, super::events::testing::Capture) {
+        let (events, capture) = capture();
+        let mut process = Process::real(PROGRAM);
+        process.answer_wait = wait;
+        let ctx =
+            Context::new(events, &fake_spec(None, 0), 1, process).with_answers(Box::new(answers));
+        (ctx, capture)
+    }
+
+    /// The answers, one line each, as the daemon writes them.
+    fn lines(text: &str) -> io::Cursor<Vec<u8>> {
+        io::Cursor::new(text.as_bytes().to_vec())
+    }
+
+    /// What the gate of `ctx` hears at a prune's first removal.
+    fn asked(ctx: &Context) -> Option<DeleteAnswer> {
+        let gate = ctx.delete_gate();
+        gate.admits_removal();
+        gate.heard().flatten()
+    }
+
+    #[test]
+    fn a_prune_asks_before_it_deletes_and_hears_the_answer() {
+        for (line, answer) in [
+            ("{\"answer\":\"delete\"}\n", DeleteAnswer::Delete),
+            (
+                "{\"answer\":\"delete_nothing\"}\n",
+                DeleteAnswer::DeleteNothing,
+            ),
+        ] {
+            let (ctx, capture) = asking(lines(line), Duration::from_secs(5));
+            assert_eq!(asked(&ctx), Some(answer));
+            assert_eq!(capture.parsed(), [WorkerEvent::ReadyToDelete]);
+        }
+    }
+
+    /// A closed stdin, a line that is no answer, and one past the cap, even
+    /// one that parses, are no answer: the prune deletes nothing.
+    #[test]
+    fn anything_but_an_answer_line_is_no_answer() {
+        let mut too_long = "{\"answer\":\"delete\"}".to_owned();
+        too_long.extend(std::iter::repeat_n(' ', crate::job::MAX_ANSWER_BYTES));
+        too_long.push('\n');
+        for answers in [
+            "",
+            "{\"answer\":\"maybe\"}\n",
+            "delete\n",
+            too_long.as_str(),
+        ] {
+            let (ctx, capture) = asking(lines(answers), Duration::from_secs(5));
+            assert_eq!(asked(&ctx), None, "{answers:?}");
+            assert_eq!(capture.parsed(), [WorkerEvent::ReadyToDelete]);
+        }
+    }
+
+    /// A second gate has no stdin to read, so it asks nothing and hears no
+    /// answer.
+    #[test]
+    fn a_prune_asks_only_once() {
+        let (ctx, capture) = asking(
+            lines("{\"answer\":\"delete\"}\n{\"answer\":\"delete\"}\n"),
+            Duration::from_secs(5),
+        );
+        assert_eq!(asked(&ctx), Some(DeleteAnswer::Delete));
+        assert_eq!(asked(&ctx), None);
+        assert_eq!(capture.parsed(), [WorkerEvent::ReadyToDelete]);
+    }
+
+    /// A stdin that says nothing until the test ends.
+    struct Silent(mpsc::Receiver<()>);
+
+    impl Read for Silent {
+        fn read(&mut self, _buf: &mut [u8]) -> io::Result<usize> {
+            let _ = self.0.recv();
+            Ok(0)
+        }
+    }
+
+    /// A daemon that doesn't answer in time is no answer: the prune waits
+    /// its bound, not for the daemon.
+    #[test]
+    fn a_prune_that_hears_nothing_in_time_hears_no_answer() {
+        let (_held, silent) = mpsc::channel();
+        let (ctx, capture) = asking(
+            io::BufReader::new(Silent(silent)),
+            Duration::from_millis(50),
+        );
+        let began = std::time::Instant::now();
+        assert_eq!(asked(&ctx), None);
+        assert!(began.elapsed() < Duration::from_secs(5));
+        assert_eq!(capture.parsed(), [WorkerEvent::ReadyToDelete]);
+    }
+
+    /// The index and pack files of the local repository at `repo`.
+    fn repository_files(repo: &Path) -> Vec<PathBuf> {
+        let mut files: Vec<PathBuf> = ["index", "data"]
+            .iter()
+            .filter_map(|folder| std::fs::read_dir(repo.join(folder)).ok())
+            .flatten()
+            .flatten()
+            .flat_map(|entry| match std::fs::read_dir(entry.path()) {
+                Ok(inner) => inner.flatten().map(|file| file.path()).collect(),
+                Err(_) => vec![entry.path()],
+            })
+            .collect();
+        files.sort();
+        files
+    }
+
+    /// A prune that hears no answer, here because its stdin ends after the
+    /// job spec, deletes nothing and fails saying it had no answer: nothing
+    /// says the lease lapsed, and on a machine that isn't paired there is
+    /// none (decision 161).
+    #[test]
+    fn a_prune_that_hears_no_answer_deletes_nothing_and_says_so() {
+        let dir = tempfile::tempdir().unwrap();
+        let source = demo_source(dir.path());
+        let repo = demo_repository(dir.path());
+        let (exit, _) = run_job(JobKind::Init(repo.clone()), Process::real(PROGRAM));
+        assert_eq!(exit, Exit::Reported { failed: false });
+        let backup = || {
+            let (_, events) = run_job(
+                JobKind::Backup(home_backup(repo.clone(), &source)),
+                Process::real(PROGRAM),
+            );
+            events
+                .into_iter()
+                .find_map(|event| match event {
+                    WorkerEvent::Result(OpResult::Backup(result)) => Some(result.snapshot),
+                    _ => None,
+                })
+                .expect("the backup succeeded")
+        };
+        let first = backup();
+        std::fs::write(source.join("notes.txt"), b"other demo").unwrap();
+        backup();
+        let forget = crate::job::ForgetJobSpec {
+            repo: repo.clone(),
+            ids: vec![first.as_str().to_owned()],
+        };
+        let (exit, _) = run_job(JobKind::Forget(forget), Process::real(PROGRAM));
+        assert_eq!(exit, Exit::Reported { failed: false });
+        let before = repository_files(&dir.path().join("repo"));
+
+        let prune = crate::job::PruneJobSpec {
+            repo,
+            keep_delete: domain::execution::deadline::KeepDelete::MIN.get(),
+        };
+        let (exit, events) = run_job(JobKind::Prune(prune), Process::real(PROGRAM));
+        assert_eq!(exit.code(), 1, "{events:?}");
+        assert!(events.contains(&WorkerEvent::ReadyToDelete), "{events:?}");
+        assert_matches!(
+            events.last(),
+            Some(WorkerEvent::Failed {
+                code: ErrorCode::MaintenanceDeletionUnanswered,
+                ..
+            })
+        );
+        let after = repository_files(&dir.path().join("repo"));
+        let gone: Vec<_> = before.iter().filter(|file| !after.contains(file)).collect();
+        assert!(gone.is_empty(), "a prune with no answer deleted {gone:?}");
     }
 }

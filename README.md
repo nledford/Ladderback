@@ -13,6 +13,13 @@ Ladderback backs up your computers on a schedule, shows your backups in one web 
 
 > [!WARNING]
 > **Ladderback is new software.** Version 0.5.0 runs scheduled backups and restores from them in your browser, but restores arrived only in 0.4.0. Before you rely on these backups, try restoring a file into a scratch folder. The `rustic` command-line program restores from any repository Ladderback backs up to, and stays your fallback. Until the hub (M8), each computer runs its own Ladderback, with its own web page. The [roadmap](#roadmap) has the order.
+>
+> **Until 1.0.0, any release can break what came before, with no deprecation period first:**
+> - the configuration file, the database and the data folder;
+> - the web API and the command line;
+> - how machines and the hub talk to each other.
+>
+> Such a release bumps the minor version (0.5 to 0.6), and its entry in [CHANGELOG.md](CHANGELOG.md) lists the break under **Breaking**, with the steps to upgrade. An upgrade might mean editing `config.toml`, pairing machines again, or starting over with an empty history. Read that entry before you upgrade. Your backups are the exception: the snapshots in your repositories stay readable by `rustic` whatever changes.
 
 <picture>
   <source media="(prefers-color-scheme: dark)" srcset="docs/guide/start-page-dark.png">

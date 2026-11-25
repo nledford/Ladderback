@@ -246,6 +246,8 @@ pub(crate) fn encode_failure(
         FailureReason::RestoreTargetUnwritable => ("restore-target-unwritable", Vec::new(), None),
         FailureReason::NoLocationRuleHolds => ("no-location-rule-holds", Vec::new(), None),
         FailureReason::PasswordNotAccepted => ("password-not-accepted", Vec::new(), None),
+        FailureReason::LeaseLapsed => ("maintenance-lease-lapsed", Vec::new(), None),
+        FailureReason::DeletionUnanswered => ("maintenance-deletion-unanswered", Vec::new(), None),
         FailureReason::SecretRefused { field, refusal } => (
             refusal.code(),
             std::iter::once(("field", MsgArg::Text(field.clone())))
@@ -373,6 +375,8 @@ pub(crate) fn decode_failure(
         "restore-target-unwritable" => Ok(FailureReason::RestoreTargetUnwritable),
         "no-location-rule-holds" => Ok(FailureReason::NoLocationRuleHolds),
         "password-not-accepted" => Ok(FailureReason::PasswordNotAccepted),
+        "maintenance-lease-lapsed" => Ok(FailureReason::LeaseLapsed),
+        "maintenance-deletion-unanswered" => Ok(FailureReason::DeletionUnanswered),
         "hook-failed" => Ok(FailureReason::HookFailed {
             hook: hook_place(&args)?,
             ended: hook_end(&args)?,
@@ -825,6 +829,30 @@ mod tests {
             Err(bad) => panic!("the written columns decode: {} {}", bad.column, bad.why),
         };
         assert_eq!(back, FailureReason::RepositoryReplaced);
+    }
+
+    /// A persisted failure of a prune stopped at its first delete reads back
+    /// as the typed reason: no arguments, no detail (decision 161).
+    #[test]
+    fn a_prune_stopped_at_its_first_delete_round_trips() {
+        for (reason, code) in [
+            (FailureReason::LeaseLapsed, "maintenance-lease-lapsed"),
+            (
+                FailureReason::DeletionUnanswered,
+                "maintenance-deletion-unanswered",
+            ),
+        ] {
+            let columns = encode_failure(&reason).expect("a failure with no arguments encodes");
+            assert_eq!(columns.code, code);
+            assert_eq!(columns.args, "[]");
+            assert_eq!(columns.detail, None);
+            let back = match decode_failure(Some(columns.code), Some(&columns.args), columns.detail)
+            {
+                Ok(reason) => reason,
+                Err(bad) => panic!("the written columns decode: {} {}", bad.column, bad.why),
+            };
+            assert_eq!(back, reason);
+        }
     }
 
     /// Encodes `reason` and decodes what it wrote.

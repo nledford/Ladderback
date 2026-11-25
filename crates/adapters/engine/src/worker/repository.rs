@@ -3,6 +3,7 @@
 use std::collections::BTreeMap;
 use std::io;
 use std::path::{Path, PathBuf};
+use std::sync::Arc;
 use std::time::SystemTime;
 
 use api::ErrorCode;
@@ -16,7 +17,7 @@ use rustic_core::{
 };
 
 use super::Context;
-use super::cancel::refusing_snapshots_once_cancelled;
+use super::cancel::{DeleteGate, asking_before_removal, refusing_snapshots_once_cancelled};
 use super::convert::JobError;
 use super::progress::EventProgressBars;
 use super::tmp_files::remove_stale_files;
@@ -29,6 +30,16 @@ use crate::job::{Level, ProbeResult, RepositorySpec};
 pub(crate) fn new_repository(
     ctx: &Context,
     spec: &RepositorySpec,
+) -> Result<Repository<()>, JobError> {
+    repository_asking(ctx, spec, None)
+}
+
+/// [`new_repository`], whose backends ask `gate`, when there is one, before
+/// their first removal.
+fn repository_asking(
+    ctx: &Context,
+    spec: &RepositorySpec,
+    gate: Option<&Arc<DeleteGate>>,
 ) -> Result<Repository<()>, JobError> {
     // rustic gives the cold half `options` and `options_cold`, the hot half
     // `options` and `options_hot`.
@@ -44,6 +55,10 @@ pub(crate) fn new_repository(
     .to_backends()
     .map_err(crate::rclone::without_command)?;
     let backends = refusing_snapshots_once_cancelled(&backends, ctx.cancel());
+    let backends = match gate {
+        Some(gate) => asking_before_removal(&backends, gate),
+        None => backends,
+    };
     let options = RepositoryOptions::default();
     let options = match cache_dir(ctx)? {
         Some(dir) => options.cache_dir(dir),
@@ -80,6 +95,24 @@ pub(crate) fn open(
     ctx: &Context,
     spec: &RepositorySpec,
 ) -> Result<Repository<OpenStatus>, JobError> {
+    open_asking(ctx, spec, None)
+}
+
+/// [`open`] for a prune: the repository removes nothing until `gate` lets
+/// it, and asks it only at its first removal (§16, decision 161).
+pub(crate) fn open_to_prune(
+    ctx: &Context,
+    spec: &RepositorySpec,
+    gate: &Arc<DeleteGate>,
+) -> Result<Repository<OpenStatus>, JobError> {
+    open_asking(ctx, spec, Some(gate))
+}
+
+fn open_asking(
+    ctx: &Context,
+    spec: &RepositorySpec,
+    gate: Option<&Arc<DeleteGate>>,
+) -> Result<Repository<OpenStatus>, JobError> {
     if let Some(root) = missing_fs_root(spec) {
         return Err(JobError::Failed {
             code: ErrorCode::RepositoryConfigNotFound,
@@ -90,7 +123,7 @@ pub(crate) fn open(
         });
     }
     let credentials = Credentials::password(spec.password.expose());
-    let repository = match new_repository(ctx, spec)?.open(&credentials) {
+    let repository = match repository_asking(ctx, spec, gate)?.open(&credentials) {
         Ok(repository) => repository,
         Err(error) => {
             // rustic's code for "no key opens with this password": the

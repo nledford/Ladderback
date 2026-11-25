@@ -105,7 +105,9 @@ impl OperationStatus {
                 | Why::PlanMoved
                 | Why::ConfigUnusable
                 | Why::KeyFilesNotLeftOut
-                | Why::RestoreTargetUnwritable => None,
+                | Why::RestoreTargetUnwritable
+                | Why::LeaseLapsed
+                | Why::DeletionUnanswered => None,
             },
             Self::Queued | Self::Running | Self::Cancelled => None,
         }
@@ -247,6 +249,14 @@ pub enum FailureReason {
         field: String,
         refusal: refusal::SettingRefusal,
     },
+    /// A prune came to its first delete and wasn't let go on: this paired
+    /// machine no longer held a live lease on the repository from its hub
+    /// (§7.3; §16, decision 161). Nothing was deleted.
+    LeaseLapsed,
+    /// A prune came to its first delete, asked whether this machine may
+    /// still maintain the repository, and had no answer in time (§16,
+    /// decision 161). Nothing was deleted.
+    DeletionUnanswered,
 }
 
 impl FailureReason {
@@ -281,6 +291,8 @@ impl FailureReason {
             Self::NoLocationRuleHolds => "no-location-rule-holds",
             Self::PasswordNotAccepted => "password-not-accepted",
             Self::SecretRefused { refusal, .. } => refusal.code(),
+            Self::LeaseLapsed => "maintenance-lease-lapsed",
+            Self::DeletionUnanswered => "maintenance-deletion-unanswered",
         }
     }
 }

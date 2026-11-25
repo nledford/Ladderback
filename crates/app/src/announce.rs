@@ -192,6 +192,8 @@ pub fn failure(reason: &FailureReason) -> ErrorDto {
             let (code, args, detail) = refused(field, refusal);
             ErrorDto::new(code, args, detail)
         }
+        F::LeaseLapsed => ErrorDto::new(ErrorCode::MaintenanceLeaseLapsed, [], None),
+        F::DeletionUnanswered => ErrorDto::new(ErrorCode::MaintenanceDeletionUnanswered, [], None),
     }
 }
 
@@ -809,6 +811,14 @@ mod tests {
             (
                 F::PasswordNotAccepted,
                 ErrorDto::new(C::PasswordNotAccepted, [], None),
+            ),
+            (
+                F::LeaseLapsed,
+                ErrorDto::new(C::MaintenanceLeaseLapsed, [], None),
+            ),
+            (
+                F::DeletionUnanswered,
+                ErrorDto::new(C::MaintenanceDeletionUnanswered, [], None),
             ),
             (
                 F::SecretsTooLargeToMask {

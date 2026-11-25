@@ -745,6 +745,17 @@ error-maintenance-not-owner = This { -machine } does not maintain the repository
 # $alias (text): the repository's alias, such as demo.
 error-maintenance-no-lease = This { -machine } is paired with a { -hub } and holds no lease on the repository { $alias } from it, so nothing in it was changed. Check that the { -hub } can be reached and lets this { -machine } maintain the repository, then try again.
 
+# A prune came to its first delete, asked whether this machine may still
+# maintain the repository, and wasn't let go on: this machine is paired with a
+# hub, and its lease on the repository ran out or was moved while the prune
+# ran. Nothing was deleted.
+error-maintenance-lease-lapsed = The prune stopped before deleting anything: this { -machine } is paired with a { -hub }, and its lease on the { -repository } lapsed while the prune ran. Nothing was deleted. Check that the { -hub } can be reached and still lets this { -machine } maintain the { -repository }, then prune again.
+
+# A prune came to its first delete and asked whether this machine may still
+# maintain the repository, but Ladderback didn't answer within a minute, so the
+# prune deleted nothing. Nothing says the lease lapsed.
+error-maintenance-deletion-unanswered = The prune stopped before deleting anything: it asked { -brand-name } whether this { -machine } may still maintain the { -repository } and had no answer within a minute. Nothing was deleted. Prune again; if it stops the same way, restart { -brand-name }.
+
 # The plan's retention policy would keep nothing, so the forget was refused
 # before anything was removed.
 # $plan (text): the plan's ID, such as home.
@@ -1352,6 +1363,10 @@ warning-profile-command-imported = The import added a command at { $key } that r
 
 # An import left the profile's global hooks out, because the configuration already had plans or repositories.
 warning-profile-global-hooks-left-out = The profile's global hooks were left out, because they would also run around the plans and repositories the configuration already has. To have them, add them to this { -machine }'s hooks yourself.
+
+# An import added a plan with no schedule, as a rustic profile has none, so it runs only when someone starts it. The schedule line is what a person types in config.toml: keep it as it is.
+# $plan (text): the plan's ID, such as home.
+warning-profile-plan-unscheduled = The plan { $plan } has no schedule, so it runs only when you start it. Give it one on the Plans page, or with a line such as { "schedule = { cron = \"0 * * * *\" }" } in its entry in { "config.toml" }.
 
 # A notification of an event was not delivered to its channel, and is not tried again.
 # $event (text): the event's name, such as backup.failed. Keep it as it is.

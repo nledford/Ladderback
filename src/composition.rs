@@ -420,6 +420,9 @@ impl Publish {
             | E::Located(_)
             | E::Dumping(_)
             | E::Piece(_) => None,
+            // The maintenance run answers a prune's question: no page is
+            // told of it.
+            E::DeletionAsked(_) => None,
         }
     }
 }
@@ -739,6 +742,12 @@ fn failure_refusal(reason: FailureReason) -> FailureRefusal {
         F::NoLocationUsable => unavailable(ErrorCode::NoLocationUsable, Vec::new(), None),
         F::NoLocationRuleHolds => unavailable(ErrorCode::NoLocationRuleHolds, Vec::new(), None),
         F::PasswordNotAccepted => unavailable(ErrorCode::PasswordNotAccepted, Vec::new(), None),
+        // Only a maintenance run's prune fails this way, and it is told as
+        // the run tells it.
+        F::LeaseLapsed => unavailable(ErrorCode::MaintenanceLeaseLapsed, Vec::new(), None),
+        F::DeletionUnanswered => {
+            unavailable(ErrorCode::MaintenanceDeletionUnanswered, Vec::new(), None)
+        }
         // Only a run the schedule started records a refusal (§5): a
         // repository job or a read is refused before it runs, as
         // `secret_refusal` says.

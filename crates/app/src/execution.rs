@@ -634,6 +634,9 @@ impl RunOperation {
             EngineEvent::Progress(_) => run.operation.report_progress(),
             // A dump is a download's read, never run as an operation.
             EngineEvent::Dumping(_) | EngineEvent::Piece(_) => Ok(()),
+            // Only a prune asks before it deletes, and a prune is a
+            // maintenance run's (§7.3): dropped, the question refuses.
+            EngineEvent::DeletionAsked(_) => Ok(()),
             EngineEvent::Warning(warning) => run.operation.record_warning(match found {
                 Some(found) => found.explain(warning),
                 None => warning,

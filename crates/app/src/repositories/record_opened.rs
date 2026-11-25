@@ -314,7 +314,8 @@ async fn identified(
             | EngineEvent::Warning(_)
             | EngineEvent::Located(_)
             | EngineEvent::Dumping(_)
-            | EngineEvent::Piece(_) => {}
+            | EngineEvent::Piece(_)
+            | EngineEvent::DeletionAsked(_) => {}
         }
     }
     Err(FailureReason::EngineExited { exit_code: None })

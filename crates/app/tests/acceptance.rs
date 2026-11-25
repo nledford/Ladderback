@@ -71,6 +71,8 @@ mod pairing_steps;
 mod plans_steps;
 #[path = "steps/proposals.rs"]
 mod proposals_steps;
+#[path = "steps/prune_guard.rs"]
+mod prune_guard_steps;
 #[path = "steps/recent_log.rs"]
 mod recent_log_steps;
 #[path = "steps/recovery.rs"]
@@ -131,6 +133,7 @@ struct Agent {
     download: download_steps::DownloadWorld,
     status: status_steps::StatusWorld,
     ownership: ownership_steps::OwnershipWorld,
+    prune_guard: prune_guard_steps::PruneGuardWorld,
 }
 
 impl std::fmt::Debug for Agent {
@@ -188,6 +191,7 @@ impl Agent {
             maintainer: Default::default(),
             machine: Default::default(),
             full_disk_access: Default::default(),
+            prune_guard: Default::default(),
             status: Default::default(),
             ownership: Default::default(),
         }

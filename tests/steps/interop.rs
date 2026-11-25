@@ -826,3 +826,23 @@ fn answer_notes_command_left_out(agent: &mut Agent, key: String) {
         "no note that {key:?} was left out: {body}"
     );
 }
+
+#[then(
+    expr = "the import ends by warning that the plan {string} runs only when it is started, and how to give it a schedule"
+)]
+fn ends_with_unscheduled(agent: &mut Agent, plan: String) {
+    assert_succeeded(agent);
+    let stderr = &ran(agent).stderr;
+    let last = stderr.trim_end().lines().last().unwrap_or_default();
+    for said in [
+        format!("The plan {plan} has no schedule"),
+        "runs only when you start it".to_owned(),
+        "Plans page".to_owned(),
+        "schedule = { cron".to_owned(),
+    ] {
+        assert!(
+            last.contains(&said),
+            "the last notice should say {said:?}: {stderr}"
+        );
+    }
+}

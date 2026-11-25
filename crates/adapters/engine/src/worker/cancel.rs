@@ -7,7 +7,7 @@
 mod backend;
 mod source;
 
-pub(crate) use backend::refusing_snapshots_once_cancelled;
+pub(crate) use backend::{DeleteGate, asking_before_removal, refusing_snapshots_once_cancelled};
 pub(crate) use source::CancellableSource;
 
 use std::sync::atomic::{AtomicU8, Ordering};

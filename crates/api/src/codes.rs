@@ -385,6 +385,15 @@ pub enum ErrorCode {
     /// ran out on the hub's time. Nothing in the repository was changed. The
     /// argument `alias` names it.
     MaintenanceNoLease,
+    /// A prune came to its first delete and was told that this machine may
+    /// no longer maintain the repository: it is paired with a hub and its
+    /// lease on the repository lapsed while the prune ran (§7.3; §16,
+    /// decision 161). Nothing was deleted.
+    MaintenanceLeaseLapsed,
+    /// A prune came to its first delete, asked whether this machine may
+    /// still maintain the repository, and had no answer in time (§16,
+    /// decision 161). Nothing was deleted.
+    MaintenanceDeletionUnanswered,
     /// The plan's retention policy is set and would keep nothing, so the
     /// forget was refused before anything was removed. The argument `plan`
     /// names it.
@@ -856,6 +865,10 @@ pub enum WarningCode {
     /// configuration already had plans or repositories whose jobs they would
     /// have run around (§6.2).
     ProfileGlobalHooksLeftOut,
+    /// An import added a plan with no schedule, as a rustic profile has
+    /// none, so it runs only when it is started (#1610). The argument `plan`
+    /// is the plan's ID.
+    ProfilePlanUnscheduled,
     /// A notification of an event wasn't delivered to its channel (§11). It
     /// is not tried again. The arguments: `event`, the event's name
     /// (`backup.failed`); `rule` and `channel`, their names in the
@@ -1546,6 +1559,8 @@ impl ErrorCode {
             Self::AdoptionNoMatch => &[],
             Self::MaintenanceSelectionChanged
             | Self::MaintenanceDataFolderCopied
+            | Self::MaintenanceLeaseLapsed
+            | Self::MaintenanceDeletionUnanswered
             | Self::MachineNotCopied
             | Self::RepositoryReadTimedOut
             | Self::ProfileCommandsUnconfirmed => &[],
@@ -1989,6 +2004,11 @@ impl WarningCode {
                     optional: false,
                 },
             ],
+            Self::ProfilePlanUnscheduled => &[ArgSpec {
+                name: "plan",
+                kind: ArgKind::Text,
+                optional: false,
+            }],
             Self::NotificationUndelivered => &[
                 ArgSpec {
                     name: "event",

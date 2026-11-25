@@ -237,6 +237,7 @@ mod tests {
                     terminate,
                     cancel,
                     wind_down_limit,
+                    answer_wait: crate::worker::ANSWER_WAIT,
                 },
             }
         }
