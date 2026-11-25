@@ -3,7 +3,7 @@
 
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { parseDecision, renderIndex, replaceIndex, type Decision } from "./decision-index.ts";
+import { parseDecision, renderIndex, roadmapProblem, type Decision } from "./decision-index.ts";
 
 const decision = (number: number, file: string, question: string): Decision => ({ number, file, question });
 
@@ -59,28 +59,41 @@ test("two files with one number are a problem naming both", () => {
   assert.match(problems[0] ?? "", /decision 9 is both 09-a\.md and 09-b\.md/);
 });
 
-const roadmap = (table: string): string =>
-  ["# Roadmap", "", "## 16. Decisions", "", "Intro.", "", table, "", "Closing words.", "", "## 17. Next", "| keep | me |", ""].join(
-    "\n",
+const roadmap = (body: string): string =>
+  ["# Roadmap", "", "## 16. Decisions", "", "Intro.", "", body, "", "## 17. Next", "| [1](decisions/01-a.md) | A |", ""].join("\n");
+
+test("a §16 whose prose links decisions, with no table of them, passes", () => {
+  assert.equal(roadmapProblem(roadmap("The files in [decisions/](decisions/); see [decision 9](decisions/09-a.md).")), null);
+});
+
+test("a row linking a decision in §16 is refused, with its line", () => {
+  assert.match(
+    String(roadmapProblem(roadmap("| # | Question |\n|---|---|\n| [9](decisions/09-a.md) | A |"))),
+    /roadmap\.md:9: §16 lists a decision in a table again/,
   );
-const TABLE = ["| # | Question |", "|---|---|", "| [9](decisions/09-a.md) | A |"];
-
-test("only §16's table is replaced; the text around it and other tables stay", () => {
-  const result = replaceIndex(roadmap("| # | Question |\n|---|---|\n| [1](decisions/01-old.md) | Old |"), TABLE);
-  assert.deepEqual(result, { text: roadmap(TABLE.join("\n")) });
 });
 
-test("a roadmap with a conflict marker is refused, naming the fix", () => {
-  const text = roadmap("| # | Question |\n|---|---|\n<<<<<<< HEAD\n| [1](decisions/01-a.md) | A |\n=======\n>>>>>>> b");
-  assert.match(String(replaceIndex(text, TABLE)), /roadmap\.md:\d+: a merge-conflict marker: .*just decision-index/);
+test("an indented row, a ./ link and a row without a leading pipe are refused too", () => {
+  for (const row of ["   | [9](decisions/09-a.md) | A |", "| [9](./decisions/09-a.md) | A |", "[9](decisions/09-a.md) | A"]) {
+    assert.match(String(roadmapProblem(roadmap(row))), /lists a decision in a table again/, row);
+  }
 });
 
-test("a row after a blank line in the index is refused rather than left behind", () => {
-  const text = roadmap("| # | Question |\n|---|---|\n| [1](decisions/01-a.md) | A |\n\n| [2](decisions/02-b.md) | B |");
-  assert.match(String(replaceIndex(text, TABLE)), /a table row after the §16 index/);
+test("a row in a fenced example, or after §16 ends, doesn't count", () => {
+  assert.equal(roadmapProblem(roadmap("```\n| [9](decisions/09-a.md) | A |\n```")), null);
 });
 
-test("a roadmap without the index table is refused", () => {
-  assert.match(String(replaceIndex(roadmap("No table."), TABLE)), /no "\| # \| Question \|" table under "## 16\. Decisions"/);
-  assert.match(String(replaceIndex("# Roadmap\n", TABLE)), /no "\| # \| Question \|" table/);
+test("a table in §16 that links no decision doesn't count", () => {
+  assert.equal(roadmapProblem(roadmap("| Risk | Answer |\n|---|---|\n| Loss | Backups |")), null);
+});
+
+test("a roadmap without the §16 heading is refused, so the check can't pass by not running", () => {
+  assert.match(
+    String(roadmapProblem("# Roadmap\n\n## 16. Design decisions\n\n| [9](decisions/09-a.md) | A |\n")),
+    /no "## 16\. Decisions" heading/,
+  );
+});
+
+test("a conflict marker anywhere in the roadmap is refused, with its line", () => {
+  assert.match(String(roadmapProblem(`${roadmap("Text.")}<<<<<<< HEAD\n`)), /roadmap\.md:\d+: a merge-conflict marker/);
 });
