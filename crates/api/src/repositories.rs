@@ -37,6 +37,11 @@ pub struct RepositoryDto {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub repo_hot: Option<String>,
     pub password: PasswordSourceDto,
+    /// Who the entry asks to maintain the repository (§7.3): this agent,
+    /// the hub or nobody from here, so a page can say so in words. A row
+    /// that doesn't say asks nobody.
+    #[serde(default)]
+    pub maintenance: RepositoryMaintenanceDto,
     /// Whether this agent maintains the repository: forgets, prunes and
     /// checks it (I1, §7.3). A row that doesn't say is maintained elsewhere,
     /// so a client offers no maintenance for it.
@@ -67,6 +72,19 @@ pub struct RepositoryDto {
     /// repository of one location, which `repository` names.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub locations: Vec<LocationDto>,
+}
+
+/// Who a repository's entry asks to maintain it, as its `maintenance`
+/// setting says (§7.3): `local`, this agent; `hub`, the hub; `none`, nobody
+/// from here, which an entry without the setting asks too.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "schemars", derive(schemars::JsonSchema))]
+#[serde(rename_all = "kebab-case")]
+pub enum RepositoryMaintenanceDto {
+    Local,
+    Hub,
+    #[default]
+    None,
 }
 
 /// One location of a repository reached at several, as the Repositories

@@ -32,7 +32,7 @@ use crate::repositories::{
     Action, Field, Form, Outcome, RowCreated, Sentence, advises_retry, create_label,
     create_saved_path, error_of, field_of, found_at, lists_locations, location_heading,
     location_option, location_rule, location_tested, locations_label, locations_tested,
-    password_source, problems_of, repository_notes, rereads_list, row_refusal,
+    maintainer_note, password_source, problems_of, repository_notes, rereads_list, row_refusal,
     test_locations_label, test_locations_path, tested_announcement,
 };
 use crate::routes::{PAGE_HEADING_ID, PageHeading, refusal, refused_sentence, text_with};
@@ -504,10 +504,10 @@ struct RowCreates {
 /// repository's name as its row's header, where it is (the hot half on a line
 /// of its own), or, for a repository reached at several locations, the list
 /// of them in order with its Test (decision 80), where its password comes
-/// from, and its Create, when the row offers it (decision 53). Never the
-/// password itself (I4). A row follows a read of the list in place; its
-/// buttons are built again only when what the row offers changes, as a
-/// created repository's Create goes.
+/// from and who maintains it, and its Create, when the row offers it
+/// (decision 53). Never the password itself (I4). A row follows a read of
+/// the list in place; its buttons are built again only when what the row
+/// offers changes, as a created repository's Create goes.
 fn repositories_table(
     localizer: &Arc<Localizer>,
     base: String,
@@ -619,13 +619,20 @@ fn place_view(
     .into_any()
 }
 
-/// Where a repository's password comes from, and what the page notes of it.
+/// Where a repository's password comes from, who maintains it (§7.3), and
+/// what the page notes of it. Who maintains it is a muted note in words,
+/// never a color alone (#1548).
 fn password_view(localizer: &Localizer, row: &RepositoryDto) -> AnyView {
     let (id, args) = password_source(&row.password);
     let password = text_with(localizer, id, &args);
+    let maintainer = text(
+        localizer,
+        maintainer_note(row.maintenance, row.maintenance_paused_since.is_some()),
+    );
     let notes = repository_notes(localizer, &row.warnings);
     view! {
         <div>{runs_view(&password)}</div>
+        <div class="text-muted">{maintainer}</div>
         {notes
             .into_iter()
             .map(|note| view! { <div class="text-muted">{runs_view(&note)}</div> })
