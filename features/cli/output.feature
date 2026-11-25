@@ -47,10 +47,13 @@ Feature: The command line's output
       Then the command exits with status 0
       And standard output is one line holding one JSON document
       And the document has:
-        | key        | value           |
-        | repository | "nas"           |
-        | plans      | ["docs","home"] |
-        | notices    | []              |
+        | key                  | value                          |
+        | repository           | "nas"                          |
+        | plans                | ["docs","home"]                |
+        | notices.0.code       | "profile-plan-unscheduled"     |
+        | notices.0.args.plan  | {"type":"text","value":"docs"} |
+        | notices.1.code       | "profile-plan-unscheduled"     |
+        | notices.1.args.plan  | {"type":"text","value":"home"} |
       And the document has no key "error"
       And standard error is empty
 
@@ -265,7 +268,7 @@ Feature: The command line's output
       When the owner runs "import-profile nas.toml --plain"
       Then the command exits with status 0
       And standard output has 3 lines
-      And standard error has 1 line
+      And standard error has 3 lines
       And the output is plain text
 
     Scenario Outline: --plain goes before or after the command's name

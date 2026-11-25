@@ -310,6 +310,18 @@ impl ImportProfile {
                     program: command.runs.program(),
                 }),
         );
+        // A rustic profile has no schedule: rustic is started from outside
+        // it. A plan without one runs only when started, which is said, so
+        // nothing reads as fine when nothing will run (#1610).
+        notices.extend(
+            profile
+                .plans
+                .iter()
+                .filter(|plan| plan.schedule.is_none())
+                .map(|plan| ProfileNotice::PlanUnscheduled {
+                    plan: plan.id.as_str().to_owned(),
+                }),
+        );
 
         let mut agent = loaded.agent().clone();
         let mut plans = loaded.plans().to_vec();
@@ -639,6 +651,8 @@ mod tests {
                     glob: "c/d".to_owned(),
                     absolute: Some("/home/demo/home/c/d".to_owned()),
                 },
+                unscheduled("home"),
+                unscheduled("docs"),
             ]
         );
         let saved = saved(&config).await;
@@ -669,11 +683,14 @@ mod tests {
         .expect("the import");
         assert_eq!(
             imported.notices,
-            [ProfileNotice::GlobNeverMatches {
-                plan: "home".to_owned(),
-                glob: "!home/demo/home/.cache".to_owned(),
-                absolute: Some("!/var/home/demo/home/.cache".to_owned()),
-            }]
+            [
+                ProfileNotice::GlobNeverMatches {
+                    plan: "home".to_owned(),
+                    glob: "!home/demo/home/.cache".to_owned(),
+                    absolute: Some("!/var/home/demo/home/.cache".to_owned()),
+                },
+                unscheduled("home")
+            ]
         );
         assert_eq!(saved(&config).await.plans().first(), Some(&home));
     }
@@ -998,6 +1015,14 @@ mod tests {
         }
     }
 
+    /// What an import says of a plan it added without a schedule, as every
+    /// profile's plan is (#1610).
+    fn unscheduled(plan: &str) -> ProfileNotice {
+        ProfileNotice::PlanUnscheduled {
+            plan: plan.to_owned(),
+        }
+    }
+
     async fn import_over(
         entry: &RepositoryConfig,
         theirs: RepositoryConfig,
@@ -1055,6 +1080,7 @@ mod tests {
                 kept("options-hot"),
                 kept("options-cold"),
                 kept("hooks"),
+                unscheduled("home"),
             ]
         );
         assert_eq!(saved.repository(&alias("nas")), Some(&entry));
@@ -1067,7 +1093,10 @@ mod tests {
         let mut entry = repository();
         entry.maintenance = Maintenance::Local;
         let (imported, _) = import_over(&entry, entry.clone(), vec![ProfileNotice::Prune]).await;
-        assert_eq!(imported.notices, [ProfileNotice::Prune]);
+        assert_eq!(
+            imported.notices,
+            [ProfileNotice::Prune, unscheduled("home")]
+        );
     }
 
     /// The kept entry is the one saved, not the profile's repository:
@@ -1097,7 +1126,7 @@ mod tests {
             ],
         )
         .await;
-        assert_eq!(imported.notices, [kept("password")]);
+        assert_eq!(imported.notices, [kept("password"), unscheduled("home")]);
         assert_eq!(saved.repository(&alias("nas")), Some(&entry));
     }
 
@@ -1117,7 +1146,7 @@ mod tests {
             }],
         )
         .await;
-        assert_eq!(imported.notices, []);
+        assert_eq!(imported.notices, [unscheduled("home")]);
         assert_eq!(saved.repository(&alias("nas")), Some(&entry));
     }
 
@@ -1158,7 +1187,7 @@ mod tests {
                 }],
             )
             .await;
-            assert_eq!(imported.notices, [kept("options")]);
+            assert_eq!(imported.notices, [kept("options"), unscheduled("home")]);
             assert_eq!(saved.repository(&alias("nas")), Some(&entry));
             assert_eq!(saved.plans().len(), 1);
         }
@@ -1229,7 +1258,7 @@ mod tests {
             }],
         )
         .await;
-        assert_eq!(imported.notices, []);
+        assert_eq!(imported.notices, [unscheduled("home")]);
     }
 
     /// The ID is what Ladderback read when it opened the repository, which
@@ -1239,7 +1268,7 @@ mod tests {
         let mut entry = repository();
         entry.id = Some(RepositoryId::parse(&"07".repeat(32)).expect("an ID"));
         let (imported, _) = import_over(&entry, repository(), Vec::new()).await;
-        assert_eq!(imported.notices, []);
+        assert_eq!(imported.notices, [unscheduled("home")]);
     }
 
     #[tokio::test]
@@ -1278,9 +1307,12 @@ mod tests {
         assert_eq!(imported.plans, vec![PlanId::parse("home").expect("an ID")]);
         assert_eq!(
             imported.notices,
-            vec![ProfileNotice::UsedProfileNotRead {
-                name: "shared".to_owned()
-            }]
+            vec![
+                ProfileNotice::UsedProfileNotRead {
+                    name: "shared".to_owned()
+                },
+                unscheduled("home")
+            ]
         );
         assert_eq!(saved(&config).await, before);
         assert_eq!(
@@ -1403,6 +1435,7 @@ mod tests {
                 imported_notice("plans.home.hooks.run-failed", "notify-send"),
                 imported_notice("plans.home.hooks.run-finally", "logger"),
                 imported_notice("plans.home.hooks.run-finally", "sync"),
+                unscheduled("home"),
             ]
         );
     }
@@ -1477,7 +1510,10 @@ mod tests {
         );
         assert_eq!(
             imported.notices,
-            [imported_notice("repositories.nas.repository", "ssh")]
+            [
+                imported_notice("repositories.nas.repository", "ssh"),
+                unscheduled("home")
+            ]
         );
     }
 
