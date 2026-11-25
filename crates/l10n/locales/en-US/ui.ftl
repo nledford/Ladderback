@@ -61,8 +61,8 @@ ui-column-notes = Notes
 ui-start-not-planned = Not planned yet
 
 # The next run of a plan without a schedule: it runs only when someone starts
-# it on the operations page.
-ui-start-on-demand = When started from Operations
+# it, which is done on the operations page.
+ui-start-on-demand = Runs only when you start it
 
 # The link from the start page to the operations page, where a plan's backup
 # is started by hand.

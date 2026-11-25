@@ -102,6 +102,7 @@ pub(super) fn translate(event: WorkerEvent, redactor: &Redactor) -> Option<Engin
                 | WarningCode::ProfileCommandLeftOut
                 | WarningCode::ProfileCommandImported
                 | WarningCode::ProfileGlobalHooksLeftOut
+                | WarningCode::ProfilePlanUnscheduled
                 | WarningCode::LocationPlainHttpCredentials
                 | WarningCode::LocationEveryRuled
                 | WarningCode::LocationLastRuledNoRetry

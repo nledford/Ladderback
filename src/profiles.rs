@@ -264,11 +264,15 @@ fn tell_import(
         list_commands(localizer, &imported.commands)?;
     }
     // The commands were listed in full: their notices would only repeat
-    // them.
-    for notice in imported.notices {
-        if !matches!(notice, ProfileNotice::CommandImported { .. }) {
-            warn(localizer, &profile_notice(notice))?;
-        }
+    // them. A plan without a schedule is said last, after the summary, so
+    // the import ends with what to do next (#1610).
+    let (unscheduled, notices): (Vec<_>, Vec<_>) = imported
+        .notices
+        .into_iter()
+        .filter(|notice| !matches!(notice, ProfileNotice::CommandImported { .. }))
+        .partition(|notice| matches!(notice, ProfileNotice::PlanUnscheduled { .. }));
+    for notice in notices {
+        warn(localizer, &profile_notice(notice))?;
     }
     let mut told = localizer
         .message(
@@ -289,6 +293,9 @@ fn tell_import(
         told.push('\n');
     }
     to_stdout(&told)?;
+    for notice in unscheduled {
+        warn(localizer, &profile_notice(notice))?;
+    }
     Ok(ExitCode::SUCCESS)
 }
 

@@ -42,7 +42,7 @@ Feature: Start page
     When I open the web UI
     Then the table "Plans" has the row "demo-home"
     And the row "demo-home" of the table "Plans" shows its planned run in its "Next run" column in the time zone "Asia/Kolkata"
-    And the row "demo-photos" of the table "Plans" shows "When started from Operations" in its "Next run" column
+    And the row "demo-photos" of the table "Plans" shows "Runs only when you start it" in its "Next run" column
     And the link "How to write a plan in config.toml by hand, on GitHub (goes to another site)" leads to the section "6.1 Source of truth" of "docs/design/scheduling-and-config.md" in this release
     And the page has no accessibility violations
     When I skip to the content

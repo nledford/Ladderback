@@ -856,6 +856,10 @@ pub enum WarningCode {
     /// configuration already had plans or repositories whose jobs they would
     /// have run around (§6.2).
     ProfileGlobalHooksLeftOut,
+    /// An import added a plan with no schedule, as a rustic profile has
+    /// none, so it runs only when it is started (#1610). The argument `plan`
+    /// is the plan's ID.
+    ProfilePlanUnscheduled,
     /// A notification of an event wasn't delivered to its channel (§11). It
     /// is not tried again. The arguments: `event`, the event's name
     /// (`backup.failed`); `rule` and `channel`, their names in the
@@ -1989,6 +1993,11 @@ impl WarningCode {
                     optional: false,
                 },
             ],
+            Self::ProfilePlanUnscheduled => &[ArgSpec {
+                name: "plan",
+                kind: ArgKind::Text,
+                optional: false,
+            }],
             Self::NotificationUndelivered => &[
                 ArgSpec {
                     name: "event",
