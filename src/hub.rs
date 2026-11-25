@@ -1188,6 +1188,129 @@ async fn connect_to_hub(
     }
 }
 
+/// `ladderback unpair`: leaves the hub this machine pinned, once the person
+/// confirms, while the daemon is stopped (decision 169). It drops every
+/// lease and epoch floor the machine took from that hub, then forgets the
+/// pin, so the machine stands alone and maintains its own repositories
+/// again; the hub isn't told, and its lease expiry stays the guarantee on
+/// its side (I1).
+pub(crate) fn unpair(yes: bool) -> ExitCode {
+    let localizer = Localizer::new(&PosixEnv::from_process().preferences());
+    finish(&localizer, run_unpair(&localizer, yes))
+}
+
+fn run_unpair(localizer: &Localizer, yes: bool) -> io::Result<ExitCode> {
+    let Some(data_dir) = dirs::data_dir() else {
+        say(localizer, msg::CLI_NO_DATA_DIR, &[])?;
+        return Ok(ExitCode::FAILURE);
+    };
+    let runtime = match runtime(localizer)? {
+        Ok(runtime) => runtime,
+        Err(code) => return Ok(code),
+    };
+    runtime.block_on(leave_hub(localizer, &data_dir, yes))
+}
+
+/// What `unpair` asks before it changes anything.
+const UNPAIR: Question = Question {
+    ask: msg::CLI_UNPAIR_CONFIRM,
+    declined: msg::CLI_UNPAIR_DECLINED,
+    no_terminal: msg::CLI_UNPAIR_NO_TERMINAL,
+};
+
+async fn leave_hub(localizer: &Localizer, data_dir: &Path, yes: bool) -> io::Result<ExitCode> {
+    let identity = Arc::new(FileIdentity::in_data_dir(data_dir));
+    // A machine that never paired has nothing to leave, and nothing is
+    // written to its data folder.
+    if let Ok(None) = identity.pin().await {
+        say(localizer, msg::CLI_UNPAIR_NOT_PAIRED, &[])?;
+        return Ok(ExitCode::SUCCESS);
+    }
+    // The daemon holds the hub's leases in memory and takes its grants: it
+    // stops first, and the lock keeps it from starting meanwhile.
+    let _lock = match DataDirLock::acquire(data_dir) {
+        Ok(lock) => lock,
+        Err(LockError::InUse { .. }) => {
+            say(
+                localizer,
+                msg::CLI_UNPAIR_DAEMON_RUNNING,
+                &[("path", text(data_dir.display()))],
+            )?;
+            return Ok(ExitCode::FAILURE);
+        }
+        Err(LockError::Unavailable { detail }) => return refused(localizer, &detail),
+    };
+    // A pin that can't be read still pins the hub, and is left the same
+    // way: only the hub can't be named.
+    let fingerprint = match identity.pin().await {
+        Ok(Some(pin)) => {
+            let fingerprint = Fingerprint::of_key(&pin.hub_key);
+            say(
+                localizer,
+                msg::CLI_UNPAIR_PAIRED,
+                &[
+                    ("address", text(pin.address.as_str())),
+                    ("fingerprint", text(fingerprint)),
+                ],
+            )?;
+            Some(fingerprint)
+        }
+        Ok(None) => {
+            say(localizer, msg::CLI_UNPAIR_NOT_PAIRED, &[])?;
+            return Ok(ExitCode::SUCCESS);
+        }
+        Err(IdentityError::Damaged { .. }) => {
+            say(localizer, msg::CLI_UNPAIR_PIN_UNREADABLE, &[])?;
+            None
+        }
+        Err(error) => return identity_refused(localizer, &error),
+    };
+    if !confirmed(localizer, &UNPAIR, terminal::stdin_is_terminal(), yes)? {
+        return Ok(ExitCode::FAILURE);
+    }
+    // The leases and epoch floors the hub granted are in the database.
+    let store = match SqliteStore::open(&data_dir.join(DATABASE)).await {
+        Ok(store) => Arc::new(store),
+        Err(error) => return refused(localizer, &error.to_string()),
+    };
+    let left = AgentPairing::new(
+        identity,
+        Arc::new(AwsLcSigning),
+        Arc::new(OsRandom),
+        Arc::<SqliteStore>::clone(&store),
+    )
+    .leave()
+    .await;
+    store.close().await;
+    match left {
+        Ok(()) => {
+            match fingerprint {
+                Some(fingerprint) => say(
+                    localizer,
+                    msg::CLI_UNPAIR_DONE,
+                    &[("fingerprint", text(fingerprint))],
+                )?,
+                None => say(localizer, msg::CLI_UNPAIR_DONE_UNNAMED, &[])?,
+            }
+            Ok(ExitCode::SUCCESS)
+        }
+        Err(AgentPairingError::Identity(error)) => identity_refused(localizer, &error),
+        Err(error) => refused(localizer, &format!("{error:?}")),
+    }
+}
+
+/// Says why a key file stopped a command: its name and mode when others
+/// can read or change it, the error itself otherwise.
+fn identity_refused(localizer: &Localizer, error: &IdentityError) -> io::Result<ExitCode> {
+    match exposed(error) {
+        Some(args) => {
+            say(localizer, msg::CLI_KEY_FILE_EXPOSED, &args)?;
+            Ok(ExitCode::FAILURE)
+        }
+        None => refused(localizer, &format!("{error:?}")),
+    }
+}
+
 /// What `hub-status` says a failure with. Nothing names anything of the pin
 /// but its address.
 fn connect_failed(failure: &ConnectFailure, address: &str) -> Said {
@@ -1309,6 +1432,14 @@ fn failed(failure: &PairFailure, address: &str) -> Said {
             });
             (code, args, None)
         }
+        PairFailure::Pairing(AgentPairingError::PinnedToAnotherHub { pinned, token }) => (
+            ErrorCode::PinnedToAnotherHub,
+            vec![
+                ("pinned", text(Fingerprint::of_key(pinned))),
+                ("token", text(Fingerprint::of_key(token))),
+            ],
+            None,
+        ),
         PairFailure::Pairing(other) => (ErrorCode::Unknown, vec![], Some(format!("{other:?}"))),
     }
 }

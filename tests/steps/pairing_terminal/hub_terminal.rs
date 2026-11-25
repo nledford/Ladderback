@@ -13,7 +13,7 @@ use crate::Agent;
 
 /// The address a token is made for: loopback, which the scenarios' machines
 /// replace with the port the hub serves on.
-pub(super) const TOKEN_ADDRESS: &str = "http://127.0.0.1:9";
+const TOKEN_ADDRESS: &str = "http://127.0.0.1:9";
 
 /// The same over the hub's built-in TLS, whose certificate a token for it
 /// pins.

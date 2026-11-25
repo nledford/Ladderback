@@ -136,6 +136,11 @@ enum Command {
         #[arg(long)]
         hostname: Option<String>,
     },
+    #[cfg(feature = "hub")]
+    Unpair {
+        #[arg(long)]
+        yes: bool,
+    },
     InstallService,
     RemoveService,
     CheckKeyring,
@@ -276,6 +281,8 @@ fn description(path: &str, argument: Option<&str>) -> Option<MessageId> {
         ("pair", Some("yes")) => msg::CLI_HELP_PAIR_YES,
         ("hub-status", None) => msg::CLI_HELP_HUB_STATUS,
         ("hub-status", Some("hostname")) => msg::CLI_HELP_HUB_STATUS_HOSTNAME,
+        ("unpair", None) => msg::CLI_HELP_UNPAIR,
+        ("unpair", Some("yes")) => msg::CLI_HELP_UNPAIR_YES,
         ("install-service", None) => msg::CLI_HELP_INSTALL_SERVICE,
         ("remove-service", None) => msg::CLI_HELP_REMOVE_SERVICE,
         ("check-keyring", None) => msg::CLI_HELP_CHECK_KEYRING,
@@ -364,6 +371,8 @@ fn main() -> ExitCode {
         ),
         #[cfg(feature = "hub")]
         Command::HubStatus { hostname } => hub::hub_status(hostname),
+        #[cfg(feature = "hub")]
+        Command::Unpair { yes } => hub::unpair(yes),
         Command::ImportProfile {
             file,
             repo_name,

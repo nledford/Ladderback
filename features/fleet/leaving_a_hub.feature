@@ -30,13 +30,13 @@ Feature: Leaving a lost or replaced hub
     Given a hub with a pairing token made at its terminal
     And the hub is serving on loopback
     And a machine named "e2e-laptop" paired with the token from its terminal
-    And the hub is lost, and a new hub with a pairing token made at its terminal takes its place
-    And the hub is serving on loopback
-    When a machine named "e2e-laptop" pairs with the token from its terminal
+    And the hub is lost, and a new hub with a pairing token for the same address made at its terminal takes its place
+    When the hub serves again on the same address
+    And a machine named "e2e-laptop" pairs with the token as it is from its terminal
     Then the machine refuses the token, since it pins the lost hub, naming both hubs' keys and "ladderback unpair"
     When the person unpairs the machine from its terminal with --yes
     Then the machine says it left the hub and maintains its own repositories again
-    When a machine named "e2e-laptop" pairs with the token from its terminal
+    When a machine named "e2e-laptop" pairs with the token as it is from its terminal
     Then the machine is paired and waits for approval
 
   @e2e
@@ -62,3 +62,12 @@ Feature: Leaving a lost or replaced hub
   Scenario: The machine's terminal says a machine that never paired has no hub to leave
     When the person unpairs the machine from its terminal with --yes
     Then the terminal says the machine isn't paired with a hub
+
+  @e2e
+  Scenario: A machine whose hub pin can't be read leaves its hub all the same
+    Given a hub with a pairing token made at its terminal
+    And the hub is serving on loopback
+    And a machine named "e2e-laptop" paired with the token from its terminal
+    And the machine's hub pin can't be read
+    When the person unpairs the machine from its terminal with --yes
+    Then the machine says it left its hub, which it couldn't name, and maintains its own repositories again
