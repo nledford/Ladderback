@@ -255,6 +255,7 @@ code_messages!(WARNINGS, warning_message, WarningCode {
     ProfileCommandLeftOut => msg::WARNING_PROFILE_COMMAND_LEFT_OUT,
     ProfileCommandImported => msg::WARNING_PROFILE_COMMAND_IMPORTED,
     ProfileGlobalHooksLeftOut => msg::WARNING_PROFILE_GLOBAL_HOOKS_LEFT_OUT,
+    ProfilePlanUnscheduled => msg::WARNING_PROFILE_PLAN_UNSCHEDULED,
     NotificationUndelivered => msg::WARNING_NOTIFICATION_UNDELIVERED,
     CoreDumpsOn => msg::WARNING_CORE_DUMPS_ON,
     DebuggerAttachAllowed => msg::WARNING_DEBUGGER_ATTACH_ALLOWED,

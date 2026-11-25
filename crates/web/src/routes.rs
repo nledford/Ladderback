@@ -493,7 +493,7 @@ mod tests {
         for next_run in [None, Some("2026-11-13T03:00:00Z")] {
             assert_eq!(
                 next_run_cell(&localizer, &plan(false, next_run), None),
-                ("When started from Operations".to_owned(), None)
+                ("Runs only when you start it".to_owned(), None)
             );
         }
     }

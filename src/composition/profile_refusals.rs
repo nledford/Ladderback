@@ -306,6 +306,10 @@ pub(crate) fn profile_notice(notice: ProfileNotice) -> Notice {
             vec![("key", text(key)), ("program", text(program))],
         ),
         ProfileNotice::GlobalHooksLeftOut => (WarningCode::ProfileGlobalHooksLeftOut, Vec::new()),
+        ProfileNotice::PlanUnscheduled { plan } => (
+            WarningCode::ProfilePlanUnscheduled,
+            vec![("plan", text(plan))],
+        ),
     };
     Notice { code, args }
 }
