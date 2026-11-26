@@ -160,14 +160,16 @@ clippy:
 # it lists), the user docs site's build and link check (`docs-site`), the
 # check of the §16 decision files (good names and headings, a number each, no
 # table of them in §16; decision 162) and that §4.5's index matches the
-# component contract files, and
+# component contract files, the check that each exclusion in
+# .cargo/mutants.toml still matches a mutant or a source file (cargo-mutants
+# lists them without building; §13.1), and
 # rustdoc on every crate, private items
 # included, with warnings as errors, so a doc comment's broken link or
 # malformed markup fails. Rustdoc sees only the items built for the host and,
 # for `web`, not its wasm32-only ones. CI runs `lint` on Linux alone, so a doc
 # comment on macOS-only code is checked only by a local run on a Mac; macOS CI
 # runs `clippy` (see `clippy`).
-[doc('The static checks: clippy (host, web UI, gallery, release flags), TypeScript, shellcheck, the tooling tests, the docs checks and rustdoc.')]
+[doc('The static checks: clippy (host, web UI, gallery, release flags), TypeScript, shellcheck, the tooling tests, the docs checks, the mutants exclusions and rustdoc.')]
 [group('quality')]
 lint: _ui-deps _shellcheck-pinned clippy docs-site
     cargo clippy --package web --all-targets --target wasm32-unknown-unknown -- -D warnings
@@ -184,6 +186,7 @@ lint: _ui-deps _shellcheck-pinned clippy docs-site
     node scripts/check-american-spelling.ts
     node scripts/decision-index.ts
     node scripts/component-index.ts
+    node scripts/check-mutants-exclusions.ts
     RUSTDOCFLAGS="-D warnings" cargo doc --workspace --no-deps --document-private-items
 
 # Print the index of the §16 decisions, one Markdown row per file in

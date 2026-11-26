@@ -413,6 +413,13 @@ jobs:
         uses: taiki-e/install-action@75a7c0f87bd666af3cdb75c5b9e9d03ab6044e6f # v2.90.6
         with:
           tool: leptosfmt@${{ steps.leptosfmt.outputs.version }}
+      # cargo-mutants for `just lint`'s check of the mutants exclusions, from
+      # the install-action the mutants jobs get it from (through setup-rust),
+      # on Linux alone, where `lint` runs.
+      - if: matrix.skip != 'true' && needs.changes.outputs.docs-only != 'true' && runner.os == 'Linux'
+        uses: taiki-e/install-action@75a7c0f87bd666af3cdb75c5b9e9d03ab6044e6f # v2.90.6
+        with:
+          tool: cargo-mutants
       # The rustic CLI the profile golden tests compare against (§6.2): the
       # official release, checked against the SHA-256 the script pins.
       - if: matrix.skip != 'true' && needs.changes.outputs.docs-only != 'true'
