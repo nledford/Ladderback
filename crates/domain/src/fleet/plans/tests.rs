@@ -83,6 +83,9 @@ fn each_outcome_reads_back_from_its_wire_name_and_no_other_name_reads() {
         LastRunOutcome::SucceededWithWarnings.wire_name(),
         "succeeded-with-warnings"
     );
+    // The wire and the hub's store keep the British spelling: changing it
+    // would change the sync protocol and need a migration.
+    assert_eq!(LastRunOutcome::Cancelled.wire_name(), "cancelled");
 }
 
 #[test]

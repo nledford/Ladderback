@@ -790,3 +790,11 @@ fn a_signed_payload_is_read_up_to_a_frames_size() {
         Err(WireRefused)
     );
 }
+
+/// A canceled operation's report keeps the British spelling on the wire:
+/// changing it would change the sync protocol between machines.
+#[test]
+fn a_cancel_report_keeps_its_wire_spelling() {
+    let payload = String::from_utf8(report_payload(&report_entry(Happening::Cancelled))).unwrap();
+    assert!(payload.contains(r#""cancelled""#), "{payload}");
+}
