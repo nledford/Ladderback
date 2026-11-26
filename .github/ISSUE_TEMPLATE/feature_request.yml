@@ -1,0 +1,24 @@
+name: Feature request
+description: Something Ladderback doesn't do yet.
+labels: ["enhancement"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        [PRODUCT.md](https://github.com/nledford/Ladderback/blob/main/PRODUCT.md) says what Ladderback is for and what it leaves to rustic, and [the roadmap](https://github.com/nledford/Ladderback/blob/main/docs/design/roadmap.md) says what is planned.
+  - type: textarea
+    id: goal
+    attributes:
+      label: What you are trying to do
+      description: The task or the problem, rather than only the change you have in mind.
+    validations:
+      required: true
+  - type: textarea
+    id: today
+    attributes:
+      label: How you do it today
+      description: With Ladderback, rustic's CLI, or something else.
+  - type: textarea
+    id: idea
+    attributes:
+      label: What you'd like Ladderback to do

@@ -1,0 +1,56 @@
+name: Bug report
+description: Ladderback did something wrong, or failed to do what it says.
+labels: ["bug"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Never paste a password, a key, an API token or a repository URL that holds credentials. A security problem goes through [the security policy](https://github.com/nledford/Ladderback/security/policy), not an issue.
+  - type: input
+    id: version
+    attributes:
+      label: Version
+      description: The web UI's footer, or `ladderback --version`.
+      placeholder: 0.6.0+1a2b3c4
+    validations:
+      required: true
+  - type: input
+    id: system
+    attributes:
+      label: System
+      description: The operating system and its version, and the processor if it isn't x86_64.
+      placeholder: Fedora 43, aarch64
+    validations:
+      required: true
+  - type: dropdown
+    id: install
+    attributes:
+      label: How Ladderback was installed
+      options:
+        - The release's .deb or .rpm package
+        - The install script
+        - cargo-binstall, or the release's archive by hand
+        - Built from source (cargo install)
+        - The Docker image (not supported yet)
+        - Something else (say below)
+    validations:
+      required: true
+  - type: textarea
+    id: steps
+    attributes:
+      label: Steps
+      description: What you did, in order, from a state someone else can reach.
+    validations:
+      required: true
+  - type: textarea
+    id: happened
+    attributes:
+      label: What happened, and what you expected
+    validations:
+      required: true
+  - type: textarea
+    id: log
+    attributes:
+      label: Log lines
+      description: The daemon's log around the problem, if it says anything. Check it for paths or names you'd rather not share.
+      render: text
