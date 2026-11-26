@@ -1,6 +1,5 @@
 //! The hub's terminal commands (§16, decision 121, "From a terminal"):
 //! `pairing-token` on the hub, and `pair` and `hub-status` on the agent.
-//! Only a build with the `hub` feature has them.
 
 use std::io;
 use std::path::{Path, PathBuf};

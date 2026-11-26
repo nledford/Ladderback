@@ -1,9 +1,8 @@
 //! The hub's own routes under `/api/v1/hub` (§16, decisions 120 and 121):
 //! the key its page shows, the pairing tokens the page makes and cancels,
 //! the agents it lists, approves, rejects and removes, and its recovery
-//! mode, which the page reads and a person ends (decision 137). Only a
-//! build with the hub has them (decision 122), and a daemon not serving as
-//! a hub answers them as it does any unknown path.
+//! mode, which the page reads and a person ends (decision 137). A daemon
+//! not serving as a hub answers them as it does any unknown path.
 //!
 //! Making a token, approving an agent and ending recovery mode are
 //! high-impact actions: a session's only (no API token permission opens

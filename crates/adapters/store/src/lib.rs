@@ -11,17 +11,13 @@
     clippy::unreachable
 )]
 
-#[cfg(feature = "hub")]
 mod agent_registry;
 mod api_tokens;
 mod codec;
 mod error_args;
-#[cfg(feature = "hub")]
 mod leases;
 mod locations;
-#[cfg(feature = "hub")]
 mod outbox;
-#[cfg(feature = "hub")]
 mod ownership;
 mod proposals;
 mod report;
@@ -283,7 +279,6 @@ fn unavailable(error: sqlx::Error) -> StoreError {
 /// longer holds: the hub removed it while its message was on its way. The
 /// removal deletes the machine's current state (decision 165), so a write
 /// refused this way leaves what one just before the removal would have.
-#[cfg(feature = "hub")]
 fn machine_gone(error: &sqlx::Error) -> bool {
     matches!(
         error,

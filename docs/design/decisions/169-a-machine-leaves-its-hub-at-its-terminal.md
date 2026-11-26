@@ -2,6 +2,8 @@
 
 **`ladderback unpair`, run at the machine while its daemon is stopped, leaves the hub it pinned: once the person confirms (`[y/N]` at a terminal, `--yes` without one), it drops every lease and epoch floor it took from that hub, then forgets the pin. The machine then stands alone, maintains its own repositories as its configuration says, and pairs with any hub's token. `pair` with another hub's token, while a pin is kept, is refused as `pinned-to-another-hub`, naming both hubs' key fingerprints and `ladderback unpair`** (recorded 2026-11-25, §7.1 and §7.3; #1637).
 
+**Amended 2026-11-25 (#1366):** `unpair` is in every build from the MVP's release, as the rest of the hub is; item 1's "in builds with the hub" describes builds before the gate's removal ([decision 122](122-hub-out-of-releases-until-m8.md) as amended).
+
 ## Why
 
 - **A replaced hub, or a machine taken out of a fleet, is a likely path**, and deleting `hub-pin` by hand was the only way out. The refusal said `An unexpected error occurred` with the error's debug text, which §8.4 forbids.

@@ -1,7 +1,6 @@
 //! The hub's registry (technical design §7.1, §9 `agents` and
 //! `pairing_tokens`; decision 120, "Pairing" and "Pending approval"): the
-//! `AgentRegistry` port on the store's own file, built only with the hub
-//! (decision 122).
+//! `AgentRegistry` port on the store's own file.
 
 use app::ports::{Added, AgentRegistry, StoreError};
 use async_trait::async_trait;

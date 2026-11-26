@@ -35,10 +35,8 @@ use crate::locations;
 use crate::report::{cap, shown};
 use crate::summary::Summary;
 
-#[cfg(feature = "hub")]
 mod hub;
 
-#[cfg(feature = "hub")]
 pub(crate) use hub::{
     agent, agent_id_text, counter_text, held_machine, pairing_token, second_machine, tombstone,
 };

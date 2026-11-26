@@ -1,7 +1,7 @@
-//! The agent routes under `/sync/` (technical design §7.1), which only a
-//! build with the `hub` feature serves, and only `serve --hub` (§16, decision
-//! 122). Anything else answers 404 on every path there, so a release never
-//! shows the UI's page, or anything of the hub, at the hub's address.
+//! The agent routes under `/sync/` (technical design §7.1), which only
+//! `serve --hub` serves. On any other daemon every path there is refused by
+//! the sync check or answers 404, so it never shows the UI's page, or
+//! anything of the hub, at that address.
 //!
 //! `/sync/v1` carries the handshake (decision 120, "The handshake") to
 //! [`HubPairing`](app::pairing::HubPairing)'s steps, under its bounds before
@@ -22,7 +22,7 @@
 //! 120); its frames keep the same cap. While the hub holds it, the hub
 //! shows the machine online.
 //!
-//! In a build with the hub, every path under `/sync/` is these routes',
+//! Every path under `/sync/` is these routes',
 //! behind a check of their own in place of the browser's request checks
 //! (technical design §10.1): agents reach the hub by whatever name it has
 //! and prove themselves with signatures, and send no `Origin`. The check
@@ -33,20 +33,11 @@ use axum::Router;
 use axum::http::StatusCode;
 use axum::routing::any;
 
-#[cfg(feature = "hub")]
 pub use served::SyncHub;
 
-/// What `/sync/` serves: nothing, in a build without the hub.
-#[cfg(not(feature = "hub"))]
-#[derive(Clone, Debug, Default)]
-pub struct SyncHub {
-    // Made only by `default`, as the hub's is.
-    _nothing: (),
-}
-
-/// The routes under `/sync/`: the handshake's when `hub` serves it, 404 on
-/// every path there otherwise. In a build with the hub, each is behind the
-/// sync check, which a route added here can't leave out.
+/// The routes under `/sync/`: the handshake's when this daemon serves as a
+/// hub, 404 on every other path there, each behind the sync check, which a
+/// route added here can't leave out.
 pub(crate) fn routes<S>(hub: &SyncHub) -> Router<S>
 where
     S: Clone + Send + Sync + 'static,
@@ -57,22 +48,17 @@ where
         .route("/sync/", not_found.clone())
         .route("/sync/{*rest}", not_found);
     // Every other path under `/sync/` answers 404 beside the handshake's.
-    #[cfg(feature = "hub")]
-    let nothing = match served::routes(hub) {
+    match served::routes(hub) {
         Some(router) => nothing.merge(router),
         None => nothing,
     }
-    .layer(axum::middleware::from_fn(check::enforce));
-    #[cfg(not(feature = "hub"))]
-    let _ = hub;
-    nothing
+    .layer(axum::middleware::from_fn(check::enforce))
 }
 
 /// The daemon's router: `app`, the UI and the API under the browser's
 /// checks, behind the routes under `/sync/`. Every path there goes to
 /// [`routes`], so a route `app` has under `/sync/` is never reached: an
 /// agent route can only be added behind the sync check.
-#[cfg(feature = "hub")]
 pub(crate) fn in_front_of(app: Router, hub: &SyncHub) -> Router {
     routes(hub).fallback_service(app)
 }
@@ -82,7 +68,6 @@ pub(crate) fn in_front_of(app: Router, hub: &SyncHub) -> Router {
 /// requests may not set `Upgrade`. So the hub needs no `Host` check here,
 /// which DNS rebinding would otherwise call for, and no `Content-Type`
 /// check, which guards bodies.
-#[cfg(feature = "hub")]
 mod check {
     use api::ErrorCode;
     use axum::body::HttpBody as _;
@@ -120,7 +105,6 @@ mod check {
     }
 }
 
-#[cfg(feature = "hub")]
 mod served {
     use std::collections::VecDeque;
     use std::net::IpAddr;
@@ -546,5 +530,4 @@ mod served {
 // Two attributes, not `all(test, …)`: clippy's test allowances see only a
 // bare `cfg(test)`.
 #[cfg(test)]
-#[cfg(feature = "hub")]
 mod tests;

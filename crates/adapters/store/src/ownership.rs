@@ -1,8 +1,8 @@
 //! The hub's registry of maintenance owners (technical design §7.3, I1;
 //! tables `repository_owners`, `ownership_reports` and
 //! `hub_recovery_floors`): the
-//! `OwnershipRegistry` port on the store's own file, built only with the
-//! hub (decision 122). A whole report, with the floors it proved, is
+//! `OwnershipRegistry` port on the store's own file. A whole report, with
+//! the floors it proved, is
 //! decided in one `BEGIN IMMEDIATE` transaction, so of claims that race,
 //! the first to write is granted and the others see its lease. Times are
 //! kept in milliseconds, and `now` is cut to a millisecond before anything

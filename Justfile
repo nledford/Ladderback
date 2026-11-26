@@ -144,8 +144,8 @@ clippy:
 # the web UI once more with the `gallery` feature (no other build turns it on,
 # so without it a warning in a demo of the component gallery goes unseen),
 # the host and the web UI (not the gallery, which no release build has) again
-# with `release_flags`, so the build without the hub (§16, decision
-# 122) has its dead code and warnings caught too, the type check of the
+# with `release_flags`, so the release build has its dead code and warnings
+# caught too, the type check of the
 # TypeScript tooling (tsconfig.json; its compiler is a ui-tests
 # dev-dependency), Biome's format and lint check of that TypeScript
 # (biome.json, also a ui-tests dev-dependency; `biome ci` writes nothing, and
@@ -341,20 +341,19 @@ test-e2e *args:
     scripts/with-skip-log.sh scripts/with-test-home.sh cargo test --workspace --test e2e -- "$@"
 
 # A release is built with `release_flags` (`--no-default-features`), which
-# leaves out the development pseudolocales (`pseudo`, technical design §8.4)
-# and the hub (`hub`, §16, decision 122). `test` builds with the default
-# features, so the tests that exist only without them never run there: the
-# release lane of `l10n`'s tests (`tests/lanes/release.rs`), the no-pseudo test
-# in `tests/cli_locale.rs` and the hub's refusals in `tests/hub_gate.rs`.
+# leaves out the development pseudolocales (`pseudo`, technical design §8.4).
+# `test` builds with the default features, so the tests that exist only
+# without them never run there: the release lane of `l10n`'s tests
+# (`tests/lanes/release.rs`) and the no-pseudo test in `tests/cli_locale.rs`.
 # This runs, built that way, the tests of every package with default features
-# (`l10n`, `ladderback` and the crates with a `hub` feature), so those run, and
+# (`l10n`, `ladderback`, `mcp` and `web`), so those run, and
 # so does any test whose result depends on a feature. Each package gets the
 # features the release build itself turns on in it (`l10n`'s `icu`), and none
 # of the development ones: `scripts/release-test-packages.ts` reads both from
 # `cargo metadata` and `cargo tree`, so a package's first default feature is
 # picked up with no edit here, and it fails before any test runs if a
 # package's tests (their dev-dependencies too) would turn a workspace crate's
-# `hub` or `pseudo` back on, naming the path. Each package is built and tested
+# `pseudo` back on, naming the path. Each package is built and tested
 # on its own: in one run Cargo would unify features across them. `web`'s wasm
 # tests run in `test-wasm`. The cucumber runners are left out, as in `test`
 # (nextest's default filter), and the tests run in a scratch home, as in
@@ -791,7 +790,7 @@ package target binary version:
       if command -v sha256sum >/dev/null; then sha256sum "$file" > "$file.sha256"; else shasum -a 256 "$file" > "$file.sha256"; fi
     done
 
-# Runs scripts/smoke-release.ts on a release binary: its version, no hub, no
+# Runs scripts/smoke-release.ts on a release binary: its version, no
 # pseudolocales and no gallery, its dynamic libraries and glibc floor, then
 # the daemon serving its UI and running one backup in scratch folders, on this
 # machine or, with `--container <name>`, in a clean Linux container (Docker).
@@ -845,13 +844,13 @@ image version +args:
     docker buildx build --file Containerfile --platform "$list" --build-arg "VERSION=$version" ${build[@]+"${build[@]}"} "$context"
 
 # Runs scripts/smoke-image.ts on a Docker image `just image` built: its
-# version and labels, its user, no hub, the refusal to listen beyond loopback
+# version and labels, its user, the refusal to listen beyond loopback
 # without `--allowed-host`, then the daemon in a container with sign-in on,
 # backing up a read-only mounted folder into a repository on a volume, and a
 # new container on the same volumes keeping the data; last, that the install
 # guide's Compose file parses (`docker compose config`). It creates its own
 # containers and volumes and removes them. `--help` lists the options.
-[doc('Smoke-test a Docker image: version, user, no hub, sign-in, one backup, data kept, the Compose file.')]
+[doc('Smoke-test a Docker image: version, user, sign-in, one backup, data kept, the Compose file.')]
 [group('release')]
 [positional-arguments]
 smoke-image image *args:

@@ -1,7 +1,7 @@
 # Ladderback's container image (technical design §12, decision 126): the
 # `ladderback` binary of a Linux release archive, with the web UI built in,
 # run as a machine's agent that backs up folders mounted into the container
-# or, from M8, as the hub. It copies the archive's binary and never builds
+# or as the hub. It copies the archive's binary and never builds
 # Rust, so the image and the archive are the same program.
 #
 # The build context is a folder holding each platform's unpacked release
@@ -24,8 +24,8 @@ ARG TARGETARCH
 ARG VERSION
 
 # The CA certificates are what the daemon needs beyond the base: its TLS is
-# rustls, which trusts the system's roots, for an HTTPS backend and, from
-# M8, a hub. Nothing else: jiff carries its own time zone database
+# rustls, which trusts the system's roots, for an HTTPS backend and a
+# hub. Nothing else: jiff carries its own time zone database
 # (`tzdb-bundle-always`), so `TZ` works whatever the base's tzdata holds, and
 # the daemon runs no `rustic` CLI.
 # The user has a fixed UID and GID, 10001, which no account on the host is

@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 // What `just test-release` runs: each package with default features (the
-// development pseudolocales, `pseudo`, and the hub, `hub`), which a release
+// development pseudolocales, `pseudo`), which a release
 // build's flags turn off, and the features to test it with: the ones the
 // release build itself turns on in that package (`l10n`'s `icu`). A package
 // without default features builds the same way in `just test`, so running its
@@ -10,7 +10,7 @@
 //
 // Before any test runs, it checks each package's test build, dev-dependencies
 // included, as `cargo tree` resolves it for the build nextest makes: if that
-// build turns on a workspace crate's `hub` or `pseudo`, those tests would not
+// build turns on a workspace crate's `pseudo`, those tests would not
 // be testing the build a release is, and it fails, naming the package and
 // printing the path that turns the feature on.
 //
@@ -32,7 +32,7 @@ export interface Metadata {
 }
 
 /** The features a release build leaves out that no test build of a package may turn back on. */
-export const DEVELOPMENT_FEATURES = ["hub", "pseudo"];
+export const DEVELOPMENT_FEATURES = ["pseudo"];
 
 /** The names of the packages in `metadata` whose `default` feature turns on anything. */
 export function releaseTestPackages(metadata: Metadata): string[] {

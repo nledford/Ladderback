@@ -89,7 +89,7 @@ mod tests {
 
     /// `pair` has turned off its core dumps, and on Linux its dumpable
     /// flag, while it still waits for the pairing token (#1256).
-    #[cfg(all(unix, feature = "hub"))]
+    #[cfg(unix)]
     #[test]
     fn pair_refuses_core_dumps_before_it_reads_the_token() {
         at_prompt::refused_while_waiting(

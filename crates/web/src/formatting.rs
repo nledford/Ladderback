@@ -134,7 +134,6 @@ fn the_viewers_offset_is_the_one_the_browsers_clock_had_at_that_instant() {
 /// The pairing dialog writes when its token lapses in the viewer's zone, the
 /// zone whose offset it names beside the time (#1271), and so does the line
 /// that says the token lapsed.
-#[cfg(feature = "hub")]
 #[wasm_bindgen_test]
 fn a_pairing_tokens_lapse_time_is_the_viewers_reading_beside_the_viewers_offset() {
     use crate::pairing::{lapsed, lapses};

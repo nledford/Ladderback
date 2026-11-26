@@ -180,15 +180,12 @@ pub(crate) struct Background {
     /// each repository it maintains that has no listing standing, and what
     /// the daemon's listings showed of other agents' snapshots, which the
     /// sync tells its hub with each repository (§7.3; §16, decision 156).
-    #[cfg(feature = "hub")]
     listings_due: Arc<app::others_snapshots::ListingsDue>,
     /// The leases this machine maintains under, the same the runner's
     /// maintenance reads.
-    #[cfg(feature = "hub")]
     leases: Arc<app::leases::MaintenanceLeases>,
     /// What tells the notification rules, for the hub's offline alerts
     /// (decision 168): none when no notification can be sent.
-    #[cfg(feature = "hub")]
     notify: Option<Arc<Notify>>,
 }
 
@@ -202,13 +199,13 @@ pub(crate) struct Releases {
 impl Background {
     /// The leases the runner's maintenance reads, for a test of what the
     /// daemon wires.
-    #[cfg(all(test, feature = "hub"))]
+    #[cfg(test)]
     pub(super) fn maintenance_reads(&self) -> Option<Arc<app::leases::MaintenanceLeases>> {
         self.runner.leases.clone()
     }
 
     /// The runner whose backups run, for a test of what the daemon wires.
-    #[cfg(all(test, feature = "hub"))]
+    #[cfg(test)]
     pub(super) fn runner(&self) -> &PlanRunner {
         &self.runner
     }
@@ -221,14 +218,12 @@ impl Background {
 
     /// The configuration the daemon runs on, which a paired machine's sync
     /// reads for the leases it asks its hub for (§7.3).
-    #[cfg(feature = "hub")]
     pub(crate) fn config(&self) -> Arc<dyn ConfigStore> {
         Arc::clone(&self.config)
     }
 
     /// Where this machine stands, which its sync with a hub it paired with
     /// tells what the hub made of it (decision 150).
-    #[cfg(feature = "hub")]
     pub(crate) fn standing(&self) -> Arc<app::machine::MachineStanding> {
         Arc::clone(&self.runner.machine)
     }
@@ -237,7 +232,6 @@ impl Background {
     /// its sync with a hub takes the hub's grants through and its
     /// maintenance reads them through, so both judge a lease by one floor
     /// (decision 151).
-    #[cfg(feature = "hub")]
     pub(crate) fn leases(&self) -> Arc<app::leases::MaintenanceLeases> {
         Arc::clone(&self.leases)
     }
@@ -246,7 +240,6 @@ impl Background {
     /// decision 168): every 30 seconds while the daemon runs, saying in the
     /// log what telling an alert left to report. None when no notification
     /// can be sent.
-    #[cfg(feature = "hub")]
     pub(crate) fn watch_machines(
         &self,
         pairing: Arc<app::pairing::HubPairing>,
@@ -272,14 +265,12 @@ impl Background {
 
     /// The backups this daemon runs, which a paired machine's heartbeat
     /// names (§16, decision 166).
-    #[cfg(feature = "hub")]
     pub(crate) fn running(&self) -> Arc<app::running::RunningBackups> {
         Arc::clone(&self.runner.running)
     }
 
     /// What a paired machine tells its hub of its plans (§7.2): their
     /// standing in the log this daemon keeps, and their planned runs.
-    #[cfg(feature = "hub")]
     pub(crate) fn read_plans(&self) -> app::sync::ReadPlans {
         app::sync::ReadPlans::new(
             app::status::ReadStatus::new(
@@ -295,7 +286,6 @@ impl Background {
     /// The listings a paired machine's sync runs before each session, and
     /// what the daemon's listings showed of other agents' snapshots (§7.3,
     /// decision 156).
-    #[cfg(feature = "hub")]
     pub(crate) fn listings_due(&self) -> Arc<app::others_snapshots::ListingsDue> {
         Arc::clone(&self.listings_due)
     }
@@ -661,23 +651,15 @@ async fn state_over(
     // One for maintenance, its pause watch, the catalog and the sync with a
     // hub alike: the floor the sync's take of the hub's grants sets is the
     // one maintenance judges a lease by (I1, decision 151).
-    #[cfg(feature = "hub")]
     let held = maintenance_leases(data_dir, &log.store);
-    #[cfg(feature = "hub")]
     let leases = Some(Arc::clone(&held));
-    // A build without the hub never pairs, so it holds no leases.
-    #[cfg(not(feature = "hub"))]
-    let leases = None;
     let notify = notify_over(
         bus.as_ref(),
         Arc::clone(&config),
         Arc::clone(&store),
-        leases.clone(),
+        Arc::clone(&held),
     )
     .await;
-    // Only a hub watches its machines for offline alerts.
-    #[cfg(not(feature = "hub"))]
-    drop(notify);
     // Nothing has run yet, so an operation the log still shows as running was
     // left by a process that stopped. It ends as failed now, which also lets
     // go of the repository a running maintenance operation held (I7). A log
@@ -745,7 +727,6 @@ async fn state_over(
     );
     // A build that pairs makes a new agent key with the new ID: a copy
     // holds the original's key (decision 154).
-    #[cfg(feature = "hub")]
     let take_new_id = take_new_id.with_agent_key(
         Arc::new(platform::identity::FileIdentity::in_data_dir(data_dir)),
         Arc::new(OsRandom),
@@ -769,9 +750,7 @@ async fn state_over(
         bus: Arc::clone(&bus),
         clock: Arc::new(SystemClock),
     });
-    #[cfg(feature = "hub")]
     let others = Arc::new(app::others_snapshots::OthersSnapshots::default());
-    #[cfg(feature = "hub")]
     let events_engine: Arc<dyn Engine> = Arc::new(app::others_snapshots::NoteListings::new(
         events_engine,
         Arc::clone(&others),
@@ -860,7 +839,6 @@ async fn state_over(
     // Before each session with its hub, a paired machine lists each
     // repository it maintains that has no listing standing, in its turn
     // with the daemon's other listings (§7.3, decision 156).
-    #[cfg(feature = "hub")]
     let listings_due = Arc::new(app::others_snapshots::ListingsDue::new(
         Arc::clone(&config),
         Arc::clone(&store),
@@ -979,11 +957,8 @@ async fn state_over(
         changes,
         notice: Arc::clone(&notice),
         releases: None,
-        #[cfg(feature = "hub")]
         listings_due,
-        #[cfg(feature = "hub")]
         leases: held,
-        #[cfg(feature = "hub")]
         notify,
     };
     Ok((
@@ -1009,7 +984,6 @@ async fn state_over(
             full_disk_access: full_disk_access_route,
             machine: machine_route,
             sync: http_adapter::SyncHub::default(),
-            #[cfg(feature = "hub")]
             pairing: Arc::new(app::pairing::PairingState::new(Arc::new(
                 platform::identity::FileIdentity::in_data_dir(data_dir),
             ))),
@@ -1022,7 +996,6 @@ async fn state_over(
 /// The leases a paired machine maintains under (§7.3, I1): its pin in
 /// `data_dir` and its lease cache in `store`, which the sync with its hub
 /// keeps (`hub::reporting`). An unpaired machine isn't held to them.
-#[cfg(feature = "hub")]
 fn maintenance_leases(
     data_dir: &std::path::Path,
     store: &Arc<SqliteStore>,
@@ -1103,10 +1076,10 @@ impl http_adapter::SettingsOpener for SystemSettings {
 }
 
 /// Tells the channels of the agent's notification rules of the news on `bus`
-/// for as long as the daemon runs (§11), and, on a machine that holds
-/// `leases`, of each repository whose maintenance has been paused for want
-/// of a lease long enough, watched as often as the machine asks its hub for
-/// grants (decision 158). A notification that wasn't delivered is said in
+/// for as long as the daemon runs (§11), and of each repository whose
+/// maintenance has been paused for want of a lease from `leases` long
+/// enough, watched as often as the machine asks its hub for grants
+/// (decision 158). A notification that wasn't delivered is said in
 /// the log by its warning code, never with a secret (I4), and an event the
 /// configuration couldn't be read for by the configuration's error code. A
 /// client that can't be built is said once, and nothing is sent. Returns
@@ -1116,7 +1089,7 @@ async fn notify_over(
     bus: &dyn EventBus,
     config: Arc<dyn ConfigStore>,
     store: Arc<dyn OperationStore>,
-    leases: Option<Arc<app::leases::MaintenanceLeases>>,
+    leases: Arc<app::leases::MaintenanceLeases>,
 ) -> Option<Arc<Notify>> {
     let localizer = || l10n::Localizer::new(&l10n::PosixEnv::from_process().preferences());
     let notifier = match HttpNotifier::new(localizer(), DELIVERY_TIMEOUT) {
@@ -1135,23 +1108,21 @@ async fn notify_over(
         )
         .telling(Arc::new(log_secret_warning)),
     );
-    if let Some(leases) = leases {
-        let pauses = app::leases::WatchPauses::new(config, leases, Arc::clone(&notify));
-        let localizer = localizer();
-        tokio::spawn(async move {
-            let every = app::sync::GRANTS_EVERY.as_secs().unsigned_abs();
-            let mut ticks = tokio::time::interval(std::time::Duration::from_secs(every));
-            // A machine that slept watches once on waking, not once per
-            // tick it missed.
-            ticks.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
-            loop {
-                ticks.tick().await;
-                for report in pauses.watch().await {
-                    log::warn!("{}", report_line(&localizer, &report));
-                }
+    let pauses = app::leases::WatchPauses::new(config, leases, Arc::clone(&notify));
+    let watch_localizer = localizer();
+    tokio::spawn(async move {
+        let every = app::sync::GRANTS_EVERY.as_secs().unsigned_abs();
+        let mut ticks = tokio::time::interval(std::time::Duration::from_secs(every));
+        // A machine that slept watches once on waking, not once per
+        // tick it missed.
+        ticks.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
+        loop {
+            ticks.tick().await;
+            for report in pauses.watch().await {
+                log::warn!("{}", report_line(&watch_localizer, &report));
             }
-        });
-    }
+        }
+    });
     // Subscribed before any run can start, so no news is missed.
     let news = bus.subscribe().await;
     let localizer = localizer();

@@ -826,8 +826,8 @@ jobs:
         run: rm -rf target
 
   # The tests of the build a release is: `--no-default-features`, which leaves
-  # out the development pseudolocales (technical design §8.4) and the hub (§16,
-  # decision 122), on every package with default features. `just test` builds
+  # out the development pseudolocales (technical design §8.4), on every package
+  # with default features. `just test` builds
   # with the defaults, so the tests that exist only without them run here
   # alone. A job of its own, so that the `Check` jobs stay as they are and
   # this one builds beside them. A required check (ruleset "Protect main"):

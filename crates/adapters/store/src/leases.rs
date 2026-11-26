@@ -1,8 +1,8 @@
 //! A paired machine's leases from its hub and its epoch floors, each with
 //! the hub's proof of it when the machine keeps one (technical design
 //! §7.3, I1; tables `machine_leases`, `machine_epoch_floors` and
-//! `machine_maintenance_paused`): the `LeaseCache` port on the store's own file,
-//! built only with the hub (decision 122). A save replaces both tables in one
+//! `machine_maintenance_paused`): the `LeaseCache` port on the store's own file.
+//! A save replaces both tables in one
 //! transaction, and a save of the pauses replaces the pauses alone, so a load
 //! never sees half of one. Numbers past `i64::MAX` are refused where they
 //! enter, on the wire, so each fits its column.

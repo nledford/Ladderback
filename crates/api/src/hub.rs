@@ -1,6 +1,6 @@
 //! The hub's own routes under `/api/v1/hub` (§16, decisions 120 and 121):
-//! its key, and the pairing tokens its page makes and cancels. Only a build
-//! with the hub serves them (decision 122). Every daemon also answers which
+//! its key, and the pairing tokens its page makes and cancels. Every daemon
+//! also answers which
 //! hub it is paired with, at [`PAIRING_PATH`].
 
 use serde::{Deserialize, Serialize};

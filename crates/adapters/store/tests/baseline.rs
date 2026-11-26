@@ -173,7 +173,6 @@ async fn a_failure_is_kept_with_its_code_and_only_a_failure() {
 /// ownership reports with it, its current state (decision 165), and keeps
 /// its operation reports, their tally and its watermarks, its history
 /// (decision 154), and the lease it holds until that expires (I1).
-#[cfg(feature = "hub")]
 #[tokio::test]
 async fn removing_a_machine_forgets_its_current_state_and_keeps_its_history_and_lease() {
     use app::ports::{AgentRegistry as _, OwnershipRegistry as _, ReportInbox as _};
@@ -327,7 +326,6 @@ async fn removing_a_machine_forgets_its_current_state_and_keeps_its_history_and_
 }
 
 /// How many rows of the hub's `table` hold `machine`'s ID.
-#[cfg(feature = "hub")]
 async fn machine_rows(raw: &mut SqliteConnection, table: &str, machine: domain::AgentId) -> i64 {
     let sql = match table {
         "sync_plans" => "SELECT COUNT(*) FROM sync_plans WHERE machine_id = ?",

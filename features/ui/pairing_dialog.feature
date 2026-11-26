@@ -65,7 +65,7 @@ Feature: Making a pairing token on the hub's page
     Given a hub with sign-in off
     When I open the address "/settings#machines"
     Then the page shows a warning alert containing "reached through a reverse proxy must turn sign-in on"
-    And the link "A hub behind a reverse proxy, in the guide on GitHub (goes to another site)" leads to the section "A hub behind a reverse proxy" of "docs/guide/remote-access.md" on main
+    And the link "A hub behind a reverse proxy, in the guide on GitHub (goes to another site)" leads to the section "A hub behind a reverse proxy" of "docs/guide/remote-access.md" in this release
     And the page has no accessibility violations
 
   Scenario: Escape cancels a token no machine has used, and the page says so

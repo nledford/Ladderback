@@ -4,6 +4,8 @@
 
 **Amended 2026-11-22 (the maintainer, #1366):** the gate comes off for the MVP's release, not M8's. The pull request that deletes the feature merges just before the MVP's release (or its first candidate) is tagged, so testers pair machines from a release build. From that release the hub is in the public contract (§12.1), and it is "the first hub release" of decision 88, item 5, the first to ship protocol 1. Where the items below say M8's candidate or M8's release, read the MVP's; the file keeps its name.
 
+**Amended 2026-11-25 (#1366):** the gate is gone as of the MVP's release. The `hub` feature, its `cfg`s, its optional dependencies, `tests/hub_gate.rs`, `just architecture`'s hub rules and the release smoke tests' no-hub checks are deleted, and every build, a release's included, has the hub. The MVP's first candidate (`0.6.0-rc.1`, #1044) is the first release that can pair, sync and serve as a hub; the hub's commands, flags, routes and protocol 1 join the public contract (§12.1) with it. The items below describe the gate as it was.
+
 ## Why
 
 Decision 119 starts the hub now, beside M3b and M4, and every release is cut from `main` (§12.1). Without a gate, 0.5.0 (M3b) and 0.6.0 (M4) would ship half-built pairing and sync code: security code still under review, reachable from the network on `/sync/`. That first release would also start decision 88's six-month promise for protocol 1 and put the hub's commands, flags and routes in the public contract, so a flaw found later in M8 would cost a new protocol or a breaking release.

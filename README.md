@@ -12,7 +12,7 @@
 Ladderback backs up your computers on a schedule, shows your backups in one web page, and restores files right in the browser. It runs on your own machines and is built on [rustic](https://rustic.cli.rs), a fast, encrypted backup program.
 
 > [!WARNING]
-> **Ladderback is new software.** Version 0.5.0 runs scheduled backups and restores from them in your browser, but restores arrived only in 0.4.0. Before you rely on these backups, try restoring a file into a scratch folder. The `rustic` command-line program restores from any repository Ladderback backs up to, and stays your fallback. Until the hub (M8), each computer runs its own Ladderback, with its own web page. The [roadmap](#roadmap) has the order.
+> **Ladderback is new software.** Version 0.5.0 runs scheduled backups and restores from them in your browser, but restores arrived only in 0.4.0. Before you rely on these backups, try restoring a file into a scratch folder. The `rustic` command-line program restores from any repository Ladderback backs up to, and stays your fallback. Until the MVP's release brings the hub, each computer runs its own Ladderback, with its own web page. The [roadmap](#roadmap) has the order.
 >
 > **Until 1.0.0, any release can break what came before, with no deprecation period first:**
 > - the configuration file, the database and the data folder;

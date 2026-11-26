@@ -59,7 +59,7 @@ async fn i1_a_clock_set_back_after_the_syncs_take_doesnt_lengthen_the_lease_main
     let maintenance = daemon
         .background
         .maintenance_reads()
-        .expect("a build with the hub maintains under leases");
+        .expect("the daemon maintains under leases");
     assert_eq!(
         maintenance.permits(Some(&repository)).await,
         Err(NoLease::RanOut)

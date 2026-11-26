@@ -2,7 +2,7 @@
 
 Maintaining a repository means forgetting the snapshots its plans no longer keep, pruning the data no snapshot uses, checking it, and adopting history into a plan. Exactly one machine may maintain a repository, so that two never delete from it at once. Without a hub, you keep it to one: a machine maintains a repository when you tick **Maintain this repository from this machine** as you connect it, or press **Maintain from this machine** for it on the **Snapshots** page, which sets `maintenance = "local"` in its entry in `config.toml`. Once the machine is paired with a hub, the hub makes sure of it too.
 
-Hubs aren't in a release yet ([The hub](hub.md)).
+The MVP's release is the first with hubs ([The hub](hub.md)).
 
 ## Leases
 

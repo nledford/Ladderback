@@ -252,7 +252,7 @@ pub struct TakeNewId {
     operations: Arc<dyn OperationStore>,
     writes: Arc<ConfigWrites>,
     /// Where the agent key is kept, and what draws a new one's seed; `None`
-    /// in a build without the hub, which never pairs.
+    /// until [`with_agent_key`](Self::with_agent_key) gives them.
     agent_key: Option<(Arc<dyn Identity>, Arc<dyn Random>)>,
 }
 
