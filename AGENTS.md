@@ -156,7 +156,7 @@ Follow all three whenever possible. Deviating needs a stated reason in the pull 
 
 **Never make a check pass by weakening it.** A red check stands for unfinished work. None of these turns it green:
 
-- `#[mutants::skip]` or a `.cargo/mutants.toml` exclusion for a mutant a test could catch. Only an equivalent mutant (one no behaviour can tell apart) or code that never runs on the host is excluded, each with its reason in a comment beside it, and the pull request names it (§13.1);
+- `#[mutants::skip]` or a `.cargo/mutants.toml` exclusion for a mutant a test could catch. Only three kinds are excluded: an equivalent mutant (one no behaviour can tell apart), code that never runs on the host, and a mutant that makes synchronous code loop forever (cargo-mutants reports a timeout: a test reaches the code and doesn't pass; excluded by line). Each has its reason in a comment beside it, and the pull request names it (§13.1);
 - an `#[expect(…)]` without a `reason` that proves the case, on code that can fail, or on a function too complex or too deeply nested that a split would fix (`#[allow]` isn't used at all: clippy refuses it, and `just architecture` an inner `#![allow]`; §13.5, rule 7);
 - `testkit::skip!` on a test that fails here rather than one that can't run here;
 - raising a test's limit to fit slow code: the e2e runner's 8 s stall check (§13.2), a step's or a scenario's timeout;
