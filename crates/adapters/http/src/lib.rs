@@ -16,9 +16,7 @@ mod body_limit;
 mod downloads;
 mod dry_runs;
 mod full_disk_access;
-#[cfg(feature = "hub")]
 mod handed;
-#[cfg(feature = "hub")]
 mod hub_pages;
 mod listener;
 mod machine;
@@ -64,7 +62,6 @@ pub use api_tokens::{status_shown, summary_shown, warning_shown};
 pub use downloads::{DownloadRefusal, DownloadStart, Downloads, HandOff};
 pub use dry_runs::{DryRuns, DryRunsError};
 pub use full_disk_access::{FullDiskAccessRoute, SettingsOpener, SettingsUnopened};
-#[cfg(feature = "hub")]
 pub use handed::{BuiltInTls, Handed, HandedIo, HandedListener, HandedPeer, handed};
 pub use listener::{GatedListener, PeerAddr};
 pub use machine::MachineRoute;
@@ -151,7 +148,6 @@ pub struct AppState {
     /// Whether this machine is paired with a hub, and with which, which
     /// `GET /api/v1/pairing` and `pairing_state` read (components §4.6), in
     /// a build with the hub, the only one that can pair (decision 122).
-    #[cfg(feature = "hub")]
     pub pairing: Arc<app::pairing::PairingState>,
 }
 
@@ -552,7 +548,6 @@ pub fn router(assets: Arc<dyn AssetSource>, checks: RequestChecks, state: AppSta
         sign_in: state.sign_in.clone(),
         without_token: Arc::clone(&state.without_token),
     };
-    #[cfg(feature = "hub")]
     let hub = state.sync.clone();
     let routes = Router::new()
         .route(
@@ -766,14 +761,8 @@ pub fn router(assets: Arc<dyn AssetSource>, checks: RequestChecks, state: AppSta
                 .post(restart::ask)
                 .delete(restart::cancel),
         );
-    // Without the hub, the paths under `/sync/` answer 404 behind the
-    // browser's checks, as every other path does (§16, decision 122).
-    #[cfg(not(feature = "hub"))]
-    let routes = routes.merge(sync::routes(&state.sync));
-    // With it, the hub's own routes under `/api/v1/hub` are the page's,
-    // behind every check the others are, and so is this machine's own
-    // pairing state, which only a build that can pair answers.
-    #[cfg(feature = "hub")]
+    // The hub's own routes under `/api/v1/hub` are the page's, behind every
+    // check the others are, and so is this machine's own pairing state.
     let routes =
         hub_pages::routes(routes).route(api::PAIRING_PATH, axum::routing::get(read_pairing));
     let app = routes
@@ -785,7 +774,6 @@ pub fn router(assets: Arc<dyn AssetSource>, checks: RequestChecks, state: AppSta
         .layer(from_fn_with_state(gate, sign_in::enforce))
         .layer(from_fn_with_state(checks, request_checks::enforce));
     // With it, they are the agents', behind a check of their own.
-    #[cfg(feature = "hub")]
     let app = sync::in_front_of(app, &hub);
     outer_layers(app)
 }
@@ -1042,7 +1030,6 @@ async fn recent_log(State(state): State<AppState>) -> Response {
 /// says (components §4.6), in a build with the hub, the only one that can
 /// pair (§16, decision 122). A pin that can't be read is `unknown`, told in
 /// the daemon's log; the error names the key file, never its text (I4).
-#[cfg(feature = "hub")]
 async fn read_pairing(State(state): State<AppState>) -> Response {
     match state.pairing.read().await {
         Ok(answer) => (StatusCode::OK, axum::Json(answer)).into_response(),

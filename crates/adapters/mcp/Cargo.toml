@@ -8,12 +8,7 @@ license.workspace = true
 publish.workspace = true
 
 [features]
-# Pairing with a hub (§16, decision 122): the tool `pairing_state` and the
-# resource `ladderback://pairing`. On by default for this crate's own tests;
-# the workspace dependency turns it off, `ladderback`'s `hub` on, and a
-# release build leaves it out, as it has no `pair` to explain.
-default = ["hub", "pseudo"]
-hub = []
+default = ["pseudo"]
 # The development pseudolocales (technical design §8.4), so a test can tell a
 # sentence in another locale apart. On by default for this crate's own tests;
 # a release build leaves them out, and `just test-release` with them.

@@ -384,7 +384,6 @@ pub(crate) const PROPOSAL_APPLIED: &str = concat!(
 
 /// The hub's registry (`pairing_tokens`, `agents`), which only a build with
 /// the hub reads and writes (§16, decision 122).
-#[cfg(feature = "hub")]
 pub(crate) mod hub {
     /// A `SELECT` of the columns `row::pairing_token` reads, followed by
     /// `clause`s.

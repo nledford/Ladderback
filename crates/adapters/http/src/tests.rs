@@ -511,7 +511,6 @@ fn state() -> AppState {
         full_disk_access: FullDiskAccessRoute::default(),
         machine: crate::MachineRoute::default(),
         sync: SyncHub::default(),
-        #[cfg(feature = "hub")]
         pairing: crate::request_checks::tests::unpaired(),
     }
 }
@@ -561,7 +560,6 @@ async fn serving() -> (std::net::SocketAddr, Arc<app::fakes::InMemoryEventBus>) 
         full_disk_access: FullDiskAccessRoute::default(),
         machine: crate::MachineRoute::default(),
         sync: SyncHub::default(),
-        #[cfg(feature = "hub")]
         pairing: crate::request_checks::tests::unpaired(),
     };
     let app = router(ui(), RequestChecks::default(), state);
@@ -2392,7 +2390,6 @@ async fn send_counted(method: Method, path: &str, body: String) -> (Response, us
         full_disk_access: FullDiskAccessRoute::default(),
         machine: crate::MachineRoute::default(),
         sync: SyncHub::default(),
-        #[cfg(feature = "hub")]
         pairing: crate::request_checks::tests::unpaired(),
     };
     let response = router(ui(), RequestChecks::default(), state)
@@ -2735,7 +2732,6 @@ async fn the_test_and_init_routes_take_nothing_but_a_post() {
     }
 }
 
-#[cfg(feature = "hub")]
 #[tokio::test]
 async fn a_machine_that_holds_no_pin_answers_that_it_isnt_paired() {
     let (status, answer) = json_of(get(api::PAIRING_PATH).await).await;
@@ -2743,7 +2739,6 @@ async fn a_machine_that_holds_no_pin_answers_that_it_isnt_paired() {
     assert_eq!(answer, serde_json::json!({"paired": false}));
 }
 
-#[cfg(feature = "hub")]
 #[tokio::test]
 async fn a_paired_machine_names_its_hub_by_address_and_key() {
     use domain::fleet::{Fingerprint, HubAddress, HubPin, PublicKey, TokenTls};
@@ -2784,7 +2779,6 @@ async fn a_paired_machine_names_its_hub_by_address_and_key() {
 
 /// A pin that can't be read is `unknown`: whether the machine is paired
 /// isn't known, and the reason goes to the daemon's log only (I4).
-#[cfg(feature = "hub")]
 #[tokio::test]
 async fn a_pin_that_cant_be_read_is_unknown() {
     let state = AppState {
@@ -2807,15 +2801,12 @@ async fn a_pin_that_cant_be_read_is_unknown() {
 }
 
 /// Key files that are all damaged, the pin among them.
-#[cfg(feature = "hub")]
 struct DamagedKeys;
 
-#[cfg(feature = "hub")]
 fn damaged(file: domain::fleet::KeyFile) -> app::ports::IdentityError {
     app::ports::IdentityError::Damaged { file }
 }
 
-#[cfg(feature = "hub")]
 #[async_trait::async_trait]
 impl app::ports::Identity for DamagedKeys {
     async fn seed(

@@ -3,8 +3,6 @@
 //! column, never read as an agent or a token that pairs or proves more than
 //! it was given.
 
-#![cfg(feature = "hub")]
-
 mod support;
 
 use app::ports::{AgentRegistry, StoreError};

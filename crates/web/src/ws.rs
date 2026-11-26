@@ -32,7 +32,6 @@ use gloo_net::http::{Request, RequestBuilder};
 use gloo_net::websocket::futures::WebSocket;
 use gloo_net::websocket::{Message, State};
 use leptos::prelude::{GetUntracked, RwSignal, Set, Update};
-#[cfg(feature = "hub")]
 use leptos::prelude::{StoredValue, UpdateValue};
 use leptos::task::spawn_local;
 use serde::de::DeserializeOwned;
@@ -751,7 +750,6 @@ async fn stream(
 /// have missed while no stream was open; `heard` gets each event in turn.
 /// A stream that drops, or never opens, is tried again after
 /// `backend::reconnect_backoff`, as `watch`'s is.
-#[cfg(feature = "hub")]
 pub(crate) fn listen(
     base: &str,
     visit: &Visit,
@@ -785,7 +783,6 @@ pub(crate) fn listen(
 }
 
 /// The events stream at `url`, once it has opened; `None` when it failed to.
-#[cfg(feature = "hub")]
 async fn opened_stream(url: &str) -> Option<WebSocket> {
     let mut socket = WebSocket::open(url).ok()?;
     // Ready once the socket has opened or failed: gloo wakes it on either.
@@ -801,7 +798,6 @@ async fn opened_stream(url: &str) -> Option<WebSocket> {
 /// whether the page still waits for its first answer: until it has one, the
 /// page asks again every `ask_again`, as it tells its reader. A read lasts no
 /// longer than the `visit`.
-#[cfg(feature = "hub")]
 pub(crate) fn reread_hub<T: DeserializeOwned + 'static>(
     url: String,
     rereads: StoredValue<Rereads>,

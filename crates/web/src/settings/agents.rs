@@ -77,11 +77,12 @@ const DEFAULT_LIFE: &str = "15";
 const READ_PATIENCE: Duration = Duration::from_secs(5);
 
 /// Where the guide says a hub reached through a reverse proxy must turn
-/// sign-in on: on `main`, since only a build that isn't a release has a hub
-/// (§16, decision 122), and its release's tag predates the section.
+/// sign-in on, at the tag of the release this build is.
 const PROXY_GUIDE_URL: &str = concat!(
     env!("CARGO_PKG_REPOSITORY"),
-    "/blob/main/docs/guide/remote-access.md#a-hub-behind-a-reverse-proxy"
+    "/blob/v",
+    env!("CARGO_PKG_VERSION"),
+    "/docs/guide/remote-access.md#a-hub-behind-a-reverse-proxy"
 );
 
 /// The hub's key as the page read it, which `App` provides, with the

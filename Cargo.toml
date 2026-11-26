@@ -69,13 +69,13 @@ hooks = { path = "crates/adapters/hooks" }
 notify-adapter = { path = "crates/adapters/notify" }
 releases-adapter = { path = "crates/adapters/releases" }
 interop = { path = "crates/adapters/interop" }
-# `hub` is on by default for each crate's own tests; `ladderback` turns it on
-# for its default build, and a release build leaves it out (§16, decision 122).
-http-adapter = { path = "crates/adapters/http", default-features = false }
+http-adapter = { path = "crates/adapters/http" }
+# `pseudo` is on by default for the crate's own tests; a release build leaves
+# it out.
 mcp = { path = "crates/adapters/mcp", default-features = false }
-platform = { path = "crates/adapters/platform", default-features = false }
-store = { path = "crates/adapters/store", default-features = false }
-# The hub's own crates, which only a build with `hub` has (decision 122).
+platform = { path = "crates/adapters/platform" }
+store = { path = "crates/adapters/store" }
+# The hub's own crates (§16, decision 120).
 signing-adapter = { path = "crates/adapters/signing" }
 tls-adapter = { path = "crates/adapters/tls" }
 secrets = { path = "crates/adapters/secrets" }
@@ -397,20 +397,8 @@ harness = false
 # The dev pseudolocales `en-XA` and `ar-XB` for the daemon's messages
 # (technical design §8.4). A release build passes `--no-default-features`, and
 # `just architecture` checks that this leaves `fluent-pseudo` out of it.
-default = ["pseudo", "hub"]
+default = ["pseudo"]
 pseudo = ["l10n/pseudo"]
-# The hub (§16, decision 122): `serve --hub`, the agent routes under `/sync/`,
-# the key files and every other way in to the hub's code. On in every
-# development and test build; a release build's `--no-default-features` leaves
-# it out until M8, and `just architecture` checks that it does.
-hub = [
-    "http-adapter/hub",
-    "mcp/hub",
-    "platform/hub",
-    "store/hub",
-    "dep:signing-adapter",
-    "dep:tls-adapter",
-]
 
 [dependencies]
 api.workspace = true
@@ -439,8 +427,8 @@ serde.workspace = true
 serde_json.workspace = true
 shell-words.workspace = true
 store.workspace = true
-signing-adapter = { workspace = true, optional = true }
-tls-adapter = { workspace = true, optional = true }
+signing-adapter.workspace = true
+tls-adapter.workspace = true
 tokio = { workspace = true, features = ["macros", "rt-multi-thread", "net", "signal", "sync", "time"] }
 uuid = { workspace = true, features = ["v7"] }
 

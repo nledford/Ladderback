@@ -18,7 +18,6 @@ pub mod data_dir_lock;
 pub mod dirs;
 pub mod dumps;
 pub mod full_disk_access;
-#[cfg(feature = "hub")]
 pub mod identity;
 pub mod network;
 pub mod network_link;

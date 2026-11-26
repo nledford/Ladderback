@@ -101,20 +101,16 @@ mod pause;
 // What the Machines tab's lists show while paused, count and say, decided on
 // the host; `settings/machines.rs` is their glue. Only a build with the hub
 // has it (decision 122).
-#[cfg(feature = "hub")]
 mod machines_list;
 // What the hub's dashboard shows while paused, counts, says, reads again
 // for and how its times read, decided on the host; `dashboard_page.rs` is
 // its glue. Only a build with the hub has it (decision 122).
-#[cfg(feature = "hub")]
 mod dashboard;
 // The hub's dashboard, the route `/dashboard`, and the start page's way to
 // it: the DOM glue of `dashboard.rs`. Only a build with the hub has it.
-#[cfg(feature = "hub")]
 mod dashboard_page;
 // What the hub's pairing dialog decides, on the host; `settings/agents.rs`
 // is its glue. Only a build with the hub has it (decision 122).
-#[cfg(feature = "hub")]
 mod pairing;
 // What a panic writes to the console: its place, never its message (#1411).
 mod panic_report;
@@ -219,18 +215,10 @@ fn gallery_page(localizer: Arc<Localizer>) -> AnyView {
     }
 }
 
-/// The page of `/dashboard`: the hub's dashboard in a build that has the hub
-/// (it shows only on a daemon serving as one), and a path nothing serves in
-/// one that doesn't.
+/// The page of `/dashboard`: the hub's dashboard (it shows only on a daemon
+/// serving as one).
 fn dashboard_page(localizer: Arc<Localizer>) -> AnyView {
-    #[cfg(feature = "hub")]
-    {
-        view! { <dashboard_page::DashboardRoute localizer=localizer /> }.into_any()
-    }
-    #[cfg(not(feature = "hub"))]
-    {
-        view! { <NotFound localizer=localizer /> }.into_any()
-    }
+    view! { <dashboard_page::DashboardRoute localizer=localizer /> }.into_any()
 }
 
 /// Watches the router: each path the reader navigates to after the first is
@@ -430,9 +418,7 @@ fn App(localizer: Arc<Localizer>) -> impl IntoView {
     // The hub's key, on a daemon serving as a hub, with the standing it was
     // read in: Settings shows its Machines tab once it is read (decision
     // 121).
-    #[cfg(feature = "hub")]
     let hub = RwSignal::new(None::<(Standing, Option<api::HubDto>)>);
-    #[cfg(feature = "hub")]
     provide_context(settings::agents::HubKey(hub));
     spawn_local(async move {
         // A live session's CSRF token and lease are the page's once read.
@@ -445,7 +431,6 @@ fn App(localizer: Arc<Localizer>) -> impl IntoView {
     // sign-in off or in a session, as the hub answers no one else; in any
     // other it has none. A read answered once the standing has changed
     // again is dropped, so an old answer never stands for the new one.
-    #[cfg(feature = "hub")]
     {
         let reads = StoredValue::new(0_u64);
         Effect::new(move |_| {

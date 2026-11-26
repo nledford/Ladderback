@@ -10,9 +10,6 @@
 //     binary says; it runs as the user 10001:10001, not root, and exposes 9898;
 //   - `--version` names the build of this checkout (scripts/build-identity.ts),
 //     or the version `--version <x.y.z>` names;
-//   - it has no hub until M8 (§16, decision 122): `serve --hub` and
-//     `pairing-token` are refused as unknown, and `serve` answers 404 on
-//     `/sync/v1`;
 //   - run with no arguments, the daemon refuses to listen beyond the
 //     container's loopback until an `--allowed-host` names a host (§10.1):
 //     the image names none for the person;
@@ -364,13 +361,6 @@ async function checkImage(image: string, version: string, scratch: Scratch, repo
     `said ${JSON.stringify(text)}${shownVersion.status === 0 ? "" : `, ${said(shownVersion)}`}`,
   );
 
-  // A release has no hub (§16, decision 122): the argument parser refuses
-  // its commands, exit 2, before anything starts.
-  for (const args of [["serve", "--hub", "--listen", "127.0.0.1:0"], ["pairing-token"]]) {
-    const refused = await docker(["run", "--rm", "--name", scratch.container(args[0] ?? "hub"), "--network", "none", image, ...args]);
-    report.add(`no hub: ${args.slice(0, 2).join(" ")} is refused`, refused.status === 2, said(refused));
-  }
-
   // The image's own command listens beyond loopback and names no host, so
   // the daemon refuses it rather than the image opening it for the person.
   const bare = await docker(["run", "--rm", "--name", scratch.container("bare"), "--network", "none", image]);
@@ -464,8 +454,6 @@ async function checkAgent(image: string, scratch: Scratch, report: Report): Prom
     page.status === 200 && page.text.includes("<title>Ladderback</title>"),
     `${page.status}, ${page.text.length} bytes`,
   );
-  const sync = await call(base, "GET", "/sync/v1");
-  report.add("no hub: GET /sync/v1 answers 404", sync.status === 404, `${sync.status}`);
   await checkSignInOn(base, report, "first container");
   const session = await signIn(base, report, "first container");
   if (session === undefined) return;

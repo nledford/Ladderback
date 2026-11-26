@@ -155,7 +155,6 @@ async fn a_read_never_sees_half_of_a_save() {
 
 /// A machine's plans as the hub keeps them: `count` plans, with `left_out`
 /// more it didn't send.
-#[cfg(feature = "hub")]
 fn plans_report(count: usize, left_out: u64) -> domain::fleet::PlansReport {
     let plans = (0..count)
         .map(|n| domain::fleet::ReportedPlan {
@@ -169,7 +168,6 @@ fn plans_report(count: usize, left_out: u64) -> domain::fleet::PlansReport {
 
 /// A read of a machine's plans is one snapshot: never the plans of one
 /// report with the count left out of another (§7.2, #1440).
-#[cfg(feature = "hub")]
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn a_read_of_plans_never_sees_half_of_a_snapshot() {
     use app::ports::ReportInbox as _;

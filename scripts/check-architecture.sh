@@ -16,9 +16,6 @@
 #   - a build of `ladderback` leaves out the history fixture builder (the
 #     `engine` feature `history-fixture`, development.md §13.9), which only
 #     its tests and `just try --demo` turn on.
-#   - a release build leaves out the hub (§16, decision 122): `ladderback` and
-#     `web` have the `hub` feature by default, and with the release flags no
-#     crate has it, nor a crate only the hub uses.
 #   - cargo-dist (`dist-workspace.toml`) builds the release archives with the
 #     release flags these checks use (technical design §12.1).
 #   - the build has one version of `dbus-secret-service`, the error type
@@ -248,48 +245,6 @@ history_fixture() {
 history_fixture has normal,build,dev
 history_fixture lacks normal,build
 history_fixture lacks normal,build "${release_flags[@]}"
-
-# The hub stays out of a release until M8 (§16, decision 122, item 6). The
-# tree lists each package with the features it is built with, so each
-# workspace crate (a path package) whose `hub` is on is found;
-# dev-dependencies are in it on purpose, so no test support turns the hub on
-# in `ladderback`'s test build either (`just test-release` checks the test
-# build of every package it runs the same way, `pseudo` too, but not the
-# hub-only crates below or the wasm32 build). A release build must also lack every crate
-# only the hub uses, which a plain dependency added by mistake would bring in:
-# the QR crates, and the built-in TLS's `tls-adapter` with its `rcgen`
-# (`rustls` and `tokio-rustls` are in every release already, for the
-# daemon's own HTTPS clients). As for the pseudolocales, both sides are
-# checked, so that a change that blinds this check cannot pass it with
-# nothing to find.
-hub_only_crates='^(qrcode|rqrr|rcgen|tls-adapter)$'
-hub() {
-  local want=$1 package=$2
-  shift 2
-  local tree found crates
-  # Separate from the pipeline, as in `check`: a failing `cargo tree` must
-  # stop the script, while "no match" must not.
-  tree=$(cargo tree --package "$package" --edges normal,build,dev --prefix none --format '{p}|{f}' "$@")
-  found=$(awk -F'|' '$1 ~ / \(\// { n = split($2, features, ","); for (i = 1; i <= n; i++) if (features[i] == "hub") print $1 }' <<<"$tree" | awk '{print $1}' | sort -u)
-  crates=$(awk '{print $1}' <<<"$tree" | sort -u | grep -E "$hub_only_crates" || true)
-  if [[ $want == has && -z $found ]]; then
-    echo "error: $package ${*:-(default features)} lacks the hub feature, so the development build has no hub" >&2
-    status=1
-  elif [[ $want == lacks && -n $found ]]; then
-    echo "error: $package ${*:-(default features)} has the hub feature of $(tr '\n' ' ' <<<"$found")which a release build must leave out" >&2
-    status=1
-  elif [[ $want == lacks && -n $crates ]]; then
-    echo "error: $package ${*:-(default features)} depends on $(tr '\n' ' ' <<<"$crates")which only the hub uses and a release build must leave out" >&2
-    status=1
-  else
-    echo "ok: $package ${*:-(default features)} $want the hub"
-  fi
-}
-
-hub has ladderback
-hub has web --target wasm32-unknown-unknown
-hub lacks ladderback "${release_flags[@]}"
-hub lacks web "${release_flags[@]}" --target wasm32-unknown-unknown
 
 # The release archives are built by cargo-dist (dist-workspace.toml, technical
 # design §12.1), which can't read the Justfile: its `[dist]` build keys must

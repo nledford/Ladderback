@@ -192,18 +192,9 @@ pub(crate) fn Start(localizer: Arc<Localizer>) -> impl IntoView {
 }
 
 /// On a hub, the way to its dashboard, the hub's main page (#569), first
-/// after the notices; nothing in a build without the hub.
+/// after the notices.
 fn dashboard_link(localizer: &Arc<Localizer>) -> AnyView {
-    #[cfg(feature = "hub")]
-    {
-        view! { <crate::dashboard_page::DashboardLink localizer=Arc::clone(localizer) /> }
-            .into_any()
-    }
-    #[cfg(not(feature = "hub"))]
-    {
-        let _ = localizer;
-        ().into_any()
-    }
+    view! { <crate::dashboard_page::DashboardLink localizer=Arc::clone(localizer) /> }.into_any()
 }
 
 /// The start page's table of plans, named by its caption: each plan's ID as

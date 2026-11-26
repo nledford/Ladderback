@@ -18,10 +18,10 @@ function metadata(packages: { name: string; dir: string; features: Record<string
 
 test("a package with default features is run, in cargo metadata's order", () => {
   const workspace = metadata([
-    { name: "store", dir: "/crates/adapters/store", features: { default: ["hub"], hub: [] } },
+    { name: "mcp", dir: "/crates/adapters/mcp", features: { default: ["pseudo"], pseudo: [] } },
     { name: "l10n", dir: "/crates/l10n", features: { default: ["pseudo"], pseudo: ["dep:fluent-pseudo"] } },
   ]);
-  assert.deepEqual(releaseTestPackages(workspace), ["store", "l10n"]);
+  assert.deepEqual(releaseTestPackages(workspace), ["mcp", "l10n"]);
 });
 
 test("a package without default features, or with an empty default, is left out", () => {
@@ -49,8 +49,8 @@ test("the tree gives each workspace crate the union of its features, and ignores
     "serde v1.0.228|derive,std",
     "[dev-dependencies]",
     `l10n v0.5.0 (${root}/crates/l10n)|icu,pseudo (*)`,
-    "store v9.9.9 (/elsewhere/store)|hub",
-    `web v9.9.9 (${root}-fork/crates/web)|hub`,
+    "store v9.9.9 (/elsewhere/store)|pseudo",
+    `web v9.9.9 (${root}-fork/crates/web)|pseudo`,
   ].join("\n");
   assert.deepEqual(
     parseTree(output, root),
@@ -61,12 +61,11 @@ test("the tree gives each workspace crate the union of its features, and ignores
   );
 });
 
-test("a workspace crate's hub or pseudo is a leak; any other feature isn't", () => {
+test("a workspace crate's pseudo is a leak; any other feature isn't", () => {
   const tree = new Map([
     ["l10n", ["icu", "pseudo"]],
-    ["store", ["hub"]],
     ["app", ["fakes"]],
   ]);
-  assert.deepEqual(leaks(tree), ["l10n/pseudo", "store/hub"]);
+  assert.deepEqual(leaks(tree), ["l10n/pseudo"]);
   assert.deepEqual(leaks(new Map([["l10n", ["icu"]]])), []);
 });

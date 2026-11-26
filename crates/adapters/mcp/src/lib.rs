@@ -173,17 +173,9 @@ impl ToolName {
         Self::DryRunPlan,
     ];
 
-    /// The tool named `name`, if this build has one.
+    /// The tool named `name`, if there is one.
     pub(crate) fn named(name: &str) -> Option<Self> {
-        Self::ALL
-            .into_iter()
-            .find(|tool| tool.built() && tool.name() == name)
-    }
-
-    /// Whether this build has the tool: `pairing_state` reads a pairing
-    /// only a build with the hub can make (§16, decision 122).
-    const fn built(self) -> bool {
-        !matches!(self, Self::PairingState) || cfg!(feature = "hub")
+        Self::ALL.into_iter().find(|tool| tool.name() == name)
     }
 
     /// The tool's name, as `tools/list` gives it.
@@ -1319,20 +1311,16 @@ impl ServerHandler for Server {
         _request: Option<PaginatedRequestParams>,
         _context: RequestContext<RoleServer>,
     ) -> Result<ListResourcesResult, McpError> {
-        let mut resources = vec![
+        let resources = vec![
             Resource::new(STATUS_RESOURCE, "status")
                 .with_title("Status summary")
                 .with_description(STATUS_RESOURCE_DESCRIPTION)
                 .with_mime_type("application/json"),
+            Resource::new(pairing::PAIRING_RESOURCE, "pairing")
+                .with_title("Pairing a machine with its hub")
+                .with_description(pairing::PAIRING_RESOURCE_DESCRIPTION)
+                .with_mime_type("application/json"),
         ];
-        if cfg!(feature = "hub") {
-            resources.push(
-                Resource::new(pairing::PAIRING_RESOURCE, "pairing")
-                    .with_title("Pairing a machine with its hub")
-                    .with_description(pairing::PAIRING_RESOURCE_DESCRIPTION)
-                    .with_mime_type("application/json"),
-            );
-        }
         Ok(ListResourcesResult::with_all_items(resources))
     }
 
@@ -1346,7 +1334,7 @@ impl ServerHandler for Server {
         request: ReadResourceRequestParams,
         _context: RequestContext<RoleServer>,
     ) -> Result<ReadResourceResponse, McpError> {
-        if cfg!(feature = "hub") && request.uri == pairing::PAIRING_RESOURCE {
+        if request.uri == pairing::PAIRING_RESOURCE {
             let guide = pairing::guide(&self.localizer);
             return Ok(ReadResourceResult::new(vec![
                 ResourceContents::text(guide.to_string(), request.uri)

@@ -25,12 +25,10 @@
 
 mod ai_agents;
 // The Agents section's DOM glue, on a hub; `pairing.rs` decides for it.
-#[cfg(feature = "hub")]
 pub(crate) mod agents;
 mod dry_run_allowlist;
 mod language;
 // The Machines tab's waiting and approved machines, on a hub.
-#[cfg(feature = "hub")]
 mod machines;
 mod page_width;
 mod password;
@@ -130,10 +128,7 @@ const SECRET_ID: &str = "api-token-secret";
 /// 121).
 #[component]
 pub(crate) fn Settings(localizer: Arc<Localizer>) -> impl IntoView {
-    #[cfg(feature = "hub")]
     let hub = agents::hub_known();
-    #[cfg(not(feature = "hub"))]
-    let hub = || Some(false);
     let drawn = Memo::new(move |was: Option<&Option<bool>>| was.copied().flatten().or_else(hub));
     move || {
         drawn
@@ -196,13 +191,10 @@ fn SettingsTabs(localizer: Arc<Localizer>, hub: bool) -> impl IntoView {
         msg::UI_AI_AGENTS_TAB,
         ai_agents.into_any(),
     ));
-    #[cfg(feature = "hub")]
     if hub {
         let agents = view! { <agents::Agents localizer=Arc::clone(&localizer) on=signed_in /> };
         sections.push((Section::Agents, msg::UI_AGENTS_HEADING, agents.into_any()));
     }
-    #[cfg(not(feature = "hub"))]
-    let _ = hub;
     let restart = view! { <RestartSection localizer=Arc::clone(&localizer) /> };
     let allowlist = view! { <DryRunAllowlistSection localizer=Arc::clone(&localizer) /> };
     sections.push((

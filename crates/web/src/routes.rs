@@ -319,7 +319,7 @@ fn title_in(localizer: &Localizer, path: &str, gallery: bool) -> String {
         msg::UI_LOG_TITLE
     } else if path == "/settings" {
         msg::UI_SETTINGS_TITLE
-    } else if cfg!(feature = "hub") && path == "/dashboard" {
+    } else if path == "/dashboard" {
         msg::UI_DASHBOARD_TITLE
     } else if is_snapshot_page(path) {
         msg::UI_SNAPSHOT_TITLE
@@ -368,7 +368,6 @@ mod tests {
     }
 
     #[test]
-    #[cfg(feature = "hub")]
     fn the_hubs_dashboard_is_titled_with_the_product_name() {
         assert_eq!(title_of("/dashboard"), "Dashboard – Ladderback");
     }

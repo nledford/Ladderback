@@ -97,15 +97,6 @@ Then(
   },
 );
 
-// The same on `main`, for a page only builds that aren't releases have, whose
-// release tag predates it, as a hub's (§16, decision 122).
-Then(
-  "the link {string} leads to the section {string} of {string} on main",
-  async function (this: BrowserWorld, name: string, heading: string, file: string) {
-    await leadsToSection(this, name, heading, file, "main");
-  },
-);
-
 // The link `name` goes to the section `heading` of `file` on GitHub at
 // `revision`. The section must exist in this checkout, so a renamed heading
 // fails here and not for a reader. GitHub's anchor for a heading is its text

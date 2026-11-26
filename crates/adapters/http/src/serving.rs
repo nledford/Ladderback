@@ -66,7 +66,6 @@ impl ServedListener for GatedListener {
     }
 }
 
-#[cfg(feature = "hub")]
 impl ServedListener for crate::HandedListener {
     type Peer = crate::HandedPeer;
 

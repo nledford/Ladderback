@@ -190,7 +190,6 @@ async fn sqlite_store_meets_the_proposal_store_contract() {
     .await;
 }
 
-#[cfg(feature = "hub")]
 #[async_trait]
 impl contract::agent_registry::AgentRegistryHarness for SqliteFiles {
     async fn empty(&self) -> Arc<dyn app::ports::AgentRegistry> {
@@ -202,7 +201,6 @@ impl contract::agent_registry::AgentRegistryHarness for SqliteFiles {
     }
 }
 
-#[cfg(feature = "hub")]
 #[tokio::test]
 async fn sqlite_store_meets_the_agent_registry_contract() {
     within(
@@ -213,7 +211,6 @@ async fn sqlite_store_meets_the_agent_registry_contract() {
     .await;
 }
 
-#[cfg(feature = "hub")]
 #[async_trait]
 impl contract::outbox::OutboxHarness for SqliteFiles {
     async fn empty(&self) -> Arc<dyn app::ports::Outbox> {
@@ -225,7 +222,6 @@ impl contract::outbox::OutboxHarness for SqliteFiles {
     }
 }
 
-#[cfg(feature = "hub")]
 #[tokio::test]
 async fn sqlite_store_meets_the_outbox_contract() {
     within(
@@ -236,7 +232,6 @@ async fn sqlite_store_meets_the_outbox_contract() {
     .await;
 }
 
-#[cfg(feature = "hub")]
 #[async_trait]
 impl contract::outbox::ReportInboxHarness for SqliteFiles {
     async fn empty(&self) -> Arc<dyn app::ports::ReportInbox> {
@@ -248,7 +243,6 @@ impl contract::outbox::ReportInboxHarness for SqliteFiles {
     }
 }
 
-#[cfg(feature = "hub")]
 #[tokio::test]
 async fn sqlite_store_meets_the_report_inbox_contract() {
     within(
@@ -259,7 +253,6 @@ async fn sqlite_store_meets_the_report_inbox_contract() {
     .await;
 }
 
-#[cfg(feature = "hub")]
 #[async_trait]
 impl contract::ownership_registry::OwnershipRegistryHarness for SqliteFiles {
     async fn empty(&self) -> Arc<dyn app::ports::OwnershipRegistry> {
@@ -271,7 +264,6 @@ impl contract::ownership_registry::OwnershipRegistryHarness for SqliteFiles {
     }
 }
 
-#[cfg(feature = "hub")]
 #[tokio::test]
 async fn sqlite_store_meets_the_ownership_registry_contract() {
     within(
@@ -282,7 +274,6 @@ async fn sqlite_store_meets_the_ownership_registry_contract() {
     .await;
 }
 
-#[cfg(feature = "hub")]
 #[async_trait]
 impl contract::lease_cache::LeaseCacheHarness for SqliteFiles {
     async fn empty(&self) -> Arc<dyn app::ports::LeaseCache> {
@@ -294,7 +285,6 @@ impl contract::lease_cache::LeaseCacheHarness for SqliteFiles {
     }
 }
 
-#[cfg(feature = "hub")]
 #[tokio::test]
 async fn sqlite_store_meets_the_lease_cache_contract() {
     within(

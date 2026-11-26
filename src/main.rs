@@ -36,7 +36,6 @@ mod check_keyring;
 mod composition;
 mod confirm;
 mod dumps;
-#[cfg(feature = "hub")]
 mod hub;
 mod logging;
 mod mcp_call;
@@ -68,7 +67,6 @@ enum Command {
         allowed_hosts: Vec<String>,
         #[arg(long)]
         service_managed: bool,
-        #[cfg(feature = "hub")]
         #[arg(
             long,
             num_args = 0..=1,
@@ -92,7 +90,6 @@ enum Command {
         plan: String,
     },
     SetPassword,
-    #[cfg(feature = "hub")]
     PairingToken {
         #[arg(long, required_unless_present_any = ["list", "revoke", "pending", "approve", "forget_computer"])]
         address: Option<String>,
@@ -123,7 +120,6 @@ enum Command {
         )]
         forget_computer: Option<String>,
     },
-    #[cfg(feature = "hub")]
     Pair {
         address: Option<String>,
         #[arg(long)]
@@ -131,7 +127,6 @@ enum Command {
         #[arg(long)]
         yes: bool,
     },
-    #[cfg(feature = "hub")]
     HubStatus {
         #[arg(long)]
         hostname: Option<String>,
@@ -312,17 +307,8 @@ fn main() -> ExitCode {
             listen,
             allowed_hosts,
             service_managed,
-            #[cfg(feature = "hub")]
             hub,
-        } => serve(
-            listen,
-            allowed_hosts,
-            service_managed,
-            plain,
-            #[cfg(feature = "hub")]
-            hub,
-        ),
-        #[cfg(feature = "hub")]
+        } => serve(listen, allowed_hosts, service_managed, plain, hub),
         Command::PairingToken {
             address,
             ttl,
@@ -349,7 +335,6 @@ fn main() -> ExitCode {
                 },
             },
         ),
-        #[cfg(feature = "hub")]
         Command::Pair {
             address,
             hostname,
@@ -362,7 +347,6 @@ fn main() -> ExitCode {
             },
             plain,
         ),
-        #[cfg(feature = "hub")]
         Command::HubStatus { hostname } => hub::hub_status(hostname),
         Command::ImportProfile {
             file,
@@ -587,7 +571,7 @@ fn serve(
     allowed_hosts: Vec<String>,
     service_managed: bool,
     plain: bool,
-    #[cfg(feature = "hub")] hub: Option<bool>,
+    hub: Option<bool>,
 ) -> ExitCode {
     // Before the log, so that it holds the start and every line after it.
     let recent_log: Arc<dyn app::ports::RecentLogStore> =
@@ -602,7 +586,6 @@ fn serve(
             allowed_hosts,
             service_managed,
             recent_log,
-            #[cfg(feature = "hub")]
             hub,
         ),
     )
@@ -620,7 +603,7 @@ fn run_daemon(
     allowed_hosts: Vec<String>,
     service_managed: bool,
     recent_log: Arc<dyn app::ports::RecentLogStore>,
-    #[cfg(feature = "hub")] hub: Option<bool>,
+    hub: Option<bool>,
 ) -> io::Result<ExitCode> {
     // Checked here, not by the argument parser, so that the refusal is said
     // in the catalog's words and the person's language (§8.4). Exit status 2
@@ -735,17 +718,10 @@ fn run_daemon(
         .into_iter()
         .map(str::to_owned)
         .collect();
-    #[cfg(not(feature = "hub"))]
-    if configured.hub {
-        log::warn!(
-            "hub mode is on in config.toml, but this build has no hub: it serves as a machine"
-        );
-    }
     // Hub mode turned off, by config.toml or `--hub=false`, stays on while
     // machines are paired with this hub, so none of them loses its hub and
     // this machine's backups go on: the daemon says which machines keep it
     // on, to be removed first (§16, decision 167).
-    #[cfg(feature = "hub")]
     let hub = hub.unwrap_or(configured.hub)
         || match hub::hub_mode_kept_on(
             localizer,
@@ -765,13 +741,10 @@ fn run_daemon(
     // fails closed ("The hub key"): the door serves only this machine, on
     // loopback, `/sync/v1` refuses every machine, and the log says why and
     // how to fix it; the daemon, and this machine's own backups, go on.
-    #[cfg(feature = "hub")]
     let mut front_door: Option<Option<tls_adapter::HubListener>> = None;
     // The hub's pairing, which its watch of its machines for offline
     // alerts reads once the daemon listens (decision 168).
-    #[cfg(feature = "hub")]
     let mut watched: Option<Arc<app::pairing::HubPairing>> = None;
-    #[cfg(feature = "hub")]
     if hub && let Some(data_dir) = platform::dirs::data_dir() {
         // It tells the page's browsers of its machines as they pair, are
         // approved and report (#569).
@@ -828,11 +801,8 @@ fn run_daemon(
     }
     // Open on the network with sign-in off is said on stderr once the
     // address is bound (below), not logged: no log setting hides it.
-    #[cfg(feature = "hub")]
     let (loopback_plain_only, built_in_tls) =
         (front_door.is_some(), matches!(front_door, Some(Some(_))));
-    #[cfg(not(feature = "hub"))]
-    let (loopback_plain_only, built_in_tls) = (false, false);
     if warns_plain_http(exposure, sign_in_on, loopback_plain_only) {
         log::warn!(
             "listening on {listen} beyond loopback over plain HTTP: the password crosses the network unencrypted unless a reverse proxy in front adds TLS"
@@ -860,7 +830,6 @@ fn run_daemon(
         };
         let bound = listener.local_addr();
         // A hub takes each connection through its front door first.
-        #[cfg(feature = "hub")]
         let listener = match (front_door, &bound) {
             (Some(tls), Ok(local)) => {
                 Listening::Door(composition::front_door::open(listener, *local, tls))
@@ -911,39 +880,30 @@ fn run_daemon(
         // listens, and stop with it: they run on what the log still holds
         // open (§5, decision 73).
         let runs = background.runs();
-        #[cfg(feature = "hub")]
         let standing = background.standing();
         let restart = state.restart.clone();
         // A paired machine's reports subscribe before the scheduler starts,
         // so an operation it starts at once is reported (§7.2).
-        #[cfg(feature = "hub")]
         let early = app::ports::EventBus::subscribe(state.events.as_ref()).await;
         // It reads which repositories this machine maintains, for their
         // leases (§7.3).
-        #[cfg(feature = "hub")]
         let config = background.config();
-        #[cfg(feature = "hub")]
         let plans = background.read_plans();
         // And what the daemon's listings showed of other agents' snapshots
         // in them, listing before each session each it maintains whose
         // listing doesn't stand (§7.3, decision 156).
-        #[cfg(feature = "hub")]
         let listings = background.listings_due();
         // And the leases maintenance reads, which it takes the hub's grants
         // into, so both judge a lease by one floor (§7.3, I1).
-        #[cfg(feature = "hub")]
         let leases = background.leases();
         // And the backups it runs, which each heartbeat names (decision 166).
-        #[cfg(feature = "hub")]
         let running = background.running();
         // A hub watches its machines for offline alerts beside the
         // scheduler (§11, decision 168).
-        #[cfg(feature = "hub")]
         let watching = watched.and_then(|pairing| background.watch_machines(pairing));
         let scheduled = tokio::spawn(background.run(random));
         // A paired machine's reports to its hub run beside the scheduler
         // and never hold it up (§7.2).
-        #[cfg(feature = "hub")]
         let reporting = platform::dirs::data_dir().map(|data_dir| {
             tokio::spawn(hub::reporting(
                 data_dir,
@@ -969,7 +929,6 @@ fn run_daemon(
         let shutdown = async move {
             let _ = cause_tx.send(shutdown_signal(interrupt, terminate, restart).await);
         };
-        #[cfg(feature = "hub")]
         let serving = match listener {
             Listening::Door(listener) => Box::pin(http_adapter::serve_connections(
                 listener,
@@ -978,8 +937,6 @@ fn run_daemon(
             )) as Serving,
             Listening::Gated(listener) => served_gated(listener, app, shutdown),
         };
-        #[cfg(not(feature = "hub"))]
-        let serving = served_gated(listener, app, shutdown);
         tokio::pin!(serving);
         // Told to stop, the server stops taking connections and waits for
         // the requests still open; the stop begins then, not once they end.
@@ -998,11 +955,9 @@ fn run_daemon(
         // queue do from now on; a worker it lets go of still gets its SIGTERM
         // and its grace, since the stop was asked for first (decision 92).
         scheduled.abort();
-        #[cfg(feature = "hub")]
         if let Some(reporting) = &reporting {
             reporting.abort();
         }
-        #[cfg(feature = "hub")]
         if let Some(watching) = &watching {
             watching.abort();
         }
@@ -1070,7 +1025,6 @@ type Serving = std::pin::Pin<Box<dyn Future<Output = io::Result<()>>>>;
 
 /// What the daemon serves on: its listener as it is, or, on a hub serving
 /// its built-in TLS, the front door on it.
-#[cfg(feature = "hub")]
 enum Listening {
     Gated(http_adapter::GatedListener),
     Door(http_adapter::HandedListener),
@@ -1088,7 +1042,6 @@ fn served_gated(
 /// The names the hub's certificate carries: loopback's, the address it
 /// listens on, and every allowed host. A machine whose token pins the
 /// certificate checks its fingerprint, not these; a browser checks them.
-#[cfg(feature = "hub")]
 fn certificate_names(listen: SocketAddr, hosts: &[String]) -> Vec<String> {
     let mut names = vec![
         "localhost".to_owned(),
@@ -1244,7 +1197,6 @@ mod tests {
 
     /// The certificate names the hub's own machine and every allowed host,
     /// an IPv6 one as an address rather than its bracketed form.
-    #[cfg(feature = "hub")]
     #[test]
     fn the_certificate_names_allowed_ipv6_hosts_as_addresses() {
         let listen = "[::]:9898".parse().unwrap();
@@ -1466,7 +1418,6 @@ mod tests {
     /// `pairing-token --forget-computer` takes a machine's hostname and no
     /// address, and nothing else that asks the hub's terminal for another
     /// thing.
-    #[cfg(feature = "hub")]
     #[test]
     fn pairing_token_forgets_a_computer_by_its_machines_hostname_alone() {
         let forget = ["pairing-token", "--forget-computer", "e2e-laptop"];
