@@ -170,24 +170,38 @@ env:
 jobs:
   # Tells a docs-only pull request from one that touches code, one that can
   # change what the `service` jobs check from one that can't, and one that can
-  # change what the Firefox and WebKit journeys check from one that can't,
-  # with plain git, so the jobs below can skip work. Anything that isn't
-  # clearly docs counts as code, anything that isn't clearly outside the
-  # service jobs' reach counts as inside it, and so does a failure here: the
-  # jobs below run unless this job says "true" (`docs-only`) or "false"
-  # (`service`, `ui`). The `ui` output is the other way round: false unless a
-  # path names the UI, because Chromium's required job covers the rest. It
-  # also estimates how many mutation shards the change needs. Pushes to main,
-  # the nightly run and manual runs skip this job and run everything.
+  # change what the Firefox and WebKit journeys check from one that can't
+  # (scripts/changed-paths.sh says how), so the jobs below can skip work. A
+  # failure here leaves the outputs empty, and the jobs below run: they skip
+  # only when this job says "true" (`docs-only`) or "false" (`service`, `ui`).
+  # The user guide (docs/guide/) is docs, but its config.toml and keyring
+  # examples are tested (crates/adapters/config/tests/guide.rs): a docs-only
+  # pull request that touches it says "true" in `guide` too, and `check`'s
+  # Linux leg runs those tests beside the docs checks; every other job skips
+  # as for any docs-only pull request (decision 171). It also reads the pull
+  # request's labels, from the API when it runs, not from the event, so a
+  # re-run sees them as they are: `no-behavior-change` says "false" in
+  # `mutants`, which skips the pull request's mutation testing alone, and
+  # beside `behaviour` fails this job with a message that says so. A failure
+  # here runs no mutation shard and fails `Mutation testing (changed code)`.
+  # No label event starts this workflow: a label counts from the next push or
+  # re-run. It also estimates how many mutation shards the change needs.
+  # Pushes to main, the nightly run and manual runs skip this job and run
+  # everything.
   changes:
     name: Changed paths
     if: github.event_name == 'pull_request'
     runs-on: ubuntu-26.04
     timeout-minutes: 5
+    permissions:
+      contents: read
+      pull-requests: read # to read the pull request's labels
     outputs:
       docs-only: ${{ steps.diff.outputs.docs-only }}
+      guide: ${{ steps.diff.outputs.guide }}
       service: ${{ steps.diff.outputs.service }}
       ui: ${{ steps.diff.outputs.ui }}
+      mutants: ${{ steps.diff.outputs.mutants }}
       mutant-shards: ${{ steps.diff.outputs.mutant-shards }}
       mutant-shard-count: ${{ steps.diff.outputs.mutant-shard-count }}
     steps:
@@ -199,69 +213,32 @@ jobs:
         env:
           BASE_SHA: ${{ github.event.pull_request.base.sha }}
           HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+          PR: ${{ github.event.pull_request.number }}
+          GH_TOKEN: ${{ github.token }}
         run: |
-          # A failing git command fails this step, and then every job below runs.
-          git diff -z --name-only --no-renames "$BASE_SHA...$HEAD_SHA" > "$RUNNER_TEMP/changed-files"
-          docs_only=true
-          service=false
-          ui=false
-          count=0
-          while IFS= read -r -d '' file; do
-            count=$((count + 1))
-            case "$file" in
-              # Markdown under crates/ can be include_str!'d or doc-tested.
-              crates/*) docs_only=false ;;
-              # The guides' config.toml and keyring examples are tested
-              # (crates/adapters/config/tests/guide.rs).
-              docs/guide/*) docs_only=false ;;
-              docs/* | LICENSE* | .github/ISSUE_TEMPLATE/* | *.md) ;;
-              *) docs_only=false ;;
-            esac
-            # What the `service` jobs run (#995): `install-service` against
-            # the real service managers. The first two arms name what they
-            # exercise; the third names what they can't reach (the web UI,
-            # the UI tests and their scenarios, the TypeScript tooling, docs)
-            # and is the only way to stay false. Every other path, a new one
-            # too, runs the jobs.
-            case "$file" in
-              crates/adapters/platform/* | scripts/service-contract.sh | src/service.rs | src/main.rs) service=true ;;
-              .github/workflows/* | .github/actions/* | Justfile | Cargo.lock | Cargo.toml | */Cargo.toml) service=true ;;
-              crates/web/* | ui-tests/* | features/ui/* | scripts/*.ts | docs/* | LICENSE* | .github/ISSUE_TEMPLATE/* | *.md) ;;
-              *) service=true ;;
-            esac
-            # What the Firefox and WebKit journeys (`ui-engines`) can see that
-            # Chromium's can't: what the page is made of, how it is served and
-            # styled, and what the browser formats (the l10n crate's `Intl`
-            # calls differ by engine), signs in with and downloads. Only a
-            # path named here turns them on; every other
-            # path leaves them off. A `.feature` outside features/ui/ counts
-            # only when it holds an `@ui` scenario, in the merged tree this
-            # job checked out (a deleted file has none).
-            case "$file" in
-              crates/web/* | ui-tests/* | features/ui/*) ui=true ;;
-              crates/l10n/*) ui=true ;;
-              crates/adapters/http/src/lib.rs | crates/adapters/http/src/response_headers.rs) ui=true ;;
-              crates/adapters/http/src/sign_in.rs | crates/adapters/http/src/downloads.rs | crates/adapters/http/src/request_checks.rs) ui=true ;;
-              rust-toolchain.toml | scripts/web-packages.sh | scripts/install-browser.sh) ui=true ;;
-              .github/workflows/ci.yml | .github/actions/browser/* | .github/actions/npm-ci/*) ui=true ;;
-              features/*.feature) if grep -Eq '@ui([[:space:]]|$)' "$file" 2> /dev/null; then ui=true; fi ;;
-            esac
-          done < "$RUNNER_TEMP/changed-files"
-          # A change with no files isn't a docs change, and runs the jobs.
-          if [ "$count" -eq 0 ]; then docs_only=false; service=true; ui=true; fi
-          {
-            echo "docs-only=$docs_only"
-            echo "service=$service"
-            echo "ui=$ui"
-          } >> "$GITHUB_OUTPUT"
+          # A failing read or script fails this step, and then every job
+          # below runs but the mutation shards, and the mutation check fails.
+          names=$(gh api "repos/$GITHUB_REPOSITORY/pulls/$PR" --jq '.labels[].name')
+          labels=()
+          if [ -n "$names" ]; then mapfile -t labels <<< "$names"; fi
+          echo "Labels: ${labels[*]}"
+          if ! scripts/changed-paths.sh "$BASE_SHA" "$HEAD_SHA" "${labels[@]}" > "$RUNNER_TEMP/lanes" 2> "$RUNNER_TEMP/why"; then
+            cat "$RUNNER_TEMP/why" >&2
+            echo "::error title=Changed paths::$(head -n 1 "$RUNNER_TEMP/why")"
+            exit 1
+          fi
+          tee -a "$GITHUB_OUTPUT" < "$RUNNER_TEMP/lanes"
           # The mutation shards (`mutants-shard`): one to four by the lines
           # the change touches in the gated crates' source. A docs-only
-          # change skips them. If the estimate fails, it writes nothing, and
-          # the shards fall back to four, the most there are.
-          if [ "$docs_only" != true ] && estimate=$(scripts/estimate-mutant-shards.sh "$BASE_SHA" "$HEAD_SHA"); then
-            echo "$estimate" >> "$GITHUB_OUTPUT"
-          elif [ "$docs_only" != true ]; then
-            echo "::warning::The mutation shard estimate failed, so the pull request runs four shards."
+          # change, or one labeled `no-behavior-change`, skips them. If the
+          # estimate fails, it writes nothing, and the shards fall back to
+          # four, the most there are.
+          if grep -qx 'mutants=true' "$RUNNER_TEMP/lanes"; then
+            if estimate=$(scripts/estimate-mutant-shards.sh "$BASE_SHA" "$HEAD_SHA"); then
+              echo "$estimate" >> "$GITHUB_OUTPUT"
+            else
+              echo "::warning::The mutation shard estimate failed, so the pull request runs four shards."
+            fi
           fi
 
   check:
@@ -291,7 +268,8 @@ jobs:
       # agent-guidance path check, the paragraph-length check, the American
       # spelling check, the user docs site's build and link check, and the
       # decision-index and component-index checks below, which `just lint`
-      # runs for the rest.
+      # runs for the rest, and, when it touches the guide, the guide's example
+      # tests.
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
@@ -299,7 +277,9 @@ jobs:
         run: scripts/check-doc-paths.sh
       # The toolchain, the build cache (allowed to fail: an outage runs the
       # build uncached, and so for every job's setup-rust below) and the tools.
-      - if: needs.changes.outputs.docs-only != 'true'
+      # A docs-only pull request that touches the guide sets it up on Linux,
+      # for the guide's example tests below.
+      - if: needs.changes.outputs.docs-only != 'true' || (needs.changes.outputs.guide == 'true' && runner.os == 'Linux')
         uses: $/.github/actions/setup-rust
         with:
           tools: just,cargo-nextest
@@ -342,6 +322,14 @@ jobs:
         run: node scripts/decision-index.ts
       - if: needs.changes.outputs.docs-only == 'true' && runner.os == 'Linux'
         run: node scripts/component-index.ts
+      # The guide's examples (crates/adapters/config/tests/guide.rs), for a
+      # docs-only pull request that touches the guide: that test target alone,
+      # with `--workspace` for the features every other build uses. Any other
+      # pull request runs it in `just test`.
+      - if: needs.changes.outputs.docs-only == 'true' && needs.changes.outputs.guide == 'true' && runner.os == 'Linux'
+        run: cargo nextest run --workspace --test guide
+        env:
+          NEXTEST_PROFILE: ci
       # leptosfmt at the version the Justfile pins, for `just fmt-check`.
       # install-action lists no leptosfmt (manifests/ at that SHA), so it
       # falls back to cargo-binstall at that version, which takes the
@@ -880,11 +868,13 @@ jobs:
   # the 60-minute limit on a large change (#443: 371 mutants), so a shard
   # takes every nth mutant (round-robin, which spreads the slow `app` mutants
   # evenly) within that limit. If `changes` gives no estimate, the matrix is
-  # the four shards this job always ran.
+  # the four shards this job always ran. A docs-only pull request, or one
+  # labeled `no-behavior-change`, skips them ("false" in `mutants`); a failed
+  # `changes` runs none, and the check below fails.
   mutants-shard:
     name: Mutation testing (shard ${{ matrix.shard }} of ${{ needs.changes.outputs.mutant-shard-count || '4' }})
     needs: changes
-    if: ${{ !cancelled() && github.event_name == 'pull_request' && needs.changes.outputs.docs-only != 'true' }}
+    if: ${{ !cancelled() && github.event_name == 'pull_request' && needs.changes.result == 'success' && needs.changes.outputs.mutants == 'true' }}
     runs-on: ubuntu-26.04
     timeout-minutes: 60
     strategy:
@@ -922,22 +912,27 @@ jobs:
           path: mutants.out
           retention-days: 14
 
-  # The check the ruleset requires, by this name: it passes only when every
-  # shard passed. `always()`, not `!cancelled()`: it must run, and so fail,
-  # whenever a shard failed, timed out (a timeout ends a job as canceled) or
-  # was canceled, since GitHub counts a skipped required check as passing.
-  # A superseded run's summary then fails on a stale commit, which is
-  # harmless. A docs-only pull request skips it with the shards, as before;
-  # keep the rest of this `if` the same as the shards'.
+  # The check the ruleset requires, by this name: it passes only when
+  # `changes` and every shard passed. `always()`, not `!cancelled()`: it must
+  # run, and so fail, whenever `changes` or a shard failed, timed out (a
+  # timeout ends a job as canceled) or was canceled, since GitHub counts a
+  # skipped required check as passing. A superseded run's summary then fails
+  # on a stale commit, which is harmless. It skips only when `changes` says
+  # "false" in `mutants` (a docs-only pull request, or the label
+  # `no-behavior-change`), which GitHub counts as passing; a failed `changes`
+  # says nothing, and this job runs and fails.
   mutants:
     name: Mutation testing (changed code)
     needs: [changes, mutants-shard]
-    if: ${{ always() && github.event_name == 'pull_request' && needs.changes.outputs.docs-only != 'true' }}
+    if: ${{ always() && github.event_name == 'pull_request' && needs.changes.outputs.mutants != 'false' }}
     runs-on: ubuntu-26.04
     timeout-minutes: 5
     steps:
-      - run: test "$SHARDS" = success || { echo "a mutation shard ended $SHARDS"; exit 1; }
+      - run: |
+          test "$CHANGES" = success || { echo "::error::Changed paths ended $CHANGES, so no mutant was tested; its log says why"; exit 1; }
+          test "$SHARDS" = success || { echo "::error::a mutation shard ended $SHARDS"; exit 1; }
         env:
+          CHANGES: ${{ needs.changes.result }}
           SHARDS: ${{ needs.mutants-shard.result }}
 
   # Every mutant of the gated crates, nightly, split round-robin over 32

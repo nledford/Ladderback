@@ -148,7 +148,7 @@ Follow all three whenever possible. Deviating needs a stated reason in the pull 
 
 - No production code without a failing test that requires it: red, green, refactor. A bug fix starts with a test that reproduces the bug.
 - A pull request that changes behavior carries the `behaviour` label, and its first commit is a `test:` commit that fails at run time, with `todo!()` stubs so it compiles. Implementation commits follow. CI's red-first check runs only on pull requests with that label; §13.1 lists the changes exempt from test first.
-- Mutation testing (§13.1) gates changed code in its crates; a surviving mutant means a behavior no test asserts.
+- Mutation testing (§13.1) gates changed code in its crates; a surviving mutant means a behavior no test asserts. A pull request that can't change behavior (a rename, a spelling change) may carry the `no-behavior-change` label, which skips its mutants on the pull request alone, from the next push or `gh run rerun`; never beside `behaviour`, which fails CI.
 - There is no coverage gate. Test behavior, boundaries, invariants and errors. Don't test wiring, mock echoes, source text or incidental defaults.
 - Doubles replace ports only. Domain behavior is never mocked. A new port gets a contract suite that runs against both its fake and its real adapter.
 - A test that can't run here (running as root makes `chmod 000` ineffective, a backend tool isn't installed) calls `testkit::skip!(reason)`, never a silent early return or a bare `eprintln!` (§13.5, rule 3). `testkit` is a dev-dependency only.
@@ -173,7 +173,7 @@ If you think a check is wrong, name it, say why, and stop for the maintainer.
 | Lane | What it runs | Use it |
 |---|---|---|
 | Quick, local | `just quick-ci`, the scenarios the change touches (`just test-e2e --name`, `just test-ui --name` for UI work), and `just red-first` on a `behaviour` branch. A change to what every page shows (the header, the footer, the page frame, `style.css`'s base rules) runs the whole `@ui` suite, since it reaches scenarios the change never names | Before every push, and while iterating |
-| Full, CI | CI's checks on the pull request: `just test` (doc tests and `@e2e` too) on Linux and macOS, `just test-release`, `just mutants`, the whole `@ui` suite in Chromium, and in Firefox and WebKit when the pull request touches the UI, red-first on Linux | Defer to it for everything the quick lane leaves out. A pull request is done when its required checks pass on its current head commit: quote that run |
+| Full, CI | CI's checks on the pull request: `just test` (doc tests and `@e2e` too) on Linux and macOS, `just test-release`, `just mutants` (not under `no-behavior-change`), the whole `@ui` suite in Chromium, and in Firefox and WebKit when the pull request touches the UI, red-first on Linux. A docs-only pull request runs the docs checks, and the guide's example tests when it touches `docs/guide/` ([development.md §13.8](docs/design/development.md#138-pull-requests-and-merging)) | Defer to it for everything the quick lane leaves out. A pull request is done when its required checks pass on its current head commit: quote that run |
 | Full, local | `just verify`, or one full recipe | Only to reproduce a CI failure, or for evidence CI can't give yet (Linux behavior on a Mac: a container run) |
 
 ## Independent adversarial review
