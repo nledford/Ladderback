@@ -404,14 +404,16 @@ jobs:
           retention-days: 14
 
   # The same journeys in Firefox and WebKit run as `ui-engines` below; this
-  # job stays Chromium alone. It runs the scenarios in two shards
+  # job stays Chromium alone. It runs the scenarios in three shards
   # (cucumber-js's `--shard`), because one runner took 16 to 26 minutes for
   # all of them in November 2026, and WebKit's run reached its step limit
-  # once. The shards' names are not the required one: the `ui` job below is,
-  # and reports for both (a matrix job that its own `if`
+  # once; two shards still took 13 to 22 minutes each, and set a pull
+  # request's wall time with Firefox and WebKit (decision 172). The shards'
+  # names are not the required one: the `ui` job below is, and reports for
+  # all three (a matrix job that its own `if`
   # skips never creates the check the ruleset names; see `check` above).
   ui-shard:
-    name: UI journeys (Chromium ${{ matrix.shard }}/2, axe-core, keyboard)
+    name: UI journeys (Chromium ${{ matrix.shard }}/3, axe-core, keyboard)
     needs: changes
     if: ${{ !cancelled() && github.event_name != 'schedule' && needs.changes.outputs.docs-only != 'true' }}
     runs-on: ubuntu-26.04
@@ -419,7 +421,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        shard: [1, 2]
+        shard: [1, 2, 3]
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -444,7 +446,7 @@ jobs:
       - uses: $/.github/actions/npm-ci
         with:
           save: "false"
-      # Only shard 1 saves the caches on main, so the two don't race for a key.
+      # Only shard 1 saves the caches on main, so the shards don't race for a key.
       - uses: $/.github/actions/browser
         with:
           engines: chromium
@@ -461,10 +463,10 @@ jobs:
       - run: |
           start=$SECONDS
           status=0
-          just test-ui --shard "$SHARD/2" || status=$?
+          just test-ui --shard "$SHARD/3" || status=$?
           elapsed=$((SECONDS - start))
           if [ "$elapsed" -gt 1575 ]; then
-            echo "::warning title=Slow UI journeys::just test-ui took $((elapsed / 60)) min $((elapsed % 60)) s, over 75% of its 35-minute limit (26 min 15 s). Chromium shard $SHARD of 2 is close to timing out."
+            echo "::warning title=Slow UI journeys::just test-ui took $((elapsed / 60)) min $((elapsed % 60)) s, over 75% of its 35-minute limit (26 min 15 s). Chromium shard $SHARD of 3 is close to timing out."
           fi
           exit "$status"
         env:
@@ -492,15 +494,15 @@ jobs:
       - if: github.event_name == 'push'
         run: rm -rf target
 
-  # The check the ruleset requires, by this name: it passes only when both
-  # shards passed. `always()`, not `!cancelled()`: it must run, and so fail,
+  # The check the ruleset requires, by this name: it passes only when every
+  # shard passed. `always()`, not `!cancelled()`: it must run, and so fail,
   # whenever a shard failed, timed out (a timeout ends a job as canceled) or
   # was canceled, since GitHub counts a skipped required check as passing.
   # A matrix job its own `if` skips creates no check of the name the ruleset
   # requires, only an unexpanded one, so this job, which is not a matrix, is
   # the one skipped then: a docs-only pull request skips it with the shards,
   # as `mutants` does. Keep the rest of this `if` the same as the shards'.
-  # `cache-prune` waits for it, and so for both shards.
+  # `cache-prune` waits for it, and so for every shard.
   ui:
     name: UI journeys (Chromium, axe-core, keyboard)
     needs: [changes, ui-shard]
@@ -514,7 +516,7 @@ jobs:
 
   # The `ui-shard` jobs' journeys in Gecko (Firefox, Zen, LibreWolf) and WebKit
   # (Safari's engine, the closest stand-in for Safari that runs on Linux),
-  # each engine in two shards.
+  # each engine in three shards, as Chromium.
   # Not required checks: the maintainer adds them to the ruleset once they have
   # a clean record. Their steps are the shards', through the same actions, but
   # restore-only: the `ui-shard` jobs save trunk's cache; change both together.
@@ -526,10 +528,10 @@ jobs:
   # also run when `changes` failed or was skipped (a push to main), so main
   # keeps all three engines. A job its `if` skips
   # can't expand its matrix, so a pull request that skips them shows one
-  # skipped check named `UI journeys (${{ matrix.name }} ${{ matrix.shard }}/2, axe-core, keyboard)`,
+  # skipped check named `UI journeys (${{ matrix.name }} ${{ matrix.shard }}/3, axe-core, keyboard)`,
   # not one per engine and shard; neither is a required check.
   ui-engines:
-    name: UI journeys (${{ matrix.name }} ${{ matrix.shard }}/2, axe-core, keyboard)
+    name: UI journeys (${{ matrix.name }} ${{ matrix.shard }}/3, axe-core, keyboard)
     needs: changes
     if: ${{ !cancelled() && github.event_name != 'schedule' && needs.changes.outputs.docs-only != 'true' && needs.changes.outputs.ui != 'false' }}
     strategy:
@@ -542,12 +544,18 @@ jobs:
           - name: Firefox
             engine: firefox
             shard: 2
+          - name: Firefox
+            engine: firefox
+            shard: 3
           - name: WebKit
             engine: webkit
             shard: 1
           - name: WebKit
             engine: webkit
             shard: 2
+          - name: WebKit
+            engine: webkit
+            shard: 3
     runs-on: ubuntu-26.04
     timeout-minutes: 45
     env:
@@ -571,7 +579,7 @@ jobs:
       - uses: $/.github/actions/npm-ci
         with:
           save: "false"
-      # Only shard 1 saves the caches on main, so the two don't race for a key.
+      # Only shard 1 saves the caches on main, so the shards don't race for a key.
       - uses: $/.github/actions/browser
         with:
           engines: ${{ matrix.engine }}
@@ -581,10 +589,10 @@ jobs:
       - run: |
           start=$SECONDS
           status=0
-          just test-ui --shard "$SHARD/2" || status=$?
+          just test-ui --shard "$SHARD/3" || status=$?
           elapsed=$((SECONDS - start))
           if [ "$elapsed" -gt 1575 ]; then
-            echo "::warning title=Slow UI journeys::just test-ui took $((elapsed / 60)) min $((elapsed % 60)) s, over 75% of its 35-minute limit (26 min 15 s). $ENGINE shard $SHARD of 2 is close to timing out."
+            echo "::warning title=Slow UI journeys::just test-ui took $((elapsed / 60)) min $((elapsed % 60)) s, over 75% of its 35-minute limit (26 min 15 s). $ENGINE shard $SHARD of 3 is close to timing out."
           fi
           exit "$status"
         env:
