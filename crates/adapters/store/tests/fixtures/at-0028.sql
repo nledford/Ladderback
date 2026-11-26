@@ -3,7 +3,7 @@
 -- (`agents`, `agent_id`). Its rows are those of `at-0029.sql`, column by
 -- column, and one more operation: a failed hook at the level an earlier
 -- build called `agent`, which migration 0029 renames `machine`. The store
--- copies it into a baseline database on open.
+-- copies it into a baseline database on start.
 PRAGMA foreign_keys=OFF;
 BEGIN TRANSACTION;
 CREATE TABLE operations (

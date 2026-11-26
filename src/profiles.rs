@@ -409,17 +409,6 @@ fn export(localizer: &Localizer, plan: &str) -> io::Result<ExitCode> {
         refuse(localizer, &plan_unknown(plan))?;
         return Ok(ExitCode::FAILURE);
     };
-    let agent = match agent_id::load_or_create(&data_dir) {
-        Ok(agent) => agent,
-        Err(error) => {
-            say(
-                localizer,
-                msg::CLI_PROFILE_NO_AGENT_ID,
-                &[("path", text(data_dir.display())), ("detail", text(error))],
-            )?;
-            return Ok(ExitCode::FAILURE);
-        }
-    };
     let runtime = match tokio::runtime::Runtime::new() {
         Ok(runtime) => runtime,
         Err(error) => {
@@ -427,6 +416,23 @@ fn export(localizer: &Localizer, plan: &str) -> io::Result<ExitCode> {
                 localizer,
                 msg::CLI_CANNOT_START_RUNTIME,
                 &[("detail", text(error))],
+            )?;
+            return Ok(ExitCode::FAILURE);
+        }
+    };
+    // A folder an earlier release left is upgraded first, or the export is
+    // refused while it can't be: its ID may still be under its earlier name.
+    if let Err(refusal) = runtime.block_on(crate::composition::upgrade::unheld(&data_dir)) {
+        say(localizer, refusal.message, &refusal.args)?;
+        return Ok(ExitCode::FAILURE);
+    }
+    let agent = match agent_id::load_or_create(&data_dir) {
+        Ok(agent) => agent,
+        Err(error) => {
+            say(
+                localizer,
+                msg::CLI_PROFILE_NO_AGENT_ID,
+                &[("path", text(data_dir.display())), ("detail", text(error))],
             )?;
             return Ok(ExitCode::FAILURE);
         }

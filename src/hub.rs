@@ -35,6 +35,7 @@ use signing_adapter::AwsLcSigning;
 use store::{OpenError, SqliteStore};
 use tls_adapter::{RcgenTlsKeys, WebSocketHubConnector};
 
+use crate::composition::{Refused, startup, upgrade};
 use crate::confirm::{Question, confirmed};
 use crate::output::{escaped, refusal_line, to_stderr, to_stdout};
 use crate::{finish, say, text};
@@ -275,7 +276,7 @@ async fn on_the_hub(localizer: &Localizer, data_dir: &Path, ask: TokenAsk) -> io
     if let Err(error) = std::fs::create_dir_all(data_dir) {
         return refused(localizer, &error.to_string());
     }
-    let _lock = match DataDirLock::acquire(data_dir) {
+    let lock = match DataDirLock::acquire(data_dir) {
         Ok(lock) => lock,
         Err(LockError::InUse { .. }) => {
             say(
@@ -287,6 +288,9 @@ async fn on_the_hub(localizer: &Localizer, data_dir: &Path, ask: TokenAsk) -> io
         }
         Err(LockError::Unavailable { detail }) => return refused(localizer, &detail),
     };
+    if let Err(refusal) = upgrade::under(&lock, data_dir).await {
+        return said_refusal(localizer, &refusal);
+    }
     let database = data_dir.join(DATABASE);
     let store = match SqliteStore::open(&database).await {
         Ok(store) => Arc::new(store),
@@ -701,27 +705,15 @@ fn refused(localizer: &Localizer, detail: &str) -> io::Result<ExitCode> {
     Ok(ExitCode::FAILURE)
 }
 
-/// The operation log a hub command can't open: one the migrations before
-/// the baseline schema left is named as such, and so is a copy of one into
-/// the baseline that failed (§16, decisions 165 and 170).
+/// The operation log a hub command can't open, said as the daemon says it
+/// (§16, decisions 165 and 170).
 fn log_refused(localizer: &Localizer, path: &Path, error: &OpenError) -> io::Result<ExitCode> {
-    match error {
-        OpenError::OldSchema { version } => say(
-            localizer,
-            msg::CLI_STORE_OLD_SCHEMA,
-            &[("path", text(path.display())), ("version", text(version))],
-        )?,
-        OpenError::BaselineCopy { version, detail } => say(
-            localizer,
-            msg::CLI_STORE_BASELINE_COPY_FAILED,
-            &[
-                ("path", text(path.display())),
-                ("version", text(version)),
-                ("detail", text(detail)),
-            ],
-        )?,
-        other => return refused(localizer, &other.to_string()),
-    }
+    said_refusal(localizer, &startup::log_refused(path, error))
+}
+
+/// Says `refusal`, and the exit status of a refusal.
+fn said_refusal(localizer: &Localizer, refusal: &Refused) -> io::Result<ExitCode> {
+    say(localizer, refusal.message, &refusal.args)?;
     Ok(ExitCode::FAILURE)
 }
 
@@ -749,8 +741,23 @@ fn run_pair(localizer: &Localizer, ask: PairAsk) -> io::Result<ExitCode> {
         say(localizer, msg::CLI_NO_DATA_DIR, &[])?;
         return Ok(ExitCode::FAILURE);
     };
+    let runtime = match runtime(localizer)? {
+        Ok(runtime) => runtime,
+        Err(code) => return Ok(code),
+    };
+    // Before a token is asked for: a folder an earlier release left is
+    // upgraded first, or the pairing is refused while it can't be.
+    if let Err(refusal) = runtime.block_on(upgrade::unheld(&data_dir)) {
+        return said_refusal(localizer, &refusal);
+    }
     if let Some(address) = ask.address.as_deref()
-        && let Some(code) = follow(localizer, &data_dir, address, ask.hostname.clone())?
+        && let Some(code) = follow(
+            localizer,
+            &runtime,
+            &data_dir,
+            address,
+            ask.hostname.clone(),
+        )?
     {
         return Ok(code);
     }
@@ -814,10 +821,6 @@ fn run_pair(localizer: &Localizer, ask: PairAsk) -> io::Result<ExitCode> {
     if !confirmed(localizer, &PAIR, at_terminal, ask.yes)? {
         return Ok(ExitCode::FAILURE);
     }
-    let runtime = match runtime(localizer)? {
-        Ok(runtime) => runtime,
-        Err(code) => return Ok(code),
-    };
     runtime.block_on(on_the_agent(localizer, &data_dir, token, hostname))
 }
 
@@ -899,16 +902,13 @@ async fn on_the_agent(
 /// address goes with the token it pairs with.
 fn follow(
     localizer: &Localizer,
+    runtime: &tokio::runtime::Runtime,
     data_dir: &Path,
     address: &str,
     hostname: Option<String>,
 ) -> io::Result<Option<ExitCode>> {
     let Ok(Some(agent_id)) = platform::agent_id::load(data_dir) else {
         return Ok(None);
-    };
-    let runtime = match runtime(localizer)? {
-        Ok(runtime) => runtime,
-        Err(code) => return Ok(Some(code)),
     };
     let identity = Arc::new(FileIdentity::in_data_dir(data_dir));
     // A pin that can't be read is still a pin: connecting says why.
@@ -1181,8 +1181,12 @@ async fn connect_to_hub(
     data_dir: &Path,
     hostname: Hostname,
 ) -> io::Result<ExitCode> {
-    // A status check writes nothing: a machine with no agent ID never paired,
-    // and gets none from asking.
+    // A folder an earlier release left is upgraded first, or the check is
+    // refused while it can't be. Otherwise a status check writes nothing:
+    // a machine with no agent ID never paired, and gets none from asking.
+    if let Err(refusal) = upgrade::unheld(data_dir).await {
+        return said_refusal(localizer, &refusal);
+    }
     let agent_id = match platform::agent_id::load(data_dir) {
         Ok(Some(id)) => id,
         Ok(None) => {
@@ -1253,7 +1257,7 @@ async fn leave_hub(localizer: &Localizer, data_dir: &Path, yes: bool) -> io::Res
     }
     // The daemon holds the hub's leases in memory and takes its grants: it
     // stops first, and the lock keeps it from starting meanwhile.
-    let _lock = match DataDirLock::acquire(data_dir) {
+    let lock = match DataDirLock::acquire(data_dir) {
         Ok(lock) => lock,
         Err(LockError::InUse { .. }) => {
             say(
@@ -1265,6 +1269,9 @@ async fn leave_hub(localizer: &Localizer, data_dir: &Path, yes: bool) -> io::Res
         }
         Err(LockError::Unavailable { detail }) => return refused(localizer, &detail),
     };
+    if let Err(refusal) = upgrade::under(&lock, data_dir).await {
+        return said_refusal(localizer, &refusal);
+    }
     // A pin that can't be read still pins the hub, and is left the same
     // way: only the hub can't be named.
     let fingerprint = match identity.pin().await {
@@ -1296,7 +1303,7 @@ async fn leave_hub(localizer: &Localizer, data_dir: &Path, yes: bool) -> io::Res
     // The leases and epoch floors the hub granted are in the database.
     let store = match SqliteStore::open(&data_dir.join(DATABASE)).await {
         Ok(store) => Arc::new(store),
-        Err(error) => return refused(localizer, &error.to_string()),
+        Err(error) => return log_refused(localizer, &data_dir.join(DATABASE), &error),
     };
     let left = AgentPairing::new(
         identity,

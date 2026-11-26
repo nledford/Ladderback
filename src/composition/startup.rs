@@ -590,13 +590,15 @@ pub(super) async fn daemon_at(
     )
     .await;
     let recorded = recorded_repositories(&loaded);
+    // A folder an earlier release left is upgraded under the lock, before
+    // the log opens; the copy is in the log even when the open then fails.
+    if let Some(copy) = super::upgrade::under(&lock, &data_dir).await? {
+        log_baseline_copy(&copy);
+    }
     let database = data_dir.join("ladderback.db");
     let store = SqliteStore::open(&database)
         .await
         .map_err(|error| log_refused(&database, &error))?;
-    if let Some(copy) = store.baseline_copy() {
-        log_baseline_copy(copy);
-    }
     let log = OperationLog {
         store: Arc::new(store),
         database,
@@ -1428,17 +1430,17 @@ pub(crate) fn config_refused(error: ConfigError) -> Refused {
 }
 
 /// A folder or database the daemon cannot open.
-fn store_refused(path: &std::path::Path, detail: &str) -> Refused {
+pub(crate) fn store_refused(path: &std::path::Path, detail: &str) -> Refused {
     Refused {
         message: msg::CLI_CANNOT_OPEN_STORE,
         args: vec![("path", text(path.display())), ("detail", text(detail))],
     }
 }
 
-/// The operation log the daemon cannot open: one the migrations before the
+/// The operation log a command cannot open: one the migrations before the
 /// baseline schema left is named as such, and so is a copy of one into the
 /// baseline that failed (§16, decisions 165 and 170).
-fn log_refused(path: &std::path::Path, error: &OpenError) -> Refused {
+pub(crate) fn log_refused(path: &std::path::Path, error: &OpenError) -> Refused {
     match error {
         OpenError::OldSchema { version } => Refused {
             message: msg::CLI_STORE_OLD_SCHEMA,
@@ -1451,6 +1453,10 @@ fn log_refused(path: &std::path::Path, error: &OpenError) -> Refused {
                 ("version", text(version)),
                 ("detail", text(detail)),
             ],
+        },
+        OpenError::BeforeBaseline { version } => Refused {
+            message: msg::CLI_STORE_BEFORE_BASELINE,
+            args: vec![("path", text(path.display())), ("version", text(version))],
         },
         other => store_refused(path, &other.to_string()),
     }

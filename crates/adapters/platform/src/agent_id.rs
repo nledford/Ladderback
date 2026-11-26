@@ -12,6 +12,8 @@ use uuid::Uuid;
 use domain::AgentId;
 use domain::fleet::KeyFile;
 
+use crate::data_dir_lock::DataDirLock;
+
 /// The file in the data dir holding the agent ID.
 pub const MACHINE_ID_FILE: &str = "machine-id";
 
@@ -21,11 +23,9 @@ const MAX_ID_FILE_BYTES: u64 = 256;
 
 /// The agent ID stored in `data_dir`, or `None` when there is none yet. A
 /// command that only reads, such as `hub-status`, uses it rather than
-/// [`load_or_create`]: it writes nothing but the one-off move of an earlier
-/// build's names (decision 170). A file that exists but doesn't
+/// [`load_or_create`]: it writes nothing. A file that exists but doesn't
 /// hold an ID is an error.
 pub fn load(data_dir: &Path) -> io::Result<Option<AgentId>> {
-    move_earlier_names(data_dir)?;
     match read_id_file(&data_dir.join(MACHINE_ID_FILE)) {
         Ok(text) => parse(&text).map(Some),
         Err(error) if error.kind() == io::ErrorKind::NotFound => Ok(None),
@@ -49,23 +49,43 @@ pub fn earlier_beside(data_dir: &Path) -> io::Result<Option<AgentId>> {
 const EARLIER_ID_FILE: &str = "agent-id";
 const EARLIER_KEY_FILE: &str = "agent-key";
 
+/// Whether `data_dir` holds what [`move_earlier_names`] moves or deletes:
+/// an earlier build's `agent-id` it would move, or a file an earlier build
+/// staged beside its key or ID. It only looks, so a command that runs
+/// without the data folder's lock asks it before it takes the lock.
+pub fn earlier_names_left(data_dir: &Path) -> io::Result<bool> {
+    let earlier_id = data_dir.join(EARLIER_ID_FILE);
+    if earlier_id.try_exists()? {
+        let id = data_dir.join(MACHINE_ID_FILE);
+        if !id.try_exists()? || same_file(&earlier_id, &id)? {
+            return Ok(true);
+        }
+    }
+    match staged(data_dir) {
+        Ok(staged) => Ok(!staged.is_empty()),
+        Err(error) if error.kind() == io::ErrorKind::NotFound => Ok(false),
+        Err(error) => Err(error),
+    }
+}
+
 /// Moves an earlier build's `agent-id` and `agent-key` to `machine-id` and
 /// `machine-key`, keeping the ID and the key as they are, so the machine's
 /// snapshots stay its own (§16, decision 170). A one-off upgrade from 0.5.0,
 /// a deliberate exception to "no shims": removed at 1.0.
 ///
-/// It runs only while `machine-id` is absent and `agent-id` is there. The
-/// key moves first, then the ID, each by a link and an unlink, so a start
-/// that stops partway leaves a state the next one finishes, and starts at
-/// once (a `pair` beside the daemon's start) agree. Then the files an
-/// earlier build staged beside them and a crash left (`agent-key.*`,
-/// `agent-id.*.tmp`, #1621) are deleted. A link keeps the file's owner-only
-/// mode, and nothing reads the key (I4). When `machine-id` is there too,
-/// both are left and `machine-id` is the ID: a build after decision 163
-/// made it and may have used it since. An `agent-key` beside a
-/// `machine-key` of its own is an error, every file left as it was: which
-/// key is the machine's is the person's to say.
-fn move_earlier_names(data_dir: &Path) -> io::Result<()> {
+/// Only a process that holds the data folder's lock moves them, so no
+/// other Ladderback, 0.5.0's daemon among them, reads the key while its
+/// name changes. It moves only while `machine-id` is absent and `agent-id`
+/// is there. The key moves first, then the ID, each by a link and an
+/// unlink, so a start that stops partway leaves a state the next one
+/// finishes. Then the files an earlier build staged beside them and a
+/// crash left (`agent-key.*`, `agent-id.*.tmp`, #1621) are deleted. A link
+/// keeps the file's owner-only mode, and nothing reads the key (I4). When
+/// `machine-id` is there too, both are left and `machine-id` is the ID: a
+/// build after decision 163 made it and may have used it since. An
+/// `agent-key` beside a `machine-key` of its own is an error, every file
+/// left as it was: which key is the machine's is the person's to say.
+pub fn move_earlier_names(data_dir: &Path, _held: &DataDirLock) -> io::Result<()> {
     let earlier_id = data_dir.join(EARLIER_ID_FILE);
     if !earlier_id.try_exists()? {
         return Ok(());
@@ -145,20 +165,8 @@ fn same_file(_a: &Path, _b: &Path) -> io::Result<bool> {
 /// Deletes what an earlier build staged beside its key and ID files and a
 /// crash left: `agent-key.*` and `agent-id.*.tmp` (#1621).
 fn remove_staged(data_dir: &Path) -> io::Result<()> {
-    let key_prefix = format!("{EARLIER_KEY_FILE}.");
-    let id_prefix = format!("{EARLIER_ID_FILE}.");
-    for entry in fs::read_dir(data_dir)? {
-        let entry = entry?;
-        let name = entry.file_name();
-        let Some(name) = name.to_str() else {
-            continue;
-        };
-        let staged = name.starts_with(&key_prefix)
-            || (name.starts_with(&id_prefix) && name.ends_with(".tmp"));
-        if !staged {
-            continue;
-        }
-        match fs::remove_file(entry.path()) {
+    for path in staged(data_dir)? {
+        match fs::remove_file(path) {
             Ok(()) => {}
             Err(error) if error.kind() == io::ErrorKind::NotFound => {}
             Err(error) => return Err(error),
@@ -167,12 +175,40 @@ fn remove_staged(data_dir: &Path) -> io::Result<()> {
     Ok(())
 }
 
+/// The files an earlier build staged beside its key and ID files.
+fn staged(data_dir: &Path) -> io::Result<Vec<std::path::PathBuf>> {
+    let key_prefix = format!("{EARLIER_KEY_FILE}.");
+    let id_prefix = format!("{EARLIER_ID_FILE}.");
+    let mut staged = Vec::new();
+    for entry in fs::read_dir(data_dir)? {
+        let entry = entry?;
+        let name = entry.file_name();
+        let Some(name) = name.to_str() else {
+            continue;
+        };
+        if name.starts_with(&key_prefix) || (name.starts_with(&id_prefix) && name.ends_with(".tmp"))
+        {
+            staged.push(entry.path());
+        }
+    }
+    Ok(staged)
+}
+
 /// The agent ID stored in `data_dir`, generating and storing one first if
 /// there is none. A file that exists but doesn't hold an ID is an error,
-/// never silently replaced.
+/// never silently replaced. So is an earlier build's `agent-id` that
+/// [`move_earlier_names`] hasn't moved: a new ID beside it would detach the
+/// machine's snapshots.
 pub fn load_or_create(data_dir: &Path) -> io::Result<AgentId> {
     if let Some(id) = load(data_dir)? {
         return Ok(id);
+    }
+    let earlier = data_dir.join(EARLIER_ID_FILE);
+    if earlier.try_exists()? {
+        return Err(io::Error::new(
+            io::ErrorKind::AlreadyExists,
+            earlier.display().to_string(),
+        ));
     }
     let path = data_dir.join(MACHINE_ID_FILE);
     fs::create_dir_all(data_dir)?;
@@ -344,14 +380,23 @@ mod tests {
         data
     }
 
-    /// The names in `data`, sorted.
+    /// The names in `data`, sorted, but the data folder's lock file.
     fn names(data: &Path) -> Vec<String> {
         let mut names: Vec<String> = fs::read_dir(data)
             .unwrap()
             .map(|entry| entry.unwrap().file_name().into_string().unwrap())
+            .filter(|name| name != crate::data_dir_lock::LOCK_FILE)
             .collect();
         names.sort();
         names
+    }
+
+    /// Moves the earlier names under the data folder's lock, as a start
+    /// does, then reads the ID.
+    fn moved(data: &Path) -> io::Result<AgentId> {
+        let lock = DataDirLock::acquire(data).unwrap();
+        move_earlier_names(data, &lock)?;
+        load_or_create(data)
     }
 
     /// An earlier build's `agent-id` and `agent-key` become `machine-id`
@@ -361,7 +406,7 @@ mod tests {
     fn an_earlier_builds_agent_id_and_key_become_the_machine_id_and_key() {
         let data = earlier_data_folder();
 
-        let id = load_or_create(data.path()).unwrap();
+        let id = moved(data.path()).unwrap();
 
         assert_eq!(id.as_uuid().hyphenated().to_string(), EARLIER_ID);
         assert_eq!(names(data.path()), ["machine-id", "machine-key"]);
@@ -380,16 +425,41 @@ mod tests {
         }
     }
 
-    /// A command that only reads the ID, such as `hub-status`, finds it
-    /// under its earlier name too, and moves it as a start does.
+    /// Without the move, which only the data folder's holder makes, a
+    /// command that reads the ID moves nothing, finds none, and makes none
+    /// beside the earlier one: the folder is left as it was.
     #[test]
-    fn a_command_that_only_reads_the_id_finds_it_under_its_earlier_name() {
+    fn reading_the_id_moves_nothing_and_makes_no_new_one_beside_an_earlier_id() {
         let data = earlier_data_folder();
+        let before = names(data.path());
 
-        let id = load(data.path()).unwrap().unwrap();
+        assert!(earlier_names_left(data.path()).unwrap());
+        assert_eq!(load(data.path()).unwrap(), None);
+        let error = load_or_create(data.path()).unwrap_err();
 
-        assert_eq!(id.as_uuid().hyphenated().to_string(), EARLIER_ID);
-        assert_eq!(names(data.path()), ["machine-id", "machine-key"]);
+        assert_eq!(error.kind(), io::ErrorKind::AlreadyExists);
+        assert_eq!(names(data.path()), before);
+    }
+
+    /// What a move would change is found by looking alone: nothing in a
+    /// folder this build made, or once the move is made, or where a
+    /// `machine-id` of its own sits beside an earlier `agent-id`.
+    #[test]
+    fn earlier_names_are_left_only_until_they_are_moved() {
+        let fresh = tempfile::tempdir().unwrap();
+        load_or_create(fresh.path()).unwrap();
+        assert!(!earlier_names_left(fresh.path()).unwrap());
+        assert!(!earlier_names_left(&fresh.path().join("missing")).unwrap());
+
+        let earlier = earlier_data_folder();
+        moved(earlier.path()).unwrap();
+        assert!(!earlier_names_left(earlier.path()).unwrap());
+
+        let both = tempfile::tempdir().unwrap();
+        write_private(both.path(), "agent-id", &format!("{EARLIER_ID}\n"));
+        let own = "0190a6e4-7a3b-7c3d-8e4f-ba9876543210";
+        write_private(both.path(), "machine-id", &format!("{own}\n"));
+        assert!(!earlier_names_left(both.path()).unwrap());
     }
 
     /// A machine that never paired kept an ID and no key: the ID moves
@@ -399,7 +469,7 @@ mod tests {
         let data = tempfile::tempdir().unwrap();
         write_private(data.path(), "agent-id", &format!("{EARLIER_ID}\n"));
 
-        let id = load_or_create(data.path()).unwrap();
+        let id = moved(data.path()).unwrap();
 
         assert_eq!(id.as_uuid().hyphenated().to_string(), EARLIER_ID);
         assert_eq!(names(data.path()), ["machine-id"]);
@@ -413,7 +483,7 @@ mod tests {
         write_private(data.path(), "agent-id", &format!("{EARLIER_ID}\n"));
         write_private(data.path(), "machine-key", KEY_CANARY);
 
-        let id = load_or_create(data.path()).unwrap();
+        let id = moved(data.path()).unwrap();
 
         assert_eq!(id.as_uuid().hyphenated().to_string(), EARLIER_ID);
         assert_eq!(names(data.path()), ["machine-id", "machine-key"]);
@@ -434,7 +504,7 @@ mod tests {
         write_private(data.path(), "machine-key", other);
         let before = names(data.path());
 
-        let error = load_or_create(data.path()).unwrap_err();
+        let error = moved(data.path()).unwrap_err();
 
         assert_eq!(error.kind(), io::ErrorKind::AlreadyExists);
         let said = error.to_string();
@@ -462,29 +532,12 @@ mod tests {
         write_private(data.path(), "machine-key", "0b0b\n");
         let before = names(data.path());
 
-        let id = load_or_create(data.path()).unwrap();
+        let id = moved(data.path()).unwrap();
 
         assert_eq!(id.as_uuid().hyphenated().to_string(), own);
         assert_eq!(names(data.path()), before);
         let earlier = earlier_beside(data.path()).unwrap().unwrap();
         assert_eq!(earlier.as_uuid().hyphenated().to_string(), EARLIER_ID);
-    }
-
-    /// Starts at once on an earlier data folder, as a `pair` beside the
-    /// daemon's start, agree on its ID.
-    #[test]
-    fn concurrent_starts_on_an_earlier_data_folder_keep_its_id() {
-        let data = earlier_data_folder();
-        let ids: Vec<AgentId> = std::thread::scope(|s| {
-            let handles: Vec<_> = (0..8)
-                .map(|_| s.spawn(|| load_or_create(data.path()).unwrap()))
-                .collect();
-            handles.into_iter().map(|h| h.join().unwrap()).collect()
-        });
-        for id in &ids {
-            assert_eq!(id.as_uuid().hyphenated().to_string(), EARLIER_ID);
-        }
-        assert_eq!(names(data.path()), ["machine-id", "machine-key"]);
     }
 
     #[test]

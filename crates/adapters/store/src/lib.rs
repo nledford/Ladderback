@@ -107,8 +107,13 @@ pub enum OpenError {
     /// it holds a row the baseline refuses, an old migration failed on it,
     /// or the copy's files couldn't be written. `detail` says which, in the
     /// database's or the operating system's words. The log is left as it
-    /// was, and the next open tries again (decision 170).
+    /// was, and the next copy tries again (decision 170).
     BaselineCopy { version: i64, detail: String },
+    /// A log the migrations before the baseline left at `version`, which
+    /// [`SqliteStore::open`] never copies: only
+    /// [`SqliteStore::copy_into_baseline`] does, for a process that holds
+    /// the data folder (decision 170). It is left as it was.
+    BeforeBaseline { version: i64 },
 }
 
 impl std::fmt::Display for OpenError {
@@ -135,9 +140,6 @@ pub struct SqliteStore {
     /// Held shared by each call for as long as it uses the database, and
     /// alone by [`SqliteStore::close`], which so waits for the calls in flight.
     calls: RwLock<()>,
-    /// What the open copied from a log the migrations before the baseline
-    /// left (decision 170).
-    copied: Option<BaselineCopy>,
 }
 
 impl SqliteStore {
@@ -147,28 +149,24 @@ impl SqliteStore {
     /// The directory must exist: the data directory is the caller's to create.
     /// A database that holds a migration this build doesn't ship, because a
     /// newer version wrote it, is refused with [`OpenError::NewerSchema`] and
-    /// left as it was. One the migrations before the baseline schema left at
-    /// a migration a release shipped is copied into the baseline first,
-    /// keeping the old one beside it ([`BaselineCopy`], decision 170); any
-    /// other such one is refused with [`OpenError::OldSchema`] and left as it
-    /// was. A failed open leaves no connection behind.
+    /// left as it was. So is one the migrations before the baseline schema
+    /// left, with [`OpenError::BeforeBaseline`]: the open never copies it
+    /// (decision 170). A failed open leaves no connection behind.
     pub async fn open(path: &Path) -> Result<Self, OpenError> {
         let pool = connect(path).await?;
-        let (pool, copied) = match old_set(&pool).await {
+        match old_set(&pool).await {
+            Ok(None) => {}
             Ok(Some(version)) => {
-                // The copy replaces the file: no connection may hold it.
                 pool.close().await;
-                let copied = baseline_copy::copy(path, version).await?;
-                (connect(path).await?, copied)
+                return Err(OpenError::BeforeBaseline { version });
             }
-            Ok(None) => (pool, None),
             Err(error) => {
                 pool.close().await;
                 return Err(OpenError::Migration {
                     detail: cap(error.to_string()),
                 });
             }
-        };
+        }
         let migrated = migrate(&pool).await;
         if let Err(error) = migrated {
             pool.close().await;
@@ -177,8 +175,38 @@ impl SqliteStore {
         Ok(Self {
             pool,
             calls: RwLock::new(()),
-            copied,
         })
+    }
+
+    /// Whether the database at `path` is one the migrations before the
+    /// baseline schema left, which [`copy_into_baseline`] would copy or
+    /// refuse: `false` when there is no file. It only reads, so a command
+    /// that runs without the data folder's lock asks it before it takes
+    /// the lock (decision 170).
+    ///
+    /// [`copy_into_baseline`]: Self::copy_into_baseline
+    pub async fn needs_copy(path: &Path) -> Result<bool, OpenError> {
+        if !path.try_exists().map_err(database)? {
+            return Ok(false);
+        }
+        baseline_copy::is_old(path).await.map_err(database)
+    }
+
+    /// Copies the database at `path` into the baseline schema when the
+    /// migrations before the baseline left it at ones a release shipped,
+    /// keeping the old one beside it, and says what it did; `None` when
+    /// there is no such database (§16, decision 170). Any other log of
+    /// that set is refused with [`OpenError::OldSchema`], and one that
+    /// can't be copied with [`OpenError::BaselineCopy`]; either is left as
+    /// it was.
+    ///
+    /// The copy replaces the file, so only a caller that holds the data
+    /// folder's lock calls it: no other process may have the log open.
+    pub async fn copy_into_baseline(path: &Path) -> Result<Option<BaselineCopy>, OpenError> {
+        if !path.try_exists().map_err(database)? {
+            return Ok(None);
+        }
+        baseline_copy::copy(path).await
     }
 
     /// Closes the pool once the calls in flight, reads and writes, have
@@ -247,11 +275,12 @@ impl SqliteStore {
     async fn call(&self) -> RwLockReadGuard<'_, ()> {
         self.calls.read().await
     }
+}
 
-    /// What the open copied from a log the migrations before the baseline
-    /// left (decision 170), or `None` when it found none.
-    pub fn baseline_copy(&self) -> Option<&BaselineCopy> {
-        self.copied.as_ref()
+/// A database that can't be read, in SQLite's or the system's words.
+fn database(error: impl Display) -> OpenError {
+    OpenError::Database {
+        detail: cap(error.to_string()),
     }
 }
 

@@ -1,11 +1,12 @@
 //! The one-off copy of an operation log the migrations before the baseline
-//! schema left into the baseline (§16, decisions 165 and 170), which the
-//! store makes itself on open, so a machine running 0.5.0 or a build after
-//! it upgrades by installing this version. A deliberate exception to "no
-//! shims": removed at 1.0, with `migrations-before-baseline/`.
+//! schema left into the baseline (§16, decisions 165 and 170), so a machine
+//! running 0.5.0 or a build after it upgrades by installing this version. A
+//! deliberate exception to "no shims": removed at 1.0, with
+//! `migrations-before-baseline/`.
 //!
-//! Under a lock of its own (`<log>.baseline-lock`), so a second open waits
-//! for the first's copy and then opens it:
+//! Only a process that holds the data folder's lock copies, so no other
+//! Ladderback, 0.5.0's daemon among them, has the log open while it is
+//! replaced:
 //!
 //! 1. The log must hold migrations 1 to N of the old set, N at most 29,
 //!    each applied with the checksum of the file Ladderback shipped (0.5.0
@@ -34,11 +35,11 @@
 //!    log's permissions.
 //!
 //! The old log is never written until the rename, which replaces it whole,
-//! so a start that stops at any step leaves it usable: the next start
-//! removes the work files and copies it again. A step that fails does the
-//! same now and says why with [`OpenError::BaselineCopy`].
+//! so a copy that stops at any step leaves it usable: the next one removes
+//! the work files and copies it again. A step that fails does the same now
+//! and says why with [`OpenError::BaselineCopy`].
 
-use std::fs::{self, File, OpenOptions};
+use std::fs::{self, File};
 use std::io;
 use std::path::{Path, PathBuf};
 
@@ -62,7 +63,6 @@ const KEPT: &str = ".before-baseline";
 const KEPT_NEW: &str = ".before-baseline-new";
 const SOURCE: &str = ".baseline-source";
 const NEW: &str = ".baseline-new";
-const LOCK: &str = ".baseline-lock";
 
 /// The tables that hold a machine's current state, which go with the
 /// machine (the baseline's cascades).
@@ -99,38 +99,27 @@ pub struct Dropped {
 }
 
 /// Copies the old log at `log` into the baseline, as the module says.
-/// `version` is the last old migration the open found, named by an error
-/// that comes before the copy reads the log itself. `None` when, by the
-/// time the lock was taken, another open had copied it.
-pub(crate) async fn copy(log: &Path, version: i64) -> Result<Option<BaselineCopy>, OpenError> {
-    let lock = Lock::take(beside(log, LOCK))
-        .await
-        .map_err(|error| failed(version, format!("its lock can't be taken: {error}")))?;
-    let recorded = recorded(log)
-        .await
-        .map_err(|error| failed(version, error.to_string()))?;
+/// `None` when `log` isn't one the migrations before the baseline left.
+pub(crate) async fn copy(log: &Path) -> Result<Option<BaselineCopy>, OpenError> {
+    let recorded = recorded(log).await.map_err(|error| OpenError::Database {
+        detail: cap(error.to_string()),
+    })?;
     let Some(recorded) = recorded else {
-        // Another open copied it while this one waited for the lock.
-        lock.remove();
         return Ok(None);
     };
     let last = recorded.last().map_or(0, |migration| migration.version);
     if !of_the_old_set(&recorded) {
-        lock.remove();
         return Err(OpenError::OldSchema { version: last });
     }
     let work = Work::beside(log);
     work.clear()
         .map_err(|error| failed(last, format!("a work file can't be removed: {error}")))?;
     match work.run().await {
-        Ok((dropped, kept)) => {
-            lock.remove();
-            Ok(Some(BaselineCopy {
-                from_version: last,
-                kept,
-                dropped,
-            }))
-        }
+        Ok((dropped, kept)) => Ok(Some(BaselineCopy {
+            from_version: last,
+            kept,
+            dropped,
+        })),
         Err(detail) => {
             // Best effort: the next start removes what is left all the same.
             let _ = work.clear();
@@ -152,6 +141,12 @@ struct Recorded {
     version: i64,
     success: bool,
     checksum: Vec<u8>,
+}
+
+/// Whether `log` is one the migrations before the baseline left, whatever
+/// migrations it holds. It only reads.
+pub(crate) async fn is_old(log: &Path) -> Result<bool, sqlx::Error> {
+    recorded(log).await.map(|recorded| recorded.is_some())
 }
 
 /// The migrations `log` records, in order, when the first is the old set's;
@@ -214,40 +209,6 @@ fn beside(log: &Path, suffix: &str) -> PathBuf {
     let mut name = log.as_os_str().to_owned();
     name.push(suffix);
     PathBuf::from(name)
-}
-
-/// The copy's lock: the open lock file, let go when it is dropped.
-struct Lock {
-    file: File,
-    path: PathBuf,
-}
-
-impl Lock {
-    /// Takes the lock at `path`, waiting while another open holds it.
-    async fn take(path: PathBuf) -> io::Result<Self> {
-        tokio::task::spawn_blocking(move || {
-            let mut options = OpenOptions::new();
-            options.create(true).truncate(false).write(true);
-            #[cfg(unix)]
-            std::os::unix::fs::OpenOptionsExt::mode(&mut options, 0o600);
-            let file = options.open(&path)?;
-            file.lock()?;
-            Ok(Self { file, path })
-        })
-        .await
-        .map_err(io::Error::other)?
-    }
-
-    /// Removes the lock file, then lets go of the lock: once the log is in
-    /// the baseline, or refused, which an open that waited on this file
-    /// finds too when it reads the log again. A copy that failed leaves the
-    /// file, so two opens never hold two locks on a log still to copy. The
-    /// lock is the operating system's advisory one, let go when the process
-    /// ends however it ends, so a file left never holds a later start back.
-    fn remove(self) {
-        let _ = fs::remove_file(&self.path);
-        drop(self.file);
-    }
 }
 
 /// The files of one copy, beside the log.

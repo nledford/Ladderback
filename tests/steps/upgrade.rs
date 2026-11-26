@@ -3,14 +3,19 @@
 //! migrations and its machine ID and key under their earlier names, started
 //! under this build (§16, decision 170).
 
+use std::collections::BTreeMap;
 use std::fs;
 use std::path::{Path, PathBuf};
 
-use cucumber::{given, then};
+use api::MsgArg;
+use cucumber::{given, then, when};
+use l10n::Localizer;
+use platform::data_dir_lock::DataDirLock;
 use sqlx::{ConnectOptions as _, Connection as _};
 
 use super::Agent;
 use super::events_steps::Events;
+use super::interop_steps;
 use super::operations_steps::{history_page, shows_status, start_backup};
 
 /// What the data folder held before the scenario gave its files their
@@ -21,6 +26,26 @@ pub(crate) struct UpgradeE2e {
     machine_id: Option<String>,
     /// The migration the earlier operation log was at.
     migration: Option<i64>,
+    /// The data folder's lock, held as another Ladderback holds it.
+    holder: Option<DataDirLock>,
+    /// Every file of the data folder and its bytes, once it was held.
+    held_files: Option<BTreeMap<String, Vec<u8>>>,
+}
+
+/// Every file in `data`, with its bytes.
+fn files_of(data: &Path) -> BTreeMap<String, Vec<u8>> {
+    fs::read_dir(data)
+        .expect("the data folder lists")
+        .map(|entry| entry.expect("an entry of the data folder").path())
+        .filter(|path| path.is_file())
+        .map(|path| {
+            let name = path
+                .file_name()
+                .map(|name| name.to_string_lossy().into_owned());
+            let bytes = fs::read(&path).expect("the file reads");
+            (name.expect("a file has a name"), bytes)
+        })
+        .collect()
 }
 
 /// A canary, never a real key (§13.9): 64 hex digits, as a machine key's
@@ -183,5 +208,56 @@ async fn a_backup_is_tagged_with_the_id(agent: &mut Agent, plan: String) {
         snapshot.tags.iter().any(|each| each.as_str() == tag),
         "the snapshot is tagged {tag}: {:?}",
         snapshot.tags
+    );
+}
+
+#[given("another Ladderback still holds that data folder")]
+fn another_ladderback_holds_it(agent: &mut Agent) {
+    let data = Events::data_dir(agent);
+    let holder = DataDirLock::acquire(&data).expect("the data folder is free");
+    agent.upgrade.holder = Some(holder);
+    agent.upgrade.held_files = Some(files_of(&data));
+}
+
+#[when(expr = "the owner runs {string} on that data folder")]
+async fn runs_on_that_data_folder(agent: &mut Agent, command: String) {
+    let data = Events::data_dir(agent);
+    agent
+        .interop
+        .env
+        .push(("LADDERBACK_DATA_DIR".to_owned(), data.display().to_string()));
+    let args: Vec<&str> = command.split_whitespace().collect();
+    interop_steps::run(agent, &args).await;
+}
+
+#[then("it is refused, saying Ladderback is running on the folder and must be stopped first")]
+fn refused_while_held(agent: &mut Agent) {
+    let data = Events::data_dir(agent);
+    let ran = interop_steps::ran(agent);
+    assert_eq!(ran.code, Some(1), "the command is refused: {}", ran.stderr);
+    let refusal = Localizer::new(&[]).message(
+        l10n::msg::CLI_UPGRADE_LADDERBACK_RUNNING,
+        &[("path", MsgArg::Text(data.display().to_string()))],
+    );
+    assert!(
+        ran.stderr.contains(refusal.text()),
+        "the refusal says {:?}:\n{}",
+        refusal.text(),
+        ran.stderr
+    );
+}
+
+#[then("every file in the data folder is as it was")]
+fn every_file_is_as_it_was(agent: &mut Agent) {
+    let data = Events::data_dir(agent);
+    let before = agent
+        .upgrade
+        .held_files
+        .as_ref()
+        .expect("the folder was held");
+    assert_eq!(
+        &files_of(&data),
+        before,
+        "every file is left byte for byte as it was"
     );
 }

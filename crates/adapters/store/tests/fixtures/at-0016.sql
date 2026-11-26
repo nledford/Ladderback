@@ -3,7 +3,7 @@
 -- rows are those of `at-0029.sql` each table at 0016 has, column by column
 -- (an API token's scopes, which migration 0017 replaced, as 0.5.0 wrote
 -- them), so the store's copy takes it through migrations 0017-0029 to the
--- same rows. The store copies it into a baseline database on open.
+-- same rows. The store copies it into a baseline database on start.
 PRAGMA foreign_keys=OFF;
 BEGIN TRANSACTION;
 CREATE TABLE operations (

@@ -78,7 +78,7 @@ async fn a_database_whose_old_migrations_no_release_shipped_is_refused_and_left_
         let folder = scratch.path().parent().expect("a folder").to_owned();
         let files_before = fs::read_dir(&folder).expect("the folder lists").count();
 
-        let error = open_error(&scratch.path()).await;
+        let error = copy_error(&scratch.path()).await;
 
         assert!(
             matches!(error, OpenError::OldSchema { version } if version == last),

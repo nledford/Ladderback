@@ -137,6 +137,15 @@ cli-store-old-schema = the operation log at { $path } is from an earlier version
 # $detail (text): the database's or the operating system's own message. It is shown as it came.
 cli-store-baseline-copy-failed = the operation log at { $path } is from an earlier version of Ladderback (migration { $version }) and couldn't be copied into this version's schema: { $detail }. It was left as it was, and the next start tries again.
 
+# The operation log is one an earlier release left, and this command opened it before it was copied into the new schema (decision 170). Only a command that holds the data folder copies it, and every command that opens the log upgrades the folder first, so this says what to do if one ever doesn't. The file was left as it was.
+# $path (text): the database file, as the user wrote it.
+# $version (text): the last migration the file holds, a whole number such as 16.
+cli-store-before-baseline = the operation log at { $path } is from an earlier version of Ladderback (migration { $version }) and hasn't been copied into this version's schema yet. Start Ladderback, which copies it, then run this command again. It was left as it was.
+
+# A command that runs beside the daemon (pair, hub-status, export-profile) found a data folder an earlier release left (decision 170), and the data folder's lock is held: Ladderback, an earlier version or this one, is running on it. The folder is upgraded only by a process that holds its lock, so nothing changed.
+# $path (text): the data folder, as the user wrote it.
+cli-upgrade-ladderback-running = the data folder { $path } is from an earlier version of Ladderback, which this version upgrades only while no Ladderback is running on it, and one is running now. Stop it, then run this command again, or start this version, which upgrades the folder. Nothing changed.
+
 # The operations an earlier run left queued or running could not be ended in the operation log. The daemon did not start, because serving over them would keep a repository held for good.
 # $path (text): the database file, as the user wrote it.
 # $detail (text): the store's own message. It is shown as it came.

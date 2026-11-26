@@ -1,9 +1,10 @@
 //! The one-off copy of an operation log the migrations before the baseline
 //! schema left (§16, decisions 165 and 170): the store takes a log at any
 //! of the old migrations a release or a build shipped through the rest of
-//! them and copies it into the baseline on open, keeping the old log beside
-//! it. A start that stops partway leaves the old log usable, and the next
-//! start copies it again. Removed at 1.0, with the copy.
+//! them and copies it into the baseline, keeping the old log beside it,
+//! for a caller that holds the data folder; the open alone never copies.
+//! A copy that stops partway leaves the old log usable, and the next one
+//! copies it again. Removed at 1.0, with the copy.
 
 mod support;
 
@@ -14,7 +15,7 @@ use std::path::{Path, PathBuf};
 use app::ports::{HistoryQuery, OperationStore};
 use sqlx::sqlite::{SqliteConnectOptions, SqliteConnection};
 use sqlx::{ConnectOptions, Connection};
-use store::{Dropped, OpenError, SqliteStore};
+use store::{BaselineCopy, Dropped, OpenError, SqliteStore};
 use support::*;
 
 /// The fixture of the database the old migrations left at `migration`.
@@ -64,12 +65,15 @@ fn beside(log: &Path, suffix: &str) -> PathBuf {
 }
 
 /// The files a copy works in, none of which outlives it.
-const WORK_FILES: [&str; 4] = [
-    ".baseline-new",
-    ".baseline-source",
-    ".before-baseline-new",
-    ".baseline-lock",
-];
+const WORK_FILES: [&str; 3] = [".baseline-new", ".baseline-source", ".before-baseline-new"];
+
+/// What the copy of the log at `log` into the baseline did, as a process
+/// that holds the data folder makes it.
+async fn copied(log: &Path) -> Option<BaselineCopy> {
+    SqliteStore::copy_into_baseline(log)
+        .await
+        .expect("the log is copied")
+}
 
 fn assert_no_work_files_left(log: &Path) {
     for suffix in WORK_FILES {
@@ -175,9 +179,10 @@ fn junk_of_28_or_29() -> Vec<Dropped> {
 }
 
 /// A log at each old migration a release or a build left, 16 (0.5.0's), 28
-/// and 29, opens copied into the baseline: every row kept but the junk the
-/// baseline's rules prove, which the store names; the old log kept beside
-/// it as it was; no work file left; and the next open finds nothing to copy.
+/// and 29, is copied into the baseline and opens: every row kept but the
+/// junk the baseline's rules prove, which the store names; the old log
+/// kept beside it as it was; no work file left; and the next copy finds
+/// nothing to copy.
 #[tokio::test]
 async fn a_log_the_old_migrations_left_at_16_28_or_29_is_copied_into_the_baseline_on_open() {
     for (migration, operations, held, dropped) in [
@@ -189,10 +194,10 @@ async fn a_log_the_old_migrations_left_at_16_28_or_29_is_copied_into_the_baselin
         let log = scratch.path();
         database_at(&log, migration, "").await;
 
-        let store = scratch.open().await;
-        let copy = store
-            .baseline_copy()
+        let copy = copied(&log)
+            .await
             .unwrap_or_else(|| panic!("the log at {migration} is copied"));
+        let store = scratch.open().await;
         assert_eq!(
             copy.from_version, migration,
             "the copy names where it began"
@@ -243,12 +248,10 @@ async fn a_log_the_old_migrations_left_at_16_28_or_29_is_copied_into_the_baselin
         );
         assert_no_work_files_left(&log);
 
-        let again = scratch.open().await;
         assert!(
-            again.baseline_copy().is_none(),
+            copied(&log).await.is_none(),
             "a log in the baseline is never copied again"
         );
-        again.close().await;
     }
 }
 
@@ -259,6 +262,7 @@ async fn a_log_the_old_migrations_left_at_16_28_or_29_is_copied_into_the_baselin
 async fn the_old_migrations_a_log_lacked_reach_its_rows_before_the_copy() {
     let scratch = Scratch::new();
     database_at(&scratch.path(), 16, "").await;
+    copied(&scratch.path()).await;
     let store = scratch.open().await;
     let mut raw = scratch.raw().await;
     let permissions: String =
@@ -275,6 +279,7 @@ async fn the_old_migrations_a_log_lacked_reach_its_rows_before_the_copy() {
 
     let scratch = Scratch::new();
     database_at(&scratch.path(), 28, "").await;
+    copied(&scratch.path()).await;
     let store = scratch.open().await;
     let mut raw = scratch.raw().await;
     let args: String = sqlx::query_scalar(
@@ -318,6 +323,7 @@ async fn rows_a_crashed_earlier_daemon_left_in_its_write_ahead_log_are_copied() 
     }
     raw.close().await.expect("the connection closes");
 
+    copied(&crashed.path()).await;
     let store = crashed.open().await;
     let page = store
         .list(&HistoryQuery::default())
@@ -331,9 +337,9 @@ async fn rows_a_crashed_earlier_daemon_left_in_its_write_ahead_log_are_copied() 
     store.close().await;
 }
 
-/// A start that stopped partway, at any step, left its work files and the
-/// old log, which it never changes: the next start copies the log again.
-/// A kept copy an earlier start left is never replaced: it may be the only
+/// A copy that stopped partway, at any step, left its work files and the
+/// old log, which it never changes: the next one copies the log again. A
+/// kept copy an earlier one left is never replaced: it may be the only
 /// untouched original, so the new one takes the next free name.
 #[tokio::test]
 async fn a_start_that_stopped_partway_leaves_the_old_log_and_the_next_start_copies_it() {
@@ -343,12 +349,11 @@ async fn a_start_that_stopped_partway_leaves_the_old_log_and_the_next_start_copi
     for suffix in [".baseline-new", ".baseline-source", ".before-baseline-new"] {
         fs::write(beside(&log, suffix), "half a database").expect("a work file a crash left");
     }
-    fs::write(beside(&log, ".baseline-lock"), "").expect("the lock a crash left");
     fs::write(beside(&log, ".before-baseline"), "an earlier start's copy")
         .expect("a kept copy a crash left");
 
+    let copy = copied(&log).await.expect("the log is copied");
     let store = scratch.open().await;
-    let copy = store.baseline_copy().expect("the log is copied");
     assert_eq!(copy.kept, beside(&log, ".before-baseline-2"));
     let page = store
         .list(&HistoryQuery::default())
@@ -370,8 +375,8 @@ async fn a_start_that_stopped_partway_leaves_the_old_log_and_the_next_start_copi
 }
 
 /// A log holding a row the baseline refuses is left as it was, with no copy
-/// kept and no work file but the lock, and the store says why; once the row
-/// is mended, the next start copies it.
+/// kept and no work file, and the store says why; once the row is mended,
+/// the next copy makes it.
 #[tokio::test]
 async fn a_log_the_baseline_refuses_a_row_of_is_left_as_it_was_and_the_next_start_tries_again() {
     let scratch = Scratch::new();
@@ -384,7 +389,7 @@ async fn a_log_the_baseline_refuses_a_row_of_is_left_as_it_was_and_the_next_star
     .await;
     let before = fs::read(&log).expect("the log is readable");
 
-    let error = open_error(&log).await;
+    let error = copy_error(&log).await;
 
     assert_matches!(error, OpenError::BaselineCopy { version: 29, .. });
     assert_eq!(
@@ -408,9 +413,7 @@ async fn a_log_the_baseline_refuses_a_row_of_is_left_as_it_was_and_the_next_star
     .await
     .expect("the row is mended");
     raw.close().await.expect("the connection closes");
-    let store = scratch.open().await;
-    assert!(store.baseline_copy().is_some(), "the next start copies it");
-    store.close().await;
+    assert!(copied(&log).await.is_some(), "the next copy makes it");
 }
 
 /// An old migration that fails on the log, here one whose table is already
@@ -427,7 +430,7 @@ async fn an_old_migration_that_fails_on_the_log_leaves_it_as_it_was() {
     .await;
     let before = fs::read(&log).expect("the log is readable");
 
-    let error = open_error(&log).await;
+    let error = copy_error(&log).await;
 
     assert_matches!(error, OpenError::BaselineCopy { version: 16, .. });
     assert_eq!(fs::read(&log).expect("the log is readable"), before);
@@ -437,35 +440,87 @@ async fn an_old_migration_that_fails_on_the_log_leaves_it_as_it_was() {
     );
 }
 
-/// Two starts at once on the same old log, as a `pair` beside the daemon's
-/// start: one copies it, the other waits and opens the copy.
+/// The open alone never copies an old log, which only a process that
+/// holds the data folder does: it is refused, left byte for byte as it
+/// was, with nothing beside it. Whether it needs the copy is found by
+/// looking alone.
 #[tokio::test]
-async fn two_starts_at_once_copy_the_log_once_and_both_open_it() {
+async fn an_open_refuses_an_old_log_it_was_not_given_copied_and_leaves_it() {
+    let scratch = Scratch::new();
+    let log = scratch.path();
+    database_at(&log, 16, "").await;
+    let before = fs::read(&log).expect("the log is readable");
+
+    assert!(
+        SqliteStore::needs_copy(&log)
+            .await
+            .expect("the log is read")
+    );
+    let error = open_error(&log).await;
+
+    assert_matches!(error, OpenError::BeforeBaseline { version: 16 });
+    assert_eq!(fs::read(&log).expect("the log is readable"), before);
+    assert!(
+        !beside(&log, ".before-baseline").exists(),
+        "no copy is kept"
+    );
+    assert_no_work_files_left(&log);
+
+    copied(&log).await.expect("the log is copied");
+    assert!(
+        !SqliteStore::needs_copy(&log)
+            .await
+            .expect("the log is read")
+    );
+    let missing = scratch.dir().join("missing.db");
+    assert!(
+        !SqliteStore::needs_copy(&missing)
+            .await
+            .expect("nothing to read")
+    );
+    assert!(copied(&missing).await.is_none());
+    assert!(!missing.exists(), "no log is made where there was none");
+}
+
+/// A connection that had the old log open across the copy, as a command
+/// beside the copy that looked at it, closes without touching the new
+/// log: SQLite finds the file it opened renamed over and leaves the
+/// `-wal` and `-shm` beside the path, now the new log's, where they are.
+#[tokio::test]
+async fn a_connection_left_on_the_old_log_across_the_copy_leaves_the_new_log_whole() {
     let scratch = Scratch::new();
     let log = scratch.path();
     database_at(&log, 29, "").await;
+    let mut held = connect(&log).await;
+    let _: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM operations")
+        .fetch_one(&mut held)
+        .await
+        .expect("the old log reads");
 
-    let (first, second) = within(60, "both opens", async {
-        tokio::join!(SqliteStore::open(&log), SqliteStore::open(&log))
-    })
-    .await;
-    let first = first.expect("the first open");
-    let second = second.expect("the second open");
+    copied(&log).await.expect("the log is copied");
+    let store = scratch.open().await;
+    let mut new = scratch.raw().await;
+    sqlx::query("PRAGMA wal_autocheckpoint = 0")
+        .execute(&mut new)
+        .await
+        .expect("no checkpoint");
+    sqlx::raw_sql("CREATE TABLE kept (n INTEGER); INSERT INTO kept VALUES (1)")
+        .execute(&mut new)
+        .await
+        .expect("a row in the new log's write-ahead log");
+    held.close().await.expect("the old connection closes");
 
-    let copies = [&first, &second]
-        .iter()
-        .filter(|store| store.baseline_copy().is_some())
-        .count();
-    assert_eq!(copies, 1, "the log is copied once");
-    for store in [&first, &second] {
-        let page = store
-            .list(&HistoryQuery::default())
-            .await
-            .expect("the history reads");
-        assert_eq!(page.operations.len(), 4, "every operation reads back");
+    for suffix in ["-wal", "-shm"] {
+        assert!(
+            beside(&log, suffix).exists(),
+            "the new log's {suffix} is left where it is"
+        );
     }
-    first.close().await;
-    second.close().await;
+    new.close().await.expect("the connection closes");
+    store.close().await;
+    let mut reopened = scratch.raw().await;
+    assert_eq!(rows(&mut reopened, "kept").await, 1);
+    reopened.close().await.expect("the connection closes");
 }
 
 /// The new log and the kept one are no more open than the old log was: it
@@ -480,6 +535,7 @@ async fn the_new_log_and_the_kept_one_keep_the_old_logs_permissions() {
     database_at(&log, 29, "").await;
     fs::set_permissions(&log, fs::Permissions::from_mode(0o600)).expect("the log is private");
 
+    copied(&log).await.expect("the log is copied");
     scratch.open().await.close().await;
 
     for path in [log.clone(), beside(&log, ".before-baseline")] {
