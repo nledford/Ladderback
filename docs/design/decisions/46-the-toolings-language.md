@@ -2,7 +2,7 @@
 
 **The tooling (`scripts/`, the l10n expectations generator, the UI tests) is TypeScript that Node runs as it is, by stripping the types: no build step, nothing emitted, and `tsc --noEmit` in `just lint` is the only place the types are checked** (recorded 2026-11-10; #144).
 
-The scripts were JavaScript, so a wrong argument or a misspelt field showed only when a run reached it.
+The scripts were JavaScript, so a wrong argument or a misspelled field showed only when a run reached it.
 
 Decided:
 

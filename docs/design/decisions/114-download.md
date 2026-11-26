@@ -18,4 +18,4 @@
 - **A restart.** A download doesn't hold a restart off: the stop cuts one being streamed short, and the browser fails it. While a restart waits for the running operations, a new download is refused `restart-pending`, as a restore is.
 - **Listings take turns too (#710).** A listing's worker also reads the whole index, so at most two run at once, of every repository together, as folder reads do (decision 102): the wait counts against the read timeout.
 
-Known limits: the short ID guards against a misclick only, as for a restore. A browser that can't save a download (a full disk, a blocked download) fails it on its own side; the history then shows it cancelled. Downloading from the hub is M5's.
+Known limits: the short ID guards against a misclick only, as for a restore. A browser that can't save a download (a full disk, a blocked download) fails it on its own side; the history then shows it canceled. Downloading from the hub is M5's.

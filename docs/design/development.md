@@ -1,6 +1,6 @@
 ## 13. Development method
 
-Ladderback is built behaviour first and test first. The two together are how the invariants in §0 stay true as the code grows.
+Ladderback is built behavior first and test first. The two together are how the invariants in §0 stay true as the code grows.
 
 ### 13.1 Test first, always
 
@@ -8,17 +8,17 @@ Ladderback is built behaviour first and test first. The two together are how the
 
 Every change follows red, green, refactor:
 
-1. write the smallest failing test that names the behaviour;
+1. write the smallest failing test that names the behavior;
 2. make it pass with the smallest correct change;
 3. clean up with the tests green.
 
 A bug fix starts with a test that reproduces the bug.
 
-**Exempt:** documentation, formatting, generated code, dependency bumps with no behaviour change, and spikes. Spikes live on `spike/*` branches and are never merged; their findings are rebuilt test-first.
+**Exempt:** documentation, formatting, generated code, dependency bumps with no behavior change, and spikes. Spikes live on `spike/*` branches and are never merged; their findings are rebuilt test-first.
 
 **How CI makes skipping it visible.** No tool can prove a test was written before the code. These checks make skipping test-first visible and costly:
 
-1. **Red-first check**, for pull requests labelled `behaviour`.
+1. **Red-first check**, for pull requests labeled `behaviour`.
    - **What it runs.** The pull request's first commit is a `test:` commit that adds the new tests and scenarios, with `todo!()` stubs for any new API so that it compiles. CI checks out that commit and runs exactly the tests it added, by name (`cargo test -- --exact`, and the new scenarios by name in both the Rust and the `@ui` runner).
    - **Each one must fail at run time.** A compile error doesn't count, because it would pass vacuously. A test that already passes specifies nothing new.
    - **Why each scenario is red.** Under each red scenario the log prints `failed at:`, its first failing step and the error's message on one line, cut at 200 characters, so a reviewer can tell the expected assertion from a page that never loaded or a server error. A report the script can't read prints `no failing step in the runner's output`; the scenario still counts as red.
@@ -32,7 +32,7 @@ A bug fix starts with a test that reproduces the bug.
    - **Red outside Chromium only.** No required job runs Firefox or WebKit, so a scenario that fails only in them counts as red only if it also passes in that engine at the pull request's head. The script then moves the `test:` commit's tree to the head, builds its UI and binary again, and runs it there. Otherwise a scenario Chromium finds nothing wrong with, failing in Firefox for a reason the branch never fixes, would pass for red. The log shows each engine under the scenario's `red` or `GREEN` line (`firefox: red, failed at: …`, `firefox at the head: passes`).
    - **What the engines cost.** The workflow installs all three engines from the caches `.github/actions/browser` keeps for that set, which ci.yml's `Browser cache for the red-first check` job saves on each push to `main` (a pull request can restore only `main`'s caches), so it takes seconds per engine. Each new `@ui` scenario starts the runner three times; the head build happens only for a scenario red outside Chromium alone.
    - **Older trees, the rules, and macOS.** A tree whose `world.ts` predates `LADDERBACK_UI_BROWSER` runs in Chromium alone, and the log says so. The verdict's rules live in `scripts/red-first-ui.ts`, tested by `node --test` in `just lint`. WebKit on macOS moves focus to buttons and links with Option+Tab, not Tab, unlike Linux CI, so a local run's WebKit lines can differ from CI's.
-2. **Mutation testing.** CI writes the pull request's diff against the base to a file and runs `cargo mutants --in-diff <file>` on the gated crates. A mutant that survives in changed code means behaviour no test asserts, and blocks the merge.
+2. **Mutation testing.** CI writes the pull request's diff against the base to a file and runs `cargo mutants --in-diff <file>` on the gated crates. A mutant that survives in changed code means behavior no test asserts, and blocks the merge.
    - **The gated crates.** The Justfile's `mutants_packages` lists them:
      - `domain`;
      - `app`;
@@ -56,14 +56,14 @@ A bug fix starts with a test that reproduces the bug.
    - **Where 590 comes from.** Of the last 460 merged pull requests (those with fewer than 1,000 mutants), 186 changed gated source. Their mutants per changed line had a median of 0.05 and a 90th percentile of 0.12, and 97 in 100 were at most 0.17: a shard of 100 mutants is 590 lines. A shard tests a mutant in 14 to 22 seconds (the slowest are `web`'s) after a baseline build of one to two minutes, so 100 take 25 to 40 of the 60 minutes. Of those 186, five had more than 100 mutants and were sized by this rule; they got two to four shards, and none a shard of more than 93 mutants. Recompute the ratio when the gate or its exclusions change a lot.
    - **The required check.** The check the ruleset requires, `Mutation testing (changed code)`, is a job that passes only when every shard passed, whether there is one or four.
    - **In MVP mode** (§13.8) the shards and the required check are skipped on pull requests; the nightly run still runs every mutant.
-   - **Nightly.** A full run happens nightly, round-robin over 32 shards, `Mutation testing (full, shard k of 32)`, at most 12 at once, each with `--jobs 2` on its own runner: on one runner the 8,551 mutants of 2026-11-21 outran its 180 minutes every night, and a 32nd of the 8,910 of 2026-11-22 is about 279, 65 to 102 minutes at the rate above. The step's limit (165 minutes) is under the job's, so a shard that runs out of time fails rather than ends as cancelled, and on a scheduled run `mutants-nightly-report` opens an issue for it, or comments on the open one.
+   - **Nightly.** A full run happens nightly, round-robin over 32 shards, `Mutation testing (full, shard k of 32)`, at most 12 at once, each with `--jobs 2` on its own runner: on one runner the 8,551 mutants of 2026-11-21 outran its 180 minutes every night, and a 32nd of the 8,910 of 2026-11-22 is about 279, 65 to 102 minutes at the rate above. The step's limit (165 minutes) is under the job's, so a shard that runs out of time fails rather than ends as canceled, and on a scheduled run `mutants-nightly-report` opens an issue for it, or comments on the open one.
 3. **Squash merge.** The check runs on the pull request before merge, and pull requests are squash-merged, so the failing `test:` commit never lands on `main` and `git bisect` stays clean.
 
-There is deliberately **no coverage percentage gate**. Coverage counts executed lines, not asserted behaviour; mutation testing measures the latter.
+There is deliberately **no coverage percentage gate**. Coverage counts executed lines, not asserted behavior; mutation testing measures the latter.
 
-### 13.2 Behaviour first (BDD)
+### 13.2 Behavior first (BDD)
 
-Every user-visible behaviour starts as a Given/When/Then scenario in `features/<context>/*.feature`, written in the ubiquitous language (§3.1) before any test or code for it. Scenarios describe outcomes, never endpoints, tables or crates. Tests of the test tooling itself are not scenarios but `node --test` files: `scripts/*.test.ts`, which `just lint` runs and which need no browser, and, beside the UI test tooling, `ui-tests/support/*.browser.test.ts`, which need one and which `just test-ui <engine>` runs in that engine before the scenarios.
+Every user-visible behavior starts as a Given/When/Then scenario in `features/<context>/*.feature`, written in the ubiquitous language (§3.1) before any test or code for it. Scenarios describe outcomes, never endpoints, tables or crates. Tests of the test tooling itself are not scenarios but `node --test` files: `scripts/*.test.ts`, which `just lint` runs and which need no browser, and, beside the UI test tooling, `ui-tests/support/*.browser.test.ts`, which need one and which `just test-ui <engine>` runs in that engine before the scenarios.
 
 - **Runner:** the `cucumber` crate (cucumber-rs). `crates/app/tests/acceptance.rs` (`harness = false`) runs every scenario tagged neither `@e2e` nor `@ui`. Because it lives in `app`, `cargo mutants` runs it for every `app` mutant.
 - **Default level:** steps drive `app` use cases with the in-memory fakes and the fake clock, so scenarios about sleep, deadlines, leases and catch-up run in milliseconds and deterministically.
@@ -98,8 +98,8 @@ Every user-visible behaviour starts as a Given/When/Then scenario in `features/<
   - `LADDERBACK_UI_BROWSER` (`chromium`, `firefox` or `webkit`; `ui-tests/support/world.ts`) picks the engine, Chromium when unset; `just test-ui webkit` sets it.
   - `just test-ui [engine] --shard 1/2` runs the first of two shards of the scenarios, as CI does (cucumber-js's own `--shard INDEX/TOTAL`, index from 1); shards 1 and 2 together are every scenario once. The recipe passes the argument on, and runs the `node --test` files in every shard, which takes about 2 seconds in Chromium.
   - CI runs each in its own Linux jobs, from `.github/actions/browser`, which installs the engines it is given and their system packages, and each job names one engine and one of its two shards (§13.8). Only the Chromium check, `UI journeys`, is required (§13.8), and Firefox and WebKit run on a pull request only when it touches the UI (§13.8). The red-first check runs a new scenario in all three (§13.1).
-  - A step whose browser behaviour differs by engine branches on `engine` from `world.ts`, with its reason, and never skips (grep `engine` in `ui-tests/` for the branches); a difference in the product itself is a `fix:` after a `test:` scenario that fails in that engine (decision 97).
-  - One Firefox workaround covers every page rather than a step: Playwright 1.65's Firefox crashes the page once an element's `ariaLabelledByElements` is read both in the page's main world and in Playwright's own (#774, microsoft/playwright#43967), as axe-core and a lookup by role and name do on a page with `aria-labelledby`. So in Firefox each scenario's browser context takes the property off `Element.prototype` before the page's scripts run (`ui-tests/support/labelledby-crash.ts`). axe-core and Playwright's main-world reads then fall back to the `aria-labelledby` attribute, which names the same elements, and `ui-tests/support/labelledby-crash.browser.test.ts` checks that the scan still passes a name given that way and reports a reference to an element the page doesn't have. It comes out with the Playwright release whose Firefox has the fix (1.66).
+  - A step whose browser behavior differs by engine branches on `engine` from `world.ts`, with its reason, and never skips (grep `engine` in `ui-tests/` for the branches); a difference in the product itself is a `fix:` after a `test:` scenario that fails in that engine (decision 97).
+  - One Firefox workaround covers every page rather than a step: Playwright 1.65's Firefox crashes the page once an element's `ariaLabelledByElements` is read both in the page's main world and in Playwright's own (#774, microsoft/playwright#43967), as axe-core and a lookup by role and name do on a page with `aria-labelledby`. So in Firefox each scenario's browser context takes the property off `Element.prototype` before the page's scripts run (`ui-tests/support/labeledby-crash.ts`). axe-core and Playwright's main-world reads then fall back to the `aria-labelledby` attribute, which names the same elements, and `ui-tests/support/labeledby-crash.browser.test.ts` checks that the scan still passes a name given that way and reports a reference to an element the page doesn't have. It comes out with the Playwright release whose Firefox has the fix (1.66).
 - **A failed `@ui` scenario leaves a trace and a screenshot.** Each scenario's browser context records a Playwright trace (`ui-tests/support/world.ts`). A scenario that passes throws it away; one that fails keeps it, with a screenshot of the page, in `ui-tests/reports/failures/<engine>/`, at the step that failed, and its report names both files.
   - `just test-ui` empties `ui-tests/reports/` first and writes cucumber-js's JUnit report there too (`ui-tests/cucumber.ts`). Open a trace with `node_modules/.bin/playwright show-trace <file>` in `ui-tests` (not `npx`, for the reason AGENTS.md gives), or at trace.playwright.dev.
   - When a UI job fails, CI uploads the folder as an artifact named after the engine, the shard and the run attempt, kept 14 days, so a failure seen only on CI, such as a page crash, can be read from the run (#998).
@@ -171,7 +171,7 @@ Each ring of the architecture is tested at its own level:
 | `l10n` | Catalog and formatting lanes (§8.4) | `fluent-bundle`, `fluent-pseudo`, `wasm-bindgen-test` (`just test-wasm`) | Every message ID and error code formats in `en-US` across its selector branches; `NUMBER` drives plural selectors; `NUMBER`/`DATETIME` in `de` and `ja` with both formatters |
 | System | `@e2e` scenarios on the real binary; `@ui` journeys with axe-core and keyboard-only runs (§4.5) | cucumber-rs; `@cucumber/cucumber` with Playwright | First backup end to end; deadline with a real worker; hub pairing; restore into a new folder; each journey by keyboard alone |
 
-Domain behaviour is never mocked. Doubles replace ports only: slow, external or nondeterministic boundaries.
+Domain behavior is never mocked. Doubles replace ports only: slow, external or nondeterministic boundaries.
 
 ### 13.4 Definition of done
 
@@ -209,7 +209,7 @@ These rules keep the daemon running and the workspace safe to work in. Rules 1 t
    - Clippy checks the indexing and the slicing (rule 7).
 3. **Visible test skips.** A test that can't run here, such as `chmod 000` under root or a backend tool that isn't installed, calls `testkit::skip!(reason)`, never a silent early return or a bare `eprintln!`.
    - **The skip log.** The macro prints `SKIPPED <module path>: <reason>` to stderr and appends it to the file named by `LADDERBACK_SKIP_LOG`. `just test`, `just test-acceptance` and `just test-e2e` run through `scripts/with-skip-log.sh`, which points that variable at a fresh file in the target directory (`$CARGO_TARGET_DIR`, default `target/`) and lists its lines after the run, also when tests fail and without changing the exit status.
-   - **`just test`.** It runs `cargo nextest` (which captures a passing test's stderr, so the log file is what makes a skip visible), the doc tests and both cucumber runners under that one log. nextest can't run the cucumber runners (`harness = false`), so `.config/nextest.toml` filters them out and `just test` runs them with `cargo test`. A failing suite doesn't stop the ones after it: all four run, and the recipe then fails, naming each suite that failed, so one CI run reports every failure. Only an interrupt (Ctrl-C, a cancelled run) stops it early, at the suite it reaches.
+   - **`just test`.** It runs `cargo nextest` (which captures a passing test's stderr, so the log file is what makes a skip visible), the doc tests and both cucumber runners under that one log. nextest can't run the cucumber runners (`harness = false`), so `.config/nextest.toml` filters them out and `just test` runs them with `cargo test`. A failing suite doesn't stop the ones after it: all four run, and the recipe then fails, naming each suite that failed, so one CI run reports every failure. Only an interrupt (Ctrl-C, a canceled run) stops it early, at the suite it reaches.
    - **`.config/nextest.toml`.** The same file terminates a test that hangs for 120 s. Its `ci` profile retries a failing test twice, reports a test that passed on retry as flaky, runs every test despite failures and writes `target/nextest/ci/junit.xml`, which CI uploads.
    - **In CI.** CI runs `just test` with `NEXTEST_PROFILE=ci`, so skips show in its log.
    - **`testkit`** is a dev-dependency only (`just architecture` checks it).
@@ -330,7 +330,7 @@ A shared component is four pieces:
    - Its accessibility contract is a file of its own, `docs/design/components/accessibility/<component>.md`, named as its `.rs` file and opening with its heading (`# The tooltip`); `just component-index` writes its row in §4.5's index of contracts (`just lint` fails when the index doesn't match the files).
 2. Its entry in the gallery, with every state it can show: a demo module of its own named as its `.rs` file, `crates/web/src/gallery/<component>.rs`, declared in `crates/web/src/gallery.rs`, whose page draws the module's demo component in the demo's place. The demo is a `<section>` whose `id` is its anchor, the demo's English heading in lower case with hyphens for spaces, then `-demo` (`text-field-demo`), and whose heading is a `DemoHeading`, so that the address `/_gallery#<id>` puts focus on it.
 3. A row in each Scenario Outline of `features/ui/components/gallery.feature`: "The address of the "<demo>" demo puts focus on its heading", for its anchor; no axe-core violations in its demo states; and its structure pinned by an ARIA snapshot, whose literal goes in `ui-tests/steps/gallery.ts`.
-4. Contract scenarios for its behaviour in a feature file of its own, `features/ui/components/<component>.feature`, with steps that find it by role and name and drive it by keyboard alone. Its steps go in a file of their own named as its `.rs` file, `ui-tests/steps/<component>.ts`; what several components' steps share, such as a demo's section, goes in `ui-tests/support/gallery.ts`. Each scenario starts at its own demo, `When I open the "<demo>" demo`, rather than walking from the top of the gallery, so a demo added above it never lengthens its walk. The one exception is a pointer's own behaviour, such as a tooltip's hover (1.4.13): its steps move the pointer through `ui-tests/support/pointer.ts`, which the maintainer approved and which never presses.
+4. Contract scenarios for its behavior in a feature file of its own, `features/ui/components/<component>.feature`, with steps that find it by role and name and drive it by keyboard alone. Its steps go in a file of their own named as its `.rs` file, `ui-tests/steps/<component>.ts`; what several components' steps share, such as a demo's section, goes in `ui-tests/support/gallery.ts`. Each scenario starts at its own demo, `When I open the "<demo>" demo`, rather than walking from the top of the gallery, so a demo added above it never lengthens its walk. The one exception is a pointer's own behavior, such as a tooltip's hover (1.4.13): its steps move the pointer through `ui-tests/support/pointer.ts`, which the maintainer approved and which never presses.
 
 #### 13.7.6 A workspace crate
 
@@ -352,7 +352,7 @@ Keep the chain short: at most three pull requests, and two where possible. Every
 
 - **Naming:** say "stacked on #N" in the title and the first line of the description of each pull request above the bottom one. When its base merges and it targets `main`, take the words out of the title, since the title becomes the changelog line.
 - **Bases:** open each layer against the branch below it (GitHub's stacked pull requests, `gh stack`, or a plain base branch), so its diff shows only its own commits.
-- **Checks:** each layer passes every check on its own. A layer that changes behaviour starts with its own failing `test:` commit (`just red-first <branch below>`).
+- **Checks:** each layer passes every check on its own. A layer that changes behavior starts with its own failing `test:` commit (`just red-first <branch below>`).
 - **Merging:** bottom-up. After a squash merge below, rebase the next layer onto `main` with `git rebase --onto origin/main <old base branch>`, which drops the base's original commits, then retarget it to `main`.
 
 **Title and squash commit.** The squash commit's subject is the pull request title, and the changelog is built from it, so the title is a Conventional Commit written for users: a type release-plz knows, no trailing full stop and no `(#N)`. Mark a change that breaks the public contract in §12.1 with `!` (`feat!: …`) and say in the body how to upgrade. `just check-pr-title "<title>"` runs CI's check.
@@ -407,7 +407,7 @@ Renaming one of those jobs blocks every merge, so don't, unless the maintainer u
 
 **The `release` label and release builds.** The `Release builds` workflow (`.github/workflows/release-builds.yml`, §12.1, §16 decision 54) builds the release archives with cargo-dist, and the Linux `.deb` and `.rpm` packages from their binaries with nfpm (§16 decision 123), and smoke-tests them every night and on demand. The Release workflow calls it for each release, whose Linux archives and packages it publishes (§12.1).
 
-- **On labelled pull requests.** It also runs on each push to a pull request labelled `release`. release-plz puts the label on every release PR (`release-plz.toml`), so a release's binaries are built before it is tagged.
+- **On labeled pull requests.** It also runs on each push to a pull request labeled `release`. release-plz puts the label on every release PR (`release-plz.toml`), so a release's binaries are built before it is tagged.
 - **Where the label belongs.** On any pull request that could break a release build but not a development one: a dependency with C code or a system library, the release profile, `release_flags` or `dist-workspace.toml`, the embedded web UI's build, or the workflow itself.
 - **Not required.** It is not a required check, and its job names (`Release archive (<target>)`, `Report a failed nightly release build`) match none of the required ones above; a job added to it keeps to that.
 - **Nightly failures.** A failed nightly run opens an issue titled "Nightly release build failed", or comments on the open one.
@@ -427,7 +427,7 @@ Renaming one of those jobs blocks every merge, so don't, unless the maintainer u
 
 - **When it runs.** On every manual run, and on a pull request or a push to `main` that touches `docs/guide/`, the `Justfile`, the link check, the axe-core script (`ui-tests/scripts/docs-site-a11y.ts`), the UI tooling's `package.json`, lockfile or Node version, the browser and npm actions, `scripts/install-browser.sh`, or the workflow itself.
 - **What it checks.** `Docs site (build, links, axe-core)` runs `just docs-site-a11y`: the build with the pinned mdBook, the link check, then axe-core (WCAG 2.2 A and AA) over every page in Chromium, in each of mdBook's five themes at 1280 and 400 px wide. It also scans the landing page with the theme list open and with search results showing, and the page a result opens, with its matches marked. A violation fails the job, on a pull request and on `main` alike, and a site that fails isn't published.
-- **How it publishes.** On `main` alone, `Docs site (deploy to Pages)` deploys the checked build with GitHub's own Pages actions (`configure-pages`, `upload-pages-artifact`, `deploy-pages`), into the `github-pages` environment. It is the workflow's only job with write access (`pages: write`, `id-token: write`), and a concurrency group lets one deploy run at a time without cancelling one in progress.
+- **How it publishes.** On `main` alone, `Docs site (deploy to Pages)` deploys the checked build with GitHub's own Pages actions (`configure-pages`, `upload-pages-artifact`, `deploy-pages`), into the `github-pages` environment. It is the workflow's only job with write access (`pages: write`, `id-token: write`), and a concurrency group lets one deploy run at a time without canceling one in progress.
 - **The maintainer's one-time step.** Settings, Pages, "Build and deployment", source "GitHub Actions", then a manual run of the workflow from `main` for the first deploy; check that the `github-pages` environment it deploys to allows `main` alone. Until the source is set, the deploy job fails and nothing is published; the check job is unaffected.
 - **Not required.** Neither job is a required check, and neither name matches one above. The workflow saves no cache: it restores the npm and Chromium caches `ci.yml` saves on `main`.
 

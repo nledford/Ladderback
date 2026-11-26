@@ -1,6 +1,6 @@
 # Decision 49: One name per repository
 
-**An agent's configuration names a repository once: two entries with one recorded repository ID, or at one location when either knows no ID, are refused, and connecting, initialising or importing a repository the configuration already holds under a new alias is refused with `repository-already-configured`, naming the alias it has** (recorded 2026-11-11, §6.1, §6.2, §7.3; #186).
+**An agent's configuration names a repository once: two entries with one recorded repository ID, or at one location when either knows no ID, are refused, and connecting, initializing or importing a repository the configuration already holds under a new alias is refused with `repository-already-configured`, naming the alias it has** (recorded 2026-11-11, §6.1, §6.2, §7.3; #186).
 
 Connecting one repository as "nas" and again as "backup" was accepted, so its plans split into two histories, two maintenance requests (I1) and two lines on every page for one set of snapshots.
 
