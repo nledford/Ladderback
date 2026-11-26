@@ -23,3 +23,7 @@ The maintainer, having paired the first real machine with the first real hub, lo
 ## Known limits
 
 - On a page load, the start page waits for the hub's read before it shows anything, as `/dashboard` did; on a daemon that isn't a hub, the read is answered at once with `route-unknown`.
+- A hub whose read of its key goes unanswered within 5 seconds, or fails, counts as no hub for that standing, as its Machines tab already did: its start page is then the welcome and its `/dashboard` a page not found until the page is loaded again.
+- Until the hub's read answers, `/dashboard` is titled "Page not found" on a hub too, and `/` "Ladderback"; each takes its title once the read answers.
+- The redirect from `/dashboard` keeps neither its query nor its fragment: `/dashboard?locale=en-XA` arrives at `/`, still shown in en-XA until the page is loaded again.
+- A header link followed before the hub's read answers on a page load is taken as the page load, so focus stays where it was rather than moving to the new page's heading; on loopback the window is milliseconds.
