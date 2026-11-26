@@ -20,7 +20,7 @@ const OTHER_REPOSITORY_HEX: &str =
     "1212121212121212121212121212121212121212121212121212121212121212";
 
 /// Writes a row as another program could: straight into the table, under the
-/// ID text `id`.
+/// ID text `id`. A failed row has a failure, as the schema asks.
 async fn insert_text(
     raw: &mut SqliteConnection,
     id: &str,
@@ -29,8 +29,11 @@ async fn insert_text(
     repository: Option<&str>,
 ) -> Result<(), sqlx::Error> {
     sqlx::query(
-        r#"INSERT INTO operations (id, machine_id, kind, "trigger", status, repo_uuid, queued_at)
-           VALUES (?1, 'local', ?2, 'manual', ?3, ?4, 1800000000000)"#,
+        r#"INSERT INTO operations
+             (id, kind, "trigger", status, repo_uuid, queued_at, error_code, error_args)
+           VALUES (?1, ?2, 'manual', ?3, ?4, 1800000000000,
+             CASE WHEN ?3 = 'failed' THEN 'operation-failed' END,
+             CASE WHEN ?3 = 'failed' THEN '[]' END)"#,
     )
     .bind(id)
     .bind(kind)

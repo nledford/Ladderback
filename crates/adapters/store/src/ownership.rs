@@ -1,5 +1,6 @@
 //! The hub's registry of maintenance owners (technical design §7.3, I1;
-//! migrations `0022_repository_ownership` and `0028_hub_recovery`): the
+//! tables `repository_owners`, `ownership_reports` and
+//! `hub_recovery_floors`): the
 //! `OwnershipRegistry` port on the store's own file, built only with the
 //! hub (decision 122). A whole report, with the floors it proved, is
 //! decided in one `BEGIN IMMEDIATE` transaction, so of claims that race,
@@ -18,7 +19,7 @@ use sqlx::sqlite::SqliteRow;
 use sqlx::{Connection, Row, SqliteConnection};
 
 use crate::row::agent_id_text;
-use crate::{SqliteStore, unavailable};
+use crate::{SqliteStore, machine_gone, unavailable};
 
 const FORGET_REPORT: &str = "DELETE FROM ownership_reports WHERE machine_id = ?1";
 
@@ -78,13 +79,18 @@ impl OwnershipRegistry for SqliteStore {
         let mut decided = Vec::with_capacity(reports.entries().len());
         for entry in reports.entries() {
             let repo = entry.repository.as_str();
-            sqlx::query(TAKE_REPORT)
+            let taken = sqlx::query(TAKE_REPORT)
                 .bind(&agent_text)
                 .bind(repo)
                 .bind(now.as_millisecond())
                 .execute(&mut *tx)
-                .await
-                .map_err(unavailable)?;
+                .await;
+            match taken {
+                // Removed since the hub read it: the transaction rolls back
+                // and nothing is decided.
+                Err(error) if machine_gone(&error) => return Ok(Vec::new()),
+                taken => taken.map_err(unavailable)?,
+            };
             let others = sqlx::query(OTHERS_REPORTS)
                 .bind(repo)
                 .bind(&agent_text)

@@ -58,6 +58,7 @@ pub async fn run_inbox(harness: &dyn ReportInboxHarness) {
     racing_deliveries_are_taken_once(harness).await;
     past_the_cap_the_oldest_give_way_and_are_counted(harness).await;
     the_latest_reports_are_read_with_the_count_let_go_of(harness).await;
+    an_operations_report_is_held_once_across_machines(harness).await;
     live::the_latest_plans_are_kept_in_place_of_the_last(harness).await;
     live::the_latest_progress_is_kept_in_place_of_the_last(harness).await;
 }
@@ -281,11 +282,22 @@ const OTHER_AGENT: AgentId = AgentId::from_uuid(Uuid::from_u128(0xa2));
 const EPOCH: OutboxEpoch = OutboxEpoch::from_uuid(Uuid::from_u128(0xe1));
 const OTHER_EPOCH: OutboxEpoch = OutboxEpoch::from_uuid(Uuid::from_u128(0xe2));
 
+/// The machines the inbox suite takes reports from. A harness whose inbox
+/// keeps the plans and progress of registered machines only registers
+/// these in `empty`.
+pub const MACHINES: [AgentId; 2] = [AGENT, OTHER_AGENT];
+
+/// The report at `place` of `epoch`, of an operation of its own: the hub
+/// holds an operation's report once, whichever machine sends it (#1513).
 fn entry(epoch: OutboxEpoch, place: u64) -> OutboxEntry {
+    let report = report(u128::from(place), Happening::Succeeded);
     OutboxEntry {
         epoch,
         seq: seq(place),
-        report: report(u128::from(place), Happening::Succeeded),
+        report: AgentReport {
+            op_id: op(epoch.as_uuid().as_u128() << 32 | u128::from(place)),
+            ..report
+        },
     }
 }
 
@@ -490,8 +502,12 @@ async fn the_epoch_just_taken_is_kept_however_the_clock_moved(harness: &dyn Repo
         Some(Ingest::Duplicate),
         "the epoch just taken is kept"
     );
+    // Another report at the first epoch's place: the place is free again,
+    // and the report is not one the hub holds (#1513).
+    let mut at_first = entry(*first, 1);
+    at_first.report.op_id = op(0xf125);
     assert_eq!(
-        taken_at(inbox, AGENT, &entry(*first, 1), later).await,
+        taken_at(inbox, AGENT, &at_first, later).await,
         Some(Ingest::New),
         "the first epoch of those taken at once gave way"
     );
@@ -529,7 +545,7 @@ async fn racing_deliveries_are_taken_once(harness: &dyn ReportInboxHarness) {
 /// across restarts, for that agent alone.
 async fn past_the_cap_the_oldest_give_way_and_are_counted(harness: &dyn ReportInboxHarness) {
     let inbox = harness.empty().await;
-    taken(inbox.as_ref(), OTHER_AGENT, &entry(EPOCH, 1)).await;
+    taken(inbox.as_ref(), OTHER_AGENT, &entry(OTHER_EPOCH, 1)).await;
     for place in 1..=MAX_REPORTS_HELD {
         assert_eq!(
             ingested(inbox.as_ref(), AGENT, &entry(EPOCH, place)).await,
@@ -559,7 +575,7 @@ async fn past_the_cap_the_oldest_give_way_and_are_counted(harness: &dyn ReportIn
         "the count outlives the hub"
     );
     assert_eq!(
-        ingested(inbox.as_ref(), OTHER_AGENT, &entry(EPOCH, 2)).await,
+        ingested(inbox.as_ref(), OTHER_AGENT, &entry(OTHER_EPOCH, 2)).await,
         Some((Ingest::New, None)),
         "another agent's reports are counted apart"
     );
@@ -572,6 +588,57 @@ async fn past_the_cap_the_oldest_give_way_and_are_counted(harness: &dyn ReportIn
     );
     assert_eq!(
         reports(inbox.as_ref(), OTHER_AGENT).await,
-        [entry(EPOCH, 1), entry(EPOCH, 2)]
+        [entry(OTHER_EPOCH, 1), entry(OTHER_EPOCH, 2)]
     );
+}
+
+/// The hub holds a report of an operation once, whichever machine sends
+/// it: one a machine sends again under a new machine ID, after the hub
+/// removed the old one, is acknowledged as a duplicate and not kept a
+/// second time (#1513). Another happening of that operation is new.
+async fn an_operations_report_is_held_once_across_machines(harness: &dyn ReportInboxHarness) {
+    let inbox = harness.empty().await;
+    let inbox = inbox.as_ref();
+    let first = entry(EPOCH, 1);
+    assert_eq!(taken(inbox, AGENT, &first).await, Some(Ingest::New));
+    let again = OutboxEntry {
+        epoch: OTHER_EPOCH,
+        seq: seq(4),
+        report: first.report.clone(),
+    };
+    assert_eq!(
+        taken(inbox, OTHER_AGENT, &again).await,
+        Some(Ingest::Duplicate),
+        "the report sent again under another machine ID"
+    );
+    // The duplicate still raises that machine's watermark: a report of
+    // another operation at an earlier place is one it already sent.
+    let earlier = OutboxEntry {
+        epoch: OTHER_EPOCH,
+        seq: seq(3),
+        report: AgentReport {
+            op_id: op(0x1513),
+            ..first.report.clone()
+        },
+    };
+    assert_eq!(
+        taken(inbox, OTHER_AGENT, &earlier).await,
+        Some(Ingest::Duplicate),
+        "the duplicate raised the other machine's watermark"
+    );
+    let started = OutboxEntry {
+        seq: seq(5),
+        report: AgentReport {
+            happening: Happening::Started,
+            ..first.report.clone()
+        },
+        ..again
+    };
+    assert_eq!(
+        taken(inbox, OTHER_AGENT, &started).await,
+        Some(Ingest::New),
+        "another happening of the operation"
+    );
+    assert_eq!(reports(inbox, AGENT).await, [first]);
+    assert_eq!(reports(inbox, OTHER_AGENT).await, [started]);
 }

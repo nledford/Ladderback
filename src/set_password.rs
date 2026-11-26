@@ -19,10 +19,10 @@ use l10n::{Localizer, MessageId, msg};
 use platform::admin_password::{FILE, FileAdminPassword};
 use platform::data_dir_lock::{DataDirLock, LockError};
 use platform::{dirs, terminal};
-use store::SqliteStore;
+use store::{OpenError, SqliteStore};
 
 use crate::output::to_stderr;
-use crate::{finish, say, text};
+use crate::{finish, said, say, text};
 
 pub(crate) fn set_password(plain: bool) -> ExitCode {
     // Core dumps and debugger attach are off before the password is read
@@ -58,7 +58,9 @@ fn run(localizer: &Localizer) -> io::Result<ExitCode> {
     };
     let kept = FileAdminPassword::in_data_dir(&data_dir);
     let database = data_dir.join(DATABASE);
-    match runtime.block_on(set_forgetting_sessions(&data_dir, &database, &kept, typed)) {
+    match runtime.block_on(set_forgetting_sessions(
+        localizer, &data_dir, &database, &kept, typed,
+    )) {
         Ok(left) => {
             say(localizer, msg::CLI_SET_PASSWORD_DONE, &[])?;
             if let Some(detail) = left {
@@ -104,6 +106,7 @@ const DATABASE: &str = "ladderback.db";
 /// and the sessions end by the password's fingerprint instead, at their next
 /// use or at the next start; with no database there are none to forget.
 async fn set_forgetting_sessions(
+    localizer: &Localizer,
     data_dir: &Path,
     database: &Path,
     kept: &FileAdminPassword,
@@ -119,6 +122,19 @@ async fn set_forgetting_sessions(
     };
     let store = match SqliteStore::open(database).await {
         Ok(store) => store,
+        // A log from before the baseline schema: say how to copy it
+        // (decision 165), not the error's own words.
+        Err(OpenError::OldSchema { version }) => {
+            let detail = said(
+                localizer,
+                msg::CLI_STORE_OLD_SCHEMA,
+                &[
+                    ("path", text(database.display())),
+                    ("version", text(version)),
+                ],
+            );
+            return leaving(kept, typed, Some(detail)).await;
+        }
         Err(error) => return leaving(kept, typed, Some(error.to_string())).await,
     };
     let set = set_admin_password(kept, &store, typed).await;

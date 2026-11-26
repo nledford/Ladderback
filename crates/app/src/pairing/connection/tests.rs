@@ -343,9 +343,10 @@ async fn reports_past_the_cap_are_let_go_of_counted_and_warned_of_once() {
     let identity = paired(&hub, 1).await;
     let waiting = hub.registry.agent(agent_id(1)).await.unwrap().unwrap();
     hub.pairing.approve(&waiting).await.unwrap().unwrap();
-    let operation = Uuid::from_u128(0x0b);
-    let report = AgentReport {
-        op_id: domain::OperationId::from_uuid(operation),
+    // Each report its own operation's, as the hub holds an operation's
+    // happening once (#1513).
+    let report = |n: u64| AgentReport {
+        op_id: domain::OperationId::from_uuid(Uuid::from_u128(0x0b_0000_0000 + u128::from(n))),
         happening: Happening::Started,
         at: EpochSeconds::from_seconds(1_800_000_000),
     };
@@ -354,7 +355,7 @@ async fn reports_past_the_cap_are_let_go_of_counted_and_warned_of_once() {
         let entry = OutboxEntry {
             epoch: earlier,
             seq: ReportSeq::new(place).unwrap(),
-            report: report.clone(),
+            report: report(place),
         };
         inbox
             .ingest(agent_id(1), &entry, hub.clock.now())
@@ -376,16 +377,18 @@ async fn reports_past_the_cap_are_let_go_of_counted_and_warned_of_once() {
         None,
     );
     crate::test_log::capture_the_log();
+    let mut fresh = MAX_REPORTS_HELD;
     for round in [2, 1] {
         for _ in 0..round {
-            outbox.append(&report).await.unwrap();
+            fresh += 1;
+            outbox.append(&report(fresh)).await.unwrap();
         }
         assert_eq!(sync.sync_once().await, Ok(Synced::Replayed { sent: round }));
     }
     let next = OutboxEntry {
         epoch: OutboxEpoch::from_uuid(Uuid::from_u128(0xe1)),
         seq: ReportSeq::new(4).unwrap(),
-        report: report.clone(),
+        report: report(fresh + 1),
     };
     assert_eq!(
         inbox
@@ -409,7 +412,10 @@ async fn reports_past_the_cap_are_let_go_of_counted_and_warned_of_once() {
             agent_id(1).as_uuid()
         )]
     );
-    assert!(!warned.concat().contains(&operation.to_string()));
+    for n in MAX_REPORTS_HELD + 1..=fresh {
+        let operation = Uuid::from_u128(0x0b_0000_0000 + u128::from(n));
+        assert!(!warned.concat().contains(&operation.to_string()));
+    }
 }
 
 /// The hub's reports, on which every new report lets go of one before it.
@@ -556,9 +562,10 @@ async fn reports_far_behind_the_last_taken_are_warned_of_once() {
     let identity = paired(&hub, 1).await;
     let waiting = hub.registry.agent(agent_id(1)).await.unwrap().unwrap();
     hub.pairing.approve(&waiting).await.unwrap().unwrap();
-    let operation = Uuid::from_u128(0x0c);
-    let report = AgentReport {
-        op_id: domain::OperationId::from_uuid(operation),
+    // Each report its own operation's, as the hub holds an operation's
+    // happening once (#1513).
+    let report = |n: u64| AgentReport {
+        op_id: domain::OperationId::from_uuid(Uuid::from_u128(0x0c_0000_0000 + u128::from(n))),
         happening: Happening::Succeeded,
         at: EpochSeconds::from_seconds(1_800_000_000),
     };
@@ -568,7 +575,7 @@ async fn reports_far_behind_the_last_taken_are_warned_of_once() {
         let entry = OutboxEntry {
             epoch,
             seq: ReportSeq::new(place).unwrap(),
-            report: report.clone(),
+            report: report(place),
         };
         inbox
             .ingest(agent_id(1), &entry, hub.clock.now())
@@ -589,9 +596,11 @@ async fn reports_far_behind_the_last_taken_are_warned_of_once() {
         None,
     );
     crate::test_log::capture_the_log();
+    let mut resent = taken_before;
     for round in [1, 2] {
         for _ in 0..round {
-            outbox.append(&report).await.unwrap();
+            resent += 1;
+            outbox.append(&report(resent)).await.unwrap();
         }
         assert_eq!(sync.sync_once().await, Ok(Synced::Replayed { sent: round }));
     }
@@ -612,7 +621,10 @@ async fn reports_far_behind_the_last_taken_are_warned_of_once() {
             agent_id(1).as_uuid()
         )]
     );
-    assert!(!warned.concat().contains(&operation.to_string()));
+    for n in taken_before + 1..=resent {
+        let operation = Uuid::from_u128(0x0c_0000_0000 + u128::from(n));
+        assert!(!warned.concat().contains(&operation.to_string()));
+    }
 }
 
 /// An outbox the agent's database can't read.

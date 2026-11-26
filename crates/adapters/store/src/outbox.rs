@@ -1,5 +1,5 @@
 //! The agent's outbox and the hub's reports of its agents (technical design
-//! §7.2, migration `0021_sync_outbox`): the `Outbox` and `ReportInbox`
+//! §7.2, tables `sync_outbox` to `sync_report_tallies`): the `Outbox` and `ReportInbox`
 //! ports on the store's own file, built only with the hub (decision 122).
 
 use app::ports::{Appended, Ingested, LatestReports, Outbox, OutboxEntry, ReportInbox, StoreError};
@@ -37,8 +37,10 @@ const WATERMARK: &str = "SELECT seq FROM sync_watermarks WHERE machine_id = ? AN
 const RAISE: &str = "INSERT INTO sync_watermarks (machine_id, epoch, seq, ingested_at) \
      VALUES (?, ?, ?, ?) ON CONFLICT (machine_id, epoch) \
      DO UPDATE SET seq = excluded.seq, ingested_at = excluded.ingested_at";
+/// A report the hub already holds of the operation, from whichever machine
+/// ID, is not taken again (#1513).
 const TAKE: &str = "INSERT INTO sync_reports (machine_id, epoch, seq, op_id, happening, code, at) \
-     VALUES (?, ?, ?, ?, ?, ?, ?)";
+     VALUES (?, ?, ?, ?, ?, ?, ?) ON CONFLICT (op_id, happening) DO NOTHING";
 /// The agent's newest epochs by when the hub last took one of each, the
 /// one just taken always among them, however the hub's clock moved.
 const FORGET_EPOCHS: &str = "DELETE FROM sync_watermarks WHERE machine_id = ?1 AND epoch NOT IN \
@@ -215,7 +217,7 @@ impl ReportInbox for SqliteStore {
             .await
             .map_err(unavailable)?;
         let (happening, code) = happening_text(&entry.report.happening);
-        sqlx::query(TAKE)
+        let taken = sqlx::query(TAKE)
             .bind(&agent)
             .bind(&epoch)
             .bind(place(entry.seq))
@@ -225,7 +227,8 @@ impl ReportInbox for SqliteStore {
             .bind(i64::try_from(entry.report.at.seconds()).unwrap_or(i64::MAX))
             .execute(&mut *tx)
             .await
-            .map_err(unavailable)?;
+            .map_err(unavailable)?
+            .rows_affected();
         sqlx::query(FORGET_EPOCHS)
             .bind(&agent)
             .bind(i64::try_from(MAX_EPOCHS_HELD).unwrap_or(i64::MAX))
@@ -233,6 +236,15 @@ impl ReportInbox for SqliteStore {
             .execute(&mut *tx)
             .await
             .map_err(unavailable)?;
+        if taken == 0 {
+            // Its place is taken, so the machine moves on; the report is
+            // held once, under the ID that sent it first.
+            tx.commit().await.map_err(unavailable)?;
+            return Ok(Ingested {
+                ingest: Ingest::Duplicate,
+                dropped: None,
+            });
+        }
         let held: i64 = sqlx::query(TALLY)
             .bind(&agent)
             .fetch_one(&mut *tx)

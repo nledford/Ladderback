@@ -126,6 +126,11 @@ cli-no-data-dir = no data folder: set LADDERBACK_DATA_DIR, or run as a user with
 # $detail (text): the operating system's or the store's own message. It is shown as it came.
 cli-cannot-open-store = cannot open the operation log at { $path }: { $detail }
 
+# The operation log was written by an earlier version of Ladderback, before the baseline schema replaced its migrations (decision 165). The daemon did not start and left the file as it was. It can't be upgraded in place, only copied once into the new schema by the script in Ladderback's source, which keeps a copy of the old file.
+# $path (text): the database file, as the user wrote it.
+# $version (text): the last migration the file holds, a whole number such as 29.
+cli-store-old-schema = the operation log at { $path } is from an earlier version of Ladderback (migration { $version }) and can't be upgraded in place. Stop Ladderback, then copy the log into the new schema once with: node scripts/copy-to-baseline.ts "{ $path }" (a log before migration 29 first needs one start of the last earlier version).
+
 # The operations an earlier run left queued or running could not be ended in the operation log. The daemon did not start, because serving over them would keep a repository held for good.
 # $path (text): the database file, as the user wrote it.
 # $detail (text): the store's own message. It is shown as it came.

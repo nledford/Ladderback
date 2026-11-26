@@ -130,6 +130,15 @@ impl ReportInbox for InMemoryReportInbox {
         received_at: Timestamp,
     ) -> Result<Ingested, StoreError> {
         let mut agents = self.agents.lock().unwrap_or_else(PoisonError::into_inner);
+        // As the store's `sync_reports_once` index: an operation's happening
+        // is held once, whichever machine ID sent it (#1513).
+        let happening = std::mem::discriminant(&entry.report.happening);
+        let held_already = agents.values().any(|other| {
+            other.reports.iter().any(|kept| {
+                kept.report.op_id == entry.report.op_id
+                    && std::mem::discriminant(&kept.report.happening) == happening
+            })
+        });
         let held = agents.entry(agent).or_default();
         let place = held
             .epochs
@@ -157,6 +166,12 @@ impl ReportInbox for InMemoryReportInbox {
         held.epochs
             .sort_by_key(|(epoch, _, at)| (*epoch != entry.epoch, std::cmp::Reverse(*at)));
         held.epochs.truncate(epochs);
+        if held_already {
+            return Ok(Ingested {
+                ingest: Ingest::Duplicate,
+                dropped: None,
+            });
+        }
         held.reports.push(entry.clone());
         let reports = usize::try_from(MAX_REPORTS_HELD).unwrap_or(usize::MAX);
         let over = held.reports.len().saturating_sub(reports);

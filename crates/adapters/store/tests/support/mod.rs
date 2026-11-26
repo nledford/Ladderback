@@ -12,7 +12,7 @@ use app::ports::{BackupSummary, EngineResult, OperationDetail, OperationRecord, 
 use domain::execution::{
     FailureReason, Operation, OperationKind, Target, Trigger, Warning, WarningKind,
 };
-use domain::{OperationId, PlanId, RepositoryId, SnapshotId, Timestamp, Uuid};
+use domain::{AgentId, OperationId, PlanId, RepositoryId, SnapshotId, Timestamp, Uuid};
 use sqlx::sqlite::{SqliteConnectOptions, SqliteConnection};
 use sqlx::{ConnectOptions, Row};
 use store::{OpenError, SqliteStore};
@@ -51,6 +51,18 @@ impl Scratch {
     /// operator's `sqlite3`.
     pub async fn raw(&self) -> SqliteConnection {
         raw_connection(&self.path()).await
+    }
+
+    /// A connection of our own that ignores the schema's CHECKs, as a later
+    /// version that relaxed one could write: the rows the store must still
+    /// report as unreadable, never read as a default.
+    pub async fn unchecked(&self) -> SqliteConnection {
+        let mut conn = self.raw().await;
+        sqlx::query("PRAGMA ignore_check_constraints = ON")
+            .execute(&mut conn)
+            .await
+            .expect("the CHECKs are ignored");
+        conn
     }
 
     /// A connection of our own that never waits for the write lock: it
@@ -397,7 +409,6 @@ pub fn detail_of(op: &Operation, result: Option<&EngineResult>) -> OperationDeta
 /// One operation's columns as the database holds them.
 #[derive(Debug, PartialEq)]
 pub struct Stored {
-    pub agent_id: String,
     pub kind: String,
     pub plan_id: Option<String>,
     pub repo_uuid: Option<String>,
@@ -414,9 +425,7 @@ pub struct Stored {
     pub warning_count: i64,
 }
 
-/// The raw row of operation `n`; the operation must be there. A database
-/// before version 29 names the machine's column `agent_id` (§16, decision
-/// 163), and the migration tests read those too.
+/// The raw row of operation `n`; the operation must be there.
 pub async fn stored_row(conn: &mut SqliteConnection, n: u128) -> Stored {
     let row = sqlx::query("SELECT * FROM operations WHERE id = ?1")
         .bind(id_text(n))
@@ -424,10 +433,6 @@ pub async fn stored_row(conn: &mut SqliteConnection, n: u128) -> Stored {
         .await
         .expect("the operation has a row");
     Stored {
-        agent_id: row
-            .try_get("machine_id")
-            .or_else(|_| row.try_get("agent_id"))
-            .expect("the machine's column"),
         kind: row.get("kind"),
         plan_id: row.get("plan_id"),
         repo_uuid: row.get("repo_uuid"),
@@ -498,4 +503,30 @@ pub async fn rows_of(conn: &mut SqliteConnection, table: &str, column: &str, n: 
         .fetch_one(&mut *conn)
         .await
         .expect("a count")
+}
+
+/// The public key bytes [`register_machine`] gives `machine`: the last
+/// byte of its ID, 32 times.
+pub fn machine_key_bytes(machine: AgentId) -> [u8; 32] {
+    [machine.as_uuid().as_bytes()[15]; 32]
+}
+
+/// Registers `machine` as an approved machine of the hub, as a pairing and
+/// an approval leave it: the hub keeps the plans, progress and ownership
+/// reports of a registered machine only.
+pub async fn register_machine(conn: &mut SqliteConnection, machine: AgentId) {
+    let hostname = format!("machine-{}", machine.as_uuid().simple());
+    sqlx::query(
+        "INSERT INTO machines (id, pubkey, hostname, hostname_key, status, status_at, counter, \
+         last_seen) VALUES (?, ?, ?, ?, 'approved', ?, '00000000000000000000', ?)",
+    )
+    .bind(machine.as_uuid().to_string())
+    .bind(machine_key_bytes(machine).as_slice())
+    .bind(&hostname)
+    .bind(&hostname)
+    .bind(ms(0))
+    .bind(ms(0))
+    .execute(conn)
+    .await
+    .expect("the machine is registered");
 }
