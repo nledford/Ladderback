@@ -95,9 +95,10 @@ pub enum OpenError {
     /// build doesn't know. Opening it would risk its data.
     NewerSchema { version: i64 },
     /// The database was written by a version before the baseline schema
-    /// (§16, decision 165): its migrations are the old set, through
-    /// `version`, which this build no longer ships and can't upgrade. It is
-    /// left as it was, for the one-off copy into a baseline database.
+    /// (§16, decision 165), and its migrations are not ones a release
+    /// shipped (decision 170): a checksum that doesn't match, a gap, or one
+    /// that never finished, through `version`. The store can't copy it into
+    /// the baseline, so it is left as it was.
     OldSchema { version: i64 },
     /// A migration this build ships failed or doesn't match the one applied.
     Migration { detail: String },
@@ -134,6 +135,9 @@ pub struct SqliteStore {
     /// Held shared by each call for as long as it uses the database, and
     /// alone by [`SqliteStore::close`], which so waits for the calls in flight.
     calls: RwLock<()>,
+    /// What the open copied from a log the migrations before the baseline
+    /// left (decision 170).
+    copied: Option<BaselineCopy>,
 }
 
 impl SqliteStore {
@@ -142,42 +146,30 @@ impl SqliteStore {
     ///
     /// The directory must exist: the data directory is the caller's to create.
     /// A database that holds a migration this build doesn't ship, because a
-    /// newer version wrote it, is refused with [`OpenError::NewerSchema`], and
-    /// one the migrations before the baseline schema left, with
-    /// [`OpenError::OldSchema`]; either is left as it was. A failed open
-    /// leaves no connection behind.
+    /// newer version wrote it, is refused with [`OpenError::NewerSchema`] and
+    /// left as it was. One the migrations before the baseline schema left at
+    /// a migration a release shipped is copied into the baseline first,
+    /// keeping the old one beside it ([`BaselineCopy`], decision 170); any
+    /// other such one is refused with [`OpenError::OldSchema`] and left as it
+    /// was. A failed open leaves no connection behind.
     pub async fn open(path: &Path) -> Result<Self, OpenError> {
-        let options = SqliteConnectOptions::new()
-            .filename(path)
-            .create_if_missing(true)
-            .journal_mode(SqliteJournalMode::Wal)
-            // NORMAL would let a power cut take back a commit the hub has
-            // already sent as a lease. On macOS this still leaves a commit
-            // in the drive's own cache: `fullfsync` would flush it, at a
-            // cost decision 164 weighs.
-            .synchronous(SqliteSynchronous::Full)
-            .busy_timeout(BUSY_TIMEOUT)
-            .foreign_keys(true);
-        let pool = SqlitePoolOptions::new()
-            .max_connections(MAX_CONNECTIONS)
-            .acquire_timeout(ACQUIRE_TIMEOUT)
-            .connect_with(options)
-            .await
-            .map_err(|error| OpenError::Database {
-                detail: cap(error.to_string()),
-            })?;
-        let migrated = match old_set(&pool).await {
-            Ok(Some(version)) => Err(OpenError::OldSchema { version }),
-            Ok(None) => MIGRATOR.run(&pool).await.map_err(|error| match error {
-                MigrateError::VersionMissing(version) => OpenError::NewerSchema { version },
-                other => OpenError::Migration {
-                    detail: cap(other.to_string()),
-                },
-            }),
-            Err(error) => Err(OpenError::Migration {
-                detail: cap(error.to_string()),
-            }),
+        let pool = connect(path).await?;
+        let (pool, copied) = match old_set(&pool).await {
+            Ok(Some(version)) => {
+                // The copy replaces the file: no connection may hold it.
+                pool.close().await;
+                let copied = baseline_copy::copy(path, version).await?;
+                (connect(path).await?, copied)
+            }
+            Ok(None) => (pool, None),
+            Err(error) => {
+                pool.close().await;
+                return Err(OpenError::Migration {
+                    detail: cap(error.to_string()),
+                });
+            }
         };
+        let migrated = migrate(&pool).await;
         if let Err(error) = migrated {
             pool.close().await;
             return Err(error);
@@ -185,6 +177,7 @@ impl SqliteStore {
         Ok(Self {
             pool,
             calls: RwLock::new(()),
+            copied,
         })
     }
 
@@ -258,8 +251,41 @@ impl SqliteStore {
     /// What the open copied from a log the migrations before the baseline
     /// left (decision 170), or `None` when it found none.
     pub fn baseline_copy(&self) -> Option<&BaselineCopy> {
-        todo!()
+        self.copied.as_ref()
     }
+}
+
+/// Brings the database's schema up to date (§8.3).
+async fn migrate(pool: &SqlitePool) -> Result<(), OpenError> {
+    MIGRATOR.run(pool).await.map_err(|error| match error {
+        MigrateError::VersionMissing(version) => OpenError::NewerSchema { version },
+        other => OpenError::Migration {
+            detail: cap(other.to_string()),
+        },
+    })
+}
+
+/// The pool on the database at `path`, created when missing.
+async fn connect(path: &Path) -> Result<SqlitePool, OpenError> {
+    let options = SqliteConnectOptions::new()
+        .filename(path)
+        .create_if_missing(true)
+        .journal_mode(SqliteJournalMode::Wal)
+        // NORMAL would let a power cut take back a commit the hub has
+        // already sent as a lease. On macOS this still leaves a commit
+        // in the drive's own cache: `fullfsync` would flush it, at a
+        // cost decision 164 weighs.
+        .synchronous(SqliteSynchronous::Full)
+        .busy_timeout(BUSY_TIMEOUT)
+        .foreign_keys(true);
+    SqlitePoolOptions::new()
+        .max_connections(MAX_CONNECTIONS)
+        .acquire_timeout(ACQUIRE_TIMEOUT)
+        .connect_with(options)
+        .await
+        .map_err(|error| OpenError::Database {
+            detail: cap(error.to_string()),
+        })
 }
 
 /// Ends every running row of the log as failed with `reason`, finished at

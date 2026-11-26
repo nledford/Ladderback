@@ -126,10 +126,16 @@ cli-no-data-dir = no data folder: set LADDERBACK_DATA_DIR, or run as a user with
 # $detail (text): the operating system's or the store's own message. It is shown as it came.
 cli-cannot-open-store = cannot open the operation log at { $path }: { $detail }
 
-# The operation log was written by an earlier version of Ladderback, before the baseline schema replaced its migrations (decision 165). The daemon did not start and left the file as it was. It can't be upgraded in place, only copied once into the new schema by the script in Ladderback's source, which keeps a copy of the old file.
+# The operation log was written before the baseline schema replaced the earlier migrations (decision 165), and its migrations are not ones a release shipped: one was changed, skipped or never finished (decision 170). A log an earlier release left is copied into the new schema on start; this one can't be. The daemon did not start and left the file as it was.
 # $path (text): the database file, as the user wrote it.
 # $version (text): the last migration the file holds, a whole number such as 29.
-cli-store-old-schema = the operation log at { $path } is from an earlier version of Ladderback (migration { $version }) and can't be upgraded in place. Stop Ladderback, then copy the log into the new schema once with: node scripts/copy-to-baseline.ts "{ $path }" (a log before migration 29 first needs one start of the last earlier version).
+cli-store-old-schema = the operation log at { $path } is from an earlier version of Ladderback (migration { $version }), but its migrations are not the ones a release shipped, so it can't be copied into this version's schema. It was left as it was.
+
+# The operation log an earlier release left could not be copied into the new schema on start (decision 170). The daemon did not start and left the file as it was; each start tries again.
+# $path (text): the database file, as the user wrote it.
+# $version (text): the last migration the file holds, a whole number such as 16.
+# $detail (text): the database's or the operating system's own message. It is shown as it came.
+cli-store-baseline-copy-failed = the operation log at { $path } is from an earlier version of Ladderback (migration { $version }) and couldn't be copied into this version's schema: { $detail }. It was left as it was, and the next start tries again.
 
 # The operations an earlier run left queued or running could not be ended in the operation log. The daemon did not start, because serving over them would keep a repository held for good.
 # $path (text): the database file, as the user wrote it.

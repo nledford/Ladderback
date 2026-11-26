@@ -702,17 +702,26 @@ fn refused(localizer: &Localizer, detail: &str) -> io::Result<ExitCode> {
 }
 
 /// The operation log a hub command can't open: one the migrations before
-/// the baseline schema left is named as such, with the way to copy it (§16,
-/// decision 165).
+/// the baseline schema left is named as such, and so is a copy of one into
+/// the baseline that failed (§16, decisions 165 and 170).
 fn log_refused(localizer: &Localizer, path: &Path, error: &OpenError) -> io::Result<ExitCode> {
-    let OpenError::OldSchema { version } = error else {
-        return refused(localizer, &error.to_string());
-    };
-    say(
-        localizer,
-        msg::CLI_STORE_OLD_SCHEMA,
-        &[("path", text(path.display())), ("version", text(version))],
-    )?;
+    match error {
+        OpenError::OldSchema { version } => say(
+            localizer,
+            msg::CLI_STORE_OLD_SCHEMA,
+            &[("path", text(path.display())), ("version", text(version))],
+        )?,
+        OpenError::BaselineCopy { version, detail } => say(
+            localizer,
+            msg::CLI_STORE_BASELINE_COPY_FAILED,
+            &[
+                ("path", text(path.display())),
+                ("version", text(version)),
+                ("detail", text(detail)),
+            ],
+        )?,
+        other => return refused(localizer, &other.to_string()),
+    }
     Ok(ExitCode::FAILURE)
 }
 

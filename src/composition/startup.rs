@@ -591,12 +591,14 @@ pub(super) async fn daemon_at(
     .await;
     let recorded = recorded_repositories(&loaded);
     let database = data_dir.join("ladderback.db");
+    let store = SqliteStore::open(&database)
+        .await
+        .map_err(|error| log_refused(&database, &error))?;
+    if let Some(copy) = store.baseline_copy() {
+        log_baseline_copy(copy);
+    }
     let log = OperationLog {
-        store: Arc::new(
-            SqliteStore::open(&database)
-                .await
-                .map_err(|error| log_refused(&database, &error))?,
-        ),
+        store: Arc::new(store),
         database,
     };
     // Every refusal from here on closes the log first: the refused daemon
@@ -692,6 +694,14 @@ async fn state_over(
     }
     let agent_id = agent_id::load_or_create(data_dir)
         .map_err(|detail| store_refused(data_dir, &detail.to_string()))?;
+    // An earlier build's ID left beside the machine's own (decision 170).
+    if let Ok(Some(earlier)) = agent_id::earlier_beside(data_dir) {
+        log::info!(
+            "the data folder holds an earlier build's agent-id ({}) beside machine-id ({}): machine-id is used, and agent-id is left as it is",
+            earlier.as_uuid().hyphenated(),
+            agent_id.as_uuid().hyphenated()
+        );
+    }
     // Before anything maintains: a data folder copied from another computer
     // runs no forget, prune or adoption (§7.1, §16 decision 144).
     let this_machine: Arc<dyn app::ports::ThisMachine> =
@@ -1426,16 +1436,45 @@ fn store_refused(path: &std::path::Path, detail: &str) -> Refused {
 }
 
 /// The operation log the daemon cannot open: one the migrations before the
-/// baseline schema left is named as such, with the way to copy it (§16,
-/// decision 165).
+/// baseline schema left is named as such, and so is a copy of one into the
+/// baseline that failed (§16, decisions 165 and 170).
 fn log_refused(path: &std::path::Path, error: &OpenError) -> Refused {
     match error {
         OpenError::OldSchema { version } => Refused {
             message: msg::CLI_STORE_OLD_SCHEMA,
             args: vec![("path", text(path.display())), ("version", text(version))],
         },
+        OpenError::BaselineCopy { version, detail } => Refused {
+            message: msg::CLI_STORE_BASELINE_COPY_FAILED,
+            args: vec![
+                ("path", text(path.display())),
+                ("version", text(version)),
+                ("detail", text(detail)),
+            ],
+        },
         other => store_refused(path, &other.to_string()),
     }
+}
+
+/// What the copy of an operation log an earlier release left into the
+/// baseline tells the daemon's log (decision 170): where the old one is
+/// kept, and the rows of each table the baseline's rules dropped as junk.
+fn log_baseline_copy(copy: &store::BaselineCopy) {
+    let dropped: Vec<String> = copy
+        .dropped
+        .iter()
+        .map(|dropped| format!("{} from {}", dropped.rows, dropped.table))
+        .collect();
+    log::info!(
+        "copied the operation log an earlier version left at migration {} into this version's schema; the old log is kept at {}; rows dropped as junk: {}",
+        copy.from_version,
+        copy.kept.display(),
+        if dropped.is_empty() {
+            "none".to_owned()
+        } else {
+            dropped.join(", ")
+        }
+    );
 }
 
 /// What the choice of a location tells the daemon's log (decision 80): for

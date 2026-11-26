@@ -332,8 +332,9 @@ async fn rows_a_crashed_earlier_daemon_left_in_its_write_ahead_log_are_copied() 
 }
 
 /// A start that stopped partway, at any step, left its work files and the
-/// old log, which it never changes: the next start copies the log again,
-/// and a kept copy an earlier start left is replaced by the new one.
+/// old log, which it never changes: the next start copies the log again.
+/// A kept copy an earlier start left is never replaced: it may be the only
+/// untouched original, so the new one takes the next free name.
 #[tokio::test]
 async fn a_start_that_stopped_partway_leaves_the_old_log_and_the_next_start_copies_it() {
     let scratch = Scratch::new();
@@ -347,7 +348,8 @@ async fn a_start_that_stopped_partway_leaves_the_old_log_and_the_next_start_copi
         .expect("a kept copy a crash left");
 
     let store = scratch.open().await;
-    assert!(store.baseline_copy().is_some(), "the log is copied");
+    let copy = store.baseline_copy().expect("the log is copied");
+    assert_eq!(copy.kept, beside(&log, ".before-baseline-2"));
     let page = store
         .list(&HistoryQuery::default())
         .await
@@ -355,9 +357,14 @@ async fn a_start_that_stopped_partway_leaves_the_old_log_and_the_next_start_copi
     assert_eq!(page.operations.len(), 4, "every operation reads back");
     store.close().await;
     assert_eq!(
-        last_migration(&beside(&log, ".before-baseline")).await,
+        fs::read_to_string(beside(&log, ".before-baseline")).expect("the earlier copy is kept"),
+        "an earlier start's copy",
+        "the earlier kept copy is left as it was"
+    );
+    assert_eq!(
+        last_migration(&beside(&log, ".before-baseline-2")).await,
         29,
-        "the kept copy is the old log's"
+        "the new kept copy is the old log's"
     );
     assert_no_work_files_left(&log);
 }

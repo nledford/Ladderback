@@ -34,20 +34,66 @@ async fn database_at_0029(scratch: &Scratch) {
     raw.close().await.expect("the old database is closed");
 }
 
+/// A database the migrations before the baseline left whose migrations
+/// are not ones a release shipped (decision 170): one changed, one
+/// skipped, one never finished, or one no release had. It is refused as
+/// old, left byte for byte as it was, with no file beside it.
 #[tokio::test]
-async fn a_database_the_old_migrations_left_is_refused_as_old_and_left_as_it_was() {
-    let scratch = Scratch::new();
-    database_at_0029(&scratch).await;
-    let before = fs::read(scratch.path()).expect("the database file is readable");
+async fn a_database_whose_old_migrations_no_release_shipped_is_refused_and_left_as_it_was() {
+    let cases = [
+        (
+            "UPDATE _sqlx_migrations SET checksum = zeroblob(48) WHERE version = 12",
+            29,
+        ),
+        ("DELETE FROM _sqlx_migrations WHERE version = 12", 29),
+        (
+            "UPDATE _sqlx_migrations SET success = FALSE WHERE version = 29",
+            29,
+        ),
+        (
+            "INSERT INTO _sqlx_migrations (version, description, success, checksum, execution_time) \
+             VALUES (30, 'unshipped', TRUE, zeroblob(48), 1)",
+            30,
+        ),
+    ];
+    for (change, last) in cases {
+        let scratch = Scratch::new();
+        database_at_0029(&scratch).await;
+        let mut raw = SqliteConnectOptions::new()
+            .filename(scratch.path())
+            .connect()
+            .await
+            .expect("the old database opens");
+        sqlx::query(sqlx::AssertSqlSafe(change))
+            .execute(&mut raw)
+            .await
+            .expect("the old database's migrations are changed");
+        sqlx::query("PRAGMA wal_checkpoint(TRUNCATE)")
+            .execute(&mut raw)
+            .await
+            .expect("the change is in the file");
+        raw.close().await.expect("the old database is closed");
+        let before = fs::read(scratch.path()).expect("the database file is readable");
+        let folder = scratch.path().parent().expect("a folder").to_owned();
+        let files_before = fs::read_dir(&folder).expect("the folder lists").count();
 
-    let error = open_error(&scratch.path()).await;
+        let error = open_error(&scratch.path()).await;
 
-    assert_matches!(error, OpenError::OldSchema { version: 29 });
-    assert_eq!(
-        fs::read(scratch.path()).expect("the database file is readable"),
-        before,
-        "the old database is left byte for byte as it was"
-    );
+        assert!(
+            matches!(error, OpenError::OldSchema { version } if version == last),
+            "{change}: {error:?}"
+        );
+        assert_eq!(
+            fs::read(scratch.path()).expect("the database file is readable"),
+            before,
+            "{change}: the old database is left byte for byte as it was"
+        );
+        assert_eq!(
+            fs::read_dir(&folder).expect("the folder lists").count(),
+            files_before,
+            "{change}: no file is left beside it"
+        );
+    }
 }
 
 /// A row of `operations` with `kind`, `trigger` and `status`, as the store

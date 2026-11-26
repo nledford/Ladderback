@@ -33,6 +33,17 @@ pub fn load(data_dir: &Path) -> io::Result<Option<AgentId>> {
     }
 }
 
+/// The ID in an earlier build's `agent-id` the one-off move left beside
+/// `machine-id`, which is the one used (decision 170), for the daemon's
+/// log to name; `None` when there is none.
+pub fn earlier_beside(data_dir: &Path) -> io::Result<Option<AgentId>> {
+    match read_id_file(&data_dir.join(EARLIER_ID_FILE)) {
+        Ok(text) => parse(&text).map(Some),
+        Err(error) if error.kind() == io::ErrorKind::NotFound => Ok(None),
+        Err(error) => Err(error),
+    }
+}
+
 /// The names an earlier build, 0.5.0 among them, gave the machine ID and
 /// the machine key before decision 163.
 const EARLIER_ID_FILE: &str = "agent-id";
@@ -437,6 +448,26 @@ mod tests {
             fs::read_to_string(data.path().join("machine-key")).unwrap(),
             other
         );
+    }
+
+    /// A `machine-id` beside a different `agent-id`: a build after
+    /// decision 163 chose the machine's new ID, which may be in use since.
+    /// Both are left, `machine-id` is the ID, and the earlier one can be
+    /// named for the daemon's log (decision 170).
+    #[test]
+    fn a_machine_id_beside_an_earlier_agent_id_is_used_and_both_are_left() {
+        let data = earlier_data_folder();
+        let own = "0190a6e4-7a3b-7c3d-8e4f-ba9876543210";
+        write_private(data.path(), "machine-id", &format!("{own}\n"));
+        write_private(data.path(), "machine-key", "0b0b\n");
+        let before = names(data.path());
+
+        let id = load_or_create(data.path()).unwrap();
+
+        assert_eq!(id.as_uuid().hyphenated().to_string(), own);
+        assert_eq!(names(data.path()), before);
+        let earlier = earlier_beside(data.path()).unwrap().unwrap();
+        assert_eq!(earlier.as_uuid().hyphenated().to_string(), EARLIER_ID);
     }
 
     /// Starts at once on an earlier data folder, as a `pair` beside the

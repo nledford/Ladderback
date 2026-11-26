@@ -378,10 +378,11 @@ async fn a_log_that_cannot_be_recovered_stops_the_start_and_keeps_what_it_held()
     );
 }
 
-/// A log the migrations before the baseline schema left (decision 165) is
+/// A log the migrations before the baseline schema left (decision 165)
+/// whose migrations are not ones a release shipped (decision 170) is
 /// refused by name, with its last migration, and nothing is written to it.
 #[tokio::test]
-async fn a_log_from_before_the_baseline_schema_is_refused_as_old() {
+async fn a_log_from_before_the_baseline_schema_no_release_shipped_is_refused_as_old() {
     use sqlx::{ConnectOptions, Connection};
     let scratch = tempfile::tempdir().expect("a scratch dir");
     let (config, data) = own_folders(scratch.path());
@@ -399,6 +400,11 @@ async fn a_log_from_before_the_baseline_schema_is_refused_as_old() {
     .execute(&mut raw)
     .await
     .expect("the old log is filled");
+    // A migration whose checksum no release shipped.
+    sqlx::query("UPDATE _sqlx_migrations SET checksum = zeroblob(48) WHERE version = 12")
+        .execute(&mut raw)
+        .await
+        .expect("the old log's migration is changed");
     // In WAL mode, as the store keeps every log.
     sqlx::query("PRAGMA journal_mode = WAL")
         .execute(&mut raw)

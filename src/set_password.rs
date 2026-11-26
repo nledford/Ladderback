@@ -122,8 +122,21 @@ async fn set_forgetting_sessions(
     };
     let store = match SqliteStore::open(database).await {
         Ok(store) => store,
-        // A log from before the baseline schema: say how to copy it
-        // (decision 165), not the error's own words.
+        // A log from before the baseline schema that can't be copied, or
+        // whose copy failed (decisions 165 and 170): said in the
+        // user's words, not the error's own.
+        Err(OpenError::BaselineCopy { version, detail }) => {
+            let detail = said(
+                localizer,
+                msg::CLI_STORE_BASELINE_COPY_FAILED,
+                &[
+                    ("path", text(database.display())),
+                    ("version", text(version)),
+                    ("detail", text(detail)),
+                ],
+            );
+            return leaving(kept, typed, Some(detail)).await;
+        }
         Err(OpenError::OldSchema { version }) => {
             let detail = said(
                 localizer,
