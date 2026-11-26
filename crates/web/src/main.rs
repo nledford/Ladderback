@@ -666,3 +666,70 @@ fn main() {
     };
     leptos::mount::mount_to(app, move || view! { <App localizer=localizer /> }).forget();
 }
+
+#[cfg(test)]
+mod tests {
+    use l10n::catalog::{Catalog, Source};
+
+    use super::*;
+
+    /// A catalog of the test's own, in words no other catalog has, so each
+    /// link's name can only have come from the localizer it was given.
+    const DE: Catalog = Catalog {
+        tag: "de",
+        sources: &[Source {
+            name: "de.ftl",
+            text: "\
+ui-nav-operations = Vorgänge
+ui-nav-plans = Pläne
+ui-nav-snapshots = Sicherungen
+ui-nav-repositories = Speicherorte
+ui-nav-proposals = Ausstehende Änderungen
+ui-nav-settings = Einstellungen
+ui-nav-log = Protokoll
+",
+        }],
+    };
+
+    fn german() -> Localizer {
+        Localizer::from_catalogs(&["de".parse().unwrap()], &[DE])
+    }
+
+    /// Each page as the bar shows it: its words and the path it links to,
+    /// with how it tells it is current.
+    fn shown(pages: &[(&'static str, MessageId)]) -> Vec<(String, Destination)> {
+        navigation_pages(&german(), pages)
+            .into_iter()
+            .map(|page| (page.words, page.to))
+            .collect()
+    }
+
+    fn section(path: &str) -> Destination {
+        Destination::route(path, Matching::Section).unwrap()
+    }
+
+    #[test]
+    fn the_bar_links_each_page_used_most_in_order_in_the_page_language() {
+        assert_eq!(
+            shown(&PAGES),
+            [
+                ("Vorgänge".to_owned(), section("/operations")),
+                ("Pläne".to_owned(), section("/plans")),
+                ("Sicherungen".to_owned(), section("/snapshots")),
+                ("Speicherorte".to_owned(), section("/repositories")),
+                ("Ausstehende Änderungen".to_owned(), section("/proposals")),
+            ]
+        );
+    }
+
+    #[test]
+    fn the_settings_menu_links_settings_then_the_log_in_the_page_language() {
+        assert_eq!(
+            shown(&SETTINGS_PAGES),
+            [
+                ("Einstellungen".to_owned(), section("/settings")),
+                ("Protokoll".to_owned(), section("/log")),
+            ]
+        );
+    }
+}
