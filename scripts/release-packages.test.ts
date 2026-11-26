@@ -42,7 +42,7 @@ test("a package is installed and removed offline, by the system's own tool", () 
   assert.deepEqual(removeCommand("rpm"), ["dnf", "remove", "--assumeyes", "--disablerepo=*", "ladderback"]);
 });
 
-test("a package may hold the program and its licences only", () => {
+test("a package may hold the program and its licenses only", () => {
   const files = [
     "/usr/bin/ladderback",
     "/usr/share/licenses/ladderback",

@@ -96,7 +96,7 @@ pub struct Download {
     /// the whole.
     pub pieces: BoxStream<'static, Result<Vec<u8>, FailureReason>>,
     /// Writes how the download ended to the operation log once the pieces
-    /// end or are dropped: succeeded, failed, or cancelled when the reader
+    /// end or are dropped: succeeded, failed, or canceled when the reader
     /// went away. The caller runs it beside the pieces, to its end.
     pub recorded: BoxFuture<'static, ()>,
 }
@@ -174,9 +174,9 @@ impl Downloads {
         // Downloads whose minute ran out give their turns back first. This
         // one takes its own before their rows are written, so a slow log
         // can't hand the turns it freed to one asked for after it (#888).
-        let cancelled = self.stop_expired();
+        let canceled = self.stop_expired();
         let turn = Turn::take(&self.under_way);
-        self.write_cancelled(&cancelled).await;
+        self.write_canceled(&canceled).await;
         let turn = turn.ok_or(DownloadError::Busy)?;
         let config = self
             .config
@@ -252,9 +252,9 @@ impl Downloads {
             Ok(()) => Ok(ticket),
             // Unreachable while every waiting download holds one of the
             // DOWNLOADS_AT_ONCE turns, fewer than MAX_PENDING; kept so a
-            // change to either still logs the refused download cancelled.
+            // change to either still logs the refused download canceled.
             Err(confirmed) => {
-                self.write_cancelled(&[self.stop(confirmed)]).await;
+                self.write_canceled(&[self.stop(confirmed)]).await;
                 Err(DownloadError::Busy)
             }
         }
@@ -294,18 +294,18 @@ impl Downloads {
     }
 
     /// Gives up every confirmed download whose minute ran out: its job
-    /// stops, its turn is free again and the log records it cancelled. All
+    /// stops, its turn is free again and the log records it canceled. All
     /// of them stop before the first is written, so a slow log holds no
     /// worker or turn (#888). The caller runs it to its end, on a task of
     /// its own: one dropped halfway leaves the downloads it took running in
     /// the log.
     pub async fn give_up_expired(&self) {
-        let cancelled = self.stop_expired();
-        self.write_cancelled(&cancelled).await;
+        let canceled = self.stop_expired();
+        self.write_canceled(&canceled).await;
     }
 
     /// Stops every confirmed download whose minute ran out and frees its
-    /// turn, and returns their records, cancelled, for the log.
+    /// turn, and returns their records, canceled, for the log.
     fn stop_expired(&self) -> Vec<Operation> {
         let expired = lock(&self.pending).expire(self.clock.now());
         expired
@@ -314,15 +314,15 @@ impl Downloads {
             .collect()
     }
 
-    /// Writes `cancelled` to the log, one after another.
-    async fn write_cancelled(&self, cancelled: &[Operation]) {
-        for operation in cancelled {
+    /// Writes `canceled` to the log, one after another.
+    async fn write_canceled(&self, canceled: &[Operation]) {
+        for operation in canceled {
             let _ = save_within_bound(&*self.clock, &*self.store, operation, None).await;
         }
     }
 
     /// Stops `confirmed`'s job and frees its turn, and returns its record,
-    /// cancelled from now, for the log.
+    /// canceled from now, for the log.
     fn stop(&self, confirmed: Confirmed) -> Operation {
         let mut operation = confirmed.handing.operation.clone();
         drop(confirmed);
@@ -426,7 +426,7 @@ struct Confirmed {
 
 /// What hands a download's pieces over: the engine's job, past what it
 /// found, and the download's record. Dropped before the job ended, it stops
-/// the job and tells the record cancelled.
+/// the job and tells the record canceled.
 struct Handing {
     running: RunningJob,
     operation: Operation,

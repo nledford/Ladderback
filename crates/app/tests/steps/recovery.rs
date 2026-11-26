@@ -193,7 +193,7 @@ fn ending_status(ending: &str) -> OperationStatus {
         "failed because the repository was unreachable" => OperationStatus::Failed {
             reason: unreachable_repository(),
         },
-        "cancelled" => OperationStatus::Cancelled,
+        "canceled" => OperationStatus::Canceled,
         other => panic!("the scenario ends an operation in a way that doesn't exist: {other}"),
     }
 }
@@ -333,7 +333,7 @@ async fn maintenance_running(agent: &mut Agent, kind: String, repository: String
 }
 
 #[given(
-    regex = r#"^the log shows a backup of the plan "([^"]+)" that ended as (succeeded with warnings|succeeded|failed because the repository was unreachable|cancelled)$"#
+    regex = r#"^the log shows a backup of the plan "([^"]+)" that ended as (succeeded with warnings|succeeded|failed because the repository was unreachable|canceled)$"#
 )]
 async fn backup_ended(agent: &mut Agent, plan: String, ending: String) {
     let mut op = agent
@@ -350,7 +350,7 @@ async fn backup_ended(agent: &mut Agent, plan: String, ending: String) {
         "failed because the repository was unreachable" => {
             op.fail(unreachable_repository(), at(70))
         }
-        "cancelled" => op.cancel(at(70)),
+        "canceled" => op.cancel(at(70)),
         other => panic!("the scenario ends an operation in a way that doesn't exist: {other}"),
     };
     ended.expect("a running operation ends");
@@ -705,7 +705,7 @@ async fn backup_still_running(agent: &mut Agent, plan: String) {
 }
 
 #[then(
-    regex = r#"^the log still shows the backup of the plan "([^"]+)" as (succeeded with warnings|succeeded|failed because the repository was unreachable|cancelled)$"#
+    regex = r#"^the log still shows the backup of the plan "([^"]+)" as (succeeded with warnings|succeeded|failed because the repository was unreachable|canceled)$"#
 )]
 async fn backup_keeps_its_ending(agent: &mut Agent, plan: String, ending: String) {
     let seeded = agent.recovery.backup(&plan);

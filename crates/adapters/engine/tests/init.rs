@@ -1,4 +1,4 @@
-//! Initialising a repository through the real worker (§4.1): a `Job::Init`
+//! Initializing a repository through the real worker (§4.1): a `Job::Init`
 //! creates one where nothing is yet, with default key options, both halves of
 //! a hot/cold location, and never overwrites one that is already there. What
 //! the job left behind is checked with `rustic_core` itself, never through
@@ -51,7 +51,7 @@ fn contents(dir: &std::path::Path) -> Vec<(String, Vec<u8>)> {
 }
 
 #[tokio::test]
-async fn initialising_an_empty_location_gives_the_repository_an_id() {
+async fn initializing_an_empty_location_gives_the_repository_an_id() {
     let scratch = Scratch::new();
     let location = Location::local(&scratch.repo_dir());
     let events = run_to_end(&engine(), Job::Init(location.access(PASSWORD))).await;
@@ -63,7 +63,7 @@ async fn initialising_an_empty_location_gives_the_repository_an_id() {
 }
 
 #[tokio::test]
-async fn initialising_where_a_repository_already_exists_is_refused_and_changes_nothing() {
+async fn initializing_where_a_repository_already_exists_is_refused_and_changes_nothing() {
     let scratch = Scratch::new();
     let location = Location::local(&scratch.repo_dir());
     off_runtime(|| location.init());
@@ -77,7 +77,7 @@ async fn initialising_where_a_repository_already_exists_is_refused_and_changes_n
 }
 
 #[tokio::test]
-async fn initialising_where_the_hot_half_holds_a_repository_is_refused_and_changes_nothing() {
+async fn initializing_where_the_hot_half_holds_a_repository_is_refused_and_changes_nothing() {
     let scratch = Scratch::new();
     let location = Location::hot_cold(&scratch.repo_dir(), &scratch.hot_dir());
     // A repository whose config lives only in the hot half: a local init
@@ -93,7 +93,7 @@ async fn initialising_where_the_hot_half_holds_a_repository_is_refused_and_chang
 }
 
 #[tokio::test]
-async fn a_hot_cold_location_is_initialised_in_both_halves() {
+async fn a_hot_cold_location_is_initialized_in_both_halves() {
     let scratch = Scratch::new();
     let location = Location::hot_cold(&scratch.repo_dir(), &scratch.hot_dir());
     let events = run_to_end(&engine(), Job::Init(location.access(PASSWORD))).await;
@@ -111,7 +111,7 @@ async fn a_hot_cold_location_is_initialised_in_both_halves() {
 }
 
 #[tokio::test]
-async fn identifying_the_initialised_repository_reports_the_same_id() {
+async fn identifying_the_initialized_repository_reports_the_same_id() {
     let scratch = Scratch::new();
     let location = Location::local(&scratch.repo_dir());
     let init = run_to_end(&engine(), Job::Init(location.access(PASSWORD))).await;

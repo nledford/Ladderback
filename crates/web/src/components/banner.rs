@@ -132,7 +132,7 @@ pub fn Banner(
                     <span class="banner-icon flex flex-none items-center [min-block-size:1lh]">
                         <Icon
                             glyph=tone.glyph()
-                            meaning=Meaning::Labelled(label.clone())
+                            meaning=Meaning::Labeled(label.clone())
                             tone=tone.tone()
                         />
                     </span>

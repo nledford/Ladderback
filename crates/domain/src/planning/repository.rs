@@ -758,8 +758,8 @@ mod tests {
             "host ",
             "host label",
             "host;label",
-            "colour",
-            "host,colour",
+            "color",
+            "host,color",
         ] {
             assert_eq!(
                 GroupBy::parse(text),

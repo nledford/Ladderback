@@ -236,7 +236,7 @@ mod tests {
             OperationStatus::Failed { reason } => operation
                 .start(at())
                 .and_then(|()| operation.fail(reason.clone(), at())),
-            OperationStatus::Cancelled => operation.cancel(at()),
+            OperationStatus::Canceled => operation.cancel(at()),
         };
         moved.unwrap_or_else(|e| panic!("{status:?}: {e:?}"));
         assert_eq!(operation.status(), status, "the operation is as asked");
@@ -280,7 +280,7 @@ mod tests {
             },
         )
         .await;
-        record(&store, 2, "home", &OperationStatus::Cancelled).await;
+        record(&store, 2, "home", &OperationStatus::Canceled).await;
         record(&store, 3, "home", &not_found()).await;
         // Another repository's success doesn't count for this one.
         record(&store, 4, "docs", &OperationStatus::Succeeded).await;
@@ -316,7 +316,7 @@ mod tests {
             OperationStatus::Succeeded,
             OperationStatus::Queued,
             OperationStatus::Running,
-            OperationStatus::Cancelled,
+            OperationStatus::Canceled,
             OperationStatus::Failed {
                 reason: FailureReason::RepositoryExists,
             },
@@ -334,7 +334,7 @@ mod tests {
     #[tokio::test]
     async fn the_latest_operation_is_the_newest_across_the_repositorys_plans() {
         let store = Arc::new(InMemoryOperationStore::new());
-        record(&store, 1, "photos", &OperationStatus::Cancelled).await;
+        record(&store, 1, "photos", &OperationStatus::Canceled).await;
         record(&store, 2, "home", &not_found()).await;
         record(&store, 3, "docs", &not_found()).await;
         assert_eq!(

@@ -186,7 +186,7 @@ impl Localizer {
 
     /// Whether the host (the browser's `Intl`, or ICU4X) writes the
     /// instants of every locale this localizer looks messages up in. Where
-    /// it doesn't, an instant is written plainly, read in UTC and labelled
+    /// it doesn't, an instant is written plainly, read in UTC and labeled
     /// so (§8.4): a page that shows a clock reading rather than an instant
     /// writes that reading itself there (§16, decision 56).
     pub fn writes_instants(&self) -> bool {

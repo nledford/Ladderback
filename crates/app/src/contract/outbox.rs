@@ -245,10 +245,10 @@ async fn a_failure_keeps_its_code(harness: &dyn OutboxHarness) {
 /// A cancel waits like any other end, and reads back as a cancel.
 async fn a_cancel_is_kept(harness: &dyn OutboxHarness) {
     let outbox = harness.empty().await;
-    let cancelled = report(9, Happening::Cancelled);
-    appended(outbox.as_ref(), &cancelled).await;
+    let canceled = report(9, Happening::Canceled);
+    appended(outbox.as_ref(), &canceled).await;
     let held = waiting(outbox.as_ref()).await;
-    assert_eq!(held.first().map(|entry| &entry.report), Some(&cancelled));
+    assert_eq!(held.first().map(|entry| &entry.report), Some(&canceled));
 }
 
 /// Full, the outbox gives up its oldest start for a new report and says
@@ -414,12 +414,12 @@ async fn a_report_is_taken_once(harness: &dyn ReportInboxHarness) {
 async fn a_cancel_is_taken(harness: &dyn ReportInboxHarness) {
     let inbox = harness.empty().await;
     let inbox = inbox.as_ref();
-    let cancelled = OutboxEntry {
-        report: report(1, Happening::Cancelled),
+    let canceled = OutboxEntry {
+        report: report(1, Happening::Canceled),
         ..entry(EPOCH, 1)
     };
-    assert_eq!(taken(inbox, AGENT, &cancelled).await, Some(Ingest::New));
-    assert_eq!(reports(inbox, AGENT).await, [cancelled]);
+    assert_eq!(taken(inbox, AGENT, &canceled).await, Some(Ingest::New));
+    assert_eq!(reports(inbox, AGENT).await, [canceled]);
 }
 
 async fn a_gap_is_no_reason_to_refuse(harness: &dyn ReportInboxHarness) {

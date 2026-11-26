@@ -297,9 +297,9 @@ async fn finished_operations_are_untouched(store: &dyn OperationStore) {
     )
     .await;
 
-    let mut cancelled = started(queued(0x7204, Some(&photos)));
-    applied(cancelled.cancel(at(40)));
-    save(store, &cancelled, None).await;
+    let mut canceled = started(queued(0x7204, Some(&photos)));
+    applied(canceled.cancel(at(40)));
+    save(store, &canceled, None).await;
 
     let mut before = Vec::new();
     for n in 0x7200..=0x7204 {

@@ -209,7 +209,7 @@ impl UserService {
         }
     }
 
-    /// A launchd agent labelled `label` in `gui/<uid>`, whose plist goes in
+    /// A launchd agent labeled `label` in `gui/<uid>`, whose plist goes in
     /// `home/Library/LaunchAgents` and log in `home/Library/Logs`.
     ///
     /// # Errors

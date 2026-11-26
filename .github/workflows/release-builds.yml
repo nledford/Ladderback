@@ -10,9 +10,9 @@
 # 22.04 and 24.04 and Fedora, and on macOS the binary on the runner.
 #
 # It runs every night, by hand, from release.yml, and on pull requests
-# labelled `release`: release-plz labels each release PR so
+# labeled `release`: release-plz labels each release PR so
 # (release-plz.toml), and a change that could break a release build
-# (dependencies, build settings, features) can be labelled to try it before it
+# (dependencies, build settings, features) can be labeled to try it before it
 # merges. None of its jobs is a required check, and their names must not match
 # one (development.md §13.8).
 #
@@ -50,7 +50,7 @@ env:
 jobs:
   build:
     name: Release archive (${{ matrix.target }})
-    # On a pull request, only one labelled `release`; on `labeled`, only when
+    # On a pull request, only one labeled `release`; on `labeled`, only when
     # that label is the one just added, so another label doesn't build again.
     if: >-
       github.event_name != 'pull_request'
@@ -59,7 +59,7 @@ jobs:
     # One build of each target per pull request or branch: a push cancels the
     # pull request's older build. On the job, not the workflow, so that a run
     # whose builds are skipped (another label added) cancels nothing. Nightly
-    # and manual runs aren't cancelled: GitHub keeps one running and one
+    # and manual runs aren't canceled: GitHub keeps one running and one
     # waiting per group, and a newer waiting run replaces the older one. The
     # event is in the group, so a nightly or manual run on main never replaces
     # a release's waiting build (release.yml runs on `push`).

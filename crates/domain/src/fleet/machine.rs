@@ -302,7 +302,7 @@ mod tests {
     }
 
     #[test]
-    fn a_fingerprint_is_spelt_and_read_as_64_lower_case_hex_digits() {
+    fn a_fingerprint_is_spelled_and_read_as_64_lower_case_hex_digits() {
         let fingerprint = MachineFingerprint([0xa5; KEY_BYTES]);
         let text = fingerprint.to_hex();
         assert_eq!(text, "a5".repeat(KEY_BYTES));

@@ -64,7 +64,7 @@ Feature: One maintenance operation at a time on a repository
       | succeeds               |
       | succeeds with warnings |
       | fails                  |
-      | is cancelled           |
+      | is canceled           |
 
   Scenario: A queued maintenance operation doesn't hold its repository
     Given a prune of the repository "nas" is queued

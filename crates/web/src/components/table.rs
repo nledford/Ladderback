@@ -286,7 +286,7 @@ where
         reply(Politeness::Polite, &said.run(seen));
         focus_element(&after_press);
     });
-    // Its own flex box, centred in the row's line, as the row of actions
+    // Its own flex box, centered in the row's line, as the row of actions
     // (`ACTIONS`, its `[&>.button]:self-center`) stands a button that is
     // the row's own item.
     view! {
@@ -404,7 +404,7 @@ where
         id
     });
     let caption_id = format!("table-{id}-caption");
-    let frame_name = name.frame_labelled_by(&caption_id).to_owned();
+    let frame_name = name.frame_labeled_by(&caption_id).to_owned();
     let pinned = row_header.width;
     let whole = row_header.whole;
     let columns: Arc<Vec<Column<R>>> =
@@ -506,7 +506,7 @@ where
         unreachable,
     } = sentences;
     let caption = name.caption().map(str::to_owned);
-    let labelled_by = name.table_labelled_by().map(str::to_owned);
+    let labeled_by = name.table_labeled_by().map(str::to_owned);
     let row_columns = Arc::clone(&columns);
     // The column a live update changes, what of a row it watches there, and
     // what its marked cell says to a screen reader.
@@ -602,7 +602,7 @@ where
                             >
                                 <table
                                     class="data-table"
-                                    aria-labelledby=labelled_by.clone()
+                                    aria-labelledby=labeled_by.clone()
                                     style:inline-size=move || width.get()
                                 >
                                     {caption

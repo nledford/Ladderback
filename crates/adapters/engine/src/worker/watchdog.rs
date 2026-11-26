@@ -1,11 +1,11 @@
 //! The deadline watchdog (invariant I3, technical design §4.1).
 //!
 //! `rustic_core`'s `backup()` writes the snapshot itself and offers no hook
-//! before that write, and nothing in it can be cancelled. So the worker
+//! before that write, and nothing in it can be canceled. So the worker
 //! watches the wall clock from a thread of its own, and once the deadline has
 //! passed it refuses the snapshot, reports the failure and ends the process:
 //! at once, or, for a backup that archives, once it has wound down as a
-//! cancelled one does (decisions 50 and 55).
+//! canceled one does (decisions 50 and 55).
 
 use std::sync::Arc;
 use std::sync::mpsc::{self, RecvTimeoutError};
@@ -122,7 +122,7 @@ fn watch(
 /// The deadline passed. The snapshot is refused first, so no snapshot write
 /// starts from here on (I3); then the failure goes out as the last line and
 /// the worker ends, at once unless a backup is archiving. That backup winds
-/// down as a cancelled one does (decision 55), finishing a snapshot write
+/// down as a canceled one does (decision 55), finishing a snapshot write
 /// that began before the deadline, and the job ends the worker once rustic
 /// returns; the watchdog waits for it, on `stopped`, for the wind-down limit
 /// and no longer, which bounds a worker whose daemon is gone.
@@ -494,7 +494,7 @@ mod tests {
         assert_eq!(*refused.lock().unwrap(), [true]);
     }
 
-    /// A backup that archives at its deadline winds down as a cancelled one
+    /// A backup that archives at its deadline winds down as a canceled one
     /// does (decision 50): the failure goes out at once, the snapshot is
     /// refused, and the job, not the watchdog, ends the worker once rustic
     /// has saved the index.
@@ -550,14 +550,14 @@ mod tests {
     /// does: rustic writes the snapshot to the hot half and then to the
     /// cold half, and a worker ended between the two would leave it in one
     /// half alone (decision 50). The margin covers the write (I3). The job,
-    /// cancelled by the deadline, then ends the worker with the deadline's
+    /// canceled by the deadline, then ends the worker with the deadline's
     /// code, as `a_backup_whose_deadline_passes_mid_archive_…` shows.
     #[test]
     fn a_deadline_during_the_snapshot_write_lets_it_finish_in_both_halves() {
         use rustic_backend::BackendOptions;
         use rustic_core::{FileType, Id, ReadBackend, RepositoryBackends, WriteBackend};
 
-        use crate::worker::cancel::{Cause, refusing_snapshots_once_cancelled};
+        use crate::worker::cancel::{Cause, refusing_snapshots_once_canceled};
 
         let local = |dir: &std::path::Path| {
             let backend = BackendOptions::default()
@@ -570,7 +570,7 @@ mod tests {
         };
         let (cold_dir, hot_dir) = (tempfile::tempdir().unwrap(), tempfile::tempdir().unwrap());
         let harness = Harness::new();
-        let backends = refusing_snapshots_once_cancelled(
+        let backends = refusing_snapshots_once_canceled(
             &RepositoryBackends::new(local(cold_dir.path()), Some(local(hot_dir.path()))),
             harness.cancel(),
         );

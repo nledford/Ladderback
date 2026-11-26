@@ -149,7 +149,7 @@ async fn a_name_that_is_not_an_alias_is_refused_before_anything_runs() {
             Err(RepositoriesError::AliasInvalid),
             "{name:?}"
         );
-        // An initialisation that would be saved is refused before it
+        // An initialization that would be saved is refused before it
         // creates a repository it couldn't then keep.
         assert_eq!(
             service.init(init(Some(name), settings_dto())).await,
@@ -190,7 +190,7 @@ async fn an_alias_already_used_is_refused_and_the_first_repository_stays() {
 }
 
 #[tokio::test]
-async fn an_initialisation_is_saved_only_when_it_names_an_alias() {
+async fn an_initialization_is_saved_only_when_it_names_an_alias() {
     let (engine, config) = (engine(), Arc::new(InMemoryConfigStore::new()));
     let service = service(&engine, config.clone());
     let answer = service.init(init(None, settings_dto())).await;
@@ -404,7 +404,7 @@ async fn a_relative_path_on_this_machine_is_refused_at_its_setting_and_nothing_r
 }
 
 #[tokio::test]
-async fn an_initialisation_under_an_alias_already_used_runs_no_job() {
+async fn an_initialization_under_an_alias_already_used_runs_no_job() {
     let (engine, config) = (engine(), Arc::new(InMemoryConfigStore::new()));
     let service = service(&engine, config.clone());
     service

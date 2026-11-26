@@ -5,7 +5,7 @@
 //! `/fail` of it.
 //!
 //! The client follows no redirect, reads no answer past its status, and
-//! gives up on a delivery after its timeout. It honours the standard proxy
+//! gives up on a delivery after its timeout. It honors the standard proxy
 //! variables (`HTTP_PROXY`, `HTTPS_PROXY`, `ALL_PROXY`, `NO_PROXY`, in either
 //! case), as the workers do (§10.2); nothing it returns or reports holds the
 //! channel's URL, a token, a proxy's credentials or the HTTP library's own
@@ -71,7 +71,7 @@ impl HttpNotifier {
     /// A notifier whose every delivery ends within `timeout`, writing in the
     /// words of `system` when the agent names no locale of its own.
     pub fn new(system: Localizer, timeout: Duration) -> Result<Self, ClientError> {
-        // No `.no_proxy()`: the standard proxy variables are honoured, read
+        // No `.no_proxy()`: the standard proxy variables are honored, read
         // once here. TLS checks certificates with the platform's verifier.
         let client = Client::builder()
             .timeout(timeout)

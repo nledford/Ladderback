@@ -8,7 +8,7 @@
 //! The client follows no redirect and gives up after its timeout. It reads
 //! at most [`MAX_ANSWER_BYTES`] of the answer, and of it only the newest
 //! release's tag and whether it is a draft or a prerelease: nothing else of
-//! GitHub's text reaches the agent, its log or its pages. It honours the
+//! GitHub's text reaches the agent, its log or its pages. It honors the
 //! standard proxy variables (`HTTP_PROXY`, `HTTPS_PROXY`, `ALL_PROXY`,
 //! `NO_PROXY`, in either case), as the notifications adapter does.
 

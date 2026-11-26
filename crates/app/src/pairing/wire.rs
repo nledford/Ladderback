@@ -200,7 +200,7 @@ pub fn report_payload(entry: &OutboxEntry) -> Vec<u8> {
         Happening::Started => ("started", None),
         Happening::Succeeded => ("succeeded", None),
         Happening::Failed { code } => ("failed", Some(code.as_str().to_owned())),
-        Happening::Cancelled => ("cancelled", None),
+        Happening::Canceled => ("cancelled", None),
     };
     ReportPayload {
         epoch: entry.epoch.as_uuid().to_string(),
@@ -224,7 +224,7 @@ pub fn read_report(bytes: &[u8]) -> Result<OutboxEntry, WireRefused> {
         ("started", None) => Happening::Started,
         ("succeeded", None) => Happening::Succeeded,
         ("failed", Some(Ok(code))) => Happening::Failed { code },
-        ("cancelled", None) => Happening::Cancelled,
+        ("cancelled", None) => Happening::Canceled,
         _ => return Err(WireRefused),
     };
     Ok(OutboxEntry {

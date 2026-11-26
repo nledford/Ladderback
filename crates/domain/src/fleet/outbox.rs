@@ -140,8 +140,8 @@ pub enum Happening {
     Failed {
         code: WireName,
     },
-    /// It was cancelled before it ended on its own.
-    Cancelled,
+    /// It was canceled before it ended on its own.
+    Canceled,
 }
 
 /// One report of the agent's to its hub.

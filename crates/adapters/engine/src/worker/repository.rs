@@ -17,7 +17,7 @@ use rustic_core::{
 };
 
 use super::Context;
-use super::cancel::{DeleteGate, asking_before_removal, refusing_snapshots_once_cancelled};
+use super::cancel::{DeleteGate, asking_before_removal, refusing_snapshots_once_canceled};
 use super::convert::JobError;
 use super::progress::EventProgressBars;
 use super::tmp_files::remove_stale_files;
@@ -25,7 +25,7 @@ use crate::job::{Level, ProbeResult, RepositorySpec};
 
 /// Builds the repository handle, both halves of it when it has a hot one:
 /// the backends, the cache this worker may use, and the progress reporting
-/// through `Context::events`. Opening it — or initialising it — is the
+/// through `Context::events`. Opening it — or initializing it — is the
 /// caller's step.
 pub(crate) fn new_repository(
     ctx: &Context,
@@ -54,7 +54,7 @@ fn repository_asking(
     }
     .to_backends()
     .map_err(crate::rclone::without_command)?;
-    let backends = refusing_snapshots_once_cancelled(&backends, ctx.cancel());
+    let backends = refusing_snapshots_once_canceled(&backends, ctx.cancel());
     let backends = match gate {
         Some(gate) => asking_before_removal(&backends, gate),
         None => backends,
@@ -460,7 +460,7 @@ const REPOSITORY_ENTRIES: [&str; 5] = ["config", "keys", "data", "index", "snaps
 /// there is what an unplugged drive looks like, and a repository made there
 /// would be a new, empty one in the old one's place; a folder that can't be
 /// read is no answer; and a folder holding a repository's other entries
-/// without its config file is an initialisation cut short or a repository
+/// without its config file is an initialization cut short or a repository
 /// that lost its config, which a new repository would be mixed into.
 fn holds_nothing_of_a_repository(folder: &Path) -> bool {
     is_folder(folder)
@@ -1438,7 +1438,7 @@ mod tests {
 
     /// A folder holding what a repository holds beside its config file (a
     /// `keys`, `data`, `index` or `snapshots` folder) is no empty location:
-    /// an initialisation cut short, or a repository whose config file was
+    /// an initialization cut short, or a repository whose config file was
     /// lost. Creating one there would mix a new repository into what is left
     /// of another, so the job fails as `repository-config-not-found` (#525),
     /// never as `repository-not-found` (decision 53), on either half and

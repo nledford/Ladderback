@@ -225,7 +225,7 @@ fn machine_section(
         ..
     } = first;
     let heading_id = format!("dashboard-machine-{agent_id}");
-    let labelled_by = heading_id.clone();
+    let labeled_by = heading_id.clone();
     let then_focus = heading_id.clone();
     let machine = Signal::derive(move || {
         shown.with(|machines| {
@@ -322,7 +322,7 @@ fn machine_section(
     };
     let plans_section = plans_view(localizer, &hostname, machine, viewer, zone);
     view! {
-        <section aria-labelledby=labelled_by>
+        <section aria-labelledby=labeled_by>
             <h2 id=heading_id tabindex="-1">
                 <bdi>{hostname}</bdi>
             </h2>

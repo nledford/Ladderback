@@ -253,7 +253,7 @@ const SNAPSHOTS: Record<string, string> = {
   - radio "Evenings"
   - text: Evenings`,
   "Status badge": `- heading "Status badge" [level=2]
-- paragraph: Queued Running Succeeded Succeeded with warnings Failed Cancelled Empty`,
+- paragraph: Queued Running Succeeded Succeeded with warnings Failed Canceled Empty`,
   Badge: `- heading "Badge" [level=2]
 - paragraph: Pending changes ⁨3⁩ Demo tag Kept by the demo plan's retention rules
 - paragraph: Primary Secondary Success Warning Error`,

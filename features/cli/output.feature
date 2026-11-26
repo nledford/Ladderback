@@ -2,7 +2,7 @@
 Feature: The command line's output
   What `ladderback` prints is read on a terminal, through a screen reader, on
   a terminal that cannot draw, and by scripts through a pipe (§4.5). So
-  colour is never the only signal; `--plain` asks for text with no colour and
+  color is never the only signal; `--plain` asks for text with no color and
   nothing to redraw, a fact to a line; and a command that reports state has
   `--json`, which prints one JSON document on one line of standard output for
   a script to parse. The exit status is the same with and without it: 0 when
@@ -21,10 +21,10 @@ Feature: The command line's output
   asked, so it has no `--json` either.
 
   In the examples, a rustic profile is the file `nas.toml` in the folder the
-  command runs in, and "colour is forced" means `CLICOLOR_FORCE` is set, which
-  makes the programs that honour it colour even a pipe. The commands here
-  always run with output that is not a terminal, so what is coloured is
-  coloured because it was forced.
+  command runs in, and "color is forced" means `CLICOLOR_FORCE` is set, which
+  makes the programs that honor it color even a pipe. The commands here
+  always run with output that is not a terminal, so what is colored is
+  colored because it was forced.
 
   Rule: --json prints one JSON document on one line of standard output
 
@@ -240,14 +240,14 @@ Feature: The command line's output
         | en-XA    |
         | ar-XB    |
 
-  Rule: --plain is text with no colour and nothing to redraw, a fact to a line
+  Rule: --plain is text with no color and nothing to redraw, a fact to a line
 
     Scenario: An import under --plain says its facts one to a line
-      Nothing an import prints is coloured, so no control exists for --plain
-      to remove here. The colour check fails once any of its lines is coloured
-      without honouring the setting.
+      Nothing an import prints is colored, so no control exists for --plain
+      to remove here. The color check fails once any of its lines is colored
+      without honoring the setting.
 
-      Given colour is forced on
+      Given color is forced on
       And a rustic profile "nas.toml" holding:
         """
         [repository]
@@ -290,13 +290,13 @@ Feature: The command line's output
         | --plain import-profile nas.toml |
         | import-profile nas.toml --plain |
 
-    Scenario: The daemon's log is plain on request, though colour is forced
-      Given colour is forced on
+    Scenario: The daemon's log is plain on request, though color is forced
+      Given color is forced on
       When the daemon is started with "--listen 127.0.0.1:0 --plain"
       Then the output is plain text
 
-    Scenario Outline: The help and the usage errors are plain on request, though colour is forced
-      Given colour is forced on
+    Scenario Outline: The help and the usage errors are plain on request, though color is forced
+      Given color is forced on
       When the owner runs "<command line>"
       Then the command exits with status <status>
       And the output is plain text
@@ -307,29 +307,29 @@ Feature: The command line's output
         | import-profile --plain | 2      |
         | --plain --bogus        | 2      |
 
-  Rule: NO_COLOR, and output that is not a terminal, leave a command's output with no colour
+  Rule: NO_COLOR, and output that is not a terminal, leave a command's output with no color
 
-    The first two scenarios are controls: forced colour does colour the help,
+    The first two scenarios are controls: forced color does color the help,
     the usage errors and the daemon's log, so the ones after them can fail.
 
-    Scenario Outline: Forced colour colours the help and the usage errors
-      Given colour is forced on
+    Scenario Outline: Forced color colors the help and the usage errors
+      Given color is forced on
       When the owner runs "<command line>"
       Then the command exits with status <status>
-      And the output has colour
+      And the output has color
 
       Examples:
         | command line | status |
         | --help       | 0      |
         | --bogus      | 2      |
 
-    Scenario: Forced colour colours the daemon's log
-      Given colour is forced on
+    Scenario: Forced color colors the daemon's log
+      Given color is forced on
       When the daemon is started with "--listen 127.0.0.1:0"
-      Then the output has colour
+      Then the output has color
 
-    Scenario Outline: NO_COLOR beats forced colour in the help and the usage errors
-      Given colour is forced on
+    Scenario Outline: NO_COLOR beats forced color in the help and the usage errors
+      Given color is forced on
       And NO_COLOR is set
       When the owner runs "<command line>"
       Then the command exits with status <status>
@@ -341,18 +341,18 @@ Feature: The command line's output
         | import-profile | 2      |
         | --bogus        | 2      |
 
-    Scenario: NO_COLOR beats forced colour in the daemon's log
-      Given colour is forced on
+    Scenario: NO_COLOR beats forced color in the daemon's log
+      Given color is forced on
       And NO_COLOR is set
       When the daemon is started with "--listen 127.0.0.1:0"
       Then the output is plain text
 
-    Scenario: An import prints no control under NO_COLOR, though colour is forced
-      Nothing an import prints is coloured, so no control exists for NO_COLOR
-      to remove here. It fails once any of its lines is coloured without
-      honouring the setting.
+    Scenario: An import prints no control under NO_COLOR, though color is forced
+      Nothing an import prints is colored, so no control exists for NO_COLOR
+      to remove here. It fails once any of its lines is colored without
+      honoring the setting.
 
-      Given colour is forced on
+      Given color is forced on
       And NO_COLOR is set
       And a rustic profile "nas.toml" holding:
         """
@@ -371,13 +371,13 @@ Feature: The command line's output
       Then the command exits with status 0
       And the output is plain text
 
-    Scenario: A terminal type alone colours nothing that goes to a pipe
+    Scenario: A terminal type alone colors nothing that goes to a pipe
       Given the environment sets "TERM" to "xterm-256color"
       When the owner runs "--help"
       Then the command exits with status 0
       And the output is plain text
 
-    Scenario: A terminal type alone colours nothing the daemon logs to a file
+    Scenario: A terminal type alone colors nothing the daemon logs to a file
       Given the environment sets "TERM" to "xterm-256color"
       When the daemon is started with "--listen 127.0.0.1:0"
       Then the output is plain text

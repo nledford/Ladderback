@@ -35,14 +35,14 @@ Feature: A machine's plans and its running operation's progress reach its hub
     And the agent's sync with its hub runs
     Then the hub shows no progress of the agent
 
-  Scenario: A cancelled backup's progress isn't shown
+  Scenario: A canceled backup's progress isn't shown
     Given the agent started a backup
     And the backup has backed up 40 of 100 bytes
     And the agent's sync with its hub ran
-    When the backup is cancelled
+    When the backup is canceled
     And the agent's sync with its hub runs
     Then the hub shows no progress of the agent
-    And the hub shows the agent's backup was cancelled
+    And the hub shows the agent's backup was canceled
 
   Scenario: The progress is sent at most every 5 seconds
     Given the agent started a backup

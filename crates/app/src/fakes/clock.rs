@@ -50,7 +50,7 @@ impl State {
     }
 
     fn wake_due(&mut self) {
-        // A dropped receiver means the sleeper was cancelled; nothing to wake.
+        // A dropped receiver means the sleeper was canceled; nothing to wake.
         let due: Vec<_> = self
             .sleepers
             .extract_if(.., |(deadline, _)| match deadline {

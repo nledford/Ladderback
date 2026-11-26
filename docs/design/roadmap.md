@@ -64,10 +64,10 @@ A **usable personal tool** (M0–M2: scheduled, lock-free backups with notificat
 | Risk | Mitigation |
 |---|---|
 | `rustic_core` is pre-1.0, so its API changes | Depend on one minor release of each crate. All usage goes through the `engine` crate. Contract tests run against a temp repo in CI |
-| A `rustic_core` release changes behaviour (a chunker cut, a prune rule) | Move to a new release only deliberately, in a commit of its own: its breaking changes read against I2 and I3, the kill test and contract tests green, and the engine's start of an `rclone:` server compared with rustic's `rclone.rs` (decision 58) |
+| A `rustic_core` release changes behavior (a chunker cut, a prune rule) | Move to a new release only deliberately, in a commit of its own: its breaking changes read against I2 and I3, the kill test and contract tests green, and the engine's start of an `rclone:` server compared with rustic's `rclone.rs` (decision 58) |
 | A `rustic_core` upgrade adds or changes option fields | Ladderback-owned option types with a parity test per mapped struct (§6.1) |
 | Divergence from rustic CLI profile semantics (list replacement, hook levels, `use-profiles`) | Golden tests: parse the rustic repo's `config/*.toml` examples and compare against expected plans; export round-trip test (§6.2) |
-| rustic CLI behaviour Ladderback's export relies on changes (e.g. `[forget] filter-*` starts working, `[snapshot-filter]` semantics change) | Export golden test runs against the rustic CLI version CI pins |
+| rustic CLI behavior Ladderback's export relies on changes (e.g. `[forget] filter-*` starts working, `[snapshot-filter]` semantics change) | Export golden test runs against the rustic CLI version CI pins |
 | A long backup collides with prune's `keep-delete` window | Worker deadline, owner prune guard and duration warnings (§7.3); 6-day default `keep-delete` |
 | Clock skew between agent and hub weakens the deadline | Clock offset recorded per agent; warning above 5 min; the 1 h margin absorbs smaller skew |
 | SQLite failure on unusual filesystems | Daily copy, `db rebuild`, CI on btrfs and Docker volumes (§9) |

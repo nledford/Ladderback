@@ -110,11 +110,11 @@ Feature: A repository reached at several locations
       And the operation used the location "public"
       And the operation shows the location "office" as not tried
 
-    Scenario: A run cancelled while a location is tried tries no later location
+    Scenario: A run canceled while a location is tried tries no later location
       Given the location "lan" doesn't answer within 8 seconds
       And the location "public" is "rest:http://backup.example.net/nas" with a user and a password in it
       And the location "public" answers
-      When the plan "home" is cancelled while the location "lan" is tried
+      When the plan "home" is canceled while the location "lan" is tried
       Then the location "public" was never tried
       And no probe of a location still runs
 
@@ -326,7 +326,7 @@ Feature: A repository reached at several locations
       Then the operation ends as failed with the reason "no location's rule holds"
       And the operation names each location and why its rule didn't hold
 
-    Scenario: A rule on a repository of one location is honoured
+    Scenario: A rule on a repository of one location is honored
       Given a repository "solo" with one location that is eligible only on a wired network
       And the machine is on Wi-Fi
       When a person runs a backup of "solo" now

@@ -373,7 +373,7 @@ fn happening_text(happening: &Happening) -> (&'static str, Option<&str>) {
         Happening::Started => ("started", None),
         Happening::Succeeded => ("succeeded", None),
         Happening::Failed { code } => ("failed", Some(code.as_str())),
-        Happening::Cancelled => ("cancelled", None),
+        Happening::Canceled => ("cancelled", None),
     }
 }
 
@@ -409,7 +409,7 @@ fn report_of(row: &SqliteRow) -> Result<AgentReport, StoreError> {
         ("failed", Some(code)) => Happening::Failed {
             code: WireName::parse(&code).map_err(|_| corrupt("code"))?,
         },
-        ("cancelled", None) => Happening::Cancelled,
+        ("cancelled", None) => Happening::Canceled,
         _ => return Err(corrupt("happening")),
     };
     Ok(AgentReport {

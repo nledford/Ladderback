@@ -1119,3 +1119,13 @@ fn the_hubs_dtos_show_what_they_bind_to_and_hide_their_secrets_in_debug() {
     };
     assert_eq!(format!("{end:?}"), "EndRecoveryDto { .. }");
 }
+
+/// A machine's canceled operation keeps the British spelling on the wire:
+/// changing it would change what the hub's dashboard reads.
+#[test]
+fn a_machines_cancel_keeps_its_wire_spelling() {
+    assert_eq!(
+        serde_json::to_string(&MachineOutcomeDto::Canceled).unwrap(),
+        r#""cancelled""#
+    );
+}

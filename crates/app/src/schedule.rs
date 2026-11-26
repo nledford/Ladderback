@@ -239,7 +239,7 @@ enum Retrying {
     /// follows.
     Started(RetryScheduled),
     /// Started, and its series ended since by another run of the plan that
-    /// succeeded or was cancelled: its run's end plans nothing more.
+    /// succeeded or was canceled: its run's end plans nothing more.
     Stopped,
 }
 
@@ -1451,7 +1451,7 @@ mod tests {
     async fn another_run_that_ends_the_series_stops_its_started_retry() {
         let scheduler = scheduler("2026-06-10T03:20:00Z", Arc::new(Started::default()));
         for trigger in [Trigger::Manual, Trigger::Schedule] {
-            for outcome in [RunOutcome::Succeeded, RunOutcome::Cancelled] {
+            for outcome in [RunOutcome::Succeeded, RunOutcome::Canceled] {
                 for retrying in [
                     Retrying::Started(retry_at("2026-06-10T03:10:00Z")),
                     Retrying::Stopped,
@@ -1477,7 +1477,7 @@ mod tests {
         for outcome in [
             RunOutcome::Failed,
             RunOutcome::Succeeded,
-            RunOutcome::Cancelled,
+            RunOutcome::Canceled,
         ] {
             let mut plans = home_retrying(Retrying::Stopped);
             scheduler

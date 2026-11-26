@@ -322,15 +322,15 @@ fn in_every_status(kind: OperationKind, target: &Target) -> Vec<Operation> {
     failed
         .fail(FailureReason::EngineExited { exit_code: None }, at(2))
         .unwrap();
-    let mut cancelled = running();
-    cancelled.cancel(at(2)).unwrap();
+    let mut canceled = running();
+    canceled.cancel(at(2)).unwrap();
     vec![
         queued(),
         running(),
         succeeded,
         with_warnings,
         failed,
-        cancelled,
+        canceled,
     ]
 }
 

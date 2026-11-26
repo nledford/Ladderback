@@ -129,7 +129,7 @@ impl RunQueue {
         state.queue.hold();
     }
 
-    /// Lets go of the hold of a restart that was cancelled, and starts the
+    /// Lets go of the hold of a restart that was canceled, and starts the
     /// waiting runs that may start now (`BackupQueue::release`).
     pub fn release(&self) {
         let mut state = self.state.lock().unwrap_or_else(PoisonError::into_inner);

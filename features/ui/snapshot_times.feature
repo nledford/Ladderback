@@ -38,7 +38,7 @@ Feature: The time a listed snapshot was taken
   # Decision 56's laptop, flown from Auckland to Hawaii: two snapshots 46
   # hours apart, both taken on 10 November by their own clocks, viewed in
   # Hawaii. Only the one taken in Auckland names its offset.
-  Scenario: A laptop that travelled shows each snapshot on the day its own clock read
+  Scenario: A laptop that traveled shows each snapshot on the day its own clock read
     Given a demo plan "home" with a tiny scratch repository
     And the plan "home" holds snapshots taken at:
       | 2026-11-10 23:30:00-10:00 |

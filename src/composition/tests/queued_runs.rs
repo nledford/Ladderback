@@ -34,7 +34,7 @@ async fn a_backup_started_while_another_runs_waits_for_its_turn() {
     runner
         .cancel(first, http_adapter::Canceller::Session)
         .await
-        .expect("the first run is cancelled");
+        .expect("the first run is canceled");
     tokio::time::timeout(
         std::time::Duration::from_secs(5),
         entered.wait_for(|entries| *entries >= 2),
@@ -45,7 +45,7 @@ async fn a_backup_started_while_another_runs_waits_for_its_turn() {
     runner
         .cancel(second, http_adapter::Canceller::Session)
         .await
-        .expect("the second run is cancelled");
+        .expect("the second run is canceled");
 }
 
 /// The end the runner's next backup says, within a few seconds.
@@ -72,14 +72,14 @@ async fn a_backup_started_now_says_how_it_ended() {
     runner
         .cancel(started, http_adapter::Canceller::Session)
         .await
-        .expect("the run is cancelled");
+        .expect("the run is canceled");
     assert_eq!(
         said_end(&ends).await,
         Some(app::retry::RunEnd {
             operation,
             plan: domain::PlanId::parse("home").expect("a plan ID"),
             trigger: Trigger::Manual,
-            outcome: app::retry::RunOutcome::Cancelled,
+            outcome: app::retry::RunOutcome::Canceled,
         })
     );
 }
@@ -115,14 +115,14 @@ async fn a_resumed_backup_says_how_it_ended() {
             http_adapter::Canceller::Session,
         )
         .await
-        .expect("the run is cancelled");
+        .expect("the run is canceled");
     assert_eq!(
         said_end(&ends).await,
         Some(app::retry::RunEnd {
             operation,
             plan: domain::PlanId::parse("home").expect("a plan ID"),
             trigger: Trigger::Retry,
-            outcome: app::retry::RunOutcome::Cancelled,
+            outcome: app::retry::RunOutcome::Canceled,
         })
     );
 }

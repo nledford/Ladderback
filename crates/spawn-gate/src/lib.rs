@@ -84,7 +84,7 @@ pub async fn hold_blocking<T: Send + 'static>(
         .await
         .map_err(|error| match error.try_into_panic() {
             Ok(payload) => std::panic::resume_unwind(payload),
-            Err(cancelled) => std::io::Error::other(cancelled),
+            Err(canceled) => std::io::Error::other(canceled),
         })
 }
 

@@ -1,14 +1,14 @@
 //! The HTTP notifier meets the `Notifier` contract against channels served on
 //! loopback: one small HTTP server reads each request as a webhook, an ntfy
 //! server or a healthchecks server would, and answers as the channel's
-//! behaviour says.
+//! behavior says.
 
 use std::collections::HashMap;
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex, PoisonError};
 use std::time::Duration;
 
-use app::contract::notifier::{Behaviour, NotifierHarness, Received, ReceivedAuth};
+use app::contract::notifier::{Behavior, NotifierHarness, Received, ReceivedAuth};
 use app::ports::Notifier;
 use base64::Engine as _;
 use domain::notifications::{ChannelKind, Ping};
@@ -64,7 +64,7 @@ impl NotifierHarness for LoopbackHarness {
         &self.notifier
     }
 
-    fn url(&self, kind: ChannelKind, behaviour: Behaviour) -> String {
+    fn url(&self, kind: ChannelKind, behavior: Behavior) -> String {
         let number = self.next.fetch_add(1, Ordering::Relaxed);
         self.served
             .kinds
@@ -72,13 +72,13 @@ impl NotifierHarness for LoopbackHarness {
             .unwrap_or_else(PoisonError::into_inner)
             .insert(number, kind);
         let port = self.port;
-        match behaviour {
-            Behaviour::Accepts => format!("http://127.0.0.1:{port}/accept/{number}"),
-            Behaviour::Answers(status) => {
+        match behavior {
+            Behavior::Accepts => format!("http://127.0.0.1:{port}/accept/{number}"),
+            Behavior::Answers(status) => {
                 format!("http://127.0.0.1:{port}/status/{status}/{number}")
             }
-            Behaviour::Hangs => format!("http://127.0.0.1:{port}/hang/{number}"),
-            Behaviour::Refuses => {
+            Behavior::Hangs => format!("http://127.0.0.1:{port}/hang/{number}"),
+            Behavior::Refuses => {
                 // A port that was free a moment ago, and that nothing listens at.
                 let listener = std::net::TcpListener::bind("127.0.0.1:0").expect("a port");
                 let port = listener.local_addr().expect("an address").port();

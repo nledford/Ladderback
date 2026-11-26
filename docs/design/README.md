@@ -55,7 +55,7 @@ The design is split by topic. A `§N` or `§N.N` mentioned anywhere in the repos
   - [12.1 Versioning and releases](operations.md#121-versioning-and-releases)
 - [13. Development method](development.md#13-development-method)
   - [13.1 Test first, always](development.md#131-test-first-always)
-  - [13.2 Behaviour first (BDD)](development.md#132-behaviour-first-bdd)
+  - [13.2 Behavior first (BDD)](development.md#132-behavior-first-bdd)
   - [13.3 Test levels by ring](development.md#133-test-levels-by-ring)
   - [13.4 Definition of done](development.md#134-definition-of-done)
   - [13.5 Robustness rules](development.md#135-robustness-rules)
@@ -100,7 +100,7 @@ The web UI meets **WCAG 2.2 AA** ([PRODUCT.md](../../PRODUCT.md)). These rules b
 | A2 | Every control, image, chart and status has a role and an accessible name that contains its visible label, and status is never shown by color alone (1.1.1, 1.3.1, 1.4.1, 2.5.3, 4.1.2). | Semantic HTML first; status is icon + text + color (§4.5) | axe-core on every page and state; UI steps find elements by role and name only, so an unnamed control fails its scenario |
 | A3 | Changes nobody asked for (progress, an operation finishing, an agent going offline) reach screen readers without flooding them, and live updates can be paused (4.1.3, 2.2.2). | One app-wide announcer fed by `UiEvent`s; a "Pause live updates" control (§4.5) | Announcer unit tests with a fake clock; screen-reader pass per milestone |
 | A4 | Text has 4.5:1 contrast and UI components 3:1. Pages reflow at 320 × 256 CSS px without two-dimensional scrolling, resize text to 200 %, and survive user text-spacing overrides (1.4.3, 1.4.4, 1.4.10, 1.4.11, 1.4.12). | Design tokens; fluid layout with logical properties and relative units | A token contrast test; axe-core; Playwright at 320 × 256, with 200 % root font size and with the 1.4.12 spacing stylesheet injected |
-| A5 | Destructive actions can be reviewed and cancelled, and step-up confirmation is no cognitive test: paste and password managers work (3.3.4, 3.3.8). | Confirmation dialog component; `autocomplete` attributes; paste never blocked (§4.5, §10.4) | Keyboard and screen-reader journeys for restore and step-up confirmation |
+| A5 | Destructive actions can be reviewed and canceled, and step-up confirmation is no cognitive test: paste and password managers work (3.3.4, 3.3.8). | Confirmation dialog component; `autocomplete` attributes; paste never blocked (§4.5, §10.4) | Keyboard and screen-reader journeys for restore and step-up confirmation |
 | A6 | Form errors are identified in text, with a suggestion where one is known, and announced on submit (3.3.1, 3.3.3, 1.3.5). | Text field component and error summary (§4.5) | Component contracts; journeys that submit invalid input |
 
 ---

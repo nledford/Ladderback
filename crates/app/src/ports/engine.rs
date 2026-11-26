@@ -134,7 +134,7 @@ pub enum Job {
     /// found there. A read, never written to the operation log; the daemon
     /// kills it at its bound.
     Probe(RepositoryAccess),
-    /// Initialises a repository at the location, with default key options,
+    /// Initializes a repository at the location, with default key options,
     /// and reports its ID. It refuses when a repository already exists
     /// there, and never overwrites one.
     Init(RepositoryAccess),
@@ -625,7 +625,7 @@ pub enum EngineEvent {
     Started {
         index_read_at: Timestamp,
         /// The ID of the repository the job opened. `None` for a job that
-        /// opens none: a fake job, and an initialisation, which reports the
+        /// opens none: a fake job, and an initialization, which reports the
         /// new repository's ID in its result.
         repository: Option<RepositoryId>,
     },

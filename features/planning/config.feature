@@ -137,7 +137,7 @@ Feature: An agent's configuration
         | keep-count       | -2                     |
         | keep-within      | -1d                    |
         | maintenance      | sometimes              |
-        | group-by         | colour                 |
+        | group-by         | color                 |
         | on-failure       | explode                |
         | hook-command     | echo 'never closed     |
         | hook-program     | ./notify.sh --done     |
@@ -216,10 +216,10 @@ Feature: An agent's configuration
         [repositories.nas]
         repository = "/srv/demo-repo"
         password = "CANARY-inline-password"
-        colour = "red"
+        color = "red"
         """
       When the agent loads the config file
-      Then the load is refused because the key "repositories.nas.colour" is unknown
+      Then the load is refused because the key "repositories.nas.color" is unknown
       And the refusal points at line 6 of the config file
       And the refusal never shows "CANARY-inline-password"
 

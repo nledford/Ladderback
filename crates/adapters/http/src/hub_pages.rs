@@ -255,7 +255,7 @@ fn machine_dto(machine: &Machine) -> api::HubMachineDto {
                         api::MachineOutcomeDto::Failed,
                         Some(code.as_str().to_owned()),
                     ),
-                    ReportedOutcome::Cancelled => (api::MachineOutcomeDto::Cancelled, None),
+                    ReportedOutcome::Canceled => (api::MachineOutcomeDto::Canceled, None),
                 };
                 api::MachineOperationDto {
                     operation: operation.op_id.as_uuid().to_string(),

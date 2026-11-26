@@ -628,10 +628,10 @@ fn a_queued_operation_can_fail_before_it_starts() {
 }
 
 #[test]
-fn queued_and_running_operations_can_be_cancelled() {
+fn queued_and_running_operations_can_be_canceled() {
     for mut op in [queued(), running()] {
         op.cancel(t(30)).unwrap();
-        assert_eq!(op.status(), &OperationStatus::Cancelled);
+        assert_eq!(op.status(), &OperationStatus::Canceled);
         assert_eq!(op.finished_at(), Some(t(30)));
     }
 }
@@ -670,10 +670,10 @@ fn a_finished_operation_refuses_every_transition() {
     failed
         .fail(FailureReason::EngineExited { exit_code: None }, t(20))
         .unwrap();
-    let mut cancelled = running();
-    cancelled.cancel(t(20)).unwrap();
+    let mut canceled = running();
+    canceled.cancel(t(20)).unwrap();
 
-    for finished in [succeeded, with_warnings, failed, cancelled] {
+    for finished in [succeeded, with_warnings, failed, canceled] {
         assert!(finished.status().is_finished());
         let mut op = finished.clone();
         assert!(op.start(t(40)).is_err());
@@ -888,7 +888,7 @@ fn only_a_failure_for_no_repository_at_the_location_found_none() {
         OperationStatus::Running,
         OperationStatus::Succeeded,
         OperationStatus::SucceededWithWarnings,
-        OperationStatus::Cancelled,
+        OperationStatus::Canceled,
         failed(FailureReason::RepositoryExists),
         failed(FailureReason::DaemonStopped),
         failed(FailureReason::RepositoryConfigNotFound {
@@ -923,7 +923,7 @@ fn an_attached_warning_promotes_only_a_bare_success() {
 }
 
 #[test]
-fn a_cancelled_operation_takes_no_attached_warning() {
+fn a_canceled_operation_takes_no_attached_warning() {
     let mut op = running();
     op.cancel(t(20)).unwrap();
     assert!(op.attach_warning(hook_warning("3")).is_err());
@@ -1004,12 +1004,12 @@ fn a_failure_to_open_or_read_the_repository_tells_it_unreadable() {
 }
 
 #[test]
-fn an_operation_unfinished_cancelled_or_failed_for_its_own_reason_tells_nothing() {
+fn an_operation_unfinished_canceled_or_failed_for_its_own_reason_tells_nothing() {
     let failed = |reason| OperationStatus::Failed { reason };
     for status in [
         OperationStatus::Queued,
         OperationStatus::Running,
-        OperationStatus::Cancelled,
+        OperationStatus::Canceled,
         failed(FailureReason::EngineFailed {
             detail: "source unreadable".to_owned(),
         }),

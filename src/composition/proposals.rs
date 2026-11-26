@@ -291,7 +291,7 @@ impl http_adapter::Proposals for ProposalService {
             let how = if ended.is_panic() {
                 "panicked"
             } else {
-                "was cancelled"
+                "was canceled"
             };
             log::warn!("the approval of proposal {id} {how}");
             ProposalsError::Unavailable {
@@ -954,7 +954,7 @@ sources = ["/home/demo"]
                 invalid(2, "plan", ChangeProblem::UnknownPlan),
             ),
             (
-                json!({"kind": "add-plan", "plan": {"id": "b", "repository": "demo", "sources": ["/b"], "colour": null}}),
+                json!({"kind": "add-plan", "plan": {"id": "b", "repository": "demo", "sources": ["/b"], "color": null}}),
                 ProposalsError::InvalidBody,
             ),
         ] {

@@ -24,7 +24,7 @@
 //     LADDERBACK_DATA_DIR, LADDERBACK_CACHE_DIR) with no D-Bus session, and
 //     `GET /` answers 200 with the embedded web UI, whose wasm has neither the
 //     pseudolocales nor the component gallery (§4.5);
-//   - a scratch local repository initialised through `/api/v1`, and one backup
+//   - a scratch local repository initialized through `/api/v1`, and one backup
 //     of a folder of demo files into it, which succeeds and leaves one snapshot.
 // With `--package <file>` (a .deb, a .rpm or both; §16 decision 123), each
 // container also installs the package of its system's format, the .deb in
@@ -35,7 +35,7 @@
 //   - the install puts `ladderback` at /usr/bin/ladderback, byte for byte the
 //     binary checked above (the packages hold the archive's binary, never a
 //     rebuild), and `--version` says the same version as that binary should;
-//   - the package holds the program and its licences only, has no maintainer
+//   - the package holds the program and its licenses only, has no maintainer
 //     scripts and carries the version nfpm writes for the release;
 //   - removing it takes the program away and leaves the person's folders alone.
 // The results go to standard output as Markdown, and are appended to the file
@@ -604,7 +604,7 @@ async function checkProgram(place: Place, version: string, report: Report): Prom
       JSON.stringify({ settings: { repository, password: { source: "file", path: passwordFile } } }),
     );
     if (
-      !report.add("a scratch repository is initialised", init.status === 201, `${init.status} ${init.body.toString().slice(0, 300)}`)
+      !report.add("a scratch repository is initialized", init.status === 201, `${init.status} ${init.body.toString().slice(0, 300)}`)
     )
       return;
 
@@ -730,7 +730,7 @@ async function checkPackage(
       .filter((line) => line !== "");
     const extra = unexpectedFiles(files);
     report.add(
-      "the package holds the program and its licences only",
+      "the package holds the program and its licenses only",
       files.length > 0 && extra.length === 0,
       extra.length > 0 ? `also: ${extra.join(", ")}` : `${files.length} files`,
     );
@@ -748,7 +748,7 @@ async function checkPackage(
     report.add(`${format} removes`, removal.status === 0, `${removeCommand(format)[0]} exit ${removal.status}${exit(removal)}`);
     const left = await shell("test -e /usr/bin/ladderback && echo present || echo gone");
     report.add("the program is gone", said(left) === "gone", said(left));
-    // An .rpm that doesn't own its licence folder leaves it behind, empty.
+    // An .rpm that doesn't own its license folder leaves it behind, empty.
     const leftovers = said(await shell("ls -d /usr/share/doc/ladderback /usr/share/licenses/ladderback 2>/dev/null || true"));
     report.add("none of the package's folders is left", leftovers === "", leftovers === "" ? "none" : leftovers);
     const still = await shell(installedVersionScript(format));

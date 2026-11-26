@@ -172,9 +172,9 @@ fn minutes_before_deadline(agent: &mut Agent, minutes: i64) {
     agent.job.deadline_budget = Some(SignedDuration::from_mins(minutes));
 }
 
-#[then("the operation ends as cancelled")]
-fn cancelled(agent: &mut Agent) {
-    assert_eq!(agent.operation().status(), &OperationStatus::Cancelled);
+#[then("the operation ends as canceled")]
+fn canceled(agent: &mut Agent) {
+    assert_eq!(agent.operation().status(), &OperationStatus::Canceled);
 }
 
 #[then("the operation ends as failed because its deadline passed")]

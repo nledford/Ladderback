@@ -2,7 +2,7 @@ Feature: Backup deadline
   A backup must write its snapshot before a prune elsewhere can delete data
   that the index it read still points to (invariant I3). A backup still
   running at its deadline stops without writing a snapshot and fails. What
-  it had already saved stays in the repository's index, as a cancelled
+  it had already saved stays in the repository's index, as a canceled
   backup's does, so the next backup reuses it. A snapshot already being
   written at the deadline is finished, so that a repository with a hot and
   a cold half never has it in one half alone; the backup fails all the same.

@@ -1,8 +1,8 @@
 # Decision 36: Repository jobs have a deadline
 
-**A test, a connection or an initialisation from the Repositories page gets 2 minutes (`REPOSITORY_JOB_BUDGET`, a constant), and a repository that has not answered by then is refused with `repository-timed-out` (503) and its worker killed** (recorded 2026-11-10, §4.2, #98).
+**A test, a connection or an initialization from the Repositories page gets 2 minutes (`REPOSITORY_JOB_BUDGET`, a constant), and a repository that has not answered by then is refused with `repository-timed-out` (503) and its worker killed** (recorded 2026-11-10, §4.2, #98).
 
-The connection and a saving initialisation hold the configuration lock across the job, so a backend that never answers (an `sftp:` host that drops packets, an `rclone` remote that never starts) held every other save until the worker's own timeouts ran out, which for a hang after the first line are none.
+The connection and a saving initialization hold the configuration lock across the job, so a backend that never answers (an `sftp:` host that drops packets, an `rclone` remote that never starts) held every other save until the worker's own timeouts ran out, which for a hang after the first line are none.
 
 - **Two minutes.** Two minutes is long for a healthy open, which reads a few small files, and short enough that a person waiting on the page gives up on the lock before they give up on the daemon.
 - **Not configurable.** It is not configurable: a setting would be a second way to hold the lock for a long time, and nothing in the design asks for one.

@@ -3139,7 +3139,7 @@
       "openWorldHint": false,
       "readOnlyHint": true
     },
-    "description": "Waits until an operation finishes or the timeout passes, then returns whether it finished and the operation as get_operation does; when its warnings are too many to read, none are listed, unlisted-warnings is absent and its warning-codes still name them. Sends progress notifications when the call asks for them. Cancelling the call stops the wait, not the operation.",
+    "description": "Waits until an operation finishes or the timeout passes, then returns whether it finished and the operation as get_operation does; when its warnings are too many to read, none are listed, unlisted-warnings is absent and its warning-codes still name them. Sends progress notifications when the call asks for them. Canceling the call stops the wait, not the operation.",
     "inputSchema": {
       "$schema": "https://json-schema.org/draft/2020-12/schema",
       "additionalProperties": false,
@@ -3706,7 +3706,7 @@
       "openWorldHint": false,
       "readOnlyHint": false
     },
-    "description": "Asks a queued or running backup to stop, however it started; it then ends as cancelled. Maintenance can't be cancelled from here.",
+    "description": "Asks a queued or running backup to stop, however it started; it then ends as canceled. Maintenance can't be canceled from here.",
     "inputSchema": {
       "$schema": "https://json-schema.org/draft/2020-12/schema",
       "additionalProperties": false,

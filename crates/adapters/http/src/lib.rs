@@ -100,7 +100,7 @@ pub struct AppState {
     /// How a request reads the configuration's plans, repositories and
     /// snapshots.
     pub catalog: Arc<dyn Catalog>,
-    /// How a request tests, connects and initialises a repository.
+    /// How a request tests, connects and initializes a repository.
     pub repositories: Arc<dyn Repositories>,
     /// How a request reads, creates, changes and deletes a plan.
     pub plans: Arc<dyn Plans>,
@@ -431,7 +431,7 @@ pub enum LookupError {
     Unknown,
 }
 
-/// Why an operation couldn't be cancelled.
+/// Why an operation couldn't be canceled.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum CancelError {
     /// The log has no operation with this ID.
@@ -531,7 +531,7 @@ fn read_ui_file(folder: &Path, path: &str) -> Option<Asset> {
 /// history, one operation, cancel — the catalog routes the pages read: the
 /// plans, the repositories, one repository's snapshots — the routes that
 /// maintain a repository: its history by owner, a preview of each run and
-/// the start of one — the routes that test, connect and initialise a
+/// the start of one — the routes that test, connect and initialize a
 /// repository, the routes that read, create, change and delete a plan, the
 /// session route that signs in and out, the route that signs out everywhere,
 /// the sign-in settings' route, and the route that sets the admin password. A
@@ -1071,7 +1071,7 @@ async fn get_operation(
 
 /// Cancels a running operation (§4.2): the empty JSON body the JSON-body
 /// rule asks of every mutating method, and a polite cancel — the worker
-/// stops, the finally-hooks run, the operation ends cancelled. An API token
+/// stops, the finally-hooks run, the operation ends canceled. An API token
 /// cancels backups only; anything else it is refused as needing a session.
 async fn cancel_operation(
     State(state): State<AppState>,

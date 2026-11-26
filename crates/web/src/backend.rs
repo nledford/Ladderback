@@ -177,7 +177,7 @@ impl OperationsState {
             // The fleet's comings and goings, a machine's approval and
             // reports, a retry planned and a proposal's status are no row of
             // this table: the retry is one once it is queued. A cancel is
-            // the settle-poll's, which the page that cancelled runs (§4.4).
+            // the settle-poll's, which the page that canceled runs (§4.4).
             UiEvent::MachineOnline { .. }
             | UiEvent::MachineOffline { .. }
             | UiEvent::MachinePending { .. }
@@ -187,7 +187,7 @@ impl OperationsState {
             | UiEvent::MachinePlans { .. }
             | UiEvent::MachineProgress { .. }
             | UiEvent::BackupRetrying { .. }
-            | UiEvent::OperationCancelled { .. }
+            | UiEvent::OperationCanceled { .. }
             | UiEvent::ProposalChanged { .. } => {}
         }
     }

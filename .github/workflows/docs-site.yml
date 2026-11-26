@@ -116,7 +116,7 @@ jobs:
       name: github-pages
       url: ${{ steps.deployment.outputs.page_url }}
     # One deploy at a time across runs, and one in progress is never
-    # cancelled: a newer run waits, and replaces any run still waiting.
+    # canceled: a newer run waits, and replaces any run still waiting.
     concurrency:
       group: docs-site-pages
       cancel-in-progress: false

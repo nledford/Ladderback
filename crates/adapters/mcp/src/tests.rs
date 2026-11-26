@@ -2487,7 +2487,7 @@ async fn a_wait_sends_no_progress_when_the_call_carries_no_token() {
 }
 
 #[tokio::test(start_paused = true)]
-async fn cancelling_a_wait_stops_the_wait_and_never_the_operation() {
+async fn canceling_a_wait_stops_the_wait_and_never_the_operation() {
     let running = Running::forever();
     let (reads, details, cancels) = (
         Arc::clone(&running.reads),
@@ -2526,17 +2526,17 @@ async fn cancelling_a_wait_stops_the_wait_and_never_the_operation() {
     let after = *reads.lock().unwrap();
     assert!(
         after <= 2,
-        "the wait went on after its call was cancelled: {after} reads"
+        "the wait went on after its call was canceled: {after} reads"
     );
     assert!(cancels.lock().unwrap().is_empty(), "{cancels:?}");
     // Its answer is dropped, so the detail isn't read for it.
     assert_eq!(*details.lock().unwrap(), 0);
-    // The session goes on, and the cancelled call is never answered.
+    // The session goes on, and the canceled call is never answered.
     let answer = client.ask_current("tools/list", json!({})).await;
     assert!(answer["result"]["tools"].is_array(), "{answer}");
     assert!(
         client.others.iter().all(|message| message["id"] != waiting),
-        "the cancelled call was answered: {:?}",
+        "the canceled call was answered: {:?}",
         client.others
     );
 }
@@ -2972,10 +2972,10 @@ async fn a_token_that_only_reads_is_listed_only_the_tools_that_read() {
     );
 }
 
-/// Cancelling reads the operation first, so it needs Backups beside Backup
+/// Canceling reads the operation first, so it needs Backups beside Backup
 /// runs; a scheduler that only starts backups is offered no cancel.
 #[tokio::test(start_paused = true)]
-async fn backup_runs_alone_open_starting_and_testing_but_not_cancelling() {
+async fn backup_runs_alone_open_starting_and_testing_but_not_canceling() {
     let mut client = proposing(granting(PermissionsDto {
         backup_runs: PermissionLevelDto::StartAndCancel,
         ..PermissionsDto::default()

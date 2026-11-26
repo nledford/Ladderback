@@ -58,7 +58,7 @@ const RCLONE_SECRET_NAMES: [&str; 1] = ["key"];
 /// file, are not secrets. Anything whose value comes from a `${…}` reference
 /// is a secret whatever its name.
 pub fn is_secret_option(name: &str) -> bool {
-    let name = normalised(name);
+    let name = normalized(name);
     if NOT_SECRETS.contains(&name.as_str()) {
         return false;
     }
@@ -71,7 +71,7 @@ pub fn is_secret_option(name: &str) -> bool {
 /// credential: what [`is_secret_option`] takes for one, and the
 /// [`RCLONE_SECRET_NAMES`].
 pub(super) fn is_rclone_secret_option(name: &str) -> bool {
-    is_secret_option(name) || RCLONE_SECRET_NAMES.contains(&normalised(name).as_str())
+    is_secret_option(name) || RCLONE_SECRET_NAMES.contains(&normalized(name).as_str())
 }
 
 /// The words that end the name of an rclone flag that says where a
@@ -106,7 +106,7 @@ const NOT_SECRET_FLAGS: [&str; 6] = [
 /// on this machine whatever its name says (`--key`, the TLS key of `rclone
 /// serve`) is the caller's to know.
 pub(crate) fn is_rclone_secret_flag(name: &str) -> bool {
-    let name = normalised(name);
+    let name = normalized(name);
     if WHERE_A_CREDENTIAL_IS.iter().any(|end| name.ends_with(end)) {
         return false;
     }
@@ -131,7 +131,7 @@ pub fn is_command_option(name: &str) -> bool {
 }
 
 /// `name` in lower case with `-` read as `_`.
-fn normalised(name: &str) -> String {
+fn normalized(name: &str) -> String {
     name.to_ascii_lowercase().replace('-', "_")
 }
 

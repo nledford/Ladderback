@@ -58,7 +58,7 @@ fn systemd_word(text: &str) -> String {
     format!("\"{}\"", text.replace('%', "%%"))
 }
 
-/// The launchd agent labelled `label` that runs `program serve
+/// The launchd agent labeled `label` that runs `program serve
 /// --service-managed` from login on, and again after any exit launchd didn't
 /// ask for (`KeepAlive` true, #1035): a `bootout` unloads the agent, so only
 /// that stops it for good. It writes its log to `log`, and launchd waits

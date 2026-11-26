@@ -618,11 +618,11 @@ export class ScriptedDaemon {
     });
   }
 
-  /** The backup of `plan` ends cancelled: its log has the end, and the page
-   *  is told nothing, as a page takes no news from a cancelled run's event.
+  /** The backup of `plan` ends canceled: its log has the end, and the page
+   *  is told nothing, as a page takes no news from a canceled run's event.
    *  A page that asked for the cancel finds the end by reading the
    *  history. */
-  isCancelled(plan: string, finishedAt: string): void {
+  isCanceled(plan: string, finishedAt: string): void {
     const backup = this.#backupOf(plan);
     backup.status = "cancelled";
     backup["finished-at"] = finishedAt;

@@ -1,5 +1,5 @@
 //! How the command line's output is chosen (technical design §4.5): whether
-//! plain output was asked for, what `clap` may colour, how a command that
+//! plain output was asked for, what `clap` may color, how a command that
 //! reports state says it (in words, or as a document with `--json`), and what
 //! a command does when nobody reads its output any more.
 //!
@@ -30,10 +30,10 @@ pub(crate) fn asked_for_plain(args: &[OsString]) -> bool {
         .any(|arg| arg == "--plain")
 }
 
-/// The colour `clap` may use in its help and its usage errors: none when
+/// The color `clap` may use in its help and its usage errors: none when
 /// plain output was asked for; otherwise whatever the environment and the
 /// terminal say.
-pub(crate) fn clap_colour(plain: bool) -> ColorChoice {
+pub(crate) fn clap_color(plain: bool) -> ColorChoice {
     if plain {
         ColorChoice::Never
     } else {
@@ -253,7 +253,7 @@ mod tests {
     use l10n::Localizer;
 
     use super::{
-        Report, asked_for_plain, clap_colour, escaped, escaped_error, refusal_said, status_after,
+        Report, asked_for_plain, clap_color, escaped, escaped_error, refusal_said, status_after,
         status_of_parser, write_json, write_text,
     };
 
@@ -310,9 +310,9 @@ mod tests {
     }
 
     #[test]
-    fn plain_output_gets_no_colour_and_the_rest_is_left_to_the_terminal() {
-        assert_eq!(clap_colour(true), ColorChoice::Never);
-        assert_eq!(clap_colour(false), ColorChoice::Auto);
+    fn plain_output_gets_no_color_and_the_rest_is_left_to_the_terminal() {
+        assert_eq!(clap_color(true), ColorChoice::Never);
+        assert_eq!(clap_color(false), ColorChoice::Auto);
     }
 
     #[test]

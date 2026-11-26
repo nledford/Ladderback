@@ -743,7 +743,7 @@ mod tests {
         );
     }
 
-    /// A stop's SIGTERM goes to the worker alone: a cancelled backup winds
+    /// A stop's SIGTERM goes to the worker alone: a canceled backup winds
     /// down through the rclone or ssh its backend started (§4.1), which the
     /// signal must not end first. What the worker started is killed once the
     /// worker has exited.

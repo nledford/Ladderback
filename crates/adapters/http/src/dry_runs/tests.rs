@@ -353,7 +353,7 @@ async fn a_body_that_is_not_the_request_is_refused_unread() {
     let (bearer, _) = daemon.token(&[Permission::Configuration]).await;
     for body in [
         "not json",
-        r#"{"plan":{"id":"home"},"colour":"red"}"#,
+        r#"{"plan":{"id":"home"},"color":"red"}"#,
         r#"{"plan":"id = 'home'"}"#,
     ] {
         let response = daemon

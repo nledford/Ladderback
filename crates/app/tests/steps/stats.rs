@@ -387,8 +387,8 @@ async fn check_runs(agent: &mut Agent, named: String) {
     agent.finished = Some(use_case.execute(prepared, future::pending()).await);
 }
 
-#[when(expr = "a check of {string} is cancelled while it reads the stats")]
-async fn check_cancelled_while_reading(agent: &mut Agent, named: String) {
+#[when(expr = "a check of {string} is canceled while it reads the stats")]
+async fn check_canceled_while_reading(agent: &mut Agent, named: String) {
     demo(agent, &named).await;
     let (asked, stats_asked) = oneshot::channel();
     *agent
@@ -397,9 +397,9 @@ async fn check_cancelled_while_reading(agent: &mut Agent, named: String) {
         .lock()
         .unwrap_or_else(PoisonError::into_inner) = Some(asked);
     let (use_case, prepared) = started_check(agent).await;
-    let (cancel, cancelled) = oneshot::channel::<()>();
+    let (cancel, canceled) = oneshot::channel::<()>();
     let mut run = pin!(use_case.execute(prepared, async move {
-        let _ = cancelled.await;
+        let _ = canceled.await;
     }));
     // The check runs until the engine has its stats job, which it never
     // answers.
@@ -407,12 +407,12 @@ async fn check_cancelled_while_reading(agent: &mut Agent, named: String) {
         panic!("the check ended before it read the stats: {finished:?}");
     }
     let _ = cancel.send(());
-    // Nothing the run waits for once cancelled is the engine's, so it ends
+    // Nothing the run waits for once canceled is the engine's, so it ends
     // in the poll that sees the cancel.
     agent.finished = Some(
         run.as_mut()
             .now_or_never()
-            .expect("the check ends once it is cancelled"),
+            .expect("the check ends once it is canceled"),
     );
 }
 

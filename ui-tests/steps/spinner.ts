@@ -43,7 +43,7 @@ Then("the button {string} holds a spinner a screen reader skips", async function
 // set in the same line finds that middle; every run of text in the line is
 // in one font, so runs on one baseline share their top and bottom.
 Then(
-  "the spinner labelled {string} stands in its line of text, its label on the line's baseline and its drawing centered on the text",
+  "the spinner labeled {string} stands in its line of text, its label on the line's baseline and its drawing centered on the text",
   async function (this: BrowserWorld, label: string) {
     const text = demoSection(this.page, "Spinner").getByText(label, { exact: true });
     await expect(text).toBeVisible();

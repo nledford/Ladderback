@@ -671,11 +671,11 @@ pub(crate) async fn finished_backups(agent: &mut Agent, count: usize, plan: Stri
     }
 }
 
-#[when("the operation is cancelled")]
+#[when("the operation is canceled")]
 async fn cancel_the_operation(agent: &mut Agent) {
     let id = agent.ops.the_operation();
     // The daemon answers a start before it has recorded the operation and
-    // registered it to be cancelled, so a cancel sent at once can find
+    // registered it to be canceled, so a cancel sent at once can find
     // neither. Such a cancel is sent again: a refusal stands only when the
     // operation is unknown after a while, or has ended.
     let started = Instant::now();
@@ -704,7 +704,7 @@ async fn cancel_the_operation(agent: &mut Agent) {
     }
 }
 
-#[when(expr = "the operation {string} is cancelled")]
+#[when(expr = "the operation {string} is canceled")]
 fn cancel_a_named_operation(agent: &mut Agent, id: String) {
     agent.ops.started.push(id.clone());
     cancel(agent, &id);
@@ -761,8 +761,8 @@ async fn shows_succeeded(agent: &mut Agent) {
     shows_status(agent, &id, "succeeded").await;
 }
 
-#[then("the history page shows the operation cancelled")]
-async fn shows_cancelled(agent: &mut Agent) {
+#[then("the history page shows the operation canceled")]
+async fn shows_canceled(agent: &mut Agent) {
     let id = agent.ops.the_operation();
     shows_status(agent, &id, "cancelled").await;
 }

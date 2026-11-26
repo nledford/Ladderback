@@ -3,9 +3,9 @@ Feature: The operation lifecycle
   A person starts, watches, cancels and reads back the operations of their
   plans (technical design §4.2). The history page is the record: newest
   first, one page at a time, and it holds running operations too, so a page
-  that arrives late still sees them before it subscribes. Cancelling is
+  that arrives late still sees them before it subscribes. Canceling is
   polite: the operation stops, its finally-hooks run, and the log shows it
-  cancelled.
+  canceled.
 
   Background:
     Given Ladderback is serving on loopback with the plan "home"
@@ -25,7 +25,7 @@ Feature: The operation lifecycle
     When the daemon starts a backup of the plan "home"
     Then the history page shows the operation running
 
-  Scenario: The history page is newest first and honours its cursor and the plan filter
+  Scenario: The history page is newest first and honors its cursor and the plan filter
     When the daemon has finished 3 backups of the plan "home"
     Then the history page lists them newest first
     And the history page after the newest operation's cursor omits it
@@ -38,21 +38,21 @@ Feature: The operation lifecycle
   # does. The cancel finds the backup running however fast the machine. A
   # worker already waiting there can't wind down, so the daemon ends it once
   # its 35 s grace is over; cancel.feature covers the polite wind-down.
-  Scenario: Cancelling a running backup stops it
+  Scenario: Canceling a running backup stops it
     Given the plan's source holds a file the backup waits on until it is let go
     And the plan runs a finally hook that notes it ran
     When the daemon starts a backup of the plan "home"
-    And the operation is cancelled
-    Then the history page shows the operation cancelled
+    And the operation is canceled
+    Then the history page shows the operation canceled
     And the plan's finally hook has run
 
-  Scenario: Cancelling a finished operation is refused
+  Scenario: Canceling a finished operation is refused
     When the daemon has finished 1 backup of the plan "home"
-    And the operation is cancelled
+    And the operation is canceled
     Then the refusal is typed "operation-not-running"
 
-  Scenario: Cancelling an operation the log has none of is refused
-    When the operation "018f0000-0000-7000-8000-00000000dead" is cancelled
+  Scenario: Canceling an operation the log has none of is refused
+    When the operation "018f0000-0000-7000-8000-00000000dead" is canceled
     Then the refusal is typed "operation-unknown"
 
   Scenario: A history page whose cursor isn't an operation is refused

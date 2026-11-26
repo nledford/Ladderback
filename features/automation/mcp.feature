@@ -344,7 +344,7 @@ Feature: AI agents and scripts use Ladderback through MCP
     And the MCP client waits for that operation
     Then the wait says the operation finished as "cancelled"
 
-  Scenario: Maintenance can't be cancelled through MCP
+  Scenario: Maintenance can't be canceled through MCP
     Given Ladderback is serving on loopback with the plan "home"
     And an MCP server connected to it
     When the owner checks the repository and the check ends

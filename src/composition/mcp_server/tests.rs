@@ -1990,7 +1990,7 @@ fn operation_named(answer: &serde_json::Value) -> serde_json::Value {
     }
     match &result["structuredContent"]["operation"] {
         serde_json::Value::Object(operation) => operation["id"].clone(),
-        cancelled => cancelled.clone(),
+        canceled => canceled.clone(),
     }
 }
 

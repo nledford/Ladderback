@@ -252,12 +252,12 @@ async fn an_operation_that_tells_nothing_of_reading_leaves_the_last_that_did() {
     let mut log = Log::default();
     log.failed(Some("home"), None, FailureReason::RepositoryNotFound)
         .await;
-    let mut cancelled = log.started(OperationKind::Backup, Some("home"), None);
-    let at = cancelled.queued_at();
-    cancelled
+    let mut canceled = log.started(OperationKind::Backup, Some("home"), None);
+    let at = canceled.queued_at();
+    canceled
         .cancel(at)
-        .unwrap_or_else(|e| panic!("a running backup is cancelled: {e:?}"));
-    log.keep(&cancelled).await;
+        .unwrap_or_else(|e| panic!("a running backup is canceled: {e:?}"));
+    log.keep(&canceled).await;
     log.failed(
         Some("home"),
         None,

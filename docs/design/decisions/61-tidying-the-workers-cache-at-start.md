@@ -4,7 +4,7 @@
 
 What is removed, in a folder named exactly as a repository ID (64 lowercase hex digits), and in it only from the folders named as a slot's number (`0` to `63`, no leading zero):
 
-- **A repository no entry records** (removed from the configuration, or initialised again under a new ID): every slot no worker holds, then the repository's folder once it is empty. While an entry records no ID, there is none (below).
+- **A repository no entry records** (removed from the configuration, or initialized again under a new ID): every slot no worker holds, then the repository's folder once it is empty. While an entry records no ID, there is none (below).
 - **Spare slots of every other repository:** the slots above the highest one in use. Slot 0 is always in use, being the one a lone job takes; a slot is in use too when another process's worker holds its lock (one that outlived a restarted daemon, or one of another daemon sharing the cache folder), or when its lock can't be looked at. A moment of many workers at once then leaves its slots behind only until the next start.
 - **Unfinished files** in every slot a repository keeps: regular files named as rustic names one, `<64 hex digits>-tmp-`, last written more than a day before. rustic writes a cache file there and renames it once it is complete, so a worker killed in between leaves it behind for good. The day is the one the worker's own clean-up of a local repository's temporary files waits (§4.1).
 

@@ -743,10 +743,10 @@ fn a_value_the_model_refuses_is_reported_with_its_key_and_its_place() {
             "\"sometimes\"",
         ),
         refused(
-            repository_with("password-env = \"X\"\ngroup-by = \"colour\"\n"),
+            repository_with("password-env = \"X\"\ngroup-by = \"color\"\n"),
             "repositories.nas.group-by",
             ValueKind::GroupBy,
-            "\"colour\"",
+            "\"color\"",
         ),
     ];
     assert_refused_where_written(rows);
@@ -1174,9 +1174,9 @@ fn unknown(file: String, key: &'static str, at: Option<&'static str>) -> Unknown
 fn an_unknown_key_is_reported_with_its_file_and_line() {
     let rows = [
         unknown(
-            "schema = 1\ncolour = \"red\"\n".to_owned(),
-            "colour",
-            Some("colour"),
+            "schema = 1\ncolor = \"red\"\n".to_owned(),
+            "color",
+            Some("color"),
         ),
         unknown(
             "schema = 1\n\n[agent]\nhostnam = \"demo\"\n".to_owned(),
@@ -1208,7 +1208,7 @@ fn an_unknown_key_is_reported_with_its_file_and_line() {
             "repositories.nas.prune-everything",
             Some("prune-everything"),
         ),
-        // Not modelled yet: refused rather than silently ignored.
+        // Not modeled yet: refused rather than silently ignored.
         unknown(
             "schema = 1\n\n[hub]\nurl = \"https://hub.example.lan:9899\"\n".to_owned(),
             "hub",
@@ -1464,7 +1464,7 @@ fn what_is_wrong_in_a_migrated_file_has_a_key_and_no_line() {
 #[test]
 fn an_error_names_the_file_as_it_was_given() {
     let file = std::path::Path::new("demo/config.toml");
-    let error = config_adapter::parse(file, "schema = 1\ncolour = 1\n", &Schemas::production())
+    let error = config_adapter::parse(file, "schema = 1\ncolor = 1\n", &Schemas::production())
         .expect_err("unknown key");
     assert_matches!(&error, ConfigError::Invalid { file, .. } if file == "demo/config.toml");
 }
@@ -1472,11 +1472,11 @@ fn an_error_names_the_file_as_it_was_given() {
 #[test]
 fn a_secret_written_in_a_file_that_is_refused_is_not_repeated() {
     // Inline passwords and a secret in a command line, beside the mistake.
-    let text = "schema = 1\ncolour = 1\n\n[repositories.nas]\nrepository = \"rest:http://demo:CANARY-url@host/r\"\n\
+    let text = "schema = 1\ncolor = 1\n\n[repositories.nas]\nrepository = \"rest:http://demo:CANARY-url@host/r\"\n\
                 password = \"CANARY-password\"\noptions = { sas_token = \"CANARY-option\" }\n";
     let result = parsed(text);
     let shown = format!("{result:?}");
-    assert!(shown.contains("colour"), "{shown}");
+    assert!(shown.contains("color"), "{shown}");
     assert!(!shown.contains("CANARY"), "{shown}");
 }
 

@@ -117,11 +117,11 @@ Feature: Crash recovery
       | succeeded                                    |
       | succeeded with warnings                      |
       | failed because the repository was unreachable |
-      | cancelled                                    |
+      | canceled                                    |
 
   Scenario: A log whose operations all ended has nothing to recover
     Given the log shows a backup of the plan "home" that ended as succeeded
-    And the log shows a backup of the plan "docs" that ended as cancelled
+    And the log shows a backup of the plan "docs" that ended as canceled
     When the daemon starts again
     Then the daemon's start ended 0 operations
 

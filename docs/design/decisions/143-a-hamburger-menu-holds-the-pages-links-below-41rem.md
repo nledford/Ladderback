@@ -10,7 +10,7 @@
 
 Below 41rem (656 px) the seven links no longer fit on one line: 614 px of links beside 2rem of the frame's padding. They wrapped onto two lines at 390 px and six at 320 px with 200 % text, with Sign out under them, so the header took 18.5 % of a 390×844 screen, 29 % of one 320 px wide, and the whole first screen at 320 px with 200 % text, before the first word of a page. The 320 Rule was met, and the reader's first screen was still navigation.
 
-The links were 32 px tall with 4 px between wrapped rows: above WCAG 2.5.8's 24 px, below the 44 px a finger wants, a slip away from the neighbouring page.
+The links were 32 px tall with 4 px between wrapped rows: above WCAG 2.5.8's 24 px, below the 44 px a finger wants, a slip away from the neighboring page.
 
 This decision first put the links behind a text button, "Pages" with a chevron. The maintainer asked for the common mobile pattern instead, a hamburger menu, which readers of a small screen already know without reading: an icon at the end of the brand's line that opens a panel of links. It follows Flowbite's navbar: an icon-only button with `aria-controls` and `aria-expanded` and a name only a screen reader hears, and a full-width panel under the brand's line holding the links stacked as rows with room around their words, in a bordered, rounded box, each row tinting under the pointer.
 

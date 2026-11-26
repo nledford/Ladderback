@@ -38,7 +38,7 @@ pub(super) fn IconDemo(localizer: Arc<Localizer>) -> impl IntoView {
             <p class="flex flex-wrap items-center gap-4">
                 <Icon
                     glyph=LucideGlyph::Bell
-                    meaning=Meaning::Labelled(t(msg::UI_GALLERY_ICON_SMALL))
+                    meaning=Meaning::Labeled(t(msg::UI_GALLERY_ICON_SMALL))
                 />
                 {[
                     (Size::Medium, msg::UI_GALLERY_ICON_MEDIUM),
@@ -51,7 +51,7 @@ pub(super) fn IconDemo(localizer: Arc<Localizer>) -> impl IntoView {
                             <Icon
                                 glyph=LucideGlyph::Bell
                                 size=size
-                                meaning=Meaning::Labelled(t(name))
+                                meaning=Meaning::Labeled(t(name))
                             />
                         }
                     })

@@ -89,7 +89,7 @@ Given("a daemon with these repositories:", async function (this: BrowserWorld, t
 });
 
 // Someone edits the running daemon's config.toml by hand and leaves a key
-// nobody knows, `colour`, in the repository `demo`, on line `line`: a note of
+// nobody knows, `color`, in the repository `demo`, on line `line`: a note of
 // their own fills the lines before it. The daemon reads the file on every
 // request, so the next one finds the mistake.
 Given(
@@ -106,7 +106,7 @@ Given(
     ];
     assert.ok(line > head.length, `the mistake can be no earlier than line ${head.length + 1}`);
     const notes = Array.from({ length: line - head.length - 1 }, () => "# A note of the person's own.");
-    const file = [...head, ...notes, 'colour = "red"', ""].join("\n");
+    const file = [...head, ...notes, 'color = "red"', ""].join("\n");
     await writeFile(path.join(own.scratch, "config", "config.toml"), file);
   },
 );

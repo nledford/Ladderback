@@ -138,7 +138,7 @@ impl Engine for RecordOpened {
             return self.inner.run(op, job).await;
         };
         match job {
-            // An identify is how the ID is found, and an initialisation
+            // An identify is how the ID is found, and an initialization
             // makes the repository: each records the ID it opened.
             Job::Identify(_) | Job::Init(_) => self.recording(op, job, saved).await,
             _ => self.identified_first(op, job, access, saved).await,
@@ -636,11 +636,11 @@ mod tests {
         *store.saves.lock().unwrap_or_else(PoisonError::into_inner)
     }
 
-    /// An identify and an initialisation are the jobs that record the ID
+    /// An identify and an initialization are the jobs that record the ID
     /// they opened: every other job of an entry that records no ID runs
     /// after an identify, which records it.
     #[tokio::test]
-    async fn an_identify_or_an_initialisation_records_the_id_of_the_repository_it_opened() {
+    async fn an_identify_or_an_initialization_records_the_id_of_the_repository_it_opened() {
         let writes = Arc::new(ConfigWrites::new(()));
         let events = vec![started(Some(opened())), succeeded()];
         let unrecorded = entry("/srv/demo/cold", None);
@@ -670,7 +670,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn an_identify_or_an_initialisation_that_failed_after_it_opened_the_repository_records_it()
+    async fn an_identify_or_an_initialization_that_failed_after_it_opened_the_repository_records_it()
      {
         let writes = Arc::new(ConfigWrites::new(()));
         let failed = EngineEvent::Failed(FailureReason::EngineFailed {
@@ -1145,7 +1145,7 @@ mod tests {
     /// knowing it: with no cache, which the engine keeps by the ID, and in
     /// an operation that names no repository. It runs after an identify,
     /// with the ID the identify found, which is recorded from that identify.
-    /// An identify, and an initialisation that makes the repository, run as
+    /// An identify, and an initialization that makes the repository, run as
     /// they are.
     #[tokio::test]
     async fn a_job_of_an_entry_that_records_no_id_runs_after_an_identify_with_the_id_it_found() {
@@ -1418,11 +1418,11 @@ mod tests {
     }
 
     /// A cancel that comes while the engine is starting a backup's job,
-    /// after its identify, ends the operation cancelled at once and gives
+    /// after its identify, ends the operation canceled at once and gives
     /// its place in the queue to the next run, with no worker left running:
     /// a shutdown, which cancels the runs and waits for them, ends too.
     #[tokio::test]
-    async fn cancelling_a_backup_while_its_job_starts_ends_it_and_frees_its_place() {
+    async fn canceling_a_backup_while_its_job_starts_ends_it_and_frees_its_place() {
         let store = holding(vec![("demo", entry("/srv/demo/cold", None))]).await;
         let access = access_of(&store, "demo").await;
         let (engine, keeps, _) = keeping(&store, Finds::Repository, true);
@@ -1444,10 +1444,10 @@ mod tests {
             Arc::new(InMemoryOperationStore::new()),
         );
         let queued = use_case.queue(op(), Trigger::Manual, backup(&access)).await;
-        let (cancel, cancelled) = futures::channel::oneshot::channel::<()>();
+        let (cancel, canceled) = futures::channel::oneshot::channel::<()>();
         let running = tokio::spawn(async move {
             use_case
-                .run_in_turn(queued, place, cancelled.map(|_| ()))
+                .run_in_turn(queued, place, canceled.map(|_| ()))
                 .await
         });
         tokio::time::timeout(BOUND, async {
@@ -1461,9 +1461,9 @@ mod tests {
         cancel.send(()).expect("the run waits for a cancel");
         let finished = tokio::time::timeout(BOUND, running)
             .await
-            .expect("the run ends once cancelled")
+            .expect("the run ends once canceled")
             .expect("the run ends without a panic");
-        assert_eq!(finished.operation.status(), &OperationStatus::Cancelled);
+        assert_eq!(finished.operation.status(), &OperationStatus::Canceled);
         tokio::time::timeout(BOUND, next.turn())
             .await
             .expect("the next run's turn comes");

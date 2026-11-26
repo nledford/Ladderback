@@ -213,7 +213,9 @@ pub enum MachineOutcomeDto {
     Running,
     Succeeded,
     Failed,
-    Cancelled,
+    // The wire keeps the British spelling: changing it would change the API.
+    #[serde(rename = "cancelled")]
+    Canceled,
 }
 
 /// One of a machine's latest operations, from its reports (§7.2): when it
