@@ -130,11 +130,16 @@ mod tests {
     }
 
     #[test]
-    fn more_backups_than_a_heartbeat_names_cant_be_told() {
+    fn as_many_backups_as_a_heartbeat_names_are_listed_and_one_more_cant_be_told() {
         let backups = Arc::new(RunningBackups::new());
-        let places: Vec<_> = (0..=MAX_RUNNING_BACKUPS)
+        let mut places: Vec<_> = (0..MAX_RUNNING_BACKUPS)
             .map(|n| backups.begin(op(n as u128), Some(repository(1))))
             .collect();
+        assert_eq!(
+            backups.listed().map(|listed| listed.len()),
+            Some(MAX_RUNNING_BACKUPS)
+        );
+        places.push(backups.begin(op(MAX_RUNNING_BACKUPS as u128), Some(repository(1))));
         assert_eq!(backups.listed(), None);
         drop(places);
         assert_eq!(backups.listed(), Some(Vec::new()));
