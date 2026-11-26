@@ -4,7 +4,7 @@
 
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { deadExclusions, globRegExp, parseExclusions } from "./check-mutants-exclusions.ts";
+import { deadExclusions, globRegExp, listedLines, parseExclusions } from "./check-mutants-exclusions.ts";
 
 const NAMES = [
   "crates/web/src/main.rs:443:46: replace == with != in App",
@@ -44,6 +44,18 @@ test("the lists are read, comments and blank lines skipped, both kinds of string
     exclude_globs: ["crates/web/src/components/*.rs", "crates/app/src/contract/**"],
     exclude_re: ["<impl fmt::Display for InvalidZoneName>", "crates/web/src/main\\.rs:443:46: replace == with != in App$"],
   });
+});
+
+test("a listed name with color codes or a line ending added still matches an exclusion that ends in $", () => {
+  const output =
+    "\u001b[32mcrates/web/src/main.rs:443:46: replace == with != in App\u001b[0m\r\n\ncrates/web/src/main.rs:12:5: replace main with ()  \n";
+  const names = listedLines(output);
+  assert.deepEqual(names, [
+    "crates/web/src/main.rs:443:46: replace == with != in App",
+    "crates/web/src/main.rs:12:5: replace main with ()",
+  ]);
+  const exclusions = { exclude_re: ["crates/web/src/main\\.rs:443:46: replace == with != in App$"], exclude_globs: [] };
+  assert.deepEqual(deadExclusions(exclusions, names, FILES), []);
 });
 
 test("a list written another way fails rather than pass unread", () => {

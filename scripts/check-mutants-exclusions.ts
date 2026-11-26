@@ -135,31 +135,51 @@ export function deadExclusions(exclusions: Exclusions, names: readonly string[],
   return found;
 }
 
+/** A color code (ESC, `[`, its numbers, `m`): built from the code, as a regex may not hold ESC itself. */
+const COLOR = new RegExp(`${String.fromCharCode(27)}\\[[0-9;]*m`, "g");
+
+/**
+ * The lines cargo-mutants listed in `output`, one name or path each, without
+ * color codes or trailing whitespace a terminal setting or a wrapper may add.
+ */
+export function listedLines(output: string): string[] {
+  return output
+    .split("\n")
+    .map((line) => line.replace(COLOR, "").trimEnd())
+    .filter((line) => line !== "");
+}
+
 // Run as a script, not imported (the real path: `import.meta.url` is one).
 if (process.argv[1] && import.meta.url === pathToFileURL(realpathSync(process.argv[1])).href) {
   const root = path.resolve(import.meta.dirname, "..");
   const exclusions = parseExclusions(readFileSync(path.join(root, ".cargo/mutants.toml"), "utf8"));
-  // One line per mutant (`--list`) or source file (`--list-files`).
+  // One line per mutant (`--list`) or source file (`--list-files`). The
+  // binary is run itself, not through `cargo`, so no wrapper of cargo's
+  // (CI's build cache has one) stands between it and the list.
   const list = (flag: string): string[] => {
     try {
-      const listed = execFileSync("cargo", ["mutants", flag, "--workspace", "--no-config"], {
+      const listed = execFileSync("cargo-mutants", ["mutants", flag, "--workspace", "--no-config"], {
         cwd: root,
         encoding: "utf8",
         maxBuffer: 64 * 1024 * 1024,
         stdio: ["ignore", "pipe", "inherit"],
       });
-      return listed.split("\n").filter((line) => line !== "");
+      return listedLines(listed);
     } catch {
       process.stderr.write(`error: \`cargo mutants ${flag}\` failed; is cargo-mutants installed? (\`just setup\` installs it)\n`);
       process.exit(1);
     }
   };
-  const found = deadExclusions(exclusions, list("--list"), list("--list-files"));
+  const names = list("--list");
+  const found = deadExclusions(exclusions, names, list("--list-files"));
   if (found.length === 0) {
     const count = exclusions.exclude_re.length + exclusions.exclude_globs.length;
     process.stdout.write(`ok: each of the ${count} exclusions in .cargo/mutants.toml matches a mutant or a source file\n`);
   } else {
     process.stderr.write(`${found.map((problem) => `.cargo/mutants.toml: ${problem}`).join("\n")}\n`);
+    // What a listed name looks like here, escaped, in case the lists differ
+    // from the ones the exclusions were written against.
+    process.stderr.write(`cargo-mutants listed ${names.length} mutants; the first is ${JSON.stringify(names[0] ?? "")}\n`);
     process.stderr.write(
       "error: an exclusion matches nothing: the line it names moved or the code is gone. Re-judge the mutant and update or remove the exclusion in this change (docs/design/development.md §13.1)\n",
     );
