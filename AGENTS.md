@@ -70,7 +70,7 @@ Keyed by what you see. Each line points at where the full reason lives.
 
 - **"a step kept the runner's thread for …, longer than the 8s allowed"** in `just test-e2e`: a step blocks the runner's one task. Run it through `blocking(…)` in `tests/e2e.rs` (§13.2).
 - **"the test: commit doesn't compile; a compile error doesn't count as red"** from `just red-first`: add `todo!()` stubs for the new API so the tests compile and fail at run time (§13.1).
-- **A `GREEN` line from `just red-first`:** the test passed (it specifies nothing new) or its run failed without a failing test, as when the name matches no test. Make it assert the missing behaviour, under the name the commit adds (§13.1). An `@ui` scenario that fails only in Firefox or WebKit is `GREEN` too unless it passes in that engine at the head (`firefox at the head: doesn't pass`).
+- **A `GREEN` line from `just red-first`:** the test passed (it specifies nothing new) or its run failed without a failing test, as when the name matches no test. Make it assert the missing behavior, under the name the commit adds (§13.1). An `@ui` scenario that fails only in Firefox or WebKit is `GREEN` too unless it passes in that engine at the head (`firefox at the head: doesn't pass`).
 - **An `@e2e` cancel scenario ends `Succeeded` on a fast runner (macOS CI):** the job finished before the cancel. Cancel once the operation has started, on a source big enough to outlive it, never after a fixed delay (`features/execution/cancel.feature`).
 - **A mutant "survives" in `web` DOM glue or in wasm32-only code:** that code never runs on the host (§13.1). Exclude the file in `.cargo/mutants.toml` only when `just test-wasm` or the `@ui` scenarios test it, with its reason, and say so in the pull request; code that decides anything moves out of the glue into a host-tested module instead.
 - **"Temporary failure resolving 'security.ubuntu.com'", then "install-browser: apt failed; trying once more in 30 s"** in a `UI journeys` job or the red-first job: the runner couldn't reach Ubuntu's package servers. The browsers' system packages come from a cache (`.github/actions/browser`), so this happens only when the cache misses, after a new runner image or Playwright version, and after Quad9 and one retry have failed too. Nothing in the change causes it; rerun the failed jobs once it clears (`gh run rerun <run-id> --failed`).
@@ -133,7 +133,7 @@ Adding or changing an error or warning code, a port, a workspace crate, a gated 
 
 Follow all three whenever possible. Deviating needs a stated reason in the pull request.
 
-**Behaviour first (BDD).** Every user-visible behaviour starts as a Given/When/Then scenario in `features/<bounded-context>/*.feature`, before any test or code for it, in the ubiquitous language, never endpoints, tables or crates. Tags pick the runner (§13.2): untagged is use cases with fakes and a fake clock; `@e2e` is the real binary; `@ui` is the browser, and its steps find elements only by role and accessible name.
+**Behavior first (BDD).** Every user-visible behavior starts as a Given/When/Then scenario in `features/<bounded-context>/*.feature`, before any test or code for it, in the ubiquitous language, never endpoints, tables or crates. Tags pick the runner (§13.2): untagged is use cases with fakes and a fake clock; `@e2e` is the real binary; `@ui` is the browser, and its steps find elements only by role and accessible name.
 
 **Domain first (DDD).**
 
@@ -146,17 +146,17 @@ Follow all three whenever possible. Deviating needs a stated reason in the pull 
 **Test first (TDD).**
 
 - No production code without a failing test that requires it: red, green, refactor. A bug fix starts with a test that reproduces the bug.
-- A pull request that changes behaviour carries the `behaviour` label, and its first commit is a `test:` commit that fails at run time, with `todo!()` stubs so it compiles. Implementation commits follow. CI's red-first check runs only on pull requests with that label; §13.1 lists the changes exempt from test first.
-- Mutation testing (§13.1) gates changed code in its crates; a surviving mutant means a behaviour no test asserts.
-- There is no coverage gate. Test behaviour, boundaries, invariants and errors. Don't test wiring, mock echoes, source text or incidental defaults.
-- Doubles replace ports only. Domain behaviour is never mocked. A new port gets a contract suite that runs against both its fake and its real adapter.
+- A pull request that changes behavior carries the `behaviour` label, and its first commit is a `test:` commit that fails at run time, with `todo!()` stubs so it compiles. Implementation commits follow. CI's red-first check runs only on pull requests with that label; §13.1 lists the changes exempt from test first.
+- Mutation testing (§13.1) gates changed code in its crates; a surviving mutant means a behavior no test asserts.
+- There is no coverage gate. Test behavior, boundaries, invariants and errors. Don't test wiring, mock echoes, source text or incidental defaults.
+- Doubles replace ports only. Domain behavior is never mocked. A new port gets a contract suite that runs against both its fake and its real adapter.
 - A test that can't run here (running as root makes `chmod 000` ineffective, a backend tool isn't installed) calls `testkit::skip!(reason)`, never a silent early return or a bare `eprintln!` (§13.5, rule 3). `testkit` is a dev-dependency only.
 
 ## Checks and evidence
 
 **Never make a check pass by weakening it.** A red check stands for unfinished work. None of these turns it green:
 
-- `#[mutants::skip]` or a `.cargo/mutants.toml` exclusion for a mutant a test could catch. Only three kinds are excluded: an equivalent mutant (one no behaviour can tell apart), code that never runs on the host, and a mutant that makes synchronous code loop forever (cargo-mutants reports a timeout: a test reaches the code and doesn't pass; excluded by line). Each has its reason in a comment beside it, and the pull request names it (§13.1);
+- `#[mutants::skip]` or a `.cargo/mutants.toml` exclusion for a mutant a test could catch. Only three kinds are excluded: an equivalent mutant (one no behavior can tell apart), code that never runs on the host, and a mutant that makes synchronous code loop forever (cargo-mutants reports a timeout: a test reaches the code and doesn't pass; excluded by line). Each has its reason in a comment beside it, and the pull request names it (§13.1);
 - an `#[expect(…)]` without a `reason` that proves the case, on code that can fail, or on a function too complex or too deeply nested that a split would fix (`#[allow]` isn't used at all: clippy refuses it, and `just architecture` an inner `#![allow]`; §13.5, rule 7);
 - `testkit::skip!` on a test that fails here rather than one that can't run here;
 - raising a test's limit to fit slow code: the e2e runner's 8 s stall check (§13.2), a step's or a scenario's timeout;
@@ -173,7 +173,7 @@ If you think a check is wrong, name it, say why, and stop for the maintainer.
 |---|---|---|
 | Quick, local | `just quick-ci`, the scenarios the change touches (`just test-e2e --name`, `just test-ui --name` for UI work), and `just red-first` on a `behaviour` branch. A change to what every page shows (the header, the footer, the page frame, `style.css`'s base rules) runs the whole `@ui` suite, since it reaches scenarios the change never names; while `CI_MODE` is `mvp`, it runs the scenarios it touches in WebKit too (`just test-ui webkit --name`), which CI then runs only after the merge | Before every push, and while iterating |
 | Full, CI | CI's checks on the pull request: `just test` (doc tests and `@e2e` too) on Linux and macOS, `just test-release`, `just mutants`, the whole `@ui` suite in Chromium, and in Firefox and WebKit when the pull request touches the UI, red-first on Linux. While the variable `CI_MODE` is `mvp`, a pull request runs a reduced set ([decision 124](docs/design/decisions/124-mvp-ci-mode.md)) | Defer to it for everything the quick lane leaves out. A pull request is done when its required checks pass on its current head commit: quote that run |
-| Full, local | `just verify`, or one full recipe | Only to reproduce a CI failure, or for evidence CI can't give yet (Linux behaviour on a Mac: a container run) |
+| Full, local | `just verify`, or one full recipe | Only to reproduce a CI failure, or for evidence CI can't give yet (Linux behavior on a Mac: a container run) |
 
 ## Independent adversarial review
 
