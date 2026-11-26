@@ -1446,14 +1446,7 @@ pub(crate) fn log_refused(path: &std::path::Path, error: &OpenError) -> Refused 
             message: msg::CLI_STORE_OLD_SCHEMA,
             args: vec![("path", text(path.display())), ("version", text(version))],
         },
-        OpenError::BaselineCopy { version, detail } => Refused {
-            message: msg::CLI_STORE_BASELINE_COPY_FAILED,
-            args: vec![
-                ("path", text(path.display())),
-                ("version", text(version)),
-                ("detail", text(detail)),
-            ],
-        },
+        OpenError::BaselineCopy { version, cause } => baseline_copy_refused(path, *version, cause),
         OpenError::BeforeBaseline { version } => Refused {
             message: msg::CLI_STORE_BEFORE_BASELINE,
             args: vec![("path", text(path.display())), ("version", text(version))],
@@ -1464,6 +1457,72 @@ pub(crate) fn log_refused(path: &std::path::Path, error: &OpenError) -> Refused 
         },
         other => store_refused(path, &other.to_string()),
     }
+}
+
+/// A copy of the operation log at `path`, at migration `version`, into the
+/// baseline that failed for `cause` (decision 170), each cause in words of
+/// its own; a detail is only ever the database's or the system's.
+fn baseline_copy_refused(
+    path: &std::path::Path,
+    version: i64,
+    cause: &store::CopyFailure,
+) -> Refused {
+    use store::CopyFailure;
+    let mut args = vec![("path", text(path.display())), ("version", text(version))];
+    let message = match cause {
+        CopyFailure::Files { detail } => {
+            args.push(("detail", text(detail)));
+            msg::CLI_STORE_BASELINE_COPY_FILES
+        }
+        CopyFailure::Database { detail } => {
+            args.push(("detail", text(detail)));
+            msg::CLI_STORE_BASELINE_COPY_DATABASE
+        }
+        CopyFailure::OldMigration { detail } => {
+            args.push(("detail", text(detail)));
+            msg::CLI_STORE_BASELINE_COPY_OLD_MIGRATION
+        }
+        CopyFailure::Tables { old, baseline } => {
+            args.push(("old", text(old.join(", "))));
+            args.push(("baseline", text(baseline.join(", "))));
+            msg::CLI_STORE_BASELINE_COPY_TABLES
+        }
+        CopyFailure::Columns { table, unmatched } => {
+            args.push(("table", text(table)));
+            args.push(("columns", text(unmatched.join(", "))));
+            msg::CLI_STORE_BASELINE_COPY_COLUMNS
+        }
+        CopyFailure::RefusedRow { table, detail } => {
+            args.push(("table", text(table)));
+            args.push(("detail", text(detail)));
+            msg::CLI_STORE_BASELINE_COPY_REFUSED_ROW
+        }
+        CopyFailure::Counts {
+            table,
+            source,
+            copied,
+            dropped,
+        } => {
+            args.push(("table", text(table)));
+            args.push(("source", text(source)));
+            args.push(("copied", text(copied)));
+            args.push(("dropped", text(dropped)));
+            msg::CLI_STORE_BASELINE_COPY_COUNTS
+        }
+        CopyFailure::ForeignKeys { broken } => {
+            args.push(("broken", text(broken)));
+            msg::CLI_STORE_BASELINE_COPY_FOREIGN_KEYS
+        }
+        CopyFailure::Integrity { detail } => {
+            args.push(("detail", text(detail)));
+            msg::CLI_STORE_BASELINE_COPY_INTEGRITY
+        }
+        CopyFailure::NotUtf8 { path: file } => {
+            args.push(("file", text(file.display())));
+            msg::CLI_STORE_BASELINE_COPY_NOT_UTF8
+        }
+    };
+    Refused { message, args }
 }
 
 /// What the copy of an operation log an earlier release left into the

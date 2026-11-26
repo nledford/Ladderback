@@ -13,7 +13,7 @@ use platform::data_dir_lock::{DataDirLock, LockError};
 use store::{BaselineCopy, SqliteStore};
 
 use super::Refused;
-use super::startup::{lock_refused, log_refused, store_refused};
+use super::startup::{lock_refused, log_refused};
 use crate::text;
 
 /// The operation log's name in the data folder.
@@ -56,8 +56,17 @@ fn move_keys(held: &DataDirLock, data_dir: &Path) -> Result<(), Refused> {
                 ("own", text(own.display())),
             ],
         },
-        MoveError::Io(error) => store_refused(data_dir, &error.to_string()),
+        MoveError::Io(error) => key_move_refused(data_dir, &error),
     })
+}
+
+/// The key files in `data_dir` that couldn't be looked at or moved, in the
+/// operating system's words.
+fn key_move_refused(data_dir: &Path, error: &std::io::Error) -> Refused {
+    Refused {
+        message: msg::CLI_UPGRADE_KEY_MOVE_FAILED,
+        args: vec![("path", text(data_dir.display())), ("detail", text(error))],
+    }
 }
 
 /// Upgrades `data_dir`, as far as `scope` reaches, for a command that runs
@@ -69,7 +78,7 @@ fn move_keys(held: &DataDirLock, data_dir: &Path) -> Result<(), Refused> {
 pub(crate) async fn unheld(data_dir: &Path, scope: Scope) -> Result<(), Refused> {
     let log = data_dir.join(DATABASE);
     let due = agent_id::earlier_names_left(data_dir)
-        .map_err(|error| store_refused(data_dir, &error.to_string()))?
+        .map_err(|error| key_move_refused(data_dir, &error))?
         || (scope == Scope::Folder
             && SqliteStore::needs_copy(&log)
                 .await

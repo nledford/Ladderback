@@ -229,3 +229,54 @@ async fn a_command_that_never_opens_the_log_upgrades_only_the_key_files() {
         .expect_err("a command that opens the log is refused");
     assert_eq!(refused.message, msg::CLI_STORE_OLD_SCHEMA);
 }
+
+/// Key files that can't be moved, here in a folder this process can't
+/// write, are refused in words about the key files, never as an operation
+/// log that can't be opened.
+#[cfg(unix)]
+#[tokio::test]
+async fn key_files_that_cant_be_moved_are_refused_naming_the_move() {
+    use std::os::unix::fs::PermissionsExt;
+    let scratch = tempfile::tempdir().expect("a scratch dir");
+    let data = scratch.path().join("data");
+    earlier_folder(&data).await;
+    let held = DataDirLock::acquire(&data).expect("the folder is free");
+    let mode = |mode| std::fs::Permissions::from_mode(mode);
+    std::fs::set_permissions(&data, mode(0o500)).expect("the folder is made read-only");
+
+    let refused = super::super::upgrade::under(&held, &data).await;
+
+    std::fs::set_permissions(&data, mode(0o700)).expect("the folder is writable again");
+    let refused = refused.expect_err("the move is refused");
+    assert_eq!(refused.message, msg::CLI_UPGRADE_KEY_MOVE_FAILED);
+    assert!(data.join("agent-id").exists() && data.join("agent-key").exists());
+}
+
+/// A copy the baseline refuses a row of is said in words of its own, naming
+/// the table, with only the database's own words as the detail.
+#[test]
+fn a_copy_refused_a_row_is_said_naming_the_table() {
+    let log = Path::new("/data/ladderback.db");
+    let refused = super::super::startup::log_refused(
+        log,
+        &store::OpenError::BaselineCopy {
+            version: 29,
+            cause: store::CopyFailure::RefusedRow {
+                table: "operations".to_owned(),
+                detail: "CHECK constraint failed: status".to_owned(),
+            },
+        },
+    );
+
+    assert_eq!(refused.message, msg::CLI_STORE_BASELINE_COPY_REFUSED_ROW);
+    let args: BTreeMap<&str, String> = refused
+        .args
+        .iter()
+        .map(|(name, value)| (*name, format!("{value:?}")))
+        .collect();
+    assert!(args["table"].contains("operations"), "{args:?}");
+    assert!(
+        args["detail"].contains("CHECK constraint failed"),
+        "{args:?}"
+    );
+}

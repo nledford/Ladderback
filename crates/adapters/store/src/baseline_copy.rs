@@ -45,7 +45,7 @@ use std::fs::{self, File};
 use std::io;
 use std::path::{Path, PathBuf};
 
-use sqlx::migrate::Migrator;
+use sqlx::migrate::{MigrateError, Migrator};
 use sqlx::sqlite::{SqliteConnectOptions, SqliteConnection, SqlitePool, SqlitePoolOptions};
 use sqlx::{AssertSqlSafe, ConnectOptions, Connection, Row};
 
@@ -106,6 +106,75 @@ pub struct Dropped {
     pub rows: u64,
 }
 
+/// Why a copy of an old log into the baseline failed (decision 170). Each
+/// detail is the database's or the operating system's own words, capped;
+/// the rest is for the caller's catalog to say.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum CopyFailure {
+    /// A work file beside the log couldn't be made, copied, synced, moved
+    /// or removed.
+    Files { detail: String },
+    /// A database step failed for a reason another try may not meet, such
+    /// as a full disk, an I/O error or a lock.
+    Database { detail: String },
+    /// One of the old migrations the log lacked failed on its rows.
+    OldMigration { detail: String },
+    /// The log's tables, with the old migrations run, are not the ones the
+    /// baseline copies.
+    Tables {
+        old: Vec<String>,
+        baseline: Vec<String>,
+    },
+    /// A table's columns are not the ones migration 29 left: those named
+    /// are missing or extra.
+    Columns {
+        table: String,
+        unmatched: Vec<String>,
+    },
+    /// A row of `table` breaks one of the baseline's constraints.
+    RefusedRow { table: String, detail: String },
+    /// The rows copied and dropped of `table` don't add up to its rows.
+    Counts {
+        table: String,
+        source: u64,
+        copied: u64,
+        dropped: u64,
+    },
+    /// The new log breaks `broken` of its foreign keys.
+    ForeignKeys { broken: usize },
+    /// The new log fails SQLite's integrity check.
+    Integrity { detail: String },
+    /// A work file's path isn't UTF-8, which a statement needs.
+    NotUtf8 { path: PathBuf },
+}
+
+impl CopyFailure {
+    fn files(error: impl std::fmt::Display) -> Self {
+        Self::Files {
+            detail: cap(error.to_string()),
+        }
+    }
+
+    fn database(error: sqlx::Error) -> Self {
+        Self::Database {
+            detail: cap(error.to_string()),
+        }
+    }
+}
+
+/// Whether `error` is one another try may not meet: an I/O error, a full
+/// disk, a lock or too little memory, rather than one of the data's own.
+fn transient(error: &sqlx::Error) -> bool {
+    match error {
+        sqlx::Error::Database(db) => db
+            .code()
+            .and_then(|code| code.parse::<i32>().ok())
+            // BUSY, LOCKED, NOMEM, READONLY, IOERR, FULL, CANTOPEN, PROTOCOL.
+            .is_none_or(|code| matches!(code & 0xff, 5..=8 | 10 | 13..=15)),
+        _ => true,
+    }
+}
+
 /// Copies the old log at `log` into the baseline, as the module says.
 /// `None` when `log` isn't one the migrations before the baseline left.
 pub(crate) async fn copy(log: &Path) -> Result<Option<BaselineCopy>, OpenError> {
@@ -121,7 +190,7 @@ pub(crate) async fn copy(log: &Path) -> Result<Option<BaselineCopy>, OpenError> 
     }
     let work = Work::beside(log);
     work.clear()
-        .map_err(|error| failed(last, format!("a work file can't be removed: {error}")))?;
+        .map_err(|error| failed(last, CopyFailure::files(error)))?;
     match work.run().await {
         Ok((dropped, swapped)) => Ok(Some(BaselineCopy {
             from_version: last,
@@ -134,18 +203,15 @@ pub(crate) async fn copy(log: &Path) -> Result<Option<BaselineCopy>, OpenError> 
             let _ = work.clear();
             Err(match stop {
                 Stop::InUse => OpenError::LogInUse { version: last },
-                Stop::Failed(detail) => failed(last, detail),
+                Stop::Failed(cause) => failed(last, cause),
             })
         }
     }
 }
 
 /// A copy of the log at `version` that failed, saying why.
-fn failed(version: i64, detail: String) -> OpenError {
-    OpenError::BaselineCopy {
-        version,
-        detail: cap(detail),
-    }
+const fn failed(version: i64, cause: CopyFailure) -> OpenError {
+    OpenError::BaselineCopy { version, cause }
 }
 
 /// One migration a log records.
@@ -254,12 +320,11 @@ impl Work {
         Ok(())
     }
 
-    /// Steps 2 to 5, each failure in the database's or the operating
-    /// system's words; the old log is unchanged by all but the last rename.
+    /// Steps 2 to 5; the old log is unchanged by all but the last rename.
     async fn run(&self) -> Result<(Vec<Dropped>, Swapped), Stop> {
         let dropped = self.copy_rows().await?;
-        remove_if_there(&self.source).map_err(|error| error.to_string())?;
-        let swapped = self.swap().map_err(|error| error.to_string())?;
+        remove_if_there(&self.source).map_err(CopyFailure::files)?;
+        let swapped = self.swap().map_err(CopyFailure::files)?;
         Ok((dropped, swapped))
     }
 
@@ -267,7 +332,7 @@ impl Work {
     /// copy of the old log's rows, made first empty and as open as the old
     /// log, never more, before any row is written to it.
     async fn copy_rows(&self) -> Result<Vec<Dropped>, Stop> {
-        self.make_files().map_err(|error| error.to_string())?;
+        self.make_files().map_err(CopyFailure::files)?;
         snapshot(&self.log, &self.kept_new).await?;
         copy_file(self.kept_new.clone(), self.source.clone()).await?;
         migrate_old(&self.source).await?;
@@ -381,24 +446,25 @@ fn sync_dir(_dir: &Path) -> io::Result<()> {
     Ok(())
 }
 
-async fn copy_file(from: PathBuf, to: PathBuf) -> Result<(), String> {
+async fn copy_file(from: PathBuf, to: PathBuf) -> Result<(), CopyFailure> {
     tokio::task::spawn_blocking(move || fs::copy(from, to))
         .await
-        .map_err(|error| error.to_string())?
+        .map_err(CopyFailure::files)?
         .map(|_| ())
-        .map_err(|error| error.to_string())
+        .map_err(CopyFailure::files)
 }
 
 /// A path as SQLite takes it in a statement.
-fn utf8(path: &Path) -> Result<&str, String> {
-    path.to_str()
-        .ok_or_else(|| format!("{} is not UTF-8", path.display()))
+fn utf8(path: &Path) -> Result<&str, CopyFailure> {
+    path.to_str().ok_or_else(|| CopyFailure::NotUtf8 {
+        path: path.to_path_buf(),
+    })
 }
 
 /// One connection to `path`, as the store's but for WAL: foreign keys on.
 /// A pool of one rather than a bare connection: a migrator run on a bare
 /// connection makes the future not `Send` to the compiler.
-async fn connect(path: &Path, create: bool) -> Result<SqlitePool, String> {
+async fn connect(path: &Path, create: bool) -> Result<SqlitePool, CopyFailure> {
     let options = SqliteConnectOptions::new()
         .filename(path)
         .create_if_missing(create)
@@ -407,7 +473,7 @@ async fn connect(path: &Path, create: bool) -> Result<SqlitePool, String> {
         .max_connections(1)
         .connect_with(options)
         .await
-        .map_err(|error| error.to_string())
+        .map_err(CopyFailure::database)
 }
 
 /// Closes `pool` after `work`, whatever `work` did, and answers `work`'s.
@@ -440,13 +506,13 @@ enum Stop {
     /// Another program reads the log, so its write-ahead log can't be
     /// checkpointed into it.
     InUse,
-    /// A step failed, in the database's or the operating system's words.
-    Failed(String),
+    /// A step failed.
+    Failed(CopyFailure),
 }
 
-impl From<String> for Stop {
-    fn from(detail: String) -> Self {
-        Self::Failed(detail)
+impl From<CopyFailure> for Stop {
+    fn from(cause: CopyFailure) -> Self {
+        Self::Failed(cause)
     }
 }
 
@@ -455,12 +521,12 @@ impl From<String> for Stop {
 async fn snapshot(log: &Path, to: &Path) -> Result<(), Stop> {
     let pool = connect(log, false).await?;
     let work = async {
-        let mut conn = pool.acquire().await.map_err(|error| error.to_string())?;
+        let mut conn = pool.acquire().await.map_err(CopyFailure::database)?;
         let row = sqlx::query("PRAGMA wal_checkpoint(TRUNCATE)")
             .fetch_one(&mut *conn)
             .await
-            .map_err(|error| error.to_string())?;
-        let busy: i64 = row.try_get(0).map_err(|error| error.to_string())?;
+            .map_err(CopyFailure::database)?;
+        let busy: i64 = row.try_get(0).map_err(CopyFailure::database)?;
         if busy != 0 {
             return Err(Stop::InUse);
         }
@@ -468,7 +534,7 @@ async fn snapshot(log: &Path, to: &Path) -> Result<(), Stop> {
             .bind(utf8(to)?)
             .execute(&mut *conn)
             .await
-            .map_err(|error| error.to_string())?;
+            .map_err(CopyFailure::database)?;
         Ok(())
     }
     .await;
@@ -476,34 +542,43 @@ async fn snapshot(log: &Path, to: &Path) -> Result<(), Stop> {
 }
 
 /// Step 3: the old migrations the source lacks, as an earlier build's
-/// start would have run them.
-async fn migrate_old(source: &Path) -> Result<(), String> {
+/// start would have run them. One that fails on the log's rows fails the
+/// same on every try; one that meets a full disk or a lock may not.
+async fn migrate_old(source: &Path) -> Result<(), CopyFailure> {
     let pool = connect(source, false).await?;
-    let work = OLD_MIGRATOR
-        .run(&pool)
-        .await
-        .map_err(|error| format!("an old migration failed: {error}"));
+    let work = OLD_MIGRATOR.run(&pool).await.map_err(|error| match error {
+        MigrateError::Execute(inner) | MigrateError::ExecuteMigration(inner, _)
+            if transient(&inner) =>
+        {
+            CopyFailure::database(inner)
+        }
+        other => CopyFailure::OldMigration {
+            detail: cap(other.to_string()),
+        },
+    });
     closing(pool, work).await
 }
 
 /// Step 4: the new log at `new`, in the baseline, with the rows of the
 /// source at `source`.
-async fn build(new: &Path, source: &Path) -> Result<Vec<Dropped>, String> {
+async fn build(new: &Path, source: &Path) -> Result<Vec<Dropped>, CopyFailure> {
     let pool = connect(new, true).await?;
     let work = async {
         MIGRATOR
             .run_to(BASELINE_VERSION, &pool)
             .await
-            .map_err(|error| error.to_string())?;
-        let mut conn = pool.acquire().await.map_err(|error| error.to_string())?;
+            .map_err(|error| CopyFailure::Database {
+                detail: cap(error.to_string()),
+            })?;
+        let mut conn = pool.acquire().await.map_err(CopyFailure::database)?;
         fill(&mut conn, source).await
     }
     .await;
     closing(pool, work).await
 }
 
-async fn fill(db: &mut SqliteConnection, source: &Path) -> Result<Vec<Dropped>, String> {
-    let text = |error: sqlx::Error| error.to_string();
+async fn fill(db: &mut SqliteConnection, source: &Path) -> Result<Vec<Dropped>, CopyFailure> {
+    let text = CopyFailure::database;
     sqlx::query("ATTACH DATABASE ? AS old")
         .bind(utf8(source)?)
         .execute(&mut *db)
@@ -512,11 +587,10 @@ async fn fill(db: &mut SqliteConnection, source: &Path) -> Result<Vec<Dropped>, 
     let tables = table_names(db, "main").await?;
     let old_tables = table_names(db, "old").await?;
     if tables != old_tables {
-        return Err(format!(
-            "the old log's tables ({}) are not the baseline's ({})",
-            old_tables.join(", "),
-            tables.join(", ")
-        ));
+        return Err(CopyFailure::Tables {
+            old: old_tables,
+            baseline: tables,
+        });
     }
     let mut tx = db.begin().await.map_err(text)?;
     let mut dropped = Vec::new();
@@ -565,10 +639,9 @@ async fn fill(db: &mut SqliteConnection, source: &Path) -> Result<Vec<Dropped>, 
         .await
         .map_err(text)?;
     if !broken.is_empty() {
-        return Err(format!(
-            "the new log breaks {} of its foreign keys",
-            broken.len()
-        ));
+        return Err(CopyFailure::ForeignKeys {
+            broken: broken.len(),
+        });
     }
     tx.commit().await.map_err(text)?;
     sqlx::query("DETACH DATABASE old")
@@ -580,22 +653,22 @@ async fn fill(db: &mut SqliteConnection, source: &Path) -> Result<Vec<Dropped>, 
         .await
         .map_err(text)?;
     if integrity != "ok" {
-        return Err(format!(
-            "the new log fails its integrity check: {integrity}"
-        ));
+        return Err(CopyFailure::Integrity {
+            detail: cap(integrity),
+        });
     }
     Ok(dropped)
 }
 
 /// The tables of `schema`, by name, but SQLite's and sqlx's own.
-async fn table_names(db: &mut SqliteConnection, schema: &str) -> Result<Vec<String>, String> {
+async fn table_names(db: &mut SqliteConnection, schema: &str) -> Result<Vec<String>, CopyFailure> {
     sqlx::query_scalar(AssertSqlSafe(format!(
         "SELECT name FROM {schema}.sqlite_master WHERE type = 'table' \
          AND name NOT LIKE 'sqlite_%' AND name <> '_sqlx_migrations' ORDER BY name"
     )))
     .fetch_all(db)
     .await
-    .map_err(|error| error.to_string())
+    .map_err(CopyFailure::database)
 }
 
 /// One column of a table.
@@ -609,8 +682,8 @@ async fn columns(
     db: &mut SqliteConnection,
     schema: &str,
     table: &str,
-) -> Result<Vec<Column>, String> {
-    let text = |error: sqlx::Error| error.to_string();
+) -> Result<Vec<Column>, CopyFailure> {
+    let text = CopyFailure::database;
     let rows = sqlx::query(AssertSqlSafe(format!(
         "PRAGMA {schema}.table_info(\"{table}\")"
     )))
@@ -628,18 +701,19 @@ async fn columns(
         .collect()
 }
 
-async fn count(db: &mut SqliteConnection, sql: String) -> Result<u64, String> {
+async fn count(db: &mut SqliteConnection, sql: String) -> Result<u64, CopyFailure> {
     let n: i64 = sqlx::query_scalar(AssertSqlSafe(sql))
         .fetch_one(db)
         .await
-        .map_err(|error| error.to_string())?;
-    u64::try_from(n).map_err(|error| error.to_string())
+        .map_err(CopyFailure::database)?;
+    // SQLite's COUNT is never negative.
+    Ok(u64::try_from(n).unwrap_or(0))
 }
 
 /// Copies the rows of `table` the baseline keeps, with their rowids, and
 /// answers how many it dropped as junk. The table's name is the
 /// baseline's own, never outside text.
-async fn copy_table(db: &mut SqliteConnection, table: &str) -> Result<u64, String> {
+async fn copy_table(db: &mut SqliteConnection, table: &str) -> Result<u64, CopyFailure> {
     let kept = columns(db, "main", table).await?;
     let had: Vec<String> = columns(db, "old", table)
         .await?
@@ -654,12 +728,12 @@ async fn copy_table(db: &mut SqliteConnection, table: &str) -> Result<u64, Strin
         !kept.iter().any(|column| column.name == *name)
             && !DROPPED_COLUMNS.contains(&(table, *name))
     });
-    let unmatched: Vec<&str> = missing.chain(extra).collect();
+    let unmatched: Vec<String> = missing.chain(extra).map(str::to_owned).collect();
     if !unmatched.is_empty() {
-        return Err(format!(
-            "{table}'s columns are not the ones at migration 29: {}",
-            unmatched.join(", ")
-        ));
+        return Err(CopyFailure::Columns {
+            table: table.to_owned(),
+            unmatched,
+        });
     }
     let keys: Vec<&Column> = kept.iter().filter(|column| column.pk > 0).collect();
     let rowid_alias = matches!(keys.as_slice(), [key] if key.ty.eq_ignore_ascii_case("INTEGER"));
@@ -704,12 +778,24 @@ async fn copy_table(db: &mut SqliteConnection, table: &str) -> Result<u64, Strin
     )))
     .execute(&mut *db)
     .await
-    .map_err(|error| format!("{table} holds a row the baseline refuses: {error}"))?;
+    .map_err(|error| {
+        if transient(&error) {
+            CopyFailure::database(error)
+        } else {
+            CopyFailure::RefusedRow {
+                table: table.to_owned(),
+                detail: cap(error.to_string()),
+            }
+        }
+    })?;
     let copied = count(db, format!("SELECT COUNT(*) FROM main.\"{table}\"")).await?;
     if copied.checked_add(junk) != Some(source) {
-        return Err(format!(
-            "{table}: the old log holds {source} rows, but {copied} were copied and {junk} dropped"
-        ));
+        return Err(CopyFailure::Counts {
+            table: table.to_owned(),
+            source,
+            copied,
+            dropped: junk,
+        });
     }
     Ok(junk)
 }

@@ -15,7 +15,7 @@ use std::path::{Path, PathBuf};
 use app::ports::{HistoryQuery, OperationStore};
 use sqlx::sqlite::{SqliteConnectOptions, SqliteConnection};
 use sqlx::{ConnectOptions, Connection};
-use store::{BaselineCopy, Dropped, OpenError, SqliteStore};
+use store::{BaselineCopy, CopyFailure, Dropped, OpenError, SqliteStore};
 use support::*;
 
 /// The fixture of the database the old migrations left at `migration`.
@@ -391,7 +391,13 @@ async fn a_log_the_baseline_refuses_a_row_of_is_left_as_it_was_and_the_next_star
 
     let error = copy_error(&log).await;
 
-    assert_matches!(error, OpenError::BaselineCopy { version: 29, .. });
+    assert_matches!(
+        error,
+        OpenError::BaselineCopy {
+            version: 29,
+            cause: CopyFailure::RefusedRow { ref table, .. },
+        } if table == "operations"
+    );
     assert_eq!(
         fs::read(&log).expect("the log is readable"),
         before,
@@ -432,7 +438,13 @@ async fn an_old_migration_that_fails_on_the_log_leaves_it_as_it_was() {
 
     let error = copy_error(&log).await;
 
-    assert_matches!(error, OpenError::BaselineCopy { version: 16, .. });
+    assert_matches!(
+        error,
+        OpenError::BaselineCopy {
+            version: 16,
+            cause: CopyFailure::OldMigration { .. },
+        }
+    );
     assert_eq!(fs::read(&log).expect("the log is readable"), before);
     assert!(
         !beside(&log, ".before-baseline").exists(),

@@ -52,7 +52,7 @@ use sqlx::sqlite::{SqliteConnectOptions, SqliteJournalMode, SqlitePoolOptions, S
 use sqlx::{Connection, SqliteConnection, SqlitePool};
 use tokio::sync::{RwLock, RwLockReadGuard};
 
-pub use crate::baseline_copy::{BaselineCopy, Dropped};
+pub use crate::baseline_copy::{BaselineCopy, CopyFailure, Dropped};
 use crate::report::cap;
 use crate::summary::Summary;
 
@@ -103,12 +103,9 @@ pub enum OpenError {
     /// A migration this build ships failed or doesn't match the one applied.
     Migration { detail: String },
     /// A log the migrations before the baseline left at `version`, one of
-    /// those a release shipped, that couldn't be copied into the baseline:
-    /// it holds a row the baseline refuses, an old migration failed on it,
-    /// or the copy's files couldn't be written. `detail` says which, in the
-    /// database's or the operating system's words. The log is left as it
-    /// was, and the next copy tries again (decision 170).
-    BaselineCopy { version: i64, detail: String },
+    /// those a release shipped, that couldn't be copied into the baseline,
+    /// for the `cause` said. The log is left as it was (decision 170).
+    BaselineCopy { version: i64, cause: CopyFailure },
     /// A log the migrations before the baseline left at `version`, which
     /// [`SqliteStore::open`] never copies: only
     /// [`SqliteStore::copy_into_baseline`] does, for a process that holds
