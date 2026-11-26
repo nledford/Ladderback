@@ -1,0 +1,35 @@
+name: Accessibility barrier
+description: Something in the web UI or the guide stopped you, or made a task harder than it should be.
+labels: ["accessibility", "bug"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Ladderback aims at WCAG 2.2 AA ([ACCESSIBILITY.md](https://github.com/nledford/Ladderback/blob/main/ACCESSIBILITY.md)). A barrier is a bug. Describe it in your own words; no technical terms needed.
+  - type: textarea
+    id: task
+    attributes:
+      label: What you were trying to do
+      placeholder: Add a plan, read an operation's log, sign in…
+    validations:
+      required: true
+  - type: textarea
+    id: barrier
+    attributes:
+      label: What happened
+      description: What stopped you or slowed you down, and where (the page, or the guide's page).
+    validations:
+      required: true
+  - type: input
+    id: tools
+    attributes:
+      label: What you use
+      description: A screen reader and its version, keyboard only, zoom or larger text, a high-contrast or reduced-motion setting, voice control…
+      placeholder: Orca 48 with Firefox, on Fedora 43
+    validations:
+      required: true
+  - type: input
+    id: version
+    attributes:
+      label: Ladderback version
+      description: The web UI's footer, or `ladderback --version`, if you can reach it.

@@ -1,0 +1,36 @@
+name: Real-world test report
+description: The result of an issue labelled "needs real-world test", run on a real machine.
+labels: ["needs real-world test"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Use a scratch repository and a made-up password, and never paste a real one.
+  - type: input
+    id: issue
+    attributes:
+      label: The issue you tested
+      placeholder: "#1060"
+    validations:
+      required: true
+  - type: input
+    id: version
+    attributes:
+      label: Version
+      description: The web UI's footer, or `ladderback --version`.
+    validations:
+      required: true
+  - type: input
+    id: system
+    attributes:
+      label: System
+      description: The operating system and its version, the desktop or none, and the processor.
+    validations:
+      required: true
+  - type: textarea
+    id: result
+    attributes:
+      label: Each step and what it did
+      description: The issue's steps, each with what you saw. Say which ones passed and which didn't.
+    validations:
+      required: true
