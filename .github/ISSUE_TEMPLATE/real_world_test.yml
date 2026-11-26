@@ -1,5 +1,5 @@
 name: Real-world test report
-description: The result of an issue labelled "needs real-world test", run on a real machine.
+description: The result of an issue labeled "needs real-world test", run on a real machine.
 labels: ["needs real-world test"]
 body:
   - type: markdown
