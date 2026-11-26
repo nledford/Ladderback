@@ -33,3 +33,50 @@ Ladderback reads the table when it starts, so restart it after a change. A flag 
 ## A hub behind a reverse proxy
 
 A hub reached through a reverse proxy must turn sign-in on, by setting an admin password ([Sign-in](#sign-in)). With sign-in off, a hub trusts a request that comes from its own computer and names it as the host. A proxy on that computer sends its requests from there, and some name `127.0.0.1` as their host, as nginx does by default, so a request from anywhere looks as if it came from the hub's own computer. Anyone who can reach the proxy could then use Ladderback as you do, and make a pairing token with nothing but the hub key's fingerprint, which isn't secret. With sign-in off, the hub's **Settings → Machines** says so too. [Decision 120](https://github.com/nledford/Ladderback/blob/main/docs/design/decisions/120-agent-hub-connection-security.md) has the details.
+
+The proxy itself needs four things, or the browser's sign-in is refused with **Ladderback refused this request because it came from a different site**:
+
+- **The public name in the allowed host names.** Add the name people type, such as `backups.example.com`, to `allowed-hosts` in `[serve]` ([Settings in config.toml](#settings-in-configtoml)), beside the hub's own names, and restart Ladderback.
+- **The browser's `Host` passed through.** Ladderback compares a request's `Origin` with its `Host`, so the proxy must forward the `Host` the browser sent, not the hub's own name. Caddy replaces it with the upstream's name when the upstream is `https://`, and nginx sends the upstream's name unless told otherwise.
+- **`https://` to the hub.** A hub serves plain HTTP only to its own computer, and closes a plain HTTP connection from any other one, logging that it did. Point the proxy at the hub's `https://` address, and have it trust the hub's certificate rather than skip the check.
+- **WebSockets.** The web UI's live updates and each machine's link to the hub are WebSockets. Caddy passes them as it is; nginx needs the two `Upgrade` lines below.
+
+The hub's certificate is its own, not a certificate authority's, and names the hub's host names and addresses ([The hub's address](hub.md#the-hubs-address)). Save it on the proxy's computer for the proxy to trust, and save it again after you change `allowed-hosts` or `listen`, which change the names in it:
+
+```sh
+openssl s_client -connect hub.lan.example:9898 -servername hub.lan.example </dev/null | openssl x509 > ladderback-hub.pem
+```
+
+With Caddy, for a hub at `hub.lan.example:9898`:
+
+```caddyfile
+backups.example.com {
+    reverse_proxy https://hub.lan.example:9898 {
+        header_up Host {host}
+        transport http {
+            tls_server_name hub.lan.example
+            tls_trust_pool file /etc/caddy/ladderback-hub.pem
+        }
+    }
+}
+```
+
+In OPNsense's Caddy plugin, make the header under **Reverse Proxy → Headers** (**Header** `header_up`, **Header Type** `Host`, **Header Value** `{host}`), then pick it under the handler's **HTTP Headers**.
+
+With nginx:
+
+```nginx
+location / {
+    proxy_pass https://hub.lan.example:9898;
+    proxy_set_header Host $http_host;
+    proxy_http_version 1.1;
+    proxy_set_header Upgrade $http_upgrade;
+    proxy_set_header Connection "upgrade";
+    proxy_ssl_name hub.lan.example;
+    proxy_ssl_server_name on;
+    proxy_ssl_verify on;
+    proxy_ssl_trusted_certificate /etc/nginx/ladderback-hub.pem;
+}
+```
+
+`$http_host` keeps the port when the proxy listens on one other than 443. To pair a machine through the proxy, make its token for the proxy's address, such as `https://backups.example.com`, with **A certificate authority's certificate** ([Making a pairing token](hub.md#making-a-pairing-token)).
