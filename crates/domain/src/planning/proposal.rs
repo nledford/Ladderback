@@ -155,7 +155,7 @@ impl std::fmt::Debug for ConfigRevision {
 }
 
 /// Why the AI agent proposes the changes, in its own words: shown apart
-/// from the summary Ladderback writes, labelled as the AI agent's.
+/// from the summary Ladderback writes, labeled as the AI agent's.
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub struct Rationale(String);
 

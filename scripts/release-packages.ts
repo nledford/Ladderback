@@ -84,7 +84,7 @@ export const FOLDER_STATE_SCRIPT =
 export const SEED_FOLDERS_SCRIPT =
   "cd \"$HOME\" && mkdir -p .config/ladderback .local/share/ladderback/repository .cache/ladderback && printf 'schema = 1\\n' > .config/ladderback/config.toml && printf 'a backup\\n' > .local/share/ladderback/repository/data && printf 'a cache\\n' > .cache/ladderback/cache";
 
-// Every path a package may hold: the program and its licence texts, and the .rpm's own licence folder.
+// Every path a package may hold: the program and its license texts, and the .rpm's own license folder.
 const ALLOWED = [
   /^\/usr\/bin\/ladderback$/,
   /^\/usr\/share\/licenses\/ladderback$/,
@@ -92,7 +92,7 @@ const ALLOWED = [
   /^\/usr\/share\/licenses\/ladderback\/LICENSE-(?:MIT|APACHE)$/,
 ];
 
-/** The paths in `files` a package must not hold: anything but the program and its licences (so no service unit, no `/etc`). */
+/** The paths in `files` a package must not hold: anything but the program and its licenses (so no service unit, no `/etc`). */
 export function unexpectedFiles(files: string[]): string[] {
   return files.filter((file) => !ALLOWED.some((pattern) => pattern.test(file)));
 }

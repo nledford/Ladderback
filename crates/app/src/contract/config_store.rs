@@ -112,7 +112,7 @@ fn strings(items: &[&str]) -> Vec<String> {
     items.iter().map(|item| (*item).to_owned()).collect()
 }
 
-/// Every part set, to values that no default and no neighbouring part
+/// Every part set, to values that no default and no neighboring part
 /// shares, and with the characters a file format has to quote.
 fn rich() -> Option<AgentConfig> {
     let nas = alias("nas")?;

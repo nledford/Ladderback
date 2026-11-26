@@ -355,7 +355,7 @@ async fn a_daemon_not_serving_as_a_hub_answers_its_routes_as_unknown() {
 }
 
 #[tokio::test]
-async fn on_loopback_the_fingerprint_makes_a_token_shown_once_and_cancelled_once() {
+async fn on_loopback_the_fingerprint_makes_a_token_shown_once_and_canceled_once() {
     let daemon = Daemon::hub(false);
     let fingerprint = daemon.fingerprint().await.to_lowercase();
     let response = daemon.send(make(LOOPBACK, &[], &ask(&fingerprint))).await;
@@ -744,7 +744,7 @@ async fn the_page_shows_each_approved_machine_with_its_latest_operations() {
         (1, 1, Happening::Started, 1_799_999_000),
         (2, 1, Happening::Succeeded, 1_799_999_100),
         (3, 2, failed, 1_799_999_200),
-        (4, 3, Happening::Cancelled, 1_799_999_300),
+        (4, 3, Happening::Canceled, 1_799_999_300),
     ] {
         let entry = OutboxEntry {
             epoch: OutboxEpoch::from_uuid(Uuid::from_u128(0xe1)),
@@ -787,7 +787,7 @@ async fn the_page_shows_each_approved_machine_with_its_latest_operations() {
                     operation: Uuid::from_u128(3).to_string(),
                     started_at: None,
                     ended_at: time(1_799_999_300),
-                    outcome: api::MachineOutcomeDto::Cancelled,
+                    outcome: api::MachineOutcomeDto::Canceled,
                     code: None,
                 },
                 api::MachineOperationDto {

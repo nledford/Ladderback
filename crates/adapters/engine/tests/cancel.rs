@@ -1,4 +1,4 @@
-//! A cancelled backup (SIGTERM, the daemon's stop) writes no snapshot, and
+//! A canceled backup (SIGTERM, the daemon's stop) writes no snapshot, and
 //! what it had already saved stays in the repository's index (§4.1): a
 //! check finds no pack the index doesn't list, and the next backup reuses
 //! that data instead of saving it again.
@@ -82,7 +82,7 @@ async fn cancel_once_packs_are_saved(scratch: &Scratch, location: &Location, pac
     while let Some(event) = events.next().await {
         assert!(
             !matches!(event, EngineEvent::Succeeded(_)),
-            "a cancelled backup reported a result: {event:?}"
+            "a canceled backup reported a result: {event:?}"
         );
     }
 }
@@ -101,7 +101,7 @@ fn findings(location: &Location) -> Vec<String> {
     })
 }
 
-async fn a_cancelled_backup_leaves_its_packs_indexed_and_no_snapshot(
+async fn a_canceled_backup_leaves_its_packs_indexed_and_no_snapshot(
     scratch: &Scratch,
     location: Location,
 ) {
@@ -122,7 +122,7 @@ async fn a_cancelled_backup_leaves_its_packs_indexed_and_no_snapshot(
         assert_eq!(
             snapshots,
             0,
-            "a cancelled backup wrote a snapshot to {}",
+            "a canceled backup wrote a snapshot to {}",
             half.display()
         );
     }
@@ -147,21 +147,21 @@ async fn a_cancelled_backup_leaves_its_packs_indexed_and_no_snapshot(
 }
 
 #[tokio::test]
-async fn a_cancelled_backup_leaves_its_packs_indexed_and_no_snapshot_in_a_local_repository() {
+async fn a_canceled_backup_leaves_its_packs_indexed_and_no_snapshot_in_a_local_repository() {
     let scratch = Scratch::new();
     let location = scratch.local();
-    a_cancelled_backup_leaves_its_packs_indexed_and_no_snapshot(&scratch, location).await;
+    a_canceled_backup_leaves_its_packs_indexed_and_no_snapshot(&scratch, location).await;
 }
 
 #[tokio::test]
-async fn a_cancelled_backup_leaves_its_packs_indexed_and_no_snapshot_in_either_half_of_a_hot_cold_repository()
+async fn a_canceled_backup_leaves_its_packs_indexed_and_no_snapshot_in_either_half_of_a_hot_cold_repository()
  {
     let scratch = Scratch::new();
     let location = scratch.hot_cold();
-    a_cancelled_backup_leaves_its_packs_indexed_and_no_snapshot(&scratch, location).await;
+    a_canceled_backup_leaves_its_packs_indexed_and_no_snapshot(&scratch, location).await;
 }
 
-/// The stop's grace in [`a_cancelled_backup_whose_events_nobody_reads_still_leaves_its_packs_indexed`]:
+/// The stop's grace in [`a_canceled_backup_whose_events_nobody_reads_still_leaves_its_packs_indexed`]:
 /// far past the wind-down of a local repository (under a second on a busy
 /// machine), and short of the worker's own 30 s limit, so a stalled
 /// wind-down ends at this grace's SIGKILL.
@@ -186,7 +186,7 @@ enum StoppedBy {
 
 #[cfg(unix)]
 #[tokio::test]
-async fn a_cancelled_backup_whose_events_nobody_reads_still_leaves_its_packs_indexed() {
+async fn a_canceled_backup_whose_events_nobody_reads_still_leaves_its_packs_indexed() {
     a_backup_whose_events_nobody_reads_still_leaves_its_packs_indexed(StoppedBy::Cancel).await;
 }
 
@@ -282,7 +282,7 @@ async fn a_backup_whose_events_nobody_reads_still_leaves_its_packs_indexed(by: S
         }
     }
     let snapshots = fs::read_dir(scratch.repo_dir().join("snapshots")).map_or(0, |f| f.count());
-    assert_eq!(snapshots, 0, "a cancelled backup wrote a snapshot");
+    assert_eq!(snapshots, 0, "a canceled backup wrote a snapshot");
     let findings = findings(&location);
     assert!(findings.is_empty(), "{findings:#?}");
     assert!(

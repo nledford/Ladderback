@@ -32,7 +32,7 @@ rmcp.workspace = true
 serde.workspace = true
 serde_json.workspace = true
 # `wait_operation` reads the operation again after a pause, until the call
-# is cancelled.
+# is canceled.
 tokio = { workspace = true, features = ["io-std", "macros", "time"] }
 # An operation's ID, and the history cursor just past it that reads its
 # summary alone in connect mode.

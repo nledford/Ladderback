@@ -1,5 +1,5 @@
 //! The repository routes' service (technical design §4.2): tests, connects
-//! and initialises repositories, from a request's settings to the use cases
+//! and initializes repositories, from a request's settings to the use cases
 //! of `app` and back to the typed refusals the routes answer with.
 
 use std::sync::Arc;
@@ -32,7 +32,7 @@ use super::{
 };
 use app::ports::config_unusable;
 
-/// Tests, connects and initialises repositories for the API (§4.2): each
+/// Tests, connects and initializes repositories for the API (§4.2): each
 /// request's settings become domain values, run through the use cases of
 /// `app`, and every refusal becomes a typed one. Writes to the configuration
 /// go one at a time, so two connections made at the same moment are both
@@ -162,29 +162,29 @@ impl Repositories for RepositoryService {
             .map_err(|_| RepositoriesError::AliasInvalid)?;
         let settings = settings_of(request.settings)?;
         let keep_in_keyring = keeps_in_keyring(request.keep_in_keyring, alias.as_ref(), &settings)?;
-        // Only a saving initialisation writes the configuration.
+        // Only a saving initialization writes the configuration.
         let _writing = match alias {
             Some(_) => Some(self.writes.lock().await),
             None => None,
         };
-        let initialising = InitRepository::new(
+        let initializing = InitRepository::new(
             Arc::clone(&self.clock),
             Arc::clone(&self.engine),
             self.resolve.clone(),
             Arc::clone(&self.config),
         );
-        let initialising = if keep_in_keyring {
-            initialising.keeping_password_in(Arc::clone(&self.keyring))
+        let initializing = if keep_in_keyring {
+            initializing.keeping_password_in(Arc::clone(&self.keyring))
         } else {
-            initialising
+            initializing
         };
-        let initialised = match initialising.init(new_operation(), &settings, alias).await {
+        let initialized = match initializing.init(new_operation(), &settings, alias).await {
             Ok(value) => value,
             Err(error) => return Err(refusal_of(error, &settings).await),
         };
         Ok(api::RepositoryInitDto {
-            id: initialised.id.as_str().to_owned(),
-            saved: initialised.saved,
+            id: initialized.id.as_str().to_owned(),
+            saved: initialized.saved,
         })
     }
 

@@ -171,12 +171,12 @@ enum McpCommand {
 }
 
 /// The command line, parsed, or the status to end with when `clap` has said
-/// its help, its version or a usage error. `clap` colours what it says while
+/// its help, its version or a usage error. `clap` colors what it says while
 /// it parses, before it has a value for `--plain`, so the raw arguments are
 /// scanned for the flag first (see [`output::asked_for_plain`]).
 fn parse(args: Vec<OsString>) -> Result<Cli, ExitCode> {
     let plain = output::asked_for_plain(&args);
-    let mut command = Cli::command().color(output::clap_colour(plain));
+    let mut command = Cli::command().color(output::clap_color(plain));
     let mut matches = match command.try_get_matches_from_mut(&args) {
         Ok(matches) => matches,
         // Help is said again with the catalog's descriptions: the catalog is
@@ -564,7 +564,7 @@ impl Session {
         if let Some(held) = &held {
             runtime.block_on(held.stop());
         }
-        // A read of stdin can't be cancelled: the runtime isn't waited for.
+        // A read of stdin can't be canceled: the runtime isn't waited for.
         runtime.shutdown_background();
         // The data folder is let go once nothing of the session can touch it.
         if let Some(held) = held {

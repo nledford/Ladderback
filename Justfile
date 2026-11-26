@@ -291,7 +291,7 @@ test *args:
 # A suite that fails doesn't stop the next one: the run goes on and fails at
 # the end, naming each suite that failed, so one run lists every failure, as
 # the nextest `ci` profile's `fail-fast = false` means it to (#997). An
-# interrupt (Ctrl-C, a cancelled CI job) stops the run at the suite it reaches,
+# interrupt (Ctrl-C, a canceled CI job) stops the run at the suite it reaches,
 # with the signal's status: the traps catch one that the suite handles itself
 # and exits from normally, as nextest does (exit 100), and the status check
 # one that ends the suite (status above 128).
@@ -907,7 +907,7 @@ release-pr version='':
     done
     case $state in
         "completed success") ;;
-        "completed cancelled") echo "error: the Release run was cancelled (a push to main can take its place in the queue); run this again" >&2; exit 1 ;;
+        "completed cancelled") echo "error: the Release run was canceled (a push to main can take its place in the queue); run this again" >&2; exit 1 ;;
         "completed "*) echo "error: the Release run failed: gh run view $run --log-failed" >&2; exit 1 ;;
         *) echo "error: the Release run hasn't finished after 45 minutes: gh run view $run" >&2; exit 1 ;;
     esac

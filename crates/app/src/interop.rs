@@ -102,7 +102,7 @@ pub enum Consent<'a> {
 /// Why an import saved nothing. A typed code, never a sentence (§8.4).
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum ImportError {
-    /// The profile could not be read, or says what Ladderback cannot honour.
+    /// The profile could not be read, or says what Ladderback cannot honor.
     Profile(ProfileError),
     /// The configuration already holds a repository under the alias, at
     /// another location than the profile's.

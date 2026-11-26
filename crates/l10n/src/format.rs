@@ -22,7 +22,7 @@
 //!
 //! # What is a host's to decide
 //!
-//! The vocabulary is closed, so every host can honour all of it:
+//! The vocabulary is closed, so every host can honor all of it:
 //!
 //! - **Numbers** follow the `NUMBER` options `minimumIntegerDigits`,
 //!   `minimumFractionDigits`, `maximumFractionDigits` and `useGrouping`
@@ -53,7 +53,7 @@ pub(crate) const MAX_FRACTION_DIGITS: u8 = 100;
 /// The most integer digits a number is padded to: ECMA-402's own limit.
 pub(crate) const MAX_INTEGER_DIGITS: u8 = 21;
 
-/// How a number is written: the digit options of `NUMBER` a host honours,
+/// How a number is written: the digit options of `NUMBER` a host honors,
 /// bounded and consistent. A host never sees more than the caps, a minimum
 /// above the maximum, or no integer digit at all.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]

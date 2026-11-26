@@ -948,8 +948,8 @@ async fn plan_runs(agent: &mut Agent, plan: String) {
 /// The run is stopped while the location `name` is the only one probed,
 /// and what it reports afterwards is read to its end, as the engine port
 /// allows a stopped job's events to be (§4.1).
-#[when(expr = "the plan {string} is cancelled while the location {string} is tried")]
-async fn plan_cancelled_while_tried(agent: &mut Agent, plan: String, name: String) {
+#[when(expr = "the plan {string} is canceled while the location {string} is tried")]
+async fn plan_canceled_while_tried(agent: &mut Agent, plan: String, name: String) {
     assert_eq!(plan, PLAN);
     let job = backup_job(agent, NAS).await;
     let world = &agent.locations;

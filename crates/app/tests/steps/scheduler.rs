@@ -183,12 +183,12 @@ impl RecordingRuns {
     /// Starts a run of `plan` as a person does, in `place`: they may cancel
     /// it while it waits for its turn ([`Self::cancel_by_hand`]).
     fn start_by_hand(&self, plan: &PlanId, place: Place) {
-        let (cancel, cancelled) = oneshot::channel();
+        let (cancel, canceled) = oneshot::channel();
         self.by_hand
             .lock()
             .unwrap_or_else(PoisonError::into_inner)
             .push(cancel);
-        self.run(plan, Trigger::Manual, place, Some(cancelled));
+        self.run(plan, Trigger::Manual, place, Some(canceled));
     }
 
     /// Cancels the run a person started last, which waits for its turn.
@@ -205,8 +205,8 @@ impl RecordingRuns {
     }
 
     /// Runs `plan` in `place`, once its turn comes, as long as the scenario
-    /// says, and says how it ended; or, cancelled through `cancel` before
-    /// its turn, gives up its place and says it was cancelled.
+    /// says, and says how it ended; or, canceled through `cancel` before
+    /// its turn, gives up its place and says it was canceled.
     fn run(
         &self,
         plan: &PlanId,
@@ -227,7 +227,7 @@ impl RecordingRuns {
             .copied()
             .unwrap_or(SignedDuration::ZERO);
         let run = async move {
-            let cancelled = match cancel {
+            let canceled = match cancel {
                 None => {
                     place.turn().await;
                     false
@@ -242,16 +242,16 @@ impl RecordingRuns {
                     }
                 },
             };
-            if cancelled {
+            if canceled {
                 // It never started: it leaves the queue and says it was
-                // cancelled, as a run of the daemon's cancelled while it
+                // canceled, as a run of the daemon's canceled while it
                 // waits does.
                 drop(place);
                 ends.send(RunEnd {
                     operation: OperationId::from_uuid(uuid::Uuid::from_u128(u128::MAX)),
                     plan,
                     trigger: trigger.clone(),
-                    outcome: RunOutcome::Cancelled,
+                    outcome: RunOutcome::Canceled,
                 });
                 return;
             }
@@ -871,7 +871,7 @@ fn outcome(text: &str) -> RunOutcome {
     match text {
         "failed" => RunOutcome::Failed,
         "succeeded" => RunOutcome::Succeeded,
-        "cancelled" => RunOutcome::Cancelled,
+        "canceled" => RunOutcome::Canceled,
         other => panic!("{other:?} is no way for a run to end"),
     }
 }

@@ -17,7 +17,7 @@ pub use rules::Meaning;
 ///
 /// By default it is decoration beside words that say what it shows, or
 /// inside a control its own label names: `aria-hidden`, so a screen reader
-/// reads the words once. Given `meaning=Meaning::Labelled(label)`, it is an
+/// reads the words once. Given `meaning=Meaning::Labeled(label)`, it is an
 /// image (`role="img"`) named by the label, for an icon that says something
 /// no words beside it say. [`rules`] decides both. It is never a tab stop
 /// (`focusable="false"`).
@@ -34,7 +34,7 @@ pub use rules::Meaning;
 /// What the caller owes WCAG 2.2 AA, since the icon does none of it:
 ///
 /// - **A label on every meaningful icon,** saying what it shows.
-/// - **A labelled icon whose glyph changes is built anew** with the new
+/// - **A labeled icon whose glyph changes is built anew** with the new
 ///   glyph's label: the label is fixed when the icon is built, so an icon
 ///   that only swapped its glyph would name what it no longer shows. A
 ///   decorative icon's glyph may follow a state in place.

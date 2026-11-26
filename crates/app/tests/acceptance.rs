@@ -234,7 +234,7 @@ impl Agent {
     }
 }
 
-#[when("the agent runs the operation after the user has cancelled it")]
+#[when("the agent runs the operation after the user has canceled it")]
 async fn run_after_cancel(agent: &mut Agent) {
     agent.run_operation_until(futures::future::ready(())).await;
 }
@@ -249,13 +249,13 @@ async fn run_and_cancel(agent: &mut Agent, minutes: u32) {
         clock.clone(),
         agent.store.clone(),
     );
-    let (cancel, cancelled) = futures::channel::oneshot::channel::<()>();
+    let (cancel, canceled) = futures::channel::oneshot::channel::<()>();
     let job = Job::Fake(agent.job.clone());
     let id = OperationId::from_uuid(Uuid::from_u128(1));
     let running = tokio::spawn(async move {
         use_case
             .run(id, Trigger::Manual, job, async move {
-                let _ = cancelled.await;
+                let _ = canceled.await;
             })
             .await
     });

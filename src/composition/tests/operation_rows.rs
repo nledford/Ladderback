@@ -249,3 +249,13 @@ fn a_failed_operations_row_keeps_its_failure_code_beside_the_failure() {
     assert_eq!(wire.get("failure-code"), Some(&serde_json::Value::Null));
     assert_eq!(wire.get("failure"), None, "{wire}");
 }
+
+/// The API names a canceled operation's status with the British spelling,
+/// the value every client reads and the store keeps.
+#[test]
+fn a_cancel_keeps_its_wire_spelling_in_the_api() {
+    assert_eq!(
+        crate::composition::status_text(&domain::execution::OperationStatus::Canceled),
+        "cancelled"
+    );
+}

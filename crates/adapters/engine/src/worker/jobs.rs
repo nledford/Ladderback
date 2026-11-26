@@ -340,7 +340,7 @@ fn copy_of(
         .map(|snapshot| snapshot.id)
 }
 
-/// Initialises a repository at the location, with default key options and
+/// Initializes a repository at the location, with default key options and
 /// both halves of a hot/cold repository. It refuses when a repository
 /// already exists there (`repository-exists`), and never overwrites one.
 pub(crate) fn init(ctx: &Context, spec: &RepositorySpec) -> Result<Done, JobError> {
@@ -445,7 +445,7 @@ pub(crate) fn backup(ctx: &Context, job: &BackupJobSpec) -> Result<Done, JobErro
         .cancel()
         .saving(|| repository.archive(&options, &source, snapshot, &paths))
     else {
-        return Ok(Done::Cancelled);
+        return Ok(Done::Canceled);
     };
     let snapshot = snapshot?;
     // The snapshot is saved: nothing is left that the deadline guards. The

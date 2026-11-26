@@ -30,7 +30,7 @@ pub const PASSWORD: &str = "e2e-scratch-password";
 /// Not a real secret: a password that opens none of the repository's keys.
 pub const WRONG_PASSWORD: &str = "canary-not-the-password";
 
-/// How long a cancelled backup runs before the user cancels it: long enough
+/// How long a canceled backup runs before the user cancels it: long enough
 /// that the worker is reading the source, far shorter than the backup.
 const CANCEL_AFTER: Duration = Duration::from_millis(500);
 
@@ -454,7 +454,7 @@ async fn backs_up(agent: &mut Agent) {
 
 #[when("the agent backs up the plan and the user cancels it once it has started")]
 async fn backs_up_and_cancels(agent: &mut Agent) {
-    agent.run_backup_cancelled_after(CANCEL_AFTER).await;
+    agent.run_backup_canceled_after(CANCEL_AFTER).await;
 }
 
 #[when(
@@ -463,7 +463,7 @@ async fn backs_up_and_cancels(agent: &mut Agent) {
 async fn backs_up_and_cancels_once_packs_saved(agent: &mut Agent, packs: usize) {
     let data = agent.repository().cold.join("data");
     agent
-        .run_backup_cancelled_once(async move {
+        .run_backup_canceled_once(async move {
             while packs_in(&data) < packs {
                 tokio::time::sleep(Duration::from_millis(5)).await;
             }

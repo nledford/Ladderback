@@ -49,7 +49,7 @@ Feature: Restarting Ladderback from Settings
     Then the history page shows the operation succeeded
 
   @e2e
-  Scenario: A cancelled restart never comes, and maintenance starts again
+  Scenario: A canceled restart never comes, and maintenance starts again
     Given Ladderback is serving on loopback under a service manager with the plan "home"
     And the plan's after hook waits until it is let go
     And the daemon is running a backup of the plan "home"

@@ -1,7 +1,7 @@
 // Fails if a step file uses a pointer action. Journeys must work by
 // keyboard alone (A1), so they may only use support/keyboard.ts. The one
 // exception is support/pointer.ts, which the maintainer approved for the
-// tooltip's hover contract (WCAG 1.4.13 is pointer behaviour), a link's
+// tooltip's hover contract (WCAG 1.4.13 is pointer behavior), a link's
 // underline under the pointer, the one drag of a table's Columns panel
 // (decision 140), whose Move buttons do the same by keyboard, and a press
 // held on one element (`holdOn`, approved 2026-11-23 for #1452's pressed

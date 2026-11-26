@@ -76,7 +76,7 @@ impl Reader<'_, '_> {
         self.invalid(path, Spot::Value, problem, String::new())
     }
 
-    /// A key rustic accepts in the profile and Ladderback can't honour.
+    /// A key rustic accepts in the profile and Ladderback can't honor.
     fn unsupported(&self, path: &Path, spot: Spot) -> ProfileError {
         ProfileError::Unsupported {
             file: self.file.to_owned(),

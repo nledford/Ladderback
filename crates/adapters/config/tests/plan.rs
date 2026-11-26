@@ -89,9 +89,9 @@ fn a_missing_key_is_refused_by_its_name() {
 #[test]
 fn a_key_a_plan_doesn_t_have_is_refused_by_its_name_at_any_depth() {
     let refused = invalid(read(
-        "id = \"home\"\nrepository = \"nas\"\nsources = [\"/home/demo\"]\ncolour = \"red\"\n",
+        "id = \"home\"\nrepository = \"nas\"\nsources = [\"/home/demo\"]\ncolor = \"red\"\n",
     ));
-    assert_eq!(refused.key.as_deref(), Some("colour"));
+    assert_eq!(refused.key.as_deref(), Some("color"));
     assert_eq!(refused.problem, Problem::UnknownKey);
     let refused = invalid(read(
         "id = \"home\"\nrepository = \"nas\"\nsources = [\"/home/demo\"]\n\

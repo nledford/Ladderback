@@ -340,7 +340,7 @@ fn what_rustic_refuses_in_group_by_the_file_refuses_and_what_it_takes_the_file_t
         "host,,tags",
         "tags,host",
         "label,host,label",
-        "host,colour",
+        "host,color",
         "Host",
         " host",
         "hostname",

@@ -87,7 +87,7 @@ pub enum ErrorCode {
     /// The configuration file is in a version of the format newer than this
     /// build reads.
     ConfigSchemaNewer,
-    /// A repository already exists where one was to be initialised, so
+    /// A repository already exists where one was to be initialized, so
     /// nothing was written. The argument `location` is where it is.
     RepositoryExists,
     /// No repository is at the location: the engine found an empty folder
@@ -120,7 +120,7 @@ pub enum ErrorCode {
     /// nothing says the location is reachable and holds no repository
     /// (decision 53). Nothing was run.
     CreateNotOffered,
-    /// A repository didn't answer a test, a connection or an initialisation
+    /// A repository didn't answer a test, a connection or an initialization
     /// in time, so the engine's worker was stopped and nothing was saved.
     RepositoryTimedOut,
     /// The configuration already holds a repository under the alias. The
@@ -424,7 +424,7 @@ pub enum ErrorCode {
     /// `key` is the setting at fault and `line` where it is written, each
     /// left out when none is known. The detail says what is wrong.
     ProfileInvalid,
-    /// A profile says something Ladderback can't honour, so nothing was
+    /// A profile says something Ladderback can't honor, so nothing was
     /// imported. The argument `key` is the setting, `file` the profile and
     /// `line` where it is written, left out when none is known.
     ProfileUnsupported,

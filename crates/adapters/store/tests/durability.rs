@@ -11,7 +11,7 @@ use sqlx::Row;
 use store::SqliteStore;
 use support::*;
 
-/// A queued, a running, a finished, a failed and a cancelled operation, with
+/// A queued, a running, a finished, a failed and a canceled operation, with
 /// warnings and a result among them, and what each was saved with.
 fn a_mix() -> Vec<(Operation, Option<EngineResult>)> {
     let queued_one = queued_backup(0x10);
@@ -31,7 +31,7 @@ fn a_mix() -> Vec<(Operation, Option<EngineResult>)> {
             detail: "repository not found".to_owned(),
         },
     );
-    let mut cancelled = queued(
+    let mut canceled = queued(
         0x14,
         OperationKind::Check,
         Trigger::Retry,
@@ -40,13 +40,13 @@ fn a_mix() -> Vec<(Operation, Option<EngineResult>)> {
             repository: Some(repository()),
         },
     );
-    cancelled.cancel(at(5)).expect("a queued operation cancels");
+    canceled.cancel(at(5)).expect("a queued operation cancels");
     vec![
         (queued_one, None),
         (running, None),
         (finished, Some(backup_result())),
         (failed_one, None),
-        (cancelled, None),
+        (canceled, None),
     ]
 }
 

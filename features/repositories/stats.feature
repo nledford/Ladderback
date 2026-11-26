@@ -65,7 +65,7 @@ Feature: A repository's stats
   Scenario: A cancel while a check reads the stats ends the check with its result
     Given the repository "demo" holds 3 snapshots of 1000 bytes each, stored in 1200 bytes of 2400 raw
     And the stats of "demo" are never answered
-    When a check of "demo" is cancelled while it reads the stats
+    When a check of "demo" is canceled while it reads the stats
     Then the check succeeded
     And the history keeps no reading of "demo"
 

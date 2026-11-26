@@ -53,7 +53,7 @@ fn each_event_serializes_with_its_kebab_case_type() {
         ),
         (succeeded(), "operation-succeeded"),
         (
-            UiEvent::OperationCancelled {
+            UiEvent::OperationCanceled {
                 operation: "018f0000-0000-7000-8000-000000000001".into(),
                 finished_at: "2026-11-09T10:05:00Z".into(),
             },

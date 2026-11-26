@@ -35,7 +35,7 @@ import {
   webkit,
 } from "playwright";
 
-import { avoidLabelledByCrash } from "./labelledby-crash.ts";
+import { avoidLabeledByCrash } from "./labeledby-crash.ts";
 import { clockStandsStill } from "./keyboard.ts";
 import { patienceMs, STEP_LIMIT_MS, timed } from "./patience.ts";
 import type { ScriptedDaemon } from "./scripted-daemon.ts";
@@ -91,7 +91,7 @@ function chosenEngine(): Engine {
 /** The browser engine the run drives: `LADDERBACK_UI_BROWSER` (`chromium`,
  *  `firefox` or `webkit`), Chromium when unset. `just test-ui <engine>` sets
  *  it, and the red-first check (`scripts/red-first.ts`) runs a new scenario
- *  under each. A step whose browser behaviour differs by engine branches on
+ *  under each. A step whose browser behavior differs by engine branches on
  *  this. */
 export const engine: Engine = chosenEngine();
 const browserType: BrowserType = engines[engine];
@@ -323,7 +323,7 @@ export class BrowserWorld extends World {
     // CI can be read from its run.
     await this.context.tracing.start({ screenshots: true, snapshots: true });
     this.tracing = true;
-    await avoidLabelledByCrash(this.context, engine);
+    await avoidLabeledByCrash(this.context, engine);
     await this.scriptedDaemon?.install(this.context);
     for (const install of this.contextRoutes) await install(this.context);
     if (this.answerDelayMs > 0) {

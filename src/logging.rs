@@ -152,8 +152,8 @@ pub(crate) fn logger(rust_log: Option<&str>, target: Target, style: WriteStyle) 
     }
 }
 
-/// How the daemon's log is styled: with no colour at all when plain output
-/// was asked for; otherwise with colour where the stream is a terminal and
+/// How the daemon's log is styled: with no color at all when plain output
+/// was asked for; otherwise with color where the stream is a terminal and
 /// the environment (`NO_COLOR`, `CLICOLOR`, `CLICOLOR_FORCE`) allows it.
 pub(crate) fn write_style(plain: bool) -> WriteStyle {
     if plain {
@@ -391,7 +391,7 @@ mod tests {
     }
 
     #[test]
-    fn plain_output_turns_colour_off_and_the_rest_is_left_to_the_terminal() {
+    fn plain_output_turns_color_off_and_the_rest_is_left_to_the_terminal() {
         assert_eq!(write_style(true), WriteStyle::Never);
         assert_eq!(write_style(false), WriteStyle::Auto);
     }
@@ -405,9 +405,9 @@ mod tests {
     }
 
     #[test]
-    fn the_style_a_logger_is_given_decides_whether_its_records_are_coloured() {
-        let coloured = written_in(WriteStyle::Always);
-        assert!(coloured.contains('\u{1b}'), "{coloured:?}");
+    fn the_style_a_logger_is_given_decides_whether_its_records_are_colored() {
+        let colored = written_in(WriteStyle::Always);
+        assert!(colored.contains('\u{1b}'), "{colored:?}");
         let plain = written_in(WriteStyle::Never);
         assert!(!plain.contains('\u{1b}'), "{plain:?}");
         assert!(plain.ends_with("disk is slow\n"), "{plain:?}");

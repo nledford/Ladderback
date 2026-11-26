@@ -1099,7 +1099,7 @@ keep-daily = 7
     fn a_file_that_is_not_a_configuration_is_not_edited() {
         let config = read(WRITTEN);
         assert_eq!(saved_as("schema = [", &config), None);
-        assert_eq!(saved_as("schema = 1\ncolour = \"red\"\n", &config), None);
+        assert_eq!(saved_as("schema = 1\ncolor = \"red\"\n", &config), None);
     }
 
     /// A file in an older version is the load's to migrate, as a whole.

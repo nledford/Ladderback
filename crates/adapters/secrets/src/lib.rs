@@ -258,7 +258,7 @@ impl SystemSecrets {
 
     /// Waits for a blocking read for the time limit and no longer: a keyring
     /// that waits for the user to unlock it, or a mount that has hung, must
-    /// not hold a job back for good. The read itself can't be cancelled; it
+    /// not hold a job back for good. The read itself can't be canceled; it
     /// ends when the system lets it go.
     async fn limited<T>(
         &self,

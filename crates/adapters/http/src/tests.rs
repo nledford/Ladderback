@@ -1754,7 +1754,7 @@ fn mistake() -> (
             ),
             ("line", api::MsgArg::Text("6".to_owned())),
         ],
-        Some("repositories.demo.colour".to_owned()),
+        Some("repositories.demo.color".to_owned()),
     )
 }
 
@@ -1855,7 +1855,7 @@ async fn a_configuration_that_cannot_be_used_is_refused_with_its_code_and_where_
                     "file": {"type": "text", "value": "/etc/ladderback/config.toml"},
                     "line": {"type": "text", "value": "6"},
                 },
-                "detail": "repositories.demo.colour",
+                "detail": "repositories.demo.color",
             }),
             "{path}"
         );
@@ -2477,7 +2477,7 @@ async fn a_connection_is_created_and_answers_with_the_repositorys_id() {
 }
 
 #[tokio::test]
-async fn an_initialisation_says_whether_it_was_saved() {
+async fn an_initialization_says_whether_it_was_saved() {
     for (alias, saved) in [(None, false), (Some("fresh"), true)] {
         let mut request = serde_json::json!({"settings": settings_json("/new")});
         if let Some(alias) = alias {

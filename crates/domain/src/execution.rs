@@ -34,15 +34,20 @@ pub const MAX_WARNING_TEXT_BYTES: usize = 4 * 1024;
 pub const WARNING_TEXT_CUT: &str = "…";
 
 /// Where an operation is in its lifecycle:
-/// `Queued` → `Running` → `Succeeded` / `SucceededWithWarnings` / `Failed` / `Cancelled`.
+/// `Queued` → `Running` → `Succeeded` / `SucceededWithWarnings` / `Failed` / `Canceled`.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub enum OperationStatus {
     Queued,
     Running,
     Succeeded,
     SucceededWithWarnings,
-    Failed { reason: FailureReason },
-    Cancelled,
+    Failed {
+        reason: FailureReason,
+    },
+    // Serialized as before the rename to American spelling, so nothing
+    // written with the old name reads differently.
+    #[serde(rename = "Cancelled")]
+    Canceled,
 }
 
 impl OperationStatus {
@@ -68,7 +73,7 @@ impl OperationStatus {
     /// couldn't be opened or read where it was looked for (no repository or
     /// another one there, its credentials or password refused, no location
     /// usable, a secret of its settings unresolved), and `None` when it
-    /// tells neither: it is queued, running or cancelled, or failed for a
+    /// tells neither: it is queued, running or canceled, or failed for a
     /// reason of its own. The status summary names a repository whose last
     /// operation that tells was [`Unreadable`] (§4.6).
     ///
@@ -109,7 +114,7 @@ impl OperationStatus {
                 | Why::LeaseLapsed
                 | Why::DeletionUnanswered => None,
             },
-            Self::Queued | Self::Running | Self::Cancelled => None,
+            Self::Queued | Self::Running | Self::Canceled => None,
         }
     }
 }
@@ -144,7 +149,7 @@ pub enum FailureReason {
     /// A backup was still running at its deadline and stopped without
     /// writing a snapshot (I3).
     DeadlinePassed,
-    /// A repository already exists where one was to be initialised, so
+    /// A repository already exists where one was to be initialized, so
     /// nothing was written. The agent refuses to overwrite one.
     RepositoryExists,
     /// The repository at the entry's location has another repository ID than
@@ -541,7 +546,7 @@ pub enum OperationKind {
     /// A scripted job that touches no repository, for tests and diagnostics.
     Fake,
     Identify,
-    /// Initialises a repository where nothing is yet, and reports its ID.
+    /// Initializes a repository where nothing is yet, and reports its ID.
     Init,
     Backup,
     /// Removes the snapshots a forget run's selection named (I6).
@@ -863,10 +868,10 @@ impl Operation {
     /// Records a warning from outside the running phase, as a hook does:
     /// before the operation starts, or after it finished. A success that had
     /// no warnings until then ends as [`OperationStatus::SucceededWithWarnings`];
-    /// a cancelled operation takes none, since its run was given up.
+    /// a canceled operation takes none, since its run was given up.
     pub fn attach_warning(&mut self, warning: Warning) -> Result<(), LifecycleError> {
         self.require(Transition::RecordWarning, |s| {
-            !matches!(s, OperationStatus::Cancelled)
+            !matches!(s, OperationStatus::Canceled)
         })?;
         self.keep(warning);
         if self.status == OperationStatus::Succeeded {
@@ -928,7 +933,7 @@ impl Operation {
 
     pub fn cancel(&mut self, at: Timestamp) -> Result<(), LifecycleError> {
         self.require(Transition::Cancel, |s| !s.is_finished())?;
-        self.finish(OperationStatus::Cancelled, at);
+        self.finish(OperationStatus::Canceled, at);
         Ok(())
     }
 

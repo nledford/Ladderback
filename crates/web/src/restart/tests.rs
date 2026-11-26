@@ -32,7 +32,7 @@ fn a_pending_restart_with_no_answer_is_the_daemon_going_down() {
         Stage::while_pending(Some(&told(true, true, 1))),
         Stage::Pending
     );
-    // Cancelled elsewhere: the section offers a restart again.
+    // Canceled elsewhere: the section offers a restart again.
     assert_eq!(
         Stage::while_pending(Some(&told(true, false, 1))),
         Stage::Offered { running: 1 }

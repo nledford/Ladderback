@@ -10,7 +10,7 @@ Feature: Restoring files from a snapshot
   restore never deletes a file. Every restore needs step-up confirmation
   first: the admin password with sign-in on, the snapshot's short ID
   otherwise. A restore runs as an operation, one at a time on an agent, with
-  the deadline a backup of its repository has; it can be cancelled, and is
+  the deadline a backup of its repository has; it can be canceled, and is
   recorded in the history and announced as other operations are. The
   history names the entry it read, by its path from the snapshot's top, with
   any secret of the repository in it masked, and where it went: the new
@@ -154,12 +154,12 @@ Feature: Restoring files from a snapshot
     When the person starts restoring "home/docs" of the snapshot, confirming with "3f2a1b4c"
     Then the history shows the restore queued, reading from the repository "demo"
 
-  Scenario: A restore cancelled midway is recorded as cancelled
+  Scenario: A restore canceled midway is recorded as canceled
     Given a snapshot "3f2a1b4c" of the host "laptop" in the repository "demo"
     Given sign-in is off
     And the engine restores in 10 steps of 1 minute each
     When the person restores "home/docs" of the snapshot, confirming with "3f2a1b4c", and cancels it after 3 minutes
-    Then the restore ends as cancelled
+    Then the restore ends as canceled
     And the history shows the restore as it ended
 
   Scenario: A restore still running at its deadline fails

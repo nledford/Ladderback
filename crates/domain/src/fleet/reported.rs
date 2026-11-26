@@ -27,7 +27,7 @@ pub enum ReportedOutcome {
     Failed {
         code: WireName,
     },
-    Cancelled,
+    Canceled,
 }
 
 /// One operation of a machine, as its reports tell it: when it started,
@@ -58,7 +58,7 @@ pub fn latest_operations(reports: &[AgentReport], limit: usize) -> Vec<ReportedO
             Happening::Started => None,
             Happening::Succeeded => Some(ReportedOutcome::Succeeded),
             Happening::Failed { code } => Some(ReportedOutcome::Failed { code: code.clone() }),
-            Happening::Cancelled => Some(ReportedOutcome::Cancelled),
+            Happening::Canceled => Some(ReportedOutcome::Canceled),
         };
         match (held, outcome) {
             (Some((_, operation)), None) => {

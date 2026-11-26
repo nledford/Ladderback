@@ -320,7 +320,7 @@ fn told_of(progress: &Progress, left: Option<Left>) -> Told {
 }
 
 /// Whether `value` is told at once, whatever the hold: a new step, a total
-/// learnt or lost, or the total reached.
+/// learned or lost, or the total reached.
 fn at_once(exposed: &Told, value: &Told) -> bool {
     let reached = |told: &Told| {
         told.measure
@@ -833,10 +833,10 @@ mod tests {
         assert_eq!(teller.report(none, at(102)), measured(none, 20, None));
     }
 
-    /// A total learnt or lost changes what the bar is: a percentage, or the
+    /// A total learned or lost changes what the bar is: a percentage, or the
     /// working text in its place.
     #[test]
-    fn a_total_learnt_or_lost_is_told_at_once() {
+    fn a_total_learned_or_lost_is_told_at_once() {
         let mut teller = Teller::default();
         teller.report(report(Some(OperationStep::BackingUp), 8, None), at(100));
         assert_eq!(

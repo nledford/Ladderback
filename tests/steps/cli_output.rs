@@ -1,7 +1,7 @@
 //! Steps for `features/cli/output.feature`: the real `ladderback`, run with
 //! the command line and the environment a scenario chooses, and what it
 //! printed read back as bytes: as JSON, for `--json`, and for the control
-//! characters a terminal acts on, for colour and redraws. A command runs as
+//! characters a terminal acts on, for color and redraws. A command runs as
 //! the interop scenarios' do (`interop_steps::run`: the scratch folders and
 //! nothing of the developer's environment), and the daemon on folders of its
 //! own (`testkit::daemon::isolate`).
@@ -25,8 +25,8 @@ const START_TIMEOUT: Duration = Duration::from_secs(60);
 /// What the daemon says once it is up, in English.
 const LISTENING: &str = "listening on http://";
 
-#[given("colour is forced on")]
-fn colour_is_forced(agent: &mut Agent) {
+#[given("color is forced on")]
+fn color_is_forced(agent: &mut Agent) {
     agent
         .interop
         .env
@@ -49,7 +49,7 @@ fn stdout_is_not_open(agent: &mut Agent) {
 }
 
 #[given("NO_COLOR is set")]
-fn no_colour_is_set(agent: &mut Agent) {
+fn no_color_is_set(agent: &mut Agent) {
     agent
         .interop
         .env
@@ -356,7 +356,7 @@ fn stderr_lines(agent: &mut Agent, count: usize) {
 fn output_is_plain(agent: &mut Agent) {
     let said = said(agent);
     assert!(!said.trim().is_empty(), "the command said nothing");
-    // Colour is an escape sequence and a redraw is a carriage return or a
+    // Color is an escape sequence and a redraw is a carriage return or a
     // cursor sequence: all of them are control characters, and text has none
     // but its line ends.
     let controls: Vec<char> = said
@@ -369,13 +369,13 @@ fn output_is_plain(agent: &mut Agent) {
     );
 }
 
-#[then("the output has colour")]
-fn output_has_colour(agent: &mut Agent) {
+#[then("the output has color")]
+fn output_has_color(agent: &mut Agent) {
     let said = said(agent);
     // The start of a control sequence that sets a style.
     assert!(
         said.contains("\u{1b}["),
-        "the output has no colour: {said:?}"
+        "the output has no color: {said:?}"
     );
 }
 

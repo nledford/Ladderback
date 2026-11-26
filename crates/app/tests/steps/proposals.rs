@@ -794,7 +794,7 @@ async fn has_proposed_removing_alone(agent: &mut Agent, name: String) {
 }
 
 #[given(expr = "an AI agent has proposed giving the plan {string} the label {string}")]
-async fn has_proposed_labelling(agent: &mut Agent, name: String, label: String) {
+async fn has_proposed_labeling(agent: &mut Agent, name: String, label: String) {
     let mut plan = forget_plan(agent, &name).await;
     plan.label = Some(label);
     propose_to_the_forget_world(agent, vec![ConfigChange::ChangePlan(plan)]).await;

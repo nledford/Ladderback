@@ -50,7 +50,7 @@ fn repository(cold: &Path, hot: Option<&Path>) -> rustic_core::Repository<()> {
 }
 
 /// Every file's name and bytes under `dir`, sorted: the repository as it
-/// stands, for checking that a refused initialisation wrote nothing.
+/// stands, for checking that a refused initialization wrote nothing.
 fn contents(dir: &Path) -> Vec<(String, Vec<u8>)> {
     fn walk(dir: &Path, out: &mut Vec<(String, Vec<u8>)>) {
         let mut entries = fs::read_dir(dir)
@@ -159,8 +159,8 @@ fn empty_hot_cold_location(agent: &mut Agent) {
     agent.settings().repo_hot = Some(text(&hot));
 }
 
-#[given("an initialised repository")]
-async fn initialised_repository(agent: &mut Agent) {
+#[given("an initialized repository")]
+async fn initialized_repository(agent: &mut Agent) {
     empty_location(agent);
     let cold = agent.repositories.cold.clone().expect("the location");
     let hot = agent.repositories.hot.clone();
@@ -173,14 +173,14 @@ async fn initialised_repository(agent: &mut Agent) {
                 &rustic_core::KeyOptions::default(),
                 &rustic_core::ConfigOptions::default(),
             )
-            .expect("the scratch repository initialises");
+            .expect("the scratch repository initializes");
     })
     .await;
 }
 
-#[given("two initialised repositories")]
-async fn two_initialised_repositories(agent: &mut Agent) {
-    initialised_repository(agent).await;
+#[given("two initialized repositories")]
+async fn two_initialized_repositories(agent: &mut Agent) {
+    initialized_repository(agent).await;
     let other = agent.scratch().join("other-repo");
     fs::create_dir_all(&other).expect("the second repository's folder");
     agent.repositories.other = Some(other.clone());
@@ -191,7 +191,7 @@ async fn two_initialised_repositories(agent: &mut Agent) {
                 &rustic_core::KeyOptions::default(),
                 &rustic_core::ConfigOptions::default(),
             )
-            .expect("the second scratch repository initialises");
+            .expect("the second scratch repository initializes");
     })
     .await;
 }
@@ -229,18 +229,18 @@ async fn tests(agent: &mut Agent) {
     agent.repositories.test = Some(use_case.test(agent.next_op(), &settings(agent)).await);
 }
 
-#[when("the agent initialises the repository")]
-async fn initialises(agent: &mut Agent) {
-    initialise(agent, None).await;
+#[when("the agent initializes the repository")]
+async fn initializes(agent: &mut Agent) {
+    initialize(agent, None).await;
 }
 
-#[when(expr = "the agent initialises the repository as {string}")]
-async fn initialises_as(agent: &mut Agent, name: String) {
+#[when(expr = "the agent initializes the repository as {string}")]
+async fn initializes_as(agent: &mut Agent, name: String) {
     let alias = RepositoryAlias::try_from(name).expect("a valid alias");
-    initialise(agent, Some(alias)).await;
+    initialize(agent, Some(alias)).await;
 }
 
-async fn initialise(agent: &mut Agent, alias: Option<RepositoryAlias>) {
+async fn initialize(agent: &mut Agent, alias: Option<RepositoryAlias>) {
     agent.repositories.before = agent
         .repositories
         .cold
@@ -300,15 +300,15 @@ async fn config(agent: &Agent) -> domain::planning::AgentConfig {
         .expect("the configuration loads")
 }
 
-#[then("the initialisation reports the repository's ID")]
+#[then("the initialization reports the repository's ID")]
 async fn init_reports_id(agent: &mut Agent) {
     let id = agent
         .repositories
         .init
         .as_ref()
-        .expect("the initialisation has run")
+        .expect("the initialization has run")
         .as_ref()
-        .expect("the initialisation succeeded")
+        .expect("the initialization succeeded")
         .id
         .clone();
     assert_eq!(id.as_str().len(), 64, "the ID is 64 hex characters");
@@ -321,7 +321,7 @@ async fn opens_with_password(agent: &mut Agent) {
     assert_eq!(id.len(), 64);
 }
 
-#[then("the initialisation is refused because a repository already exists")]
+#[then("the initialization is refused because a repository already exists")]
 fn init_refused(agent: &mut Agent) {
     assert_matches!(
         agent.repositories.init.as_ref().expect("the run"),
@@ -335,7 +335,7 @@ fn unchanged(agent: &mut Agent) {
     assert_eq!(
         contents(cold),
         agent.repositories.before,
-        "the initialisation wrote something"
+        "the initialization wrote something"
     );
 }
 
@@ -347,7 +347,7 @@ fn both_halves_hold_config(agent: &mut Agent) {
         .as_ref()
         .expect("the run")
         .as_ref()
-        .expect("the initialisation succeeded");
+        .expect("the initialization succeeded");
     for half in [
         agent.repositories.cold.as_ref().expect("the location"),
         agent.repositories.hot.as_ref().expect("the hot half"),
@@ -400,7 +400,7 @@ async fn configured_with_settings(agent: &mut Agent, name: String) {
     assert_eq!(repository.settings, settings(agent));
 }
 
-// The same behaviours over HTTP, for `features/repositories/api.feature`: the
+// The same behaviors over HTTP, for `features/repositories/api.feature`: the
 // real daemon, spoken to as the Repositories page speaks to it. The
 // repositories are still made and inspected with `rustic_core` itself.
 
@@ -636,17 +636,17 @@ async fn api_connects_at_once(agent: &mut Agent, first: String, second: String) 
     }
 }
 
-#[when("the client initialises the repository")]
-async fn api_initialises(agent: &mut Agent) {
-    api_initialise(agent, None).await;
+#[when("the client initializes the repository")]
+async fn api_initializes(agent: &mut Agent) {
+    api_initialize(agent, None).await;
 }
 
-#[when(expr = "the client initialises the repository as {string}")]
-async fn api_initialises_as(agent: &mut Agent, alias: String) {
-    api_initialise(agent, Some(alias)).await;
+#[when(expr = "the client initializes the repository as {string}")]
+async fn api_initializes_as(agent: &mut Agent, alias: String) {
+    api_initialize(agent, Some(alias)).await;
 }
 
-async fn api_initialise(agent: &mut Agent, alias: Option<String>) {
+async fn api_initialize(agent: &mut Agent, alias: Option<String>) {
     agent.repositories.before = agent
         .repositories
         .cold

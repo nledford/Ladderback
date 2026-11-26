@@ -262,7 +262,7 @@ impl Restores {
     }
 
     /// Runs `prepared` until it ends, or `cancel` completes and it is
-    /// cancelled; the slot is free again once it has ended.
+    /// canceled; the slot is free again once it has ended.
     pub async fn run(
         &self,
         prepared: PreparedRestore,

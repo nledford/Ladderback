@@ -9,7 +9,7 @@
 
 const MAX_LENGTH = 200;
 
-// Colour and cursor sequences: cucumber-rs colours its report on a terminal.
+// Color and cursor sequences: cucumber-rs colors its report on a terminal.
 // biome-ignore lint/suspicious/noControlCharactersInRegex: ESC (U+001B) opens every ANSI sequence; matching it is the point.
 const ANSI = /\u001b\[[0-9;?]*[ -/]*[@-~]/g;
 

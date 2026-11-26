@@ -610,8 +610,8 @@ When("the daemon reports that the backup of {string} has failed", async function
   await scripted(this).fails(plan, "2026-11-09T10:05:00Z");
 });
 
-When("the daemon reports that the backup of {string} has been cancelled", function (this: BrowserWorld, plan: string) {
-  scripted(this).isCancelled(plan, "2026-11-09T10:05:00Z");
+When("the daemon reports that the backup of {string} has been canceled", function (this: BrowserWorld, plan: string) {
+  scripted(this).isCanceled(plan, "2026-11-09T10:05:00Z");
 });
 
 When("the daemon holds back its answer to the next reading of the history", function (this: BrowserWorld) {

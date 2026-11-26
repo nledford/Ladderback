@@ -98,7 +98,7 @@ pub fn Alert(
             // The icon, centered on the first line of the words (one line
             // tall: `1lh`, which no utility names).
             <span class="alert-icon flex flex-none items-center [min-block-size:1lh]">
-                <Icon glyph=tone.glyph() meaning=Meaning::Labelled(label) tone=tone.tone() />
+                <Icon glyph=tone.glyph() meaning=Meaning::Labeled(label) tone=tone.tone() />
             </span>
             // The words and Dismiss take all the room beside the icon
             // (`flex-1`; `min-inline-size: 0` lets them narrow below their

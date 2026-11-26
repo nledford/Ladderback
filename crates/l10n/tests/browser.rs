@@ -352,7 +352,7 @@ fn the_datetime_vocabulary_is_written_and_a_bad_call_is_shown_as_the_function() 
 }
 
 #[wasm_bindgen_test]
-fn options_the_host_does_not_honour_change_nothing() {
+fn options_the_host_does_not_honor_change_nothing() {
     let localizer = speaking("en-US");
     assert_eq!(written(&localizer, "ignored", &[]), "1,234.5");
     assert_eq!(written(&localizer, "grouping-false", &[]), "1234567");

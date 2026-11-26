@@ -223,7 +223,7 @@ pub(crate) fn running(name: &str) -> Words {
 /// What the wait for the restore of the entry shown as `name` came to is
 /// said as, and how, by its operation's status as a maintenance run's end
 /// is: a failure assertively, the rest politely. A restore into a new
-/// folder that finished or was cancelled names `folder`, where its files
+/// folder that finished or was canceled names `folder`, where its files
 /// are. Nothing is said when the page that waited is gone.
 pub(crate) fn ended(
     name: &str,
@@ -235,11 +235,11 @@ pub(crate) fn ended(
             ("failed", _) => (msg::UI_RESTORE_FAILED, Politeness::Assertive),
             ("cancelled", Some(folder)) => {
                 return Some((
-                    into(msg::UI_RESTORE_CANCELLED_INTO, name, folder),
+                    into(msg::UI_RESTORE_CANCELED_INTO, name, folder),
                     Politeness::Polite,
                 ));
             }
-            ("cancelled", None) => (msg::UI_RESTORE_CANCELLED, Politeness::Polite),
+            ("cancelled", None) => (msg::UI_RESTORE_CANCELED, Politeness::Polite),
             (_, Some(folder)) => {
                 return Some((
                     into(msg::UI_RESTORE_FINISHED_INTO, name, folder),
@@ -538,7 +538,7 @@ mod tests {
                 msg::UI_RESTORE_FINISHED,
                 Politeness::Polite,
             ),
-            ("cancelled", msg::UI_RESTORE_CANCELLED, Politeness::Polite),
+            ("cancelled", msg::UI_RESTORE_CANCELED, Politeness::Polite),
             ("failed", msg::UI_RESTORE_FAILED, Politeness::Assertive),
         ] {
             assert_eq!(
@@ -561,7 +561,7 @@ mod tests {
     }
 
     #[test]
-    fn a_restore_into_a_new_folder_names_it_once_it_finished_or_was_cancelled() {
+    fn a_restore_into_a_new_folder_names_it_once_it_finished_or_was_canceled() {
         const FOLDER: &str = "/home/demo/ladderback-restore/laptop-3f2a1b4c-20270115-080000";
         let into = || {
             vec![
@@ -588,7 +588,7 @@ mod tests {
             (
                 "cancelled",
                 Words {
-                    id: msg::UI_RESTORE_CANCELLED_INTO,
+                    id: msg::UI_RESTORE_CANCELED_INTO,
                     args: into(),
                 },
             ),

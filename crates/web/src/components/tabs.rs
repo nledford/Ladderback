@@ -167,7 +167,7 @@ pub fn Tabs(
     if orientation.fixed().is_none() {
         follow_drawn_layout(frame, list, layout);
     }
-    let (label, labelled_by) = name.attributes();
+    let (label, labeled_by) = name.attributes();
     let classes = orientation.classes();
     let mut buttons = Vec::with_capacity(last.saturating_add(1));
     let mut panels = Vec::with_capacity(last.saturating_add(1));
@@ -247,7 +247,7 @@ pub fn Tabs(
                     class=classes.list
                     node_ref=list
                     aria-label=label
-                    aria-labelledby=labelled_by
+                    aria-labelledby=labeled_by
                     aria-describedby=described_by
                     aria-orientation=move || layout.get().aria_orientation()
                 >

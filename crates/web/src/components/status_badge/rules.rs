@@ -23,8 +23,8 @@ pub enum BadgeState {
     SucceededWithWarnings,
     /// The operation ended badly.
     Failed,
-    /// The operation was cancelled.
-    Cancelled,
+    /// The operation was canceled.
+    Canceled,
     /// Nothing to tell: no result, or a status this build doesn't know.
     Empty,
 }
@@ -38,7 +38,7 @@ impl BadgeState {
         Self::Succeeded,
         Self::SucceededWithWarnings,
         Self::Failed,
-        Self::Cancelled,
+        Self::Canceled,
         Self::Empty,
     ];
 
@@ -52,7 +52,7 @@ impl BadgeState {
             Self::Succeeded => BadgeTone::Success,
             Self::SucceededWithWarnings => BadgeTone::Warning,
             Self::Failed => BadgeTone::Error,
-            Self::Queued | Self::Cancelled | Self::Empty => BadgeTone::Secondary,
+            Self::Queued | Self::Canceled | Self::Empty => BadgeTone::Secondary,
         }
     }
 
@@ -67,7 +67,7 @@ impl BadgeState {
             // crate's Lucide release gives it.
             Self::SucceededWithWarnings => LucideGlyph::TriangleAlert,
             Self::Failed => LucideGlyph::CircleX,
-            Self::Cancelled => LucideGlyph::CircleSlash,
+            Self::Canceled => LucideGlyph::CircleSlash,
             Self::Empty => LucideGlyph::CircleDashed,
         }
     }
@@ -89,7 +89,7 @@ mod tests {
                 LucideGlyph::TriangleAlert,
             ),
             (BadgeState::Failed, LucideGlyph::CircleX),
-            (BadgeState::Cancelled, LucideGlyph::CircleSlash),
+            (BadgeState::Canceled, LucideGlyph::CircleSlash),
             (BadgeState::Empty, LucideGlyph::CircleDashed),
         ];
         for (state, icon) in icons {
@@ -113,7 +113,7 @@ mod tests {
             (BadgeState::Succeeded, BadgeTone::Success),
             (BadgeState::SucceededWithWarnings, BadgeTone::Warning),
             (BadgeState::Failed, BadgeTone::Error),
-            (BadgeState::Cancelled, BadgeTone::Secondary),
+            (BadgeState::Canceled, BadgeTone::Secondary),
             (BadgeState::Empty, BadgeTone::Secondary),
         ];
         for (state, tone) in tones {

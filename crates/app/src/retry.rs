@@ -17,8 +17,8 @@ pub enum RunOutcome {
     Succeeded,
     /// It failed: the plan may retry it.
     Failed,
-    /// A person cancelled it: the retries end.
-    Cancelled,
+    /// A person canceled it: the retries end.
+    Canceled,
 }
 
 /// A backup of a plan that ended: which plan, what started it, and how it
@@ -44,7 +44,7 @@ impl RunEnd {
                 RunOutcome::Succeeded
             }
             OperationStatus::Failed { .. } => RunOutcome::Failed,
-            OperationStatus::Cancelled => RunOutcome::Cancelled,
+            OperationStatus::Canceled => RunOutcome::Canceled,
             OperationStatus::Queued | OperationStatus::Running => return None,
         };
         Some(Self {

@@ -160,12 +160,12 @@ impl BackupQueue {
     /// Holds the queue for a restart that waits for the running backups to
     /// end: from now on no waiting run starts, and a run that asks for a
     /// place waits, for the daemon that starts next to run (decision 94).
-    /// The restart ends the hold, or [`Self::release`] when it is cancelled.
+    /// The restart ends the hold, or [`Self::release`] when it is canceled.
     pub fn hold(&mut self) {
         self.held = true;
     }
 
-    /// Lets go of the hold of a restart that was cancelled: the waiting runs
+    /// Lets go of the hold of a restart that was canceled: the waiting runs
     /// start again at the next [`Self::start`], under the limit.
     pub fn release(&mut self) {
         self.held = false;

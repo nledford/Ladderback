@@ -1,4 +1,4 @@
-//! The notifier honours the standard proxy variables, as the workers do
+//! The notifier honors the standard proxy variables, as the workers do
 //! (technical design §11, §10.2): a channel is sent through the proxy
 //! `HTTP_PROXY` names, with the proxy's own credentials, unless `NO_PROXY`
 //! names the channel's host.

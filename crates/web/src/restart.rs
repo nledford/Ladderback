@@ -29,7 +29,7 @@ pub(crate) const BUTTON_ID: &str = "restart-button";
 pub(crate) const BODY_ID: &str = "restart-body";
 
 /// How often the section reads the route again while a restart waits for the
-/// running operations, so it sees the restart come or be cancelled.
+/// running operations, so it sees the restart come or be canceled.
 pub(crate) const PENDING_EVERY: Duration = Duration::from_secs(1);
 
 /// How often the page asks whether the daemon answers while it restarts.

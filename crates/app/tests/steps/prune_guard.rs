@@ -108,9 +108,9 @@ pub struct PruneGuardWorld {
     /// How long the prune then takes to warm up and repack, before its
     /// first delete.
     repacking_takes: SignedDuration,
-    /// Whether the run is cancelled just as the prune asks.
+    /// Whether the run is canceled just as the prune asks.
     cancel_as_it_asks: bool,
-    /// Whether the run is cancelled while the daemon checks the lease, once
+    /// Whether the run is canceled while the daemon checks the lease, once
     /// the prune asked.
     cancel_during_check: bool,
     /// Whether the hub grants the repository again, at a new epoch, while
@@ -153,13 +153,13 @@ fn not_paired(agent: &mut Agent) {
     agent.prune_guard.paired = false;
 }
 
-#[given("the prune is cancelled just as it asks whether it may delete")]
-fn cancelled_as_it_asks(agent: &mut Agent) {
+#[given("the prune is canceled just as it asks whether it may delete")]
+fn canceled_as_it_asks(agent: &mut Agent) {
     agent.prune_guard.cancel_as_it_asks = true;
 }
 
-#[given("the prune is cancelled while the daemon checks whether it may delete")]
-fn cancelled_during_check(agent: &mut Agent) {
+#[given("the prune is canceled while the daemon checks whether it may delete")]
+fn canceled_during_check(agent: &mut Agent) {
     agent.prune_guard.cancel_during_check = true;
 }
 
@@ -282,7 +282,7 @@ async fn prune(agent: &mut Agent) {
     };
     let leases = Arc::new(MaintenanceLeases::new(
         identity.clone(),
-        Arc::new(CancelledDuringCheck {
+        Arc::new(CanceledDuringCheck {
             kept: InMemoryLeaseCache::default(),
             asked: Arc::clone(&asked),
             fire: Mutex::new(fire_during_check),
@@ -389,7 +389,7 @@ async fn prune(agent: &mut Agent) {
         }
     };
     // A cancel the prune fires as it asks; without one, the run is never
-    // cancelled.
+    // canceled.
     let cancel = async move {
         if cancel.await.is_err() {
             futures::future::pending::<()>().await;
@@ -431,11 +431,11 @@ fn failed_lease_lapsed(agent: &mut Agent) {
     );
 }
 
-#[then("the prune was cancelled")]
-fn was_cancelled(agent: &mut Agent) {
+#[then("the prune was canceled")]
+fn was_canceled(agent: &mut Agent) {
     assert_eq!(
         agent.prune_guard.finished().operation.status(),
-        &OperationStatus::Cancelled
+        &OperationStatus::Canceled
     );
 }
 
@@ -525,14 +525,14 @@ struct Pruning {
 
 /// A lease cache that fires the run's cancel when it is read once the
 /// prune asked: a cancel that comes while the daemon checks the lease.
-struct CancelledDuringCheck {
+struct CanceledDuringCheck {
     kept: InMemoryLeaseCache,
     asked: Arc<AtomicBool>,
     fire: Mutex<Option<oneshot::Sender<()>>>,
 }
 
 #[async_trait]
-impl LeaseCache for CancelledDuringCheck {
+impl LeaseCache for CanceledDuringCheck {
     async fn load(&self) -> Result<HeldLeases, StoreError> {
         if self.asked.load(Ordering::SeqCst)
             && let Some(fire) = self

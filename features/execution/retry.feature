@@ -61,11 +61,11 @@ Feature: Retries of a failed backup
     Then the runs of the plan "home" started at "2026-06-10 03:00+00:00, 2026-06-10 03:10+00:00"
     And the plan "home" has no pending retry
 
-  Scenario: A cancelled retry is not retried again
+  Scenario: A canceled retry is not retried again
     Given the agent starts at "2026-06-10 02:50+00:00"
     And the plan "home" is scheduled "0 3 * * *"
     And the plan "home" retries a failed backup 3 times, 10 minutes apart at first
-    And the runs of the plan "home" end "failed, cancelled, failed"
+    And the runs of the plan "home" end "failed, canceled, failed"
     When the agent serves until "2026-06-10 05:00+00:00"
     Then the runs of the plan "home" started at "2026-06-10 03:00+00:00, 2026-06-10 03:10+00:00"
     And the plan "home" has no pending retry

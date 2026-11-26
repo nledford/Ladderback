@@ -228,7 +228,7 @@ fn end(end: &End) -> Words {
                 vec![("warnings", number(warnings))],
             );
         }
-        Outcome::Cancelled => msg::UI_MAINTENANCE_CANCELLED,
+        Outcome::Canceled => msg::UI_MAINTENANCE_CANCELED,
         Outcome::Failed => msg::UI_MAINTENANCE_FAILED,
     };
     words(id, vec![("kind", text(end.kind.wire()))])
@@ -787,7 +787,7 @@ mod tests {
     fn a_run_ends_in_the_message_of_its_outcome_told_by_its_kind() {
         for (outcome, id) in [
             (Outcome::Finished, msg::UI_MAINTENANCE_FINISHED),
-            (Outcome::Cancelled, msg::UI_MAINTENANCE_CANCELLED),
+            (Outcome::Canceled, msg::UI_MAINTENANCE_CANCELED),
             (Outcome::Failed, msg::UI_MAINTENANCE_FAILED),
         ] {
             let ended = End {

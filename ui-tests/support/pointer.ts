@@ -2,10 +2,10 @@
 // shows. A tooltip shows when the pointer rests on its control and stays
 // while the pointer moves onto it (WCAG 1.4.13, Content on Hover or Focus),
 // and a link's underline grows thicker under it (§4.5); that is pointer
-// behaviour, so their scenarios move the pointer.
+// behavior, so their scenarios move the pointer.
 // Its moves never press, but for two: the drag of a column in a table's
 // Columns panel (decision 140), whose scenario checks dragging itself, a
-// pointer's own behaviour, while its Move buttons do all of it by keyboard
+// pointer's own behavior, while its Move buttons do all of it by keyboard
 // (2.5.7); and a press held on one element (decision 152), for what only a
 // pressing pointer shows or does: a pressed link's look, and a press outside
 // an open disclosure menu closing it, which Escape and Tab do by keyboard.

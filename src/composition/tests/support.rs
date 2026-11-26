@@ -240,7 +240,7 @@ pub(super) async fn ended(runner: &PlanRunner, operation: OperationId) -> Operat
     };
     tokio::time::timeout(std::time::Duration::from_secs(30), ended)
         .await
-        .expect("the cancelled operation ends")
+        .expect("the canceled operation ends")
 }
 
 /// An engine whose jobs play `events`, whatever the jobs are.

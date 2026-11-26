@@ -1,4 +1,4 @@
-// The Firefox workaround for issue #774 (support/labelledby-crash.ts), tried
+// The Firefox workaround for issue #774 (support/labeledby-crash.ts), tried
 // in a real browser on a page of the test's own: with it, a page whose names
 // come through `aria-labelledby` survives an accessibility scan followed by
 // lookups by role and name, and the scan still reads those names, so it
@@ -15,7 +15,7 @@ import { after, before, test } from "node:test";
 import AxeBuilder from "@axe-core/playwright";
 import { type Browser, chromium, firefox, type Page, webkit } from "playwright";
 
-import { avoidLabelledByCrash } from "./labelledby-crash.ts";
+import { avoidLabeledByCrash } from "./labeledby-crash.ts";
 import type { Engine } from "./world.ts";
 
 const engines = { chromium, firefox, webkit };
@@ -75,7 +75,7 @@ async function withPage<T>(use: (page: Page) => Promise<T>): Promise<T> {
   assert.ok(browser !== undefined, "the browser is not running: `before` failed");
   const context = await browser.newContext();
   try {
-    await avoidLabelledByCrash(context, engine);
+    await avoidLabeledByCrash(context, engine);
     const page = await context.newPage();
     await page.setContent(PAGE);
     return await use(page);

@@ -71,7 +71,7 @@ pub use pages::{DEFAULT_PAGE, MAX_OPERATION_WARNINGS, MAX_PAGE, SnapshotFilter};
 pub use proposals::{PlanTables, Proposals};
 
 use actions::{
-    CancelArguments, Cancelling, RunArguments, Started, WaitArguments, Waited, wait_length,
+    CancelArguments, Canceling, RunArguments, Started, WaitArguments, Waited, wait_length,
 };
 use arguments::{NoArguments, read};
 use checks::{ExportArguments, ForgetPreview, ImportArguments, RepositoryArguments};
@@ -215,7 +215,7 @@ impl ToolName {
     }
 
     /// The permissions the tool needs (decision 127), as the daemon's routes
-    /// it calls need them: cancelling reads the operation it cancels first,
+    /// it calls need them: canceling reads the operation it cancels first,
     /// so it needs Backups beside Backup runs.
     pub(crate) const fn needs(self) -> &'static [Permission] {
         match self {
@@ -780,7 +780,7 @@ impl Server {
     /// sending a progress notification after each read that finds it
     /// unfinished when the call carried a progress token. A detail too large
     /// to read is the summary just read, with no warnings listed or counted. A
-    /// cancelled call stops the wait, never the operation: the answer is
+    /// canceled call stops the wait, never the operation: the answer is
     /// dropped then, as the protocol asks, so the detail isn't read for it.
     async fn wait_operation(
         &self,
@@ -831,23 +831,23 @@ impl Server {
             }
             // A one-shot call has no client to cancel it: its wait ends
             // only when the operation does or its length has passed.
-            let cancelled = async {
+            let canceled = async {
                 match context {
                     Some(context) => context.ct.cancelled().await,
                     None => std::future::pending().await,
                 }
             };
             tokio::select! {
-                () = cancelled => {}
+                () = canceled => {}
                 () = tokio::time::sleep(WAIT_STEP.min(left)) => {}
             }
         }
     }
 
-    async fn cancel_operation(&self, given: Option<JsonObject>) -> Result<Cancelling, ErrorDto> {
+    async fn cancel_operation(&self, given: Option<JsonObject>) -> Result<Canceling, ErrorDto> {
         let arguments: CancelArguments = read(given)?;
         self.backend.cancel(arguments.operation.clone()).await?;
-        Ok(Cancelling {
+        Ok(Canceling {
             operation: arguments.operation,
         })
     }
@@ -1157,7 +1157,7 @@ fn tools() -> Vec<Tool> {
              finished and the operation as get_operation does; when its warnings are too many \
              to read, none are listed, unlisted-warnings is absent and its warning-codes still \
              name them. Sends progress \
-             notifications when the call asks for them. Cancelling the call stops the wait, not \
+             notifications when the call asks for them. Canceling the call stops the wait, not \
              the operation.",
             input_schema::<WaitArguments>(),
         )
@@ -1167,11 +1167,11 @@ fn tools() -> Vec<Tool> {
         Tool::new(
             CANCEL_OPERATION,
             "Asks a queued or running backup to stop, however it started; it then ends as \
-             cancelled. Maintenance can't be cancelled from here.",
+             canceled. Maintenance can't be canceled from here.",
             input_schema::<CancelArguments>(),
         )
         .with_title("Cancel operation")
-        .with_raw_output_schema(output_schema::<Cancelling>())
+        .with_raw_output_schema(output_schema::<Canceling>())
         .with_annotations(acting()),
         Tool::new(
             TEST_REPOSITORY,

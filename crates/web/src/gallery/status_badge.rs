@@ -28,7 +28,7 @@ pub(super) fn StatusBadgeDemo(localizer: Arc<Localizer>) -> impl IntoView {
                     label=t(msg::UI_STATUS_SUCCEEDED_WITH_WARNINGS)
                 />
                 <StatusBadge state=BadgeState::Failed label=t(msg::UI_STATUS_FAILED) />
-                <StatusBadge state=BadgeState::Cancelled label=t(msg::UI_STATUS_CANCELLED) />
+                <StatusBadge state=BadgeState::Canceled label=t(msg::UI_STATUS_CANCELED) />
                 <StatusBadge state=BadgeState::Empty label=t(msg::UI_GALLERY_BADGE_EMPTY) />
             </p>
         </section>

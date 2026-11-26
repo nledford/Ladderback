@@ -82,7 +82,7 @@ impl LiveProgress {
             *latest = Some(progress);
         } else if let UiEvent::OperationSucceeded { operation, .. }
         | UiEvent::OperationFailed { operation, .. }
-        | UiEvent::OperationCancelled { operation, .. } = event
+        | UiEvent::OperationCanceled { operation, .. } = event
             && latest
                 .as_ref()
                 .is_some_and(|progress| Some(progress.op_id) == operation_id(operation))

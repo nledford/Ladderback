@@ -873,7 +873,7 @@ cli-unpair-done-unnamed = This { -machine } left its { -hub } and maintains its 
 cli-help = Self-hosted backup manager for rustic
 
 # What `--plain`, an option of every command, does.
-cli-help-plain = Print plain text: no colour, and nothing drawn over what is already printed
+cli-help-plain = Print plain text: no color, and nothing drawn over what is already printed
 
 # What `serve` does.
 cli-help-serve = Run { -brand-name } on this { -machine } and serve its web UI

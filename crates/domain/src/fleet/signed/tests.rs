@@ -211,7 +211,7 @@ fn every_message_has_its_own_label() {
 /// decision 163): its proof `machine-proof` and its messages after the
 /// handshake `machine-signed`, and no label says `agent`.
 #[test]
-fn the_machines_messages_are_labelled_for_the_machine() {
+fn the_machines_messages_are_labeled_for_the_machine() {
     let (host, zone, grants, heartbeat, refused) = (
         hostname(),
         chicago(),

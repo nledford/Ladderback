@@ -371,7 +371,7 @@ Feature: Each row of the Operations page names its operation and says what it di
 
   # The page listens to the daemon only while the reader is on it: leaving it
   # closes its events stream, ends the wait to reconnect a dropped one, and
-  # stops the polling of a run the page started or cancelled, so coming back
+  # stops the polling of a run the page started or canceled, so coming back
   # opens one stream, never a second beside the first (#300).
   Scenario: Leaving the Operations page closes its events stream, and coming back opens one
     Given the daemon reports a running backup of "demo-home"
@@ -488,7 +488,7 @@ Feature: Each row of the Operations page names its operation and says what it di
     And I press Enter
     Then the page stops listening to the daemon
 
-  Scenario: Leaving the Operations page while it waits on a cancelled run ends the wait
+  Scenario: Leaving the Operations page while it waits on a canceled run ends the wait
     Given the daemon reports a running backup of "demo-home"
     And the daemon accepts each cancel the page asks for, and the run goes on
     When I open the address "/operations"
@@ -643,7 +643,7 @@ Feature: Each row of the Operations page names its operation and says what it di
     And I press Enter
     Then focus is on the main heading "Operations"
     And the page shows an error alert containing "did not accept its configuration file"
-    And the page shows an error alert containing "line 6: repositories.demo.colour"
+    And the page shows an error alert containing "line 6: repositories.demo.color"
     And the assertive region comes to contain "did not accept its configuration file"
     And the alert marks the sender's words as English
     And the page doesn't show "demo-password"
@@ -656,8 +656,8 @@ Feature: Each row of the Operations page names its operation and says what it di
     And I press Tab until focus is on the button "Start backup of home"
     And someone has written a setting the daemon does not know on line 6 of its configuration file
     And I press Enter
-    Then the page shows an error alert containing "line 6: repositories.demo.colour"
-    And the assertive region comes to contain "line 6: repositories.demo.colour"
+    Then the page shows an error alert containing "line 6: repositories.demo.color"
+    And the assertive region comes to contain "line 6: repositories.demo.color"
     And the alert marks the sender's words as English
     And the page doesn't show "demo-password"
     And the page has no accessibility violations

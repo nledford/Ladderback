@@ -14,7 +14,7 @@ Feature: A prune waits for other machines' backups and deletes only while its ma
 
   The prune deletes only on yes, with the plan it worked out, never a new
   one. On no, it deletes nothing, and the run fails saying the lease lapsed
-  before it deleted anything. A run cancelled before the answer is given
+  before it deleted anything. A run canceled before the answer is given
   tells the prune no. A deletion already begun finishes, and I2's delayed
   deletion protects the packs it marked.
 
@@ -50,12 +50,12 @@ Feature: A prune waits for other machines' backups and deletes only while its ma
     When this machine prunes the repository
     Then the prune deleted what it planned
 
-  Scenario: A prune cancelled just as it asks deletes nothing
+  Scenario: A prune canceled just as it asks deletes nothing
     Given this machine isn't paired with a hub
-    And the prune is cancelled just as it asks whether it may delete
+    And the prune is canceled just as it asks whether it may delete
     When this machine prunes the repository
     Then the prune deleted nothing
-    And the prune was cancelled
+    And the prune was canceled
 
   Scenario: A lease that lapses and is granted again while the prune repacks deletes nothing
     Given this machine is paired with a hub and holds the lease on the repository
@@ -64,12 +64,12 @@ Feature: A prune waits for other machines' backups and deletes only while its ma
     Then the prune deleted nothing
     And the prune failed because the lease lapsed before it deleted anything
 
-  Scenario: A prune cancelled while the daemon checks whether it may delete deletes nothing
+  Scenario: A prune canceled while the daemon checks whether it may delete deletes nothing
     Given this machine is paired with a hub and holds the lease on the repository
-    And the prune is cancelled while the daemon checks whether it may delete
+    And the prune is canceled while the daemon checks whether it may delete
     When this machine prunes the repository
     Then the prune deleted nothing
-    And the prune was cancelled
+    And the prune was canceled
 
   Scenario: Another machine's backup to the repository holds the prune
     Given this machine is paired with a hub and holds the lease on the repository

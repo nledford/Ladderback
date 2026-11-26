@@ -196,7 +196,7 @@ async fn a_request_that_isnt_a_restart_is_refused() {
 }
 
 #[tokio::test]
-async fn a_cancelled_restart_lets_go_of_the_hold_and_never_comes() {
+async fn a_canceled_restart_lets_go_of_the_hold_and_never_comes() {
     let (restart, work) = daemon(true, 1);
     send(&restart, post(r#"{"when":"finished"}"#)).await;
     let due = tokio::spawn({
@@ -213,8 +213,8 @@ async fn a_cancelled_restart_lets_go_of_the_hold_and_never_comes() {
     work.running.store(0, Ordering::SeqCst);
     // Past a recheck, which would find nothing running.
     tokio::time::sleep(super::IDLE_RECHECK * 2).await;
-    assert!(!due.is_finished(), "the cancelled restart came");
-    // Cancelled twice, or with none asked for: nothing to cancel.
+    assert!(!due.is_finished(), "the canceled restart came");
+    // Canceled twice, or with none asked for: nothing to cancel.
     let (status, _) = send(&restart, delete()).await;
     assert_eq!(status, StatusCode::OK);
     // Asked for again, it holds the work again.
@@ -227,7 +227,7 @@ async fn a_cancelled_restart_lets_go_of_the_hold_and_never_comes() {
 }
 
 #[tokio::test]
-async fn a_restart_asked_for_now_cannot_be_cancelled() {
+async fn a_restart_asked_for_now_cannot_be_canceled() {
     let (restart, work) = daemon(true, 1);
     send(&restart, post(r#"{"when":"finished"}"#)).await;
     send(&restart, post(r#"{"when":"now"}"#)).await;
@@ -241,13 +241,13 @@ async fn a_restart_asked_for_now_cannot_be_cancelled() {
 // stops is too late, so it neither lets go of the hold (a queued backup
 // would start only to be cut off) nor tells Settings the restart is off.
 #[tokio::test]
-async fn a_restart_that_has_come_is_not_cancelled() {
+async fn a_restart_that_has_come_is_not_canceled() {
     let (restart, work) = daemon(true, 0);
     send(&restart, post(r#"{"when":"finished"}"#)).await;
     assert_eq!(due_now(&restart), Some(RestartAsker::SignInOff));
     let (status, body) = send(&restart, delete()).await;
     assert_eq!(status, StatusCode::OK);
-    assert_eq!(body["pending"], true, "Settings says it was cancelled");
+    assert_eq!(body["pending"], true, "Settings says it was canceled");
     assert!(work.held.load(Ordering::SeqCst), "the hold was let go");
     assert_eq!(due_now(&restart), Some(RestartAsker::SignInOff));
 }

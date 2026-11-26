@@ -387,7 +387,7 @@ async fn reads_that_are_no_operation_tell_the_pages_nothing() {
 
 /// Which of the engine's jobs tell the pages their progress and warnings
 /// (#308): an operation's, which the history has a row for, and none of
-/// the reads', nor the initialising of a repository, which answers its
+/// the reads', nor the initializing of a repository, which answers its
 /// request and has no row.
 #[tokio::test]
 async fn only_an_operations_job_tells_the_pages_its_progress_and_warnings() {

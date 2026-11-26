@@ -186,7 +186,7 @@ Feature: The table
     And the button "Columns" says its panel is closed
 
   # Dragging is never the only way (2.5.7): the Move buttons above do it
-  # all by keyboard. This is the pointer's own behaviour, so its step moves
+  # all by keyboard. This is the pointer's own behavior, so its step moves
   # and presses the pointer through support/pointer.ts.
   Scenario: A column dragged by its handle in the Columns panel takes the place it is dropped at
     When I open the "Table" demo

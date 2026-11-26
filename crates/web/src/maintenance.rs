@@ -447,7 +447,7 @@ pub(crate) enum Outcome {
         errors: u64,
         warnings: u64,
     },
-    Cancelled,
+    Canceled,
     Failed,
 }
 
@@ -465,7 +465,7 @@ impl End {
     pub(crate) fn of(kind: Kind, status: &str) -> End {
         let outcome = match status {
             "failed" => Outcome::Failed,
-            "cancelled" => Outcome::Cancelled,
+            "cancelled" => Outcome::Canceled,
             _ => Outcome::Finished,
         };
         End::told(kind, outcome)
@@ -494,7 +494,7 @@ impl End {
         let politeness = match outcome {
             Outcome::Failed => Politeness::Assertive,
             Outcome::Found { errors, .. } if errors > 0 => Politeness::Assertive,
-            Outcome::Found { .. } | Outcome::Cancelled | Outcome::Finished => Politeness::Polite,
+            Outcome::Found { .. } | Outcome::Canceled | Outcome::Finished => Politeness::Polite,
         };
         End {
             kind,
@@ -1402,10 +1402,10 @@ mod tests {
     }
 
     #[test]
-    fn a_cancelled_run_ends_politely() {
+    fn a_canceled_run_ends_politely() {
         let end = End::of(Kind::Check, "cancelled");
         assert_eq!(end.kind, Kind::Check);
-        assert_eq!(end.outcome, Outcome::Cancelled);
+        assert_eq!(end.outcome, Outcome::Canceled);
         assert_eq!(end.politeness, Politeness::Polite);
     }
 
@@ -1907,7 +1907,7 @@ mod tests {
                 Outcome::Finished,
                 Politeness::Polite,
             ),
-            ("cancelled", Outcome::Cancelled, Politeness::Polite),
+            ("cancelled", Outcome::Canceled, Politeness::Polite),
             ("failed", Outcome::Failed, Politeness::Assertive),
         ] {
             let detail = read(status);
@@ -1986,7 +1986,7 @@ mod tests {
     }
 
     #[test]
-    fn a_run_is_read_and_cancelled_through_its_own_routes() {
+    fn a_run_is_read_and_canceled_through_its_own_routes() {
         assert_eq!(operation_path("0a1b"), "/api/v1/operations/0a1b");
         assert_eq!(cancel_path("0a1b"), "/api/v1/operations/0a1b/cancel");
     }

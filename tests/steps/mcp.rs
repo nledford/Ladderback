@@ -673,7 +673,7 @@ fn about_the_operation(agent: &mut Agent) {
         let content = &result["structuredContent"];
         match &content["operation"] {
             Value::Object(operation) => operation["id"].clone(),
-            cancelled => cancelled.clone(),
+            canceled => canceled.clone(),
         }
     };
     assert_eq!(named, id.as_str(), "{result}");

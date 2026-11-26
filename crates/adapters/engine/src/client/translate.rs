@@ -251,7 +251,7 @@ pub(super) fn translate(event: WorkerEvent, redactor: &Redactor) -> Option<Engin
                 ErrorCode::DeadlinePassed => FailureReason::DeadlinePassed,
                 ErrorCode::RestoreTargetUnwritable => FailureReason::RestoreTargetUnwritable,
                 // A repository that already exists where one was to be
-                // initialised, and a location with no repository at all
+                // initialized, and a location with no repository at all
                 // (decision 53), are the failures the agent reports as codes
                 // of their own: `InitRepository` refuses with the first, and
                 // a saved repository's row offers Create on the second.

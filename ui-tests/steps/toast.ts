@@ -91,7 +91,7 @@ Then("the toast is no live region, nor holds one", async function (this: Browser
 });
 
 // A pointer resting on a toast holds it, as focus on it does (2.2.1): moving
-// the pointer is pointer behaviour, so these steps move it, and never press.
+// the pointer is pointer behavior, so these steps move it, and never press.
 // The pointer moves to what the window shows, so the toast is first
 // scrolled into view, as a reader scrolls to what they read.
 When("I rest the pointer on the toast", async function (this: BrowserWorld) {

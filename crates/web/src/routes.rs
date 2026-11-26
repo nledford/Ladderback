@@ -538,13 +538,13 @@ mod tests {
                 ("file".to_owned(), MsgArg::Text("/c/config.toml".to_owned())),
                 ("line".to_owned(), MsgArg::Text("6".to_owned())),
             ],
-            Some("repositories.demo.colour"),
+            Some("repositories.demo.color"),
         );
         let said = sentence.plain().replace(['\u{2068}', '\u{2069}'], "");
         assert!(said.contains("/c/config.toml"), "{said}");
-        assert!(said.contains("line 6: repositories.demo.colour"), "{said}");
+        assert!(said.contains("line 6: repositories.demo.color"), "{said}");
         let (detail, _) = sentence.detail.expect("the setting is marked as sent");
-        assert_eq!(detail, "repositories.demo.colour");
+        assert_eq!(detail, "repositories.demo.color");
     }
 
     #[test]
