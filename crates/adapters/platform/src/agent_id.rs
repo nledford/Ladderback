@@ -10,6 +10,7 @@ use std::path::Path;
 use uuid::Uuid;
 
 use domain::AgentId;
+use domain::fleet::KeyFile;
 
 /// The file in the data dir holding the agent ID.
 pub const MACHINE_ID_FILE: &str = "machine-id";
@@ -18,16 +19,141 @@ pub const MACHINE_ID_FILE: &str = "machine-id";
 /// and is never read whole (technical design §13.5).
 const MAX_ID_FILE_BYTES: u64 = 256;
 
-/// The agent ID stored in `data_dir`, or `None` when there is none yet.
-/// Writes nothing: a command that only reads, such as `hub-status`, uses it
-/// rather than [`load_or_create`]. A file that exists but doesn't hold an ID
-/// is an error.
+/// The agent ID stored in `data_dir`, or `None` when there is none yet. A
+/// command that only reads, such as `hub-status`, uses it rather than
+/// [`load_or_create`]: it writes nothing but the one-off move of an earlier
+/// build's names ([`move_earlier_names`]). A file that exists but doesn't
+/// hold an ID is an error.
 pub fn load(data_dir: &Path) -> io::Result<Option<AgentId>> {
+    move_earlier_names(data_dir)?;
     match read_id_file(&data_dir.join(MACHINE_ID_FILE)) {
         Ok(text) => parse(&text).map(Some),
         Err(error) if error.kind() == io::ErrorKind::NotFound => Ok(None),
         Err(error) => Err(error),
     }
+}
+
+/// The names an earlier build, 0.5.0 among them, gave the machine ID and
+/// the machine key before decision 163.
+const EARLIER_ID_FILE: &str = "agent-id";
+const EARLIER_KEY_FILE: &str = "agent-key";
+
+/// Moves an earlier build's `agent-id` and `agent-key` to `machine-id` and
+/// `machine-key`, keeping the ID and the key as they are, so the machine's
+/// snapshots stay its own (§16, decision 170). A one-off upgrade from 0.5.0,
+/// a deliberate exception to "no shims": removed at 1.0.
+///
+/// It runs only while `machine-id` is absent and `agent-id` is there. The
+/// key moves first, then the ID, each by a link and an unlink, so a start
+/// that stops partway leaves a state the next one finishes, and starts at
+/// once (a `pair` beside the daemon's start) agree. Then the files an
+/// earlier build staged beside them and a crash left (`agent-key.*`,
+/// `agent-id.*.tmp`, #1621) are deleted. A link keeps the file's owner-only
+/// mode, and nothing reads the key (I4). When `machine-id` is there too,
+/// both are left and `machine-id` is the ID: a build after decision 163
+/// made it and may have used it since. An `agent-key` beside a
+/// `machine-key` of its own is an error, every file left as it was: which
+/// key is the machine's is the person's to say.
+fn move_earlier_names(data_dir: &Path) -> io::Result<()> {
+    let earlier_id = data_dir.join(EARLIER_ID_FILE);
+    if !earlier_id.try_exists()? {
+        return Ok(());
+    }
+    let id = data_dir.join(MACHINE_ID_FILE);
+    if id.try_exists()? {
+        // A move that stopped between the ID's link and its unlink left
+        // two names of one file: finish it. Two files are both left.
+        if !same_file(&earlier_id, &id)? {
+            return Ok(());
+        }
+    } else {
+        move_file(
+            &data_dir.join(EARLIER_KEY_FILE),
+            &data_dir.join(KeyFile::AgentKey.file_name()),
+        )?;
+    }
+    move_file(&earlier_id, &id)?;
+    remove_staged(data_dir)?;
+    sync_dir(data_dir)
+}
+
+/// Gives `from`'s file the name `to` and drops the name `from`. `from`
+/// already gone is a move done, by an earlier start or one beside this,
+/// or one never needed. `to` there already is the same move made beside
+/// this one, or, as another file, an error that names both files and
+/// leaves them.
+fn move_file(from: &Path, to: &Path) -> io::Result<()> {
+    match fs::hard_link(from, to) {
+        Ok(()) => {}
+        Err(error) if error.kind() == io::ErrorKind::NotFound => return Ok(()),
+        Err(error) if error.kind() == io::ErrorKind::AlreadyExists => {
+            // Not one file: unless a move beside this one has just dropped
+            // the name `from`, two files hold the name's content.
+            if !same_file(from, to)? && from.try_exists()? {
+                return Err(io::Error::new(
+                    io::ErrorKind::AlreadyExists,
+                    format!(
+                        "{} and {} are two files, and the machine ID is still in {EARLIER_ID_FILE}: \
+                         move away the one that isn't this machine's",
+                        from.display(),
+                        to.display()
+                    ),
+                ));
+            }
+        }
+        Err(error) => return Err(error),
+    }
+    match fs::remove_file(from) {
+        Ok(()) => Ok(()),
+        Err(error) if error.kind() == io::ErrorKind::NotFound => Ok(()),
+        Err(error) => Err(error),
+    }
+}
+
+/// Whether `a` and `b` name one file; `false` when either is gone.
+#[cfg(unix)]
+fn same_file(a: &Path, b: &Path) -> io::Result<bool> {
+    use std::os::unix::fs::MetadataExt;
+    let (a, b) = match (fs::metadata(a), fs::metadata(b)) {
+        (Ok(a), Ok(b)) => (a, b),
+        (Err(error), _) | (_, Err(error)) if error.kind() == io::ErrorKind::NotFound => {
+            return Ok(false);
+        }
+        (Err(error), _) | (_, Err(error)) => return Err(error),
+    };
+    Ok(a.dev() == b.dev() && a.ino() == b.ino())
+}
+
+/// Off Unix there is no inode to compare: two names are taken for two
+/// files, the safe answer.
+#[cfg(not(unix))]
+fn same_file(_a: &Path, _b: &Path) -> io::Result<bool> {
+    Ok(false)
+}
+
+/// Deletes what an earlier build staged beside its key and ID files and a
+/// crash left: `agent-key.*` and `agent-id.*.tmp` (#1621).
+fn remove_staged(data_dir: &Path) -> io::Result<()> {
+    let key_prefix = format!("{EARLIER_KEY_FILE}.");
+    let id_prefix = format!("{EARLIER_ID_FILE}.");
+    for entry in fs::read_dir(data_dir)? {
+        let entry = entry?;
+        let name = entry.file_name();
+        let Some(name) = name.to_str() else {
+            continue;
+        };
+        let staged = name.starts_with(&key_prefix)
+            || (name.starts_with(&id_prefix) && name.ends_with(".tmp"));
+        if !staged {
+            continue;
+        }
+        match fs::remove_file(entry.path()) {
+            Ok(()) => {}
+            Err(error) if error.kind() == io::ErrorKind::NotFound => {}
+            Err(error) => return Err(error),
+        }
+    }
+    Ok(())
 }
 
 /// The agent ID stored in `data_dir`, generating and storing one first if
