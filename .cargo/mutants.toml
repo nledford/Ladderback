@@ -374,7 +374,7 @@ exclude_re = [
     # Machines tab, which every `@ui` scenario of
     # `features/ui/approving_machines.feature` opens in Chromium. Named by
     # line, so a moved line brings the mutant back to judge.
-    'crates/web/src/main\.rs:459:46: replace == with != in App$',
+    'crates/web/src/main\.rs:443:46: replace == with != in App$',
     # Each page's `paced` takes which shown value is its first load: DOM
     # glue. A test of `!=` hides the page's "Loading…" while it waits, which
     # the `@ui` scenarios check: the operations page's "A page still waiting
