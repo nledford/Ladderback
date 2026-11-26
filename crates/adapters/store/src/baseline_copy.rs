@@ -268,17 +268,26 @@ impl Work {
         for suffix in ["-wal", "-shm"] {
             remove_if_there(&beside(&self.log, suffix))?;
         }
+        // The kept copy's name is durable before the old log's goes.
+        sync_dir(self.folder())?;
         fs::rename(&self.new, &self.log)?;
-        match self.log.parent() {
-            Some(folder) if !folder.as_os_str().is_empty() => sync_dir(folder)?,
-            _ => sync_dir(Path::new("."))?,
-        }
+        sync_dir(self.folder())?;
         Ok(kept)
+    }
+
+    /// The folder the log is in.
+    fn folder(&self) -> &Path {
+        match self.log.parent() {
+            Some(folder) if !folder.as_os_str().is_empty() => folder,
+            _ => Path::new("."),
+        }
     }
 
     /// Gives the copy from step 2 the first free name of
     /// `<log>.before-baseline`, `<log>.before-baseline-2`, …: a link fails
-    /// rather than replace a file, so a kept copy is never lost.
+    /// rather than replace a file, so a kept copy is never lost. The link
+    /// is made durable before the work name is dropped, so a crash between
+    /// leaves the copy under one name or both, never neither.
     fn keep(&self) -> io::Result<PathBuf> {
         let mut n: u32 = 1;
         loop {
@@ -289,6 +298,7 @@ impl Work {
             };
             match fs::hard_link(&self.kept_new, &kept) {
                 Ok(()) => {
+                    sync_dir(self.folder())?;
                     fs::remove_file(&self.kept_new)?;
                     return Ok(kept);
                 }

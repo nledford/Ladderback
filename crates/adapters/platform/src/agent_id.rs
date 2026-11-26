@@ -119,17 +119,19 @@ pub fn move_earlier_names(data_dir: &Path, _held: &DataDirLock) -> io::Result<()
 }
 
 /// Gives `from`'s file the name `to` and drops the name `from`. `from`
-/// already gone is a move done, by an earlier start or one beside this,
-/// or one never needed. `to` there already is the same move made beside
-/// this one, or, as another file, an error that names both files and
-/// leaves them.
+/// already gone is a move done, by an earlier start, or one never needed.
+/// `to` there already is the same move an earlier start stopped between
+/// its link and its unlink, or, as another file, an error that names both
+/// files and leaves them. The new name is made durable before the old one
+/// is dropped, so a crash between leaves the file under one name or both,
+/// never neither.
 fn move_file(from: &Path, to: &Path) -> io::Result<()> {
     match fs::hard_link(from, to) {
         Ok(()) => {}
         Err(error) if error.kind() == io::ErrorKind::NotFound => return Ok(()),
         Err(error) if error.kind() == io::ErrorKind::AlreadyExists => {
-            // Not one file: unless a move beside this one has just dropped
-            // the name `from`, two files hold the name's content.
+            // Not one file: unless an earlier move has dropped the name
+            // `from`, two files hold the name's content.
             if !same_file(from, to)? && from.try_exists()? {
                 return Err(io::Error::new(
                     io::ErrorKind::AlreadyExists,
@@ -143,6 +145,10 @@ fn move_file(from: &Path, to: &Path) -> io::Result<()> {
             }
         }
         Err(error) => return Err(error),
+    }
+    match to.parent() {
+        Some(folder) if !folder.as_os_str().is_empty() => sync_dir(folder)?,
+        _ => sync_dir(Path::new("."))?,
     }
     match fs::remove_file(from) {
         Ok(()) => Ok(()),
