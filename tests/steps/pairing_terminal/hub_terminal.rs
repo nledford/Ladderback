@@ -34,7 +34,7 @@ async fn another_token_made(agent: &mut Agent) {
     make_token(agent, TOKEN_ADDRESS).await;
 }
 
-async fn make_token(agent: &mut Agent, address: &str) {
+pub(super) async fn make_token(agent: &mut Agent, address: &str) {
     let said = ladderback(
         hub_root(agent),
         &["pairing-token", "--address", address],

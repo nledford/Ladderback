@@ -459,6 +459,7 @@ pub(super) fn translate(event: WorkerEvent, redactor: &Redactor) -> Option<Engin
                 | ErrorCode::IdentityConflict
                 | ErrorCode::HubUnreachable
                 | ErrorCode::HubPinMismatch
+                | ErrorCode::PinnedToAnotherHub
                 | ErrorCode::HubUntrusted
                 | ErrorCode::HubTlsRefused
                 | ErrorCode::PlainAddress

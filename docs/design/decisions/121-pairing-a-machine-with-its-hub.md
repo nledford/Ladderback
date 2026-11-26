@@ -2,6 +2,8 @@
 
 **A person pairs a machine by moving one pairing token from the hub to the agent: as text, as a QR code of the same text (in the web UI, or drawn in a terminal by `ladderback pairing-token`) or through a phone's share sheet. Both ends show the same key fingerprint, in one rendering, to compare. The agent then waits for a person to approve it on the hub, which tells the person that a machine is waiting. Every error says what to do next, and no step needs a camera, a mouse or color. The hub's recovery seed is shown as a Recovery Kit, one printable page the person stores and confirms** (recorded 2026-11-18, §7.1, §4.5, §13.7.5; #567, the maintainer's directions of 2026-11-18 on pairing by QR code, from a phone and from a headless machine, and on the Recovery Kit; revised the same day after independent review).
 
+**Partly superseded by [decision 169](169-a-machine-leaves-its-hub-at-its-terminal.md)** (2026-11-25, #1637): a machine that pins one hub refuses another hub's token, naming both keys, with no `--replace-pin`; the person leaves the pinned hub with `ladderback unpair`, then pairs. The unproved-hub message names that way out. The rest of this record is kept as it was decided.
+
 [Decision 120](120-agent-hub-connection-security.md) decides what is secure: the token's format, its server side, pending approval, the step-up, the keys, the recovery seed and the handshake. This decision decides what the person sees and does. It links 120 for every security rule rather than restating it; where the two seem to differ, 120 governs.
 
 ## Where each item is answered

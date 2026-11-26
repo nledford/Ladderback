@@ -288,6 +288,10 @@ impl crate::ports::Identity for CountingPinWrites {
         self.inner.write_pin(pin).await
     }
 
+    async fn forget_pin(&self) -> Result<(), crate::ports::IdentityError> {
+        self.inner.forget_pin().await
+    }
+
     async fn begin_attempt(&self) -> Result<crate::ports::Attempt, crate::ports::IdentityError> {
         self.inner.begin_attempt().await
     }

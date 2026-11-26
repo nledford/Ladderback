@@ -78,8 +78,8 @@ pub struct PairedHub {
 /// (I4).
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum AgentPairingError {
-    /// The agent pins another hub; replacing the pin needs its person to
-    /// confirm, naming both keys (decision 120, "Pairing").
+    /// The agent pins another hub, and pairs with no other until it leaves
+    /// that one with `ladderback unpair` (decision 169).
     PinnedToAnotherHub {
         pinned: PublicKey,
         token: PublicKey,
@@ -427,6 +427,20 @@ impl AgentPairing {
             held_as,
             approved: paired.approval == Some(Approval::Approved),
         })
+    }
+
+    /// Leaves the hub this machine pins, as `ladderback unpair` does
+    /// (decision 169): drops every lease, epoch floor and maintenance pause
+    /// it took, then forgets the pin, so the machine stands alone and
+    /// maintains its own repositories again, and a next hub's pauses count
+    /// from its own. The leases go first: a machine that can't drop them
+    /// keeps its pin, so it never stands alone with a lease of the hub it
+    /// left (I1). Done when it pins no hub.
+    pub async fn leave(&self) -> Result<(), AgentPairingError> {
+        self.leases.save(&HeldLeases::default()).await?;
+        self.leases.save_pauses(&HeldLeases::default()).await?;
+        self.identity.forget_pin().await?;
+        Ok(())
     }
 
     /// The agent key's seed, made the first time the agent pairs.
