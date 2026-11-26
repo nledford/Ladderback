@@ -7,6 +7,192 @@ All notable changes to Ladderback are listed here. The format follows
 
 ## [Unreleased]
 
+## [0.6.0](https://github.com/nledford/Ladderback/compare/v0.5.0...v0.6.0) - 2026-11-26
+
+### Breaking
+
+- The wire and stored names say machine ([#1631](https://github.com/nledford/Ladderback/pull/1631))
+- A machine becomes the hub through hub mode in config.toml's [serve] table ([#1634](https://github.com/nledford/Ladderback/pull/1634)): `serve --hub` takes an optional `=false`, and
+`--listen` no longer has a clap default (127.0.0.1:9898 still applies).
+
+* docs: hub mode, the address and the allowed host names in config.toml's [serve] table (decision 167)
+
+Decision 167 names the keys and replaces decision 136's refusal to turn
+hub mode off with keeping it on; §6.1, multi-machine §7 and the guide's
+remote access page say how.
+
+* fix: the line naming a paired machine has words a translator translates
+
+The pseudolocale lanes refused a message of only an argument.
+
+* fix: serve reads [serve] under the data folder's lock, and an unreadable paired list keeps hub mode on only for a former hub
+
+Review findings 1-4 on #1202:
+- the daemon hands back the `[serve]` table it read under the lock, and
+  who can reach it is set afterwards; a refusal from there closes the
+  operation log first, as every refusal after the lock does (§9);
+- paired machines that can't be read keep hub mode on only when the hub
+  key shows a former hub, and either way stderr and the log say so;
+- a failed stderr write of the warning closes the log too;
+- the warning and `--hub`'s help no longer name `hub = false` when a
+  flag or no table turned hub mode off.
+
+* test: [serve] in the round-trip property, and the start refusals and --hub=false that name it
+
+Review finding 6: the edit-in-place round trip draws `[serve]`; e2e
+scenarios for a bad host name in `allowed-hosts`, an address beyond
+loopback with none, and `--hub=false` while a machine is paired.
+
+* docs: security §10.1 and decision 167 say where [serve] comes from and when it is read
+
+Review findings 1, 2 and 5.
+- A prune waits while another machine backs up to its repository ([#1636](https://github.com/nledford/Ladderback/pull/1636))
+- One reviewed baseline schema replaces the 29 migrations ([#1635](https://github.com/nledford/Ladderback/pull/1635)): a build with the baseline refuses an existing operation
+log. Copy it once with `node scripts/copy-to-baseline.ts`, following the
+upgrade steps in #1621 and decision 165.
+
+* feat(cli): the daemon, hub and set-password commands name an old log
+
+- When the store refuses an operation log the migrations before the
+  baseline left (`OpenError::OldSchema`), `serve`, the hub commands and
+  `set-password` say so with `cli-store-old-schema`, which names the log's
+  path, quoted, and the copy script (decision 165).
+
+* feat(scripts): copy an operation log at migration 29 into the baseline
+
+- `scripts/copy-to-baseline.ts` refuses any log but one at exactly
+  migrations 1-29, each finished and with the shipped checksums; keeps a
+  copy of the old log; copies every row into a new baseline log, dropping
+  only the junk the baseline's rules prove (a removed machine's current
+  state, a report another machine ID sent first, #1513); checks that each
+  table's rows were copied or dropped, its foreign keys and its integrity;
+  then puts the new log in place.
+- Tested with `node --test` (refusals, the count check) and from the store
+  tests against a fixture dumped at migration 29, which the store opens
+  after the copy.
+
+* docs: record decision 165, one baseline schema, and its upgrade steps
+
+- Adds §16, decision 165: the baseline replaces migrations 0001-0029
+  before the first release, and an existing log is copied once with the
+  script (#1621's steps: stop the service, run the last earlier build
+  once if the log is at 28, copy, `just install-restart --now`).
+- Updates data-model.md to the baseline's tables and rules.
+- Every build ships the hub; the hub Cargo feature is gone ([#1645](https://github.com/nledford/Ladderback/pull/1645))
+
+### Added
+
+- A Docker image of the release binary, for an agent or a hub, not yet supported ([#1196](https://github.com/nledford/Ladderback/pull/1196))
+- Connect a paired machine to its hub and check it with hub-status ([#1199](https://github.com/nledford/Ladderback/pull/1199))
+- Give each API token its own permissions ([#1214](https://github.com/nledford/Ladderback/pull/1214))
+- Mark a changed live table row until it is seen ([#1218](https://github.com/nledford/Ladderback/pull/1218))
+- Say when a run with no total last reported, and draw a still spinner as dots ([#1217](https://github.com/nledford/Ladderback/pull/1217))
+- AI agents can list a snapshot's folder and find a file across snapshots through MCP ([#1201](https://github.com/nledford/Ladderback/pull/1201))
+- An AI agent can read the daemon's log through MCP, filtered and paged ([#1232](https://github.com/nledford/Ladderback/pull/1232))
+- Describe every command and option of --help in the reader's language ([#1239](https://github.com/nledford/Ladderback/pull/1239))
+- Make a pairing token in the hub's Settings, shown once with the hub key's fingerprint ([#1231](https://github.com/nledford/Ladderback/pull/1231))
+- Choose each API token's permissions and what AI agents may do without a token ([#1244](https://github.com/nledford/Ladderback/pull/1244))
+- A hub serves its own TLS, and its pairing tokens pin its certificate ([#1254](https://github.com/nledford/Ladderback/pull/1254))
+- Build demo and test repositories from a declared snapshot history ([#1266](https://github.com/nledford/Ladderback/pull/1266))
+- Flag lookalike machine hostnames and refuse invisible ones ([#1260](https://github.com/nledford/Ladderback/pull/1260))
+- Approve a waiting machine from the hub's terminal ([#1275](https://github.com/nledford/Ladderback/pull/1275))
+- A paired machine follows its hub to a new address ([#1270](https://github.com/nledford/Ladderback/pull/1270))
+- An AI agent can read the pairing steps and this machine's hub through MCP ([#1273](https://github.com/nledford/Ladderback/pull/1273))
+- Name the before-hook that stopped a backup and show its warnings live ([#1286](https://github.com/nledford/Ladderback/pull/1286))
+- A paired machine tells its hub its time zone ([#1285](https://github.com/nledford/Ladderback/pull/1285))
+- Warn on a hub's Machines tab and in the guide that a hub behind a reverse proxy must turn sign-in on ([#1288](https://github.com/nledford/Ladderback/pull/1288))
+- Approve a waiting machine on the hub's Settings page ([#1279](https://github.com/nledford/Ladderback/pull/1279))
+- Name each restore by its entry and target, and end a backup that gave way to a newer run as superseded ([#1297](https://github.com/nledford/Ladderback/pull/1297))
+- Let readers hide, show and reorder a table's columns ([#1292](https://github.com/nledford/Ladderback/pull/1292))
+- Show the running version in a footer at the foot of every page ([#1350](https://github.com/nledford/Ladderback/pull/1350))
+- Stand the header's content in the page's frame and draw the pages' links in the text's color ([#1322](https://github.com/nledford/Ladderback/pull/1322))
+- Put the pages' links behind a menu button below 41rem ([#1347](https://github.com/nledford/Ladderback/pull/1347))
+- Send the web UI's files precompressed and answer a handler's panic with 500 ([#1388](https://github.com/nledford/Ladderback/pull/1388))
+- Stop maintaining in a data folder copied from another computer ([#1410](https://github.com/nledford/Ladderback/pull/1410))
+- Paired machines send their operations' starts and ends to the hub, replayed in order after outages ([#1436](https://github.com/nledford/Ladderback/pull/1436))
+- The hub gives each repository at most one maintenance owner ([#1451](https://github.com/nledford/Ladderback/pull/1451))
+- Take one computer under each machine ID, and forget it at the hub's terminal ([#1477](https://github.com/nledford/Ladderback/pull/1477))
+- The hub's dashboard of its approved machines, followed live ([#1483](https://github.com/nledford/Ladderback/pull/1483))
+- A paired machine maintains a repository only while it holds its hub's lease ([#1485](https://github.com/nledford/Ladderback/pull/1485))
+- A machine its hub refused as a second computer can take a new machine ID ([#1487](https://github.com/nledford/Ladderback/pull/1487))
+- A paired machine reports its plans and progress to the hub's dashboard ([#1494](https://github.com/nledford/Ladderback/pull/1494))
+- Remove or reject a machine on the hub, and let a waiting one lapse after 7 days ([#1492](https://github.com/nledford/Ladderback/pull/1492))
+- A hub that starts moves no repository to a new owner until its machines report ([#1499](https://github.com/nledford/Ladderback/pull/1499))
+- A one-line header with a Settings menu, and links standing alone without an underline ([#1496](https://github.com/nledford/Ladderback/pull/1496))
+- A paired machine tells its hub when a repository holds another machine's snapshots ([#1510](https://github.com/nledford/Ladderback/pull/1510))
+- A paired machine shows and alerts when its maintenance is paused for want of a lease ([#1512](https://github.com/nledford/Ladderback/pull/1512))
+- A machine its hub removed or rejected can take a new machine ID and ask again ([#1515](https://github.com/nledford/Ladderback/pull/1515))
+- End hub recovery mode from the Machines page ([#1602](https://github.com/nledford/Ladderback/pull/1602))
+- The hub's Machines tab flags a machine whose ID it refused for a second computer ([#1605](https://github.com/nledford/Ladderback/pull/1605))
+- A paired machine stays connected to its hub, and the hub shows it online ([#1611](https://github.com/nledford/Ladderback/pull/1611))
+- A shared navigation bar whose small-screen menu opens over the page and closes on a press outside ([#1614](https://github.com/nledford/Ladderback/pull/1614))
+- The hub alerts when a paired machine stays offline 15 minutes ([#1641](https://github.com/nledford/Ladderback/pull/1641))
+- A machine leaves a lost or replaced hub with `ladderback unpair` ([#1643](https://github.com/nledford/Ladderback/pull/1643))
+- A machine running 0.5.0 upgrades by installing 0.6.0 and starting it ([#1648](https://github.com/nledford/Ladderback/pull/1648))
+
+### Changed
+
+- Sort every table's rows with one sort function ([#1441](https://github.com/nledford/Ladderback/pull/1441))
+- The web UI downloads 28% less, its wasm built for size ([#1442](https://github.com/nledford/Ladderback/pull/1442))
+
+### Fixed
+
+- A toast no longer moves what follows it on the page ([#1209](https://github.com/nledford/Ladderback/pull/1209))
+- Steadier loading, progress and tooltip motion ([#1213](https://github.com/nledford/Ladderback/pull/1213))
+- Refuse a second waiting backup of a plan started by hand ([#1211](https://github.com/nledford/Ladderback/pull/1211))
+- Import-profile lists a profile's commands and asks before writing them ([#1219](https://github.com/nledford/Ladderback/pull/1219))
+- Log a failing session store again only after a write changed the sessions ([#1228](https://github.com/nledford/Ladderback/pull/1228))
+- Advise ftps:// in the plain-FTP warning ([#1229](https://github.com/nledford/Ladderback/pull/1229))
+- Drop the stale note under the Propose permission ([#1230](https://github.com/nledford/Ladderback/pull/1230))
+- Escape the import's notices and the service manager's words on the command line ([#1235](https://github.com/nledford/Ladderback/pull/1235))
+- Log a failing API-token store again only after a write changed the tokens ([#1236](https://github.com/nledford/Ladderback/pull/1236))
+- Say why a snapshot listing failed in rustic's own words, as maintenance does ([#1252](https://github.com/nledford/Ladderback/pull/1252))
+- A run whose keyring is locked waits for it to be unlocked ([#1233](https://github.com/nledford/Ladderback/pull/1233))
+- Read the admin password and its file safely: named pipes, permissions and terminal echo ([#1257](https://github.com/nledford/Ladderback/pull/1257))
+- Say the keyring is locked when its unlock prompt was dismissed ([#1268](https://github.com/nledford/Ladderback/pull/1268))
+- Show the pairing token's lapse time in the viewer's time zone ([#1276](https://github.com/nledford/Ladderback/pull/1276))
+- Refuse relative option paths at job start and ignore relative XDG folders ([#1284](https://github.com/nledford/Ladderback/pull/1284))
+- Compare, log and cancel repository locations as decisions 49 and 80 say ([#1289](https://github.com/nledford/Ladderback/pull/1289))
+- The pairing steps say to approve on the hub's Settings page ([#1298](https://github.com/nledford/Ladderback/pull/1298))
+- Settings → Machines speaks through the screen-reader announcer ([#1296](https://github.com/nledford/Ladderback/pull/1296))
+- Read cargo tree without color in the release-test plan ([#1304](https://github.com/nledford/Ladderback/pull/1304))
+- A wrong step-up and "Copied." are read once on Settings → Machines and Pending changes ([#1313](https://github.com/nledford/Ladderback/pull/1313))
+- Log when a machine pairs with the hub ([#1315](https://github.com/nledford/Ladderback/pull/1315))
+- A backup that waited for its keyring and never ran says why ([#1318](https://github.com/nledford/Ladderback/pull/1318))
+- Write pairing-token's times in the person's own time zone ([#1316](https://github.com/nledford/Ladderback/pull/1316))
+- A wrong admin password on Settings → AI agents is read once ([#1321](https://github.com/nledford/Ladderback/pull/1321))
+- Make the hub's keys at its first start ([#1319](https://github.com/nledford/Ladderback/pull/1319))
+- Say which hostname the hub holds when a machine pairs again ([#1323](https://github.com/nledford/Ladderback/pull/1323))
+- How queued and keyring-waiting backups end when the history, a cancel or a deleted plan gets in the way ([#1331](https://github.com/nledford/Ladderback/pull/1331))
+- Refuse every character that hides in a machine's hostname ([#1348](https://github.com/nledford/Ladderback/pull/1348))
+- An approved machine that pairs again is told so, and the hub logs approvals ([#1363](https://github.com/nledford/Ladderback/pull/1363))
+- Confirm a step-up by the hub key's fingerprint, the one ID every screen shows ([#1364](https://github.com/nledford/Ladderback/pull/1364))
+- Bound request heads and served connections, and close the hub's front door on shutdown ([#1370](https://github.com/nledford/Ladderback/pull/1370))
+- Pairing over a plain http address names no certificate ([#1376](https://github.com/nledford/Ladderback/pull/1376))
+- Set-password and pair turn core dumps off before they prompt, and Ctrl-\ puts echo back ([#1379](https://github.com/nledford/Ladderback/pull/1379))
+- Point the start page and sign-in notices to the web UI's own pages ([#1382](https://github.com/nledford/Ladderback/pull/1382))
+- Check-keyring says when the macOS keychain asks, and install-restart waits for the answer ([#1412](https://github.com/nledford/Ladderback/pull/1412))
+- Keep a panic's message out of the daemon's log and the commands' stderr ([#1417](https://github.com/nledford/Ladderback/pull/1417))
+- Point set-password notices to the Admin password tab ([#1414](https://github.com/nledford/Ladderback/pull/1414))
+- Leave a panic's message out of the web UI's console line ([#1422](https://github.com/nledford/Ladderback/pull/1422))
+- Pairing_state names no certificate for a plain http address ([#1423](https://github.com/nledford/Ladderback/pull/1423))
+- Say when install-service starts a service another daemon will block ([#1424](https://github.com/nledford/Ladderback/pull/1424))
+- Clear a step-up field's wrong-password error when a later try is refused for another reason ([#1433](https://github.com/nledford/Ladderback/pull/1433))
+- Show a repeated row once and sort times by instant ([#1435](https://github.com/nledford/Ladderback/pull/1435))
+- Announce a second wrong try in the gallery's step-up demos ([#1438](https://github.com/nledford/Ladderback/pull/1438))
+- Read a debug build's UI files off the async runtime ([#1446](https://github.com/nledford/Ladderback/pull/1446))
+- Say what each pairing-token use would do while the hub runs ([#1448](https://github.com/nledford/Ladderback/pull/1448))
+- A machine paired with a new hub takes that hub's lease grants ([#1493](https://github.com/nledford/Ladderback/pull/1493))
+- Drop the replacement token from the proof-refused message ([#1497](https://github.com/nledford/Ladderback/pull/1497))
+- Maintenance on a paired machine judges its leases by the floor its hub sync sets, so a clock set back can't lengthen one ([#1519](https://github.com/nledford/Ladderback/pull/1519))
+- Sign development installs on macOS ([#1600](https://github.com/nledford/Ladderback/pull/1600))
+- Keep a plan's interval schedule when its form is saved, and say how often it runs ([#1608](https://github.com/nledford/Ladderback/pull/1608))
+- Each repository's row says who maintains it ([#1615](https://github.com/nledford/Ladderback/pull/1615))
+- Say when an imported plan has no schedule, at the import and on the start page ([#1616](https://github.com/nledford/Ladderback/pull/1616))
+- A prune deletes nothing once its machine's hub lease has lapsed (#1482, #573 slice 1) ([#1617](https://github.com/nledford/Ladderback/pull/1617))
+- A lease the hub grants, or a machine gives up, survives a crash or, on Linux, a power cut ([#1632](https://github.com/nledford/Ladderback/pull/1632))
+- The Machines table and pairing-token say machine ID, not agent ID ([#1640](https://github.com/nledford/Ladderback/pull/1640))
+
 ## [0.5.0](https://github.com/nledford/Ladderback/compare/v0.4.0...v0.5.0) - 2026-11-20
 
 ### Added
