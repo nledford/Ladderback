@@ -3,7 +3,7 @@
 # the repository's root, with the three variables below; nothing else is read
 # from the environment.
 #
-# The package holds the binary the release's archive holds, and the licences.
+# The package holds the binary the release's archive holds, and the licenses.
 # It has no maintainer scripts and enables no service: Ladderback runs as the
 # person's own user service, which `ladderback install-service` writes and
 # starts (decision 64), so installing the package changes nothing but these
@@ -45,7 +45,7 @@ contents:
   - src: LICENSE-APACHE
     dst: /usr/share/doc/ladderback/LICENSE-APACHE
     packager: deb
-  # The .rpm owns its licence folder, or removing it leaves the folder behind
+  # The .rpm owns its license folder, or removing it leaves the folder behind
   # (rpm removes only what it owns; dpkg removes a folder it has no file in).
   - dst: /usr/share/licenses/ladderback
     type: dir
