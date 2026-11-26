@@ -61,6 +61,12 @@ fn agent(n: u128) -> AgentId {
     AgentId::from_uuid(Uuid::from_u128(n))
 }
 
+/// The machines the suite reports as. A harness whose registry keeps the
+/// reports of registered machines only registers these in `empty`.
+pub fn machines() -> impl Iterator<Item = AgentId> {
+    (1..=8).map(agent)
+}
+
 fn repository(digit: char) -> Option<RepositoryId> {
     ok(
         RepositoryId::parse(&digit.to_string().repeat(64)),

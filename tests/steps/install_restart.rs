@@ -514,12 +514,18 @@ async fn operations_without_status(agent: &mut Agent) {
     connection.close().await.expect("the connection closes");
 }
 
+/// A status no build writes, past the schema's CHECK, as a later version
+/// that relaxed it could.
 #[given(expr = "the operation log holds an operation whose status is {string}")]
 async fn log_holds_status(agent: &mut Agent, status: String) {
     let mut connection = connect(agent).await;
+    sqlx::raw_sql("PRAGMA ignore_check_constraints = ON")
+        .execute(&mut connection)
+        .await
+        .expect("the CHECKs are ignored");
     sqlx::query(
-        "INSERT INTO operations (id, machine_id, kind, trigger, status, queued_at) \
-         VALUES ('01890000-0000-7000-8000-000000000001', 'local', 'backup', 'manual', ?, 0)",
+        "INSERT INTO operations (id, kind, trigger, status, queued_at) \
+         VALUES ('01890000-0000-7000-8000-000000000001', 'backup', 'manual', ?, 0)",
     )
     .bind(status)
     .execute(&mut connection)

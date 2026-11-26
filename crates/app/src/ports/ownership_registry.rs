@@ -34,6 +34,9 @@ pub trait OwnershipRegistry: Send + Sync {
     /// lies above what the hub counts, the hub is in recovery mode, and
     /// every repository is decided with [`HubRecovery::decide`] instead,
     /// changing no ownership, until [`end_recovery`](Self::end_recovery).
+    ///
+    /// Of an agent removed since the hub read it, it keeps nothing and
+    /// decides nothing: an empty list, no ownership changed.
     async fn report(
         &self,
         agent: AgentId,

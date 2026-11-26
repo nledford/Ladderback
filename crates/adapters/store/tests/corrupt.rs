@@ -1,7 +1,9 @@
 //! A row this version didn't write is reported as corrupt, naming the column
 //! and the operation: never read as a default, never a panic. The rows are
 //! inserted with a connection of our own, the way damage or another program
-//! would put them there.
+//! would put them there, past the schema's CHECKs (as a later version that
+//! relaxed one could). A value of another type the STRICT tables refuse
+//! themselves (decision 165), so no case here writes one.
 
 mod support;
 
@@ -69,7 +71,6 @@ impl RawRow {
         Self {
             cells: vec![
                 ("id", id.into()),
-                ("machine_id", "local".into()),
                 ("kind", "backup".into()),
                 ("plan_id", "demo-home".into()),
                 ("repo_uuid", REPOSITORY_HEX.into()),
@@ -642,31 +643,11 @@ fn cases() -> Vec<Case> {
             "finished_at",
             good().with("finished_at", i64::MIN),
         ),
-        broken(
-            "a queued time that is text",
-            "queued_at",
-            good().with("queued_at", "yesterday"),
-        ),
-        broken(
-            "a start that is a fraction",
-            "started_at",
-            good().with("started_at", 1.5_f64),
-        ),
         // The warning count.
         broken(
             "a negative warning count",
             "warning_count",
             good().with("warning_count", -1_i64),
-        ),
-        broken(
-            "a warning count that is text",
-            "warning_count",
-            good().with("warning_count", "many"),
-        ),
-        broken(
-            "a warning count that is a fraction",
-            "warning_count",
-            good().with("warning_count", 2.5_f64),
         ),
         // The locations of a run's choice (decision 80).
         broken(
@@ -745,7 +726,7 @@ fn expected_good_record() -> OperationRecord {
 async fn the_rows_the_cases_start_from_are_good() {
     let scratch = Scratch::new();
     let store = scratch.open().await;
-    let mut raw = scratch.raw().await;
+    let mut raw = scratch.unchecked().await;
     RawRow::succeeded_backup(&id_text(BAD))
         .insert(&mut raw)
         .await;
@@ -779,7 +760,7 @@ async fn the_rows_the_cases_start_from_are_good() {
 async fn a_hook_failure_an_earlier_version_kept_is_still_read() {
     let scratch = Scratch::new();
     let store = scratch.open().await;
-    let mut raw = scratch.raw().await;
+    let mut raw = scratch.unchecked().await;
     for (byte, args) in [
         (0x01, r#"[["exit_code",{"type":"text","value":"3"}]]"#),
         (0x02, "[]"),
@@ -825,7 +806,7 @@ async fn a_row_this_version_didnt_write_is_reported_as_corrupt() {
     let store = scratch.open().await;
     let neighbour = succeeded(queued_backup(GOOD));
     save(&store, &neighbour, None).await;
-    let mut raw = scratch.raw().await;
+    let mut raw = scratch.unchecked().await;
 
     for case in cases() {
         case.row.insert(&mut raw).await;
@@ -875,7 +856,7 @@ async fn a_row_after_the_page_is_not_read() {
     let store = scratch.open().await;
     let newest = succeeded(queued_backup(GOOD));
     save(&store, &newest, None).await;
-    let mut raw = scratch.raw().await;
+    let mut raw = scratch.unchecked().await;
     good().with("status", "paused").insert(&mut raw).await;
 
     // The page ends before the damaged row, which is only looked at to tell
@@ -908,7 +889,7 @@ async fn a_row_after_the_page_is_not_read() {
 async fn a_warning_row_with_a_field_missing_is_reported_as_corrupt() {
     let scratch = Scratch::new();
     let store = scratch.open().await;
-    let mut raw = scratch.raw().await;
+    let mut raw = scratch.unchecked().await;
     RawRow::succeeded_backup(&id_text(BAD))
         .insert(&mut raw)
         .await;
@@ -956,7 +937,7 @@ async fn a_warning_row_with_a_field_missing_is_reported_as_corrupt() {
 async fn what_this_version_adds_nothing_to_is_still_read() {
     let scratch = Scratch::new();
     let store = scratch.open().await;
-    let mut raw = scratch.raw().await;
+    let mut raw = scratch.unchecked().await;
 
     // A result with a field this version doesn't know.
     let extra = format!(
@@ -1052,7 +1033,7 @@ async fn what_this_version_adds_nothing_to_is_still_read() {
 async fn a_report_of_a_corrupt_row_is_short_however_long_the_stored_value_is() {
     let scratch = Scratch::new();
     let store = scratch.open().await;
-    let mut raw = scratch.raw().await;
+    let mut raw = scratch.unchecked().await;
     let huge = "x".repeat(1_000_000);
 
     for (n, row) in [
@@ -1115,30 +1096,16 @@ async fn a_pending_retry_this_version_did_not_write_is_reported() {
             Cell::Null,
         ),
         (
-            "an attempt that is text",
-            "attempt",
-            Cell::from("two"),
-            Cell::Int(ms(0)),
-            Cell::Null,
-        ),
-        (
             "a retry time past the last timestamp",
             "retry_at",
             Cell::Int(1),
             Cell::Int(i64::MAX),
             Cell::Null,
         ),
-        (
-            "an end that is text",
-            "until",
-            Cell::Int(1),
-            Cell::Int(ms(0)),
-            Cell::from("soon"),
-        ),
     ] {
         let scratch = Scratch::new();
         let store = scratch.open().await;
-        let mut raw = scratch.raw().await;
+        let mut raw = scratch.unchecked().await;
         let mut query = sqlx::query(
             "INSERT INTO retry_state (plan_id, attempt, retry_at, until) VALUES ('demo-home', ?, ?, ?)",
         );
@@ -1233,7 +1200,7 @@ async fn an_api_token_this_version_did_not_write_is_reported() {
     ] {
         let scratch = Scratch::new();
         let store = scratch.open().await;
-        let mut raw = scratch.raw().await;
+        let mut raw = scratch.unchecked().await;
         let mut query = sqlx::query(
             "INSERT INTO api_tokens (id, label, digest, permissions, password, created_at) \
              VALUES ('abcdefghijkl', ?, ?, ?, 1, 1800000000000)",
@@ -1271,7 +1238,7 @@ async fn a_proposal_this_version_did_not_write_is_reported() {
     ] {
         let scratch = Scratch::new();
         let store = scratch.open().await;
-        let mut raw = scratch.raw().await;
+        let mut raw = scratch.unchecked().await;
         sqlx::query(
             "INSERT INTO proposals \
              (id, base, changes, rationale, status, created_at, expires_at) \

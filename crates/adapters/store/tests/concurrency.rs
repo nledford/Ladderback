@@ -177,6 +177,7 @@ async fn a_read_of_plans_never_sees_half_of_a_snapshot() {
     let scratch = Scratch::new();
     let store = Arc::new(scratch.open().await);
     let agent = domain::AgentId::from_uuid(domain::Uuid::from_u128(0xa1));
+    register_machine(&mut scratch.raw().await, agent).await;
     // Two snapshots that differ in both their plans and their count left out.
     let (few, many) = (plans_report(1, 9), plans_report(8, 0));
     store
@@ -301,8 +302,8 @@ async fn begin_a_write_of_a_foreign_row(raw: &mut SqliteConnection, n: u128) {
         .await
         .expect("the write lock is taken");
     sqlx::query(
-        r#"INSERT INTO operations (id, machine_id, kind, "trigger", status, queued_at)
-           VALUES (?1, 'local', 'backup', 'manual', 'queued', 1800000000000)"#,
+        r#"INSERT INTO operations (id, kind, "trigger", status, queued_at)
+           VALUES (?1, 'backup', 'manual', 'queued', 1800000000000)"#,
     )
     .bind(id_text(n))
     .execute(&mut *raw)

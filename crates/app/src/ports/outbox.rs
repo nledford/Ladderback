@@ -79,8 +79,10 @@ pub trait ReportInbox: Send + Sync {
     /// Takes `entry` from `agent`, received at `received_at`, deciding by
     /// `domain::fleet::ingest` in the same step: a report it took before is
     /// [`Ingest::Duplicate`] and changes nothing, so deliveries that race
-    /// keep it once. A new report past the cap lets go of the agent's
-    /// oldest and counts it.
+    /// keep it once. A report of an operation's happening the hub holds from
+    /// another machine ID is a duplicate too: its place is taken, but it is
+    /// held once, under the ID that sent it first (#1513). A new report past
+    /// the cap lets go of the agent's oldest and counts it.
     async fn ingest(
         &self,
         agent: AgentId,
@@ -95,14 +97,17 @@ pub trait ReportInbox: Send + Sync {
     /// and how many of its reports it let go of past the cap.
     async fn latest(&self, agent: AgentId, limit: usize) -> Result<LatestReports, StoreError>;
 
-    /// Keeps `plans` as `agent`'s plans, in place of any it kept before.
+    /// Keeps `plans` as `agent`'s plans, in place of any it kept before; of
+    /// an agent removed meanwhile, keeps nothing, as its removal would have
+    /// deleted them.
     async fn keep_plans(&self, agent: AgentId, plans: &PlansReport) -> Result<(), StoreError>;
 
     /// The plans last kept of `agent`; none before it reported any.
     async fn plans(&self, agent: AgentId) -> Result<Option<PlansReport>, StoreError>;
 
     /// Keeps `progress` as `agent`'s latest progress, in place of any it
-    /// kept before, of whichever operation.
+    /// kept before, of whichever operation; of an agent removed meanwhile,
+    /// keeps nothing.
     async fn keep_progress(
         &self,
         agent: AgentId,
