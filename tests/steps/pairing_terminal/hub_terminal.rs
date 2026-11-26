@@ -263,7 +263,7 @@ fn named_and_approved(agent: &mut Agent, hostname: String) {
     assert!(said.success, "{said:?}");
     let key = machine_key(agent);
     assert!(
-        said.stderr.contains(&format!("{hostname} (agent ID "))
+        said.stderr.contains(&format!("{hostname} (machine ID "))
             && said.stderr.contains(&format!("is waiting with key {key}")),
         "{said:?}"
     );

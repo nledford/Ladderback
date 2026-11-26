@@ -3707,8 +3707,8 @@ ui-machines-approved-heading = Approved machines
 # The header of the column of each machine's hostname.
 ui-machines-hostname = Hostname
 
-# The header of the column of each machine's agent ID, which the hub gave it when it paired.
-ui-machines-agent-id = Agent ID
+# The header of the column of each machine's ID, a UUID the machine keeps in its data folder.
+ui-machines-agent-id = Machine ID
 
 # The header of the column of each machine's key fingerprint, in full.
 ui-machines-key = Key fingerprint
