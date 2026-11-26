@@ -170,15 +170,12 @@ env:
 jobs:
   # Tells a docs-only pull request from one that touches code, one that can
   # change what the `service` jobs check from one that can't, and one that can
-  # change what the Firefox and WebKit journeys check from one that can't,
-  # with plain git, so the jobs below can skip work. Anything that isn't
-  # clearly docs counts as code, anything that isn't clearly outside the
-  # service jobs' reach counts as inside it, and so does a failure here: the
-  # jobs below run unless this job says "true" (`docs-only`) or "false"
-  # (`service`, `ui`). The `ui` output is the other way round: false unless a
-  # path names the UI, because Chromium's required job covers the rest. It
-  # also estimates how many mutation shards the change needs. Pushes to main,
-  # the nightly run and manual runs skip this job and run everything.
+  # change what the Firefox and WebKit journeys check from one that can't
+  # (scripts/changed-paths.sh says how), so the jobs below can skip work. A
+  # failure here leaves the outputs empty, and the jobs below run: they skip
+  # only when this job says "true" (`docs-only`) or "false" (`service`, `ui`).
+  # It also estimates how many mutation shards the change needs. Pushes to
+  # main, the nightly run and manual runs skip this job and run everything.
   changes:
     name: Changed paths
     if: github.event_name == 'pull_request'
@@ -200,60 +197,10 @@ jobs:
           BASE_SHA: ${{ github.event.pull_request.base.sha }}
           HEAD_SHA: ${{ github.event.pull_request.head.sha }}
         run: |
-          # A failing git command fails this step, and then every job below runs.
-          git diff -z --name-only --no-renames "$BASE_SHA...$HEAD_SHA" > "$RUNNER_TEMP/changed-files"
-          docs_only=true
-          service=false
-          ui=false
-          count=0
-          while IFS= read -r -d '' file; do
-            count=$((count + 1))
-            case "$file" in
-              # Markdown under crates/ can be include_str!'d or doc-tested.
-              crates/*) docs_only=false ;;
-              # The guides' config.toml and keyring examples are tested
-              # (crates/adapters/config/tests/guide.rs).
-              docs/guide/*) docs_only=false ;;
-              docs/* | LICENSE* | .github/ISSUE_TEMPLATE/* | *.md) ;;
-              *) docs_only=false ;;
-            esac
-            # What the `service` jobs run (#995): `install-service` against
-            # the real service managers. The first two arms name what they
-            # exercise; the third names what they can't reach (the web UI,
-            # the UI tests and their scenarios, the TypeScript tooling, docs)
-            # and is the only way to stay false. Every other path, a new one
-            # too, runs the jobs.
-            case "$file" in
-              crates/adapters/platform/* | scripts/service-contract.sh | src/service.rs | src/main.rs) service=true ;;
-              .github/workflows/* | .github/actions/* | Justfile | Cargo.lock | Cargo.toml | */Cargo.toml) service=true ;;
-              crates/web/* | ui-tests/* | features/ui/* | scripts/*.ts | docs/* | LICENSE* | .github/ISSUE_TEMPLATE/* | *.md) ;;
-              *) service=true ;;
-            esac
-            # What the Firefox and WebKit journeys (`ui-engines`) can see that
-            # Chromium's can't: what the page is made of, how it is served and
-            # styled, and what the browser formats (the l10n crate's `Intl`
-            # calls differ by engine), signs in with and downloads. Only a
-            # path named here turns them on; every other
-            # path leaves them off. A `.feature` outside features/ui/ counts
-            # only when it holds an `@ui` scenario, in the merged tree this
-            # job checked out (a deleted file has none).
-            case "$file" in
-              crates/web/* | ui-tests/* | features/ui/*) ui=true ;;
-              crates/l10n/*) ui=true ;;
-              crates/adapters/http/src/lib.rs | crates/adapters/http/src/response_headers.rs) ui=true ;;
-              crates/adapters/http/src/sign_in.rs | crates/adapters/http/src/downloads.rs | crates/adapters/http/src/request_checks.rs) ui=true ;;
-              rust-toolchain.toml | scripts/web-packages.sh | scripts/install-browser.sh) ui=true ;;
-              .github/workflows/ci.yml | .github/actions/browser/* | .github/actions/npm-ci/*) ui=true ;;
-              features/*.feature) if grep -Eq '@ui([[:space:]]|$)' "$file" 2> /dev/null; then ui=true; fi ;;
-            esac
-          done < "$RUNNER_TEMP/changed-files"
-          # A change with no files isn't a docs change, and runs the jobs.
-          if [ "$count" -eq 0 ]; then docs_only=false; service=true; ui=true; fi
-          {
-            echo "docs-only=$docs_only"
-            echo "service=$service"
-            echo "ui=$ui"
-          } >> "$GITHUB_OUTPUT"
+          # A failing script fails this step, and then every job below runs.
+          scripts/changed-paths.sh "$BASE_SHA" "$HEAD_SHA" > "$RUNNER_TEMP/lanes"
+          cat "$RUNNER_TEMP/lanes" >> "$GITHUB_OUTPUT"
+          docs_only=$(sed -n 's/^docs-only=//p' "$RUNNER_TEMP/lanes")
           # The mutation shards (`mutants-shard`): one to four by the lines
           # the change touches in the gated crates' source. A docs-only
           # change skips them. If the estimate fails, it writes nothing, and
