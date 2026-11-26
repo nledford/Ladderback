@@ -648,4 +648,37 @@ mod tests {
         clock.advance(wait);
         assert_eq!(secrets.keyring_lock().await, KeyringLock::Unlocked);
     }
+
+    /// A keyring locked until a time gives its entries from that time on,
+    /// and not before, as the scenarios that unlock it at a moment read it.
+    #[tokio::test]
+    async fn a_keyring_locked_until_a_time_gives_the_entry_from_that_time() {
+        let start = domain::Timestamp::from_second(1_800_000_000).unwrap();
+        let clock = Arc::new(crate::fakes::FakeClock::new(start));
+        let secrets = FakeSecrets::new();
+        let entry = KeyringEntry::parse("ladderback-demo/nas").unwrap();
+        secrets.set_keyring_entry(&entry, "canary-secret");
+        let wait = domain::SignedDuration::from_secs(60);
+        secrets.lock_keyring_until(clock.clone(), start + wait);
+        let secret = SecretRef::Keyring(entry);
+        assert_eq!(secrets.keyring_lock().await, KeyringLock::Locked);
+        let before = secrets.resolve(&secret).await;
+        assert!(
+            matches!(
+                before,
+                Err(SecretError {
+                    problem: Problem::KeyringUnavailable {
+                        cause: KeyringCause::Locked,
+                        ..
+                    },
+                    ..
+                })
+            ),
+            "{before:?}"
+        );
+        clock.advance(wait);
+        assert_eq!(secrets.keyring_lock().await, KeyringLock::Unlocked);
+        let at = secrets.resolve(&secret).await;
+        assert!(at.is_ok(), "{at:?}");
+    }
 }

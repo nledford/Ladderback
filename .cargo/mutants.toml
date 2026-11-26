@@ -316,16 +316,6 @@ exclude_re = [
     # slower, so no test can tell it from the cache. A guard of `true` (an old
     # locale's localizer for a new one) is not excluded and is caught.
     'crates/adapters/notify/src/lib\.rs.*: replace match guard held\.0 == \*locale with false in HttpNotifier::in_locale$',
-    # `wait_operation` answers a call cancelled mid-wait with what it last
-    # read, but `rmcp` drops every answer to a request the client cancelled
-    # (it forgets the request when `notifications/cancelled` arrives, and
-    # its sink drops an answer to a request it no longer holds), and the
-    # session's end cancels it with no client left to answer. So whether
-    # that answer says `finished` reaches no one;
-    # `cancelling_a_wait_stops_the_wait_and_never_the_operation` checks that
-    # it is never sent. The other `!`s of the wait are not excluded and are
-    # caught. Named by line, so a moved line brings the mutant back to judge.
-    'crates/adapters/mcp/src/lib\.rs:806:31: delete ! in Server::wait_operation$',
     # `FolderPath::top` is `Self::default()`, the path that names no folder:
     # the mutant that returns `Default::default()` is the same code.
     'crates/domain/src/browse\.rs.*: replace FolderPath::top -> Self with Default::default\(\)$',
@@ -340,14 +330,6 @@ exclude_re = [
     # of the walk are not excluded and are caught. Named by line, so a moved
     # line brings the mutant back to judge.
     'crates/app/src/proposals/diff\.rs:174:65: replace \+ with \* in middle$',
-    # `ToolName::built` is `!matches!(self, PairingState) || cfg!(feature = "hub")`.
-    # `mcp`'s own default features turn `hub` on, so in the build `cargo
-    # mutants` tests the `||` is `true` for every tool: both `true` and the
-    # deleted `!` give the same answer there. Only a build without `hub`
-    # takes the other branch, and `just test-release` checks it:
-    # `the_mcp_server_has_no_pairing_tool` (`tests/hub_gate.rs`). Named by
-    # line, so a moved line brings the mutant back to judge.
-    'crates/adapters/mcp/src/lib\.rs:186:9: (delete ! in ToolName::built|replace ToolName::built -> bool with true)$',
     # The fake agent registry's `Keeping` (how long its fake store's write
     # takes) has a Debug only so the registry's derived Debug compiles: no
     # test, contract or scenario prints a fake's internals, and what it

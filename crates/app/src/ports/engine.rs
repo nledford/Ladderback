@@ -664,7 +664,7 @@ pub enum Deletion {
 /// counts. Dropped unanswered, every copy of it, it answers
 /// [`Deletion::Refused`], so an event consumer that doesn't know the
 /// question never lets a prune delete.
-#[derive(Clone)]
+#[derive(Clone, Debug)]
 pub struct DeletionAsk(Arc<Mutex<Option<oneshot::Sender<Deletion>>>>);
 
 impl DeletionAsk {
@@ -697,12 +697,6 @@ impl PartialEq for DeletionAsk {
 }
 
 impl Eq for DeletionAsk {}
-
-impl std::fmt::Debug for DeletionAsk {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.write_str("DeletionAsk")
-    }
-}
 
 /// The answer a [`DeletionAsk`] gets: [`Deletion::Refused`] when it is
 /// dropped unanswered.
@@ -744,6 +738,16 @@ mod deletion_tests {
         copy.answer(Deletion::Permitted);
         ask.answer(Deletion::Refused);
         assert_eq!(answer.now_or_never(), Some(Deletion::Permitted));
+    }
+
+    /// Copies of one question are equal; two questions never are, so a
+    /// consumer can't take one prune's question for another's.
+    #[test]
+    fn two_questions_are_never_equal() {
+        let (one, _) = DeletionAsk::new();
+        let (other, _) = DeletionAsk::new();
+        assert_ne!(one, other);
+        assert_eq!(one.clone(), one);
     }
 }
 

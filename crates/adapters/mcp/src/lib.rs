@@ -793,14 +793,15 @@ impl Server {
         let progress = context.and_then(|context| context.meta.get_progress_token());
         loop {
             let operation = self.backend.summary(arguments.operation.clone()).await?;
+            let finished = !is_unfinished(&operation);
             if context.is_some_and(|context| context.ct.is_cancelled()) {
                 return Ok(Waited {
-                    finished: !is_unfinished(&operation),
+                    finished,
                     operation: Operation::unread(operation),
                 });
             }
             let left = length.saturating_sub(began.elapsed());
-            if !is_unfinished(&operation) || left.is_zero() {
+            if finished || left.is_zero() {
                 let operation = match self.backend.operation(arguments.operation).await {
                     Ok(OperationDetailDto {
                         operation,
