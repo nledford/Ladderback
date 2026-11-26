@@ -3,7 +3,7 @@
 //!
 //! A placeholder is a name in braces, `{plan}`, from a closed list:
 //! `{event}`, `{plan}`, `{repository}`, `{operation}`, `{code}`, `{time}`,
-//! and a retry's `{attempt}` and `{attempts}`.
+//! a retry's `{attempt}` and `{attempts}`, and a machine's `{machine}`.
 //! None of them can hold a secret (I4), and a name not on the list is
 //! refused when the template is read, so a template can never ask for one.
 //! `{{` and `}}` write a brace.
@@ -35,6 +35,8 @@ enum Placeholder {
     Attempt,
     /// How many retries its plan makes.
     Attempts,
+    /// The hostname of the machine a `machine.*` event tells of.
+    Machine,
 }
 
 impl Placeholder {
@@ -48,6 +50,7 @@ impl Placeholder {
             "time" => Self::Time,
             "attempt" => Self::Attempt,
             "attempts" => Self::Attempts,
+            "machine" => Self::Machine,
             _ => return None,
         })
     }
@@ -154,6 +157,11 @@ impl Template {
                 Part::Value(Placeholder::Attempts) => {
                     if let Some(attempt) = event.attempt {
                         message.push_str(&attempt.of.to_string());
+                    }
+                }
+                Part::Value(Placeholder::Machine) => {
+                    if let Some(machine) = &event.machine {
+                        message.push_str(machine.as_str());
                     }
                 }
             }

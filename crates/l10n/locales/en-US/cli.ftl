@@ -577,9 +577,9 @@ cli-pairing-token-waiting = { $agent_id }  { $fingerprint }  waiting since { DAT
 
 # `ladderback pairing-token --approve` names the machine before it asks, so the person compares its key with that machine's own screen, where `ladderback pair` and `ladderback hub-status` show it.
 # $hostname (text): the machine's hostname as it paired. It is shown as it came.
-# $agent_id (text): the machine's agent ID, a UUID.
+# $agent_id (text): the machine's ID, a UUID.
 # $fingerprint (text): the machine's key fingerprint, in groups of four characters.
-cli-pairing-token-approve-waiting = { $hostname } (agent ID { $agent_id }) is waiting with key { $fingerprint }. Compare it with that { -machine }'s own screen.
+cli-pairing-token-approve-waiting = { $hostname } (machine ID { $agent_id }) is waiting with key { $fingerprint }. Compare it with that { -machine }'s own screen.
 
 # Asked before the hub approves the machine. `[y/N]` is typed as it is: keep it a string literal.
 cli-pairing-token-approve-confirm = Approve it? { "[y/N]" }
@@ -805,7 +805,7 @@ cli-help-pairing-token-ttl = How long the token lives, in minutes: 5 to 1440, 15
 cli-help-pairing-token-list = List the unused tokens by token ID, with when each lapses
 
 # What `pairing-token --pending` does.
-cli-help-pairing-token-pending = List the { -machine(form: "other") } waiting for approval, with each one's agent ID and key fingerprint
+cli-help-pairing-token-pending = List the { -machine(form: "other") } waiting for approval, with each one's ID and key fingerprint
 
 # What `pairing-token --approve` takes.
 cli-help-pairing-token-approve = Approve the { -machine } with this hostname, after showing its key fingerprint to compare with that { -machine }'s own screen

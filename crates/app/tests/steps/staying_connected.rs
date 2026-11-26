@@ -37,7 +37,7 @@ fn agent_time(agent: &mut Agent) -> SignedDuration {
 }
 
 #[given("the agent is connected to its hub")]
-async fn is_connected(agent: &mut Agent) {
+pub(super) async fn is_connected(agent: &mut Agent) {
     for _ in 0..WAKES {
         if online(agent).await {
             return;
@@ -136,6 +136,7 @@ async fn connects_again(agent: &mut Agent) {
 }
 
 #[when("the agent stops sending anything")]
+#[when("the agent's computer goes to sleep")]
 async fn stops_sending(agent: &mut Agent) {
     let running = first(agent)
         .running

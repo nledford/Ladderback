@@ -141,7 +141,7 @@ Not planned for v1: Windows, multiple users, and rustic's `copy`, `merge`, `rewr
 
 ## Documentation
 
-- [The user guide](https://nledford.github.io/Ladderback/) ([source](docs/guide/README.md)): installing and a first backup in the web UI, for everyone; then an Advanced part with the other ways to install, the service, `config.toml`, secrets, sign-in and remote access, and API tokens and AI agents.
+- [The user guide](https://nledford.github.io/Ladderback/) ([source](docs/guide/README.md)): installing and a first backup in the web UI, for everyone; then an Advanced part with the other ways to install, the service, `config.toml`, secrets, sign-in and remote access, API tokens and AI agents, and the hub: pairing machines, its dashboard and maintenance with it.
 - [PRODUCT.md](PRODUCT.md): who Ladderback is for, what it does and doesn't do.
 - [docs/design/](docs/design/README.md): architecture, safety invariants, data model, milestones and decisions.
 

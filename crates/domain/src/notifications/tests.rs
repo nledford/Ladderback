@@ -55,6 +55,7 @@ fn backup_event(kind: EventKind, plan_id: Option<&str>) -> Event {
         at: at(),
         codes: Vec::new(),
         attempt: None,
+        machine: None,
     }
 }
 
@@ -102,6 +103,8 @@ fn each_event_is_named_as_section_11_names_it_and_read_back_by_that_name() {
             "check.failed",
             "restore.failed",
             "repo.maintenance_paused",
+            "machine.offline",
+            "machine.online",
         ]
     );
     for kind in EventKind::ALL {
@@ -392,6 +395,7 @@ fn a_planned_retry_tells_the_failed_backups_plan_and_code_its_attempt_and_when_i
             at: runs,
             codes: vec!["operation-failed"],
             attempt: Some(attempt),
+            machine: None,
         }
     );
 }
@@ -901,6 +905,7 @@ fn paused_maintenance_tells_its_repository_and_since_when_and_no_operation_plan_
             at: at(),
             codes: Vec::new(),
             attempt: None,
+            machine: None,
         }
     );
     assert_eq!(
@@ -912,5 +917,76 @@ fn paused_maintenance_tells_its_repository_and_since_when_and_no_operation_plan_
     assert_eq!(
         template.render(&event),
         "repo.maintenance_paused photos [] [] 2026-11-12T09:30:00Z"
+    );
+}
+
+#[test]
+fn a_machine_offline_tells_the_machine_and_since_when_and_no_operation_plan_repository_or_code() {
+    let machine = crate::fleet::Hostname::parse("Nick's laptop").unwrap();
+    let event = Event::machine_offline(machine.clone(), at());
+    assert_eq!(
+        event,
+        Event {
+            kind: EventKind::MachineOffline,
+            operation: None,
+            plan: None,
+            repository: None,
+            at: at(),
+            codes: Vec::new(),
+            attempt: None,
+            machine: Some(machine),
+        }
+    );
+    assert_eq!(
+        EventKind::parse("machine.offline"),
+        Ok(EventKind::MachineOffline)
+    );
+    assert_eq!(event.kind.ping(), Ping::Fail);
+    let template =
+        Template::parse("{event} {machine} [{repository}] [{operation}] [{plan}] {time}").unwrap();
+    assert_eq!(
+        template.render(&event),
+        "machine.offline Nick's laptop [] [] [] 2026-11-12T09:30:00Z"
+    );
+}
+
+#[test]
+fn a_machine_back_online_tells_the_machine_and_when_and_pings_success() {
+    let machine = crate::fleet::Hostname::parse("laptop").unwrap();
+    let event = Event::machine_online(machine.clone(), at());
+    assert_eq!(event.kind, EventKind::MachineOnline);
+    assert_eq!(event.machine, Some(machine));
+    assert_eq!(event.at, at());
+    assert_eq!(
+        (&event.operation, &event.plan, &event.repository),
+        (&None, &None, &None)
+    );
+    assert_eq!(
+        EventKind::parse("machine.online"),
+        Ok(EventKind::MachineOnline)
+    );
+    assert_eq!(event.kind.ping(), Ping::Success);
+    let template = Template::parse("{event} {machine} {time}").unwrap();
+    assert_eq!(
+        template.render(&event),
+        "machine.online laptop 2026-11-12T09:30:00Z"
+    );
+}
+
+#[test]
+fn a_rule_for_some_plans_is_not_sent_a_machines_event() {
+    let machine = crate::fleet::Hostname::parse("laptop").unwrap();
+    let event = Event::machine_offline(machine, at());
+    assert!(rule(&[EventKind::MachineOffline], "ops", &[]).matches(&event));
+    assert!(!rule(&[EventKind::MachineOffline], "ops", &["home"]).matches(&event));
+    assert!(!rule(&[EventKind::MachineOnline], "ops", &[]).matches(&event));
+}
+
+#[test]
+fn a_template_of_another_event_names_no_machine() {
+    let template = Template::parse("[{machine}]").unwrap();
+    assert_eq!(
+        template.render(&backup_event(EventKind::BackupFailed, Some("home"))),
+        "[]"
     );
 }

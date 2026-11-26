@@ -107,6 +107,7 @@ fn event(kind: EventKind) -> Event {
             Vec::new()
         },
         attempt: (kind == EventKind::BackupRetrying).then_some(Attempt { number: 1, of: 3 }),
+        machine: None,
     }
 }
 
