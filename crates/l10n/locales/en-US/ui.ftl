@@ -3857,7 +3857,7 @@ ui-machines-resumed-unlisted = Live updates are on again.
 # $hostname (string): the name the machine gave.
 ui-machines-started-waiting = { $hostname } is waiting for approval.
 
-# A link to the dashboard of the approved machines, on the Machines tab and, on a hub, on the start page.
+# A link on the Machines tab to the dashboard of the approved machines, which is the hub's start page (decision 173).
 ui-machines-dashboard-link = See the approved { -machine(form: "other") }' latest operations
 
 # The heading of the notice that leads the Machines tab while the hub is in recovery mode (decision 137).
@@ -3884,14 +3884,15 @@ ui-machines-recovery-ended = Recovery mode ended. This { -hub } grants leases ag
 # Said in the review when the step-up is wrong: recovery mode didn't end.
 ui-machines-recovery-step-up-failed = That isn't right, so recovery mode didn't end. Try again.
 
-## The hub's dashboard (#569): each approved machine, whether it is online
-## now or when it last connected, the reports the hub let go of, and its
-## latest operations, as its reports told them.
+## The hub's dashboard (#569), which is the hub's start page (decision 173):
+## each approved machine, whether it is online now or when it last
+## connected, the reports the hub let go of, and its latest operations, as
+## its reports told them.
 
-# The dashboard's heading.
+# The dashboard's heading, the hub's start page's.
 ui-dashboard-heading = Dashboard
 
-# The dashboard's title, as the browser's tab and history show it.
+# The dashboard's title, as the browser's tab and history show it: the hub's start page's.
 ui-dashboard-title = Dashboard – { -brand-name }
 
 # What the dashboard shows, under its heading.

@@ -85,14 +85,14 @@ The machine moves to **Approved machines**, and shows on the Dashboard at once. 
 
 ## The Dashboard
 
-The hub's **Dashboard** shows each approved machine. Its start page and its **Machines** tab lead there by the link **See the approved machines' latest operations**.
+The hub's **Dashboard** is its start page: **Ladderback** at the top of every page leads there, and so does the link **See the approved machines' latest operations** on its **Machines** tab. Notices, such as sign-in being off, come first, then each approved machine.
 
 - **Online now**, or **Last connected** and when. A running machine holds one connection to its hub and sends something on it at least every 30 seconds. The hub closes a connection that sent nothing for 90 seconds, so a machine that sleeps, shuts down or loses the network shows when it last connected within 90 seconds. After the hub restarts, each machine shows when it last connected until it connects again.
 - **Plans of** the machine, as it last reported them: how and when each last ran, and when it runs next.
 - **Latest operations of** the machine, newest first: when each started and ended, its result, and a failure's error code. A machine keeps its reports while it can't reach the hub and sends them in order once it can. When the hub let go of a machine's oldest reports to stay within its limit, the page says so.
 - The progress of the operation the machine runs.
 
-Times read in your browser's time zone, with the machine's own beside them when the two differ. **Pause live updates** holds the page still until you press it again. The hub's own plans and operations stay on its own pages, as on any machine.
+Times read in your browser's time zone, with the machine's own beside them when the two differ. **Pause live updates** holds the page still until you press it again. The hub's own plans and operations are on its **Plans** and **Operations** pages, as on any machine. A bookmark of the hub's `/dashboard` from 0.6.0-rc.1 leads to the start page.
 
 ## Removing a machine
 

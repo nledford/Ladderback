@@ -131,6 +131,21 @@ Then("the page shows the machine {string}", async function (this: BrowserWorld, 
   await expect(this.page.getByRole("heading", { level: 2, name: namePattern(hostname) })).toBeVisible();
 });
 
+// Which of two regions, each named by its heading, a reader meets first in
+// the page's order, as a screen reader and the keyboard walk it: the start
+// page's notices before a hub's machines (§16, decision 173).
+Then("the region {string} comes before the region {string}", async function (this: BrowserWorld, first: string, second: string) {
+  const earlier = this.page.getByRole("region", { name: namePattern(first) });
+  const later = this.page.getByRole("region", { name: namePattern(second) });
+  await expect(earlier).toHaveCount(1);
+  await expect(later).toHaveCount(1);
+  const before = await earlier.evaluate(
+    (region, other) => other !== null && (region.compareDocumentPosition(other) & Node.DOCUMENT_POSITION_FOLLOWING) !== 0,
+    await later.elementHandle(),
+  );
+  assert.ok(before, `the region "${first}" doesn't come before the region "${second}"`);
+});
+
 // The viewer's time, then the machine's in parentheses with its zone named,
 // the zone isolated as fetched text is (§4.5).
 Then(

@@ -1,9 +1,12 @@
-//! The start page, the route `/` (§4.4): the configured plans and when each
-//! runs next, the ways to the Repositories and Plans pages while there are
-//! none, the way to the Operations page, and where the format of a plan in
-//! `config.toml` is described. A plan's "Next run" cell is
+//! The start page, the route `/` (§4.4): on a daemon serving as a hub, its
+//! dashboard (`dashboard_page.rs`; §16, decision 173); elsewhere the
+//! configured plans and when each runs next, the ways to the Repositories
+//! and Plans pages while there are none, the way to the Operations page, and
+//! where the format of a plan in `config.toml` is described. Both say the
+//! start page's notices first. A plan's "Next run" cell is
 //! `routes::next_run_cell`'s, host-tested; this is the DOM glue, which the
-//! `@ui` scenarios of `features/ui/start_page.feature` run.
+//! `@ui` scenarios of `features/ui/start_page.feature` and
+//! `features/ui/hub_dashboard.feature` run.
 
 use std::sync::Arc;
 
@@ -22,6 +25,7 @@ use crate::copied_data_folder::CopiedDataFolder;
 use crate::full_disk_access_warning::FullDiskAccessSteps;
 use crate::repositories::{Sentence, repository_notes};
 use crate::routes::{PageHeading, next_run_cell, refused_sentence, time_view};
+use crate::settings::agents::hub_known;
 use crate::sign_in::SignInOff;
 use crate::text;
 use crate::variants::Rem;
@@ -37,15 +41,42 @@ pub(crate) const PLAN_FORMAT_URL: &str = concat!(
     "/docs/design/scheduling-and-config.md#61-source-of-truth"
 );
 
-/// The start page, the route `/`: the configured plans, each with when it
-/// runs next on its schedule (§5), the way to the operations page, where a
-/// backup is started by hand, and, last, for whoever writes `config.toml` by
-/// hand, where the format of a plan is described. Without plans it says to
-/// connect a repository first and add the plan on the Plans page, with the
-/// way to each (#477, #1373). With sign-in off it says so, and how to turn
-/// it on (security §10.1).
+/// The route `/`: the dashboard on a daemon serving as a hub (§16, decision
+/// 173), the start page on one that isn't; nothing until the page knows
+/// which, so a hub's start page never shows the welcome first.
 #[component]
-pub(crate) fn Start(localizer: Arc<Localizer>) -> impl IntoView {
+pub(crate) fn StartRoute(localizer: Arc<Localizer>) -> impl IntoView {
+    let hub = hub_known();
+    move || match hub() {
+        None => ().into_any(),
+        Some(true) => {
+            view! { <crate::dashboard_page::Dashboard localizer=Arc::clone(&localizer) /> }
+                .into_any()
+        }
+        Some(false) => view! { <Start localizer=Arc::clone(&localizer) /> }.into_any(),
+    }
+}
+
+/// What the start page says first, under its heading, on every daemon: that
+/// sign-in is off, with how to turn it on (security §10.1), the Full Disk
+/// Access steps (decision 115), and a copied data folder or a machine its
+/// hub refused or removed (decision 144).
+pub(crate) fn notices(localizer: &Arc<Localizer>) -> impl IntoView + use<> {
+    view! {
+        <SignInOff localizer=Arc::clone(localizer) />
+        <FullDiskAccessSteps localizer=Arc::clone(localizer) />
+        <CopiedDataFolder localizer=Arc::clone(localizer) />
+    }
+}
+
+/// The start page of a daemon that isn't a hub: its notices, then the
+/// configured plans, each with when it runs next on its schedule (§5), the
+/// way to the operations page, where a backup is started by hand, and,
+/// last, for whoever writes `config.toml` by hand, where the format of a
+/// plan is described. Without plans it says to connect a repository first
+/// and add the plan on the Plans page, with the way to each (#477, #1373).
+#[component]
+fn Start(localizer: Arc<Localizer>) -> impl IntoView {
     let heading = text(&localizer, msg::UI_START_HEADING);
     let unreachable_heading = text(&localizer, msg::UI_UNREACHABLE_HEADING);
     let body = text(&localizer, msg::UI_START_PLANS_BODY);
@@ -93,9 +124,7 @@ pub(crate) fn Start(localizer: Arc<Localizer>) -> impl IntoView {
     // Each next run is written in the viewer's own zone, as every instant the
     // page shows is (§8.4).
     let viewer = l10n::viewer_zone();
-    let notice = Arc::clone(&localizer);
-    let full_disk_access = Arc::clone(&localizer);
-    let copied_data_folder = Arc::clone(&localizer);
+    let notices = notices(&localizer);
     let links = Arc::clone(&localizer);
     let operations_localizer = Arc::clone(&localizer);
     let (phase, pace) = paced(move || phase.get(), |phase| *phase == Phase::Loading);
@@ -109,10 +138,7 @@ pub(crate) fn Start(localizer: Arc<Localizer>) -> impl IntoView {
                 }
             }}
         </PageHeading>
-        <SignInOff localizer=notice />
-        <FullDiskAccessSteps localizer=full_disk_access />
-        <CopiedDataFolder localizer=copied_data_folder />
-        {dashboard_link(&localizer)}
+        {notices}
         <p>{body}</p>
         {move || match phase.get() {
             Phase::Loading => first_load(loading.clone(), Awaited::table(2), pace).into_any(),
@@ -189,12 +215,6 @@ pub(crate) fn Start(localizer: Arc<Localizer>) -> impl IntoView {
                 })}
         </p>
     }
-}
-
-/// On a hub, the way to its dashboard, the hub's main page (#569), first
-/// after the notices.
-fn dashboard_link(localizer: &Arc<Localizer>) -> AnyView {
-    view! { <crate::dashboard_page::DashboardLink localizer=Arc::clone(localizer) /> }.into_any()
 }
 
 /// The start page's table of plans, named by its caption: each plan's ID as

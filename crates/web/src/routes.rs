@@ -281,9 +281,17 @@ pub(crate) fn NotFound(localizer: Arc<Localizer>) -> impl IntoView {
 /// The title of the page at `path`, for the browser's tab and history: the
 /// page's own, in the page's language (technical design §4.5, "Route
 /// changes"). A path with no page is the not-found page, and so is
-/// `/_gallery` in a build without the gallery.
-pub(crate) fn title(localizer: &Localizer, path: &str) -> String {
-    title_in(localizer, path, cfg!(feature = "gallery"))
+/// `/_gallery` in a build without the gallery. On a daemon serving as a hub
+/// (`hub`, `None` until the page knows), the start page is the dashboard,
+/// titled so, and `/dashboard` is its old address; elsewhere `/dashboard` is
+/// no page (§16, decision 173).
+pub(crate) fn title(localizer: &Localizer, path: &str, hub: Option<bool>) -> String {
+    title_in(
+        localizer,
+        path,
+        cfg!(feature = "gallery"),
+        hub == Some(true),
+    )
 }
 
 /// Whether `path` is a snapshot's page: `/snapshots/{alias}/{snapshot}`,
@@ -300,8 +308,10 @@ fn is_snapshot_page(path: &str) -> bool {
 
 /// [`title`] for a build that has the gallery or not, so that both are tested
 /// whichever one the tests are built as.
-fn title_in(localizer: &Localizer, path: &str, gallery: bool) -> String {
-    let page = if path == "/" {
+fn title_in(localizer: &Localizer, path: &str, gallery: bool, hub: bool) -> String {
+    let page = if path == "/" && hub {
+        msg::UI_DASHBOARD_TITLE
+    } else if path == "/" {
         msg::UI_START_TITLE
     } else if gallery && path.trim_suffix('/') == "/_gallery" {
         msg::UI_GALLERY_TITLE
@@ -319,7 +329,7 @@ fn title_in(localizer: &Localizer, path: &str, gallery: bool) -> String {
         msg::UI_LOG_TITLE
     } else if path == "/settings" {
         msg::UI_SETTINGS_TITLE
-    } else if path == "/dashboard" {
+    } else if path == "/dashboard" && hub {
         msg::UI_DASHBOARD_TITLE
     } else if is_snapshot_page(path) {
         msg::UI_SNAPSHOT_TITLE
@@ -333,13 +343,29 @@ fn title_in(localizer: &Localizer, path: &str, gallery: bool) -> String {
 mod tests {
     use super::*;
 
+    /// The title of `path` before the page knows whether the daemon is a hub.
     fn title_of(path: &str) -> String {
-        title(&Localizer::new(&[]), path)
+        title(&Localizer::new(&[]), path, None)
+    }
+
+    /// The title of `path` on a daemon serving as a hub.
+    fn title_on_a_hub(path: &str) -> String {
+        title(&Localizer::new(&[]), path, Some(true))
     }
 
     #[test]
     fn the_start_page_is_titled_with_the_product_name() {
         assert_eq!(title_of("/"), "Ladderback");
+    }
+
+    #[test]
+    fn a_hubs_start_page_is_titled_as_its_dashboard() {
+        assert_eq!(title_on_a_hub("/"), "Dashboard – Ladderback");
+    }
+
+    #[test]
+    fn a_daemon_that_isnt_a_hub_titles_its_start_page_with_the_product_name() {
+        assert_eq!(title(&Localizer::new(&[]), "/", Some(false)), "Ladderback");
     }
 
     #[test]
@@ -369,7 +395,21 @@ mod tests {
 
     #[test]
     fn the_hubs_dashboard_is_titled_with_the_product_name() {
-        assert_eq!(title_of("/dashboard"), "Dashboard – Ladderback");
+        assert_eq!(title_on_a_hub("/dashboard"), "Dashboard – Ladderback");
+    }
+
+    #[test]
+    fn the_dashboards_address_is_page_not_found_on_a_daemon_that_isnt_a_hub() {
+        let known = title(&Localizer::new(&[]), "/dashboard", Some(false));
+        assert_eq!(known, "Page not found – Ladderback");
+        assert_eq!(title_of("/dashboard"), "Page not found – Ladderback");
+    }
+
+    #[test]
+    fn a_hub_titles_every_page_but_its_start_page_as_any_daemon_does() {
+        for path in ["/operations", "/plans", "/settings", "/no/such/page"] {
+            assert_eq!(title_on_a_hub(path), title_of(path), "{path}");
+        }
     }
 
     #[test]
@@ -389,8 +429,8 @@ mod tests {
 
     #[test]
     fn the_gallery_has_its_title_only_in_a_build_that_has_it() {
-        let with = title_in(&Localizer::new(&[]), "/_gallery", true);
-        let without = title_in(&Localizer::new(&[]), "/_gallery", false);
+        let with = title_in(&Localizer::new(&[]), "/_gallery", true, false);
+        let without = title_in(&Localizer::new(&[]), "/_gallery", false, false);
         assert_eq!(with, "Component gallery – Ladderback");
         assert_eq!(without, "Page not found – Ladderback");
     }
@@ -409,7 +449,7 @@ mod tests {
     fn a_trailing_slash_names_the_same_page() {
         let localizer = Localizer::new(&[]);
         assert_eq!(
-            title_in(&localizer, "/_gallery/", true),
+            title_in(&localizer, "/_gallery/", true, false),
             "Component gallery – Ladderback"
         );
         assert_eq!(title_of("/no/such/page/"), "Page not found – Ladderback");

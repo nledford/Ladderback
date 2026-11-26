@@ -105,8 +105,8 @@ mod machines_list;
 // for and how its times read, decided on the host; `dashboard_page.rs` is
 // its glue.
 mod dashboard;
-// The hub's dashboard, the route `/dashboard`, and the start page's way to
-// it: the DOM glue of `dashboard.rs`.
+// The hub's dashboard, its start page, and its old address `/dashboard`:
+// the DOM glue of `dashboard.rs`.
 mod dashboard_page;
 // What the hub's pairing dialog decides, on the host; `settings/agents.rs`
 // is its glue.
@@ -155,7 +155,8 @@ mod time_zones;
 // A snapshot's page's DOM glue; `components/tree/rules.rs` decides for its
 // tree.
 mod snapshot_page;
-// The start page's DOM glue; `routes::next_run_cell` words a plan's next run.
+// The start page's DOM glue, and the route `/`, which is the dashboard on a
+// hub; `routes::next_run_cell` words a plan's next run.
 mod start_page;
 // The live pages' fetch and WebSocket glue; see `backend.rs` for why this
 // one is only covered by the browser journeys.
@@ -194,7 +195,7 @@ use sign_in::{
 };
 use snapshot_page::Snapshot;
 use snapshots::Snapshots;
-use start_page::Start;
+use start_page::StartRoute;
 
 /// The text of message `id` in the page's language.
 fn text(localizer: &Localizer, id: MessageId) -> String {
@@ -214,23 +215,24 @@ fn gallery_page(localizer: Arc<Localizer>) -> AnyView {
     }
 }
 
-/// The page of `/dashboard`: the hub's dashboard (it shows only on a daemon
-/// serving as one).
+/// The page of `/dashboard`: the dashboard's old address (it leads to the
+/// start page on a daemon serving as a hub).
 fn dashboard_page(localizer: Arc<Localizer>) -> AnyView {
     view! { <dashboard_page::DashboardRoute localizer=localizer /> }.into_any()
 }
 
-/// Watches the router: each path the reader navigates to after the first is
-/// titled (`page::retitle`). The first path is the page load, which
-/// `page::declare` titled. Focus is the page heading's (`routes::PageHeading`).
+/// Watches the router: each path the page shows is titled (`page::retitle`),
+/// again once the page knows whether the daemon is a hub, whose start page
+/// is titled as its dashboard (§16, decision 173). `page::declare` titled
+/// the page load before either was known. Focus is the page heading's
+/// (`routes::PageHeading`).
 #[component]
 fn Arrival(localizer: Arc<Localizer>) -> impl IntoView {
     let pathname = use_location().pathname;
-    Effect::new(move |previous: Option<()>| {
+    let hub = settings::agents::hub_known();
+    Effect::new(move |_| {
         let path = pathname.get();
-        if previous.is_some() {
-            page::retitle(&localizer, &path);
-        }
+        page::retitle(&localizer, &path, hub());
     });
 }
 
@@ -253,7 +255,10 @@ fn Pages(localizer: Arc<Localizer>) -> impl IntoView {
     view! {
         <Arrival localizer=localizer />
         <Routes fallback=move || view! { <NotFound localizer=Arc::clone(&not_found) /> }>
-            <Route path=path!("/") view=move || view! { <Start localizer=Arc::clone(&start) /> } />
+            <Route
+                path=path!("/")
+                view=move || view! { <StartRoute localizer=Arc::clone(&start) /> }
+            />
             <Route path=path!("/_gallery") view=move || gallery_page(Arc::clone(&gallery)) />
             <Route
                 path=path!("/operations")
@@ -449,7 +454,8 @@ fn App(localizer: Arc<Localizer>) -> impl IntoView {
         });
     }
     // The sign-in page has a title of its own; once signed in, the page asked
-    // for has the title its address names.
+    // for has the title its address names, which `Arrival` gives again once
+    // the page knows whether the daemon is a hub.
     let titles = Arc::clone(&localizer);
     Effect::new(move |previous: Option<Standing>| {
         let now = shown.get();

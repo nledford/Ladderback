@@ -14,6 +14,8 @@
 
 ## Where it is reached
 
+*This section no longer holds: [decision 173](173-a-hubs-start-page-is-its-dashboard.md) made a hub's start page the dashboard. Its reasons against a header link still stand.*
+
 The dashboard is the hub's main page, but the header's links are the same on every daemon (§4.4, "Navigation"): they don't change with the daemon's mode, and a hub-only link would be the first that does, on a line whose seven links and Sign out already take 903 of its 928 pixels in a pseudolocale. So the hub's start page leads to the dashboard first, after its notices, and the Machines tab of Settings, where machines are approved, leads there too, each with a link "See the approved machines' latest operations". A daemon that isn't a hub shows neither link, and its `/dashboard` is a page not found.
 
 ## Known limits
@@ -23,3 +25,5 @@ The dashboard is the hub's main page, but the header's links are the same on eve
 - The rest of §4.4's card (overdue plans, recent failures) and a machine's own page are still to come; plans, their next runs and live progress came with #1440 (§7.2). Removing or rejecting a machine, and its event, wait for #1439.
 
 **Amended by [decision 163](163-the-wire-and-stored-names-say-machine.md)** (2026-11-25, #1220): the dashboard's read is `GET /api/v1/hub/dashboard`, where it was `GET /api/v1/hub/machines`, which the registry now takes, and the events `AgentOnline`, `AgentOffline`, `AgentPending`, `AgentApproved` and `AgentReported` are `machine-online`, `machine-offline`, `machine-pending`, `machine-approved` and `machine-reported` (`MachineOnline` and the rest), each naming its machine in `machine`.
+
+**Amended by [decision 173](173-a-hubs-start-page-is-its-dashboard.md)** (2026-11-26, #1484): on a hub, the dashboard is the start page (`/`), after the start page's notices, and the product name in the banner leads to it. `/dashboard` leads to `/` on a hub, and is a page not found, titled so, on a daemon that isn't one. The section "Where it is reached" no longer holds.
