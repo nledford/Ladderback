@@ -2876,6 +2876,10 @@ impl app::ports::Identity for DamagedKeys {
         Err(damaged(domain::fleet::KeyFile::HubPin))
     }
 
+    async fn forget_pin(&self) -> Result<(), app::ports::IdentityError> {
+        Err(damaged(domain::fleet::KeyFile::HubPin))
+    }
+
     async fn begin_attempt(&self) -> Result<app::ports::Attempt, app::ports::IdentityError> {
         Err(damaged(domain::fleet::KeyFile::ConnectionCounter))
     }

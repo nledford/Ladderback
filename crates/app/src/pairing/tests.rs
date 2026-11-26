@@ -1169,3 +1169,60 @@ async fn i1_a_machine_refusing_a_hub_it_doesnt_pin_keeps_its_leases_and_floors()
     );
     assert_eq!(cache.load().await.unwrap(), kept());
 }
+
+/// A machine that leaves its hub drops every lease and epoch floor of it,
+/// then forgets the pin: it stands alone, and holds no lease of a hub it
+/// left (I1; decision 169).
+#[tokio::test]
+async fn i1_a_machine_leaving_its_hub_drops_its_leases_and_floors_and_forgets_the_pin() {
+    let hub = Hub::new(1);
+    let identity = Arc::new(InMemoryIdentity::default());
+    let cache = Arc::new(InMemoryLeaseCache::default());
+    let agent = agent_keeping(identity.clone(), cache.clone());
+    pair(&hub, &agent, hub.token(pinned()).await).await.unwrap();
+    cache.save(&kept()).await.unwrap();
+    assert_eq!(agent.leave().await, Ok(()));
+    assert_eq!(identity.pin().await.unwrap(), None);
+    assert_eq!(cache.load().await.unwrap(), HeldLeases::default());
+    assert_eq!(agent.leave().await, Ok(()), "leaving no hub is done");
+}
+
+/// The pauses the hub left go with it: the next hub's 14-day alert counts
+/// from its own pause, not one noted, or already told, under the old hub.
+#[tokio::test]
+async fn a_machine_leaving_its_hub_drops_that_hubs_pauses() {
+    let hub = Hub::new(1);
+    let identity = Arc::new(InMemoryIdentity::default());
+    let cache = Arc::new(InMemoryLeaseCache::default());
+    let agent = agent_keeping(identity, cache.clone());
+    pair(&hub, &agent, hub.token(pinned()).await).await.unwrap();
+    let paused = HeldLeases::default().with_pauses([(
+        RepositoryId::parse(&"a".repeat(64)).unwrap(),
+        domain::maintenance::Pause {
+            since: Timestamp::from_second(1_900_000_000).unwrap(),
+            alerted: true,
+        },
+    )]);
+    cache.save_pauses(&paused).await.unwrap();
+    assert_eq!(agent.leave().await, Ok(()));
+    assert_eq!(cache.load().await.unwrap().pauses().count(), 0);
+}
+
+/// A machine that can't drop its leases keeps its pin, so it never stands
+/// alone with a lease of the hub it left, and leaving again tries again.
+#[tokio::test]
+async fn i1_a_machine_that_cant_drop_its_leases_keeps_its_pin() {
+    let hub = Hub::new(1);
+    let identity = Arc::new(InMemoryIdentity::default());
+    let paired = agent(identity.clone());
+    pair(&hub, &paired, hub.token(pinned()).await)
+        .await
+        .unwrap();
+    let agent = agent_keeping(identity.clone(), Arc::new(Unwritable));
+    let outcome = agent.leave().await;
+    assert!(
+        matches!(outcome, Err(AgentPairingError::Leases(_))),
+        "{outcome:?}"
+    );
+    assert!(identity.pin().await.unwrap().is_some());
+}

@@ -665,6 +665,11 @@ pub enum ErrorCode {
     /// The certificate at the pinned argument `address` isn't the one the
     /// token names. Nothing was sent.
     HubPinMismatch,
+    /// This machine is paired with another hub, whose key fingerprint is
+    /// the argument `pinned`, than the token's, whose key fingerprint is
+    /// the argument `token`: it pairs with no other hub until it leaves its
+    /// own (decision 169). Nothing was sent.
+    PinnedToAnotherHub,
     /// The certificate at the CA-checked argument `address` isn't one this
     /// machine's trust store accepts for its name. Nothing was sent.
     HubUntrusted,
@@ -1164,6 +1169,18 @@ impl ErrorCode {
                 kind: ArgKind::Count,
                 optional: false,
             }],
+            Self::PinnedToAnotherHub => &[
+                ArgSpec {
+                    name: "pinned",
+                    kind: ArgKind::Text,
+                    optional: false,
+                },
+                ArgSpec {
+                    name: "token",
+                    kind: ArgKind::Text,
+                    optional: false,
+                },
+            ],
             Self::HostnameTaken => &[
                 ArgSpec {
                     name: "hostname",
