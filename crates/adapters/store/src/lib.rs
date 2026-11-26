@@ -13,6 +13,7 @@
 
 mod agent_registry;
 mod api_tokens;
+mod baseline_copy;
 mod codec;
 mod error_args;
 mod leases;
@@ -51,6 +52,7 @@ use sqlx::sqlite::{SqliteConnectOptions, SqliteJournalMode, SqlitePoolOptions, S
 use sqlx::{Connection, SqliteConnection, SqlitePool};
 use tokio::sync::{RwLock, RwLockReadGuard};
 
+pub use crate::baseline_copy::{BaselineCopy, Dropped};
 use crate::report::cap;
 use crate::summary::Summary;
 
@@ -99,6 +101,13 @@ pub enum OpenError {
     OldSchema { version: i64 },
     /// A migration this build ships failed or doesn't match the one applied.
     Migration { detail: String },
+    /// A log the migrations before the baseline left at `version`, one of
+    /// those a release shipped, that couldn't be copied into the baseline:
+    /// it holds a row the baseline refuses, an old migration failed on it,
+    /// or the copy's files couldn't be written. `detail` says which, in the
+    /// database's or the operating system's words. The log is left as it
+    /// was, and the next open tries again (decision 170).
+    BaselineCopy { version: i64, detail: String },
 }
 
 impl std::fmt::Display for OpenError {
@@ -244,6 +253,12 @@ impl SqliteStore {
     /// pool closed: the lock is fair, so calls can't keep `close` waiting.
     async fn call(&self) -> RwLockReadGuard<'_, ()> {
         self.calls.read().await
+    }
+
+    /// What the open copied from a log the migrations before the baseline
+    /// left (decision 170), or `None` when it found none.
+    pub fn baseline_copy(&self) -> Option<&BaselineCopy> {
+        todo!()
     }
 }
 

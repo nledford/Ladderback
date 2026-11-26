@@ -169,21 +169,165 @@ mod tests {
         assert_eq!(id.as_uuid().hyphenated().to_string(), text);
     }
 
-    /// The ID lives in `machine-id` (§16, decision 163): a new one is kept
-    /// there, and an `agent-id` an earlier build left is never read.
+    /// The ID lives in `machine-id` (§16, decision 163).
     #[test]
     fn the_id_is_kept_in_machine_id() {
         let data = tempfile::tempdir().unwrap();
         let id = load_or_create(data.path()).unwrap();
         let kept = fs::read_to_string(data.path().join("machine-id")).unwrap();
         assert_eq!(kept.trim(), id.as_uuid().hyphenated().to_string());
-        let old = tempfile::tempdir().unwrap();
-        fs::write(
-            old.path().join("agent-id"),
-            "0190a6e4-7a3b-7c3d-8e4f-0123456789ab\n",
-        )
-        .unwrap();
-        assert_eq!(load(old.path()).unwrap(), None);
+    }
+
+    /// The ID an earlier build kept in `agent-id`.
+    const EARLIER_ID: &str = "0190a6e4-7a3b-7c3d-8e4f-0123456789ab";
+
+    /// A canary, never a real key (§13.9).
+    const KEY_CANARY: &str = "cacacacacacacacacacacacacacacacacacacacacacacacacacacacacacacaca\n";
+
+    /// Writes `text` to `name` in `data`, its owner's alone, as every key
+    /// file and ID file is written.
+    fn write_private(data: &Path, name: &str, text: &str) {
+        fs::write(data.join(name), text).unwrap();
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            fs::set_permissions(data.join(name), fs::Permissions::from_mode(0o600)).unwrap();
+        }
+    }
+
+    /// A data folder as an earlier build left it (§16, decisions 163 and
+    /// 170): `agent-id`, `agent-key`, and the files it staged beside them
+    /// that a crash left (#1621).
+    fn earlier_data_folder() -> tempfile::TempDir {
+        let data = tempfile::tempdir().unwrap();
+        write_private(data.path(), "agent-id", &format!("{EARLIER_ID}\n"));
+        write_private(data.path(), "agent-key", KEY_CANARY);
+        write_private(data.path(), "agent-key.0190a6e47a3b7c3d.tmp", KEY_CANARY);
+        write_private(data.path(), "agent-id.0190a6e47a3b7c3d.tmp", EARLIER_ID);
+        data
+    }
+
+    /// The names in `data`, sorted.
+    fn names(data: &Path) -> Vec<String> {
+        let mut names: Vec<String> = fs::read_dir(data)
+            .unwrap()
+            .map(|entry| entry.unwrap().file_name().into_string().unwrap())
+            .collect();
+        names.sort();
+        names
+    }
+
+    /// An earlier build's `agent-id` and `agent-key` become `machine-id`
+    /// and `machine-key`, keeping the ID, the key byte for byte and its
+    /// owner-only mode; what it staged beside them is gone.
+    #[test]
+    fn an_earlier_builds_agent_id_and_key_become_the_machine_id_and_key() {
+        let data = earlier_data_folder();
+
+        let id = load_or_create(data.path()).unwrap();
+
+        assert_eq!(id.as_uuid().hyphenated().to_string(), EARLIER_ID);
+        assert_eq!(names(data.path()), ["machine-id", "machine-key"]);
+        assert_eq!(
+            fs::read_to_string(data.path().join("machine-key")).unwrap(),
+            KEY_CANARY
+        );
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            let mode = fs::metadata(data.path().join("machine-key"))
+                .unwrap()
+                .permissions()
+                .mode();
+            assert_eq!(mode & 0o777, 0o600, "the key stays its owner's alone");
+        }
+    }
+
+    /// A command that only reads the ID, such as `hub-status`, finds it
+    /// under its earlier name too, and moves it as a start does.
+    #[test]
+    fn a_command_that_only_reads_the_id_finds_it_under_its_earlier_name() {
+        let data = earlier_data_folder();
+
+        let id = load(data.path()).unwrap().unwrap();
+
+        assert_eq!(id.as_uuid().hyphenated().to_string(), EARLIER_ID);
+        assert_eq!(names(data.path()), ["machine-id", "machine-key"]);
+    }
+
+    /// A machine that never paired kept an ID and no key: the ID moves
+    /// alone.
+    #[test]
+    fn an_earlier_id_with_no_key_moves_alone() {
+        let data = tempfile::tempdir().unwrap();
+        write_private(data.path(), "agent-id", &format!("{EARLIER_ID}\n"));
+
+        let id = load_or_create(data.path()).unwrap();
+
+        assert_eq!(id.as_uuid().hyphenated().to_string(), EARLIER_ID);
+        assert_eq!(names(data.path()), ["machine-id"]);
+    }
+
+    /// The key moves first, then the ID: a start that stopped between the
+    /// two left `machine-key` and `agent-id`, and the next one finishes.
+    #[test]
+    fn a_move_that_stopped_after_the_key_is_finished_by_the_next_start() {
+        let data = tempfile::tempdir().unwrap();
+        write_private(data.path(), "agent-id", &format!("{EARLIER_ID}\n"));
+        write_private(data.path(), "machine-key", KEY_CANARY);
+
+        let id = load_or_create(data.path()).unwrap();
+
+        assert_eq!(id.as_uuid().hyphenated().to_string(), EARLIER_ID);
+        assert_eq!(names(data.path()), ["machine-id", "machine-key"]);
+        assert_eq!(
+            fs::read_to_string(data.path().join("machine-key")).unwrap(),
+            KEY_CANARY
+        );
+    }
+
+    /// An `agent-key` beside a `machine-key` of its own, with the ID still
+    /// under its earlier name, is no state a move leaves: which key is the
+    /// machine's is the person's to say. The start is refused, every file
+    /// left as it was, and the error holds neither key (I4).
+    #[test]
+    fn an_earlier_key_beside_another_machine_key_is_refused_and_left() {
+        let data = earlier_data_folder();
+        let other = "0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b\n";
+        write_private(data.path(), "machine-key", other);
+        let before = names(data.path());
+
+        let error = load_or_create(data.path()).unwrap_err();
+
+        assert_eq!(error.kind(), io::ErrorKind::AlreadyExists);
+        let said = error.to_string();
+        assert!(
+            said.contains("agent-key") && said.contains("machine-key"),
+            "{said}"
+        );
+        assert!(!said.contains("caca") && !said.contains("0b0b"), "{said}");
+        assert_eq!(names(data.path()), before);
+        assert_eq!(
+            fs::read_to_string(data.path().join("machine-key")).unwrap(),
+            other
+        );
+    }
+
+    /// Starts at once on an earlier data folder, as a `pair` beside the
+    /// daemon's start, agree on its ID.
+    #[test]
+    fn concurrent_starts_on_an_earlier_data_folder_keep_its_id() {
+        let data = earlier_data_folder();
+        let ids: Vec<AgentId> = std::thread::scope(|s| {
+            let handles: Vec<_> = (0..8)
+                .map(|_| s.spawn(|| load_or_create(data.path()).unwrap()))
+                .collect();
+            handles.into_iter().map(|h| h.join().unwrap()).collect()
+        });
+        for id in &ids {
+            assert_eq!(id.as_uuid().hyphenated().to_string(), EARLIER_ID);
+        }
+        assert_eq!(names(data.path()), ["machine-id", "machine-key"]);
     }
 
     #[test]
