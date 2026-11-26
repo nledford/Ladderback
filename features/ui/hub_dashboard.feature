@@ -14,8 +14,12 @@ Feature: The hub's dashboard of its approved machines
   `features/fleet/staying_connected.feature`. A machine's times read in the
   viewer's zone, and in its own beside them when the two differ (#115). The
   page follows the hub's events, and "Pause live updates" holds it still until
-  it is pressed again (A3; §16, decision 65). It is the hub's main page: the
-  hub's start page and its Machines tab lead to it.
+  it is pressed again (A3; §16, decision 65). It is the hub's start page,
+  after the start page's notices, so the product name in the banner leads
+  to it, and the Machines tab links to it; the hub's own plans and
+  operations stay on its Plans and Operations pages. Its old address,
+  `/dashboard`, leads to the start page on a hub, and is a page not found
+  on a machine that isn't one (§16, decision 173).
 
   Scenario: Each approved machine shows its latest operations, a failure's code and the reports let go of
     Given a hub with sign-in off
@@ -30,7 +34,7 @@ Feature: The hub's dashboard of its approved machines
       | 2         | failed    | 25          | repository-unreachable |
       | 3         | started   | 5           |                        |
     And the hub let go of 3 of the reports of "demo-laptop"
-    When I open the address "/dashboard"
+    When I open the web UI
     Then the table "Latest operations of demo-laptop" lists, newest first:
       | result    | error code             |
       | Running   |                        |
@@ -45,14 +49,14 @@ Feature: The hub's dashboard of its approved machines
     Given a hub with sign-in off
     And a machine named "demo-laptop" is approved on the hub
     And the machine "demo-laptop" runs in the time zone "Pacific/Chatham"
-    When I open the address "/dashboard"
+    When I open the web UI
     Then the time "demo-laptop" last connected reads in the zone "Pacific/Chatham" too
 
   Scenario: A dashboard the hub didn't answer says so, and asks again until it does
     Given a hub with sign-in off
     And a machine named "demo-laptop" is approved on the hub
     And the hub fails its first two answers about its machines
-    When I open the address "/dashboard"
+    When I open the web UI
     Then the page says "The hub didn't answer, so its machines can't be shown. The page asks again in a few seconds."
     And the page shows the machine "demo-laptop"
 
@@ -60,7 +64,7 @@ Feature: The hub's dashboard of its approved machines
     Given a hub with sign-in off
     And a machine named "demo-laptop" is approved on the hub
     And a machine named "demo-desktop" waits for approval on the hub
-    When I open the address "/dashboard"
+    When I open the web UI
     Then the page shows the machine "demo-laptop"
     When I skip to the content
     And I press Tab until focus is on the button "Pause live updates"
@@ -74,22 +78,56 @@ Feature: The hub's dashboard of its approved machines
     And the page shows the machine "demo-desktop"
     And the page has no live region but the announcer's
 
-  Scenario: A hub's start page leads to its dashboard
+  Scenario: A hub's start page says its notices first, then shows each approved machine
     Given a hub with sign-in off
-    When I open the address "/"
-    And I skip to the content
-    And I press Tab until focus is on the link "See the approved machines' latest operations"
+    And the agent found its data folder was copied from another computer
+    And a machine named "demo-laptop" is approved on the hub
+    When I open the web UI
+    Then the main heading reads "Dashboard"
+    And the page is titled "Dashboard – Ladderback"
+    And the page shows the machine "demo-laptop"
+    And the page says the data folder came from another computer
+    And the region "This data folder came from another computer" comes before the region "demo-laptop"
+    And the page doesn't show "There are no plans yet"
+    And the page has no accessibility violations
+
+  Scenario: The product name in the banner leads a hub's reader to its approved machines, by keyboard
+    Given a hub with sign-in off
+    And a machine named "demo-laptop" is approved on the hub
+    When I open the address "/operations"
+    And I press Tab until focus is on the link "Ladderback"
     And I press Enter
     Then focus is on the main heading "Dashboard"
+    And the page shows the machine "demo-laptop"
+    And the link "Ladderback" in the banner is marked as the current page
+    And the page is titled "Dashboard – Ladderback"
+    And the page has no accessibility violations
+
+  Scenario: A hub's old dashboard address leads to its start page
+    Given a hub with sign-in off
+    And a machine named "demo-laptop" is approved on the hub
+    When I open the address "/dashboard"
+    Then the page shows the machine "demo-laptop"
+    And the page's address is "/"
+    And the main heading reads "Dashboard"
     And the page is titled "Dashboard – Ladderback"
 
-  Scenario: The Machines tab leads to the dashboard
+  Scenario: The dashboard's address is a page not found on a machine that isn't a hub
+    When I open the address "/dashboard"
+    Then the main heading reads "Page not found"
+    And the page is titled "Page not found – Ladderback"
+    And the page has no accessibility violations
+
+  Scenario: The Machines tab leads to the hub's start page, where the approved machines are
     Given a hub with sign-in off
+    And a machine named "demo-laptop" is approved on the hub
     When I open the address "/settings#machines"
     And I skip to the content
     And I press Tab until focus is on the link "See the approved machines' latest operations"
     And I press Enter
     Then focus is on the main heading "Dashboard"
+    And the page's address is "/"
+    And the page shows the machine "demo-laptop"
 
   Scenario: Each machine shows its plans as it last reported them, and says when it left some out or reported none
     Given a hub with sign-in off
@@ -102,7 +140,7 @@ Feature: The hub's dashboard of its approved machines
       | documents | succeeded | 60                   | 30                  |
       | photos    | failed    | 120                  |                     |
       | music     |           |                      | 90                  |
-    When I open the address "/dashboard"
+    When I open the web UI
     Then the table "Plans of demo-laptop" lists, in order:
       | plan      | last run    | next run     |
       | documents | Succeeded   |              |
@@ -120,7 +158,7 @@ Feature: The hub's dashboard of its approved machines
       | operation | happening | minutes ago | code |
       | 1         | started   | 5           |      |
     And "demo-laptop" reported operation 1 backing up 512 of 2048 bytes at "2026-11-09T10:01:00Z"
-    When I open the address "/dashboard"
+    When I open the web UI
     And I skip to the content
     And I press Tab until focus is on the progressbar "Progress of the operation running on demo-laptop"
     Then the progress bar "Progress of the operation running on demo-laptop" shows 25 percent
