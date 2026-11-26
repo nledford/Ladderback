@@ -169,32 +169,16 @@ env:
 
 jobs:
   # Tells a docs-only pull request from one that touches code, one that can
-  # change what the `service` jobs check from one that can't, one that can
-  # change what the Firefox and WebKit journeys check from one that can't, and
-  # which of the workflow, dependency and MVP-mode switches below apply, with
-  # plain git, so the jobs below can skip work. Anything that isn't clearly
-  # docs counts as code, anything that isn't clearly outside the service jobs'
-  # reach counts as inside it, and so does a failure here: the jobs below run
-  # unless this job says "true" (`docs-only`) or "false" (`service`, `ui`,
-  # `workflows`, `deps`), and run in full unless it says `mvp` is "true". The
-  # `ui` output is the other way round: false unless a path names the UI,
-  # because Chromium's required job covers the rest. It also estimates how
-  # many mutation shards the change needs. Pushes to main, the nightly run and
-  # manual runs skip this job and run everything.
-  #
-  # MVP mode (decision 124): while the repository variable `CI_MODE` is `mvp`,
-  # a pull request runs a reduced set of jobs: `mvp` is "true" only here, so
-  # only on a pull request, and only for the value `mvp` (in any letter case,
-  # as red-first.yml's expression compares it). Any other value, or none, is
-  # full mode. The jobs the mode skips do so by their own `if`, which
-  # reports them as skipped under their names, so each required check still
-  # reports (GitHub counts a skipped one as passing); `check` skips its macOS
-  # leg by another route, described there. A pull request that changes the
-  # workflows, the actions, the Justfile or `scripts/` runs in full mode
-  # whatever the variable says, since what it changes may be a job the mode
-  # skips (#1295 broke the release-build tests that way, through the Justfile
-  # and a script only that job runs). Turning the mode off is deleting the
-  # variable or setting it to `full`.
+  # change what the `service` jobs check from one that can't, and one that can
+  # change what the Firefox and WebKit journeys check from one that can't,
+  # with plain git, so the jobs below can skip work. Anything that isn't
+  # clearly docs counts as code, anything that isn't clearly outside the
+  # service jobs' reach counts as inside it, and so does a failure here: the
+  # jobs below run unless this job says "true" (`docs-only`) or "false"
+  # (`service`, `ui`). The `ui` output is the other way round: false unless a
+  # path names the UI, because Chromium's required job covers the rest. It
+  # also estimates how many mutation shards the change needs. Pushes to main,
+  # the nightly run and manual runs skip this job and run everything.
   changes:
     name: Changed paths
     if: github.event_name == 'pull_request'
@@ -206,9 +190,6 @@ jobs:
       ui: ${{ steps.diff.outputs.ui }}
       mutant-shards: ${{ steps.diff.outputs.mutant-shards }}
       mutant-shard-count: ${{ steps.diff.outputs.mutant-shard-count }}
-      workflows: ${{ steps.diff.outputs.workflows }}
-      deps: ${{ steps.diff.outputs.deps }}
-      mvp: ${{ steps.diff.outputs.mvp }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -218,16 +199,12 @@ jobs:
         env:
           BASE_SHA: ${{ github.event.pull_request.base.sha }}
           HEAD_SHA: ${{ github.event.pull_request.head.sha }}
-          CI_MODE: ${{ vars.CI_MODE }}
         run: |
           # A failing git command fails this step, and then every job below runs.
           git diff -z --name-only --no-renames "$BASE_SHA...$HEAD_SHA" > "$RUNNER_TEMP/changed-files"
           docs_only=true
           service=false
           ui=false
-          workflows=false
-          deps=false
-          ci_files=false
           count=0
           while IFS= read -r -d '' file; do
             count=$((count + 1))
@@ -269,38 +246,13 @@ jobs:
               .github/workflows/ci.yml | .github/actions/browser/* | .github/actions/npm-ci/*) ui=true ;;
               features/*.feature) if grep -Eq '@ui([[:space:]]|$)' "$file" 2> /dev/null; then ui=true; fi ;;
             esac
-            # What the two jobs that MVP mode runs only on a change to their
-            # inputs read: `workflow-lint` the workflows and actions and what
-            # configures and installs the linters, `deny` the lockfiles, the
-            # manifests, deny.toml and .nvmrc.
-            case "$file" in
-              .github/workflows/* | .github/actions/* | .github/actionlint.yaml | scripts/install-actionlint.sh | scripts/install-shellcheck.sh) workflows=true ;;
-            esac
-            case "$file" in
-              Cargo.lock | Cargo.toml | */Cargo.toml | deny.toml | */package.json | */package-lock.json | ui-tests/.nvmrc) deps=true ;;
-            esac
-            # What CI itself is made of: a change here runs in full mode
-            # (decision 124), so the jobs it changes run before the merge.
-            case "$file" in
-              .github/workflows/* | .github/actions/* | Justfile | scripts/*) ci_files=true ;;
-            esac
           done < "$RUNNER_TEMP/changed-files"
           # A change with no files isn't a docs change, and runs the jobs.
-          if [ "$count" -eq 0 ]; then docs_only=false; service=true; ui=true; workflows=true; deps=true; fi
-          # Last, so that a failure above leaves it empty, which is full mode.
-          # Case-insensitive, as an expression's `==` is (red-first.yml's).
-          case "$CI_MODE" in
-            [Mm][Vv][Pp]) mvp=true ;;
-            *) mvp=false ;;
-          esac
-          if [ "$ci_files" = true ]; then mvp=false; fi
+          if [ "$count" -eq 0 ]; then docs_only=false; service=true; ui=true; fi
           {
             echo "docs-only=$docs_only"
             echo "service=$service"
             echo "ui=$ui"
-            echo "workflows=$workflows"
-            echo "deps=$deps"
-            echo "mvp=$mvp"
           } >> "$GITHUB_OUTPUT"
           # The mutation shards (`mutants-shard`): one to four by the lines
           # the change touches in the gated crates' source. A docs-only
@@ -320,29 +272,18 @@ jobs:
     # requires ("Check (ubuntu-latest)", "Check (macos-latest)"), so they would
     # stay "Expected" and block the merge. ui and mutants have fixed names and
     # skip as whole jobs.
-    #
-    # MVP mode skips the macOS leg the same way, with every step off, and moves
-    # the leg to the Linux runner image, which has the larger pool, so it
-    # reports in seconds without waiting for a macOS runner: `skip` and `os`
-    # below. A separate job of the same name would leave two checks under it in
-    # full mode.
     if: ${{ !cancelled() && github.event_name != 'schedule' }}
     strategy:
       fail-fast: false
       # `name` is the leg's name in the check the ruleset requires, so it
       # stays `ubuntu-latest` and `macos-latest`; `os` is the runner image,
       # pinned, and a pull request of its own bumps it (development.md §13.8).
-      # `skip` is the string "true" for a leg that MVP mode turns off, and
-      # every step that can run on a pull request starts its `if` with
-      # `matrix.skip != 'true'` (the push-only step needs no such guard).
       matrix:
         include:
           - name: ubuntu-latest
             os: ubuntu-26.04
-            skip: "false"
           - name: macos-latest
-            os: ${{ needs.changes.outputs.mvp == 'true' && 'ubuntu-26.04' || 'macos-26' }}
-            skip: ${{ needs.changes.outputs.mvp == 'true' && 'true' || 'false' }}
+            os: macos-26
     runs-on: ${{ matrix.os }}
     timeout-minutes: 45
     steps:
@@ -351,15 +292,14 @@ jobs:
       # spelling check, the user docs site's build and link check, and the
       # decision-index and component-index checks below, which `just lint`
       # runs for the rest.
-      - if: matrix.skip != 'true'
-        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
-      - if: matrix.skip != 'true' && needs.changes.outputs.docs-only == 'true'
+      - if: needs.changes.outputs.docs-only == 'true'
         run: scripts/check-doc-paths.sh
       # The toolchain, the build cache (allowed to fail: an outage runs the
       # build uncached, and so for every job's setup-rust below) and the tools.
-      - if: matrix.skip != 'true' && needs.changes.outputs.docs-only != 'true'
+      - if: needs.changes.outputs.docs-only != 'true'
         uses: $/.github/actions/setup-rust
         with:
           tools: just,cargo-nextest
@@ -372,7 +312,7 @@ jobs:
       # component-index checks. Every setup-node reads Node's major version from
       # ui-tests/.nvmrc, which a pull request of its own bumps (development.md
       # §13.8).
-      - if: matrix.skip != 'true' && runner.os == 'Linux'
+      - if: runner.os == 'Linux'
         uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         with:
           node-version-file: ui-tests/.nvmrc
@@ -382,34 +322,34 @@ jobs:
       # for the user docs site's build and link check (`just docs-site`). An
       # empty read fails here rather than install whatever mdBook is newest.
       - id: mdbook
-        if: matrix.skip != 'true' && runner.os == 'Linux'
+        if: runner.os == 'Linux'
         run: |
           version=$(sed -n 's/^mdbook_version := "\(.*\)"$/\1/p' Justfile)
           test -n "$version"
           echo "version=$version" >> "$GITHUB_OUTPUT"
-      - if: matrix.skip != 'true' && runner.os == 'Linux'
+      - if: runner.os == 'Linux'
         uses: taiki-e/install-action@75a7c0f87bd666af3cdb75c5b9e9d03ab6044e6f # v2.90.6
         with:
           tool: mdbook@${{ steps.mdbook.outputs.version }}
       # `just docs-site`'s three lines, for a docs-only pull request.
-      - if: matrix.skip != 'true' && needs.changes.outputs.docs-only == 'true' && runner.os == 'Linux'
+      - if: needs.changes.outputs.docs-only == 'true' && runner.os == 'Linux'
         run: mdbook build docs/guide && node scripts/check-site-links.ts && node scripts/check-theme-override.ts
-      - if: matrix.skip != 'true' && needs.changes.outputs.docs-only == 'true' && runner.os == 'Linux'
+      - if: needs.changes.outputs.docs-only == 'true' && runner.os == 'Linux'
         run: node scripts/check-paragraph-length.ts
-      - if: matrix.skip != 'true' && needs.changes.outputs.docs-only == 'true' && runner.os == 'Linux'
+      - if: needs.changes.outputs.docs-only == 'true' && runner.os == 'Linux'
         run: node scripts/check-american-spelling.ts
-      - if: matrix.skip != 'true' && needs.changes.outputs.docs-only == 'true' && runner.os == 'Linux'
+      - if: needs.changes.outputs.docs-only == 'true' && runner.os == 'Linux'
         run: node scripts/decision-index.ts
-      - if: matrix.skip != 'true' && needs.changes.outputs.docs-only == 'true' && runner.os == 'Linux'
+      - if: needs.changes.outputs.docs-only == 'true' && runner.os == 'Linux'
         run: node scripts/component-index.ts
       # leptosfmt at the version the Justfile pins, for `just fmt-check`.
       # install-action lists no leptosfmt (manifests/ at that SHA), so it
       # falls back to cargo-binstall at that version, which takes the
       # release's prebuilt binary, as for wasm-bindgen in red-first.yml.
       - id: leptosfmt
-        if: matrix.skip != 'true' && needs.changes.outputs.docs-only != 'true' && runner.os == 'Linux'
+        if: needs.changes.outputs.docs-only != 'true' && runner.os == 'Linux'
         run: echo "version=$(just --evaluate leptosfmt_version)" >> "$GITHUB_OUTPUT"
-      - if: matrix.skip != 'true' && needs.changes.outputs.docs-only != 'true' && runner.os == 'Linux'
+      - if: needs.changes.outputs.docs-only != 'true' && runner.os == 'Linux'
         uses: taiki-e/install-action@75a7c0f87bd666af3cdb75c5b9e9d03ab6044e6f # v2.90.6
         with:
           tool: leptosfmt@${{ steps.leptosfmt.outputs.version }}
@@ -417,40 +357,40 @@ jobs:
       # `cargo_mutants_version` line says why), for `just lint`'s check of the
       # mutants exclusions, on Linux alone, where `lint` runs.
       - id: cargo-mutants
-        if: matrix.skip != 'true' && needs.changes.outputs.docs-only != 'true' && runner.os == 'Linux'
+        if: needs.changes.outputs.docs-only != 'true' && runner.os == 'Linux'
         run: echo "version=$(just --evaluate cargo_mutants_version)" >> "$GITHUB_OUTPUT"
-      - if: matrix.skip != 'true' && needs.changes.outputs.docs-only != 'true' && runner.os == 'Linux'
+      - if: needs.changes.outputs.docs-only != 'true' && runner.os == 'Linux'
         uses: taiki-e/install-action@75a7c0f87bd666af3cdb75c5b9e9d03ab6044e6f # v2.90.6
         with:
           tool: cargo-mutants@${{ steps.cargo-mutants.outputs.version }}
       # The rustic CLI the profile golden tests compare against (§6.2): the
       # official release, checked against the SHA-256 the script pins.
-      - if: matrix.skip != 'true' && needs.changes.outputs.docs-only != 'true'
+      - if: needs.changes.outputs.docs-only != 'true'
         run: scripts/install-rustic.sh
       # The one job that saves npm's cache on a push to main (the header
       # comment's table).
-      - if: matrix.skip != 'true' && needs.changes.outputs.docs-only != 'true' && runner.os == 'Linux'
+      - if: needs.changes.outputs.docs-only != 'true' && runner.os == 'Linux'
         uses: $/.github/actions/npm-ci
-      - if: matrix.skip != 'true' && needs.changes.outputs.docs-only != 'true' && runner.os == 'Linux'
+      - if: needs.changes.outputs.docs-only != 'true' && runner.os == 'Linux'
         run: just fmt-check
       # shellcheck for `just lint`: the official release, checked against the
       # SHA-256 the script pins, ahead of the runner's own copy on the PATH.
-      - if: matrix.skip != 'true' && needs.changes.outputs.docs-only != 'true' && runner.os == 'Linux'
+      - if: needs.changes.outputs.docs-only != 'true' && runner.os == 'Linux'
         run: scripts/install-shellcheck.sh
-      - if: matrix.skip != 'true' && needs.changes.outputs.docs-only != 'true' && runner.os == 'Linux'
+      - if: needs.changes.outputs.docs-only != 'true' && runner.os == 'Linux'
         run: just lint
-      - if: matrix.skip != 'true' && needs.changes.outputs.docs-only != 'true' && runner.os != 'Linux'
+      - if: needs.changes.outputs.docs-only != 'true' && runner.os != 'Linux'
         run: just clippy
-      - if: matrix.skip != 'true' && needs.changes.outputs.docs-only != 'true' && runner.os == 'Linux'
+      - if: needs.changes.outputs.docs-only != 'true' && runner.os == 'Linux'
         run: just architecture
-      - if: matrix.skip != 'true' && needs.changes.outputs.docs-only != 'true' && runner.os == 'Linux'
+      - if: needs.changes.outputs.docs-only != 'true' && runner.os == 'Linux'
         run: just test-contrast
       # The ci profile (.config/nextest.toml) retries, reports flaky tests and
       # writes the JUnit report. The step has a limit of its own, below the
       # job's 45 minutes: a hang (#638) then fails the step, which keeps its
       # log, where canceling the job at its limit discarded it. The figure is
       # measured in development.md §13.8.
-      - if: matrix.skip != 'true' && needs.changes.outputs.docs-only != 'true'
+      - if: needs.changes.outputs.docs-only != 'true'
         run: just test
         timeout-minutes: 30
         env:
@@ -468,7 +408,7 @@ jobs:
       # Kept 14 days, not the repository's default of 90: a report is read
       # while its failure is fresh, and two weeks still covers a run looked at
       # after a week away. The same holds for both `mutants.out` uploads below.
-      - if: always() && matrix.skip != 'true' && needs.changes.outputs.docs-only != 'true'
+      - if: always() && needs.changes.outputs.docs-only != 'true'
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: junit-${{ matrix.name }}
@@ -482,13 +422,10 @@ jobs:
   # once. The shards' names are not the required one: the `ui` job below is,
   # and reports for both (a matrix job that its own `if`
   # skips never creates the check the ruleset names; see `check` above).
-  # In MVP mode (decision 124) a pull request runs it only when `changes`
-  # says its paths reach the UI (the `ui` output, which an empty value from a
-  # failed `changes` also counts as); main runs it after every merge.
   ui-shard:
     name: UI journeys (Chromium ${{ matrix.shard }}/2, axe-core, keyboard)
     needs: changes
-    if: ${{ !cancelled() && github.event_name != 'schedule' && needs.changes.outputs.docs-only != 'true' && (needs.changes.outputs.mvp != 'true' || needs.changes.outputs.ui != 'false') }}
+    if: ${{ !cancelled() && github.event_name != 'schedule' && needs.changes.outputs.docs-only != 'true' }}
     runs-on: ubuntu-26.04
     timeout-minutes: 45
     strategy:
@@ -574,13 +511,12 @@ jobs:
   # A matrix job its own `if` skips creates no check of the name the ruleset
   # requires, only an unexpanded one, so this job, which is not a matrix, is
   # the one skipped then: a docs-only pull request skips it with the shards,
-  # and so does MVP mode (decision 124), as `mutants` does. Keep the rest of
-  # this `if` the same as the shards'. `cache-prune` waits for it, and so for
-  # both shards.
+  # as `mutants` does. Keep the rest of this `if` the same as the shards'.
+  # `cache-prune` waits for it, and so for both shards.
   ui:
     name: UI journeys (Chromium, axe-core, keyboard)
     needs: [changes, ui-shard]
-    if: ${{ always() && github.event_name != 'schedule' && needs.changes.outputs.docs-only != 'true' && (needs.changes.outputs.mvp != 'true' || needs.changes.outputs.ui != 'false') }}
+    if: ${{ always() && github.event_name != 'schedule' && needs.changes.outputs.docs-only != 'true' }}
     runs-on: ubuntu-26.04
     timeout-minutes: 5
     steps:
@@ -607,8 +543,7 @@ jobs:
   ui-engines:
     name: UI journeys (${{ matrix.name }} ${{ matrix.shard }}/2, axe-core, keyboard)
     needs: changes
-    # Not in MVP mode (decision 124).
-    if: ${{ !cancelled() && github.event_name != 'schedule' && needs.changes.outputs.docs-only != 'true' && needs.changes.outputs.ui != 'false' && needs.changes.outputs.mvp != 'true' }}
+    if: ${{ !cancelled() && github.event_name != 'schedule' && needs.changes.outputs.docs-only != 'true' && needs.changes.outputs.ui != 'false' }}
     strategy:
       fail-fast: false
       matrix:
@@ -716,8 +651,7 @@ jobs:
   wasm:
     name: Wasm tests (Node)
     needs: changes
-    # Not in MVP mode (decision 124).
-    if: ${{ !cancelled() && github.event_name != 'schedule' && needs.changes.outputs.docs-only != 'true' && needs.changes.outputs.mvp != 'true' }}
+    if: ${{ !cancelled() && github.event_name != 'schedule' && needs.changes.outputs.docs-only != 'true' }}
     runs-on: ubuntu-26.04
     timeout-minutes: 30
     steps:
@@ -747,9 +681,7 @@ jobs:
   workflow-lint:
     name: Workflow lint (actionlint, zizmor)
     needs: changes
-    # In MVP mode only when a workflow or an action changed (decision 124); a
-    # failed `changes` leaves `workflows` empty, which runs it.
-    if: ${{ !cancelled() && github.event_name != 'schedule' && needs.changes.outputs.docs-only != 'true' && (needs.changes.outputs.mvp != 'true' || needs.changes.outputs.workflows != 'false') }}
+    if: ${{ !cancelled() && github.event_name != 'schedule' && needs.changes.outputs.docs-only != 'true' }}
     runs-on: ubuntu-26.04
     timeout-minutes: 10
     steps:
@@ -784,8 +716,8 @@ jobs:
     needs: changes
     # On a pull request, only when `changes` doesn't say "false": the jobs
     # also run when it failed or was skipped (pushes to main). Not on the
-    # nightly run, as before, and not in MVP mode (decision 124).
-    if: ${{ !cancelled() && github.event_name != 'schedule' && needs.changes.outputs.service != 'false' && needs.changes.outputs.mvp != 'true' }}
+    # nightly run, as before.
+    if: ${{ !cancelled() && github.event_name != 'schedule' && needs.changes.outputs.service != 'false' }}
     strategy:
       fail-fast: false
       matrix:
@@ -844,12 +776,11 @@ jobs:
   # with the defaults, so the tests that exist only without them run here
   # alone. A job of its own, so that the `Check` jobs stay as they are and
   # this one builds beside them. A required check (ruleset "Protect main"):
-  # don't rename it. In MVP mode (decision 124) its `if` skips it, which GitHub
-  # counts as passing.
+  # don't rename it.
   release-tests:
     name: Release-build tests (no default features)
     needs: changes
-    if: ${{ !cancelled() && github.event_name != 'schedule' && needs.changes.outputs.docs-only != 'true' && needs.changes.outputs.mvp != 'true' }}
+    if: ${{ !cancelled() && github.event_name != 'schedule' && needs.changes.outputs.docs-only != 'true' }}
     runs-on: ubuntu-26.04
     timeout-minutes: 45
     steps:
@@ -890,10 +821,8 @@ jobs:
     name: Dependencies (cargo-deny)
     needs: changes
     # `changes` is skipped on a push, the nightly run and a manual run; with
-    # `!cancelled()` this job runs then, and a pull request skips it when it is
-    # docs-only or, in MVP mode (decision 124), when no lockfile, manifest,
-    # deny.toml or .nvmrc changed; a failed `changes` leaves `deps` empty, which runs it.
-    if: ${{ !cancelled() && needs.changes.outputs.docs-only != 'true' && (needs.changes.outputs.mvp != 'true' || needs.changes.outputs.deps != 'false') }}
+    # `!cancelled()` this job runs then, and only a docs-only pull request skips it.
+    if: ${{ !cancelled() && needs.changes.outputs.docs-only != 'true' }}
     runs-on: ubuntu-26.04
     timeout-minutes: 15
     steps:
@@ -955,8 +884,7 @@ jobs:
   mutants-shard:
     name: Mutation testing (shard ${{ matrix.shard }} of ${{ needs.changes.outputs.mutant-shard-count || '4' }})
     needs: changes
-    # Not in MVP mode (decision 124); keep the rest the same in `mutants`.
-    if: ${{ !cancelled() && github.event_name == 'pull_request' && needs.changes.outputs.docs-only != 'true' && needs.changes.outputs.mvp != 'true' }}
+    if: ${{ !cancelled() && github.event_name == 'pull_request' && needs.changes.outputs.docs-only != 'true' }}
     runs-on: ubuntu-26.04
     timeout-minutes: 60
     strategy:
@@ -999,14 +927,12 @@ jobs:
   # whenever a shard failed, timed out (a timeout ends a job as canceled) or
   # was canceled, since GitHub counts a skipped required check as passing.
   # A superseded run's summary then fails on a stale commit, which is
-  # harmless. A docs-only pull request skips it with the shards, as before, and
-  # so does MVP mode (decision 124): with the shards skipped, this job would
-  # fail on their result, so its own `if` skips it, which GitHub counts as
-  # passing. Keep the rest of this `if` the same as the shards'.
+  # harmless. A docs-only pull request skips it with the shards, as before;
+  # keep the rest of this `if` the same as the shards'.
   mutants:
     name: Mutation testing (changed code)
     needs: [changes, mutants-shard]
-    if: ${{ always() && github.event_name == 'pull_request' && needs.changes.outputs.docs-only != 'true' && needs.changes.outputs.mvp != 'true' }}
+    if: ${{ always() && github.event_name == 'pull_request' && needs.changes.outputs.docs-only != 'true' }}
     runs-on: ubuntu-26.04
     timeout-minutes: 5
     steps:
