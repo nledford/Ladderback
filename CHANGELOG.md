@@ -7,6 +7,16 @@ All notable changes to Ladderback are listed here. The format follows
 
 ## [Unreleased]
 
+## [0.6.0-rc.2](https://github.com/nledford/Ladderback/compare/v0.6.0-rc.1...v0.6.0-rc.2) - 2026-11-26
+
+### Upgrading
+
+From 0.6.0-rc.1: install this release and restart Ladderback; nothing else changes. From 0.5.0: follow "Upgrading from 0.5.0" in the 0.6.0-rc.1 notes, which holds for this release too.
+
+### Added
+
+- A hub's start page is its dashboard ([#1667](https://github.com/nledford/Ladderback/pull/1667))
+
 ## [0.6.0-rc.1](https://github.com/nledford/Ladderback/compare/v0.5.0...v0.6.0-rc.1) - 2026-11-26
 
 ### Upgrading from 0.5.0
