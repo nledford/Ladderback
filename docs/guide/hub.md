@@ -77,7 +77,7 @@ Once the hub has taken the pairing, `pair` says `Paired. The hub holds this mach
 
 ### Approving it on the hub
 
-The hub's **Machines** tab lists the machine under **Waiting for approval**, with its hostname, its machine ID (the **Agent ID** column), its key fingerprint and how long it has waited. A name that looks like another machine's, as `lаptop` with a Cyrillic `а` looks like `laptop`, is noted on its row. Press **Approve** on the machine's row: the review shows its key fingerprint in full. Compare it with the one `ladderback pair` printed on that machine, confirm as for a token, and approve it.
+The hub's **Machines** tab lists the machine under **Waiting for approval**, with its hostname, its machine ID (the **Machine ID** column), its key fingerprint and how long it has waited. A name that looks like another machine's, as `lаptop` with a Cyrillic `а` looks like `laptop`, is noted on its row. Press **Approve** on the machine's row: the review shows its key fingerprint in full. Compare it with the one `ladderback pair` printed on that machine, confirm as for a token, and approve it.
 
 The machine moves to **Approved machines**, and shows on the Dashboard at once. It learns that it is approved the next time it tries the hub, at most 5 minutes later, and shows **Online now** from then on. A machine nobody approves within 7 days lapses: the hub drops it and frees its hostname, and the machine pairs again with a new token. **Reject** turns away a machine you don't recognize.
 
@@ -125,7 +125,9 @@ rustic -r <repository> tag --no-cache --filter-tags ladderback-agent:<id> --remo
 rustic -r <repository> tag --no-cache --filter-tags ladderback-agent:<id> --remove ladderback-agent:<id>
 ```
 
-Until they are retagged, those snapshots list as orphaned, and a repository holding recent ones counts as shared.
+Until they are retagged, those snapshots list as orphaned, and a repository holding recent ones counts as shared. A plan's next backup also finds no parent among them and reads its sources in full, so retag before the plan's next scheduled backup. The retag is quick: 136 snapshots on a REST server took about 45 seconds over both passes.
+
+rustic rewrites each snapshot it retags, so each gets a new ID. The history of operations from before the retag keeps naming the old IDs, which the repository no longer has; the snapshots themselves, and the backups that build on them, are unaffected.
 
 ## Known limits
 
