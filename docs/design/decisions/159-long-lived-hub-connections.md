@@ -71,7 +71,8 @@ the owner prune guard (#573).
   hub no longer holds a connection of it. A check from the machine's
   terminal (`hub-status`, or `pair` again) sends none, so it never replaces
   the daemon's connection. A newer connection replacing the older tells
-  nothing. The offline notification is the offline alert's (#570).
+  nothing. The offline notification is the offline alert's: `machine.offline`
+  after 15 minutes offline, once ([decision 168](168-the-hubs-offline-alerts.md)).
 - **Last heard from.** When a machine's live connection ends, the hub keeps
   that time as when it last heard from the machine, which the dashboard
   shows when it isn't online, so a machine that held a connection for days

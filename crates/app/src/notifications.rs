@@ -195,6 +195,35 @@ impl Notify {
         (reports.len() < matched, reports)
     }
 
+    /// Tells the channels of every rule that sends each of the machines'
+    /// `events`, `machine.offline` or `machine.online` (§16, decision 168),
+    /// reading the configuration once. Returns, for each event in turn,
+    /// whether a rule sends it, whether or not its channel took it, since
+    /// each notification is tried once (decision 74), and what there is to
+    /// report, as [`Self::tell`] does: a configuration that can't be read
+    /// sends none, and is reported once.
+    pub async fn tell_machines(&self, events: &[Event]) -> (Vec<bool>, Vec<Report>) {
+        if events.is_empty() {
+            return (Vec::new(), Vec::new());
+        }
+        let config = match self.config.load().await {
+            Ok(config) => config,
+            Err(error) => {
+                return (
+                    vec![false; events.len()],
+                    vec![Report::ConfigUnavailable(error)],
+                );
+            }
+        };
+        let mut sent = Vec::with_capacity(events.len());
+        let mut reports = Vec::new();
+        for event in events {
+            sent.push(config.notifications().matching(event).next().is_some());
+            reports.extend(self.deliver(&config, event).await);
+        }
+        (sent, reports)
+    }
+
     /// Tells the event `news` is, as [`Self::tell`] does.
     async fn told(&self, news: News) -> Vec<Report> {
         let News {

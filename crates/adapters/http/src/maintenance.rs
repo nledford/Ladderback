@@ -41,6 +41,10 @@ pub enum MaintenanceRefusal {
     /// This machine is paired with a hub and holds no live lease on the
     /// repository from it (I1): nothing was stored or run.
     NoLease,
+    /// This machine is paired with a hub, and the hub holds the prune while
+    /// another machine may be backing up to the repository: nothing was
+    /// stored or run.
+    PruneHeld,
     /// The configuration holds no plan to adopt into. Names the plan.
     UnknownPlan { plan: String },
     /// Another maintenance operation holds the repository (I7). Names the
@@ -273,6 +277,12 @@ fn answer(alias: &str, error: MaintenanceRefusal) -> (StatusCode, api::ErrorDto)
         MaintenanceRefusal::NoLease => (
             StatusCode::CONFLICT,
             ErrorCode::MaintenanceNoLease,
+            text("alias", alias.to_owned()),
+            None,
+        ),
+        MaintenanceRefusal::PruneHeld => (
+            StatusCode::CONFLICT,
+            ErrorCode::MaintenancePruneHeld,
             text("alias", alias.to_owned()),
             None,
         ),

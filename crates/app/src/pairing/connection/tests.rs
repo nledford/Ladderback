@@ -1005,7 +1005,7 @@ async fn a_link_dropped_before_an_acknowledgement_fails_the_wait_for_it() {
         let waited = if kind == "plans" {
             channel.receive_plans_ack().await
         } else {
-            channel.receive_heartbeat_ack().await
+            channel.receive_heartbeat_ack().await.map(|_| ())
         };
         assert!(
             matches!(waited, Err(ChannelError::Link(_))),

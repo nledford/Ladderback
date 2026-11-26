@@ -5,14 +5,17 @@
 //! and a newer one replaces the older, which closes. Presence lives in
 //! memory only: after a restart every machine is offline until it connects
 //! again. When a live connection ends, the registry keeps the time as when
-//! the hub last heard from the machine.
+//! the hub last heard from the machine. The offline alerts (decision 168)
+//! learn here when a machine went offline or came back, and live in memory
+//! too.
 
 use std::collections::HashMap;
-use std::sync::{Mutex, PoisonError};
+use std::sync::{Mutex, MutexGuard, PoisonError};
 
 use api::UiEvent;
 use domain::AgentId;
-use domain::fleet::AgentStatus;
+use domain::fleet::{AgentStatus, OfflineAlerts};
+use domain::maintenance::RunningBackup;
 
 use super::HubPairing;
 
@@ -20,14 +23,28 @@ use super::HubPairing;
 pub type CloseConnection = Box<dyn FnOnce() + Send>;
 
 /// The live connection of each online machine: the transport's number for
-/// it, and what closes it.
+/// it, and what closes it; and what each machine's latest heartbeat said
+/// it runs, which the prune guard reads (decision 166).
 #[derive(Default)]
 pub(super) struct Presence {
     live: Mutex<HashMap<AgentId, (u64, CloseConnection)>>,
+    /// The backups each machine's latest heartbeat named; a machine whose
+    /// heartbeat didn't say, or that sent none yet, has none here.
+    pub(super) running: Mutex<HashMap<AgentId, Vec<RunningBackup>>>,
     /// Held from a change of the table until the browsers heard it, so
     /// they hear a machine come online and go offline in the order the
     /// table changed.
-    telling: futures::lock::Mutex<()>,
+    pub(super) telling: futures::lock::Mutex<()>,
+    /// Since when each approved machine is offline, and which the hub
+    /// alerted (decision 168).
+    alerts: Mutex<OfflineAlerts>,
+}
+
+impl Presence {
+    /// The offline alerts, which no one holds across an `await`.
+    pub(super) fn alerts(&self) -> MutexGuard<'_, OfflineAlerts> {
+        self.alerts.lock().unwrap_or_else(PoisonError::into_inner)
+    }
 }
 
 impl HubPairing {
@@ -65,6 +82,7 @@ impl HubPairing {
         if !approved {
             self.let_go(agent);
         } else if !was_online {
+            self.presence.alerts().came_online(agent, self.clock.now());
             self.tell(self.heard(agent, true)).await;
         }
     }
@@ -86,7 +104,11 @@ impl HubPairing {
             this_one.then(|| live.remove(&agent)).flatten()
         };
         if ended.is_some() {
-            if let Err(error) = self.registry.record_seen(agent, self.clock.now()).await {
+            // What it ran ends with it: a machine offline holds no prune.
+            self.forget_running(agent);
+            let now = self.clock.now();
+            self.presence.alerts().went_offline(agent, now);
+            if let Err(error) = self.registry.record_seen(agent, now).await {
                 log::warn!("the hub couldn't keep when it last heard from a machine: {error:?}");
             }
             self.tell(self.heard(agent, false)).await;
@@ -102,16 +124,40 @@ impl HubPairing {
             .contains_key(&agent)
     }
 
-    /// Closes the machine `agent`'s live connection, if the hub holds one:
-    /// a person removed the machine (decision 154), which then syncs no more
-    /// on a connection it proved before. The browsers heard it was removed.
+    /// The machines the hub holds a connection of, but `agent`.
+    pub(super) fn online_except(&self, agent: AgentId) -> Vec<AgentId> {
+        self.presence
+            .live
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .keys()
+            .filter(|online| **online != agent)
+            .copied()
+            .collect()
+    }
+
+    /// Forgets what `agent`'s heartbeats said it runs.
+    fn forget_running(&self, agent: AgentId) {
+        self.presence
+            .running
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .remove(&agent);
+    }
+
+    /// Closes the machine `agent`'s live connection, if the hub holds one,
+    /// and cancels its offline alert: a person removed the machine
+    /// (decision 154), which then syncs no more on a connection it proved
+    /// before. The browsers heard it was removed.
     pub(super) fn let_go(&self, agent: AgentId) {
+        self.presence.alerts().removed(agent);
         let held = self
             .presence
             .live
             .lock()
             .unwrap_or_else(PoisonError::into_inner)
             .remove(&agent);
+        self.forget_running(agent);
         // Closed outside the lock: what closes it may take its own.
         if let Some((_, close)) = held {
             close();

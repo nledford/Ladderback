@@ -1,3 +1,4 @@
+use domain::fleet::Hostname;
 use domain::notifications::{Attempt, Event, EventKind, Ping};
 use domain::planning::Locale;
 use domain::{OperationId, PlanId, RepositoryAlias, Timestamp, Uuid};
@@ -19,6 +20,7 @@ fn event(kind: EventKind) -> Event {
         at: Timestamp::from_second(1_800_000_000).expect("a time"),
         codes: vec!["operation-failed"],
         attempt: (kind == EventKind::BackupRetrying).then_some(Attempt { number: 2, of: 3 }),
+        machine: None,
     }
 }
 
@@ -321,6 +323,8 @@ fn each_event_has_a_title_that_says_what_happened() {
             "Check failed",
             "Restore failed",
             "Maintenance paused",
+            "Machine offline",
+            "Machine back online",
         ]
     );
 }
@@ -408,4 +412,39 @@ fn paused_maintenance_says_which_repository_and_since_when_and_posts_no_operatio
     assert_eq!(body["operation"], serde_json::Value::Null);
     assert_eq!(body["repository"], "demo-repo");
     assert_eq!(body["time"], "2027-01-15T08:00:00Z");
+}
+
+#[test]
+fn a_machine_offline_says_which_machine_and_since_when_and_posts_the_machine() {
+    let localizer = localizer();
+    let offline = Event::machine_offline(
+        Hostname::parse("Nick's laptop").expect("a hostname"),
+        Timestamp::from_second(1_800_000_000).expect("a time"),
+    );
+    assert_eq!(
+        default_message(&localizer, &offline),
+        "The machine Nick's laptop has been offline since Jan 15, 2027, 8:00\u{202f}AM UTC."
+    );
+    let body = webhook_body(&offline, "");
+    assert_eq!(body["event"], "machine.offline");
+    assert_eq!(body["machine"], "Nick's laptop");
+    assert_eq!(body["operation"], serde_json::Value::Null);
+    assert_eq!(body["repository"], serde_json::Value::Null);
+    assert_eq!(body["time"], "2027-01-15T08:00:00Z");
+}
+
+#[test]
+fn a_machine_back_online_says_which_machine_and_when() {
+    let localizer = localizer();
+    let online = Event::machine_online(
+        Hostname::parse("laptop").expect("a hostname"),
+        Timestamp::from_second(1_800_000_000).expect("a time"),
+    );
+    assert_eq!(
+        default_message(&localizer, &online),
+        "The machine laptop came back online at Jan 15, 2027, 8:00\u{202f}AM UTC."
+    );
+    let body = webhook_body(&online, "");
+    assert_eq!(body["event"], "machine.online");
+    assert_eq!(body["machine"], "laptop");
 }

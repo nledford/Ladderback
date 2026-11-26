@@ -243,9 +243,10 @@ fn ping_url(mut url: Url, ping: Ping) -> Url {
 }
 
 /// The JSON a webhook is posted: the event's name and facts, and the
-/// message. A fact the event doesn't have is `null`.
+/// message. A fact the event doesn't have is `null`, but for the machine a
+/// hub's event names, which only such an event has (decision 122).
 fn webhook_body(event: &Event, message: &str) -> serde_json::Value {
-    serde_json::json!({
+    let mut body = serde_json::json!({
         "event": event.kind.name(),
         "message": message,
         "operation": event.operation.map(|operation| operation.as_uuid().to_string()),
@@ -255,7 +256,11 @@ fn webhook_body(event: &Event, message: &str) -> serde_json::Value {
         "time": event.at.to_string(),
         "attempt": event.attempt.map(|attempt| attempt.number),
         "attempts": event.attempt.map(|attempt| attempt.of),
-    })
+    });
+    if let (Some(machine), Some(fields)) = (&event.machine, body.as_object_mut()) {
+        fields.insert("machine".to_owned(), machine.as_str().into());
+    }
+    body
 }
 
 /// The catalog's text for `event`, in the localizer's locale.
@@ -355,6 +360,20 @@ fn default_message(localizer: &Localizer, event: &Event) -> String {
                 ),
             ],
         ),
+        EventKind::MachineOffline => (
+            msg::NOTIFY_MACHINE_OFFLINE,
+            vec![
+                ("machine", MsgArg::Text(machine(event))),
+                ("since", instant(event)),
+            ],
+        ),
+        EventKind::MachineOnline => (
+            msg::NOTIFY_MACHINE_ONLINE,
+            vec![
+                ("machine", MsgArg::Text(machine(event))),
+                ("at", instant(event)),
+            ],
+        ),
     };
     localizer.message(id, &args).text().to_owned()
 }
@@ -374,8 +393,26 @@ fn title(localizer: &Localizer, kind: EventKind) -> String {
         EventKind::CheckFailed => msg::NOTIFY_TITLE_CHECK_FAILED,
         EventKind::RestoreFailed => msg::NOTIFY_TITLE_RESTORE_FAILED,
         EventKind::RepoMaintenancePaused => msg::NOTIFY_TITLE_REPO_MAINTENANCE_PAUSED,
+        EventKind::MachineOffline => msg::NOTIFY_TITLE_MACHINE_OFFLINE,
+        EventKind::MachineOnline => msg::NOTIFY_TITLE_MACHINE_ONLINE,
     };
     localizer.message(id, &[]).text().to_owned()
+}
+
+/// The hostname of the machine `event` tells of.
+fn machine(event: &Event) -> String {
+    event
+        .machine
+        .as_ref()
+        .map_or_else(String::new, |machine| machine.as_str().to_owned())
+}
+
+/// When `event` happened, read in UTC with the zone's name.
+fn instant(event: &Event) -> MsgArg {
+    MsgArg::Timestamp {
+        utc_ms: event.at.as_millisecond(),
+        zone: None,
+    }
 }
 
 /// `text` as a header's value: as it is when it is printable ASCII, and

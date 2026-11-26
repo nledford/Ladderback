@@ -182,6 +182,7 @@ async fn what_hooks_printing_secrets_left(
         full_disk_access: None,
         machine: Arc::default(),
         leases: None,
+        running: Arc::default(),
         left_out: KeyFilesLeftOut::default(),
         writes: Arc::default(),
     };

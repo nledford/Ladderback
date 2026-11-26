@@ -2,6 +2,10 @@
 //! prunes against an engine that plays the worker's part. It works out its
 //! plan and repacks, each taking the scenario's time on the clock, asks at
 //! its first delete, and deletes only on yes (§7.3; §16, decision 161).
+//! A paired machine's hub is a hub's pairing use case holding a connection
+//! of this machine and, in some scenarios, of another one, whose
+//! heartbeats say what it runs; the hub's answer to this machine's
+//! heartbeat is what its leases heard (§7.3, layer 2; §16, decision 166).
 
 use std::collections::BTreeMap;
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -10,8 +14,10 @@ use std::sync::{Arc, Mutex, PoisonError};
 use async_trait::async_trait;
 use cucumber::{given, then, when};
 use domain::execution::{FailureReason, OperationStatus};
-use domain::fleet::{HubAddress, HubPin, PublicKey, Signature, TokenTls};
-use domain::maintenance::{Grant, HeldLeases, LeaseEpoch, RepoGrants};
+use domain::fleet::{
+    AgentRecord, AgentStatus, Hostname, HubAddress, HubPin, PublicKey, Signature, TokenTls,
+};
+use domain::maintenance::{Grant, HeldLeases, LeaseEpoch, RepoGrants, RunningBackup};
 use domain::planning::{
     AgentConfig, AgentSettings, GroupBy, Hooks, Maintenance, RepositoryConfig, RepositorySettings,
 };
@@ -26,14 +32,16 @@ use futures::{FutureExt, StreamExt};
 use super::Agent;
 use app::execution::Finished;
 use app::fakes::{
-    FakeClock, FakeRetention, FakeSecrets, FakeSources, InMemoryConfigStore, InMemoryIdentity,
-    InMemoryLeaseCache, InMemoryOperationStore,
+    FakeClock, FakeRetention, FakeSecrets, FakeSigning, FakeSources, InMemoryAgentRegistry,
+    InMemoryConfigStore, InMemoryIdentity, InMemoryLeaseCache, InMemoryOperationStore,
+    SeededRandom,
 };
 use app::leases::MaintenanceLeases;
-use app::maintenance::{MaintenanceKind, RunMaintenance};
+use app::maintenance::{MaintenanceError, MaintenanceKind, RunMaintenance};
+use app::pairing::HubPairing;
 use app::ports::{
     Clock, ConfigStore, Deletion, DeletionAsk, Engine, EngineError, EngineEvent, EngineResult,
-    Identity, Job, JobControl, LeaseCache, PruneSummary, RunningJob, StoreError,
+    Identity, Job, JobControl, LeaseCache, OperationStore, PruneSummary, RunningJob, StoreError,
 };
 use app::secrets::ResolveRepository;
 
@@ -49,6 +57,42 @@ fn repository() -> RepositoryId {
 
 fn alias() -> RepositoryAlias {
     RepositoryAlias::parse("demo").expect("an alias")
+}
+
+/// This machine, and the other one a scenario's hub holds a connection of.
+fn this_machine() -> AgentId {
+    AgentId::from_uuid(Uuid::from_u128(1))
+}
+
+fn other_machine() -> AgentId {
+    AgentId::from_uuid(Uuid::from_u128(2))
+}
+
+/// The other machine's backup, to `repository` when it knows its ID.
+fn backup(repository: Option<RepositoryId>) -> Vec<RunningBackup> {
+    vec![RunningBackup {
+        op_id: OperationId::from_uuid(Uuid::from_u128(0xbb)),
+        repository,
+    }]
+}
+
+/// What the other machine does, as its heartbeats tell the hub.
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum Other {
+    /// Is backing up to the repository.
+    BackingUp,
+    /// Was backing up to it, and its backup finished.
+    Finished,
+    /// Was backing up to it, and went offline.
+    WentOffline,
+    /// Is backing up to another repository.
+    BackingUpElsewhere,
+    /// Is online, and its heartbeat doesn't say what it runs.
+    Silent,
+    /// Is backing up to a repository whose ID it doesn't know yet.
+    BackingUpUnknown,
+    /// Starts backing up to the repository while the prune repacks.
+    StartsDuringRepack,
 }
 
 /// What a scenario sets up, and what its prune did.
@@ -72,8 +116,18 @@ pub struct PruneGuardWorld {
     /// Whether the hub grants the repository again, at a new epoch, while
     /// the prune repacks.
     granted_again: bool,
+    /// What another machine the hub holds a connection of does, if one.
+    other: Option<Other>,
+    /// How long ago this machine last heard its hub answer a heartbeat,
+    /// when not just now.
+    last_heard_ago: Option<SignedDuration>,
     deleted: Arc<AtomicBool>,
     finished: Option<Finished>,
+    /// Why the prune was refused before it ran, if it was.
+    refused: Option<MaintenanceError>,
+    /// What the run stored.
+    operations: Arc<InMemoryOperationStore>,
+    operation: Option<OperationId>,
 }
 
 impl PruneGuardWorld {
@@ -115,6 +169,98 @@ fn cancelled_during_check(agent: &mut Agent) {
 fn granted_again(agent: &mut Agent) {
     lease_runs_out(agent);
     agent.prune_guard.granted_again = true;
+}
+
+#[given("another machine is backing up to the repository")]
+fn other_backing_up(agent: &mut Agent) {
+    agent.prune_guard.other = Some(Other::BackingUp);
+}
+
+#[given("another machine was backing up to the repository, and its backup finished")]
+fn other_finished(agent: &mut Agent) {
+    agent.prune_guard.other = Some(Other::Finished);
+}
+
+#[given("another machine was backing up to the repository, and went offline")]
+fn other_went_offline(agent: &mut Agent) {
+    agent.prune_guard.other = Some(Other::WentOffline);
+}
+
+#[given("another machine is backing up to another repository")]
+fn other_backing_up_elsewhere(agent: &mut Agent) {
+    agent.prune_guard.other = Some(Other::BackingUpElsewhere);
+}
+
+#[given("another machine is online, and its heartbeat doesn't say what it runs")]
+fn other_silent(agent: &mut Agent) {
+    agent.prune_guard.other = Some(Other::Silent);
+}
+
+#[given("another machine is backing up to a repository whose ID it doesn't know yet")]
+fn other_backing_up_unknown(agent: &mut Agent) {
+    agent.prune_guard.other = Some(Other::BackingUpUnknown);
+}
+
+#[given("this machine last heard its hub answer a heartbeat 90 seconds ago")]
+fn heard_long_ago(agent: &mut Agent) {
+    agent.prune_guard.last_heard_ago = Some(SignedDuration::from_secs(90));
+}
+
+#[given("another machine starts backing up to the repository while the prune repacks")]
+fn other_starts_during_repack(agent: &mut Agent) {
+    agent.prune_guard.other = Some(Other::StartsDuringRepack);
+    agent.prune_guard.repacking_takes = SignedDuration::from_mins(10);
+}
+
+/// A hub holding a connection of this machine, and of the other one when
+/// the scenario has one, each heartbeat of which said what `other` runs;
+/// approved machines both, as a hub lets go of any other.
+async fn hub_with(other: Option<Other>, clock: Arc<FakeClock>) -> Arc<HubPairing> {
+    let registry = Arc::new(InMemoryAgentRegistry::new());
+    let now = clock.now();
+    for (n, agent_id) in [(1, this_machine()), (2, other_machine())] {
+        registry.hold(AgentRecord {
+            agent_id,
+            key: PublicKey::from_bytes([n; 32]).expect("a key"),
+            hostname: Hostname::parse(&format!("machine-{n}")).expect("a hostname"),
+            status: AgentStatus::Approved { at: now },
+            counter: 1,
+            last_seen: now,
+            zone: None,
+        });
+    }
+    let hub = Arc::new(HubPairing::new(
+        registry,
+        Arc::new(InMemoryIdentity::default()),
+        Arc::new(FakeSigning),
+        Arc::new(SeededRandom::new(1)),
+        clock,
+        "0.5.0-hub".to_owned(),
+    ));
+    hub.went_live(this_machine(), 1, Box::new(|| {})).await;
+    hub.heard_running(this_machine(), Some(Vec::new()));
+    let Some(other) = other else {
+        return hub;
+    };
+    hub.went_live(other_machine(), 2, Box::new(|| {})).await;
+    let running = match other {
+        Other::BackingUp | Other::Finished | Other::WentOffline => Some(backup(Some(repository()))),
+        Other::BackingUpElsewhere => Some(backup(Some(
+            RepositoryId::parse(&"08".repeat(32)).expect("a repository ID"),
+        ))),
+        Other::BackingUpUnknown => Some(backup(None)),
+        Other::Silent => None,
+        Other::StartsDuringRepack => Some(Vec::new()),
+    };
+    if running.is_some() {
+        hub.heard_running(other_machine(), running);
+    }
+    match other {
+        Other::Finished => hub.heard_running(other_machine(), Some(Vec::new())),
+        Other::WentOffline => hub.went_away(other_machine(), 2).await,
+        _ => {}
+    }
+    hub
 }
 
 #[when("this machine prunes the repository")]
@@ -161,25 +307,47 @@ async fn prune(agent: &mut Agent) {
             .take(&granted(1, 1, start(), lasts), 0, start())
             .await
             .expect("the grants are kept");
+        // The hub answers this machine's heartbeat, now or as long ago as
+        // the scenario says.
+        let hub = hub_with(world.other, Arc::clone(&clock)).await;
+        leases.heard_holds(hub.prunes_held_for(this_machine()));
+        if let Some(ago) = world.last_heard_ago {
+            clock.advance(ago);
+        }
     }
     // Past the first lease's end and the hub's hour of grace, the hub
     // grants the repository again, at the next epoch but one: another
     // machine may have held it meanwhile.
-    let during_repack = world.granted_again.then(|| {
+    let during_repack = if world.granted_again {
         let (leases, clock) = (Arc::clone(&leases), Arc::clone(&clock));
-        async move {
-            let now = clock.now();
-            leases
-                .take(
-                    &granted(2, 3, now, SignedDuration::from_hours(7 * 24)),
-                    0,
-                    now,
-                )
-                .await
-                .expect("the new grant is kept");
-        }
-        .boxed()
-    });
+        Some(
+            async move {
+                let now = clock.now();
+                leases
+                    .take(
+                        &granted(2, 3, now, SignedDuration::from_hours(7 * 24)),
+                        0,
+                        now,
+                    )
+                    .await
+                    .expect("the new grant is kept");
+            }
+            .boxed(),
+        )
+    } else if world.other == Some(Other::StartsDuringRepack) {
+        // The other machine's next heartbeat names its backup, and this
+        // machine's next one hears the hub hold the prune it runs.
+        let (leases, clock) = (Arc::clone(&leases), Arc::clone(&clock));
+        Some(
+            async move {
+                let hub = hub_with(Some(Other::BackingUp), clock).await;
+                leases.heard_holds(hub.prunes_held_for(this_machine()));
+            }
+            .boxed(),
+        )
+    } else {
+        None
+    };
     let use_case = RunMaintenance::new(
         Arc::new(Pruning {
             clock: clock.clone(),
@@ -191,25 +359,35 @@ async fn prune(agent: &mut Agent) {
             during_repack: Mutex::new(during_repack),
         }),
         clock,
-        Arc::new(InMemoryOperationStore::new()),
+        Arc::clone(&world.operations) as Arc<dyn OperationStore>,
         ResolveRepository::new(Arc::new(FakeSecrets::default())),
         Arc::new(FakeRetention),
         configs,
         Arc::default(),
-        AgentId::from_uuid(Uuid::from_u128(1)),
+        this_machine(),
         "demo-host".to_owned(),
         Arc::new(FakeSources),
     )
     .with_leases(leases);
     let operation = OperationId::from_uuid(Uuid::from_u128(0xcc));
-    let assessed = use_case
+    world.operation = Some(operation);
+    let assessed = match use_case
         .assess(operation, &alias(), MaintenanceKind::Prune)
         .await
-        .expect("the prune is assessed");
-    let prepared = use_case
-        .start(assessed)
-        .await
-        .expect("the prune starts while the lease is live");
+    {
+        Ok(assessed) => assessed,
+        Err(refused) => {
+            world.refused = Some(refused);
+            return;
+        }
+    };
+    let prepared = match use_case.start(assessed).await {
+        Ok(prepared) => prepared,
+        Err(refused) => {
+            world.refused = Some(refused);
+            return;
+        }
+    };
     // A cancel the prune fires as it asks; without one, the run is never
     // cancelled.
     let cancel = async move {
@@ -271,6 +449,35 @@ fn deleted_as_planned(agent: &mut Agent) {
     assert_eq!(
         world.finished().operation.status(),
         &OperationStatus::Succeeded
+    );
+}
+
+#[then("the prune is held because another machine may be backing up to the repository")]
+fn held(agent: &mut Agent) {
+    assert!(
+        matches!(agent.prune_guard.refused, Some(MaintenanceError::PruneHeld)),
+        "the prune wasn't held: {:?}",
+        agent.prune_guard.refused
+    );
+}
+
+#[then("nothing ran")]
+async fn nothing_ran(agent: &mut Agent) {
+    let world = &agent.prune_guard;
+    assert!(world.finished.is_none(), "the prune ran");
+    assert!(
+        !world.deleted.load(Ordering::SeqCst),
+        "the prune deleted packs"
+    );
+    let operation = world.operation.expect("the prune was asked for");
+    assert!(
+        world
+            .operations
+            .get(operation)
+            .await
+            .expect("the store reads")
+            .is_none(),
+        "the prune was stored"
     );
 }
 

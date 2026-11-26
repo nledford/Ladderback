@@ -1,5 +1,6 @@
-//! The leases a paired machine maintains under, as the daemon wires them
-//! (§7.3, I1; §16, decision 151).
+//! The leases a paired machine maintains under, and the backups its
+//! heartbeats name, as the daemon wires them (§7.3, I1; §16, decisions 151
+//! and 166).
 
 use app::ports::Identity as _;
 use domain::fleet::{HubAddress, HubPin, PublicKey, TokenTls};
@@ -9,7 +10,7 @@ use domain::{RepositoryId, SignedDuration};
 use platform::SystemClock;
 use platform::identity::FileIdentity;
 
-use super::support::own_folders;
+use super::support::{own_folders, runner_at_a_gate};
 use super::*;
 
 /// The grants the sync with the hub took while the machine's wall clock
@@ -63,4 +64,47 @@ async fn i1_a_clock_set_back_after_the_syncs_take_doesnt_lengthen_the_lease_main
         maintenance.permits(Some(&repository)).await,
         Err(NoLease::RanOut)
     );
+}
+
+/// The backups the daemon hands its sync with a hub are its runner's: a
+/// sync given a list of its own would name no backup, and the hub would
+/// hold no other machine's prune (§16, decision 166).
+#[tokio::test]
+async fn the_sync_names_the_backups_the_daemons_runner_runs() {
+    let scratch = tempfile::tempdir().expect("a scratch dir");
+    let (config, data) = own_folders(scratch.path());
+    let daemon = daemon_at(Some(config), Some(data), None)
+        .await
+        .map_err(|refused| refused.message)
+        .expect("the daemon starts");
+    assert!(Arc::ptr_eq(
+        &daemon.background.running(),
+        &daemon.background.runner().running
+    ));
+}
+
+/// A backup the runner runs is among its backups from before its engine
+/// is asked until it ends, so the heartbeats name it while it runs (§16,
+/// decision 166).
+#[tokio::test]
+async fn a_backup_the_runner_runs_is_among_its_backups_while_it_runs() {
+    let (runner, _entered, open_gate, _scratch) = runner_at_a_gate().await;
+    open_gate.send(true).expect("the gate opens");
+    let id = runner
+        .start_backup("home".into(), Trigger::Manual)
+        .await
+        .expect("the plan starts");
+    let operation = operation_of(&id).expect("the answer is an operation ID");
+    // The engine parks, so the backup runs until the test ends.
+    let named = tokio::time::timeout(std::time::Duration::from_secs(5), async {
+        while !runner
+            .running
+            .listed()
+            .is_some_and(|running| running.iter().any(|backup| backup.op_id == operation))
+        {
+            tokio::time::sleep(std::time::Duration::from_millis(10)).await;
+        }
+    })
+    .await;
+    assert!(named.is_ok(), "the running backup was never named");
 }

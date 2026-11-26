@@ -75,6 +75,7 @@ fn refusal_of(repository: &str) -> Option<MaintenanceRefusal> {
         "missing" => MaintenanceRefusal::UnknownRepository,
         "not-owner" => MaintenanceRefusal::NotOwner,
         "no-lease" => MaintenanceRefusal::NoLease,
+        "held" => MaintenanceRefusal::PruneHeld,
         "busy" => MaintenanceRefusal::Busy {
             running: text("018f0000-0000-7000-8000-000000000003"),
         },
@@ -1193,6 +1194,30 @@ async fn i1_maintenance_without_the_hubs_lease_is_a_conflict_naming_it() {
         assert_eq!(status.as_u16(), 409, "{kind}");
         assert_eq!(answer, expected, "{kind}");
     }
+}
+
+/// A prune the hub holds, as another machine may be backing up to the
+/// repository, is a conflict naming the repository (§7.3, layer 2; §16,
+/// decision 166).
+#[tokio::test]
+async fn a_held_prune_is_a_conflict_naming_the_repository() {
+    use serde_json::json;
+    let response = request(
+        ui(),
+        Method::POST,
+        "/api/v1/repositories/held/maintenance",
+        r#"{"kind":"prune"}"#,
+    )
+    .await;
+    let (status, answer) = json_of(response).await;
+    assert_eq!(status.as_u16(), 409);
+    assert_eq!(
+        answer,
+        json!({
+            "code": "maintenance-prune-held",
+            "args": {"alias": {"type": "text", "value": "held"}},
+        })
+    );
 }
 
 #[tokio::test]

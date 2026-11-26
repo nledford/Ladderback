@@ -124,6 +124,11 @@ pub enum MaintenanceError {
     /// granted the lease to no one or another agent, or the lease ran out
     /// on the hub's time. Refused before anything is stored.
     NoLease(NoLease),
+    /// The hub holds the prune: this machine is paired with it, and another
+    /// machine may be backing up to the repository, or this machine hasn't
+    /// heard from its hub in the last 90 seconds (§7.3, layer 2; §16,
+    /// decision 166). Refused before anything is stored.
+    PruneHeld,
     /// The configuration couldn't be read or used: the store's own report,
     /// which says where a mistake is and never holds a value of the file,
     /// so a route refuses it as a save of it is refused (#347).
@@ -538,6 +543,9 @@ impl RunMaintenance {
         let config = self.maintained(alias).await?;
         let (access, secret_warnings) = self.identified(op, &config, alias).await?;
         self.leased(alias, access.id.as_ref()).await?;
+        if matches!(kind, MaintenanceKind::Prune) {
+            self.unheld(alias, access.id.as_ref()).await?;
+        }
 
         let (other_hosts, partition, job) = match kind {
             MaintenanceKind::Forget => {
@@ -643,6 +651,9 @@ impl RunMaintenance {
         // The repository the job opens is the one whose lease it needs.
         let opened = job.access().and_then(|access| access.id.as_ref());
         let lease = self.leased(&alias, opened).await?;
+        if matches!(job, Job::Prune(_)) {
+            self.unheld(&alias, opened).await?;
+        }
         let mut operation = Operation::queue(
             id,
             job.kind(),
@@ -1042,6 +1053,30 @@ impl RunMaintenance {
             );
             MaintenanceError::NoLease(why)
         })
+    }
+
+    /// Refuses a prune of `repository` the hub holds, as another machine
+    /// may be backing up to it (§7.3, layer 2; §16, decision 166): checked
+    /// at the start only, as a backup that starts later reads the index the
+    /// prune left. A machine that isn't paired is never held. A refusal is
+    /// logged.
+    async fn unheld(
+        &self,
+        alias: &RepositoryAlias,
+        repository: Option<&RepositoryId>,
+    ) -> Result<(), MaintenanceError> {
+        let Some(leases) = &self.leases else {
+            return Ok(());
+        };
+        if leases.prune_held(repository).await {
+            log::warn!(
+                "prune of {} refused (maintenance-prune-held): this machine is paired with a \
+                 hub, and another machine may be backing up to the repository",
+                alias.as_str()
+            );
+            return Err(MaintenanceError::PruneHeld);
+        }
+        Ok(())
     }
 
     /// Whether a prune that has come to its first delete may delete: while
@@ -2977,6 +3012,97 @@ mod start_tests {
             .await
             .expect("the grants are kept");
         assert!(use_case.start(assessed()).await.is_ok(), "the run starts");
+    }
+
+    /// A prune assessed while its hub held nothing is refused at its
+    /// start, nothing stored, once the hub's answer holds it: the start
+    /// checks the guard again under the lock, as it checks the lease. A
+    /// check is never held (§7.3, layer 2; §16, decision 166).
+    #[tokio::test]
+    async fn a_prune_held_after_it_was_assessed_doesnt_start() {
+        use domain::fleet::{HubAddress, HubPin, PublicKey, TokenTls};
+        use domain::maintenance::{Grant, LeaseEpoch, RepoGrants};
+
+        use crate::fakes::{InMemoryIdentity, InMemoryLeaseCache};
+        use crate::ports::{Identity as _, PruneJob};
+
+        let configs = Arc::new(InMemoryConfigStore::new());
+        configs
+            .save(&config(Maintenance::Local))
+            .await
+            .expect("the configuration saves");
+        let store = Arc::new(InMemoryOperationStore::new());
+        let start = Timestamp::from_second(1_800_000_000).expect("a time");
+        let clock = Arc::new(FakeClock::new(start));
+        let identity = Arc::new(InMemoryIdentity::default());
+        let key = |byte| PublicKey::from_bytes([byte; 32]).expect("a key");
+        identity
+            .write_pin(&HubPin::new(
+                key(7),
+                TokenTls::Ca,
+                key(9),
+                HubAddress::parse("https://hub.example:9898").expect("an address"),
+            ))
+            .await
+            .expect("the pin is kept");
+        let leases = Arc::new(crate::leases::MaintenanceLeases::new(
+            identity,
+            Arc::new(InMemoryLeaseCache::default()),
+            clock.clone(),
+        ));
+        let repository = RepositoryId::parse(&"07".repeat(32)).expect("a repository ID");
+        let grants = RepoGrants {
+            generation: 1,
+            signed_at: start,
+            grants: vec![Grant {
+                repository: repository.clone(),
+                epoch: LeaseEpoch::new(1).expect("an epoch"),
+                expires_at: start
+                    .checked_add(SignedDuration::from_hours(7 * 24))
+                    .expect("a time"),
+                signature: domain::fleet::Signature::from_bytes([0; 64]).expect("a signature"),
+            }],
+        };
+        leases
+            .take(&grants, 0, start)
+            .await
+            .expect("the grants are kept");
+        let use_case = RunMaintenance::new(
+            Arc::new(crate::fakes::SimulatedEngine::new(clock.clone())),
+            clock,
+            store.clone(),
+            ResolveRepository::new(Arc::new(FakeSecrets::default())),
+            Arc::new(FakeRetention),
+            configs,
+            Arc::default(),
+            AgentId::from_uuid(Uuid::from_u128(1)),
+            "demo-host".to_owned(),
+            Arc::new(FakeSources),
+        )
+        .with_leases(leases.clone());
+        let check = assessed();
+        let prune = MaintenanceAssessment {
+            job: Job::Prune(PruneJob {
+                repository: check.job.access().expect("a check opens it").clone(),
+                keep_delete: default_keep_delete(),
+            }),
+            ..assessed()
+        };
+
+        leases.heard_holds(Some(vec![repository]));
+        assert_eq!(
+            use_case.start(prune).await.err(),
+            Some(MaintenanceError::PruneHeld)
+        );
+        let logged = store
+            .list(&HistoryQuery::default())
+            .await
+            .expect("the log answers");
+        assert!(logged.operations.is_empty(), "nothing was stored");
+        assert!(
+            use_case.start(assessed()).await.is_ok(),
+            "a check isn't held"
+        );
     }
 }
 
