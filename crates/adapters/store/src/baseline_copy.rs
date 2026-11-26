@@ -296,21 +296,34 @@ impl Work {
 
     /// Step 5: the new log in the old one's place, the old one kept, at
     /// the path it answers. Once the rename is made, the copy is done:
-    /// the folder's sync after it can only warn.
+    /// the folder's sync after it can only warn. A step that fails before
+    /// it leaves the old log in use, so the copy this attempt kept is
+    /// removed: every failed attempt would otherwise leave one more.
     fn swap(&self) -> io::Result<Swapped> {
         for file in [&self.kept_new, &self.new] {
             File::open(file)?.sync_all()?;
         }
         let kept = self.keep()?;
+        match self.replace() {
+            Ok(()) => Ok(Swapped::after_rename(kept, sync_dir(self.folder()))),
+            Err(error) => {
+                // Best effort: the error says why the copy stopped.
+                let _ = remove_if_there(&kept);
+                Err(error)
+            }
+        }
+    }
+
+    /// Renames the new log over the old one, once the old one's emptied
+    /// `-wal` and `-shm` are gone and the kept copy's name is durable.
+    fn replace(&self) -> io::Result<()> {
         // Empty since the checkpoint: a crash right after leaves the old
         // log whole.
         for suffix in ["-wal", "-shm"] {
             remove_if_there(&beside(&self.log, suffix))?;
         }
-        // The kept copy's name is durable before the old log's goes.
         sync_dir(self.folder())?;
-        fs::rename(&self.new, &self.log)?;
-        Ok(Swapped::after_rename(kept, sync_dir(self.folder())))
+        fs::rename(&self.new, &self.log)
     }
 
     /// The folder the log is in.
@@ -704,6 +717,59 @@ async fn copy_table(db: &mut SqliteConnection, table: &str) -> Result<u64, Strin
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// The log the migrations before the baseline left at 29, at `log`, in
+    /// the rollback-journal mode, so SQLite never opens its `-shm`.
+    async fn old_log_at_29(log: &Path) {
+        let mut raw = SqliteConnectOptions::new()
+            .filename(log)
+            .create_if_missing(true)
+            .connect()
+            .await
+            .expect("the old log is created");
+        sqlx::raw_sql(include_str!("../tests/fixtures/at-0029.sql"))
+            .execute(&mut raw)
+            .await
+            .expect("the old log is filled");
+        raw.close().await.expect("the old log is closed");
+    }
+
+    /// A swap that fails after it kept the snapshot but before the rename
+    /// leaves the old log in use, so the copy it kept is removed: a start
+    /// that fails this way again and again never fills the disk with
+    /// copies of the log.
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn a_swap_that_fails_before_the_rename_removes_the_copy_it_kept() {
+        let folder = tempfile::tempdir().expect("a scratch folder");
+        let log = folder.path().join("ladderback.db");
+        old_log_at_29(&log).await;
+        let before = fs::read(&log).expect("the log reads");
+        // A `-shm` the swap can't remove, as a folder with a file in it.
+        let shm = beside(&log, "-shm");
+        fs::create_dir(&shm).expect("a folder in the way");
+        fs::write(shm.join("held"), "").expect("a file in it");
+
+        let error = copy(&log).await.expect_err("the swap fails");
+
+        assert!(
+            matches!(error, OpenError::BaselineCopy { version: 29, .. }),
+            "{error:?}"
+        );
+        assert_eq!(fs::read(&log).expect("the log reads"), before);
+        let mut left: Vec<String> = fs::read_dir(folder.path())
+            .expect("the folder lists")
+            .map(|entry| {
+                entry
+                    .expect("an entry")
+                    .file_name()
+                    .to_string_lossy()
+                    .into_owned()
+            })
+            .collect();
+        left.sort();
+        assert_eq!(left, ["ladderback.db", "ladderback.db-shm"]);
+    }
 
     /// The work files hold the old log's rows, the sessions and API
     /// tokens' fingerprints among them: from the moment each is made, it
