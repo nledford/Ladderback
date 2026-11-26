@@ -417,7 +417,7 @@ exclude_re = [
     # glob of a plan that can never match is pointed out on its row in words"
     # of `features/ui/start_page.feature`, whose one plan has a note, checks
     # it. Named by line, so a moved line brings the mutant back to judge.
-    'crates/web/src/start_page\.rs:217:41: delete ! in start_plans_table$',
+    'crates/web/src/start_page\.rs:208:41: delete ! in start_plans_table$',
 ]
 # A mutant that makes a test hang is caught, but slowly; fail fast instead.
 timeout_multiplier = 3.0
