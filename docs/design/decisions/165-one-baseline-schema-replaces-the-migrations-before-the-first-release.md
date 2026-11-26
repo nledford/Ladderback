@@ -1,6 +1,6 @@
 # Decision 165: One baseline schema replaces the migrations before the first release
 
-**`migrations/0001_baseline.sql` replaces migrations 0001 to 0029 before the first release. It makes the same tables under the machine names (decision 163) and adds the rules the code already kept: every table `STRICT`, a `CHECK` on each value the store writes from a fixed list, a failure only on a failed operation, `json_valid` on the JSON the store reads, times and counts at least 0, a machine's current state deleted with it by `ON DELETE CASCADE`, and an operation's report held once across machine IDs (#1513). `operations.machine_id`, always `local`, is gone. A database the old migrations left is refused with `OpenError::OldSchema` and left as it was; `scripts/copy-to-baseline.ts` copies one at migration 29 into the baseline once. From the first release on, migrations are append-only again** (recorded 2026-11-25, #1618; §9).
+**`migrations/0001_baseline.sql` replaces migrations 0001 to 0029 before the first release. It makes the same tables under the machine names (decision 163) and adds the rules the code already kept: every table `STRICT`, a `CHECK` on each value the store writes from a fixed list, a failure only on a failed operation, `json_valid` on the JSON the store reads, times and counts at least 0, a machine's current state deleted with it by `ON DELETE CASCADE`, and an operation's report held once across machine IDs (#1513). `operations.machine_id`, always `local`, is gone. A database the old migrations left is copied into the baseline on open when its migrations are ones a release shipped, and refused with `OpenError::OldSchema` and left as it was otherwise (decision 170). From the first release on, migrations are append-only again** (recorded 2026-11-25, #1618; §9).
 
 ## Why
 
@@ -24,20 +24,11 @@ Each is a rule the store's code already keeps, so no write the store makes is re
 
 ## The refusal and the copy
 
-The store reads `_sqlx_migrations` before it runs any migration. When version 1 has the checksum sqlx recorded for the old `0001_operations.sql`, it closes the pool and returns `OpenError::OldSchema` with the last version recorded, having only read. Without this, sqlx would fail on the changed checksum of version 1 with a message about a modified migration, which says nothing of what to do. The daemon and the hub commands say `cli-store-old-schema`: the log is from an earlier version, can't be upgraded in place, and is copied once by the script.
+The store reads `_sqlx_migrations` before it runs any migration. When version 1 has the checksum sqlx recorded for the old `0001_operations.sql`, the log is from the old set. Without this check, sqlx would fail on the changed checksum of version 1 with a message about a modified migration, which says nothing of what to do. Decision 170 copies such a log into the baseline on open, and refuses one whose migrations no release shipped with `OpenError::OldSchema` (`cli-store-old-schema`). The copy drops only the rows the baseline's rules prove are junk, and counts each: a removed machine's current state, which the cascades would have deleted, and a second report of an operation's happening, of which the first is kept and the tally of a machine that lost one is set to what it still holds. Any other row the baseline refuses stops the copy with the log left as it was.
 
-`scripts/copy-to-baseline.ts` refuses any log that does not hold exactly versions 1 to 29, each applied, with the first and last checksums Ladderback shipped. It keeps the old log, write-ahead log included, as `<log>.before-baseline` and refuses to run when that file is there. It builds the new log beside it from the baseline, copying each table with its rowids, and drops only the rows the baseline's rules prove are junk, naming how many of each: a removed machine's current state, which the cascades would have deleted, and a second report of an operation's happening, the first kept, with the tally of a machine that lost one set to what it still holds. Any other row the baseline refuses stops the copy with nothing changed. It then checks the counts, the foreign keys and the file's integrity, removes the old log's `-wal` and `-shm` and renames the new log over it.
+This decision first shipped the copy as a Node script, `scripts/copy-to-baseline.ts`, run by hand on a log at 29. Decision 170 replaced it, along with the upgrade steps (#1621) it needed.
 
-## Upgrade (#1621)
-
-On each machine and on the hub, once. The script takes a log at migration 29 only, so a log an older build left (the maintainer's was at 28 on 2026-11-25) first needs one start of the last build before the baseline (`origin/main` before #1618 merges, with #1220), which migrates it to 29; then:
-
-1. Stop Ladderback: `launchctl bootout gui/$(id -u)/io.github.nledford.ladderback` on macOS, `systemctl --user stop ladderback` on Linux, and any `ladderback serve` started by hand.
-2. From a checkout of the build with the baseline, run `node scripts/copy-to-baseline.ts "<data folder>/ladderback.db"`, the path quoted (the data folder is `~/Library/Application Support/ladderback` on macOS, `~/.local/share/ladderback` on Linux, or `LADDERBACK_DATA_DIR`). It names what it dropped.
-3. Install that build and start the service again with `just install-restart --now`: the service is stopped, so it can't wait for the daemon to be idle.
-4. Once the daemon serves, delete `<data folder>/ladderback.db.before-baseline` when it is no longer wanted.
-
-A log the script refuses stays as it was. A build from before the baseline can't open the copied log: sqlx finds version 1 with another checksum (`VersionMismatch`, which the store reports as `OpenError::Migration`), so going back means going back to `ladderback.db.before-baseline`.
+A build from before the baseline can't open the copied log: sqlx finds version 1 with another checksum (`VersionMismatch`, which the store reports as `OpenError::Migration`), so going back means going back to `ladderback.db.before-baseline`.
 
 ## Consequences
 
@@ -45,7 +36,7 @@ A log the script refuses stays as it was. A build from before the baseline can't
 - The store's corrupt-row tests write past the `CHECK`s with `PRAGMA ignore_check_constraints`, as a later version that relaxed one could. A value of another type `STRICT` refuses outright, so those cases are gone: the store still reads strictly, but can no longer be handed text where it keeps a number.
 - A new kind, trigger or status is a migration that rebuilds `operations`; a new warning code still isn't.
 - The SQLite contract harnesses register the machines their suites report as, since a machine's plans and progress now need its row.
-- **The script can't tell whether a daemon has the log open.** The upgrade steps stop the service first; a daemon still running could write to the old log after the copy read it, and that write would be lost with the old `-wal`.
+- **The copy can't always tell whether an earlier daemon has the log open** (decision 170): a daemon still running could write to the old log after the copy read it, and that write would be lost with the old `-wal`.
 
 ## Rejected
 

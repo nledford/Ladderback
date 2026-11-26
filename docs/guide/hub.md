@@ -114,6 +114,8 @@ The machine drops the leases it held from that hub and forgets the hub's key. It
 
 Until 1.0.0, a release may change how machines and the hub talk to each other, as [the README's warning](https://github.com/nledford/Ladderback/blob/main/README.md) says. Such a release raises the minor version, as 0.6 to 0.7, and its entry in [CHANGELOG.md](https://github.com/nledford/Ladderback/blob/main/CHANGELOG.md) lists the change under **Breaking**, with the steps to upgrade, which may be pairing each machine again. Read it before you upgrade the hub or any machine.
 
+**From 0.5.0 to 0.6.0,** install 0.6.0 and start it; there are no other steps. On its first start, each machine keeps its machine ID and key, and copies its operation log into the new schema. The old log is kept beside the new one as `ladderback.db.before-baseline`, which you can delete once you no longer want it. A log that can't be copied is left as it was, and Ladderback says why. Snapshots 0.5.0 took carry the tag `ladderback-agent:<id>`, where 0.6.0 writes `ladderback-machine:<id>`: retag them once as the 0.6.0 release notes describe.
+
 ## Known limits
 
 - **Losing the hub's machine.** Machines keep backing up, and within 7 days their leases run out, after which they maintain nothing ([Maintenance with a hub](hub-maintenance.md)). There is no way yet to recover the hub ([#1466](https://github.com/nledford/Ladderback/issues/1466)): pair its machines with a new one once each has left the old one ([Leaving a hub](#leaving-a-hub)). Keep your copy of the hub's key files ([Keeping the hub's keys](#keeping-the-hubs-keys)).
