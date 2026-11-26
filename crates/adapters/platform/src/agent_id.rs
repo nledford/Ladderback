@@ -78,33 +78,43 @@ pub fn earlier_names_left(data_dir: &Path) -> io::Result<bool> {
 /// name changes. It moves only while `machine-id` is absent and `agent-id`
 /// is there. The key moves first, then the ID, each by a link and an
 /// unlink, so a start that stops partway leaves a state the next one
-/// finishes. Then the files an earlier build staged beside them and a
-/// crash left (`agent-key.*`, `agent-id.*.tmp`, #1621) are deleted. A link
-/// keeps the file's owner-only mode, and nothing reads the key (I4). When
-/// `machine-id` is there too, both are left and `machine-id` is the ID: a
-/// build after decision 163 made it and may have used it since. An
-/// `agent-key` beside a `machine-key` of its own is an error, every file
-/// left as it was: which key is the machine's is the person's to say.
+/// finishes. Then, whether it moved or not, the files an earlier build
+/// staged beside them and a crash left (`agent-key.*.tmp`,
+/// `agent-id.*.tmp`, #1621) are deleted, so a start that stopped before it
+/// deleted them leaves them to the next. A link keeps the file's
+/// owner-only mode, and nothing reads the key (I4). When `machine-id` is
+/// there too, both are left and `machine-id` is the ID: a build after
+/// decision 163 made it and may have used it since. An `agent-key` beside
+/// a `machine-key` of its own is an error, every file left as it was:
+/// which key is the machine's is the person's to say.
 pub fn move_earlier_names(data_dir: &Path, _held: &DataDirLock) -> io::Result<()> {
     let earlier_id = data_dir.join(EARLIER_ID_FILE);
-    if !earlier_id.try_exists()? {
-        return Ok(());
-    }
     let id = data_dir.join(MACHINE_ID_FILE);
-    if id.try_exists()? {
+    let mut moved = false;
+    if earlier_id.try_exists()? {
         // A move that stopped between the ID's link and its unlink left
         // two names of one file: finish it. Two files are both left.
-        if !same_file(&earlier_id, &id)? {
-            return Ok(());
+        let unmoved = !id.try_exists()?;
+        if unmoved {
+            move_file(
+                &data_dir.join(EARLIER_KEY_FILE),
+                &data_dir.join(KeyFile::AgentKey.file_name()),
+            )?;
         }
-    } else {
-        move_file(
-            &data_dir.join(EARLIER_KEY_FILE),
-            &data_dir.join(KeyFile::AgentKey.file_name()),
-        )?;
+        if unmoved || same_file(&earlier_id, &id)? {
+            move_file(&earlier_id, &id)?;
+            moved = true;
+        }
     }
-    move_file(&earlier_id, &id)?;
-    remove_staged(data_dir)?;
+    let staged = match staged(data_dir) {
+        Ok(staged) => staged,
+        Err(error) if error.kind() == io::ErrorKind::NotFound => return Ok(()),
+        Err(error) => return Err(error),
+    };
+    if staged.is_empty() && !moved {
+        return Ok(());
+    }
+    remove_staged(staged)?;
     sync_dir(data_dir)
 }
 
@@ -162,10 +172,10 @@ fn same_file(_a: &Path, _b: &Path) -> io::Result<bool> {
     Ok(false)
 }
 
-/// Deletes what an earlier build staged beside its key and ID files and a
-/// crash left: `agent-key.*` and `agent-id.*.tmp` (#1621).
-fn remove_staged(data_dir: &Path) -> io::Result<()> {
-    for path in staged(data_dir)? {
+/// Deletes `staged`, what an earlier build staged beside its key and ID
+/// files and a crash left.
+fn remove_staged(staged: Vec<std::path::PathBuf>) -> io::Result<()> {
+    for path in staged {
         match fs::remove_file(path) {
             Ok(()) => {}
             Err(error) if error.kind() == io::ErrorKind::NotFound => {}
@@ -175,10 +185,14 @@ fn remove_staged(data_dir: &Path) -> io::Result<()> {
     Ok(())
 }
 
-/// The files an earlier build staged beside its key and ID files.
+/// The files an earlier build staged beside its key and ID files, each
+/// `agent-key.<hex>.tmp` or `agent-id.<hex>.tmp` (#1621). Any other name
+/// beside them, as an `agent-key.bak` the person keeps, is not one.
 fn staged(data_dir: &Path) -> io::Result<Vec<std::path::PathBuf>> {
-    let key_prefix = format!("{EARLIER_KEY_FILE}.");
-    let id_prefix = format!("{EARLIER_ID_FILE}.");
+    let prefixes = [
+        format!("{EARLIER_KEY_FILE}."),
+        format!("{EARLIER_ID_FILE}."),
+    ];
     let mut staged = Vec::new();
     for entry in fs::read_dir(data_dir)? {
         let entry = entry?;
@@ -186,8 +200,7 @@ fn staged(data_dir: &Path) -> io::Result<Vec<std::path::PathBuf>> {
         let Some(name) = name.to_str() else {
             continue;
         };
-        if name.starts_with(&key_prefix) || (name.starts_with(&id_prefix) && name.ends_with(".tmp"))
-        {
+        if name.ends_with(".tmp") && prefixes.iter().any(|prefix| name.starts_with(prefix)) {
             staged.push(entry.path());
         }
     }
@@ -530,14 +543,53 @@ mod tests {
         let own = "0190a6e4-7a3b-7c3d-8e4f-ba9876543210";
         write_private(data.path(), "machine-id", &format!("{own}\n"));
         write_private(data.path(), "machine-key", "0b0b\n");
-        let before = names(data.path());
 
         let id = moved(data.path()).unwrap();
 
         assert_eq!(id.as_uuid().hyphenated().to_string(), own);
-        assert_eq!(names(data.path()), before);
+        assert_eq!(
+            names(data.path()),
+            ["agent-id", "agent-key", "machine-id", "machine-key"],
+            "both IDs and keys are left; only what was staged is gone"
+        );
+        assert!(!earlier_names_left(data.path()).unwrap());
         let earlier = earlier_beside(data.path()).unwrap().unwrap();
         assert_eq!(earlier.as_uuid().hyphenated().to_string(), EARLIER_ID);
+    }
+
+    /// A move that finished but stopped before it deleted what an earlier
+    /// build staged left `machine-id` alone with those files: the next
+    /// start deletes them, so nothing is left to upgrade.
+    #[test]
+    fn staged_files_a_finished_move_left_are_deleted_by_the_next_start() {
+        let data = tempfile::tempdir().unwrap();
+        write_private(data.path(), "machine-id", &format!("{EARLIER_ID}\n"));
+        write_private(data.path(), "machine-key", KEY_CANARY);
+        write_private(data.path(), "agent-key.0190a6e47a3b7c3d.tmp", KEY_CANARY);
+        write_private(data.path(), "agent-id.0190a6e47a3b7c3d.tmp", EARLIER_ID);
+        assert!(earlier_names_left(data.path()).unwrap());
+
+        moved(data.path()).unwrap();
+
+        assert_eq!(names(data.path()), ["machine-id", "machine-key"]);
+        assert!(!earlier_names_left(data.path()).unwrap());
+    }
+
+    /// Only what an earlier build staged is deleted, `.tmp` files: a file
+    /// the person keeps beside the key, as `agent-key.bak`, stays, and is
+    /// nothing left to upgrade.
+    #[test]
+    fn a_file_beside_the_key_that_no_build_staged_is_kept() {
+        let data = earlier_data_folder();
+        write_private(data.path(), "agent-key.bak", KEY_CANARY);
+
+        moved(data.path()).unwrap();
+
+        assert_eq!(
+            names(data.path()),
+            ["agent-key.bak", "machine-id", "machine-key"]
+        );
+        assert!(!earlier_names_left(data.path()).unwrap());
     }
 
     #[test]

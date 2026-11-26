@@ -20,7 +20,7 @@ Decision 163 renamed the key files and decision 165 replaced the migrations. Tog
 
 - The key moves first, then the ID. Each move is a hard link followed by an unlink, so a start that stopped partway leaves a state the next one finishes: `machine-key` with `agent-id`, or one file with two names. A link that finds the target already there compares inodes. If it is the same file, an earlier move stopped between its link and its unlink. If `agent-key` sits beside a different `machine-key`, the start is refused, every file is left as it was, and the error names both files and holds neither key (I4).
 - A link keeps the file's mode, so the key stays its owner's alone. Nothing reads the key.
-- After the move, the files an earlier build staged and a crash left are deleted: `agent-key.*` and `agent-id.*.tmp` (#1621). The folder is synced.
+- After the move, and on any later start that finds them, the files an earlier build staged and a crash left are deleted: `agent-key.*.tmp` and `agent-id.*.tmp` (#1621). Any other name beside the key, such as an `agent-key.bak` the person keeps, is left. The folder is synced.
 - When `machine-id` and a different `agent-id` are both there, both are left and `machine-id` is the ID. A build after decision 163 chose it, and it may have been used since: the maintainer's laptop chose its new ID on 2026-11-26. The daemon logs one line naming both IDs, never a key.
 
 ## The operation log
