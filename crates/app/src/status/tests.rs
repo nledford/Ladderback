@@ -256,7 +256,7 @@ async fn an_operation_that_tells_nothing_of_reading_leaves_the_last_that_did() {
     let at = canceled.queued_at();
     canceled
         .cancel(at)
-        .unwrap_or_else(|e| panic!("a running backup is cancelled: {e:?}"));
+        .unwrap_or_else(|e| panic!("a running backup is canceled: {e:?}"));
     log.keep(&canceled).await;
     log.failed(
         Some("home"),

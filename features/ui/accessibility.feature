@@ -179,7 +179,7 @@ Feature: Accessibility of the app shell
     And the table "Operations" has 2 rows
     And the page has no accessibility violations
 
-  Scenario: Cancelling a running backup by keyboard
+  Scenario: Canceling a running backup by keyboard
     Given a demo plan "demo-home" with a big scratch repository
     When I open the address "/operations"
     And I skip to the content
@@ -188,8 +188,8 @@ Feature: Accessibility of the app shell
     And the table "Operations" has a row "demo-home" that shows "Running"
     And I press Tab until focus is on the button "Cancel demo-home"
     And I press Enter
-    Then the table "Operations" has a row "demo-home" that shows "Cancelled"
-    And the polite region comes to contain "Backup cancelled."
+    Then the table "Operations" has a row "demo-home" that shows "Canceled"
+    And the polite region comes to contain "Backup canceled."
     And the page has no accessibility violations
 
   Scenario: The operations table sorts by keyboard with the sort announced
@@ -239,7 +239,7 @@ Feature: Accessibility of the app shell
     And focus is on the row header "demo-home"
     And the polite region comes to contain "Backup finished."
 
-  # The page takes no news from a cancelled run's event: it reads the
+  # The page takes no news from a canceled run's event: it reads the
   # history after the press until the run has ended there.
   Scenario: Focus moves to the row's header when the reader cancels the run of the focused Cancel button
     Given the daemon reports a running backup of "demo-home"
@@ -250,10 +250,10 @@ Feature: Accessibility of the app shell
     And I press Tab until focus is on the button "Cancel demo-home"
     And I press Enter
     And the daemon has accepted the cancel of the backup of "demo-home"
-    And the daemon reports that the backup of "demo-home" has been cancelled
-    Then the table "Operations" has a row "demo-home" that shows "Cancelled"
+    And the daemon reports that the backup of "demo-home" has been canceled
+    Then the table "Operations" has a row "demo-home" that shows "Canceled"
     And focus is on the row header "demo-home"
-    And the polite region comes to contain "Backup cancelled."
+    And the polite region comes to contain "Backup canceled."
 
   Scenario: The operations table sorts oldest first on the second press of its sort button
     Given the daemon reports two finished backups of "demo-home"

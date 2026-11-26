@@ -614,7 +614,7 @@ fn each_started(agent: &mut Agent) {
     );
 }
 
-#[then("the restore ends as cancelled")]
+#[then("the restore ends as canceled")]
 fn ends_canceled(agent: &mut Agent) {
     assert_eq!(agent.restore.status(), &OperationStatus::Canceled);
 }

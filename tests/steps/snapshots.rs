@@ -79,7 +79,7 @@ async fn init(cold: &Path) {
                 &KeyOptions::default(),
                 &ConfigOptions::default(),
             )
-            .expect("the scratch repository initialises");
+            .expect("the scratch repository initializes");
     })
     .await;
 }

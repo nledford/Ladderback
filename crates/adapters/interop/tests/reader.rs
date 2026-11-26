@@ -1025,7 +1025,7 @@ async fn the_backup_sections_grouping_is_left_out_with_a_notice() {
 
 #[tokio::test]
 async fn a_grouping_that_is_not_one_is_refused() {
-    let text = profile_text("[forget]\ngroup-by = \"colour\"\n");
+    let text = profile_text("[forget]\ngroup-by = \"color\"\n");
     let (key, line, problem) = invalid(read_err(&text).await);
     assert_eq!(key, "forget.group-by");
     assert_eq!(line, Some(line_of(&text, "group-by")));

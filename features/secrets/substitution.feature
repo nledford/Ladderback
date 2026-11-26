@@ -873,7 +873,7 @@ Feature: Secret references in a repository's settings
   Rule: A file that others can change comes with a warning of its own
 
     Whoever can change a secret file chooses the secret: for a repository
-    initialised with it, the key it is made with (#1137). The warning says
+    initialized with it, the key it is made with (#1137). The warning says
     so, in place of the one for a file others can read.
 
     Scenario Outline: A file other users can change

@@ -1,7 +1,7 @@
 @e2e @repositories
 Feature: Repositories over HTTP
   The Repositories page tests a location, connects it by saving it into the
-  configuration, and initialises a repository where nothing is yet, all through
+  configuration, and initializes a repository where nothing is yet, all through
   the daemon's API (components/web-ui.md §4.4). A request carries the password a
   person typed: no answer carries it back, and what the configuration keeps is
   the settings as written, a secret reference included (I4). A repository's
@@ -11,13 +11,13 @@ Feature: Repositories over HTTP
     Given Ladderback is serving on loopback with no repositories
 
   Scenario: Testing a repository over HTTP reports its ID and saves nothing
-    Given an initialised repository
+    Given an initialized repository
     When the client tests the repository
     Then the answer has status 200 and the repository's ID
     And the daemon lists no repositories
 
   Scenario: Testing with a wrong password is refused as a password not accepted, and saves nothing
-    Given an initialised repository
+    Given an initialized repository
     And the client uses the wrong password
     When the client tests the repository
     Then the refusal has status 503 and the typed code "password-not-accepted"
@@ -48,40 +48,40 @@ Feature: Repositories over HTTP
     And the daemon lists no repositories
 
   Scenario: Connecting a repository adds it to the list, without its password
-    Given an initialised repository
+    Given an initialized repository
     When the client connects it as "demo"
     Then the answer has status 201 and the repository's ID
     And the daemon lists the repository "demo" at the location, its password stored inline
     And no answer holds the password
 
   Scenario: A password stored in the config is listed with a warning that names the setting, not the value
-    Given an initialised repository
+    Given an initialized repository
     When the client connects it as "demo"
     Then the daemon lists the repository "demo" with a warning that its password is written in the config
     And no answer holds the password
 
   Scenario: Connecting over HTTP with an alias already used is refused
-    Given an initialised repository
+    Given an initialized repository
     And the client has connected it as "demo"
     When the client connects it as "demo"
     Then the refusal has status 409 and the typed code "repository-alias-taken"
     And the daemon lists 1 repository
 
   Scenario: Connecting under an alias that is not a name is refused
-    Given an initialised repository
+    Given an initialized repository
     When the client connects it as "Not A Name"
     Then the refusal has status 422 and the typed code "repository-alias-invalid"
     And the daemon lists no repositories
 
   Scenario: Connecting a repository with a wrong password is refused as a password not accepted, and saves nothing
-    Given an initialised repository
+    Given an initialized repository
     And the client uses the wrong password
     When the client connects it as "demo"
     Then the refusal has status 503 and the typed code "password-not-accepted"
     And the daemon lists no repositories
 
   Scenario: A password file that is not there is refused with a code of its own
-    Given an initialised repository
+    Given an initialized repository
     And the client's password is in a file that is not there
     When the client connects it as "demo"
     Then the refusal has status 422 and the typed code "secret-missing"
@@ -89,12 +89,12 @@ Feature: Repositories over HTTP
     And the daemon lists no repositories
 
   Scenario: Two repositories connected at the same moment are both kept
-    Given two initialised repositories
+    Given two initialized repositories
     When the client connects one as "first" and the other as "second" at the same moment
     Then the daemon lists 2 repositories
 
   Scenario: A password file stays a reference, in the saved config and in the list
-    Given an initialised repository
+    Given an initialized repository
     And the client's password is in a file
     When the client connects it as "demo"
     Then the daemon's config file doesn't hold "demo-password"
@@ -102,7 +102,7 @@ Feature: Repositories over HTTP
     And the daemon lists the repository "demo" with no warnings
 
   Scenario: A password file other users can read is used, and the daemon's log says so by its path and mode
-    Given an initialised repository
+    Given an initialized repository
     And the client's password is in a file other users can read
     When the client tests the repository
     Then the answer has status 200 and the repository's ID
@@ -110,62 +110,62 @@ Feature: Repositories over HTTP
     And the daemon's log never holds the password
 
   Scenario: A password file other users can change is used, and the daemon's log says so by its path and mode
-    Given an initialised repository
+    Given an initialized repository
     And the client's password is in a file other users can change
     When the client tests the repository
     Then the answer has status 200 and the repository's ID
     And the daemon's log warns that other users can change the password file, of mode "0620"
     And the daemon's log never holds the password
 
-  Scenario: Initialising a new local repository gives it an ID and saves nothing
+  Scenario: Initializing a new local repository gives it an ID and saves nothing
     Given an empty repository location
-    When the client initialises the repository
+    When the client initializes the repository
     Then the answer has status 201 and the repository's ID, not saved
     And the repository at the location opens with the password
     And the daemon lists no repositories
 
-  Scenario: Initialising as an alias saves the repository too
+  Scenario: Initializing as an alias saves the repository too
     Given an empty repository location
-    When the client initialises the repository as "fresh"
+    When the client initializes the repository as "fresh"
     Then the answer has status 201 and the repository's ID, saved
     And the daemon lists the repository "fresh" at the location, its password stored inline
 
-  Scenario: Initialising under an alias already used is refused and creates nothing
-    Given an initialised repository
+  Scenario: Initializing under an alias already used is refused and creates nothing
+    Given an initialized repository
     And the client has connected it as "demo"
     And the client's repository is at another, empty location
-    When the client initialises the repository as "demo"
+    When the client initializes the repository as "demo"
     Then the refusal has status 409 and the typed code "repository-alias-taken"
     And the repository is unchanged
     And the daemon lists 1 repository
 
-  Scenario: Initialising over HTTP where a repository already exists is refused, and the repository is unchanged
-    Given an initialised repository
-    When the client initialises the repository
+  Scenario: Initializing over HTTP where a repository already exists is refused, and the repository is unchanged
+    Given an initialized repository
+    When the client initializes the repository
     Then the refusal has status 409 and the typed code "repository-exists"
     And the repository is unchanged
     And no answer holds the password
 
-  Scenario: Initialising at a server that refuses the credentials says so, and saves nothing
+  Scenario: Initializing at a server that refuses the credentials says so, and saves nothing
     Given a REST server that refuses the credentials the client sends it
-    When the client initialises the repository
+    When the client initializes the repository
     Then the refusal has status 503 and the typed code "credentials-refused"
     And no answer holds the password
     And no answer shows "canary-wrong-secret"
     And the daemon lists no repositories
 
-  Scenario: Initialising a hot/cold repository whose hot half's server refuses the credentials names that half, and writes nothing
+  Scenario: Initializing a hot/cold repository whose hot half's server refuses the credentials names that half, and writes nothing
     Given an empty repository location whose hot half is on a REST server that refuses the credentials the client sends it
-    When the client initialises the repository
+    When the client initializes the repository
     Then the refusal has status 503 and the typed code "credentials-refused"
     And the refusal names the hot half
     And the repository location holds nothing
     And no answer shows "canary-wrong-secret"
     And the daemon lists no repositories
 
-  Scenario: A new hot/cold repository is initialised in both halves over HTTP
+  Scenario: A new hot/cold repository is initialized in both halves over HTTP
     Given an empty hot/cold repository location
-    When the client initialises the repository
+    When the client initializes the repository
     Then the answer has status 201 and the repository's ID, not saved
     And the hot and the cold half each hold the repository's config
 

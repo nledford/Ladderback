@@ -147,7 +147,7 @@ async fn is_queued(agent: &mut Agent, kind: String, repository: String) {
     agent.maintenance.queued = Some(op);
 }
 
-#[given(regex = r"^the running operation (succeeds with warnings|succeeds|fails|is cancelled)$")]
+#[given(regex = r"^the running operation (succeeds with warnings|succeeds|fails|is canceled)$")]
 async fn running_operation_ends(agent: &mut Agent, ending: String) {
     let mut op = agent.maintenance.running().clone();
     let ended = match ending.as_str() {
@@ -163,7 +163,7 @@ async fn running_operation_ends(agent: &mut Agent, ending: String) {
             op.succeed(at(70))
         }
         "fails" => op.fail(FailureReason::EngineExited { exit_code: Some(1) }, at(70)),
-        "is cancelled" => op.cancel(at(70)),
+        "is canceled" => op.cancel(at(70)),
         other => panic!("the scenario ends an operation in a way that doesn't exist: {other}"),
     };
     ended.expect("a running operation ends");

@@ -1893,7 +1893,7 @@ async fn a_resumed_run_waiting_for_its_keyring_can_be_canceled() {
             http_adapter::Canceller::Session,
         )
         .await;
-    assert_eq!(cancel, Ok(()), "the waiting run can be cancelled");
+    assert_eq!(cancel, Ok(()), "the waiting run can be canceled");
     tokio::time::timeout(std::time::Duration::from_secs(5), async {
         loop {
             let history = store
@@ -1911,7 +1911,7 @@ async fn a_resumed_run_waiting_for_its_keyring_can_be_canceled() {
         }
     })
     .await
-    .expect("the queued backup ends cancelled");
+    .expect("the queued backup ends canceled");
     assert_eq!(clock.sleepers(), 0, "the wait for the keyring stopped");
     assert_eq!(jobs(&scripted), 0, "the engine was never asked");
 }
@@ -1941,7 +1941,7 @@ async fn a_cancel_as_a_resumed_runs_wait_ends_ends_it_canceled() {
             http_adapter::Canceller::Session,
         )
         .await;
-    assert_eq!(cancel, Ok(()), "the waiting run can be cancelled");
+    assert_eq!(cancel, Ok(()), "the waiting run can be canceled");
     runner
         .after_wait(
             queued.clone(),

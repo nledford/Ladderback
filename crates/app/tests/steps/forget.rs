@@ -1149,7 +1149,7 @@ async fn check(agent: &mut Agent) {
     run_maintenance(agent, MaintenanceKind::Check).await;
 }
 
-#[when("the owner checks the repository after cancelling it")]
+#[when("the owner checks the repository after canceling it")]
 async fn check_after_cancel(agent: &mut Agent) {
     let use_case = use_case(agent);
     let prepared = assess_and_start(&use_case, operation_id(0xcc), MaintenanceKind::Check)

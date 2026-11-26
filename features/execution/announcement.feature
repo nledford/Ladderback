@@ -32,11 +32,11 @@ Feature: Announcing how an operation started and ended
     Then the page hears the operation failed with the code "engine-exited"
     And the history the page read holds the operation as it ended
 
-  Scenario: A page hears that an operation was cancelled
+  Scenario: A page hears that an operation was canceled
     Given the engine will complete the operation in 10 steps of 1 minute each
-    When the agent runs the operation after the user has cancelled it
-    Then the operation ends as cancelled
-    And the page hears the operation was cancelled
+    When the agent runs the operation after the user has canceled it
+    Then the operation ends as canceled
+    And the page hears the operation was canceled
 
   Scenario Outline: A log that can't take the end doesn't keep the page from hearing it
     Given the log <fault> the write of the operation's end

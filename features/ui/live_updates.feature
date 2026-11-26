@@ -90,7 +90,7 @@ Feature: Live updates can be paused
     And I press Enter
     And I press Tab until focus is on the button "Cancel demo-home"
     And I press Enter
-    Then the polite region comes to contain "Backup cancelled."
+    Then the polite region comes to contain "Backup canceled."
     And the row "demo-home" of the table "Operations" keeps showing "Running" in its "Status" column
     When I press Shift+Tab until focus is on the button "Sort by started"
     And I press Enter
@@ -98,7 +98,7 @@ Feature: Live updates can be paused
     When I press Shift+Tab until focus is on the button "Pause live updates"
     And I press Enter
     Then the polite region reads "Live updates are on again. No run ended while they were paused."
-    And the row "demo-home" of the table "Operations" shows "Cancelled" in its "Status" column
+    And the row "demo-home" of the table "Operations" shows "Canceled" in its "Status" column
 
   Scenario: Leaving a paused page ends the pause
     Given a demo plan "demo-home" with a scratch repository

@@ -542,7 +542,7 @@ Feature: Repositories page
     And I press Enter
     Then focus is on the main heading "Repositories"
     And the page shows an error alert containing "did not accept its configuration file"
-    And the page shows an error alert containing "line 6: repositories.demo.colour"
+    And the page shows an error alert containing "line 6: repositories.demo.color"
     And the assertive region comes to contain "did not accept its configuration file"
     And the alert marks the sender's words as English
     And the page doesn't show "demo-password"

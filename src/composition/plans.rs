@@ -250,8 +250,8 @@ plans = ["home"]
                 invalid("schedule.cron", PlanProblem::Invalid),
             ),
             (
-                with("colour", json!("red")),
-                invalid("colour", PlanProblem::UnknownKey),
+                with("color", json!("red")),
+                invalid("color", PlanProblem::UnknownKey),
             ),
             (
                 with("sources", json!("/p")),

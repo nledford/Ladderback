@@ -344,7 +344,7 @@ fn hears_warnings(agent: &mut Agent, count: usize) {
     );
 }
 
-#[then("the page hears the operation was cancelled")]
+#[then("the page hears the operation was canceled")]
 fn hears_cancel(agent: &mut Agent) {
     let operation = agent.operation();
     assert_eq!(

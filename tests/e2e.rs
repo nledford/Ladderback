@@ -490,7 +490,7 @@ async fn blocking<T: Send + 'static>(work: impl FnOnce() -> T + Send + 'static) 
         Ok(done) => done,
         Err(error) => match error.try_into_panic() {
             Ok(panic) => std::panic::resume_unwind(panic),
-            Err(error) => panic!("the blocking step's thread was cancelled: {error}"),
+            Err(error) => panic!("the blocking step's thread was canceled: {error}"),
         },
     }
 }

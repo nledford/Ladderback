@@ -823,7 +823,7 @@ mod tests {
             "{events:?}"
         );
         let snapshots = std::fs::read_dir(dir.path().join("repo/snapshots")).unwrap();
-        assert_eq!(snapshots.count(), 0, "a cancelled backup wrote a snapshot");
+        assert_eq!(snapshots.count(), 0, "a canceled backup wrote a snapshot");
     }
 
     /// A backup's snapshot names the program and the build the worker was

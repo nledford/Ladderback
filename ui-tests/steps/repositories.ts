@@ -106,7 +106,7 @@ Given(
     ];
     assert.ok(line > head.length, `the mistake can be no earlier than line ${head.length + 1}`);
     const notes = Array.from({ length: line - head.length - 1 }, () => "# A note of the person's own.");
-    const file = [...head, ...notes, 'colour = "red"', ""].join("\n");
+    const file = [...head, ...notes, 'color = "red"', ""].join("\n");
     await writeFile(path.join(own.scratch, "config", "config.toml"), file);
   },
 );

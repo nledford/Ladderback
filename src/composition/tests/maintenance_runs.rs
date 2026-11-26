@@ -395,7 +395,7 @@ async fn a_maintenance_run_canceled_after_its_start_is_announced_to_no_page_and_
     assert_eq!(
         ends_heard_when_done(&runner, &mut heard).await,
         [],
-        "the page was told how a cancelled run ended"
+        "the page was told how a canceled run ended"
     );
     let operation = operation_of(&id).expect("the answer is an operation ID");
     assert_eq!(ended(&runner, operation).await, OperationStatus::Canceled);
@@ -431,12 +431,12 @@ async fn a_maintenance_start_refused_for_a_busy_repository_is_announced_to_no_pa
     runner
         .cancel(running, http_adapter::Canceller::Session)
         .await
-        .expect("the run that holds the repository is cancelled");
+        .expect("the run that holds the repository is canceled");
 
     assert_eq!(
         ends_heard_when_done(&runner, &mut heard).await,
         [],
-        "the page was told how a run ended: the refused one began none, and the one cancelled is no news"
+        "the page was told how a run ended: the refused one began none, and the one canceled is no news"
     );
 }
 

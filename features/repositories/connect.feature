@@ -1,6 +1,6 @@
 @repositories
 Feature: Connecting a repository
-  The agent initialises a repository where nothing is yet, tests one that is
+  The agent initializes a repository where nothing is yet, tests one that is
   there, and connects one by saving it into its configuration once its test
   passed. A repository the configuration already names, such as one an
   imported profile added, is created where its entry says, with the entry's
@@ -55,16 +55,16 @@ Feature: Connecting a repository
     When the agent connects it as "demo"
     Then the agent has the repository "demo" configured with the repository's ID
 
-  Scenario: Initialising where the agent has a repository under another name is refused
+  Scenario: Initializing where the agent has a repository under another name is refused
     Given a repository the engine identifies
     And the agent has the repository "demo" configured with its settings
-    When the agent initialises the repository as "other"
+    When the agent initializes the repository as "other"
     Then the request is refused because the repository is configured as "demo"
     And the agent has one repository configured
 
-  Scenario: Initialising keeps the new repository's ID in the configuration
+  Scenario: Initializing keeps the new repository's ID in the configuration
     Given a repository the engine identifies
-    When the agent initialises the repository as "demo"
+    When the agent initializes the repository as "demo"
     Then the agent has the repository "demo" configured with the repository's ID
 
   Scenario: Connecting a repository whose test fails leaves the config unchanged
@@ -73,26 +73,26 @@ Feature: Connecting a repository
     Then the connection fails
     And the agent has no repository configured
 
-  Scenario: Initialising saves the repository only when an alias is given
+  Scenario: Initializing saves the repository only when an alias is given
     Given a repository the engine identifies
-    When the agent initialises the repository
-    Then the initialisation reports the repository's ID
+    When the agent initializes the repository
+    Then the initialization reports the repository's ID
     And the agent has no repository configured
-    When the agent initialises the repository as "demo"
+    When the agent initializes the repository as "demo"
     Then the agent has the repository "demo" configured with its settings
 
   Scenario: Creating a repository under a name asks this agent to maintain it
     Given a repository the engine identifies
-    When the agent initialises the repository as "demo"
+    When the agent initializes the repository as "demo"
     Then the repository "demo" asks this agent to maintain it
 
-  Scenario: Creating a saved repository initialises it where its entry says, and records only its new ID in the entry
+  Scenario: Creating a saved repository initializes it where its entry says, and records only its new ID in the entry
     Given a location the engine finds empty
     And the agent has the repository "demo" configured with its settings, backed up to by the plan "demo-home"
     And the latest operation of the plan "demo-home" failed because no repository is there
     When the agent creates the saved repository "demo"
     Then the creation reports the repository's ID
-    And the engine looked at the location, then initialised the repository there, with its saved settings
+    And the engine looked at the location, then initialized the repository there, with its saved settings
     And the agent has the repository "demo" configured with the repository's ID
     And the agent has the repository "demo" configured with its settings
     And the repository "demo" asks nobody to maintain it
@@ -103,7 +103,7 @@ Feature: Connecting a repository
     And the latest operation of the plan "demo-home" failed because no repository is there
     When the agent creates the saved repository "demo"
     Then the creation is refused because its row doesn't offer it
-    And the engine initialised no repository
+    And the engine initialized no repository
     And the agent has the repository "demo" configured with no repository ID
 
   Scenario: Creating a saved repository the engine finds there now is refused as already there, and nothing is created
@@ -112,7 +112,7 @@ Feature: Connecting a repository
     And the latest operation of the plan "demo-home" failed because no repository is there
     When the agent creates the saved repository "demo"
     Then the creation is refused because a repository already exists
-    And the engine initialised no repository
+    And the engine initialized no repository
     And the agent has the repository "demo" configured with no repository ID
 
   Scenario: Creating a saved repository whose entry records a repository ID is refused, and nothing runs
@@ -195,43 +195,43 @@ Feature: Connecting a repository
     And the repository's worker was stopped
     And the agent has no repository configured
 
-  Scenario: Initialising a repository that never answers is refused and saves nothing
+  Scenario: Initializing a repository that never answers is refused and saves nothing
     Given a repository the engine never answers
-    When the agent initialises the repository as "demo"
+    When the agent initializes the repository as "demo"
     Then the request is refused because the repository did not answer in time
     And the repository's worker was stopped
     And the agent has no repository configured
 
   @e2e
-  Scenario: Initialising a new local repository gives it an ID
+  Scenario: Initializing a new local repository gives it an ID
     Given an empty repository location
-    When the agent initialises the repository
-    Then the initialisation reports the repository's ID
+    When the agent initializes the repository
+    Then the initialization reports the repository's ID
     And the repository at the location opens with the password
 
   @e2e
-  Scenario: Initialising where a repository already exists is refused, and the repository is unchanged
-    Given an initialised repository
-    When the agent initialises the repository
-    Then the initialisation is refused because a repository already exists
+  Scenario: Initializing where a repository already exists is refused, and the repository is unchanged
+    Given an initialized repository
+    When the agent initializes the repository
+    Then the initialization is refused because a repository already exists
     And the repository is unchanged
 
   @e2e
-  Scenario: A new hot/cold repository is initialised in both halves
+  Scenario: A new hot/cold repository is initialized in both halves
     Given an empty hot/cold repository location
-    When the agent initialises the repository
+    When the agent initializes the repository
     Then both halves hold the repository's config
 
   @e2e
   Scenario: Testing a repository with the right password reports its ID and saves nothing
-    Given an initialised repository
+    Given an initialized repository
     When the agent tests the repository
     Then the test reports the repository's ID
     And the agent has no repository configured
 
   @e2e
   Scenario: Testing a repository with a wrong password fails and saves nothing
-    Given an initialised repository
+    Given an initialized repository
     And the agent uses the wrong password
     When the agent tests the repository
     Then the test fails
@@ -246,14 +246,14 @@ Feature: Connecting a repository
 
   @e2e
   Scenario: Connecting a repository adds it to the config, and the config file lists it
-    Given an initialised repository
+    Given an initialized repository
     When the agent connects it as "demo"
     Then the saved config file gives the repository "demo" the "repository" "{scratch}/repo"
     And the agent has the repository "demo" configured with its settings
 
   @e2e
   Scenario: Secrets stay references in the saved config
-    Given an initialised repository
+    Given an initialized repository
     And the repository's password is in a file
     When the agent connects it as "demo"
     Then the saved config file doesn't hold "demo-password"

@@ -1487,14 +1487,14 @@ ui-operation-finished =
 # adopt, restore or download; any other kind is an operation.
 ui-operation-canceled =
     { $kind ->
-        [backup] Backup cancelled.
-        [forget] Forget cancelled.
-        [prune] Prune cancelled.
-        [check] Check cancelled.
-        [adopt] Adoption cancelled.
-        [restore] Restore cancelled.
-        [download] Download cancelled.
-       *[other] Operation cancelled.
+        [backup] Backup canceled.
+        [forget] Forget canceled.
+        [prune] Prune canceled.
+        [check] Check canceled.
+        [adopt] Adoption canceled.
+        [restore] Restore canceled.
+        [download] Download canceled.
+       *[other] Operation canceled.
     }
 
 # Announced assertively on the Operations page when a run it watched ended
@@ -1555,8 +1555,8 @@ ui-operation-restore-finished =
 # $folder (text): the new folder's path, for folder only. It is shown as it came.
 ui-operation-restore-canceled =
     { $to ->
-        [in-place] In-place restore of { $entry } cancelled.
-       *[folder] Restore of { $entry } to { $folder } cancelled.
+        [in-place] In-place restore of { $entry } canceled.
+       *[folder] Restore of { $entry } to { $folder } canceled.
     }
 
 # Announced assertively on the Operations page when a restore it watched,
@@ -1856,7 +1856,7 @@ ui-status-succeeded-with-warnings = Succeeded with warnings
 ui-status-failed = Failed
 
 # A status label: the operation was canceled.
-ui-status-canceled = Cancelled
+ui-status-canceled = Canceled
 
 # Announced politely when a backup has been asked for.
 ui-backup-started = Backup started.
@@ -2023,10 +2023,10 @@ ui-maintenance-check-more =
 # Said politely, and shown, when a run was canceled. $kind is the wire text of what ran: forget, prune, check or adopt.
 ui-maintenance-canceled =
     { $kind ->
-        [forget] Forget cancelled.
-        [prune] Prune cancelled.
-        [check] Check cancelled.
-       *[adopt] Adoption cancelled.
+        [forget] Forget canceled.
+        [prune] Prune canceled.
+        [check] Check canceled.
+       *[adopt] Adoption canceled.
     }
 
 # Said assertively, and shown, when a run failed. $kind is the wire text of what ran: forget, prune, check or adopt.
@@ -2502,13 +2502,13 @@ ui-restore-finished-into = Restore of { $name } finished. Its files are in { $fo
 
 # Said politely when a restore was canceled. What it wrote before stays.
 # $name (text): the entry restored, as the tree shows it.
-ui-restore-canceled = Restore of { $name } was cancelled. What it wrote before stays.
+ui-restore-canceled = Restore of { $name } was canceled. What it wrote before stays.
 
 # Said politely when a restore into a new folder was canceled, naming that
 # folder. What it wrote before stays there.
 # $name (text): the entry restored, as the tree shows it.
 # $folder (text): the folder made for the restore, its full path on this machine.
-ui-restore-canceled-into = Restore of { $name } was cancelled. What it wrote before stays in { $folder }.
+ui-restore-canceled-into = Restore of { $name } was canceled. What it wrote before stays in { $folder }.
 
 # Said urgently when a restore failed. The Operations page says why.
 # $name (text): the entry restored, as the tree shows it.

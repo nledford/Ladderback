@@ -871,7 +871,7 @@ fn outcome(text: &str) -> RunOutcome {
     match text {
         "failed" => RunOutcome::Failed,
         "succeeded" => RunOutcome::Succeeded,
-        "cancelled" => RunOutcome::Canceled,
+        "canceled" => RunOutcome::Canceled,
         other => panic!("{other:?} is no way for a run to end"),
     }
 }

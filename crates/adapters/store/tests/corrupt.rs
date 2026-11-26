@@ -830,7 +830,7 @@ async fn a_row_this_version_didnt_write_is_reported_as_corrupt() {
         assert_eq!(
             found.map(|found| found.map(|detail| detail.record)),
             Ok(Some(OperationRecord::of(&neighbor, None))),
-            "{}: the neighbour is unaffected",
+            "{}: the neighbor is unaffected",
             case.name
         );
         // A page that holds the row can't be listed.

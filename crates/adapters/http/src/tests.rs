@@ -1754,7 +1754,7 @@ fn mistake() -> (
             ),
             ("line", api::MsgArg::Text("6".to_owned())),
         ],
-        Some("repositories.demo.colour".to_owned()),
+        Some("repositories.demo.color".to_owned()),
     )
 }
 
@@ -1855,7 +1855,7 @@ async fn a_configuration_that_cannot_be_used_is_refused_with_its_code_and_where_
                     "file": {"type": "text", "value": "/etc/ladderback/config.toml"},
                     "line": {"type": "text", "value": "6"},
                 },
-                "detail": "repositories.demo.colour",
+                "detail": "repositories.demo.color",
             }),
             "{path}"
         );

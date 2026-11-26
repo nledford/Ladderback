@@ -153,12 +153,12 @@ fn not_paired(agent: &mut Agent) {
     agent.prune_guard.paired = false;
 }
 
-#[given("the prune is cancelled just as it asks whether it may delete")]
+#[given("the prune is canceled just as it asks whether it may delete")]
 fn canceled_as_it_asks(agent: &mut Agent) {
     agent.prune_guard.cancel_as_it_asks = true;
 }
 
-#[given("the prune is cancelled while the daemon checks whether it may delete")]
+#[given("the prune is canceled while the daemon checks whether it may delete")]
 fn canceled_during_check(agent: &mut Agent) {
     agent.prune_guard.cancel_during_check = true;
 }
@@ -431,7 +431,7 @@ fn failed_lease_lapsed(agent: &mut Agent) {
     );
 }
 
-#[then("the prune was cancelled")]
+#[then("the prune was canceled")]
 fn was_canceled(agent: &mut Agent) {
     assert_eq!(
         agent.prune_guard.finished().operation.status(),

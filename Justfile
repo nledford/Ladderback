@@ -907,7 +907,7 @@ release-pr version='':
     done
     case $state in
         "completed success") ;;
-        "completed cancelled") echo "error: the Release run was cancelled (a push to main can take its place in the queue); run this again" >&2; exit 1 ;;
+        "completed cancelled") echo "error: the Release run was canceled (a push to main can take its place in the queue); run this again" >&2; exit 1 ;;
         "completed "*) echo "error: the Release run failed: gh run view $run --log-failed" >&2; exit 1 ;;
         *) echo "error: the Release run hasn't finished after 45 minutes: gh run view $run" >&2; exit 1 ;;
     esac

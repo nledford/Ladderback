@@ -1006,7 +1006,7 @@ mod tests {
         let outcome = use_case
             .init(op(), &settings(), Some(alias()))
             .await
-            .unwrap_or_else(|e| panic!("the initialisation: {e:?}"));
+            .unwrap_or_else(|e| panic!("the initialization: {e:?}"));
         assert!(outcome.saved);
         assert_eq!(
             config
@@ -1476,13 +1476,13 @@ mod tests {
         let outcome = use_case.init(op(), &settings(), None).await;
         assert!(
             !outcome
-                .unwrap_or_else(|e| panic!("the initialisation: {e:?}"))
+                .unwrap_or_else(|e| panic!("the initialization: {e:?}"))
                 .saved
         );
         use_case
             .init(op(), &settings(), Some(alias()))
             .await
-            .unwrap_or_else(|e| panic!("the initialisation with an alias: {e:?}"));
+            .unwrap_or_else(|e| panic!("the initialization with an alias: {e:?}"));
         let saved = config
             .load()
             .await
@@ -1533,7 +1533,7 @@ mod tests {
         )
         .init(op(), &settings(), Some(alias()))
         .await
-        .unwrap_or_else(|e| panic!("the initialisation: {e:?}"));
+        .unwrap_or_else(|e| panic!("the initialization: {e:?}"));
         let saved = config
             .load()
             .await
@@ -1560,7 +1560,7 @@ mod tests {
         use_case
             .init(op(), &settings(), Some(alias()))
             .await
-            .unwrap_or_else(|e| panic!("the first initialisation: {e:?}"));
+            .unwrap_or_else(|e| panic!("the first initialization: {e:?}"));
         let jobs_before = engine
             .seen
             .lock()
@@ -1579,7 +1579,7 @@ mod tests {
                 .unwrap_or_else(PoisonError::into_inner)
                 .len(),
             jobs_before,
-            "the refused initialisation ran a job, and so created a repository"
+            "the refused initialization ran a job, and so created a repository"
         );
         let saved = config
             .load()
@@ -1606,11 +1606,11 @@ mod tests {
         use_case
             .init(op(), &settings(), None)
             .await
-            .unwrap_or_else(|e| panic!("the initialisation: {e:?}"));
+            .unwrap_or_else(|e| panic!("the initialization: {e:?}"));
         {
             let seen = engine.seen.lock().unwrap_or_else(PoisonError::into_inner);
             let Job::Init(_) = &seen[0] else {
-                panic!("initialising runs Job::Init, got {:?}", seen[0]);
+                panic!("initializing runs Job::Init, got {:?}", seen[0]);
             };
         }
     }

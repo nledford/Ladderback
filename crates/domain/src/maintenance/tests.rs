@@ -855,7 +855,7 @@ fn no_plan_claims_a_group_of_another_folder_host_or_label() {
     let [group] = partition.unmanaged.try_into().expect("one unmanaged group");
     let mut other_host = full_plan("elsewhere", "/home/demo");
     other_host.host = Some(crate::planning::Hostname::parse("other-host").expect("a hostname"));
-    let mut labeled = full_plan("labelled", "/home/demo");
+    let mut labeled = full_plan("labeled", "/home/demo");
     labeled.label = Some("weekly".to_owned());
     let candidates = vec![full_plan("photos", "/srv/photos"), other_host, labeled];
     assert_eq!(

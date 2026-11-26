@@ -14,15 +14,15 @@ Feature: A configuration file with a mistake, read over HTTP
       [repositories.demo]
       repository = "/srv/demo-repo"
       password = "CANARY-inline-password"
-      colour = "CANARY-inline-colour"
+      color = "CANARY-inline-color"
       """
 
   Scenario Outline: Asking to <request> names the line and the setting of a mistake
     When the client asks to <request>
     Then the refusal has status 503 and the typed code "config-invalid"
-    And the refusal names the daemon's config file, line 6 and the setting "repositories.demo.colour"
+    And the refusal names the daemon's config file, line 6 and the setting "repositories.demo.color"
     And no answer shows "CANARY-inline-password"
-    And no answer shows "CANARY-inline-colour"
+    And no answer shows "CANARY-inline-color"
 
     Examples:
       | request                                     |

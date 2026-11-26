@@ -573,7 +573,7 @@ async function main(argv: string[]): Promise<number> {
   for (const signal of ["SIGINT", "SIGTERM"] as const)
     process.once(signal, () => {
       void scratch.close(report).finally(() => {
-        if (report.failed) console.error(report.markdown(`Image smoke test, cancelled: ${image}`));
+        if (report.failed) console.error(report.markdown(`Image smoke test, canceled: ${image}`));
         process.exit(130);
       });
     });

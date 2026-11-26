@@ -14,7 +14,7 @@ use super::Cancel;
 /// How often a size scan still running looks for the cancel.
 const SIZE_POLL: Duration = Duration::from_millis(50);
 
-const CANCELED: &str = "the backup was cancelled";
+const CANCELED: &str = "the backup was canceled";
 
 /// A source that, once the cancel is asked for, lists nothing more, opens
 /// nothing more, reads nothing more from a file already open, and gives up

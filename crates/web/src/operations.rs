@@ -928,7 +928,7 @@ mod tests {
         let english_of = |kind, status| english(&ended(kind, status).1);
         assert_eq!(english_of("check", "succeeded"), "Check finished.");
         assert_eq!(english_of("prune", "failed"), "Prune failed.");
-        assert_eq!(english_of("backup", "cancelled"), "Backup cancelled.");
+        assert_eq!(english_of("backup", "cancelled"), "Backup canceled.");
     }
 
     /// The end of a restore or a download the page watched is told as a
@@ -937,10 +937,10 @@ mod tests {
     fn the_end_of_a_restore_or_a_download_is_announced_as_what_ran() {
         for (kind, status, english_end) in [
             ("restore", "succeeded", "Restore finished."),
-            ("restore", "cancelled", "Restore cancelled."),
+            ("restore", "cancelled", "Restore canceled."),
             ("restore", "failed", "Restore failed."),
             ("download", "succeeded", "Download finished."),
-            ("download", "cancelled", "Download cancelled."),
+            ("download", "cancelled", "Download canceled."),
             ("download", "failed", "Download failed."),
         ] {
             let mut run = summary(kind, "", Some("demo"), None);
@@ -1005,7 +1005,7 @@ mod tests {
             (
                 into_folder(),
                 "cancelled",
-                "Restore of /home/docs to /srv/restore/laptop-3f2a1b4c cancelled.",
+                "Restore of /home/docs to /srv/restore/laptop-3f2a1b4c canceled.",
             ),
             (
                 into_folder(),
@@ -1020,7 +1020,7 @@ mod tests {
             (
                 api::RestoredToDto::InPlace,
                 "cancelled",
-                "In-place restore of /home/docs cancelled.",
+                "In-place restore of /home/docs canceled.",
             ),
             (
                 api::RestoredToDto::InPlace,

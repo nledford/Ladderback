@@ -3,7 +3,7 @@ Feature: Import a rustic profile
   what to back up, how much history to keep, hooks. `ladderback import-profile`
   reads that file and adds the repository and a plan for each snapshot entry
   to the agent's configuration (technical design §6.2). A profile is input
-  nobody vetted, so the import takes only what Ladderback can honour exactly,
+  nobody vetted, so the import takes only what Ladderback can honor exactly,
   says what it left out, and refuses what it could only guess at: the
   configuration changes whole, or not at all.
 
@@ -1038,7 +1038,7 @@ Feature: Import a rustic profile
       And the import never shows "hc.example"
 
   @e2e
-  Rule: What Ladderback does not carry over is said, and what it cannot honour is refused
+  Rule: What Ladderback does not carry over is said, and what it cannot honor is refused
 
     Scenario: Sections of other purposes are left out one notice each
       Given a rustic profile "nas.toml" holding:

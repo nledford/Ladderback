@@ -514,7 +514,7 @@ fn word(status: &OperationStatus) -> &'static str {
         OperationStatus::Succeeded => "succeeded",
         OperationStatus::SucceededWithWarnings => "succeeded with warnings",
         OperationStatus::Failed { .. } => "failed",
-        OperationStatus::Canceled => "cancelled",
+        OperationStatus::Canceled => "canceled",
     }
 }
 

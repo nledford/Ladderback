@@ -387,7 +387,7 @@ async fn check_runs(agent: &mut Agent, named: String) {
     agent.finished = Some(use_case.execute(prepared, future::pending()).await);
 }
 
-#[when(expr = "a check of {string} is cancelled while it reads the stats")]
+#[when(expr = "a check of {string} is canceled while it reads the stats")]
 async fn check_canceled_while_reading(agent: &mut Agent, named: String) {
     demo(agent, &named).await;
     let (asked, stats_asked) = oneshot::channel();
@@ -412,7 +412,7 @@ async fn check_canceled_while_reading(agent: &mut Agent, named: String) {
     agent.finished = Some(
         run.as_mut()
             .now_or_never()
-            .expect("the check ends once it is cancelled"),
+            .expect("the check ends once it is canceled"),
     );
 }
 

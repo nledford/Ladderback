@@ -1461,7 +1461,7 @@ mod tests {
         cancel.send(()).expect("the run waits for a cancel");
         let finished = tokio::time::timeout(BOUND, running)
             .await
-            .expect("the run ends once cancelled")
+            .expect("the run ends once canceled")
             .expect("the run ends without a panic");
         assert_eq!(finished.operation.status(), &OperationStatus::Canceled);
         tokio::time::timeout(BOUND, next.turn())

@@ -234,7 +234,7 @@ impl Agent {
     }
 }
 
-#[when("the agent runs the operation after the user has cancelled it")]
+#[when("the agent runs the operation after the user has canceled it")]
 async fn run_after_cancel(agent: &mut Agent) {
     agent.run_operation_until(futures::future::ready(())).await;
 }

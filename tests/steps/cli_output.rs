@@ -25,7 +25,7 @@ const START_TIMEOUT: Duration = Duration::from_secs(60);
 /// What the daemon says once it is up, in English.
 const LISTENING: &str = "listening on http://";
 
-#[given("colour is forced on")]
+#[given("color is forced on")]
 fn color_is_forced(agent: &mut Agent) {
     agent
         .interop
@@ -369,13 +369,13 @@ fn output_is_plain(agent: &mut Agent) {
     );
 }
 
-#[then("the output has colour")]
+#[then("the output has color")]
 fn output_has_color(agent: &mut Agent) {
     let said = said(agent);
     // The start of a control sequence that sets a style.
     assert!(
         said.contains("\u{1b}["),
-        "the output has no colour: {said:?}"
+        "the output has no color: {said:?}"
     );
 }
 

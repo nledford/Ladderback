@@ -21,8 +21,8 @@ Feature: Keeping a repository's password in the system keyring
 
   Scenario: Creating a repository under a name with the password kept in the keyring saves a reference to the entry
     Given a repository the engine identifies
-    When the agent initialises the repository as "demo", keeping the password in the keyring
-    Then the engine initialised the repository with the typed password
+    When the agent initializes the repository as "demo", keeping the password in the keyring
+    Then the engine initialized the repository with the typed password
     And the keyring entry "ladderback/demo" holds the typed password
     And the agent has the repository "demo" configured with its password read from the keyring entry "ladderback/demo"
 
@@ -36,7 +36,7 @@ Feature: Keeping a repository's password in the system keyring
   Scenario: Where there is no keyring, creating with the password kept in it is refused before anything is created
     Given a repository the engine identifies
     And a machine with no keyring service
-    When the agent initialises the repository as "demo", keeping the password in the keyring
+    When the agent initializes the repository as "demo", keeping the password in the keyring
     Then the request is refused because there is no keyring to keep the password in
     And the engine ran no job
     And the agent has no repository configured
@@ -84,22 +84,22 @@ Feature: Keeping a repository's password in the system keyring
 
   Scenario: A creation that fails removes the keyring entry it added
     Given a location that already holds a repository
-    When the agent initialises the repository as "demo", keeping the password in the keyring
-    Then the initialisation is refused because a repository already exists
+    When the agent initializes the repository as "demo", keeping the password in the keyring
+    Then the initialization is refused because a repository already exists
     And the keyring has no entry "ladderback/demo"
     And the agent has no repository configured
 
   Scenario: A creation that fails leaves a keyring entry that was there before
     Given a location that already holds a repository
     And the keyring entry "ladderback/demo" holds the typed password
-    When the agent initialises the repository as "demo", keeping the password in the keyring
-    Then the initialisation is refused because a repository already exists
+    When the agent initializes the repository as "demo", keeping the password in the keyring
+    Then the initialization is refused because a repository already exists
     And the keyring entry "ladderback/demo" holds the typed password
 
   Scenario: A creation whose settings can't be resolved keeps nothing in the keyring
     Given a repository the engine identifies
     And its location names a variable that is not set
-    When the agent initialises the repository as "demo", keeping the password in the keyring
+    When the agent initializes the repository as "demo", keeping the password in the keyring
     Then the request is refused because a secret can't be read
     And the engine ran no job
     And the keyring has no entry "ladderback/demo"

@@ -11,7 +11,7 @@ async fn a_running_operation_is_canceled_once() {
     tokio::pin!(sleep);
     tokio::select! {
         _ = cancel => {}
-        _ = &mut sleep => panic!("cancelling fired the run's cancel future"),
+        _ = &mut sleep => panic!("canceling fired the run's cancel future"),
     }
     assert!(!registry.cancel(&id), "one handle, one cancel");
     registry.finish(&id);

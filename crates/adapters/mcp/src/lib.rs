@@ -1157,7 +1157,7 @@ fn tools() -> Vec<Tool> {
              finished and the operation as get_operation does; when its warnings are too many \
              to read, none are listed, unlisted-warnings is absent and its warning-codes still \
              name them. Sends progress \
-             notifications when the call asks for them. Cancelling the call stops the wait, not \
+             notifications when the call asks for them. Canceling the call stops the wait, not \
              the operation.",
             input_schema::<WaitArguments>(),
         )
@@ -1167,7 +1167,7 @@ fn tools() -> Vec<Tool> {
         Tool::new(
             CANCEL_OPERATION,
             "Asks a queued or running backup to stop, however it started; it then ends as \
-             cancelled. Maintenance can't be cancelled from here.",
+             canceled. Maintenance can't be canceled from here.",
             input_schema::<CancelArguments>(),
         )
         .with_title("Cancel operation")

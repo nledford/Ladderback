@@ -895,7 +895,7 @@ warning-unknown = The operation reported a problem that this version of { -brand
 
 # A repository already exists where one was to be initialized, so nothing was written.
 # $location (text): where the repository is.
-error-repository-exists = { -brand-name } did not initialise a repository at { $location }, because one is already there. Connect the existing repository instead.
+error-repository-exists = { -brand-name } did not initialize a repository at { $location }, because one is already there. Connect the existing repository instead.
 
 # No repository is at the location: it is a folder on this machine holding nothing of a repository, so nothing was opened or written.
 error-repository-not-found = There is no repository at this location. First check that the drive or location can be reached and is the right one; if it is, you can create the repository there.

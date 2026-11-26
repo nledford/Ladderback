@@ -109,19 +109,19 @@ Feature: Downloading files from a snapshot
     And the agent gives up the downloads whose minute ran out
     Then the hand-over is refused because the download is unknown
     And the engine's download job was stopped
-    And the history shows the download, started by hand, as cancelled
+    And the history shows the download, started by hand, as canceled
 
   # The browser's request can end at any moment, as when the person closes
   # the tab, so giving up a download whose minute ran out is the agent's
   # work, never the request's: none is left running in the history.
-  Scenario: A browser that hangs up after a download's minute leaves it in the history as cancelled
+  Scenario: A browser that hangs up after a download's minute leaves it in the history as canceled
     Given a snapshot "3f2a1b4c" of the host "laptop" in the repository "demo"
     And sign-in is off
     When the person confirms a download of "home/docs/notes.md" of the snapshot, confirming with "3f2a1b4c"
     And 61 seconds pass before the browser fetches it and hangs up while the history is written
     And the agent gives up the downloads whose minute ran out
     Then the engine's download job was stopped
-    And the history shows the download, started by hand, as cancelled
+    And the history shows the download, started by hand, as canceled
 
   # A busy disk can be slow to take the history's writes. The downloads
   # whose minute ran out are all stopped and their turns given back before
@@ -135,7 +135,7 @@ Feature: Downloading files from a snapshot
     And the agent starts giving up the downloads whose minute ran out
     Then the engine's jobs of both downloads were stopped before the history wrote either
     When the history takes its writes again
-    Then the history shows both downloads, started by hand, as cancelled
+    Then the history shows both downloads, started by hand, as canceled
 
   # A download being confirmed first gives up the downloads whose minute
   # ran out. It takes its own turn before their history is written, so a
@@ -155,7 +155,7 @@ Feature: Downloading files from a snapshot
     And sign-in is off
     When the person downloads "home/docs" of the snapshot as zip, confirming with "3f2a1b4c", and the browser goes away after the first piece
     Then the engine's download job was stopped
-    And the history shows the download, started by hand, as cancelled
+    And the history shows the download, started by hand, as canceled
     And a new download can start at once
 
   # A file goes with its size, and an HTTP server reads nothing more of a

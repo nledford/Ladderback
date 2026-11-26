@@ -450,7 +450,7 @@ async fn a_body_that_is_not_a_proposal_is_refused_unread() {
     for body in [
         "not json",
         r#"{"changes":[{"kind":"rename-plan","plan":"home"}]}"#,
-        r#"{"changes":[],"colour":"red"}"#,
+        r#"{"changes":[],"color":"red"}"#,
         r#"{"rationale":"no changes key"}"#,
     ] {
         let response = daemon.send(post("/api/v1/proposals", &auth, body)).await;
@@ -683,7 +683,7 @@ async fn an_approval_or_rejection_that_is_not_one_is_refused_unread() {
         ("approve", r#"{"revision":"aaaa","diff-hash":"bbbb"}"#),
         (
             "approve",
-            r#"{"revision":"aaaa","diff-hash":"bbbb","confirmation":"x","colour":"red"}"#,
+            r#"{"revision":"aaaa","diff-hash":"bbbb","confirmation":"x","color":"red"}"#,
         ),
         ("reject", r#"{"reasons":"none"}"#),
         ("reject", "{}"),

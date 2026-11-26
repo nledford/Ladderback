@@ -213,7 +213,7 @@ async fn a_canceled_restart_lets_go_of_the_hold_and_never_comes() {
     work.running.store(0, Ordering::SeqCst);
     // Past a recheck, which would find nothing running.
     tokio::time::sleep(super::IDLE_RECHECK * 2).await;
-    assert!(!due.is_finished(), "the cancelled restart came");
+    assert!(!due.is_finished(), "the canceled restart came");
     // Canceled twice, or with none asked for: nothing to cancel.
     let (status, _) = send(&restart, delete()).await;
     assert_eq!(status, StatusCode::OK);
@@ -247,7 +247,7 @@ async fn a_restart_that_has_come_is_not_canceled() {
     assert_eq!(due_now(&restart), Some(RestartAsker::SignInOff));
     let (status, body) = send(&restart, delete()).await;
     assert_eq!(status, StatusCode::OK);
-    assert_eq!(body["pending"], true, "Settings says it was cancelled");
+    assert_eq!(body["pending"], true, "Settings says it was canceled");
     assert!(work.held.load(Ordering::SeqCst), "the hold was let go");
     assert_eq!(due_now(&restart), Some(RestartAsker::SignInOff));
 }

@@ -263,7 +263,7 @@ pub(crate) async fn cancel(
     }
     if state.restart.cancel() {
         log::info!(
-            "the restart that waited was cancelled ({}); queued operations start again",
+            "the restart that waited was canceled ({}); queued operations start again",
             canceled_by(asker_of(session.as_ref()))
         );
     }

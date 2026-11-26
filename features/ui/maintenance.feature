@@ -8,7 +8,7 @@ Feature: Maintenance of a repository on the Snapshots page
   this run started with a demo plan and a scratch repository, so every
   backup, forget and prune they start is real. Maintenance from this agent
   is turned on or off on the same page, each after a dialog that says what
-  it means. Unmanaged history and cancelling a running maintenance are not
+  it means. Unmanaged history and canceling a running maintenance are not
   tried here.
 
   Scenario: The snapshots page groups a repository's history under its plan
@@ -602,7 +602,7 @@ Feature: Maintenance of a repository on the Snapshots page
     And I press Enter
     Then focus is on the main heading "Snapshots"
     And the page shows an error alert containing "did not accept its configuration file"
-    And the page shows an error alert containing "line 6: repositories.demo.colour"
+    And the page shows an error alert containing "line 6: repositories.demo.color"
     And the assertive region comes to contain "did not accept its configuration file"
     And the alert marks the sender's words as English
     And the page doesn't show "demo-password"

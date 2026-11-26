@@ -258,26 +258,23 @@ Then("the tab {string} is as wide as it is bold, so choosing it moves no tab", a
 
 // The rules under tabs side by side join into one unbroken line: no gap
 // between neighbors on a line, in either reading direction.
-Then(
-  "the tabs of the list of the tab {string} touch their neighbours on each line",
-  async function (this: BrowserWorld, name: string) {
-    const boxes = await listOf(this, name).evaluate((element) =>
-      Array.from(element.querySelectorAll('[role="tab"]'), (each) => {
-        const box = each.getBoundingClientRect();
-        return { name: (each.textContent ?? "").trim(), top: box.top, left: box.left, right: box.right };
-      }),
-    );
-    const pairs = boxes.slice(1).flatMap((b, i) => {
-      const a = boxes[i];
-      return a && Math.abs(a.top - b.top) <= 0.5 ? [[a, b] as const] : [];
-    });
-    assert.ok(pairs.length > 0, `no two tabs of the list of the tab "${name}" share a line`);
-    for (const [a, b] of pairs) {
-      const gap = Math.min(Math.abs(a.right - b.left), Math.abs(b.right - a.left));
-      assert.ok(gap <= 0.5, `the tabs "${a.name}" and "${b.name}" stand ${gap}px apart`);
-    }
-  },
-);
+Then("the tabs of the list of the tab {string} touch their neighbors on each line", async function (this: BrowserWorld, name: string) {
+  const boxes = await listOf(this, name).evaluate((element) =>
+    Array.from(element.querySelectorAll('[role="tab"]'), (each) => {
+      const box = each.getBoundingClientRect();
+      return { name: (each.textContent ?? "").trim(), top: box.top, left: box.left, right: box.right };
+    }),
+  );
+  const pairs = boxes.slice(1).flatMap((b, i) => {
+    const a = boxes[i];
+    return a && Math.abs(a.top - b.top) <= 0.5 ? [[a, b] as const] : [];
+  });
+  assert.ok(pairs.length > 0, `no two tabs of the list of the tab "${name}" share a line`);
+  for (const [a, b] of pairs) {
+    const gap = Math.min(Math.abs(a.right - b.left), Math.abs(b.right - a.left));
+    assert.ok(gap <= 0.5, `the tabs "${a.name}" and "${b.name}" stand ${gap}px apart`);
+  }
+});
 
 // On a wrapped row the list's rule is under the last line only, so each
 // tab carries its own stretch of it: a tab selected on an earlier line

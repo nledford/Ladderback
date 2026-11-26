@@ -82,7 +82,7 @@ async fn cancel_once_packs_are_saved(scratch: &Scratch, location: &Location, pac
     while let Some(event) = events.next().await {
         assert!(
             !matches!(event, EngineEvent::Succeeded(_)),
-            "a cancelled backup reported a result: {event:?}"
+            "a canceled backup reported a result: {event:?}"
         );
     }
 }
@@ -122,7 +122,7 @@ async fn a_canceled_backup_leaves_its_packs_indexed_and_no_snapshot(
         assert_eq!(
             snapshots,
             0,
-            "a cancelled backup wrote a snapshot to {}",
+            "a canceled backup wrote a snapshot to {}",
             half.display()
         );
     }
@@ -282,7 +282,7 @@ async fn a_backup_whose_events_nobody_reads_still_leaves_its_packs_indexed(by: S
         }
     }
     let snapshots = fs::read_dir(scratch.repo_dir().join("snapshots")).map_or(0, |f| f.count());
-    assert_eq!(snapshots, 0, "a cancelled backup wrote a snapshot");
+    assert_eq!(snapshots, 0, "a canceled backup wrote a snapshot");
     let findings = findings(&location);
     assert!(findings.is_empty(), "{findings:#?}");
     assert!(

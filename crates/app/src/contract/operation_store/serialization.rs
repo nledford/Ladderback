@@ -215,7 +215,7 @@ async fn a_repository_is_free_again_once_its_operation_has_ended(store: &dyn Ope
         ("failed", |op| {
             failed(op, FailureReason::EngineExited { exit_code: Some(1) })
         }),
-        ("was cancelled", canceled),
+        ("was canceled", canceled),
     ];
     for (number, (how, end)) in (0_u8..).zip(endings) {
         let Some(repository) = numbered(0x40 + number) else {
@@ -338,7 +338,7 @@ async fn only_a_running_operation_can_be_started(store: &dyn OperationStore) {
                 "failed",
                 failed(on_it(3), FailureReason::EngineExited { exit_code: Some(1) }),
             ),
-            ("cancelled", canceled(on_it(4))),
+            ("canceled", canceled(on_it(4))),
         ];
         for (state, op) in ops {
             let decided = store.try_start(&op).await;

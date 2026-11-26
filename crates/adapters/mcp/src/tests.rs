@@ -2526,7 +2526,7 @@ async fn canceling_a_wait_stops_the_wait_and_never_the_operation() {
     let after = *reads.lock().unwrap();
     assert!(
         after <= 2,
-        "the wait went on after its call was cancelled: {after} reads"
+        "the wait went on after its call was canceled: {after} reads"
     );
     assert!(cancels.lock().unwrap().is_empty(), "{cancels:?}");
     // Its answer is dropped, so the detail isn't read for it.
@@ -2536,7 +2536,7 @@ async fn canceling_a_wait_stops_the_wait_and_never_the_operation() {
     assert!(answer["result"]["tools"].is_array(), "{answer}");
     assert!(
         client.others.iter().all(|message| message["id"] != waiting),
-        "the cancelled call was answered: {:?}",
+        "the canceled call was answered: {:?}",
         client.others
     );
 }

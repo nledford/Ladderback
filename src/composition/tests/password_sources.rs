@@ -108,7 +108,7 @@ async fn the_list_shows_where_each_password_comes_from_and_never_the_password() 
         assert_eq!(row.alias, name);
         assert_eq!(&row.password, shown, "{name}");
     }
-    let wire = serde_json::to_string(&listed).expect("the list serialises");
+    let wire = serde_json::to_string(&listed).expect("the list serializes");
     for secret in ["typed-secret", "hunter2", "hunter3"] {
         assert!(!wire.contains(secret), "{secret} in {wire}");
     }

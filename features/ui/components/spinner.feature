@@ -12,7 +12,7 @@ Feature: The spinner
 
   Scenario: A spinner in a line of text stands on the line's baseline, its drawing centered on the text
     When I open the component gallery
-    Then the spinner labelled "Loading the demo snapshots…" stands in its line of text, its label on the line's baseline and its drawing centered on the text
+    Then the spinner labeled "Loading the demo snapshots…" stands in its line of text, its label on the line's baseline and its drawing centered on the text
 
   Scenario: A spinner whose label is hidden is an image named by its label
     When I open the component gallery
@@ -39,7 +39,7 @@ Feature: The spinner
     When the reader asks for less motion
     Then every spinner of the "Spinner" demo stands still as a row of three dots in its drawing's color, with no arc or track
     And no spinner of the "Spinner" demo moves
-    And the spinner labelled "Loading the demo snapshots…" stands in its line of text, its label on the line's baseline and its drawing centered on the text
+    And the spinner labeled "Loading the demo snapshots…" stands in its line of text, its label on the line's baseline and its drawing centered on the text
     And the "Spinner" demo shows the text "Loading the demo snapshots…" beside a spinner a screen reader skips
     And the "Spinner" demo has the image "Demo spinner at the Medium size"
     And the button "Save the demo notes" holds a spinner a screen reader skips

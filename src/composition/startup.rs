@@ -1277,7 +1277,7 @@ fn untidied_line(dir: &std::path::Path, ended: &tokio::task::JoinError) -> Strin
     let how = if ended.is_panic() {
         "panicked"
     } else {
-        "was cancelled"
+        "was canceled"
     };
     format!(
         "the cache folder {} was not tidied: the tidying {how}",
