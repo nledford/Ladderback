@@ -44,7 +44,7 @@ function demoAnchor(demo: string): string {
 // focus on the demo's heading as it loads, as it does for a section of
 // Settings (`page::focus_when_named`), so a scenario can start at its own demo
 // (technical design §13.7.5). Reaching a demo by its address is navigation,
-// not the keyboard behaviour under test; the walk from its heading to its
+// not the keyboard behavior under test; the walk from its heading to its
 // controls is.
 When("I open the {string} demo", async function (this: BrowserWorld, demo: string) {
   const anchor = demoAnchor(demo);

@@ -164,7 +164,7 @@ struct Case {
     found_by_id: bool,
 }
 
-/// The ID the cases' rows have, and the neighbour's, which is newer.
+/// The ID the cases' rows have, and the neighbor's, which is newer.
 const BAD: u128 = 0x01;
 const GOOD: u128 = 0x7f;
 
@@ -825,7 +825,7 @@ async fn a_row_this_version_didnt_write_is_reported_as_corrupt() {
                 case.column
             );
         }
-        // The neighbour reads as it was saved, however damaged its neighbour.
+        // The neighbor reads as it was saved, however damaged its neighbor.
         let found = store.get(id(GOOD)).await;
         assert_eq!(
             found.map(|found| found.map(|detail| detail.record)),

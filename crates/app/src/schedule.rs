@@ -239,7 +239,7 @@ enum Retrying {
     /// follows.
     Started(RetryScheduled),
     /// Started, and its series ended since by another run of the plan that
-    /// succeeded or was cancelled: its run's end plans nothing more.
+    /// succeeded or was canceled: its run's end plans nothing more.
     Stopped,
 }
 

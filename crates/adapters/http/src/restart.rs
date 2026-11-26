@@ -33,7 +33,7 @@ pub trait Work: Send + Sync {
     /// maintenance run: a restart waits for the running ones, and the queued
     /// ones wait for the daemon that starts next.
     fn hold(&self);
-    /// Lets go of the hold, as a restart cancelled does: the queued
+    /// Lets go of the hold, as a restart canceled does: the queued
     /// operations start again.
     fn release(&self);
     /// How many operations are running.
@@ -147,7 +147,7 @@ impl Restart {
     }
 
     /// What the route says: offered, pending (a restart asked for once the
-    /// running operations finish that hasn't come or been cancelled,
+    /// running operations finish that hasn't come or been canceled,
     /// whatever runs, so Settings says it waits until the daemon stops), and
     /// the running count.
     fn told(&self) -> RestartDto {
@@ -286,7 +286,7 @@ fn asker_of(session: Option<&axum::Extension<SessionOf>>) -> RestartAsker {
     }
 }
 
-/// Who cancelled a restart, as the log says it.
+/// Who canceled a restart, as the log says it.
 fn canceled_by(asker: RestartAsker) -> &'static str {
     match asker {
         RestartAsker::SignedInAdmin => "by the signed-in admin",

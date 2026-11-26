@@ -105,7 +105,7 @@ fn progress_shows_only_while_its_operation_runs() {
     assert_eq!(progress_shown(&[], Some(progress_of(1))), None);
 }
 
-/// A cancelled operation's end, as its reports tell it, hides its progress
+/// A canceled operation's end, as its reports tell it, hides its progress
 /// as any other end does.
 #[test]
 fn a_canceled_operations_progress_is_not_shown() {

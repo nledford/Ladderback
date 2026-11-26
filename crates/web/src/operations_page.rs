@@ -4,7 +4,7 @@
 //! page's `pause.rs`'s; this is the DOM glue, which the `@ui` scenarios of
 //! `features/ui/` run, with the decisions not yet moved out of it (#739): the
 //! order of its rows, what it shows in its table's place, how a status is
-//! badged, and which runs can be cancelled or announce their end, tested on
+//! badged, and which runs can be canceled or announce their end, tested on
 //! the host below.
 
 use std::collections::{HashMap, HashSet};
@@ -153,7 +153,7 @@ pub(crate) fn Operations(localizer: Arc<Localizer>) -> impl IntoView {
     // The end of a run is announced from a status transition, so the events
     // stream and the settle-poll both arrive at one announcement, whichever
     // sees the end first. The first sight of a row only seeds its status.
-    // The end of a run the reader cancelled answers that press, and is said
+    // The end of a run the reader canceled answers that press, and is said
     // even while the page is paused. Any other end, while the page is paused,
     // is counted instead, and the resume tells the count in one sentence.
     let seen = StoredValue::new(HashMap::<String, String>::new());
@@ -402,7 +402,7 @@ pub(crate) fn Operations(localizer: Arc<Localizer>) -> impl IntoView {
 /// and its repository), its status (with a running backup's progress), the
 /// instant it started, in its words in a `<time>` that gives it to a program
 /// (#851), what a run that succeeded produced, and what can be done with it:
-/// a running or queued run can be cancelled. Its rows come in the daemon's
+/// a running or queued run can be canceled. Its rows come in the daemon's
 /// order, newest first, and sort by Started, newest first on the first press
 /// of its button, as that order already is.
 ///
@@ -415,7 +415,7 @@ pub(crate) fn Operations(localizer: Arc<Localizer>) -> impl IntoView {
 ///
 /// What it shows is read from `page`, which holds still while the reader has
 /// paused it; a cancel waits for its end in the live state, as long as the
-/// reader's visit lasts, and puts its run in `cancelled`, so that its end is
+/// reader's visit lasts, and puts its run in `canceled`, so that its end is
 /// said as the answer to the press.
 ///
 /// Its row header takes focus from a script, not from Tab: a control in the
@@ -661,7 +661,7 @@ fn cancel_view(
             let still_waiting = still_waiting.clone();
             let error_localizer = Arc::clone(&error_localizer);
             let cancel_name = cancel_label.clone();
-            // `cancelling` keeps the button busy while the daemon answers
+            // `canceling` keeps the button busy while the daemon answers
             // the cancel; the run's end then takes the button away.
             let canceling = RwSignal::new(false);
             view! {

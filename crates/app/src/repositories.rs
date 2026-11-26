@@ -1,4 +1,4 @@
-//! Repository use cases (technical design §5, components/daemon.md): initialising a
+//! Repository use cases (technical design §5, components/daemon.md): initializing a
 //! repository where nothing is yet, testing one that is there, and connecting
 //! one by saving it into the configuration once its test passes. Each one
 //! resolves the repository's secrets first, so no resolved value is kept past
@@ -29,15 +29,15 @@ use crate::ports::{
 };
 use crate::secrets::{ResolveError, ResolveRepository};
 
-/// Initialises a repository: resolves the settings, then runs a `Job::Init`
-/// against the location. It initialises with default key options, both halves
+/// Initializes a repository: resolves the settings, then runs a `Job::Init`
+/// against the location. It initializes with default key options, both halves
 /// of a hot/cold repository, and refuses when a repository already exists
 /// there, with [`RepositoryError::Exists`]: it never overwrites one.
 ///
 /// When `alias` is given, the repository is saved into the configuration
-/// after the initialisation succeeded, as [`ConnectRepository`]
+/// after the initialization succeeded, as [`ConnectRepository`]
 /// saves one. A repository the configuration already holds, such as one an
-/// imported profile added, is initialised from its own entry by
+/// imported profile added, is initialized from its own entry by
 /// [`InitRepository::init_saved`], which records only the new ID in it.
 pub struct InitRepository {
     clock: Arc<dyn Clock>,
@@ -47,7 +47,7 @@ pub struct InitRepository {
     keyring: Option<Arc<dyn Keyring>>,
 }
 
-/// What an initialisation gave: the new repository's ID, and whether the
+/// What an initialization gave: the new repository's ID, and whether the
 /// repository was saved into the configuration.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct InitOutcome {
@@ -55,8 +55,8 @@ pub struct InitOutcome {
     pub saved: bool,
 }
 
-/// What initialising a saved repository tried: the settings of its entry,
-/// which a refusal is redacted with, and how the initialisation went.
+/// What initializing a saved repository tried: the settings of its entry,
+/// which a refusal is redacted with, and how the initialization went.
 #[derive(Debug, PartialEq)]
 pub struct SavedInit {
     pub settings: RepositorySettings,
@@ -102,12 +102,12 @@ pub struct ConnectRepository {
     keyring: Option<Arc<dyn Keyring>>,
 }
 
-/// Why initialising, testing or connecting a repository failed. A typed code,
+/// Why initializing, testing or connecting a repository failed. A typed code,
 /// never a sentence (technical design §8.4).
 #[derive(Debug, PartialEq)]
 pub enum RepositoryError {
     /// A repository already exists at the location, so it was not
-    /// initialised, and nothing there was changed.
+    /// initialized, and nothing there was changed.
     Exists,
     /// The repository's row doesn't offer to create it: its entry records
     /// no ID, and no job found the location empty since nothing reached it;
@@ -173,7 +173,7 @@ impl InitRepository {
         }
     }
 
-    /// Initialises the repository the settings describe, and reports its ID.
+    /// Initializes the repository the settings describe, and reports its ID.
     /// Saved only when `alias` is given, by the same rule
     /// [`ConnectRepository`] saves one, with the new repository's ID: an
     /// alias the configuration already holds is refused, and so is a location
@@ -223,7 +223,7 @@ impl InitRepository {
         Ok(InitOutcome { id, saved })
     }
 
-    /// Initialises the repository the configuration holds under `alias`,
+    /// Initializes the repository the configuration holds under `alias`,
     /// where its entry says it is and with the entry's own references, so a
     /// password the configuration already names is never asked for again.
     /// Only the new repository's ID is recorded in the entry, as [`init`]
@@ -283,7 +283,7 @@ impl InitRepository {
 /// holding nothing of a repository: the only place Create may make one. The
 /// row's offer comes from the log, which doesn't say where its jobs ran, so
 /// the entry may since name another location, or the drive be unplugged; an
-/// initialisation there would make the folder (decision 53). A repository
+/// initialization there would make the folder (decision 53). A repository
 /// that opens is refused as one already there, and any other failure to find
 /// one as not offered; a refusal of the look itself (a timeout, an engine
 /// that didn't start) is its own.
@@ -1624,8 +1624,8 @@ mod tests {
     /// A configuration holding `settings` under `alias()`, as an imported
     /// profile leaves it: with `recorded` as its repository ID, asking
     /// nobody to maintain it, and backed up to by the plan [`home`]; and the
-    /// engine and the use case to initialise it with. The engine finds no
-    /// repository at the location, and ends an initialisation with
+    /// engine and the use case to initialize it with. The engine finds no
+    /// repository at the location, and ends an initialization with
     /// `outcome`.
     async fn saved_entry(
         settings: &domain::planning::RepositorySettings,
@@ -1894,7 +1894,7 @@ mod tests {
         }
     }
 
-    /// An engine that, while it initialises, moves the entry saved under
+    /// An engine that, while it initializes, moves the entry saved under
     /// `alias()` to `to`, as a hand edit of the configuration or a second
     /// import may; each job itself is the scripted one.
     struct MovedMeanwhile {

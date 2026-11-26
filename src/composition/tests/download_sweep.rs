@@ -56,7 +56,7 @@ impl Engine for Found {
 /// A download nobody fetches within its minute is given up by the sweep
 /// alone, within 10 s of its minute (§10.4): with no other download asked
 /// for and no fetch, time passing its minute stops its job and ends it
-/// cancelled in the history (#888).
+/// canceled in the history (#888).
 #[tokio::test]
 async fn the_sweep_gives_up_a_download_nobody_fetched_within_its_minute() {
     let (mut runner, _entered, _open_gate, _scratch) = runner_at_a_gate().await;

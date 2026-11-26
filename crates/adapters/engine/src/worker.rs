@@ -2,7 +2,7 @@
 //! [`WorkerEvent`]s on stdout, one JSON object per line.
 //!
 //! The worker is a process of its own (technical design §4.1) because
-//! `rustic_core` can't be cancelled, keeps whole indexes in memory and runs
+//! `rustic_core` can't be canceled, keeps whole indexes in memory and runs
 //! its own Tokio runtimes. [`main`] is what `ladderback worker` does: it routes
 //! rustic's logging into the event stream, exits on SIGTERM, and runs the job.
 //!
@@ -1029,7 +1029,7 @@ mod tests {
     }
 
     /// The first cause stands: a backup winding down on a SIGTERM is not
-    /// ended by its deadline passing meanwhile, and ends as a cancelled one,
+    /// ended by its deadline passing meanwhile, and ends as a canceled one,
     /// with 143 and nothing more on the stream.
     #[test]
     fn a_backup_winding_down_on_a_sigterm_ends_canceled_when_its_deadline_passes_meanwhile() {
@@ -1081,7 +1081,7 @@ mod tests {
     }
 
     /// A backup whose deadline passes while it archives winds down as a
-    /// cancelled one does (decision 50): the worker reports the deadline,
+    /// canceled one does (decision 50): the worker reports the deadline,
     /// the packs it saved are in the index, no snapshot is written (I3),
     /// and the job, not the watchdog, ends the worker with the deadline's
     /// code once rustic has returned.

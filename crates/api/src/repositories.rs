@@ -1,5 +1,5 @@
 //! Repositories on the wire: their settings and locations, connecting,
-//! initialising and testing one, and its statistics.
+//! initializing and testing one, and its statistics.
 
 use serde::{Deserialize, Serialize};
 
@@ -323,7 +323,7 @@ pub struct RepositoryIdDto {
     pub id: String,
 }
 
-/// What initialising a repository answers: its ID, and whether it was saved
+/// What initializing a repository answers: its ID, and whether it was saved
 /// into the configuration.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "kebab-case")]

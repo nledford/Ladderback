@@ -152,8 +152,8 @@ pub(crate) fn logger(rust_log: Option<&str>, target: Target, style: WriteStyle) 
     }
 }
 
-/// How the daemon's log is styled: with no colour at all when plain output
-/// was asked for; otherwise with colour where the stream is a terminal and
+/// How the daemon's log is styled: with no color at all when plain output
+/// was asked for; otherwise with color where the stream is a terminal and
 /// the environment (`NO_COLOR`, `CLICOLOR`, `CLICOLOR_FORCE`) allows it.
 pub(crate) fn write_style(plain: bool) -> WriteStyle {
     if plain {

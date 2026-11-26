@@ -29,7 +29,7 @@ use super::forget_steps::snapshots_of;
 #[derive(Default)]
 pub struct InteropE2e {
     /// The environment variables the commands run with: rustic's, and the
-    /// ones a scenario sets to choose colour or language.
+    /// ones a scenario sets to choose color or language.
     pub(super) env: Vec<(String, String)>,
     /// Whether the commands run with a standard output nobody reads: a pipe
     /// whose reader has gone, so that a write to it fails.

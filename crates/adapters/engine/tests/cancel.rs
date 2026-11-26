@@ -1,4 +1,4 @@
-//! A cancelled backup (SIGTERM, the daemon's stop) writes no snapshot, and
+//! A canceled backup (SIGTERM, the daemon's stop) writes no snapshot, and
 //! what it had already saved stays in the repository's index (§4.1): a
 //! check finds no pack the index doesn't list, and the next backup reuses
 //! that data instead of saving it again.
@@ -161,7 +161,7 @@ async fn a_canceled_backup_leaves_its_packs_indexed_and_no_snapshot_in_either_ha
     a_canceled_backup_leaves_its_packs_indexed_and_no_snapshot(&scratch, location).await;
 }
 
-/// The stop's grace in [`a_cancelled_backup_whose_events_nobody_reads_still_leaves_its_packs_indexed`]:
+/// The stop's grace in [`a_canceled_backup_whose_events_nobody_reads_still_leaves_its_packs_indexed`]:
 /// far past the wind-down of a local repository (under a second on a busy
 /// machine), and short of the worker's own 30 s limit, so a stalled
 /// wind-down ends at this grace's SIGKILL.

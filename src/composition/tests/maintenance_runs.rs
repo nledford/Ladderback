@@ -374,9 +374,9 @@ async fn a_backup_that_ends_is_announced_once_and_logged_once() {
     assert_said_once_that_it_ended(&id, "Succeeded");
 }
 
-/// A maintenance run cancelled after its start is announced to no page
-/// (the page that cancelled it reads the history until it settles), and
-/// the daemon's log says once that it ended cancelled.
+/// A maintenance run canceled after its start is announced to no page
+/// (the page that canceled it reads the history until it settles), and
+/// the daemon's log says once that it ended canceled.
 #[tokio::test]
 async fn a_maintenance_run_canceled_after_its_start_is_announced_to_no_page_and_logged_once() {
     captured_log::capture();

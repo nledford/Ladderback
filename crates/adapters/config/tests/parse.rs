@@ -1208,7 +1208,7 @@ fn an_unknown_key_is_reported_with_its_file_and_line() {
             "repositories.nas.prune-everything",
             Some("prune-everything"),
         ),
-        // Not modelled yet: refused rather than silently ignored.
+        // Not modeled yet: refused rather than silently ignored.
         unknown(
             "schema = 1\n\n[hub]\nurl = \"https://hub.example.lan:9899\"\n".to_owned(),
             "hub",

@@ -377,8 +377,8 @@ async fn a_start_the_log_refuses_is_announced_all_the_same() {
     assert_eq!(news, Some(started_at(t(0))));
 }
 
-/// A run cancelled while the log holds the write that says it is running
-/// tells the page only that it was cancelled: not that it started, which
+/// A run canceled while the log holds the write that says it is running
+/// tells the page only that it was canceled: not that it started, which
 /// the log never said.
 #[tokio::test]
 async fn a_run_canceled_before_the_log_has_its_start_announces_only_its_cancel() {

@@ -54,7 +54,7 @@ impl Drop for Killable {
 /// An engine that answers every repository job with the scripted outcome, or
 /// never answers, and keeps the jobs it was given. A `Job::Identify` is
 /// answered with `found` instead once a scenario sets it: what the engine
-/// finds at a location it doesn't initialise.
+/// finds at a location it doesn't initialize.
 struct Scripted {
     outcome: Mutex<Result<RepositoryId, FailureReason>>,
     found: Mutex<Option<Result<RepositoryId, FailureReason>>>,
@@ -254,7 +254,7 @@ fn cannot_open(agent: &mut super::Agent) {
 }
 
 /// A location with a folder that holds nothing of a repository: the
-/// engine finds no repository there, and initialises one.
+/// engine finds no repository there, and initializes one.
 #[given("a location the engine finds empty")]
 fn finds_empty(agent: &mut super::Agent) {
     *agent
@@ -805,7 +805,7 @@ fn refused_unresolved(agent: &mut super::Agent) {
     }
 }
 
-/// A location where the engine's initialisation finds a repository already.
+/// A location where the engine's initialization finds a repository already.
 #[given("a location that already holds a repository")]
 fn already_holds(agent: &mut super::Agent) {
     *agent

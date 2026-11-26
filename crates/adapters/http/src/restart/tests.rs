@@ -214,7 +214,7 @@ async fn a_canceled_restart_lets_go_of_the_hold_and_never_comes() {
     // Past a recheck, which would find nothing running.
     tokio::time::sleep(super::IDLE_RECHECK * 2).await;
     assert!(!due.is_finished(), "the cancelled restart came");
-    // Cancelled twice, or with none asked for: nothing to cancel.
+    // Canceled twice, or with none asked for: nothing to cancel.
     let (status, _) = send(&restart, delete()).await;
     assert_eq!(status, StatusCode::OK);
     // Asked for again, it holds the work again.

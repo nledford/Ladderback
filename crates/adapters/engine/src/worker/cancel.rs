@@ -27,7 +27,7 @@ pub(crate) enum AfterCancel {
 /// first cause stands.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) enum Cause {
-    /// The daemon's SIGTERM: the operation ends cancelled.
+    /// The daemon's SIGTERM: the operation ends canceled.
     Cancel,
     /// The job's deadline passed (I3): the operation ends `deadline-passed`.
     Deadline,
@@ -85,7 +85,7 @@ impl Cancel {
     /// Asks for the cancel because the deadline passed (I3), and says what
     /// the watchdog does next. The snapshot is refused from here on. A
     /// backup that archives, or whose snapshot write began, winds down as a
-    /// cancelled one does; otherwise the worker exits at once.
+    /// canceled one does; otherwise the worker exits at once.
     pub(crate) fn pass_deadline(&self) -> AfterCancel {
         self.ask(Cause::Deadline)
     }
@@ -110,7 +110,7 @@ impl Cancel {
 
     /// Runs `save`, a backup's archiving, as the part of the job a cancel
     /// winds down rather than cuts off. `None` when the cancel came before
-    /// or during it: the job is cancelled, whatever `save` returned.
+    /// or during it: the job is canceled, whatever `save` returned.
     pub(crate) fn saving<T>(&self, save: impl FnOnce() -> T) -> Option<T> {
         {
             let mut saving = self.lock_saving();

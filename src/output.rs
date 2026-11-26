@@ -1,5 +1,5 @@
 //! How the command line's output is chosen (technical design §4.5): whether
-//! plain output was asked for, what `clap` may colour, how a command that
+//! plain output was asked for, what `clap` may color, how a command that
 //! reports state says it (in words, or as a document with `--json`), and what
 //! a command does when nobody reads its output any more.
 //!
@@ -30,7 +30,7 @@ pub(crate) fn asked_for_plain(args: &[OsString]) -> bool {
         .any(|arg| arg == "--plain")
 }
 
-/// The colour `clap` may use in its help and its usage errors: none when
+/// The color `clap` may use in its help and its usage errors: none when
 /// plain output was asked for; otherwise whatever the environment and the
 /// terminal say.
 pub(crate) fn clap_color(plain: bool) -> ColorChoice {

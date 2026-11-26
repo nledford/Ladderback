@@ -99,7 +99,7 @@ pub enum JobKind {
     /// killed worker's leftovers, and says what is there. A read, never an
     /// operation.
     Probe(RepositorySpec),
-    /// Initialises a repository where nothing is yet, with default key
+    /// Initializes a repository where nothing is yet, with default key
     /// options. It refuses when one already exists there.
     Init(RepositorySpec),
     Backup(BackupJobSpec),
@@ -393,7 +393,7 @@ pub enum WorkerEvent {
     /// `index_read_at` is when the worker started reading the repository
     /// index, which is what a deadline counts from. `repository` is the ID
     /// of the repository the job opened, and `None` for a job that opens
-    /// none: a fake one, and an initialisation, whose result names the new
+    /// none: a fake one, and an initialization, whose result names the new
     /// repository.
     Started {
         op_id: OperationId,

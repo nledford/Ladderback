@@ -69,7 +69,7 @@ async fn snapshots(cold: &Path) -> Vec<SnapshotFile> {
     .await
 }
 
-/// Initialises a scratch repository at `cold`.
+/// Initializes a scratch repository at `cold`.
 async fn init(cold: &Path) {
     let cold = cold.to_owned();
     blocking(move || {
@@ -158,7 +158,7 @@ fn text(path: &Path) -> String {
     path.to_str().expect("a UTF-8 scratch path").to_owned()
 }
 
-/// Initialises a scratch repository and makes three snapshots in it, with
+/// Initializes a scratch repository and makes three snapshots in it, with
 /// the labels "first", "second" and "third" in that order of age.
 async fn three_snapshots(agent: &mut Agent) {
     let cold = agent.scratch().join("repo");
@@ -198,7 +198,7 @@ async fn a_repository_with_three_snapshots(agent: &mut Agent) {
     three_snapshots(agent).await;
 }
 
-/// Initialises a scratch repository and makes one snapshot in it, recorded
+/// Initializes a scratch repository and makes one snapshot in it, recorded
 /// at `time`: a date, a time of day and the offset of the clock that took
 /// it, read as rustic reads the time of a snapshot file.
 #[given(expr = "a repository with a snapshot taken at {string}")]

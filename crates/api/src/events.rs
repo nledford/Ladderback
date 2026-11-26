@@ -73,7 +73,7 @@ pub enum UiEvent {
         args: Vec<MsgArg>,
         finished_at: String,
     },
-    /// The operation was cancelled: announced like
+    /// The operation was canceled: announced like
     /// [`Self::OperationSucceeded`], once the run recorded the cancel. A
     /// paired machine reports it to its hub as the operation's end (§7.2).
     // The wire keeps the British spelling: the event type is part of the API.

@@ -286,7 +286,7 @@ where
         reply(Politeness::Polite, &said.run(seen));
         focus_element(&after_press);
     });
-    // Its own flex box, centred in the row's line, as the row of actions
+    // Its own flex box, centered in the row's line, as the row of actions
     // (`ACTIONS`, its `[&>.button]:self-center`) stands a button that is
     // the row's own item.
     view! {

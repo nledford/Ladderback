@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-// Red-first check (technical design §13.1). For a pull request labelled
+// Red-first check (technical design §13.1). For a pull request labeled
 // `behaviour`, its first commit must be a `test:` commit. Every test and
 // scenario that commit adds must fail *at run time* on that commit: a compile
 // error doesn't count, and a test that already passes specifies nothing new.

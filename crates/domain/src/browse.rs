@@ -474,7 +474,7 @@ mod tests {
                 "{hidden:?}"
             );
         }
-        // Their neighbours are shown as they are.
+        // Their neighbors are shown as they are.
         for kept in [
             '\u{a0}', '\u{200d}', '\u{2027}', '\u{202f}', '\u{2065}', '\u{206a}', '\u{61b}',
         ] {

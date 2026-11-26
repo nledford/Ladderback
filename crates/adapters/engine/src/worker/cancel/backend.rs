@@ -1,4 +1,4 @@
-//! A repository backend that refuses a snapshot once the job is cancelled,
+//! A repository backend that refuses a snapshot once the job is canceled,
 //! by the daemon or by its deadline.
 
 use std::sync::{Arc, Mutex, PoisonError};
@@ -13,7 +13,7 @@ use super::Cancel;
 use crate::job::DeleteAnswer;
 
 /// `backends`, refusing to write a snapshot once the cancel is asked for. A
-/// backup cancelled, or past its deadline, winds down through rustic's own
+/// backup canceled, or past its deadline, winds down through rustic's own
 /// end of a backup, which saves the index of its packs and then the
 /// snapshot: this is what keeps the snapshot out. rustic writes a snapshot
 /// to the hot half first and to the cold half only once the hot half has
@@ -320,7 +320,7 @@ mod tests {
         assert!(inner.list(FileType::Snapshot).unwrap().is_empty());
     }
 
-    /// What a cancelled backup still writes as it winds down: its last
+    /// What a canceled backup still writes as it winds down: its last
     /// packs, and the index of them all.
     #[test]
     fn once_canceled_packs_and_index_files_are_still_written() {

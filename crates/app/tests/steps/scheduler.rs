@@ -205,8 +205,8 @@ impl RecordingRuns {
     }
 
     /// Runs `plan` in `place`, once its turn comes, as long as the scenario
-    /// says, and says how it ended; or, cancelled through `cancel` before
-    /// its turn, gives up its place and says it was cancelled.
+    /// says, and says how it ended; or, canceled through `cancel` before
+    /// its turn, gives up its place and says it was canceled.
     fn run(
         &self,
         plan: &PlanId,
@@ -244,7 +244,7 @@ impl RecordingRuns {
             };
             if canceled {
                 // It never started: it leaves the queue and says it was
-                // cancelled, as a run of the daemon's cancelled while it
+                // canceled, as a run of the daemon's canceled while it
                 // waits does.
                 drop(place);
                 ends.send(RunEnd {

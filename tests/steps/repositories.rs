@@ -50,7 +50,7 @@ fn repository(cold: &Path, hot: Option<&Path>) -> rustic_core::Repository<()> {
 }
 
 /// Every file's name and bytes under `dir`, sorted: the repository as it
-/// stands, for checking that a refused initialisation wrote nothing.
+/// stands, for checking that a refused initialization wrote nothing.
 fn contents(dir: &Path) -> Vec<(String, Vec<u8>)> {
     fn walk(dir: &Path, out: &mut Vec<(String, Vec<u8>)>) {
         let mut entries = fs::read_dir(dir)
@@ -400,7 +400,7 @@ async fn configured_with_settings(agent: &mut Agent, name: String) {
     assert_eq!(repository.settings, settings(agent));
 }
 
-// The same behaviours over HTTP, for `features/repositories/api.feature`: the
+// The same behaviors over HTTP, for `features/repositories/api.feature`: the
 // real daemon, spoken to as the Repositories page speaks to it. The
 // repositories are still made and inspected with `rustic_core` itself.
 

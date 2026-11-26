@@ -89,7 +89,7 @@ Given("a daemon with these repositories:", async function (this: BrowserWorld, t
 });
 
 // Someone edits the running daemon's config.toml by hand and leaves a key
-// nobody knows, `colour`, in the repository `demo`, on line `line`: a note of
+// nobody knows, `color`, in the repository `demo`, on line `line`: a note of
 // their own fills the lines before it. The daemon reads the file on every
 // request, so the next one finds the mistake.
 Given(

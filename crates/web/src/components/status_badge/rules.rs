@@ -23,7 +23,7 @@ pub enum BadgeState {
     SucceededWithWarnings,
     /// The operation ended badly.
     Failed,
-    /// The operation was cancelled.
+    /// The operation was canceled.
     Canceled,
     /// Nothing to tell: no result, or a status this build doesn't know.
     Empty,

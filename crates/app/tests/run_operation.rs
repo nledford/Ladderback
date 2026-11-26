@@ -1,5 +1,5 @@
 //! `RunOperation` when an engine breaks its contract, and when an operation
-//! is cancelled or passes its deadline; and what a run writes to the
+//! is canceled or passes its deadline; and what a run writes to the
 //! operation log. The well-behaved paths are specified in
 //! `features/execution/*.feature`.
 
@@ -452,7 +452,7 @@ async fn run(events: Vec<EngineEvent>) -> Operation {
     scripted(events, log()).await.operation
 }
 
-/// Runs a job that is cancelled five seconds after the engine started it.
+/// Runs a job that is canceled five seconds after the engine started it.
 async fn canceled_while_running(store: Arc<dyn OperationStore>) -> Finished {
     let clock = Arc::new(FakeClock::new(t(0)));
     let engine = Arc::new(Live::new());
@@ -1632,7 +1632,7 @@ async fn a_queued_operation_canceled_while_it_waits_ends_at_once_and_runs_nothin
     );
     assert_logged_as_it_ended(&store, &ended).await;
     // Its place left the queue: the next run takes its turn once the
-    // running one ends, not after the cancelled one too.
+    // running one ends, not after the canceled one too.
     let mut next = queue.push(&plan("photos"), limit);
     assert!(!has_turn(&mut next));
     drop(running);

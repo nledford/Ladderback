@@ -45,7 +45,7 @@ async fn a_cancel_in_the_start_window_stops_the_operation() {
 /// A client that cancels the instant it has the answer to its start is
 /// not told the operation is unknown or not running: the operation is
 /// recorded and its cancel switch parked before the route answers, and
-/// the run it cancels ends cancelled.
+/// the run it cancels ends canceled.
 #[tokio::test]
 async fn a_cancel_right_after_the_answer_is_accepted_and_ends_the_operation_canceled() {
     let (runner, _entered, open_gate, _scratch) = runner_at_a_gate().await;
@@ -229,7 +229,7 @@ async fn a_start_whose_client_gave_up_still_runs_and_still_cancels() {
 /// start is not told the operation is unknown or not running: the run
 /// starts on a task of its own, and that task parks the run's cancel
 /// switch before the route answers (§4.2). The run it cancels ends
-/// cancelled.
+/// canceled.
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn a_cancel_right_after_a_maintenance_start_is_accepted_and_ends_the_run_canceled() {
     let (mut runner, _entered, _gate, _scratch) = runner_at_a_gate().await;

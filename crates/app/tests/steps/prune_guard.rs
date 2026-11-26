@@ -108,9 +108,9 @@ pub struct PruneGuardWorld {
     /// How long the prune then takes to warm up and repack, before its
     /// first delete.
     repacking_takes: SignedDuration,
-    /// Whether the run is cancelled just as the prune asks.
+    /// Whether the run is canceled just as the prune asks.
     cancel_as_it_asks: bool,
-    /// Whether the run is cancelled while the daemon checks the lease, once
+    /// Whether the run is canceled while the daemon checks the lease, once
     /// the prune asked.
     cancel_during_check: bool,
     /// Whether the hub grants the repository again, at a new epoch, while
@@ -389,7 +389,7 @@ async fn prune(agent: &mut Agent) {
         }
     };
     // A cancel the prune fires as it asks; without one, the run is never
-    // cancelled.
+    // canceled.
     let cancel = async move {
         if cancel.await.is_err() {
             futures::future::pending::<()>().await;

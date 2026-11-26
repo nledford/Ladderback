@@ -329,7 +329,7 @@ impl ApiToken {
 }
 
 /// Whether a token, given the `run` scope, may cancel an operation of `kind`:
-/// a backup only. Stopping maintenance or an initialisation is left to a
+/// a backup only. Stopping maintenance or an initialization is left to a
 /// signed-in admin (decision 93).
 pub fn cancels(kind: crate::execution::OperationKind) -> bool {
     kind == crate::execution::OperationKind::Backup

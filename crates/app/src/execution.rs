@@ -30,7 +30,7 @@ use crate::running::RunningBackups;
 /// as the engine reports. Each write is the whole operation as it stands, so
 /// a write the log refused is made good by the next one.
 ///
-/// - Cancelling stops the engine and records the operation as cancelled.
+/// - Canceling stops the engine and records the operation as canceled.
 /// - A job with a deadline budget gets a deadline once the engine reports
 ///   when it read the index; still running then, the engine is stopped, with
 ///   its grace period, and the operation fails with `DeadlinePassed` (I3). The
@@ -208,7 +208,7 @@ impl RunOperation {
     }
 
     /// Runs `job`, started by `trigger`. When `cancel` completes, the
-    /// operation is cancelled.
+    /// operation is canceled.
     pub async fn run(
         &self,
         id: OperationId,
@@ -377,7 +377,7 @@ impl RunOperation {
     /// Runs the job of an operation [`Self::queue`] recorded once `place`'s
     /// turn comes, as [`Self::run_queued`] does, and gives the place up when
     /// the run has ended (§5, the concurrency limit). A cancel that comes
-    /// while it waits ends the operation cancelled at once: nothing ran, so
+    /// while it waits ends the operation canceled at once: nothing ran, so
     /// no hook runs and the engine isn't asked.
     pub async fn run_in_turn(
         &self,
@@ -399,7 +399,7 @@ impl RunOperation {
         finished
     }
 
-    /// Ends `queued` cancelled before its turn came: it records the end and
+    /// Ends `queued` canceled before its turn came: it records the end and
     /// announces it, as a run does, and nothing else.
     async fn cancel_waiting(&self, queued: Queued) -> Finished {
         let Queued { run, .. } = queued;
@@ -407,7 +407,7 @@ impl RunOperation {
     }
 
     /// Ends `operation`, a backup the log held as queued when the daemon
-    /// stopped, cancelled before it ran: its start waited for its keyring
+    /// stopped, canceled before it ran: its start waited for its keyring
     /// to be unlocked, and a cancel came first (#1221). One write, of the
     /// end, then the news, as [`Self::end_resumed`]. No hook runs and
     /// the engine is never asked.
@@ -421,7 +421,7 @@ impl RunOperation {
         .await
     }
 
-    /// Ends `run` cancelled before anything of it ran: records the end and
+    /// Ends `run` canceled before anything of it ran: records the end and
     /// announces it.
     async fn end_canceled(&self, mut run: Run) -> Finished {
         self.cancel(&mut run);
@@ -465,7 +465,7 @@ impl RunOperation {
             }
         };
         let mut cancel = pin!(cancel.fuse());
-        // A cancel made before the engine was up is honoured at once, not
+        // A cancel made before the engine was up is honored at once, not
         // raced against the events the engine already has ready: the client
         // was told it was accepted.
         if (&mut cancel).now_or_never().is_some() {
@@ -874,7 +874,7 @@ fn ending_list(setup: &HookSetup, phase: HookPhase) -> impl Iterator<Item = &'_ 
 
 /// Which ending list runs for `status`: the after-hooks on a success, the
 /// failed-hooks on a failure, and neither when a before-hook stopped the run
-/// or the operation was cancelled. The finally-hooks always run.
+/// or the operation was canceled. The finally-hooks always run.
 fn ending_phase(status: &OperationStatus, stopped_by_hook: bool) -> Option<HookPhase> {
     match status {
         OperationStatus::Succeeded | OperationStatus::SucceededWithWarnings => {
@@ -1263,7 +1263,7 @@ mod tests {
         );
     }
 
-    /// A cancelled operation keeps no warning, so a page is told of none,
+    /// A canceled operation keeps no warning, so a page is told of none,
     /// though its finally hook ran and failed.
     #[tokio::test]
     async fn a_hook_warning_a_canceled_operation_does_not_keep_is_not_told() {

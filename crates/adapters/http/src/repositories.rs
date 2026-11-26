@@ -1,5 +1,5 @@
 //! The routes the Repositories page speaks to (technical design §4.2): test a
-//! repository, connect it, initialise one, and initialise the one an entry of
+//! repository, connect it, initialize one, and initialize the one an entry of
 //! the configuration names. A request carries the password a person typed,
 //! so no answer carries it back (I4): an answer is an ID, or a typed refusal
 //! whose arguments are names, never values.
@@ -160,7 +160,7 @@ pub(crate) async fn connect_repository(
     }
 }
 
-/// Initialises the repository the body describes.
+/// Initializes the repository the body describes.
 pub(crate) async fn init_repository(
     State(state): State<AppState>,
     body: Result<Json<api::InitRepositoryDto>, JsonRejection>,

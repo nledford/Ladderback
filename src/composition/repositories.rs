@@ -1,5 +1,5 @@
 //! The repository routes' service (technical design §4.2): tests, connects
-//! and initialises repositories, from a request's settings to the use cases
+//! and initializes repositories, from a request's settings to the use cases
 //! of `app` and back to the typed refusals the routes answer with.
 
 use std::sync::Arc;
@@ -32,7 +32,7 @@ use super::{
 };
 use app::ports::config_unusable;
 
-/// Tests, connects and initialises repositories for the API (§4.2): each
+/// Tests, connects and initializes repositories for the API (§4.2): each
 /// request's settings become domain values, run through the use cases of
 /// `app`, and every refusal becomes a typed one. Writes to the configuration
 /// go one at a time, so two connections made at the same moment are both
@@ -162,7 +162,7 @@ impl Repositories for RepositoryService {
             .map_err(|_| RepositoriesError::AliasInvalid)?;
         let settings = settings_of(request.settings)?;
         let keep_in_keyring = keeps_in_keyring(request.keep_in_keyring, alias.as_ref(), &settings)?;
-        // Only a saving initialisation writes the configuration.
+        // Only a saving initialization writes the configuration.
         let _writing = match alias {
             Some(_) => Some(self.writes.lock().await),
             None => None,

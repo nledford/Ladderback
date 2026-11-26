@@ -149,7 +149,7 @@ async fn a_name_that_is_not_an_alias_is_refused_before_anything_runs() {
             Err(RepositoriesError::AliasInvalid),
             "{name:?}"
         );
-        // An initialisation that would be saved is refused before it
+        // An initialization that would be saved is refused before it
         // creates a repository it couldn't then keep.
         assert_eq!(
             service.init(init(Some(name), settings_dto())).await,

@@ -15,7 +15,7 @@ use crate::planning::{InvalidValue, ValueKind};
 pub enum Permission {
     /// Seeing plans, repositories, snapshots, operations and status.
     Backups,
-    /// Starting and cancelling backups, without reading anything.
+    /// Starting and canceling backups, without reading anything.
     BackupRuns,
     /// What forget or an import would do.
     Previews,

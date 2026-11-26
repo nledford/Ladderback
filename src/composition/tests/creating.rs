@@ -325,7 +325,7 @@ async fn a_saved_repository_whose_password_cannot_be_read_is_refused_with_the_se
 
 /// A job that failed is refused with the code of its failure: one that
 /// finds no repository as `repository-not-found`, and any other in the
-/// engine's words, as an initialisation of new settings is.
+/// engine's words, as an initialization of new settings is.
 #[tokio::test]
 async fn a_saved_repository_whose_job_failed_is_refused_with_the_failures_code() {
     for (reason, refusal) in [

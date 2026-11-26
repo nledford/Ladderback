@@ -50,7 +50,7 @@ pub trait NotifierHarness: Send + Sync {
     /// The notifier under test, with a timeout short enough for the hang
     /// check; the adapter's own tests check that it keeps to it.
     fn notifier(&self) -> &dyn Notifier;
-    /// The URL of a fresh channel of `kind` that answers as `behaviour`.
+    /// The URL of a fresh channel of `kind` that answers as `behavior`.
     fn url(&self, kind: ChannelKind, behavior: Behavior) -> String;
     /// What the channels that accept have been sent, in the order they took
     /// it.

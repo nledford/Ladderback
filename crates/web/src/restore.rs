@@ -223,7 +223,7 @@ pub(crate) fn running(name: &str) -> Words {
 /// What the wait for the restore of the entry shown as `name` came to is
 /// said as, and how, by its operation's status as a maintenance run's end
 /// is: a failure assertively, the rest politely. A restore into a new
-/// folder that finished or was cancelled names `folder`, where its files
+/// folder that finished or was canceled names `folder`, where its files
 /// are. Nothing is said when the page that waited is gone.
 pub(crate) fn ended(
     name: &str,

@@ -1388,7 +1388,7 @@ mod tests {
         assert_eq!(sites.running(), 0);
     }
 
-    /// A job cancelled while its choice waits on a location's probe ends at
+    /// A job canceled while its choice waits on a location's probe ends at
     /// once, without the clock moving on, with no event and no job run, and
     /// leaves no probe worker running: the cancel reaches the probe.
     #[tokio::test]
@@ -1491,7 +1491,7 @@ mod tests {
         assert_eq!(sites.running(), 0, "its probe was stopped");
     }
 
-    /// A job cancelled while its choice waits on several probes at once
+    /// A job canceled while its choice waits on several probes at once
     /// stops every one of them.
     #[tokio::test]
     async fn a_job_canceled_while_several_probes_run_stops_every_one() {
@@ -1546,7 +1546,7 @@ mod tests {
         )
     }
 
-    /// A job cancelled while its choice waits on a location's probe, and
+    /// A job canceled while its choice waits on a location's probe, and
     /// whose events are read on afterwards, as the engine port allows,
     /// starts no later location's probe and reads none of its secrets
     /// (#498).
@@ -1630,7 +1630,7 @@ mod tests {
         }
     }
 
-    /// A job cancelled while a later location's reference is still being
+    /// A job canceled while a later location's reference is still being
     /// read, in that location's turn, starts no probe of it once the read
     /// ends (#498).
     #[tokio::test]
@@ -1685,7 +1685,7 @@ mod tests {
         );
     }
 
-    /// A job cancelled while an early location's reference is read resolves
+    /// A job canceled while an early location's reference is read resolves
     /// no later early location once the read ends (#498).
     #[tokio::test]
     async fn a_job_canceled_while_an_early_locations_secret_is_read_resolves_no_later_one() {

@@ -138,7 +138,7 @@ impl Engine for RecordOpened {
             return self.inner.run(op, job).await;
         };
         match job {
-            // An identify is how the ID is found, and an initialisation
+            // An identify is how the ID is found, and an initialization
             // makes the repository: each records the ID it opened.
             Job::Identify(_) | Job::Init(_) => self.recording(op, job, saved).await,
             _ => self.identified_first(op, job, access, saved).await,
@@ -636,7 +636,7 @@ mod tests {
         *store.saves.lock().unwrap_or_else(PoisonError::into_inner)
     }
 
-    /// An identify and an initialisation are the jobs that record the ID
+    /// An identify and an initialization are the jobs that record the ID
     /// they opened: every other job of an entry that records no ID runs
     /// after an identify, which records it.
     #[tokio::test]
@@ -1145,7 +1145,7 @@ mod tests {
     /// knowing it: with no cache, which the engine keeps by the ID, and in
     /// an operation that names no repository. It runs after an identify,
     /// with the ID the identify found, which is recorded from that identify.
-    /// An identify, and an initialisation that makes the repository, run as
+    /// An identify, and an initialization that makes the repository, run as
     /// they are.
     #[tokio::test]
     async fn a_job_of_an_entry_that_records_no_id_runs_after_an_identify_with_the_id_it_found() {
@@ -1418,7 +1418,7 @@ mod tests {
     }
 
     /// A cancel that comes while the engine is starting a backup's job,
-    /// after its identify, ends the operation cancelled at once and gives
+    /// after its identify, ends the operation canceled at once and gives
     /// its place in the queue to the next run, with no worker left running:
     /// a shutdown, which cancels the runs and waits for them, ends too.
     #[tokio::test]

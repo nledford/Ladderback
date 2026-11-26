@@ -893,7 +893,7 @@ warning-maintenance-other-hosts = { $count ->
 warning-unknown = The operation reported a problem that this version of { -brand-name } cannot describe, and went on.
     .with-detail = The operation reported a problem that this version of { -brand-name } cannot describe, and went on: { $detail }
 
-# A repository already exists where one was to be initialised, so nothing was written.
+# A repository already exists where one was to be initialized, so nothing was written.
 # $location (text): where the repository is.
 error-repository-exists = { -brand-name } did not initialise a repository at { $location }, because one is already there. Connect the existing repository instead.
 
@@ -926,7 +926,7 @@ error-password-not-accepted = The repository's password was not accepted, so not
 # A saved repository's Create was refused because its row doesn't offer it: no backup found the location empty, or one reached the repository there once, so nothing says the location can be reached and holds no repository. Nothing was run.
 error-create-not-offered = This repository wasn't created: { -brand-name } creates one only where a backup found the location empty. Check that the drive or location can be reached, then run a backup.
 
-# A repository did not answer a test, a connection or an initialisation in time.
+# A repository did not answer a test, a connection or an initialization in time.
 error-repository-timed-out = The repository did not answer in time, so { -brand-name } stopped waiting and saved nothing. Check that it can be reached, then try again.
 
 # The configuration already holds a repository under this alias.

@@ -92,7 +92,7 @@ impl Runs {
         self.lock().held = true;
     }
 
-    /// Starts maintenance runs again: the restart was cancelled.
+    /// Starts maintenance runs again: the restart was canceled.
     fn release(&self) {
         self.lock().held = false;
     }

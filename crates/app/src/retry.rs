@@ -17,7 +17,7 @@ pub enum RunOutcome {
     Succeeded,
     /// It failed: the plan may retry it.
     Failed,
-    /// A person cancelled it: the retries end.
+    /// A person canceled it: the retries end.
     Canceled,
 }
 

@@ -99,7 +99,7 @@ impl Daemon {
     }
 }
 
-/// Records what it was asked to start and cancel. Cancelling `prune-op` is
+/// Records what it was asked to start and cancel. Canceling `prune-op` is
 /// refused to a token, as the daemon refuses any operation but a backup.
 #[derive(Default)]
 struct Recorder {

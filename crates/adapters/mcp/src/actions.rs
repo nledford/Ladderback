@@ -95,7 +95,7 @@ pub struct CancelArguments {
 }
 
 /// What `cancel_operation` returns: the operation asked to stop. It ends as
-/// cancelled once its worker has stopped and its ending hooks have run,
+/// canceled once its worker has stopped and its ending hooks have run,
 /// which `wait_operation` tells.
 #[derive(Debug, Serialize, JsonSchema)]
 #[schemars(crate = "rmcp::schemars")]

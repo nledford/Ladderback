@@ -360,7 +360,7 @@ impl Engine for EventEngine {
 /// Whether the job is an operation, which the history has a row for, so a
 /// page can show its progress and warnings there (§4.4). The reads (the look
 /// that names a repository, a listing, a stats read, a prune's or a
-/// restore's plan) and the initialising of a repository answer their request
+/// restore's plan) and the initializing of a repository answer their request
 /// and are written to no log (§9): a page told of their news would show it
 /// on no row, or on the row of the run that read, which keeps none of it
 /// (#308). A download has a row, but its use case writes it, not a run, and
@@ -607,7 +607,7 @@ fn warning_args(warning: &domain::execution::Warning) -> Vec<MsgArg> {
 
 /// The running operations' cancel switches (§4.2): what the API cancels
 /// through. A handle is registered when an operation starts running and
-/// dropped when it ends, so only a running operation can be cancelled, once.
+/// dropped when it ends, so only a running operation can be canceled, once.
 struct CancelRegistry {
     running: std::sync::Mutex<HashMap<OperationId, futures::channel::oneshot::Sender<()>>>,
 }
@@ -945,7 +945,7 @@ impl CancelRegistry {
         receiver
     }
 
-    /// Cancels `id`: `true` when it was running and is now cancelled, `false`
+    /// Cancels `id`: `true` when it was running and is now canceled, `false`
     /// when nothing by that ID is running, so there is nothing to cancel.
     /// A second cancel of the same operation is `false`: the one handle is
     /// spent.
@@ -955,7 +955,7 @@ impl CancelRegistry {
             .is_some_and(|sender| sender.send(()).is_ok())
     }
 
-    /// The operation ended, cancelled or not: its handle, fired or spent, is
+    /// The operation ended, canceled or not: its handle, fired or spent, is
     /// dropped, so a later cancel is a typed refusal.
     fn finish(&self, id: &OperationId) {
         let _ = self.running().remove(id);
@@ -964,7 +964,7 @@ impl CancelRegistry {
     /// The operation ends without running: its handle is dropped, as
     /// [`Self::finish`] drops it. `true` when it was still held, `false`
     /// when a cancel took it first, so that cancel was answered `Ok` and
-    /// the operation ends cancelled (#1248).
+    /// the operation ends canceled (#1248).
     fn release(&self, id: &OperationId) -> bool {
         self.running().remove(id).is_some()
     }

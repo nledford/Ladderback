@@ -1,7 +1,7 @@
 //! The HTTP notifier meets the `Notifier` contract against channels served on
 //! loopback: one small HTTP server reads each request as a webhook, an ntfy
 //! server or a healthchecks server would, and answers as the channel's
-//! behaviour says.
+//! behavior says.
 
 use std::collections::HashMap;
 use std::sync::atomic::{AtomicUsize, Ordering};

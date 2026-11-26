@@ -1,4 +1,4 @@
-//! Initialising a repository through the real worker (§4.1): a `Job::Init`
+//! Initializing a repository through the real worker (§4.1): a `Job::Init`
 //! creates one where nothing is yet, with default key options, both halves of
 //! a hot/cold location, and never overwrites one that is already there. What
 //! the job left behind is checked with `rustic_core` itself, never through

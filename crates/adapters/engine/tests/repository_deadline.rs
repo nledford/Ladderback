@@ -1,5 +1,5 @@
 //! The deadline of a repository job through the real worker (#98): a test,
-//! connection or initialisation that reaches a backend that never answers is
+//! connection or initialization that reaches a backend that never answers is
 //! refused when its time is up, and its worker is killed. The clock is a
 //! fake one that the test moves once the worker is really stuck in the
 //! backend, so the two minutes the daemon gives a job cost none here.

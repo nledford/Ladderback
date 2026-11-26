@@ -40,7 +40,7 @@ impl<S: ReadSource + 'static> ReadSource for CancellableSource<S> {
 
     /// The inner source's size, scanned on a thread of its own: rustic
     /// waits for the scan before it saves the index, and a scan of a large
-    /// source must not hold a cancelled backup's wind-down. A scan given up
+    /// source must not hold a canceled backup's wind-down. A scan given up
     /// is left to run until the worker exits; the size only feeds progress.
     fn size(&self) -> RusticResult<Option<u64>> {
         let inner = Arc::clone(&self.inner);

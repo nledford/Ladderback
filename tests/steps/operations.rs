@@ -675,7 +675,7 @@ pub(crate) async fn finished_backups(agent: &mut Agent, count: usize, plan: Stri
 async fn cancel_the_operation(agent: &mut Agent) {
     let id = agent.ops.the_operation();
     // The daemon answers a start before it has recorded the operation and
-    // registered it to be cancelled, so a cancel sent at once can find
+    // registered it to be canceled, so a cancel sent at once can find
     // neither. Such a cancel is sent again: a refusal stands only when the
     // operation is unknown after a while, or has ended.
     let started = Instant::now();

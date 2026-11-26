@@ -340,7 +340,7 @@ fn copy_of(
         .map(|snapshot| snapshot.id)
 }
 
-/// Initialises a repository at the location, with default key options and
+/// Initializes a repository at the location, with default key options and
 /// both halves of a hot/cold repository. It refuses when a repository
 /// already exists there (`repository-exists`), and never overwrites one.
 pub(crate) fn init(ctx: &Context, spec: &RepositorySpec) -> Result<Done, JobError> {

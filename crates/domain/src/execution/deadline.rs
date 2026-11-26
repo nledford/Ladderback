@@ -63,7 +63,7 @@ pub fn backup_budget(
         .saturating_sub(margin)
 }
 
-/// How long a repository job (a test, a connection or an initialisation from
+/// How long a repository job (a test, a connection or an initialization from
 /// the Repositories page) may run before the daemon kills its worker and
 /// refuses the request. The job only opens or creates a repository, which
 /// reads or writes a few small files, so a healthy backend answers in

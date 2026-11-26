@@ -1858,8 +1858,8 @@ async fn a_resumed_run_whose_unlock_prompt_was_dismissed_is_refused_as_locked_an
     assert_eq!(secrets.lock_query_count(), 0, "the run never waited");
 }
 
-/// A queued backup whose run waits for its keyring can be cancelled while
-/// it waits, as any queued backup can: it ends cancelled, and the engine
+/// A queued backup whose run waits for its keyring can be canceled while
+/// it waits, as any queued backup can: it ends canceled, and the engine
 /// is never asked (#1221, §4.2).
 #[tokio::test]
 async fn a_resumed_run_waiting_for_its_keyring_can_be_canceled() {
@@ -1918,7 +1918,7 @@ async fn a_resumed_run_waiting_for_its_keyring_can_be_canceled() {
 
 /// A cancel the route answers `Ok` in the instant a queued backup's wait
 /// for its keyring ends, before the run gives up its cancel switch, ends
-/// the backup cancelled, whatever the wait answered (#1248).
+/// the backup canceled, whatever the wait answered (#1248).
 #[tokio::test]
 async fn a_cancel_as_a_resumed_runs_wait_ends_ends_it_canceled() {
     let store = Arc::new(app::fakes::InMemoryOperationStore::new());

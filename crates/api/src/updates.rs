@@ -17,7 +17,7 @@ pub struct AvailableUpdateDto {
 /// request (decision 94): whether Settings offers a restart, which it does
 /// only when a service manager runs the daemon and starts it again once it
 /// exits; whether a restart asked for once the running operations finish is
-/// pending, neither come nor cancelled, whatever runs (it stays pending
+/// pending, neither come nor canceled, whatever runs (it stays pending
 /// until the daemon stops); and how many operations are running.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "kebab-case")]

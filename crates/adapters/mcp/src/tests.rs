@@ -2531,7 +2531,7 @@ async fn canceling_a_wait_stops_the_wait_and_never_the_operation() {
     assert!(cancels.lock().unwrap().is_empty(), "{cancels:?}");
     // Its answer is dropped, so the detail isn't read for it.
     assert_eq!(*details.lock().unwrap(), 0);
-    // The session goes on, and the cancelled call is never answered.
+    // The session goes on, and the canceled call is never answered.
     let answer = client.ask_current("tools/list", json!({})).await;
     assert!(answer["result"]["tools"].is_array(), "{answer}");
     assert!(
@@ -2972,7 +2972,7 @@ async fn a_token_that_only_reads_is_listed_only_the_tools_that_read() {
     );
 }
 
-/// Cancelling reads the operation first, so it needs Backups beside Backup
+/// Canceling reads the operation first, so it needs Backups beside Backup
 /// runs; a scheduler that only starts backups is offered no cancel.
 #[tokio::test(start_paused = true)]
 async fn backup_runs_alone_open_starting_and_testing_but_not_canceling() {

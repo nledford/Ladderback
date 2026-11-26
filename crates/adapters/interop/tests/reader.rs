@@ -28,7 +28,7 @@ fn invalid(error: ProfileError) -> (String, Option<usize>, ProfileProblem) {
     }
 }
 
-/// The key and the line of a refusal for something Ladderback can't honour.
+/// The key and the line of a refusal for something Ladderback can't honor.
 fn unsupported(error: ProfileError) -> (String, Option<usize>) {
     match error {
         ProfileError::Unsupported { key, at, .. } => (key, at.map(|at| at.line)),

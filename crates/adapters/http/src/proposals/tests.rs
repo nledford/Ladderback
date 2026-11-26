@@ -263,7 +263,7 @@ impl Daemon {
             .unwrap()
     }
 
-    /// A token with `permissions` labelled `assistant`, as a program sends it,
+    /// A token with `permissions` labeled `assistant`, as a program sends it,
     /// and who it is.
     async fn token(&self, permissions: &[Permission]) -> (String, Proposer) {
         let created = self

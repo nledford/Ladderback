@@ -91,7 +91,7 @@ function chosenEngine(): Engine {
 /** The browser engine the run drives: `LADDERBACK_UI_BROWSER` (`chromium`,
  *  `firefox` or `webkit`), Chromium when unset. `just test-ui <engine>` sets
  *  it, and the red-first check (`scripts/red-first.ts`) runs a new scenario
- *  under each. A step whose browser behaviour differs by engine branches on
+ *  under each. A step whose browser behavior differs by engine branches on
  *  this. */
 export const engine: Engine = chosenEngine();
 const browserType: BrowserType = engines[engine];

@@ -257,7 +257,7 @@ Then("the tab {string} is as wide as it is bold, so choosing it moves no tab", a
 });
 
 // The rules under tabs side by side join into one unbroken line: no gap
-// between neighbours on a line, in either reading direction.
+// between neighbors on a line, in either reading direction.
 Then(
   "the tabs of the list of the tab {string} touch their neighbours on each line",
   async function (this: BrowserWorld, name: string) {

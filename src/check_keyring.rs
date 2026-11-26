@@ -483,7 +483,7 @@ mod tests {
         );
     }
 
-    /// A keyring read that outlived its limit can't be cancelled: it waits
+    /// A keyring read that outlived its limit can't be canceled: it waits
     /// on for the keychain's answer. The command ends at the limit all the
     /// same, not when someone answers (#1375).
     #[test]

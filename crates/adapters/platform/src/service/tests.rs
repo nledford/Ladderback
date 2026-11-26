@@ -1091,7 +1091,7 @@ fn real_manager_answers() -> bool {
         .is_ok_and(|output| output.status.success())
 }
 
-/// The real adapter, on a service labelled for this test run whose plist
+/// The real adapter, on a service labeled for this test run whose plist
 /// and log go in `scratch`. Making it asks the manager nothing.
 #[cfg(target_os = "macos")]
 fn real_service(scratch: &Path) -> (UserService, String) {

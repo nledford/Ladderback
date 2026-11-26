@@ -1133,7 +1133,7 @@ async fn a_plan_ever_succeeded_only_if_one_of_its_own_operations_did(store: &dyn
         return;
     };
 
-    // Queued, running, cancelled and failed: none of them a success.
+    // Queued, running, canceled and failed: none of them a success.
     save(store, &queued(0x900, Some(&never_succeeded)), None).await;
     save(store, &started(queued(0x901, Some(&never_succeeded))), None).await;
     let mut canceled = started(queued(0x902, Some(&never_succeeded)));

@@ -30,7 +30,7 @@ pub const PASSWORD: &str = "e2e-scratch-password";
 /// Not a real secret: a password that opens none of the repository's keys.
 pub const WRONG_PASSWORD: &str = "canary-not-the-password";
 
-/// How long a cancelled backup runs before the user cancels it: long enough
+/// How long a canceled backup runs before the user cancels it: long enough
 /// that the worker is reading the source, far shorter than the backup.
 const CANCEL_AFTER: Duration = Duration::from_millis(500);
 

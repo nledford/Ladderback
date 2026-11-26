@@ -215,7 +215,7 @@ impl ToolName {
     }
 
     /// The permissions the tool needs (decision 127), as the daemon's routes
-    /// it calls need them: cancelling reads the operation it cancels first,
+    /// it calls need them: canceling reads the operation it cancels first,
     /// so it needs Backups beside Backup runs.
     pub(crate) const fn needs(self) -> &'static [Permission] {
         match self {
@@ -780,7 +780,7 @@ impl Server {
     /// sending a progress notification after each read that finds it
     /// unfinished when the call carried a progress token. A detail too large
     /// to read is the summary just read, with no warnings listed or counted. A
-    /// cancelled call stops the wait, never the operation: the answer is
+    /// canceled call stops the wait, never the operation: the answer is
     /// dropped then, as the protocol asks, so the detail isn't read for it.
     async fn wait_operation(
         &self,

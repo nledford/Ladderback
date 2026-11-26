@@ -1164,7 +1164,7 @@ async fn fake_service_manager_meets_the_service_manager_contract() {
 }
 
 /// Channels for the recording fake: each URL is fresh, and one that doesn't
-/// accept is told to fail as its behaviour says.
+/// accept is told to fail as its behavior says.
 #[derive(Default)]
 struct FakeNotifierHarness {
     notifier: app::fakes::RecordingNotifier,

@@ -61,7 +61,7 @@ fn reports_are_read_as_operations_newest_first() {
     );
 }
 
-/// A cancel ends its operation as cancelled, and a start heard after it
+/// A cancel ends its operation as canceled, and a start heard after it
 /// doesn't set it running again.
 #[test]
 fn a_cancel_ends_its_operation() {

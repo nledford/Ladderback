@@ -407,7 +407,7 @@ async fn check_canceled_while_reading(agent: &mut Agent, named: String) {
         panic!("the check ended before it read the stats: {finished:?}");
     }
     let _ = cancel.send(());
-    // Nothing the run waits for once cancelled is the engine's, so it ends
+    // Nothing the run waits for once canceled is the engine's, so it ends
     // in the poll that sees the cancel.
     agent.finished = Some(
         run.as_mut()

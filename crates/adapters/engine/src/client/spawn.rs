@@ -229,7 +229,7 @@ fn repository_id(job: &Job) -> Option<&RepositoryId> {
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum NoCache {
     /// The job names no repository ID: an identify that is run to learn it,
-    /// an initialisation, or a job of a repository a request gave.
+    /// an initialization, or a job of a repository a request gave.
     IdUnknown,
     /// Every one of the repository's cache slots is held by another worker.
     EverySlotTaken,

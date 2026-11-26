@@ -140,7 +140,7 @@ impl HookRunner for FakeHookRunner {
                 context: context.clone(),
             });
         }
-        // The latest behaviour registered for the program wins, so a
+        // The latest behavior registered for the program wins, so a
         // scenario can change its mind.
         if let Ok(simulated) = self.simulated.lock()
             && let Some((_, behavior)) = simulated.iter().rev().find(|(name, _)| name == program)

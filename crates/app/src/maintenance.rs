@@ -465,7 +465,7 @@ impl RunMaintenance {
     /// Announces how each run ends on `events` (§4.4): once, after the last
     /// write to the log, whether the log took that write or not. A run of
     /// several engine jobs ends once, and so does a run that reads the
-    /// repository first; a cancelled run is announced as cancelled.
+    /// repository first; a canceled run is announced as canceled.
     pub fn with_events(mut self, events: Arc<dyn EventBus>) -> Self {
         self.events = Some(events);
         self
@@ -1474,7 +1474,7 @@ impl RunMaintenance {
 
     /// Plays one engine job's events into the operation until it reports a
     /// result (the operation is left running for the caller to settle) or
-    /// the operation ends: failed, or cancelled. `done` is what the jobs
+    /// the operation ends: failed, or canceled. `done` is what the jobs
     /// before this one finished, `total` how many snapshots the whole run
     /// names, and `ruled` the positions of the repository's locations that
     /// have a rule. A prune's question is answered for `repository`, under
@@ -1498,7 +1498,7 @@ impl RunMaintenance {
             events,
             mut control,
         } = running;
-        // A cancel made before the engine was up is honoured at once, not
+        // A cancel made before the engine was up is honored at once, not
         // raced against the events the engine already has ready: the client
         // was told it was accepted.
         if futures::poll!(cancel.as_mut()).is_ready() {
@@ -1530,7 +1530,7 @@ impl RunMaintenance {
                         // A prune at its first delete asks, and is answered
                         // as the run started, under the same lease. A cancel
                         // there before the answer is given, already or once
-                        // the lease is checked, is honoured instead: the
+                        // the lease is checked, is honored instead: the
                         // client was told it was accepted, so the prune is
                         // told no and stopped.
                         EngineEvent::DeletionAsked(ask) => {
@@ -1601,7 +1601,7 @@ impl RunMaintenance {
 enum Played {
     /// The job reported this result; the operation is still running.
     Reported(EngineResult),
-    /// The operation ended: failed, or cancelled.
+    /// The operation ended: failed, or canceled.
     Ended,
 }
 
@@ -1828,7 +1828,7 @@ pub(crate) async fn run_read(
 }
 
 /// Awaits a read of the repository, giving it up when [`READ_TIMEOUT`] has
-/// passed on `clock` (dropping the read cancels what can be cancelled).
+/// passed on `clock` (dropping the read cancels what can be canceled).
 pub(crate) async fn within_read_timeout<T>(
     clock: &dyn Clock,
     read: impl Future<Output = Result<T, MaintenanceError>>,
