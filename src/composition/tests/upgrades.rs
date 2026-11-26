@@ -88,7 +88,7 @@ async fn a_command_beside_a_ladderback_that_holds_an_earlier_folder_changes_noth
         let held = DataDirLock::acquire(&data).expect("the folder is free");
         let before = contents(&data);
 
-        let refused = super::super::upgrade::unheld(&data)
+        let refused = super::super::upgrade::unheld(&data, super::super::upgrade::Scope::Folder)
             .await
             .expect_err("the upgrade is refused while the folder is held");
 
@@ -112,7 +112,7 @@ async fn a_command_on_an_earlier_folder_nobody_holds_upgrades_it_and_lets_it_go(
     let data = scratch.path().join("data");
     earlier_folder(&data).await;
 
-    super::super::upgrade::unheld(&data)
+    super::super::upgrade::unheld(&data, super::super::upgrade::Scope::Folder)
         .await
         .map_err(|refused| refused.message)
         .expect("the folder is upgraded");
@@ -150,7 +150,7 @@ async fn a_command_on_a_current_folder_beside_the_daemon_goes_ahead() {
         .await;
     let held = DataDirLock::acquire(&data).expect("the folder is free");
 
-    super::super::upgrade::unheld(&data)
+    super::super::upgrade::unheld(&data, super::super::upgrade::Scope::Folder)
         .await
         .map_err(|refused| refused.message)
         .expect("nothing to upgrade");
@@ -169,7 +169,7 @@ async fn an_earlier_key_beside_another_machine_key_is_refused_naming_both() {
     write_private(&data, "machine-key", "0b0b\n");
     let before = contents(&data);
 
-    let refused = super::super::upgrade::unheld(&data)
+    let refused = super::super::upgrade::unheld(&data, super::super::upgrade::Scope::Folder)
         .await
         .expect_err("two keys are refused");
 
@@ -188,4 +188,44 @@ async fn an_earlier_key_beside_another_machine_key_is_refused_naming_both() {
     let mut after = contents(&data);
     after.remove(platform::data_dir_lock::LOCK_FILE);
     assert_eq!(after, before, "every file is left as it was");
+}
+
+/// A command that never opens the log, `hub-status` or `export-profile`,
+/// upgrades only the key files: an earlier log the copy refuses, here one
+/// whose migration was changed after it ran, neither refuses it nor is
+/// copied, and is left byte for byte as it was. `pair`, which opens the
+/// log, upgrades it too and is refused.
+#[tokio::test]
+async fn a_command_that_never_opens_the_log_upgrades_only_the_key_files() {
+    use super::super::upgrade::{Scope, unheld};
+    let scratch = tempfile::tempdir().expect("a scratch dir");
+    let data = scratch.path().join("data");
+    earlier_folder(&data).await;
+    let mut raw = sqlx::sqlite::SqliteConnectOptions::new()
+        .filename(data.join("ladderback.db"))
+        .connect()
+        .await
+        .expect("the old log opens");
+    sqlx::query("UPDATE _sqlx_migrations SET checksum = zeroblob(48) WHERE version = 12")
+        .execute(&mut raw)
+        .await
+        .expect("a migration changed after it ran");
+    raw.close().await.expect("the old log is closed");
+    let log = std::fs::read(data.join("ladderback.db")).expect("the log reads");
+
+    unheld(&data, Scope::Keys)
+        .await
+        .map_err(|refused| refused.message)
+        .expect("the key files are upgraded");
+
+    assert!(data.join("machine-id").exists() && data.join("machine-key").exists());
+    assert_eq!(
+        std::fs::read(data.join("ladderback.db")).expect("the log reads"),
+        log
+    );
+    assert!(!data.join("ladderback.db.before-baseline").exists());
+    let refused = unheld(&data, Scope::Folder)
+        .await
+        .expect_err("a command that opens the log is refused");
+    assert_eq!(refused.message, msg::CLI_STORE_OLD_SCHEMA);
 }

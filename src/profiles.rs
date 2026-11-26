@@ -420,9 +420,14 @@ fn export(localizer: &Localizer, plan: &str) -> io::Result<ExitCode> {
             return Ok(ExitCode::FAILURE);
         }
     };
-    // A folder an earlier release left is upgraded first, or the export is
-    // refused while it can't be: its ID may still be under its earlier name.
-    if let Err(refusal) = runtime.block_on(crate::composition::upgrade::unheld(&data_dir)) {
+    // A folder an earlier release left has its key files upgraded first, or
+    // the export is refused while they can't be: its ID may still be under
+    // its earlier name. The operation log, which the export never opens,
+    // is left.
+    if let Err(refusal) = runtime.block_on(crate::composition::upgrade::unheld(
+        &data_dir,
+        crate::composition::upgrade::Scope::Keys,
+    )) {
         say(localizer, refusal.message, &refusal.args)?;
         return Ok(ExitCode::FAILURE);
     }

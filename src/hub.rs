@@ -747,7 +747,7 @@ fn run_pair(localizer: &Localizer, ask: PairAsk) -> io::Result<ExitCode> {
     };
     // Before a token is asked for: a folder an earlier release left is
     // upgraded first, or the pairing is refused while it can't be.
-    if let Err(refusal) = runtime.block_on(upgrade::unheld(&data_dir)) {
+    if let Err(refusal) = runtime.block_on(upgrade::unheld(&data_dir, upgrade::Scope::Folder)) {
         return said_refusal(localizer, &refusal);
     }
     if let Some(address) = ask.address.as_deref()
@@ -1181,10 +1181,12 @@ async fn connect_to_hub(
     data_dir: &Path,
     hostname: Hostname,
 ) -> io::Result<ExitCode> {
-    // A folder an earlier release left is upgraded first, or the check is
-    // refused while it can't be. Otherwise a status check writes nothing:
-    // a machine with no agent ID never paired, and gets none from asking.
-    if let Err(refusal) = upgrade::unheld(data_dir).await {
+    // A folder an earlier release left has its key files upgraded first, or
+    // the check is refused while they can't be; the operation log, which
+    // the check never opens, is left. Otherwise a status check writes
+    // nothing: a machine with no agent ID never paired, and gets none from
+    // asking.
+    if let Err(refusal) = upgrade::unheld(data_dir, upgrade::Scope::Keys).await {
         return said_refusal(localizer, &refusal);
     }
     let agent_id = match platform::agent_id::load(data_dir) {
