@@ -280,3 +280,64 @@ fn a_copy_refused_a_row_is_said_naming_the_table() {
         "{args:?}"
     );
 }
+
+/// Only a copy that failed for a reason another start may not meet, the
+/// files or the database, says the next start tries again; one that fails
+/// the same on every start says the log is untouched and what to report.
+#[test]
+fn only_a_copy_that_may_succeed_later_says_the_next_start_tries_again() {
+    use store::CopyFailure;
+    let detail = || "the system's words".to_owned();
+    let table = || "operations".to_owned();
+    let retried = [
+        CopyFailure::Files { detail: detail() },
+        CopyFailure::Database { detail: detail() },
+    ];
+    let lasting = [
+        CopyFailure::OldMigration { detail: detail() },
+        CopyFailure::Tables {
+            old: vec![table()],
+            baseline: vec![table()],
+        },
+        CopyFailure::Columns {
+            table: table(),
+            unmatched: vec!["status".to_owned()],
+        },
+        CopyFailure::RefusedRow {
+            table: table(),
+            detail: detail(),
+        },
+        CopyFailure::Counts {
+            table: table(),
+            source: 3,
+            copied: 2,
+            dropped: 0,
+        },
+        CopyFailure::ForeignKeys { broken: 1 },
+        CopyFailure::Integrity { detail: detail() },
+        CopyFailure::NotUtf8 {
+            path: "/data/ladderback.db.baseline-new".into(),
+        },
+    ];
+    let said = |cause: CopyFailure| {
+        let refused = super::super::startup::log_refused(
+            Path::new("/data/ladderback.db"),
+            &store::OpenError::BaselineCopy { version: 16, cause },
+        );
+        l10n::Localizer::new(&[])
+            .message(refused.message, &refused.args)
+            .text()
+            .to_owned()
+    };
+
+    for cause in retried {
+        let text = said(cause);
+        assert!(text.contains("the next start tries again"), "{text}");
+    }
+    for cause in lasting {
+        let text = said(cause);
+        assert!(!text.contains("tries again"), "{text}");
+        assert!(text.contains("It was left as it was"), "{text}");
+        assert!(text.contains("report"), "{text}");
+    }
+}

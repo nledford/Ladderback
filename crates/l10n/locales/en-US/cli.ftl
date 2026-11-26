@@ -131,7 +131,7 @@ cli-cannot-open-store = cannot open the operation log at { $path }: { $detail }
 # $version (text): the last migration the file holds, a whole number such as 29.
 cli-store-old-schema = the operation log at { $path } is from an earlier version of Ladderback (migration { $version }), but its migrations are not the ones a release shipped, so it can't be copied into this version's schema. It was left as it was.
 
-# The cli-store-baseline-copy-* messages: the operation log an earlier release left could not be copied into the new schema on start (decision 170), each for the reason its name says. The daemon did not start and left the file as it was; each start tries again. Every one takes:
+# The cli-store-baseline-copy-* messages: the operation log an earlier release left could not be copied into the new schema on start (decision 170), each for the reason its name says. The daemon did not start and left the file as it was. A copy that failed on its files or the database (a full disk, a lock) is tried again at each start; one that failed on the log's own rows fails the same way at every start, so it asks for a report instead, at the project's issue tracker (the address is typed as it is: keep it a string literal). Every one takes:
 # $path (text): the database file, as the user wrote it.
 # $version (text): the last migration the file holds, a whole number such as 16.
 
@@ -145,41 +145,41 @@ cli-store-baseline-copy-database = the operation log at { $path } is from an ear
 
 # One of the earlier version's migrations the log lacked, run on a copy of it, failed on its rows.
 # $detail (text): the database's own message. It is shown as it came.
-cli-store-baseline-copy-old-migration = the operation log at { $path } is from an earlier version of Ladderback (migration { $version }) and couldn't be copied into this version's schema: one of its earlier version's migrations failed on it: { $detail }. It was left as it was, and the next start tries again.
+cli-store-baseline-copy-old-migration = the operation log at { $path } is from an earlier version of Ladderback (migration { $version }) and couldn't be copied into this version's schema: one of its earlier version's migrations failed on it: { $detail }. It was left as it was, and starting again fails the same way: keep it, and report this message at { "https://github.com/nledford/Ladderback/issues" }.
 
 # The log's tables are not the ones the new schema copies.
 # $old (text): the log's tables, by name, separated by commas.
 # $baseline (text): the tables the new schema copies, by name, separated by commas.
-cli-store-baseline-copy-tables = the operation log at { $path } is from an earlier version of Ladderback (migration { $version }) and couldn't be copied into this version's schema: its tables ({ $old }) are not the ones the copy takes ({ $baseline }). It was left as it was, and the next start tries again.
+cli-store-baseline-copy-tables = the operation log at { $path } is from an earlier version of Ladderback (migration { $version }) and couldn't be copied into this version's schema: its tables ({ $old }) are not the ones the copy takes ({ $baseline }). It was left as it was, and starting again fails the same way: keep it, and report this message at { "https://github.com/nledford/Ladderback/issues" }.
 
 # A table's columns are not the ones an earlier release left.
 # $table (text): the table's name, as it is in the database.
 # $columns (text): the columns missing or extra, by name, separated by commas.
-cli-store-baseline-copy-columns = the operation log at { $path } is from an earlier version of Ladderback (migration { $version }) and couldn't be copied into this version's schema: the columns { $columns } of its table { $table } are not the ones an earlier release left. It was left as it was, and the next start tries again.
+cli-store-baseline-copy-columns = the operation log at { $path } is from an earlier version of Ladderback (migration { $version }) and couldn't be copied into this version's schema: the columns { $columns } of its table { $table } are not the ones an earlier release left. It was left as it was, and starting again fails the same way: keep it, and report this message at { "https://github.com/nledford/Ladderback/issues" }.
 
 # A row of the log breaks one of the new schema's rules.
 # $table (text): the table's name, as it is in the database.
 # $detail (text): the database's own message, naming the rule. It is shown as it came.
-cli-store-baseline-copy-refused-row = the operation log at { $path } is from an earlier version of Ladderback (migration { $version }) and couldn't be copied into this version's schema: its table { $table } holds a row the new schema refuses: { $detail }. It was left as it was, and the next start tries again.
+cli-store-baseline-copy-refused-row = the operation log at { $path } is from an earlier version of Ladderback (migration { $version }) and couldn't be copied into this version's schema: its table { $table } holds a row the new schema refuses: { $detail }. It was left as it was, and starting again fails the same way: keep it, and report this message at { "https://github.com/nledford/Ladderback/issues" }.
 
 # The rows copied and dropped of a table don't add up to the rows it held.
 # $table (text): the table's name, as it is in the database.
 # $source (text): how many rows the log's table held, a whole number.
 # $copied (text): how many were copied, a whole number.
 # $dropped (text): how many were dropped as junk, a whole number.
-cli-store-baseline-copy-counts = the operation log at { $path } is from an earlier version of Ladderback (migration { $version }) and couldn't be copied into this version's schema: its table { $table } doesn't add up after the copy (held: { $source }, copied: { $copied }, dropped: { $dropped }). It was left as it was, and the next start tries again.
+cli-store-baseline-copy-counts = the operation log at { $path } is from an earlier version of Ladderback (migration { $version }) and couldn't be copied into this version's schema: its table { $table } doesn't add up after the copy (held: { $source }, copied: { $copied }, dropped: { $dropped }). It was left as it was, and starting again fails the same way: keep it, and report this message at { "https://github.com/nledford/Ladderback/issues" }.
 
 # The copy breaks references between its tables (SQLite's foreign_key_check).
 # $broken (text): how many references are broken, a whole number.
-cli-store-baseline-copy-foreign-keys = the operation log at { $path } is from an earlier version of Ladderback (migration { $version }) and couldn't be copied into this version's schema: the copy breaks references between its tables (broken: { $broken }). It was left as it was, and the next start tries again.
+cli-store-baseline-copy-foreign-keys = the operation log at { $path } is from an earlier version of Ladderback (migration { $version }) and couldn't be copied into this version's schema: the copy breaks references between its tables (broken: { $broken }). It was left as it was, and starting again fails the same way: keep it, and report this message at { "https://github.com/nledford/Ladderback/issues" }.
 
 # The copy fails SQLite's integrity check.
 # $detail (text): the database's own report. It is shown as it came.
-cli-store-baseline-copy-integrity = the operation log at { $path } is from an earlier version of Ladderback (migration { $version }) and couldn't be copied into this version's schema: the copy fails the database's integrity check: { $detail }. It was left as it was, and the next start tries again.
+cli-store-baseline-copy-integrity = the operation log at { $path } is from an earlier version of Ladderback (migration { $version }) and couldn't be copied into this version's schema: the copy fails the database's integrity check: { $detail }. It was left as it was, and starting again fails the same way: keep it, and report this message at { "https://github.com/nledford/Ladderback/issues" }.
 
 # A file the copy works with has a path that isn't UTF-8, which the database needs.
 # $file (text): that file's path, as the system gives it.
-cli-store-baseline-copy-not-utf8 = the operation log at { $path } is from an earlier version of Ladderback (migration { $version }) and couldn't be copied into this version's schema: the path { $file } is not UTF-8, which the database needs. It was left as it was, and the next start tries again.
+cli-store-baseline-copy-not-utf8 = the operation log at { $path } is from an earlier version of Ladderback (migration { $version }) and couldn't be copied into this version's schema: the path { $file } is not UTF-8, which the database needs. It was left as it was, and starting again fails the same way: move the data folder to a path that is UTF-8, or report this message at { "https://github.com/nledford/Ladderback/issues" }.
 
 # The operation log is one an earlier release left, and this command opened it before it was copied into the new schema (decision 170). Only a command that holds the data folder copies it, and every command that opens the log upgrades the folder first, so this says what to do if one ever doesn't. The file was left as it was.
 # $path (text): the database file, as the user wrote it.
