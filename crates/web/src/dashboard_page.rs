@@ -1,12 +1,14 @@
-//! The hub's dashboard, the route `/dashboard` (technical design §4.3, §4.4;
-//! #569, #1440): each approved machine in a section of its own, named by its
-//! hostname, with whether it is online now or when it last connected, a
-//! warning when the hub let go of its oldest reports, the shared progress
-//! bar of the operation it runs, a table of its latest operations and one
-//! of its plans, with a warning when it left some out. What it shows while
-//! paused, counts, says, reads again for and how its times and progress
-//! read is `dashboard.rs`'s, decided on the host; this is the DOM glue,
-//! which the `@ui` scenarios of `features/ui/hub_dashboard.feature` run.
+//! The hub's dashboard, its start page `/` (technical design §4.3, §4.4;
+//! #569, #1440; §16, decision 173): the start page's notices, then each
+//! approved machine in a section of its own, named by its hostname, with
+//! whether it is online now or when it last connected, a warning when the
+//! hub let go of its oldest reports, the shared progress bar of the
+//! operation it runs, a table of its latest operations and one of its
+//! plans, with a warning when it left some out. Its old address,
+//! `/dashboard`, leads there. What it shows while paused, counts, says,
+//! reads again for and how its times and progress read is `dashboard.rs`'s,
+//! decided on the host; this is the DOM glue, which the `@ui` scenarios of
+//! `features/ui/hub_dashboard.feature` run.
 //!
 //! The machines are read when the page opens, again each time the events
 //! stream opens, the first time and after a reconnect, and when an event of
@@ -23,14 +25,15 @@ use api::{
 };
 use l10n::{Localizer, msg};
 use leptos::prelude::*;
+use leptos_router::NavigateOptions;
+use leptos_router::components::Redirect;
 
 use crate::backend::Rereads;
 use crate::components::alert::rules::AlertTone;
-use crate::components::link::rules::{Destination, LinkPlacement, Matching};
 use crate::components::skeleton::rules::Awaited;
 use crate::components::{
-    Alert, Column, Link, Name, PauseUpdates, Progress, Sentences, State, StatusBadge, Table,
-    first_load, paced,
+    Alert, Column, Name, PauseUpdates, Progress, Sentences, State, StatusBadge, Table, first_load,
+    paced,
 };
 use crate::dashboard::{
     Fleet, connection_line, instant, no_plans, outcome_badge, progress_reading, reads_again,
@@ -39,6 +42,7 @@ use crate::operations_page::badge_of;
 use crate::pause;
 use crate::routes::{NotFound, PageHeading, text_with, time_view};
 use crate::settings::agents::hub_known;
+use crate::start_page::notices;
 use crate::text;
 use crate::variants::Rem;
 use crate::visit::Visit;
@@ -54,40 +58,23 @@ const READ_PATIENCE: Duration = Duration::from_secs(5);
 /// unanswered while none had answered: the "few seconds" it says.
 const ASK_AGAIN: Duration = Duration::from_secs(3);
 
-/// The route `/dashboard`: the dashboard on a daemon serving as a hub, and
-/// what any path nothing serves shows on one that isn't; nothing until the
-/// page knows which.
+/// The route `/dashboard`, the dashboard's old address: on a daemon serving
+/// as a hub, it leads to the start page, which is the dashboard, in place of
+/// itself in the browser's history; on one that isn't, what any path nothing
+/// serves shows; nothing until the page knows which (§16, decision 173).
 #[component]
 pub(crate) fn DashboardRoute(localizer: Arc<Localizer>) -> impl IntoView {
     let hub = hub_known();
     move || match hub() {
         None => ().into_any(),
-        Some(true) => view! { <Dashboard localizer=Arc::clone(&localizer) /> }.into_any(),
+        Some(true) => {
+            let options = NavigateOptions {
+                replace: true,
+                ..NavigateOptions::default()
+            };
+            view! { <Redirect path="/" options=options /> }.into_any()
+        }
         Some(false) => view! { <NotFound localizer=Arc::clone(&localizer) /> }.into_any(),
-    }
-}
-
-/// On a hub, the start page's way to the dashboard; nothing elsewhere.
-#[component]
-pub(crate) fn DashboardLink(localizer: Arc<Localizer>) -> impl IntoView {
-    let hub = hub_known();
-    move || {
-        (hub() == Some(true)).then(|| {
-            let words = text(&localizer, msg::UI_MACHINES_DASHBOARD_LINK);
-            Destination::route("/dashboard", Matching::Exact).map(|to| {
-                view! {
-                    <p>
-                        <Link
-                            to=to
-                            localizer=Arc::clone(&localizer)
-                            placement=LinkPlacement::InText
-                        >
-                            {words}
-                        </Link>
-                    </p>
-                }
-            })
-        })
     }
 }
 
@@ -142,9 +129,10 @@ fn follow(fleet: Fleet) {
     );
 }
 
-/// The dashboard itself.
+/// The dashboard itself, a hub's start page: its heading, the start page's
+/// notices, then the machines.
 #[component]
-fn Dashboard(localizer: Arc<Localizer>) -> impl IntoView {
+pub(crate) fn Dashboard(localizer: Arc<Localizer>) -> impl IntoView {
     let fleet = Fleet::new();
     follow(fleet);
     let viewer = l10n::viewer_zone();
@@ -171,8 +159,10 @@ fn Dashboard(localizer: Arc<Localizer>) -> impl IntoView {
     );
     let heading = text(&localizer, msg::UI_DASHBOARD_HEADING);
     let intro = text(&localizer, msg::UI_DASHBOARD_INTRO);
+    let notices = notices(&localizer);
     view! {
         <PageHeading>{heading}</PageHeading>
+        {notices}
         <p>{intro}</p>
         <PauseUpdates
             label=pause_label

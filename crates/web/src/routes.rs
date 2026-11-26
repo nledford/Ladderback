@@ -281,9 +281,11 @@ pub(crate) fn NotFound(localizer: Arc<Localizer>) -> impl IntoView {
 /// The title of the page at `path`, for the browser's tab and history: the
 /// page's own, in the page's language (technical design §4.5, "Route
 /// changes"). A path with no page is the not-found page, and so is
-/// `/_gallery` in a build without the gallery.
-pub(crate) fn title(localizer: &Localizer, path: &str) -> String {
-    title_in(localizer, path, cfg!(feature = "gallery"), false)
+/// `/_gallery` in a build without the gallery. On a daemon serving as a
+/// `hub`, the start page is the dashboard, titled so, and `/dashboard` is
+/// its old address; elsewhere `/dashboard` is no page (§16, decision 173).
+pub(crate) fn title(localizer: &Localizer, path: &str, hub: bool) -> String {
+    title_in(localizer, path, cfg!(feature = "gallery"), hub)
 }
 
 /// Whether `path` is a snapshot's page: `/snapshots/{alias}/{snapshot}`,
@@ -301,8 +303,9 @@ fn is_snapshot_page(path: &str) -> bool {
 /// [`title`] for a build that has the gallery or not, so that both are tested
 /// whichever one the tests are built as.
 fn title_in(localizer: &Localizer, path: &str, gallery: bool, hub: bool) -> String {
-    let _ = hub;
-    let page = if path == "/" {
+    let page = if path == "/" && hub {
+        msg::UI_DASHBOARD_TITLE
+    } else if path == "/" {
         msg::UI_START_TITLE
     } else if gallery && path.trim_suffix('/') == "/_gallery" {
         msg::UI_GALLERY_TITLE
@@ -320,7 +323,7 @@ fn title_in(localizer: &Localizer, path: &str, gallery: bool, hub: bool) -> Stri
         msg::UI_LOG_TITLE
     } else if path == "/settings" {
         msg::UI_SETTINGS_TITLE
-    } else if path == "/dashboard" {
+    } else if path == "/dashboard" && hub {
         msg::UI_DASHBOARD_TITLE
     } else if is_snapshot_page(path) {
         msg::UI_SNAPSHOT_TITLE
@@ -386,6 +389,13 @@ mod tests {
     #[test]
     fn the_dashboards_address_is_page_not_found_on_a_daemon_that_isnt_a_hub() {
         assert_eq!(title_of("/dashboard"), "Page not found – Ladderback");
+    }
+
+    #[test]
+    fn a_hub_titles_every_page_but_its_start_page_as_any_daemon_does() {
+        for path in ["/operations", "/plans", "/settings", "/no/such/page"] {
+            assert_eq!(title_on_a_hub(path), title_of(path), "{path}");
+        }
     }
 
     #[test]

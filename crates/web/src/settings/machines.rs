@@ -21,7 +21,8 @@
 //! each reads the list again, and a machine that starts waiting is said
 //! politely while the tables aren't paused. "Pause live updates" holds both
 //! tables still (A3, decision 65); what they show while paused, and what the
-//! resume says, is `machines_list.rs`'s. A link leads to the hub's dashboard.
+//! resume says, is `machines_list.rs`'s. A link leads to the hub's dashboard,
+//! its start page (§16, decision 173).
 //!
 //! While the hub is in recovery mode, read when the tab is built, a warning
 //! leads the tab: a machine proved a lease the hub doesn't count, as after
@@ -447,7 +448,7 @@ pub(crate) fn Machines(localizer: Arc<Localizer>, step_up: StepUp) -> impl IntoV
         />
         <p>{move || said.get()}</p>
         <p>
-            {Destination::route("/dashboard", Matching::Exact)
+            {Destination::route("/", Matching::Exact)
                 .map(|to| {
                     view! {
                         <Link

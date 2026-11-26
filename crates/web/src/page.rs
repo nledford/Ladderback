@@ -142,7 +142,9 @@ pub(crate) fn keep_page_width(kept: Option<&str>) -> bool {
 
 /// Tells the browser what the page is written in: the `lang` and `dir` of
 /// `<html>`, which a screen reader and the layout follow, and the title of the
-/// page the address names.
+/// page the address names. Whether the daemon is a hub isn't known yet, so
+/// the title is a daemon's that isn't; [`retitle`] corrects it once that is
+/// known (§16, decision 173).
 pub(crate) fn declare(localizer: &Localizer) {
     let Some(window) = web_sys::window() else {
         return;
@@ -156,22 +158,22 @@ pub(crate) fn declare(localizer: &Localizer) {
         let _ = root.set_attribute("dir", localizer.direction().as_str());
     }
     let path = window.location().pathname().unwrap_or_default();
-    document.set_title(&routes::title(localizer, &path));
+    document.set_title(&routes::title(localizer, &path, false));
 }
 
-/// The reader has navigated to the page at `path`: the title follows
-/// (technical design §4.5, "Route changes"). Focus is the heading's own, see
-/// [`focus_on_arrival`].
-pub(crate) fn retitle(localizer: &Localizer, path: &str) {
+/// The page shows the page at `path`, on a daemon serving as a `hub` or not:
+/// the title follows (technical design §4.5, "Route changes"). Focus is the
+/// heading's own, see [`focus_on_arrival`].
+pub(crate) fn retitle(localizer: &Localizer, path: &str, hub: bool) {
     if let Some(document) = web_sys::window().and_then(|window| window.document()) {
-        document.set_title(&routes::title(localizer, path));
+        document.set_title(&routes::title(localizer, path, hub));
     }
 }
 
 /// The page's standing with sign-in changed (security §10.1): the sign-in
 /// page has a title of its own, and once signed in the page takes the title
-/// its address names.
-pub(crate) fn retitle_as(localizer: &Localizer, title: Title) {
+/// its address names, on a daemon serving as a `hub` or not.
+pub(crate) fn retitle_as(localizer: &Localizer, title: Title, hub: bool) {
     let Some(window) = web_sys::window() else {
         return;
     };
@@ -184,7 +186,7 @@ pub(crate) fn retitle_as(localizer: &Localizer, title: Title) {
         }
         Title::Address => {
             let path = window.location().pathname().unwrap_or_default();
-            document.set_title(&routes::title(localizer, &path));
+            document.set_title(&routes::title(localizer, &path, hub));
         }
     }
 }
