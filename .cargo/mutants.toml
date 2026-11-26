@@ -374,7 +374,7 @@ exclude_re = [
     # Machines tab, which every `@ui` scenario of
     # `features/ui/approving_machines.feature` opens in Chromium. Named by
     # line, so a moved line brings the mutant back to judge.
-    'crates/web/src/main\.rs:443:46: replace == with != in App$',
+    'crates/web/src/main\.rs:448:46: replace == with != in App$',
     # Each page's `paced` takes which shown value is its first load: DOM
     # glue. A test of `!=` hides the page's "Loading…" while it waits, which
     # the `@ui` scenarios check: the operations page's "A page still waiting
@@ -386,7 +386,7 @@ exclude_re = [
     # so a moved line brings the mutant back to judge.
     'crates/web/src/operations_page\.rs:210:75: replace == with != in Operations$',
     'crates/web/src/repositories_page\.rs:323:68: replace == with != in Repositories$',
-    'crates/web/src/start_page\.rs:101:67: replace == with != in Start$',
+    'crates/web/src/start_page\.rs:130:67: replace == with != in Start$',
     'crates/web/src/settings/ai_agents\.rs:162:67: replace == with != in AiAgentsSection$',
     # `panic_report::install` sets a hook that writes through `console.error`,
     # which only a browser has. `just test-wasm` runs it:
@@ -417,7 +417,7 @@ exclude_re = [
     # glob of a plan that can never match is pointed out on its row in words"
     # of `features/ui/start_page.feature`, whose one plan has a note, checks
     # it. Named by line, so a moved line brings the mutant back to judge.
-    'crates/web/src/start_page\.rs:208:41: delete ! in start_plans_table$',
+    'crates/web/src/start_page\.rs:228:41: delete ! in start_plans_table$',
 ]
 # A mutant that makes a test hang is caught, but slowly; fail fast instead.
 timeout_multiplier = 3.0

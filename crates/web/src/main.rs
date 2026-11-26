@@ -232,7 +232,7 @@ fn Arrival(localizer: Arc<Localizer>) -> impl IntoView {
     let hub = settings::agents::hub_known();
     Effect::new(move |_| {
         let path = pathname.get();
-        page::retitle(&localizer, &path, hub() == Some(true));
+        page::retitle(&localizer, &path, hub());
     });
 }
 
@@ -457,12 +457,10 @@ fn App(localizer: Arc<Localizer>) -> impl IntoView {
     // for has the title its address names, which `Arrival` gives again once
     // the page knows whether the daemon is a hub.
     let titles = Arc::clone(&localizer);
-    let serves_as_hub = settings::agents::hub_known();
     Effect::new(move |previous: Option<Standing>| {
         let now = shown.get();
         if let Some(title) = Title::on(previous, now) {
-            let hub = untrack(serves_as_hub) == Some(true);
-            page::retitle_as(&titles, title, hub);
+            page::retitle_as(&titles, title);
         }
         now
     });

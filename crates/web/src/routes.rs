@@ -281,11 +281,17 @@ pub(crate) fn NotFound(localizer: Arc<Localizer>) -> impl IntoView {
 /// The title of the page at `path`, for the browser's tab and history: the
 /// page's own, in the page's language (technical design §4.5, "Route
 /// changes"). A path with no page is the not-found page, and so is
-/// `/_gallery` in a build without the gallery. On a daemon serving as a
-/// `hub`, the start page is the dashboard, titled so, and `/dashboard` is
-/// its old address; elsewhere `/dashboard` is no page (§16, decision 173).
-pub(crate) fn title(localizer: &Localizer, path: &str, hub: bool) -> String {
-    title_in(localizer, path, cfg!(feature = "gallery"), hub)
+/// `/_gallery` in a build without the gallery. On a daemon serving as a hub
+/// (`hub`, `None` until the page knows), the start page is the dashboard,
+/// titled so, and `/dashboard` is its old address; elsewhere `/dashboard` is
+/// no page (§16, decision 173).
+pub(crate) fn title(localizer: &Localizer, path: &str, hub: Option<bool>) -> String {
+    title_in(
+        localizer,
+        path,
+        cfg!(feature = "gallery"),
+        hub == Some(true),
+    )
 }
 
 /// Whether `path` is a snapshot's page: `/snapshots/{alias}/{snapshot}`,
@@ -337,13 +343,14 @@ fn title_in(localizer: &Localizer, path: &str, gallery: bool, hub: bool) -> Stri
 mod tests {
     use super::*;
 
+    /// The title of `path` before the page knows whether the daemon is a hub.
     fn title_of(path: &str) -> String {
-        title_in(&Localizer::new(&[]), path, cfg!(feature = "gallery"), false)
+        title(&Localizer::new(&[]), path, None)
     }
 
     /// The title of `path` on a daemon serving as a hub.
     fn title_on_a_hub(path: &str) -> String {
-        title_in(&Localizer::new(&[]), path, cfg!(feature = "gallery"), true)
+        title(&Localizer::new(&[]), path, Some(true))
     }
 
     #[test]
@@ -354,6 +361,11 @@ mod tests {
     #[test]
     fn a_hubs_start_page_is_titled_as_its_dashboard() {
         assert_eq!(title_on_a_hub("/"), "Dashboard – Ladderback");
+    }
+
+    #[test]
+    fn a_daemon_that_isnt_a_hub_titles_its_start_page_with_the_product_name() {
+        assert_eq!(title(&Localizer::new(&[]), "/", Some(false)), "Ladderback");
     }
 
     #[test]
