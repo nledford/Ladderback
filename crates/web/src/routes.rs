@@ -400,6 +400,8 @@ mod tests {
 
     #[test]
     fn the_dashboards_address_is_page_not_found_on_a_daemon_that_isnt_a_hub() {
+        let known = title(&Localizer::new(&[]), "/dashboard", Some(false));
+        assert_eq!(known, "Page not found – Ladderback");
         assert_eq!(title_of("/dashboard"), "Page not found – Ladderback");
     }
 
