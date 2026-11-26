@@ -664,7 +664,7 @@ pub enum Deletion {
 /// counts. Dropped unanswered, every copy of it, it answers
 /// [`Deletion::Refused`], so an event consumer that doesn't know the
 /// question never lets a prune delete.
-#[derive(Clone)]
+#[derive(Clone, Debug)]
 pub struct DeletionAsk(Arc<Mutex<Option<oneshot::Sender<Deletion>>>>);
 
 impl DeletionAsk {
@@ -697,12 +697,6 @@ impl PartialEq for DeletionAsk {
 }
 
 impl Eq for DeletionAsk {}
-
-impl std::fmt::Debug for DeletionAsk {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.write_str("DeletionAsk")
-    }
-}
 
 /// The answer a [`DeletionAsk`] gets: [`Deletion::Refused`] when it is
 /// dropped unanswered.
