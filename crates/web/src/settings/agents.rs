@@ -206,31 +206,12 @@ impl Token {
             .unwrap_or(false)
     }
 
-    /// Whether a cancel of the token `id` is on its way.
-    fn cancel_on_its_way(self, id: &str) -> bool {
-        self.canceling
-            .with_untracked(|canceling| pairing::same_token(canceling.as_deref(), Some(id)))
-    }
-
     /// Whether Cancel this token, or leaving the dialog, cancels the token
     /// `id`.
     fn cancelable(self, id: &str) -> bool {
         let ended = self.ended.with_untracked(Option::is_some);
         self.canceling
             .with_untracked(|canceling| pairing::cancelable(ended, canceling.as_deref(), id))
-    }
-
-    /// Whether a cancel of the token the dialog shows is on its way, for
-    /// its Cancel this token button.
-    fn canceling_shown(self) -> bool {
-        self.canceling.with(|canceling| {
-            self.shown.with(|shown| {
-                pairing::same_token(
-                    canceling.as_deref(),
-                    shown.as_ref().map(|shown| shown.id.as_str()),
-                )
-            })
-        })
     }
 
     /// Whether the open dialog shows the token `id`.
@@ -626,7 +607,10 @@ fn PairingDialog(localizer: Arc<Localizer>, token: Token) -> impl IntoView {
             if token.canceling.try_get_untracked().is_none() {
                 return;
             }
-            if token.cancel_on_its_way(&id) {
+            if token
+                .canceling
+                .with_untracked(|canceling| pairing::cancel_on_its_way(canceling.as_deref(), &id))
+            {
                 token.canceling.set(None);
             }
             // Left while the cancel was on its way: the section says its
@@ -744,7 +728,20 @@ fn PairingDialog(localizer: Arc<Localizer>, token: Token) -> impl IntoView {
                                 <Button
                                     id=CANCEL_ID
                                     content=Content::Text(token_t(msg::UI_PAIRING_CANCEL).into())
-                                    busy=Signal::derive(move || token.canceling_shown())
+                                    busy=Signal::derive(move || {
+                                        token
+                                            .canceling
+                                            .with(|canceling| {
+                                                token
+                                                    .shown
+                                                    .with(|shown| {
+                                                        pairing::canceling_shown(
+                                                            canceling.as_deref(),
+                                                            shown.as_ref().map(|shown| shown.id.as_str()),
+                                                        )
+                                                    })
+                                            })
+                                    })
                                     on_press=cancel
                                 />
                             </p>

@@ -289,6 +289,19 @@ pub(crate) fn cancelable(ended: bool, canceling: Option<&str>, id: &str) -> bool
     !ended && !same_token(canceling, Some(id))
 }
 
+/// Whether the answer of a cancel that was on its way ends the wait for
+/// it: the cancel on its way now (`canceling`) is still the token `id`'s,
+/// not a later token's.
+pub(crate) fn cancel_on_its_way(canceling: Option<&str>, id: &str) -> bool {
+    same_token(canceling, Some(id))
+}
+
+/// Whether the dialog's Cancel this token is busy: a cancel of the token it
+/// shows (`shown`) is on its way (`canceling`).
+pub(crate) fn canceling_shown(canceling: Option<&str>, shown: Option<&str>) -> bool {
+    same_token(canceling, shown)
+}
+
 /// Whether the dialog was just left: it was open (`was_open`, `None`
 /// before the first look) and no longer is.
 pub(crate) fn left(was_open: Option<bool>, open: bool) -> bool {

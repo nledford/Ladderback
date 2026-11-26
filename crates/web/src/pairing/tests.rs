@@ -378,3 +378,24 @@ fn a_closed_dialogs_cancel_is_said_of_the_last_token_in_full_and_of_an_earlier_i
         }
     }
 }
+
+#[test]
+fn a_cancels_answer_ends_the_wait_only_while_that_tokens_cancel_is_on_its_way() {
+    assert!(cancel_on_its_way(Some("t1"), "t1"));
+    assert!(
+        !cancel_on_its_way(Some("t2"), "t1"),
+        "a later token's cancel waits on"
+    );
+    assert!(!cancel_on_its_way(None, "t1"), "no cancel is on its way");
+}
+
+#[test]
+fn cancel_this_token_is_busy_only_while_the_shown_tokens_cancel_is_on_its_way() {
+    assert!(canceling_shown(Some("t1"), Some("t1")));
+    assert!(
+        !canceling_shown(Some("t1"), Some("t2")),
+        "another token's cancel"
+    );
+    assert!(!canceling_shown(None, Some("t1")), "no cancel on its way");
+    assert!(!canceling_shown(None, None), "no token shown");
+}
