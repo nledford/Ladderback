@@ -676,3 +676,105 @@ async fn the_end_of_a_live_connection_is_kept_as_when_the_machine_was_last_heard
     hub.pairing.went_away(agent, 1).await;
     assert_eq!(last_seen().await, Timestamp::from_second(NOW).unwrap());
 }
+
+/// A machine's progress reads as the API tells it: its step and unit by
+/// their names, and its time as the API writes times. A time past what a
+/// timestamp holds reads as none.
+#[test]
+fn a_progress_reads_as_the_api_tells_it() {
+    use api::{MachineProgressDto, OperationStep, ProgressUnit};
+    use domain::fleet::{ReportedProgress, WireName};
+
+    use crate::pairing::{progress_dto, time_of};
+
+    let progress = ReportedProgress {
+        op_id: op(1),
+        step: Some(WireName::parse("backing-up").unwrap()),
+        unit: WireName::parse("bytes").unwrap(),
+        current: 5,
+        total: Some(9),
+        at: EpochSeconds::from_seconds(1_800_000_000),
+    };
+    assert_eq!(
+        progress_dto(&progress),
+        MachineProgressDto {
+            operation: op(1).as_uuid().to_string(),
+            step: Some(OperationStep::BackingUp),
+            unit: ProgressUnit::Bytes,
+            current: 5,
+            total: Some(9),
+            at: "2027-01-15T08:00:00Z".to_owned(),
+        }
+    );
+    assert_eq!(time_of(EpochSeconds::from_seconds(u64::MAX)), None);
+}
+
+/// The hub's keys show their public halves in a log, never the seed.
+#[tokio::test]
+async fn the_hubs_keys_show_their_public_halves_and_no_seed() {
+    let hub = hub();
+    let keys = hub.pairing.keys().await.unwrap();
+    assert_eq!(
+        format!("{keys:?}"),
+        format!(
+            "HubKeys {{ key: {:?}, recovery_key: {:?}, .. }}",
+            keys.key(),
+            keys.recovery_key()
+        )
+    );
+}
+
+/// What the page asks for shows in a log without the step-up's
+/// confirmation (I4).
+#[test]
+fn an_ask_shows_in_a_log_without_its_confirmation() {
+    use std::net::{IpAddr, Ipv4Addr};
+
+    use domain::access::step_up::StepUpConfirmation;
+    use domain::fleet::PublicKey;
+
+    use crate::pairing::{ApprovalAsk, RecoveryAsk, TokenAsk};
+
+    let confirmation = || Some(StepUpConfirmation::parse("canary-step-up".to_owned()).unwrap());
+    let peer = IpAddr::V4(Ipv4Addr::LOCALHOST);
+    let address = HubAddress::parse("https://hub.example:9443").unwrap();
+    let token = TokenAsk {
+        address: address.clone(),
+        tls: TokenTls::Ca,
+        life: None,
+        peer,
+        beyond_loopback: false,
+        confirmation: confirmation(),
+    };
+    assert_eq!(
+        format!("{token:?}"),
+        format!(
+            "TokenAsk {{ address: {address:?}, tls: Ca, life: None, beyond_loopback: false, .. }}"
+        )
+    );
+    let key = PublicKey::from_bytes([0x22; 32]).unwrap();
+    let approval = ApprovalAsk {
+        agent_id: agent_id(1),
+        agent_key: key,
+        peer,
+        beyond_loopback: true,
+        confirmation: confirmation(),
+    };
+    assert_eq!(
+        format!("{approval:?}"),
+        format!(
+            "ApprovalAsk {{ agent_id: {:?}, agent_key: {key:?}, peer: 127.0.0.1, \
+             beyond_loopback: true, .. }}",
+            agent_id(1)
+        )
+    );
+    let recovery = RecoveryAsk {
+        peer,
+        beyond_loopback: false,
+        confirmation: confirmation(),
+    };
+    assert_eq!(
+        format!("{recovery:?}"),
+        "RecoveryAsk { peer: 127.0.0.1, beyond_loopback: false, .. }"
+    );
+}

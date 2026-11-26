@@ -5,14 +5,13 @@
 //! leaving the dialog clears it from the page (I4). Leaving the dialog, by
 //! Close or Escape, cancels a token no agent has used, and the section says
 //! so. With sign-in off it warns that a hub behind a reverse proxy must turn
-//! sign-in on (decision 120). `pairing.rs` decides for it.
+//! sign-in on (decision 120). It is DOM glue: `pairing.rs` decides for it.
 
-use std::str::FromStr;
 use std::sync::Arc;
 use std::time::Duration;
 
 use api::{
-    ErrorCode, HUB_PATH, HubDto, MakePairingTokenDto, MsgArg, PAIRING_TOKENS_PATH, PairingTokenDto,
+    ErrorCode, HUB_PATH, HubDto, MakePairingTokenDto, PAIRING_TOKENS_PATH, PairingTokenDto,
     TokenCertificateDto,
 };
 use l10n::{Localizer, msg};
@@ -31,11 +30,12 @@ use crate::components::{
     focus_element, holds_focus, point_at_refusal, refusal_alert, say_refusals,
 };
 use crate::live::{PageClock, reply};
-use crate::pairing::{AddressWarning, Countdown, Scheme, life, minutes};
+use crate::pairing::{
+    self, AddressWarning, CA, ClosedCancel, Countdown, PINNED, Scheme, asked, lapsed, lapses, life,
+};
 use crate::repositories::Sentence;
-use crate::routes::{instant, refused_sentence, text_with};
+use crate::routes::refused_sentence;
 use crate::session::Standing;
-use crate::snapshots::viewer_offset;
 use crate::text;
 use crate::ws::{self, Posted};
 
@@ -48,10 +48,8 @@ const WARNING_ID: &str = "pairing-address-warning";
 /// The field of the token's life.
 const LIFE_ID: &str = "pairing-life";
 
-/// The certificate choice's group, and its two values.
+/// The certificate choice's group; `pairing.rs` holds its two values.
 const CERTIFICATE_GROUP: &str = "pairing-certificate";
-const PINNED: &str = "pinned";
-const CA: &str = "ca";
 
 /// The step-up field, where focus goes when the step-up is refused.
 const STEP_UP_ID: &str = "pairing-confirmation";
@@ -101,9 +99,8 @@ pub(crate) fn hub_known() -> impl Fn() -> Option<bool> + Copy + 'static {
             return Some(false);
         };
         let now = standing.map(|standing| standing.get());
-        key.with(|read| match read {
-            Some((when, key)) if now.is_none_or(|now| now == *when) => Some(key.is_some()),
-            _ => None,
+        key.with(|read| {
+            pairing::is_hub(read.as_ref().map(|(when, key)| (*when, key.is_some())), now)
         })
     });
     move || known.get()
@@ -185,16 +182,14 @@ impl Token {
     /// section shows it, and the announcer says it (§4.5): the section is
     /// no live region of its own.
     fn say_closed(self, localizer: &Localizer, id: &str, answer: Option<&Posted>) {
-        let (said, shown) = if self.last_shown(id) {
-            (said_once_closed(localizer, answer), self.page_said)
-        } else if still_works(answer) {
-            (
-                Some(text(localizer, msg::UI_PAIRING_EARLIER_NOT_CANCELED)),
-                self.earlier_said,
-            )
-        } else {
+        let Some(closed) = pairing::closed_cancel(self.last_shown(id), answer) else {
             return;
         };
+        let (said, shown) = match closed {
+            ClosedCancel::Last(said) => (said, self.page_said),
+            ClosedCancel::Earlier(said) => (Some(said), self.earlier_said),
+        };
+        let said = said.map(|said| text(localizer, said));
         // A section gone with Settings meanwhile has nobody to tell.
         if shown.try_set(said.clone()).is_some() {
             return;
@@ -207,33 +202,24 @@ impl Token {
     /// Whether `id` is the last token the dialog showed.
     fn last_shown(self, id: &str) -> bool {
         self.last_shown
-            .try_with_value(|last| last.as_deref() == Some(id))
+            .try_with_value(|last| pairing::same_token(last.as_deref(), Some(id)))
             .unwrap_or(false)
     }
 
-    /// Whether a cancel of the token `id` is on its way.
-    fn cancel_on_its_way(self, id: &str) -> bool {
+    /// Whether Cancel this token, or leaving the dialog, cancels the token
+    /// `id`.
+    fn cancelable(self, id: &str) -> bool {
+        let ended = self.ended.with_untracked(Option::is_some);
         self.canceling
-            .with_untracked(|canceling| canceling.as_deref() == Some(id))
-    }
-
-    /// Whether a cancel of the token the dialog shows is on its way, for
-    /// its Cancel this token button.
-    fn canceling_shown(self) -> bool {
-        self.canceling.with(|canceling| {
-            self.shown.with(|shown| match (canceling, shown) {
-                (Some(id), Some(shown)) => *id == shown.id,
-                _ => false,
-            })
-        })
+            .with_untracked(|canceling| pairing::cancelable(ended, canceling.as_deref(), id))
     }
 
     /// Whether the open dialog shows the token `id`.
     fn shows(self, id: &str) -> bool {
-        self.open.get_untracked()
-            && self
-                .shown
-                .with_untracked(|shown| shown.as_ref().is_some_and(|shown| shown.id == id))
+        let open = self.open.get_untracked();
+        self.shown.with_untracked(|shown| {
+            pairing::shows(open, shown.as_ref().map(|shown| shown.id.as_str()), id)
+        })
     }
 
     /// Shows `made` in the dialog and starts counting its life down.
@@ -262,10 +248,15 @@ impl Token {
         spawn_local(async move {
             loop {
                 gloo_timers::future::sleep(TICK).await;
-                let still = self
-                    .shown
-                    .try_with_untracked(|shown| shown.as_ref().is_some_and(|shown| shown.id == id));
-                if still != Some(true) || self.ended.get_untracked().is_some() {
+                // A section gone with Settings meanwhile has nothing to count.
+                let counting = self.shown.try_with_untracked(|shown| {
+                    pairing::counts_down(
+                        shown.as_ref().map(|shown| shown.id.as_str()),
+                        &id,
+                        self.ended.with_untracked(Option::is_some),
+                    )
+                });
+                if counting != Some(true) {
                     return;
                 }
                 let left = countdown.left(PageClock.now());
@@ -298,38 +289,9 @@ impl Token {
     }
 }
 
-/// The address a token's path cancels it at.
-fn cancel_url(id: &str) -> String {
-    format!("{}{PAIRING_TOKENS_PATH}/{id}", ws::origin())
-}
-
 /// A request the hub didn't answer, or answered with what isn't a token.
 fn unanswered(localizer: &Localizer) -> Sentence {
     Sentence::new(&text(localizer, msg::UI_PAIRING_UNANSWERED), None)
-}
-
-/// Whether a token still works once its cancel is answered: the hub
-/// refused the cancel, other than as a token it no longer holds, or didn't
-/// answer.
-fn still_works(answer: Option<&Posted>) -> bool {
-    !matches!(
-        answer,
-        Some(Posted::Done(_) | Posted::Refused(ErrorCode::PairingTokenUnknown, ..))
-    )
-}
-
-/// What the section says of a cancel answered once its dialog is closed:
-/// that the token was canceled, or that the hub couldn't cancel it, so it
-/// still works until it lapses. A token the hub no longer holds was used or
-/// lapsed already, and nothing is said.
-fn said_once_closed(localizer: &Localizer, answer: Option<&Posted>) -> Option<String> {
-    match answer {
-        Some(Posted::Done(_)) => Some(text(localizer, msg::UI_PAIRING_CLOSED_CANCELED)),
-        Some(Posted::Refused(ErrorCode::PairingTokenUnknown, ..)) => None,
-        Some(Posted::Refused(..)) | None => {
-            Some(text(localizer, msg::UI_PAIRING_CLOSED_NOT_CANCELED))
-        }
-    }
 }
 
 /// The Agents section: what pairing is, the form that makes a token, and
@@ -353,10 +315,10 @@ pub(crate) fn Agents(localizer: Arc<Localizer>, on: bool) -> impl IntoView {
     let serves_own = hub
         .as_ref()
         .is_some_and(|hub| hub.own_certificate.is_some());
-    let certificate = RwSignal::new(match hub.as_ref().map(|hub| hub.certificate) {
-        Some(TokenCertificateDto::Pinned) if serves_own => PINNED,
-        _ => CA,
-    });
+    let certificate = RwSignal::new(pairing::first_choice(
+        hub.as_ref().map(|hub| hub.certificate),
+        serves_own,
+    ));
     let fingerprint = hub.map(|key| key.fingerprint).unwrap_or_default();
     let (step_up, proxy_warning) = if on {
         (StepUp::Password, None)
@@ -372,7 +334,7 @@ pub(crate) fn Agents(localizer: Arc<Localizer>, on: bool) -> impl IntoView {
     let address = RwSignal::new(ws::origin());
     // A plain address shows no certificate, so it is offered no choice of
     // one (#1343).
-    let plain = Memo::new(move |_| Scheme::of(&address.get()) == Some(Scheme::Http));
+    let plain = Memo::new(move |_| Scheme::plain(&address.get()));
     let choice_t = t.clone();
     let life_typed = RwSignal::new(DEFAULT_LIFE.to_owned());
     let life_error = RwSignal::new(None::<String>);
@@ -419,7 +381,7 @@ pub(crate) fn Agents(localizer: Arc<Localizer>, on: bool) -> impl IntoView {
                     _ => None,
                 };
                 if let Some(made) = made {
-                    ws::delete(&cancel_url(&made.token_id)).await;
+                    ws::delete(&pairing::cancel_url(&ws::origin(), &made.token_id)).await;
                 }
                 return;
             }
@@ -454,10 +416,11 @@ pub(crate) fn Agents(localizer: Arc<Localizer>, on: bool) -> impl IntoView {
     let close_localizer = Arc::clone(&localizer);
     Effect::new(move |was_open: Option<bool>| {
         let now = token.open.get();
-        if was_open == Some(true) && !now {
-            let live = token.shown.get_untracked().filter(|live| {
-                token.ended.get_untracked().is_none() && !token.cancel_on_its_way(&live.id)
-            });
+        if pairing::left(was_open, now) {
+            let live = token
+                .shown
+                .get_untracked()
+                .filter(|live| token.cancelable(&live.id));
             token.secret.set(String::new());
             token.shown.set(None);
             token.ended.set(None);
@@ -465,7 +428,7 @@ pub(crate) fn Agents(localizer: Arc<Localizer>, on: bool) -> impl IntoView {
             if let Some(live) = live {
                 let localizer = Arc::clone(&close_localizer);
                 spawn_local(async move {
-                    let answer = ws::delete(&cancel_url(&live.id)).await;
+                    let answer = ws::delete(&pairing::cancel_url(&ws::origin(), &live.id)).await;
                     token.say_closed(&localizer, &live.id, answer.as_ref());
                 });
             }
@@ -634,17 +597,20 @@ fn PairingDialog(localizer: Arc<Localizer>, token: Token) -> impl IntoView {
         else {
             return;
         };
-        if token.cancel_on_its_way(&id) || token.ended.get_untracked().is_some() {
+        if !token.cancelable(&id) {
             return;
         }
         token.canceling.set(Some(id.clone()));
         let localizer = Arc::clone(&cancel_localizer);
         spawn_local(async move {
-            let answer = ws::delete(&cancel_url(&id)).await;
+            let answer = ws::delete(&pairing::cancel_url(&ws::origin(), &id)).await;
             if token.canceling.try_get_untracked().is_none() {
                 return;
             }
-            if token.cancel_on_its_way(&id) {
+            if token
+                .canceling
+                .with_untracked(|canceling| pairing::cancel_on_its_way(canceling.as_deref(), &id))
+            {
                 token.canceling.set(None);
             }
             // Left while the cancel was on its way: the section says its
@@ -762,7 +728,20 @@ fn PairingDialog(localizer: Arc<Localizer>, token: Token) -> impl IntoView {
                                 <Button
                                     id=CANCEL_ID
                                     content=Content::Text(token_t(msg::UI_PAIRING_CANCEL).into())
-                                    busy=Signal::derive(move || token.canceling_shown())
+                                    busy=Signal::derive(move || {
+                                        token
+                                            .canceling
+                                            .with(|canceling| {
+                                                token
+                                                    .shown
+                                                    .with(|shown| {
+                                                        pairing::canceling_shown(
+                                                            canceling.as_deref(),
+                                                            shown.as_ref().map(|shown| shown.id.as_str()),
+                                                        )
+                                                    })
+                                            })
+                                    })
                                     on_press=cancel
                                 />
                             </p>
@@ -808,128 +787,5 @@ fn PairingDialog(localizer: Arc<Localizer>, token: Token) -> impl IntoView {
             </p>
             <p>{t(msg::UI_PAIRING_CLOSE_NOTE)}</p>
         </ReviewDialog>
-    }
-}
-
-/// When the token lapses, in the viewer's `zone` with its offset named,
-/// and in how many minutes, rounded up. Without a zone the time is UTC's,
-/// as `instant` writes it, and so is the offset named.
-pub(crate) fn lapses(
-    localizer: &Localizer,
-    zone: Option<&api::IanaZone>,
-    expires_at: &str,
-    left: u64,
-) -> String {
-    let offset = jiff::Timestamp::from_str(expires_at)
-        .map(|at| zone.map_or(jiff::tz::Offset::UTC, |_| viewer_offset(at)))
-        .map(|offset| api::ClockOffset::new(offset).to_string())
-        .unwrap_or_default();
-    text_with(
-        localizer,
-        msg::UI_PAIRING_LAPSES,
-        &[
-            ("when", MsgArg::Text(instant(localizer, expires_at, zone))),
-            ("offset", MsgArg::Text(offset)),
-            ("minutes", MsgArg::Count(minutes(left))),
-        ],
-    )
-}
-
-/// What the dialog says once the token lapsed, its time in the viewer's
-/// `zone`.
-pub(crate) fn lapsed(
-    localizer: &Localizer,
-    zone: Option<&api::IanaZone>,
-    expires_at: &str,
-) -> String {
-    text_with(
-        localizer,
-        msg::UI_PAIRING_LAPSED,
-        &[("when", MsgArg::Text(instant(localizer, expires_at, zone)))],
-    )
-}
-
-/// What a token is asked for: the address as typed, without the spaces
-/// around it, and the certificate chosen; but a plain `http://` address
-/// shows no certificate, so its token pins none, even when the hub's own was
-/// chosen before the address was typed (#1343).
-fn asked(typed: &str, chosen: &str) -> (String, TokenCertificateDto) {
-    let typed = typed.trim();
-    let certificate = match Scheme::of(typed) {
-        Some(Scheme::Http) => TokenCertificateDto::Ca,
-        _ if chosen == PINNED => TokenCertificateDto::Pinned,
-        _ => TokenCertificateDto::Ca,
-    };
-    (typed.to_owned(), certificate)
-}
-
-#[cfg(test)]
-mod tests {
-    use super::{CA, PINNED, asked, instant, lapsed, lapses};
-    use api::TokenCertificateDto;
-    use l10n::Localizer;
-
-    /// Without the viewer's zone the dialog writes the lapse time in UTC,
-    /// as `instant` writes one without a zone, so the offset it names beside
-    /// it is UTC's, never the viewer's (#1271). The viewer's zone is a
-    /// browser's: `formatting.rs` tests it in `just test-wasm`.
-    #[test]
-    fn without_the_viewers_zone_a_tokens_lapse_time_and_the_offset_named_are_utcs() {
-        let localizer = Localizer::new(&["en-US".parse().unwrap()]);
-        let raw = "2026-11-21T17:25:04Z";
-        let utc = instant(&localizer, raw, None);
-        assert_eq!(
-            lapses(&localizer, None, raw, 15 * 60),
-            format!("{utc} (+00:00), in 15 minutes")
-        );
-        assert_eq!(
-            lapsed(&localizer, None, raw),
-            format!("Lapsed at {utc}. Make a new token to pair a machine.")
-        );
-    }
-
-    /// The choice is asked for at the address as typed, but a plain
-    /// address shows no certificate, so its token pins none, even when the
-    /// hub's own was chosen before it was typed (#1343).
-    #[test]
-    fn a_token_is_asked_for_at_the_address_typed_and_a_plain_one_pins_nothing() {
-        for (typed, chosen, address, certificate) in [
-            (
-                " http://hub.example:9898 ",
-                PINNED,
-                "http://hub.example:9898",
-                TokenCertificateDto::Ca,
-            ),
-            (
-                "HTTP://127.0.0.1:9898",
-                PINNED,
-                "HTTP://127.0.0.1:9898",
-                TokenCertificateDto::Ca,
-            ),
-            (
-                "http://hub.example:9898",
-                CA,
-                "http://hub.example:9898",
-                TokenCertificateDto::Ca,
-            ),
-            (
-                "https://hub.example:9443",
-                PINNED,
-                "https://hub.example:9443",
-                TokenCertificateDto::Pinned,
-            ),
-            (
-                "https://proxy.example",
-                CA,
-                "https://proxy.example",
-                TokenCertificateDto::Ca,
-            ),
-        ] {
-            assert_eq!(
-                asked(typed, chosen),
-                (address.to_owned(), certificate),
-                "{typed}, {chosen}"
-            );
-        }
     }
 }

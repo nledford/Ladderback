@@ -222,6 +222,112 @@ async fn an_approved_agent_is_welcomed_approved() {
     ));
 }
 
+/// The key files of `inner`, counting each write of the pin.
+struct CountingPinWrites {
+    inner: Arc<InMemoryIdentity>,
+    writes: std::sync::atomic::AtomicUsize,
+}
+
+#[async_trait]
+impl crate::ports::Identity for CountingPinWrites {
+    async fn seed(
+        &self,
+        file: SeedFile,
+    ) -> Result<Option<SigningSeed>, crate::ports::IdentityError> {
+        self.inner.seed(file).await
+    }
+
+    async fn keep_seed(
+        &self,
+        file: SeedFile,
+        seed: SigningSeed,
+    ) -> Result<SigningSeed, crate::ports::IdentityError> {
+        self.inner.keep_seed(file, seed).await
+    }
+
+    async fn forget_recovery_seed(&self) -> Result<(), crate::ports::IdentityError> {
+        self.inner.forget_recovery_seed().await
+    }
+
+    async fn renew_agent_key(&self, seed: SigningSeed) -> Result<(), crate::ports::IdentityError> {
+        self.inner.renew_agent_key(seed).await
+    }
+
+    async fn recovery_key(&self) -> Result<Option<PublicKey>, crate::ports::IdentityError> {
+        self.inner.recovery_key().await
+    }
+
+    async fn keep_recovery_key(
+        &self,
+        key: PublicKey,
+    ) -> Result<PublicKey, crate::ports::IdentityError> {
+        self.inner.keep_recovery_key(key).await
+    }
+
+    async fn tls_key(&self) -> Result<Option<domain::fleet::TlsKey>, crate::ports::IdentityError> {
+        self.inner.tls_key().await
+    }
+
+    async fn keep_tls_key(
+        &self,
+        key: domain::fleet::TlsKey,
+    ) -> Result<domain::fleet::TlsKey, crate::ports::IdentityError> {
+        self.inner.keep_tls_key(key).await
+    }
+
+    async fn pin(&self) -> Result<Option<domain::fleet::HubPin>, crate::ports::IdentityError> {
+        self.inner.pin().await
+    }
+
+    async fn write_pin(
+        &self,
+        pin: &domain::fleet::HubPin,
+    ) -> Result<(), crate::ports::IdentityError> {
+        self.writes
+            .fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+        self.inner.write_pin(pin).await
+    }
+
+    async fn forget_pin(&self) -> Result<(), crate::ports::IdentityError> {
+        self.inner.forget_pin().await
+    }
+
+    async fn begin_attempt(&self) -> Result<crate::ports::Attempt, crate::ports::IdentityError> {
+        self.inner.begin_attempt().await
+    }
+}
+
+/// A welcome at the generation the pin already holds writes no pin: the
+/// key files are written only when the hub's pin changes.
+#[tokio::test]
+async fn a_welcome_at_the_pins_own_generation_writes_no_pin() {
+    let hub = hub(1);
+    let identity = approved(&hub).await;
+    let pinned = identity.pin().await.unwrap();
+    let counting = Arc::new(CountingPinWrites {
+        inner: identity.clone(),
+        writes: std::sync::atomic::AtomicUsize::new(0),
+    });
+    let connector = Arc::new(LoopbackHubConnector::to(hub.pairing.clone()));
+    let connected = ConnectToHub::new(
+        counting.clone(),
+        Arc::new(FakeSigning),
+        Arc::new(SeededRandom::new(77)),
+        Arc::new(FakeClock::new(
+            Timestamp::from_second(1_800_000_030).unwrap(),
+        )),
+        connector,
+        "0.5.0-agent".to_owned(),
+        None,
+    )
+    .connect(agent_id(1), hostname(1), None)
+    .await
+    .unwrap();
+    assert_eq!(connected.approval, Approval::Approved);
+    assert_eq!(counting.writes.load(std::sync::atomic::Ordering::SeqCst), 0);
+    assert_eq!(identity.pin().await.unwrap(), pinned);
+}
+
 /// Past the cap of reports the hub keeps of one agent, it lets go of the
 /// oldest and warns once for that agent while it runs, with the count let
 /// go of so far and nothing a report says (I4); the ones after are counted
@@ -835,6 +941,50 @@ async fn the_sync_loop_tells_the_hub_a_progress_with_no_report_waiting() {
     assert_eq!(inbox.progress(agent_id(1)).await.unwrap(), Some(told));
 }
 
+/// The agent's sync loop tells the hub a report waiting in its outbox once
+/// its connection holds, with nothing else due: no progress, no plans and
+/// no lease to ask for.
+#[tokio::test]
+async fn the_sync_loop_tells_the_hub_a_report_waiting_in_its_outbox() {
+    use crate::ports::{Outbox as _, ReportInbox as _};
+    use crate::sync::SyncWithHub;
+    use domain::fleet::OutboxEpoch;
+
+    let inbox = Arc::new(crate::fakes::InMemoryReportInbox::default());
+    let hub = hub_with(1, |pairing| pairing.with_inbox(inbox.clone()));
+    let identity = approved(&hub).await;
+    let outbox = Arc::new(crate::fakes::InMemoryOutbox::new(OutboxEpoch::from_uuid(
+        Uuid::from_u128(0xe1),
+    )));
+    let entry = one_report();
+    outbox.append(&entry.report).await.unwrap();
+    let clock = Arc::new(FakeClock::new(
+        Timestamp::from_second(1_800_000_030).unwrap(),
+    ));
+    let sync = SyncWithHub::new(
+        connecting(
+            identity,
+            Arc::new(LoopbackHubConnector::to(hub.pairing.clone())),
+        ),
+        outbox,
+        clock.clone(),
+        agent_id(1),
+        hostname(1),
+        None,
+    );
+
+    let warned = warned_by_the_sync_loop(sync, &clock, 2).await;
+    assert!(warned.is_empty(), "{warned:?}");
+    let told: Vec<_> = inbox
+        .reports(agent_id(1))
+        .await
+        .unwrap()
+        .into_iter()
+        .map(|told| told.report)
+        .collect();
+    assert_eq!(told, vec![entry.report]);
+}
+
 /// A channel shows its sequence numbers in a log and leaves out its keys.
 #[tokio::test]
 async fn a_channel_shows_its_sequence_numbers_and_no_key() {
@@ -850,6 +1000,34 @@ async fn a_channel_shows_its_sequence_numbers_and_no_key() {
         format!("{channel:?}"),
         format!("AgentChannel {{ next_sent: {next}, next_received: {next}, .. }}")
     );
+}
+
+/// An acknowledgement the hub never sent is never taken: a link the hub
+/// drops before its plans or heartbeat acknowledgement ends the wait for
+/// it with the link's failure.
+#[tokio::test]
+async fn a_link_dropped_before_an_acknowledgement_fails_the_wait_for_it() {
+    use crate::pairing::ChannelError;
+
+    let hub = hub_with(1, |pairing| pairing);
+    let identity = approved(&hub).await;
+    for kind in ["plans", "heartbeat"] {
+        let connector = Arc::new(LoopbackHubConnector::to(hub.pairing.clone()));
+        let (_, mut channel) = connecting(identity.clone(), connector.clone())
+            .connect_channel(agent_id(1), hostname(1), None)
+            .await
+            .unwrap();
+        connector.drop_links().await;
+        let waited = if kind == "plans" {
+            channel.receive_plans_ack().await
+        } else {
+            channel.receive_heartbeat_ack().await.map(|_| ())
+        };
+        assert!(
+            matches!(waited, Err(ChannelError::Link(_))),
+            "{kind}: {waited:?}"
+        );
+    }
 }
 
 /// The hub logs an approved agent's first connection since its approval
@@ -2878,6 +3056,55 @@ async fn i1_a_hub_that_hears_a_proven_floor_above_its_counter_withholds_its_gran
         Some(1),
         "the hub granted nothing above its counter"
     );
+}
+
+/// A hub in recovery mode warns once that a machine's report found it
+/// there, however many reports do; a person's confirmation ends it once
+/// and says so, and a second confirmation finds nothing to end (decision
+/// 137).
+#[tokio::test]
+async fn i1_recovery_mode_is_warned_of_once_and_a_confirmation_ends_it_once() {
+    use std::net::{IpAddr, Ipv4Addr};
+
+    use domain::access::step_up::StepUpConfirmation;
+
+    use crate::pairing::RecoveryAsk;
+
+    crate::test_log::capture_the_log();
+    let leasing = leasing(Timestamp::from_second(1_800_000_000).unwrap()).await;
+    leasing.sync.sync_once().await.unwrap();
+    let keys = leasing.hub.pairing.keys().await.unwrap();
+    take_grant_at(&leasing, &keys, 5).await;
+    for _ in 0..3 {
+        leasing.machine_clock.advance(SignedDuration::from_secs(60));
+        leasing.hub.clock.advance(SignedDuration::from_secs(60));
+        leasing.sync.sync_once().await.unwrap();
+    }
+    assert!(leasing.hub.pairing.recovering().await.unwrap());
+    let warned = |text: &str| {
+        crate::test_log::logged_by("app::pairing")
+            .into_iter()
+            .filter(|(level, line)| *level == log::Level::Warn && line.contains(text))
+            .count()
+    };
+    assert_eq!(warned("proved a lease above what this hub counts"), 1);
+    let ask = || RecoveryAsk {
+        peer: IpAddr::V4(Ipv4Addr::LOCALHOST),
+        beyond_loopback: false,
+        confirmation: Some(
+            StepUpConfirmation::parse(Fingerprint::of_key(keys.key()).to_string()).unwrap(),
+        ),
+    };
+    assert_eq!(
+        leasing.hub.pairing.end_recovery_asked(ask()).await,
+        Ok(true)
+    );
+    assert!(!leasing.hub.pairing.recovering().await.unwrap());
+    assert_eq!(
+        leasing.hub.pairing.end_recovery_asked(ask()).await,
+        Ok(false)
+    );
+    assert_eq!(warned("recovery mode ended"), 1);
 }
 
 /// A floor whose proof another hub's key signed doesn't count: the hub

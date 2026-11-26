@@ -405,3 +405,114 @@ impl HubLink for LoopLink {
         }
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use api::sync::AgentFrame;
+    use domain::Timestamp;
+    use domain::fleet::RouteSession;
+
+    use super::*;
+    use crate::fakes::{
+        FakeClock, FakeSigning, InMemoryAgentRegistry, InMemoryIdentity, SeededRandom,
+    };
+
+    fn start() -> Timestamp {
+        Timestamp::from_second(1_800_000_000).unwrap()
+    }
+
+    fn hub(clock: Arc<FakeClock>) -> Arc<HubPairing> {
+        Arc::new(HubPairing::new(
+            Arc::new(InMemoryAgentRegistry::new()),
+            Arc::new(InMemoryIdentity::default()),
+            Arc::new(FakeSigning),
+            Arc::new(SeededRandom::new(7)),
+            clock,
+            "0.0.0-test".to_owned(),
+        ))
+    }
+
+    fn route() -> HubRoute {
+        HubRoute {
+            host: "hub.example".to_owned(),
+            port: 9443,
+            session: RouteSession::Plain,
+        }
+    }
+
+    /// A `Connect` from agent 1 asking for no binding.
+    fn connect() -> AgentFrame {
+        AgentFrame::Connect {
+            machine_id: "00000000-0000-0000-0000-000000000001".to_owned(),
+            machine_nonce: "A".repeat(43),
+            binding_kind: 0,
+        }
+    }
+
+    /// The hub closes a link once it sent nothing for [`SILENCE_LIMIT`] by
+    /// the hub's clock, counted from its last frame, not from its opening.
+    #[tokio::test]
+    async fn a_link_is_closed_once_silent_for_the_limit_since_its_last_frame() {
+        let clock = Arc::new(FakeClock::new(start()));
+        let connector = LoopbackHubConnector::to(hub(clock.clone())).watching(clock.clone());
+        let mut link = connector.connect(&route()).await.unwrap();
+        clock.advance(SignedDuration::from_secs(10));
+        assert_eq!(link.send(&connect()).await, Ok(()));
+        clock.advance(SILENCE_LIMIT - SignedDuration::from_secs(1));
+        connector.close_silent().await;
+        assert_eq!(connector.open_links(), 1, "a second short of the limit");
+        clock.advance(SignedDuration::from_secs(1));
+        connector.close_silent().await;
+        assert_eq!(connector.open_links(), 0);
+    }
+
+    /// A frame the agent sends over [`MAX_FRAME_BYTES`] ends the link
+    /// unread: the hub gives no reason, as it would for a frame out of turn.
+    #[tokio::test]
+    async fn a_frame_sent_over_the_limit_ends_the_link_unread() {
+        let connector = LoopbackHubConnector::to(hub(Arc::new(FakeClock::new(start()))));
+        let mut link = connector.connect(&route()).await.unwrap();
+        let long = AgentFrame::Pair {
+            pairing_key: "A".repeat(43),
+            machine_key: "A".repeat(43),
+            counter: 0,
+            hostname: "a".repeat(MAX_FRAME_BYTES),
+            zone: None,
+            pairing_signature: "A".repeat(86),
+            machine_signature: "A".repeat(86),
+        };
+        assert_eq!(link.send(&long).await, Ok(()));
+        assert_eq!(
+            link.receive().await,
+            Err(LinkError::Closed { reason: None })
+        );
+    }
+
+    /// A frame the hub sends over [`MAX_FRAME_BYTES`] reaches the agent as
+    /// unreadable.
+    #[tokio::test]
+    async fn a_frame_received_over_the_limit_is_unreadable() {
+        let long = HubFrame::Signed {
+            kind: "Welcome".to_owned(),
+            seq: 1,
+            expires_at: 1,
+            payload: "A".repeat(MAX_FRAME_BYTES),
+            signature: "A".repeat(86),
+        };
+        let mut link = LoopLink {
+            hub: hub(Arc::new(FakeClock::new(start()))),
+            exporter: None,
+            tap: Arc::default(),
+            session: None,
+            inbox: VecDeque::from([long.to_text()]),
+            held: Arc::new(Held {
+                connection: 0,
+                live: Mutex::new(None),
+                closed: AtomicBool::new(false),
+                heard: Mutex::new(SignedDuration::ZERO),
+            }),
+            reason: None,
+        };
+        assert_eq!(link.receive().await, Err(LinkError::Unreadable));
+    }
+}

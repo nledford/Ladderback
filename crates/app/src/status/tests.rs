@@ -319,3 +319,32 @@ async fn a_repository_whose_last_reading_failed_before_the_newest_page_is_still_
     let status = log.read(&config()).await;
     assert_eq!(unreadable(&status), vec![("nas", OperationKind::Backup)]);
 }
+
+/// The log is read back only until every configured repository has been
+/// told of: what is older can't change what the summary says.
+#[tokio::test]
+async fn every_configured_repository_told_of_completes_the_reading() {
+    let mut log = Log::default();
+    let mut record = async |plan: Option<&str>, on: Option<&str>| {
+        let operation = log.started(OperationKind::Check, plan, on);
+        log.keep(&operation).await;
+        log.store
+            .get(operation.id())
+            .await
+            .unwrap_or_else(|e| panic!("the log reads it: {e:?}"))
+            .unwrap_or_else(|| panic!("the log holds it"))
+            .record
+    };
+    let mut nas = record(None, Some("nas")).await;
+    let mut office = record(None, Some("office")).await;
+    for record in [&mut nas, &mut office] {
+        record.status = OperationStatus::Succeeded;
+    }
+    let config = config();
+    let mut told = super::Told::new(&config);
+    assert!(!told.complete(), "nothing told of yet");
+    told.take(std::slice::from_ref(&nas));
+    assert!(!told.complete(), "office not told of yet");
+    told.take(std::slice::from_ref(&office));
+    assert!(told.complete());
+}

@@ -1030,3 +1030,13 @@ fn an_operation_unfinished_cancelled_or_failed_for_its_own_reason_tells_nothing(
         assert_eq!(status.repository_reading(), None, "{status:?}");
     }
 }
+
+#[test]
+fn an_operation_keeps_where_its_restore_writes() {
+    assert_eq!(queued().restored_to(), None);
+    let restored = queued().with_restored_to(logged_entry::RestoredTo::InPlace);
+    assert_eq!(
+        restored.restored_to(),
+        Some(&logged_entry::RestoredTo::InPlace)
+    );
+}

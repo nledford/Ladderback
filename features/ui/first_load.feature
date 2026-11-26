@@ -38,6 +38,18 @@ Feature: A page's first load
     And the radio "30 days" of the group "Stay signed in for" is checked
     And the page doesn't show "Loading…"
 
+  Scenario: The AI agents tab says it waits for what AI agents may do just before a busy region in the shape of a form, and the form takes its place
+    Given a daemon with sign-in off
+    And the daemon holds back its answer to the Settings page's reading of what AI agents may do without a token
+    When I open the address "/settings#ai-agents"
+    Then a region of the page is busy and shows the still shape of a form, 7 fields and its button
+    And the page says "Loading…" just before its busy region, outside it
+    And the page has no accessibility violations
+    When the daemon gives the answer it held back to the Settings page's reading of what AI agents may do without a token
+    Then no region of the page is busy
+    And the group "Backups" has "Read" chosen
+    And the page doesn't show "Loading…"
+
   Scenario: The Snapshots page whose reading of the repositories reaches no daemon stops waiting for them
     Given a demo plan "demo-home" with a scratch repository
     And the Snapshots page's reading of the repositories reaches no daemon

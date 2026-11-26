@@ -385,3 +385,36 @@ fn a_token_with_another_address_keeps_its_keys() {
 }
 
 use super::super::keys::SMALL_ORDER_KEYS;
+
+/// The longest token, wrapped after every character with a Windows line
+/// break and a zero-width character, is still read.
+#[test]
+fn the_longest_token_wrapped_on_every_character_is_read() {
+    let address = format!("https://{}", "h".repeat(MAX_ADDRESS_BYTES - 8));
+    let text = token(pinned(), &address).to_text();
+    let wrapped: String = text
+        .expose()
+        .chars()
+        .flat_map(|c| [c, '\r', '\n', '\u{200b}'])
+        .collect();
+    let read = PairingToken::parse_pasted(&wrapped).unwrap();
+    assert_eq!(read.address().as_str(), address);
+}
+
+/// Only the token's own prefix, in any case and with `-` for `_`, is read
+/// as it: other text of its length in its place is malformed.
+#[test]
+fn a_pasted_token_with_another_prefix_is_malformed() {
+    let (_, body) = PINNED.split_at(TOKEN_PREFIX.len());
+    let other = "x".repeat(TOKEN_PREFIX.len());
+    assert_eq!(
+        PairingToken::parse_pasted(&format!("{other}{body}")).map(|_| ()),
+        Err(TokenRefused::Malformed)
+    );
+    // A `-` stands only for the prefix's `_`, never for another letter.
+    let dashed = format!("-{}", TOKEN_PREFIX.get(1..).unwrap());
+    assert_eq!(
+        PairingToken::parse_pasted(&format!("{dashed}{body}")).map(|_| ()),
+        Err(TokenRefused::Malformed)
+    );
+}

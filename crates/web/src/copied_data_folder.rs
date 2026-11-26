@@ -107,20 +107,7 @@ pub(crate) fn CopiedDataFolder(localizer: Arc<Localizer>) -> impl IntoView {
         });
     });
 
-    let copied = Offer {
-        body: text(&localizer, msg::UI_COPIED_DATA_FOLDER_BODY),
-        button: text(&localizer, msg::UI_COPIED_DATA_FOLDER_NEW_ID),
-        review: text(&localizer, msg::UI_COPIED_DATA_FOLDER_REVIEW_BODY),
-    };
-    let refused = Offer {
-        body: text(&localizer, msg::UI_REFUSED_MACHINE_BODY),
-        ..copied.clone()
-    };
-    let removed = Offer {
-        body: text(&localizer, msg::UI_REMOVED_MACHINE_BODY),
-        button: text(&localizer, msg::UI_REMOVED_MACHINE_NEW_ID),
-        review: text(&localizer, msg::UI_REMOVED_MACHINE_REVIEW_BODY),
-    };
+    let (copied, refused, removed) = offers(&localizer);
     let copied_heading = text(&localizer, msg::UI_COPIED_DATA_FOLDER_HEADING);
     let refused_heading = text(&localizer, msg::UI_REFUSED_MACHINE_HEADING);
     let removed_heading = text(&localizer, msg::UI_REMOVED_MACHINE_HEADING);
@@ -199,11 +186,32 @@ pub(crate) fn CopiedDataFolder(localizer: Arc<Localizer>) -> impl IntoView {
 
 /// What the notice says and offers to a machine that may take a new ID:
 /// its body, the button that asks, and what the review says of it.
-#[derive(Clone)]
+#[derive(Clone, Debug, PartialEq, Eq)]
 struct Offer {
     body: String,
     button: String,
     review: String,
+}
+
+/// What the notice offers a copied data folder, a machine its hub refused
+/// and one its hub removed. A refused machine is told why in its own words
+/// and offered a new ID as a copy is.
+fn offers(localizer: &Localizer) -> (Offer, Offer, Offer) {
+    let copied = Offer {
+        body: text(localizer, msg::UI_COPIED_DATA_FOLDER_BODY),
+        button: text(localizer, msg::UI_COPIED_DATA_FOLDER_NEW_ID),
+        review: text(localizer, msg::UI_COPIED_DATA_FOLDER_REVIEW_BODY),
+    };
+    let refused = Offer {
+        body: text(localizer, msg::UI_REFUSED_MACHINE_BODY),
+        ..copied.clone()
+    };
+    let removed = Offer {
+        body: text(localizer, msg::UI_REMOVED_MACHINE_BODY),
+        button: text(localizer, msg::UI_REMOVED_MACHINE_NEW_ID),
+        review: text(localizer, msg::UI_REMOVED_MACHINE_REVIEW_BODY),
+    };
+    (copied, refused, removed)
 }
 
 /// The review of taking a new machine ID: what happens to this computer's
@@ -251,4 +259,24 @@ fn unanswered(localizer: &Localizer) -> Sentence {
         &text(localizer, msg::UI_COPIED_DATA_FOLDER_UNREACHABLE),
         None,
     )
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn a_refused_machine_is_told_in_its_own_words_and_offered_a_new_id_as_a_copy_is() {
+        let localizer = Localizer::new(&[]);
+        let (copied, refused, removed) = offers(&localizer);
+        assert_eq!(
+            refused,
+            Offer {
+                body: text(&localizer, msg::UI_REFUSED_MACHINE_BODY),
+                ..copied.clone()
+            }
+        );
+        assert_ne!(refused.body, copied.body);
+        assert_eq!(removed.body, text(&localizer, msg::UI_REMOVED_MACHINE_BODY));
+    }
 }

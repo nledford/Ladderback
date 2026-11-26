@@ -1116,8 +1116,13 @@ impl Backend for Lists {
         self.told(self.detail.as_ref().expect("a detail to tell"))
     }
 
+    /// A wait reads the summary every half second; one that reads it a
+    /// thousand times never ends, and fails its test at once rather than
+    /// spin past the runner's timeout.
     async fn summary(&self, id: String) -> Result<OperationSummaryDto, ErrorDto> {
         self.ask(format!("summary of {id}"));
+        let reads = self.asked.lock().unwrap().len();
+        assert!(reads < 1000, "a wait read the summary {reads} times");
         self.told(&self.detail.as_ref().expect("a detail to tell").operation)
     }
 

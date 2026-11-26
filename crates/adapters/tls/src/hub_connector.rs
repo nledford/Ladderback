@@ -367,4 +367,23 @@ mod tests {
             "the read gave no error within its deadline: {received:?}"
         );
     }
+    /// A frame or message past the API's limit is refused, writes go out
+    /// at once, and what waits to be written stays within two frames.
+    #[test]
+    fn the_socket_limits_frames_and_queued_writes() {
+        let config = config();
+        assert_eq!(config.max_message_size, Some(MAX_FRAME_BYTES));
+        assert_eq!(config.max_frame_size, Some(MAX_FRAME_BYTES));
+        assert_eq!(config.write_buffer_size, 0);
+        assert_eq!(config.max_write_buffer_size, 2 * MAX_FRAME_BYTES);
+    }
+
+    /// The connector names itself in `Debug`, and nothing else.
+    #[test]
+    fn a_connector_names_itself_in_debug() {
+        assert_eq!(
+            format!("{:?}", WebSocketHubConnector::new()),
+            "WebSocketHubConnector { .. }"
+        );
+    }
 }

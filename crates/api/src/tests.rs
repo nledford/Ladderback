@@ -1078,3 +1078,44 @@ fn the_hubs_machines_go_by_machine_on_the_wire() {
     let read: HubMachinesDto = serde_json::from_value(dashboard.clone()).unwrap();
     assert_eq!(serde_json::to_value(read).unwrap(), dashboard);
 }
+
+/// The hub's pairing and step-up DTOs name themselves and what a person may
+/// read in `Debug`, and hide the token and the confirmation (I4).
+#[test]
+fn the_hubs_dtos_show_what_they_bind_to_and_hide_their_secrets_in_debug() {
+    let make = MakePairingTokenDto {
+        address: "https://hub.lan".to_owned(),
+        certificate: TokenCertificateDto::Pinned,
+        life_minutes: Some(5),
+        confirmation: "canary-admin-password".to_owned(),
+    };
+    assert_eq!(
+        format!("{make:?}"),
+        r#"MakePairingTokenDto { address: "https://hub.lan", certificate: Pinned, life_minutes: Some(5), .. }"#
+    );
+    let made = PairingTokenDto {
+        token: "canary-token".to_owned(),
+        token_id: "t1".to_owned(),
+        fingerprint: "f1".to_owned(),
+        address: "https://hub.lan".to_owned(),
+        expires_at: "2026-11-25T10:00:00Z".to_owned(),
+        seconds_left: 60,
+        certificate: None,
+    };
+    assert_eq!(
+        format!("{made:?}"),
+        r#"PairingTokenDto { token_id: "t1", fingerprint: "f1", address: "https://hub.lan", certificate: None, expires_at: "2026-11-25T10:00:00Z", seconds_left: 60, .. }"#
+    );
+    let approve = ApproveAgentDto {
+        key: "k1".to_owned(),
+        confirmation: "canary-admin-password".to_owned(),
+    };
+    assert_eq!(
+        format!("{approve:?}"),
+        r#"ApproveAgentDto { key: "k1", .. }"#
+    );
+    let end = EndRecoveryDto {
+        confirmation: "canary-admin-password".to_owned(),
+    };
+    assert_eq!(format!("{end:?}"), "EndRecoveryDto { .. }");
+}

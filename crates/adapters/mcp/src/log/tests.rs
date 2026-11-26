@@ -213,3 +213,19 @@ fn a_line_whose_time_isnt_one_is_an_answer_the_api_never_gives() {
     let refused = read_page(log(vec![broken]), arguments()).unwrap_err();
     assert_eq!(refused.code, ErrorCode::DaemonUnreachable);
 }
+
+/// Every level the API spells names its level, and a word it doesn't
+/// spell names none.
+#[test]
+fn every_level_the_api_spells_is_read_as_its_level() {
+    for (name, level) in [
+        ("error", LogLevel::Error),
+        ("warn", LogLevel::Warn),
+        ("info", LogLevel::Info),
+        ("debug", LogLevel::Debug),
+        ("trace", LogLevel::Trace),
+    ] {
+        assert_eq!(level_named(name), Some(level), "{name}");
+    }
+    assert_eq!(level_named("verbose"), None);
+}

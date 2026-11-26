@@ -1170,6 +1170,28 @@ async fn i1_a_machine_refusing_a_hub_it_doesnt_pin_keeps_its_leases_and_floors()
     assert_eq!(cache.load().await.unwrap(), kept());
 }
 
+/// A handshake shows in a log by the agent ID, hostname, zone and binding
+/// kind it asks with, never its token or nonce.
+#[tokio::test]
+async fn a_handshake_shows_in_a_log_without_its_token_or_nonce() {
+    let hub = Hub::new(1);
+    let machine = agent(Arc::default());
+    let token = hub.token(pinned()).await;
+    let (_, handshake) = machine
+        .connect(token, agent_id(), laptop(), None)
+        .await
+        .unwrap();
+    assert_eq!(
+        format!("{handshake:?}"),
+        format!(
+            "AgentHandshake {{ agent_id: {:?}, hostname: {:?}, zone: None, kind: {:?}, .. }}",
+            agent_id(),
+            laptop(),
+            BindingKind::TlsExporter
+        )
+    );
+}
+
 /// A machine that leaves its hub drops every lease and epoch floor of it,
 /// then forgets the pin: it stands alone, and holds no lease of a hub it
 /// left (I1; decision 169).

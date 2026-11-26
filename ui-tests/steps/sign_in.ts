@@ -128,6 +128,7 @@ const heldReadings = new WeakMap<BrowserWorld, HeldReading>();
 const HELD_READINGS: Record<string, string> = {
   "the start page's reading of the plans list": "/api/v1/plans",
   "the Settings page's reading of how long signing in lasts": "/api/v1/settings/sign-in",
+  "the Settings page's reading of what AI agents may do without a token": "/api/v1/settings/without-token",
 };
 
 for (const [reading, address] of Object.entries(HELD_READINGS)) {

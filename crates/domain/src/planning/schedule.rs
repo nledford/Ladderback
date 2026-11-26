@@ -934,6 +934,19 @@ mod tests {
     }
 
     #[test]
+    fn jitter_past_the_gap_between_moments_delays_only_to_just_before_the_next() {
+        let every = Schedule::new(Interval::new(SignedDuration::from_mins(10)).unwrap())
+            .with_jitter(SignedDuration::from_hours(1))
+            .unwrap();
+        let utc = zone("UTC");
+        // Moments at 00:10 and 00:20; the 00:10 run may start as late as
+        // 00:19:59.999 and is given its ten minutes from there.
+        let success = Some(at("2027-01-15T00:00:00Z"));
+        assert!(!every.is_overdue(&utc, success, at("2027-01-15T00:29:59.998Z")));
+        assert!(every.is_overdue(&utc, success, at("2027-01-15T00:29:59.999Z")));
+    }
+
+    #[test]
     fn a_schedule_whose_moment_after_the_next_is_past_the_last_time_is_never_overdue() {
         let every = Schedule::new(Interval::new(SignedDuration::from_hours(6)).unwrap());
         let success = Timestamp::MAX - SignedDuration::from_hours(7);

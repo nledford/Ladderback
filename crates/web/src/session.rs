@@ -60,6 +60,12 @@ impl Standing {
     pub(crate) fn keeps_sign_out_failure(self, failed: bool) -> bool {
         failed && self == Self::SignedIn
     }
+
+    /// Whether the Settings menu offers Sign out: only to a page with a
+    /// session, as there is none to end otherwise.
+    pub(crate) fn offers_sign_out(self) -> bool {
+        self == Self::SignedIn
+    }
 }
 
 /// Which notice says that sign-in is off, and where the page shows it
@@ -529,6 +535,21 @@ mod tests {
         };
         assert_eq!(keeping(true), [Standing::SignedIn]);
         assert_eq!(keeping(false), []);
+    }
+
+    #[test]
+    fn sign_out_is_offered_only_while_the_page_is_signed_in() {
+        let offering = [
+            Standing::Asking,
+            Standing::Off,
+            Standing::SignedOut,
+            Standing::SignedIn,
+            Standing::Unread,
+        ]
+        .into_iter()
+        .filter(|standing| standing.offers_sign_out())
+        .collect::<Vec<_>>();
+        assert_eq!(offering, [Standing::SignedIn]);
     }
 
     #[test]

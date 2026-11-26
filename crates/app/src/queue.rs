@@ -431,4 +431,17 @@ mod tests {
         drop(running);
         assert!(queue.unless_going(&plan("home"), limit(2)).is_ok());
     }
+
+    #[test]
+    fn a_run_by_hand_of_a_plan_still_resuming_is_refused_until_every_one_is_resumed() {
+        let queue = RunQueue::new();
+        queue.resuming([plan("home")]);
+        assert!(matches!(
+            queue.by_hand(&plan("home"), limit(2)),
+            Err(RunWaiting)
+        ));
+        assert!(queue.by_hand(&plan("docs"), limit(2)).is_ok());
+        queue.resumed();
+        assert!(queue.by_hand(&plan("home"), limit(2)).is_ok());
+    }
 }

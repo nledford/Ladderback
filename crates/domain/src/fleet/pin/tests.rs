@@ -369,3 +369,23 @@ fn an_address_that_would_make_the_pin_too_long_is_refused() {
     assert_eq!(full.given_address, None);
     assert_eq!(full.to_text(), text);
 }
+
+/// A given address that brings the pin to exactly [`MAX_PIN_BYTES`] fits.
+#[test]
+fn an_address_that_makes_the_pin_exactly_the_most_bytes_is_kept() {
+    let given = address("https://hub-new.example:9898");
+    let mut with_given = pin();
+    with_given.give_address(given.clone()).unwrap();
+    let given_bytes = with_given.to_text().len() - pin().to_text().len();
+    let mut text = pin().to_text();
+    let mut n = 0;
+    while MAX_PIN_BYTES - given_bytes - text.len() > 40 {
+        text.push_str(&format!("x{n:07} = 1\n"));
+        n += 1;
+    }
+    let rest = MAX_PIN_BYTES - given_bytes - text.len();
+    text.push_str(&format!("y = {}\n", "1".repeat(rest - 5)));
+    let mut full = HubPin::parse(&text).unwrap();
+    assert_eq!(full.give_address(given), Ok(true));
+    assert_eq!(full.to_text().len(), MAX_PIN_BYTES);
+}

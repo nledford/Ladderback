@@ -222,6 +222,11 @@ mod tests {
     }
 
     #[test]
+    fn an_identifier_debugs_as_its_type_and_text() {
+        assert_eq!(format!("{:?}", id("abc")), "MachineIdentifier(\"abc\")");
+    }
+
+    #[test]
     fn empty_long_or_hidden_text_is_no_identifier() {
         assert_eq!(
             MachineIdentifier::parse(" \n"),

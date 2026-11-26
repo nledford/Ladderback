@@ -996,4 +996,21 @@ mod tests {
             "history does not move"
         );
     }
+
+    #[test]
+    fn each_row_header_has_an_id_of_its_own_that_names_its_operation() {
+        let first = header_id(&row(1, None, "2026-11-09T10:00:00Z"));
+        let second = header_id(&row(2, None, "2026-11-09T10:00:00Z"));
+        assert_ne!(first, second, "two rows never share a header's id");
+        assert_eq!(first, format!("operation-{}", id_of(1)));
+    }
+
+    #[test]
+    fn a_row_is_marked_by_its_status() {
+        let mut going = row(1, None, "2026-11-09T10:00:00Z");
+        going.summary.status = "running".to_owned();
+        let ended = row(1, None, "2026-11-09T10:00:00Z");
+        assert_eq!(status_of(&going), "running");
+        assert_eq!(status_of(&ended), "succeeded");
+    }
 }

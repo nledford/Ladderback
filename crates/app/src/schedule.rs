@@ -1042,6 +1042,28 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn a_start_that_ends_before_the_following_run_keeps_it_as_planned() {
+        // A run due at 02:59:30 whose start takes a minute ends at 03:00:30,
+        // before the following run, 03:00 and its share of the jitter (a
+        // quarter of the hour): that run stays as planned, not planned
+        // again from 03:00:30.
+        let clock = Arc::new(FakeClock::new(at("2026-06-10T02:59:30Z")));
+        let mut scheduler = scheduler("2026-06-10T02:59:30Z", Arc::new(Started::default()));
+        scheduler.clock = clock.clone();
+        scheduler.random = Arc::new(SeededRandom::new(1 << 62));
+        scheduler.runs = Arc::new(SlowStart(clock, SignedDuration::from_mins(1)));
+        let mut planned = home_planned_for("2026-06-10T02:59:30Z");
+        if let Some(held) = planned.get_mut(&home()) {
+            held.schedule = daily().with_jitter(SignedDuration::from_hours(1)).unwrap();
+        }
+        scheduler.start_due(&mut planned).await;
+        assert_eq!(
+            planned[&home()].next.as_ref().map(|next| next.at),
+            Some(at("2026-06-10T03:15:00Z"))
+        );
+    }
+
+    #[tokio::test]
     async fn a_run_a_second_away_waits() {
         let runs = Arc::new(Started::default());
         let scheduler = scheduler("2026-06-10T02:59:59Z", runs.clone());

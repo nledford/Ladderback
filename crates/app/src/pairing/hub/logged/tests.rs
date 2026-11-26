@@ -4,7 +4,7 @@ use domain::fleet::{
 };
 use domain::{AgentId, Timestamp, Uuid};
 
-use super::{approved as approved_line, connected, lapsed, paired, removed};
+use super::{approved as approved_line, connected, lapsed, paired, recovered, recovering, removed};
 
 fn key(byte: u8) -> PublicKey {
     PublicKey::from_bytes([byte; 32]).expect("a key")
@@ -208,5 +208,24 @@ fn a_lapse_is_named_by_hostname_agent_id_and_key() {
              {fingerprint}) lapsed: nobody approved it within 7 days; it may pair again with a \
              new token"
         )
+    );
+}
+
+/// Entering recovery mode names the agent whose report found it there, what
+/// the hub stops doing and the way out; ending it says what the person
+/// confirmed and what the epochs continue from.
+#[test]
+fn recovery_mode_is_named_as_it_starts_and_as_a_person_ends_it() {
+    let agent = request("e2e-laptop").agent_id;
+    assert_eq!(
+        recovering(agent),
+        "agent 01900000-0000-7000-8000-000000000001 proved a lease above what this hub \
+         counts, as after a restore from an older copy: the hub grants and renews no lease \
+         until a person confirms on the Machines tab that the old hub is stopped or gone"
+    );
+    assert_eq!(
+        recovered(),
+        "a person confirmed the old hub is stopped or gone: recovery mode ended, and each \
+         repository's epochs continue above the floors its machines proved"
     );
 }

@@ -1656,4 +1656,41 @@ mod tests {
             [file("/home/alice/c"), file("/srv/missing")]
         );
     }
+
+    /// Only a keyring the service said is locked is waited on to be
+    /// unlocked; a dismissed prompt is a no, and other refusals aren't
+    /// waits (decision 135, #993).
+    #[test]
+    fn only_a_locked_keyring_is_waited_on_to_be_unlocked() {
+        use domain::secrets::KeyringCause;
+
+        let keyring_said = |cause| {
+            unresolved(
+                Field::Password,
+                keyring("ladderback/demo"),
+                Problem::KeyringUnavailable {
+                    detail: "Secret Service".to_owned(),
+                    cause,
+                },
+            )
+        };
+        assert!(keyring_said(KeyringCause::Locked).waits_for_unlock());
+        assert!(!keyring_said(KeyringCause::Dismissed).waits_for_unlock());
+        assert!(!keyring_said(KeyringCause::NoService).waits_for_unlock());
+        assert!(
+            !unresolved(Field::Password, env("DEMO_PASSWORD"), Problem::Missing).waits_for_unlock()
+        );
+    }
+
+    #[test]
+    fn an_unlock_wait_has_passed_only_once_the_next_run_is_due() {
+        use crate::fakes::FakeClock;
+
+        let start: domain::Timestamp = "2026-06-10T03:00:00Z".parse().unwrap();
+        let clock = Arc::new(FakeClock::new(start));
+        let wait = UnlockWait::new(clock.clone(), start + domain::SignedDuration::from_mins(5));
+        assert!(!wait.has_passed());
+        clock.advance(domain::SignedDuration::from_mins(5));
+        assert!(wait.has_passed());
+    }
 }

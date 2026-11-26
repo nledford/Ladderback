@@ -245,3 +245,17 @@ fn a_result_names_its_kind_on_the_wire() {
     assert_eq!(from_str::<OperationResultDto>(earlier).unwrap(), read);
     assert_eq!(to_string(&read).unwrap(), earlier);
 }
+
+/// A summary told where its restore wrote keeps it; one never told names
+/// nowhere (#813).
+#[test]
+fn a_summary_with_restored_to_names_where_the_restore_wrote() {
+    assert_eq!(summary().restored_to, None);
+    let folder = crate::RestoredToDto::Folder {
+        path: "/srv/restored".to_owned(),
+    };
+    assert_eq!(
+        summary().with_restored_to(folder.clone()).restored_to,
+        Some(folder)
+    );
+}
