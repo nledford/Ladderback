@@ -2,7 +2,7 @@
 
 One of your machines can be the **hub**. The others pair with it, and its **Dashboard** shows each of them: whether it is online, its plans, and its latest operations. Each machine still runs its own Ladderback, with its own plans, schedules and web UI, and keeps backing up when it can't reach the hub. The hub also decides which one machine maintains each repository, as [Maintenance with a hub](hub-maintenance.md) says.
 
-Hubs aren't in a release yet: the MVP's release brings them ([decision 122](https://github.com/nledford/Ladderback/blob/main/docs/design/decisions/122-hub-out-of-releases-until-m8.md)), and this page describes them as that release has them. Turning a machine into the hub is a few lines of `config.toml`; pairing a machine takes its terminal and the hub's web UI.
+The MVP's release is the first with hubs ([decision 122](https://github.com/nledford/Ladderback/blob/main/docs/design/decisions/122-hub-out-of-releases-until-m8.md)); an earlier release can't pair, so update every machine first. Turning a machine into the hub is a few lines of `config.toml`; pairing a machine takes its terminal and the hub's web UI.
 
 ## What crosses the network
 

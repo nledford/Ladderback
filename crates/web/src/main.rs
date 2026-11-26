@@ -99,18 +99,17 @@ mod repositories_page;
 // What a paused live page shows, counts and says, decided on the host.
 mod pause;
 // What the Machines tab's lists show while paused, count and say, decided on
-// the host; `settings/machines.rs` is their glue. Only a build with the hub
-// has it (decision 122).
+// the host; `settings/machines.rs` is their glue.
 mod machines_list;
 // What the hub's dashboard shows while paused, counts, says, reads again
 // for and how its times read, decided on the host; `dashboard_page.rs` is
-// its glue. Only a build with the hub has it (decision 122).
+// its glue.
 mod dashboard;
 // The hub's dashboard, the route `/dashboard`, and the start page's way to
-// it: the DOM glue of `dashboard.rs`. Only a build with the hub has it.
+// it: the DOM glue of `dashboard.rs`.
 mod dashboard_page;
 // What the hub's pairing dialog decides, on the host; `settings/agents.rs`
-// is its glue. Only a build with the hub has it (decision 122).
+// is its glue.
 mod pairing;
 // What a panic writes to the console: its place, never its message (#1411).
 mod panic_report;

@@ -1,6 +1,6 @@
 //! The agent's outbox and the hub's reports of its agents (technical design
 //! §7.2, migration `0021_sync_outbox`): the `Outbox` and `ReportInbox`
-//! ports on the store's own file, built only with the hub (decision 122).
+//! ports on the store's own file.
 
 use app::ports::{Appended, Ingested, LatestReports, Outbox, OutboxEntry, ReportInbox, StoreError};
 use async_trait::async_trait;

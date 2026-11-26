@@ -134,6 +134,13 @@ Ladderback follows [Semantic Versioning 2.0.0](https://semver.org/spec/v2.0.0.ht
 
 Not part of the contract: UI layout and wording, log text, the CLI's sentences (a script reads `--json`; the daemon's `listening on` line stays as §8.4 says), the worker protocol (both ends ship in one binary), and Rust APIs. Downgrades are unsupported; the config history and the daily database copy are the way back.
 
+**The hub in the contract.** From the MVP's first release candidate (`0.6.0-rc.1`, #1044), the first release with the hub (§16, decision 122 as amended), the table covers the hub as it does the rest:
+
+- **Commands and flags:** `serve --hub` (and `--hub=false`); `pairing-token` with `--address`, `--ttl`, `--certificate-authority`, `--list`, `--revoke`, `--pending`, `--approve` with `--yes`, and `--forget-computer`; `pair [ADDRESS]` with `--hostname` and `--yes`; `hub-status` with `--hostname`.
+- **`config.toml`:** `hub` in the `[serve]` table (§16, decision 167).
+- **Routes:** `GET /api/v1/pairing`; `/api/v1/hub`, `/api/v1/hub/pairing-tokens` and `/api/v1/hub/pairing-tokens/{id}`, `/api/v1/hub/machines`, `/api/v1/hub/machines/{id}/approval` and `/removal`, the dashboard's and the recovery routes under `/api/v1/hub` (§4.2); the MCP tool `pairing_state` and the resource `ladderback://pairing` (§4.6).
+- **Protocol 1** at `/sync/v1` (§7.2): its handshake and messages, under decision 88 from that release.
+
 **Bump rules.** A release takes the highest bump among its changes, judged by the table, not by commit labels:
 
 - before 1.0.0: a breaking change or a feature bumps the minor version, a fix bumps the patch;
@@ -181,6 +188,6 @@ The `Release builds` workflow (`.github/workflows/release-builds.yml`) runs `jus
 
 The release builds use them: `just web-release` passes them to `trunk build --release`, and cargo-dist, which can't read the `Justfile`, has the same in `dist-workspace.toml`, which `just architecture` checks against `release_flags`. `just install`, the install guide's way to install from a checkout and the one `scripts/install.sh` runs (decision 79), builds `web-release` and passes them to `cargo install --path . --profile dist`, so the installed binary is built as the archives are, with the `dist` profile (thin LTO).
 
-**The hub until the MVP's release.** The same flags leave out the hub: its code merges to `main` behind the `hub` feature, on by default, so development and test builds have it and no release can pair, sync or serve as a hub. From the first of the hub's pull requests (#1040, slice 1), `just architecture` checks that a build with `release_flags` has no `hub` feature, and the smoke test that the binary refuses `serve --hub` and answers 404 on `/sync/v1`. A pull request merged just before the MVP's release is tagged deletes the feature (#1366), so testers pair machines from a release build and the hub joins the public contract with that release (§16, decision 122 as amended).
+**The hub in every build.** Until the MVP's release, the hub's code sat behind a `hub` Cargo feature that `release_flags` left out, and `just architecture` and the smoke tests checked that a release had none. #1366 deleted the feature and those checks, so every build has the hub and testers pair machines from a release build (§16, decision 122 as amended).
 
 The development recipes (`just web`, `just build`) don't use the flags. The Docker image builds nothing: it copies the release archive's binary, so the check and the artifact can't drift apart. A feature a release needs is added to `release_flags` and `dist-workspace.toml`, not to a workflow.

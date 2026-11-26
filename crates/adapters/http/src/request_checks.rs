@@ -12,9 +12,9 @@
 //!    a cross-site form post through.
 //!
 //! Each refusal is a typed [`ErrorCode`]. Every request to the UI and the
-//! API passes them, and no path is exempt; in a build with the `hub`
-//! feature, the agent routes under `/sync/` are a router of their own, with
-//! a check of their own instead (`crate::sync`; §16, decision 122).
+//! API passes them, and no path is exempt; the agent routes under `/sync/`
+//! are a router of their own, with a check of their own instead
+//! (`crate::sync`).
 
 use std::net::{Ipv4Addr, Ipv6Addr, SocketAddr};
 use std::sync::Arc;

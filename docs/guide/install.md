@@ -6,7 +6,7 @@ Ladderback runs on each computer it backs up. Each system has one recommended wa
 - **[Other Linux](install-linux.md):** any other 64-bit Linux uses the install script, which downloads the release and checks it.
 - **[macOS](install-macos.md):** the install script builds the release on your Mac, signed with your own certificate so that macOS keeps its permissions from one update to the next.
 
-Linux means 64-bit (x86_64 or aarch64) with glibc 2.35 or newer: 32-bit ARM and musl distributions such as Alpine aren't supported, and neither is [Windows](#windows-and-wsl2). A hub for several computers isn't in a release yet. Once Ladderback is installed and started, [Getting started](getting-started.md) takes you to a first backup in the web UI. [Other ways to install](other-ways-to-install.md), such as the release's archive by hand or a build from source, and the [Docker image](docker.md), which isn't a supported way to run Ladderback yet, are in the Advanced part.
+Linux means 64-bit (x86_64 or aarch64) with glibc 2.35 or newer: 32-bit ARM and musl distributions such as Alpine aren't supported, and neither is [Windows](#windows-and-wsl2). The MVP's release is the first with a [hub](hub.md) for several computers. Once Ladderback is installed and started, [Getting started](getting-started.md) takes you to a first backup in the web UI. [Other ways to install](other-ways-to-install.md), such as the release's archive by hand or a build from source, and the [Docker image](docker.md), which isn't a supported way to run Ladderback yet, are in the Advanced part.
 
 ## Start Ladderback
 

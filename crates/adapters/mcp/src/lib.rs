@@ -1304,8 +1304,7 @@ impl ServerHandler for Server {
         Ok(ListToolsResult::with_all_items(self.offered().await))
     }
 
-    /// The resources: the status summary and, in a build with the hub, the
-    /// pairing guide (§4.6; §16, decision 122).
+    /// The resources: the status summary and the pairing guide (§4.6).
     async fn list_resources(
         &self,
         _request: Option<PaginatedRequestParams>,

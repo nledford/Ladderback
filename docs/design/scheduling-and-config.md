@@ -79,7 +79,7 @@ hub = true                       # --hub / --hub=false; turned off, it stays on 
 backup-runs = "none"             # a row as an API token has it: "none" or its one level; a row left out keeps its default
 daemon-log = "read"              # defaults: backups, backup-runs, previews and configuration on; the rest off
 
-[hub]                            # optional; a build with the hub only, so from M8 (decision 122)
+[hub]                            # optional; not read yet: hub mode is `hub` in [serve] (decision 167)
 url = "https://hub.example.lan:9899"
 
 [hooks]                          # = rustic [global.hooks]: wraps every job on this agent

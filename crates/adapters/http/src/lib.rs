@@ -146,8 +146,7 @@ pub struct AppState {
     /// nothing otherwise (§16, decision 122).
     pub sync: SyncHub,
     /// Whether this machine is paired with a hub, and with which, which
-    /// `GET /api/v1/pairing` and `pairing_state` read (components §4.6), in
-    /// a build with the hub, the only one that can pair (decision 122).
+    /// `GET /api/v1/pairing` and `pairing_state` read (components §4.6).
     pub pairing: Arc<app::pairing::PairingState>,
 }
 
@@ -1027,8 +1026,7 @@ async fn recent_log(State(state): State<AppState>) -> Response {
 }
 
 /// Whether this machine is paired with a hub, and with which, as its pin
-/// says (components §4.6), in a build with the hub, the only one that can
-/// pair (§16, decision 122). A pin that can't be read is `unknown`, told in
+/// says (components §4.6). A pin that can't be read is `unknown`, told in
 /// the daemon's log; the error names the key file, never its text (I4).
 async fn read_pairing(State(state): State<AppState>) -> Response {
     match state.pairing.read().await {

@@ -700,8 +700,7 @@ async fn a_database_at_version_14_keeps_its_restores_naming_no_entry() {
     assert_eq!(applied_versions(&mut raw).await.last(), Some(&(29, true)));
 }
 
-/// A database an earlier build kept gains the hub's registry, empty, in
-/// every build, a build without the hub included (§16, decision 122), and
+/// A database an earlier build kept gains the hub's registry, empty, and
 /// keeps its log.
 #[tokio::test]
 async fn a_database_at_version_15_gains_an_empty_registry_and_keeps_its_log() {

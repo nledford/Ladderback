@@ -1,6 +1,6 @@
 //! Platform adapter: the operating system's clocks, what powers the machine
 //! and whether it is online, the agent ID file, the key files of an agent
-//! and its hub (with the `hub` feature, §16, decision 122), and the user's
+//! and its hub (§16, decision 120), and the user's
 //! service manager (technical design §3.2).
 
 #![deny(

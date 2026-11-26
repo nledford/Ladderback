@@ -22,7 +22,7 @@ pub(crate) enum Section {
     /// What AI agents may do without a token (decision 127).
     AiAgents,
     /// The pairing tokens a hub makes for another machine (decision 121),
-    /// only in a build with the hub and on a daemon serving as one.
+    /// only on a daemon serving as one.
     Agents,
     /// The dry-run allowlist: the folders a plan dry run an AI agent asks
     /// for may read (decision 89).

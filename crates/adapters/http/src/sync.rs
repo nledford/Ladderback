@@ -1,7 +1,7 @@
-//! The agent routes under `/sync/` (technical design §7.1), which only a
-//! build with the `hub` feature serves, and only `serve --hub` (§16, decision
-//! 122). Anything else answers 404 on every path there, so a release never
-//! shows the UI's page, or anything of the hub, at the hub's address.
+//! The agent routes under `/sync/` (technical design §7.1), which only
+//! `serve --hub` serves. On any other daemon every path there is refused by
+//! the sync check or answers 404, so it never shows the UI's page, or
+//! anything of the hub, at that address.
 //!
 //! `/sync/v1` carries the handshake (decision 120, "The handshake") to
 //! [`HubPairing`](app::pairing::HubPairing)'s steps, under its bounds before
@@ -22,7 +22,7 @@
 //! 120); its frames keep the same cap. While the hub holds it, the hub
 //! shows the machine online.
 //!
-//! In a build with the hub, every path under `/sync/` is these routes',
+//! Every path under `/sync/` is these routes',
 //! behind a check of their own in place of the browser's request checks
 //! (technical design §10.1): agents reach the hub by whatever name it has
 //! and prove themselves with signatures, and send no `Origin`. The check
