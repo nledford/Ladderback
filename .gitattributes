@@ -1,3 +1,6 @@
 # sqlx checksums an applied migration's bytes: a CRLF checkout would make an
 # unchanged migration look edited and the store would refuse to open.
 migrations/*.sql text eol=lf
+# The old migrations the copy into the baseline runs on a log 0.5.0 left
+# (decision 170) are checked against the checksums releases recorded.
+crates/adapters/store/migrations-before-baseline/*.sql text eol=lf
