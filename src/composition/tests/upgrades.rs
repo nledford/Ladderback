@@ -156,3 +156,36 @@ async fn a_command_on_a_current_folder_beside_the_daemon_goes_ahead() {
         .expect("nothing to upgrade");
     drop(held);
 }
+
+/// An earlier key beside a `machine-key` of its own, the ID still under
+/// its earlier name: which key is the machine's is the person's to say,
+/// so the upgrade is refused in words of its own, naming both files, and
+/// every file is left as it was.
+#[tokio::test]
+async fn an_earlier_key_beside_another_machine_key_is_refused_naming_both() {
+    let scratch = tempfile::tempdir().expect("a scratch dir");
+    let data = scratch.path().join("data");
+    earlier_folder(&data).await;
+    write_private(&data, "machine-key", "0b0b\n");
+    let before = contents(&data);
+
+    let refused = super::super::upgrade::unheld(&data)
+        .await
+        .expect_err("two keys are refused");
+
+    assert_eq!(refused.message, msg::CLI_UPGRADE_TWO_KEYS);
+    for (name, file) in [("earlier", "agent-key"), ("own", "machine-key")] {
+        let named = data.join(file).display().to_string();
+        assert!(
+            refused
+                .args
+                .iter()
+                .any(|(arg, value)| *arg == name && *value == MsgArg::Text(named.clone())),
+            "{name} is {named}: {:?}",
+            refused.args
+        );
+    }
+    let mut after = contents(&data);
+    after.remove(platform::data_dir_lock::LOCK_FILE);
+    assert_eq!(after, before, "every file is left as it was");
+}

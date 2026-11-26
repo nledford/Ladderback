@@ -5,7 +5,7 @@
 
 use std::fs::{self, File};
 use std::io::{self, Read, Write};
-use std::path::Path;
+use std::path::{Path, PathBuf};
 
 use uuid::Uuid;
 
@@ -13,6 +13,25 @@ use domain::AgentId;
 use domain::fleet::KeyFile;
 
 use crate::data_dir_lock::DataDirLock;
+
+/// Why [`move_earlier_names`] didn't move the earlier names.
+#[derive(Debug)]
+pub enum MoveError {
+    /// `earlier`, an earlier build's `agent-key`, sits beside `own`, a
+    /// `machine-key` of its own, while the ID is still in `agent-id`: which
+    /// key is the machine's is the person's to say. Every file is left as
+    /// it was.
+    TwoKeys { earlier: PathBuf, own: PathBuf },
+    /// The data folder couldn't be read or written, in the operating
+    /// system's words.
+    Io(io::Error),
+}
+
+impl From<io::Error> for MoveError {
+    fn from(error: io::Error) -> Self {
+        Self::Io(error)
+    }
+}
 
 /// The file in the data dir holding the agent ID.
 pub const MACHINE_ID_FILE: &str = "machine-id";
@@ -85,9 +104,9 @@ pub fn earlier_names_left(data_dir: &Path) -> io::Result<bool> {
 /// owner-only mode, and nothing reads the key (I4). When `machine-id` is
 /// there too, both are left and `machine-id` is the ID: a build after
 /// decision 163 made it and may have used it since. An `agent-key` beside
-/// a `machine-key` of its own is an error, every file left as it was:
-/// which key is the machine's is the person's to say.
-pub fn move_earlier_names(data_dir: &Path, _held: &DataDirLock) -> io::Result<()> {
+/// a `machine-key` of its own is [`MoveError::TwoKeys`], every file left
+/// as it was: which key is the machine's is the person's to say.
+pub fn move_earlier_names(data_dir: &Path, _held: &DataDirLock) -> Result<(), MoveError> {
     let earlier_id = data_dir.join(EARLIER_ID_FILE);
     let id = data_dir.join(MACHINE_ID_FILE);
     let mut moved = false;
@@ -109,23 +128,23 @@ pub fn move_earlier_names(data_dir: &Path, _held: &DataDirLock) -> io::Result<()
     let staged = match staged(data_dir) {
         Ok(staged) => staged,
         Err(error) if error.kind() == io::ErrorKind::NotFound => return Ok(()),
-        Err(error) => return Err(error),
+        Err(error) => return Err(error.into()),
     };
     if staged.is_empty() && !moved {
         return Ok(());
     }
     remove_staged(staged)?;
-    sync_dir(data_dir)
+    Ok(sync_dir(data_dir)?)
 }
 
 /// Gives `from`'s file the name `to` and drops the name `from`. `from`
 /// already gone is a move done, by an earlier start, or one never needed.
 /// `to` there already is the same move an earlier start stopped between
-/// its link and its unlink, or, as another file, an error that names both
-/// files and leaves them. The new name is made durable before the old one
-/// is dropped, so a crash between leaves the file under one name or both,
-/// never neither.
-fn move_file(from: &Path, to: &Path) -> io::Result<()> {
+/// its link and its unlink, or, as another file, [`MoveError::TwoKeys`],
+/// both left. The new name is made durable before the old one is dropped,
+/// so a crash between leaves the file under one name or both, never
+/// neither.
+fn move_file(from: &Path, to: &Path) -> Result<(), MoveError> {
     match fs::hard_link(from, to) {
         Ok(()) => {}
         Err(error) if error.kind() == io::ErrorKind::NotFound => return Ok(()),
@@ -133,18 +152,13 @@ fn move_file(from: &Path, to: &Path) -> io::Result<()> {
             // Not one file: unless an earlier move has dropped the name
             // `from`, two files hold the name's content.
             if !same_file(from, to)? && from.try_exists()? {
-                return Err(io::Error::new(
-                    io::ErrorKind::AlreadyExists,
-                    format!(
-                        "{} and {} are two files, and the machine ID is still in {EARLIER_ID_FILE}: \
-                         move away the one that isn't this machine's",
-                        from.display(),
-                        to.display()
-                    ),
-                ));
+                return Err(MoveError::TwoKeys {
+                    earlier: from.to_owned(),
+                    own: to.to_owned(),
+                });
             }
         }
-        Err(error) => return Err(error),
+        Err(error) => return Err(error.into()),
     }
     match to.parent() {
         Some(folder) if !folder.as_os_str().is_empty() => sync_dir(folder)?,
@@ -153,7 +167,7 @@ fn move_file(from: &Path, to: &Path) -> io::Result<()> {
     match fs::remove_file(from) {
         Ok(()) => Ok(()),
         Err(error) if error.kind() == io::ErrorKind::NotFound => Ok(()),
-        Err(error) => Err(error),
+        Err(error) => Err(error.into()),
     }
 }
 
@@ -414,7 +428,7 @@ mod tests {
     /// does, then reads the ID.
     fn moved(data: &Path) -> io::Result<AgentId> {
         let lock = DataDirLock::acquire(data).unwrap();
-        move_earlier_names(data, &lock)?;
+        move_earlier_names(data, &lock).unwrap();
         load_or_create(data)
     }
 
@@ -523,15 +537,18 @@ mod tests {
         write_private(data.path(), "machine-key", other);
         let before = names(data.path());
 
-        let error = moved(data.path()).unwrap_err();
+        let lock = DataDirLock::acquire(data.path()).unwrap();
+        let error = move_earlier_names(data.path(), &lock).unwrap_err();
 
-        assert_eq!(error.kind(), io::ErrorKind::AlreadyExists);
-        let said = error.to_string();
         assert!(
-            said.contains("agent-key") && said.contains("machine-key"),
-            "{said}"
+            matches!(
+                &error,
+                MoveError::TwoKeys { earlier, own }
+                    if *earlier == data.path().join("agent-key")
+                        && *own == data.path().join("machine-key")
+            ),
+            "{error:?}"
         );
-        assert!(!said.contains("caca") && !said.contains("0b0b"), "{said}");
         assert_eq!(names(data.path()), before);
         assert_eq!(
             fs::read_to_string(data.path().join("machine-key")).unwrap(),

@@ -1458,6 +1458,10 @@ pub(crate) fn log_refused(path: &std::path::Path, error: &OpenError) -> Refused 
             message: msg::CLI_STORE_BEFORE_BASELINE,
             args: vec![("path", text(path.display())), ("version", text(version))],
         },
+        OpenError::LogInUse { version } => Refused {
+            message: msg::CLI_STORE_BASELINE_LOG_IN_USE,
+            args: vec![("path", text(path.display())), ("version", text(version))],
+        },
         other => store_refused(path, &other.to_string()),
     }
 }

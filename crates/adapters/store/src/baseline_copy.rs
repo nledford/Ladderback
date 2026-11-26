@@ -122,10 +122,13 @@ pub(crate) async fn copy(log: &Path) -> Result<Option<BaselineCopy>, OpenError> 
             kept,
             dropped,
         })),
-        Err(detail) => {
-            // Best effort: the next start removes what is left all the same.
+        Err(stop) => {
+            // Best effort: the next copy removes what is left all the same.
             let _ = work.clear();
-            Err(failed(last, detail))
+            Err(match stop {
+                Stop::InUse => OpenError::LogInUse { version: last },
+                Stop::Failed(detail) => failed(last, detail),
+            })
         }
     }
 }
@@ -246,7 +249,7 @@ impl Work {
 
     /// Steps 2 to 5, each failure in the database's or the operating
     /// system's words; the old log is unchanged by all but the last rename.
-    async fn run(&self) -> Result<(Vec<Dropped>, PathBuf), String> {
+    async fn run(&self) -> Result<(Vec<Dropped>, PathBuf), Stop> {
         let dropped = self.copy_rows().await?;
         remove_if_there(&self.source).map_err(|error| error.to_string())?;
         let kept = self.swap().map_err(|error| error.to_string())?;
@@ -256,12 +259,12 @@ impl Work {
     /// Steps 2 to 4: the snapshot, the source and the new log, each a
     /// copy of the old log's rows, made first empty and as open as the old
     /// log, never more, before any row is written to it.
-    async fn copy_rows(&self) -> Result<Vec<Dropped>, String> {
+    async fn copy_rows(&self) -> Result<Vec<Dropped>, Stop> {
         self.make_files().map_err(|error| error.to_string())?;
         snapshot(&self.log, &self.kept_new).await?;
         copy_file(self.kept_new.clone(), self.source.clone()).await?;
         migrate_old(&self.source).await?;
-        build(&self.new, &self.source).await
+        Ok(build(&self.new, &self.source).await?)
     }
 
     /// Makes each work file empty with the old log's permissions. SQLite
@@ -388,14 +391,30 @@ async fn connect(path: &Path, create: bool) -> Result<SqlitePool, String> {
 }
 
 /// Closes `pool` after `work`, whatever `work` did, and answers `work`'s.
-async fn closing<T>(pool: SqlitePool, work: Result<T, String>) -> Result<T, String> {
+async fn closing<T, E>(pool: SqlitePool, work: Result<T, E>) -> Result<T, E> {
     pool.close().await;
     work
 }
 
+/// Why a copy stopped.
+#[derive(Debug)]
+enum Stop {
+    /// Another program reads the log, so its write-ahead log can't be
+    /// checkpointed into it.
+    InUse,
+    /// A step failed, in the database's or the operating system's words.
+    Failed(String),
+}
+
+impl From<String> for Stop {
+    fn from(detail: String) -> Self {
+        Self::Failed(detail)
+    }
+}
+
 /// Step 2: the log, its write-ahead log checkpointed into it first, copied
 /// whole to `to`.
-async fn snapshot(log: &Path, to: &Path) -> Result<(), String> {
+async fn snapshot(log: &Path, to: &Path) -> Result<(), Stop> {
     let pool = connect(log, false).await?;
     let work = async {
         let mut conn = pool.acquire().await.map_err(|error| error.to_string())?;
@@ -405,7 +424,7 @@ async fn snapshot(log: &Path, to: &Path) -> Result<(), String> {
             .map_err(|error| error.to_string())?;
         let busy: i64 = row.try_get(0).map_err(|error| error.to_string())?;
         if busy != 0 {
-            return Err("another program has it open".to_owned());
+            return Err(Stop::InUse);
         }
         sqlx::query("VACUUM INTO ?")
             .bind(utf8(to)?)

@@ -146,6 +146,16 @@ cli-store-before-baseline = the operation log at { $path } is from an earlier ve
 # $path (text): the data folder, as the user wrote it.
 cli-upgrade-ladderback-running = the data folder { $path } is from an earlier version of Ladderback, which this version upgrades only while no Ladderback is running on it, and one is running now. Stop it, then run this command again, or start this version, which upgrades the folder. Nothing changed.
 
+# An earlier release's machine key (`agent-key`) sits beside a `machine-key` of this version's, while the machine ID is still under its earlier name (decision 170). Which key is this machine's is the person's to say, so the upgrade moved nothing and left both files as they were.
+# $earlier (text): the earlier key file, `agent-key` in the data folder.
+# $own (text): this version's key file, `machine-key` in the data folder.
+cli-upgrade-two-keys = the data folder holds two machine keys, { $earlier } from an earlier version of Ladderback and { $own }, and the machine ID is still under its earlier name, so this version can't tell which key is this machine's. Move away the one that isn't, then try again. Nothing changed.
+
+# The operation log an earlier release left could not be copied into the new schema because another program was reading it (decision 170). It was left as it was.
+# $path (text): the database file, as the user wrote it.
+# $version (text): the last migration the file holds, a whole number such as 16.
+cli-store-baseline-log-in-use = the operation log at { $path } is from an earlier version of Ladderback (migration { $version }), and another program has it open, so it couldn't be copied into this version's schema. Close the program that has it open, such as a database browser, then try again. It was left as it was.
+
 # The operations an earlier run left queued or running could not be ended in the operation log. The daemon did not start, because serving over them would keep a repository held for good.
 # $path (text): the database file, as the user wrote it.
 # $detail (text): the store's own message. It is shown as it came.

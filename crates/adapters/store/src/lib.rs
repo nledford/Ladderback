@@ -114,6 +114,11 @@ pub enum OpenError {
     /// [`SqliteStore::copy_into_baseline`] does, for a process that holds
     /// the data folder (decision 170). It is left as it was.
     BeforeBaseline { version: i64 },
+    /// A log the migrations before the baseline left at `version` that
+    /// another program was reading when the copy began, so its
+    /// write-ahead log couldn't be checkpointed into it (decision 170). It
+    /// is left as it was, and the next copy tries again.
+    LogInUse { version: i64 },
 }
 
 impl std::fmt::Display for OpenError {

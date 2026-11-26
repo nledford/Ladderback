@@ -8,7 +8,7 @@
 use std::path::Path;
 
 use l10n::msg;
-use platform::agent_id;
+use platform::agent_id::{self, MoveError};
 use platform::data_dir_lock::{DataDirLock, LockError};
 use store::{BaselineCopy, SqliteStore};
 
@@ -27,8 +27,16 @@ pub(crate) async fn under(
     held: &DataDirLock,
     data_dir: &Path,
 ) -> Result<Option<BaselineCopy>, Refused> {
-    agent_id::move_earlier_names(data_dir, held)
-        .map_err(|error| store_refused(data_dir, &error.to_string()))?;
+    agent_id::move_earlier_names(data_dir, held).map_err(|error| match error {
+        MoveError::TwoKeys { earlier, own } => Refused {
+            message: msg::CLI_UPGRADE_TWO_KEYS,
+            args: vec![
+                ("earlier", text(earlier.display())),
+                ("own", text(own.display())),
+            ],
+        },
+        MoveError::Io(error) => store_refused(data_dir, &error.to_string()),
+    })?;
     let log = data_dir.join(DATABASE);
     SqliteStore::copy_into_baseline(&log)
         .await

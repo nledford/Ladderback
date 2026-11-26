@@ -551,3 +551,53 @@ async fn the_new_log_and_the_kept_one_keep_the_old_logs_permissions() {
         );
     }
 }
+
+/// Another program reading the old log, as a database browser left open
+/// on it, stops the copy at the checkpoint: the store says the log is in
+/// use, in a refusal of its own, and leaves it as it was; once the
+/// program lets go, the next copy makes it.
+#[tokio::test]
+async fn a_log_another_program_is_reading_is_refused_as_in_use_and_left() {
+    let scratch = Scratch::new();
+    let log = scratch.path();
+    database_at(&log, 29, "").await;
+    // A row in the write-ahead log alone, as a running earlier daemon
+    // keeps one, which only a checkpoint no reader holds back moves.
+    let mut writer = connect(&log).await;
+    sqlx::raw_sql(
+        r#"PRAGMA wal_autocheckpoint = 0;
+           INSERT INTO operations (id, machine_id, kind, "trigger", status, queued_at, warning_count)
+           VALUES ('00000000-0000-0000-0000-000000000009', 'local', 'check', 'manual', 'queued', 1800000000000, 0)"#,
+    )
+    .execute(&mut writer)
+    .await
+    .expect("a row in the write-ahead log");
+    let mut reader = connect(&log).await;
+    sqlx::raw_sql("BEGIN; SELECT COUNT(*) FROM operations;")
+        .execute(&mut reader)
+        .await
+        .expect("a read held open");
+    writer.close().await.expect("the writer closes");
+
+    let error = within(60, "the refused copy", copy_error(&log)).await;
+
+    assert_matches!(error, OpenError::LogInUse { version: 29 });
+    // The checkpoint may have moved the row into the file, but the log
+    // holds what it held, at its own migration.
+    assert_eq!(last_migration(&log).await, 29);
+    let mut raw = scratch.raw().await;
+    assert_eq!(rows(&mut raw, "operations").await, 5);
+    raw.close().await.expect("the connection closes");
+    assert!(
+        !beside(&log, ".before-baseline").exists(),
+        "no copy is kept"
+    );
+    assert_no_work_files_left(&log);
+
+    sqlx::raw_sql("COMMIT")
+        .execute(&mut reader)
+        .await
+        .expect("the read ends");
+    reader.close().await.expect("the reader closes");
+    assert!(copied(&log).await.is_some(), "the next copy makes it");
+}
