@@ -1125,7 +1125,7 @@ fn the_hubs_dtos_show_what_they_bind_to_and_hide_their_secrets_in_debug() {
 #[test]
 fn a_machines_cancel_keeps_its_wire_spelling() {
     assert_eq!(
-        serde_json::to_string(&MachineOutcomeDto::Cancelled).unwrap(),
+        serde_json::to_string(&MachineOutcomeDto::Canceled).unwrap(),
         r#""cancelled""#
     );
 }

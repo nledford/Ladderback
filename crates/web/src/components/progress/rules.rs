@@ -836,7 +836,7 @@ mod tests {
     /// A total learnt or lost changes what the bar is: a percentage, or the
     /// working text in its place.
     #[test]
-    fn a_total_learnt_or_lost_is_told_at_once() {
+    fn a_total_learned_or_lost_is_told_at_once() {
         let mut teller = Teller::default();
         teller.report(report(Some(OperationStep::BackingUp), 8, None), at(100));
         assert_eq!(

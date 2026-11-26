@@ -171,8 +171,8 @@ async fn recovery_changes_only_the_status_and_failure_columns_of_running_rows() 
     let store = scratch.open().await;
     let mut raw = scratch.raw().await;
 
-    let mut cancelled = started(queued_backup(0x15));
-    cancelled
+    let mut canceled = started(queued_backup(0x15));
+    canceled
         .cancel(at(40))
         .expect("a running operation cancels");
     let mut warned = with_warnings(started(queued_backup(0x16)), 1);
@@ -213,7 +213,7 @@ async fn recovery_changes_only_the_status_and_failure_columns_of_running_rows() 
         None,
     )
     .await;
-    save(&store, &cancelled, None).await;
+    save(&store, &canceled, None).await;
     save(&store, &warned, None).await;
 
     let running = [0x10];

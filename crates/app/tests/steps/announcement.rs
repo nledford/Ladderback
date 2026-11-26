@@ -205,7 +205,7 @@ fn the_news(agent: &Agent) -> Heard {
                 heard.news,
                 UiEvent::OperationSucceeded { .. }
                     | UiEvent::OperationFailed { .. }
-                    | UiEvent::OperationCancelled { .. }
+                    | UiEvent::OperationCanceled { .. }
             )
         })
         .collect();
@@ -349,7 +349,7 @@ fn hears_cancel(agent: &mut Agent) {
     let operation = agent.operation();
     assert_eq!(
         the_news(agent).news,
-        UiEvent::OperationCancelled {
+        UiEvent::OperationCanceled {
             operation: operation.id().as_uuid().hyphenated().to_string(),
             finished_at: operation
                 .finished_at()

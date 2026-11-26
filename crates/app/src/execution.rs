@@ -108,7 +108,7 @@ impl Queued {
 /// short.
 enum Written {
     Saved(Result<(), StoreError>),
-    Cancelled,
+    Canceled,
     DeadlinePassed,
 }
 
@@ -403,7 +403,7 @@ impl RunOperation {
     /// announces it, as a run does, and nothing else.
     async fn cancel_waiting(&self, queued: Queued) -> Finished {
         let Queued { run, .. } = queued;
-        self.end_cancelled(run).await
+        self.end_canceled(run).await
     }
 
     /// Ends `operation`, a backup the log held as queued when the daemon
@@ -412,7 +412,7 @@ impl RunOperation {
     /// end, then the news, as [`Self::end_resumed`]. No hook runs and
     /// the engine is never asked.
     pub async fn cancel_resumed(&self, operation: Operation) -> Finished {
-        self.end_cancelled(Run {
+        self.end_canceled(Run {
             operation,
             result: None,
             recording_errors: Vec::new(),
@@ -423,7 +423,7 @@ impl RunOperation {
 
     /// Ends `run` cancelled before anything of it ran: records the end and
     /// announces it.
-    async fn end_cancelled(&self, mut run: Run) -> Finished {
+    async fn end_canceled(&self, mut run: Run) -> Finished {
         self.cancel(&mut run);
         self.record(&mut run).await;
         announce_end(self.events.as_deref(), &run.operation).await;
@@ -611,7 +611,7 @@ impl RunOperation {
             let mut write = pin!(write.fuse());
             select_biased! {
                 saved = write => Written::Saved(saved),
-                () = cancel => Written::Cancelled,
+                () = cancel => Written::Canceled,
                 () = timer => Written::DeadlinePassed,
             }
         };
@@ -626,7 +626,7 @@ impl RunOperation {
                 announce_start(self.events.as_deref(), &run.operation, opened).await;
                 true
             }
-            Written::Cancelled => {
+            Written::Canceled => {
                 control.stop().await;
                 self.cancel(run);
                 false
@@ -1266,10 +1266,10 @@ mod tests {
     /// A cancelled operation keeps no warning, so a page is told of none,
     /// though its finally hook ran and failed.
     #[tokio::test]
-    async fn a_hook_warning_a_cancelled_operation_does_not_keep_is_not_told() {
+    async fn a_hook_warning_a_canceled_operation_does_not_keep_is_not_told() {
         assert_eq!(
             told_of_hook_warnings(true).await,
-            (Vec::new(), OperationStatus::Cancelled)
+            (Vec::new(), OperationStatus::Canceled)
         );
     }
 

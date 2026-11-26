@@ -109,7 +109,7 @@ pub(crate) fn status_text(status: &OperationStatus) -> &'static str {
         OperationStatus::Succeeded => "succeeded",
         OperationStatus::SucceededWithWarnings => "succeeded_with_warnings",
         OperationStatus::Failed { .. } => FAILED,
-        OperationStatus::Cancelled => "cancelled",
+        OperationStatus::Canceled => "cancelled",
     }
 }
 
@@ -120,7 +120,7 @@ pub(crate) fn unfailed_status_from_text(text: &str) -> Option<OperationStatus> {
         "running" => Some(OperationStatus::Running),
         "succeeded" => Some(OperationStatus::Succeeded),
         "succeeded_with_warnings" => Some(OperationStatus::SucceededWithWarnings),
-        "cancelled" => Some(OperationStatus::Cancelled),
+        "cancelled" => Some(OperationStatus::Canceled),
         _ => None,
     }
 }

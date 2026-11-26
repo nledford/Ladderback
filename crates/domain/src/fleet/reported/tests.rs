@@ -67,7 +67,7 @@ fn reports_are_read_as_operations_newest_first() {
 fn a_cancel_ends_its_operation() {
     let reports = [
         report(1, Happening::Started, 100),
-        report(1, Happening::Cancelled, 160),
+        report(1, Happening::Canceled, 160),
         report(1, Happening::Started, 100),
     ];
     assert_eq!(
@@ -76,7 +76,7 @@ fn a_cancel_ends_its_operation() {
             op_id: op(1),
             started_at: Some(at(100)),
             ended_at: Some(at(160)),
-            outcome: ReportedOutcome::Cancelled,
+            outcome: ReportedOutcome::Canceled,
         }]
     );
 }

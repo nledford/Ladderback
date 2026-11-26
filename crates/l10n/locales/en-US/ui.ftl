@@ -1485,7 +1485,7 @@ ui-operation-finished =
 # Announced politely on the Operations page when a run it watched was
 # cancelled. $kind is the wire text of what ran: backup, forget, prune, check,
 # adopt, restore or download; any other kind is an operation.
-ui-operation-cancelled =
+ui-operation-canceled =
     { $kind ->
         [backup] Backup cancelled.
         [forget] Forget cancelled.
@@ -1553,7 +1553,7 @@ ui-operation-restore-finished =
 # $entry (text): the entry's path in the snapshot. It is shown as it came.
 # $to (text): in-place or folder, as for ui-operation-restore-of.
 # $folder (text): the new folder's path, for folder only. It is shown as it came.
-ui-operation-restore-cancelled =
+ui-operation-restore-canceled =
     { $to ->
         [in-place] In-place restore of { $entry } cancelled.
        *[folder] Restore of { $entry } to { $folder } cancelled.
@@ -1856,7 +1856,7 @@ ui-status-succeeded-with-warnings = Succeeded with warnings
 ui-status-failed = Failed
 
 # A status label: the operation was cancelled.
-ui-status-cancelled = Cancelled
+ui-status-canceled = Cancelled
 
 # Announced politely when a backup has been asked for.
 ui-backup-started = Backup started.
@@ -2021,7 +2021,7 @@ ui-maintenance-check-more =
     }
 
 # Said politely, and shown, when a run was cancelled. $kind is the wire text of what ran: forget, prune, check or adopt.
-ui-maintenance-cancelled =
+ui-maintenance-canceled =
     { $kind ->
         [forget] Forget cancelled.
         [prune] Prune cancelled.
@@ -2502,13 +2502,13 @@ ui-restore-finished-into = Restore of { $name } finished. Its files are in { $fo
 
 # Said politely when a restore was cancelled. What it wrote before stays.
 # $name (text): the entry restored, as the tree shows it.
-ui-restore-cancelled = Restore of { $name } was cancelled. What it wrote before stays.
+ui-restore-canceled = Restore of { $name } was cancelled. What it wrote before stays.
 
 # Said politely when a restore into a new folder was cancelled, naming that
 # folder. What it wrote before stays there.
 # $name (text): the entry restored, as the tree shows it.
 # $folder (text): the folder made for the restore, its full path on this machine.
-ui-restore-cancelled-into = Restore of { $name } was cancelled. What it wrote before stays in { $folder }.
+ui-restore-canceled-into = Restore of { $name } was cancelled. What it wrote before stays in { $folder }.
 
 # Said urgently when a restore failed. The Operations page says why.
 # $name (text): the entry restored, as the tree shows it.

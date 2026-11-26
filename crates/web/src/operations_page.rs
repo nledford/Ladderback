@@ -157,7 +157,7 @@ pub(crate) fn Operations(localizer: Arc<Localizer>) -> impl IntoView {
     // even while the page is paused. Any other end, while the page is paused,
     // is counted instead, and the resume tells the count in one sentence.
     let seen = StoredValue::new(HashMap::<String, String>::new());
-    let cancelled = StoredValue::new(HashSet::<String>::new());
+    let canceled = StoredValue::new(HashSet::<String>::new());
     let ends = StoredValue::new(Ends::default());
     let announced_ops = ops;
     let announced_localizer = Arc::clone(&localizer);
@@ -170,8 +170,8 @@ pub(crate) fn Operations(localizer: Arc<Localizer>) -> impl IntoView {
                 let previous = seen.insert(row.summary.id.clone(), status.clone());
                 let changed = previous.is_some_and(|previous| announces_end(&previous, &status));
                 if changed {
-                    let asked = cancelled
-                        .try_update_value(|cancelled| cancelled.remove(&row.summary.id))
+                    let asked = canceled
+                        .try_update_value(|canceled| canceled.remove(&row.summary.id))
                         .unwrap_or_default();
                     let (politeness, words) = operations::end(&row.summary);
                     let words = text_with(&announced_localizer, words.id, &words.args);
@@ -386,7 +386,7 @@ pub(crate) fn Operations(localizer: Arc<Localizer>) -> impl IntoView {
                         &table_localizer,
                         &connection,
                         page,
-                        cancelled,
+                        canceled,
                         Answers { refused: error, toasts },
                         viewer.clone(),
                         marks,
@@ -425,7 +425,7 @@ fn operations_table(
     localizer: &Arc<Localizer>,
     connection: &Connection,
     page: Pausable,
-    cancelled: StoredValue<HashSet<String>>,
+    canceled: StoredValue<HashSet<String>>,
     answers: Answers,
     zone: Option<api::IanaZone>,
     marks: ChangeMarks<String>,
@@ -507,7 +507,7 @@ fn operations_table(
                 &cancel_localizer,
                 &cancel_connection,
                 page,
-                cancelled,
+                canceled,
                 answers,
                 row,
             )
@@ -633,7 +633,7 @@ fn cancel_view(
     localizer: &Arc<Localizer>,
     connection: &Connection,
     page: Pausable,
-    cancelled: StoredValue<HashSet<String>>,
+    canceled: StoredValue<HashSet<String>>,
     answers: Answers,
     row: Signal<OperationRow>,
 ) -> AnyView {
@@ -663,14 +663,14 @@ fn cancel_view(
             let cancel_name = cancel_label.clone();
             // `cancelling` keeps the button busy while the daemon answers
             // the cancel; the run's end then takes the button away.
-            let cancelling = RwSignal::new(false);
+            let canceling = RwSignal::new(false);
             view! {
                 <Button
                     content=Content::Text(cancel_shown.clone().into())
                     size=Size::Small
                     node_ref=button
                     fuller_name=Signal::derive(move || cancel_name.clone())
-                    busy=cancelling
+                    busy=canceling
                     on_press=Callback::new(move |()| {
                         let error_localizer = Arc::clone(&error_localizer);
                         let Connection { base, visit } = connection.clone();
@@ -678,15 +678,15 @@ fn cancel_view(
                         let operation = operation.clone();
                         let url = url.clone();
                         let ops = page.live();
-                        cancelled
-                            .update_value(|cancelled| {
-                                cancelled.insert(operation.clone());
+                        canceled
+                            .update_value(|canceled| {
+                                canceled.insert(operation.clone());
                             });
                         answers.refused.set(None);
-                        cancelling.set(true);
+                        canceling.set(true);
                         spawn_local(async move {
                             let answer = ws::post(&url, &Empty {}).await;
-                            cancelling.try_set(false);
+                            canceling.try_set(false);
                             match answer {
                                 Some(Posted::Done(_)) => {
                                     if visit.during(ws::settle(&base, ops, &operation)).await
@@ -696,9 +696,9 @@ fn cancel_view(
                                     }
                                 }
                                 Some(Posted::Refused(code, args, detail)) => {
-                                    cancelled
-                                        .update_value(|cancelled| {
-                                            cancelled.remove(&operation);
+                                    canceled
+                                        .update_value(|canceled| {
+                                            canceled.remove(&operation);
                                         });
                                     answers
                                         .refused
@@ -714,9 +714,9 @@ fn cancel_view(
                                         );
                                 }
                                 None => {
-                                    cancelled
-                                        .update_value(|cancelled| {
-                                            cancelled.remove(&operation);
+                                    canceled
+                                        .update_value(|canceled| {
+                                            canceled.remove(&operation);
                                         });
                                 }
                             }
@@ -804,7 +804,7 @@ fn status_display(status: &str) -> Option<(BadgeState, MessageId)> {
             msg::UI_STATUS_SUCCEEDED_WITH_WARNINGS,
         )),
         "failed" => Some((BadgeState::Failed, msg::UI_STATUS_FAILED)),
-        "cancelled" => Some((BadgeState::Cancelled, msg::UI_STATUS_CANCELLED)),
+        "cancelled" => Some((BadgeState::Canceled, msg::UI_STATUS_CANCELED)),
         _ => None,
     }
 }
@@ -956,7 +956,7 @@ mod tests {
                 msg::UI_STATUS_SUCCEEDED_WITH_WARNINGS,
             ),
             ("failed", BadgeState::Failed, msg::UI_STATUS_FAILED),
-            ("cancelled", BadgeState::Cancelled, msg::UI_STATUS_CANCELLED),
+            ("cancelled", BadgeState::Canceled, msg::UI_STATUS_CANCELED),
         ];
         for (status, state, label) in states {
             assert_eq!(status_display(status), Some((state, label)), "{status}");
@@ -969,7 +969,7 @@ mod tests {
     }
 
     #[test]
-    fn only_a_run_that_is_still_going_can_be_cancelled() {
+    fn only_a_run_that_is_still_going_can_be_canceled() {
         assert!(cancellable("queued"));
         assert!(cancellable("running"));
         for ended in [

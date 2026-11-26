@@ -169,7 +169,7 @@ pub(crate) async fn init_repository(
         return refusal(&RepositoriesError::InvalidBody);
     };
     match state.repositories.init(request).await {
-        Ok(initialised) => (StatusCode::CREATED, Json(initialised)).into_response(),
+        Ok(initialized) => (StatusCode::CREATED, Json(initialized)).into_response(),
         Err(error) => refusal(&error),
     }
 }

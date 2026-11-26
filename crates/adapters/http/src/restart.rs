@@ -264,7 +264,7 @@ pub(crate) async fn cancel(
     if state.restart.cancel() {
         log::info!(
             "the restart that waited was cancelled ({}); queued operations start again",
-            cancelled_by(asker_of(session.as_ref()))
+            canceled_by(asker_of(session.as_ref()))
         );
     }
     axum::Json(state.restart.told()).into_response()
@@ -287,7 +287,7 @@ fn asker_of(session: Option<&axum::Extension<SessionOf>>) -> RestartAsker {
 }
 
 /// Who cancelled a restart, as the log says it.
-fn cancelled_by(asker: RestartAsker) -> &'static str {
+fn canceled_by(asker: RestartAsker) -> &'static str {
     match asker {
         RestartAsker::SignedInAdmin => "by the signed-in admin",
         RestartAsker::SignInOff => "with sign-in off",

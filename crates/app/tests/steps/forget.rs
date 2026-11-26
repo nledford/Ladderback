@@ -1080,12 +1080,12 @@ async fn forget_then_cancel(agent: &mut Agent) {
     let prepared = assess_and_start(&use_case, operation_id(0xcc), MaintenanceKind::Forget)
         .await
         .expect("the repository is free");
-    let (cancel, cancelled) = tokio::sync::oneshot::channel::<()>();
+    let (cancel, canceled) = tokio::sync::oneshot::channel::<()>();
     let runner = Arc::clone(&use_case);
     let running = tokio::spawn(async move {
         runner
             .execute(prepared, async move {
-                let _ = cancelled.await;
+                let _ = canceled.await;
             })
             .await
     });

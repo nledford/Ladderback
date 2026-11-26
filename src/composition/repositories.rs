@@ -167,24 +167,24 @@ impl Repositories for RepositoryService {
             Some(_) => Some(self.writes.lock().await),
             None => None,
         };
-        let initialising = InitRepository::new(
+        let initializing = InitRepository::new(
             Arc::clone(&self.clock),
             Arc::clone(&self.engine),
             self.resolve.clone(),
             Arc::clone(&self.config),
         );
-        let initialising = if keep_in_keyring {
-            initialising.keeping_password_in(Arc::clone(&self.keyring))
+        let initializing = if keep_in_keyring {
+            initializing.keeping_password_in(Arc::clone(&self.keyring))
         } else {
-            initialising
+            initializing
         };
-        let initialised = match initialising.init(new_operation(), &settings, alias).await {
+        let initialized = match initializing.init(new_operation(), &settings, alias).await {
             Ok(value) => value,
             Err(error) => return Err(refusal_of(error, &settings).await),
         };
         Ok(api::RepositoryInitDto {
-            id: initialised.id.as_str().to_owned(),
-            saved: initialised.saved,
+            id: initialized.id.as_str().to_owned(),
+            saved: initialized.saved,
         })
     }
 

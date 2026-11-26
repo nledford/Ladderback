@@ -762,7 +762,7 @@ async fn shows_succeeded(agent: &mut Agent) {
 }
 
 #[then("the history page shows the operation cancelled")]
-async fn shows_cancelled(agent: &mut Agent) {
+async fn shows_canceled(agent: &mut Agent) {
     let id = agent.ops.the_operation();
     shows_status(agent, &id, "cancelled").await;
 }

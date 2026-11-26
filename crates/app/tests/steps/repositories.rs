@@ -390,23 +390,23 @@ async fn connects_elsewhere(agent: &mut super::Agent, name: String) {
 }
 
 #[when("the agent initialises the repository")]
-async fn initialises(agent: &mut super::Agent) {
-    initialise(agent, None, false).await;
+async fn initializes(agent: &mut super::Agent) {
+    initialize(agent, None, false).await;
 }
 
 #[when(expr = "the agent initialises the repository as {string}")]
-async fn initialises_as(agent: &mut super::Agent, name: String) {
-    initialise(agent, Some(name), false).await;
+async fn initializes_as(agent: &mut super::Agent, name: String) {
+    initialize(agent, Some(name), false).await;
 }
 
 #[when(
     expr = "the agent initialises the repository as {string}, keeping the password in the keyring"
 )]
-async fn initialises_keeping_in_keyring(agent: &mut super::Agent, name: String) {
-    initialise(agent, Some(name), true).await;
+async fn initializes_keeping_in_keyring(agent: &mut super::Agent, name: String) {
+    initialize(agent, Some(name), true).await;
 }
 
-async fn initialise(agent: &mut super::Agent, name: Option<String>, keyring: bool) {
+async fn initialize(agent: &mut super::Agent, name: Option<String>, keyring: bool) {
     let secrets = agent.repositories.secrets.clone();
     let mut use_case = app::repositories::InitRepository::new(
         agent.clock.clone(),
@@ -482,7 +482,7 @@ fn creation_reports_id(agent: &mut super::Agent) {
 #[then(
     "the engine looked at the location, then initialised the repository there, with its saved settings"
 )]
-fn initialised_with_saved_settings(agent: &mut super::Agent) {
+fn initialized_with_saved_settings(agent: &mut super::Agent) {
     let seen = agent.repositories.engine.seen.lock().expect("the jobs");
     let [Job::Identify(looked), Job::Init(access)] = seen.as_slice() else {
         panic!("the engine was not given a look, then one initialisation: {seen:?}");
@@ -499,7 +499,7 @@ fn initialised_with_saved_settings(agent: &mut super::Agent) {
 }
 
 #[then("the engine initialised no repository")]
-fn initialised_none(agent: &mut super::Agent) {
+fn initialized_none(agent: &mut super::Agent) {
     let seen = agent.repositories.engine.seen.lock().expect("the jobs");
     assert!(
         !seen.iter().any(|job| matches!(job, Job::Init(_))),
@@ -825,7 +825,7 @@ fn init_refused_exists(agent: &mut super::Agent) {
 }
 
 #[then("the engine initialised the repository with the typed password")]
-fn initialised_with_typed(agent: &mut super::Agent) {
+fn initialized_with_typed(agent: &mut super::Agent) {
     let seen = agent.repositories.engine.seen.lock().expect("the jobs");
     let [Job::Init(access)] = seen.as_slice() else {
         panic!("the engine was not given one initialisation: {seen:?}");

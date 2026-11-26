@@ -71,7 +71,7 @@ pub use pages::{DEFAULT_PAGE, MAX_OPERATION_WARNINGS, MAX_PAGE, SnapshotFilter};
 pub use proposals::{PlanTables, Proposals};
 
 use actions::{
-    CancelArguments, Cancelling, RunArguments, Started, WaitArguments, Waited, wait_length,
+    CancelArguments, Canceling, RunArguments, Started, WaitArguments, Waited, wait_length,
 };
 use arguments::{NoArguments, read};
 use checks::{ExportArguments, ForgetPreview, ImportArguments, RepositoryArguments};
@@ -831,23 +831,23 @@ impl Server {
             }
             // A one-shot call has no client to cancel it: its wait ends
             // only when the operation does or its length has passed.
-            let cancelled = async {
+            let canceled = async {
                 match context {
                     Some(context) => context.ct.cancelled().await,
                     None => std::future::pending().await,
                 }
             };
             tokio::select! {
-                () = cancelled => {}
+                () = canceled => {}
                 () = tokio::time::sleep(WAIT_STEP.min(left)) => {}
             }
         }
     }
 
-    async fn cancel_operation(&self, given: Option<JsonObject>) -> Result<Cancelling, ErrorDto> {
+    async fn cancel_operation(&self, given: Option<JsonObject>) -> Result<Canceling, ErrorDto> {
         let arguments: CancelArguments = read(given)?;
         self.backend.cancel(arguments.operation.clone()).await?;
-        Ok(Cancelling {
+        Ok(Canceling {
             operation: arguments.operation,
         })
     }
@@ -1171,7 +1171,7 @@ fn tools() -> Vec<Tool> {
             input_schema::<CancelArguments>(),
         )
         .with_title("Cancel operation")
-        .with_raw_output_schema(output_schema::<Cancelling>())
+        .with_raw_output_schema(output_schema::<Canceling>())
         .with_annotations(acting()),
         Tool::new(
             TEST_REPOSITORY,

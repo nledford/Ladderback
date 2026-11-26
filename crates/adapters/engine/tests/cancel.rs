@@ -101,7 +101,7 @@ fn findings(location: &Location) -> Vec<String> {
     })
 }
 
-async fn a_cancelled_backup_leaves_its_packs_indexed_and_no_snapshot(
+async fn a_canceled_backup_leaves_its_packs_indexed_and_no_snapshot(
     scratch: &Scratch,
     location: Location,
 ) {
@@ -147,18 +147,18 @@ async fn a_cancelled_backup_leaves_its_packs_indexed_and_no_snapshot(
 }
 
 #[tokio::test]
-async fn a_cancelled_backup_leaves_its_packs_indexed_and_no_snapshot_in_a_local_repository() {
+async fn a_canceled_backup_leaves_its_packs_indexed_and_no_snapshot_in_a_local_repository() {
     let scratch = Scratch::new();
     let location = scratch.local();
-    a_cancelled_backup_leaves_its_packs_indexed_and_no_snapshot(&scratch, location).await;
+    a_canceled_backup_leaves_its_packs_indexed_and_no_snapshot(&scratch, location).await;
 }
 
 #[tokio::test]
-async fn a_cancelled_backup_leaves_its_packs_indexed_and_no_snapshot_in_either_half_of_a_hot_cold_repository()
+async fn a_canceled_backup_leaves_its_packs_indexed_and_no_snapshot_in_either_half_of_a_hot_cold_repository()
  {
     let scratch = Scratch::new();
     let location = scratch.hot_cold();
-    a_cancelled_backup_leaves_its_packs_indexed_and_no_snapshot(&scratch, location).await;
+    a_canceled_backup_leaves_its_packs_indexed_and_no_snapshot(&scratch, location).await;
 }
 
 /// The stop's grace in [`a_cancelled_backup_whose_events_nobody_reads_still_leaves_its_packs_indexed`]:
@@ -186,7 +186,7 @@ enum StoppedBy {
 
 #[cfg(unix)]
 #[tokio::test]
-async fn a_cancelled_backup_whose_events_nobody_reads_still_leaves_its_packs_indexed() {
+async fn a_canceled_backup_whose_events_nobody_reads_still_leaves_its_packs_indexed() {
     a_backup_whose_events_nobody_reads_still_leaves_its_packs_indexed(StoppedBy::Cancel).await;
 }
 

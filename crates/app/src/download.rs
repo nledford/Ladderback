@@ -174,9 +174,9 @@ impl Downloads {
         // Downloads whose minute ran out give their turns back first. This
         // one takes its own before their rows are written, so a slow log
         // can't hand the turns it freed to one asked for after it (#888).
-        let cancelled = self.stop_expired();
+        let canceled = self.stop_expired();
         let turn = Turn::take(&self.under_way);
-        self.write_cancelled(&cancelled).await;
+        self.write_canceled(&canceled).await;
         let turn = turn.ok_or(DownloadError::Busy)?;
         let config = self
             .config
@@ -254,7 +254,7 @@ impl Downloads {
             // DOWNLOADS_AT_ONCE turns, fewer than MAX_PENDING; kept so a
             // change to either still logs the refused download cancelled.
             Err(confirmed) => {
-                self.write_cancelled(&[self.stop(confirmed)]).await;
+                self.write_canceled(&[self.stop(confirmed)]).await;
                 Err(DownloadError::Busy)
             }
         }
@@ -300,8 +300,8 @@ impl Downloads {
     /// its own: one dropped halfway leaves the downloads it took running in
     /// the log.
     pub async fn give_up_expired(&self) {
-        let cancelled = self.stop_expired();
-        self.write_cancelled(&cancelled).await;
+        let canceled = self.stop_expired();
+        self.write_canceled(&canceled).await;
     }
 
     /// Stops every confirmed download whose minute ran out and frees its
@@ -315,8 +315,8 @@ impl Downloads {
     }
 
     /// Writes `cancelled` to the log, one after another.
-    async fn write_cancelled(&self, cancelled: &[Operation]) {
-        for operation in cancelled {
+    async fn write_canceled(&self, canceled: &[Operation]) {
+        for operation in canceled {
             let _ = save_within_bound(&*self.clock, &*self.store, operation, None).await;
         }
     }

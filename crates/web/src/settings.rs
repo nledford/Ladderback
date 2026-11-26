@@ -285,7 +285,7 @@ fn SettingsTabs(localizer: Arc<Localizer>, hub: bool) -> impl IntoView {
         }}
         <Tabs
             id="settings"
-            name=TabsName::LabelledBy(PAGE_HEADING_ID.to_owned())
+            name=TabsName::LabeledBy(PAGE_HEADING_ID.to_owned())
             orientation=Orientation::Responsive
             tabs=TabSet::new(first, rest)
             selected=selected

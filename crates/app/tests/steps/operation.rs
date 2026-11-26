@@ -173,8 +173,8 @@ fn minutes_before_deadline(agent: &mut Agent, minutes: i64) {
 }
 
 #[then("the operation ends as cancelled")]
-fn cancelled(agent: &mut Agent) {
-    assert_eq!(agent.operation().status(), &OperationStatus::Cancelled);
+fn canceled(agent: &mut Agent) {
+    assert_eq!(agent.operation().status(), &OperationStatus::Canceled);
 }
 
 #[then("the operation ends as failed because its deadline passed")]

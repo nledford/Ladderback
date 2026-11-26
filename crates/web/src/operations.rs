@@ -275,8 +275,8 @@ pub(crate) fn end(operation: &OperationSummaryDto) -> (Politeness, Words) {
         ),
         "cancelled" => (
             Politeness::Polite,
-            msg::UI_OPERATION_CANCELLED,
-            msg::UI_OPERATION_RESTORE_CANCELLED,
+            msg::UI_OPERATION_CANCELED,
+            msg::UI_OPERATION_RESTORE_CANCELED,
         ),
         _ => (
             Politeness::Polite,
@@ -915,7 +915,7 @@ mod tests {
                     Politeness::Polite,
                     msg::UI_OPERATION_FINISHED,
                 ),
-                ("cancelled", Politeness::Polite, msg::UI_OPERATION_CANCELLED),
+                ("cancelled", Politeness::Polite, msg::UI_OPERATION_CANCELED),
                 ("failed", Politeness::Assertive, msg::UI_OPERATION_FAILED),
             ] {
                 assert_eq!(

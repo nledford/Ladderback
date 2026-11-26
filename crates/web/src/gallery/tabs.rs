@@ -29,7 +29,7 @@ pub(super) fn TabsDemo(localizer: Arc<Localizer>) -> impl IntoView {
             <h3 id="gallery-tabs-repository">{t(msg::UI_GALLERY_TABS_REPOSITORY)}</h3>
             <Tabs
                 id="gallery-tabs-automatic"
-                name=TabsName::LabelledBy("gallery-tabs-repository".to_owned())
+                name=TabsName::LabeledBy("gallery-tabs-repository".to_owned())
                 tabs=TabSet::new(
                     Tab::new(
                         t(msg::UI_GALLERY_TABS_OVERVIEW),

@@ -278,9 +278,9 @@ async fn ends(agent: &mut Agent) {
 }
 
 #[when("the backup is cancelled")]
-async fn cancelled(agent: &mut Agent) {
+async fn canceled(agent: &mut Agent) {
     let side = side(agent);
-    let event = UiEvent::OperationCancelled {
+    let event = UiEvent::OperationCanceled {
         operation: side.backup.expect("a backup").as_uuid().to_string(),
         finished_at: side.clock.now().to_string(),
     };
@@ -343,12 +343,12 @@ async fn shows_no_progress(agent: &mut Agent) {
 }
 
 #[then("the hub shows the agent's backup was cancelled")]
-async fn shows_cancelled(agent: &mut Agent) {
+async fn shows_canceled(agent: &mut Agent) {
     let backup = side(agent).backup.expect("a backup");
     let operations = shown(agent).await.operations;
     let shown = operations
         .iter()
         .find(|operation| operation.op_id == backup)
         .expect("the hub shows the backup");
-    assert_eq!(shown.outcome, ReportedOutcome::Cancelled);
+    assert_eq!(shown.outcome, ReportedOutcome::Canceled);
 }

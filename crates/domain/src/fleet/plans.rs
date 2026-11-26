@@ -26,7 +26,7 @@ pub enum LastRunOutcome {
     Succeeded,
     SucceededWithWarnings,
     Failed,
-    Cancelled,
+    Canceled,
 }
 
 impl LastRunOutcome {
@@ -38,7 +38,7 @@ impl LastRunOutcome {
             Self::Succeeded => "succeeded",
             Self::SucceededWithWarnings => "succeeded-with-warnings",
             Self::Failed => "failed",
-            Self::Cancelled => "cancelled",
+            Self::Canceled => "cancelled",
         }
     }
 
@@ -50,7 +50,7 @@ impl LastRunOutcome {
             Self::Succeeded,
             Self::SucceededWithWarnings,
             Self::Failed,
-            Self::Cancelled,
+            Self::Canceled,
         ]
         .into_iter()
         .find(|outcome| outcome.wire_name() == name)
@@ -64,7 +64,7 @@ impl LastRunOutcome {
             OperationStatus::Succeeded => Self::Succeeded,
             OperationStatus::SucceededWithWarnings => Self::SucceededWithWarnings,
             OperationStatus::Failed { .. } => Self::Failed,
-            OperationStatus::Cancelled => Self::Cancelled,
+            OperationStatus::Canceled => Self::Canceled,
         }
     }
 }

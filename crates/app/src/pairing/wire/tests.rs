@@ -452,7 +452,7 @@ fn a_report_of_each_event_reads_back_from_its_payload() {
         Happening::Started,
         Happening::Succeeded,
         Happening::Failed { code },
-        Happening::Cancelled,
+        Happening::Canceled,
     ] {
         let entry = report_entry(happening);
         assert_eq!(read_report(&report_payload(&entry)), Ok(entry));
@@ -795,6 +795,6 @@ fn a_signed_payload_is_read_up_to_a_frames_size() {
 /// changing it would change the sync protocol between machines.
 #[test]
 fn a_cancel_report_keeps_its_wire_spelling() {
-    let payload = String::from_utf8(report_payload(&report_entry(Happening::Cancelled))).unwrap();
+    let payload = String::from_utf8(report_payload(&report_entry(Happening::Canceled))).unwrap();
     assert!(payload.contains(r#""cancelled""#), "{payload}");
 }

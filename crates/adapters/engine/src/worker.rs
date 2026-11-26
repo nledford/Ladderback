@@ -58,7 +58,7 @@ pub enum Exit {
     /// The job ran and its result or failure was reported.
     Reported { failed: bool },
     /// A cancel ended the job, which reports nothing more.
-    Cancelled,
+    Canceled,
     /// The deadline ended a backup that wound down. Its failure is the
     /// stream's last line, written by the watchdog or else at the exit.
     DeadlinePassed,
@@ -72,7 +72,7 @@ impl Exit {
         match self {
             Self::Reported { failed: false } => 0,
             Self::Reported { failed: true } => 1,
-            Self::Cancelled => exit_code::TERMINATED,
+            Self::Canceled => exit_code::TERMINATED,
             Self::DeadlinePassed => exit_code::DEADLINE_PASSED,
             Self::Abrupt(code) => i32::from(code),
         }
@@ -238,7 +238,7 @@ pub(crate) enum Done {
     Reported,
     /// A cancel, or the deadline, ended the job: exit as its cause says,
     /// reporting nothing more.
-    Cancelled,
+    Canceled,
     /// Exit at once with this code and report nothing more.
     Abrupt(u8),
 }
@@ -433,7 +433,7 @@ fn run_events(
             Ok(Exit::Reported { failed: false })
         }
         Ok(Done::Reported) => Ok(Exit::Reported { failed: false }),
-        Ok(Done::Cancelled) => Ok(exit_of_cancelled(&events, ctx.cancel())),
+        Ok(Done::Canceled) => Ok(exit_of_canceled(&events, ctx.cancel())),
         Ok(Done::Abrupt(code)) => Ok(Exit::Abrupt(code)),
         Err(JobError::Failed { code, detail }) => {
             events.emit(&WorkerEvent::Failed {
@@ -503,7 +503,7 @@ fn read_answer(answers: impl BufRead) -> Option<DeleteAnswer> {
 /// How a job the cancel ended exits: as the cancel's first cause says. A
 /// deadline's failure the watchdog couldn't write, because another line
 /// was being written then, goes out now as the stream's last line.
-fn exit_of_cancelled(events: &Events, cancel: &Cancel) -> Exit {
+fn exit_of_canceled(events: &Events, cancel: &Cancel) -> Exit {
     match cancel.cause() {
         Some(Cause::Deadline) => {
             // Nothing happens when the watchdog wrote it, or a SIGTERM
@@ -511,7 +511,7 @@ fn exit_of_cancelled(events: &Events, cancel: &Cancel) -> Exit {
             events.end(Some(&watchdog::deadline_failure()), LAST_LINE_PATIENCE);
             Exit::DeadlinePassed
         }
-        Some(Cause::Cancel) | None => Exit::Cancelled,
+        Some(Cause::Cancel) | None => Exit::Canceled,
     }
 }
 
@@ -805,7 +805,7 @@ mod tests {
     /// a failure, and the worker exits as a SIGTERM's, so that the daemon
     /// tells it from a crash when the SIGTERM wasn't its own.
     #[test]
-    fn a_cancelled_backup_ends_the_worker_with_sigterms_code_and_reports_nothing() {
+    fn a_canceled_backup_ends_the_worker_with_sigterms_code_and_reports_nothing() {
         let dir = tempfile::tempdir().unwrap();
         let source = demo_source(dir.path());
         let repo = demo_repository(dir.path());
@@ -1008,7 +1008,7 @@ mod tests {
             writer.join().unwrap().unwrap();
         });
         assert_eq!(saved, None);
-        let exit = exit_of_cancelled(&events, &cancel);
+        let exit = exit_of_canceled(&events, &cancel);
         drop(watchdog);
         assert_eq!(exit.code(), exit_code::DEADLINE_PASSED);
         assert!(
@@ -1032,7 +1032,7 @@ mod tests {
     /// ended by its deadline passing meanwhile, and ends as a cancelled one,
     /// with 143 and nothing more on the stream.
     #[test]
-    fn a_backup_winding_down_on_a_sigterm_ends_cancelled_when_its_deadline_passes_meanwhile() {
+    fn a_backup_winding_down_on_a_sigterm_ends_canceled_when_its_deadline_passes_meanwhile() {
         let seconds = Arc::new(std::sync::atomic::AtomicI64::new(1_800_000_000));
         let (process, terminated) = process_on(&seconds);
         let cancel = process.cancel.clone();
@@ -1055,7 +1055,7 @@ mod tests {
             );
         });
         assert_eq!(saved, None);
-        let exit = exit_of_cancelled(&events, &cancel);
+        let exit = exit_of_canceled(&events, &cancel);
         drop(watchdog);
         assert_eq!(exit.code(), exit_code::TERMINATED);
         assert!(

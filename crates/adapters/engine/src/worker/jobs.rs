@@ -445,7 +445,7 @@ pub(crate) fn backup(ctx: &Context, job: &BackupJobSpec) -> Result<Done, JobErro
         .cancel()
         .saving(|| repository.archive(&options, &source, snapshot, &paths))
     else {
-        return Ok(Done::Cancelled);
+        return Ok(Done::Canceled);
     };
     let snapshot = snapshot?;
     // The snapshot is saved: nothing is left that the deadline guards. The

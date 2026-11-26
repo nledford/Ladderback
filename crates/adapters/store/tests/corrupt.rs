@@ -119,7 +119,7 @@ impl RawRow {
 
     /// A backup whose `summary_json` is `summary` and which has no snapshot
     /// column of its own, so only the summary can be wrong.
-    fn summarised(id: &str, summary: impl Into<Cell>) -> Self {
+    fn summarized(id: &str, summary: impl Into<Cell>) -> Self {
         Self::succeeded_backup(id)
             .null("snapshot_id")
             .with("summary_json", summary)
@@ -195,7 +195,7 @@ fn error_of(code: &str, args: Cell, detail: Cell) -> RawRow {
 }
 
 fn bad_summary(summary: &str) -> RawRow {
-    RawRow::summarised(&id_text(BAD), summary)
+    RawRow::summarized(&id_text(BAD), summary)
 }
 
 fn good() -> RawRow {
@@ -804,8 +804,8 @@ async fn a_hook_failure_an_earlier_version_kept_is_still_read() {
 async fn a_row_this_version_didnt_write_is_reported_as_corrupt() {
     let scratch = Scratch::new();
     let store = scratch.open().await;
-    let neighbour = succeeded(queued_backup(GOOD));
-    save(&store, &neighbour, None).await;
+    let neighbor = succeeded(queued_backup(GOOD));
+    save(&store, &neighbor, None).await;
     let mut raw = scratch.unchecked().await;
 
     for case in cases() {
@@ -829,7 +829,7 @@ async fn a_row_this_version_didnt_write_is_reported_as_corrupt() {
         let found = store.get(id(GOOD)).await;
         assert_eq!(
             found.map(|found| found.map(|detail| detail.record)),
-            Ok(Some(OperationRecord::of(&neighbour, None))),
+            Ok(Some(OperationRecord::of(&neighbor, None))),
             "{}: the neighbour is unaffected",
             case.name
         );
@@ -1043,7 +1043,7 @@ async fn a_report_of_a_corrupt_row_is_short_however_long_the_stored_value_is() {
         ),
         (
             0x02,
-            RawRow::summarised(
+            RawRow::summarized(
                 &id_text(0x02),
                 format!(r#"{{"type":"fake","steps_completed":"{huge}"}}"#),
             ),

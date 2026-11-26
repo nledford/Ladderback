@@ -52,10 +52,10 @@ fn a_progress_is_let_go_of_when_its_operation_ends_and_not_when_another_does() {
 }
 
 #[test]
-fn a_progress_is_let_go_of_when_its_operation_is_cancelled() {
+fn a_progress_is_let_go_of_when_its_operation_is_canceled() {
     let live = LiveProgress::new();
     live.hear(&progress(OP, 10));
-    live.hear(&UiEvent::OperationCancelled {
+    live.hear(&UiEvent::OperationCanceled {
         operation: OP.to_owned(),
         finished_at: "2027-01-15T08:01:00Z".to_owned(),
     });

@@ -104,7 +104,7 @@ impl Daemon {
 #[derive(Default)]
 struct Recorder {
     started: Mutex<Vec<Trigger>>,
-    cancelled: Mutex<Vec<Canceller>>,
+    canceled: Mutex<Vec<Canceller>>,
 }
 
 #[async_trait]
@@ -175,7 +175,7 @@ impl crate::Operations for Recorder {
     }
 
     async fn cancel(&self, id: String, by: Canceller) -> Result<(), CancelError> {
-        self.cancelled
+        self.canceled
             .lock()
             .unwrap_or_else(PoisonError::into_inner)
             .push(by);
@@ -1055,9 +1055,9 @@ async fn a_token_cancels_as_a_token_and_what_it_may_not_stop_needs_a_session() {
         ))
         .await;
     assert_eq!(response.status(), StatusCode::OK);
-    let cancelled = daemon.operations.cancelled.lock().unwrap().clone();
+    let canceled = daemon.operations.canceled.lock().unwrap().clone();
     assert_eq!(
-        cancelled,
+        canceled,
         [Canceller::ApiToken, Canceller::ApiToken, Canceller::Session]
     );
 }

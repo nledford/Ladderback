@@ -17,7 +17,7 @@ use rustic_core::{
 };
 
 use super::Context;
-use super::cancel::{DeleteGate, asking_before_removal, refusing_snapshots_once_cancelled};
+use super::cancel::{DeleteGate, asking_before_removal, refusing_snapshots_once_canceled};
 use super::convert::JobError;
 use super::progress::EventProgressBars;
 use super::tmp_files::remove_stale_files;
@@ -54,7 +54,7 @@ fn repository_asking(
     }
     .to_backends()
     .map_err(crate::rclone::without_command)?;
-    let backends = refusing_snapshots_once_cancelled(&backends, ctx.cancel());
+    let backends = refusing_snapshots_once_canceled(&backends, ctx.cancel());
     let backends = match gate {
         Some(gate) => asking_before_removal(&backends, gate),
         None => backends,

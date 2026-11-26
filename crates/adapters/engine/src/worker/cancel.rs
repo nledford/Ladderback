@@ -7,7 +7,7 @@
 mod backend;
 mod source;
 
-pub(crate) use backend::{DeleteGate, asking_before_removal, refusing_snapshots_once_cancelled};
+pub(crate) use backend::{DeleteGate, asking_before_removal, refusing_snapshots_once_canceled};
 pub(crate) use source::CancellableSource;
 
 use std::sync::atomic::{AtomicU8, Ordering};
@@ -163,7 +163,7 @@ mod tests {
     }
 
     #[test]
-    fn a_backup_cancelled_before_it_saves_anything_does_not_start() {
+    fn a_backup_canceled_before_it_saves_anything_does_not_start() {
         let cancel = Cancel::default();
         cancel.request();
         let ran = Cell::new(false);
@@ -172,7 +172,7 @@ mod tests {
     }
 
     #[test]
-    fn a_backup_that_saves_uncancelled_keeps_its_result_and_a_later_cancel_exits_at_once() {
+    fn a_backup_that_saves_uncanceled_keeps_its_result_and_a_later_cancel_exits_at_once() {
         let cancel = Cancel::default();
         assert_eq!(cancel.saving(|| "saved"), Some("saved"));
         assert_eq!(cancel.request(), AfterCancel::ExitNow);
@@ -223,10 +223,10 @@ mod tests {
 
     #[test]
     fn no_snapshot_write_is_admitted_once_the_cancel_or_the_deadline_came() {
-        let cancelled = Cancel::default();
-        assert!(cancelled.admit_snapshot());
-        cancelled.request();
-        assert!(!cancelled.admit_snapshot());
+        let canceled = Cancel::default();
+        assert!(canceled.admit_snapshot());
+        canceled.request();
+        assert!(!canceled.admit_snapshot());
         let past = Cancel::default();
         past.pass_deadline();
         assert!(!past.admit_snapshot());

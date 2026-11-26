@@ -18,13 +18,13 @@ pub enum Meaning {
     /// An image that says something no words beside it say, named by this
     /// label, which must say it: an empty one leaves an image without a name
     /// (1.1.1).
-    Labelled(String),
+    Labeled(String),
 }
 
 impl Meaning {
     /// The drawing's `role`: an image only when it carries a label.
     pub fn role(&self) -> Option<&'static str> {
-        matches!(self, Self::Labelled(_)).then_some("img")
+        matches!(self, Self::Labeled(_)).then_some("img")
     }
 
     /// The drawing's `aria-hidden`: hidden when it is decoration.
@@ -36,7 +36,7 @@ impl Meaning {
     pub fn name(&self) -> Option<&str> {
         match self {
             Self::Decorative => None,
-            Self::Labelled(label) => Some(label),
+            Self::Labeled(label) => Some(label),
         }
     }
 }
@@ -90,11 +90,11 @@ mod tests {
     }
 
     #[test]
-    fn a_labelled_icon_is_an_image_named_by_its_label() {
-        let labelled = Meaning::Labelled("Demo repository checked".to_owned());
-        assert_eq!(labelled.role(), Some("img"));
-        assert_eq!(labelled.hidden(), None);
-        assert_eq!(labelled.name(), Some("Demo repository checked"));
+    fn a_labeled_icon_is_an_image_named_by_its_label() {
+        let labeled = Meaning::Labeled("Demo repository checked".to_owned());
+        assert_eq!(labeled.role(), Some("img"));
+        assert_eq!(labeled.hidden(), None);
+        assert_eq!(labeled.name(), Some("Demo repository checked"));
     }
 
     #[test]

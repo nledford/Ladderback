@@ -632,12 +632,12 @@ async fn a_proposer_starts_its_hourly_limit_of_dry_runs_and_others_still_run() {
         Err(DryRunError::TooSoon { until })
     );
     // The same token under another label is the same proposer.
-    let relabelled = Proposer::Token {
+    let relabeled = Proposer::Token {
         id: ApiTokenId::from_bytes(&[1; TOKEN_BYTES]),
         label: ApiTokenLabel::new("renamed".to_owned()).expect("a label"),
     };
     assert_eq!(
-        dry_runs.run(&relabelled, &draft).await,
+        dry_runs.run(&relabeled, &draft).await,
         Err(DryRunError::TooSoon { until })
     );
     assert!(dry_runs.run(&token(2), &draft).await.is_ok());

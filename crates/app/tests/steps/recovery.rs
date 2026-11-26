@@ -193,7 +193,7 @@ fn ending_status(ending: &str) -> OperationStatus {
         "failed because the repository was unreachable" => OperationStatus::Failed {
             reason: unreachable_repository(),
         },
-        "cancelled" => OperationStatus::Cancelled,
+        "cancelled" => OperationStatus::Canceled,
         other => panic!("the scenario ends an operation in a way that doesn't exist: {other}"),
     }
 }

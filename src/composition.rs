@@ -565,7 +565,7 @@ fn status_text(status: &OperationStatus) -> &'static str {
         OperationStatus::Succeeded => "succeeded",
         OperationStatus::SucceededWithWarnings => "succeeded-with-warnings",
         OperationStatus::Failed { .. } => "failed",
-        OperationStatus::Cancelled => "cancelled",
+        OperationStatus::Canceled => "cancelled",
     }
 }
 

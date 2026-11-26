@@ -1461,7 +1461,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn initialising_saves_only_when_an_alias_is_given() {
+    async fn initializing_saves_only_when_an_alias_is_given() {
         let engine = Arc::new(Scripted {
             outcome: Mutex::new(Ok(id())),
             seen: Mutex::new(Vec::new()),
@@ -1545,7 +1545,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn initialising_under_an_alias_already_taken_is_refused_before_the_job_runs() {
+    async fn initializing_under_an_alias_already_taken_is_refused_before_the_job_runs() {
         let engine = Arc::new(Scripted {
             outcome: Mutex::new(Ok(id())),
             seen: Mutex::new(Vec::new()),
@@ -1592,7 +1592,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn initialising_runs_job_init() {
+    async fn initializing_runs_job_init() {
         let engine = Arc::new(Scripted {
             outcome: Mutex::new(Ok(id())),
             seen: Mutex::new(Vec::new()),
@@ -1723,7 +1723,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn a_saved_repository_is_initialised_from_its_entry_which_records_only_its_new_id() {
+    async fn a_saved_repository_is_initialized_from_its_entry_which_records_only_its_new_id() {
         let mut entry = settings();
         entry.repo_hot = Some("/home/demo/scratch/hot".to_owned());
         entry.password = SecretRef::Env("DEMO_PASSWORD".to_owned());

@@ -381,7 +381,7 @@ async fn a_start_the_log_refuses_is_announced_all_the_same() {
 /// tells the page only that it was cancelled: not that it started, which
 /// the log never said.
 #[tokio::test]
-async fn a_run_cancelled_before_the_log_has_its_start_announces_only_its_cancel() {
+async fn a_run_canceled_before_the_log_has_its_start_announces_only_its_cancel() {
     let bus = Arc::new(BroadcastEventBus::new());
     let mut page = bus.subscribe().await;
     let store = Arc::new(Held::start());
@@ -391,11 +391,11 @@ async fn a_run_cancelled_before_the_log_has_its_start_announces_only_its_cancel(
         store.clone(),
     )
     .with_events(bus);
-    let (cancel, cancelled) = futures::channel::oneshot::channel::<()>();
+    let (cancel, canceled) = futures::channel::oneshot::channel::<()>();
     let running = tokio::spawn(async move {
         use_case
             .run(id(), Trigger::Manual, job(None), async {
-                let _ = cancelled.await;
+                let _ = canceled.await;
             })
             .await
     });
@@ -406,10 +406,10 @@ async fn a_run_cancelled_before_the_log_has_its_start_announces_only_its_cancel(
         .await
         .expect("the run ended on the cancel")
         .unwrap();
-    assert_eq!(ended.operation.status(), &OperationStatus::Cancelled);
+    assert_eq!(ended.operation.status(), &OperationStatus::Canceled);
     assert_eq!(
         heard_so_far(&mut page),
-        [UiEvent::OperationCancelled {
+        [UiEvent::OperationCanceled {
             operation: id().as_uuid().hyphenated().to_string(),
             finished_at: t(0).to_string(),
         }]
@@ -514,7 +514,7 @@ fn word(status: &OperationStatus) -> &'static str {
         OperationStatus::Succeeded => "succeeded",
         OperationStatus::SucceededWithWarnings => "succeeded with warnings",
         OperationStatus::Failed { .. } => "failed",
-        OperationStatus::Cancelled => "cancelled",
+        OperationStatus::Canceled => "cancelled",
     }
 }
 

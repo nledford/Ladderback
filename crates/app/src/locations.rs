@@ -1392,7 +1392,7 @@ mod tests {
     /// once, without the clock moving on, with no event and no job run, and
     /// leaves no probe worker running: the cancel reaches the probe.
     #[tokio::test]
-    async fn a_job_cancelled_while_its_choice_probes_ends_and_leaves_no_probe_running() {
+    async fn a_job_canceled_while_its_choice_probes_ends_and_leaves_no_probe_running() {
         let sites = Sites::silent_at("/srv/lan");
         let (choose, access, _clock) = choosing(&sites).await;
         let RunningJob {
@@ -1494,7 +1494,7 @@ mod tests {
     /// A job cancelled while its choice waits on several probes at once
     /// stops every one of them.
     #[tokio::test]
-    async fn a_job_cancelled_while_several_probes_run_stops_every_one() {
+    async fn a_job_canceled_while_several_probes_run_stops_every_one() {
         let sites = Sites {
             silent: vec!["/srv/lan".to_owned(), "/srv/public".to_owned()],
             ..Sites::default()
@@ -1551,7 +1551,7 @@ mod tests {
     /// starts no later location's probe and reads none of its secrets
     /// (#498).
     #[tokio::test]
-    async fn a_job_cancelled_while_a_location_is_probed_tries_no_later_location() {
+    async fn a_job_canceled_while_a_location_is_probed_tries_no_later_location() {
         let sites = Sites::silent_at("/srv/lan");
         let secrets = Arc::new(FakeSecrets::default());
         secrets.set_env("NAS_PASSWORD", "demo-password");
@@ -1634,7 +1634,7 @@ mod tests {
     /// read, in that location's turn, starts no probe of it once the read
     /// ends (#498).
     #[tokio::test]
-    async fn a_job_cancelled_while_a_locations_secret_is_read_starts_no_probe_of_it() {
+    async fn a_job_canceled_while_a_locations_secret_is_read_starts_no_probe_of_it() {
         let sites = Sites::silent_at("/srv/lan");
         let secrets = FakeSecrets::default();
         secrets.set_env("NAS_PASSWORD", "demo-password");
@@ -1688,7 +1688,7 @@ mod tests {
     /// A job cancelled while an early location's reference is read resolves
     /// no later early location once the read ends (#498).
     #[tokio::test]
-    async fn a_job_cancelled_while_an_early_locations_secret_is_read_resolves_no_later_one() {
+    async fn a_job_canceled_while_an_early_locations_secret_is_read_resolves_no_later_one() {
         let sites = Sites::silent_at("/srv/lan");
         let secrets = Arc::new(FakeSecrets::default());
         secrets.set_env("NAS_PASSWORD", "demo-password");

@@ -100,6 +100,6 @@ pub struct CancelArguments {
 #[derive(Debug, Serialize, JsonSchema)]
 #[schemars(crate = "rmcp::schemars")]
 #[serde(rename_all = "kebab-case")]
-pub struct Cancelling {
+pub struct Canceling {
     pub operation: String,
 }

@@ -20,7 +20,7 @@ use crate::job::DeleteAnswer;
 /// it, so only the half written first refuses it: a cancel between the two
 /// writes can't leave the snapshot in one half alone. Everything else is
 /// the halves' own.
-pub(crate) fn refusing_snapshots_once_cancelled(
+pub(crate) fn refusing_snapshots_once_canceled(
     backends: &RepositoryBackends,
     cancel: &Cancel,
 ) -> RepositoryBackends {
@@ -31,18 +31,18 @@ pub(crate) fn refusing_snapshots_once_cancelled(
 }
 
 fn refusing(inner: Arc<dyn WriteBackend>, cancel: &Cancel) -> Arc<dyn WriteBackend> {
-    Arc::new(NoSnapshotOnceCancelled {
+    Arc::new(NoSnapshotOnceCanceled {
         inner,
         cancel: cancel.clone(),
     })
 }
 
-struct NoSnapshotOnceCancelled {
+struct NoSnapshotOnceCanceled {
     inner: Arc<dyn WriteBackend>,
     cancel: Cancel,
 }
 
-impl ReadBackend for NoSnapshotOnceCancelled {
+impl ReadBackend for NoSnapshotOnceCanceled {
     fn location(&self) -> String {
         self.inner.location()
     }
@@ -83,7 +83,7 @@ impl ReadBackend for NoSnapshotOnceCancelled {
     }
 }
 
-impl WriteBackend for NoSnapshotOnceCancelled {
+impl WriteBackend for NoSnapshotOnceCanceled {
     fn create(&self) -> RusticResult<()> {
         self.inner.create()
     }
@@ -289,7 +289,7 @@ mod tests {
     }
 
     #[test]
-    fn once_cancelled_no_snapshot_is_written() {
+    fn once_canceled_no_snapshot_is_written() {
         let dir = tempfile::tempdir().unwrap();
         let inner = local(dir.path());
         let cancel = Cancel::default();
@@ -323,7 +323,7 @@ mod tests {
     /// What a cancelled backup still writes as it winds down: its last
     /// packs, and the index of them all.
     #[test]
-    fn once_cancelled_packs_and_index_files_are_still_written() {
+    fn once_canceled_packs_and_index_files_are_still_written() {
         let dir = tempfile::tempdir().unwrap();
         let inner = local(dir.path());
         let cancel = Cancel::default();
@@ -350,7 +350,7 @@ mod tests {
     fn in_a_hot_cold_repository_only_the_hot_half_refuses_a_snapshot() {
         let (cold, hot) = (tempfile::tempdir().unwrap(), tempfile::tempdir().unwrap());
         let cancel = Cancel::default();
-        let backends = refusing_snapshots_once_cancelled(
+        let backends = refusing_snapshots_once_canceled(
             &RepositoryBackends::new(local(cold.path()), Some(local(hot.path()))),
             &cancel,
         );
@@ -363,7 +363,7 @@ mod tests {
     fn without_a_hot_half_the_repository_refuses_a_snapshot() {
         let dir = tempfile::tempdir().unwrap();
         let cancel = Cancel::default();
-        let backends = refusing_snapshots_once_cancelled(
+        let backends = refusing_snapshots_once_canceled(
             &RepositoryBackends::new(local(dir.path()), None),
             &cancel,
         );

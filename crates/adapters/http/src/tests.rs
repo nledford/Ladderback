@@ -2477,7 +2477,7 @@ async fn a_connection_is_created_and_answers_with_the_repositorys_id() {
 }
 
 #[tokio::test]
-async fn an_initialisation_says_whether_it_was_saved() {
+async fn an_initialization_says_whether_it_was_saved() {
     for (alias, saved) in [(None, false), (Some("fresh"), true)] {
         let mut request = serde_json::json!({"settings": settings_json("/new")});
         if let Some(alias) = alias {

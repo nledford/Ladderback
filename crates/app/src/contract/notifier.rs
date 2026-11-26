@@ -11,7 +11,7 @@ use crate::ports::{Credentials, Destination, Message, Notification, Notifier, No
 
 /// How a channel the harness serves answers.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum Behaviour {
+pub enum Behavior {
     /// It takes the notification: a success status.
     Accepts,
     /// Nothing listens at its address.
@@ -51,7 +51,7 @@ pub trait NotifierHarness: Send + Sync {
     /// check; the adapter's own tests check that it keeps to it.
     fn notifier(&self) -> &dyn Notifier;
     /// The URL of a fresh channel of `kind` that answers as `behaviour`.
-    fn url(&self, kind: ChannelKind, behaviour: Behaviour) -> String;
+    fn url(&self, kind: ChannelKind, behavior: Behavior) -> String;
     /// What the channels that accept have been sent, in the order they took
     /// it.
     async fn received(&self) -> Vec<Received>;
@@ -136,7 +136,7 @@ async fn received_since(harness: &dyn NotifierHarness, before: usize) -> Vec<Rec
 
 async fn a_webhook_is_sent_the_event_and_the_message(harness: &dyn NotifierHarness) {
     let before = harness.received().await.len();
-    let url = harness.url(ChannelKind::Webhook, Behaviour::Accepts);
+    let url = harness.url(ChannelKind::Webhook, Behavior::Accepts);
     let sent = harness
         .notifier()
         .deliver(&notification(
@@ -162,7 +162,7 @@ async fn a_webhook_is_sent_the_event_and_the_message(harness: &dyn NotifierHarne
 
 async fn ntfy_is_sent_the_message_with_its_token(harness: &dyn NotifierHarness) {
     let before = harness.received().await.len();
-    let url = harness.url(ChannelKind::Ntfy, Behaviour::Accepts);
+    let url = harness.url(ChannelKind::Ntfy, Behavior::Accepts);
     let sent = harness
         .notifier()
         .deliver(&notification(
@@ -188,7 +188,7 @@ async fn ntfy_is_sent_the_message_with_its_token(harness: &dyn NotifierHarness) 
 
 async fn ntfy_is_sent_the_message_with_a_name_and_password(harness: &dyn NotifierHarness) {
     let before = harness.received().await.len();
-    let url = harness.url(ChannelKind::Ntfy, Behaviour::Accepts);
+    let url = harness.url(ChannelKind::Ntfy, Behavior::Accepts);
     let sent = harness
         .notifier()
         .deliver(&notification(
@@ -217,7 +217,7 @@ async fn ntfy_is_sent_the_message_with_a_name_and_password(harness: &dyn Notifie
 
 async fn a_healthchecks_channel_is_pinged_for_each_event(harness: &dyn NotifierHarness) {
     let before = harness.received().await.len();
-    let url = harness.url(ChannelKind::Healthchecks, Behaviour::Accepts);
+    let url = harness.url(ChannelKind::Healthchecks, Behavior::Accepts);
     let kinds = [
         EventKind::BackupStarted,
         EventKind::BackupSucceeded,
@@ -254,7 +254,7 @@ async fn a_healthchecks_channel_is_pinged_for_each_event(harness: &dyn NotifierH
 async fn a_default_message_says_something_for_every_event(harness: &dyn NotifierHarness) {
     for kind in EventKind::ALL {
         let before = harness.received().await.len();
-        let url = harness.url(ChannelKind::Webhook, Behaviour::Accepts);
+        let url = harness.url(ChannelKind::Webhook, Behavior::Accepts);
         let sent = harness
             .notifier()
             .deliver(&notification(
@@ -282,7 +282,7 @@ async fn a_default_message_says_something_for_every_event(harness: &dyn Notifier
 
 async fn a_channel_nobody_listens_at_is_unreachable(harness: &dyn NotifierHarness) {
     for kind in ChannelKind::ALL {
-        let url = harness.url(kind, Behaviour::Refuses);
+        let url = harness.url(kind, Behavior::Refuses);
         let sent = harness
             .notifier()
             .deliver(&notification(
@@ -304,7 +304,7 @@ async fn a_status_other_than_success_is_a_rejection(harness: &dyn NotifierHarnes
         (ChannelKind::Healthchecks, 404),
     ] {
         let before = harness.received().await.len();
-        let url = harness.url(kind, Behaviour::Answers(status));
+        let url = harness.url(kind, Behavior::Answers(status));
         let sent = harness
             .notifier()
             .deliver(&notification(
@@ -321,7 +321,7 @@ async fn a_status_other_than_success_is_a_rejection(harness: &dyn NotifierHarnes
 }
 
 async fn a_redirect_is_not_followed(harness: &dyn NotifierHarness) {
-    let url = harness.url(ChannelKind::Webhook, Behaviour::Answers(307));
+    let url = harness.url(ChannelKind::Webhook, Behavior::Answers(307));
     let sent = harness
         .notifier()
         .deliver(&notification(
@@ -336,7 +336,7 @@ async fn a_redirect_is_not_followed(harness: &dyn NotifierHarness) {
 }
 
 async fn a_channel_that_never_answers_times_out(harness: &dyn NotifierHarness) {
-    let url = harness.url(ChannelKind::Webhook, Behaviour::Hangs);
+    let url = harness.url(ChannelKind::Webhook, Behavior::Hangs);
     let sent = harness
         .notifier()
         .deliver(&notification(

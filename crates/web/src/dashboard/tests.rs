@@ -193,8 +193,8 @@ fn each_outcome_reads_as_its_status_badge() {
         (BadgeState::Failed, msg::UI_STATUS_FAILED)
     );
     assert_eq!(
-        outcome_badge(MachineOutcomeDto::Cancelled),
-        (BadgeState::Cancelled, msg::UI_STATUS_CANCELLED)
+        outcome_badge(MachineOutcomeDto::Canceled),
+        (BadgeState::Canceled, msg::UI_STATUS_CANCELED)
     );
 }
 

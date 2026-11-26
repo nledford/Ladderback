@@ -70,7 +70,7 @@ fn each_outcome_reads_back_from_its_wire_name_and_no_other_name_reads() {
         LastRunOutcome::Succeeded,
         LastRunOutcome::SucceededWithWarnings,
         LastRunOutcome::Failed,
-        LastRunOutcome::Cancelled,
+        LastRunOutcome::Canceled,
     ] {
         assert_eq!(
             LastRunOutcome::from_wire_name(outcome.wire_name()),
@@ -85,7 +85,7 @@ fn each_outcome_reads_back_from_its_wire_name_and_no_other_name_reads() {
     );
     // The wire and the hub's store keep the British spelling: changing it
     // would change the sync protocol and need a migration.
-    assert_eq!(LastRunOutcome::Cancelled.wire_name(), "cancelled");
+    assert_eq!(LastRunOutcome::Canceled.wire_name(), "cancelled");
 }
 
 #[test]
@@ -108,7 +108,7 @@ fn progress_shows_only_while_its_operation_runs() {
 /// A cancelled operation's end, as its reports tell it, hides its progress
 /// as any other end does.
 #[test]
-fn a_cancelled_operations_progress_is_not_shown() {
+fn a_canceled_operations_progress_is_not_shown() {
     use crate::fleet::{AgentReport, Happening, OPERATIONS_SHOWN, latest_operations};
 
     let report = |happening, seconds| AgentReport {
@@ -118,7 +118,7 @@ fn a_cancelled_operations_progress_is_not_shown() {
     };
     let reports = [
         report(Happening::Started, 100),
-        report(Happening::Cancelled, 160),
+        report(Happening::Canceled, 160),
     ];
     let operations = latest_operations(&reports, OPERATIONS_SHOWN);
     assert_eq!(progress_shown(&operations, Some(progress_of(1))), None);
@@ -163,7 +163,7 @@ fn a_last_run_stands_as_its_operation_does() {
             },
             LastRunOutcome::Failed,
         ),
-        (OperationStatus::Cancelled, LastRunOutcome::Cancelled),
+        (OperationStatus::Canceled, LastRunOutcome::Canceled),
     ] {
         assert_eq!(LastRunOutcome::of(&status), outcome);
     }

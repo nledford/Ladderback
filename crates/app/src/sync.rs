@@ -74,10 +74,10 @@ impl RecordReports {
                 operation,
                 finished_at,
             } => (operation, Happening::Succeeded, finished_at),
-            UiEvent::OperationCancelled {
+            UiEvent::OperationCanceled {
                 operation,
                 finished_at,
-            } => (operation, Happening::Cancelled, finished_at),
+            } => (operation, Happening::Canceled, finished_at),
             UiEvent::OperationFailed {
                 operation,
                 code,

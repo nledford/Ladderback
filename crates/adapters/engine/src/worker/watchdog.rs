@@ -557,7 +557,7 @@ mod tests {
         use rustic_backend::BackendOptions;
         use rustic_core::{FileType, Id, ReadBackend, RepositoryBackends, WriteBackend};
 
-        use crate::worker::cancel::{Cause, refusing_snapshots_once_cancelled};
+        use crate::worker::cancel::{Cause, refusing_snapshots_once_canceled};
 
         let local = |dir: &std::path::Path| {
             let backend = BackendOptions::default()
@@ -570,7 +570,7 @@ mod tests {
         };
         let (cold_dir, hot_dir) = (tempfile::tempdir().unwrap(), tempfile::tempdir().unwrap());
         let harness = Harness::new();
-        let backends = refusing_snapshots_once_cancelled(
+        let backends = refusing_snapshots_once_canceled(
             &RepositoryBackends::new(local(cold_dir.path()), Some(local(hot_dir.path()))),
             harness.cancel(),
         );

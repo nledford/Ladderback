@@ -29,7 +29,7 @@ import type { Engine } from "./world.ts";
 /** In Firefox, takes `ariaLabelledByElements` off `Element.prototype` in
  *  every page `context` opens from now on, before the page's own scripts run;
  *  in Chromium and WebKit, does nothing. */
-export async function avoidLabelledByCrash(context: BrowserContext, engine: Engine): Promise<void> {
+export async function avoidLabeledByCrash(context: BrowserContext, engine: Engine): Promise<void> {
   if (engine !== "firefox") return;
   await context.addInitScript(() => {
     Reflect.deleteProperty(Element.prototype, "ariaLabelledByElements");

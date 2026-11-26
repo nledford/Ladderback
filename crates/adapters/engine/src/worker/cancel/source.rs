@@ -14,7 +14,7 @@ use super::Cancel;
 /// How often a size scan still running looks for the cancel.
 const SIZE_POLL: Duration = Duration::from_millis(50);
 
-const CANCELLED: &str = "the backup was cancelled";
+const CANCELED: &str = "the backup was cancelled";
 
 /// A source that, once the cancel is asked for, lists nothing more, opens
 /// nothing more, reads nothing more from a file already open, and gives up
@@ -109,7 +109,7 @@ impl<O: ReadSourceOpen> ReadSourceOpen for CancellableOpen<O> {
 
     fn open(self) -> RusticResult<Self::Reader> {
         if self.cancel.is_requested() {
-            return Err(RusticError::new(ErrorKind::InputOutput, CANCELLED));
+            return Err(RusticError::new(ErrorKind::InputOutput, CANCELED));
         }
         Ok(CancellableReader {
             inner: self.inner.open()?,
@@ -129,7 +129,7 @@ pub(crate) struct CancellableReader<R> {
 impl<R: Read> Read for CancellableReader<R> {
     fn read(&mut self, buf: &mut [u8]) -> io::Result<usize> {
         if self.cancel.is_requested() {
-            return Err(io::Error::other(CANCELLED));
+            return Err(io::Error::other(CANCELED));
         }
         self.inner.read(buf)
     }

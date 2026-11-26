@@ -2,7 +2,7 @@ use super::support::*;
 use super::*;
 
 #[tokio::test]
-async fn a_running_operation_is_cancelled_once() {
+async fn a_running_operation_is_canceled_once() {
     let registry = CancelRegistry::new();
     let id = OperationId::from_uuid(Uuid::new_v4());
     let cancel = registry.register(id);
@@ -47,7 +47,7 @@ async fn a_cancel_in_the_start_window_stops_the_operation() {
 /// recorded and its cancel switch parked before the route answers, and
 /// the run it cancels ends cancelled.
 #[tokio::test]
-async fn a_cancel_right_after_the_answer_is_accepted_and_ends_the_operation_cancelled() {
+async fn a_cancel_right_after_the_answer_is_accepted_and_ends_the_operation_canceled() {
     let (runner, _entered, open_gate, _scratch) = runner_at_a_gate().await;
     open_gate.send(true).expect("the gate opens");
     let id = runner
@@ -59,7 +59,7 @@ async fn a_cancel_right_after_the_answer_is_accepted_and_ends_the_operation_canc
         .await
         .expect("a cancel straight after the answer is accepted");
     let operation = operation_of(&id).expect("the answer is an operation ID");
-    assert_eq!(ended(&runner, operation).await, OperationStatus::Cancelled);
+    assert_eq!(ended(&runner, operation).await, OperationStatus::Canceled);
 }
 
 fn an_api_token_trigger() -> Trigger {
@@ -91,7 +91,7 @@ async fn a_backup_an_api_token_started_is_logged_as_its_and_the_token_cancels_it
         .cancel(id.clone(), http_adapter::Canceller::ApiToken)
         .await
         .expect("a token cancels a backup");
-    assert_eq!(ended(&runner, operation).await, OperationStatus::Cancelled);
+    assert_eq!(ended(&runner, operation).await, OperationStatus::Canceled);
 }
 
 /// An API token stops backups only: a running check is refused to it as
@@ -115,7 +115,7 @@ async fn an_api_token_cancels_no_maintenance_run_and_a_session_still_can() {
         .await
         .expect("a session cancels the check");
     let operation = operation_of(&id).expect("the answer is an operation ID");
-    assert_eq!(ended(&runner, operation).await, OperationStatus::Cancelled);
+    assert_eq!(ended(&runner, operation).await, OperationStatus::Canceled);
 }
 
 /// An operation log whose writes wait until the test opens it.
@@ -222,7 +222,7 @@ async fn a_start_whose_client_gave_up_still_runs_and_still_cancels() {
         .await
         .expect("the operation ends up in the log")
         .expect("the operation that was started is cancellable");
-    assert_eq!(ended(&runner, operation).await, OperationStatus::Cancelled);
+    assert_eq!(ended(&runner, operation).await, OperationStatus::Canceled);
 }
 
 /// A client that cancels the instant it has the answer to a maintenance
@@ -231,7 +231,7 @@ async fn a_start_whose_client_gave_up_still_runs_and_still_cancels() {
 /// switch before the route answers (§4.2). The run it cancels ends
 /// cancelled.
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-async fn a_cancel_right_after_a_maintenance_start_is_accepted_and_ends_the_run_cancelled() {
+async fn a_cancel_right_after_a_maintenance_start_is_accepted_and_ends_the_run_canceled() {
     let (mut runner, _entered, _gate, _scratch) = runner_at_a_gate().await;
     runner.engine = Arc::new(IdentifiesThenParks);
     let id = runner
@@ -243,5 +243,5 @@ async fn a_cancel_right_after_a_maintenance_start_is_accepted_and_ends_the_run_c
         .await
         .expect("a cancel straight after the answer is accepted");
     let operation = operation_of(&id).expect("the answer is an operation ID");
-    assert_eq!(ended(&runner, operation).await, OperationStatus::Cancelled);
+    assert_eq!(ended(&runner, operation).await, OperationStatus::Canceled);
 }

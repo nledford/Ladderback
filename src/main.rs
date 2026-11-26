@@ -176,7 +176,7 @@ enum McpCommand {
 /// scanned for the flag first (see [`output::asked_for_plain`]).
 fn parse(args: Vec<OsString>) -> Result<Cli, ExitCode> {
     let plain = output::asked_for_plain(&args);
-    let mut command = Cli::command().color(output::clap_colour(plain));
+    let mut command = Cli::command().color(output::clap_color(plain));
     let mut matches = match command.try_get_matches_from_mut(&args) {
         Ok(matches) => matches,
         // Help is said again with the catalog's descriptions: the catalog is

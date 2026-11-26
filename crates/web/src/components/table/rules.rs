@@ -377,7 +377,7 @@ impl Name {
 
     /// The table's `aria-labelledby`: the heading's `id`, for a table named
     /// by one. A caption names its table without it.
-    pub fn table_labelled_by(&self) -> Option<&str> {
+    pub fn table_labeled_by(&self) -> Option<&str> {
         match self {
             Self::Caption(_) => None,
             Self::Heading(id) => Some(id),
@@ -386,7 +386,7 @@ impl Name {
 
     /// The frame's `aria-labelledby`: the caption's `id`, `caption_id`, or
     /// the heading's.
-    pub fn frame_labelled_by<'a>(&'a self, caption_id: &'a str) -> &'a str {
+    pub fn frame_labeled_by<'a>(&'a self, caption_id: &'a str) -> &'a str {
         match self {
             Self::Caption(_) => caption_id,
             Self::Heading(id) => id,
@@ -953,16 +953,16 @@ mod tests {
     fn a_caption_names_its_table_and_its_frame() {
         let name = Name::Caption("Demo folders".to_owned());
         assert_eq!(name.caption(), Some("Demo folders"));
-        assert_eq!(name.table_labelled_by(), None);
-        assert_eq!(name.frame_labelled_by("table-1-caption"), "table-1-caption");
+        assert_eq!(name.table_labeled_by(), None);
+        assert_eq!(name.frame_labeled_by("table-1-caption"), "table-1-caption");
     }
 
     #[test]
     fn the_pages_heading_names_the_table_and_its_frame() {
         let name = Name::Heading("page-heading".to_owned());
         assert_eq!(name.caption(), None);
-        assert_eq!(name.table_labelled_by(), Some("page-heading"));
-        assert_eq!(name.frame_labelled_by("table-1-caption"), "page-heading");
+        assert_eq!(name.table_labeled_by(), Some("page-heading"));
+        assert_eq!(name.frame_labeled_by("table-1-caption"), "page-heading");
     }
 
     #[test]

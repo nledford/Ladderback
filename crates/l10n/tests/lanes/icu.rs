@@ -290,7 +290,7 @@ fn the_datetime_vocabulary_is_written_and_a_bad_call_is_shown_as_the_function() 
 }
 
 #[test]
-fn options_a_host_does_not_honour_change_nothing() {
+fn options_a_host_does_not_honor_change_nothing() {
     let localizer = speaking("en-US");
     let shown = localizer.message(id("ignored"), &[]);
     assert!(shown.problems().is_empty(), "{:?}", shown.problems());

@@ -255,7 +255,7 @@ fn a_failed_operations_row_keeps_its_failure_code_beside_the_failure() {
 #[test]
 fn a_cancel_keeps_its_wire_spelling_in_the_api() {
     assert_eq!(
-        crate::composition::status_text(&domain::execution::OperationStatus::Cancelled),
+        crate::composition::status_text(&domain::execution::OperationStatus::Canceled),
         "cancelled"
     );
 }

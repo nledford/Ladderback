@@ -252,14 +252,14 @@ impl Agent {
     }
 
     /// Runs the backup and cancels it `after` its worker reported `Started`.
-    async fn run_backup_cancelled_after(&mut self, after: Duration) {
-        self.run_backup_cancelled_once(tokio::time::sleep(after))
+    async fn run_backup_canceled_after(&mut self, after: Duration) {
+        self.run_backup_canceled_once(tokio::time::sleep(after))
             .await;
     }
 
     /// Runs the backup and cancels it once `ready` has resolved, polled
     /// from the moment its worker reported `Started`.
-    async fn run_backup_cancelled_once(&mut self, ready: impl Future<Output = ()> + Send) {
+    async fn run_backup_canceled_once(&mut self, ready: impl Future<Output = ()> + Send) {
         let (started, on_start) = oneshot::channel();
         let engine = Arc::new(Watched {
             inner: self.engine.clone(),

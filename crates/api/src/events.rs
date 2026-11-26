@@ -76,7 +76,9 @@ pub enum UiEvent {
     /// The operation was cancelled: announced like
     /// [`Self::OperationSucceeded`], once the run recorded the cancel. A
     /// paired machine reports it to its hub as the operation's end (§7.2).
-    OperationCancelled {
+    // The wire keeps the British spelling: the event type is part of the API.
+    #[serde(rename = "operation-cancelled")]
+    OperationCanceled {
         operation: String,
         finished_at: String,
     },

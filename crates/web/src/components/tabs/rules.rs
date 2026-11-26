@@ -82,7 +82,7 @@ pub enum TabsName {
     /// The list's `aria-label`.
     Label(String),
     /// The `id` of the element that names the list (`aria-labelledby`).
-    LabelledBy(String),
+    LabeledBy(String),
 }
 
 impl TabsName {
@@ -91,7 +91,7 @@ impl TabsName {
     pub fn attributes(&self) -> (Option<String>, Option<String>) {
         match self {
             Self::Label(label) => (Some(label.clone()), None),
-            Self::LabelledBy(id) => (None, Some(id.clone())),
+            Self::LabeledBy(id) => (None, Some(id.clone())),
         }
     }
 }
@@ -594,7 +594,7 @@ mod tests {
             (Some("Demo agent".to_owned()), None)
         );
         assert_eq!(
-            TabsName::LabelledBy("demo-heading".to_owned()).attributes(),
+            TabsName::LabeledBy("demo-heading".to_owned()).attributes(),
             (None, Some("demo-heading".to_owned()))
         );
     }

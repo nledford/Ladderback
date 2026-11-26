@@ -136,10 +136,7 @@ async fn the_sweep_gives_up_a_download_nobody_fetched_within_its_minute() {
         clock.advance(next);
         waited += next;
     }
-    assert_eq!(
-        ended(&runner, download.id).await,
-        OperationStatus::Cancelled
-    );
+    assert_eq!(ended(&runner, download.id).await, OperationStatus::Canceled);
     assert_eq!(
         stopped.load(Ordering::SeqCst),
         1,

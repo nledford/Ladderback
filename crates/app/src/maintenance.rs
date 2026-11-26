@@ -2599,10 +2599,10 @@ mod cancel_tests {
     }
 
     fn use_case(runs: &Arc<AtomicUsize>, stops: &Arc<AtomicUsize>) -> RunMaintenance {
-        use_case_cancelling(runs, stops, None)
+        use_case_canceling(runs, stops, None)
     }
 
-    fn use_case_cancelling(
+    fn use_case_canceling(
         runs: &Arc<AtomicUsize>,
         stops: &Arc<AtomicUsize>,
         cancel: Option<futures::channel::oneshot::Sender<()>>,
@@ -2631,13 +2631,13 @@ mod cancel_tests {
         let stops = Arc::new(AtomicUsize::new(0));
         // Fires as the first job reports, before the second is asked for.
         let (fire, cancel) = futures::channel::oneshot::channel::<()>();
-        let finished = use_case_cancelling(&runs, &stops, Some(fire))
+        let finished = use_case_canceling(&runs, &stops, Some(fire))
             .execute(prepared(2 * MAX_JOB_IDS + 1), async move {
                 let _ = cancel.await;
             })
             .await;
         assert_eq!(runs.load(Ordering::SeqCst), 1, "only the first job started");
-        assert_eq!(finished.operation.status(), &OperationStatus::Cancelled);
+        assert_eq!(finished.operation.status(), &OperationStatus::Canceled);
         let [warning] = finished.operation.warnings() else {
             panic!("one warning: {:?}", finished.operation.warnings());
         };
@@ -2660,7 +2660,7 @@ mod cancel_tests {
             .await;
         assert_eq!(runs.load(Ordering::SeqCst), 1, "only the first job started");
         assert_eq!(stops.load(Ordering::SeqCst), 1, "its worker was stopped");
-        assert_eq!(finished.operation.status(), &OperationStatus::Cancelled);
+        assert_eq!(finished.operation.status(), &OperationStatus::Canceled);
         assert!(
             finished.operation.warnings().is_empty(),
             "nothing had been done to report: {:?}",

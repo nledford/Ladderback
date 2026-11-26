@@ -453,14 +453,14 @@ async fn run(events: Vec<EngineEvent>) -> Operation {
 }
 
 /// Runs a job that is cancelled five seconds after the engine started it.
-async fn cancelled_while_running(store: Arc<dyn OperationStore>) -> Finished {
+async fn canceled_while_running(store: Arc<dyn OperationStore>) -> Finished {
     let clock = Arc::new(FakeClock::new(t(0)));
     let engine = Arc::new(Live::new());
-    let (cancel, cancelled) = oneshot::channel::<()>();
+    let (cancel, canceled) = oneshot::channel::<()>();
     let use_case = RunOperation::new(engine.clone(), clock.clone(), store);
     let running = tokio::spawn(async move {
         use_case
-            .run(id(), Trigger::Manual, fake_job(None), cancelled.map(|_| ()))
+            .run(id(), Trigger::Manual, fake_job(None), canceled.map(|_| ()))
             .await
     });
     engine.send(started());
@@ -651,14 +651,14 @@ async fn events_after_the_result_are_ignored() {
 }
 
 #[tokio::test]
-async fn cancelling_a_running_operation_stops_the_engine() {
+async fn canceling_a_running_operation_stops_the_engine() {
     let clock = Arc::new(FakeClock::new(t(0)));
     let engine = Arc::new(Live::new());
-    let (cancel, cancelled) = oneshot::channel::<()>();
+    let (cancel, canceled) = oneshot::channel::<()>();
     let use_case = RunOperation::new(engine.clone(), clock.clone(), log());
     let running = tokio::spawn(async move {
         use_case
-            .run(id(), Trigger::Manual, fake_job(None), cancelled.map(|_| ()))
+            .run(id(), Trigger::Manual, fake_job(None), canceled.map(|_| ()))
             .await
     });
     engine.send(started());
@@ -666,13 +666,13 @@ async fn cancelling_a_running_operation_stops_the_engine() {
     clock.advance(SignedDuration::from_secs(5));
     cancel.send(()).unwrap();
     let op = finished(running).await.operation;
-    assert_eq!(op.status(), &OperationStatus::Cancelled);
+    assert_eq!(op.status(), &OperationStatus::Canceled);
     assert_eq!(op.finished_at(), Some(t(5)));
     assert_eq!(engine.stops(), 1);
 }
 
 #[tokio::test]
-async fn cancelling_before_the_engine_starts_cancels_the_queued_operation() {
+async fn canceling_before_the_engine_starts_cancels_the_queued_operation() {
     let clock = Arc::new(FakeClock::new(t(0)));
     let engine = Arc::new(Live::new());
     let use_case = RunOperation::new(engine.clone(), clock, log());
@@ -682,7 +682,7 @@ async fn cancelling_before_the_engine_starts_cancels_the_queued_operation() {
             .await
     });
     let op = finished(running).await.operation;
-    assert_eq!(op.status(), &OperationStatus::Cancelled);
+    assert_eq!(op.status(), &OperationStatus::Canceled);
     assert_eq!(op.started_at(), None);
     assert_eq!(engine.stops(), 1);
 }
@@ -700,7 +700,7 @@ async fn a_cancel_made_before_the_engine_is_up_wins_over_the_events_it_already_h
     let ended = use_case
         .run(id(), Trigger::Manual, fake_job(None), future::ready(()))
         .await;
-    assert_eq!(ended.operation.status(), &OperationStatus::Cancelled);
+    assert_eq!(ended.operation.status(), &OperationStatus::Canceled);
     assert_eq!(engine.stops(), 1);
     assert_logged_as_it_ended(&store, &ended).await;
 }
@@ -1095,19 +1095,19 @@ async fn every_way_a_run_can_end_is_in_the_log_as_it_ended() {
 }
 
 #[tokio::test]
-async fn a_cancelled_operation_is_in_the_log_as_cancelled() {
+async fn a_canceled_operation_is_in_the_log_as_canceled() {
     let store = log();
-    let ended = cancelled_while_running(store.clone()).await;
-    assert_eq!(ended.operation.status(), &OperationStatus::Cancelled);
+    let ended = canceled_while_running(store.clone()).await;
+    assert_eq!(ended.operation.status(), &OperationStatus::Canceled);
     assert_logged_as_it_ended(&store, &ended).await;
     let record = logged(&store).await.record;
-    assert_eq!(record.status, OperationStatus::Cancelled);
+    assert_eq!(record.status, OperationStatus::Canceled);
     assert_eq!(record.started_at, Some(t(0)));
     assert_eq!(record.finished_at, Some(t(5)));
 }
 
 #[tokio::test]
-async fn an_operation_cancelled_before_it_starts_is_in_the_log_as_cancelled() {
+async fn an_operation_canceled_before_it_starts_is_in_the_log_as_canceled() {
     let store = log();
     let engine = Arc::new(Live::new());
     let use_case = RunOperation::new(engine, Arc::new(FakeClock::new(t(0))), store.clone());
@@ -1116,7 +1116,7 @@ async fn an_operation_cancelled_before_it_starts_is_in_the_log_as_cancelled() {
         .await;
     assert_logged_as_it_ended(&store, &ended).await;
     let record = logged(&store).await.record;
-    assert_eq!(record.status, OperationStatus::Cancelled);
+    assert_eq!(record.status, OperationStatus::Canceled);
     assert_eq!(record.started_at, None);
 }
 
@@ -1308,7 +1308,7 @@ async fn a_log_that_fails_never_changes_how_an_operation_ends() {
         ("an event out of order", |store| {
             scripted(vec![succeeded(), started()], store).boxed()
         }),
-        ("a cancel", |store| cancelled_while_running(store).boxed()),
+        ("a cancel", |store| canceled_while_running(store).boxed()),
         ("a deadline", |store| killed_at_its_deadline(store).boxed()),
         ("an engine that never took the job", |store| {
             refused(EngineError::StartTimedOut, store).boxed()
@@ -1362,11 +1362,11 @@ async fn a_stalled_write_does_not_delay_a_cancel() {
     let clock = Arc::new(FakeClock::new(t(0)));
     let engine = Arc::new(Live::new());
     let store = Arc::new(Stalled::after(1));
-    let (cancel, cancelled) = oneshot::channel::<()>();
+    let (cancel, canceled) = oneshot::channel::<()>();
     let use_case = RunOperation::new(engine.clone(), clock.clone(), store);
     let running = tokio::spawn(async move {
         use_case
-            .run(id(), Trigger::Manual, fake_job(None), cancelled.map(|_| ()))
+            .run(id(), Trigger::Manual, fake_job(None), canceled.map(|_| ()))
             .await
     });
     // The write that says the operation is running never answers.
@@ -1379,7 +1379,7 @@ async fn a_stalled_write_does_not_delay_a_cancel() {
     // Only the final write is left to give up on.
     give_up_on_the_log(&clock, &running).await;
     let ended = finished(running).await;
-    assert_eq!(ended.operation.status(), &OperationStatus::Cancelled);
+    assert_eq!(ended.operation.status(), &OperationStatus::Canceled);
     assert_eq!(ended.operation.finished_at(), Some(t(0)));
     assert_matches!(
         ended.recording_errors.as_slice(),
@@ -1579,7 +1579,7 @@ async fn a_queued_operation_waits_for_its_turn_and_gives_its_place_up_when_it_en
 }
 
 #[tokio::test]
-async fn a_queued_operation_cancelled_while_it_waits_ends_at_once_and_runs_nothing() {
+async fn a_queued_operation_canceled_while_it_waits_ends_at_once_and_runs_nothing() {
     let limit = domain::planning::Concurrency::default();
     let queue = app::queue::RunQueue::new();
     let running = queue.push(&plan("docs"), limit);
@@ -1620,7 +1620,7 @@ async fn a_queued_operation_cancelled_while_it_waits_ends_at_once_and_runs_nothi
             .await
     });
     let ended = finished(run).await;
-    assert_eq!(ended.operation.status(), &OperationStatus::Cancelled);
+    assert_eq!(ended.operation.status(), &OperationStatus::Canceled);
     assert_eq!(ended.operation.started_at(), None);
     assert_eq!(ended.operation.finished_at(), Some(t(3)));
     // The engine was never asked: a job it had been given would be stopped.

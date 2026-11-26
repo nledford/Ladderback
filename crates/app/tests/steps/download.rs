@@ -909,7 +909,7 @@ async fn history_shows_download(agent: &mut Agent, ended: String) {
     assert_eq!(record.trigger, Trigger::Manual);
     match ended.as_str() {
         "succeeded" => assert_eq!(record.status, OperationStatus::Succeeded),
-        "cancelled" => assert_eq!(record.status, OperationStatus::Cancelled),
+        "cancelled" => assert_eq!(record.status, OperationStatus::Canceled),
         _ => assert!(
             matches!(record.status, OperationStatus::Failed { .. }),
             "{:?}",
@@ -919,14 +919,14 @@ async fn history_shows_download(agent: &mut Agent, ended: String) {
 }
 
 #[then("the history shows both downloads, started by hand, as cancelled")]
-async fn history_shows_both_cancelled(agent: &mut Agent) {
+async fn history_shows_both_canceled(agent: &mut Agent) {
     agent.recorded().await;
     let history = agent.restore.history().await;
     assert_eq!(history.len(), 2, "{history:?}");
     for record in &history {
         assert_eq!(record.kind, OperationKind::Download);
         assert_eq!(record.trigger, Trigger::Manual);
-        assert_eq!(record.status, OperationStatus::Cancelled, "{history:?}");
+        assert_eq!(record.status, OperationStatus::Canceled, "{history:?}");
     }
 }
 

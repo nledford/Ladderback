@@ -113,10 +113,10 @@ impl FakeHookRunner {
     pub fn simulate(
         &self,
         program: &str,
-        behaviour: impl Fn(&HookEntry, &HookContext) -> HookOutcome + Send + Sync + 'static,
+        behavior: impl Fn(&HookEntry, &HookContext) -> HookOutcome + Send + Sync + 'static,
     ) {
         if let Ok(mut simulated) = self.simulated.lock() {
-            simulated.push((program.to_owned(), Box::new(behaviour)));
+            simulated.push((program.to_owned(), Box::new(behavior)));
         }
     }
 
@@ -143,9 +143,9 @@ impl HookRunner for FakeHookRunner {
         // The latest behaviour registered for the program wins, so a
         // scenario can change its mind.
         if let Ok(simulated) = self.simulated.lock()
-            && let Some((_, behaviour)) = simulated.iter().rev().find(|(name, _)| name == program)
+            && let Some((_, behavior)) = simulated.iter().rev().find(|(name, _)| name == program)
         {
-            return behaviour(entry, context);
+            return behavior(entry, context);
         }
         if let Ok(scripts) = self.scripts.lock()
             && let Some((_, scripted)) = scripts.iter().rev().find(|(name, _)| name == program)

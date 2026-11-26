@@ -1862,7 +1862,7 @@ async fn a_resumed_run_whose_unlock_prompt_was_dismissed_is_refused_as_locked_an
 /// it waits, as any queued backup can: it ends cancelled, and the engine
 /// is never asked (#1221, §4.2).
 #[tokio::test]
-async fn a_resumed_run_waiting_for_its_keyring_can_be_cancelled() {
+async fn a_resumed_run_waiting_for_its_keyring_can_be_canceled() {
     capture();
     let started = domain::Timestamp::from_second(1_800_000_000).expect("a timestamp");
     let clock = Arc::new(FakeClock::new(started));
@@ -1903,7 +1903,7 @@ async fn a_resumed_run_waiting_for_its_keyring_can_be_cancelled() {
             if history
                 .operations
                 .iter()
-                .any(|record| record.status == domain::execution::OperationStatus::Cancelled)
+                .any(|record| record.status == domain::execution::OperationStatus::Canceled)
             {
                 break;
             }
@@ -1920,7 +1920,7 @@ async fn a_resumed_run_waiting_for_its_keyring_can_be_cancelled() {
 /// for its keyring ends, before the run gives up its cancel switch, ends
 /// the backup cancelled, whatever the wait answered (#1248).
 #[tokio::test]
-async fn a_cancel_as_a_resumed_runs_wait_ends_ends_it_cancelled() {
+async fn a_cancel_as_a_resumed_runs_wait_ends_ends_it_canceled() {
     let store = Arc::new(app::fakes::InMemoryOperationStore::new());
     let (runner, _heard, scripted, home) = refused_password_runner(
         "LADDERBACK_TEST_CANCEL_AS_THE_WAIT_ENDS_UNSET",
@@ -1957,7 +1957,7 @@ async fn a_cancel_as_a_resumed_runs_wait_ends_ends_it_cancelled() {
         .await;
 
     let status = until_ended(&store, queued.id()).await;
-    assert_eq!(status, OperationStatus::Cancelled, "the cancel it was told");
+    assert_eq!(status, OperationStatus::Canceled, "the cancel it was told");
     assert_eq!(jobs(&scripted), 0, "the engine was never asked");
 }
 

@@ -41,8 +41,13 @@ pub enum OperationStatus {
     Running,
     Succeeded,
     SucceededWithWarnings,
-    Failed { reason: FailureReason },
-    Cancelled,
+    Failed {
+        reason: FailureReason,
+    },
+    // Serialized as before the rename to American spelling, so nothing
+    // written with the old name reads differently.
+    #[serde(rename = "Cancelled")]
+    Canceled,
 }
 
 impl OperationStatus {
@@ -109,7 +114,7 @@ impl OperationStatus {
                 | Why::LeaseLapsed
                 | Why::DeletionUnanswered => None,
             },
-            Self::Queued | Self::Running | Self::Cancelled => None,
+            Self::Queued | Self::Running | Self::Canceled => None,
         }
     }
 }
@@ -866,7 +871,7 @@ impl Operation {
     /// a cancelled operation takes none, since its run was given up.
     pub fn attach_warning(&mut self, warning: Warning) -> Result<(), LifecycleError> {
         self.require(Transition::RecordWarning, |s| {
-            !matches!(s, OperationStatus::Cancelled)
+            !matches!(s, OperationStatus::Canceled)
         })?;
         self.keep(warning);
         if self.status == OperationStatus::Succeeded {
@@ -928,7 +933,7 @@ impl Operation {
 
     pub fn cancel(&mut self, at: Timestamp) -> Result<(), LifecycleError> {
         self.require(Transition::Cancel, |s| !s.is_finished())?;
-        self.finish(OperationStatus::Cancelled, at);
+        self.finish(OperationStatus::Canceled, at);
         Ok(())
     }
 

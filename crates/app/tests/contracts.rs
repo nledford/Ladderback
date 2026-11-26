@@ -1180,18 +1180,18 @@ impl contract::notifier::NotifierHarness for FakeNotifierHarness {
     fn url(
         &self,
         kind: domain::notifications::ChannelKind,
-        behaviour: contract::notifier::Behaviour,
+        behavior: contract::notifier::Behavior,
     ) -> String {
         use app::ports::NotifyError;
-        use contract::notifier::Behaviour;
+        use contract::notifier::Behavior;
         let number = self.next.fetch_add(1, Ordering::Relaxed);
         let url = format!("http://127.0.0.1/{}/{number}", kind.name());
-        let failure = match behaviour {
-            Behaviour::Accepts => None,
-            Behaviour::Refuses => Some(NotifyError::Unreachable),
-            Behaviour::Hangs => Some(NotifyError::TimedOut),
-            Behaviour::Answers(status) if (200..300).contains(&status) => None,
-            Behaviour::Answers(status) => Some(NotifyError::Rejected { status }),
+        let failure = match behavior {
+            Behavior::Accepts => None,
+            Behavior::Refuses => Some(NotifyError::Unreachable),
+            Behavior::Hangs => Some(NotifyError::TimedOut),
+            Behavior::Answers(status) if (200..300).contains(&status) => None,
+            Behavior::Answers(status) => Some(NotifyError::Rejected { status }),
         };
         if let Some(error) = failure {
             self.notifier.fail_at(&url, error);

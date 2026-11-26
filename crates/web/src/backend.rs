@@ -187,7 +187,7 @@ impl OperationsState {
             | UiEvent::MachinePlans { .. }
             | UiEvent::MachineProgress { .. }
             | UiEvent::BackupRetrying { .. }
-            | UiEvent::OperationCancelled { .. }
+            | UiEvent::OperationCanceled { .. }
             | UiEvent::ProposalChanged { .. } => {}
         }
     }

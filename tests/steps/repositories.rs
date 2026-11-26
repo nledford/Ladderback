@@ -160,7 +160,7 @@ fn empty_hot_cold_location(agent: &mut Agent) {
 }
 
 #[given("an initialised repository")]
-async fn initialised_repository(agent: &mut Agent) {
+async fn initialized_repository(agent: &mut Agent) {
     empty_location(agent);
     let cold = agent.repositories.cold.clone().expect("the location");
     let hot = agent.repositories.hot.clone();
@@ -179,8 +179,8 @@ async fn initialised_repository(agent: &mut Agent) {
 }
 
 #[given("two initialised repositories")]
-async fn two_initialised_repositories(agent: &mut Agent) {
-    initialised_repository(agent).await;
+async fn two_initialized_repositories(agent: &mut Agent) {
+    initialized_repository(agent).await;
     let other = agent.scratch().join("other-repo");
     fs::create_dir_all(&other).expect("the second repository's folder");
     agent.repositories.other = Some(other.clone());
@@ -230,17 +230,17 @@ async fn tests(agent: &mut Agent) {
 }
 
 #[when("the agent initialises the repository")]
-async fn initialises(agent: &mut Agent) {
-    initialise(agent, None).await;
+async fn initializes(agent: &mut Agent) {
+    initialize(agent, None).await;
 }
 
 #[when(expr = "the agent initialises the repository as {string}")]
-async fn initialises_as(agent: &mut Agent, name: String) {
+async fn initializes_as(agent: &mut Agent, name: String) {
     let alias = RepositoryAlias::try_from(name).expect("a valid alias");
-    initialise(agent, Some(alias)).await;
+    initialize(agent, Some(alias)).await;
 }
 
-async fn initialise(agent: &mut Agent, alias: Option<RepositoryAlias>) {
+async fn initialize(agent: &mut Agent, alias: Option<RepositoryAlias>) {
     agent.repositories.before = agent
         .repositories
         .cold
@@ -637,16 +637,16 @@ async fn api_connects_at_once(agent: &mut Agent, first: String, second: String) 
 }
 
 #[when("the client initialises the repository")]
-async fn api_initialises(agent: &mut Agent) {
-    api_initialise(agent, None).await;
+async fn api_initializes(agent: &mut Agent) {
+    api_initialize(agent, None).await;
 }
 
 #[when(expr = "the client initialises the repository as {string}")]
-async fn api_initialises_as(agent: &mut Agent, alias: String) {
-    api_initialise(agent, Some(alias)).await;
+async fn api_initializes_as(agent: &mut Agent, alias: String) {
+    api_initialize(agent, Some(alias)).await;
 }
 
-async fn api_initialise(agent: &mut Agent, alias: Option<String>) {
+async fn api_initialize(agent: &mut Agent, alias: Option<String>) {
     agent.repositories.before = agent
         .repositories
         .cold

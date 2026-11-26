@@ -461,12 +461,12 @@ async fn every_status_and_failure_reason_reads_back(store: &dyn OperationStore) 
     applied(with_warning.record_warning(unreadable("/home/demo/a")));
     applied(with_warning.succeed(at(70)));
     ops.push(with_warning);
-    let mut cancelled_in_the_queue = queued(0x34, None);
-    applied(cancelled_in_the_queue.cancel(at(5)));
-    ops.push(cancelled_in_the_queue);
-    let mut cancelled_while_running = started(queued(0x35, None));
-    applied(cancelled_while_running.cancel(at(40)));
-    ops.push(cancelled_while_running);
+    let mut canceled_in_the_queue = queued(0x34, None);
+    applied(canceled_in_the_queue.cancel(at(5)));
+    ops.push(canceled_in_the_queue);
+    let mut canceled_while_running = started(queued(0x35, None));
+    applied(canceled_while_running.cancel(at(40)));
+    ops.push(canceled_while_running);
     // Failures: one that happened before the operation started, and one for every reason.
     let mut never_started = queued(0x36, None);
     applied(never_started.fail(reasons[0].clone(), at(1)));
@@ -1136,9 +1136,9 @@ async fn a_plan_ever_succeeded_only_if_one_of_its_own_operations_did(store: &dyn
     // Queued, running, cancelled and failed: none of them a success.
     save(store, &queued(0x900, Some(&never_succeeded)), None).await;
     save(store, &started(queued(0x901, Some(&never_succeeded))), None).await;
-    let mut cancelled = started(queued(0x902, Some(&never_succeeded)));
-    applied(cancelled.cancel(at(40)));
-    save(store, &cancelled, None).await;
+    let mut canceled = started(queued(0x902, Some(&never_succeeded)));
+    applied(canceled.cancel(at(40)));
+    save(store, &canceled, None).await;
     let not_there = FailureReason::EngineFailed {
         detail: "no repository".to_owned(),
     };

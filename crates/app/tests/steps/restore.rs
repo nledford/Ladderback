@@ -543,11 +543,11 @@ async fn restores_and_cancels(
         .restores
         .clone()
         .expect("the use case was made");
-    let (cancel, cancelled) = futures::channel::oneshot::channel::<()>();
+    let (cancel, canceled) = futures::channel::oneshot::channel::<()>();
     let running = tokio::spawn(async move {
         restores
             .run(prepared, async move {
-                let _ = cancelled.await;
+                let _ = canceled.await;
             })
             .await
     });
@@ -615,8 +615,8 @@ fn each_started(agent: &mut Agent) {
 }
 
 #[then("the restore ends as cancelled")]
-fn ends_cancelled(agent: &mut Agent) {
-    assert_eq!(agent.restore.status(), &OperationStatus::Cancelled);
+fn ends_canceled(agent: &mut Agent) {
+    assert_eq!(agent.restore.status(), &OperationStatus::Canceled);
 }
 
 #[then("the restore fails because its deadline passed")]

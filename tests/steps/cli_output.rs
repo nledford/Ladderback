@@ -26,7 +26,7 @@ const START_TIMEOUT: Duration = Duration::from_secs(60);
 const LISTENING: &str = "listening on http://";
 
 #[given("colour is forced on")]
-fn colour_is_forced(agent: &mut Agent) {
+fn color_is_forced(agent: &mut Agent) {
     agent
         .interop
         .env
@@ -49,7 +49,7 @@ fn stdout_is_not_open(agent: &mut Agent) {
 }
 
 #[given("NO_COLOR is set")]
-fn no_colour_is_set(agent: &mut Agent) {
+fn no_color_is_set(agent: &mut Agent) {
     agent
         .interop
         .env
@@ -370,7 +370,7 @@ fn output_is_plain(agent: &mut Agent) {
 }
 
 #[then("the output has colour")]
-fn output_has_colour(agent: &mut Agent) {
+fn output_has_color(agent: &mut Agent) {
     let said = said(agent);
     // The start of a control sequence that sets a style.
     assert!(

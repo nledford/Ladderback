@@ -168,7 +168,7 @@ pub fn Toast(
                         {move || {
                             let tone = tone();
                             let label = text(&localizer, tone.label());
-                            view! { <Icon glyph=tone.glyph() meaning=Meaning::Labelled(label) /> }
+                            view! { <Icon glyph=tone.glyph() meaning=Meaning::Labeled(label) /> }
                         }}
                     </span>
                     <p class=WORDS>

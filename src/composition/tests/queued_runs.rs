@@ -79,7 +79,7 @@ async fn a_backup_started_now_says_how_it_ended() {
             operation,
             plan: domain::PlanId::parse("home").expect("a plan ID"),
             trigger: Trigger::Manual,
-            outcome: app::retry::RunOutcome::Cancelled,
+            outcome: app::retry::RunOutcome::Canceled,
         })
     );
 }
@@ -122,7 +122,7 @@ async fn a_resumed_backup_says_how_it_ended() {
             operation,
             plan: domain::PlanId::parse("home").expect("a plan ID"),
             trigger: Trigger::Retry,
-            outcome: app::retry::RunOutcome::Cancelled,
+            outcome: app::retry::RunOutcome::Canceled,
         })
     );
 }
