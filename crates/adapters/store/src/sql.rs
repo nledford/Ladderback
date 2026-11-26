@@ -17,20 +17,42 @@ macro_rules! select_operations {
     };
 }
 
+/// Whether the database holds sqlx's record of the migrations it ran.
+pub(crate) const HAS_MIGRATIONS: &str = concat!(
+    "SELECT EXISTS (SELECT 1 FROM sqlite_master ",
+    "WHERE type = 'table' AND name = '_sqlx_migrations')"
+);
+
+/// The last migration recorded, when the first recorded is the first of the
+/// set before the baseline schema; NULL otherwise. Parameter: that first
+/// migration's checksum, [`OLD_SET_FIRST_CHECKSUM`].
+pub(crate) const OLD_SET_VERSION: &str = concat!(
+    "SELECT MAX(version) FROM _sqlx_migrations WHERE EXISTS ",
+    "(SELECT 1 FROM _sqlx_migrations WHERE version = 1 AND hex(checksum) = ?)"
+);
+
+/// The SHA-384 sqlx recorded for `0001_operations.sql`, the first migration
+/// of the set the baseline schema replaced (decision 165), in upper-case hex
+/// as SQLite's `hex()` gives it.
+pub(crate) const OLD_SET_FIRST_CHECKSUM: &str = concat!(
+    "27AD56A7416EE4E55FDBC6C7671A82D8783984EE9FA2A95253EF23BD3DB95F03",
+    "88E1A69B1048FD42ADB5467C8D808A5F"
+);
+
 /// Writes an operation, or replaces the one with its ID: every column, so
-/// nothing of an earlier save survives. Parameters, in order: `id`, `agent_id`,
-/// `kind`, `plan_id`, `repo_uuid`, `trigger`, `status`, `queued_at`,
-/// `started_at`, `finished_at`, `snapshot_id`, `summary_json`, `error_code`,
-/// `error_args`, `error_detail`, `warning_count`, `repo_alias`, `location_no`,
+/// nothing of an earlier save survives. Parameters, in order: `id`, `kind`,
+/// `plan_id`, `repo_uuid`, `trigger`, `status`, `queued_at`, `started_at`,
+/// `finished_at`, `snapshot_id`, `summary_json`, `error_code`, `error_args`,
+/// `error_detail`, `warning_count`, `repo_alias`, `location_no`,
 /// `locations_json`, `token_id`, `token_label`, `entry`, `restored_to`.
 pub(crate) const UPSERT_OPERATION: &str = concat!(
-    "INSERT INTO operations (id, machine_id, kind, plan_id, repo_uuid, \"trigger\", status, ",
+    "INSERT INTO operations (id, kind, plan_id, repo_uuid, \"trigger\", status, ",
     "queued_at, started_at, finished_at, snapshot_id, summary_json, error_code, error_args, ",
     "error_detail, warning_count, repo_alias, location_no, locations_json, token_id, ",
     "token_label, entry, restored_to) ",
-    "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) ",
+    "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) ",
     "ON CONFLICT(id) DO UPDATE SET ",
-    "machine_id = excluded.machine_id, kind = excluded.kind, plan_id = excluded.plan_id, ",
+    "kind = excluded.kind, plan_id = excluded.plan_id, ",
     "repo_uuid = excluded.repo_uuid, \"trigger\" = excluded.\"trigger\", ",
     "status = excluded.status, queued_at = excluded.queued_at, ",
     "started_at = excluded.started_at, finished_at = excluded.finished_at, ",

@@ -1,18 +1,19 @@
 //! The hub's latest plans and progress of each agent (technical design
-//! §7.2, migration `0025_sync_plans_progress`): each kept in place of the
-//! one before.
+//! §7.2, tables `sync_plans`, `sync_plan_snapshots` and `sync_progress`):
+//! each kept in place of the one before; nothing of a machine removed
+//! meanwhile.
 
 use app::ports::StoreError;
 use domain::fleet::{
     EpochSeconds, LastRun, LastRunOutcome, PlansReport, ReportedPlan, ReportedProgress, WireName,
 };
 use domain::{AgentId, OperationId, PlanId, Uuid};
-use sqlx::sqlite::SqliteRow;
+use sqlx::sqlite::{SqliteConnection, SqliteRow};
 use sqlx::{Connection, Row};
 
 use super::corrupt;
 use crate::row::agent_id_text;
-use crate::{SqliteStore, unavailable};
+use crate::{SqliteStore, machine_gone, unavailable};
 
 const FORGET_PLANS: &str = "DELETE FROM sync_plans WHERE machine_id = ?";
 const KEEP_PLAN: &str = "INSERT INTO sync_plans \
@@ -38,34 +39,45 @@ pub(super) async fn keep_plans(
     let agent = agent_id_text(agent);
     let _call = store.call().await;
     let mut conn = store.pool.acquire().await.map_err(unavailable)?;
-    let mut tx = conn
-        .begin_with("BEGIN IMMEDIATE")
-        .await
-        .map_err(unavailable)?;
+    kept(replace_plans(&mut conn, &agent, plans).await)
+}
+
+async fn replace_plans(
+    conn: &mut SqliteConnection,
+    agent: &str,
+    plans: &PlansReport,
+) -> Result<(), sqlx::Error> {
+    let mut tx = conn.begin_with("BEGIN IMMEDIATE").await?;
     sqlx::query(FORGET_PLANS)
-        .bind(&agent)
+        .bind(agent)
         .execute(&mut *tx)
-        .await
-        .map_err(unavailable)?;
+        .await?;
     for (place, plan) in (0_i64..).zip(plans.plans()) {
         sqlx::query(KEEP_PLAN)
-            .bind(&agent)
+            .bind(agent)
             .bind(place)
             .bind(plan.plan.as_str())
             .bind(plan.last.map(|last| number(last.at.seconds())))
             .bind(plan.last.map(|last| last.outcome.wire_name()))
             .bind(plan.next_run.map(|next| number(next.seconds())))
             .execute(&mut *tx)
-            .await
-            .map_err(unavailable)?;
+            .await?;
     }
     sqlx::query(KEEP_SNAPSHOT)
-        .bind(&agent)
+        .bind(agent)
         .bind(number(plans.left_out()))
         .execute(&mut *tx)
-        .await
-        .map_err(unavailable)?;
-    tx.commit().await.map_err(unavailable)
+        .await?;
+    tx.commit().await
+}
+
+/// A write of a machine's current state, or none of a machine removed
+/// while it was on its way ([`machine_gone`]).
+fn kept(written: Result<(), sqlx::Error>) -> Result<(), StoreError> {
+    match written {
+        Err(error) if machine_gone(&error) => Ok(()),
+        written => written.map_err(unavailable),
+    }
 }
 
 pub(super) async fn plans(
@@ -106,7 +118,7 @@ pub(super) async fn keep_progress(
 ) -> Result<(), StoreError> {
     let _call = store.call().await;
     let mut conn = store.pool.acquire().await.map_err(unavailable)?;
-    sqlx::query(KEEP_PROGRESS)
+    let written = sqlx::query(KEEP_PROGRESS)
         .bind(agent_id_text(agent))
         .bind(progress.op_id.as_uuid().to_string())
         .bind(progress.step.as_ref().map(WireName::as_str))
@@ -115,9 +127,8 @@ pub(super) async fn keep_progress(
         .bind(progress.total.map(number))
         .bind(number(progress.at.seconds()))
         .execute(&mut *conn)
-        .await
-        .map_err(unavailable)?;
-    Ok(())
+        .await;
+    kept(written.map(drop))
 }
 
 pub(super) async fn progress(

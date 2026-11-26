@@ -166,7 +166,6 @@ async fn an_operation_is_stored_as_its_own_columns() {
         save(&store, &row.op, row.result.as_ref()).await;
         let n = row.op.id().as_uuid().as_u128();
         let stored = stored_row(&mut raw, n).await;
-        assert_eq!(stored.agent_id, "local", "{}", row.status);
         assert_eq!(stored.kind, row.kind);
         assert_eq!(stored.trigger, row.trigger);
         assert_eq!(stored.status, row.status);
@@ -683,7 +682,6 @@ async fn a_later_save_replaces_every_column_and_every_warning() {
     assert_eq!(
         after_third,
         Stored {
-            agent_id: "local".to_owned(),
             kind: "prune".to_owned(),
             plan_id: None,
             repo_uuid: None,

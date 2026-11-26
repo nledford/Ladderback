@@ -41,7 +41,7 @@ use releases_adapter::GitHubReleases;
 use secrets::SystemSecrets;
 use std::collections::BTreeSet;
 use std::sync::Arc;
-use store::SqliteStore;
+use store::{OpenError, SqliteStore};
 
 use super::catalog::ConfigCatalog;
 use super::key_files::KeyFilesLeftOut;
@@ -595,7 +595,7 @@ pub(super) async fn daemon_at(
         store: Arc::new(
             SqliteStore::open(&database)
                 .await
-                .map_err(|detail| store_refused(&database, &detail.to_string()))?,
+                .map_err(|error| log_refused(&database, &error))?,
         ),
         database,
     };
@@ -1422,6 +1422,19 @@ fn store_refused(path: &std::path::Path, detail: &str) -> Refused {
     Refused {
         message: msg::CLI_CANNOT_OPEN_STORE,
         args: vec![("path", text(path.display())), ("detail", text(detail))],
+    }
+}
+
+/// The operation log the daemon cannot open: one the migrations before the
+/// baseline schema left is named as such, with the way to copy it (§16,
+/// decision 165).
+fn log_refused(path: &std::path::Path, error: &OpenError) -> Refused {
+    match error {
+        OpenError::OldSchema { version } => Refused {
+            message: msg::CLI_STORE_OLD_SCHEMA,
+            args: vec![("path", text(path.display())), ("version", text(version))],
+        },
+        other => store_refused(path, &other.to_string()),
     }
 }
 

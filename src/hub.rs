@@ -32,7 +32,7 @@ use platform::identity::FileIdentity;
 use platform::random::OsRandom;
 use platform::{SystemClock, dirs, terminal};
 use signing_adapter::AwsLcSigning;
-use store::SqliteStore;
+use store::{OpenError, SqliteStore};
 use tls_adapter::{RcgenTlsKeys, WebSocketHubConnector};
 
 use crate::confirm::{Question, confirmed};
@@ -287,9 +287,10 @@ async fn on_the_hub(localizer: &Localizer, data_dir: &Path, ask: TokenAsk) -> io
         }
         Err(LockError::Unavailable { detail }) => return refused(localizer, &detail),
     };
-    let store = match SqliteStore::open(&data_dir.join(DATABASE)).await {
+    let database = data_dir.join(DATABASE);
+    let store = match SqliteStore::open(&database).await {
         Ok(store) => Arc::new(store),
-        Err(error) => return refused(localizer, &error.to_string()),
+        Err(error) => return log_refused(localizer, &database, &error),
     };
     let pairing = hub_pairing(data_dir, Arc::clone(&store));
     // The zone this computer is in, which the person reads times in.
@@ -700,6 +701,21 @@ fn refused(localizer: &Localizer, detail: &str) -> io::Result<ExitCode> {
     Ok(ExitCode::FAILURE)
 }
 
+/// The operation log a hub command can't open: one the migrations before
+/// the baseline schema left is named as such, with the way to copy it (§16,
+/// decision 165).
+fn log_refused(localizer: &Localizer, path: &Path, error: &OpenError) -> io::Result<ExitCode> {
+    let OpenError::OldSchema { version } = error else {
+        return refused(localizer, &error.to_string());
+    };
+    say(
+        localizer,
+        msg::CLI_STORE_OLD_SCHEMA,
+        &[("path", text(path.display())), ("version", text(version))],
+    )?;
+    Ok(ExitCode::FAILURE)
+}
+
 /// What `pair` was asked: the address to use instead of the token's, the
 /// hostname to pair under instead of the machine's, and whether a pairing
 /// with no terminal to ask on goes ahead.
@@ -814,9 +830,10 @@ async fn on_the_agent(
         Err(error) => return refused(localizer, &error.to_string()),
     };
     // The leases and epoch floors a new hub replaces are in the database.
-    let store = match SqliteStore::open(&data_dir.join(DATABASE)).await {
+    let database = data_dir.join(DATABASE);
+    let store = match SqliteStore::open(&database).await {
         Ok(store) => Arc::new(store),
-        Err(error) => return refused(localizer, &error.to_string()),
+        Err(error) => return log_refused(localizer, &database, &error),
     };
     let connector = WebSocketHubConnector::new();
     let pairing = AgentPairing::new(
