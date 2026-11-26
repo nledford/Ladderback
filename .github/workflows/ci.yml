@@ -413,13 +413,16 @@ jobs:
         uses: taiki-e/install-action@75a7c0f87bd666af3cdb75c5b9e9d03ab6044e6f # v2.90.6
         with:
           tool: leptosfmt@${{ steps.leptosfmt.outputs.version }}
-      # cargo-mutants for `just lint`'s check of the mutants exclusions, from
-      # the install-action the mutants jobs get it from (through setup-rust),
-      # on Linux alone, where `lint` runs.
+      # cargo-mutants at the version the Justfile pins (its
+      # `cargo_mutants_version` line says why), for `just lint`'s check of the
+      # mutants exclusions, on Linux alone, where `lint` runs.
+      - id: cargo-mutants
+        if: matrix.skip != 'true' && needs.changes.outputs.docs-only != 'true' && runner.os == 'Linux'
+        run: echo "version=$(just --evaluate cargo_mutants_version)" >> "$GITHUB_OUTPUT"
       - if: matrix.skip != 'true' && needs.changes.outputs.docs-only != 'true' && runner.os == 'Linux'
         uses: taiki-e/install-action@75a7c0f87bd666af3cdb75c5b9e9d03ab6044e6f # v2.90.6
         with:
-          tool: cargo-mutants
+          tool: cargo-mutants@${{ steps.cargo-mutants.outputs.version }}
       # The rustic CLI the profile golden tests compare against (§6.2): the
       # official release, checked against the SHA-256 the script pins.
       - if: matrix.skip != 'true' && needs.changes.outputs.docs-only != 'true'
@@ -967,7 +970,14 @@ jobs:
           fetch-depth: 0
       - uses: $/.github/actions/setup-rust
         with:
-          tools: just,cargo-mutants
+          tools: just
+      # cargo-mutants at the version the Justfile pins (its
+      # `cargo_mutants_version` line says why); `just mutants` refuses another.
+      - id: cargo-mutants
+        run: echo "version=$(just --evaluate cargo_mutants_version)" >> "$GITHUB_OUTPUT"
+      - uses: taiki-e/install-action@75a7c0f87bd666af3cdb75c5b9e9d03ab6044e6f # v2.90.6
+        with:
+          tool: cargo-mutants@${{ steps.cargo-mutants.outputs.version }}
       # Two mutants at a time: each builds in its own copy of the tree, and the
       # runner has four cores. `--caught --unviable` print every outcome as it
       # comes, so a shard that runs out of time shows how far it got.
@@ -1034,7 +1044,13 @@ jobs:
           persist-credentials: false
       - uses: $/.github/actions/setup-rust
         with:
-          tools: just,cargo-mutants
+          tools: just
+      # cargo-mutants at the version the Justfile pins, as in `mutants-shard`.
+      - id: cargo-mutants
+        run: echo "version=$(just --evaluate cargo_mutants_version)" >> "$GITHUB_OUTPUT"
+      - uses: taiki-e/install-action@75a7c0f87bd666af3cdb75c5b9e9d03ab6044e6f # v2.90.6
+        with:
+          tool: cargo-mutants@${{ steps.cargo-mutants.outputs.version }}
       - run: just mutants-all --jobs 2 --shard "$SHARD/32" --sharding round-robin --caught --unviable
         timeout-minutes: 165
         env:
