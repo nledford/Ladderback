@@ -174,8 +174,13 @@ jobs:
   # (scripts/changed-paths.sh says how), so the jobs below can skip work. A
   # failure here leaves the outputs empty, and the jobs below run: they skip
   # only when this job says "true" (`docs-only`) or "false" (`service`, `ui`).
-  # It also estimates how many mutation shards the change needs. Pushes to
-  # main, the nightly run and manual runs skip this job and run everything.
+  # The user guide (docs/guide/) is docs, but its config.toml and keyring
+  # examples are tested (crates/adapters/config/tests/guide.rs): a docs-only
+  # pull request that touches it says "true" in `guide` too, and `check`'s
+  # Linux leg runs those tests beside the docs checks; every other job skips
+  # as for any docs-only pull request (decision 171). It also estimates how
+  # many mutation shards the change needs. Pushes to main, the nightly run and
+  # manual runs skip this job and run everything.
   changes:
     name: Changed paths
     if: github.event_name == 'pull_request'
@@ -183,6 +188,7 @@ jobs:
     timeout-minutes: 5
     outputs:
       docs-only: ${{ steps.diff.outputs.docs-only }}
+      guide: ${{ steps.diff.outputs.guide }}
       service: ${{ steps.diff.outputs.service }}
       ui: ${{ steps.diff.outputs.ui }}
       mutant-shards: ${{ steps.diff.outputs.mutant-shards }}
@@ -238,7 +244,8 @@ jobs:
       # agent-guidance path check, the paragraph-length check, the American
       # spelling check, the user docs site's build and link check, and the
       # decision-index and component-index checks below, which `just lint`
-      # runs for the rest.
+      # runs for the rest, and, when it touches the guide, the guide's example
+      # tests.
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
@@ -246,7 +253,9 @@ jobs:
         run: scripts/check-doc-paths.sh
       # The toolchain, the build cache (allowed to fail: an outage runs the
       # build uncached, and so for every job's setup-rust below) and the tools.
-      - if: needs.changes.outputs.docs-only != 'true'
+      # A docs-only pull request that touches the guide sets it up on Linux,
+      # for the guide's example tests below.
+      - if: needs.changes.outputs.docs-only != 'true' || (needs.changes.outputs.guide == 'true' && runner.os == 'Linux')
         uses: $/.github/actions/setup-rust
         with:
           tools: just,cargo-nextest
@@ -289,6 +298,14 @@ jobs:
         run: node scripts/decision-index.ts
       - if: needs.changes.outputs.docs-only == 'true' && runner.os == 'Linux'
         run: node scripts/component-index.ts
+      # The guide's examples (crates/adapters/config/tests/guide.rs), for a
+      # docs-only pull request that touches the guide: that test target alone,
+      # with `--workspace` for the features every other build uses. Any other
+      # pull request runs it in `just test`.
+      - if: needs.changes.outputs.docs-only == 'true' && needs.changes.outputs.guide == 'true' && runner.os == 'Linux'
+        run: cargo nextest run --workspace --test guide
+        env:
+          NEXTEST_PROFILE: ci
       # leptosfmt at the version the Justfile pins, for `just fmt-check`.
       # install-action lists no leptosfmt (manifests/ at that SHA), so it
       # falls back to cargo-binstall at that version, which takes the

@@ -10,6 +10,7 @@
 # Output on stdout, one line per lane for `$GITHUB_OUTPUT`:
 #
 #   docs-only=true|false   every path is docs, which skip the code suites
+#   guide=true|false       a path is in the user guide, docs/guide/
 #   service=true|false     a path can change what the `service` jobs check
 #   ui=true|false          a path can change what Firefox and WebKit see
 #
@@ -17,9 +18,12 @@
 # clearly outside the service jobs' reach counts as inside it: the jobs run
 # unless this says "true" (`docs-only`) or "false" (`service`). The `ui`
 # lane is the other way round: false unless a path names the UI, because
-# Chromium's required job covers the rest. A failure prints nothing, and the
-# jobs then run as for code. A `.feature` file is read from the checked-out
-# tree, which is what the jobs run on.
+# Chromium's required job covers the rest. The user guide is docs, but its
+# config.toml and keyring examples are tested
+# (crates/adapters/config/tests/guide.rs): a docs-only change that touches it
+# runs those tests, and a change to code runs them with the rest. A failure
+# prints nothing, and the jobs then run as for code. A `.feature` file is
+# read from the checked-out tree, which is what the jobs run on.
 set -euo pipefail
 
 cd "$(dirname "$0")/.."
@@ -36,6 +40,7 @@ trap 'rm -f "$changed"' EXIT
 git diff -z --name-only --no-renames "$base...$head" > "$changed"
 
 docs_only=true
+guide=false
 service=false
 ui=false
 count=0
@@ -44,9 +49,7 @@ while IFS= read -r -d '' file; do
   case "$file" in
     # Markdown under crates/ can be include_str!'d or doc-tested.
     crates/*) docs_only=false ;;
-    # The guides' config.toml and keyring examples are tested
-    # (crates/adapters/config/tests/guide.rs).
-    docs/guide/*) docs_only=false ;;
+    docs/guide/*) guide=true ;;
     docs/* | LICENSE* | .github/ISSUE_TEMPLATE/* | *.md) ;;
     *) docs_only=false ;;
   esac
@@ -82,5 +85,6 @@ done < "$changed"
 if ((count == 0)); then docs_only=false service=true ui=true; fi
 
 echo "docs-only=$docs_only"
+echo "guide=$guide"
 echo "service=$service"
 echo "ui=$ui"

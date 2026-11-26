@@ -70,7 +70,24 @@ test("a change to docs and Markdown alone is docs-only and reaches neither the s
     ".github/ISSUE_TEMPLATE/bug.yml": "name: bug\n",
   });
   assert.equal(result.status, 0);
-  assert.deepEqual(result.lanes, { "docs-only": "true", service: "false", ui: "false" });
+  assert.deepEqual(result.lanes, { "docs-only": "true", guide: "false", service: "false", ui: "false" });
+});
+
+test("a change to the guide alone, or with other docs, is docs-only and runs the guide's example tests", () => {
+  const alone = lanes({ "docs/guide/first-plan.md": "text\n" });
+  assert.deepEqual(alone.lanes, { "docs-only": "true", guide: "true", service: "false", ui: "false" });
+  const withDocs = lanes({ "docs/guide/book.toml": "[book]\n", "docs/design/x.md": "text\n", "README.md": "changed\n" });
+  assert.equal(withDocs.lanes["docs-only"], "true");
+  assert.equal(withDocs.lanes.guide, "true");
+});
+
+test("a change to the guide and to code is no docs-only change", () => {
+  const result = lanes({ "docs/guide/first-plan.md": "text\n", "crates/adapters/config/src/lib.rs": "fn f() {}\n" });
+  assert.equal(result.lanes["docs-only"], "false");
+});
+
+test("a path that only starts like the guide's folder is no guide change", () => {
+  assert.equal(lanes({ "docs/guide.md": "text\n", "docs/guides/x.md": "text\n" }).lanes.guide, "false");
 });
 
 test("Markdown under crates/ counts as code", () => {
@@ -85,7 +102,7 @@ test("a path the script doesn't know counts as code and reaches the services", (
 
 test("the web UI turns on the engines and stays out of the services' reach", () => {
   const result = lanes({ "crates/web/src/lib.rs": "fn f() {}\n" });
-  assert.deepEqual(result.lanes, { "docs-only": "false", service: "false", ui: "true" });
+  assert.deepEqual(result.lanes, { "docs-only": "false", guide: "false", service: "false", ui: "true" });
 });
 
 test("the platform adapter reaches the services, not the engines", () => {
@@ -101,7 +118,7 @@ test("a feature file outside features/ui/ turns on the engines only when it hold
 });
 
 test("a change with no files runs every job", () => {
-  assert.deepEqual(lanes({}).lanes, { "docs-only": "false", service: "true", ui: "true" });
+  assert.deepEqual(lanes({}).lanes, { "docs-only": "false", guide: "false", service: "true", ui: "true" });
 });
 
 test("a wrong number of arguments is refused", () => {
