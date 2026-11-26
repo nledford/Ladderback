@@ -10,7 +10,7 @@ Open an issue with the **Bug report** form. It asks for the version (the web UI'
 
 Never paste a password, a key, an API token or a repository URL that holds credentials. Ladderback keeps secrets out of its own logs and messages, but a configuration file or a shell history may hold them, and a log may name paths and machines you'd rather not share.
 
-A security problem goes through the [security policy](SECURITY.md), never a public issue.
+A security problem goes through the [security policy](SECURITY.md), never a public issue. An accessibility barrier has a form of its own, **Accessibility barrier**; [ACCESSIBILITY.md](ACCESSIBILITY.md) says what Ladderback aims at.
 
 ## Asking for a feature
 
