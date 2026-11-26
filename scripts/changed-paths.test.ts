@@ -1,7 +1,7 @@
 // Tests for scripts/changed-paths.sh, which ci.yml's `changes` job runs to
-// sort a pull request's paths into CI's lanes. Each test builds a small
-// repository, commits a change on a branch and reads the lanes the script
-// answers. `just lint` runs them with `node --test`.
+// sort a pull request's paths and labels into CI's lanes. Each test builds a
+// small repository, commits a change on a branch and reads the lanes the
+// script answers. `just lint` runs them with `node --test`.
 
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
@@ -70,12 +70,12 @@ test("a change to docs and Markdown alone is docs-only and reaches neither the s
     ".github/ISSUE_TEMPLATE/bug.yml": "name: bug\n",
   });
   assert.equal(result.status, 0);
-  assert.deepEqual(result.lanes, { "docs-only": "true", guide: "false", service: "false", ui: "false" });
+  assert.deepEqual(result.lanes, { "docs-only": "true", guide: "false", service: "false", ui: "false", mutants: "false" });
 });
 
 test("a change to the guide alone, or with other docs, is docs-only and runs the guide's example tests", () => {
   const alone = lanes({ "docs/guide/first-plan.md": "text\n" });
-  assert.deepEqual(alone.lanes, { "docs-only": "true", guide: "true", service: "false", ui: "false" });
+  assert.deepEqual(alone.lanes, { "docs-only": "true", guide: "true", service: "false", ui: "false", mutants: "false" });
   const withDocs = lanes({ "docs/guide/book.toml": "[book]\n", "docs/design/x.md": "text\n", "README.md": "changed\n" });
   assert.equal(withDocs.lanes["docs-only"], "true");
   assert.equal(withDocs.lanes.guide, "true");
@@ -102,7 +102,7 @@ test("a path the script doesn't know counts as code and reaches the services", (
 
 test("the web UI turns on the engines and stays out of the services' reach", () => {
   const result = lanes({ "crates/web/src/lib.rs": "fn f() {}\n" });
-  assert.deepEqual(result.lanes, { "docs-only": "false", guide: "false", service: "false", ui: "true" });
+  assert.deepEqual(result.lanes, { "docs-only": "false", guide: "false", service: "false", ui: "true", mutants: "true" });
 });
 
 test("the platform adapter reaches the services, not the engines", () => {
@@ -118,7 +118,60 @@ test("a feature file outside features/ui/ turns on the engines only when it hold
 });
 
 test("a change with no files runs every job", () => {
-  assert.deepEqual(lanes({}).lanes, { "docs-only": "false", guide: "false", service: "true", ui: "true" });
+  assert.deepEqual(lanes({}).lanes, { "docs-only": "false", guide: "false", service: "true", ui: "true", mutants: "true" });
+});
+
+// The red-first label, which keeps its British spelling (AGENTS.md).
+const redFirst = `behaviour`;
+
+const code = { "crates/domain/src/lib.rs": "fn f() {}\n" };
+
+test("a change to code runs its mutation testing, with or without other labels", () => {
+  assert.equal(lanes(code).lanes.mutants, "true");
+  assert.equal(lanes(code, {}, redFirst, "documentation").lanes.mutants, "true");
+});
+
+test("the no-behavior-change label turns off the mutation testing and nothing else", () => {
+  const result = lanes(code, {}, "documentation", "no-behavior-change");
+  assert.equal(result.status, 0);
+  assert.deepEqual(result.lanes, { "docs-only": "false", guide: "false", service: "true", ui: "false", mutants: "false" });
+});
+
+test("a label that only resembles no-behavior-change leaves the mutation testing on", () => {
+  assert.equal(lanes(code, {}, "no-behavior-changes", "no behavior change").lanes.mutants, "true");
+});
+
+test("the labels match whatever their case, as red-first.yml's do", () => {
+  assert.equal(lanes(code, {}, "No-Behavior-Change").lanes.mutants, "false");
+  assert.equal(lanes(code, {}, redFirst.toUpperCase(), "no-behavior-change").status, 1);
+});
+
+test("the guide's theme scripts count as code, for Biome in just lint", () => {
+  assert.equal(lanes({ "docs/guide/theme/ladderback.js": "let x = 1;\n" }).lanes["docs-only"], "false");
+});
+
+test("a guide page the web UI or a UI scenario links to counts as code, for the journey that checks its heading", () => {
+  const linked = { "docs/guide/remote-access.md": "# Remote\n\n## A hub behind a reverse proxy\n" };
+  const fromWeb = { "crates/web/src/agents.rs": 'const GUIDE: &str = "/docs/guide/remote-access.md#a-hub";\n' };
+  const fromScenario = { "features/ui/pairing.feature": 'Then it leads to the section "A" of "docs/guide/remote-access.md"\n' };
+  const change = { "docs/guide/remote-access.md": "# Remote\n\n## A hub behind a proxy\n" };
+  assert.equal(lanes(change, { ...linked, ...fromWeb }).lanes["docs-only"], "false");
+  assert.equal(lanes(change, { ...linked, ...fromScenario }).lanes["docs-only"], "false");
+  const other = lanes({ "docs/guide/install.md": "text\n" }, { ...linked, ...fromWeb });
+  assert.equal(other.lanes["docs-only"], "true", "a page nothing links to stays docs");
+});
+
+test("no-behavior-change beside the red-first label fails, prints no lane and says why", () => {
+  const result = lanes(code, {}, redFirst, "no-behavior-change");
+  assert.equal(result.status, 1);
+  assert.deepEqual(result.lanes, {});
+  assert.match(result.why, /'no-behavior-change' and 'behaviour' contradict each other/);
+});
+
+test("a diff that fails prints no lane, so the jobs run as for code", () => {
+  const result = spawnSync("bash", [script, "0000000000000000000000000000000000000000", "HEAD"], { encoding: "utf8" });
+  assert.notEqual(result.status, 0);
+  assert.equal(result.stdout, "");
 });
 
 test("a wrong number of arguments is refused", () => {
