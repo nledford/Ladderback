@@ -114,7 +114,18 @@ The machine drops the leases it held from that hub and forgets the hub's key. It
 
 Until 1.0.0, a release may change how machines and the hub talk to each other, as [the README's warning](https://github.com/nledford/Ladderback/blob/main/README.md) says. Such a release raises the minor version, as 0.6 to 0.7, and its entry in [CHANGELOG.md](https://github.com/nledford/Ladderback/blob/main/CHANGELOG.md) lists the change under **Breaking**, with the steps to upgrade, which may be pairing each machine again. Read it before you upgrade the hub or any machine.
 
-**From 0.5.0 to 0.6.0,** install 0.6.0 and start it; there are no other steps. On its first start, each machine keeps its machine ID and key, and copies its operation log into the new schema. The old log is kept beside the new one as `ladderback.db.before-baseline`, which you can delete once you no longer want it. A log that can't be copied is left as it was, and Ladderback says why. A command such as `ladderback pair` or `ladderback hub-status`, run while 0.5.0 still runs, is refused and changes nothing: stop 0.5.0 first. Snapshots 0.5.0 took carry the tag `ladderback-agent:<id>`, where 0.6.0 writes `ladderback-machine:<id>`: retag them once as the 0.6.0 release notes describe.
+**From 0.5.0 to 0.6.0,** install 0.6.0 and start it; there are no other steps. On its first start, each machine keeps its machine ID and key, and copies its operation log into the new schema. The old log is kept beside the new one as `ladderback.db.before-baseline`, which you can delete once you no longer want it. A log that can't be copied is left as it was, and Ladderback says why. A command such as `ladderback pair` or `ladderback hub-status`, run while 0.5.0 still runs, is refused and changes nothing: stop 0.5.0 first.
+
+Snapshots 0.5.0 took carry the tag `ladderback-agent:<id>`, where 0.6.0 writes `ladderback-machine:<id>`; `<id>` is the content of `machine-id` in the data folder. Retag them once per machine and repository. rustic 0.11 refuses `--add` together with `--remove`, so this takes two passes. Run each with `--dry-run` first, then without it:
+
+```sh
+rustic -r <repository> tag --no-cache --filter-tags ladderback-agent:<id> --add ladderback-machine:<id> --dry-run
+rustic -r <repository> tag --no-cache --filter-tags ladderback-agent:<id> --add ladderback-machine:<id>
+rustic -r <repository> tag --no-cache --filter-tags ladderback-agent:<id> --remove ladderback-agent:<id> --dry-run
+rustic -r <repository> tag --no-cache --filter-tags ladderback-agent:<id> --remove ladderback-agent:<id>
+```
+
+Until they are retagged, those snapshots list as orphaned, and a repository holding recent ones counts as shared.
 
 ## Known limits
 
