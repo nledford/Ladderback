@@ -30,6 +30,16 @@ macos_sign_identity := env_var_or_default("LADDERBACK_SIGN_IDENTITY", "Ladderbac
 # (`just --evaluate leptosfmt_version`), and `fmt-check` refuses another.
 leptosfmt_version := "0.1.34"
 
+# The cargo-mutants release the mutants recipes and `lint` expect (§13.1).
+# `lint`'s check of .cargo/mutants.toml (scripts/check-mutants-exclusions.ts)
+# reads the names cargo-mutants gives its mutants, and the exclusions are
+# written in them, so a release that renames mutants must arrive as a
+# deliberate bump of this line, with the exclusions it breaks fixed in the
+# same change. `setup` installs this one, CI too (`just --evaluate
+# cargo_mutants_version`), and `lint`, `mutants` and `mutants-all` refuse
+# another.
+cargo_mutants_version := "27.1.0"
+
 # The mdBook release that builds the user docs site (§16, decision 128).
 # Another release renders the pages and their anchors differently, so `setup`
 # installs this one, CI too (it reads this line), and `docs-site` refuses
@@ -51,7 +61,8 @@ alias v := verify
 [group('setup')]
 setup:
     rustup target add wasm32-unknown-unknown
-    cargo binstall --no-confirm trunk cargo-deny cargo-mutants cargo-nextest release-plz zizmor cargo-auditable
+    cargo binstall --no-confirm trunk cargo-deny cargo-nextest release-plz zizmor cargo-auditable
+    cargo binstall --no-confirm --version '{{ cargo_mutants_version }}' cargo-mutants
     cargo binstall --no-confirm --version "$(just _wasm-bindgen-version)" wasm-bindgen-cli
     cargo binstall --no-confirm --version '{{ leptosfmt_version }}' leptosfmt
     cargo binstall --no-confirm --version '{{ mdbook_version }}' mdbook
@@ -91,6 +102,11 @@ fmt-check: _leptosfmt-pinned
 [private]
 _leptosfmt-pinned:
     @[ "$(leptosfmt --version)" = 'leptosfmt {{ leptosfmt_version }}' ] || { echo "needs leptosfmt {{ leptosfmt_version }}, found $(leptosfmt --version 2>&1 || true); run just setup" >&2; exit 1; }
+
+# Fails unless the installed cargo-mutants is the pinned release.
+[private]
+_cargo-mutants-pinned:
+    @[ "$(cargo mutants --version)" = 'cargo-mutants {{ cargo_mutants_version }}' ] || { echo "needs cargo-mutants {{ cargo_mutants_version }}, found $(cargo mutants --version 2>&1 || true); run just setup" >&2; exit 1; }
 
 # Fails unless the installed mdBook is the pinned release.
 [private]
@@ -160,16 +176,18 @@ clippy:
 # it lists), the user docs site's build and link check (`docs-site`), the
 # check of the §16 decision files (good names and headings, a number each, no
 # table of them in §16; decision 162) and that §4.5's index matches the
-# component contract files, and
+# component contract files, the check that each exclusion in
+# .cargo/mutants.toml still matches a mutant or a source file (cargo-mutants
+# lists them without building; §13.1), and
 # rustdoc on every crate, private items
 # included, with warnings as errors, so a doc comment's broken link or
 # malformed markup fails. Rustdoc sees only the items built for the host and,
 # for `web`, not its wasm32-only ones. CI runs `lint` on Linux alone, so a doc
 # comment on macOS-only code is checked only by a local run on a Mac; macOS CI
 # runs `clippy` (see `clippy`).
-[doc('The static checks: clippy (host, web UI, gallery, release flags), TypeScript, shellcheck, the tooling tests, the docs checks and rustdoc.')]
+[doc('The static checks: clippy (host, web UI, gallery, release flags), TypeScript, shellcheck, the tooling tests, the docs checks, the mutants exclusions and rustdoc.')]
 [group('quality')]
-lint: _ui-deps _shellcheck-pinned clippy docs-site
+lint: _ui-deps _shellcheck-pinned _cargo-mutants-pinned clippy docs-site
     cargo clippy --package web --all-targets --target wasm32-unknown-unknown -- -D warnings
     cargo clippy --package web --all-targets --features gallery --target wasm32-unknown-unknown -- -D warnings
     cargo clippy --workspace --all-targets {{ release_flags }} -- -D warnings
@@ -184,6 +202,7 @@ lint: _ui-deps _shellcheck-pinned clippy docs-site
     node scripts/check-american-spelling.ts
     node scripts/decision-index.ts
     node scripts/component-index.ts
+    node scripts/check-mutants-exclusions.ts
     RUSTDOCFLAGS="-D warnings" cargo doc --workspace --no-deps --document-private-items
 
 # Print the index of the §16 decisions, one Markdown row per file in
@@ -593,7 +612,7 @@ _ui-deps:
 [doc("Mutation-test the gated crates' code changed since `base`, and the whole of any crate the branch adds to the gate.")]
 [group('test')]
 [positional-arguments]
-mutants base='origin/main' *args:
+mutants base='origin/main' *args: _cargo-mutants-pinned
     #!/usr/bin/env bash
     set -euo pipefail
     shift
@@ -623,7 +642,7 @@ mutants base='origin/main' *args:
 [doc('Mutation-test all of the gated crates (slow; CI runs it nightly).')]
 [group('test')]
 [positional-arguments]
-mutants-all *args:
+mutants-all *args: _cargo-mutants-pinned
     env -u CARGO_TARGET_DIR -u CARGO_BUILD_TARGET_DIR cargo mutants {{ mutants_packages }} "$@"
 
 # Check that the branch's first commit is a failing test: commit (§13.1).
