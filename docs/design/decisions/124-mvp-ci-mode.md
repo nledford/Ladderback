@@ -4,6 +4,8 @@
 
 **Amended 2026-11-22 (the maintainer, #1097):** MVP mode ends when the milestone "MVP: Ready for real-world testing" is done, not when every milestone except M7 (Japanese) is implemented, as first decided. The goal is now an MVP that works and can start real-world testing before a proper `1.0.0`; M4, M5 and M8 to M10 follow it, before `1.0.0`, with full CI on pull requests again (§14). Turning full CI back on (#1097) is one of that milestone's issues.
 
+**Superseded 2026-11-26 (#1097):** MVP mode is gone, not just switched off. ci.yml's `mvp` output, the `workflows` and `deps` outputs that only it read, the `CI_MODE` reads in ci.yml and red-first.yml, and every job condition and step guard that narrowed a pull request's run are deleted, so each job runs on pull requests as it did before this decision, `Red-first check` included, whatever the variable says. The maintainer deletes the variable after the merge. The rest of this record is kept as it was decided.
+
 ## Why
 
 A pull request's CI takes a median of 83 minutes, and most of it is waiting for runners: macOS has the smallest pool. A pull request has also passed local checks before it opens: the quick lane of AGENTS.md, and the maintainer's own run of `just quick-ci`, red-first and the Chromium UI journeys. So the full run mostly repeats work that has already passed, at the price of the queue.

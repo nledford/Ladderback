@@ -47,11 +47,9 @@ jobs:
   red-first:
     # This name is a required status check (ruleset "Protect main"): don't rename it.
     # The job's own `if` skips it when the pull request has no `behaviour`
-    # label and in MVP mode (decision 124), as a skipped required check is
-    # reported and counts as passing. `vars.CI_MODE` is the variable ci.yml's
-    # `changes` job reads: only `mvp`, in any letter case, turns the mode on.
+    # label, as a skipped required check is reported and counts as passing.
     name: Red-first check
-    if: github.event_name == 'pull_request' && vars.CI_MODE != 'mvp' && contains(github.event.pull_request.labels.*.name, 'behaviour')
+    if: github.event_name == 'pull_request' && contains(github.event.pull_request.labels.*.name, 'behaviour')
     runs-on: ubuntu-26.04
     timeout-minutes: 90
     steps:
