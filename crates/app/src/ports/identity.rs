@@ -56,6 +56,11 @@ pub trait Identity: Send + Sync {
     /// it back once this has answered.
     async fn write_pin(&self, pin: &HubPin) -> Result<(), IdentityError>;
 
+    /// Deletes the pin, as a machine that leaves its hub does (decision
+    /// 169). Done when there is none. The other key files stay, the agent
+    /// key among them.
+    async fn forget_pin(&self) -> Result<(), IdentityError>;
+
     /// Starts a connection attempt: takes the counter's lock, raises the
     /// counter by one and writes it, durably, before it answers. The
     /// attempt holds the lock until it is dropped, so a second attempt on

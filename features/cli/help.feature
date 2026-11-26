@@ -29,6 +29,7 @@ Feature: The command line's help
         | pairing-token --help   |
         | pair --help            |
         | hub-status --help      |
+        | unpair --help          |
         | install-service --help |
         | remove-service --help  |
         | check-keyring --help   |

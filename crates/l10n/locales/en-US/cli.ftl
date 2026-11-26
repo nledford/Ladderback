@@ -726,7 +726,44 @@ cli-hub-status-approved = Connected. The { -hub } approved this machine.
 # at pairing, so the machine sent it no proof. Pairing's own messages say to
 # pair again, which `ladderback pair` refuses while the machine holds a pin.
 # $address (text): the hub address this machine pinned.
-cli-hub-status-hub-unproved = The { -hub } at { $address } didn't prove the key this machine pinned when it paired, so this machine sent it nothing and keeps backing up on its own. Don't pair again. Check the address with whoever runs the { -hub }. If they reset or reinstalled it on purpose, ask them how to move this machine to its new key; if they didn't, someone may be posing as the { -hub }.
+# `ladderback unpair` is the command, typed as it is: keep it a string literal.
+cli-hub-status-hub-unproved = The { -hub } at { $address } didn't prove the key this machine pinned when it paired, so this machine sent it nothing and keeps backing up on its own. Don't pair again yet. Check the address with whoever runs the { -hub }. If they reset or reinstalled it on purpose, stop this machine's daemon and run { "ladderback unpair" } to leave the old { -hub }, then pair with a token made on the new one; if they didn't, someone may be posing as the { -hub }.
+
+# `ladderback unpair` on a machine with no hub pin: there is no hub to leave.
+cli-unpair-not-paired = This { -machine } isn't paired with a { -hub }, so there is none to leave. It maintains its own repositories.
+
+# `ladderback unpair` while the machine's daemon holds the data folder: the daemon holds the hub's leases, so it must stop first.
+# $path (text): the data folder. It is shown as it is.
+# `ladderback unpair` is the command, typed as it is: keep it a string literal.
+cli-unpair-daemon-running = This { -machine }'s daemon is running on the data folder { $path }, and it holds the { -hub }'s leases. Stop the daemon, run { "ladderback unpair" } again, then start the daemon again as you started it before. Nothing changed.
+
+# `ladderback unpair` names the hub it would leave before it asks.
+# $address (text): the hub address this machine pinned.
+# $fingerprint (text): the hub key's fingerprint.
+cli-unpair-paired = This { -machine } is paired with the { -hub } at { $address }, whose key is { $fingerprint }.
+
+# `ladderback unpair` on a machine whose hub pin is there but can't be read: it still leaves the hub, which it can't name.
+cli-unpair-pin-unreadable = This { -machine } is paired with a { -hub }, but the file that names it can't be read.
+
+# `unpair` asks before it changes anything. Printed without the program's name, and the answer follows on the same line.
+# `[y/N]` is what the person types to answer, and only `y` or `Y` says yes: keep it a string literal.
+cli-unpair-confirm = Leave that { -hub }? This { -machine } drops the leases it holds from it and maintains its own repositories again. { "[y/N]" }
+
+# The person answered anything but `y` to `cli-unpair-confirm`.
+cli-unpair-declined = Not unpaired: this { -machine } is still paired with the { -hub }, and nothing changed.
+
+# Standard input isn't a terminal and `--yes` wasn't given, so the machine didn't leave its hub.
+# `ladderback unpair --yes` is the command, typed as it is: keep it a string literal.
+cli-unpair-no-terminal = No terminal to ask on, so this { -machine } is still paired with the { -hub }, and nothing changed. To leave it, run { "ladderback unpair --yes" }.
+
+# `ladderback unpair` dropped the hub's leases and forgot its pin.
+# $fingerprint (text): the key fingerprint of the hub the machine left.
+# `ladderback pair` is the command, typed as it is: keep it a string literal.
+cli-unpair-done = This { -machine } left the { -hub } whose key is { $fingerprint } and maintains its own repositories again. If that { -hub } still runs, remove this { -machine } in the Machines tab of its Settings page. To pair with a { -hub }, run { "ladderback pair" } with a token made on it.
+
+# `ladderback unpair` dropped the hub's leases and forgot a pin it couldn't read.
+# `ladderback pair` is the command, typed as it is: keep it a string literal.
+cli-unpair-done-unnamed = This { -machine } left its { -hub } and maintains its own repositories again. If that { -hub } still runs, remove this { -machine } in the Machines tab of its Settings page. To pair with a { -hub }, run { "ladderback pair" } with a token made on it.
 
 ## The help (`--help`): what the program, each command and each option does.
 ## `clap` prints each description after the names a person types, and its
@@ -828,6 +865,12 @@ cli-help-hub-status = Check this { -machine }'s link to the { -hub } it paired w
 
 # What `hub-status --hostname` does. `pair` is the command, typed as it is: keep it a string literal.
 cli-help-hub-status-hostname = Connect under this hostname instead of the { -machine }'s, as { "pair" } takes it
+
+# What `unpair` does.
+cli-help-unpair = Leave the { -hub } this { -machine } is paired with, while its daemon is stopped: drop the leases it holds from the { -hub } and forget the { -hub }'s key, so it maintains its own repositories again
+
+# What `unpair --yes` does.
+cli-help-unpair-yes = Leave without asking, as when there is no terminal to ask on
 
 # What `mcp --connect` does. The address is the one used when none follows: keep it a string literal.
 cli-help-mcp-connect = Drive the running daemon at this address through its API; { "http://127.0.0.1:9898" } when no address follows
