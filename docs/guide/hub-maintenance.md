@@ -40,4 +40,4 @@ A hub restored from an older backup of its data folder may be shown, by a machin
 
 - **A repository that two machines back up to is maintained by neither.** Making the hub its maintenance owner comes later ([README, roadmap](https://github.com/nledford/Ladderback/blob/main/README.md#roadmap), M9).
 - **Forget and prune don't run on a schedule yet**, with a hub or without one ([Getting started](getting-started.md#known-limits)): a machine that holds the lease runs them when you press their buttons.
-- **A machine that lost its hub maintains nothing** once its leases run out, and can't pair with a new hub yet ([The hub](hub.md#known-limits)).
+- **A machine that lost its hub maintains nothing** once its leases run out, until it leaves that hub with `ladderback unpair` ([Leaving a hub](hub.md#leaving-a-hub)).

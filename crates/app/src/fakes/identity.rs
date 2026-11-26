@@ -114,6 +114,11 @@ impl Identity for InMemoryIdentity {
         Ok(())
     }
 
+    async fn forget_pin(&self) -> Result<(), IdentityError> {
+        self.kept().pin = None;
+        Ok(())
+    }
+
     async fn begin_attempt(&self) -> Result<Attempt, IdentityError> {
         if self.attempting.swap(true, Ordering::SeqCst) {
             return Err(IdentityError::AttemptInFlight);

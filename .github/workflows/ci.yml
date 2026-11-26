@@ -387,7 +387,7 @@ jobs:
           test -n "$version"
           echo "version=$version" >> "$GITHUB_OUTPUT"
       - if: matrix.skip != 'true' && runner.os == 'Linux'
-        uses: taiki-e/install-action@cfdb7ed4ccc7c7dce37759eae89dc5674b469b39 # v2.90.3
+        uses: taiki-e/install-action@75a7c0f87bd666af3cdb75c5b9e9d03ab6044e6f # v2.90.6
         with:
           tool: mdbook@${{ steps.mdbook.outputs.version }}
       # `just docs-site`'s three lines, for a docs-only pull request.
@@ -407,7 +407,7 @@ jobs:
         if: matrix.skip != 'true' && needs.changes.outputs.docs-only != 'true' && runner.os == 'Linux'
         run: echo "version=$(just --evaluate leptosfmt_version)" >> "$GITHUB_OUTPUT"
       - if: matrix.skip != 'true' && needs.changes.outputs.docs-only != 'true' && runner.os == 'Linux'
-        uses: taiki-e/install-action@cfdb7ed4ccc7c7dce37759eae89dc5674b469b39 # v2.90.3
+        uses: taiki-e/install-action@75a7c0f87bd666af3cdb75c5b9e9d03ab6044e6f # v2.90.6
         with:
           tool: leptosfmt@${{ steps.leptosfmt.outputs.version }}
       # The rustic CLI the profile golden tests compare against (§6.2): the
@@ -722,7 +722,7 @@ jobs:
           package-manager-cache: false
       - id: wasm-bindgen
         run: echo "version=$(just _wasm-bindgen-version)" >> "$GITHUB_OUTPUT"
-      - uses: taiki-e/install-action@cfdb7ed4ccc7c7dce37759eae89dc5674b469b39 # v2.90.3
+      - uses: taiki-e/install-action@75a7c0f87bd666af3cdb75c5b9e9d03ab6044e6f # v2.90.6
         with:
           tool: wasm-bindgen@${{ steps.wasm-bindgen.outputs.version }}
       - run: just test-wasm
@@ -743,7 +743,7 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
-      - uses: taiki-e/install-action@cfdb7ed4ccc7c7dce37759eae89dc5674b469b39 # v2.90.3
+      - uses: taiki-e/install-action@75a7c0f87bd666af3cdb75c5b9e9d03ab6044e6f # v2.90.6
         with:
           tool: just,zizmor
       # Not in install-action's list: the official release, checked against

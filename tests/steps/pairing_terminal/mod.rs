@@ -25,6 +25,7 @@ mod hub;
 mod hub_mode;
 mod hub_page;
 mod hub_terminal;
+mod leaving;
 mod machine_terminal;
 mod staying_connected;
 
@@ -62,6 +63,9 @@ pub struct PairingTerminal {
     machine: Option<Owned>,
     /// What the hub's `config.toml` says in its `[serve]` table.
     serve_table: hub_mode::ServeTable,
+    /// The key fingerprint of the hub the machine paired with before it
+    /// was lost.
+    lost_hub_key: Option<String>,
 }
 
 /// What a command said, and whether it succeeded.

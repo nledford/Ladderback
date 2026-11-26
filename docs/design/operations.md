@@ -136,7 +136,9 @@ Not part of the contract: UI layout and wording, log text, the CLI's sentences (
 
 **The hub in the contract.** From the MVP's first release candidate (`0.6.0-rc.1`, #1044), the first release with the hub (§16, decision 122 as amended), the table covers the hub as it does the rest:
 
-- **Commands and flags:** `serve --hub` (and `--hub=false`); `pairing-token` with `--address`, `--ttl`, `--certificate-authority`, `--list`, `--revoke`, `--pending`, `--approve` with `--yes`, and `--forget-computer`; `pair [ADDRESS]` with `--hostname` and `--yes`; `hub-status` with `--hostname`.
+- **Commands and flags:** `serve --hub` (and `--hub=false`); `pairing-token` with `--address`, `--ttl`, `--certificate-authority`, `--list`, `--revoke`, `--pending`, `--approve` with `--yes`, and `--forget-computer`; `pair [ADDRESS]` with `--hostname` and `--yes`; `hub-status` with `--hostname`; `unpair` with `--yes` (§16, decision 169).
+- **Error codes:** the hub's and pairing's codes in `--json` and the API, `pinned-to-another-hub` among them (decision 169).
+- **Webhook events:** `machine.offline` and `machine.online`, with the `machine` key and `{machine}` in a rule's text (§11, decision 168).
 - **`config.toml`:** `hub` in the `[serve]` table (§16, decision 167).
 - **Routes:** `GET /api/v1/pairing`; `/api/v1/hub`, `/api/v1/hub/pairing-tokens` and `/api/v1/hub/pairing-tokens/{id}`, `/api/v1/hub/machines`, `/api/v1/hub/machines/{id}/approval` and `/removal`, the dashboard's and the recovery routes under `/api/v1/hub` (§4.2); the MCP tool `pairing_state` and the resource `ladderback://pairing` (§4.6).
 - **Protocol 1** at `/sync/v1` (§7.2): its handshake and messages, under decision 88 from that release.

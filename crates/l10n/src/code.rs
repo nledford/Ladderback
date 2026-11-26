@@ -177,6 +177,7 @@ code_messages!(ERRORS, error_message, ErrorCode {
     IdentityConflict => msg::ERROR_IDENTITY_CONFLICT,
     HubUnreachable => msg::ERROR_HUB_UNREACHABLE,
     HubPinMismatch => msg::ERROR_HUB_PIN_MISMATCH,
+    PinnedToAnotherHub => msg::ERROR_PINNED_TO_ANOTHER_HUB,
     HubUntrusted => msg::ERROR_HUB_UNTRUSTED,
     HubTlsRefused => msg::ERROR_HUB_TLS_REFUSED,
     PlainAddress => msg::ERROR_PLAIN_ADDRESS,

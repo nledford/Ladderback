@@ -34,7 +34,7 @@ async fn another_token_made(agent: &mut Agent) {
     make_token(agent, TOKEN_ADDRESS).await;
 }
 
-async fn make_token(agent: &mut Agent, address: &str) {
+pub(super) async fn make_token(agent: &mut Agent, address: &str) {
     let said = ladderback(
         hub_root(agent),
         &["pairing-token", "--address", address],
@@ -263,7 +263,7 @@ fn named_and_approved(agent: &mut Agent, hostname: String) {
     assert!(said.success, "{said:?}");
     let key = machine_key(agent);
     assert!(
-        said.stderr.contains(&format!("{hostname} (agent ID "))
+        said.stderr.contains(&format!("{hostname} (machine ID "))
             && said.stderr.contains(&format!("is waiting with key {key}")),
         "{said:?}"
     );

@@ -20,6 +20,7 @@ pub async fn run(fresh: &dyn Identity) {
     a_recovery_key_once_kept_is_never_replaced(fresh).await;
     a_tls_key_once_kept_is_never_replaced(fresh).await;
     a_pin_is_replaced_whole(fresh).await;
+    a_forgotten_pin_is_gone(fresh).await;
     each_attempt_takes_the_next_counter(fresh).await;
     one_attempt_holds_the_counter_at_a_time(fresh).await;
     a_new_agent_key_replaces_the_kept_one(fresh).await;
@@ -200,6 +201,35 @@ async fn a_pin_is_replaced_whole(identity: &dyn Identity) {
     assert_eq!(identity.pin().await, Ok(Some(first)));
     assert_eq!(identity.write_pin(&second).await, Ok(()));
     assert_eq!(identity.pin().await, Ok(Some(second)));
+}
+
+/// A machine that leaves its hub forgets the pin and nothing else: it
+/// pairs again under the agent key it kept (decision 169).
+async fn a_forgotten_pin_is_gone(identity: &dyn Identity) {
+    let Some(kept) = pin(3) else {
+        return;
+    };
+    assert_eq!(identity.write_pin(&kept).await, Ok(()));
+    let recovery_key = identity.recovery_key().await;
+    assert_eq!(identity.forget_pin().await, Ok(()));
+    assert_eq!(identity.pin().await, Ok(None));
+    assert_eq!(
+        identity.forget_pin().await,
+        Ok(()),
+        "forgetting none is done"
+    );
+    assert_eq!(
+        exposed(&identity.seed(SeedFile::AgentKey).await),
+        Some([1; 32]),
+        "the agent key stays"
+    );
+    assert_eq!(identity.recovery_key().await, recovery_key);
+    assert_eq!(
+        identity.write_pin(&kept).await,
+        Ok(()),
+        "a pin is kept again"
+    );
+    assert_eq!(identity.pin().await, Ok(Some(kept)));
 }
 
 async fn each_attempt_takes_the_next_counter(identity: &dyn Identity) {

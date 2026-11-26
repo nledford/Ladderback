@@ -662,6 +662,13 @@ error-hub-unreachable = This machine couldn't reach the { -hub } at { $address }
 # $address (text): the hub's address.
 error-hub-pin-mismatch = The { -hub } at { $address } showed a certificate that isn't the one its token names. Don't pair. Check the address with whoever runs the { -hub }; if they replaced the { -hub }'s certificate key, make a new token and compare the fingerprint.
 
+# This machine is paired with another hub than the token's, and pairs with no
+# other hub until it leaves its own. Nothing was sent. `ladderback unpair` is
+# the command, typed as it is.
+# $pinned (text): the key fingerprint of the hub this machine is paired with.
+# $token (text): the key fingerprint of the hub the token is for.
+error-pinned-to-another-hub = This { -machine } is paired with another { -hub }, whose key is { $pinned }, so it didn't use this token, which is for the { -hub } whose key is { $token }. If the { -hub } it's paired with is lost or replaced, stop this { -machine }'s daemon and run { "ladderback unpair" } to leave it, then pair again.
+
 # The hub's certificate at an https address isn't one this machine's trust
 # store accepts for the address's name. Nothing was sent.
 # $address (text): the hub's address.

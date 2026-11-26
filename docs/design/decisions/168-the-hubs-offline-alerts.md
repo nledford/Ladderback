@@ -2,6 +2,8 @@
 
 **Every 30 seconds the hub watches its approved machines. One offline for 15 minutes is told once through the hub's notification rules as `machine.offline`, with the machine's hostname and since when it is offline; one that comes back after that alert is told once as `machine.online`, with when it came back, and one back sooner is told nothing. Removing a machine cancels its alert. The hub keeps this in memory, so after it restarts a machine still offline is offline since the hub's first watch and is alerted 15 minutes after the restart.** (Recorded 2026-11-25, #570; the maintainer decided the times and the single alert on 2026-11-24.)
 
+**Amended 2026-11-25 (#1366):** every build has the hub from the MVP's release, so no build both accepts `machine.offline` and `machine.online` and never sends them; the item below on a build without the hub describes builds before the gate's removal ([decision 122](122-hub-out-of-releases-until-m8.md) as amended).
+
 ## Why
 
 The dashboard shows a machine offline once its connection ends, 90 seconds after it last sent anything at most ([decision 159](159-long-lived-hub-connections.md)), but nobody watches a dashboard. A machine whose daemon stopped, or whose network broke, backs up nothing its hub can see, and the person should hear of it. A laptop closed for lunch or a router restarting shouldn't page anyone.
