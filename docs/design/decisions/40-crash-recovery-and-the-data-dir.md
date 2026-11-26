@@ -6,7 +6,7 @@
 2. It is only safe under the lock, so the lock was built first: a second `serve` on a data dir is refused with the holder's PID, as a command-line message rather than an API code, because no request can reach a process that never listened; `mcp --headless` and `db rebuild` take it when they exist.
 3. A log that can't be changed refuses the start.
 
-Why: marking a crashed run succeeded or cancelled would be a lie, resuming a queued one needs M2's persistent queue, and recovering without the lock would let a second daemon end the first one's live operations. Cost: recovery ends rows, not processes, so a worker the dead daemon left behind can write for a moment more (§9).
+Why: marking a crashed run succeeded or canceled would be a lie, resuming a queued one needs M2's persistent queue, and recovering without the lock would let a second daemon end the first one's live operations. Cost: recovery ends rows, not processes, so a worker the dead daemon left behind can write for a moment more (§9).
 
 **Amended by decision 73** (2026-11-12, #274): recovery no longer ends the *queued* operations. It ends the running ones as before and leaves the queued ones to the persistent queue, which runs a queued backup again once the daemon listens and ends any other queued operation `daemon-stopped` then.
 

@@ -22,7 +22,7 @@ Rejected:
 
 Cost:
 
-- **An unknown run.** A client that hangs up after the assessment leaves a run it never learned the ID of; it goes on, shows in the history and can be cancelled there, as a backup's start already does and as any response lost after the server accepted the request does.
+- **An unknown run.** A client that hangs up after the assessment leaves a run it never learned the ID of; it goes on, shows in the history and can be canceled there, as a backup's start already does and as any response lost after the server accepted the request does.
 - **A busy repository.** A busy repository is refused by the task, so a client that hung up is not told, and that refused start has no end to log or announce, since no operation began. The identify read in `assess` has already published an `operation-started` for it, which decision 41 left as it was and decision 68 stopped.
 - **Refusals before the log.** The refusals that need no slot (an unknown repository, a policy that keeps nothing, an adoption that matches no group) are still made before the log is touched.
 

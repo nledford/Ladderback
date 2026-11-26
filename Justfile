@@ -155,10 +155,12 @@ clippy:
 # its warnings and errors fail and its style notes don't), the tooling's own
 # tests (`scripts/*.test.ts`, under Node's built-in runner), the journey lint,
 # the check that every path AGENTS.md and CLAUDE.md name exists, the check that
-# no paragraph in docs/ runs over 150 words, the user docs site's build and
-# link check (`docs-site`), the check of the §16 decision files (good names
-# and headings, a number each, no table of them in §16; decision 162) and that
-# §4.5's index matches the component contract files, and
+# no paragraph in docs/ runs over 150 words, the check that the tracked files
+# spell in American English (but for the stored and wire values and the label
+# it lists), the user docs site's build and link check (`docs-site`), the
+# check of the §16 decision files (good names and headings, a number each, no
+# table of them in §16; decision 162) and that §4.5's index matches the
+# component contract files, and
 # rustdoc on every crate, private items
 # included, with warnings as errors, so a doc comment's broken link or
 # malformed markup fails. Rustdoc sees only the items built for the host and,
@@ -179,6 +181,7 @@ lint: _ui-deps _shellcheck-pinned clippy docs-site
     cd ui-tests && npm run --silent lint
     scripts/check-doc-paths.sh
     node scripts/check-paragraph-length.ts
+    node scripts/check-american-spelling.ts
     node scripts/decision-index.ts
     node scripts/component-index.ts
     RUSTDOCFLAGS="-D warnings" cargo doc --workspace --no-deps --document-private-items

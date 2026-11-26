@@ -4,7 +4,7 @@
 
 Settled:
 
-1. **Color.** `--plain` turns off the colour of the daemon's log and of `clap`'s help and usage errors, and `NO_COLOR`, `CLICOLOR` and `CLICOLOR_FORCE` need no code, since `clap` and `env_logger` both ask `anstream`.
+1. **Color.** `--plain` turns off the color of the daemon's log and of `clap`'s help and usage errors, and `NO_COLOR`, `CLICOLOR` and `CLICOLOR_FORCE` need no code, since `clap` and `env_logger` both ask `anstream`.
 2. **The document.** `import-profile --json` prints one compact document on one line of standard output, and nothing on standard error, made of codes and arguments and never of a sentence: the repository, the plans and the notices, or the refusal as the REST API's typed error under `error`.
 3. **Failures.** Every failure of it is a document, including those that stop an import before it starts: a missing configuration folder and a runtime that did not start have codes of their own (`config-folder-unknown`, `runtime-unavailable`), and a name that is no alias is `repository-alias-invalid`, as over REST. The one that stays a sentence is a document that cannot be written.
 4. **Statuses.** The statuses, with and without `--json`, are 0 for done, 1 for refused or could not start, and 2 for a command line that was not understood, by `clap`, which leaves standard output empty, or by `serve`, for an `--allowed-host` that no request could match (§10.1). The worker is no command a person runs, and keeps the statuses of §4.1.

@@ -19,7 +19,7 @@ Decided:
 Accepted:
 
 - **One more request when a REST repository doesn't open for another reason** (a missing repository, a server error at the config; a wrong password costs none, as rustic tells it apart once the keys are listed): the listing of its keys. It is the error path only, one request, and no retry; on a server that refuses the credentials it is a second refused login, so a lockout that counts them (fail2ban and the like) comes twice as soon.
-- **Initialising on a refusing server** (amended for #484): `init` doesn't open a repository, but its failure goes through the same check, `credentials_refused` in `repository.rs`: rustic's writes keep the server's status, so a 401 or 403 there fails `credentials-refused` too, and the init route refuses it with 503.
+- **Initializing on a refusing server** (amended for #484): `init` doesn't open a repository, but its failure goes through the same check, `credentials_refused` in `repository.rs`: rustic's writes keep the server's status, so a 401 or 403 there fails `credentials-refused` too, and the init route refuses it with 503.
 - **A rustic upgrade that keeps the status out of its errors** turns a refusal back into `operation-failed`; the engine's tests against a refusing server (401 and 403, a cold and a hot half) fail then, rather than the code going quiet.
 
 Rejected:

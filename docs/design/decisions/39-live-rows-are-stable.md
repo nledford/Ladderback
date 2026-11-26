@@ -2,7 +2,7 @@
 
 **A live table is built once and its rows follow the state in place: an update to a row changes the text, the value or the presence of what it is about, and never rebuilds a control a reader may be on** (recorded 2026-11-10, §4.4, §4.5; #124).
 
-The operations table was rebuilt whole on every update to any row: the block that rendered it read the sorted rows, and the keyed list inside it is a reactive closure that Leptos replaces when its parent is patched, so each progress report built every row anew and the Cancel button a reader had tabbed to left the page. That dropped focus to the body (2.4.3) and made "Cancelling a running backup by keyboard" flake.
+The operations table was rebuilt whole on every update to any row: the block that rendered it read the sorted rows, and the keyed list inside it is a reactive closure that Leptos replaces when its parent is patched, so each progress report built every row anew and the Cancel button a reader had tabbed to left the page. That dropped focus to the body (2.4.3) and made "Canceling a running backup by keyboard" flake.
 
 **Decided:** what the page shows and the order of the rows are memos, a row is keyed by its operation and reads each fact through a memo of its own, a button or a bar that comes and goes is a boolean memo, and the sort follows its signal.
 

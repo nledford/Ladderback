@@ -133,10 +133,10 @@ permissions:
 
 # On pull requests only a push (`synchronize`) may cancel a run; any other
 # pull request run (opened, reopened) gets a group of its own, so a required
-# check is never left cancelled on the commit being merged (see red-first.yml).
+# check is never left canceled on the commit being merged (see red-first.yml).
 # The nightly run and manual runs get a group of their own too: GitHub keeps
 # one pending run per group and cancels the older one when another queues, so
-# sharing main's queue, nightly run 43208497343 (2026-11-12) was cancelled
+# sharing main's queue, nightly run 43208497343 (2026-11-12) was canceled
 # before any job started, when a push to main queued behind it; and a running
 # nightly (the full mutation run takes up to 180 minutes) held main's push CI
 # behind it. Only pushes to main share one group, and queue.
@@ -159,7 +159,7 @@ env:
   # whether a build is worth saving by looking for a non-empty `.fingerprint`
   # directory, and it prunes the saved tree by the old directory names, so on
   # the new layout every job logged "No reusable Cargo target state was
-  # produced" and saved nothing (#598). Cargo 1.100 still honours this
+  # produced" and saved nothing (#598). Cargo 1.100 still honors this
   # variable, which it calls temporary, and means to delete the legacy layout
   # once a few weeks have passed (rust-lang/cargo#17182). When it does, the
   # "Build cache" step below warns on every push to main, and the fix is an
@@ -347,9 +347,10 @@ jobs:
     timeout-minutes: 45
     steps:
       # Every pull request is checked out: a docs-only one still runs the
-      # agent-guidance path check, the paragraph-length check, the user docs
-      # site's build and link check, and the decision-index and
-      # component-index checks below, which `just lint` runs for the rest.
+      # agent-guidance path check, the paragraph-length check, the American
+      # spelling check, the user docs site's build and link check, and the
+      # decision-index and component-index checks below, which `just lint`
+      # runs for the rest.
       - if: matrix.skip != 'true'
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -367,8 +368,8 @@ jobs:
       # paragraph-length lints, the architecture checks and the contrast gate
       # give one answer anywhere, so they run on Linux alone; macOS needs no
       # Node then. A docs-only pull request sets Node up as well, for the
-      # paragraph-length, site link, decision-index and component-index
-      # checks. Every setup-node reads Node's major version from
+      # paragraph-length, American spelling, site link, decision-index and
+      # component-index checks. Every setup-node reads Node's major version from
       # ui-tests/.nvmrc, which a pull request of its own bumps (development.md
       # §13.8).
       - if: matrix.skip != 'true' && runner.os == 'Linux'
@@ -395,6 +396,8 @@ jobs:
         run: mdbook build docs/guide && node scripts/check-site-links.ts && node scripts/check-theme-override.ts
       - if: matrix.skip != 'true' && needs.changes.outputs.docs-only == 'true' && runner.os == 'Linux'
         run: node scripts/check-paragraph-length.ts
+      - if: matrix.skip != 'true' && needs.changes.outputs.docs-only == 'true' && runner.os == 'Linux'
+        run: node scripts/check-american-spelling.ts
       - if: matrix.skip != 'true' && needs.changes.outputs.docs-only == 'true' && runner.os == 'Linux'
         run: node scripts/decision-index.ts
       - if: matrix.skip != 'true' && needs.changes.outputs.docs-only == 'true' && runner.os == 'Linux'
@@ -435,7 +438,7 @@ jobs:
       # The ci profile (.config/nextest.toml) retries, reports flaky tests and
       # writes the JUnit report. The step has a limit of its own, below the
       # job's 45 minutes: a hang (#638) then fails the step, which keeps its
-      # log, where cancelling the job at its limit discarded it. The figure is
+      # log, where canceling the job at its limit discarded it. The figure is
       # measured in development.md §13.8.
       - if: matrix.skip != 'true' && needs.changes.outputs.docs-only != 'true'
         run: just test
@@ -513,7 +516,7 @@ jobs:
           save: ${{ matrix.shard == 1 && 'true' || 'false' }}
       # A step limit of its own, 10 minutes below the job's 45 (as `just test`
       # in `Check` has a limit of its own, #638): a hang fails this step, and
-      # the steps that run after a failure still run, where a job cancelled at
+      # the steps that run after a failure still run, where a job canceled at
       # its limit skips them (#1016). The step starts up to about 4 minutes in,
       # so 35 leaves about 6 for the upload. A step that ends after more than
       # 26 minutes (75% of 35, 1575 seconds) warns, so a slowing suite shows
@@ -556,8 +559,8 @@ jobs:
 
   # The check the ruleset requires, by this name: it passes only when both
   # shards passed. `always()`, not `!cancelled()`: it must run, and so fail,
-  # whenever a shard failed, timed out (a timeout ends a job as cancelled) or
-  # was cancelled, since GitHub counts a skipped required check as passing.
+  # whenever a shard failed, timed out (a timeout ends a job as canceled) or
+  # was canceled, since GitHub counts a skipped required check as passing.
   # A matrix job its own `if` skips creates no check of the name the ruleset
   # requires, only an unexpanded one, so this job, which is not a matrix, is
   # the one skipped then: a docs-only pull request skips it with the shards,
@@ -670,7 +673,7 @@ jobs:
   # The red-first check (red-first.yml) installs all three engines in one job,
   # under caches keyed on that set, and runs only on pull requests, whose
   # caches no other pull request can restore: GitHub shares only the base
-  # branch's. So a push to main saves the set here, and each behaviour pull
+  # branch's. So a push to main saves the set here, and each `behaviour` pull
   # request's red-first run restores it instead of downloading three browsers
   # and their system packages through Ubuntu's mirrors. Not a required check.
   browser-cache:
@@ -913,7 +916,7 @@ jobs:
     name: Report a failed nightly dependency check
     needs: deny
     # Only on the nightly run, and only when `deny` failed, not when it was
-    # cancelled. The title is fixed, so a second failure finds the open issue.
+    # canceled. The title is fixed, so a second failure finds the open issue.
     if: failure() && github.event_name == 'schedule'
     runs-on: ubuntu-26.04
     timeout-minutes: 5
@@ -976,8 +979,8 @@ jobs:
 
   # The check the ruleset requires, by this name: it passes only when every
   # shard passed. `always()`, not `!cancelled()`: it must run, and so fail,
-  # whenever a shard failed, timed out (a timeout ends a job as cancelled) or
-  # was cancelled, since GitHub counts a skipped required check as passing.
+  # whenever a shard failed, timed out (a timeout ends a job as canceled) or
+  # was canceled, since GitHub counts a skipped required check as passing.
   # A superseded run's summary then fails on a stale commit, which is
   # harmless. A docs-only pull request skips it with the shards, as before, and
   # so does MVP mode (decision 124): with the shards skipped, this job would
@@ -1003,7 +1006,7 @@ jobs:
   # baseline of about 4. At most 12 run at once, so the nightly leaves
   # runners for the pull requests and pushes of the morning it runs into.
   # The step's own limit is under the job's, so running out of time fails
-  # the step rather than cancelling the job, which `mutants-nightly-report`
+  # the step rather than canceling the job, which `mutants-nightly-report`
   # would not report. `--caught --unviable` print every outcome as it comes,
   # so a shard that runs out of time shows how far it got.
   mutants-nightly:

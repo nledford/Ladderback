@@ -6,7 +6,7 @@
 
 Both sides act on a commit as soon as it returns. The hub stores its decisions on a report, then signs and sends the grants (`HubPairing::grant`); a machine lets go of a lease, then sends its `ReleaseAck` (`exchange_leases`). Under `NORMAL` the log reaches the disk only at a checkpoint, or when the operating system writes it, so a power cut can take back a commit after the other side has heard of it.
 
-The defences against a rewound hub (decisions 137 and 157) don't catch a lost grant:
+The defenses against a rewound hub (decisions 137 and 157) don't catch a lost grant:
 
 - Recovery mode starts on a floor *above* the hub's counter (`RepositoryOwnership::is_behind`). A hub that lost the grant of epoch N gives N again, and the first holder's floor of N is then *at* the counter, which changes nothing.
 - The start window waits, for each repository, only on the agents whose last *stored* report named it, and the report that won the grant is lost with it.

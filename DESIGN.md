@@ -210,7 +210,7 @@ The status pairs: each status tone's soft pair, for a part tinted in it (a badge
 
 The words are at 4.5:1 or more on their fill. Warning's and Error's fills stand at least 0.1 apart in OKLab lightness in both schemes, Error's the further from the page (darker in light, lighter in dark), so amber and red never read as one, for a reader who can't tell the hues apart either. Warning's fill stands further from the page and a surface than Success's, by contrast ratio and by 0.02 or more in OKLab lightness, so a warning never reads paler than a success beside it (decision 108). The Error pair's words also draw a form's errors and the error summary's border on the page. Under forced colors the system's colors replace both.
 
-The badge's own pairs, for the tones that tell no result: Loading (dark blue on pale blue), the badge's Primary tone, which a status badge takes while a run is under way, and Empty (gray), its Secondary tone, which a status badge takes while a run waits, once it was cancelled, or with nothing to tell. A badge in the Success, Warning or Error tone, and a status badge for a run that succeeded or failed, draws in its status tone's pair; the status hues above are not drawn on a fill.
+The badge's own pairs, for the tones that tell no result: Loading (dark blue on pale blue), the badge's Primary tone, which a status badge takes while a run is under way, and Empty (gray), its Secondary tone, which a status badge takes while a run waits, once it was canceled, or with nothing to tell. A badge in the Success, Warning or Error tone, and a status badge for a run that succeeded or failed, draws in its status tone's pair; the status hues above are not drawn on a fill.
 
 ### Named Rules
 
