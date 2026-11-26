@@ -341,11 +341,12 @@ exclude_re = [
     # line brings the mutant back to judge.
     'crates/app/src/proposals/diff\.rs:174:65: replace \+ with \* in middle$',
     # `ToolName::built` is `!matches!(self, PairingState) || cfg!(feature = "hub")`.
-    # A workspace build (the one `cargo mutants` tests) unifies features and
-    # `ladderback` turns `hub` on, so the `||` is `true` for every tool: both
-    # `true` and the deleted `!` give the same answer, and no test of that
-    # build can tell them apart. Only a build without `hub` takes the other
-    # branch. Named by line, so a moved line brings the mutant back to judge.
+    # `mcp`'s own default features turn `hub` on, so in the build `cargo
+    # mutants` tests the `||` is `true` for every tool: both `true` and the
+    # deleted `!` give the same answer there. Only a build without `hub`
+    # takes the other branch, and `just test-release` checks it:
+    # `the_mcp_server_has_no_pairing_tool` (`tests/hub_gate.rs`). Named by
+    # line, so a moved line brings the mutant back to judge.
     'crates/adapters/mcp/src/lib\.rs:186:9: (delete ! in ToolName::built|replace ToolName::built -> bool with true)$',
     # The fake agent registry's `Keeping` (how long its fake store's write
     # takes) has a Debug only so the registry's derived Debug compiles: no
