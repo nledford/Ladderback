@@ -288,8 +288,9 @@ async fn on_the_hub(localizer: &Localizer, data_dir: &Path, ask: TokenAsk) -> io
         }
         Err(LockError::Unavailable { detail }) => return refused(localizer, &detail),
     };
-    if let Err(refusal) = upgrade::under(&lock, data_dir).await {
-        return said_refusal(localizer, &refusal);
+    match upgrade::under(&lock, data_dir).await {
+        Ok(copy) => upgrade::tell(localizer, copy.as_ref())?,
+        Err(refusal) => return said_refusal(localizer, &refusal),
     }
     let database = data_dir.join(DATABASE);
     let store = match SqliteStore::open(&database).await {
@@ -747,8 +748,9 @@ fn run_pair(localizer: &Localizer, ask: PairAsk) -> io::Result<ExitCode> {
     };
     // Before a token is asked for: a folder an earlier release left is
     // upgraded first, or the pairing is refused while it can't be.
-    if let Err(refusal) = runtime.block_on(upgrade::unheld(&data_dir, upgrade::Scope::Folder)) {
-        return said_refusal(localizer, &refusal);
+    match runtime.block_on(upgrade::unheld(&data_dir, upgrade::Scope::Folder)) {
+        Ok(copy) => upgrade::tell(localizer, copy.as_ref())?,
+        Err(refusal) => return said_refusal(localizer, &refusal),
     }
     if let Some(address) = ask.address.as_deref()
         && let Some(code) = follow(
@@ -1186,8 +1188,9 @@ async fn connect_to_hub(
     // the check never opens, is left. Otherwise a status check writes
     // nothing: a machine with no agent ID never paired, and gets none from
     // asking.
-    if let Err(refusal) = upgrade::unheld(data_dir, upgrade::Scope::Keys).await {
-        return said_refusal(localizer, &refusal);
+    match upgrade::unheld(data_dir, upgrade::Scope::Keys).await {
+        Ok(copy) => upgrade::tell(localizer, copy.as_ref())?,
+        Err(refusal) => return said_refusal(localizer, &refusal),
     }
     let agent_id = match platform::agent_id::load(data_dir) {
         Ok(Some(id)) => id,
@@ -1271,8 +1274,9 @@ async fn leave_hub(localizer: &Localizer, data_dir: &Path, yes: bool) -> io::Res
         }
         Err(LockError::Unavailable { detail }) => return refused(localizer, &detail),
     };
-    if let Err(refusal) = upgrade::under(&lock, data_dir).await {
-        return said_refusal(localizer, &refusal);
+    match upgrade::under(&lock, data_dir).await {
+        Ok(copy) => upgrade::tell(localizer, copy.as_ref())?,
+        Err(refusal) => return said_refusal(localizer, &refusal),
     }
     // A pin that can't be read still pins the hub, and is left the same
     // way: only the hub can't be named.

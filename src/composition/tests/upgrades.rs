@@ -112,10 +112,13 @@ async fn a_command_on_an_earlier_folder_nobody_holds_upgrades_it_and_lets_it_go(
     let data = scratch.path().join("data");
     earlier_folder(&data).await;
 
-    super::super::upgrade::unheld(&data, super::super::upgrade::Scope::Folder)
+    let copy = super::super::upgrade::unheld(&data, super::super::upgrade::Scope::Folder)
         .await
         .map_err(|refused| refused.message)
-        .expect("the folder is upgraded");
+        .expect("the folder is upgraded")
+        .expect("the copy is answered, for the command to say");
+    assert_eq!(copy.from_version, 16);
+    assert_eq!(copy.kept, data.join("ladderback.db.before-baseline"));
 
     let id = agent_id::load(&data)
         .expect("the ID reads")
@@ -340,4 +343,55 @@ fn only_a_copy_that_may_succeed_later_says_the_next_start_tries_again() {
         assert!(text.contains("It was left as it was"), "{text}");
         assert!(text.contains("report"), "{text}");
     }
+}
+
+/// A copy any command made is said to the person who ran it, through the
+/// catalog: where the old log is kept, each table's rows dropped as junk,
+/// and a folder that couldn't be synced after it, as a warning.
+#[test]
+fn a_finished_copy_is_said_with_where_the_old_log_is_kept_and_what_it_dropped() {
+    let copy = store::BaselineCopy {
+        from_version: 16,
+        kept: "/data/ladderback.db.before-baseline".into(),
+        dropped: vec![store::Dropped {
+            table: "sync_reports".to_owned(),
+            rows: 2,
+        }],
+        unsynced: Some("Input/output error".to_owned()),
+    };
+    let localizer = l10n::Localizer::new(&[]);
+
+    let said: Vec<String> = super::super::upgrade::copy_said(&copy)
+        .iter()
+        .map(|line| {
+            localizer
+                .message(line.message, &line.args)
+                .text()
+                .to_owned()
+        })
+        .collect();
+
+    assert_eq!(said.len(), 3, "{said:?}");
+    assert!(
+        said[0].contains("/data/ladderback.db.before-baseline"),
+        "{said:?}"
+    );
+    assert!(said[0].contains("16"), "{said:?}");
+    assert!(
+        said[1].contains("sync_reports") && said[1].contains('2'),
+        "{said:?}"
+    );
+    assert!(
+        said[2].starts_with("warning:") && said[2].contains("Input/output error"),
+        "{said:?}"
+    );
+    assert!(
+        super::super::upgrade::copy_said(&store::BaselineCopy {
+            dropped: Vec::new(),
+            unsynced: None,
+            ..copy
+        })
+        .len()
+            == 1
+    );
 }

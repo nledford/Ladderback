@@ -200,6 +200,23 @@ cli-upgrade-two-keys = the data folder holds two machine keys, { $earlier } from
 # $detail (text): the operating system's own message. It is shown as it came.
 cli-upgrade-key-move-failed = the machine ID and key in the data folder { $path }, from an earlier version of Ladderback, couldn't be moved to this version's names: { $detail }. Nothing was lost, and the next start, or this command run again, finishes the move.
 
+# A command (pair, set-password, pairing-token, unpair) found the operation log an earlier release left and copied it into this version's schema (decision 170), as a start of Ladderback would have. Printed on stderr before the command goes on; cli-upgrade-rows-dropped and cli-upgrade-copy-unsynced may follow.
+# $version (text): the last migration the old log held, a whole number such as 16.
+# $kept (text): the file the old log is kept in, beside the new one.
+cli-upgrade-log-copied = copied the operation log an earlier version of Ladderback left (migration { $version }) into this version's schema. The old log is kept at { $kept }; you can delete it once you no longer want it.
+
+# One line for each table after cli-upgrade-log-copied: rows the copy dropped because the new schema proves them junk, the current state of a machine the hub had removed, or a second report of the same happening (decision 165).
+# $table (text): the table's name, as it is in the database.
+# $count (count): how many rows were dropped.
+cli-upgrade-rows-dropped = { $count ->
+    [one] dropped { $count } row of { $table } as junk: the state of a removed machine, or a report the hub already had.
+   *[other] dropped { $count } rows of { $table } as junk: the state of removed machines, or reports the hub already had.
+}
+
+# After cli-upgrade-log-copied: the copy is done and the new log is in use, but the data folder couldn't be synced after it took the old one's place.
+# $detail (text): the operating system's own message. It is shown as it came.
+cli-upgrade-copy-unsynced = warning: the data folder couldn't be synced after the copied operation log took the old one's place ({ $detail }): a power loss now could bring the old log back, and the next start would copy it again.
+
 # The operation log an earlier release left could not be copied into the new schema because another program was reading it (decision 170). It was left as it was.
 # $path (text): the database file, as the user wrote it.
 # $version (text): the last migration the file holds, a whole number such as 16.

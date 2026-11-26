@@ -122,11 +122,17 @@ async fn set_forgetting_sessions(
         Err(LockError::Unavailable { detail }) => return leaving(kept, typed, Some(detail)).await,
     };
     // A folder an earlier release left is upgraded under the lock first
-    // (decision 170). A refusal, and a log that can't be opened, is said
-    // in the user's words, not the error's own.
-    if let Err(refusal) = upgrade::under(&lock, data_dir).await {
-        let detail = said(localizer, refusal.message, &refusal.args);
-        return leaving(kept, typed, Some(detail)).await;
+    // (decision 170), and a copy it made is said. A refusal, and a log that
+    // can't be opened, is said in the user's words, not the error's own.
+    match upgrade::under(&lock, data_dir).await {
+        // Best effort: the password is set all the same if stderr is gone.
+        Ok(copy) => {
+            let _ = upgrade::tell(localizer, copy.as_ref());
+        }
+        Err(refusal) => {
+            let detail = said(localizer, refusal.message, &refusal.args);
+            return leaving(kept, typed, Some(detail)).await;
+        }
     }
     let store = match SqliteStore::open(database).await {
         Ok(store) => store,

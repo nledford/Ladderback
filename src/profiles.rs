@@ -424,12 +424,15 @@ fn export(localizer: &Localizer, plan: &str) -> io::Result<ExitCode> {
     // the export is refused while they can't be: its ID may still be under
     // its earlier name. The operation log, which the export never opens,
     // is left.
-    if let Err(refusal) = runtime.block_on(crate::composition::upgrade::unheld(
+    match runtime.block_on(crate::composition::upgrade::unheld(
         &data_dir,
         crate::composition::upgrade::Scope::Keys,
     )) {
-        say(localizer, refusal.message, &refusal.args)?;
-        return Ok(ExitCode::FAILURE);
+        Ok(copy) => crate::composition::upgrade::tell(localizer, copy.as_ref())?,
+        Err(refusal) => {
+            say(localizer, refusal.message, &refusal.args)?;
+            return Ok(ExitCode::FAILURE);
+        }
     }
     let agent = match agent_id::load_or_create(&data_dir) {
         Ok(agent) => agent,

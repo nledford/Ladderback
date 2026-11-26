@@ -5,9 +5,11 @@
 //! 0.5.0's daemon among them, has the log or the key open while they
 //! change. A deliberate exception to "no shims": removed at 1.0.
 
+use std::io;
 use std::path::Path;
 
-use l10n::msg;
+use api::MsgArg;
+use l10n::{Localizer, MessageId, msg};
 use platform::agent_id::{self, MoveError};
 use platform::data_dir_lock::{DataDirLock, LockError};
 use store::{BaselineCopy, SqliteStore};
@@ -74,8 +76,9 @@ fn key_move_refused(data_dir: &Path, error: &std::io::Error) -> Refused {
 /// no upgrade is only looked at. One that does is upgraded under the lock,
 /// taken for the upgrade and let go after it. While another process holds
 /// the lock, a Ladderback running on the folder, it is refused and nothing
-/// changes.
-pub(crate) async fn unheld(data_dir: &Path, scope: Scope) -> Result<(), Refused> {
+/// changes. What a copy did, for the command to [`tell`]; `None` when it
+/// made none.
+pub(crate) async fn unheld(data_dir: &Path, scope: Scope) -> Result<Option<BaselineCopy>, Refused> {
     let log = data_dir.join(DATABASE);
     let due = agent_id::earlier_names_left(data_dir)
         .map_err(|error| key_move_refused(data_dir, &error))?
@@ -84,7 +87,7 @@ pub(crate) async fn unheld(data_dir: &Path, scope: Scope) -> Result<(), Refused>
                 .await
                 .map_err(|error| log_refused(&log, &error))?);
     if !due {
-        return Ok(());
+        return Ok(None);
     }
     let lock = match DataDirLock::acquire(data_dir) {
         Ok(lock) => lock,
@@ -97,7 +100,48 @@ pub(crate) async fn unheld(data_dir: &Path, scope: Scope) -> Result<(), Refused>
         Err(error) => return Err(lock_refused(data_dir, error)),
     };
     match scope {
-        Scope::Keys => move_keys(&lock, data_dir),
-        Scope::Folder => under(&lock, data_dir).await.map(|_| ()),
+        Scope::Keys => move_keys(&lock, data_dir).map(|()| None),
+        Scope::Folder => under(&lock, data_dir).await,
     }
+}
+
+/// One line a command says about the upgrade it made.
+pub(crate) struct Said {
+    pub(crate) message: MessageId,
+    pub(crate) args: Vec<(&'static str, MsgArg)>,
+}
+
+/// What a finished `copy` tells the person who ran the command (decision
+/// 170): where the old log is kept, the rows of each table dropped as
+/// junk, and a folder that couldn't be synced after it, as a warning.
+pub(crate) fn copy_said(copy: &BaselineCopy) -> Vec<Said> {
+    let mut said = vec![Said {
+        message: msg::CLI_UPGRADE_LOG_COPIED,
+        args: vec![
+            ("version", text(copy.from_version)),
+            ("kept", text(copy.kept.display())),
+        ],
+    }];
+    said.extend(copy.dropped.iter().map(|dropped| Said {
+        message: msg::CLI_UPGRADE_ROWS_DROPPED,
+        args: vec![
+            ("table", text(&dropped.table)),
+            ("count", MsgArg::Count(dropped.rows)),
+        ],
+    }));
+    if let Some(detail) = &copy.unsynced {
+        said.push(Said {
+            message: msg::CLI_UPGRADE_COPY_UNSYNCED,
+            args: vec![("detail", text(detail))],
+        });
+    }
+    said
+}
+
+/// Says on stderr what a `copy` the command made did, if it made one.
+pub(crate) fn tell(localizer: &Localizer, copy: Option<&BaselineCopy>) -> io::Result<()> {
+    for line in copy.map(copy_said).unwrap_or_default() {
+        crate::say(localizer, line.message, &line.args)?;
+    }
+    Ok(())
 }
