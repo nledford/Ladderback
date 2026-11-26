@@ -508,6 +508,34 @@ mod tests {
         assert_eq!(names(data.path()), ["machine-id"]);
     }
 
+    /// A start that stopped between a move's link and its unlink left one
+    /// file under two names, for the key or for the ID: the next start
+    /// finishes the move, never taking the two names for two keys.
+    #[cfg(unix)]
+    #[test]
+    fn a_move_that_stopped_between_its_link_and_unlink_is_finished_by_the_next_start() {
+        for (from, to) in [("agent-key", "machine-key"), ("agent-id", "machine-id")] {
+            let data = tempfile::tempdir().unwrap();
+            write_private(data.path(), "agent-id", &format!("{EARLIER_ID}\n"));
+            if from == "agent-id" {
+                write_private(data.path(), "machine-key", KEY_CANARY);
+            } else {
+                write_private(data.path(), "agent-key", KEY_CANARY);
+            }
+            fs::hard_link(data.path().join(from), data.path().join(to)).unwrap();
+
+            let id = moved(data.path()).unwrap();
+
+            assert_eq!(id.as_uuid().hyphenated().to_string(), EARLIER_ID);
+            assert_eq!(names(data.path()), ["machine-id", "machine-key"], "{from}");
+            assert_eq!(
+                fs::read_to_string(data.path().join("machine-key")).unwrap(),
+                KEY_CANARY
+            );
+            assert!(!earlier_names_left(data.path()).unwrap(), "{from}");
+        }
+    }
+
     /// The key moves first, then the ID: a start that stopped between the
     /// two left `machine-key` and `agent-id`, and the next one finishes.
     #[test]
