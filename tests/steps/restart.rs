@@ -333,11 +333,13 @@ fn operation_log(agent: &Agent) -> (std::path::PathBuf, std::path::PathBuf) {
 }
 
 /// The log a killed daemon left is replaced by the one
-/// `crates/adapters/store/tests/fixtures/at-0029.sql` describes: the 29
+/// `crates/adapters/store/tests/fixtures/at-0029.sql` describes, the 29
 /// migrations before the baseline schema applied, in WAL mode as the store
-/// keeps it (decision 165).
+/// keeps it (decision 165), but with the checksum of migration 12 one no
+/// release shipped: the store copies only a log whose migrations are those
+/// a release shipped (decision 170).
 #[given(
-    "the data folder holds an operation log an earlier Ladderback wrote before the baseline schema"
+    "the data folder holds an operation log from before the baseline schema whose migrations no release shipped"
 )]
 async fn an_old_operation_log(agent: &mut Agent) {
     use sqlx::{ConnectOptions as _, Connection as _};
@@ -363,6 +365,10 @@ async fn an_old_operation_log(agent: &mut Agent) {
     .execute(&mut raw)
     .await
     .expect("the old operation log is filled");
+    sqlx::query("UPDATE _sqlx_migrations SET checksum = zeroblob(48) WHERE version = 12")
+        .execute(&mut raw)
+        .await
+        .expect("migration 12 is given a checksum no release shipped");
     sqlx::query("PRAGMA journal_mode = WAL")
         .execute(&mut raw)
         .await
@@ -371,15 +377,32 @@ async fn an_old_operation_log(agent: &mut Agent) {
     std::fs::copy(&log, kept).expect("the old operation log is kept to compare");
 }
 
+/// The refusal as the daemon's catalog words it for this log, at its last
+/// migration, and no script to run: the store copies a log it can copy
+/// itself (decision 170).
 #[then(
-    "Ladderback refuses to start, saying the operation log is from an earlier version and naming the copy script"
+    "Ladderback refuses to start, saying the operation log is from an earlier version it can't copy"
 )]
 fn refuses_an_old_log(agent: &mut Agent) {
-    let (status, log) = events_steps::refusal(agent);
+    let (log, _) = operation_log(agent);
+    let (status, said) = events_steps::refusal(agent);
     assert!(!status.success(), "a refusal is a failure: {status}");
-    for words in ["earlier version", "29", "scripts/copy-to-baseline.ts"] {
-        assert!(log.contains(words), "the refusal says {words:?}:\n{log}");
-    }
+    let refusal = Localizer::new(&[]).message(
+        l10n::msg::CLI_STORE_OLD_SCHEMA,
+        &[
+            ("path", MsgArg::Text(log.display().to_string())),
+            ("version", MsgArg::Text("29".to_owned())),
+        ],
+    );
+    assert!(
+        said.contains(refusal.text()),
+        "the refusal says {:?}:\n{said}",
+        refusal.text()
+    );
+    assert!(
+        !said.contains("copy-to-baseline"),
+        "the refusal names no script to run:\n{said}"
+    );
 }
 
 #[then("the operation log is left as it was")]

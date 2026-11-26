@@ -117,6 +117,8 @@ mod sign_in_steps;
 mod snapshots_steps;
 #[path = "steps/translations.rs"]
 mod translations_steps;
+#[path = "steps/upgrade.rs"]
+mod upgrade_steps;
 
 const LADDERBACK: &str = env!("CARGO_BIN_EXE_ladderback");
 
@@ -162,6 +164,7 @@ struct Agent {
     restore: restore_steps::RestoreE2e,
     download: download_steps::DownloadE2e,
     pairing_terminal: pairing_terminal_steps::PairingTerminal,
+    upgrade: upgrade_steps::UpgradeE2e,
     /// The daemon's answer to an API token setting the dry-run allowlist.
     dry_run_refusal: Option<request_checks_steps::Response>,
 }
@@ -224,6 +227,7 @@ impl Agent {
             restore: restore_steps::RestoreE2e::default(),
             download: download_steps::DownloadE2e::default(),
             pairing_terminal: pairing_terminal_steps::PairingTerminal::default(),
+            upgrade: upgrade_steps::UpgradeE2e::default(),
             dry_run_refusal: None,
         }
     }

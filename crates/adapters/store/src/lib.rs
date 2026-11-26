@@ -13,6 +13,7 @@
 
 mod agent_registry;
 mod api_tokens;
+mod baseline_copy;
 mod codec;
 mod error_args;
 mod leases;
@@ -51,6 +52,7 @@ use sqlx::sqlite::{SqliteConnectOptions, SqliteJournalMode, SqlitePoolOptions, S
 use sqlx::{Connection, SqliteConnection, SqlitePool};
 use tokio::sync::{RwLock, RwLockReadGuard};
 
+pub use crate::baseline_copy::{BaselineCopy, CopyFailure, Dropped};
 use crate::report::cap;
 use crate::summary::Summary;
 
@@ -93,12 +95,27 @@ pub enum OpenError {
     /// build doesn't know. Opening it would risk its data.
     NewerSchema { version: i64 },
     /// The database was written by a version before the baseline schema
-    /// (§16, decision 165): its migrations are the old set, through
-    /// `version`, which this build no longer ships and can't upgrade. It is
-    /// left as it was, for the one-off copy into a baseline database.
+    /// (§16, decision 165), and its migrations are not ones a release
+    /// shipped (decision 170): a checksum that doesn't match, a gap, or one
+    /// that never finished, through `version`. The store can't copy it into
+    /// the baseline, so it is left as it was.
     OldSchema { version: i64 },
     /// A migration this build ships failed or doesn't match the one applied.
     Migration { detail: String },
+    /// A log the migrations before the baseline left at `version`, one of
+    /// those a release shipped, that couldn't be copied into the baseline,
+    /// for the `cause` said. The log is left as it was (decision 170).
+    BaselineCopy { version: i64, cause: CopyFailure },
+    /// A log the migrations before the baseline left at `version`, which
+    /// [`SqliteStore::open`] never copies: only
+    /// [`SqliteStore::copy_into_baseline`] does, for a process that holds
+    /// the data folder (decision 170). It is left as it was.
+    BeforeBaseline { version: i64 },
+    /// A log the migrations before the baseline left at `version` that
+    /// another program was reading when the copy began, so its
+    /// write-ahead log couldn't be checkpointed into it (decision 170). It
+    /// is left as it was, and the next copy tries again.
+    LogInUse { version: i64 },
 }
 
 impl std::fmt::Display for OpenError {
@@ -133,42 +150,26 @@ impl SqliteStore {
     ///
     /// The directory must exist: the data directory is the caller's to create.
     /// A database that holds a migration this build doesn't ship, because a
-    /// newer version wrote it, is refused with [`OpenError::NewerSchema`], and
-    /// one the migrations before the baseline schema left, with
-    /// [`OpenError::OldSchema`]; either is left as it was. A failed open
-    /// leaves no connection behind.
+    /// newer version wrote it, is refused with [`OpenError::NewerSchema`] and
+    /// left as it was. So is one the migrations before the baseline schema
+    /// left, with [`OpenError::BeforeBaseline`]: the open never copies it
+    /// (decision 170). A failed open leaves no connection behind.
     pub async fn open(path: &Path) -> Result<Self, OpenError> {
-        let options = SqliteConnectOptions::new()
-            .filename(path)
-            .create_if_missing(true)
-            .journal_mode(SqliteJournalMode::Wal)
-            // NORMAL would let a power cut take back a commit the hub has
-            // already sent as a lease. On macOS this still leaves a commit
-            // in the drive's own cache: `fullfsync` would flush it, at a
-            // cost decision 164 weighs.
-            .synchronous(SqliteSynchronous::Full)
-            .busy_timeout(BUSY_TIMEOUT)
-            .foreign_keys(true);
-        let pool = SqlitePoolOptions::new()
-            .max_connections(MAX_CONNECTIONS)
-            .acquire_timeout(ACQUIRE_TIMEOUT)
-            .connect_with(options)
-            .await
-            .map_err(|error| OpenError::Database {
-                detail: cap(error.to_string()),
-            })?;
-        let migrated = match old_set(&pool).await {
-            Ok(Some(version)) => Err(OpenError::OldSchema { version }),
-            Ok(None) => MIGRATOR.run(&pool).await.map_err(|error| match error {
-                MigrateError::VersionMissing(version) => OpenError::NewerSchema { version },
-                other => OpenError::Migration {
-                    detail: cap(other.to_string()),
-                },
-            }),
-            Err(error) => Err(OpenError::Migration {
-                detail: cap(error.to_string()),
-            }),
-        };
+        let pool = connect(path).await?;
+        match old_set(&pool).await {
+            Ok(None) => {}
+            Ok(Some(version)) => {
+                pool.close().await;
+                return Err(OpenError::BeforeBaseline { version });
+            }
+            Err(error) => {
+                pool.close().await;
+                return Err(OpenError::Migration {
+                    detail: cap(error.to_string()),
+                });
+            }
+        }
+        let migrated = migrate(&pool).await;
         if let Err(error) = migrated {
             pool.close().await;
             return Err(error);
@@ -177,6 +178,37 @@ impl SqliteStore {
             pool,
             calls: RwLock::new(()),
         })
+    }
+
+    /// Whether the database at `path` is one the migrations before the
+    /// baseline schema left, which [`copy_into_baseline`] would copy or
+    /// refuse: `false` when there is no file. It only reads, so a command
+    /// that runs without the data folder's lock asks it before it takes
+    /// the lock (decision 170).
+    ///
+    /// [`copy_into_baseline`]: Self::copy_into_baseline
+    pub async fn needs_copy(path: &Path) -> Result<bool, OpenError> {
+        if !path.try_exists().map_err(database)? {
+            return Ok(false);
+        }
+        baseline_copy::is_old(path).await.map_err(database)
+    }
+
+    /// Copies the database at `path` into the baseline schema when the
+    /// migrations before the baseline left it at ones a release shipped,
+    /// keeping the old one beside it, and says what it did; `None` when
+    /// there is no such database (§16, decision 170). Any other log of
+    /// that set is refused with [`OpenError::OldSchema`], and one that
+    /// can't be copied with [`OpenError::BaselineCopy`]; either is left as
+    /// it was.
+    ///
+    /// The copy replaces the file, so only a caller that holds the data
+    /// folder's lock calls it: no other process may have the log open.
+    pub async fn copy_into_baseline(path: &Path) -> Result<Option<BaselineCopy>, OpenError> {
+        if !path.try_exists().map_err(database)? {
+            return Ok(None);
+        }
+        baseline_copy::copy(path).await
     }
 
     /// Closes the pool once the calls in flight, reads and writes, have
@@ -245,6 +277,46 @@ impl SqliteStore {
     async fn call(&self) -> RwLockReadGuard<'_, ()> {
         self.calls.read().await
     }
+}
+
+/// A database that can't be read, in SQLite's or the system's words.
+fn database(error: impl Display) -> OpenError {
+    OpenError::Database {
+        detail: cap(error.to_string()),
+    }
+}
+
+/// Brings the database's schema up to date (§8.3).
+async fn migrate(pool: &SqlitePool) -> Result<(), OpenError> {
+    MIGRATOR.run(pool).await.map_err(|error| match error {
+        MigrateError::VersionMissing(version) => OpenError::NewerSchema { version },
+        other => OpenError::Migration {
+            detail: cap(other.to_string()),
+        },
+    })
+}
+
+/// The pool on the database at `path`, created when missing.
+async fn connect(path: &Path) -> Result<SqlitePool, OpenError> {
+    let options = SqliteConnectOptions::new()
+        .filename(path)
+        .create_if_missing(true)
+        .journal_mode(SqliteJournalMode::Wal)
+        // NORMAL would let a power cut take back a commit the hub has
+        // already sent as a lease. On macOS this still leaves a commit
+        // in the drive's own cache: `fullfsync` would flush it, at a
+        // cost decision 164 weighs.
+        .synchronous(SqliteSynchronous::Full)
+        .busy_timeout(BUSY_TIMEOUT)
+        .foreign_keys(true);
+    SqlitePoolOptions::new()
+        .max_connections(MAX_CONNECTIONS)
+        .acquire_timeout(ACQUIRE_TIMEOUT)
+        .connect_with(options)
+        .await
+        .map_err(|error| OpenError::Database {
+            detail: cap(error.to_string()),
+        })
 }
 
 /// Ends every running row of the log as failed with `reason`, finished at

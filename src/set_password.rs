@@ -21,6 +21,7 @@ use platform::data_dir_lock::{DataDirLock, LockError};
 use platform::{dirs, terminal};
 use store::{OpenError, SqliteStore};
 
+use crate::composition::{startup, upgrade};
 use crate::output::to_stderr;
 use crate::{finish, said, say, text};
 
@@ -115,24 +116,29 @@ async fn set_forgetting_sessions(
     if !database.exists() {
         return leaving(kept, typed, None).await;
     }
-    let _lock = match DataDirLock::acquire(data_dir) {
+    let lock = match DataDirLock::acquire(data_dir) {
         Ok(lock) => lock,
         Err(LockError::InUse { .. }) => return leaving(kept, typed, None).await,
         Err(LockError::Unavailable { detail }) => return leaving(kept, typed, Some(detail)).await,
     };
+    // A folder an earlier release left is upgraded under the lock first
+    // (decision 170), and a copy it made is said. A refusal, and a log that
+    // can't be opened, is said in the user's words, not the error's own.
+    match upgrade::under(&lock, data_dir).await {
+        // Best effort: the password is set all the same if stderr is gone.
+        Ok(copy) => {
+            let _ = upgrade::tell(localizer, copy.as_ref());
+        }
+        Err(refusal) => {
+            let detail = said(localizer, refusal.message, &refusal.args);
+            return leaving(kept, typed, Some(detail)).await;
+        }
+    }
     let store = match SqliteStore::open(database).await {
         Ok(store) => store,
-        // A log from before the baseline schema: say how to copy it
-        // (decision 165), not the error's own words.
-        Err(OpenError::OldSchema { version }) => {
-            let detail = said(
-                localizer,
-                msg::CLI_STORE_OLD_SCHEMA,
-                &[
-                    ("path", text(database.display())),
-                    ("version", text(version)),
-                ],
-            );
+        Err(error @ OpenError::BeforeBaseline { .. }) => {
+            let refusal = startup::log_refused(database, &error);
+            let detail = said(localizer, refusal.message, &refusal.args);
             return leaving(kept, typed, Some(detail)).await;
         }
         Err(error) => return leaving(kept, typed, Some(error.to_string())).await,

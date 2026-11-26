@@ -126,10 +126,101 @@ cli-no-data-dir = no data folder: set LADDERBACK_DATA_DIR, or run as a user with
 # $detail (text): the operating system's or the store's own message. It is shown as it came.
 cli-cannot-open-store = cannot open the operation log at { $path }: { $detail }
 
-# The operation log was written by an earlier version of Ladderback, before the baseline schema replaced its migrations (decision 165). The daemon did not start and left the file as it was. It can't be upgraded in place, only copied once into the new schema by the script in Ladderback's source, which keeps a copy of the old file.
+# The operation log was written before the baseline schema replaced the earlier migrations (decision 165), and its migrations are not ones a release shipped: one was changed, skipped or never finished (decision 170). A log an earlier release left is copied into the new schema on start; this one can't be. The daemon did not start and left the file as it was.
 # $path (text): the database file, as the user wrote it.
 # $version (text): the last migration the file holds, a whole number such as 29.
-cli-store-old-schema = the operation log at { $path } is from an earlier version of Ladderback (migration { $version }) and can't be upgraded in place. Stop Ladderback, then copy the log into the new schema once with: node scripts/copy-to-baseline.ts "{ $path }" (a log before migration 29 first needs one start of the last earlier version).
+cli-store-old-schema = the operation log at { $path } is from an earlier version of Ladderback (migration { $version }), but its migrations are not the ones a release shipped, so it can't be copied into this version's schema. It was left as it was.
+
+# The cli-store-baseline-copy-* messages: the operation log an earlier release left could not be copied into the new schema on start (decision 170), each for the reason its name says. The daemon did not start and left the file as it was. A copy that failed on its files or the database (a full disk, a lock) is tried again at each start; one that failed on the log's own rows fails the same way at every start, so it asks for a report instead, at the project's issue tracker (the address is typed as it is: keep it a string literal). Every one takes:
+# $path (text): the database file, as the user wrote it.
+# $version (text): the last migration the file holds, a whole number such as 16.
+
+# A file the copy works with beside the log couldn't be made, copied, synced, moved or removed.
+# $detail (text): the operating system's own message. It is shown as it came.
+cli-store-baseline-copy-files = the operation log at { $path } is from an earlier version of Ladderback (migration { $version }) and couldn't be copied into this version's schema: a file the copy works with, beside the log, couldn't be written or removed: { $detail }. It was left as it was, and the next start tries again.
+
+# A database step of the copy failed, such as on a full disk or a lock.
+# $detail (text): the database's own message. It is shown as it came.
+cli-store-baseline-copy-database = the operation log at { $path } is from an earlier version of Ladderback (migration { $version }) and couldn't be copied into this version's schema: the database said: { $detail }. It was left as it was, and the next start tries again.
+
+# One of the earlier version's migrations the log lacked, run on a copy of it, failed on its rows.
+# $detail (text): the database's own message. It is shown as it came.
+cli-store-baseline-copy-old-migration = the operation log at { $path } is from an earlier version of Ladderback (migration { $version }) and couldn't be copied into this version's schema: one of its earlier version's migrations failed on it: { $detail }. It was left as it was, and starting again fails the same way: keep it, and report this message at { "https://github.com/nledford/Ladderback/issues" }.
+
+# The log's tables are not the ones the new schema copies.
+# $old (text): the log's tables, by name, separated by commas.
+# $baseline (text): the tables the new schema copies, by name, separated by commas.
+cli-store-baseline-copy-tables = the operation log at { $path } is from an earlier version of Ladderback (migration { $version }) and couldn't be copied into this version's schema: its tables ({ $old }) are not the ones the copy takes ({ $baseline }). It was left as it was, and starting again fails the same way: keep it, and report this message at { "https://github.com/nledford/Ladderback/issues" }.
+
+# A table's columns are not the ones an earlier release left.
+# $table (text): the table's name, as it is in the database.
+# $columns (text): the columns missing or extra, by name, separated by commas.
+cli-store-baseline-copy-columns = the operation log at { $path } is from an earlier version of Ladderback (migration { $version }) and couldn't be copied into this version's schema: the columns { $columns } of its table { $table } are not the ones an earlier release left. It was left as it was, and starting again fails the same way: keep it, and report this message at { "https://github.com/nledford/Ladderback/issues" }.
+
+# A row of the log breaks one of the new schema's rules.
+# $table (text): the table's name, as it is in the database.
+# $detail (text): the database's own message, naming the rule. It is shown as it came.
+cli-store-baseline-copy-refused-row = the operation log at { $path } is from an earlier version of Ladderback (migration { $version }) and couldn't be copied into this version's schema: its table { $table } holds a row the new schema refuses: { $detail }. It was left as it was, and starting again fails the same way: keep it, and report this message at { "https://github.com/nledford/Ladderback/issues" }.
+
+# The rows copied and dropped of a table don't add up to the rows it held.
+# $table (text): the table's name, as it is in the database.
+# $source (text): how many rows the log's table held, a whole number.
+# $copied (text): how many were copied, a whole number.
+# $dropped (text): how many were dropped as junk, a whole number.
+cli-store-baseline-copy-counts = the operation log at { $path } is from an earlier version of Ladderback (migration { $version }) and couldn't be copied into this version's schema: its table { $table } doesn't add up after the copy (held: { $source }, copied: { $copied }, dropped: { $dropped }). It was left as it was, and starting again fails the same way: keep it, and report this message at { "https://github.com/nledford/Ladderback/issues" }.
+
+# The copy breaks references between its tables (SQLite's foreign_key_check).
+# $broken (text): how many references are broken, a whole number.
+cli-store-baseline-copy-foreign-keys = the operation log at { $path } is from an earlier version of Ladderback (migration { $version }) and couldn't be copied into this version's schema: the copy breaks references between its tables (broken: { $broken }). It was left as it was, and starting again fails the same way: keep it, and report this message at { "https://github.com/nledford/Ladderback/issues" }.
+
+# The copy fails SQLite's integrity check.
+# $detail (text): the database's own report. It is shown as it came.
+cli-store-baseline-copy-integrity = the operation log at { $path } is from an earlier version of Ladderback (migration { $version }) and couldn't be copied into this version's schema: the copy fails the database's integrity check: { $detail }. It was left as it was, and starting again fails the same way: keep it, and report this message at { "https://github.com/nledford/Ladderback/issues" }.
+
+# A file the copy works with has a path that isn't UTF-8, which the database needs.
+# $file (text): that file's path, as the system gives it.
+cli-store-baseline-copy-not-utf8 = the operation log at { $path } is from an earlier version of Ladderback (migration { $version }) and couldn't be copied into this version's schema: the path { $file } is not UTF-8, which the database needs. It was left as it was, and starting again fails the same way: move the data folder to a path that is UTF-8, or report this message at { "https://github.com/nledford/Ladderback/issues" }.
+
+# The operation log is one an earlier release left, and this command opened it before it was copied into the new schema (decision 170). Only a command that holds the data folder copies it, and every command that opens the log upgrades the folder first, so this says what to do if one ever doesn't. The file was left as it was.
+# $path (text): the database file, as the user wrote it.
+# $version (text): the last migration the file holds, a whole number such as 16.
+cli-store-before-baseline = the operation log at { $path } is from an earlier version of Ladderback (migration { $version }) and hasn't been copied into this version's schema yet. Start Ladderback, which copies it, then run this command again. It was left as it was.
+
+# A command that runs beside the daemon (pair, hub-status, export-profile) found a data folder an earlier release left (decision 170), and the data folder's lock is held: Ladderback, an earlier version or this one, is running on it. The folder is upgraded only by a process that holds its lock, so nothing changed.
+# $path (text): the data folder, as the user wrote it.
+cli-upgrade-ladderback-running = the data folder { $path } is from an earlier version of Ladderback, which this version upgrades only while no Ladderback is running on it, and one is running now. Stop it, then run this command again, or start this version, which upgrades the folder. Nothing changed.
+
+# An earlier release's machine key (`agent-key`) sits beside a `machine-key` of this version's, while the machine ID is still under its earlier name (decision 170). Which key is this machine's is the person's to say, so the upgrade moved nothing and left both files as they were.
+# $earlier (text): the earlier key file, `agent-key` in the data folder.
+# $own (text): this version's key file, `machine-key` in the data folder.
+cli-upgrade-two-keys = the data folder holds two machine keys, { $earlier } from an earlier version of Ladderback and { $own }, and the machine ID is still under its earlier name, so this version can't tell which key is this machine's. Move away the one that isn't, then try again. Nothing changed.
+
+# The machine ID and key an earlier release left (`agent-id`, `agent-key`) couldn't be moved to this version's names (`machine-id`, `machine-key`) (decision 170). Each move links the new name before it removes the earlier one, so both files are whole under one name or the other, and the next try finishes the move.
+# $path (text): the data folder, as the user wrote it.
+# $detail (text): the operating system's own message. It is shown as it came.
+cli-upgrade-key-move-failed = the machine ID and key in the data folder { $path }, from an earlier version of Ladderback, couldn't be moved to this version's names: { $detail }. Nothing was lost, and the next start, or this command run again, finishes the move.
+
+# A command (pair, set-password, pairing-token, unpair) found the operation log an earlier release left and copied it into this version's schema (decision 170), as a start of Ladderback would have. Printed on stderr before the command goes on; cli-upgrade-rows-dropped and cli-upgrade-copy-unsynced may follow.
+# $version (text): the last migration the old log held, a whole number such as 16.
+# $kept (text): the file the old log is kept in, beside the new one.
+cli-upgrade-log-copied = copied the operation log an earlier version of Ladderback left (migration { $version }) into this version's schema. The old log is kept at { $kept }; you can delete it once you no longer want it.
+
+# One line for each table after cli-upgrade-log-copied: rows the copy dropped because the new schema proves them junk, the current state of a machine the hub had removed, or a second report of the same happening (decision 165).
+# $table (text): the table's name, as it is in the database.
+# $count (count): how many rows were dropped.
+cli-upgrade-rows-dropped = { $count ->
+    [one] dropped { $count } row of { $table } as junk: the state of a removed machine, or a report the hub already had.
+   *[other] dropped { $count } rows of { $table } as junk: the state of removed machines, or reports the hub already had.
+}
+
+# After cli-upgrade-log-copied: the copy is done and the new log is in use, but the data folder couldn't be synced after it took the old one's place.
+# $detail (text): the operating system's own message. It is shown as it came.
+cli-upgrade-copy-unsynced = warning: the data folder couldn't be synced after the copied operation log took the old one's place ({ $detail }): a power loss now could bring the old log back, and the next start would copy it again.
+
+# The operation log an earlier release left could not be copied into the new schema because another program was reading it (decision 170). It was left as it was.
+# $path (text): the database file, as the user wrote it.
+# $version (text): the last migration the file holds, a whole number such as 16.
+cli-store-baseline-log-in-use = the operation log at { $path } is from an earlier version of Ladderback (migration { $version }), and another program has it open, so it couldn't be copied into this version's schema. Close the program that has it open, such as a database browser, then try again. It was left as it was.
 
 # The operations an earlier run left queued or running could not be ended in the operation log. The daemon did not start, because serving over them would keep a repository held for good.
 # $path (text): the database file, as the user wrote it.

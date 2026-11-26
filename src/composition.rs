@@ -59,6 +59,7 @@ mod repositories;
 mod restores;
 mod runs;
 pub(crate) mod startup;
+pub(crate) mod upgrade;
 
 use startup::Background;
 

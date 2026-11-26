@@ -4,8 +4,8 @@
 -- every other table written in that schema. It holds the rows the copy to the
 -- baseline drops as junk, too: the plans, progress and ownership reports of
 -- the removed machine ...a3, and the report its new ID ...a1 sent again
--- (#1513). The store refuses it (`OpenError::OldSchema`);
--- `scripts/copy-to-baseline.ts` copies it into a baseline database.
+-- (#1513). The store copies it into a baseline database on start (decision
+-- 170).
 PRAGMA foreign_keys=OFF;
 BEGIN TRANSACTION;
 CREATE TABLE _sqlx_migrations (

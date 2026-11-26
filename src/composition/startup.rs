@@ -590,13 +590,17 @@ pub(super) async fn daemon_at(
     )
     .await;
     let recorded = recorded_repositories(&loaded);
+    // A folder an earlier release left is upgraded under the lock, before
+    // the log opens; the copy is in the log even when the open then fails.
+    if let Some(copy) = super::upgrade::under(&lock, &data_dir).await? {
+        log_baseline_copy(&copy);
+    }
     let database = data_dir.join("ladderback.db");
+    let store = SqliteStore::open(&database)
+        .await
+        .map_err(|error| log_refused(&database, &error))?;
     let log = OperationLog {
-        store: Arc::new(
-            SqliteStore::open(&database)
-                .await
-                .map_err(|error| log_refused(&database, &error))?,
-        ),
+        store: Arc::new(store),
         database,
     };
     // Every refusal from here on closes the log first: the refused daemon
@@ -692,6 +696,14 @@ async fn state_over(
     }
     let agent_id = agent_id::load_or_create(data_dir)
         .map_err(|detail| store_refused(data_dir, &detail.to_string()))?;
+    // An earlier build's ID left beside the machine's own (decision 170).
+    if let Ok(Some(earlier)) = agent_id::earlier_beside(data_dir) {
+        log::info!(
+            "the data folder holds an earlier build's agent-id ({}) beside machine-id ({}): machine-id is used, and agent-id is left as it is",
+            earlier.as_uuid().hyphenated(),
+            agent_id.as_uuid().hyphenated()
+        );
+    }
     // Before anything maintains: a data folder copied from another computer
     // runs no forget, prune or adoption (§7.1, §16 decision 144).
     let this_machine: Arc<dyn app::ports::ThisMachine> =
@@ -1418,23 +1430,124 @@ pub(crate) fn config_refused(error: ConfigError) -> Refused {
 }
 
 /// A folder or database the daemon cannot open.
-fn store_refused(path: &std::path::Path, detail: &str) -> Refused {
+pub(crate) fn store_refused(path: &std::path::Path, detail: &str) -> Refused {
     Refused {
         message: msg::CLI_CANNOT_OPEN_STORE,
         args: vec![("path", text(path.display())), ("detail", text(detail))],
     }
 }
 
-/// The operation log the daemon cannot open: one the migrations before the
-/// baseline schema left is named as such, with the way to copy it (§16,
-/// decision 165).
-fn log_refused(path: &std::path::Path, error: &OpenError) -> Refused {
+/// The operation log a command cannot open: one the migrations before the
+/// baseline schema left is named as such, and so is a copy of one into the
+/// baseline that failed (§16, decisions 165 and 170).
+pub(crate) fn log_refused(path: &std::path::Path, error: &OpenError) -> Refused {
     match error {
         OpenError::OldSchema { version } => Refused {
             message: msg::CLI_STORE_OLD_SCHEMA,
             args: vec![("path", text(path.display())), ("version", text(version))],
         },
+        OpenError::BaselineCopy { version, cause } => baseline_copy_refused(path, *version, cause),
+        OpenError::BeforeBaseline { version } => Refused {
+            message: msg::CLI_STORE_BEFORE_BASELINE,
+            args: vec![("path", text(path.display())), ("version", text(version))],
+        },
+        OpenError::LogInUse { version } => Refused {
+            message: msg::CLI_STORE_BASELINE_LOG_IN_USE,
+            args: vec![("path", text(path.display())), ("version", text(version))],
+        },
         other => store_refused(path, &other.to_string()),
+    }
+}
+
+/// A copy of the operation log at `path`, at migration `version`, into the
+/// baseline that failed for `cause` (decision 170), each cause in words of
+/// its own; a detail is only ever the database's or the system's.
+fn baseline_copy_refused(
+    path: &std::path::Path,
+    version: i64,
+    cause: &store::CopyFailure,
+) -> Refused {
+    use store::CopyFailure;
+    let mut args = vec![("path", text(path.display())), ("version", text(version))];
+    let message = match cause {
+        CopyFailure::Files { detail } => {
+            args.push(("detail", text(detail)));
+            msg::CLI_STORE_BASELINE_COPY_FILES
+        }
+        CopyFailure::Database { detail } => {
+            args.push(("detail", text(detail)));
+            msg::CLI_STORE_BASELINE_COPY_DATABASE
+        }
+        CopyFailure::OldMigration { detail } => {
+            args.push(("detail", text(detail)));
+            msg::CLI_STORE_BASELINE_COPY_OLD_MIGRATION
+        }
+        CopyFailure::Tables { old, baseline } => {
+            args.push(("old", text(old.join(", "))));
+            args.push(("baseline", text(baseline.join(", "))));
+            msg::CLI_STORE_BASELINE_COPY_TABLES
+        }
+        CopyFailure::Columns { table, unmatched } => {
+            args.push(("table", text(table)));
+            args.push(("columns", text(unmatched.join(", "))));
+            msg::CLI_STORE_BASELINE_COPY_COLUMNS
+        }
+        CopyFailure::RefusedRow { table, detail } => {
+            args.push(("table", text(table)));
+            args.push(("detail", text(detail)));
+            msg::CLI_STORE_BASELINE_COPY_REFUSED_ROW
+        }
+        CopyFailure::Counts {
+            table,
+            source,
+            copied,
+            dropped,
+        } => {
+            args.push(("table", text(table)));
+            args.push(("source", text(source)));
+            args.push(("copied", text(copied)));
+            args.push(("dropped", text(dropped)));
+            msg::CLI_STORE_BASELINE_COPY_COUNTS
+        }
+        CopyFailure::ForeignKeys { broken } => {
+            args.push(("broken", text(broken)));
+            msg::CLI_STORE_BASELINE_COPY_FOREIGN_KEYS
+        }
+        CopyFailure::Integrity { detail } => {
+            args.push(("detail", text(detail)));
+            msg::CLI_STORE_BASELINE_COPY_INTEGRITY
+        }
+        CopyFailure::NotUtf8 { path: file } => {
+            args.push(("file", text(file.display())));
+            msg::CLI_STORE_BASELINE_COPY_NOT_UTF8
+        }
+    };
+    Refused { message, args }
+}
+
+/// What the copy of an operation log an earlier release left into the
+/// baseline tells the daemon's log (decision 170): where the old one is
+/// kept, and the rows of each table the baseline's rules dropped as junk.
+fn log_baseline_copy(copy: &store::BaselineCopy) {
+    let dropped: Vec<String> = copy
+        .dropped
+        .iter()
+        .map(|dropped| format!("{} from {}", dropped.rows, dropped.table))
+        .collect();
+    log::info!(
+        "copied the operation log an earlier version left at migration {} into this version's schema; the old log is kept at {}; rows dropped as junk: {}",
+        copy.from_version,
+        copy.kept.display(),
+        if dropped.is_empty() {
+            "none".to_owned()
+        } else {
+            dropped.join(", ")
+        }
+    );
+    if let Some(detail) = &copy.unsynced {
+        log::warn!(
+            "the data folder couldn't be synced after the copied operation log took the old one's place ({detail}): a power loss now could bring the old log back, and the next start would copy it again"
+        );
     }
 }
 

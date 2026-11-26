@@ -94,6 +94,18 @@ pub async fn open_error(path: &Path) -> OpenError {
     }
 }
 
+/// Why the copy into the baseline refused `path` (decision 170); a copy
+/// that succeeds fails the test.
+pub async fn copy_error(path: &Path) -> OpenError {
+    match SqliteStore::copy_into_baseline(path).await {
+        Ok(_) => panic!(
+            "{} was copied, but should have been refused",
+            path.display()
+        ),
+        Err(error) => error,
+    }
+}
+
 /// `work`, or a failed test when it takes more than `seconds`: a store that
 /// hangs must fail its test, not stall the run.
 pub async fn within<T>(seconds: u64, what: &str, work: impl Future<Output = T>) -> T {
