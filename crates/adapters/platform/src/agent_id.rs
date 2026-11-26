@@ -22,7 +22,7 @@ const MAX_ID_FILE_BYTES: u64 = 256;
 /// The agent ID stored in `data_dir`, or `None` when there is none yet. A
 /// command that only reads, such as `hub-status`, uses it rather than
 /// [`load_or_create`]: it writes nothing but the one-off move of an earlier
-/// build's names ([`move_earlier_names`]). A file that exists but doesn't
+/// build's names (decision 170). A file that exists but doesn't
 /// hold an ID is an error.
 pub fn load(data_dir: &Path) -> io::Result<Option<AgentId>> {
     move_earlier_names(data_dir)?;
