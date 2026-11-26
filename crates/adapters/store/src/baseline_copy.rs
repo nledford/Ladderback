@@ -90,6 +90,12 @@ pub struct BaselineCopy {
     pub kept: PathBuf,
     /// The rows the baseline's rules prove are junk, dropped, by table.
     pub dropped: Vec<Dropped>,
+    /// Why the folder couldn't be synced once the new log took the old
+    /// one's place, in the operating system's words. The copy is done and
+    /// the new log is the one in use; a power loss before the folder
+    /// reaches the disk could bring the old log back, which the next start
+    /// copies again. A warning, never a failure.
+    pub unsynced: Option<String>,
 }
 
 /// Rows of one table the copy dropped as junk (decision 165): a removed
@@ -117,10 +123,11 @@ pub(crate) async fn copy(log: &Path) -> Result<Option<BaselineCopy>, OpenError> 
     work.clear()
         .map_err(|error| failed(last, format!("a work file can't be removed: {error}")))?;
     match work.run().await {
-        Ok((dropped, kept)) => Ok(Some(BaselineCopy {
+        Ok((dropped, swapped)) => Ok(Some(BaselineCopy {
             from_version: last,
-            kept,
+            kept: swapped.kept,
             dropped,
+            unsynced: swapped.unsynced,
         })),
         Err(stop) => {
             // Best effort: the next copy removes what is left all the same.
@@ -249,11 +256,11 @@ impl Work {
 
     /// Steps 2 to 5, each failure in the database's or the operating
     /// system's words; the old log is unchanged by all but the last rename.
-    async fn run(&self) -> Result<(Vec<Dropped>, PathBuf), Stop> {
+    async fn run(&self) -> Result<(Vec<Dropped>, Swapped), Stop> {
         let dropped = self.copy_rows().await?;
         remove_if_there(&self.source).map_err(|error| error.to_string())?;
-        let kept = self.swap().map_err(|error| error.to_string())?;
-        Ok((dropped, kept))
+        let swapped = self.swap().map_err(|error| error.to_string())?;
+        Ok((dropped, swapped))
     }
 
     /// Steps 2 to 4: the snapshot, the source and the new log, each a
@@ -288,8 +295,9 @@ impl Work {
     }
 
     /// Step 5: the new log in the old one's place, the old one kept, at
-    /// the path it answers.
-    fn swap(&self) -> io::Result<PathBuf> {
+    /// the path it answers. Once the rename is made, the copy is done:
+    /// the folder's sync after it can only warn.
+    fn swap(&self) -> io::Result<Swapped> {
         for file in [&self.kept_new, &self.new] {
             File::open(file)?.sync_all()?;
         }
@@ -302,8 +310,7 @@ impl Work {
         // The kept copy's name is durable before the old log's goes.
         sync_dir(self.folder())?;
         fs::rename(&self.new, &self.log)?;
-        sync_dir(self.folder())?;
-        Ok(kept)
+        Ok(Swapped::after_rename(kept, sync_dir(self.folder())))
     }
 
     /// The folder the log is in.
@@ -394,6 +401,24 @@ async fn connect(path: &Path, create: bool) -> Result<SqlitePool, String> {
 async fn closing<T, E>(pool: SqlitePool, work: Result<T, E>) -> Result<T, E> {
     pool.close().await;
     work
+}
+
+/// The new log in the old one's place, and where the old one is kept.
+struct Swapped {
+    kept: PathBuf,
+    /// Why the folder couldn't be synced after the rename, if it couldn't.
+    unsynced: Option<String>,
+}
+
+impl Swapped {
+    /// The swap once its rename is made: the folder's `synced` after it
+    /// can only warn, as the new log is the one in use.
+    fn after_rename(kept: PathBuf, synced: io::Result<()>) -> Self {
+        Self {
+            kept,
+            unsynced: synced.err().map(|error| error.to_string()),
+        }
+    }
 }
 
 /// Why a copy stopped.
@@ -718,5 +743,21 @@ mod tests {
                 file.display()
             );
         }
+    }
+
+    /// The folder's sync after the rename failing leaves the copy done:
+    /// the new log is the one in use, so it is a finished copy with a
+    /// warning in the operating system's words, never a failure that says
+    /// the old log was left as it was.
+    #[test]
+    fn a_folder_that_cant_be_synced_after_the_rename_is_a_finished_copy_with_a_warning() {
+        let kept = PathBuf::from("ladderback.db.before-baseline");
+
+        let swapped = Swapped::after_rename(kept.clone(), Err(io::Error::other("no sync")));
+
+        assert_eq!(swapped.kept, kept);
+        assert_eq!(swapped.unsynced.as_deref(), Some("no sync"));
+        let synced = Swapped::after_rename(kept, Ok(()));
+        assert_eq!(synced.unsynced, None);
     }
 }

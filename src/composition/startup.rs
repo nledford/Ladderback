@@ -1485,6 +1485,11 @@ fn log_baseline_copy(copy: &store::BaselineCopy) {
             dropped.join(", ")
         }
     );
+    if let Some(detail) = &copy.unsynced {
+        log::warn!(
+            "the data folder couldn't be synced after the copied operation log took the old one's place ({detail}): a power loss now could bring the old log back, and the next start would copy it again"
+        );
+    }
 }
 
 /// What the choice of a location tells the daemon's log (decision 80): for
