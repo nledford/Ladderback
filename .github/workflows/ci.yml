@@ -347,9 +347,10 @@ jobs:
     timeout-minutes: 45
     steps:
       # Every pull request is checked out: a docs-only one still runs the
-      # agent-guidance path check, the paragraph-length check, the user docs
-      # site's build and link check, and the decision-index and
-      # component-index checks below, which `just lint` runs for the rest.
+      # agent-guidance path check, the paragraph-length check, the American
+      # spelling check, the user docs site's build and link check, and the
+      # decision-index and component-index checks below, which `just lint`
+      # runs for the rest.
       - if: matrix.skip != 'true'
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -367,8 +368,8 @@ jobs:
       # paragraph-length lints, the architecture checks and the contrast gate
       # give one answer anywhere, so they run on Linux alone; macOS needs no
       # Node then. A docs-only pull request sets Node up as well, for the
-      # paragraph-length, site link, decision-index and component-index
-      # checks. Every setup-node reads Node's major version from
+      # paragraph-length, American spelling, site link, decision-index and
+      # component-index checks. Every setup-node reads Node's major version from
       # ui-tests/.nvmrc, which a pull request of its own bumps (development.md
       # §13.8).
       - if: matrix.skip != 'true' && runner.os == 'Linux'
@@ -395,6 +396,8 @@ jobs:
         run: mdbook build docs/guide && node scripts/check-site-links.ts && node scripts/check-theme-override.ts
       - if: matrix.skip != 'true' && needs.changes.outputs.docs-only == 'true' && runner.os == 'Linux'
         run: node scripts/check-paragraph-length.ts
+      - if: matrix.skip != 'true' && needs.changes.outputs.docs-only == 'true' && runner.os == 'Linux'
+        run: node scripts/check-american-spelling.ts
       - if: matrix.skip != 'true' && needs.changes.outputs.docs-only == 'true' && runner.os == 'Linux'
         run: node scripts/decision-index.ts
       - if: matrix.skip != 'true' && needs.changes.outputs.docs-only == 'true' && runner.os == 'Linux'
