@@ -662,6 +662,35 @@ fn unreadable() -> crate::ports::StoreError {
     }
 }
 
+/// A configuration the agent can't read.
+struct UnreadableConfig;
+
+#[async_trait]
+impl crate::ports::ConfigStore for UnreadableConfig {
+    async fn load(&self) -> Result<domain::planning::AgentConfig, crate::ports::ConfigError> {
+        Err(crate::ports::ConfigError::Unavailable {
+            file: "ladderback.toml".to_owned(),
+            detail: "unreadable".to_owned(),
+        })
+    }
+
+    async fn save(
+        &self,
+        _: &domain::planning::AgentConfig,
+    ) -> Result<(), crate::ports::ConfigError> {
+        Ok(())
+    }
+
+    async fn record_id(
+        &self,
+        _: &domain::RepositoryAlias,
+        _: &domain::planning::RepositoryConfig,
+        _: &domain::RepositoryId,
+    ) -> Result<(), crate::ports::RecordError> {
+        Ok(())
+    }
+}
+
 /// An outbox of one epoch whose reports lie at the places given, as a full
 /// one's lie once it gave up its starts, and which can't record the first
 /// `Ack` it is given.
@@ -838,7 +867,8 @@ async fn warned_by_the_sync_loop(
 }
 
 /// The agent's sync loop logs a streak of failures once, at its first: a hub
-/// it can't reach, and an outbox it can't read, aren't logged at every retry.
+/// it can't reach, an outbox it can't read, and a configuration it can't
+/// read its leases from, aren't logged at every retry.
 #[tokio::test]
 async fn the_sync_loop_logs_a_streak_of_failures_once() {
     use crate::ports::Outbox as _;
@@ -893,6 +923,35 @@ async fn the_sync_loop_logs_a_streak_of_failures_once() {
     let warned = warned_by_the_sync_loop(sync, &clock, 3).await;
     assert_eq!(warned.len(), 1, "{warned:?}");
     assert!(warned[0].starts_with("the outbox couldn't be read"));
+
+    // A configuration it can't read leaves the leases unasked at every look
+    // of the one connection it holds to a hub that approved it.
+    let Leasing {
+        hub,
+        leases,
+        operations,
+        others,
+        identity,
+        machine_clock,
+        ..
+    } = leasing(Timestamp::from_second(1_800_000_000).unwrap()).await;
+    let sync = SyncWithHub::new(
+        connecting(
+            identity,
+            Arc::new(LoopbackHubConnector::to(hub.pairing.clone())),
+        ),
+        Arc::new(crate::fakes::InMemoryOutbox::new(OutboxEpoch::from_uuid(
+            Uuid::from_u128(0xe1),
+        ))),
+        machine_clock.clone(),
+        agent_id(1),
+        hostname(1),
+        None,
+    )
+    .with_leases(Arc::new(UnreadableConfig), leases, operations, others);
+    let warned = warned_by_the_sync_loop(sync, &machine_clock, 3).await;
+    assert_eq!(warned.len(), 1, "{warned:?}");
+    assert!(warned[0].starts_with("the leases weren't asked for"));
 }
 
 /// The agent's sync loop opens a session for a progress alone: with no
@@ -2603,36 +2662,8 @@ async fn i1_the_sync_loop_asks_for_grants_at_its_start_and_every_15_minutes() {
 #[tokio::test]
 async fn an_unreadable_configuration_keeps_the_connection_to_the_hub() {
     use domain::fleet::OutboxEpoch;
-    use domain::planning::{AgentConfig, RepositoryConfig};
-    use domain::{RepositoryAlias, RepositoryId};
 
-    use crate::ports::{ConfigError, ConfigStore, RecordError};
     use crate::sync::{POLL, SyncWithHub};
-
-    struct Unreadable;
-
-    #[async_trait]
-    impl ConfigStore for Unreadable {
-        async fn load(&self) -> Result<AgentConfig, ConfigError> {
-            Err(ConfigError::Unavailable {
-                file: "ladderback.toml".to_owned(),
-                detail: "unreadable".to_owned(),
-            })
-        }
-
-        async fn save(&self, _: &AgentConfig) -> Result<(), ConfigError> {
-            Ok(())
-        }
-
-        async fn record_id(
-            &self,
-            _: &RepositoryAlias,
-            _: &RepositoryConfig,
-            _: &RepositoryId,
-        ) -> Result<(), RecordError> {
-            Ok(())
-        }
-    }
 
     let start = Timestamp::from_second(1_800_000_000).unwrap();
     let Leasing {
@@ -2655,7 +2686,7 @@ async fn an_unreadable_configuration_keeps_the_connection_to_the_hub() {
         hostname(1),
         None,
     )
-    .with_leases(Arc::new(Unreadable), leases, operations, others);
+    .with_leases(Arc::new(UnreadableConfig), leases, operations, others);
     let (stop, stopped) = tokio::sync::oneshot::channel::<()>();
     let runner = std::thread::spawn(move || {
         let runtime = tokio::runtime::Builder::new_current_thread()

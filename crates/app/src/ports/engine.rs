@@ -745,6 +745,16 @@ mod deletion_tests {
         ask.answer(Deletion::Refused);
         assert_eq!(answer.now_or_never(), Some(Deletion::Permitted));
     }
+
+    /// Copies of one question are equal; two questions never are, so a
+    /// consumer can't take one prune's question for another's.
+    #[test]
+    fn two_questions_are_never_equal() {
+        let (one, _) = DeletionAsk::new();
+        let (other, _) = DeletionAsk::new();
+        assert_ne!(one, other);
+        assert_eq!(one.clone(), one);
+    }
 }
 
 /// One progress bar's change; `key` tells concurrent bars apart. A bar names
