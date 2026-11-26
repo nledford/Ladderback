@@ -9,76 +9,32 @@ All notable changes to Ladderback are listed here. The format follows
 
 ## [0.6.0-rc.1](https://github.com/nledford/Ladderback/compare/v0.5.0...v0.6.0-rc.1) - 2026-11-26
 
+### Upgrading from 0.5.0
+
+Install 0.6.0 and start it: that is the whole upgrade for the program (#1648).
+
+- **Stop 0.5.0 first.** A 0.6.0 start beside a running 0.5.0 daemon is refused, and so is a command, with a message saying another Ladderback holds the data folder.
+- **On its first start**, 0.6.0 renames `agent-id` and `agent-key` to `machine-id` and `machine-key`, keeping the machine's ID and key. It copies the operation log into the new baseline schema and keeps the old log beside it as `ladderback.db.before-baseline`. The copy needs about three times the log's size free in the data folder. To go back to 0.5.0, put `ladderback.db.before-baseline` back as `ladderback.db` and install 0.5.0.
+- **Retag the snapshots 0.5.0 took.** Their tag `ladderback-agent:<id>` is now `ladderback-machine:<id>` (#1631), and Ladderback doesn't rewrite your repositories itself. Until they are retagged, those snapshots list as orphaned history of an unknown machine, a plan's next backup finds no parent among them and reads its sources in full, and the repository counts as shared with another machine for 30 days.
+
+  For each repository, and each machine that backs up to it, with `<id>` from that machine's `machine-id` file (on macOS in `~/Library/Application Support/ladderback`), run these four commands in order. rustic 0.11 refuses `--add` together with `--remove`, so it takes two passes, each tried with `--dry-run` first:
+
+  ```sh
+  rustic --no-cache --dry-run tag --filter-tags ladderback-agent:<id> --add ladderback-machine:<id>
+  rustic --no-cache tag --filter-tags ladderback-agent:<id> --add ladderback-machine:<id>
+  rustic --no-cache --dry-run tag --filter-tags ladderback-agent:<id> --remove ladderback-agent:<id>
+  rustic --no-cache tag --filter-tags ladderback-agent:<id> --remove ladderback-agent:<id>
+  ```
+
+- **An exported rustic profile** that filters on `ladderback-agent:` is refused on import; export it again from 0.6.0.
+
 ### Breaking
 
-- The wire and stored names say machine ([#1631](https://github.com/nledford/Ladderback/pull/1631))
-- A machine becomes the hub through hub mode in config.toml's [serve] table ([#1634](https://github.com/nledford/Ladderback/pull/1634)): `serve --hub` takes an optional `=false`, and
-`--listen` no longer has a clap default (127.0.0.1:9898 still applies).
-
-* docs: hub mode, the address and the allowed host names in config.toml's [serve] table (decision 167)
-
-Decision 167 names the keys and replaces decision 136's refusal to turn
-hub mode off with keeping it on; §6.1, multi-machine §7 and the guide's
-remote access page say how.
-
-* fix: the line naming a paired machine has words a translator translates
-
-The pseudolocale lanes refused a message of only an argument.
-
-* fix: serve reads [serve] under the data folder's lock, and an unreadable paired list keeps hub mode on only for a former hub
-
-Review findings 1-4 on #1202:
-- the daemon hands back the `[serve]` table it read under the lock, and
-  who can reach it is set afterwards; a refusal from there closes the
-  operation log first, as every refusal after the lock does (§9);
-- paired machines that can't be read keep hub mode on only when the hub
-  key shows a former hub, and either way stderr and the log say so;
-- a failed stderr write of the warning closes the log too;
-- the warning and `--hub`'s help no longer name `hub = false` when a
-  flag or no table turned hub mode off.
-
-* test: [serve] in the round-trip property, and the start refusals and --hub=false that name it
-
-Review finding 6: the edit-in-place round trip draws `[serve]`; e2e
-scenarios for a bad host name in `allowed-hosts`, an address beyond
-loopback with none, and `--hub=false` while a machine is paired.
-
-* docs: security §10.1 and decision 167 say where [serve] comes from and when it is read
-
-Review findings 1, 2 and 5.
-- A prune waits while another machine backs up to its repository ([#1636](https://github.com/nledford/Ladderback/pull/1636))
-- One reviewed baseline schema replaces the 29 migrations ([#1635](https://github.com/nledford/Ladderback/pull/1635)): a build with the baseline refuses an existing operation
-log. Copy it once with `node scripts/copy-to-baseline.ts`, following the
-upgrade steps in #1621 and decision 165.
-
-* feat(cli): the daemon, hub and set-password commands name an old log
-
-- When the store refuses an operation log the migrations before the
-  baseline left (`OpenError::OldSchema`), `serve`, the hub commands and
-  `set-password` say so with `cli-store-old-schema`, which names the log's
-  path, quoted, and the copy script (decision 165).
-
-* feat(scripts): copy an operation log at migration 29 into the baseline
-
-- `scripts/copy-to-baseline.ts` refuses any log but one at exactly
-  migrations 1-29, each finished and with the shipped checksums; keeps a
-  copy of the old log; copies every row into a new baseline log, dropping
-  only the junk the baseline's rules prove (a removed machine's current
-  state, a report another machine ID sent first, #1513); checks that each
-  table's rows were copied or dropped, its foreign keys and its integrity;
-  then puts the new log in place.
-- Tested with `node --test` (refusals, the count check) and from the store
-  tests against a fixture dumped at migration 29, which the store opens
-  after the copy.
-
-* docs: record decision 165, one baseline schema, and its upgrade steps
-
-- Adds §16, decision 165: the baseline replaces migrations 0001-0029
-  before the first release, and an existing log is copied once with the
-  script (#1621's steps: stop the service, run the last earlier build
-  once if the log is at 28, copy, `just install-restart --now`).
-- Updates data-model.md to the baseline's tables and rules.
-- Every build ships the hub; the hub Cargo feature is gone ([#1645](https://github.com/nledford/Ladderback/pull/1645))
+- The wire and stored names say machine where they said agent: the snapshot tag, the sync protocol, the API's error and warning codes, and the key files in the data folder (#1631). API clients that match on a code that said `agent` must use the new one.
+- Hub mode is set in `config.toml`'s `[serve]` table, with the address and the allowed host names; `serve --hub` takes an optional `=false` (#1634).
+- One reviewed baseline schema replaces the 29 migrations (#1635). A 0.5.0 operation log is copied into it on the first start (see above); a build from before the baseline can't open the copy.
+- A prune waits while another machine backs up to its repository (#1636).
+- Every build ships the hub; the `hub` Cargo feature is gone (#1645).
 
 ### Added
 
