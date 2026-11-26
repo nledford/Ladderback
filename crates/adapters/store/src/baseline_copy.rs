@@ -31,8 +31,10 @@
 //!    `<log>.before-baseline`, or `<log>.before-baseline-2` and on when an
 //!    earlier start kept one (never replaced: it may be the only untouched
 //!    original), the log's emptied `-wal` and `-shm` are removed, and the
-//!    new log is renamed over the old one. Both new files take the old
-//!    log's permissions.
+//!    new log is renamed over the old one.
+//!
+//! Every work file is made empty with the old log's permissions before
+//! step 2, so none is ever more open than the log whose rows it holds.
 //!
 //! The old log is never written until the rename, which replaces it whole,
 //! so a copy that stops at any step leaves it usable: the next one removes
@@ -245,21 +247,47 @@ impl Work {
     /// Steps 2 to 5, each failure in the database's or the operating
     /// system's words; the old log is unchanged by all but the last rename.
     async fn run(&self) -> Result<(Vec<Dropped>, PathBuf), String> {
-        snapshot(&self.log, &self.kept_new).await?;
-        copy_file(self.kept_new.clone(), self.source.clone()).await?;
-        migrate_old(&self.source).await?;
-        let dropped = build(&self.new, &self.source).await?;
+        let dropped = self.copy_rows().await?;
         remove_if_there(&self.source).map_err(|error| error.to_string())?;
         let kept = self.swap().map_err(|error| error.to_string())?;
         Ok((dropped, kept))
     }
 
+    /// Steps 2 to 4: the snapshot, the source and the new log, each a
+    /// copy of the old log's rows, made first empty and as open as the old
+    /// log, never more, before any row is written to it.
+    async fn copy_rows(&self) -> Result<Vec<Dropped>, String> {
+        self.make_files().map_err(|error| error.to_string())?;
+        snapshot(&self.log, &self.kept_new).await?;
+        copy_file(self.kept_new.clone(), self.source.clone()).await?;
+        migrate_old(&self.source).await?;
+        build(&self.new, &self.source).await
+    }
+
+    /// Makes each work file empty with the old log's permissions. SQLite
+    /// writes a snapshot into an empty file and takes it as a new
+    /// database, and gives a database's journals its permissions.
+    fn make_files(&self) -> io::Result<()> {
+        let permissions = fs::metadata(&self.log)?.permissions();
+        for file in [&self.kept_new, &self.source, &self.new] {
+            let mut options = fs::OpenOptions::new();
+            options.write(true).create_new(true);
+            #[cfg(unix)]
+            {
+                use std::os::unix::fs::{OpenOptionsExt, PermissionsExt};
+                options.mode(permissions.mode() & 0o777);
+            }
+            options.open(file)?;
+            // The umask may have taken more away than the log's mode did.
+            fs::set_permissions(file, permissions.clone())?;
+        }
+        Ok(())
+    }
+
     /// Step 5: the new log in the old one's place, the old one kept, at
     /// the path it answers.
     fn swap(&self) -> io::Result<PathBuf> {
-        let permissions = fs::metadata(&self.log)?.permissions();
         for file in [&self.kept_new, &self.new] {
-            fs::set_permissions(file, permissions.clone())?;
             File::open(file)?.sync_all()?;
         }
         let kept = self.keep()?;
@@ -627,4 +655,49 @@ async fn copy_table(db: &mut SqliteConnection, table: &str) -> Result<u64, Strin
         ));
     }
     Ok(junk)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// The work files hold the old log's rows, the sessions and API
+    /// tokens' fingerprints among them: from the moment each is made, it
+    /// is no more open than the old log, whatever the process's umask.
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn every_work_file_is_as_private_as_the_old_log_while_the_copy_runs() {
+        use std::os::unix::fs::PermissionsExt;
+
+        let folder = tempfile::tempdir().expect("a scratch folder");
+        let log = folder.path().join("ladderback.db");
+        let mut raw = SqliteConnectOptions::new()
+            .filename(&log)
+            .create_if_missing(true)
+            .connect()
+            .await
+            .expect("the old log is created");
+        sqlx::raw_sql(include_str!("../tests/fixtures/at-0029.sql"))
+            .execute(&mut raw)
+            .await
+            .expect("the old log is filled");
+        raw.close().await.expect("the old log is closed");
+        fs::set_permissions(&log, fs::Permissions::from_mode(0o600)).expect("the log is private");
+
+        let work = Work::beside(&log);
+        work.copy_rows().await.expect("the rows are copied");
+
+        for file in [&work.kept_new, &work.source, &work.new] {
+            let mode = fs::metadata(file)
+                .expect("the work file is there")
+                .permissions()
+                .mode();
+            assert_eq!(
+                mode & 0o777,
+                0o600,
+                "{} is its owner's alone",
+                file.display()
+            );
+        }
+    }
 }
