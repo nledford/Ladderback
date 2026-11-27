@@ -3539,6 +3539,16 @@ fn photos_plan() -> domain::fleet::HubCommand {
     }
 }
 
+/// A person's ask on loopback that machine `agent` run `photos`.
+fn photos_asked_of(agent: AgentId) -> crate::pairing::CommandAsk {
+    crate::pairing::CommandAsk {
+        agent,
+        command: photos_plan(),
+        asked_by: None,
+        beyond_loopback: false,
+    }
+}
+
 /// The hub sends a live machine that takes commands the one a person asked
 /// for, and hears the machine's answer: the backup it started (decision
 /// 176).
@@ -3556,7 +3566,7 @@ async fn the_hub_hears_the_backup_a_live_machine_started_for_it() {
             tokio::task::yield_now().await;
         }
         hub.pairing
-            .command_asked(agent_id(1), photos_plan(), None)
+            .command_asked(photos_asked_of(agent_id(1)))
             .await
     };
     let running = std::pin::pin!(sync.run());
@@ -3586,7 +3596,7 @@ async fn the_hub_refuses_at_once_a_command_no_live_machine_takes() {
 
     let hub = keeping_reports(1);
     let _identity = approved(&hub).await;
-    let ask = |agent| hub.pairing.command_asked(agent, photos_plan(), None);
+    let ask = |agent| hub.pairing.command_asked(photos_asked_of(agent));
     assert_eq!(
         ask(agent_id(2)).await,
         Err(CommandAskRefused::MachineUnknown)
@@ -3625,7 +3635,7 @@ async fn the_hub_waits_20_seconds_for_a_machines_answer() {
         .pairing
         .went_live_taking(agent_id(1), 1, Box::new(|| {}), Some(Accepts::all()))
         .await;
-    let asked = hub.pairing.command_asked(agent_id(1), photos_plan(), None);
+    let asked = hub.pairing.command_asked(photos_asked_of(agent_id(1)));
     let waited = async {
         let sent = queue.next().await.expect("the hub sent the command");
         let request = crate::pairing::wire::read_command(&sent.kind, &sent.payload)

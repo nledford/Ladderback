@@ -37,7 +37,7 @@ mod presence;
 #[cfg(test)]
 mod tests;
 
-pub use commands::CommandAskRefused;
+pub use commands::{CommandAsk, CommandAskRefused};
 pub use dialog::{
     AgentsListed, ApprovalAsk, MadeToken, RecoveryAsk, RemovalAsk, TokenAsk, TokenAskRefused,
 };

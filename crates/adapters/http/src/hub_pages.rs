@@ -46,6 +46,14 @@ const MACHINE_APPROVAL_PATH: &str = "/api/v1/hub/machines/{id}/approval";
 /// [`api::machine_removal_path`] names it.
 const MACHINE_REMOVAL_PATH: &str = "/api/v1/hub/machines/{id}/removal";
 
+/// The path the page runs a plan on one machine at: `POST`, as
+/// [`api::machine_runs_path`] names it.
+const MACHINE_RUNS_PATH: &str = "/api/v1/hub/machines/{id}/runs";
+
+/// The path the page cancels one machine's backup at: `POST`, as
+/// [`api::machine_cancel_path`] names it.
+const MACHINE_CANCEL_PATH: &str = "/api/v1/hub/machines/{id}/operations/{operation}/cancel";
+
 /// `routes` with the hub's own.
 pub(crate) fn routes(routes: Router<AppState>) -> Router<AppState> {
     routes
@@ -56,6 +64,8 @@ pub(crate) fn routes(routes: Router<AppState>) -> Router<AppState> {
         .route(api::HUB_DASHBOARD_PATH, axum::routing::get(machines))
         .route(MACHINE_APPROVAL_PATH, axum::routing::post(approve))
         .route(MACHINE_REMOVAL_PATH, axum::routing::post(remove))
+        .route(MACHINE_RUNS_PATH, axum::routing::post(run_plan))
+        .route(MACHINE_CANCEL_PATH, axum::routing::post(cancel_operation))
         .route(api::HUB_RECOVERY_PATH, axum::routing::get(recovery))
         .route(
             api::HUB_RECOVERY_CONFIRMATION_PATH,
@@ -441,6 +451,32 @@ async fn remove(
         }
         Err(refused) => ask_refusal(refused),
     }
+}
+
+/// The run of the plan the [`api::MachineRunDto`] names on the machine the
+/// path names (decision 176): `202 Accepted` with the backup that runs it,
+/// new or already running, or the refusal of the hub or of the machine.
+async fn run_plan(
+    State(state): State<AppState>,
+    Path(id): Path<String>,
+    session: Option<axum::Extension<crate::sign_in::SessionOf>>,
+    request: Request,
+) -> Response {
+    let _ = (state, id, session, request);
+    todo!()
+}
+
+/// The cancel of the backup the path names on the machine it names
+/// (decision 176): `200` with the canceled backup, or the refusal of the
+/// hub or of the machine.
+async fn cancel_operation(
+    State(state): State<AppState>,
+    Path((id, operation)): Path<(String, String)>,
+    session: Option<axum::Extension<crate::sign_in::SessionOf>>,
+    request: Request,
+) -> Response {
+    let _ = (state, id, operation, session, request);
+    todo!()
 }
 
 /// When the agent's status began: approved just now, for one the hub

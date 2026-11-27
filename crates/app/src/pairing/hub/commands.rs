@@ -7,12 +7,12 @@
 use std::sync::PoisonError;
 
 use api::ErrorCode;
-use domain::AgentId;
 use domain::access::SessionTag;
 use domain::fleet::{
     AgentStatus, COMMAND_ANSWER_WITHIN, CommandId, CommandRequest, EpochSeconds, HubCommand,
-    MAX_COMMANDS_IN_FLIGHT,
+    MAX_COMMANDS_IN_FLIGHT, needs_sign_in,
 };
+use domain::{AgentId, Timestamp};
 use futures::channel::oneshot;
 use futures::future::{Either, select};
 
@@ -24,9 +24,22 @@ use crate::pairing::wire::{command_payload, read_command_result};
 /// How many random bytes a command's ID holds.
 const ID_RANDOM_BYTES: usize = 10;
 
+/// A command a person on the hub asks a machine for: the machine, the
+/// command, the person's session, and whether the ask came from beyond
+/// loopback.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct CommandAsk {
+    pub agent: AgentId,
+    pub command: HubCommand,
+    pub asked_by: Option<SessionTag>,
+    pub beyond_loopback: bool,
+}
+
 /// Why the hub didn't get a machine's answer to its command.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum CommandAskRefused {
+    /// Asked from beyond loopback with sign-in off: nothing was sent.
+    NeedsSignIn,
     /// The hub has no approved machine of that ID.
     MachineUnknown,
     /// The machine isn't connected: nothing was sent.
@@ -35,8 +48,9 @@ pub enum CommandAskRefused {
     CommandsUnsupported,
     /// The machine turned its hub's commands off.
     CommandsOff,
-    /// As many commands wait for the machine's answer as it takes at once.
-    Busy,
+    /// As many commands wait for the machine's answer as it takes at once;
+    /// one has its answer by `retry_at`.
+    Busy { retry_at: Timestamp },
     /// The machine didn't answer in time, or its connection ended first.
     NoAnswer,
     /// The hub couldn't read its machines or make the command's ID.
@@ -47,11 +61,12 @@ impl CommandAskRefused {
     /// The code a person asking is answered with.
     pub const fn code(self) -> ErrorCode {
         match self {
+            Self::NeedsSignIn => ErrorCode::PairingNeedsSignIn,
             Self::MachineUnknown => ErrorCode::MachineUnknown,
             Self::MachineOffline => ErrorCode::MachineOffline,
             Self::CommandsUnsupported => ErrorCode::MachineCommandsUnsupported,
             Self::CommandsOff => ErrorCode::MachineCommandsOff,
-            Self::Busy => ErrorCode::CommandRateLimited,
+            Self::Busy { .. } => ErrorCode::CommandRateLimited,
             Self::NoAnswer => ErrorCode::MachineNoAnswer,
             Self::Unavailable => ErrorCode::HubUnavailable,
         }
@@ -59,16 +74,21 @@ impl CommandAskRefused {
 }
 
 impl HubPairing {
-    /// Sends the machine `agent` the hub's `command`, which the hub's
-    /// session `asked_by` asked for, and waits up to
-    /// [`COMMAND_ANSWER_WITHIN`] for its answer. A machine unknown,
-    /// offline or that doesn't take the command is refused at once.
-    pub async fn command_asked(
-        &self,
-        agent: AgentId,
-        command: HubCommand,
-        asked_by: Option<SessionTag>,
-    ) -> Result<CommandAnswer, CommandAskRefused> {
+    /// Sends the machine `ask` names the hub's command, which the hub's
+    /// session asked for, and waits up to [`COMMAND_ANSWER_WITHIN`] for its
+    /// answer. An ask from beyond loopback with sign-in off, or for a
+    /// machine unknown, offline or that doesn't take the command, is
+    /// refused at once.
+    pub async fn command_asked(&self, ask: CommandAsk) -> Result<CommandAnswer, CommandAskRefused> {
+        let CommandAsk {
+            agent,
+            command,
+            asked_by,
+            beyond_loopback,
+        } = ask;
+        if needs_sign_in(self.access.is_some(), beyond_loopback) {
+            return Err(CommandAskRefused::NeedsSignIn);
+        }
         match self.registry.agent(agent).await {
             Ok(Some(record)) if matches!(record.status, AgentStatus::Approved { .. }) => {}
             Ok(_) => return Err(CommandAskRefused::MachineUnknown),
@@ -99,14 +119,14 @@ impl HubPairing {
                 .unwrap_or_else(PoisonError::into_inner);
             let waiting = awaited.values().filter(|held| held.agent == agent).count();
             if waiting >= MAX_COMMANDS_IN_FLIGHT {
-                return Err(CommandAskRefused::Busy);
+                return Err(self.busy());
             }
             awaited.insert(id, Awaited { agent, answer });
         }
         if let Err(error) = line.try_send(OutgoingCommand { kind, payload }) {
             self.forget_command(id);
             return Err(if error.is_full() {
-                CommandAskRefused::Busy
+                self.busy()
             } else {
                 CommandAskRefused::MachineOffline
             });
@@ -118,6 +138,16 @@ impl HubPairing {
         };
         self.forget_command(id);
         heard
+    }
+
+    /// A command refused while as many wait as the machine takes: the
+    /// oldest has its answer, or is given up on, by
+    /// [`COMMAND_ANSWER_WITHIN`] from now.
+    fn busy(&self) -> CommandAskRefused {
+        let now = self.clock.now();
+        CommandAskRefused::Busy {
+            retry_at: now.checked_add(COMMAND_ANSWER_WITHIN).unwrap_or(now),
+        }
     }
 
     /// The machine `agent`'s `CommandResult` holding `payload`: the answer
