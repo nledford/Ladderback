@@ -305,6 +305,15 @@ async fn a_paired_machines_watch_says_what_it_found_in_one_line() {
     );
 }
 
+/// A machine that isn't paired has nothing to watch, and says nothing.
+#[tokio::test]
+async fn a_machine_that_isnt_paired_watches_without_a_line() {
+    let machine = machine(Arc::new(InMemoryIdentity::default()));
+    crate::test_log::capture_the_log();
+    assert_eq!(machine.leases.watch(&[repository('a')]).await, Ok(vec![]));
+    assert_eq!(logged(), vec![]);
+}
+
 /// A cache whose pauses can't be written, as a read-only database.
 struct PausesUnwritable;
 
