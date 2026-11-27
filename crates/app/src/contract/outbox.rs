@@ -64,6 +64,7 @@ pub async fn run_inbox(harness: &dyn ReportInboxHarness) {
     the_last_place_taken_is_read_for_each_agent_and_epoch(harness).await;
     a_report_unlike_the_one_taken_at_its_place_diverges(harness).await;
     a_diverged_mark_is_forgotten_with_its_epoch(harness).await;
+    a_report_held_under_another_machine_id_is_sent_again(harness).await;
     live::the_latest_plans_are_kept_in_place_of_the_last(harness).await;
     live::the_latest_progress_is_kept_in_place_of_the_last(harness).await;
 }
@@ -815,8 +816,7 @@ fn other_at(epoch: OutboxEpoch, place: u64) -> OutboxEntry {
 /// behind, as before. Another diverges, near or far behind the last taken:
 /// it is kept nowhere, and its epoch is marked diverged, for that agent and
 /// epoch only, across restarts. With no report at the place, one the hub
-/// holds under another machine ID is sent again (#1513), and one it holds
-/// nowhere diverges.
+/// holds nowhere diverges.
 async fn a_report_unlike_the_one_taken_at_its_place_diverges(harness: &dyn ReportInboxHarness) {
     let inbox = harness.empty().await;
     let window = u64::try_from(SEND_WINDOW).unwrap_or(u64::MAX);
@@ -858,10 +858,21 @@ async fn a_report_unlike_the_one_taken_at_its_place_diverges(harness: &dyn Repor
         diverged(inbox.as_ref(), OTHER_AGENT, EPOCH).await,
         Some(false)
     );
+    drop(inbox);
+    let inbox = harness.reopened().await;
+    assert_eq!(diverged(inbox.as_ref(), AGENT, EPOCH).await, Some(true));
+}
+
+/// With no report at a place the hub took, a report the hub holds under
+/// another machine ID is sent again (#1513), and doesn't diverge.
+async fn a_report_held_under_another_machine_id_is_sent_again(harness: &dyn ReportInboxHarness) {
+    let inbox = harness.empty().await;
+    taken(inbox.as_ref(), AGENT, &entry(EPOCH, 5)).await;
     let held = entry(OTHER_EPOCH, 1);
     taken(inbox.as_ref(), OTHER_AGENT, &held).await;
     let again = OutboxEntry {
-        seq: seq(5),
+        epoch: EPOCH,
+        seq: seq(3),
         ..held
     };
     for _ in 0..2 {
@@ -871,13 +882,7 @@ async fn a_report_unlike_the_one_taken_at_its_place_diverges(harness: &dyn Repor
             "a report held under another machine ID"
         );
     }
-    assert_eq!(
-        diverged(inbox.as_ref(), AGENT, OTHER_EPOCH).await,
-        Some(false)
-    );
-    drop(inbox);
-    let inbox = harness.reopened().await;
-    assert_eq!(diverged(inbox.as_ref(), AGENT, EPOCH).await, Some(true));
+    assert_eq!(diverged(inbox.as_ref(), AGENT, EPOCH).await, Some(false));
 }
 
 /// The diverged mark lives with its epoch's last place taken: once the hub

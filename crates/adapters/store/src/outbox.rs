@@ -7,7 +7,7 @@ use async_trait::async_trait;
 use domain::fleet::{
     AgentReport, EpochSeconds, Happening, Ingest, MAX_EPOCHS_HELD, MAX_REPORTS_HELD,
     OutboxAdmission, OutboxEpoch, OutboxPosition, PlansReport, ReportSeq, ReportedProgress,
-    WireName, admit, ingest,
+    WireName, admit, diverges, ingest,
 };
 use domain::{AgentId, OperationId, Timestamp, Uuid};
 use sqlx::sqlite::SqliteRow;
@@ -50,6 +50,16 @@ const WAITING: &str = "SELECT seq, op_id, happening, code, at FROM sync_outbox \
      WHERE seq > ? ORDER BY seq LIMIT ?";
 const ACKNOWLEDGE: &str = "DELETE FROM sync_outbox WHERE seq <= ?";
 const WATERMARK: &str = "SELECT seq FROM sync_watermarks WHERE machine_id = ? AND epoch = ?";
+/// The report the hub took at a place of an agent's epoch, the last taken
+/// there should the epoch have been forgotten and taken again.
+const AT_PLACE: &str = "SELECT op_id, happening, code, at FROM sync_reports \
+     WHERE machine_id = ? AND epoch = ? AND seq = ? ORDER BY id DESC LIMIT 1";
+/// Whether the hub holds an operation's happening, from whichever machine
+/// ID (`sync_reports_once`).
+const HELD_ANYWHERE: &str = "SELECT 1 FROM sync_reports WHERE op_id = ? AND happening = ?";
+const MARK_DIVERGED: &str =
+    "UPDATE sync_watermarks SET diverged = 1 WHERE machine_id = ? AND epoch = ?";
+const DIVERGED: &str = "SELECT diverged FROM sync_watermarks WHERE machine_id = ? AND epoch = ?";
 const RAISE: &str = "INSERT INTO sync_watermarks (machine_id, epoch, seq, ingested_at) \
      VALUES (?, ?, ?, ?) ON CONFLICT (machine_id, epoch) \
      DO UPDATE SET seq = excluded.seq, ingested_at = excluded.ingested_at";
@@ -244,10 +254,20 @@ impl ReportInbox for SqliteStore {
             .transpose()?;
         let verdict = ingest(held, entry.seq);
         if verdict != Ingest::New {
+            let diverged = check_content(&mut tx, &agent, &epoch, entry).await?;
+            if diverged {
+                sqlx::query(MARK_DIVERGED)
+                    .bind(&agent)
+                    .bind(&epoch)
+                    .execute(&mut *tx)
+                    .await
+                    .map_err(unavailable)?;
+                tx.commit().await.map_err(unavailable)?;
+            }
             return Ok(Ingested {
                 ingest: verdict,
                 dropped: None,
-                diverged: false,
+                diverged,
             });
         }
         sqlx::query(RAISE)
@@ -386,8 +406,15 @@ impl ReportInbox for SqliteStore {
     }
 
     async fn diverged(&self, agent: AgentId, epoch: OutboxEpoch) -> Result<bool, StoreError> {
-        let _ = (agent, epoch);
-        todo!("the diverged mark")
+        let _call = self.call().await;
+        let mut conn = self.pool.acquire().await.map_err(unavailable)?;
+        let marked: Option<i64> = sqlx::query_scalar(DIVERGED)
+            .bind(agent_id_text(agent))
+            .bind(epoch.as_uuid().to_string())
+            .fetch_optional(&mut *conn)
+            .await
+            .map_err(unavailable)?;
+        Ok(marked.is_some_and(|marked| marked != 0))
     }
 
     async fn keep_plans(&self, agent: AgentId, plans: &PlansReport) -> Result<(), StoreError> {
@@ -426,6 +453,40 @@ async fn meta(conn: &mut SqliteConnection) -> Result<Option<(OutboxEpoch, u64)>,
     let last: i64 = row.try_get("last_seq").map_err(unavailable)?;
     let last = u64::try_from(last).map_err(|_| corrupt("last_seq"))?;
     Ok(Some((epoch_of(&row, "epoch")?, last)))
+}
+
+/// Whether `entry`, at a place of `agent`'s `epoch` the hub took, diverges
+/// from the report taken there (`domain::fleet::diverges`), read in the
+/// ingest's transaction.
+async fn check_content(
+    conn: &mut SqliteConnection,
+    agent: &str,
+    epoch: &str,
+    entry: &OutboxEntry,
+) -> Result<bool, StoreError> {
+    let at_place = sqlx::query(AT_PLACE)
+        .bind(agent)
+        .bind(epoch)
+        .bind(place(entry.seq))
+        .fetch_optional(&mut *conn)
+        .await
+        .map_err(unavailable)?
+        .map(|row| report_of(&row))
+        .transpose()?;
+    let held_anywhere = match at_place {
+        Some(_) => true,
+        None => {
+            let (happening, _) = happening_text(&entry.report.happening);
+            sqlx::query(HELD_ANYWHERE)
+                .bind(entry.report.op_id.as_uuid().to_string())
+                .bind(happening)
+                .fetch_optional(&mut *conn)
+                .await
+                .map_err(unavailable)?
+                .is_some()
+        }
+    };
+    Ok(diverges(&entry.report, at_place.as_ref(), held_anywhere))
 }
 
 /// A place as the store keeps it: every place the outbox gives fits, and

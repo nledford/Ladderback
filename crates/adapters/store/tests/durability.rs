@@ -150,7 +150,11 @@ async fn reopening_does_not_apply_the_migrations_again() {
     scratch.open().await.close().await;
     let first = migration_rows(&scratch).await;
     let versions: Vec<i64> = first.iter().map(|row| row.0).collect();
-    assert_eq!(versions, [1], "the baseline ships alone: {first:?}");
+    assert_eq!(
+        versions,
+        [1, 2],
+        "the baseline, then each after it: {first:?}"
+    );
     assert!(
         first.iter().all(|row| row.2),
         "and each is recorded as applied"

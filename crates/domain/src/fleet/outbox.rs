@@ -293,8 +293,14 @@ pub fn ingest(held: Option<ReportSeq>, seq: ReportSeq) -> Ingest {
 /// is new to it: the agent's outbox gave the place again to another report,
 /// as one restored from an older database does.
 pub fn diverges(sent: &AgentReport, at_place: Option<&AgentReport>, held_anywhere: bool) -> bool {
-    let _ = (sent, at_place, held_anywhere);
-    todo!("the content check")
+    match at_place {
+        Some(taken) => {
+            taken.op_id != sent.op_id
+                || std::mem::discriminant(&taken.happening)
+                    != std::mem::discriminant(&sent.happening)
+        }
+        None => !held_anywhere,
+    }
 }
 
 #[cfg(test)]

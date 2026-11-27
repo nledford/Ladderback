@@ -2053,7 +2053,9 @@ async fn the_hub_welcomes_only_a_proved_agents_first_hello() {
             Err(refusal)
         );
     }
-    let Ok(HelloAnswer::Welcome(welcome)) = hub
+    let Ok(HelloAnswer::Welcome {
+        envelope: welcome, ..
+    }) = hub
         .pairing
         .welcome(
             &keys,

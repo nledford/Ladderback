@@ -1,10 +1,10 @@
-use std::collections::{BTreeMap, HashMap};
+use std::collections::{BTreeMap, HashMap, HashSet};
 use std::sync::{Mutex, PoisonError};
 
 use async_trait::async_trait;
 use domain::fleet::{
     AgentReport, Ingest, MAX_EPOCHS_HELD, MAX_REPORTS_HELD, OutboxAdmission, OutboxEpoch,
-    OutboxPosition, PlansReport, ReportSeq, ReportedProgress, admit, ingest,
+    OutboxPosition, PlansReport, ReportSeq, ReportedProgress, admit, diverges, ingest,
 };
 use domain::{AgentId, Timestamp, Uuid};
 
@@ -146,6 +146,9 @@ pub struct InMemoryReportInbox {
 struct Agent {
     /// Each epoch's last place taken and when, in no order.
     epochs: Vec<(OutboxEpoch, ReportSeq, Timestamp)>,
+    /// The epochs whose report diverged from the one taken at its place,
+    /// each among `epochs`: the store keeps the mark on the epoch's row.
+    diverged: HashSet<OutboxEpoch>,
     /// The reports taken, oldest first.
     reports: Vec<OutboxEntry>,
     /// How many reports were let go of past the cap.
@@ -184,10 +187,20 @@ impl ReportInbox for InMemoryReportInbox {
             .map(|(_, seq, _)| *seq);
         let verdict = ingest(through, entry.seq);
         if verdict != Ingest::New {
+            let at_place = held
+                .reports
+                .iter()
+                .rev()
+                .find(|kept| kept.epoch == entry.epoch && kept.seq == entry.seq)
+                .map(|kept| &kept.report);
+            let diverged = diverges(&entry.report, at_place, held_already);
+            if diverged {
+                held.diverged.insert(entry.epoch);
+            }
             return Ok(Ingested {
                 ingest: verdict,
                 dropped: None,
-                diverged: false,
+                diverged,
             });
         }
         match place.and_then(|place| held.epochs.get_mut(place)) {
@@ -202,6 +215,9 @@ impl ReportInbox for InMemoryReportInbox {
         held.epochs
             .sort_by_key(|(epoch, _, at)| (*epoch != entry.epoch, std::cmp::Reverse(*at)));
         held.epochs.truncate(epochs);
+        let kept = &held.epochs;
+        held.diverged
+            .retain(|marked| kept.iter().any(|(epoch, _, _)| epoch == marked));
         if held_already {
             return Ok(Ingested {
                 ingest: Ingest::Duplicate,
@@ -268,8 +284,10 @@ impl ReportInbox for InMemoryReportInbox {
     }
 
     async fn diverged(&self, agent: AgentId, epoch: OutboxEpoch) -> Result<bool, StoreError> {
-        let _ = (agent, epoch);
-        todo!("the diverged mark")
+        let agents = self.agents.lock().unwrap_or_else(PoisonError::into_inner);
+        Ok(agents
+            .get(&agent)
+            .is_some_and(|held| held.diverged.contains(&epoch)))
     }
 
     async fn keep_plans(&self, agent: AgentId, plans: &PlansReport) -> Result<(), StoreError> {

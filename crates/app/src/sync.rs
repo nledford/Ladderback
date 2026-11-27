@@ -473,11 +473,18 @@ impl SyncWithHub {
                 .start_epoch(stated.epoch)
                 .await
                 .map_err(SyncFailure::Store)?;
-            log::warn!(
-                "the hub took the place the outbox gives next already, as after a restore from \
-                 an older database: the outbox starts a new epoch ({started:?}) so the hub keeps \
-                 its reports"
-            );
+            match started {
+                Some(epoch) => log::warn!(
+                    "the hub told this machine to start a new outbox epoch, as after a restore \
+                     from an older database: its reports wait under epoch {} so the hub keeps \
+                     them",
+                    epoch.as_uuid()
+                ),
+                None => log::info!(
+                    "the hub told this machine to start a new outbox epoch, and the outbox has \
+                     started one already"
+                ),
+            }
         }
         Ok((connected.approval != Approval::Pending).then_some((connected, channel)))
     }
