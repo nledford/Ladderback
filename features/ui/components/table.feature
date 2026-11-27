@@ -118,8 +118,9 @@ Feature: The table
   # The Columns panel (decision 140): a table may let the reader hide, show
   # and reorder its columns after the row header's, by keyboard through the
   # panel's checkboxes and Move buttons, or by dragging an item of its list
-  # by its handle. This browser keeps the choice for that table.
-  Scenario: The Columns button opens a panel that lists every column after the row header's, in the table's order
+  # by its handle. This browser keeps the choice for that table. A column
+  # the table always shows, the demo's Kind, isn't listed (#1625).
+  Scenario: The Columns button opens a panel that lists every column after the row header's and those always shown, in the table's order
     When I open the "Table" demo
     And I press Tab until focus is on the button "Columns"
     And I press Enter
@@ -135,11 +136,11 @@ Feature: The table
     And I press Enter
     And I press Tab until focus is on the checkbox "Size"
     And I press Space
-    Then the column headers of the table "Demo folders" are "Name, Changed, Files, Actions"
+    Then the column headers of the table "Demo folders" are "Name, Kind, Changed, Files, Actions"
     And the polite region reads "Size hidden."
     And the row "Total" of the table "Demo folders" reads "1,540" in the column "Files"
     When I press Space
-    Then the column headers of the table "Demo folders" are "Name, Size, Changed, Files, Actions"
+    Then the column headers of the table "Demo folders" are "Name, Kind, Size, Changed, Files, Actions"
     And the polite region reads "Size shown."
 
   Scenario: Hiding the column a table is sorted by returns its rows to the order given
@@ -159,12 +160,12 @@ Feature: The table
     And I press Enter
     And I press Tab until focus is on the button "Move Files up"
     And I press Enter
-    Then the column headers of the table "Demo folders" are "Name, Size, Files, Changed, Actions"
+    Then the column headers of the table "Demo folders" are "Name, Kind, Size, Files, Changed, Actions"
     And the polite region reads "Files moved to position 2 of 4."
     And focus is kept on the button "Move Files up"
     And the row "Total" of the table "Demo folders" reads "1,540" in the column "Files"
     When I press Enter
-    Then the column headers of the table "Demo folders" are "Name, Files, Size, Changed, Actions"
+    Then the column headers of the table "Demo folders" are "Name, Kind, Files, Size, Changed, Actions"
     And the polite region reads "Files moved to position 1 of 4."
     And focus is kept on the button "Move Files down"
     And the button "Move Files up" says it is unavailable, and is not disabled, wherever focus is
@@ -179,7 +180,7 @@ Feature: The table
     And I press Enter
     And I press Tab until focus is on the button "Reset columns"
     And I press Enter
-    Then the column headers of the table "Demo folders" are "Name, Size, Changed, Files, Actions"
+    Then the column headers of the table "Demo folders" are "Name, Kind, Size, Changed, Files, Actions"
     And the checkbox "Size" is checked
     And the polite region comes to contain "Columns reset: every column shown, in the order given."
     And focus is kept on the button "Reset columns"
@@ -193,7 +194,7 @@ Feature: The table
     And I press Tab until focus is on the button "Move Actions up"
     And I press Enter
     And I reload the page
-    Then the column headers of the table "Demo folders" are "Name, Size, Actions, Files"
+    Then the column headers of the table "Demo folders" are "Name, Kind, Size, Actions, Files"
 
   Scenario: Escape closes the Columns panel and hands focus back to its button
     When I open the "Table" demo
@@ -204,6 +205,28 @@ Feature: The table
     Then focus is on the button "Columns"
     And the button "Columns" says its panel is closed
 
+  # A column the table always shows (decision 140, #1625) stands right after
+  # the row header whatever the reader hides, and Reset leaves it there.
+  # The total stays under its own column, the footer counting Kind first.
+  Scenario: A column the table always shows stays right after the row header with every other column hidden
+    When I open the "Table" demo
+    And I press Tab until focus is on the button "Columns"
+    And I press Enter
+    And I press Tab until focus is on the checkbox "Size"
+    And I press Space
+    And I press Tab until focus is on the checkbox "Changed"
+    And I press Space
+    And I press Tab until focus is on the checkbox "Files"
+    And I press Space
+    And I press Tab until focus is on the checkbox "Actions"
+    And I press Space
+    Then the column headers of the table "Demo folders" are "Name, Kind"
+    And the row "photos" of the table "Demo folders" reads "Folder" in the column "Kind"
+    When I press Tab until focus is on the button "Reset columns"
+    And I press Enter
+    Then the column headers of the table "Demo folders" are "Name, Kind, Size, Changed, Files, Actions"
+    And the row "Total" of the table "Demo folders" reads "1,540" in the column "Files"
+
   # Dragging is never the only way (2.5.7): the Move buttons above do it
   # all by keyboard. This is the pointer's own behavior, so its step moves
   # and presses the pointer through support/pointer.ts.
@@ -212,7 +235,7 @@ Feature: The table
     And I press Tab until focus is on the button "Columns"
     And I press Enter
     And I drag the column "Files" by its handle onto the top half of the column "Size" in the Columns panel
-    Then the column headers of the table "Demo folders" are "Name, Files, Size, Changed, Actions"
+    Then the column headers of the table "Demo folders" are "Name, Kind, Files, Size, Changed, Actions"
     And the polite region reads "Files moved to position 1 of 4."
 
   # A line shows where the held column would land, and only there, under
@@ -226,7 +249,7 @@ Feature: The table
     And I hold the column "Files" by its handle over the top half of the column "Size" in the Columns panel
     Then the Columns panel draws one line, before the column "Size"
     When I let go of the pointer
-    Then the column headers of the table "Demo folders" are "Name, Files, Size, Changed, Actions"
+    Then the column headers of the table "Demo folders" are "Name, Kind, Files, Size, Changed, Actions"
 
     Examples:
       | colors        |
@@ -241,7 +264,7 @@ Feature: The table
     And I press Enter
     And I press Tab until focus is on the button "Add a file to music"
     And I drag the column "Actions" by its handle onto the top half of the column "Size" in the Columns panel
-    Then the column headers of the table "Demo folders" are "Name, Actions, Size, Changed, Files"
+    Then the column headers of the table "Demo folders" are "Name, Kind, Actions, Size, Changed, Files"
     And focus is kept on the button "Add a file to music"
 
   Scenario: On a small screen with larger text, the open Columns panel doesn't make the page scroll sideways

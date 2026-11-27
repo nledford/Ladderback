@@ -182,8 +182,9 @@ Feature: Repositories page
     And the row "notes" of the table "Repositories" says "No one maintains it from here." in its "Maintenance" column to a screen reader
 
   # On a small screen with larger text, the row's name stays pinned at the
-  # frame's start and who maintains it is the next cell, its words whole,
-  # and the page doesn't scroll sideways (1.4.10).
+  # frame's start and who maintains it is the next cell, its words whole;
+  # where the frame is narrower than the cell, the frame scrolls to show the
+  # rest of its line, and the page doesn't scroll sideways (1.4.10).
   Scenario Outline: On a small screen who maintains each repository is the cell after its name
     Given a daemon with these repositories:
       | repository | maintained by |
