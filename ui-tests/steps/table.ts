@@ -274,6 +274,18 @@ Then(
   },
 );
 
+// A wide screen's room holds the table's columns: they add up to no more
+// than the page's width at 1280 px (§4.5, the table), so its frame has
+// nothing to scroll.
+Then("the frame of the table {string} doesn't scroll sideways", async function (this: BrowserWorld, name: string) {
+  const found = this.page.getByRole("table", { name: namePattern(name) });
+  await expect(found).toBeVisible();
+  const { scroll, client } = await found
+    .locator("xpath=..")
+    .evaluate((frame) => ({ scroll: frame.scrollWidth, client: frame.clientWidth }));
+  assert.ok(scroll <= client + 1, `the frame of the table "${name}" scrolls: ${scroll}px of content in ${client}px`);
+});
+
 // An instant in a cell is the cell's own words, in a `<time datetime>` that
 // gives it to a program (§4.5, "Time"), so a keyboard or a screen reader meets
 // it where a sighted reader does. A `title`, which only a pointer resting on

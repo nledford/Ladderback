@@ -46,20 +46,22 @@ Feature: Repositories page
     And the main content shows "Repositories" once, as its heading
     And the page has no accessibility violations
 
-  # On a wide screen the Location column is as wide as its longest address
-  # needs, so the address sits on one line, and the Password column has the
+  # On a wide screen the Location column holds a long address on two lines
+  # at most, broken only after a separator, and the Password column has the
   # room the other columns leave: at least a quarter of the table, so where
   # a password comes from, and a warning about it, read as sentences. A path
   # in it, such as the file a password is read from, moves to the next line
   # whole rather than breaking inside a word ("exampl" / "e.password"). A
   # fixed share left Location half empty beside a Password column squeezed
-  # to a fifth (#482).
-  Scenario: On a wide screen a location's address sits on one line and the Password column keeps its room
+  # to a fifth (#482). The columns, Maintenance among them, add up to the
+  # page's room, so the table's frame doesn't scroll there either (#1625).
+  Scenario: On a wide screen a location's address breaks only between its parts and the Password column keeps its room
     Given a daemon whose repository "nas" has the locations "sftp:me@nas.home.lan:/srv/data/repo/pc/main" and "rest:https://backup.example.org/laptop" and its password in the file "/etc/ladderback/example.password"
     And a viewport of 1280 by 800 pixels
     When I open the address "/repositories"
     Then the repository "nas" lists 2 locations
-    And the address "sftp:me@nas.home.lan:/srv/data/repo/pc/main" of the repository "nas" sits on one line
+    And the address "sftp:me@nas.home.lan:/srv/data/repo/pc/main" of the repository "nas" breaks only after a separator, each part whole
+    And the frame of the table "Repositories" doesn't scroll sideways
     And the row "nas" of the table "Repositories" keeps each part of "/etc/ladderback/example.password" whole in its "Password" column
     And the column "Password" of the table "Repositories" takes at least a quarter of the table's width
     And the header "Actions" of the table "Repositories" keeps its words whole
