@@ -148,13 +148,22 @@ pub fn hello_payload(hello: &Hello) -> Vec<u8> {
 
 /// Where an outbox stands, on the wire: its epoch as its UUID's text.
 fn outbox_payload(position: OutboxPosition) -> OutboxPayload {
-    todo!("{position:?}")
+    OutboxPayload {
+        epoch: position.epoch.as_uuid().to_string(),
+        next: position.next.get(),
+    }
 }
 
 /// Where an outbox stands, as a `Hello` says it; an epoch that isn't a
-/// UUID, or a place of 0, refuses the frame.
+/// UUID, or a place of 0 or past `i64::MAX`, which the hub's store can't
+/// hold, refuses the frame.
 fn outbox_position(payload: OutboxPayload) -> Result<OutboxPosition, WireRefused> {
-    todo!("{payload:?}")
+    Ok(OutboxPosition {
+        epoch: OutboxEpoch::from_uuid(uuid(&payload.epoch)?),
+        next: ReportSeq::new(payload.next)
+            .filter(|next| i64::try_from(next.get()).is_ok())
+            .ok_or(WireRefused)?,
+    })
 }
 
 /// The `Hello` a payload's bytes hold.
@@ -186,7 +195,7 @@ pub fn welcome_payload(welcome: &Welcome) -> Vec<u8> {
         hub_version: welcome.hub_version.clone(),
         signed_at: welcome.signed_at.seconds(),
         status: status_of(welcome.approval),
-        new_epoch: welcome.new_epoch && todo!(),
+        new_epoch: welcome.new_epoch,
     }
     .to_bytes()
 }
@@ -203,7 +212,7 @@ pub fn read_welcome(bytes: &[u8]) -> Result<Welcome, WireRefused> {
         hub_version: payload.hub_version,
         signed_at: EpochSeconds::from_seconds(payload.signed_at),
         approval: approval_of(payload.status),
-        new_epoch: payload.new_epoch && todo!(),
+        new_epoch: payload.new_epoch,
     })
 }
 

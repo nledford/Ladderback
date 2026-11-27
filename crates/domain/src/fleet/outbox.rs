@@ -145,7 +145,7 @@ pub struct OutboxPosition {
 /// as one restored from an older database does (#1387). Past the last
 /// place taken, every place the agent gives is new to the hub.
 pub fn starts_new_epoch(taken: Option<ReportSeq>, next: ReportSeq) -> bool {
-    todo!("{taken:?} {next:?}")
+    taken.is_some_and(|taken| next <= taken)
 }
 
 /// What a report says happened to an operation.
