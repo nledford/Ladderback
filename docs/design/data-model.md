@@ -130,6 +130,8 @@ A copy that fails is `OpenError::BaselineCopy`, whose `CopyFailure` cause says w
 
 **Released migrations are append-only.** Every installed database records each applied migration's sqlx checksum and the store refuses to open one whose file has since changed, so a released migration is never edited, renamed or removed: a change is a new migration. `crates/adapters/store/tests/migrations_pinned.rs` pins each migration's checksum and fails on any such edit, or on a migration it doesn't list; adding a migration adds its line there in the same PR (#1068). The baseline replaced every migration once, before the first release (decision 165); from the first release on, the rule holds again.
 
+**Migrations after the baseline.** `0002_diverged_epochs.sql` adds `sync_watermarks.diverged`, a 0/1 flag set when a machine's report at a place the hub took isn't the one taken there, and an index on `sync_reports (machine_id, epoch, seq)` to read that report ([decision 177](decisions/177-a-restored-outbox-starts-a-new-epoch.md)).
+
 **The hub's tables ship in every build,** as the hub does from the MVP's release; a release before it held them empty (§16, decision 122).
 
 The tables:
