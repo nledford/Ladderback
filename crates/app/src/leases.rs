@@ -185,6 +185,12 @@ impl MaintenanceLeases {
         held.paused_since(repository?, self.now())
     }
 
+    /// Whether this machine is paired with a hub, so its maintenance can be
+    /// paused: false when it isn't, or its pin can't be read.
+    pub async fn paired(&self) -> bool {
+        matches!(self.identity.pin().await, Ok(Some(_)))
+    }
+
     /// Notes, now, which of `maintained`, the repositories the
     /// configuration asks this machine to maintain, are paused for want of
     /// a lease, and returns each pause an earlier watch noted that has
@@ -303,12 +309,24 @@ impl WatchPauses {
             log::warn!("the maintenance watch noted no pause: the configuration can't be read");
             return Vec::new();
         };
-        let maintained: Vec<(&RepositoryAlias, &RepositoryId)> = config
+        let owned: Vec<(&RepositoryAlias, Option<&RepositoryId>)> = config
             .repositories()
             .iter()
             .filter(|(_, entry)| Ownership::owned_here(entry.maintenance))
-            .filter_map(|(alias, entry)| entry.id.as_ref().map(|id| (alias, id)))
+            .map(|(alias, entry)| (alias, entry.id.as_ref()))
             .collect();
+        let maintained: Vec<(&RepositoryAlias, &RepositoryId)> = owned
+            .iter()
+            .filter_map(|(alias, id)| id.map(|id| (*alias, id)))
+            .collect();
+        // A pause is kept by ID, so one of an entry that records none can't
+        // be noted, though its maintenance is refused all the same (#1671).
+        let unidentified = owned.len().saturating_sub(maintained.len());
+        if unidentified > 0 && self.leases.paired().await {
+            log::warn!(
+                "the maintenance watch can't note a pause for {unidentified} of the repositories maintained here: their entries record no repository ID"
+            );
+        }
         let ids: Vec<RepositoryId> = maintained.iter().map(|(_, id)| (*id).clone()).collect();
         let due = match self.leases.watch(&ids).await {
             Ok(due) => due,

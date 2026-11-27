@@ -613,6 +613,29 @@ async fn a_watch_says_in_the_log_what_it_maintains_with_no_id() {
     );
 }
 
+/// A machine that isn't paired is never paused, so a watch of an entry
+/// that records no ID says nothing of it.
+#[tokio::test]
+async fn an_unpaired_watch_says_nothing_of_what_it_maintains_with_no_id() {
+    let config: Arc<dyn ConfigStore> =
+        photos_with(domain::planning::Maintenance::Local, None).await;
+    let leases = Arc::new(MaintenanceLeases::new(
+        Arc::new(InMemoryIdentity::default()),
+        Arc::new(InMemoryLeaseCache::default()),
+        Arc::new(FakeClock::new(start())),
+    ));
+    let notify = Arc::new(Notify::new(
+        config.clone(),
+        Arc::new(crate::fakes::InMemoryOperationStore::new()),
+        Arc::new(crate::fakes::FakeSecrets::default()),
+        Arc::new(crate::fakes::RecordingNotifier::new()),
+    ));
+    let watch = WatchPauses::new(config, leases, notify);
+    crate::test_log::capture_the_log();
+    assert_eq!(watch.watch().await, vec![]);
+    assert_eq!(logged(), vec![]);
+}
+
 /// A watch whose configuration can't be read notes nothing, and says so in
 /// the log (#1671).
 #[tokio::test]
