@@ -16,7 +16,7 @@ use app::pairing::{
 };
 use app::ports::{
     AgentRegistry as _, EventBus, Identity as _, IdentityError, LinkError, Signing as _,
-    ThisMachine as _,
+    StoreError, ThisMachine as _,
 };
 use app::sync::{LiveProgress, ReadPlans, RecordReports, SyncWithHub};
 use domain::fleet::{
@@ -227,6 +227,12 @@ fn start_refusal(error: &HubPairingError) -> (MessageId, Vec<(&'static str, MsgA
         HubPairingError::Identity(IdentityError::Unavailable { file, detail }) => (
             msg::CLI_HUB_KEY_FILE_UNAVAILABLE,
             vec![("file", text(file)), ("detail", text(escaped(detail)))],
+        ),
+        HubPairingError::Registry(
+            StoreError::Unavailable { detail } | StoreError::Corrupt { detail },
+        ) => (
+            msg::CLI_HUB_REGISTRY_FAILED,
+            vec![("detail", text(escaped(detail)))],
         ),
         other => (
             msg::CLI_HUB_KEYS_FAILED,
@@ -1924,7 +1930,6 @@ mod tests {
     /// names the registry, not the keys, and the database's text escaped.
     #[test]
     fn a_registry_that_stops_the_start_is_said_as_the_registry() {
-        use app::ports::StoreError;
         let (id, args) = start_refusal(&HubPairingError::Registry(StoreError::Unavailable {
             detail: "locked\u{1b}[31m".to_owned(),
         }));

@@ -722,7 +722,7 @@ cli-hub-key-file-damaged = the { -hub } didn't start: its key file { $file } in 
 # $detail (text): the system's message. It is shown as it came.
 cli-hub-key-file-unavailable = the { -hub } didn't start: its key file { $file } in the data folder couldn't be read or written ({ $detail }). Fix what this says, then start the { -hub } again.
 
-# The { -hub } didn't start because its keys couldn't be made or read, for a reason other than a key file the system refused or one that holds no key.
+# The { -hub } didn't start because its keys couldn't be made or read, for a reason other than a key file the system refused, one that holds no key, or its records of machines (cli-hub-registry-failed).
 # $detail (text): the reason, as the program names it. It is shown as it came.
 cli-hub-keys-failed = the { -hub } didn't start: its keys couldn't be made or read ({ $detail }). Start it again, and report this if it is said again.
 
