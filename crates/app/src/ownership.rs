@@ -58,8 +58,9 @@ pub struct RepositoryOwners {
     clock: Arc<dyn Clock>,
     /// The drive the registry is on, flushed before a new grant goes out.
     drive: Arc<dyn DriveFlush>,
-    /// Whether a flush failed since the last that succeeded, so a grant
-    /// may be off the drive's permanent storage.
+    /// Whether a grant may be off the drive's permanent storage: set from
+    /// the start, since a run before it may have stopped before its flush,
+    /// and while a grant's call hasn't flushed it.
     unflushed: AtomicBool,
     /// The hub's monotonic time at its start.
     started: SignedDuration,
@@ -81,7 +82,7 @@ impl RepositoryOwners {
             owners,
             clock,
             drive,
-            unflushed: AtomicBool::new(false),
+            unflushed: AtomicBool::new(true),
             window: Mutex::new(None),
         }
     }
@@ -97,7 +98,9 @@ impl RepositoryOwners {
 
     /// Takes `reports` as every repository `agent` uses, with `proven`, the
     /// floors among them whose proof the hub checked, and decides each at
-    /// the hub's now when the agent is approved.
+    /// the hub's now when the agent is approved. It flushes nothing, so a
+    /// grant it decides mustn't be sent: [`grant`](Self::grant) gives what
+    /// is sent.
     pub async fn report(
         &self,
         agent: AgentId,
@@ -124,6 +127,12 @@ impl RepositoryOwners {
         proven: &[ProvenFloor],
     ) -> Result<Granting, StoreError> {
         let now = self.clock.now();
+        // Marked before the decision commits a grant: one stored but not
+        // given, because what follows failed or the call was dropped,
+        // stays marked, and the next lease given is flushed first. Grants
+        // are given one at a time (`HubPairing`), so no other call clears
+        // the mark meanwhile.
+        let outstanding = self.unflushed.swap(true, Ordering::SeqCst);
         let Some(decided) = self.decide(agent, reports, proven, now).await? else {
             return Ok(Granting::NotApproved);
         };
@@ -142,13 +151,12 @@ impl RepositoryOwners {
             .collect();
         // A new grant goes out only once the drive holds it, so a power
         // cut can't take back a grant a machine holds; so does any lease
-        // while a flush has failed, since that grant may go out now as a
-        // renewal. Grants are given one at a time (`HubPairing`).
-        if given.iter().any(|(_, _, new)| *new) || self.unflushed.load(Ordering::SeqCst) {
-            self.unflushed.store(true, Ordering::SeqCst);
+        // while a grant may be off the drive, since it may go out now as a
+        // renewal.
+        if outstanding || given.iter().any(|(_, _, new)| *new) {
             self.drive.flush().await?;
-            self.unflushed.store(false, Ordering::SeqCst);
         }
+        self.unflushed.store(false, Ordering::SeqCst);
         Ok(Granting::Leases {
             generation: GENERATION,
             signed_at: now,
