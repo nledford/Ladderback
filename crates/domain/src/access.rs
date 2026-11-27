@@ -271,11 +271,26 @@ const SESSION_TAG_BYTES: usize = 8;
 /// session's digest, as 16 lower-case hex digits. It tells one session
 /// from another and says nothing of the token or of its digest (I4).
 #[derive(Clone, Debug, PartialEq, Eq, Hash, serde::Serialize, serde::Deserialize)]
+#[serde(try_from = "String")]
 pub struct SessionTag(String);
 
 /// Text that isn't 16 lower-case hex digits.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct InvalidSessionTag;
+
+impl std::fmt::Display for InvalidSessionTag {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str("a session tag isn't 16 lower-case hex digits")
+    }
+}
+
+impl TryFrom<String> for SessionTag {
+    type Error = InvalidSessionTag;
+
+    fn try_from(text: String) -> Result<Self, Self::Error> {
+        Self::parse(&text)
+    }
+}
 
 impl SessionTag {
     /// The tag of the session kept by `digest`.
