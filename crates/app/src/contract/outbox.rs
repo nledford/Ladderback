@@ -63,6 +63,7 @@ pub async fn run_inbox(harness: &dyn ReportInboxHarness) {
     an_operations_report_is_held_once_across_machines(harness).await;
     the_last_place_taken_is_read_for_each_agent_and_epoch(harness).await;
     a_report_unlike_the_one_taken_at_its_place_diverges(harness).await;
+    a_place_two_epochs_took_is_checked_within_its_own_epoch(harness).await;
     a_diverged_mark_is_forgotten_with_its_epoch(harness).await;
     a_report_held_under_another_machine_id_is_sent_again(harness).await;
     live::the_latest_plans_are_kept_in_place_of_the_last(harness).await;
@@ -861,6 +862,34 @@ async fn a_report_unlike_the_one_taken_at_its_place_diverges(harness: &dyn Repor
     drop(inbox);
     let inbox = harness.reopened().await;
     assert_eq!(diverged(inbox.as_ref(), AGENT, EPOCH).await, Some(true));
+}
+
+/// A new epoch numbers its places from where the old one stood, so after a
+/// restore two epochs can hold different reports at one place (#1387). A
+/// report sent again is checked against the one its own epoch took there,
+/// never another epoch's: sent again under either epoch, it is a duplicate
+/// and diverges nothing.
+async fn a_place_two_epochs_took_is_checked_within_its_own_epoch(harness: &dyn ReportInboxHarness) {
+    let inbox = harness.empty().await;
+    let before = entry(EPOCH, 1);
+    let after = other_at(OTHER_EPOCH, 1);
+    taken(inbox.as_ref(), AGENT, &before).await;
+    taken(inbox.as_ref(), AGENT, &after).await;
+    assert_eq!(
+        checked(inbox.as_ref(), AGENT, &after).await,
+        Some((Ingest::Duplicate, false)),
+        "the new epoch's report, sent again"
+    );
+    assert_eq!(
+        checked(inbox.as_ref(), AGENT, &before).await,
+        Some((Ingest::Duplicate, false)),
+        "the old epoch's report, sent again"
+    );
+    assert_eq!(diverged(inbox.as_ref(), AGENT, EPOCH).await, Some(false));
+    assert_eq!(
+        diverged(inbox.as_ref(), AGENT, OTHER_EPOCH).await,
+        Some(false)
+    );
 }
 
 /// With no report at a place the hub took, a report the hub holds under
