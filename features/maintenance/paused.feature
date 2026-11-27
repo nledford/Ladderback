@@ -3,10 +3,10 @@ Feature: A paired machine says when its maintenance is paused for want of a leas
   on it from its hub (technical design §7.3, I1). While it holds none on a
   repository it asks to maintain, its maintenance of that repository is
   paused, and the repository's state says since when: since its lease ran
-  out, or since the machine first saw it held none, which a read of the
-  repository's state notes at once, so a repository its hub leases to
-  another machine shows paused the moment the machine asks to maintain it,
-  not only once the next watch notes it (#1671). Once a pause has lasted
+  out, or since the machine first saw it held none: from the moment it
+  turns maintenance on, so a repository its hub leases to another machine
+  shows paused at once, not only once the next watch notes it (#1671), or
+  else from the watch that first sees it. Once a pause has lasted
   14 days the machine tells its notification rules, once, with
   `repo.maintenance_paused`. The next grant clears it. A run asked for by
   hand is refused with `maintenance-no-lease`, as before.
@@ -41,10 +41,11 @@ Feature: A paired machine says when its maintenance is paused for want of a leas
     And 2 days pass on the hub
     Then maintenance of "photos" on "laptop" is paused since 2 days ago
 
-  Scenario: A machine that asks to maintain a repository its hub leases to another machine is paused at once, before any watch
+  Scenario: A machine that turns maintenance on for a repository its hub leases to another machine is paused at once, before any watch
     Given "nas" claims the repository "photos" and hears the hub's grants
-    And "laptop" asks to maintain "photos"
-    When "laptop" claims the repository "photos" and hears the hub's grants
+    And "laptop" keeps "photos" without maintaining it
+    And "laptop" claims the repository "photos" and hears the hub's grants
+    When "laptop" turns on maintenance of "photos"
     Then "laptop" may not maintain "photos", because it holds no lease on it
     And maintenance of "photos" on "laptop" is paused since now
     When 2 days pass on the hub

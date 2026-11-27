@@ -58,6 +58,12 @@ impl ChangeMaintainer {
         }
     }
 
+    /// Notes the pause of a repository this paired machine turns
+    /// maintenance on for while it holds no lease on it (#1671).
+    pub fn with_leases(self, _leases: Arc<crate::leases::MaintenanceLeases>) -> Self {
+        todo!()
+    }
+
     /// Asks this agent to maintain the repository saved under `alias`
     /// (`maintain_here`), or nobody, and answers what its entry asks for
     /// now. An entry that already asks for it is not written again.

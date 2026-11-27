@@ -195,19 +195,16 @@ async fn kept_pause(cache: &InMemoryLeaseCache) {
     cache.save_pauses(&paused).await.unwrap();
 }
 
-/// The first read that sees no lease notes the pause at once, so a page
-/// says it from the moment maintenance is asked for, not from the next
-/// watch (#1671); the watch keeps its date.
+/// A read notes nothing: the pause is noted where it begins, when
+/// maintenance is turned on (#1671), or else by the watch, which keeps its
+/// date.
 #[tokio::test]
 async fn a_paired_machine_notes_and_reads_its_pauses_now() {
     let machine = machine(paired().await);
-    assert_eq!(
-        machine.leases.paused(Some(&repository('a'))).await,
-        Some(start())
-    );
-    machine.clock.advance(SignedDuration::from_hours(1));
+    assert_eq!(machine.leases.paused(Some(&repository('a'))).await, None);
+    assert_eq!(machine.cache.load().await.unwrap().pauses().count(), 0);
     assert_eq!(machine.leases.watch(&[repository('a')]).await, Ok(vec![]));
-    machine.clock.advance(SignedDuration::from_hours(23));
+    machine.clock.advance(SignedDuration::from_hours(24));
     assert_eq!(
         machine.leases.paused(Some(&repository('a'))).await,
         Some(start())
@@ -328,16 +325,114 @@ impl LeaseCache for PausesUnwritable {
     }
 }
 
-/// A pause a read can't note is still said: the machine maintains nothing
-/// there either way.
+/// Turns maintenance of `photos` on (`maintain_here`) or off on a machine
+/// keeping `leases`, as the Snapshots page's toggle does.
+async fn turn(
+    config: Arc<crate::fakes::InMemoryConfigStore>,
+    leases: Arc<MaintenanceLeases>,
+    maintain_here: bool,
+) -> Result<domain::planning::Maintenance, crate::repositories::MaintainerError> {
+    crate::repositories::ChangeMaintainer::new(
+        config,
+        Arc::new(crate::fakes::InMemoryOperationStore::new()),
+        Arc::default(),
+    )
+    .with_leases(leases)
+    .change(&RepositoryAlias::parse("photos").unwrap(), maintain_here)
+    .await
+}
+
+/// A paired machine that turns maintenance on for a repository its hub
+/// doesn't lease it notes the pause there and then, so every page says it
+/// at once rather than after the next watch (#1671); the watch keeps that
+/// date.
 #[tokio::test]
-async fn a_pause_a_read_cant_note_is_said_all_the_same() {
-    let leases = MaintenanceLeases::new(
+async fn turning_maintenance_on_without_a_lease_notes_the_pause_at_once() {
+    let machine = machine(paired().await);
+    let leases = Arc::new(machine.leases);
+    let config = photos(domain::planning::Maintenance::None).await;
+    assert_eq!(
+        turn(config, leases.clone(), true).await,
+        Ok(domain::planning::Maintenance::Local)
+    );
+    assert_eq!(leases.paused(Some(&repository('a'))).await, Some(start()));
+    machine.clock.advance(SignedDuration::from_hours(1));
+    assert_eq!(leases.watch(&[repository('a')]).await, Ok(vec![]));
+    assert_eq!(leases.paused(Some(&repository('a'))).await, Some(start()));
+}
+
+/// Turning maintenance on while holding a live lease notes no pause (I1:
+/// a held lease is never shown paused).
+#[tokio::test]
+async fn turning_maintenance_on_with_a_lease_notes_no_pause() {
+    let machine = machine(paired().await);
+    machine
+        .leases
+        .take(&grants(start()), 0, start())
+        .await
+        .unwrap();
+    let leases = Arc::new(machine.leases);
+    let config = photos(domain::planning::Maintenance::None).await;
+    turn(config, leases.clone(), true).await.unwrap();
+    assert_eq!(leases.paused(Some(&repository('a'))).await, None);
+    assert_eq!(machine.cache.load().await.unwrap().pauses().count(), 0);
+}
+
+/// Turning maintenance off drops the pause, so none is left behind for a
+/// repository this machine no longer asks to maintain.
+#[tokio::test]
+async fn turning_maintenance_off_drops_its_pause() {
+    let machine = machine(paired().await);
+    let leases = Arc::new(machine.leases);
+    let config = photos(domain::planning::Maintenance::None).await;
+    turn(config.clone(), leases.clone(), true).await.unwrap();
+    assert_eq!(machine.cache.load().await.unwrap().pauses().count(), 1);
+    turn(config, leases.clone(), false).await.unwrap();
+    assert_eq!(machine.cache.load().await.unwrap().pauses().count(), 0);
+}
+
+/// A machine that isn't paired is never paused, so turning maintenance on
+/// notes nothing.
+#[tokio::test]
+async fn turning_maintenance_on_unpaired_notes_nothing() {
+    let machine = machine(Arc::new(InMemoryIdentity::default()));
+    let leases = Arc::new(machine.leases);
+    let config = photos(domain::planning::Maintenance::None).await;
+    turn(config, leases.clone(), true).await.unwrap();
+    assert_eq!(machine.cache.load().await.unwrap().pauses().count(), 0);
+}
+
+/// A pause the toggle can't save leaves maintenance on, and the log says
+/// so by the failure's code alone (I4); the next watch notes it.
+#[tokio::test]
+async fn a_pause_the_toggle_cant_note_leaves_maintenance_on_and_says_so() {
+    let leases = Arc::new(MaintenanceLeases::new(
         paired().await,
         Arc::new(PausesUnwritable),
         Arc::new(FakeClock::new(start())),
+    ));
+    let config = photos(domain::planning::Maintenance::None).await;
+    crate::test_log::capture_the_log();
+    assert_eq!(
+        turn(config.clone(), leases, true).await,
+        Ok(domain::planning::Maintenance::Local)
     );
-    assert_eq!(leases.paused(Some(&repository('a'))).await, Some(start()));
+    let saved = config.load().await.unwrap();
+    assert_eq!(
+        saved
+            .repository(&RepositoryAlias::parse("photos").unwrap())
+            .map(|entry| entry.maintenance),
+        Some(domain::planning::Maintenance::Local)
+    );
+    assert_eq!(
+        crate::test_log::logged_by("app::repositories::maintainer"),
+        vec![(
+            log::Level::Warn,
+            "maintenance was turned on or off, but its pause couldn't be noted \
+             (store-unavailable); the next maintenance watch notes it"
+                .to_owned()
+        )]
+    );
 }
 
 /// A cache that can't be read at all, whose failure names a value nobody
@@ -394,13 +489,15 @@ impl ConfigStore for ConfigUnreadable {
     }
 }
 
-/// A configuration that asks to maintain `photos` (ID `a`) here.
-async fn maintaining_photos() -> Arc<dyn ConfigStore> {
+/// A configuration that keeps `photos` (ID `a`), asking `maintenance` of
+/// it.
+async fn photos(
+    maintenance: domain::planning::Maintenance,
+) -> Arc<crate::fakes::InMemoryConfigStore> {
     use std::collections::BTreeMap;
 
     use domain::planning::{
-        AgentConfig, AgentSettings, GroupBy, Hooks, Maintenance, RepositoryConfig,
-        RepositorySettings,
+        AgentConfig, AgentSettings, GroupBy, Hooks, RepositoryConfig, RepositorySettings,
     };
     use domain::secrets::SecretRef;
     let entry = RepositoryConfig {
@@ -414,7 +511,7 @@ async fn maintaining_photos() -> Arc<dyn ConfigStore> {
             options_hot: BTreeMap::new(),
             options_cold: BTreeMap::new(),
         },
-        maintenance: Maintenance::Local,
+        maintenance,
         group_by: GroupBy::default(),
         hooks: Hooks::default(),
     };
@@ -450,7 +547,11 @@ async fn watching(config: Arc<dyn ConfigStore>, cache: Arc<dyn LeaseCache>) -> W
 /// the log by the failure's code alone (#1671, I4).
 #[tokio::test]
 async fn a_watch_whose_cache_cant_be_read_says_so_in_the_log() {
-    let watch = watching(maintaining_photos().await, Arc::new(Unreadable)).await;
+    let watch = watching(
+        photos(domain::planning::Maintenance::Local).await,
+        Arc::new(Unreadable),
+    )
+    .await;
     crate::test_log::capture_the_log();
     assert_eq!(watch.watch().await, vec![]);
     assert_eq!(

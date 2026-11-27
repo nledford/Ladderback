@@ -1272,13 +1272,14 @@ async fn refused_lower(world: &mut Agent, machine: String, repository: String) {
     );
 }
 
-/// `machine`'s configuration: `repository` maintained here, of its ID on
-/// the hub, and, when `rule` names a channel, a rule that sends
+/// `machine`'s configuration: `repository`, of its ID on the hub, asking
+/// `maintenance` of it, and, when `rule` names a channel, a rule that sends
 /// `repo.maintenance_paused` to that webhook channel.
 async fn asks_to_maintain_with(
     world: &mut Agent,
     machine: &str,
     repository: &str,
+    maintenance: Maintenance,
     rule: Option<&str>,
 ) {
     let id = world.ownership.repository(repository);
@@ -1293,7 +1294,7 @@ async fn asks_to_maintain_with(
             options_hot: BTreeMap::new(),
             options_cold: BTreeMap::new(),
         },
-        maintenance: Maintenance::Local,
+        maintenance,
         group_by: GroupBy::default(),
         hooks: Hooks::default(),
     };
@@ -1354,7 +1355,29 @@ async fn asks_to_maintain_with(
 
 #[given(expr = "{string} asks to maintain {string}")]
 async fn asks_to_maintain(world: &mut Agent, machine: String, repository: String) {
-    asks_to_maintain_with(world, &machine, &repository, None).await;
+    asks_to_maintain_with(world, &machine, &repository, Maintenance::Local, None).await;
+}
+
+#[given(expr = "{string} keeps {string} without maintaining it")]
+async fn keeps_without_maintaining(world: &mut Agent, machine: String, repository: String) {
+    asks_to_maintain_with(world, &machine, &repository, Maintenance::None, None).await;
+}
+
+/// `machine` turns maintenance of `repository` on, as the Snapshots page's
+/// toggle does, which notes a pause at once when it holds no lease (#1671).
+#[when(expr = "{string} turns on maintenance of {string}")]
+async fn turns_on_maintenance(world: &mut Agent, machine: String, repository: String) {
+    let leases = world.ownership.holder(&machine).await.leases.clone();
+    let config = watcher(world, &machine).config.clone();
+    let changed = app::repositories::ChangeMaintainer::new(
+        config,
+        Arc::new(InMemoryOperationStore::new()),
+        Arc::default(),
+    )
+    .with_leases(leases)
+    .change(&RepositoryAlias::parse(&repository).unwrap(), true)
+    .await;
+    assert_eq!(changed, Ok(Maintenance::Local));
 }
 
 #[given(
@@ -1366,7 +1389,14 @@ async fn asks_to_maintain_with_a_rule(
     repository: String,
     channel: String,
 ) {
-    asks_to_maintain_with(world, &machine, &repository, Some(&channel)).await;
+    asks_to_maintain_with(
+        world,
+        &machine,
+        &repository,
+        Maintenance::Local,
+        Some(&channel),
+    )
+    .await;
 }
 
 #[when("a day passes on the hub")]
@@ -1410,8 +1440,8 @@ async fn paused_since(world: &mut Agent, repository: String, machine: String, da
     assert_eq!(paused(world, &machine, &repository).await, Some(since));
 }
 
-/// Paused since `machine`'s clock reads now: the read noted the pause the
-/// moment it saw no lease, with no watch since (#1671).
+/// Paused since `machine`'s clock reads now: turning maintenance on noted
+/// the pause the moment it saw no lease, with no watch since (#1671).
 #[then(expr = "maintenance of {string} on {string} is paused since now")]
 async fn paused_since_now(world: &mut Agent, repository: String, machine: String) {
     let now = world.ownership.holder(&machine).await.clock.now();
