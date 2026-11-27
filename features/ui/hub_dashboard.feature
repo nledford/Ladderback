@@ -125,12 +125,12 @@ Feature: The hub's dashboard of its machines
     Given a hub with sign-in off and a demo plan "demo-home" with a tiny scratch repository
     When I open the web UI
     And I skip to the content
-    And I press Tab until focus is on the button "Back up"
+    And I press Tab until focus is on the hub's own Back up button
     And I press Enter
     And I press Tab until focus is on the button "Start backup of demo-home"
     And I press Enter
-    Then the button "Back up" is collapsed
-    And focus is on the button "Back up"
+    Then the hub's own Back up button is collapsed
+    And focus is on the hub's own Back up button
     And the polite region reads "Backup started."
     And the hub's own card tells its status "Succeeded"
     And the page has no accessibility violations
@@ -141,9 +141,9 @@ Feature: The hub's dashboard of its machines
     And a hub with sign-in off and a demo plan "demo-home" with a tiny scratch repository
     When I open the web UI
     And I skip to the content
-    And I press Tab until focus is on the button "Back up"
+    And I press Tab until focus is on the hub's own Back up button
     And I press Enter
-    Then the menu of the button "Back up" lies inside the window
+    Then the menu of the hub's own Back up button lies inside the window
 
     Examples:
       | size |

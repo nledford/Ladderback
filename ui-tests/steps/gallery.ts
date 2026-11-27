@@ -649,7 +649,7 @@ const SNAPSHOTS: Record<string, string> = {
         - time: 11/10/26, 9:00:00 AM
       - term: Plans
       - definition: "2"
-      - button "Back up"
+      - button "Back up ⁨demo-hub⁩"
       - link "Open ⁨demo-hub⁩":
         - /url: /machines/demo-hub
   - listitem:

@@ -12,10 +12,11 @@ import { type DataTable, Given, Then, When } from "@cucumber/cucumber";
 import type { Locator } from "playwright";
 
 import { expect } from "../support/expect.ts";
-import { ISOLATION, journey, namePattern } from "../support/keyboard.ts";
+import { focusComesTo, ISOLATION, journey, namePattern } from "../support/keyboard.ts";
 import type { BrowserWorld } from "../support/world.ts";
 import { pressUntilFocusIsOn } from "./accessibility.ts";
 import { askHub, listedMachine } from "./approving_machines.ts";
+import { menuLiesInsideWindow } from "./disclosure_menu.ts";
 import { attentionMark, cardIn, factOf, markedWith, standInOneColumn, standSideBySide, statusOf } from "./machine_card.ts";
 
 /** The outbox epoch every report of a scenario's machine is under. */
@@ -365,6 +366,31 @@ Then("the hub's own card has its Open link and no button", async function (this:
   const card = await hubsCard(this);
   await expect(card.getByRole("link", { name: namePattern(`Open ${hostname}`) })).toHaveCount(1);
   await expect(card.getByRole("button")).toHaveCount(0);
+});
+
+// The hub's own Back up menu is named by the machine it backs up, as its
+// Open link is (The Summary Card Rule, DESIGN.md).
+async function backUpName(world: BrowserWorld): Promise<string> {
+  const { hostname } = await hubItself(world);
+  return `Back up ${hostname}`;
+}
+
+When("I press Tab until focus is on the hub's own Back up button", async function (this: BrowserWorld) {
+  await pressUntilFocusIsOn(this, "Tab", "button", await backUpName(this));
+});
+
+Then("focus is on the hub's own Back up button", async function (this: BrowserWorld) {
+  const name = await backUpName(this);
+  await focusComesTo(this.page, journey(this.page).byRole("button", { name: namePattern(name) }), `the button "${name}"`);
+});
+
+Then("the hub's own Back up button is collapsed", async function (this: BrowserWorld) {
+  const button = this.page.getByRole("button", { name: namePattern(await backUpName(this)) });
+  await expect(button).toHaveAttribute("aria-expanded", "false");
+});
+
+Then("the menu of the hub's own Back up button lies inside the window", async function (this: BrowserWorld) {
+  await menuLiesInsideWindow(this.page, await backUpName(this));
 });
 
 // The Open link stands before the Back up menu, which is last on the card.

@@ -18,7 +18,7 @@ Feature: The machine card
   Scenario: A card is an article named by its heading, and the card itself is never a stop for Tab
     When I open the "Machine card" demo
     And I press Tab
-    Then focus is on the button "Back up"
+    Then focus is on the button "Back up demo-hub"
     When I press Tab
     Then focus is on the link "Open demo-hub"
     When I press Tab
