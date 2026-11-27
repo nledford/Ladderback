@@ -103,7 +103,7 @@ impl HubPairing {
             }
         }
         let Some((accepts, mut line)) = self.command_line(agent) else {
-            return Err(CommandAskRefused::MachineOffline);
+            return Err(self.offline(agent, &command).await);
         };
         match accepts {
             Some(accepts) if accepts.takes(command.kind()) => {}
@@ -143,6 +143,30 @@ impl HubPairing {
         };
         self.forget_command(id);
         heard
+    }
+
+    /// The refusal of `command` to the machine `agent`, offline: for a run
+    /// of a plan, with its next run on its schedule as the machine last
+    /// reported it, when that is still to come by the hub's clock.
+    async fn offline(&self, agent: AgentId, command: &HubCommand) -> CommandAskRefused {
+        let (HubCommand::RunPlan { plan }, Some(inbox)) = (command, &self.inbox) else {
+            return CommandAskRefused::MachineOffline;
+        };
+        let report = inbox.plans(agent).await.unwrap_or_else(|error| {
+            log::warn!("the hub couldn't read the plans of a machine offline: {error:?}");
+            None
+        });
+        let now = self.clock.now();
+        report
+            .as_ref()
+            .and_then(|report| report.plans().iter().find(|shown| shown.plan == *plan))
+            .and_then(|shown| shown.next_run)
+            .and_then(|at| i64::try_from(at.seconds()).ok())
+            .and_then(|seconds| Timestamp::from_second(seconds).ok())
+            .filter(|next_run| *next_run > now)
+            .map_or(CommandAskRefused::MachineOffline, |next_run| {
+                CommandAskRefused::MachineOfflineNextRun { next_run }
+            })
     }
 
     /// A command refused while as many wait as the machine takes: the

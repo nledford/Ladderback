@@ -500,7 +500,7 @@ async fn run_plan(
             (StatusCode::ACCEPTED, command_done(operation)).into_response()
         }
         Ok(answer) => machine_answer_refused(&answer, &subject),
-        Err(refused) => command_refused(refused),
+        Err(refused) => command_refused(refused, &subject),
     }
 }
 
@@ -548,7 +548,7 @@ async fn cancel_operation(
             (StatusCode::OK, command_done(operation)).into_response()
         }
         Ok(answer) => machine_answer_refused(&answer, &subject),
-        Err(refused) => command_refused(refused),
+        Err(refused) => command_refused(refused, &subject),
     }
 }
 
@@ -603,13 +603,24 @@ fn machine_answer_refused(answer: &CommandAnswer, subject: &Subject<'_>) -> Resp
     crate::refused_with(status, code, args)
 }
 
-/// The hub's refusal of a command, by its kind.
-fn command_refused(refused: CommandAskRefused) -> Response {
+/// The hub's refusal of a command about `subject`, by its kind.
+fn command_refused(refused: CommandAskRefused, subject: &Subject<'_>) -> Response {
     let code = refused.code();
     match refused {
         CommandAskRefused::NeedsSignIn => crate::refused(StatusCode::FORBIDDEN, code),
         CommandAskRefused::MachineUnknown => crate::refused(StatusCode::NOT_FOUND, code),
-        CommandAskRefused::MachineOfflineNextRun { .. } => todo!(),
+        // Only a run of a plan is refused so, and its subject names it.
+        CommandAskRefused::MachineOfflineNextRun { next_run } => crate::refused_with(
+            StatusCode::CONFLICT,
+            code,
+            vec![
+                (
+                    "plan",
+                    api::MsgArg::Text(subject.plan.unwrap_or_default().to_owned()),
+                ),
+                ("next-run", time_arg(next_run)),
+            ],
+        ),
         CommandAskRefused::MachineOffline
         | CommandAskRefused::CommandsUnsupported
         | CommandAskRefused::CommandsOff => crate::refused(StatusCode::CONFLICT, code),
