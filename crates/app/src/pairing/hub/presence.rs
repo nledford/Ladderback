@@ -14,7 +14,7 @@ use std::sync::{Mutex, MutexGuard, PoisonError};
 
 use api::UiEvent;
 use domain::AgentId;
-use domain::fleet::{AgentStatus, OfflineAlerts};
+use domain::fleet::{Accepts, AgentStatus, OfflineAlerts};
 use domain::maintenance::RunningBackup;
 
 use super::HubPairing;
@@ -22,12 +22,21 @@ use super::HubPairing;
 /// What closes a live connection the hub let go of.
 pub type CloseConnection = Box<dyn FnOnce() + Send>;
 
-/// The live connection of each online machine: the transport's number for
-/// it, and what closes it; and what each machine's latest heartbeat said
-/// it runs, which the prune guard reads (decision 166).
+/// One machine's live connection: the transport's number for it, what
+/// closes it, and the commands the machine takes on it, as its `Hello`
+/// said (decision 176).
+struct Live {
+    connection: u64,
+    close: CloseConnection,
+    accepts: Accepts,
+}
+
+/// The live connection of each online machine; and what each machine's
+/// latest heartbeat said it runs, which the prune guard reads (decision
+/// 166).
 #[derive(Default)]
 pub(super) struct Presence {
-    live: Mutex<HashMap<AgentId, (u64, CloseConnection)>>,
+    live: Mutex<HashMap<AgentId, Live>>,
     /// The backups each machine's latest heartbeat named; a machine whose
     /// heartbeat didn't say, or that sent none yet, has none here.
     pub(super) running: Mutex<HashMap<AgentId, Vec<RunningBackup>>>,
@@ -54,17 +63,37 @@ impl HubPairing {
     /// A machine no longer approved, as one a person removed while this
     /// connection made its handshake, is let go of at once instead.
     pub async fn went_live(&self, agent: AgentId, connection: u64, close: CloseConnection) {
+        self.went_live_taking(agent, connection, close, Accepts::none())
+            .await;
+    }
+
+    /// [`Self::went_live`], the machine taking `accepts` from the hub on
+    /// this connection (decision 176).
+    pub async fn went_live_taking(
+        &self,
+        agent: AgentId,
+        connection: u64,
+        close: CloseConnection,
+        accepts: Accepts,
+    ) {
         let _telling = self.presence.telling.lock().await;
         let replaced = self
             .presence
             .live
             .lock()
             .unwrap_or_else(PoisonError::into_inner)
-            .insert(agent, (connection, close));
+            .insert(
+                agent,
+                Live {
+                    connection,
+                    close,
+                    accepts,
+                },
+            );
         let was_online = replaced.is_some();
         // Closed outside the lock: what closes it may take its own.
-        if let Some((_, close_older)) = replaced {
-            close_older();
+        if let Some(older) = replaced {
+            (older.close)();
         }
         // Read after the connection is in the table: a removal that let go
         // of nothing, having come first, is seen here (decision 154).
@@ -100,7 +129,7 @@ impl HubPairing {
                 .unwrap_or_else(PoisonError::into_inner);
             let this_one = live
                 .get(&agent)
-                .is_some_and(|(held, _)| *held == connection);
+                .is_some_and(|held| held.connection == connection);
             this_one.then(|| live.remove(&agent)).flatten()
         };
         if ended.is_some() {
@@ -122,6 +151,17 @@ impl HubPairing {
             .lock()
             .unwrap_or_else(PoisonError::into_inner)
             .contains_key(&agent)
+    }
+
+    /// The commands the machine `agent` takes from the hub: none while it
+    /// is offline (decision 176).
+    pub fn accepts_of(&self, agent: AgentId) -> Accepts {
+        self.presence
+            .live
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .get(&agent)
+            .map_or_else(Accepts::none, |held| held.accepts.clone())
     }
 
     /// The machines the hub holds a connection of, but `agent`.
@@ -159,8 +199,8 @@ impl HubPairing {
             .remove(&agent);
         self.forget_running(agent);
         // Closed outside the lock: what closes it may take its own.
-        if let Some((_, close)) = held {
-            close();
+        if let Some(held) = held {
+            (held.close)();
         }
     }
 

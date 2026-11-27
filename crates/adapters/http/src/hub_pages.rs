@@ -268,6 +268,14 @@ fn machine_dto(machine: &Machine) -> api::HubMachineDto {
             .collect(),
         plans: machine.plans.as_ref().map(plans_dto),
         progress: machine.progress.as_ref().map(progress_dto),
+        accepts: machine
+            .accepts
+            .kinds()
+            .map(|kind| match kind {
+                domain::fleet::CommandKind::RunPlan => api::MachineCommandDto::RunPlan,
+                domain::fleet::CommandKind::CancelOp => api::MachineCommandDto::CancelOp,
+            })
+            .collect(),
     }
 }
 

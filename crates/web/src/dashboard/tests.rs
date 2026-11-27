@@ -13,6 +13,7 @@ fn machine(hostname: &str, last_seen: &str) -> HubMachineDto {
         operations: Vec::new(),
         plans: None,
         progress: None,
+        accepts: Vec::new(),
     }
 }
 

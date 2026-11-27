@@ -6,6 +6,7 @@
 
 use api::{MachineOutcomeDto, UiEvent};
 use domain::fleet::{
+    Accepts,
     AgentRecord, AgentReport, Happening, OPERATIONS_SHOWN, Pairing, PlansReport, REPORTS_READ,
     ReportedOperation, ReportedProgress, Tombstone, latest_operations, progress_shown,
 };
@@ -18,8 +19,9 @@ use super::{HubPairing, HubPairingError};
 /// One approved machine as the hub's dashboard shows it: its record,
 /// whether it is online (the hub holds its sync connection; decision 159),
 /// how many of its reports the hub let go of past the cap, its latest
-/// operations, newest first, its plans as it last reported them, and the
-/// progress of the operation it runs, while its reports say it runs.
+/// operations, newest first, its plans as it last reported them, the
+/// progress of the operation it runs, while its reports say it runs, and
+/// the commands it takes from the hub while online (decision 176).
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Machine {
     pub record: AgentRecord,
@@ -28,6 +30,7 @@ pub struct Machine {
     pub operations: Vec<ReportedOperation>,
     pub plans: Option<PlansReport>,
     pub progress: Option<ReportedProgress>,
+    pub accepts: Accepts,
 }
 
 impl HubPairing {
@@ -64,6 +67,7 @@ impl HubPairing {
             let operations = latest_operations(&latest.reports, OPERATIONS_SHOWN);
             machines.push(Machine {
                 online: self.is_online(record.agent_id),
+                accepts: self.accepts_of(record.agent_id),
                 record,
                 reports_dropped: latest.dropped,
                 progress: progress_shown(&operations, progress),
