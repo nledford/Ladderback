@@ -485,6 +485,22 @@ fn a_failed_run_then_a_run_past_due_needs_attention() {
     assert_eq!(card_facts(&running(late), AT_MS).attention, None);
 }
 
+/// A running machine's planned run past due is on its way: its card tells
+/// when it was planned, not that it fell due.
+#[test]
+fn a_running_machines_run_past_due_reads_as_its_next_run() {
+    let late = online(with_plans(
+        machine("demo-laptop", AT),
+        vec![plan("documents", Some(("succeeded", -60)), Some(-30))],
+        0,
+    ));
+    assert_eq!(card_facts(&late, AT_MS).next_run, NextRun::WasDue(at(-30)));
+    assert_eq!(
+        card_facts(&running(late), AT_MS).next_run,
+        NextRun::At(at(-30))
+    );
+}
+
 /// The sentence counts the machines and those that need attention, whose
 /// links follow it.
 #[test]
@@ -743,6 +759,27 @@ fn the_hubs_own_plan_that_runs_again_reads_its_last_success() {
     );
 }
 
+/// An operation of the hub's own that was canceled reads Canceled on its
+/// card, as a paired machine's does.
+#[test]
+fn the_hubs_own_canceled_operation_reads_canceled() {
+    let operations = OperationsState::from_history(
+        vec![summary_of("op-1", "documents", "cancelled", -10)],
+        None,
+    );
+    let own = own_machine(&identity(Some("agent-hub")), None, &operations);
+    assert_eq!(
+        own.map(|own| own.operations),
+        Some(vec![MachineOperationDto {
+            operation: "op-1".to_owned(),
+            started_at: Some(at(-10)),
+            ended_at: Some(at(-9)),
+            outcome: MachineOutcomeDto::Canceled,
+            code: None,
+        }])
+    );
+}
+
 /// The page reads the hub's plans' status on opening, then again for each
 /// operation that comes and each status that changes, the end above all,
 /// which the card's status and last backup tell; never for progress, nor
@@ -832,4 +869,29 @@ fn a_pause_holds_the_hubs_own_card_and_the_time() {
     assert_eq!(fleet.pending(), 1);
     assert_eq!(fleet.resume(), resumed(1));
     assert_eq!(fleet.shown_now().get_untracked(), AT_MS + MINUTE_MS);
+}
+
+/// A page paused once the hub's own machine was read stays ready; one
+/// paused before it was read still waits for it.
+#[test]
+fn a_paused_page_stays_ready_once_the_hubs_own_was_read() {
+    let fleet = Fleet::new();
+    fleet.state.set(State::Ready);
+    fleet
+        .own
+        .set(Own::Read(Some(Box::new(machine("demo-hub", AT)))));
+    fleet.pause();
+    assert_eq!(fleet.shown_state().get_untracked(), State::Ready);
+
+    let waiting = Fleet::new();
+    waiting.state.set(State::Ready);
+    waiting.pause();
+    waiting
+        .own
+        .set(Own::Read(Some(Box::new(machine("demo-hub", AT)))));
+    assert_eq!(
+        waiting.shown_state().get_untracked(),
+        State::Loading,
+        "the pause holds the page as it was: waiting"
+    );
 }
