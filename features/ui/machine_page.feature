@@ -116,3 +116,8 @@ Feature: A machine's page on the hub
     When I open the address "/machines/018f0000-0000-7000-8000-00000000dead"
     Then the main heading reads "Page not found"
     And the page has no accessibility violations
+
+  Scenario: A machine's page is a page not found on a machine that isn't a hub
+    When I open the address "/machines/018f0000-0000-7000-8000-00000000dead"
+    Then the main heading reads "Page not found"
+    And the page is titled "Page not found – Ladderback"
