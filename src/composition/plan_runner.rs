@@ -1419,22 +1419,71 @@ fn log_keyring_wait(
 
 #[async_trait]
 impl app::hub_commands::HubRuns for PlanRunner {
-    async fn going(&self, _plan: &PlanId) -> Option<OperationId> {
-        todo!()
+    async fn going(&self, plan: &PlanId) -> Option<OperationId> {
+        let mut after = None;
+        loop {
+            let query = app::ports::HistoryQuery {
+                plan: Some(plan.clone()),
+                after,
+                limit: app::ports::PageSize::DEFAULT,
+            };
+            let page = match self.store.list(&query).await {
+                Ok(page) => page,
+                Err(error) => {
+                    log::error!("the operation log could not be read: {error}");
+                    return None;
+                }
+            };
+            let found = page.operations.iter().find(|record| {
+                record.kind == domain::execution::OperationKind::Backup
+                    && !record.status.is_finished()
+            });
+            if let Some(record) = found {
+                return Some(record.id);
+            }
+            after = Some(page.next?);
+        }
     }
 
     async fn start(
         &self,
-        _plan: &PlanId,
-        _asked_by: Option<domain::access::SessionTag>,
+        plan: &PlanId,
+        asked_by: Option<domain::access::SessionTag>,
     ) -> Result<OperationId, app::hub_commands::HubRunRefused> {
-        todo!()
+        use app::hub_commands::HubRunRefused;
+        self.start_plan(plan, Trigger::Hub { asked_by })
+            .await
+            .map_err(|unbuilt| match unbuilt.into_start_error() {
+                StartError::UnknownPlan => HubRunRefused::UnknownPlan,
+                StartError::RunWaiting => HubRunRefused::RunWaiting,
+                StartError::KeyFilesNotLeftOut => HubRunRefused::KeyFilesNotLeftOut,
+                _ => HubRunRefused::Refused,
+            })
     }
 
     async fn cancel(
         &self,
-        _operation: &OperationId,
+        operation: &OperationId,
     ) -> Result<(), app::hub_commands::HubCancelRefused> {
-        todo!()
+        use app::hub_commands::HubCancelRefused;
+        let record = match GetOperation::new(Arc::clone(&self.store))
+            .get(*operation)
+            .await
+        {
+            Ok(Some(detail)) => detail.record,
+            Ok(None) => return Err(HubCancelRefused::Unknown),
+            Err(error) => {
+                log::error!("the operation log could not be read: {error}");
+                return Err(HubCancelRefused::Unknown);
+            }
+        };
+        if record.kind != domain::execution::OperationKind::Backup {
+            return Err(HubCancelRefused::NotABackup);
+        }
+        if !record.status.is_finished() && self.registry.cancel(operation) {
+            Ok(())
+        } else {
+            Err(HubCancelRefused::NotRunning)
+        }
     }
 }
