@@ -3717,6 +3717,34 @@ async fn the_hub_waits_20_seconds_for_a_machines_answer() {
     assert_eq!(answer, Err(CommandAskRefused::NoAnswer));
 }
 
+/// A command whose asker stopped waiting, as when the person closed the
+/// page, no longer waits for the machine's answer: the hub's limit on the
+/// commands waiting counts only those still waited on (decision 176).
+#[tokio::test]
+async fn a_command_no_one_waits_for_leaves_room_for_the_next() {
+    use domain::fleet::{Accepts, MAX_COMMANDS_IN_FLIGHT};
+    use futures::{FutureExt as _, StreamExt as _};
+
+    let hub = keeping_reports(1);
+    let _identity = approved(&hub).await;
+    let mut queue = hub
+        .pairing
+        .went_live_taking(agent_id(1), 1, Box::new(|| {}), Some(Accepts::all()))
+        .await;
+    for ask in 0..=MAX_COMMANDS_IN_FLIGHT {
+        let mut asked = Box::pin(hub.pairing.command_asked(photos_asked_of(agent_id(1))));
+        assert!(
+            futures::poll!(asked.as_mut()).is_pending(),
+            "the hub refused ask {ask}"
+        );
+        assert!(
+            queue.next().now_or_never().flatten().is_some(),
+            "the hub sent nothing for ask {ask}"
+        );
+        drop(asked);
+    }
+}
+
 /// The hub's runs for a sync that takes its commands: no plan runs, and
 /// each start is the operation `0x0e`.
 struct StartsOne;
