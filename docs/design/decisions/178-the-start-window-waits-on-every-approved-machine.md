@@ -1,0 +1,26 @@
+# Decision 178: After each start, the hub's start window waits on every machine it had approved, and a new grant and a release reach the drive's permanent storage first
+
+**After any start, the hub grants no repository to a new owner while a machine it had approved before the start hasn't reported since, or until 7 days and an hour have passed since the start on its monotonic clock, beside what decision 157 already waits for. On macOS, the hub flushes the drive's own cache (`F_FULLFSYNC`) after a commit that makes a new grant, before it signs the grant, and a machine does the same after letting go of a lease, before it sends the release; `checkpoint_fullfsync` is on, so a checkpoint flushes too. A renewal isn't flushed** (recorded 2026-11-27, #1630; §7.3, I1).
+
+## Why
+
+A hub can lose a grant it has already sent: on a Mac, a power cut can lose the commit from the drive's cache, since `fsync` there stops at it (decision 164), and on any system a restore from a backup taken between a grant and the next backup does the same. The report that won the grant was in the same transaction, so it is lost with it. Decision 157's window waited only on the machines whose *stored* reports named a repository, so it didn't wait on the machine holding the lost grant, and a second machine could be granted the repository, at the same epoch, before the holder's next report (decision 164's sequence).
+
+- **The window waits on every approved machine.** The holder of a lost grant was approved before it was granted, so it is one of them. Its report reaches the hub before any first claim is granted, and its floor, above the rewound counter, starts recovery mode (decision 137, `is_behind`). A holder that stays offline sees its lease end, 7 days after its last renewal, before the window does, 7 days and an hour after the start.
+- **Approved at the start, not since.** The hub reads its approved machines when it starts (`HubPairing::start`). A machine approved since can hold only grants this run made, which the hub knows of, so it isn't waited for, and a newly paired machine's first claim isn't held up by another new one.
+- **The flush for what the other side acts on at once.** The commit that makes a new grant is flushed before the grant is signed, and a machine's commit that lets go of a lease before the release that lets the hub grant it elsewhere. A full flush drains the whole drive cache, so the approval made before the grant reaches the disk too, and the window can then wait on that machine. A grant whose flush failed isn't sent, and the hub flushes before it sends any lease while a failed flush is outstanding, so it doesn't go out later as a renewal. Elsewhere `F_FULLFSYNC` doesn't exist: the commit's own `fsync` reaches the disk, and the flush does nothing.
+- **A renewal isn't flushed.** A lost renewal is one exchange old, and the lease it renewed was on the drive before it was sent; the holder's lease then ends an exchange early on the hub, within `LEASE_GRACE`, the hour the hub waits past a lease's end before it grants the repository to another.
+
+## Consequences
+
+- **After each start, a machine that stays silent holds every first claim**, up to 7 days and an hour: a laptop left closed delays a new owner for every repository, on every restart of the hub. Renewals and backups go on, and a claim refused this way is decision 157's `Starting`. This widens decision 157's wait, which held a repository only for the machines that had used it.
+- **A machine paired after the backup** a hub was restored from is unknown to it, and isn't waited for: decision 137's existing cost. The hub's own approval of a machine is flushed with the machine's first grant, so a power cut doesn't lose one whose grant went out.
+- One full flush per new grant and per release on a Mac, events that come a few times a day, not on every commit: decision 164 rejected `fullfsync` for every commit for its cost. The flush's own time is unmeasured.
+- A checkpoint on a Mac flushes the drive too, once per automatic checkpoint of the log.
+
+## Rejected
+
+- **A grant ID, random or per start:** it changes the stored lease, the signed bytes of a lease and the protocol (decision 137 makes a safety field mandatory), and still lets the second grant through: it goes to a machine that never held the repository, whose floor can't refuse it.
+- **A margin on the counter at each start, or a durable floor:** a margin needs a stored field, and the laptop is still granted the repository while the NAS holds it; the NAS's floor, now below the counter, hides the rewind from `is_behind`. A durable floor sits in the same file as the grant, and is lost with it.
+- **`fullfsync` for every commit:** decision 164 measured it at 25 times the store's test time on a Mac.
+- **Waiting for every approved machine only after a restore:** a restore can't be told from a restart (decision 137).
