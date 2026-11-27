@@ -12,7 +12,7 @@
 Ladderback backs up your computers on a schedule, shows your backups in one web page, and restores files right in the browser. It runs on your own machines and is built on [rustic](https://rustic.cli.rs), a fast, encrypted backup program.
 
 > [!WARNING]
-> **Ladderback is new software.** Version 0.5.0 runs scheduled backups and restores from them in your browser, but restores arrived only in 0.4.0. Before you rely on these backups, try restoring a file into a scratch folder. The `rustic` command-line program restores from any repository Ladderback backs up to, and stays your fallback. Until the MVP's release brings the hub, each computer runs its own Ladderback, with its own web page. The [roadmap](#roadmap) has the order.
+> **Ladderback is new software.** Version 0.6.0 runs scheduled backups and restores from them in your browser, and is the first release with the hub, which shows every paired machine on one dashboard. Restores arrived only in 0.4.0, and the hub only in 0.6.0. Before you rely on these backups, try restoring a file into a scratch folder. The `rustic` command-line program restores from any repository Ladderback backs up to, and stays your fallback. The [roadmap](#roadmap) has the order.
 >
 > **Until 1.0.0, any release can break what came before, with no deprecation period first:**
 > - the configuration file, the database and the data folder;
@@ -62,8 +62,8 @@ Ladderback borrows Backrest's user-facing model: repositories, plans, schedules,
 
 **Ladderback may suit you better if you:**
 
-- back up **several machines into one shared repository**. In Backrest, each plan runs `restic forget` after its backup, which takes an exclusive lock and blocks other hosts' backups ([backrest#244](https://github.com/garethgeorge/backrest/issues/244)). In Ladderback, backups never wait for a lock, and with the hub (M9) one owner per repository runs maintenance;
-- don't want repository **passwords and backend keys copied to other machines**. Backrest's multi-host sync pushes shared repositories to clients, credentials included. With Ladderback's hub (from the MVP's release), the hub keeps its own secrets, and paired machines never send theirs;
+- back up **several machines into one shared repository**. In Backrest, each plan runs `restic forget` after its backup, which takes an exclusive lock and blocks other hosts' backups ([backrest#244](https://github.com/garethgeorge/backrest/issues/244)). In Ladderback, backups never wait for a lock, and with the hub at most one machine maintains each repository, the one holding the hub's lease on it. For now the hub leases a repository only to a machine that is alone in using it, so a shared repository is maintained by none until M9 lets you choose its owner on the hub;
+- don't want repository **passwords and backend keys copied to other machines**. Backrest's multi-host sync pushes shared repositories to clients, credentials included. With Ladderback's hub (since 0.6.0), the hub keeps its own secrets, and paired machines never send theirs;
 - back up **laptops**. Missed runs catch up by default, and the scheduler notices sleep and wake;
 - want an **AI agent** to check on and run backups. Ladderback has an MCP server built in, `ladderback mcp`, which takes a token scoped to reading, running or previewing, and can't restore or delete. An AI agent can also propose plans, over the API or through MCP, which change nothing until a person approves them in the web UI;
 - want **secrets out of the config file**: a password command, the system keyring, a file or an environment variable. A missing secret fails the job instead of silently becoming an empty string;
@@ -117,9 +117,9 @@ An AI agent whose API token has the Configuration permission can propose adding,
 
 ## Roadmap
 
-Ladderback 0.5.0 holds milestones M0 to M3b: backups run on their schedules, and snapshots can be browsed, restored and downloaded in the web UI. A milestone is done when its acceptance scenarios pass, including keyboard-only and screen-reader checks for the UI. [CHANGELOG.md](CHANGELOG.md) has what each release brought, and each [milestone's page](https://github.com/nledford/Ladderback/milestones) its issues.
+Ladderback 0.6.0 holds milestones M0 to M3b and the MVP: backups run on their schedules, snapshots can be browsed, restored and downloaded in the web UI, and machines pair with a hub that shows them all on one dashboard. A milestone is done when its acceptance scenarios pass, including keyboard-only and screen-reader checks for the UI. [CHANGELOG.md](CHANGELOG.md) has what each release brought, and each [milestone's page](https://github.com/nledford/Ladderback/milestones) its issues.
 
-Since 2026-11-22 the work comes in three phases: first the [MVP: Ready for real-world testing](https://github.com/nledford/Ladderback/milestone/12), what you need to use Ladderback for real and start testing it, taken from M8, M9 and M10; then the rest of M4, M5 and M8 to M10, before 1.0.0; and [after 1.0.0](https://github.com/nledford/Ladderback/milestone/13), M6, M7, M11, and smaller improvements and rare edge cases.
+Since 2026-11-22 the work comes in three phases: first the [MVP: Ready for real-world testing](https://github.com/nledford/Ladderback/milestone/12), what you need to use Ladderback for real and start testing it, taken from M8, M9 and M10 and released in 0.6.0; then the rest of M4, M5 and M8 to M10, before 1.0.0; and [after 1.0.0](https://github.com/nledford/Ladderback/milestone/13), M6, M7, M11, and smaller improvements and rare edge cases.
 
 - [x] **M0: Skeleton.** Workspace, CI, test tooling (acceptance scenarios, mutation testing, browser tests with accessibility checks) and an embedded web UI shell.
 - [x] **M1a: Engine.** Backups through `rustic_core` in an isolated worker process, with live progress, warnings, cancellation and deadlines.
@@ -127,13 +127,13 @@ Since 2026-11-22 the work comes in three phases: first the [MVP: Ready for real-
 - [x] **M2: Schedules and errors.** Scheduler with catch-up after sleep, time zones and retries; notifications to webhooks, ntfy and healthchecks; systemd and launchd service install; optional sign-in. The first usable release.
 - [x] **M3: Browse, restore and automation.** Snapshot browser; restore into a new folder or in place; downloads as tar or zip; repository stats; scoped API tokens; an MCP server for AI agents; macOS builds from source that keep their Full Disk Access across upgrades. The first release with restores in the web UI.
 - [x] **M3b: Shared UI components.** One accessible component set for every widget the pages use, the pages moved onto it, a full-width page option, and Settings in tabs.
-- [ ] **MVP: Ready for real-world testing.** Pairing machines with a hub and seeing them on its dashboard; offline alerts; one owner for each shared repository, with the owner prune guard; the install, getting-started and hub docs.
+- [x] **MVP: Ready for real-world testing.** Pairing machines with a hub and seeing them on its dashboard; offline alerts; at most one machine maintaining each repository, through the hub's leases, with the owner prune guard; the install, getting-started and hub docs. Released in [0.6.0](https://github.com/nledford/Ladderback/releases/tag/v0.6.0).
 - [ ] **M4: AI agents.** MCP tools for what people ask AI agents most, such as comparing snapshots and reading the log, and proposals for repositories, hooks and maintenance.
 - [ ] **M5: Scheduled maintenance.** Forget, prune and check on their schedules, one at a time by default, each check's result kept and shown.
 - [ ] **M6: Notification channels.** Gotify, Discord, Slack, email, Telegram, Pushover, Pushbullet, web push and a webhook you template. After 1.0.0.
 - [ ] **M7: Japanese.** The first language after English, with a language choice in the web UI. After 1.0.0, released once its review is done.
-- [ ] **M8: Hub, visibility.** Pair machines with a hub; one dashboard with the status, live progress, history, warnings and errors of every connected computer; offline alerts; any installed machine can become the hub, and the Docker image runs one on a machine of its own.
-- [ ] **M9: Hub, control and maintenance.** Repository ownership, so that exactly one place runs forget, prune and check for each repository, whichever machines back up to it; maintenance managed from the hub; remote run and cancel; opt-in restores from the hub.
+- [ ] **M8: Hub, visibility.** The rest after the MVP: sync tested across releases, signed release checksums, Podman, pairing tokens listed and revoked while the hub runs, and reports after a restored database.
+- [ ] **M9: Hub, control and maintenance.** A repository's owner chosen on the hub, so that a repository several machines back up to is maintained by exactly one; maintenance managed from the hub; remote run and cancel; opt-in restores from the hub; recovering the fleet when the hub's machine is lost.
 - [ ] **M10: Polish.** A run condition for metered networks, charts, database rebuild, user docs.
 - [ ] **M11: Menu bar and tray icon.** Backup status at a glance in the macOS menu bar and the Linux tray, for a machine and for the hub. After 1.0.0.
 
