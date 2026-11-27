@@ -134,6 +134,26 @@ fn a_run_ahead_of_the_machines_clock_counts_by_how_far_it_lies() {
     assert_eq!(hub_run_admitted(&far, &plan("photos"), at(NOW)), Ok(()));
 }
 
+/// The time a refusal names is one the same runs admit: a run behind now
+/// and one ahead of it, as after a clock set back, don't send the hub to a
+/// time that is refused again.
+#[test]
+fn a_refused_run_is_told_a_time_it_is_admitted_at() {
+    let runs = [
+        HubRun {
+            plan: plan("photos"),
+            at: at(NOW - 299),
+        },
+        HubRun {
+            plan: plan("photos"),
+            at: at(NOW + 300),
+        },
+    ];
+    let again = hub_run_admitted(&runs, &plan("photos"), at(NOW)).unwrap_err();
+    assert_eq!(again, at(NOW + 600));
+    assert_eq!(hub_run_admitted(&runs, &plan("photos"), again), Ok(()));
+}
+
 /// A hub that sends a machine every command its limit lets it, for as long
 /// as the machine remembers a command's ID, sends fewer than the machine
 /// remembers: its asks alone never fill the machine's ledger.
