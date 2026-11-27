@@ -285,7 +285,7 @@ fn plans_dto(plans: &PlansReport) -> api::MachinePlansDto {
                         status: last.outcome.wire_name().to_owned(),
                     })
                 }),
-                last_success: None,
+                last_success: plan.last_success.and_then(time_of),
                 next_run: plan.next_run.and_then(time_of),
             })
             .collect(),

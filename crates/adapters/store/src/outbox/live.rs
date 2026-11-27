@@ -17,12 +17,13 @@ use crate::{SqliteStore, machine_gone, unavailable};
 
 const FORGET_PLANS: &str = "DELETE FROM sync_plans WHERE machine_id = ?";
 const KEEP_PLAN: &str = "INSERT INTO sync_plans \
-     (machine_id, place, plan_id, last_at, last_outcome, next_run) VALUES (?, ?, ?, ?, ?, ?)";
+     (machine_id, place, plan_id, last_at, last_outcome, last_success_at, next_run) \
+     VALUES (?, ?, ?, ?, ?, ?, ?)";
 const KEEP_SNAPSHOT: &str = "INSERT INTO sync_plan_snapshots (machine_id, left_out) \
      VALUES (?, ?) ON CONFLICT (machine_id) DO UPDATE SET left_out = excluded.left_out";
 const SNAPSHOT: &str = "SELECT left_out FROM sync_plan_snapshots WHERE machine_id = ?";
-const PLANS: &str = "SELECT plan_id, last_at, last_outcome, next_run FROM sync_plans \
-     WHERE machine_id = ? ORDER BY place";
+const PLANS: &str = "SELECT plan_id, last_at, last_outcome, last_success_at, next_run \
+     FROM sync_plans WHERE machine_id = ? ORDER BY place";
 const KEEP_PROGRESS: &str = "INSERT INTO sync_progress \
      (machine_id, op_id, step, unit, current, total, at) VALUES (?, ?, ?, ?, ?, ?, ?) \
      ON CONFLICT (machine_id) DO UPDATE SET op_id = excluded.op_id, step = excluded.step, \
@@ -59,6 +60,7 @@ async fn replace_plans(
             .bind(plan.plan.as_str())
             .bind(plan.last.map(|last| number(last.at.seconds())))
             .bind(plan.last.map(|last| last.outcome.wire_name()))
+            .bind(plan.last_success.map(|at| number(at.seconds())))
             .bind(plan.next_run.map(|next| number(next.seconds())))
             .execute(&mut *tx)
             .await?;
@@ -183,7 +185,7 @@ fn plan_of(row: &SqliteRow) -> Result<ReportedPlan, StoreError> {
     Ok(ReportedPlan {
         plan: PlanId::parse(&plan).map_err(|_| corrupt("plan_id"))?,
         last,
-        last_success: None,
+        last_success: held_if_any(row, "last_success_at")?.map(EpochSeconds::from_seconds),
         next_run: held_if_any(row, "next_run")?.map(EpochSeconds::from_seconds),
     })
 }
