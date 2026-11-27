@@ -356,9 +356,10 @@ impl Scheduler {
     /// now, and a plan no longer scheduled is forgotten. A plan that no
     /// longer retries a failed backup drops its pending retry and stops one
     /// already going, and one whose attempts went down drops a pending retry
-    /// past them: its series ran out. The queue runs as many backups at once
-    /// as it says from then on, the runs already waiting included. A
-    /// configuration that can't be read changes nothing.
+    /// past them: its series ran out. The backup queue runs as many backups
+    /// at once as it says from then on, and the maintenance queue as many
+    /// maintenance runs, the runs already waiting included. A configuration
+    /// that can't be read changes nothing.
     async fn refresh(&self, plans: &mut Plans) {
         let config = match self.config.load().await {
             Ok(config) => config,
@@ -369,6 +370,8 @@ impl Scheduler {
         };
         let now = self.clock.now();
         self.queue.set_limit(config.agent().concurrency);
+        self.maintenance
+            .set_limit(config.agent().maintenance_concurrency);
         let scheduled = scheduled(&config);
         let mut kept = plans.kept.take().unwrap_or_default();
         for (plan, (schedule, overlap, rules)) in &scheduled {
@@ -1208,7 +1211,11 @@ mod tests {
             .unwrap();
         let mut waiting = scheduler
             .maintenance
-            .unless_going_as(&RepositoryAlias::parse("laptop").unwrap(), operation(2), one())
+            .unless_going_as(
+                &RepositoryAlias::parse("laptop").unwrap(),
+                operation(2),
+                one(),
+            )
             .unwrap();
         assert!(waiting.turn().now_or_never().is_none(), "the limit is 1");
         let config = AgentConfig::new(
