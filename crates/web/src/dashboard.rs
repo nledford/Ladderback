@@ -100,14 +100,18 @@ impl Fleet {
 
     /// Notes that the read of the hub's own machine went unanswered past its
     /// patience: a page still waiting for it shows the approved machines
-    /// without it, and one that has read it keeps it.
+    /// without it, and one that has read it keeps it. A page gone already
+    /// takes no note.
     pub(crate) fn own_unanswered(self) {
-        todo!()
+        if self.own.try_with_untracked(|own| *own == Own::Waiting) == Some(true) {
+            let _ = self.own.try_set(Own::Unanswered);
+        }
     }
 
     /// Whether the page shows that the hub's own machine couldn't be read.
     pub(crate) fn own_unread(self) -> Signal<bool> {
-        todo!()
+        let own = self.shown_own();
+        Signal::derive(move || own.with(|own| *own == Own::Unanswered))
     }
 
     /// Holds the machines as they are now; a page already paused keeps the
@@ -201,7 +205,7 @@ impl Fleet {
 /// the machine its address names isn't among them, and the hub's own
 /// machine, which it may be, was read too, not left unanswered (#1692).
 pub(crate) fn not_found(state: State, found: bool, own_unread: bool) -> bool {
-    todo!()
+    state == State::Ready && !found && !own_unread
 }
 
 /// Whether `event` asks the dashboard to read its machines again: a

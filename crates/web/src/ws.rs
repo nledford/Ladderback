@@ -432,23 +432,35 @@ pub(crate) async fn answers(patience: Duration) -> bool {
 /// mutating method, §4.2), with the session's CSRF token when sign-in is on,
 /// and sorts the answer.
 pub(crate) async fn post<S: Serialize>(url: &str, body: &S) -> Option<Posted> {
-    change(Request::post, url, body).await
+    change(Request::post, url, body, None).await
+}
+
+/// Posts `body` as [`post`] does, but aborts a send that takes longer than
+/// `patience`, which is `None` as no answer is (#1690).
+pub(crate) async fn post_within<S: Serialize>(
+    url: &str,
+    body: &S,
+    patience: Duration,
+) -> Option<Posted> {
+    change(Request::post, url, body, Some(patience)).await
 }
 
 /// Puts `body` as JSON at `url`, as [`post`] posts it.
 pub(crate) async fn put<S: Serialize>(url: &str, body: &S) -> Option<Posted> {
-    change(Request::put, url, body).await
+    change(Request::put, url, body, None).await
 }
 
 /// Sends `body` as JSON to `url` with the method `start` begins, with the
-/// session's CSRF token when sign-in is on, and sorts the answer.
+/// session's CSRF token when sign-in is on, and sorts the answer; with
+/// `patience`, a send that takes longer is aborted.
 async fn change<S: Serialize>(
     start: fn(&str) -> RequestBuilder,
     url: &str,
     body: &S,
+    patience: Option<Duration>,
 ) -> Option<Posted> {
-    let (status, text) = send(None, Asked::ByPerson, |csrf, _| {
-        let builder = start(url);
+    let (status, text) = send(patience, Asked::ByPerson, |csrf, signal| {
+        let builder = start(url).abort_signal(signal);
         let builder = match csrf {
             Some(csrf) => builder.header(CSRF_HEADER, csrf),
             None => builder,
