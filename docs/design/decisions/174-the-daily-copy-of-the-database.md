@@ -28,5 +28,7 @@
 
 - The schedule follows the file system's clock: a copy whose time a sync tool or a restore changed is taken again when that time says.
 - A machine that never runs `serve` keeps no copy.
-- A copy dropped at shutdown leaves `ladderback.db.daily-new` until the next copy removes it; it has the database's mode.
-- A large database's copy holds one of the store's connections while `VACUUM INTO` runs.
+- A copy in flight at shutdown isn't interrupted: SQLite runs its `VACUUM INTO` to the end, and the log's close waits for it within its 20-second bound. A copy stopped before its rename leaves `ladderback.db.daily-new` until the next copy removes it; it has the database's mode.
+- A large database's copy holds one of the store's connections while `VACUUM INTO` runs, and its file syncs run on the task the scheduler shares.
+- A clock set back while `serve` runs is noticed at the next copy or the next start, not at once: the daemon sleeps until the copy it last took is a day old.
+- A folder sync that fails after the rename is told as a failed copy, though the new copy is in place, and the next is a day later.
