@@ -32,11 +32,12 @@ struct Held {
 
 /// What the page has read of the hub's own machine: nothing yet, or its
 /// card's machine, none when the hub didn't say who it is (decision 175).
+/// Boxed so that a `Waiting` doesn't take a whole machine's room.
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub(crate) enum Own {
     #[default]
     Waiting,
-    Read(Option<HubMachineDto>),
+    Read(Option<Box<HubMachineDto>>),
 }
 
 /// The machines as the hub last listed them, whether a read has answered,
@@ -152,7 +153,7 @@ impl Fleet {
             if let Own::Read(Some(own)) = own.get() {
                 // Never twice, should the hub list itself among its machines.
                 machines.retain(|machine| machine.machine_id != own.machine_id);
-                machines.insert(0, own);
+                machines.insert(0, *own);
             }
             machines
         })

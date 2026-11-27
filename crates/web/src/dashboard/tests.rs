@@ -742,7 +742,9 @@ fn the_hubs_own_card_comes_first_and_the_page_waits_for_it() {
         .set(vec![machine("demo-a", AT), machine("demo-b", AT)]);
     fleet.state.set(State::Ready);
     assert_eq!(fleet.shown_state().get_untracked(), State::Loading);
-    fleet.own.set(Own::Read(Some(machine("demo-hub", AT))));
+    fleet
+        .own
+        .set(Own::Read(Some(Box::new(machine("demo-hub", AT)))));
     assert_eq!(fleet.shown_state().get_untracked(), State::Ready);
     let names: Vec<String> = fleet
         .shown()
@@ -766,12 +768,14 @@ fn the_hubs_own_card_comes_first_and_the_page_waits_for_it() {
 fn a_pause_holds_the_hubs_own_card_and_the_time() {
     let fleet = Fleet::new();
     fleet.state.set(State::Ready);
-    fleet.own.set(Own::Read(Some(machine("demo-hub", AT))));
+    fleet
+        .own
+        .set(Own::Read(Some(Box::new(machine("demo-hub", AT)))));
     fleet.now.set(AT_MS);
     fleet.pause();
     fleet
         .own
-        .set(Own::Read(Some(online(machine("demo-hub", AT)))));
+        .set(Own::Read(Some(Box::new(online(machine("demo-hub", AT))))));
     fleet.now.set(AT_MS + MINUTE_MS);
     assert_eq!(fleet.shown_now().get_untracked(), AT_MS);
     assert_eq!(
