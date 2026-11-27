@@ -1009,9 +1009,9 @@ async fn an_outbox_position_that_cant_be_read_sends_nothing() {
     let taken = one_report();
     let now = Timestamp::from_second(1_800_000_030).unwrap();
     inbox.ingest(agent_id(1), &taken, now).await.unwrap();
-    let restored = Arc::new(UnreadablePositionOutbox(
-        crate::fakes::InMemoryOutbox::new(taken.epoch),
-    ));
+    let restored = Arc::new(UnreadablePositionOutbox(crate::fakes::InMemoryOutbox::new(
+        taken.epoch,
+    )));
     restored
         .append(&domain::fleet::AgentReport {
             op_id: domain::OperationId::from_uuid(Uuid::from_u128(0x10)),

@@ -430,11 +430,7 @@ impl SyncWithHub {
         // An outbox whose position can't be read ends the session with
         // nothing sent, as a new epoch that can't be started does: stated as
         // none, its reports at places the hub took would be let go of.
-        let stated = self
-            .outbox
-            .position()
-            .await
-            .map_err(SyncFailure::Store)?;
+        let stated = self.outbox.position().await.map_err(SyncFailure::Store)?;
         let connected = self
             .connect
             .connect_channel(
