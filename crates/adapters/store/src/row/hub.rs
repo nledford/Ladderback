@@ -5,8 +5,8 @@
 
 use app::ports::StoreError;
 use domain::fleet::{
-    AgentRecord, AgentStatus, BindingKind, Hostname, KEY_BYTES, MachineFingerprint, MachineZone,
-    PublicKey, SecondMachine, TokenRecord, TokenUse, Tombstone,
+    AgentRecord, AgentStatus, BindingKind, Hostname, KEY_BYTES, MachineFingerprint, MachineVersion,
+    MachineZone, PublicKey, SecondMachine, TokenRecord, TokenUse, Tombstone,
 };
 use domain::{AgentId, Uuid};
 use sqlx::sqlite::SqliteRow;
@@ -183,6 +183,14 @@ pub(crate) fn agent(row: &SqliteRow) -> Result<AgentRecord, StoreError> {
                 .map_err(|_| reader.corrupt("zone", format!("{} is not a zone name", shown(&text))))
         })
         .transpose()?;
+    let version = reader
+        .text("version")?
+        .map(|text| {
+            MachineVersion::parse(&text).map_err(|_| {
+                reader.corrupt("version", format!("{} is not a version", shown(&text)))
+            })
+        })
+        .transpose()?;
     Ok(AgentRecord {
         agent_id,
         key: reader.required_key("pubkey")?,
@@ -191,7 +199,7 @@ pub(crate) fn agent(row: &SqliteRow) -> Result<AgentRecord, StoreError> {
         counter,
         last_seen: reader.required_time("last_seen")?,
         zone,
-        version: None,
+        version,
     })
 }
 

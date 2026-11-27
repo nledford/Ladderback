@@ -243,7 +243,17 @@ fn machine_dto(machine: &Machine) -> api::HubMachineDto {
         last_seen: record.last_seen.to_string(),
         online: machine.online,
         zone: record.zone.as_ref().map(|zone| zone.as_str().to_owned()),
-        version: None,
+        version: record
+            .version
+            .as_ref()
+            .map(|version| api::MachineVersionDto {
+                version: version.as_str().to_owned(),
+                against_hub: match machine.against_hub {
+                    Some(std::cmp::Ordering::Less) => Some(api::AgainstHubDto::Older),
+                    Some(std::cmp::Ordering::Greater) => Some(api::AgainstHubDto::Newer),
+                    Some(std::cmp::Ordering::Equal) | None => None,
+                },
+            }),
         reports_dropped: machine.reports_dropped,
         operations: machine
             .operations

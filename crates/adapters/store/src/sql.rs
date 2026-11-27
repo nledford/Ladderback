@@ -422,7 +422,7 @@ pub(crate) mod hub {
     macro_rules! select_agents {
         ($($clause:literal),+ $(,)?) => {
             concat!(
-                "SELECT id, pubkey, hostname, status, status_at, counter, last_seen, zone ",
+                "SELECT id, pubkey, hostname, status, status_at, counter, last_seen, zone, version ",
                 "FROM machines",
                 $($clause),+
             )
@@ -494,24 +494,29 @@ pub(crate) mod hub {
     pub(crate) const ALL_AGENTS: &str = select_agents!(" ORDER BY rowid");
 
     /// Keeps a new agent. Parameters, in order: `id`, `pubkey`, `hostname`,
-    /// `hostname_key`, `status`, `status_at`, `counter`, `last_seen`, `zone`.
+    /// `hostname_key`, `status`, `status_at`, `counter`, `last_seen`, `zone`,
+    /// `version`.
     pub(crate) const INSERT_AGENT: &str = concat!(
         "INSERT INTO machines (id, pubkey, hostname, hostname_key, status, status_at, counter, ",
-        "last_seen, zone) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)"
+        "last_seen, zone, version) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)"
     );
 
     /// Writes an agent's record over the one kept under its ID, every
     /// column but the ID. Parameters, in order: `pubkey`, `hostname`,
     /// `hostname_key`, `status`, `status_at`, `counter`, `last_seen`,
-    /// `zone`, `id`.
+    /// `zone`, `version`, `id`.
     pub(crate) const UPDATE_AGENT: &str = concat!(
         "UPDATE machines SET pubkey = ?, hostname = ?, hostname_key = ?, status = ?, ",
-        "status_at = ?, counter = ?, last_seen = ?, zone = ? WHERE id = ?"
+        "status_at = ?, counter = ?, last_seen = ?, zone = ?, version = ? WHERE id = ?"
     );
 
     /// Keeps the machine zone an agent reported, NULL for none, over the
     /// one it held. Parameters: the zone, the agent ID.
     pub(crate) const RECORD_ZONE: &str = "UPDATE machines SET zone = ? WHERE id = ?";
+
+    /// Keeps the version of Ladderback an agent's `Hello` named, NULL for
+    /// none, over the one it held. Parameters: the version, the agent ID.
+    pub(crate) const RECORD_VERSION: &str = "UPDATE machines SET version = ? WHERE id = ?";
 
     /// Keeps when the hub last heard from an agent: when its live
     /// connection ended (decision 159). Parameters: the time in

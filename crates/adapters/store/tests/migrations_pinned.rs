@@ -27,6 +27,11 @@ const PINNED: &[(i64, &str, &str)] = &[
         "diverged epochs",
         "11ae64b79438522f0d89befccbd5fa12cf451e2d58c58e60103800c6ab104df0be92a9b23e17e9fe0df31823df6ff5fb",
     ),
+    (
+        3,
+        "machine version",
+        "965335406e6609e8b66526ba3b4ff629bbc6b45123861f869277a9e8b160b3a565246e6b5b39f15472504f9a4883380c",
+    ),
 ];
 
 /// The migration's file name, as `sqlx::migrate!` reads it: sqlx turns the

@@ -317,8 +317,15 @@ impl AgentRegistry for InMemoryAgentRegistry {
         agent_id: AgentId,
         version: Option<&MachineVersion>,
     ) -> Result<(), StoreError> {
-        let _ = (agent_id, version);
-        todo!()
+        if let Some(agent) = self
+            .kept()
+            .agents
+            .iter_mut()
+            .find(|agent| agent.agent_id == agent_id)
+        {
+            agent.version = version.cloned();
+        }
+        Ok(())
     }
 
     async fn record_seen(&self, agent_id: AgentId, now: Timestamp) -> Result<(), StoreError> {

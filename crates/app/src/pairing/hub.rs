@@ -5,13 +5,13 @@ use std::sync::{Arc, Mutex, PoisonError};
 use domain::fleet::{
     Ack, AgentEnvelope, AgentRecord, Approval, ApprovalRefused, Binding, BindingKind, Challenge,
     Connect, EpochSeconds, FIRST_SEQUENCE, HANDSHAKES, Holder, Hostname, HostnameKey, HubAddress,
-    HubEnvelope, Ingest, KEY_BYTES, KeyFile, ListedAgent, MESSAGE_LIFE, MachineCheck, MachineZone,
-    Nonce, Pair, PairAnswer, PairRefusal, PairRequest, Paired, PairingToken, PayloadDigest, Proof,
-    ProofRefusal, ProofRequest, PublicKey, Refused, RemovalRefused, SeedFile, SignedMessage,
-    SigningSeed, TokenId, TokenRecord, TokenTls, TokenUse, Tombstone, UNUSED_TOKEN_LIMIT, Welcome,
-    WireName, ack_kind, grants_kind, heartbeat_kind, hello_kind, list_agents, plans_kind,
-    progress_kind, release_kind, released_kind, report_kind, repos_kind, starts_new_epoch,
-    token_life, welcome_kind, withheld_kind,
+    HubEnvelope, Ingest, KEY_BYTES, KeyFile, ListedAgent, MESSAGE_LIFE, MachineCheck,
+    MachineVersion, MachineZone, Nonce, Pair, PairAnswer, PairRefusal, PairRequest, Paired,
+    PairingToken, PayloadDigest, Proof, ProofRefusal, ProofRequest, PublicKey, Refused,
+    RemovalRefused, SeedFile, SignedMessage, SigningSeed, TokenId, TokenRecord, TokenTls, TokenUse,
+    Tombstone, UNUSED_TOKEN_LIMIT, Welcome, WireName, ack_kind, grants_kind, heartbeat_kind,
+    hello_kind, list_agents, plans_kind, progress_kind, release_kind, released_kind, report_kind,
+    repos_kind, starts_new_epoch, token_life, welcome_kind, withheld_kind,
 };
 use domain::{AgentId, SignedDuration, TimeZoneDatabase, Timestamp};
 
@@ -725,7 +725,9 @@ impl HubPairing {
     /// as any good proof under the agent's key is: the record's last-seen
     /// time and counter are the copy's. The machine zone the `Hello`
     /// reports is kept over the one the agent held, pending or approved, so
-    /// a machine that moved tells its hub at its next connection.
+    /// a machine that moved tells its hub at its next connection, and so is
+    /// the version of Ladderback it names, none when it isn't shaped like
+    /// one (#1707).
     pub async fn welcome(
         &self,
         keys: &HubKeys,
@@ -771,6 +773,14 @@ impl HubPairing {
         if zone != agent.zone {
             self.registry
                 .record_zone(agent.agent_id, zone.as_ref())
+                .await?;
+        }
+        // A version not shaped like one is kept as none, as a zone this
+        // hub doesn't know is (#1707).
+        let version = MachineVersion::parse(&read.agent_version).ok();
+        if version != agent.version {
+            self.registry
+                .record_version(agent.agent_id, version.as_ref())
                 .await?;
         }
         // The outbox numbers its reports again from an older place when the

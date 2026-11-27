@@ -164,6 +164,11 @@ fn agent_cases() -> Vec<(&'static str, &'static str, String)> {
             "zone",
             "UPDATE machines SET zone = '../etc/localtime'".to_owned(),
         ),
+        (
+            "a version not shaped like a version",
+            "version",
+            "UPDATE machines SET version = '0.6.0 beta'".to_owned(),
+        ),
     ]
 }
 
