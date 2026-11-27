@@ -25,7 +25,11 @@ fn a_session_tag_is_sixteen_hex_digits_that_tell_sessions_apart() {
     let one = SessionTag::of(&token(1).digest());
     let other = SessionTag::of(&token(2).digest());
     assert_eq!(one.as_str().len(), 16);
-    assert!(one.as_str().bytes().all(|b| b.is_ascii_hexdigit() && !b.is_ascii_uppercase()));
+    assert!(
+        one.as_str()
+            .bytes()
+            .all(|b| b.is_ascii_hexdigit() && !b.is_ascii_uppercase())
+    );
     assert_ne!(one, other);
     assert_eq!(SessionTag::of(&token(1).digest()), one);
     // Neither the token's text nor its digest's leading bytes.
@@ -42,7 +46,13 @@ fn a_session_tag_is_sixteen_hex_digits_that_tell_sessions_apart() {
 fn a_session_tag_reads_back_and_refuses_anything_else() {
     let tag = SessionTag::of(&token(3).digest());
     assert_eq!(SessionTag::parse(tag.as_str()), Ok(tag.clone()));
-    for text in ["", "0123456789abcde", "0123456789abcdef0", "0123456789ABCDEF", "0123456789abcdeg"] {
+    for text in [
+        "",
+        "0123456789abcde",
+        "0123456789abcdef0",
+        "0123456789ABCDEF",
+        "0123456789abcdeg",
+    ] {
         assert_eq!(SessionTag::parse(text), Err(InvalidSessionTag), "{text:?}");
     }
 }

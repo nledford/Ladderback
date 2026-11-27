@@ -13,10 +13,9 @@ use base64::Engine as _;
 use base64::engine::general_purpose::URL_SAFE_NO_PAD;
 use domain::fleet::{
     Accepts, Ack, AgentEnvelope, AgentReport, Approval, BindingKind, Challenge, Connect,
-    EpochSeconds,
-    Handshakes, Happening, Hello, Holder, Hostname, HubEnvelope, KEY_BYTES, MachineFingerprint,
-    MachineZone, Nonce, OutboxEpoch, OutboxPosition, Pair, PairAnswer, Paired, Proof, Protocols,
-    PublicKey, Refused, ReportSeq, SIGNATURE_BYTES, Signature, Welcome, WireName,
+    EpochSeconds, Handshakes, Happening, Hello, Holder, Hostname, HubEnvelope, KEY_BYTES,
+    MachineFingerprint, MachineZone, Nonce, OutboxEpoch, OutboxPosition, Pair, PairAnswer, Paired,
+    Proof, Protocols, PublicKey, Refused, ReportSeq, SIGNATURE_BYTES, Signature, Welcome, WireName,
 };
 use domain::maintenance::{
     Grant, LeaseEpoch, RepoGrants, ReportedFloor, RepositoryReport, RepositoryReports,

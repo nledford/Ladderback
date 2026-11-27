@@ -1,12 +1,14 @@
 use api::sync::{AgentFrame, HubFrame};
 use domain::AgentId;
-use domain::fleet::{AgentRecord, KEY_BYTES};
+use domain::fleet::{Accepts, AgentRecord, KEY_BYTES};
 
 use super::hub::{
     HelloAnswer, HubHandshake, HubKeys, HubPairing, HubPairingError, MessageRefused, ProofAnswer,
     Syncing,
 };
-use super::wire::{AgentMessage, agent_message, answer_frame, challenge_frame, hub_envelope_frame};
+use super::wire::{
+    AgentMessage, agent_message, answer_frame, challenge_frame, hub_envelope_frame, read_hello,
+};
 use domain::fleet::PairAnswer;
 
 /// The close reason of a message out of turn or one that doesn't read: a
@@ -46,6 +48,16 @@ impl HubSession {
         match &self.stage {
             Stage::Syncing(syncing) => Some(syncing.agent_id()),
             _ => None,
+        }
+    }
+
+    /// The commands the agent welcomed on this connection takes from the
+    /// hub, as its `Hello` said: none before then, or when it said none
+    /// (decision 176).
+    pub fn accepts(&self) -> Accepts {
+        match &self.stage {
+            Stage::Syncing(syncing) => syncing.accepts().clone(),
+            _ => Accepts::none(),
         }
     }
 }
@@ -144,13 +156,21 @@ impl HubPairing {
                     Ok(Ok(HelloAnswer::Welcome {
                         envelope,
                         outbox_stated,
-                    })) => match self.syncing(handshake, &agent, outbox_stated) {
-                        Some(syncing) => {
-                            session.stage = Stage::Syncing(Box::new(syncing));
-                            HubStep::Reply(hub_envelope_frame(&envelope))
+                    })) => {
+                        // Read again: the `Welcome` read it whole, so it
+                        // reads.
+                        let accepts = read_hello(&hello.payload)
+                            .ok()
+                            .and_then(|read| read.accepts)
+                            .unwrap_or_default();
+                        match self.syncing(handshake, &agent, outbox_stated, accepts) {
+                            Some(syncing) => {
+                                session.stage = Stage::Syncing(Box::new(syncing));
+                                HubStep::Reply(hub_envelope_frame(&envelope))
+                            }
+                            None => HubStep::Last(hub_envelope_frame(&envelope)),
                         }
-                        None => HubStep::Last(hub_envelope_frame(&envelope)),
-                    },
+                    }
                     Ok(Err(refused)) => HubStep::Close(close_reason(refused)),
                     Err(error) => HubStep::Fail(error),
                 }

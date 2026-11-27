@@ -69,7 +69,11 @@ fn a_commands_freshness_ignores_how_the_machines_own_clock_stands() {
     // asked at the `Welcome`'s time has long expired.
     let welcomed = EpochSeconds::from_seconds(1_800_000_000);
     let asked = EpochSeconds::from_seconds(1_800_000_000);
-    assert!(!command_fresh(welcomed, SignedDuration::from_hours(2), asked));
+    assert!(!command_fresh(
+        welcomed,
+        SignedDuration::from_hours(2),
+        asked
+    ));
     assert!(command_fresh(welcomed, SignedDuration::ZERO, asked));
 }
 
@@ -84,7 +88,10 @@ fn the_hub_starts_no_second_run_of_a_plan_within_five_minutes() {
         Err(at(NOW + 1))
     );
     assert_eq!(hub_run_admitted(&runs, &plan("documents"), at(NOW)), Ok(()));
-    assert_eq!(hub_run_admitted(&runs, &plan("photos"), at(NOW + 1)), Ok(()));
+    assert_eq!(
+        hub_run_admitted(&runs, &plan("photos"), at(NOW + 1)),
+        Ok(())
+    );
 }
 
 #[test]
@@ -100,8 +107,14 @@ fn the_hub_starts_at_most_twelve_runs_an_hour() {
         hub_run_admitted(&runs, &plan("other"), at(NOW)),
         Err(at(NOW + 600))
     );
-    assert_eq!(hub_run_admitted(&runs[1..], &plan("other"), at(NOW)), Ok(()));
-    assert_eq!(hub_run_admitted(&runs, &plan("other"), at(NOW + 600)), Ok(()));
+    assert_eq!(
+        hub_run_admitted(&runs[1..], &plan("other"), at(NOW)),
+        Ok(())
+    );
+    assert_eq!(
+        hub_run_admitted(&runs, &plan("other"), at(NOW + 600)),
+        Ok(())
+    );
 }
 
 #[test]

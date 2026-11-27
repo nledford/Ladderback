@@ -3,15 +3,15 @@ use std::fmt;
 use std::sync::{Arc, Mutex, PoisonError};
 
 use domain::fleet::{
-    Ack, AgentEnvelope, AgentRecord, Approval, ApprovalRefused, Binding, BindingKind, Challenge,
-    Connect, EpochSeconds, FIRST_SEQUENCE, HANDSHAKES, Holder, Hostname, HostnameKey, HubAddress,
-    HubEnvelope, Ingest, KEY_BYTES, KeyFile, ListedAgent, MESSAGE_LIFE, MachineCheck, MachineZone,
-    Nonce, Pair, PairAnswer, PairRefusal, PairRequest, Paired, PairingToken, PayloadDigest, Proof,
-    ProofRefusal, ProofRequest, PublicKey, Refused, RemovalRefused, SeedFile, SignedMessage,
-    SigningSeed, TokenId, TokenRecord, TokenTls, TokenUse, Tombstone, UNUSED_TOKEN_LIMIT, Welcome,
-    WireName, ack_kind, grants_kind, heartbeat_kind, hello_kind, list_agents, plans_kind,
-    progress_kind, release_kind, released_kind, report_kind, repos_kind, starts_new_epoch,
-    token_life, welcome_kind, withheld_kind,
+    Accepts, Ack, AgentEnvelope, AgentRecord, Approval, ApprovalRefused, Binding, BindingKind,
+    Challenge, Connect, EpochSeconds, FIRST_SEQUENCE, HANDSHAKES, Holder, Hostname, HostnameKey,
+    HubAddress, HubEnvelope, Ingest, KEY_BYTES, KeyFile, ListedAgent, MESSAGE_LIFE, MachineCheck,
+    MachineZone, Nonce, Pair, PairAnswer, PairRefusal, PairRequest, Paired, PairingToken,
+    PayloadDigest, Proof, ProofRefusal, ProofRequest, PublicKey, Refused, RemovalRefused, SeedFile,
+    SignedMessage, SigningSeed, TokenId, TokenRecord, TokenTls, TokenUse, Tombstone,
+    UNUSED_TOKEN_LIMIT, Welcome, WireName, ack_kind, grants_kind, heartbeat_kind, hello_kind,
+    list_agents, plans_kind, progress_kind, release_kind, released_kind, report_kind, repos_kind,
+    starts_new_epoch, token_life, welcome_kind, withheld_kind,
 };
 use domain::{AgentId, SignedDuration, TimeZoneDatabase, Timestamp};
 
@@ -836,6 +836,7 @@ impl HubPairing {
         handshake: HubHandshake,
         agent: &AgentRecord,
         outbox_stated: bool,
+        accepts: Accepts,
     ) -> Option<Syncing> {
         let approved = Approval::of(agent.status) == Approval::Approved;
         (approved && self.inbox.is_some()).then(|| {
@@ -847,6 +848,7 @@ impl HubPairing {
                 outbox_stated,
                 next_received: next,
                 next_sent: next,
+                accepts,
             }
         })
     }
@@ -1198,12 +1200,19 @@ pub(super) struct Syncing {
     next_received: u64,
     /// The sequence number of the hub's next message.
     next_sent: u64,
+    /// The commands the agent's `Hello` said it takes (decision 176).
+    accepts: Accepts,
 }
 
 impl Syncing {
     /// The agent whose messages the connection carries.
     pub(super) fn agent_id(&self) -> AgentId {
         self.agent_id
+    }
+
+    /// The commands the agent takes on this connection.
+    pub(super) fn accepts(&self) -> &Accepts {
+        &self.accepts
     }
 }
 

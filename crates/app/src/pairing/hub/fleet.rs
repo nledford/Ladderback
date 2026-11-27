@@ -6,9 +6,9 @@
 
 use api::{MachineOutcomeDto, UiEvent};
 use domain::fleet::{
-    Accepts,
-    AgentRecord, AgentReport, Happening, OPERATIONS_SHOWN, Pairing, PlansReport, REPORTS_READ,
-    ReportedOperation, ReportedProgress, Tombstone, latest_operations, progress_shown,
+    Accepts, AgentRecord, AgentReport, Happening, OPERATIONS_SHOWN, Pairing, PlansReport,
+    REPORTS_READ, ReportedOperation, ReportedProgress, Tombstone, latest_operations,
+    progress_shown,
 };
 use domain::{AgentId, Timestamp};
 

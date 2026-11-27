@@ -470,7 +470,9 @@ mod served {
                 match tokio::time::timeout(self.bounds.idle_within, frame).await {
                     Ok(None) => {
                         if let Some(close) = live.close.take() {
-                            self.pairing.went_live(live.agent, live.id, close).await;
+                            self.pairing
+                                .went_live_taking(live.agent, live.id, close, session.accepts())
+                                .await;
                         }
                     }
                     Ok(Some(end)) => return end,
