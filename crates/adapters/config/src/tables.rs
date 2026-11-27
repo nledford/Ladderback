@@ -61,6 +61,7 @@ table! {
     AgentTable {
         hostname: String,
         concurrency: i64,
+        maintenance_concurrency: i64,
         nice: i64,
         allow_hub_restore: bool,
         locale: String,
