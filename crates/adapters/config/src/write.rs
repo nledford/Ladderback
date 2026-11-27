@@ -337,6 +337,8 @@ fn agent(settings: &AgentSettings) -> Option<AgentTable> {
             .then(|| i64::from(settings.maintenance_concurrency.get())),
         nice: settings.nice.map(|nice| i64::from(nice.get())),
         allow_hub_restore: settings.allow_hub_restore.then_some(true),
+        allow_hub_commands: (settings.hub_commands == domain::planning::HubCommands::Off)
+            .then_some(false),
         locale: settings
             .locale
             .as_ref()
