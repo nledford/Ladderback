@@ -3921,6 +3921,12 @@ ui-dashboard-none = No { -machine } is approved yet. Approve one on the Machines
 # Shown in place of the machines when the hub didn't answer the page's request for them.
 ui-dashboard-unreachable = The { -hub } didn't answer, so its { -machine(form: "other") } can't be shown. The page asks again in a few seconds.
 
+# Shown above the approved machines, and on a machine's page, while the hub doesn't answer the page's request for which machine it is itself; the page keeps asking.
+ui-dashboard-own-unanswered = The { -hub } didn't say which { -machine } it is, so this { -hub }'s own { -machine } can't be shown. The page asks again in a few seconds.
+
+# Shown in an alert above the cards, where a refusal shows, when the hub didn't answer the Back up menu's request to start a backup.
+ui-dashboard-backup-unanswered = The backup didn't start because the { -hub } couldn't be reached.
+
 # When the machine last connected to the hub.
 # $when (string): the time, as ui-instant or ui-dashboard-time-elsewhere writes it.
 ui-dashboard-last-connected = Last connected { $when }.
