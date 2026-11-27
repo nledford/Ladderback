@@ -23,11 +23,15 @@ pub struct KeepDailyCopy {
 
 impl KeepDailyCopy {
     /// Keeps the daily copy until the future is dropped: takes one when it
-    /// is due, then sleeps until the next is.
+    /// is due, then sleeps until the next is, but never more than an hour
+    /// of monotonic time, so a clock set back while it sleeps, which
+    /// leaves the copy dated after now, is noticed within the hour.
     pub async fn run(&self) {
         loop {
             let next = self.keep().await;
-            self.clock.sleep_until(next).await;
+            let due = std::pin::pin!(self.clock.sleep_until(next));
+            let nap = std::pin::pin!(self.clock.sleep(RETRY_AFTER));
+            futures::future::select(due, nap).await;
         }
     }
 
