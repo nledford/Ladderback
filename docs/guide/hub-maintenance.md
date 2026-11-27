@@ -38,6 +38,8 @@ After any start, the hub gives no repository to another machine until every mach
 
 A hub restored from an older backup of its data folder may be shown, by a machine, a lease it granted after that backup. It then grants and renews no lease, and its **Machines** tab says why, until you confirm that the hub that granted it is stopped or gone for good: press **End recovery mode**, and confirm as for a pairing token. Do that only once the old hub can't run again, since two hubs that both grant leases could each give one repository to a different machine.
 
+After you restore a hub's data folder from a backup, or its `ladderback.db.daily` over `ladderback.db` ([Install](install.md#where-ladderback-keeps-your-files)), start it and, before any machine claims maintenance, approve again each machine its **Machines** tab shows under **Waiting for approval** that you had approved already, comparing its key fingerprint as the first time. The restored hub holds such a machine as waiting again, so it doesn't wait for that machine's report before it gives another machine a repository the first may still maintain.
+
 ## Known limits
 
 - **A repository that two machines back up to is maintained by neither.** Making the hub its maintenance owner comes later ([README, roadmap](https://github.com/nledford/Ladderback/blob/main/README.md#roadmap), M9).
