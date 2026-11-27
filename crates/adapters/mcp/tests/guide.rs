@@ -1,7 +1,7 @@
 //! The user guide's page on AI agents (#1188) lists the tools `ladderback mcp`
 //! offers as the server lists them: each tool's name and description, the
 //! permissions that open it, and whether a session of its own offers it. The
-//! table is the server's, never typed by hand, so a tool added, renamed,
+//! list is the server's, never typed by hand, so a tool added, renamed,
 //! described anew or opened by another permission fails this test until the
 //! page shows it.
 //!
@@ -25,14 +25,14 @@ use tokio::io::{
 
 /// The page, `docs/guide/<PAGE>.md`.
 const PAGE: &str = "ai-agents";
-/// The line before the table on the page.
-const START: &str = "<!-- The tools, as the server lists them: crates/adapters/mcp/tests/guide.rs checks this table. -->";
+/// The line before the list on the page.
+const START: &str = "<!-- The tools, as the server lists them: crates/adapters/mcp/tests/guide.rs checks this list. -->";
 /// The line after it.
 const END: &str = "<!-- The end of the tools. -->";
 
 #[tokio::test]
 async fn the_guide_lists_the_tools_the_server_offers() {
-    let table = tools_table().await;
+    let list = tools_list().await;
     let path = format!(
         "{}/../../../docs/guide/{PAGE}.md",
         env!("CARGO_MANIFEST_DIR")
@@ -44,9 +44,9 @@ async fn the_guide_lists_the_tools_the_server_offers() {
         .and_then(|(_, after)| after.split_once(&format!("\n{END}")))
         .map(|(listed, _)| listed);
     assert!(
-        listed == Some(table.as_str()),
+        listed == Some(list.as_str()),
         "the tools on {path} aren't the server's; write this between its lines\n\
-         {START}\nand\n{END}\n\n{table}"
+         {START}\nand\n{END}\n\n{list}"
     );
 }
 
@@ -61,9 +61,10 @@ fn label(permission: Permission) -> String {
     name.into_text()
 }
 
-/// The guide's table of the tools, after the blank line that starts it: a
-/// row for each tool, in the order the server lists them.
-async fn tools_table() -> String {
+/// The guide's list of the tools, after the blank line that starts it: an
+/// item for each tool, in the order the server lists them, narrow enough for
+/// a phone, as a table of the descriptions isn't.
+async fn tools_list() -> String {
     let permissions = Arc::new(Mutex::new(granted(None)));
     let daemon = stand_in_daemon(Arc::clone(&permissions)).await;
     let connect = Arc::new(
@@ -105,25 +106,21 @@ async fn tools_table() -> String {
         }
     }
 
-    let mut table = String::from(
-        "\n| Tool | Permission | Headless and scratch | What it does |\n|---|---|---|---|\n",
-    );
+    let mut list = String::from("\n");
     for (tool, needed) in tools.iter().zip(needs) {
         let name = text(tool, "name");
-        let headless = if in_own_session.contains(&name) {
-            "Yes"
+        let where_offered = if in_own_session.contains(&name) {
+            ""
         } else {
-            "No"
+            "; running Ladderback only"
         };
-        let description = text(tool, "description")
-            .replace('|', "\\|")
-            .replace('\n', " ");
-        table.push_str(&format!(
-            "| `{name}` | {} | {headless} | {description} |\n",
+        let description = text(tool, "description").replace('\n', " ");
+        list.push_str(&format!(
+            "- **`{name}`** ({}{where_offered}). {description}\n",
             needed.join(" and ")
         ));
     }
-    table
+    list
 }
 
 /// Every permission at its level, but `without`, as the daemon answers it.

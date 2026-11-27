@@ -2,7 +2,7 @@
 
 **A pull request whose every path is docs, with at least one under `docs/guide/`, runs what a docs-only pull request runs and the guide's example tests (`crates/adapters/config/tests/guide.rs`) alone; everything else skips as for docs-only, and every required check still reports. A pull request labeled `no-behavior-change` skips only its mutation testing, which reports as skipped; every test still runs, and the nightly and `main` runs are unaffected. Beside `behaviour` the label fails the pull request's mutation check. A label counts as of the pull request's latest CI run: adding or removing it takes effect at the next push or re-run** (recorded 2026-11-26, §13.1, §13.8; the maintainer's decision).
 
-**Amended 2026-11-27 (#1188):** the guide lane runs every test target named `guide`, with the same command: beside `crates/adapters/config/tests/guide.rs`, `crates/adapters/mcp/tests/guide.rs` checks the guide's table of MCP tools against the server's `tools/list`.
+**Amended 2026-11-27 (#1188):** the guide lane runs every test target named `guide`, with the same command: beside `crates/adapters/config/tests/guide.rs`, `crates/adapters/mcp/tests/guide.rs` checks the guide's list of MCP tools against the server's `tools/list`.
 
 ## Why
 

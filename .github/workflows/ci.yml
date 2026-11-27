@@ -175,7 +175,7 @@ jobs:
   # failure here leaves the outputs empty, and the jobs below run: they skip
   # only when this job says "true" (`docs-only`) or "false" (`service`, `ui`).
   # The user guide (docs/guide/) is docs, but its config.toml and keyring
-  # examples and its table of MCP tools are tested (the `guide` test targets,
+  # examples and its list of MCP tools are tested (the `guide` test targets,
   # crates/adapters/config/tests/guide.rs and crates/adapters/mcp/tests/guide.rs):
   # a docs-only pull request that touches it says "true" in `guide` too, and `check`'s
   # Linux leg runs those tests beside the docs checks; every other job skips
@@ -323,7 +323,7 @@ jobs:
         run: node scripts/decision-index.ts
       - if: needs.changes.outputs.docs-only == 'true' && runner.os == 'Linux'
         run: node scripts/component-index.ts
-      # The guide's examples and table of MCP tools (the `guide` test targets,
+      # The guide's examples and list of MCP tools (the `guide` test targets,
       # crates/adapters/config/tests/guide.rs and crates/adapters/mcp/tests/guide.rs),
       # for a docs-only pull request that touches the guide: those test targets
       # alone, with `--workspace` for the features every other build uses. Any
