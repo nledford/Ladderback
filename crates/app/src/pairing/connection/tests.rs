@@ -3745,6 +3745,47 @@ async fn a_command_no_one_waits_for_leaves_room_for_the_next() {
     }
 }
 
+/// The hub sends one machine at most its commands an hour, so its own asks
+/// never fill the machine's ledger of the commands it took; the next is
+/// refused with when to ask again, an hour after the oldest (decision 176).
+#[tokio::test]
+async fn the_hub_sends_a_machine_at_most_its_commands_an_hour() {
+    use crate::pairing::CommandAskRefused;
+    use domain::fleet::{Accepts, HUB_COMMANDS_PER_HOUR};
+    use futures::{FutureExt as _, StreamExt as _};
+
+    let hub = keeping_reports(1);
+    let _identity = approved(&hub).await;
+    let mut queue = hub
+        .pairing
+        .went_live_taking(agent_id(1), 1, Box::new(|| {}), Some(Accepts::all()))
+        .await;
+    let mut sent = async || {
+        let mut asked = Box::pin(hub.pairing.command_asked(photos_asked_of(agent_id(1))));
+        let pending = futures::poll!(asked.as_mut()).is_pending();
+        pending && queue.next().now_or_never().flatten().is_some()
+    };
+    let first = hub.clock.now();
+    for ask in 0..HUB_COMMANDS_PER_HOUR {
+        assert!(sent().await, "the hub refused ask {ask}");
+        hub.clock.advance(SignedDuration::from_secs(1));
+    }
+    let refused = futures::poll!(Box::pin(
+        hub.pairing.command_asked(photos_asked_of(agent_id(1)))
+    ));
+    assert_eq!(
+        refused,
+        std::task::Poll::Ready(Err(CommandAskRefused::Busy {
+            retry_at: first + SignedDuration::from_hours(1)
+        }))
+    );
+    hub.clock.advance(
+        SignedDuration::from_hours(1)
+            - SignedDuration::from_secs(i64::try_from(HUB_COMMANDS_PER_HOUR).unwrap()),
+    );
+    assert!(sent().await, "the hub refused the ask an hour after the first");
+}
+
 /// The hub's runs for a sync that takes its commands: no plan runs, and
 /// each start is the operation `0x0e`.
 struct StartsOne;

@@ -27,9 +27,9 @@ mod zone;
 
 pub use commands::{
     Accepts, COMMAND_ANSWER_WITHIN, COMMAND_LIFE, COMMANDS_REMEMBERED_FOR, CommandId, CommandKind,
-    CommandRequest, HUB_RUN_SPACING, HUB_RUNS_PER_HOUR, HubCommand, HubRun, MAX_ACCEPTS,
-    MAX_COMMANDS_IN_FLIGHT, MAX_COMMANDS_REMEMBERED, TooManyAccepted, cancel_op_kind,
-    command_fresh, command_result_kind, hub_run_admitted, run_plan_kind,
+    CommandRequest, HUB_COMMANDS_PER_HOUR, HUB_RUN_SPACING, HUB_RUNS_PER_HOUR, HubCommand, HubRun,
+    MAX_ACCEPTS, MAX_COMMANDS_IN_FLIGHT, MAX_COMMANDS_REMEMBERED, TooManyAccepted, cancel_op_kind,
+    command_fresh, command_result_kind, hub_command_admitted, hub_run_admitted, run_plan_kind,
 };
 pub use fingerprint::{Fingerprint, TokenId};
 pub use greeting::{

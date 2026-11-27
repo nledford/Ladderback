@@ -133,3 +133,49 @@ fn a_run_ahead_of_the_machines_clock_counts_by_how_far_it_lies() {
     }];
     assert_eq!(hub_run_admitted(&far, &plan("photos"), at(NOW)), Ok(()));
 }
+
+/// A hub that sends a machine every command its limit lets it, for as long
+/// as the machine remembers a command's ID, sends fewer than the machine
+/// remembers: its asks alone never fill the machine's ledger.
+#[test]
+fn a_hub_at_its_limit_for_a_day_never_fills_a_machines_ledger() {
+    let mut sent = Vec::new();
+    let mut now = SignedDuration::ZERO;
+    while now < COMMANDS_REMEMBERED_FOR {
+        match hub_command_admitted(&sent, now) {
+            Ok(()) => sent.push(now),
+            Err(again) => {
+                assert!(again > now, "{again:?} isn't after {now:?}");
+                now = again;
+            }
+        }
+    }
+    let hour = SignedDuration::from_hours(1);
+    assert_eq!(
+        sent.iter().filter(|at| **at < hour).count(),
+        HUB_COMMANDS_PER_HOUR
+    );
+    assert!(sent.len() < MAX_COMMANDS_REMEMBERED, "{}", sent.len());
+}
+
+/// The hub sends the next command once the oldest of the hour's leaves it.
+#[test]
+fn a_hub_at_its_limit_sends_again_an_hour_after_its_oldest() {
+    let minute = SignedDuration::from_mins(1);
+    let sent: Vec<SignedDuration> = (0..HUB_COMMANDS_PER_HOUR)
+        .map(|number| minute * i32::try_from(number).unwrap())
+        .collect();
+    let now = SignedDuration::from_mins(50);
+    assert_eq!(
+        hub_command_admitted(&sent, now),
+        Err(SignedDuration::from_hours(1))
+    );
+    assert_eq!(
+        hub_command_admitted(sent.get(1..).unwrap(), now),
+        Ok(())
+    );
+    assert_eq!(
+        hub_command_admitted(&sent, SignedDuration::from_hours(1)),
+        Ok(())
+    );
+}

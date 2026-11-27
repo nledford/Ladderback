@@ -32,6 +32,12 @@ pub const MAX_COMMANDS_REMEMBERED: usize = 1_000;
 /// oldest, which the hub has stopped waiting for, answering it expired.
 pub const MAX_COMMANDS_IN_FLIGHT: usize = 8;
 
+/// The most commands a hub sends one machine in an hour. A machine
+/// remembers each command's ID for [`COMMANDS_REMEMBERED_FOR`], and at most
+/// [`MAX_COMMANDS_REMEMBERED`] of them: a hub that sends no more than this
+/// never fills that ledger, whatever its commands come to.
+pub const HUB_COMMANDS_PER_HOUR: usize = 40;
+
 /// How long a hub waits for a machine's answer to a command.
 pub const COMMAND_ANSWER_WITHIN: SignedDuration = SignedDuration::from_secs(20);
 
@@ -233,6 +239,17 @@ pub fn hub_run_admitted(runs: &[HubRun], plan: &PlanId, now: Timestamp) -> Resul
         Some(again) => Err(again),
         None => Ok(()),
     }
+}
+
+/// Whether a hub may send a machine one more command at `now`, on the
+/// hub's monotonic clock, having sent it commands at `sent`: fewer than
+/// [`HUB_COMMANDS_PER_HOUR`] within the hour before. Refused, it says when
+/// on that clock the hub may send one again.
+pub fn hub_command_admitted(
+    sent: &[SignedDuration],
+    now: SignedDuration,
+) -> Result<(), SignedDuration> {
+    todo!("{sent:?} {now:?}")
 }
 
 #[cfg(test)]
