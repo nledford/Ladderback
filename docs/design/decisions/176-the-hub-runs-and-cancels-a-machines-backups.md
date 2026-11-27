@@ -50,4 +50,3 @@ The dashboard's Back up menu (#1461) needs the hub to start a backup on a machin
 - A rate limit's `retry-at` is on the machine's clock, which the hub passes on as it is, so a skewed machine clock moves when the person is told to ask again. A cancel refused because the ledger is full reads as `command-rate-limited`, the code a run's limit gives.
 - A run counts toward the machine's limits only when recording it succeeds. The machine records the run in `hub_runs` once the backup is queued, so should that write fail, just after the command's own write to the same file succeeded, the backup runs uncounted and the machine logs the error.
 - A run counts toward the limits once it is queued, so a backup that then fails because a secret can't be read still counts against them.
-- The hub's idle bound on a connection also ends when it sends a command, so asks made within that bound of each other keep a silent machine's connection marked online.
