@@ -4023,7 +4023,7 @@ ui-dashboard-summary =
 # $hostname (string): the machine's name.
 # $when (string): when it last connected, as ui-instant or ui-dashboard-time-elsewhere writes it.
 # $due (string): when the run was planned for, written the same way.
-ui-dashboard-attention-offline = { $hostname } last connected { $when }, before a run planned for { $due }.
+ui-dashboard-attention-offline = { $hostname } last connected { $when } and is offline, past a run planned for { $due }.
 
 # A link after ui-dashboard-summary to the page of a machine whose plan's last run failed.
 # $hostname (string): the machine's name.
@@ -4049,7 +4049,7 @@ ui-machine-card-attention = Needs attention: { $reason }
 # Why a card needs attention: its machine is offline though a planned run of it fell due.
 # $when (string): when it last connected, as ui-instant or ui-dashboard-time-elsewhere writes it.
 # $due (string): when the run was planned for, written the same way.
-ui-machine-card-offline = It last connected { $when }, before a run planned for { $due }.
+ui-machine-card-offline = It last connected { $when } and is offline, past a run planned for { $due }.
 
 # Why a card needs attention: a plan's last run failed.
 # $plan (string): the plan's ID.
