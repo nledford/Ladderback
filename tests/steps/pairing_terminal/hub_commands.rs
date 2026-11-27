@@ -142,8 +142,9 @@ fn answers_started(agent: &mut Agent) {
     started_operation(agent);
 }
 
-#[then("the machine's backup soon succeeds")]
-async fn backup_succeeds(agent: &mut Agent) {
+/// The machine's operation the hub's answer named, once it has ended, as
+/// the machine's own page reads it.
+async fn backup_ended(agent: &Agent) -> serde_json::Value {
     let id = started_operation(agent);
     let address = agent
         .pairing_terminal
@@ -157,15 +158,41 @@ async fn backup_succeeds(agent: &mut Agent) {
         assert_eq!(status, 200, "the machine knows the operation: {body}");
         let detail: serde_json::Value =
             serde_json::from_str(&body).unwrap_or_else(|error| panic!("{error}: {body}"));
-        match detail["operation"]["status"].as_str() {
-            Some("succeeded") => return,
-            Some("queued" | "running") => {}
-            _ => panic!("the machine's backup didn't succeed: {body}"),
+        if !matches!(
+            detail["operation"]["status"].as_str(),
+            Some("queued" | "running")
+        ) {
+            return detail;
         }
         last = body;
         tokio::time::sleep(Duration::from_millis(250)).await;
     }
     panic!("the machine's backup didn't end within {BACKUP_WITHIN:?}: {last}");
+}
+
+#[then("the machine's backup soon succeeds")]
+async fn backup_succeeds(agent: &mut Agent) {
+    let detail = backup_ended(agent).await;
+    assert_eq!(detail["operation"]["status"], "succeeded", "{detail}");
+}
+
+#[given("the machine reads the repository's password from a variable that isn't set")]
+async fn password_unset(agent: &mut Agent) {
+    agent.backup.password = Some(domain::secrets::SecretRef::Env(
+        "LADDERBACK_E2E_PASSWORD_NEVER_SET".to_owned(),
+    ));
+    let dir = testkit::daemon::config_dir(&machine_root(agent));
+    save_daemon_config_in(agent, &dir, None).await;
+}
+
+#[then("the machine's backup soon fails, its password missing")]
+async fn backup_fails_for_password(agent: &mut Agent) {
+    let detail = backup_ended(agent).await;
+    assert_eq!(detail["operation"]["status"], "failed", "{detail}");
+    assert_eq!(
+        detail["operation"]["failure"]["code"], "secret-missing",
+        "{detail}"
+    );
 }
 
 /// Stops the machine's daemon and opens its store.
