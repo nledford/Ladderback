@@ -696,6 +696,53 @@ fn the_hubs_own_machine_reads_as_a_paired_one_does() {
     );
 }
 
+/// While a plan of the hub's own runs or waits in the queue, its card's
+/// last run is the plan's last success, which its status tells, so the
+/// card never says no backup has ended while one runs.
+#[test]
+fn the_hubs_own_plan_that_runs_again_reads_its_last_success() {
+    let standing = |status: &str, success: Option<i64>| api::PlanStatusDto {
+        plan: api::PlanSummaryDto {
+            id: "documents".to_owned(),
+            repository: "demo".to_owned(),
+            scheduled: true,
+            next_run: None,
+            warnings: Vec::new(),
+        },
+        last: Some(summary_of("op-3", "documents", status, -2)),
+        last_success: success.map(|minutes| api::LastSuccessDto {
+            operation: "op-1".to_owned(),
+            finished_at: at(minutes),
+            ago_seconds: 0,
+        }),
+        overdue: false,
+    };
+    let read = |plan: api::PlanStatusDto| {
+        let status = StatusDto {
+            plans: vec![plan],
+            running: Vec::new(),
+            unreadable_repositories: Vec::new(),
+            full_disk_access: api::FullDiskAccessStateDto::NotApplicable,
+        };
+        own_machine(
+            &identity(Some("agent-hub")),
+            Some(&status),
+            &OperationsState::default(),
+        )
+        .and_then(|own| own.plans)
+        .map(|plans| plans.plans)
+    };
+    assert_eq!(
+        read(standing("running", Some(-1500))),
+        Some(vec![plan("documents", Some(("succeeded", -1500)), None)])
+    );
+    assert_eq!(
+        read(standing("queued", None)),
+        Some(vec![plan("documents", None, None)]),
+        "never succeeded: no last run yet"
+    );
+}
+
 /// The page reads the hub's plans' status on opening, then again for each
 /// operation that comes and each status that changes, the end above all,
 /// which the card's status and last backup tell; never for progress, nor
