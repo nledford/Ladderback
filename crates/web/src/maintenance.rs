@@ -15,7 +15,7 @@ use api::{
 };
 
 use crate::announcer::Politeness;
-use crate::backend::{ended, reconnect_backoff};
+use crate::backend::{ended, queued, reconnect_backoff};
 
 /// What a maintenance run does.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -83,6 +83,22 @@ pub(crate) fn preview_path(alias: &str) -> String {
 /// The route that starts a maintenance run.
 pub(crate) fn start_path(alias: &str) -> String {
     format!("/api/v1/repositories/{alias}/maintenance")
+}
+
+/// What a maintenance start answers: the operation's ID and its status,
+/// `queued` while it waits for its turn.
+#[derive(serde::Deserialize)]
+struct Started {
+    operation: String,
+    status: String,
+}
+
+/// The operation a maintenance start's answer names, and whether it waits
+/// for its turn; `None` for an answer that isn't one.
+pub(crate) fn started_run(answer: &str) -> Option<(String, bool)> {
+    let started = serde_json::from_str::<Started>(answer).ok()?;
+    let waiting = queued(&started.status);
+    Some((started.operation, waiting))
 }
 
 /// The route that turns maintenance of a repository from this agent on or
@@ -733,18 +749,27 @@ impl Run {
     pub(crate) fn told(&self) -> Told {
         match self.state {
             RunState::Waiting => Told::Waiting(self.kind),
-            RunState::Starting | RunState::Running => Told::Running(self.kind),
+            RunState::Running => Told::Running(self.kind),
         }
     }
 }
 
-/// Where a run that goes on stands: not read yet since its start was
-/// accepted, waiting for its turn, or running.
+/// Where a run that goes on stands, as its start's answer or the last read
+/// said: waiting for its turn, or running.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) enum RunState {
-    Starting,
     Waiting,
     Running,
+}
+
+impl RunState {
+    fn of(waiting: bool) -> Self {
+        if waiting {
+            Self::Waiting
+        } else {
+            Self::Running
+        }
+    }
 }
 
 /// What the page does next, as the panel decides.
@@ -842,18 +867,21 @@ impl Panel {
     }
 
     /// The start was accepted: the run goes on, and is watched. Whether it
-    /// runs or waits for its turn is told once it is read.
-    pub(crate) fn started(&mut self, kind: Kind, operation: String, _waiting: bool) -> Vec<Effect> {
+    /// runs or waits for its turn, as the start's answer says, is told at
+    /// once.
+    pub(crate) fn started(&mut self, kind: Kind, operation: String, waiting: bool) -> Vec<Effect> {
         self.step = None;
         self.ended = None;
         self.findings = Findings::default();
         self.refusal = None;
-        self.run = Some(Run {
+        let run = Run {
             kind,
             operation,
-            state: RunState::Starting,
-        });
-        vec![Effect::CloseReview, Effect::Watch]
+            state: RunState::of(waiting),
+        };
+        let told = run.told();
+        self.run = Some(run);
+        vec![Effect::CloseReview, Effect::Say(told), Effect::Watch]
     }
 
     /// The run that goes on was read as `waiting` for its turn, or as
@@ -862,11 +890,7 @@ impl Panel {
         let Some(run) = self.run.as_mut() else {
             return Vec::new();
         };
-        let state = if waiting {
-            RunState::Waiting
-        } else {
-            RunState::Running
-        };
+        let state = RunState::of(waiting);
         if std::mem::replace(&mut run.state, state) == state {
             Vec::new()
         } else {
@@ -2034,6 +2058,19 @@ mod tests {
     fn a_run_is_read_and_canceled_through_its_own_routes() {
         assert_eq!(operation_path("0a1b"), "/api/v1/operations/0a1b");
         assert_eq!(cancel_path("0a1b"), "/api/v1/operations/0a1b/cancel");
+    }
+
+    #[test]
+    fn a_starts_answer_names_its_run_and_whether_it_waits_for_its_turn() {
+        assert_eq!(
+            started_run(r#"{"operation":"0a1b","status":"queued"}"#),
+            Some(("0a1b".to_owned(), true))
+        );
+        assert_eq!(
+            started_run(r#"{"operation":"0a1b","status":"running"}"#),
+            Some(("0a1b".to_owned(), false))
+        );
+        assert_eq!(started_run(r#"{"operation":"0a1b"}"#), None);
     }
 
     #[test]

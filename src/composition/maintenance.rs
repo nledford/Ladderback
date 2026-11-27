@@ -181,7 +181,9 @@ pub(super) async fn start(
         let cancel = async move {
             let _ = cancel.await;
         };
-        let _ = started.send(Ok(()));
+        // Whether it waits as the route answers; the page reads it from then
+        // on, so a turn that comes meanwhile is told at its first read.
+        let _ = started.send(Ok(matches!(run, Run::Waiting(_))));
         let finished = match run {
             Run::Now(prepared) => use_case.execute(*prepared, cancel).await,
             Run::Waiting(waiting) => use_case.run_waiting(*waiting, cancel).await,
@@ -192,9 +194,9 @@ pub(super) async fn start(
     // A task that ended without answering has not started anything the route
     // could name.
     match wait_for_start.await {
-        Ok(answer) => answer.map(|()| http_adapter::MaintenanceStarted {
+        Ok(answer) => answer.map(|waiting| http_adapter::MaintenanceStarted {
             operation: operation.as_uuid().hyphenated().to_string(),
-            waiting: false,
+            waiting,
         }),
         Err(_) => Err(unavailable(ErrorCode::OperationFailed, Vec::new(), None)),
     }

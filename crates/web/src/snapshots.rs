@@ -394,10 +394,10 @@ impl Page {
                 return;
             }
             match answer {
-                Some(Posted::Done(body)) => match ws::started_operation(&body) {
-                    Some(operation) => {
+                Some(Posted::Done(body)) => match maintenance::started_run(&body) {
+                    Some((operation, waiting)) => {
                         self.answered(true);
-                        self.change(|panel| panel.started(kind, operation, false));
+                        self.change(|panel| panel.started(kind, operation, waiting));
                     }
                     None => {
                         self.answered(false);
