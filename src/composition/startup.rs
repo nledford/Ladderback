@@ -330,6 +330,7 @@ impl Background {
             reports: Arc::new(log_daily_copy),
         };
         let queue = Arc::clone(&self.runner.queue);
+        let maintenance = Arc::clone(&self.runner.maintenance_queue);
         let events = Arc::clone(&self.runner.events);
         let runs: Arc<dyn PlanRuns> = self.runner;
         let scheduling = async {
@@ -355,6 +356,7 @@ impl Background {
                 link: self.conditions.link,
                 runs,
                 queue,
+                maintenance,
                 zone: domain::TimeZone::system(),
                 ends: self.ends,
                 events,

@@ -16,7 +16,7 @@ use app::fakes::{
     SeededRandom,
 };
 use app::ports::{Clock, ConfigStore, EventBus, PendingRetry, PlannedRun, ScheduleStore};
-use app::queue::{Place, RunQueue};
+use app::queue::{MaintenanceQueue, Place, RunQueue};
 use app::retry::{RunEnd, RunEndSender, RunEnds, RunOutcome, run_ends};
 use app::schedule::{PlanRuns, ScheduleReport, Scheduler};
 use app::secrets::UnlockWait;
@@ -441,6 +441,7 @@ impl SchedulerWorld {
                 link: self.link.clone(),
                 runs: self.runs.clone(),
                 queue: self.queue.clone(),
+                maintenance: Arc::new(MaintenanceQueue::new()),
                 zone: self.zone.clone(),
                 ends: self.runs.ends(),
                 events: self.events.clone(),
