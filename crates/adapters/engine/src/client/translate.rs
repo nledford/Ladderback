@@ -475,6 +475,16 @@ pub(super) fn translate(event: WorkerEvent, redactor: &Redactor) -> Option<Engin
                 | ErrorCode::MachineUnknown
                 | ErrorCode::MachineApprovedAlready
                 | ErrorCode::HubUnavailable
+                | ErrorCode::MachineOffline
+                | ErrorCode::MachineOfflineNextRun
+                | ErrorCode::MachineCommandsUnsupported
+                | ErrorCode::MachineCommandsOff
+                | ErrorCode::MachineNoAnswer
+                | ErrorCode::CommandExpired
+                | ErrorCode::CommandReplayed
+                | ErrorCode::CommandRateLimited
+                | ErrorCode::MachineRunRefused
+                | ErrorCode::CommandBackupsOnly
                 | ErrorCode::Unknown => FailureReason::EngineFailed { detail },
             })
         }
