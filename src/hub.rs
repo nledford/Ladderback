@@ -85,8 +85,9 @@ pub(crate) fn hub_pairing(data_dir: &Path, store: Arc<SqliteStore>) -> HubPairin
     .with_inbox(Arc::<SqliteStore>::clone(&store))
     .with_owners(Arc::new(RepositoryOwners::new(
         Arc::<SqliteStore>::clone(&store),
-        store,
+        Arc::<SqliteStore>::clone(&store),
         Arc::new(SystemClock),
+        store,
     )))
 }
 
@@ -1102,8 +1103,15 @@ pub(crate) async fn reporting(
         machine_zone(),
     )
     // A maintenance running here keeps its repository's lease from a
-    // release, as its operation log says.
-    .with_leases(config, leases, store, Arc::clone(listings.seen()))
+    // release, as its operation log says; a release goes out only once
+    // the database's drive holds it (decision 178).
+    .with_leases(
+        config,
+        leases,
+        Arc::<SqliteStore>::clone(&store),
+        Arc::clone(listings.seen()),
+        store,
+    )
     .with_listings(listings)
     .with_standing(standing)
     .with_progress(Arc::clone(&progress))

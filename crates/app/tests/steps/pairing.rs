@@ -94,6 +94,7 @@ impl Hub {
             registry.clone(),
             Arc::new(InMemoryOwnershipRegistry::new()),
             clock.clone(),
+            Arc::new(app::fakes::InMemoryDriveFlush::default()),
         )));
         let events = Arc::new(app::event_bus::BroadcastEventBus::new());
         let heard = Arc::new(std::sync::Mutex::new(

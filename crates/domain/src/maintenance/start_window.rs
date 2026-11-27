@@ -36,8 +36,13 @@ pub struct StartWindow {
 
 impl StartWindow {
     /// The window of a hub that has just started, from every repository
-    /// each agent's last report named.
-    pub fn new(uses: impl IntoIterator<Item = (AgentId, RepositoryId)>) -> Self {
+    /// each agent's last report named, and every agent `approved` at the
+    /// start.
+    pub fn new(
+        uses: impl IntoIterator<Item = (AgentId, RepositoryId)>,
+        approved: impl IntoIterator<Item = AgentId>,
+    ) -> Self {
+        let _ = approved.into_iter();
         let mut window = Self::default();
         for (agent, repository) in uses {
             window.listed.insert(repository.clone());

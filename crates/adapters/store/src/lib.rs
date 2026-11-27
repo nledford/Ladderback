@@ -17,6 +17,7 @@ mod baseline_copy;
 mod codec;
 mod copy;
 mod daily_copy;
+mod drive_flush;
 mod error_args;
 mod leases;
 mod locations;

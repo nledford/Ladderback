@@ -21,8 +21,8 @@ use std::sync::Arc;
 
 use app::fakes::{
     FakeClock, FakeSecrets, FakeSigning, InMemoryAgentRegistry, InMemoryConfigStore,
-    InMemoryIdentity, InMemoryLeaseCache, InMemoryOperationStore, InMemoryOwnershipRegistry,
-    ListingEngine, RecordingNotifier, SeededRandom,
+    InMemoryDriveFlush, InMemoryIdentity, InMemoryLeaseCache, InMemoryOperationStore,
+    InMemoryOwnershipRegistry, ListingEngine, RecordingNotifier, SeededRandom,
 };
 use app::leases::{MaintenanceLeases, WatchPauses};
 use app::notifications::Notify;
@@ -135,11 +135,7 @@ impl Default for OwnershipWorld {
         let agents = Arc::new(InMemoryAgentRegistry::new());
         let owners = Arc::new(InMemoryOwnershipRegistry::new());
         Self {
-            hub: Arc::new(RepositoryOwners::new(
-                agents.clone(),
-                owners.clone(),
-                clock.clone(),
-            )),
+            hub: started(&agents, &owners, &clock),
             clock,
             agents,
             owners,
@@ -168,13 +164,29 @@ impl OwnershipWorld {
     /// The hub starts again over `owners`.
     fn start_hub(&mut self, owners: Arc<InMemoryOwnershipRegistry>) {
         self.owners = owners;
-        self.hub = Arc::new(RepositoryOwners::new(
-            self.agents.clone(),
-            self.owners.clone(),
-            self.clock.clone(),
-        ));
+        self.hub = started(&self.agents, &self.owners, &self.clock);
     }
+}
 
+/// The hub's use case at its start, over `agents` and `owners`, with its
+/// start window opened, as the hub's start opens it.
+fn started(
+    agents: &Arc<InMemoryAgentRegistry>,
+    owners: &Arc<InMemoryOwnershipRegistry>,
+    clock: &Arc<FakeClock>,
+) -> Arc<RepositoryOwners> {
+    let hub = RepositoryOwners::new(
+        agents.clone(),
+        owners.clone(),
+        clock.clone(),
+        Arc::new(InMemoryDriveFlush::default()),
+    );
+    // The in-memory registries answer at once.
+    futures::executor::block_on(hub.open()).expect("the registries answer");
+    Arc::new(hub)
+}
+
+impl OwnershipWorld {
     /// Registers `name` on the hub, approved or waiting for approval.
     fn register(&mut self, name: &str, approved: bool) {
         let n = u8::try_from(self.machines.len() + 1).unwrap();
