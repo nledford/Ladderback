@@ -1222,7 +1222,13 @@ async fn the_sync_loop_logs_a_streak_of_failures_once() {
         hostname(1),
         None,
     )
-    .with_leases(Arc::new(UnreadableConfig), leases, operations, others);
+    .with_leases(
+        Arc::new(UnreadableConfig),
+        leases,
+        operations,
+        others,
+        Arc::new(crate::fakes::InMemoryDriveFlush::default()),
+    );
     let warned = warned_by_the_sync_loop(sync, &machine_clock, 3).await;
     assert_eq!(warned.len(), 1, "{warned:?}");
     assert!(warned[0].starts_with("the leases weren't asked for"));
@@ -2685,10 +2691,12 @@ fn photos() -> domain::RepositoryId {
 
 /// An approved agent on a hub that decides leases, with the repository
 /// `photos`, which its entry asks to maintain, and a sync that asks for its
-/// leases, on a clock of the machine's own from `machine_start`.
+/// leases, on a clock of the machine's own from `machine_start`. The hub's
+/// drive and the machine's are each a fake.
 struct Leasing {
     hub: Hub,
     owners: Arc<crate::fakes::InMemoryOwnershipRegistry>,
+    hub_drive: Arc<crate::fakes::InMemoryDriveFlush>,
     configs: Arc<crate::fakes::InMemoryConfigStore>,
     cache: Arc<crate::fakes::InMemoryLeaseCache>,
     leases: Arc<crate::leases::MaintenanceLeases>,
@@ -2697,6 +2705,7 @@ struct Leasing {
     identity: Arc<InMemoryIdentity>,
     operations: Arc<crate::fakes::InMemoryOperationStore>,
     others: Arc<crate::others_snapshots::OthersSnapshots>,
+    drive: Arc<crate::fakes::InMemoryDriveFlush>,
 }
 
 async fn leasing(machine_start: Timestamp) -> Leasing {
@@ -2711,6 +2720,7 @@ async fn leasing(machine_start: Timestamp) -> Leasing {
 
     let inbox = Arc::new(crate::fakes::InMemoryReportInbox::default());
     let owners = Arc::new(InMemoryOwnershipRegistry::new());
+    let hub_drive = Arc::new(crate::fakes::InMemoryDriveFlush::default());
     let hub = hub(1);
     let hub = Hub {
         pairing: Arc::new(
@@ -2727,6 +2737,7 @@ async fn leasing(machine_start: Timestamp) -> Leasing {
                 hub.registry.clone(),
                 owners.clone(),
                 hub.clock.clone(),
+                hub_drive.clone(),
             ))),
         ),
         ..hub
@@ -2748,6 +2759,7 @@ async fn leasing(machine_start: Timestamp) -> Leasing {
     ));
     let connector = Arc::new(LoopbackHubConnector::to(hub.pairing.clone()));
     let operations = Arc::new(crate::fakes::InMemoryOperationStore::new());
+    let drive = Arc::new(crate::fakes::InMemoryDriveFlush::default());
     // The machine listed `photos` and found no other agent's snapshots, so
     // its claims are the hub's to grant.
     let others = Arc::new(crate::others_snapshots::OthersSnapshots::default());
@@ -2767,10 +2779,12 @@ async fn leasing(machine_start: Timestamp) -> Leasing {
         leases.clone(),
         operations.clone(),
         others.clone(),
+        drive.clone(),
     );
     Leasing {
         hub,
         owners,
+        hub_drive,
         configs,
         cache,
         leases,
@@ -2779,6 +2793,7 @@ async fn leasing(machine_start: Timestamp) -> Leasing {
         identity,
         operations,
         others,
+        drive,
     }
 }
 
@@ -2807,6 +2822,7 @@ fn losing_released(leasing: &Leasing) -> crate::sync::SyncWithHub {
         leasing.leases.clone(),
         leasing.operations.clone(),
         leasing.others.clone(),
+        leasing.drive.clone(),
     )
 }
 
@@ -2848,6 +2864,49 @@ async fn i1_a_release_whose_answer_is_lost_leaves_the_machine_holding_nothing() 
         leasing.leases.permits(Some(&photos())).await,
         Err(NoLease::NoneHeld)
     );
+}
+
+/// A machine sends its release only once its drive holds its letting go:
+/// the hub may grant the repository to another machine as soon as it
+/// takes the release, so a power cut must not bring the lease back here.
+/// One whose flush fails sends nothing, and the hub counts the lease until
+/// it runs out. The hub flushes its new grant before it signs it, and
+/// neither side flushes a renewal (§7.3, I1; §16, decision 178).
+#[tokio::test]
+async fn i1_a_release_goes_out_only_once_the_machines_drive_holds_it() {
+    use domain::planning::Maintenance;
+
+    use crate::ports::{ConfigStore as _, OwnershipRegistry as _, StoreError};
+
+    let start = Timestamp::from_second(1_800_000_000).unwrap();
+    for fails in [false, true] {
+        let leasing = leasing(start).await;
+        leasing.sync.sync_once().await.unwrap();
+        assert_eq!(leasing.hub_drive.flushed(), 1, "the new grant");
+        leasing.sync.sync_once().await.unwrap();
+        assert_eq!(leasing.hub_drive.flushed(), 1, "a renewal isn't flushed");
+        assert_eq!(leasing.drive.flushed(), 0, "taking a grant flushes nothing");
+
+        leasing
+            .configs
+            .save(&photos_config(Maintenance::Hub))
+            .await
+            .unwrap();
+        if fails {
+            leasing.drive.fail(StoreError::Unavailable {
+                detail: "the drive".to_owned(),
+            });
+        }
+        assert_eq!(leasing.sync.sync_once().await.is_err(), fails);
+        assert_eq!(leasing.drive.flushed(), usize::from(!fails));
+        let held = leasing.owners.ownership(&photos()).await.unwrap();
+        assert_eq!(
+            held.binding(leasing.hub.clock.now()).is_some(),
+            fails,
+            "the hub took the release only once the drive held it"
+        );
+        assert_eq!(leasing.leases.held().await.unwrap(), vec![]);
+    }
 }
 
 /// A machine releases nothing while a maintenance of the repository runs
@@ -2997,7 +3056,13 @@ async fn an_unreadable_configuration_keeps_the_connection_to_the_hub() {
         hostname(1),
         None,
     )
-    .with_leases(Arc::new(UnreadableConfig), leases, operations, others);
+    .with_leases(
+        Arc::new(UnreadableConfig),
+        leases,
+        operations,
+        others,
+        Arc::new(crate::fakes::InMemoryDriveFlush::default()),
+    );
     let (stop, stopped) = tokio::sync::oneshot::channel::<()>();
     let runner = std::thread::spawn(move || {
         let runtime = tokio::runtime::Builder::new_current_thread()
@@ -3171,6 +3236,7 @@ async fn i1_a_session_reports_a_repository_never_listed_as_holding_another_agent
         leasing.leases.clone(),
         leasing.operations.clone(),
         Arc::default(),
+        leasing.drive.clone(),
     );
     never_listed.sync_once().await.unwrap();
     let held = leasing.owners.ownership(&photos()).await.unwrap();
@@ -3226,6 +3292,7 @@ fn listing_first(
         leasing.leases.clone(),
         leasing.operations.clone(),
         Arc::clone(listings.seen()),
+        leasing.drive.clone(),
     )
     .with_listings(listings)
 }

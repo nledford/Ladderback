@@ -203,6 +203,7 @@ async fn both_syncing(agent: &mut Agent) {
         leases.clone(),
         Arc::new(InMemoryOperationStore::default()),
         others,
+        Arc::new(app::fakes::InMemoryDriveFlush::default()),
     )
     .with_running(Arc::new(RunningBackups::new()));
     world.held.this = Some(Syncing {

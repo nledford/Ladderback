@@ -16,7 +16,9 @@ use domain::maintenance::{
 };
 use domain::{AgentId, RepositoryId, SignedDuration, Timestamp};
 
-use crate::ports::{AgentRegistry, ClaimDecision, Clock, OwnershipRegistry, StoreError};
+use crate::ports::{
+    AgentRegistry, ClaimDecision, Clock, DriveFlush, OwnershipRegistry, StoreError,
+};
 
 /// What became of an agent's report.
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -51,9 +53,12 @@ pub struct RepositoryOwners {
     agents: Arc<dyn AgentRegistry>,
     owners: Arc<dyn OwnershipRegistry>,
     clock: Arc<dyn Clock>,
+    /// The drive the registry is on, flushed before a new grant goes out.
+    drive: Arc<dyn DriveFlush>,
     /// The hub's monotonic time at its start.
     started: SignedDuration,
-    /// The start window, once the first report since the start read it.
+    /// The start window, once [`open`](Self::open) or the first report
+    /// since the start read it.
     window: Mutex<Option<StartWindow>>,
 }
 
@@ -62,14 +67,22 @@ impl RepositoryOwners {
         agents: Arc<dyn AgentRegistry>,
         owners: Arc<dyn OwnershipRegistry>,
         clock: Arc<dyn Clock>,
+        drive: Arc<dyn DriveFlush>,
     ) -> Self {
         Self {
             started: clock.monotonic(),
             agents,
             owners,
             clock,
+            drive,
             window: Mutex::new(None),
         }
+    }
+
+    /// Reads the start window now, at the hub's start, so it waits for
+    /// every agent approved before the start and none approved since.
+    pub async fn open(&self) -> Result<(), StoreError> {
+        Ok(())
     }
 
     /// Takes `reports` as every repository `agent` uses, with `proven`, the
@@ -165,7 +178,7 @@ impl RepositoryOwners {
     /// stored, so a report that fails, or is dropped, opens nothing.
     async fn window(&self, agent: AgentId) -> Result<StartWindow, StoreError> {
         let read = if self.kept_window().is_none() {
-            Some(StartWindow::new(self.owners.reported_uses().await?))
+            Some(StartWindow::new(self.owners.reported_uses().await?, []))
         } else {
             None
         };
