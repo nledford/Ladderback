@@ -122,7 +122,7 @@ impl crate::Operations for Recorder {
         _repository: String,
         _request: crate::MaintenanceRequest,
         _selection: Option<String>,
-    ) -> Result<String, crate::MaintenanceRefusal> {
+    ) -> Result<crate::MaintenanceStarted, crate::MaintenanceRefusal> {
         Err(crate::MaintenanceRefusal::UnknownRepository)
     }
 

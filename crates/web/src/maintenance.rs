@@ -843,7 +843,7 @@ impl Panel {
 
     /// The start was accepted: the run goes on, and is watched. Whether it
     /// runs or waits for its turn is told once it is read.
-    pub(crate) fn started(&mut self, kind: Kind, operation: String) -> Vec<Effect> {
+    pub(crate) fn started(&mut self, kind: Kind, operation: String, _waiting: bool) -> Vec<Effect> {
         self.step = None;
         self.ended = None;
         self.findings = Findings::default();
@@ -2157,7 +2157,7 @@ mod tests {
         panel.previewed();
         panel.asks(Step::Starting(Kind::Prune));
         assert!(panel.starting());
-        panel.started(Kind::Prune, operation());
+        panel.started(Kind::Prune, operation(), false);
         assert!(!panel.starting());
     }
 
@@ -2225,63 +2225,56 @@ mod tests {
     }
 
     #[test]
-    fn a_run_that_started_closes_its_review_and_is_watched_saying_nothing_until_it_is_read() {
-        let mut panel = Panel::default();
-        panel.asks(Step::Starting(Kind::Forget));
-        assert_eq!(
-            panel.started(Kind::Forget, operation()),
-            vec![Effect::CloseReview, Effect::Watch]
-        );
-        assert_eq!(panel.step, None);
-        assert_eq!(
-            panel.run,
-            Some(Run {
-                kind: Kind::Forget,
-                operation: operation(),
-                state: RunState::Starting,
-            })
-        );
+    fn a_run_that_started_closes_its_review_is_told_as_its_start_answered_and_is_watched() {
+        for (waiting, told, state) in [
+            (false, Told::Running(Kind::Forget), RunState::Running),
+            (true, Told::Waiting(Kind::Forget), RunState::Waiting),
+        ] {
+            let mut panel = Panel::default();
+            panel.asks(Step::Starting(Kind::Forget));
+            assert_eq!(
+                panel.started(Kind::Forget, operation(), waiting),
+                vec![Effect::CloseReview, Effect::Say(told), Effect::Watch],
+                "waiting: {waiting}"
+            );
+            assert_eq!(panel.step, None);
+            assert_eq!(
+                panel.run,
+                Some(Run {
+                    kind: Kind::Forget,
+                    operation: operation(),
+                    state,
+                })
+            );
+        }
     }
 
     #[test]
-    fn a_run_read_running_at_once_is_told_running_once() {
+    fn a_run_read_as_its_start_answered_is_not_told_again() {
         let mut panel = Panel::default();
-        panel.started(Kind::Prune, operation());
+        panel.started(Kind::Prune, operation(), false);
+        assert_eq!(panel.seen(false), Vec::new());
+        assert_eq!(panel.run.map(|run| run.state), Some(RunState::Running));
+    }
+
+    #[test]
+    fn a_run_that_waited_is_told_running_once_when_its_turn_comes() {
+        let mut panel = Panel::default();
+        panel.started(Kind::Check, operation(), true);
+        assert_eq!(panel.seen(true), Vec::new(), "the wait is told again");
         assert_eq!(
             panel.seen(false),
-            vec![Effect::Say(Told::Running(Kind::Prune))]
+            vec![Effect::Say(Told::Running(Kind::Check))]
         );
         assert_eq!(panel.seen(false), Vec::new());
         assert_eq!(panel.run.map(|run| run.state), Some(RunState::Running));
     }
 
     #[test]
-    fn a_run_read_waiting_is_told_waiting_once_then_running_when_its_turn_comes() {
-        let mut panel = Panel::default();
-        panel.started(Kind::Check, operation());
-        assert_eq!(
-            panel.seen(true),
-            vec![Effect::Say(Told::Waiting(Kind::Check))]
-        );
-        assert_eq!(panel.seen(true), Vec::new(), "the wait is told again");
-        assert_eq!(
-            panel.run.as_ref().map(|run| run.state),
-            Some(RunState::Waiting)
-        );
-        assert_eq!(
-            panel.seen(false),
-            vec![Effect::Say(Told::Running(Kind::Check))]
-        );
-        assert_eq!(panel.run.map(|run| run.state), Some(RunState::Running));
-    }
-
-    #[test]
     fn a_run_shows_that_it_waits_until_it_is_read_running() {
         let mut panel = Panel::default();
-        panel.started(Kind::Prune, operation());
+        panel.started(Kind::Prune, operation(), true);
         let shown = |panel: &Panel| panel.run.as_ref().map(Run::told);
-        assert_eq!(shown(&panel), Some(Told::Running(Kind::Prune)));
-        panel.seen(true);
         assert_eq!(shown(&panel), Some(Told::Waiting(Kind::Prune)));
         panel.seen(false);
         assert_eq!(shown(&panel), Some(Told::Running(Kind::Prune)));
@@ -2297,7 +2290,7 @@ mod tests {
     #[test]
     fn a_run_that_ended_is_told_and_the_history_it_changed_is_read_again() {
         let mut panel = Panel::default();
-        panel.started(Kind::Check, operation());
+        panel.started(Kind::Check, operation(), false);
         let end = End::of(Kind::Check, "failed");
         assert_eq!(
             panel.watched(Watched::Ended(end, Findings::default())),
@@ -2325,7 +2318,7 @@ mod tests {
     #[test]
     fn a_check_that_ended_keeps_what_it_found_to_show() {
         let mut panel = Panel::default();
-        panel.started(Kind::Check, operation());
+        panel.started(Kind::Check, operation(), false);
         let end = End::of(Kind::Check, "succeeded-with-warnings");
         panel.watched(Watched::Ended(end, some_findings()));
         assert_eq!(panel.findings, some_findings());
@@ -2347,14 +2340,14 @@ mod tests {
         refused.refused(refusal(ErrorCode::MaintenanceBusy));
         assert_eq!(refused.findings, Findings::default());
         let mut started = shown();
-        started.started(Kind::Check, operation());
+        started.started(Kind::Check, operation(), false);
         assert_eq!(started.findings, Findings::default());
     }
 
     #[test]
     fn a_run_the_page_stopped_watching_is_told_to_go_on_without_it() {
         let mut panel = Panel::default();
-        panel.started(Kind::Prune, operation());
+        panel.started(Kind::Prune, operation(), false);
         assert_eq!(
             panel.watched(Watched::GaveUp),
             vec![
@@ -2369,7 +2362,7 @@ mod tests {
     #[test]
     fn a_page_that_is_gone_changes_nothing() {
         let mut panel = Panel::default();
-        panel.started(Kind::Check, operation());
+        panel.started(Kind::Check, operation(), false);
         let before = panel.clone();
         assert_eq!(panel.watched(Watched::Gone), Vec::new());
         assert_eq!(panel, before);

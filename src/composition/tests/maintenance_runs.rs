@@ -341,7 +341,8 @@ async fn a_maintenance_run_that_ends_is_announced_once_and_logged_once() {
     let id = runner
         .start_maintenance("demo".into(), http_adapter::MaintenanceRequest::Check, None)
         .await
-        .expect("the check starts");
+        .expect("the check starts")
+        .operation;
 
     let ends = ends_heard_when_done(&runner, &mut heard).await;
     assert_matches!(
@@ -350,6 +351,29 @@ async fn a_maintenance_run_that_ends_is_announced_once_and_logged_once() {
         "the page hears one end, the run's: {ends:?}"
     );
     assert_said_once_that_it_ended(&id, "Succeeded");
+}
+
+/// A maintenance start whose turn doesn't come at once answers that it
+/// waits, so the page can say so before it reads the run (decision 75,
+/// point 8).
+#[tokio::test]
+async fn a_maintenance_start_that_waits_for_its_turn_answers_that_it_waits() {
+    let (mut runner, _entered, _gate, _scratch) = runner_at_a_gate().await;
+    let log = Arc::clone(&runner.store);
+    let _heard = listen(&mut runner, Completes, log).await;
+    let _elsewhere = runner
+        .maintenance_queue
+        .unless_going_as(
+            &domain::RepositoryAlias::parse("elsewhere").expect("an alias"),
+            OperationId::from_uuid(Uuid::now_v7()),
+            domain::planning::Concurrency::default(),
+        )
+        .expect("another repository's run takes the one slot");
+    let started = runner
+        .start_maintenance("demo".into(), http_adapter::MaintenanceRequest::Check, None)
+        .await
+        .expect("the check is queued");
+    assert!(started.waiting, "the check was said to run");
 }
 
 /// The same for a backup, which the daemon runs on a task of its own too.
@@ -386,7 +410,8 @@ async fn a_maintenance_run_canceled_after_its_start_is_announced_to_no_page_and_
     let id = runner
         .start_maintenance("demo".into(), http_adapter::MaintenanceRequest::Check, None)
         .await
-        .expect("the check starts");
+        .expect("the check starts")
+        .operation;
     runner
         .cancel(id.clone(), http_adapter::Canceller::Session)
         .await
@@ -413,7 +438,8 @@ async fn a_maintenance_start_refused_for_a_busy_repository_is_announced_to_no_pa
     let running = runner
         .start_maintenance("demo".into(), http_adapter::MaintenanceRequest::Check, None)
         .await
-        .expect("the first check starts");
+        .expect("the first check starts")
+        .operation;
     let refused = runner
         .start_maintenance("demo".into(), http_adapter::MaintenanceRequest::Check, None)
         .await;

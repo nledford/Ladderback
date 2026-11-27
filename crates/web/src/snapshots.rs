@@ -397,7 +397,7 @@ impl Page {
                 Some(Posted::Done(body)) => match ws::started_operation(&body) {
                     Some(operation) => {
                         self.answered(true);
-                        self.change(|panel| panel.started(kind, operation));
+                        self.change(|panel| panel.started(kind, operation, false));
                     }
                     None => {
                         self.answered(false);

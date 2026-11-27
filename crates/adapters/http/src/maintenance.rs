@@ -29,6 +29,15 @@ pub enum MaintenanceRequest {
     },
 }
 
+/// A maintenance run the daemon accepted: its operation's ID, and whether it
+/// waits for its turn in the maintenance queue or runs now (decision 75,
+/// point 8), so the page can say which at once.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct MaintenanceStarted {
+    pub operation: String,
+    pub waiting: bool,
+}
+
 /// Why maintenance couldn't be started, previewed or listed. One refusal is
 /// one typed code with the status of its kind; none holds a secret.
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -230,9 +239,13 @@ pub(crate) async fn start(
         .start_maintenance(alias.clone(), request, selection)
         .await
     {
-        Ok(operation) => {
-            (StatusCode::ACCEPTED, Json(StartedOperation { operation })).into_response()
-        }
+        Ok(started) => (
+            StatusCode::ACCEPTED,
+            Json(StartedOperation {
+                operation: started.operation,
+            }),
+        )
+            .into_response(),
         Err(error) => refusal(&alias, error),
     }
 }

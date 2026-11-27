@@ -148,7 +148,8 @@ async fn a_write_the_log_refuses_during_maintenance_is_logged_once_with_its_code
     let id = runner
         .start_maintenance("demo".into(), http_adapter::MaintenanceRequest::Check, None)
         .await
-        .expect("a check starts");
+        .expect("a check starts")
+        .operation;
     let lines = logged_about_the_run(&id, &refused).await;
     assert_each_refusal_is_said(&lines, refused.load(std::sync::atomic::Ordering::SeqCst));
 }

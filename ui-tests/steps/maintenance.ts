@@ -713,6 +713,34 @@ Given("the daemon refuses each change of who maintains a repository", function (
   });
 });
 
+// The daemon answers a maintenance start as a run that waits for its turn
+// (decision 75, point 8). A real wait needs another repository's run to hold
+// the one slot through the whole journey, which a tiny scratch repository's
+// can't; the run still runs, and the page reads it as it is from then on.
+// Each read of an operation comes 4 seconds late, so what the start's answer
+// said stays on the page long enough to be read before the run is.
+Given("the daemon answers each maintenance start as waiting for its turn", function (this: BrowserWorld) {
+  this.contextRoutes.push(async (context) => {
+    await context.route(
+      (url) => /^\/api\/v1\/repositories\/[^/]+\/maintenance$/.test(url.pathname),
+      async (route) => {
+        if (route.request().method() !== "POST") return route.fallback();
+        const response = await route.fetch();
+        if (response.status() !== 202) return route.fulfill({ response });
+        const body = (await response.json()) as { operation: string; status: string };
+        await route.fulfill({ response, json: { ...body, status: "queued" } });
+      },
+    );
+    await context.route(
+      (url) => /^\/api\/v1\/operations\/[^/]+$/.test(url.pathname),
+      async (route) => {
+        await sleep(4_000);
+        await route.fallback();
+      },
+    );
+  });
+});
+
 // Nothing on the page says it as a live alert now: an alert drawn with the
 // page is there at once. A shared Error alert, no live region, may show it.
 Then("no live alert on the page contains {string}", async function (this: BrowserWorld, needle: string) {

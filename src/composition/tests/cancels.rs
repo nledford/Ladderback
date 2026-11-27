@@ -103,7 +103,8 @@ async fn an_api_token_cancels_no_maintenance_run_and_a_session_still_can() {
     let id = runner
         .start_maintenance("demo".into(), http_adapter::MaintenanceRequest::Check, None)
         .await
-        .expect("the check starts");
+        .expect("the check starts")
+        .operation;
     assert_eq!(
         runner
             .cancel(id.clone(), http_adapter::Canceller::ApiToken)
@@ -237,7 +238,8 @@ async fn a_cancel_right_after_a_maintenance_start_is_accepted_and_ends_the_run_c
     let id = runner
         .start_maintenance("demo".into(), http_adapter::MaintenanceRequest::Check, None)
         .await
-        .expect("the check starts");
+        .expect("the check starts")
+        .operation;
     runner
         .cancel(id.clone(), http_adapter::Canceller::Session)
         .await

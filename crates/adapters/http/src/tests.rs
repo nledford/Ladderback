@@ -152,20 +152,30 @@ impl Operations for Plans {
         repository: String,
         request: MaintenanceRequest,
         selection: Option<String>,
-    ) -> Result<String, MaintenanceRefusal> {
+    ) -> Result<MaintenanceStarted, MaintenanceRefusal> {
         if let Some(refusal) = refusal_of(&repository) {
             return Err(refusal);
         }
         if repository != "demo" {
             return Err(MaintenanceRefusal::UnknownRepository);
         }
+        let now = |operation: &str| MaintenanceStarted {
+            operation: operation.to_owned(),
+            waiting: false,
+        };
         let adopt = matches!(request, MaintenanceRequest::Adopt { .. });
         match (adopt, selection.as_deref()) {
-            (false, None) => Ok("018f0000-0000-7000-8000-000000000002".to_owned()),
-            (true, None) => Ok("018f0000-0000-7000-8000-000000000004".to_owned()),
+            // A prune waits for its turn, as if another repository's
+            // maintenance ran.
+            _ if request == MaintenanceRequest::Prune => Ok(MaintenanceStarted {
+                operation: "018f0000-0000-7000-8000-000000000007".to_owned(),
+                waiting: true,
+            }),
+            (false, None) => Ok(now("018f0000-0000-7000-8000-000000000002")),
+            (true, None) => Ok(now("018f0000-0000-7000-8000-000000000004")),
             // The selection a preview named: the run goes ahead.
-            (false, Some(SELECTION)) => Ok("018f0000-0000-7000-8000-000000000005".to_owned()),
-            (true, Some(SELECTION)) => Ok("018f0000-0000-7000-8000-000000000006".to_owned()),
+            (false, Some(SELECTION)) => Ok(now("018f0000-0000-7000-8000-000000000005")),
+            (true, Some(SELECTION)) => Ok(now("018f0000-0000-7000-8000-000000000006")),
             // Any other: the repository has changed since.
             (_, Some(_)) => Err(MaintenanceRefusal::SelectionChanged),
         }
@@ -734,7 +744,25 @@ async fn maintenance_on_a_repository_is_accepted_with_its_operation() {
     assert_eq!(response.status(), StatusCode::ACCEPTED);
     assert_eq!(
         body(response).await,
-        r#"{"operation":"018f0000-0000-7000-8000-000000000002"}"#
+        r#"{"operation":"018f0000-0000-7000-8000-000000000002","status":"running"}"#
+    );
+}
+
+/// A run that waits for its turn is accepted saying so, so the page can tell
+/// the person at once (decision 75, point 8).
+#[tokio::test]
+async fn maintenance_that_waits_for_its_turn_is_accepted_saying_it_is_queued() {
+    let response = request(
+        ui(),
+        Method::POST,
+        "/api/v1/repositories/demo/maintenance",
+        r#"{"kind":"prune"}"#,
+    )
+    .await;
+    assert_eq!(response.status(), StatusCode::ACCEPTED);
+    assert_eq!(
+        body(response).await,
+        r#"{"operation":"018f0000-0000-7000-8000-000000000007","status":"queued"}"#
     );
 }
 
@@ -827,7 +855,7 @@ async fn an_adoption_is_accepted_with_its_operation() {
     assert_eq!(response.status(), StatusCode::ACCEPTED);
     assert_eq!(
         body(response).await,
-        r#"{"operation":"018f0000-0000-7000-8000-000000000004"}"#
+        r#"{"operation":"018f0000-0000-7000-8000-000000000004","status":"running"}"#
     );
 }
 
@@ -1010,19 +1038,19 @@ async fn a_start_hands_the_selection_it_carries_to_the_daemon() {
         (
             r#"{"kind":"forget"}"#.to_owned(),
             202,
-            json!({"operation": "018f0000-0000-7000-8000-000000000002"}),
+            json!({"operation": "018f0000-0000-7000-8000-000000000002", "status": "running"}),
         ),
         (
             format!(r#"{{"kind":"forget","selection":"{SELECTION}"}}"#),
             202,
-            json!({"operation": "018f0000-0000-7000-8000-000000000005"}),
+            json!({"operation": "018f0000-0000-7000-8000-000000000005", "status": "running"}),
         ),
         (
             format!(
                 r#"{{"kind":"adopt","into":"home","from":{{"from":"unmanaged"}},"selection":"{SELECTION}"}}"#
             ),
             202,
-            json!({"operation": "018f0000-0000-7000-8000-000000000006"}),
+            json!({"operation": "018f0000-0000-7000-8000-000000000006", "status": "running"}),
         ),
         (
             r#"{"kind":"forget","selection":"ffffffffffffffff"}"#.to_owned(),

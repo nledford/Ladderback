@@ -1156,7 +1156,7 @@ impl Operations for PlanRunner {
         repository: String,
         request: http_adapter::MaintenanceRequest,
         selection: Option<String>,
-    ) -> Result<String, MaintenanceRefusal> {
+    ) -> Result<http_adapter::MaintenanceStarted, MaintenanceRefusal> {
         maintenance::start(self, repository, request, selection).await
     }
 

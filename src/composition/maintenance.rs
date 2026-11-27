@@ -127,7 +127,7 @@ pub(super) async fn start(
     repository: String,
     request: MaintenanceRequest,
     selection: Option<String>,
-) -> Result<String, MaintenanceRefusal> {
+) -> Result<http_adapter::MaintenanceStarted, MaintenanceRefusal> {
     // Counted from the request on, until the run has its place in the queue,
     // which counts it from then on while it runs and never while it waits,
     // so a restart asked for from now on waits only for the running ones; a
@@ -192,7 +192,10 @@ pub(super) async fn start(
     // A task that ended without answering has not started anything the route
     // could name.
     match wait_for_start.await {
-        Ok(answer) => answer.map(|()| operation.as_uuid().hyphenated().to_string()),
+        Ok(answer) => answer.map(|()| http_adapter::MaintenanceStarted {
+            operation: operation.as_uuid().hyphenated().to_string(),
+            waiting: false,
+        }),
         Err(_) => Err(unavailable(ErrorCode::OperationFailed, Vec::new(), None)),
     }
 }
