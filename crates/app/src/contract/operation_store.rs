@@ -535,7 +535,10 @@ async fn every_kind_and_trigger_reads_back(store: &dyn OperationStore, fx: &Fixt
         Trigger::Manual,
         Trigger::CatchUp,
         Trigger::Retry,
-        Trigger::Hub,
+        Trigger::Hub { asked_by: None },
+        Trigger::Hub {
+            asked_by: domain::access::SessionTag::parse("0123456789abcdef").ok(),
+        },
         Trigger::Mcp,
     ];
     if let Ok(label) = label {

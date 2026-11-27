@@ -80,7 +80,7 @@ pub(crate) fn trigger_text(trigger: &Trigger) -> &'static str {
         Trigger::Manual => "manual",
         Trigger::CatchUp => "catch-up",
         Trigger::Retry => "retry",
-        Trigger::Hub => "hub",
+        Trigger::Hub { .. } => "hub",
         Trigger::Mcp => "mcp",
         Trigger::ApiToken { .. } => API_TOKEN,
     }
@@ -93,7 +93,7 @@ pub(crate) fn trigger_from_text(text: &str) -> Option<Trigger> {
         "manual" => Some(Trigger::Manual),
         "catch-up" => Some(Trigger::CatchUp),
         "retry" => Some(Trigger::Retry),
-        "hub" => Some(Trigger::Hub),
+        "hub" => Some(Trigger::Hub { asked_by: None }),
         "mcp" => Some(Trigger::Mcp),
         _ => None,
     }

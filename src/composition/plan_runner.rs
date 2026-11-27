@@ -834,7 +834,7 @@ pub(super) fn run_named(trigger: &Trigger) -> std::borrow::Cow<'static, str> {
         Trigger::Manual => "the manual run".into(),
         Trigger::CatchUp => "the catch-up run".into(),
         Trigger::Retry => "the retry".into(),
-        Trigger::Hub => "the hub's run".into(),
+        Trigger::Hub { .. } => "the hub's run".into(),
         Trigger::Mcp => "the MCP client's run".into(),
         Trigger::ApiToken { id, label } => format!(
             "the run API token \"{}\" ({}) asked for",

@@ -246,7 +246,7 @@ impl Restores {
         });
         let trigger = match request.origin() {
             RestoreOrigin::LocalUi => Trigger::Manual,
-            RestoreOrigin::Hub => Trigger::Hub,
+            RestoreOrigin::Hub => Trigger::Hub { asked_by: None },
         };
         let queued = self
             .run

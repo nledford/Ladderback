@@ -102,7 +102,9 @@ impl RetrySchedule {
     pub fn retried(trigger: &Trigger) -> bool {
         match trigger {
             Trigger::Schedule | Trigger::CatchUp | Trigger::Retry => true,
-            Trigger::Manual | Trigger::Hub | Trigger::Mcp | Trigger::ApiToken { .. } => false,
+            Trigger::Manual | Trigger::Hub { .. } | Trigger::Mcp | Trigger::ApiToken { .. } => {
+                false
+            }
         }
     }
 
@@ -148,7 +150,8 @@ mod tests {
             id: crate::access::api_token::ApiTokenId::from_bytes(&[7; crate::access::TOKEN_BYTES]),
             label: crate::access::api_token::ApiTokenLabel::new("nightly-mcp".to_owned()).unwrap(),
         };
-        for trigger in [Trigger::Manual, Trigger::Hub, Trigger::Mcp, token] {
+        let hub = Trigger::Hub { asked_by: None };
+        for trigger in [Trigger::Manual, hub, Trigger::Mcp, token] {
             assert!(!RetrySchedule::retried(&trigger), "{trigger:?}");
         }
     }

@@ -9,7 +9,15 @@ fn a_run_is_named_in_the_log_by_what_started_it_in_words() {
         (Trigger::Manual, "the manual run"),
         (Trigger::CatchUp, "the catch-up run"),
         (Trigger::Retry, "the retry"),
-        (Trigger::Hub, "the hub's run"),
+        (Trigger::Hub { asked_by: None }, "the hub's run"),
+        (
+            Trigger::Hub {
+                asked_by: Some(
+                    domain::access::SessionTag::parse("0123456789abcdef").expect("a tag"),
+                ),
+            },
+            "the hub's run, asked for by session 0123456789abcdef",
+        ),
         (Trigger::Mcp, "the MCP client's run"),
         (
             Trigger::ApiToken {

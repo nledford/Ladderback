@@ -15,6 +15,7 @@ mod agent_registry;
 mod api_tokens;
 mod baseline_copy;
 mod codec;
+mod commands;
 mod copy;
 mod daily_copy;
 mod error_args;

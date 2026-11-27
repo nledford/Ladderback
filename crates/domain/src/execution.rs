@@ -632,7 +632,11 @@ pub enum Trigger {
     /// A scheduled run that was missed while the agent was off, started late.
     CatchUp,
     Retry,
-    Hub,
+    /// The hub asked for it: the tag of the hub's session that asked, when
+    /// the hub named one, never anything secret (I4, decision 176).
+    Hub {
+        asked_by: Option<crate::access::SessionTag>,
+    },
     Mcp,
     /// A program asked for it with an API token: the token's ID and label,
     /// never its secret (§10.1, decision 93).
