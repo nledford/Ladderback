@@ -33,7 +33,7 @@ impl HubRuns for Started {
         None
     }
 
-    async fn start(
+    async fn queue(
         &self,
         plan: &PlanId,
         asked_by: Option<SessionTag>,

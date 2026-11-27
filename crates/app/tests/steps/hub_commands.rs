@@ -162,7 +162,7 @@ impl HubRuns for Runs {
             .map(|op| op.id)
     }
 
-    async fn start(
+    async fn queue(
         &self,
         plan: &PlanId,
         asked_by: Option<SessionTag>,

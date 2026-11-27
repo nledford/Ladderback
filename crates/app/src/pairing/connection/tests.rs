@@ -3842,7 +3842,7 @@ impl crate::hub_commands::HubRuns for StartsOne {
         None
     }
 
-    async fn start(
+    async fn queue(
         &self,
         _plan: &domain::PlanId,
         _asked_by: Option<domain::access::SessionTag>,
@@ -4074,15 +4074,6 @@ struct SlowStart {
 impl crate::hub_commands::HubRuns for SlowStart {
     async fn going(&self, _plan: &domain::PlanId) -> Option<domain::OperationId> {
         None
-    }
-
-    async fn start(
-        &self,
-        _plan: &domain::PlanId,
-        _asked_by: Option<domain::access::SessionTag>,
-    ) -> Result<domain::OperationId, crate::hub_commands::HubRunRefused> {
-        crate::ports::Clock::sleep(&*self.clock, SLOW_START).await;
-        Ok(domain::OperationId::from_uuid(Uuid::from_u128(0x0e)))
     }
 
     async fn queue(

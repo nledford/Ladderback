@@ -34,14 +34,6 @@ pub trait HubRuns: Send + Sync {
     /// The backup of `plan` running or waiting for its turn, if one is.
     async fn going(&self, plan: &PlanId) -> Option<OperationId>;
 
-    /// Starts a backup of `plan` the hub's session `asked_by` asked for,
-    /// as a new operation, and returns once the operation log has it.
-    async fn start(
-        &self,
-        plan: &PlanId,
-        asked_by: Option<SessionTag>,
-    ) -> Result<OperationId, HubRunRefused>;
-
     /// Admits a backup of `plan` the hub's session `asked_by` asked for,
     /// as a new operation, and returns once the operation log has it
     /// queued: on a task of its own, the backup then reads its
@@ -51,10 +43,7 @@ pub trait HubRuns: Send + Sync {
         &self,
         plan: &PlanId,
         asked_by: Option<SessionTag>,
-    ) -> Result<OperationId, HubRunRefused> {
-        let _ = (plan, asked_by);
-        todo!()
-    }
+    ) -> Result<OperationId, HubRunRefused>;
 
     /// Cancels the backup `operation`.
     async fn cancel(&self, operation: &OperationId) -> Result<(), HubCancelRefused>;
@@ -259,7 +248,11 @@ impl AnswerHubCommands {
         if let Err(again) = hub_run_admitted(&runs, plan, now) {
             return Some(rate_limited(Some(again)));
         }
-        Some(match self.runs.start(plan, asked_by).await {
+        // The answer means the backup is admitted and queued: its start,
+        // which reads its repository's secrets and can take minutes, runs
+        // on a task of its own, so the connection keeps beating and
+        // answers within the hub's wait (decision 176).
+        Some(match self.runs.queue(plan, asked_by).await {
             Ok(operation) => {
                 let run = HubRun {
                     plan: plan.clone(),

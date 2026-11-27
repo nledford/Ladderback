@@ -21,9 +21,9 @@ fn tag() -> SessionTag {
 #[tokio::test]
 async fn the_hubs_backup_is_logged_as_its_found_going_and_canceled() {
     let (runner, _entered, open_gate, _scratch) = runner_at_a_gate().await;
-    let operation = HubRuns::start(&runner, &plan("home"), Some(tag()))
+    let operation = HubRuns::queue(&runner, &plan("home"), Some(tag()))
         .await
-        .expect("the plan starts");
+        .expect("the plan is queued");
     let logged = GetOperation::new(Arc::clone(&runner.store))
         .get(operation)
         .await
@@ -55,7 +55,7 @@ async fn the_hubs_backup_is_logged_as_its_found_going_and_canceled() {
 async fn the_hub_is_refused_an_unknown_plan_and_operation() {
     let (runner, _entered, _gate, _scratch) = runner_at_a_gate().await;
     assert_eq!(
-        HubRuns::start(&runner, &plan("missing"), None).await,
+        HubRuns::queue(&runner, &plan("missing"), None).await,
         Err(HubRunRefused::UnknownPlan)
     );
     assert_eq!(

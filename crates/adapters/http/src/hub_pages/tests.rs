@@ -1455,7 +1455,7 @@ impl app::hub_commands::HubRuns for Runs {
         None
     }
 
-    async fn start(
+    async fn queue(
         &self,
         _plan: &domain::PlanId,
         _asked_by: Option<domain::access::SessionTag>,

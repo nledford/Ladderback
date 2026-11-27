@@ -1563,7 +1563,7 @@ mod tests {
             None
         }
 
-        async fn start(
+        async fn queue(
             &self,
             _plan: &domain::PlanId,
             _asked_by: Option<domain::access::SessionTag>,

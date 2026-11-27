@@ -254,6 +254,23 @@ impl RunOperation {
         }
     }
 
+    /// Records a backup of `target` queued before its job is built: the hub
+    /// asked for it, and its repository's secrets are read once the
+    /// machine has answered (decision 176). One write, within the log's
+    /// bound: the operation the log holds, or why it refused it.
+    /// [`Queued::resumed`] runs it once it is built.
+    pub async fn queue_backup(
+        &self,
+        id: OperationId,
+        trigger: Trigger,
+        target: Target,
+    ) -> Result<Operation, StoreError> {
+        let operation =
+            Operation::queue(id, OperationKind::Backup, trigger, target, self.clock.now());
+        save_within_bound(&*self.clock, &*self.store, &operation, None).await?;
+        Ok(operation)
+    }
+
     /// Records a backup the schedule started whose start was refused before
     /// anything ran (§5): one write, of the operation queued and failed with
     /// `reason` in the same instant, then the news that it failed, as any

@@ -298,6 +298,52 @@ impl PlanRunner {
         operation
     }
 
+    /// Starts `operation`, a backup of `plan` the hub asked for, which the
+    /// log holds queued and `place` holds its turn for: reads its
+    /// repository's secrets as `config` names them, then runs it in its
+    /// turn (decision 176). A secret it can't read ends it failed with the
+    /// refusal, as an unattended run's (§5, #490). `cancel` is its cancel
+    /// switch, parked already: a cancel while the secrets are read ends it
+    /// canceled before anything ran.
+    async fn start_queued(
+        &self,
+        operation: domain::execution::Operation,
+        plan: &PlanId,
+        config: &domain::planning::AgentConfig,
+        trigger: &Trigger,
+        place: Place,
+        cancel: impl Future<Output = ()> + Send + 'static,
+    ) {
+        let mut cancel = Box::pin(cancel);
+        let built = tokio::select! {
+            biased;
+            () = &mut cancel => None,
+            built = self.backup_of(config, plan, trigger, None) => Some(built),
+        };
+        let built = match built {
+            Some(Ok(built)) => return self.spawn_resumed(operation, built, place, cancel),
+            Some(Err(unbuilt)) => unbuilt,
+            None => {
+                drop(place);
+                self.registry.finish(&operation.id());
+                self.end_canceled(operation).await;
+                return;
+            }
+        };
+        // A run that won't go gives its turn up before its end is written.
+        drop(place);
+        let Some(operation) = self.unless_canceled(operation).await else {
+            return;
+        };
+        match built {
+            Unbuilt::Secret(secret) => self.refuse_resumed(operation, *secret).await,
+            Unbuilt::Refused(error) => {
+                self.end_unrunnable(operation, never_ran(&error), &start_refused(&error))
+                    .await;
+            }
+        }
+    }
+
     /// The configuration a run of `plan` starts under, or `None`, with the
     /// refusal said in the daemon's log, when it can't be read.
     async fn config_for_a_run(
@@ -1429,20 +1475,75 @@ impl app::hub_commands::HubRuns for PlanRunner {
             })
     }
 
-    async fn start(
+    async fn queue(
         &self,
         plan: &PlanId,
         asked_by: Option<domain::access::SessionTag>,
     ) -> Result<OperationId, app::hub_commands::HubRunRefused> {
         use app::hub_commands::HubRunRefused;
-        self.start_plan(plan, Trigger::Hub { asked_by })
+        let trigger = Trigger::Hub { asked_by };
+        let refused = |error: StartError| match error {
+            StartError::UnknownPlan => HubRunRefused::UnknownPlan,
+            StartError::RunWaiting => HubRunRefused::RunWaiting,
+            StartError::KeyFilesNotLeftOut => HubRunRefused::KeyFilesNotLeftOut,
+            other => {
+                log_not_started(plan, &trigger, &other);
+                HubRunRefused::Refused
+            }
+        };
+        let config = self.config.load().await.map_err(|error| {
+            refused(config_unusable(error, |code, args, detail| {
+                StartError::Unavailable { code, args, detail }
+            }))
+        })?;
+        // What Back up now refuses before it reads a secret, the hub's
+        // backup is refused for in its answer; what it refuses once it
+        // reads them ends the queued run (decision 176).
+        let planned = config.plan(plan).ok_or(HubRunRefused::UnknownPlan)?;
+        let repository = config
+            .repository(&planned.repository)
+            .ok_or(HubRunRefused::UnknownPlan)?;
+        self.left_out
+            .for_backup(&planned.sources)
+            .map_err(&refused)?;
+        let target = Target {
+            plan: Some(plan.clone()),
+            repository: repository.id.clone(),
+        };
+        let place = self
+            .queue
+            .by_hand(plan, config.agent().concurrency)
+            .map_err(|RunWaiting| HubRunRefused::RunWaiting)?;
+        // A UUIDv7: the log orders by ID, so the newest run is the highest.
+        let id = OperationId::from_uuid(Uuid::now_v7());
+        let cancel = self.cancel_switch(id);
+        let operation = match self
+            .queued_ends()
+            .queue_backup(id, trigger.clone(), target)
             .await
-            .map_err(|unbuilt| match unbuilt.into_start_error() {
-                StartError::UnknownPlan => HubRunRefused::UnknownPlan,
-                StartError::RunWaiting => HubRunRefused::RunWaiting,
-                StartError::KeyFilesNotLeftOut => HubRunRefused::KeyFilesNotLeftOut,
-                _ => HubRunRefused::Refused,
-            })
+        {
+            Ok(operation) => operation,
+            Err(error) => {
+                self.registry.finish(&id);
+                log::error!(
+                    "{} of plan {} didn't start: the operation log refused it: {error}",
+                    run_named(&trigger),
+                    plan.as_str()
+                );
+                return Err(HubRunRefused::Refused);
+            }
+        };
+        let runner = self.clone();
+        let plan = plan.clone();
+        // Nothing waits on the start: the run reports through the event
+        // bus. One the daemon's stop freezes stays queued, for the next
+        // start to run (decision 73).
+        tokio::spawn(self.runs.until_frozen(async move {
+            runner
+                .start_queued(operation, &plan, &config, &trigger, place, cancel)
+                .await;
+        }));
+        Ok(id)
     }
 
     async fn cancel(
