@@ -3,9 +3,9 @@ use std::sync::Arc;
 use domain::fleet::{
     AgentEnvelope, Approval, Binding, BindingKind, Challenge, Connect, EpochSeconds,
     FIRST_SEQUENCE, Hello, Hostname, HubAddress, HubEnvelope, HubPin, HubRoute, MachineFingerprint,
-    MachineIdentifier, MachineZone, Nonce, PROTOCOLS, PairAnswer, PayloadDigest, Proof, PublicKey,
-    Refused, RouteRefused, SeedFile, SignedMessage, SigningSeed, WelcomeRefused, hello_kind,
-    welcome_kind,
+    MachineIdentifier, MachineZone, Nonce, OutboxPosition, PROTOCOLS, PairAnswer, PayloadDigest,
+    Proof, PublicKey, Refused, RouteRefused, SeedFile, SignedMessage, SigningSeed, WelcomeRefused,
+    hello_kind, welcome_kind,
 };
 use domain::{AgentId, SignedDuration};
 
@@ -50,6 +50,9 @@ pub struct Connected {
     /// The agent's own key, whose fingerprint the person compares with the
     /// one the hub shows.
     pub agent_key: PublicKey,
+    /// The hub took the place the outbox position the agent's `Hello`
+    /// stated gives next: the agent starts a new epoch (§16, decision 177).
+    pub new_epoch: bool,
 }
 
 /// Why the agent didn't connect. None carries a seed (I4).
@@ -117,11 +120,14 @@ struct Opened {
     binding: Binding,
 }
 
-/// What the agent's `Hello` says of the machine: its hostname and its
-/// machine zone, none when its zone has no IANA name.
+/// What the agent's `Hello` says of the machine: its hostname, its machine
+/// zone, none when its zone has no IANA name, and where its outbox stands,
+/// none when the connection carries no reports or the outbox holds none
+/// yet.
 struct Introduction {
     hostname: Hostname,
     zone: Option<MachineZone>,
+    outbox: Option<OutboxPosition>,
 }
 
 impl ConnectToHub {
@@ -159,18 +165,21 @@ impl ConnectToHub {
         hostname: Hostname,
         zone: Option<MachineZone>,
     ) -> Result<Connected, ConnectFailure> {
-        self.connect_channel(agent_id, hostname, zone)
+        self.connect_channel(agent_id, hostname, zone, None)
             .await
             .map(|(connected, _)| connected)
     }
 
     /// [`Self::connect`], keeping the connection after the `Welcome` for
-    /// the signed messages that follow it.
+    /// the signed messages that follow it, its `Hello` saying where the
+    /// agent's outbox stands when `outbox` says it, so the hub can tell it
+    /// to start a new epoch (§16, decision 177).
     pub async fn connect_channel(
         &self,
         agent_id: AgentId,
         hostname: Hostname,
         zone: Option<MachineZone>,
+        outbox: Option<OutboxPosition>,
     ) -> Result<(Connected, AgentChannel), ConnectFailure> {
         let (pin, seed) = self.paired().await?;
         let addresses: Vec<HubAddress> = pin.addresses().cloned().collect();
@@ -184,7 +193,11 @@ impl ConnectToHub {
                             &seed,
                             opened,
                             agent_id,
-                            Introduction { hostname, zone },
+                            Introduction {
+                                hostname,
+                                zone,
+                                outbox,
+                            },
                             false,
                         )
                         .await;
@@ -219,7 +232,11 @@ impl ConnectToHub {
             &seed,
             opened,
             agent_id,
-            Introduction { hostname, zone },
+            Introduction {
+                hostname,
+                zone,
+                outbox: None,
+            },
             changed,
         )
         .await
@@ -322,6 +339,7 @@ impl ConnectToHub {
                 .machine
                 .as_ref()
                 .map(|identifier| MachineFingerprint::of(agent_id, identifier)),
+            outbox: introduction.outbox,
         };
         let payload = hello_payload(&hello);
         let kind = hello_kind();
@@ -446,6 +464,7 @@ impl ConnectToHub {
                 approval: read.approval,
                 pin,
                 agent_key,
+                new_epoch: read.new_epoch,
             },
             read.signed_at,
         ))

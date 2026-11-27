@@ -9,6 +9,7 @@ use super::handshake::HANDSHAKES;
 use super::hostname::Hostname;
 use super::keys::Signature;
 use super::machine::MachineFingerprint;
+use super::outbox::OutboxPosition;
 use super::registry::AgentStatus;
 use super::signed::{EpochSeconds, Handshakes, WireName};
 use super::zone::MachineZone;
@@ -134,6 +135,9 @@ pub struct Hello {
     /// from a build before fingerprints, or when the computer's identifier
     /// can't be read (decision 150).
     pub machine: Option<MachineFingerprint>,
+    /// Where the agent's outbox stands; none before its first report, and
+    /// from a build before it was said (§16, decision 177).
+    pub outbox: Option<OutboxPosition>,
 }
 
 /// The hub's answer to `Hello`.
@@ -151,6 +155,9 @@ pub struct Welcome {
     pub hub_version: String,
     pub signed_at: EpochSeconds,
     pub approval: Approval,
+    /// The hub took the place the agent's outbox gives next, of the epoch
+    /// its `Hello` named: the agent starts a new epoch (§16, decision 177).
+    pub new_epoch: bool,
 }
 
 /// Why an agent acts on no `Welcome`.
@@ -187,6 +194,7 @@ impl Welcome {
             hub_version,
             signed_at,
             approval,
+            new_epoch: false,
         }
     }
 

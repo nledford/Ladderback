@@ -343,6 +343,7 @@ fn welcome() -> Welcome {
         hub_version: "0.5.0+def5678".to_owned(),
         signed_at: EpochSeconds::from_seconds(1_800_000_000),
         approval: domain::fleet::Approval::Approved,
+        new_epoch: false,
     }
 }
 
@@ -354,6 +355,7 @@ fn hello() -> Hello {
         clock: EpochSeconds::from_seconds(1_800_000_001),
         zone: None,
         machine: None,
+        outbox: None,
     }
 }
 
@@ -520,6 +522,64 @@ fn the_machine_fingerprint_travels_in_a_hello() {
         "5A".repeat(32)
     );
     assert_eq!(read_hello(upper.as_bytes()), Err(WireRefused));
+}
+
+/// A `Hello` says where the machine's outbox stands, its epoch's UUID and
+/// the place it gives next, and leaves it out when it says none, so a
+/// 0.6.0 hub reads it as before and a 0.6.0 `Hello` reads as saying none.
+/// An epoch that isn't a UUID, or a place of 0, refuses the frame
+/// (decision 177).
+#[test]
+fn a_hello_says_where_the_outbox_stands() {
+    let epoch = Uuid::from_u128(0x0e1);
+    let told = Hello {
+        outbox: Some(domain::fleet::OutboxPosition {
+            epoch: domain::fleet::OutboxEpoch::from_uuid(epoch),
+            next: domain::fleet::ReportSeq::new(7).unwrap(),
+        }),
+        ..hello()
+    };
+    let payload = String::from_utf8(hello_payload(&told)).unwrap();
+    assert!(
+        payload.contains(&format!(r#""outbox":{{"epoch":"{epoch}","next":7}}"#)),
+        "{payload}"
+    );
+    assert_eq!(read_hello(payload.as_bytes()), Ok(told));
+    let plain = String::from_utf8(hello_payload(&hello())).unwrap();
+    assert!(!plain.contains("outbox"), "{plain}");
+    let older = br#"{"machine_version":"0.6.0","hostname":"nas","protocols":[1,1],"clock":1}"#;
+    assert_eq!(read_hello(older).map(|hello| hello.outbox), Ok(None));
+    for outbox in [
+        r#"{"epoch":"not-a-uuid","next":7}"#,
+        &format!(r#"{{"epoch":"{epoch}","next":0}}"#),
+        &format!(r#"{{"epoch":"{epoch}"}}"#),
+    ] {
+        let shaped = format!(
+            r#"{{"machine_version":"x","hostname":"nas","protocols":[1,1],"clock":1,"outbox":{outbox}}}"#
+        );
+        assert_eq!(read_hello(shaped.as_bytes()), Err(WireRefused), "{outbox}");
+    }
+}
+
+/// A `Welcome` says `new_epoch` only when the hub tells the machine to
+/// start one, and leaves it out otherwise, so a 0.6.0 machine reads it as
+/// before; a 0.6.0 `Welcome`, which never says it, keeps the machine's
+/// epoch (decision 177).
+#[test]
+fn a_welcome_says_new_epoch_only_when_the_hub_tells_one() {
+    let told = Welcome {
+        new_epoch: true,
+        ..welcome()
+    };
+    let payload = String::from_utf8(welcome_payload(&told)).unwrap();
+    assert!(payload.contains(r#""new_epoch":true"#), "{payload}");
+    assert_eq!(read_welcome(payload.as_bytes()), Ok(told));
+    let plain = String::from_utf8(welcome_payload(&welcome())).unwrap();
+    assert!(!plain.contains("new_epoch"), "{plain}");
+    assert_eq!(
+        read_welcome(plain.as_bytes()).map(|w| w.new_epoch),
+        Ok(false)
+    );
 }
 
 /// A zone that isn't an IANA-shaped name refuses the frame, as a hostname

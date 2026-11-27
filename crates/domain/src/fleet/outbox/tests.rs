@@ -134,6 +134,25 @@ fn a_report_a_send_window_behind_the_last_taken_is_behind() {
     assert_eq!(ingest(Some(last), seq(1)), Ingest::Behind);
 }
 
+/// An agent starts a new epoch when the hub took the place its outbox
+/// gives next, however near or far behind the last taken: the hub took
+/// every place up to that one already, and a resend never makes the
+/// outbox give a place again (decision 177). Past the last place taken, or
+/// of an epoch the hub took nothing of, it goes on.
+#[test]
+fn an_agent_starts_a_new_epoch_when_the_hub_took_the_place_it_gives_next() {
+    assert!(!starts_new_epoch(None, seq(1)));
+    assert!(!starts_new_epoch(None, seq(40)));
+    assert!(!starts_new_epoch(Some(seq(6)), seq(7)));
+    assert!(!starts_new_epoch(Some(seq(6)), seq(90)));
+    assert!(starts_new_epoch(Some(seq(6)), seq(6)));
+    assert!(starts_new_epoch(Some(seq(6)), seq(5)));
+    assert!(starts_new_epoch(Some(seq(6)), seq(1)));
+    let last = ReportSeq::new(u64::MAX).unwrap();
+    assert!(starts_new_epoch(Some(last), seq(1)));
+    assert!(!starts_new_epoch(Some(seq(1)), last));
+}
+
 #[test]
 fn a_hubs_message_holds_until_its_expiry_on_the_hubs_time() {
     let signed_at = EpochSeconds::from_seconds(1_000);

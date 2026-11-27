@@ -4,7 +4,7 @@ use std::sync::{Mutex, PoisonError};
 use async_trait::async_trait;
 use domain::fleet::{
     AgentReport, Ingest, MAX_EPOCHS_HELD, MAX_REPORTS_HELD, OutboxAdmission, OutboxEpoch,
-    PlansReport, ReportSeq, ReportedProgress, admit, ingest,
+    OutboxPosition, PlansReport, ReportSeq, ReportedProgress, admit, ingest,
 };
 use domain::{AgentId, Timestamp};
 
@@ -21,7 +21,7 @@ pub struct InMemoryOutbox {
     kept: Mutex<Held>,
 }
 
-#[derive(Debug, Default)]
+#[derive(Clone, Debug, Default)]
 struct Held {
     /// The last place given, none before the first report.
     last: Option<ReportSeq>,
@@ -37,8 +37,18 @@ impl InMemoryOutbox {
         }
     }
 
-    pub const fn epoch(&self) -> OutboxEpoch {
-        self.epoch
+    /// A copy of this outbox as it stands, as a copy of its database taken
+    /// now holds it, to restore later in its place.
+    pub fn copied(&self) -> Self {
+        Self {
+            epoch: self.epoch,
+            kept: Mutex::new(
+                self.kept
+                    .lock()
+                    .unwrap_or_else(PoisonError::into_inner)
+                    .clone(),
+            ),
+        }
     }
 }
 
@@ -97,6 +107,14 @@ impl Outbox for InMemoryOutbox {
             held.reports.retain(|seq, _| *seq > through);
         }
         Ok(())
+    }
+
+    async fn position(&self) -> Result<Option<OutboxPosition>, StoreError> {
+        todo!()
+    }
+
+    async fn start_epoch(&self, from: OutboxEpoch) -> Result<Option<OutboxEpoch>, StoreError> {
+        todo!("{from:?}")
     }
 }
 
@@ -213,6 +231,14 @@ impl ReportInbox for InMemoryReportInbox {
                 dropped: held.dropped,
             },
         ))
+    }
+
+    async fn taken_through(
+        &self,
+        agent: AgentId,
+        epoch: OutboxEpoch,
+    ) -> Result<Option<ReportSeq>, StoreError> {
+        todo!("{agent:?} {epoch:?}")
     }
 
     async fn keep_plans(&self, agent: AgentId, plans: &PlansReport) -> Result<(), StoreError> {

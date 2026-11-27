@@ -6,16 +6,16 @@
 
 use api::sync::{
     AckPayload, AgentApproval, AgentFrame, FloorPayload, GrantPayload, GrantsPayload, HelloPayload,
-    HolderFrame, HubFrame, MAX_FRAME_BYTES, ReleasePayload, ReleasedPayload, RepoPayload,
-    ReportPayload, ReposPayload, WelcomePayload, WithheldPayload,
+    HolderFrame, HubFrame, MAX_FRAME_BYTES, OutboxPayload, ReleasePayload, ReleasedPayload,
+    RepoPayload, ReportPayload, ReposPayload, WelcomePayload, WithheldPayload,
 };
 use base64::Engine as _;
 use base64::engine::general_purpose::URL_SAFE_NO_PAD;
 use domain::fleet::{
     Ack, AgentEnvelope, AgentReport, Approval, BindingKind, Challenge, Connect, EpochSeconds,
     Handshakes, Happening, Hello, Holder, Hostname, HubEnvelope, KEY_BYTES, MachineFingerprint,
-    MachineZone, Nonce, OutboxEpoch, Pair, PairAnswer, Paired, Proof, Protocols, PublicKey,
-    Refused, ReportSeq, SIGNATURE_BYTES, Signature, Welcome, WireName,
+    MachineZone, Nonce, OutboxEpoch, OutboxPosition, Pair, PairAnswer, Paired, Proof, Protocols,
+    PublicKey, Refused, ReportSeq, SIGNATURE_BYTES, Signature, Welcome, WireName,
 };
 use domain::maintenance::{
     Grant, LeaseEpoch, RepoGrants, ReportedFloor, RepositoryReport, RepositoryReports,
@@ -141,8 +141,20 @@ pub fn hello_payload(hello: &Hello) -> Vec<u8> {
         clock: hello.clock.seconds(),
         zone: hello.zone.as_ref().map(|zone| zone.as_str().to_owned()),
         machine: hello.machine.as_ref().map(MachineFingerprint::to_hex),
+        outbox: hello.outbox.map(outbox_payload),
     }
     .to_bytes()
+}
+
+/// Where an outbox stands, on the wire: its epoch as its UUID's text.
+fn outbox_payload(position: OutboxPosition) -> OutboxPayload {
+    todo!("{position:?}")
+}
+
+/// Where an outbox stands, as a `Hello` says it; an epoch that isn't a
+/// UUID, or a place of 0, refuses the frame.
+fn outbox_position(payload: OutboxPayload) -> Result<OutboxPosition, WireRefused> {
+    todo!("{payload:?}")
 }
 
 /// The `Hello` a payload's bytes hold.
@@ -159,6 +171,7 @@ pub fn read_hello(bytes: &[u8]) -> Result<Hello, WireRefused> {
             .as_deref()
             .map(|text| MachineFingerprint::from_hex(text).map_err(|_| WireRefused))
             .transpose()?,
+        outbox: payload.outbox.map(outbox_position).transpose()?,
     })
 }
 
@@ -173,6 +186,7 @@ pub fn welcome_payload(welcome: &Welcome) -> Vec<u8> {
         hub_version: welcome.hub_version.clone(),
         signed_at: welcome.signed_at.seconds(),
         status: status_of(welcome.approval),
+        new_epoch: welcome.new_epoch && todo!(),
     }
     .to_bytes()
 }
@@ -189,6 +203,7 @@ pub fn read_welcome(bytes: &[u8]) -> Result<Welcome, WireRefused> {
         hub_version: payload.hub_version,
         signed_at: EpochSeconds::from_seconds(payload.signed_at),
         approval: approval_of(payload.status),
+        new_epoch: payload.new_epoch && todo!(),
     })
 }
 

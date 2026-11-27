@@ -177,6 +177,7 @@ async fn a_paired_agent_is_welcomed_pending_and_its_counter_kept() {
             approval: Approval::Pending,
             pin: identity.pin().await.unwrap().unwrap(),
             agent_key: agent_key(&seed),
+            new_epoch: false,
         }
     );
     let after = hub.registry.agent(agent_id(1)).await.unwrap().unwrap();
@@ -485,6 +486,14 @@ impl crate::ports::ReportInbox for FullInbox {
     ) -> Result<Option<domain::fleet::ReportedProgress>, crate::ports::StoreError> {
         self.inner.progress(agent).await
     }
+
+    async fn taken_through(
+        &self,
+        agent: domain::AgentId,
+        epoch: domain::fleet::OutboxEpoch,
+    ) -> Result<Option<domain::fleet::ReportSeq>, crate::ports::StoreError> {
+        self.inner.taken_through(agent, epoch).await
+    }
 }
 
 /// The hub warns that it let go of an agent's reports in the step that let
@@ -517,7 +526,7 @@ async fn a_step_cut_short_after_letting_go_of_a_report_loses_no_warning() {
     };
     crate::test_log::capture_the_log();
     let (_, mut cut) = connecting
-        .connect_channel(agent_id(1), hostname(1), None)
+        .connect_channel(agent_id(1), hostname(1), None, None)
         .await
         .unwrap();
     // Cut short at the step's first wait after the ingest, if it has one.
@@ -527,7 +536,7 @@ async fn a_step_cut_short_after_letting_go_of_a_report_loses_no_warning() {
     )
     .await;
     let (_, mut next) = connecting
-        .connect_channel(agent_id(1), hostname(1), None)
+        .connect_channel(agent_id(1), hostname(1), None, None)
         .await
         .unwrap();
     next.send_report(&entry(2)).await.unwrap();
@@ -654,6 +663,19 @@ impl crate::ports::Outbox for UnreadableOutbox {
     ) -> Result<(), crate::ports::StoreError> {
         Err(unreadable())
     }
+
+    async fn position(
+        &self,
+    ) -> Result<Option<domain::fleet::OutboxPosition>, crate::ports::StoreError> {
+        Err(unreadable())
+    }
+
+    async fn start_epoch(
+        &self,
+        _: domain::fleet::OutboxEpoch,
+    ) -> Result<Option<domain::fleet::OutboxEpoch>, crate::ports::StoreError> {
+        Err(unreadable())
+    }
 }
 
 fn unreadable() -> crate::ports::StoreError {
@@ -762,6 +784,21 @@ impl crate::ports::Outbox for GappedOutbox {
                 .retain(|entry| entry.seq > through);
         }
         Ok(())
+    }
+
+    /// It says nothing of where it stands, so the hub never tells it to
+    /// start a new epoch.
+    async fn position(
+        &self,
+    ) -> Result<Option<domain::fleet::OutboxPosition>, crate::ports::StoreError> {
+        Ok(None)
+    }
+
+    async fn start_epoch(
+        &self,
+        _: domain::fleet::OutboxEpoch,
+    ) -> Result<Option<domain::fleet::OutboxEpoch>, crate::ports::StoreError> {
+        Ok(None)
     }
 }
 
@@ -1051,7 +1088,7 @@ async fn a_channel_shows_its_sequence_numbers_and_no_key() {
     let identity = paired(&hub, 1).await;
     let connector = Arc::new(LoopbackHubConnector::to(hub.pairing.clone()));
     let (_, channel) = connecting(identity, connector)
-        .connect_channel(agent_id(1), hostname(1), None)
+        .connect_channel(agent_id(1), hostname(1), None, None)
         .await
         .unwrap();
     let next = domain::fleet::FIRST_SEQUENCE + 1;
@@ -1073,7 +1110,7 @@ async fn a_link_dropped_before_an_acknowledgement_fails_the_wait_for_it() {
     for kind in ["plans", "heartbeat"] {
         let connector = Arc::new(LoopbackHubConnector::to(hub.pairing.clone()));
         let (_, mut channel) = connecting(identity.clone(), connector.clone())
-            .connect_channel(agent_id(1), hostname(1), None)
+            .connect_channel(agent_id(1), hostname(1), None, None)
             .await
             .unwrap();
         connector.drop_links().await;
@@ -1825,6 +1862,7 @@ async fn the_hub_welcomes_only_a_proved_agents_first_hello() {
             clock: EpochSeconds::from_seconds(1_800_000_000),
             zone: None,
             machine: None,
+            outbox: None,
         });
         let signed = SignedMessage::AgentMessage {
             hub_key: *keys.key(),
@@ -2162,7 +2200,7 @@ async fn an_ack_out_of_sequence_or_not_signed_for_it_is_not_acted_on() {
             rewrite,
         };
         let (_, mut channel) = connecting(identity.clone(), Arc::new(connector))
-            .connect_channel(agent_id(1), hostname(1), None)
+            .connect_channel(agent_id(1), hostname(1), None, None)
             .await
             .unwrap();
         channel.send_report(&entry).await.unwrap();
@@ -2282,7 +2320,7 @@ async fn a_report_sent_again_on_its_connection_closes_it_as_a_sequence_error() {
         ..Watching::default()
     });
     let (_, mut channel) = connecting(identity, connector.clone())
-        .connect_channel(agent_id(1), hostname(1), None)
+        .connect_channel(agent_id(1), hostname(1), None, None)
         .await
         .unwrap();
     channel.send_report(&one_report()).await.unwrap();

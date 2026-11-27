@@ -130,6 +130,24 @@ impl ReportSeq {
     }
 }
 
+/// Where an agent's outbox stands, as its `Hello` says it: its epoch and
+/// the place it gives its next report (§16, decision 177).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct OutboxPosition {
+    pub epoch: OutboxEpoch,
+    pub next: ReportSeq,
+}
+
+/// Whether an agent whose outbox gives `next` next, of an epoch whose
+/// reports the hub took through `taken` (none when it took none of that
+/// epoch, or forgot it), starts a new epoch: the hub took that place
+/// already, so the outbox numbers its reports again from an older place,
+/// as one restored from an older database does (#1387). Past the last
+/// place taken, every place the agent gives is new to the hub.
+pub fn starts_new_epoch(taken: Option<ReportSeq>, next: ReportSeq) -> bool {
+    todo!("{taken:?} {next:?}")
+}
+
 /// What a report says happened to an operation.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum Happening {

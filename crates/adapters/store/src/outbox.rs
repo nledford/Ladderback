@@ -6,8 +6,8 @@ use app::ports::{Appended, Ingested, LatestReports, Outbox, OutboxEntry, ReportI
 use async_trait::async_trait;
 use domain::fleet::{
     AgentReport, EpochSeconds, Happening, Ingest, MAX_EPOCHS_HELD, MAX_REPORTS_HELD,
-    OutboxAdmission, OutboxEpoch, PlansReport, ReportSeq, ReportedProgress, WireName, admit,
-    ingest,
+    OutboxAdmission, OutboxEpoch, OutboxPosition, PlansReport, ReportSeq, ReportedProgress,
+    WireName, admit, ingest,
 };
 use domain::{AgentId, OperationId, Timestamp, Uuid};
 use sqlx::sqlite::SqliteRow;
@@ -173,6 +173,14 @@ impl Outbox for SqliteStore {
         }
         tx.commit().await.map_err(unavailable)
     }
+
+    async fn position(&self) -> Result<Option<OutboxPosition>, StoreError> {
+        todo!()
+    }
+
+    async fn start_epoch(&self, from: OutboxEpoch) -> Result<Option<OutboxEpoch>, StoreError> {
+        todo!("{from:?}")
+    }
 }
 
 #[async_trait]
@@ -322,6 +330,14 @@ impl ReportInbox for SqliteStore {
             reports,
             dropped: u64::try_from(dropped.unwrap_or(0)).map_err(|_| corrupt("dropped"))?,
         })
+    }
+
+    async fn taken_through(
+        &self,
+        agent: AgentId,
+        epoch: OutboxEpoch,
+    ) -> Result<Option<ReportSeq>, StoreError> {
+        todo!("{agent:?} {epoch:?}")
     }
 
     async fn keep_plans(&self, agent: AgentId, plans: &PlansReport) -> Result<(), StoreError> {

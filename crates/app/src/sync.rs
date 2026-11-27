@@ -426,7 +426,12 @@ impl SyncWithHub {
     async fn open(&self) -> Result<Option<(Connected, AgentChannel)>, SyncFailure> {
         let connected = self
             .connect
-            .connect_channel(self.agent_id, self.hostname.clone(), self.zone.clone())
+            .connect_channel(
+                self.agent_id,
+                self.hostname.clone(),
+                self.zone.clone(),
+                None,
+            )
             .await;
         if let Some(standing) = &self.standing {
             match &connected {

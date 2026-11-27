@@ -172,6 +172,7 @@ async fn terminal_checks(agent: &mut Agent) {
             machine.agent_id,
             machine.hostname.clone(),
             machine.zone.clone(),
+            None,
         )
         .await;
     assert!(checked.is_ok(), "the terminal's check: {:?}", checked.err());

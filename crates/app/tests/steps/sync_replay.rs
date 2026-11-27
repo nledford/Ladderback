@@ -3,25 +3,27 @@
 //! back, and taken once however often they come (technical design §7.2).
 //! A backup is its two reports, as the agent's event recorder makes them;
 //! a restart is a new recorder and a new sync over the same outbox, as the
-//! store's file outlives the daemon. An agent that keeps syncing runs the
-//! daemon's sync loop on a clock of its own, which the steps move from one
-//! of the loop's waits to the next.
+//! store's file outlives the daemon, and a restore from a copy of the
+//! database is a restart over a copy of the outbox taken earlier (decision
+//! 177). An agent that keeps syncing runs the daemon's sync loop on a clock
+//! of its own, which the steps move from one of the loop's waits to the
+//! next.
 
 use std::sync::Arc;
 
+use super::{Agent, Machine, PairingWorld};
 use api::UiEvent;
-use api::sync::{AgentFrame, ReportPayload};
+use api::sync::{AgentFrame, HelloPayload, OutboxPayload, ReportPayload};
 use app::fakes::{FakeClock, InMemoryOutbox, LoopbackHubConnector};
 use app::machine::MachineStanding;
-use app::ports::{Appended, Outbox, ReportInbox};
+use app::ports::{Appended, Outbox, OutboxEntry, ReportInbox, StoreError};
 use app::sync::{RecordReports, SyncFailure, SyncWithHub, Synced};
+use async_trait::async_trait;
 use base64::Engine;
 use base64::engine::general_purpose::URL_SAFE_NO_PAD;
 use cucumber::{given, then, when};
-use domain::fleet::{AgentReport, Happening, OutboxEpoch};
+use domain::fleet::{AgentReport, Happening, OutboxEpoch, OutboxPosition, ReportSeq};
 use domain::{Timestamp, Uuid};
-
-use super::{Agent, Machine, PairingWorld};
 
 /// The sync world: each agent's outbox, recorder and connection.
 #[derive(Default)]
@@ -34,6 +36,14 @@ pub(super) struct SyncWorld {
 
 pub(super) struct Side {
     outbox: Arc<InMemoryOutbox>,
+    /// The epoch the outbox was made with.
+    epoch: OutboxEpoch,
+    /// A copy of the outbox taken earlier, as a copy of the database holds
+    /// it, to restore in its place.
+    copy: Option<InMemoryOutbox>,
+    /// Whether the agent's `Hello` says nothing of its outbox, as a
+    /// machine on 0.6.0 does.
+    silent: bool,
     record: RecordReports,
     pub(super) connector: Arc<LoopbackHubConnector>,
     /// The reports recorded, in order.
@@ -49,6 +59,37 @@ pub(super) struct Side {
     /// Where the machine stands, which its syncs tell what the hub made of
     /// it, when a scenario follows it.
     pub(super) standing: Option<Arc<MachineStanding>>,
+}
+
+/// The agent's outbox as a machine on 0.6.0 tells its hub of it: its
+/// `Hello` says nothing of where the outbox stands.
+struct Silent(Arc<InMemoryOutbox>);
+
+#[async_trait]
+impl Outbox for Silent {
+    async fn append(&self, report: &AgentReport) -> Result<Appended, StoreError> {
+        self.0.append(report).await
+    }
+
+    async fn unacknowledged(
+        &self,
+        after: Option<ReportSeq>,
+        limit: usize,
+    ) -> Result<Vec<OutboxEntry>, StoreError> {
+        self.0.unacknowledged(after, limit).await
+    }
+
+    async fn acknowledge(&self, epoch: OutboxEpoch, through: ReportSeq) -> Result<(), StoreError> {
+        self.0.acknowledge(epoch, through).await
+    }
+
+    async fn position(&self) -> Result<Option<OutboxPosition>, StoreError> {
+        Ok(None)
+    }
+
+    async fn start_epoch(&self, from: OutboxEpoch) -> Result<Option<OutboxEpoch>, StoreError> {
+        self.0.start_epoch(from).await
+    }
 }
 
 /// How many of the sync loop's waits a step moves through before it gives
@@ -96,14 +137,16 @@ impl Drop for Running {
 
 impl Side {
     fn new(world: &PairingWorld, n: u128) -> Self {
-        let outbox = Arc::new(InMemoryOutbox::new(OutboxEpoch::from_uuid(
-            Uuid::from_u128(0xe0 + n),
-        )));
+        let epoch = OutboxEpoch::from_uuid(Uuid::from_u128(0xe0 + n));
+        let outbox = Arc::new(InMemoryOutbox::new(epoch));
         let connector = world.connector_to(world.hub());
         connector.set_down(world.syncing.down);
         Self {
             record: RecordReports::new(outbox.clone()),
             outbox,
+            epoch,
+            copy: None,
+            silent: false,
             connector,
             recorded: Vec::new(),
             kept_while_down: 0,
@@ -144,9 +187,14 @@ impl Side {
     }
 
     pub(super) async fn sync(&mut self, machine: &Machine) -> &Result<Synced, SyncFailure> {
+        let outbox: Arc<dyn Outbox> = if self.silent {
+            Arc::new(Silent(self.outbox.clone()))
+        } else {
+            self.outbox.clone()
+        };
         let sync = SyncWithHub::new(
             machine.connecting(self.connector.clone()),
-            self.outbox.clone(),
+            outbox,
             Arc::new(FakeClock::new(
                 Timestamp::from_second(1_800_000_000).unwrap(),
             )),
@@ -169,6 +217,16 @@ impl Side {
             .await
             .expect("the reports waiting")
             .len()
+    }
+
+    /// Where the outbox stands now, after a failed assertion if it stands
+    /// nowhere.
+    async fn position(&self) -> OutboxPosition {
+        self.outbox
+            .position()
+            .await
+            .expect("the outbox's position")
+            .expect("the outbox holds a report")
     }
 
     /// The hub's refusals reach this side with a signature the hub didn't
@@ -212,6 +270,7 @@ async fn hub_down(agent: &mut Agent) {
     set_down(agent, true);
 }
 
+#[given("the hub can be reached again")]
 #[when("the hub can be reached again")]
 async fn hub_back(agent: &mut Agent) {
     set_down(agent, false);
@@ -274,6 +333,7 @@ async fn tries_to_sync(agent: &mut Agent) {
     sync_first(agent).await;
 }
 
+#[given("the agent synced with its hub")]
 #[when("the agent syncs with its hub")]
 async fn syncs(agent: &mut Agent) {
     sync_first(agent).await;
@@ -293,24 +353,44 @@ async fn other_syncs(agent: &mut Agent) {
 
 #[when("the agent restarts")]
 async fn restarts(agent: &mut Agent) {
-    let world = &mut agent.pairing;
+    restart(&mut agent.pairing);
+}
+
+/// A new recorder and a new connection over the first agent's outbox, as
+/// its daemon's restart makes them.
+fn restart(world: &mut PairingWorld) {
+    let connector = world.connector_to(world.hub());
+    connector.set_down(world.syncing.down);
     let side = world
         .syncing
         .first
         .as_mut()
         .expect("the first agent's side");
     side.record = RecordReports::new(side.outbox.clone());
-    let connector = world.connector_to(world.hub());
-    connector.set_down(world.syncing.down);
-    world
-        .syncing
-        .first
-        .as_mut()
-        .expect("the first agent's side")
-        .connector = connector;
+    side.connector = connector;
+}
+
+#[given("a copy of the agent's database was kept")]
+async fn copy_kept(agent: &mut Agent) {
+    let side = first(agent);
+    side.copy = Some(side.outbox.copied());
+}
+
+#[when("the agent's database is restored from the copy")]
+async fn restored(agent: &mut Agent) {
+    let side = first(agent);
+    let copy = side.copy.as_ref().expect("a copy was kept").copied();
+    side.outbox = Arc::new(copy);
+    restart(&mut agent.pairing);
+}
+
+#[given("the agent's Hello says nothing of its outbox, as a machine on 0.6.0 does")]
+async fn silent(agent: &mut Agent) {
+    first(agent).silent = true;
 }
 
 #[given("the hub's next acknowledgement is lost with its connection")]
+#[when("the hub's next acknowledgement is lost with its connection")]
 async fn ack_lost(agent: &mut Agent) {
     first(agent).connector.lose_acks(1);
 }
@@ -435,4 +515,68 @@ async fn first_report_twice(agent: &mut Agent) {
 async fn other_pending(agent: &mut Agent) {
     let side = other(agent);
     assert_eq!(side.synced.last(), Some(&Ok(Synced::Pending)));
+}
+
+#[then("the agent's outbox has started a new epoch")]
+async fn started_new_epoch(agent: &mut Agent) {
+    let side = first(agent);
+    let now = side.position().await;
+    assert_ne!(now.epoch, side.epoch, "{now:?}");
+}
+
+#[then("the agent's outbox keeps its epoch")]
+async fn keeps_epoch(agent: &mut Agent) {
+    let side = first(agent);
+    assert_eq!(side.position().await.epoch, side.epoch);
+}
+
+/// The reports the hub holds of the first agent.
+async fn held(agent: &mut Agent) -> Vec<AgentReport> {
+    let id = agent.pairing.first().agent_id;
+    let held = agent.pairing.hub().inbox.reports(id).await.unwrap();
+    held.into_iter().map(|entry| entry.report).collect()
+}
+
+#[then(
+    regex = r"^the hub holds each of the agent's (\d+) reports once, in the order it took them$"
+)]
+async fn hub_holds_each_once(agent: &mut Agent, count: usize) {
+    let reports = held(agent).await;
+    assert_eq!(reports.len(), count, "{reports:?}");
+    assert_eq!(reports, first(agent).recorded);
+}
+
+#[then(
+    regex = r"^the hub holds the agent's first (\d+) reports only, as it did before decision 177$"
+)]
+async fn hub_holds_first_only(agent: &mut Agent, count: usize) {
+    let reports = held(agent).await;
+    let recorded = &first(agent).recorded;
+    assert!(recorded.len() > count, "{recorded:?}");
+    assert_eq!(reports, recorded[..count]);
+}
+
+#[then(regex = r"^the agent's last Hello said its outbox gives place (\d+) next$")]
+async fn hello_said(agent: &mut Agent, next: u64) {
+    let side = first(agent);
+    let said = side
+        .connector
+        .sent()
+        .iter()
+        .filter_map(|text| match AgentFrame::from_text(text) {
+            Ok(AgentFrame::Signed { kind, payload, .. }) if kind == "Hello" => {
+                URL_SAFE_NO_PAD.decode(payload).ok()
+            }
+            _ => None,
+        })
+        .filter_map(|bytes| HelloPayload::from_bytes(&bytes).ok())
+        .next_back()
+        .expect("a Hello");
+    assert_eq!(
+        said.outbox,
+        Some(OutboxPayload {
+            epoch: side.epoch.as_uuid().to_string(),
+            next,
+        })
+    );
 }

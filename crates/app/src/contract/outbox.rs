@@ -10,7 +10,7 @@ use std::sync::Arc;
 use async_trait::async_trait;
 use domain::fleet::{
     AgentReport, EpochSeconds, Happening, Ingest, MAX_EPOCHS_HELD, MAX_OUTBOX_REPORTS,
-    MAX_REPORTS_HELD, OutboxEpoch, ReportSeq, SEND_WINDOW, WireName,
+    MAX_REPORTS_HELD, OutboxEpoch, OutboxPosition, ReportSeq, SEND_WINDOW, WireName,
 };
 use domain::{AgentId, OperationId, Timestamp, Uuid};
 
@@ -45,6 +45,8 @@ pub async fn run(harness: &dyn OutboxHarness) {
     a_failure_keeps_its_code(harness).await;
     a_cancel_is_kept(harness).await;
     a_full_outbox_says_which_start_gave_way(harness).await;
+    the_position_is_the_epoch_and_the_place_given_next(harness).await;
+    a_new_epoch_keeps_the_places_and_the_reports_waiting(harness).await;
 }
 
 pub async fn run_inbox(harness: &dyn ReportInboxHarness) {
@@ -59,6 +61,7 @@ pub async fn run_inbox(harness: &dyn ReportInboxHarness) {
     past_the_cap_the_oldest_give_way_and_are_counted(harness).await;
     the_latest_reports_are_read_with_the_count_let_go_of(harness).await;
     an_operations_report_is_held_once_across_machines(harness).await;
+    the_last_place_taken_is_read_for_each_agent_and_epoch(harness).await;
     live::the_latest_plans_are_kept_in_place_of_the_last(harness).await;
     live::the_latest_progress_is_kept_in_place_of_the_last(harness).await;
 }
@@ -126,6 +129,103 @@ async fn acknowledge(outbox: &dyn Outbox, epoch: OutboxEpoch, through: u64) {
         outbox.acknowledge(epoch, seq(through)).await,
         "acknowledging reports",
     );
+}
+
+async fn position(outbox: &dyn Outbox) -> Option<OutboxPosition> {
+    ok(outbox.position().await, "the outbox's position").flatten()
+}
+
+async fn start_epoch(outbox: &dyn Outbox, from: OutboxEpoch) -> Option<OutboxEpoch> {
+    ok(outbox.start_epoch(from).await, "starting a new epoch").flatten()
+}
+
+/// An outbox stands nowhere before its first report; after, at its epoch
+/// and the place after the last it gave, whatever the hub acknowledged,
+/// and there again once it is opened again (decision 177).
+async fn the_position_is_the_epoch_and_the_place_given_next(harness: &dyn OutboxHarness) {
+    let outbox = harness.empty().await;
+    assert_eq!(position(outbox.as_ref()).await, None);
+    appended(outbox.as_ref(), &report(1, Happening::Started)).await;
+    appended(outbox.as_ref(), &report(1, Happening::Succeeded)).await;
+    let Some(epoch) = epoch_of(&waiting(outbox.as_ref()).await) else {
+        return;
+    };
+    let at_three = Some(OutboxPosition {
+        epoch,
+        next: seq(3),
+    });
+    assert_eq!(position(outbox.as_ref()).await, at_three);
+    acknowledge(outbox.as_ref(), epoch, 2).await;
+    assert_eq!(position(outbox.as_ref()).await, at_three);
+    drop(outbox);
+    let outbox = harness.reopened().await;
+    assert_eq!(position(outbox.as_ref()).await, at_three);
+}
+
+/// A new epoch replaces the one it is started from, and only that one:
+/// the reports waiting wait under it at their places, the count goes on
+/// where it stood, an acknowledgement of the old epoch lets go of nothing,
+/// and it outlives the agent. Started again from the old epoch, as by an
+/// agent that stopped before it took the hub's answer in, it changes
+/// nothing. An outbox with no report yet starts none (decision 177).
+async fn a_new_epoch_keeps_the_places_and_the_reports_waiting(harness: &dyn OutboxHarness) {
+    let outbox = harness.empty().await;
+    let unknown = OutboxEpoch::from_uuid(Uuid::from_u128(0x0e));
+    assert_eq!(start_epoch(outbox.as_ref(), unknown).await, None);
+    for n in 1..=3 {
+        appended(outbox.as_ref(), &report(n, Happening::Started)).await;
+    }
+    let Some(old) = epoch_of(&waiting(outbox.as_ref()).await) else {
+        return;
+    };
+    acknowledge(outbox.as_ref(), old, 1).await;
+    let before = waiting(outbox.as_ref()).await;
+    let other = OutboxEpoch::from_uuid(Uuid::from_u128(old.as_uuid().as_u128() ^ 1));
+    assert_eq!(
+        start_epoch(outbox.as_ref(), other).await,
+        None,
+        "another epoch than the outbox's starts none"
+    );
+    let new = start_epoch(outbox.as_ref(), old).await;
+    assert!(new.is_some_and(|new| new != old), "{new:?} after {old:?}");
+    let Some(new) = new else {
+        return;
+    };
+    let after = waiting(outbox.as_ref()).await;
+    assert_eq!(places(&after), [2, 3]);
+    assert!(after.iter().all(|entry| entry.epoch == new), "{after:?}");
+    let said = |entries: &[OutboxEntry]| -> Vec<AgentReport> {
+        entries.iter().map(|entry| entry.report.clone()).collect()
+    };
+    assert_eq!(said(&after), said(&before));
+    assert_eq!(
+        position(outbox.as_ref()).await,
+        Some(OutboxPosition {
+            epoch: new,
+            next: seq(4)
+        })
+    );
+    acknowledge(outbox.as_ref(), old, 3).await;
+    assert_eq!(places(&waiting(outbox.as_ref()).await), [2, 3]);
+    assert_eq!(
+        start_epoch(outbox.as_ref(), old).await,
+        None,
+        "the old epoch is gone"
+    );
+    drop(outbox);
+    let outbox = harness.reopened().await;
+    assert_eq!(
+        appended(outbox.as_ref(), &report(4, Happening::Started)).await,
+        Some(seq(4))
+    );
+    let reopened = waiting(outbox.as_ref()).await;
+    assert_eq!(places(&reopened), [2, 3, 4]);
+    assert!(
+        reopened.iter().all(|entry| entry.epoch == new),
+        "{reopened:?}"
+    );
+    acknowledge(outbox.as_ref(), new, 3).await;
+    assert_eq!(places(&waiting(outbox.as_ref()).await), [4]);
 }
 
 async fn nothing_waits_at_first(harness: &dyn OutboxHarness) {
@@ -641,4 +741,30 @@ async fn an_operations_report_is_held_once_across_machines(harness: &dyn ReportI
     );
     assert_eq!(reports(inbox, AGENT).await, [first]);
     assert_eq!(reports(inbox, OTHER_AGENT).await, [started]);
+}
+
+/// The last place taken of each agent's epoch is read as the hub took it:
+/// none of an epoch or an agent it took nothing of, a duplicate and a
+/// report behind it change nothing, and it outlives the hub (decision
+/// 177).
+async fn the_last_place_taken_is_read_for_each_agent_and_epoch(harness: &dyn ReportInboxHarness) {
+    let inbox = harness.empty().await;
+    let through = |inbox: Arc<dyn ReportInbox>, agent, epoch| async move {
+        ok(
+            inbox.taken_through(agent, epoch).await,
+            "the last place taken",
+        )
+        .flatten()
+    };
+    assert_eq!(through(inbox.clone(), AGENT, EPOCH).await, None);
+    taken(inbox.as_ref(), AGENT, &entry(EPOCH, 1)).await;
+    taken(inbox.as_ref(), AGENT, &entry(EPOCH, 5)).await;
+    taken(inbox.as_ref(), AGENT, &entry(EPOCH, 5)).await;
+    taken(inbox.as_ref(), AGENT, &entry(EPOCH, 3)).await;
+    assert_eq!(through(inbox.clone(), AGENT, EPOCH).await, Some(seq(5)));
+    assert_eq!(through(inbox.clone(), AGENT, OTHER_EPOCH).await, None);
+    assert_eq!(through(inbox.clone(), OTHER_AGENT, EPOCH).await, None);
+    drop(inbox);
+    let inbox = harness.reopened().await;
+    assert_eq!(through(inbox, AGENT, EPOCH).await, Some(seq(5)));
 }
