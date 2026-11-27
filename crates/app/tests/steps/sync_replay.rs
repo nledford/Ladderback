@@ -553,7 +553,7 @@ async fn hub_holds_first_only(agent: &mut Agent, count: usize) {
     let reports = held(agent).await;
     let recorded = &first(agent).recorded;
     assert!(recorded.len() > count, "{recorded:?}");
-    assert_eq!(reports, recorded[..count]);
+    assert_eq!(Some(reports.as_slice()), recorded.get(..count));
 }
 
 #[then(regex = r"^the agent's last Hello said its outbox gives place (\d+) next$")]

@@ -205,6 +205,17 @@ async fn a_new_epoch_keeps_the_places_and_the_reports_waiting(harness: &dyn Outb
             next: seq(4)
         })
     );
+    the_new_epoch_outlives_the_old(harness, outbox, old, new).await;
+}
+
+/// The rest of the test above, once `outbox` started `new` from `old` with
+/// places 2 and 3 waiting.
+async fn the_new_epoch_outlives_the_old(
+    harness: &dyn OutboxHarness,
+    outbox: Arc<dyn Outbox>,
+    old: OutboxEpoch,
+    new: OutboxEpoch,
+) {
     acknowledge(outbox.as_ref(), old, 3).await;
     assert_eq!(places(&waiting(outbox.as_ref()).await), [2, 3]);
     assert_eq!(
