@@ -3593,6 +3593,7 @@ async fn the_hub_hears_the_backup_a_live_machine_started_for_it() {
 async fn the_hub_refuses_at_once_a_command_no_live_machine_takes() {
     use crate::pairing::CommandAskRefused;
     use domain::fleet::Accepts;
+    use futures::FutureExt as _;
 
     let hub = keeping_reports(1);
     let _identity = approved(&hub).await;
@@ -3609,15 +3610,19 @@ async fn the_hub_refuses_at_once_a_command_no_live_machine_takes() {
         .pairing
         .went_live_taking(agent_id(1), 1, Box::new(|| {}), None)
         .await;
+    // Refused at once: an ask the hub sent would wait for an answer.
     assert_eq!(
-        ask(agent_id(1)).await,
-        Err(CommandAskRefused::CommandsUnsupported)
+        ask(agent_id(1)).now_or_never(),
+        Some(Err(CommandAskRefused::CommandsUnsupported))
     );
     let _newer = hub
         .pairing
         .went_live_taking(agent_id(1), 2, Box::new(|| {}), Some(Accepts::none()))
         .await;
-    assert_eq!(ask(agent_id(1)).await, Err(CommandAskRefused::CommandsOff));
+    assert_eq!(
+        ask(agent_id(1)).now_or_never(),
+        Some(Err(CommandAskRefused::CommandsOff))
+    );
 }
 
 /// A command to a machine the hub doesn't hold approved, as one waiting for
