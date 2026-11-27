@@ -67,9 +67,11 @@ async fn the_hub_is_refused_an_unknown_plan_and_operation() {
 /// The hub's backup is queued before its repository's password is read:
 /// the log holds it when the machine answers, and a password that can't
 /// be read ends that run failed for it, before any hook runs, as an
-/// unattended run's does (decision 176).
+/// unattended run's does (decision 176). The daemon's log says the hub's
+/// run didn't start, not that a queued backup can't run again.
 #[tokio::test]
 async fn the_hubs_backup_is_queued_and_a_password_it_cant_read_fails_it() {
+    super::captured_log::capture();
     let (mut runner, entered, _gate, _scratch) = runner_at_a_gate().await;
     let config = app::ports::ConfigStore::load(&*runner.config)
         .await
@@ -122,6 +124,22 @@ async fn the_hubs_backup_is_queued_and_a_password_it_cant_read_fails_it() {
         "{status:?}"
     );
     assert_eq!(*entered.borrow(), 0, "a hook ran");
+    let id = operation.as_uuid().hyphenated().to_string();
+    let said: Vec<String> = super::captured_log::lines()
+        .into_iter()
+        .filter(|(level, line)| *level == log::Level::Warn && line.contains(&id))
+        .map(|(_, line)| line)
+        .collect();
+    assert!(
+        said.iter().any(|line| line.contains(
+            "the hub's run, asked for by session 0123456789abcdef of plan home didn't start"
+        )),
+        "{said:?}"
+    );
+    assert!(
+        said.iter().all(|line| !line.contains("can't run again")),
+        "{said:?}"
+    );
 }
 
 /// The hub cancels backups only: a running check goes on until a session
