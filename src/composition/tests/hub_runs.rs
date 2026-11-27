@@ -64,15 +64,9 @@ async fn the_hub_is_refused_an_unknown_plan_and_operation() {
     );
 }
 
-/// The hub's backup is queued before its repository's password is read:
-/// the log holds it when the machine answers, and a password that can't
-/// be read ends that run failed for it, before any hook runs, as an
-/// unattended run's does (decision 176). The daemon's log says the hub's
-/// run didn't start, not that a queued backup can't run again.
-#[tokio::test]
-async fn the_hubs_backup_is_queued_and_a_password_it_cant_read_fails_it() {
-    super::captured_log::capture();
-    let (mut runner, entered, _gate, _scratch) = runner_at_a_gate().await;
+/// Points every repository's password at an environment variable that is
+/// never set, read by `secrets`.
+async fn password_read_by(runner: &mut PlanRunner, secrets: Arc<dyn app::ports::SecretResolver>) {
     let config = app::ports::ConfigStore::load(&*runner.config)
         .await
         .expect("the config loads");
@@ -96,9 +90,104 @@ async fn the_hubs_backup_is_queued_and_a_password_it_cant_read_fails_it() {
     app::ports::ConfigStore::save(&*runner.config, &unreadable)
         .await
         .expect("the config saves");
-    runner.resolve = Arc::new(ResolveRepository::new(Arc::new(
-        app::fakes::FakeSecrets::new(),
-    )));
+    runner.resolve = Arc::new(ResolveRepository::new(secrets));
+}
+
+/// A password source that never answers, as a password command that
+/// hangs or a keyring waiting on a prompt nobody sees.
+struct NeverAnswers;
+
+#[async_trait]
+impl app::ports::SecretResolver for NeverAnswers {
+    async fn resolve(
+        &self,
+        _secret: &domain::secrets::SecretRef,
+    ) -> Result<app::ports::Resolved, domain::secrets::SecretError> {
+        std::future::pending().await
+    }
+
+    async fn keyring_lock(&self) -> app::ports::KeyringLock {
+        app::ports::KeyringLock::Unknown
+    }
+}
+
+/// The machine answers the hub's backup once it is queued, while its
+/// repository's password is still being read, so a password source slow
+/// to answer holds neither the answer nor the machine's heartbeats; a
+/// cancel meanwhile ends the backup canceled before any hook runs
+/// (decision 176).
+#[tokio::test]
+async fn the_hubs_backup_is_answered_while_its_password_is_read_and_a_cancel_then_ends_it() {
+    let (mut runner, entered, _gate, _scratch) = runner_at_a_gate().await;
+    password_read_by(&mut runner, Arc::new(NeverAnswers)).await;
+    let operation = tokio::time::timeout(
+        std::time::Duration::from_secs(5),
+        HubRuns::queue(&runner, &plan("home"), Some(tag())),
+    )
+    .await
+    .expect("the machine answers while the password is read")
+    .expect("the plan is queued");
+    assert_eq!(runner.going(&plan("home")).await, Some(operation));
+    HubRuns::cancel(&runner, &operation)
+        .await
+        .expect("the hub cancels the backup");
+    assert_eq!(ended(&runner, operation).await, OperationStatus::Canceled);
+    assert_eq!(*entered.borrow(), 0, "a hook ran");
+}
+
+/// A hub whose connection drops while the machine writes the hub's
+/// backup to its log, and the answer with it, leaves a backup that goes
+/// on: nothing is left queued and never run, or registered and never
+/// cancellable, as for Back up now.
+#[tokio::test]
+async fn the_hubs_backup_whose_answer_nobody_waits_for_still_runs_and_still_cancels() {
+    let (mut runner, _entered, open_hooks, _scratch) = runner_at_a_gate().await;
+    open_hooks.send(true).expect("the gate opens");
+    let (open_log, log_is_open) = tokio::sync::watch::channel(false);
+    runner.store = Arc::new(GatedSaves {
+        inner: Arc::clone(&runner.store),
+        open: log_is_open,
+    });
+    let answered = tokio::time::timeout(
+        std::time::Duration::from_millis(200),
+        HubRuns::queue(&runner, &plan("home"), Some(tag())),
+    )
+    .await;
+    assert!(answered.is_err(), "the answer waits for the log");
+    open_log.send(true).expect("the log opens");
+    let operation = *runner
+        .registry
+        .running()
+        .keys()
+        .next()
+        .expect("the start parked a cancel switch");
+    let accepted = async {
+        loop {
+            match HubRuns::cancel(&runner, &operation).await {
+                Err(HubCancelRefused::Unknown) => {
+                    tokio::time::sleep(std::time::Duration::from_millis(10)).await;
+                }
+                other => return other,
+            }
+        }
+    };
+    tokio::time::timeout(std::time::Duration::from_secs(5), accepted)
+        .await
+        .expect("the operation ends up in the log")
+        .expect("the backup that was started is cancellable");
+    assert_eq!(ended(&runner, operation).await, OperationStatus::Canceled);
+}
+
+/// The hub's backup is queued before its repository's password is read:
+/// the log holds it when the machine answers, and a password that can't
+/// be read ends that run failed for it, before any hook runs, as an
+/// unattended run's does (decision 176). The daemon's log says the hub's
+/// run didn't start, not that a queued backup can't run again.
+#[tokio::test]
+async fn the_hubs_backup_is_queued_and_a_password_it_cant_read_fails_it() {
+    super::captured_log::capture();
+    let (mut runner, entered, _gate, _scratch) = runner_at_a_gate().await;
+    password_read_by(&mut runner, Arc::new(app::fakes::FakeSecrets::new())).await;
     let operation = HubRuns::queue(&runner, &plan("home"), Some(tag()))
         .await
         .expect("the plan is queued");
