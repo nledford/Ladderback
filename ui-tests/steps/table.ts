@@ -620,18 +620,28 @@ for (const [state, expanded] of [
   });
 }
 
+/** The Columns panel's list `list` holds a checkbox for each of `columns`, in order, each checked. */
+async function listsEachShown(list: Locator, columns: string): Promise<void> {
+  const boxes = list.getByRole("listitem").getByRole("checkbox");
+  await expect(boxes).toHaveCount(columns.split(", ").length);
+  for (const [at, column] of columns.split(", ").entries()) {
+    await expect(boxes.nth(at)).toHaveAccessibleName(column);
+    await expect(boxes.nth(at)).toBeChecked();
+  }
+}
+
 Then(
   "the Columns panel of the {string} demo lists {string}, each shown",
   async function (this: BrowserWorld, demo: string, columns: string) {
-    const list = demoSection(this.page, demo).getByRole("list", { name: "Columns", exact: true });
-    const boxes = list.getByRole("listitem").getByRole("checkbox");
-    await expect(boxes).toHaveCount(columns.split(", ").length);
-    for (const [at, column] of columns.split(", ").entries()) {
-      await expect(boxes.nth(at)).toHaveAccessibleName(column);
-      await expect(boxes.nth(at)).toBeChecked();
-    }
+    await listsEachShown(demoSection(this.page, demo).getByRole("list", { name: "Columns", exact: true }), columns);
   },
 );
+
+// A page's one Columns panel: a column it doesn't list is one the reader
+// can't hide (decision 140).
+Then("the Columns panel lists {string}, each shown", async function (this: BrowserWorld, columns: string) {
+  await listsEachShown(this.page.getByRole("list", { name: "Columns", exact: true }), columns);
+});
 
 // A Move button at its end of the list says it is unavailable
 // (`aria-disabled`) and stays in the Tab order, never `disabled` nor

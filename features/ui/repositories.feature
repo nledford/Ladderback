@@ -127,8 +127,8 @@ Feature: Repositories page
 
   # Who maintains a repository is the fact that keeps a shared one safe:
   # exactly one place may forget and prune it (I1). Each row says so in
-  # words under where its password comes from, never by color alone, and a
-  # screen reader hears it with the row's cell (#1548).
+  # words in a Maintenance column of its own, never by color alone, and a
+  # screen reader hears it with the row's cell (#1548, #1625).
   Scenario: Each repository's row says in words who maintains it
     Given a daemon with these repositories:
       | repository | maintained by |
@@ -136,13 +136,72 @@ Feature: Repositories page
       | music      | the hub       |
       | notes      | no one        |
     When I open the address "/repositories"
-    Then the row "photos" of the table "Repositories" says "Maintained from this machine." in its "Password" column to a screen reader
-    And the row "music" of the table "Repositories" says "Left to the hub to maintain." in its "Password" column to a screen reader
-    And the row "notes" of the table "Repositories" says "No one maintains it from here." in its "Password" column to a screen reader
-    And the row "photos" of the table "Repositories" doesn't say "No one maintains it from here." in its "Password" column to a screen reader
-    And the row "music" of the table "Repositories" doesn't say "Maintained from this machine." in its "Password" column to a screen reader
-    And the row "notes" of the table "Repositories" doesn't say "Maintained from this machine." in its "Password" column to a screen reader
+    Then the row "photos" of the table "Repositories" says "Maintained from this machine." in its "Maintenance" column to a screen reader
+    And the row "music" of the table "Repositories" says "Left to the hub to maintain." in its "Maintenance" column to a screen reader
+    And the row "notes" of the table "Repositories" says "No one maintains it from here." in its "Maintenance" column to a screen reader
+    And the row "photos" of the table "Repositories" doesn't say "No one maintains it from here." in its "Maintenance" column to a screen reader
+    And the row "music" of the table "Repositories" doesn't say "Maintained from this machine." in its "Maintenance" column to a screen reader
+    And the row "notes" of the table "Repositories" doesn't say "Maintained from this machine." in its "Maintenance" column to a screen reader
     And the page has no accessibility violations
+
+  # The Maintenance column stands right after the name, and the Columns
+  # panel doesn't list it (decision 140), so no choice of columns hides it:
+  # hiding Password, where the note once was, leaves it (#1625).
+  Scenario: With the Password column hidden, each repository's row still says who maintains it
+    Given a daemon with these repositories:
+      | repository | maintained by |
+      | photos     | this machine  |
+      | music      | the hub       |
+      | notes      | no one        |
+    When I open the address "/repositories"
+    And I skip to the content
+    And I press Tab until focus is on the button "Columns"
+    And I press Enter
+    Then the Columns panel lists "Location, Password, Actions", each shown
+    When I press Tab until focus is on the checkbox "Password"
+    And I press Space
+    Then the column headers of the table "Repositories" are "Name, Maintenance, Location, Actions"
+    And the row "photos" of the table "Repositories" says "Maintained from this machine." in its "Maintenance" column to a screen reader
+    And the row "music" of the table "Repositories" says "Left to the hub to maintain." in its "Maintenance" column to a screen reader
+    And the row "notes" of the table "Repositories" says "No one maintains it from here." in its "Maintenance" column to a screen reader
+    And the page has no accessibility violations
+
+  # A choice of columns this browser kept before the Maintenance column
+  # came names no such column: the column shows all the same (#1625).
+  Scenario: A choice of columns kept from before, with Password hidden, still shows who maintains each repository
+    Given a daemon with these repositories:
+      | repository | maintained by |
+      | photos     | this machine  |
+      | notes      | no one        |
+    And this browser kept a choice of the Repositories columns from before they had a Maintenance column, Password hidden
+    When I open the address "/repositories"
+    Then the column headers of the table "Repositories" are "Name, Maintenance, Location, Actions"
+    And the row "photos" of the table "Repositories" says "Maintained from this machine." in its "Maintenance" column to a screen reader
+    And the row "notes" of the table "Repositories" says "No one maintains it from here." in its "Maintenance" column to a screen reader
+
+  # On a small screen with larger text, the row's name stays pinned at the
+  # frame's start and who maintains it is the next cell, its words whole,
+  # and the page doesn't scroll sideways (1.4.10).
+  Scenario Outline: On a small screen who maintains each repository is the cell after its name
+    Given a daemon with these repositories:
+      | repository | maintained by |
+      | photos     | this machine  |
+      | music      | the hub       |
+    And a viewport of 320 by 256 pixels
+    And the reader sets the text size to <size> percent
+    When I open the address "/repositories"
+    Then the column headers of the table "Repositories" are "Name, Maintenance, Location, Password, Actions"
+    And the row "photos" of the table "Repositories" says "Maintained from this machine." in its "Maintenance" column to a screen reader
+    And the column header "Name" sits on one line
+    And no word of a table breaks inside, an address only between its parts
+    And the page doesn't scroll sideways
+    And no text is clipped
+    And the page has no accessibility violations
+
+    Examples:
+      | size |
+      | 100  |
+      | 200  |
 
   Scenario: The Repositories link in the navigation moves focus to the page's heading
     When I open the web UI

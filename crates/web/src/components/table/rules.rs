@@ -614,6 +614,25 @@ pub fn sort_kept(sorted: Option<Sorted>, layout: &Layout) -> Option<Sorted> {
     })
 }
 
+/// Whether the table shows the column at its place `place` (the row
+/// header's 0), the `fixed` columns after the row header's being ones the
+/// reader can't hide (`Table`'s `always_shown`, decision 140) and the
+/// `layout` the reader's choice of the rest: the row header and the fixed
+/// columns always show, any other as the reader chose.
+pub fn is_place_shown(place: usize, fixed: usize, layout: &Layout) -> bool {
+    let _ = (place, fixed, layout);
+    todo!()
+}
+
+/// The table's places (the row header's 0) of the columns it shows after
+/// the row header's, in their order: the `fixed` ones the reader can't hide
+/// first, as given, then those the reader shows of the `layout`, in its
+/// order.
+pub fn shown_places(fixed: usize, layout: &Layout) -> Vec<usize> {
+    let _ = (fixed, layout);
+    todo!()
+}
+
 /// Whether a change to the cued column of a row is seen as it comes, and
 /// so marks nothing: focus is in the row (`focused`), or the column is
 /// hidden (`!cue_shown`), where no cell could say the mark (decision 140).
@@ -1239,6 +1258,32 @@ mod tests {
         let by_name = sorted(0, Direction::Ascending);
         assert_eq!(sort_kept(by_name, &all_hidden()), by_name);
         assert_eq!(sort_kept(None, &all_hidden()), None);
+    }
+
+    #[test]
+    fn a_column_the_reader_cant_hide_stands_right_after_the_row_header_in_every_layout() {
+        assert_eq!(shown_places(0, &Layout::given(4)), [1, 2, 3, 4]);
+        assert_eq!(shown_places(1, &Layout::given(4)), [1, 2, 3, 4, 5]);
+        assert_eq!(shown_places(1, &all_hidden()), [1]);
+        assert_eq!(shown_places(2, &all_hidden()), [1, 2]);
+        let chosen = Layout::given(4)
+            .showing(CHANGED, false)
+            .moved(FILES_PLACE, Step::Up);
+        assert_eq!(shown_places(1, &chosen), [1, 2, 4, 5]);
+    }
+
+    #[test]
+    fn the_row_header_and_a_column_the_reader_cant_hide_always_show() {
+        let none = all_hidden();
+        assert!(is_place_shown(0, 1, &none));
+        assert!(is_place_shown(1, 1, &none));
+        assert!(!is_place_shown(2, 1, &none));
+        let changed_hidden = Layout::given(4).showing(CHANGED, false);
+        assert!(is_place_shown(2, 1, &changed_hidden));
+        assert!(!is_place_shown(CHANGED + 2, 1, &changed_hidden));
+        assert!(is_place_shown(CHANGED + 1, 0, &Layout::given(4)));
+        assert!(!is_place_shown(CHANGED + 1, 0, &changed_hidden));
+        assert!(!is_place_shown(6, 1, &Layout::given(4)));
     }
 
     #[test]
