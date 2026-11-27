@@ -6,7 +6,8 @@
 
 use std::sync::Arc;
 
-use domain::Timestamp;
+use domain::execution::daily_copy::{COPY_EVERY, RETRY_AFTER, next_copy};
+use domain::{SignedDuration, Timestamp};
 
 use crate::ports::{Clock, DailyCopy, DailyCopyError};
 
@@ -35,7 +36,29 @@ impl KeepDailyCopy {
     /// there is couldn't be read or a copy couldn't be taken, which is
     /// told.
     pub async fn keep(&self) -> Timestamp {
-        let _ = (&self.clock, &self.copies, &self.reports);
-        todo!()
+        let now = self.clock.now();
+        let taken = match self.copies.taken_at().await {
+            Ok(taken) => taken,
+            Err(error) => return self.not_taken(error, now),
+        };
+        let due = next_copy(taken, now);
+        if due > now {
+            return due;
+        }
+        match self.copies.take().await {
+            Ok(()) => later(now, COPY_EVERY),
+            Err(error) => self.not_taken(error, now),
+        }
     }
+
+    /// Tells `error`, and answers when to try again, at `now`.
+    fn not_taken(&self, error: DailyCopyError, now: Timestamp) -> Timestamp {
+        (self.reports)(error);
+        later(now, RETRY_AFTER)
+    }
+}
+
+/// `duration` after `moment`, or the last moment there is.
+fn later(moment: Timestamp, duration: SignedDuration) -> Timestamp {
+    moment.checked_add(duration).unwrap_or(Timestamp::MAX)
 }
