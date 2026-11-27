@@ -189,16 +189,12 @@ async fn a_hook_is_told_the_context_and_nothing_else(harness: &dyn HooksHarness,
             .any(|l| l.starts_with("env: LADDERBACK_OPERATION_ID=")),
         "the hook is told its operation: {written:?}"
     );
-    // Every name the hook saw is the worker's allow-list (components/worker.md
-    // §4.1) or a context variable: nothing else of the daemon's gets
-    // through. `PWD`, `SHLVL` and `_` are set by the POSIX shell the demo
-    // script runs under, not given by the runner.
+    // Every name the hook saw is one a hook may be given (below): nothing
+    // else of the daemon's gets through.
     for line in &written {
         if let Some(name) = line.strip_prefix("env: ").and_then(|l| l.split('=').next()) {
             assert!(
-                name.starts_with("LADDERBACK_")
-                    || WORKER_ALLOW_LIST.contains(&name)
-                    || matches!(name, "PWD" | "SHLVL" | "_"),
+                may_reach_a_hook(name, std::env::consts::OS),
                 "{name} is not allowed to reach a hook"
             );
         }
@@ -212,6 +208,28 @@ async fn a_hook_is_told_the_context_and_nothing_else(harness: &dyn HooksHarness,
         "no secret value reaches a hook: {written:?}"
     );
 }
+
+/// Whether a hook running on `os` may see `name` in its environment: the
+/// worker's allow-list (components/worker.md §4.1), a context variable,
+/// what the POSIX shell the demo script runs under sets itself (`PWD`,
+/// `SHLVL`, `_`), or a variable [the OS adds](OS_ADDED) on that platform.
+/// Every other name fails the contract.
+fn may_reach_a_hook(name: &str, os: &str) -> bool {
+    name.starts_with("LADDERBACK_")
+        || WORKER_ALLOW_LIST.contains(&name)
+        || matches!(name, "PWD" | "SHLVL" | "_")
+        || OS_ADDED.contains(&(name, os))
+}
+
+/// Variables the operating system adds to a process's environment whatever
+/// it was started with, by name and the platform (`std::env::consts::OS`)
+/// that adds them. The runner starts every hook with a cleared environment,
+/// so it can't leave these out: on macOS, a system program that loads
+/// CoreFoundation sets `__CF_USER_TEXT_ENCODING`, the user's text encoding
+/// (no secret), in its own environment when it lacks it, and what it starts
+/// inherits it (`env -i /usr/bin/arch -arm64 /bin/sh -c env` shows it), so
+/// it reaches a hook through any such program in its process tree (#1627).
+const OS_ADDED: &[(&str, &str)] = &[("__CF_USER_TEXT_ENCODING", "macos")];
 
 /// The only variables of the daemon's environment a worker, and so a hook,
 /// is passed (components/worker.md §4.1). The proxy variables also count in
@@ -321,6 +339,36 @@ async fn a_whole_secret_just_before_the_cap_leaks_nothing(harness: &dyn HooksHar
                 "a secret before the cap leaves no prefix behind (first {len} bytes): {:?}",
                 outcome.stdout
             );
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::may_reach_a_hook;
+
+    #[test]
+    fn an_os_added_variable_may_reach_a_hook_only_on_its_platform() {
+        assert!(may_reach_a_hook("__CF_USER_TEXT_ENCODING", "macos"));
+        assert!(!may_reach_a_hook("__CF_USER_TEXT_ENCODING", "linux"));
+    }
+
+    #[test]
+    fn no_other_unlisted_variable_may_reach_a_hook() {
+        for os in ["macos", "linux"] {
+            for name in [
+                "CARGO_PKG_NAME",
+                "RESTIC_PASSWORD",
+                "RUSTIC_PASSWORD",
+                "__CF_USER_TEXT_ENCODING_EXTRA",
+                "__CF_OTHER",
+                "VERSIONER_PYTHON_VERSION",
+                "LD_PRELOAD",
+                "DYLD_INSERT_LIBRARIES",
+                "path",
+            ] {
+                assert!(!may_reach_a_hook(name, os), "{name} on {os}");
+            }
         }
     }
 }
