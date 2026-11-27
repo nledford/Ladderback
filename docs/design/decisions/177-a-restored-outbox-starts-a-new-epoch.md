@@ -25,7 +25,9 @@ Each report of a machine's outbox has a place in its epoch, and the hub takes ea
 | 0.6.0 | This release | Its `Hello` has no `outbox`: its reports are acknowledged as today, and the hub logs the first unlike the one it took at its place |
 | 0.6.0 | 0.6.0 | As today |
 
-A `Hello` whose `outbox` is out of shape (an epoch that isn't a UUID, a place of 0) is refused, as one with a fingerprint out of shape is. `new_epoch` is a boolean, absent when false. A 0.6.0 hub opens no database migration 0002 changed, as it opens no newer schema: going back to it means its own database copy.
+A `Hello` whose `outbox` is out of shape (an epoch that isn't a UUID, a place of 0) is refused, as one with a fingerprint out of shape is. `new_epoch` is a boolean, absent when false. An outbox whose position can't be read ends the session with nothing sent, as a new epoch that can't be started does; stated as none, its reports at places the hub took would be let go of.
+
+**Going back to 0.6.0.** Every machine's database, a hub's, an agent's or a standalone one's, gets migration 0002 at its first start on this release, and 0.6.0 opens no newer schema, so every 0.6.0 build refuses it. This release takes no copy before the migration (#1474), and its daily copy is taken after it, so neither is a way back: going back needs a copy of the database the person made before upgrading.
 
 ## Consequences
 
