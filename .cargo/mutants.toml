@@ -319,6 +319,10 @@ exclude_re = [
     # `FolderPath::top` is `Self::default()`, the path that names no folder:
     # the mutant that returns `Default::default()` is the same code.
     'crates/domain/src/browse\.rs.*: replace FolderPath::top -> Self with Default::default\(\)$',
+    # `Accepts::none` is `Self::default()`, the empty set of commands a
+    # machine that turned its hub's commands off takes: the mutant that
+    # returns `Default::default()` is the same code.
+    'crates/domain/src/fleet/commands\.rs.*: replace Accepts::none -> Self with Default::default\(\)$',
     # A proposal's diff walks the table of longest common runs. The walk
     # takes this branch only where `old[i] != new[j]`, the same test the
     # table was filled by, so there `common[i][j]` is

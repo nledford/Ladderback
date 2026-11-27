@@ -67,6 +67,18 @@ fn a_session_tag_read_from_json_is_checked_as_parse_checks_it() {
     }
 }
 
+/// A tag refused as JSON is read says why.
+#[test]
+fn a_session_tag_refused_from_json_says_why() {
+    let refused = serde_json::from_str::<SessionTag>("\"zz\"").unwrap_err();
+    assert!(
+        refused
+            .to_string()
+            .contains("a session tag isn't 16 lower-case hex digits"),
+        "{refused}"
+    );
+}
+
 #[test]
 fn a_password_is_one_byte_to_the_most_bytes() {
     assert_eq!(

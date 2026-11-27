@@ -22,6 +22,20 @@ fn accepts_reads_the_commands_it_knows_and_passes_over_the_rest() {
 }
 
 #[test]
+fn accepts_lists_the_commands_it_takes_in_a_fixed_order() {
+    let kinds = |accepts: &Accepts| accepts.kinds().collect::<Vec<_>>();
+    assert_eq!(
+        kinds(&Accepts::all()),
+        [CommandKind::RunPlan, CommandKind::CancelOp]
+    );
+    assert_eq!(
+        kinds(&Accepts::from_names(["cancel-op"]).unwrap()),
+        [CommandKind::CancelOp]
+    );
+    assert_eq!(kinds(&Accepts::none()), []);
+}
+
+#[test]
 fn accepts_refuses_more_names_than_a_hello_holds() {
     let names = vec!["run-plan"; MAX_ACCEPTS];
     assert!(Accepts::from_names(names.iter().copied()).is_ok());
@@ -163,7 +177,12 @@ fn a_hub_at_its_limit_for_a_day_never_fills_a_machines_ledger() {
     let mut now = SignedDuration::ZERO;
     while now < COMMANDS_REMEMBERED_FOR {
         match hub_command_admitted(&sent, now) {
-            Ok(()) => sent.push(now),
+            Ok(()) => {
+                sent.push(now);
+                // Checked as each is sent, so a limit that lets every
+                // command through fails here rather than sending forever.
+                assert!(sent.len() < MAX_COMMANDS_REMEMBERED, "{}", sent.len());
+            }
             Err(again) => {
                 assert!(again > now, "{again:?} isn't after {now:?}");
                 now = again;
@@ -175,7 +194,6 @@ fn a_hub_at_its_limit_for_a_day_never_fills_a_machines_ledger() {
         sent.iter().filter(|at| **at < hour).count(),
         HUB_COMMANDS_PER_HOUR
     );
-    assert!(sent.len() < MAX_COMMANDS_REMEMBERED, "{}", sent.len());
 }
 
 /// The hub sends the next command once the oldest of the hour's leaves it.

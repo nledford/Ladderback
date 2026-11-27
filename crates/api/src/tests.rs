@@ -1053,6 +1053,21 @@ fn a_machines_removal_has_a_path_of_its_own() {
     assert_ne!(machine_removal_path(id), machine_approval_path(id));
 }
 
+/// The hub's page runs a plan on a machine, and cancels one of its backups,
+/// at paths under the machine, as the hub routes them (§16, decision 176).
+#[test]
+fn a_machines_runs_and_cancels_have_their_paths() {
+    let id = "0194f3a2-6b1c-7d2e-8f30-415263748596";
+    assert_eq!(
+        machine_runs_path(id),
+        "/api/v1/hub/machines/0194f3a2-6b1c-7d2e-8f30-415263748596/runs"
+    );
+    assert_eq!(
+        machine_cancel_path(id, "0194f3a2-0000-7000-8000-000000000001"),
+        "/api/v1/hub/machines/0194f3a2-6b1c-7d2e-8f30-415263748596/operations/0194f3a2-0000-7000-8000-000000000001/cancel"
+    );
+}
+
 /// The hub's page reads and changes its machines under `machines`, and its
 /// dashboard at a path of its own; every field that names a machine is
 /// `machine-id` (§16, decision 163).

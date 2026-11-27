@@ -3620,6 +3620,111 @@ async fn the_hub_refuses_at_once_a_command_no_live_machine_takes() {
     assert_eq!(ask(agent_id(1)).await, Err(CommandAskRefused::CommandsOff));
 }
 
+/// A command to a machine the hub doesn't hold approved, as one waiting for
+/// approval or one removed, is refused as to a machine it doesn't know, and
+/// nothing is sent: even while the hub still holds a connection of it, as
+/// when the registry changed under a live connection (decision 176).
+#[tokio::test]
+async fn a_command_to_a_machine_not_approved_is_refused_and_nothing_is_sent() {
+    use crate::pairing::CommandAskRefused;
+    use domain::fleet::{Accepts, AgentRecord};
+    use futures::{FutureExt as _, StreamExt as _};
+
+    let hub = keeping_reports(1);
+    let _identity = paired(&hub, 1).await;
+    let ask = || hub.pairing.command_asked(photos_asked_of(agent_id(1)));
+    assert_eq!(ask().await, Err(CommandAskRefused::MachineUnknown));
+    let waiting = hub.registry.agent(agent_id(1)).await.unwrap().unwrap();
+    let approved = hub.pairing.approve(&waiting).await.unwrap().unwrap();
+    let mut queue = hub
+        .pairing
+        .went_live_taking(agent_id(1), 1, Box::new(|| {}), Some(Accepts::all()))
+        .await;
+    hub.registry
+        .remove(agent_id(1), approved.key, hub.clock.now())
+        .await
+        .unwrap()
+        .unwrap();
+    assert_eq!(
+        ask().now_or_never(),
+        Some(Err(CommandAskRefused::MachineUnknown)),
+        "removed"
+    );
+    hub.registry.hold(AgentRecord {
+        status: AgentStatus::Pending {
+            since: hub.clock.now(),
+        },
+        ..approved
+    });
+    assert_eq!(
+        ask().now_or_never(),
+        Some(Err(CommandAskRefused::MachineUnknown)),
+        "waiting for approval"
+    );
+    assert!(
+        queue.next().now_or_never().flatten().is_none(),
+        "the hub sent a command to a machine it doesn't hold approved"
+    );
+}
+
+/// A command the live machine doesn't take is refused at once and nothing
+/// is sent: one whose `Hello` didn't say, or that takes other commands, runs
+/// a release that doesn't take it; one that takes none turned its hub's
+/// commands off (decision 176).
+#[tokio::test]
+async fn a_command_the_live_machine_doesnt_take_is_refused_and_nothing_is_sent() {
+    use crate::pairing::CommandAskRefused;
+    use domain::fleet::Accepts;
+    use futures::{FutureExt as _, StreamExt as _};
+
+    let hub = keeping_reports(1);
+    let _identity = approved(&hub).await;
+    let only_cancel = Accepts::from_names(["cancel-op"]).unwrap();
+    for (connection, accepts, refused) in [
+        (1, None, CommandAskRefused::CommandsUnsupported),
+        (2, Some(only_cancel), CommandAskRefused::CommandsUnsupported),
+        (3, Some(Accepts::none()), CommandAskRefused::CommandsOff),
+    ] {
+        let mut queue = hub
+            .pairing
+            .went_live_taking(agent_id(1), connection, Box::new(|| {}), accepts.clone())
+            .await;
+        assert_eq!(
+            hub.pairing
+                .command_asked(photos_asked_of(agent_id(1)))
+                .now_or_never(),
+            Some(Err(refused)),
+            "{accepts:?}"
+        );
+        assert!(
+            queue.next().now_or_never().flatten().is_none(),
+            "the hub sent a command the machine doesn't take: {accepts:?}"
+        );
+    }
+}
+
+/// When a machine's connection ends, an asker waiting on it hears at once
+/// that the machine didn't answer, rather than once the hub's 20 seconds
+/// are up (decision 176).
+#[tokio::test]
+async fn an_asker_waiting_on_a_machine_whose_connection_ends_hears_at_once() {
+    use crate::pairing::CommandAskRefused;
+    use domain::fleet::Accepts;
+    use futures::{FutureExt as _, StreamExt as _};
+
+    let hub = keeping_reports(1);
+    let _identity = approved(&hub).await;
+    let mut queue = hub
+        .pairing
+        .went_live_taking(agent_id(1), 1, Box::new(|| {}), Some(Accepts::all()))
+        .await;
+    let mut asked = Box::pin(hub.pairing.command_asked(photos_asked_of(agent_id(1))));
+    assert!(futures::poll!(asked.as_mut()).is_pending());
+    assert!(queue.next().now_or_never().flatten().is_some());
+    hub.pairing.went_away(agent_id(1), 1).await;
+    assert_eq!(asked.now_or_never(), Some(Err(CommandAskRefused::NoAnswer)));
+}
+
 /// A run of a plan on a machine offline names the plan's next run on its
 /// schedule, as the machine last reported it, when it is still to come; a
 /// cancel, a plan reported without one, or one already past, is only
@@ -4335,4 +4440,56 @@ async fn a_machine_holding_its_limit_of_commands_answers_the_oldest_expired() {
     );
     let answered: Vec<String> = results.into_iter().map(|(id, ..)| id).collect();
     assert_eq!(answered, (1..=sent).map(id).collect::<Vec<_>>());
+}
+
+/// A machine keeps at most as many of the hub's commands unanswered as the
+/// hub waits on, and as many of those it dropped to make room: past both,
+/// the oldest dropped is forgotten unanswered, the next dropped are each
+/// answered expired, and the newest are answered (decision 176).
+#[tokio::test]
+async fn a_machine_forgets_the_oldest_of_more_commands_dropped_than_it_holds() {
+    use domain::fleet::{Accepts, MAX_COMMANDS_IN_FLIGHT, command_result_kind, run_plan_kind};
+
+    let hub = keeping_reports(1);
+    let identity = approved(&hub).await;
+    let connector = Arc::new(LoopbackHubConnector::to(hub.pairing.clone()));
+    let (_, mut channel) = connecting(identity, connector.clone())
+        .connect_accepting(agent_id(1), hostname(1), None, None, Some(Accepts::all()))
+        .await
+        .unwrap();
+    channel.send_report(&one_report()).await.unwrap();
+    channel.receive_ack().await.unwrap();
+    let held = u128::try_from(MAX_COMMANDS_IN_FLIGHT).unwrap();
+    let sent = 2 * held + 1;
+    for number in 1..=sent {
+        connector.send_command(run_plan_kind(), run_photos(number, hub.clock.now()));
+    }
+    connector.send_commands_ahead();
+    channel.send_heartbeat(None).await.unwrap();
+    channel
+        .receive_heartbeat_ack()
+        .await
+        .expect("the machine keeps its connection");
+    answering(Arc::new(FakeClock::new(hub.clock.now())))
+        .answer_held(&mut channel)
+        .await
+        .unwrap();
+    let answered: Vec<(String, bool)> = sent_of(&connector, &command_result_kind())
+        .iter()
+        .map(|bytes| {
+            let result = api::sync::CommandResultPayload::from_bytes(bytes).unwrap();
+            let expired = result.code.as_deref() == Some("command-expired");
+            (result.command_id, expired)
+        })
+        .collect();
+    let id = |number: u128| {
+        Uuid::from_u128((0x0191_u128 << 112) | number)
+            .hyphenated()
+            .to_string()
+    };
+    let expected: Vec<(String, bool)> = (2..=held + 1)
+        .map(|number| (id(number), true))
+        .chain((held + 2..=sent).map(|number| (id(number), false)))
+        .collect();
+    assert_eq!(answered, expected);
 }

@@ -860,6 +860,29 @@ fn a_cancel_report_keeps_its_wire_spelling() {
     assert!(payload.contains(r#""cancelled""#), "{payload}");
 }
 
+/// The hub reads a machine's answer that it started a backup, or canceled
+/// one, as the machine wrote it, with the operation it names (decision
+/// 176).
+#[test]
+fn the_hub_reads_a_machines_start_and_cancel_as_written() {
+    use crate::hub_commands::CommandAnswer;
+    use domain::OperationId;
+    use domain::fleet::CommandId;
+
+    let id = CommandId::from_uuid(Uuid::from_u128(0x0191));
+    let operation = OperationId::from_uuid(Uuid::from_u128(0x0e));
+    for answer in [
+        CommandAnswer::Started(operation),
+        CommandAnswer::Canceled(operation),
+    ] {
+        assert_eq!(
+            read_command_result(&command_result_payload(id, &answer)),
+            Ok((id, answer.clone())),
+            "{answer:?}"
+        );
+    }
+}
+
 /// The hub reads each refusal a machine answers its command with by its
 /// own code, and when to ask again only of a rate limit; a code no machine
 /// refuses with is `machine-run-refused`, so a machine can't have the hub
