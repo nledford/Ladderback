@@ -28,20 +28,19 @@ impl DriveFlush for SqliteStore {
 }
 
 /// Flushes the drive the database at `path` is on, through its
-/// write-ahead log. A log that isn't there holds nothing to flush: a
-/// checkpoint moved it into the database file and flushed that.
+/// write-ahead log, which an open store always keeps: one that isn't there
+/// fails the flush, since the commits it held may be off the drive.
 #[cfg(target_os = "macos")]
 async fn full_flush(path: &std::path::Path) -> Result<(), StoreError> {
     use std::fs::OpenOptions;
-    use std::io;
 
     let log = crate::copy::beside(path, "-wal");
     let synced = tokio::task::spawn_blocking(move || {
-        match OpenOptions::new().read(true).write(true).open(&log) {
-            Ok(file) => file.sync_all(),
-            Err(error) if error.kind() == io::ErrorKind::NotFound => Ok(()),
-            Err(error) => Err(error),
-        }
+        OpenOptions::new()
+            .read(true)
+            .write(true)
+            .open(&log)
+            .and_then(|file| file.sync_all())
     })
     .await;
     let failed = |detail: String| StoreError::Unavailable {
