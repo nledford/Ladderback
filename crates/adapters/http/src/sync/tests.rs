@@ -852,3 +852,54 @@ async fn a_connection_silent_for_90_seconds_is_closed_and_its_machine_shown_offl
     let closed = tokio::time::timeout(PATIENCE, channel.receive_heartbeat_ack()).await;
     assert!(matches!(closed, Ok(Err(_))), "{closed:?}");
 }
+
+/// Only what the machine sends starts its 90 seconds over: a command the
+/// hub sends it doesn't, so a machine that stays silent while the hub
+/// commands it is let go of 90 seconds after its last message (§7.2).
+#[tokio::test]
+async fn a_command_the_hub_sends_doesnt_keep_a_silent_connection() {
+    use app::pairing::CommandAsk;
+    use domain::fleet::{Accepts, HubCommand};
+    use domain::{OperationId, Uuid};
+
+    let (connecting, agent, hostname, pairing) = approved_agent(Bounds::DECIDED).await;
+    let (_, mut channel) = connecting
+        .connect_accepting(agent, hostname, None, None, Some(Accepts::all()))
+        .await
+        .unwrap();
+    channel.send_heartbeat(Some(&[])).await.unwrap();
+    channel.receive_heartbeat_ack().await.unwrap();
+    let started = std::time::Instant::now();
+    while !pairing.is_online(agent) {
+        assert!(started.elapsed() < PATIENCE, "the agent never came online");
+        tokio::time::sleep(Duration::from_millis(10)).await;
+    }
+    tokio::time::pause();
+    tokio::time::advance(Duration::from_secs(60)).await;
+    tokio::time::resume();
+    let asking = pairing.clone();
+    // The asker waits on the hub's fake clock, which never moves here.
+    let _asker = tokio::spawn(async move {
+        asking
+            .command_asked(CommandAsk {
+                agent,
+                command: HubCommand::CancelOp {
+                    op: OperationId::from_uuid(Uuid::from_u128(0x0c)),
+                },
+                asked_by: None,
+                beyond_loopback: false,
+            })
+            .await
+    });
+    tokio::time::timeout(PATIENCE, channel.listen_command())
+        .await
+        .unwrap()
+        .unwrap();
+    // 90 seconds after the heartbeat, 30 after the command.
+    tokio::time::pause();
+    tokio::time::advance(Duration::from_secs(29)).await;
+    assert!(shown_online(&pairing, agent, 100).await);
+    tokio::time::advance(Duration::from_secs(1) + Duration::from_millis(2)).await;
+    assert!(!shown_online(&pairing, agent, 100).await);
+    tokio::time::resume();
+}
