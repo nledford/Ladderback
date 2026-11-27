@@ -67,7 +67,9 @@ impl HubPairing {
             let operations = latest_operations(&latest.reports, OPERATIONS_SHOWN);
             machines.push(Machine {
                 online: self.is_online(record.agent_id),
-                accepts: self.accepts_of(record.agent_id),
+                // A machine that didn't say and one that took none alike
+                // show no commands.
+                accepts: self.accepts_of(record.agent_id).unwrap_or_default(),
                 record,
                 reports_dropped: latest.dropped,
                 progress: progress_shown(&operations, progress),

@@ -112,7 +112,12 @@ mod served {
     use std::time::Duration;
 
     use api::sync::{AgentFrame, MAX_FRAME_BYTES, PATH};
-    use app::pairing::{CloseConnection, HubPairing, HubSession, HubStep, PROTOCOL_ERROR};
+    use app::pairing::{
+        CloseConnection, CommandQueue, HubPairing, HubSession, HubStep, OutgoingCommand,
+        PROTOCOL_ERROR,
+    };
+    use futures::StreamExt as _;
+    use futures::future::Either;
     use axum::Router;
     use axum::extract::ws::{CloseFrame, Message, WebSocket, WebSocketUpgrade, close_code};
     use axum::extract::{ConnectInfo, Extension};
@@ -462,21 +467,64 @@ mod served {
             session: &mut HubSession,
             mut live: Live,
         ) -> End {
+            // The hub's commands to the machine, once its connection is live
+            // (decision 176).
+            let mut queue: Option<CommandQueue> = None;
             loop {
-                let frame = async {
-                    let read = next(socket).await;
-                    self.take(socket, session, read).await
+                let woke = async {
+                    match queue.as_mut() {
+                        Some(commands) => {
+                            let read = std::pin::pin!(next(socket));
+                            match futures::future::select(read, commands.next()).await {
+                                Either::Left((read, _)) => Woke::Read(read),
+                                Either::Right((command, _)) => Woke::Command(command),
+                            }
+                        }
+                        None => Woke::Read(next(socket).await),
+                    }
                 };
-                match tokio::time::timeout(self.bounds.idle_within, frame).await {
-                    Ok(None) => {
+                let woke = match tokio::time::timeout(self.bounds.idle_within, woke).await {
+                    Ok(woke) => woke,
+                    Err(_) => return End::Dropped,
+                };
+                match woke {
+                    Woke::Read(read) => {
+                        // Answering is within the idle bound too, so an agent
+                        // that stops reading is let go of.
+                        let taken = self.take(socket, session, read);
+                        match tokio::time::timeout(self.bounds.idle_within, taken).await {
+                            Ok(None) => {}
+                            Ok(Some(end)) => return end,
+                            Err(_) => return End::Dropped,
+                        }
                         if let Some(close) = live.close.take() {
-                            self.pairing
-                                .went_live_taking(live.agent, live.id, close, session.accepts())
-                                .await;
+                            queue = Some(
+                                self.pairing
+                                    .went_live_taking(
+                                        live.agent,
+                                        live.id,
+                                        close,
+                                        session.accepts(),
+                                    )
+                                    .await,
+                            );
                         }
                     }
-                    Ok(Some(end)) => return end,
-                    Err(_) => return End::Dropped,
+                    Woke::Command(Some(OutgoingCommand { kind, payload })) => {
+                        let Some(frame) = self.pairing.command_frame(session, kind, payload).await
+                        else {
+                            continue;
+                        };
+                        let sent = socket.send(Message::text(frame.to_text()));
+                        if !matches!(
+                            tokio::time::timeout(self.bounds.idle_within, sent).await,
+                            Ok(Ok(()))
+                        ) {
+                            return End::Dropped;
+                        }
+                    }
+                    // A newer connection of the machine took its commands.
+                    Woke::Command(None) => queue = None,
                 }
             }
         }
@@ -526,6 +574,13 @@ mod served {
                 Some(Ok(Message::Close(_)) | Err(_)) | None => Next::Gone,
             };
         }
+    }
+
+    /// What a live connection woke for: the agent's next frame, or the
+    /// hub's next command to it (none once the queue ended).
+    enum Woke {
+        Read(Next),
+        Command(Option<OutgoingCommand>),
     }
 }
 

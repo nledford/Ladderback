@@ -26,6 +26,7 @@ use crate::ports::{
     ReportInbox, Signing, SigningError, StoreError,
 };
 
+mod commands;
 mod dialog;
 mod fleet;
 mod lease_proof;
@@ -43,7 +44,8 @@ pub use fleet::Machine;
 pub use lease_proof::{proven_floors, signed_grants};
 pub use live::{progress_dto, time_of};
 pub use offline::{MACHINES_WATCHED_EVERY, WatchMachines};
-pub use presence::CloseConnection;
+pub use commands::CommandAskRefused;
+pub use presence::{CloseConnection, CommandQueue, OutgoingCommand};
 
 /// The hub's side of pairing: its keys, its tokens, and its answers to an
 /// agent's `Connect` and `Pair`.
@@ -836,7 +838,7 @@ impl HubPairing {
         handshake: HubHandshake,
         agent: &AgentRecord,
         outbox_stated: bool,
-        accepts: Accepts,
+        accepts: Option<Accepts>,
     ) -> Option<Syncing> {
         let approved = Approval::of(agent.status) == Approval::Approved;
         (approved && self.inbox.is_some()).then(|| {
@@ -1214,8 +1216,9 @@ pub(super) struct Syncing {
     next_received: u64,
     /// The sequence number of the hub's next message.
     next_sent: u64,
-    /// The commands the agent's `Hello` said it takes (decision 176).
-    accepts: Accepts,
+    /// The commands the agent's `Hello` said it takes, `None` when it
+    /// didn't say (decision 176).
+    accepts: Option<Accepts>,
 }
 
 impl Syncing {
@@ -1225,8 +1228,8 @@ impl Syncing {
     }
 
     /// The commands the agent takes on this connection.
-    pub(super) fn accepts(&self) -> &Accepts {
-        &self.accepts
+    pub(super) fn accepts(&self) -> Option<&Accepts> {
+        self.accepts.as_ref()
     }
 }
 

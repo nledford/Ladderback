@@ -52,12 +52,12 @@ impl HubSession {
     }
 
     /// The commands the agent welcomed on this connection takes from the
-    /// hub, as its `Hello` said: none before then, or when it said none
+    /// hub, as its `Hello` said: `None` before then, or when it didn't say
     /// (decision 176).
-    pub fn accepts(&self) -> Accepts {
+    pub fn accepts(&self) -> Option<Accepts> {
         match &self.stage {
-            Stage::Syncing(syncing) => syncing.accepts().clone(),
-            _ => Accepts::none(),
+            Stage::Syncing(syncing) => syncing.accepts().cloned(),
+            _ => None,
         }
     }
 }
@@ -161,8 +161,7 @@ impl HubPairing {
                         // reads.
                         let accepts = read_hello(&hello.payload)
                             .ok()
-                            .and_then(|read| read.accepts)
-                            .unwrap_or_default();
+                            .and_then(|read| read.accepts);
                         match self.syncing(handshake, &agent, outbox_stated, accepts) {
                             Some(syncing) => {
                                 session.stage = Stage::Syncing(Box::new(syncing));

@@ -7,7 +7,9 @@ use async_trait::async_trait;
 use domain::fleet::{HubRoute, KEY_BYTES, RouteSession, SILENCE_LIMIT, WireName};
 use domain::{AgentId, SignedDuration};
 
-use crate::pairing::{HubPairing, HubSession, HubStep};
+use futures::StreamExt as _;
+
+use crate::pairing::{CommandQueue, HubPairing, HubSession, HubStep, OutgoingCommand};
 use crate::ports::{Clock, HubConnector, HubLink, LinkError};
 
 /// The `tls-exporter` value both ends of a pinned link see.
@@ -286,6 +288,7 @@ impl HubConnector for LoopbackHubConnector {
             inbox: VecDeque::new(),
             held,
             reason: None,
+            queue: None,
         }))
     }
 }
@@ -301,6 +304,8 @@ struct LoopLink {
     /// The link as the hub holds it: its `closed` is the hub's side.
     held: Arc<Held>,
     reason: Option<String>,
+    /// The hub's commands to the agent once the link went live.
+    queue: Option<CommandQueue>,
 }
 
 impl LoopLink {
@@ -386,9 +391,11 @@ impl HubLink for LoopLink {
         if let Some(agent) = went_live {
             let held = self.held.clone();
             let close = Box::new(move || held.closed.store(true, Ordering::SeqCst));
-            self.hub
-                .went_live_taking(agent, self.held.connection, close, accepts)
-                .await;
+            self.queue = Some(
+                self.hub
+                    .went_live_taking(agent, self.held.connection, close, accepts)
+                    .await,
+            );
         }
         match step {
             HubStep::Reply(answer) => {
@@ -441,8 +448,21 @@ impl HubLink for LoopLink {
         if self.inbox.is_empty() {
             self.deliver_commands().await;
         }
-        if self.inbox.is_empty() && !self.closed() {
-            return std::future::pending().await;
+        while self.inbox.is_empty() && !self.closed() {
+            // The hub's next command, as its transport waits for it.
+            let Some(queue) = self.queue.as_mut() else {
+                return std::future::pending().await;
+            };
+            let Some(OutgoingCommand { kind, payload }) = queue.next().await else {
+                self.queue = None;
+                continue;
+            };
+            self.tap
+                .commands
+                .lock()
+                .unwrap_or_else(PoisonError::into_inner)
+                .push_back((kind, payload));
+            self.deliver_commands().await;
         }
         self.receive().await
     }
@@ -456,13 +476,18 @@ impl LoopLink {
         if self.closed() {
             return;
         }
-        let queued: Vec<_> = self
+        let mut queued: Vec<_> = self
             .tap
             .commands
             .lock()
             .unwrap_or_else(PoisonError::into_inner)
             .drain(..)
             .collect();
+        if let Some(queue) = self.queue.as_mut() {
+            while let Ok(OutgoingCommand { kind, payload }) = queue.try_recv() {
+                queued.push((kind, payload));
+            }
+        }
         let Some(session) = self.session.as_mut() else {
             return;
         };
@@ -597,6 +622,7 @@ mod tests {
                 heard: Mutex::new(SignedDuration::ZERO),
             }),
             reason: None,
+            queue: None,
         };
         assert_eq!(link.receive().await, Err(LinkError::Unreadable));
     }
