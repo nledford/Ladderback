@@ -216,8 +216,22 @@ pub struct HubRun {
 /// [`HUB_RUN_SPACING`], and fewer than [`HUB_RUNS_PER_HOUR`] within an
 /// hour. A run the machine's clock puts ahead of now, as after a clock set
 /// back, counts by how far it lies either way. Refused, it says when the
-/// hub may start one again.
+/// hub may start one again: a time the same runs admit.
 pub fn hub_run_admitted(runs: &[HubRun], plan: &PlanId, now: Timestamp) -> Result<(), Timestamp> {
+    let Some(mut again) = hub_run_refused(runs, plan, now) else {
+        return Ok(());
+    };
+    // Each time is a run's plus a span, so they rise to an end.
+    while let Some(later) = hub_run_refused(runs, plan, again).filter(|later| *later > again) {
+        again = later;
+    }
+    Err(again)
+}
+
+/// When the hub may next start a backup of `plan`, if `runs` refuse it at
+/// `now`: the later of the end of `plan`'s spacing and of the hour's
+/// twelfth run.
+fn hub_run_refused(runs: &[HubRun], plan: &PlanId, now: Timestamp) -> Option<Timestamp> {
     let within = |run: &HubRun, span: SignedDuration| now.duration_since(run.at).abs() < span;
     let spaced = runs
         .iter()
@@ -235,10 +249,7 @@ pub fn hub_run_admitted(runs: &[HubRun], plan: &PlanId, now: Timestamp) -> Resul
         .checked_sub(HUB_RUNS_PER_HOUR)
         .and_then(|past| hour.get(past))
         .and_then(|oldest| oldest.checked_add(SignedDuration::from_hours(1)).ok());
-    match spaced.into_iter().chain(crowded).max() {
-        Some(again) => Err(again),
-        None => Ok(()),
-    }
+    spaced.into_iter().chain(crowded).max()
 }
 
 /// Whether a hub may send a machine one more command at `now`, on the
