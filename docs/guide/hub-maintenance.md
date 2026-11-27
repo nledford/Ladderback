@@ -34,7 +34,7 @@ The hub learns what each machine runs from the heartbeat it sends every 30 secon
 
 ## After the hub restarts
 
-After any start, the hub gives no repository to another machine until every machine that used it has reported since, or 7 days and an hour have passed. The machine that holds the lease keeps it, renewed as before. A machine that was off when the hub restarted therefore doesn't lose its repositories.
+After any start, the hub gives no repository to another machine until every machine that used it, and every machine approved before the start, has reported since, or 7 days and an hour have passed. The machine that holds the lease keeps it, renewed as before. A machine that was off when the hub restarted therefore doesn't lose its repositories, but while one stays off, no repository gets a new maintainer until those 7 days and an hour are up.
 
 A hub restored from an older backup of its data folder may be shown, by a machine, a lease it granted after that backup. It then grants and renews no lease, and its **Machines** tab says why, until you confirm that the hub that granted it is stopped or gone for good: press **End recovery mode**, and confirm as for a pairing token. Do that only once the old hub can't run again, since two hubs that both grant leases could each give one repository to a different machine.
 
