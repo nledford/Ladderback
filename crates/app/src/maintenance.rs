@@ -1124,6 +1124,8 @@ impl RunMaintenance {
     /// read: every plan of this agent on the repository, the history no plan
     /// of this agent owns, and for each group of it the plans that could
     /// take it. A read, so it is answered whoever maintains the repository.
+    /// A paired machine holding no lease on it forgets and prunes nothing
+    /// there, so its groups warn of no other host (#1671).
     pub async fn groups(
         &self,
         op: OperationId,
@@ -1146,7 +1148,16 @@ impl RunMaintenance {
                 .filter_map(|(_, result)| result.ok())
                 .collect()
         };
-        let other_hosts = self.other_hosts_in(&config, alias, &partition);
+        let id = config.repository(alias).and_then(|entry| entry.id.as_ref());
+        let paused = match &self.leases {
+            Some(leases) => leases.permits(id).await.is_err(),
+            None => false,
+        };
+        let other_hosts = if paused {
+            OtherHosts::default()
+        } else {
+            self.other_hosts_in(&config, alias, &partition)
+        };
         // Which plan takes orphaned history is the person's choice, so every
         // plan of the repository is offered, to a group an adoption can name:
         // it names both tags, so a group missing one can't be adopted.
