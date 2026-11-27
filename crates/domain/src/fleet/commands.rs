@@ -81,8 +81,7 @@ impl CommandKind {
     /// The command a name in `accepts` stands for; none for one this build
     /// doesn't know.
     pub fn from_wire_name(name: &str) -> Option<Self> {
-        let _ = name;
-        todo!("a command's wire name")
+        Self::ALL.into_iter().find(|kind| kind.wire_name() == name)
     }
 }
 
@@ -121,8 +120,14 @@ impl Accepts {
     pub fn from_names<'a>(
         names: impl IntoIterator<Item = &'a str>,
     ) -> Result<Self, TooManyAccepted> {
-        let _ = names;
-        todo!("read the commands a Hello accepts")
+        let mut kinds = BTreeSet::new();
+        for (count, name) in names.into_iter().enumerate() {
+            if count >= MAX_ACCEPTS {
+                return Err(TooManyAccepted);
+            }
+            kinds.extend(CommandKind::from_wire_name(name));
+        }
+        Ok(Self(kinds))
     }
 }
 
@@ -138,8 +143,7 @@ impl CommandId {
     /// The UUIDv7 of `unix_ms`, the hub's clock in milliseconds, and
     /// `random`, bytes from its `Random` port.
     pub fn v7(unix_ms: u64, random: &[u8; 10]) -> Self {
-        let _ = (unix_ms, random);
-        todo!("a command's UUIDv7")
+        Self(uuid::Builder::from_unix_timestamp_millis(unix_ms, random).into_uuid())
     }
 
     pub const fn as_uuid(&self) -> Uuid {
@@ -187,8 +191,9 @@ pub fn command_fresh(
     since: SignedDuration,
     requested_at: EpochSeconds,
 ) -> bool {
-    let _ = (welcomed_at, since, requested_at);
-    todo!("judge a command's time on the hub's")
+    let hub_now = i128::from(welcomed_at.seconds()) + i128::from(since.as_secs());
+    let apart = (hub_now - i128::from(requested_at.seconds())).abs();
+    apart <= i128::from(COMMAND_LIFE.as_secs())
 }
 
 /// A backup the hub started on a machine: of which plan, and when the
@@ -206,8 +211,27 @@ pub struct HubRun {
 /// back, counts by how far it lies either way. Refused, it says when the
 /// hub may start one again.
 pub fn hub_run_admitted(runs: &[HubRun], plan: &PlanId, now: Timestamp) -> Result<(), Timestamp> {
-    let _ = (runs, plan, now);
-    todo!("the hub's rate of backups")
+    let within = |run: &HubRun, span: SignedDuration| now.duration_since(run.at).abs() < span;
+    let spaced = runs
+        .iter()
+        .filter(|run| run.plan == *plan && within(run, HUB_RUN_SPACING))
+        .filter_map(|run| run.at.checked_add(HUB_RUN_SPACING).ok())
+        .max();
+    let mut hour: Vec<Timestamp> = runs
+        .iter()
+        .filter(|run| within(run, SignedDuration::from_hours(1)))
+        .map(|run| run.at)
+        .collect();
+    hour.sort_unstable();
+    let crowded = hour
+        .len()
+        .checked_sub(HUB_RUNS_PER_HOUR)
+        .and_then(|past| hour.get(past))
+        .and_then(|oldest| oldest.checked_add(SignedDuration::from_hours(1)).ok());
+    match spaced.into_iter().chain(crowded).max() {
+        Some(again) => Err(again),
+        None => Ok(()),
+    }
 }
 
 #[cfg(test)]
