@@ -556,10 +556,11 @@ async fn a_step_cut_short_after_letting_go_of_a_report_loses_no_warning() {
     );
 }
 
-/// An agent restored from an older database numbers its new reports again
-/// from places of its epoch the hub took before, further behind than a
-/// resend: the hub acknowledges them as taken, keeps none, and warns once
-/// for that agent while it runs, naming nothing a report says (I4; #1387).
+/// A 0.6.0 agent restored from an older database, whose `Hello` says
+/// nothing of its outbox, numbers its new reports again from places of its
+/// epoch the hub took before, further behind than a resend: the hub
+/// acknowledges them as taken, keeps none, and warns once for that agent
+/// while it runs, naming nothing a report says (I4; #1387, decision 177).
 #[tokio::test]
 async fn reports_far_behind_the_last_taken_are_warned_of_once() {
     use crate::ports::{Outbox as _, OutboxEntry, ReportInbox as _};
@@ -591,12 +592,13 @@ async fn reports_far_behind_the_last_taken_are_warned_of_once() {
             .await
             .unwrap();
     }
-    // The restored outbox: the same epoch, numbering from its first place.
+    // The restored outbox: the same epoch, numbering from its first place,
+    // stating no position, as 0.6.0's `Hello`.
     let outbox = Arc::new(crate::fakes::InMemoryOutbox::new(epoch));
     let connector = Arc::new(LoopbackHubConnector::to(hub.pairing.clone()));
     let sync = SyncWithHub::new(
         connecting(identity, connector),
-        outbox.clone(),
+        Arc::new(UnstatedOutbox(outbox.clone())),
         Arc::new(FakeClock::new(
             Timestamp::from_second(1_800_000_030).unwrap(),
         )),
@@ -633,6 +635,49 @@ async fn reports_far_behind_the_last_taken_are_warned_of_once() {
     for n in taken_before + 1..=resent {
         let operation = Uuid::from_u128(0x0c_0000_0000 + u128::from(n));
         assert!(!warned.concat().contains(&operation.to_string()));
+    }
+}
+
+/// An outbox that states no position, as a 0.6.0 agent's `Hello` doesn't,
+/// and otherwise is the in-memory outbox it wraps.
+struct UnstatedOutbox(Arc<crate::fakes::InMemoryOutbox>);
+
+#[async_trait]
+impl crate::ports::Outbox for UnstatedOutbox {
+    async fn append(
+        &self,
+        report: &domain::fleet::AgentReport,
+    ) -> Result<crate::ports::Appended, crate::ports::StoreError> {
+        self.0.append(report).await
+    }
+
+    async fn unacknowledged(
+        &self,
+        after: Option<domain::fleet::ReportSeq>,
+        limit: usize,
+    ) -> Result<Vec<crate::ports::OutboxEntry>, crate::ports::StoreError> {
+        self.0.unacknowledged(after, limit).await
+    }
+
+    async fn acknowledge(
+        &self,
+        epoch: domain::fleet::OutboxEpoch,
+        through: domain::fleet::ReportSeq,
+    ) -> Result<(), crate::ports::StoreError> {
+        self.0.acknowledge(epoch, through).await
+    }
+
+    async fn position(
+        &self,
+    ) -> Result<Option<domain::fleet::OutboxPosition>, crate::ports::StoreError> {
+        Ok(None)
+    }
+
+    async fn start_epoch(
+        &self,
+        from: domain::fleet::OutboxEpoch,
+    ) -> Result<Option<domain::fleet::OutboxEpoch>, crate::ports::StoreError> {
+        self.0.start_epoch(from).await
     }
 }
 
@@ -853,6 +898,102 @@ async fn a_window_sent_again_across_the_outboxs_gaps_is_taken_as_resent() {
         .map(|(_, line)| line)
         .collect();
     assert_eq!(warned, Vec::<String>::new());
+}
+
+/// An outbox that gives its position and reports as `InMemoryOutbox` does
+/// but can't start a new epoch, as on a full or read-only disk.
+struct StuckEpochOutbox(crate::fakes::InMemoryOutbox);
+
+#[async_trait]
+impl crate::ports::Outbox for StuckEpochOutbox {
+    async fn append(
+        &self,
+        report: &domain::fleet::AgentReport,
+    ) -> Result<crate::ports::Appended, crate::ports::StoreError> {
+        self.0.append(report).await
+    }
+
+    async fn unacknowledged(
+        &self,
+        after: Option<domain::fleet::ReportSeq>,
+        limit: usize,
+    ) -> Result<Vec<crate::ports::OutboxEntry>, crate::ports::StoreError> {
+        self.0.unacknowledged(after, limit).await
+    }
+
+    async fn acknowledge(
+        &self,
+        epoch: domain::fleet::OutboxEpoch,
+        through: domain::fleet::ReportSeq,
+    ) -> Result<(), crate::ports::StoreError> {
+        self.0.acknowledge(epoch, through).await
+    }
+
+    async fn position(
+        &self,
+    ) -> Result<Option<domain::fleet::OutboxPosition>, crate::ports::StoreError> {
+        self.0.position().await
+    }
+
+    async fn start_epoch(
+        &self,
+        _: domain::fleet::OutboxEpoch,
+    ) -> Result<Option<domain::fleet::OutboxEpoch>, crate::ports::StoreError> {
+        Err(unreadable())
+    }
+}
+
+/// A machine told to start a new epoch whose outbox can't start one ends
+/// the session as a store failure and sends nothing under the old epoch,
+/// so the hub drops none of its reports as taken (decision 177).
+#[tokio::test]
+async fn a_new_epoch_that_cant_be_started_sends_nothing() {
+    use crate::ports::{Outbox as _, ReportInbox as _};
+    use crate::sync::{SyncFailure, SyncWithHub};
+
+    let inbox = Arc::new(crate::fakes::InMemoryReportInbox::default());
+    let hub = hub_with(1, |pairing| pairing.with_inbox(inbox.clone()));
+    let identity = paired(&hub, 1).await;
+    let waiting = hub.registry.agent(agent_id(1)).await.unwrap().unwrap();
+    hub.pairing.approve(&waiting).await.unwrap().unwrap();
+    let epoch = domain::fleet::OutboxEpoch::from_uuid(Uuid::from_u128(0xe1));
+    let report = |n: u128| domain::fleet::AgentReport {
+        op_id: domain::OperationId::from_uuid(Uuid::from_u128(n)),
+        happening: domain::fleet::Happening::Succeeded,
+        at: domain::fleet::EpochSeconds::from_seconds(1_800_000_000),
+    };
+    let now = Timestamp::from_second(1_800_000_030).unwrap();
+    for n in 1..=3 {
+        let entry = crate::ports::OutboxEntry {
+            epoch,
+            seq: domain::fleet::ReportSeq::new(n).unwrap(),
+            report: report(u128::from(n)),
+        };
+        inbox.ingest(agent_id(1), &entry, now).await.unwrap();
+    }
+    let restored = crate::fakes::InMemoryOutbox::new(epoch);
+    restored.append(&report(0x10)).await.unwrap();
+    let sync = SyncWithHub::new(
+        connecting(
+            identity,
+            Arc::new(LoopbackHubConnector::to(hub.pairing.clone())),
+        ),
+        Arc::new(StuckEpochOutbox(restored)),
+        Arc::new(FakeClock::new(now)),
+        agent_id(1),
+        hostname(1),
+        None,
+    );
+    assert!(
+        matches!(sync.sync_once().await, Err(SyncFailure::Store(_))),
+        "the new epoch isn't started"
+    );
+    assert_eq!(inbox.reports(agent_id(1)).await.unwrap().len(), 3);
+    assert_eq!(
+        inbox.taken_through(agent_id(1), epoch).await.unwrap(),
+        domain::fleet::ReportSeq::new(3),
+        "nothing was sent under the old epoch"
+    );
 }
 
 /// Runs the agent's sync loop through `waits` of its waits on `clock`, and

@@ -427,10 +427,12 @@ impl SyncWithHub {
     /// next, as after a restore from an older database, the outbox starts a
     /// new epoch before anything is sent (§16, decision 177).
     async fn open(&self) -> Result<Option<(Connected, AgentChannel)>, SyncFailure> {
+        // An outbox that can't be read is stated as none, as 0.6.0's
+        // `Hello` states it; the sync loop warns of it once a streak.
         let stated = match self.outbox.position().await {
             Ok(position) => position,
             Err(error) => {
-                log::warn!("the outbox's position couldn't be read: {error:?}");
+                log::debug!("the outbox's position couldn't be read: {error:?}");
                 None
             }
         };
