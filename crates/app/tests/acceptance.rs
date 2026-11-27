@@ -23,6 +23,9 @@ mod conditions_steps;
 #[path = "steps/config.rs"]
 mod config_steps;
 
+#[path = "steps/daily_copy.rs"]
+mod daily_copy_steps;
+
 #[path = "steps/locations.rs"]
 mod locations_steps;
 
@@ -119,6 +122,7 @@ struct Agent {
     schedule: schedule_steps::ScheduleWorld,
     scheduler: scheduler_steps::SchedulerWorld,
     notifications: notifications_steps::NotificationsWorld,
+    daily_copy: daily_copy_steps::DailyCopyWorld,
     sign_in: sign_in_steps::SignInWorld,
     api_tokens: api_tokens_steps::ApiTokensWorld,
     plans: plans_steps::PlansWorld,
@@ -187,6 +191,7 @@ impl Agent {
             proposals: Default::default(),
             stats: Default::default(),
             updates: Default::default(),
+            daily_copy: Default::default(),
             recent_log: Default::default(),
             maintainer: Default::default(),
             machine: Default::default(),

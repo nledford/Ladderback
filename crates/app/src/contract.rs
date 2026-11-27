@@ -8,6 +8,7 @@ pub mod change_codec;
 pub mod clock;
 pub mod config_drafts;
 pub mod config_store;
+pub mod daily_copy;
 pub mod engine;
 pub mod event_bus;
 pub mod full_disk_access;

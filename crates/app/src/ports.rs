@@ -7,6 +7,7 @@ mod change_codec;
 mod clock;
 mod config_drafts;
 mod config_store;
+mod daily_copy;
 mod engine;
 mod event_bus;
 mod full_disk_access;
@@ -47,6 +48,7 @@ pub use config_store::{
     CadenceProblem, ConfigError, ConfigStore, NotInPlace, PasswordProblem, Position, Problem,
     RecordError, config_unusable,
 };
+pub use daily_copy::{DailyCopy, DailyCopyError};
 pub use engine::{
     BackupJob, BackupSummary, BrowseJob, CheckJob, CheckSummary, Deletion, DeletionAnswer,
     DeletionAsk, DumpAnswer, DumpHeader, DumpJob, Engine, EngineError, EngineEvent, EngineResult,

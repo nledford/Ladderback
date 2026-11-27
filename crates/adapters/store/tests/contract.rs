@@ -317,3 +317,24 @@ async fn sqlite_store_meets_the_lease_cache_contract() {
     )
     .await;
 }
+
+#[async_trait]
+impl contract::daily_copy::DailyCopyHarness for SqliteFiles {
+    async fn empty(&self) -> Arc<dyn app::ports::DailyCopy> {
+        Arc::new(self.new_store().await)
+    }
+
+    async fn reopened(&self) -> Arc<dyn app::ports::DailyCopy> {
+        Arc::new(self.last_store().await)
+    }
+}
+
+#[tokio::test]
+async fn sqlite_store_meets_the_daily_copy_contract() {
+    within(
+        120,
+        "the daily copy contract suite",
+        contract::daily_copy::run(&SqliteFiles::default()),
+    )
+    .await;
+}
