@@ -57,13 +57,26 @@ pub(crate) fn closes_on_press(open: bool, inside: bool) -> bool {
     open && !inside
 }
 
-/// Whether focus goes back to the button once a row's link is chosen, given
-/// the link's `aria-current`: only for the current page's link, which
-/// changes no route, so no page's heading takes focus and the link it was on
-/// is no longer drawn (2.4.3). Any other link's route change moves focus to
-/// the new page's heading, as every link's does.
-pub(crate) fn focus_returns_on_choice(link_current: Option<&str>) -> bool {
-    link_current == Some("page")
+/// A row the reader chose in the panel: a link, with its `aria-current`,
+/// or a button.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum Choice<'a> {
+    Link { current: Option<&'a str> },
+    Button,
+}
+
+/// Whether focus goes back to the button once a row is chosen, which
+/// closes the panel either way. For a link, only the current page's, which
+/// changes no route, so no page's heading takes focus and the link it was
+/// on is no longer drawn (2.4.3); any other link's route change moves focus
+/// to the new page's heading, as every link's does. For a button, always:
+/// it acts on the page, which stays, and the button it was is no longer
+/// drawn, as a menu button's item returns focus to its button.
+pub(crate) fn focus_returns_on_choice(choice: Choice<'_>) -> bool {
+    match choice {
+        Choice::Link { current } => current == Some("page"),
+        Choice::Button => true,
+    }
 }
 
 /// The button's `aria-current`: `true` while the page the reader is on is
@@ -191,9 +204,15 @@ mod tests {
 
     #[test]
     fn choosing_the_current_pages_link_returns_focus_to_the_button() {
-        assert!(focus_returns_on_choice(Some("page")));
-        assert!(!focus_returns_on_choice(None));
-        assert!(!focus_returns_on_choice(Some("true")));
+        let link = |current| Choice::Link { current };
+        assert!(focus_returns_on_choice(link(Some("page"))));
+        assert!(!focus_returns_on_choice(link(None)));
+        assert!(!focus_returns_on_choice(link(Some("true"))));
+    }
+
+    #[test]
+    fn pressing_a_rows_button_returns_focus_to_the_menus_button() {
+        assert!(focus_returns_on_choice(Choice::Button));
     }
 
     #[test]

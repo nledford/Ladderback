@@ -170,9 +170,9 @@ pub fn NavigationBar(
             open.set(false);
             if was_open
                 && is_drawn(&choice_button)
-                && menu_rules::focus_returns_on_choice(
-                    link.get_attribute("aria-current").as_deref(),
-                )
+                && menu_rules::focus_returns_on_choice(menu_rules::Choice::Link {
+                    current: link.get_attribute("aria-current").as_deref(),
+                })
             {
                 focus_element(&choice_button);
             }

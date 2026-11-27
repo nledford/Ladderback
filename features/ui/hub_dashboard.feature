@@ -121,7 +121,7 @@ Feature: The hub's dashboard of its machines
     When I open the web UI
     Then the card "demo-laptop" stands beside the hub's own
 
-  Scenario: The hub's own Back up menu starts a backup of the plan chosen, by keyboard
+  Scenario: The hub's own Back up menu starts a backup of the plan chosen, by keyboard, and closes back to its button
     Given a hub with sign-in off and a demo plan "demo-home" with a tiny scratch repository
     When I open the web UI
     And I skip to the content
@@ -129,7 +129,9 @@ Feature: The hub's dashboard of its machines
     And I press Enter
     And I press Tab until focus is on the button "Start backup of demo-home"
     And I press Enter
-    Then the polite region reads "Backup started."
+    Then the button "Back up" is collapsed
+    And focus is on the button "Back up"
+    And the polite region reads "Backup started."
     And the hub's own card tells its status "Succeeded"
     And the page has no accessibility violations
 
