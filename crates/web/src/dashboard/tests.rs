@@ -696,6 +696,42 @@ fn the_hubs_own_machine_reads_as_a_paired_one_does() {
     );
 }
 
+/// The page reads the hub's plans' status on opening, then again for each
+/// operation that comes and each status that changes, the end above all,
+/// which the card's status and last backup tell; never for progress, nor
+/// for a story it has read for.
+#[test]
+fn a_new_operation_or_a_changed_status_reads_the_hubs_status_again() {
+    let mut story = OwnStory::default();
+    let mut operations = OperationsState::default();
+    assert!(story.moves_on(&operations), "the first read");
+    assert!(!story.moves_on(&operations), "nothing changed");
+    operations =
+        OperationsState::from_history(vec![summary_of("op-1", "documents", "queued", 0)], None);
+    assert!(story.moves_on(&operations), "an operation came");
+    operations.apply(&UiEvent::OperationStarted {
+        operation: "op-1".to_owned(),
+        repository: None,
+        started_at: at(1),
+    });
+    assert!(story.moves_on(&operations), "it started");
+    operations.apply(&UiEvent::OperationProgress {
+        operation: "op-1".to_owned(),
+        step: Some(api::OperationStep::BackingUp),
+        unit: api::ProgressUnit::Bytes,
+        current: 512,
+        total: Some(2048),
+        at: Some(at(2)),
+    });
+    assert!(!story.moves_on(&operations), "progress changes no status");
+    operations.apply(&UiEvent::OperationSucceeded {
+        operation: "op-1".to_owned(),
+        finished_at: at(3),
+    });
+    assert!(story.moves_on(&operations), "it ended");
+    assert!(!story.moves_on(&operations), "the end was read for");
+}
+
 /// The hub's own card comes first, then each approved machine in the order
 /// the hub lists them; until the hub's own is read, the page waits for it.
 #[test]

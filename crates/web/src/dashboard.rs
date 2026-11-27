@@ -605,5 +605,22 @@ pub(crate) fn own_machine(
     })
 }
 
+/// Each of the hub's own operations and its status, as its plans' status
+/// was last read for (decision 175). The card's status and last backup
+/// come from that status, so the page reads it on opening, and again each
+/// time an operation comes or its status changes; progress changes
+/// neither.
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub(crate) struct OwnStory(Option<Vec<(String, String)>>);
+
+impl OwnStory {
+    /// Whether `operations` tells another story than the one the status
+    /// was last read for, always so before the first read, which it then
+    /// becomes: whether to read the status again.
+    pub(crate) fn moves_on(&mut self, operations: &OperationsState) -> bool {
+        todo!("{self:?} {operations:?}")
+    }
+}
+
 #[cfg(test)]
 mod tests;
