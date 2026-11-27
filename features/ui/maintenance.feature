@@ -75,6 +75,22 @@ Feature: Maintenance of a repository on the Snapshots page
     And the page offers the button "Forget snapshots"
     And the page offers the button "Stop maintaining from this machine"
 
+  Scenario: A paired machine that turns maintenance on for a repository its hub doesn't lease is shown paused at once
+    Given a demo plan "home" with a tiny scratch repository
+    And the plan "home" has been backed up 2 times
+    And the repository "demo" has no maintenance setting
+    And the daemon says maintenance of "demo" from this machine is paused since "2026-11-01T12:00:00Z" once it maintains it
+    When I open the address "/snapshots"
+    And I skip to the content
+    And I press Tab until focus is on the button "Snapshots of demo"
+    And I press Enter
+    And I press Tab until focus is on the button "Maintain from this machine"
+    And I press Enter
+    And I press Tab until focus is on the button "Turn on maintenance"
+    And I press Enter
+    Then the polite region comes to contain "This machine now maintains demo."
+    And the page shows a warning alert containing "Maintenance from this machine has been paused since Nov 1, 2026, because it holds no lease on this repository from its hub."
+
   Scenario: Maintenance from this agent is turned off after saying what stops
     Given a demo plan "home" with a tiny scratch repository
     And the plan "home" has been backed up 2 times

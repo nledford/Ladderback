@@ -33,6 +33,31 @@ async fn agent_hostname(agent: &mut Agent, hostname: String) {
     agent.forget.name_agent(&hostname).await;
 }
 
+/// The machine is paired with a hub and has heard no grant from it, so it
+/// holds no lease on the repository and its maintenance of it is paused
+/// (§7.3, decision 158).
+#[given("this agent is paired with a hub that grants it no lease")]
+async fn paired_without_a_lease(agent: &mut Agent) {
+    use app::ports::Identity as _;
+    use domain::fleet::{HubAddress, HubPin, PublicKey, TokenTls};
+    let identity = std::sync::Arc::new(app::fakes::InMemoryIdentity::default());
+    let key = |byte| PublicKey::from_bytes([byte; 32]).expect("a key");
+    identity
+        .write_pin(&HubPin::new(
+            key(7),
+            TokenTls::Ca,
+            key(9),
+            HubAddress::parse("https://hub.example:9898").expect("an address"),
+        ))
+        .await
+        .expect("the pin is kept");
+    agent.forget.leases = Some(std::sync::Arc::new(app::leases::MaintenanceLeases::new(
+        identity,
+        std::sync::Arc::new(app::fakes::InMemoryLeaseCache::default()),
+        agent.clock.clone(),
+    )));
+}
+
 #[given(expr = "a plan {string} keeping the last {int} snapshot(s) that records the host {string}")]
 async fn plan_with_host(agent: &mut Agent, plan: String, keep: i64, host: String) {
     agent.forget.repository().await;

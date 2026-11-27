@@ -137,6 +137,9 @@ pub struct ForgetWorld {
     /// How long the engine takes to list each repository, by its location,
     /// on the use case's clock; one not named lists at once.
     listing_takes: BTreeMap<String, SignedDuration>,
+    /// The leases from a hub the machine is paired with, when a scenario
+    /// pairs it; none for a machine that stands alone.
+    pub(super) leases: Option<Arc<app::leases::MaintenanceLeases>>,
 }
 
 impl Default for ForgetWorld {
@@ -161,6 +164,7 @@ impl Default for ForgetWorld {
             source_reads: Arc::new(AtomicUsize::new(0)),
             hostname: None,
             listing_takes: BTreeMap::new(),
+            leases: None,
         }
     }
 }
@@ -763,28 +767,33 @@ pub fn use_case_on(agent: &Agent, clock: Arc<dyn Clock>) -> Arc<RunMaintenance> 
     for (name, value) in &agent.forget.env {
         secrets.set_env(name, value);
     }
+    let maintenance = RunMaintenance::new(
+        agent.forget.engine(Arc::clone(&clock)),
+        clock,
+        agent.store.clone(),
+        app::secrets::ResolveRepository::new(Arc::new(secrets)),
+        match agent.forget.fail {
+            ReadFailure::RetentionSilent => Arc::new(NeverAnswers),
+            _ => Arc::new(FakeRetention),
+        },
+        agent.forget.store.clone(),
+        Arc::default(),
+        self_agent(),
+        MACHINE.to_owned(),
+        Arc::new(ScriptedSources {
+            unreadable_folder: agent.forget.unreadable_folder.clone(),
+            recorded_folder: agent.forget.recorded_folder.clone(),
+            reads: Arc::clone(&agent.forget.source_reads),
+        }),
+    );
+    let maintenance = match &agent.forget.leases {
+        Some(leases) => maintenance.with_leases(Arc::clone(leases)),
+        None => maintenance,
+    };
     Arc::new(
         agent
             .announcement
-            .listening_maintenance(RunMaintenance::new(
-                agent.forget.engine(Arc::clone(&clock)),
-                clock,
-                agent.store.clone(),
-                app::secrets::ResolveRepository::new(Arc::new(secrets)),
-                match agent.forget.fail {
-                    ReadFailure::RetentionSilent => Arc::new(NeverAnswers),
-                    _ => Arc::new(FakeRetention),
-                },
-                agent.forget.store.clone(),
-                Arc::default(),
-                self_agent(),
-                MACHINE.to_owned(),
-                Arc::new(ScriptedSources {
-                    unreadable_folder: agent.forget.unreadable_folder.clone(),
-                    recorded_folder: agent.forget.recorded_folder.clone(),
-                    reads: Arc::clone(&agent.forget.source_reads),
-                }),
-            ))
+            .listening_maintenance(maintenance)
             .with_machine(agent.machine.standing()),
     )
 }

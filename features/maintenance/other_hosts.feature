@@ -14,7 +14,9 @@ Feature: A repository maintained here warns of snapshots from other hosts
   forget, an adoption or a prune, name those other hosts, and a run of one
   ends with them as a warning. A check only reads, so it warns of nothing.
   The groups of a repository this agent doesn't maintain, the one thing it
-  may still ask of one, warn of nothing, whoever writes to it.
+  may still ask of one, warn of nothing, whoever writes to it; nor do those
+  of one a paired machine asks to maintain and holds no lease on from its
+  hub, whose maintenance is paused, so it forgets and prunes nothing (#1671).
 
   Scenario: The groups of a repository maintained here name the other host plain rustic wrote from
     Given a plan "home" keeping the last 1 snapshot
@@ -56,6 +58,27 @@ Feature: A repository maintained here warns of snapshots from other hosts
     And the repository holds 2 snapshots plain rustic made on the host "demo-desktop"
     When this agent lists the repository's groups
     Then the groups warn of no other host
+
+  Scenario: A repository a paired machine holds no lease on warns of no other host
+    Given a plan "home" keeping the last 1 snapshot
+    And the repository is maintained by this agent
+    And this agent is paired with a hub that grants it no lease
+    And the repository holds 2 snapshots plain rustic made on the host "demo-desktop"
+    When the owner lists the repository's groups
+    Then the groups warn of no other host
+
+  Scenario Outline: The review of a <run> on a paired machine that holds no lease warns of no other host
+    Given a plan "home" keeping the last 1 snapshot
+    And the repository is maintained by this agent
+    And this agent is paired with a hub that grants it no lease
+    And the repository holds 2 snapshots plain rustic made on the host "demo-desktop"
+    When the owner previews <previewing> the repository
+    Then the preview warns of no other host
+
+    Examples:
+      | run    | previewing |
+      | forget | forgetting |
+      | prune  | pruning    |
 
   Scenario: A recent snapshot another agent made under this host's name comes from another machine
     Given this agent's hostname is "demo-pi"

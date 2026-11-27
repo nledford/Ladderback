@@ -207,6 +207,27 @@ impl HeldLeases {
         }
     }
 
+    /// Notes at `now` that maintenance of `repository` was just turned on
+    /// (`maintained`) or off here (#1671). Turned on while the machine holds
+    /// no live lease on it, it is paused from `now`, a pause noted before
+    /// keeping its date, so pages say it at once rather than after the next
+    /// [`watch`](Self::watch); maintenance that wasn't asked for wasn't
+    /// paused, so a lease that ran out before doesn't date it. Turned off,
+    /// its pause is dropped.
+    pub fn turned(&mut self, repository: &RepositoryId, maintained: bool, now: Timestamp) {
+        if !maintained {
+            self.paused.remove(repository);
+        } else if self.holds(repository, now).is_err() && !self.paused.contains_key(repository) {
+            self.paused.insert(
+                repository.clone(),
+                Pause {
+                    since: now,
+                    alerted: false,
+                },
+            );
+        }
+    }
+
     pub fn leases(&self) -> impl Iterator<Item = (&RepositoryId, &HeldLease)> {
         self.leases.iter()
     }
