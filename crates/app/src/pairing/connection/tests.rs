@@ -2742,6 +2742,8 @@ async fn leasing(machine_start: Timestamp) -> Leasing {
         ),
         ..hub
     };
+    // The hub starts before any machine is approved, as a new hub does.
+    hub.pairing.start().await.unwrap();
     let identity = paired(&hub, 1).await;
     let waiting = hub.registry.agent(agent_id(1)).await.unwrap().unwrap();
     hub.pairing.approve(&waiting).await.unwrap().unwrap();
@@ -2863,6 +2865,35 @@ async fn i1_a_release_whose_answer_is_lost_leaves_the_machine_holding_nothing() 
     assert_eq!(
         leasing.leases.permits(Some(&photos())).await,
         Err(NoLease::NoneHeld)
+    );
+}
+
+/// The hub's start opens its start window, which waits for every machine
+/// approved before the start and for none approved since: one approved
+/// since holds no grant the hub may have lost (§16, decision 178).
+#[tokio::test]
+async fn i1_the_hubs_start_window_waits_for_no_machine_approved_since_its_start() {
+    let leasing = leasing(Timestamp::from_second(1_800_000_000).unwrap()).await;
+    paired(&leasing.hub, 2).await;
+    let waiting = leasing
+        .hub
+        .registry
+        .agent(agent_id(2))
+        .await
+        .unwrap()
+        .unwrap();
+    leasing
+        .hub
+        .pairing
+        .approve(&waiting)
+        .await
+        .unwrap()
+        .unwrap();
+
+    leasing.sync.sync_once().await.unwrap();
+    assert!(
+        matches!(leasing.leases.permits(Some(&photos())).await, Ok(Some(_))),
+        "the machine approved since the start isn't waited for"
     );
 }
 

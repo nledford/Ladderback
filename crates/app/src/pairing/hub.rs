@@ -355,13 +355,18 @@ impl HubPairing {
         })
     }
 
-    /// The hub's start: its keys made on a first start and read after
-    /// that, so a key file that can't be read is found here, and not by
-    /// the first agent or token that asks (§16, decision 120, "The key's
-    /// life"). A key file gone while agents are registered isn't a failed
-    /// start: the hub runs without a key, makes none, and refuses every
-    /// agent's session ([`HubStart::Unserved`], "The hub key").
+    /// The hub's start: its start window opened, so it waits for every
+    /// agent approved before now (§16, decision 178), and its keys made on
+    /// a first start and read after that, so a key file that can't be read
+    /// is found here, and not by the first agent or token that asks
+    /// (decision 120, "The key's life"). A key file gone while agents are
+    /// registered isn't a failed start: the hub runs without a key, makes
+    /// none, and refuses every agent's session ([`HubStart::Unserved`], "The
+    /// hub key").
     pub async fn start(&self) -> Result<HubStart, HubPairingError> {
+        if let Some(owners) = &self.owners {
+            owners.open().await?;
+        }
         match self.keys().await {
             Ok(keys) => Ok(HubStart::Keys(keys)),
             Err(HubPairingError::KeyMissing { file }) => Ok(HubStart::Unserved(file)),

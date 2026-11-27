@@ -339,12 +339,16 @@ impl SyncWithHub {
                 continue;
             }
             // Let go first: a release the hub takes but whose answer is
-            // lost must leave nothing here to maintain under.
+            // lost must leave nothing here to maintain under. The letting
+            // go is on the drive's permanent storage before the release
+            // leaves, so a power cut can't bring back a lease the hub may
+            // have granted elsewhere (decision 178).
             leasing
                 .leases
                 .released(&repository, epoch)
                 .await
                 .map_err(SyncFailure::Store)?;
+            leasing.drive.flush().await.map_err(SyncFailure::Store)?;
             channel
                 .send_release(&repository, epoch)
                 .await
