@@ -17,13 +17,29 @@ use crate::row::agent_id_text;
 use crate::{SqliteStore, unavailable};
 
 const META: &str = "SELECT epoch, last_seq FROM sync_outbox_meta WHERE id = 1";
-/// A new outbox's epoch: a random UUID (version 4), which only has to differ
-/// from the epoch of any outbox the machine had before.
-const NEW_META: &str = "INSERT INTO sync_outbox_meta (id, epoch, last_seq) VALUES (1, \
-     lower(hex(randomblob(4))) || '-' || lower(hex(randomblob(2))) || '-4' || \
-     substr(lower(hex(randomblob(2))), 2) || '-' || \
-     substr('89ab', 1 + abs(random() % 4), 1) || substr(lower(hex(randomblob(2))), 2) || '-' || \
-     lower(hex(randomblob(6))), 0)";
+/// A random UUID (version 4) in SQL, as a new epoch's, which only has to
+/// differ from the epoch of any outbox the machine had before.
+macro_rules! random_uuid {
+    () => {
+        "lower(hex(randomblob(4))) || '-' || lower(hex(randomblob(2))) || '-4' || \
+         substr(lower(hex(randomblob(2))), 2) || '-' || \
+         substr('89ab', 1 + abs(random() % 4), 1) || substr(lower(hex(randomblob(2))), 2) || \
+         '-' || lower(hex(randomblob(6)))"
+    };
+}
+/// A new outbox, of a random epoch.
+const NEW_META: &str = concat!(
+    "INSERT INTO sync_outbox_meta (id, epoch, last_seq) VALUES (1, ",
+    random_uuid!(),
+    ", 0)"
+);
+/// A new epoch in place of the one named, keeping the places given and the
+/// reports waiting (decision 177).
+const NEW_EPOCH: &str = concat!(
+    "UPDATE sync_outbox_meta SET epoch = ",
+    random_uuid!(),
+    " WHERE id = 1 AND epoch = ? RETURNING epoch"
+);
 const HELD: &str = "SELECT (SELECT COUNT(*) FROM sync_outbox), \
      (SELECT MIN(seq) FROM sync_outbox WHERE kept = 0)";
 const EVICT: &str = "DELETE FROM sync_outbox WHERE seq = ?";
@@ -175,11 +191,28 @@ impl Outbox for SqliteStore {
     }
 
     async fn position(&self) -> Result<Option<OutboxPosition>, StoreError> {
-        todo!()
+        let _call = self.call().await;
+        let mut conn = self.pool.acquire().await.map_err(unavailable)?;
+        Ok(meta(&mut conn).await?.and_then(|(epoch, last)| {
+            ReportSeq::new(last)
+                .and_then(ReportSeq::next)
+                .filter(|next| i64::try_from(next.get()).is_ok())
+                .map(|next| OutboxPosition { epoch, next })
+        }))
     }
 
+    /// One statement, so a crash leaves the old epoch or the new, never
+    /// half of either.
     async fn start_epoch(&self, from: OutboxEpoch) -> Result<Option<OutboxEpoch>, StoreError> {
-        todo!("{from:?}")
+        let _call = self.call().await;
+        let mut conn = self.pool.acquire().await.map_err(unavailable)?;
+        sqlx::query(NEW_EPOCH)
+            .bind(from.as_uuid().to_string())
+            .fetch_optional(&mut *conn)
+            .await
+            .map_err(unavailable)?
+            .map(|row| epoch_of(&row, "epoch"))
+            .transpose()
     }
 }
 
@@ -337,7 +370,16 @@ impl ReportInbox for SqliteStore {
         agent: AgentId,
         epoch: OutboxEpoch,
     ) -> Result<Option<ReportSeq>, StoreError> {
-        todo!("{agent:?} {epoch:?}")
+        let _call = self.call().await;
+        let mut conn = self.pool.acquire().await.map_err(unavailable)?;
+        sqlx::query(WATERMARK)
+            .bind(agent_id_text(agent))
+            .bind(epoch.as_uuid().to_string())
+            .fetch_optional(&mut *conn)
+            .await
+            .map_err(unavailable)?
+            .map(|row| seq_of(&row, "seq"))
+            .transpose()
     }
 
     async fn keep_plans(&self, agent: AgentId, plans: &PlansReport) -> Result<(), StoreError> {

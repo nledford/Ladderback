@@ -6,7 +6,7 @@ use domain::fleet::{
     AgentReport, Ingest, MAX_EPOCHS_HELD, MAX_REPORTS_HELD, OutboxAdmission, OutboxEpoch,
     OutboxPosition, PlansReport, ReportSeq, ReportedProgress, admit, ingest,
 };
-use domain::{AgentId, Timestamp};
+use domain::{AgentId, Timestamp, Uuid};
 
 use crate::ports::{
     Appended, Ingested, LatestReports, Outbox, OutboxEntry, ReportInbox, StoreError,
@@ -17,12 +17,12 @@ use crate::ports::{
 /// across a rebuilt use case has what a restart keeps.
 #[derive(Debug)]
 pub struct InMemoryOutbox {
-    epoch: OutboxEpoch,
     kept: Mutex<Held>,
 }
 
-#[derive(Clone, Debug, Default)]
+#[derive(Clone, Debug)]
 struct Held {
+    epoch: OutboxEpoch,
     /// The last place given, none before the first report.
     last: Option<ReportSeq>,
     reports: BTreeMap<ReportSeq, AgentReport>,
@@ -32,8 +32,11 @@ impl InMemoryOutbox {
     /// An empty outbox of `epoch`.
     pub fn new(epoch: OutboxEpoch) -> Self {
         Self {
-            epoch,
-            kept: Mutex::default(),
+            kept: Mutex::new(Held {
+                epoch,
+                last: None,
+                reports: BTreeMap::new(),
+            }),
         }
     }
 
@@ -41,7 +44,6 @@ impl InMemoryOutbox {
     /// now holds it, to restore later in its place.
     pub fn copied(&self) -> Self {
         Self {
-            epoch: self.epoch,
             kept: Mutex::new(
                 self.kept
                     .lock()
@@ -94,7 +96,7 @@ impl Outbox for InMemoryOutbox {
             .filter(|(seq, _)| after.is_none_or(|after| **seq > after))
             .take(limit)
             .map(|(seq, report)| OutboxEntry {
-                epoch: self.epoch,
+                epoch: held.epoch,
                 seq: *seq,
                 report: report.clone(),
             })
@@ -102,19 +104,34 @@ impl Outbox for InMemoryOutbox {
     }
 
     async fn acknowledge(&self, epoch: OutboxEpoch, through: ReportSeq) -> Result<(), StoreError> {
-        if epoch == self.epoch {
-            let mut held = self.kept.lock().unwrap_or_else(PoisonError::into_inner);
+        let mut held = self.kept.lock().unwrap_or_else(PoisonError::into_inner);
+        if epoch == held.epoch {
             held.reports.retain(|seq, _| *seq > through);
         }
         Ok(())
     }
 
     async fn position(&self) -> Result<Option<OutboxPosition>, StoreError> {
-        todo!()
+        let held = self.kept.lock().unwrap_or_else(PoisonError::into_inner);
+        Ok(held
+            .last
+            .and_then(ReportSeq::next)
+            .map(|next| OutboxPosition {
+                epoch: held.epoch,
+                next,
+            }))
     }
 
+    /// The new epoch is the old one's UUID moved on by 2⁶⁴, so a test can
+    /// tell it from the old and name it.
     async fn start_epoch(&self, from: OutboxEpoch) -> Result<Option<OutboxEpoch>, StoreError> {
-        todo!("{from:?}")
+        let mut held = self.kept.lock().unwrap_or_else(PoisonError::into_inner);
+        if held.epoch != from || held.last.is_none() {
+            return Ok(None);
+        }
+        let current = held.epoch.as_uuid().as_u128();
+        held.epoch = OutboxEpoch::from_uuid(Uuid::from_u128(current.wrapping_add(1 << 64)));
+        Ok(Some(held.epoch))
     }
 }
 
@@ -238,7 +255,13 @@ impl ReportInbox for InMemoryReportInbox {
         agent: AgentId,
         epoch: OutboxEpoch,
     ) -> Result<Option<ReportSeq>, StoreError> {
-        todo!("{agent:?} {epoch:?}")
+        let agents = self.agents.lock().unwrap_or_else(PoisonError::into_inner);
+        Ok(agents.get(&agent).and_then(|held| {
+            held.epochs
+                .iter()
+                .find(|(held, _, _)| *held == epoch)
+                .map(|(_, seq, _)| *seq)
+        }))
     }
 
     async fn keep_plans(&self, agent: AgentId, plans: &PlansReport) -> Result<(), StoreError> {
