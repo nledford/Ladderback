@@ -341,13 +341,13 @@ exclude_re = [
     # before it is decoded, so every decode fits either buffer and gives the
     # same bytes or the same refusal. Named by line, so a moved line brings
     # the mutant back to judge.
-    'crates/app/src/pairing/wire\.rs:643:42: replace \+ with \* in decoded$',
+    'crates/app/src/pairing/wire\.rs:658:42: replace \+ with \* in decoded$',
     # `decoded` takes only a text of `(N * 4).div_ceil(3)` characters, and a
     # strict decode of that many characters gives exactly `N` bytes or fails
     # (stray bits are refused), so the guard `length == N` is true whenever
     # the decode succeeds: a guard of `true` takes the same branch every
     # time. Named by line, so a moved line brings the mutant back to judge.
-    'crates/app/src/pairing/wire\.rs:645:23: replace match guard length == N with true in decoded$',
+    'crates/app/src/pairing/wire\.rs:660:23: replace match guard length == N with true in decoded$',
     # A token ID's byte is a high hex digit shifted left four bits and a low one
     # below it: the two never share a bit, so `|` and `^` give the same byte.
     # Other bytes (`&`) are caught.
