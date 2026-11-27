@@ -601,17 +601,12 @@ pub fn drop_place(from: usize, gap: usize) -> usize {
     if gap > from { gap - 1 } else { gap }
 }
 
-/// The sort the table keeps once its columns are laid out as `layout`:
-/// none, the caller's order, once the column it sorts by (`Sorted`
-/// counts the row header's as 0) is hidden, so no row is ordered by a
-/// value the table no longer shows or says (decision 140).
-pub fn sort_kept(sorted: Option<Sorted>, layout: &Layout) -> Option<Sorted> {
-    sorted.filter(|sorted| {
-        sorted
-            .column
-            .checked_sub(1)
-            .is_none_or(|column| layout.is_shown(column))
-    })
+/// The sort the table keeps once the columns after its `fixed` ones are
+/// laid out as `layout`: none, the caller's order, once the column it
+/// sorts by (`Sorted` counts the row header's as 0) is hidden, so no row is
+/// ordered by a value the table no longer shows or says (decision 140).
+pub fn sort_kept(sorted: Option<Sorted>, fixed: usize, layout: &Layout) -> Option<Sorted> {
+    sorted.filter(|sorted| is_place_shown(sorted.column, fixed, layout))
 }
 
 /// Whether the table shows the column at its place `place` (the row
@@ -620,8 +615,9 @@ pub fn sort_kept(sorted: Option<Sorted>, layout: &Layout) -> Option<Sorted> {
 /// `layout` the reader's choice of the rest: the row header and the fixed
 /// columns always show, any other as the reader chose.
 pub fn is_place_shown(place: usize, fixed: usize, layout: &Layout) -> bool {
-    let _ = (place, fixed, layout);
-    todo!()
+    place
+        .checked_sub(fixed + 1)
+        .is_none_or(|column| layout.is_shown(column))
 }
 
 /// The table's places (the row header's 0) of the columns it shows after
@@ -629,8 +625,9 @@ pub fn is_place_shown(place: usize, fixed: usize, layout: &Layout) -> bool {
 /// first, as given, then those the reader shows of the `layout`, in its
 /// order.
 pub fn shown_places(fixed: usize, layout: &Layout) -> Vec<usize> {
-    let _ = (fixed, layout);
-    todo!()
+    (1..=fixed)
+        .chain(layout.shown().into_iter().map(|column| column + fixed + 1))
+        .collect()
 }
 
 /// Whether a change to the cued column of a row is seen as it comes, and
@@ -1250,14 +1247,24 @@ mod tests {
     fn hiding_the_sorted_column_ends_the_sort_and_hiding_another_keeps_it() {
         let by_changed = sorted(CHANGED + 1, Direction::Descending);
         let changed_hidden = Layout::given(4).showing(CHANGED, false);
-        assert_eq!(sort_kept(by_changed, &changed_hidden), None);
+        assert_eq!(sort_kept(by_changed, 0, &changed_hidden), None);
         let files_hidden = Layout::given(4).showing(FILES_PLACE, false);
-        assert_eq!(sort_kept(by_changed, &files_hidden), by_changed);
+        assert_eq!(sort_kept(by_changed, 0, &files_hidden), by_changed);
         let moved = Layout::given(4).moved(CHANGED, Step::Up);
-        assert_eq!(sort_kept(by_changed, &moved), by_changed);
+        assert_eq!(sort_kept(by_changed, 0, &moved), by_changed);
         let by_name = sorted(0, Direction::Ascending);
-        assert_eq!(sort_kept(by_name, &all_hidden()), by_name);
-        assert_eq!(sort_kept(None, &all_hidden()), None);
+        assert_eq!(sort_kept(by_name, 0, &all_hidden()), by_name);
+        assert_eq!(sort_kept(None, 0, &all_hidden()), None);
+    }
+
+    #[test]
+    fn a_sort_by_a_column_the_reader_cant_hide_stays_whatever_is_hidden() {
+        let by_fixed = sorted(1, Direction::Ascending);
+        assert_eq!(sort_kept(by_fixed, 1, &all_hidden()), by_fixed);
+        let by_changed = sorted(CHANGED + 2, Direction::Descending);
+        let changed_hidden = Layout::given(4).showing(CHANGED, false);
+        assert_eq!(sort_kept(by_changed, 1, &changed_hidden), None);
+        assert_eq!(sort_kept(by_changed, 1, &Layout::given(4)), by_changed);
     }
 
     #[test]
