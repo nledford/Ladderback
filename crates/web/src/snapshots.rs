@@ -538,7 +538,7 @@ pub(crate) fn Snapshots(localizer: Arc<Localizer>) -> impl IntoView {
     // The repositories to pick from, each with whether this agent maintains
     // it and since when that maintenance is paused for want of a lease, on a
     // paired machine; `None` while the read is on its way.
-    let repositories = RwSignal::<Option<Vec<(String, bool, Option<String>)>>>::new(None);
+    let repositories = RwSignal::<Option<Vec<Pickable>>>::new(None);
     let chosen = RwSignal::<Option<(String, bool)>>::new(None);
     // The page of a repository is made anew when another is picked, not when
     // the one shown is picked again; that only asks for its history again.
@@ -672,6 +672,10 @@ pub(crate) fn Snapshots(localizer: Arc<Localizer>) -> impl IntoView {
     }
 }
 
+/// A repository to pick: its alias, whether this agent maintains it, and
+/// since when that maintenance is paused for want of a lease.
+type Pickable = (String, bool, Option<String>);
+
 /// One repository: its maintenance, its history by owner and the review of
 /// whatever is asked. It is made anew for each repository picked, and reads
 /// its history again each time its repository is picked. A repository this
@@ -685,7 +689,7 @@ fn Repository(
     localizer: Arc<Localizer>,
     alias: String,
     maintained: bool,
-    repositories: RwSignal<Option<Vec<(String, bool, Option<String>)>>>,
+    repositories: RwSignal<Option<Vec<Pickable>>>,
     unreachable: RwSignal<bool>,
     picks: RwSignal<u32>,
     remember: Callback<(String, bool)>,

@@ -336,6 +336,7 @@ impl LeaseCache for PausesUnwritable {
 
 /// Turns maintenance of `photos` on (`maintain_here`) or off on a machine
 /// keeping `leases`, as the Snapshots page's toggle does.
+#[expect(clippy::result_large_err, reason = "the use case's own error")]
 async fn turn(
     config: Arc<crate::fakes::InMemoryConfigStore>,
     leases: Arc<MaintenanceLeases>,
