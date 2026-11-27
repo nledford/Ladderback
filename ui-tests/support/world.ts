@@ -467,8 +467,12 @@ After(async function (this: BrowserWorld, { pickle, result }) {
   // trace and screenshot here, unless a failed step kept them already.
   if (blocked || result?.status === Status.FAILED) await this.keepFailureEvidence(evidenceName(pickle));
   else await this.discardTrace();
-  // A scenario that failed before its first page opened has no context.
-  await (this.context as BrowserContext | undefined)?.close();
+  // A scenario that failed before its first page opened has no context. A
+  // route still waiting (one that delays reads) must end with its scenario:
+  // finishing on a closed page, it would fail the next one.
+  const context = this.context as BrowserContext | undefined;
+  await context?.unrouteAll({ behavior: "ignoreErrors" });
+  await context?.close();
   if (blocked) {
     throw new Error(`the browser blocked the page under its content security policy:\n${this.policyBlocks.join("\n")}`);
   }
