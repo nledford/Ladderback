@@ -770,25 +770,41 @@ Then("no live alert on the page contains {string}", async function (this: Browse
 // The daemon says this paired machine's maintenance of `alias` is paused
 // since `since`, for want of a lease from its hub (§7.3, decision 158). A
 // paired machine would need a hub of its own, so the list of repositories
-// says it in the daemon's stead, as the daemon writes it.
+// says it in the daemon's stead, as the daemon writes it: on every read, or,
+// as the daemon does, only once the row says this machine maintains it.
+function saysPaused(world: BrowserWorld, alias: string, since: string, onceMaintained: boolean) {
+  world.contextRoutes.push(async (context) => {
+    await context.route(
+      (url) => url.pathname === "/api/v1/repositories",
+      async (route) => {
+        if (route.request().method() !== "GET") return route.continue();
+        const response = await route.fetch();
+        const body = (await response.json()) as {
+          repositories: { alias: string; "maintained-here"?: boolean; "maintenance-paused-since"?: string }[];
+        };
+        for (const row of body.repositories) {
+          if (row.alias === alias && (!onceMaintained || row["maintained-here"] === true)) {
+            row["maintenance-paused-since"] = since;
+          }
+        }
+        await route.fulfill({ response, json: body });
+      },
+    );
+  });
+}
+
 Given(
   "the daemon says maintenance of {string} from this machine is paused since {string}",
   function (this: BrowserWorld, alias: string, since: string) {
-    this.contextRoutes.push(async (context) => {
-      await context.route(
-        (url) => url.pathname === "/api/v1/repositories",
-        async (route) => {
-          if (route.request().method() !== "GET") return route.continue();
-          const response = await route.fetch();
-          const body = (await response.json()) as {
-            repositories: { alias: string; "maintenance-paused-since"?: string }[];
-          };
-          for (const row of body.repositories) {
-            if (row.alias === alias) row["maintenance-paused-since"] = since;
-          }
-          await route.fulfill({ response, json: body });
-        },
-      );
-    });
+    saysPaused(this, alias, since, false);
+  },
+);
+
+// #1671: the page that turned maintenance on learns of the pause the daemon
+// notes at once, without being opened again.
+Given(
+  "the daemon says maintenance of {string} from this machine is paused since {string} once it maintains it",
+  function (this: BrowserWorld, alias: string, since: string) {
+    saysPaused(this, alias, since, true);
   },
 );

@@ -85,6 +85,25 @@ Feature: The table
       | left to right | Demo folders                | ArrowRight |
       | right to left | Demo folders, right to left | ArrowLeft  |
 
+  # A table's caption is page text, not table data (The 320 Rule): where the
+  # columns are wider than a small screen and the frame scrolls, the caption
+  # wraps within the frame and stays at its start, so every word of it reads
+  # without scrolling the table (#1695).
+  Scenario Outline: On a small screen with larger text, a wide table's caption wraps within its frame and every word of it shows, <direction>
+    Given a viewport of 320 by 640 pixels
+    And the reader sets the text size to 200 percent
+    When I open the component gallery
+    Then the caption of the table "<table>" wraps within its frame, every word of it in view
+    When I press Shift+Tab until focus is on the region "<table>"
+    And I press <key> until the region "<table>" has scrolled to its end
+    Then the caption of the table "<table>" wraps within its frame, every word of it in view
+    And the page doesn't scroll sideways
+
+    Examples:
+      | direction     | table                          | key        |
+      | left to right | Demo folders in a narrow frame | ArrowRight |
+      | right to left | Demo folders, right to left    | ArrowLeft  |
+
   Scenario Outline: A table's row headers are filled with the page's background, so the cells scrolled under them don't show through, in <colors>
     Given the browser asks for "<colors>"
     When I open the component gallery

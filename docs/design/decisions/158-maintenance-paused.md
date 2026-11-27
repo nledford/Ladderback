@@ -23,3 +23,5 @@
 - The page reads the pause when the repository list is read; a pause that starts while the page is open shows on the next read.
 
 **Amended by [decision 163](163-the-wire-and-stored-names-say-machine.md)** (2026-11-25, #1220): the table `agent_maintenance_paused` is `machine_maintenance_paused` (migration `0029_machine_names.sql`).
+
+**Amended** (2026-11-27, #1671): a pause is also noted where it begins. Turning maintenance of a repository on (`ChangeMaintainer`) notes its pause right after the configuration is saved when the paired machine holds no live lease on it, dated then, not from a lease that ran out while maintenance was off, and turning it off drops the pause; a pause that can't be saved is logged and leaves the change made, for the next watch notes it. A read never writes a pause, so a page load or an API read saves nothing. The Snapshots page reads the repository list again after the change, so it warns at once, and its groups and reviews warn of no other host without a lease. The first consequence above now holds only for a pause that begins without the toggle. Each watch logs what it found, and why it noted nothing.

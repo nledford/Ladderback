@@ -185,28 +185,47 @@ impl MaintenanceLeases {
         held.paused_since(repository?, self.now())
     }
 
+    /// Whether this machine is paired with a hub, so its maintenance can be
+    /// paused: false when it isn't, or its pin can't be read.
+    pub async fn paired(&self) -> bool {
+        matches!(self.identity.pin().await, Ok(Some(_)))
+    }
+
     /// Notes, now, which of `maintained`, the repositories the
     /// configuration asks this machine to maintain, are paused for want of
     /// a lease, and returns each pause an earlier watch noted that has
     /// lasted [`PAUSE_ALERT_AFTER`](domain::maintenance::PAUSE_ALERT_AFTER)
     /// and wasn't [`told`](Self::told) yet, by repository and since when.
     /// A machine that isn't paired drops every pause; one whose pin can't
-    /// be read notes nothing. Only the pauses are saved, so a grant taken
-    /// meanwhile stands (I1).
+    /// be read notes nothing and says why in the log. A paired machine's
+    /// watch logs one line of what it found (#1671). Only the pauses are
+    /// saved, so a grant taken meanwhile stands (I1).
     pub async fn watch(
         &self,
         maintained: &[RepositoryId],
     ) -> Result<Vec<(RepositoryId, Timestamp)>, StoreError> {
-        let maintained = match self.identity.pin().await {
-            Ok(Some(_)) => maintained,
-            Ok(None) => &[],
-            Err(_) => return Ok(Vec::new()),
+        let (maintained, paired) = match self.identity.pin().await {
+            Ok(Some(_)) => (maintained, true),
+            Ok(None) => (&[][..], false),
+            Err(error) => {
+                log::warn!(
+                    "the maintenance watch noted no pause: this machine's hub pin can't be read ({error:?})"
+                );
+                return Ok(Vec::new());
+            }
         };
         let mut held = self.cache.load().await?;
         let before = held.clone();
         let due = held.watch(maintained, self.now());
         if held != before {
             self.cache.save_pauses(&held).await?;
+        }
+        if paired {
+            log::info!(
+                "the maintenance watch found {} of the {} repositories this machine asks to maintain paused, for want of a lease from its hub",
+                held.pauses().count(),
+                maintained.len()
+            );
         }
         Ok(due)
     }
@@ -222,6 +241,29 @@ impl MaintenanceLeases {
         let mut held = self.cache.load().await?;
         let before = held.clone();
         held.told(repository, since);
+        if held != before {
+            self.cache.save_pauses(&held).await?;
+        }
+        Ok(())
+    }
+
+    /// Notes, now, that maintenance of `repository` was just turned on
+    /// (`maintained`) or off here, so a paired machine that holds no live
+    /// lease on it says it is paused from that moment, not from the next
+    /// watch, and one turned off leaves no pause behind (#1671). A machine
+    /// that isn't paired, or whose pin can't be read, notes nothing. Only
+    /// the pauses are saved (I1).
+    pub async fn turned(
+        &self,
+        repository: &RepositoryId,
+        maintained: bool,
+    ) -> Result<(), StoreError> {
+        let Ok(Some(_)) = self.identity.pin().await else {
+            return Ok(());
+        };
+        let mut held = self.cache.load().await?;
+        let before = held.clone();
+        held.turned(repository, maintained, self.now());
         if held != before {
             self.cache.save_pauses(&held).await?;
         }
@@ -259,21 +301,42 @@ impl WatchPauses {
     /// pause is noted as told only once a rule's channel took it, so one
     /// every channel failed is told again at the next watch; one a grant
     /// ended since the watch read the leases isn't told. A configuration or
-    /// a cache that can't be read notes nothing and tells nothing; the next
-    /// watch tries again.
+    /// a cache that can't be read notes nothing and tells nothing, and
+    /// says so in the log by its code alone (I4); the next watch tries
+    /// again.
     pub async fn watch(&self) -> Vec<Report> {
         let Ok(config) = self.config.load().await else {
+            log::warn!("the maintenance watch noted no pause: the configuration can't be read");
             return Vec::new();
         };
-        let maintained: Vec<(&RepositoryAlias, &RepositoryId)> = config
+        let owned: Vec<(&RepositoryAlias, Option<&RepositoryId>)> = config
             .repositories()
             .iter()
             .filter(|(_, entry)| Ownership::owned_here(entry.maintenance))
-            .filter_map(|(alias, entry)| entry.id.as_ref().map(|id| (alias, id)))
+            .map(|(alias, entry)| (alias, entry.id.as_ref()))
             .collect();
+        let maintained: Vec<(&RepositoryAlias, &RepositoryId)> = owned
+            .iter()
+            .filter_map(|(alias, id)| id.map(|id| (*alias, id)))
+            .collect();
+        // A pause is kept by ID, so one of an entry that records none can't
+        // be noted, though its maintenance is refused all the same (#1671).
+        let unidentified = owned.len().saturating_sub(maintained.len());
+        if unidentified > 0 && self.leases.paired().await {
+            log::warn!(
+                "the maintenance watch can't note a pause for {unidentified} of the repositories maintained here: their entries record no repository ID"
+            );
+        }
         let ids: Vec<RepositoryId> = maintained.iter().map(|(_, id)| (*id).clone()).collect();
-        let Ok(due) = self.leases.watch(&ids).await else {
-            return Vec::new();
+        let due = match self.leases.watch(&ids).await {
+            Ok(due) => due,
+            Err(error) => {
+                log::warn!(
+                    "the maintenance watch noted no pause: the lease cache can't be read or written ({})",
+                    error.code()
+                );
+                return Vec::new();
+            }
         };
         let mut reports = Vec::new();
         for (repository, since) in due {

@@ -156,12 +156,14 @@ If you think a check is wrong, name it, say why, and stop for the maintainer.
 | Full, CI | CI's checks on the pull request: `just test` (doc tests and `@e2e` too) on Linux and macOS, `just test-release`, `just mutants` (not under `no-behavior-change`), the whole `@ui` suite in Chromium, and in Firefox and WebKit when the pull request touches the UI, red-first on Linux. A docs-only pull request runs the docs checks, and the guide's tests when it touches `docs/guide/` ([development.md §13.8](docs/design/development.md#138-pull-requests-and-merging)) | Defer to it for everything the quick lane leaves out. A pull request is done when its required checks pass on its current head commit: quote that run |
 | Full, local | `just verify`, or one full recipe | Only to reproduce a CI failure, or for evidence CI can't give yet (Linux behavior on a Mac: a container run) |
 
+**Start CI's mutation testing early.** It is CI's slowest check, and the quick lane leaves it out. Once `just quick-ci` passes and opening the pull request is approved, open it as a draft and push, so mutation testing runs while the scenarios, red-first and the review go on here; mark it ready when its required checks pass on its head ([development.md §13.1](docs/design/development.md#131-test-first-always)).
+
 ## Independent adversarial review
 
 After implementing a non-trivial change, get one independent adversarial review from a reviewer subagent that has a fresh context. Don't review your own work. If your tool has no subagents, use a new session that sees only the diff and the relevant design sections.
 
 - **Needed for:** product code; anything touching an invariant in §0; security-sensitive code (auth, secrets, request checks, command execution, file paths); concurrency or maintenance logic (leases, prune guard, deadlines); changes to design decisions or the architecture. **Not needed for** mechanical work: renames, link fixes, formatting and wording-only edits.
-- **Give the reviewer:** the diff; the design sections and invariants it touches; the acceptance criteria; and an instruction to find what is wrong, not to confirm it works. Ask for evidence (file and line, a failing input, a counterexample) and a severity for each finding.
+- **Give the reviewer:** the diff; the design sections and invariants it touches; the acceptance criteria; and an instruction to find what is wrong, not to confirm it works. Ask for evidence (file and line, a failing input, a counterexample) and a severity for each finding. In the gated crates, ask it to list every new branch, guard, match arm and comparison with the test that fails without it: one with no such test is a finding, and the mutant CI would find.
 - **Afterwards:** fix every real finding, with a failing test first where it is a bug. Say in the pull request which findings were rejected and why. One review per change; re-review only when the fixes change the design.
 
 ## Parallel agents
