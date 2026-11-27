@@ -1416,3 +1416,25 @@ fn log_keyring_wait(
         ),
     }
 }
+
+#[async_trait]
+impl app::hub_commands::HubRuns for PlanRunner {
+    async fn going(&self, _plan: &PlanId) -> Option<OperationId> {
+        todo!()
+    }
+
+    async fn start(
+        &self,
+        _plan: &PlanId,
+        _asked_by: Option<domain::access::SessionTag>,
+    ) -> Result<OperationId, app::hub_commands::HubRunRefused> {
+        todo!()
+    }
+
+    async fn cancel(
+        &self,
+        _operation: &OperationId,
+    ) -> Result<(), app::hub_commands::HubCancelRefused> {
+        todo!()
+    }
+}
