@@ -73,7 +73,7 @@ impl<K: Ord + Clone> Queue<K> {
         }
     }
 
-    /// Runs at most `limit` backups at once from now on. Lowering it stops
+    /// Runs at most `limit` runs at once from now on. Lowering it stops
     /// nothing that runs: no run starts until fewer than `limit` do.
     pub fn set_limit(&mut self, limit: Concurrency) {
         self.limit = limit;
@@ -168,7 +168,7 @@ impl<K: Ord + Clone> Queue<K> {
             .or_else(|| self.waiting.iter().find_map(of_key))
     }
 
-    /// Whether any backup holds a place: running, or waiting for its turn.
+    /// Whether any run holds a place: running, or waiting for its turn.
     pub fn is_busy(&self) -> bool {
         !self.running.is_empty() || !self.waiting.is_empty()
     }
