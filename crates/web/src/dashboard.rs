@@ -530,9 +530,9 @@ fn own_outcome(status: &str) -> Option<MachineOutcomeDto> {
 /// The hub's own machine as a card shows one (decision 175): who
 /// `identity` says it is, online, since the page reads it from the hub
 /// itself; its plans from its `status` once read, each one's last run when
-/// it ended, or else started or was queued; its latest `operations` that
-/// started, newest first, and the progress of the one that runs. None
-/// without a machine ID or a hostname.
+/// it ended, or else, while it waits or runs again, its last success; its
+/// latest `operations` that started, newest first, and the progress of the
+/// one that runs. None without a machine ID or a hostname.
 pub(crate) fn own_machine(
     identity: &MachineDto,
     status: Option<&StatusDto>,
@@ -546,15 +546,21 @@ pub(crate) fn own_machine(
             .iter()
             .map(|plan| MachinePlanDto {
                 plan: plan.plan.id.clone(),
-                last_run: plan.last.as_ref().map(|last| MachinePlanRunDto {
-                    at: last
-                        .finished_at
-                        .as_ref()
-                        .or(last.started_at.as_ref())
-                        .unwrap_or(&last.queued_at)
-                        .clone(),
-                    status: last.status.clone(),
-                }),
+                last_run: match plan.last.as_ref() {
+                    Some(last) if ended(&last.status) => Some(MachinePlanRunDto {
+                        at: last
+                            .finished_at
+                            .as_ref()
+                            .or(last.started_at.as_ref())
+                            .unwrap_or(&last.queued_at)
+                            .clone(),
+                        status: last.status.clone(),
+                    }),
+                    _ => plan.last_success.as_ref().map(|success| MachinePlanRunDto {
+                        at: success.finished_at.clone(),
+                        status: "succeeded".to_owned(),
+                    }),
+                },
                 next_run: plan.plan.next_run.clone(),
             })
             .collect(),
