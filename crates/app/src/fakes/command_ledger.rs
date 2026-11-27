@@ -31,7 +31,7 @@ impl CommandLedger for InMemoryCommandLedger {
     async fn remember(&self, id: CommandId, now: Timestamp) -> Result<Remembered, StoreError> {
         let mut kept = self.kept();
         kept.commands
-            .retain(|(_, at)| now.duration_since(*at) < COMMANDS_REMEMBERED_FOR);
+            .retain(|(_, at)| now.duration_since(*at).abs() < COMMANDS_REMEMBERED_FOR);
         if kept.commands.iter().any(|(kept, _)| *kept == id) {
             return Ok(Remembered::Seen);
         }

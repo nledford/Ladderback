@@ -1,8 +1,10 @@
 //! A paired machine's ledger of its hub's commands (§16, decisions 120 and
 //! 176; tables `hub_commands` and `hub_runs`): the `CommandLedger` port on
 //! the store's own file. Each call is one transaction, so two commands
-//! taken at once can't both find room or both be new. Only what is old by
-//! the time given is forgotten: a clock stepped back forgets nothing.
+//! taken at once can't both find room or both be new. An ID is forgotten
+//! once it lies a whole life from the time given, either way: one taken
+//! while the clock ran ahead goes once the clock is set back, rather than
+//! waiting for the clock to catch up.
 
 use app::ports::{CommandLedger, Remembered, StoreError};
 use async_trait::async_trait;
@@ -12,8 +14,9 @@ use sqlx::{Connection, Row};
 
 use crate::{SqliteStore, unavailable};
 
-/// Parameter: the time before which, or at which, an ID is forgotten.
-const FORGET_COMMANDS: &str = "DELETE FROM hub_commands WHERE taken_at <= ?1";
+/// Parameters: the times at or before which, and at or after which, an ID
+/// is forgotten.
+const FORGET_COMMANDS: &str = "DELETE FROM hub_commands WHERE taken_at <= ?1 OR taken_at >= ?2";
 
 const COMMAND_KEPT: &str = "SELECT EXISTS (SELECT 1 FROM hub_commands WHERE command_id = ?1)";
 
@@ -41,6 +44,7 @@ impl CommandLedger for SqliteStore {
         let mut tx = conn.begin().await.map_err(unavailable)?;
         sqlx::query(FORGET_COMMANDS)
             .bind(now.as_millisecond().saturating_sub(life))
+            .bind(now.as_millisecond().saturating_add(life))
             .execute(&mut *tx)
             .await
             .map_err(unavailable)?;
