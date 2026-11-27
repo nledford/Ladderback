@@ -111,7 +111,7 @@ A restore goes into a new folder by default. A restore in place, over the origin
 
 ### AI agents and MCP
 
-`ladderback mcp` is an MCP server over stdio. An AI agent can read a status summary, with overdue plans and unreadable repositories, and plans, repositories, snapshots and history; run a plan and wait for it, cancel a backup, test a repository, preview a forget or a profile import, and export a plan as a profile. It drives a running instance, with a scoped API token when sign-in is on; a headless session of its own when none is running; or a throwaway scratch setup to try it on. Driving a running instance, it can also count what a draft plan would back up within the folders you allow, and propose plan changes. It can't restore, delete or change the configuration. `ladderback mcp call` runs the same tools from a shell or a script without an MCP client, printing each result as a line of JSON.
+`ladderback mcp` is an [MCP server](docs/guide/ai-agents.md) over stdio. An AI agent can read a status summary, with overdue plans and unreadable repositories, and plans, repositories, snapshots and history; run a plan and wait for it, cancel a backup, test a repository, preview a forget or a profile import, and export a plan as a profile. It drives a running instance, with a scoped API token when sign-in is on; a headless session of its own when none is running; or a throwaway scratch setup to try it on. Driving a running instance, it can also count what a draft plan would back up within the folders you allow, and propose plan changes. It can't restore, delete or change the configuration. `ladderback mcp call` runs the same tools from a shell or a script without an MCP client, printing each result as a line of JSON.
 
 An AI agent whose API token has the Configuration permission can propose adding, changing or removing plans, over the REST API or through `ladderback mcp` driving a running instance. Nothing changes until a person approves it on the Pending changes page, with the same confirmation as a restore. A proposal that could delete snapshots shows what it would forget, before and after, and is approved from that preview. Proposals can't yet touch repositories, hooks or maintenance. The AI agents tab in Settings sets what an AI agent may do without a token, and [API tokens and AI agents](docs/guide/api-tokens.md) has which permissions to give.
 
@@ -141,7 +141,7 @@ Not planned for v1: Windows, multiple users, and rustic's `copy`, `merge`, `rewr
 
 ## Documentation
 
-- [The user guide](https://nledford.github.io/Ladderback/) ([source](docs/guide/README.md)): installing and a first backup in the web UI, for everyone; then an Advanced part with the other ways to install, the service, `config.toml`, secrets, sign-in and remote access, API tokens and AI agents, and the hub: pairing machines, its dashboard and maintenance with it.
+- [The user guide](https://nledford.github.io/Ladderback/) ([source](docs/guide/README.md)): installing and a first backup in the web UI, for everyone; then an Advanced part with the other ways to install, the service, `config.toml`, secrets, sign-in and remote access, API tokens and AI agents, the MCP server, and the hub: pairing machines, its dashboard and maintenance with it.
 - [PRODUCT.md](PRODUCT.md): who Ladderback is for, what it does and doesn't do.
 - [docs/design/](docs/design/README.md): architecture, safety invariants, data model, milestones and decisions.
 
