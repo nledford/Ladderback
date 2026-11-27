@@ -208,6 +208,37 @@ Then(
   },
 );
 
+// A caption is page text, not table data (The 320 Rule, #1695): where the
+// columns are wider than the frame, its lines still lie inside the frame's
+// visible width, wrapped there and kept at its start as the frame scrolls,
+// so the frame's clip cuts off none of its words.
+Then(
+  "the caption of the table {string} wraps within its frame, every word of it in view",
+  async function (this: BrowserWorld, name: string) {
+    const caption = table(this.page, name).locator("caption");
+    await expect(caption).toHaveText(name);
+    const found = await caption.evaluate((el) => {
+      const frame = el.closest('[role="region"]');
+      if (frame === null) return { problem: "the caption is in no frame" };
+      if (frame.scrollWidth <= frame.clientWidth + 1) return { problem: "the table is no wider than its frame" };
+      const start = frame.getBoundingClientRect().left + frame.clientLeft;
+      const end = start + frame.clientWidth;
+      const words = document.createRange();
+      words.selectNodeContents(el);
+      const lines = [...words.getClientRects()].filter((line) => line.width > 0);
+      if (lines.length === 0) return { problem: "the caption shows no words" };
+      const cut = lines.find((line) => line.left < start - 0.5 || line.right > end + 0.5);
+      return {
+        problem:
+          cut === undefined
+            ? null
+            : `a line of "${el.textContent}" stands at ${Math.round(cut.left)}..${Math.round(cut.right)}px in a frame showing ${Math.round(start)}..${Math.round(end)}px`,
+      };
+    });
+    assert.equal(found.problem, null, found.problem ?? "");
+  },
+);
+
 // What the cells scrolled under a pinned row header would show through: the
 // header's fill is the page's own background, the system's in forced colors.
 Then(
