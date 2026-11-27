@@ -37,6 +37,7 @@ mod presence;
 #[cfg(test)]
 mod tests;
 
+pub use commands::CommandAskRefused;
 pub use dialog::{
     AgentsListed, ApprovalAsk, MadeToken, RecoveryAsk, RemovalAsk, TokenAsk, TokenAskRefused,
 };
@@ -44,7 +45,6 @@ pub use fleet::Machine;
 pub use lease_proof::{proven_floors, signed_grants};
 pub use live::{progress_dto, time_of};
 pub use offline::{MACHINES_WATCHED_EVERY, WatchMachines};
-pub use commands::CommandAskRefused;
 pub use presence::{CloseConnection, CommandQueue, OutgoingCommand};
 
 /// The hub's side of pairing: its keys, its tokens, and its answers to an
@@ -911,6 +911,8 @@ impl HubPairing {
                 .await?
         } else if message.kind == heartbeat_kind() {
             self.take_heartbeat(syncing.agent_id, &message.payload)
+        } else if message.kind == domain::fleet::command_result_kind() {
+            self.take_command_result(syncing.agent_id, &message.payload)
         } else {
             return Ok(Ok(None));
         };

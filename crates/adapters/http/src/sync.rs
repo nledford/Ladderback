@@ -116,14 +116,14 @@ mod served {
         CloseConnection, CommandQueue, HubPairing, HubSession, HubStep, OutgoingCommand,
         PROTOCOL_ERROR,
     };
-    use futures::StreamExt as _;
-    use futures::future::Either;
     use axum::Router;
     use axum::extract::ws::{CloseFrame, Message, WebSocket, WebSocketUpgrade, close_code};
     use axum::extract::{ConnectInfo, Extension};
     use axum::routing::get;
     use domain::AgentId;
     use domain::fleet::{Fingerprint, KEY_BYTES, SILENCE_LIMIT};
+    use futures::StreamExt as _;
+    use futures::future::Either;
     use tokio::sync::Notify;
 
     use crate::{BuiltInTls, PeerAddr};
@@ -500,12 +500,7 @@ mod served {
                         if let Some(close) = live.close.take() {
                             queue = Some(
                                 self.pairing
-                                    .went_live_taking(
-                                        live.agent,
-                                        live.id,
-                                        close,
-                                        session.accepts(),
-                                    )
+                                    .went_live_taking(live.agent, live.id, close, session.accepts())
                                     .await,
                             );
                         }
