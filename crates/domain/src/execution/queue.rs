@@ -152,6 +152,12 @@ impl BackupQueue {
             .any(|going| going == plan)
     }
 
+    /// The run of `key` that is going: the one running, or else the oldest
+    /// waiting for its turn; `None` when none is.
+    pub fn going(&self, _key: &PlanId) -> Option<Ticket> {
+        todo!()
+    }
+
     /// Whether any backup holds a place: running, or waiting for its turn.
     pub fn is_busy(&self) -> bool {
         !self.running.is_empty() || !self.waiting.is_empty()
@@ -204,6 +210,22 @@ mod tests {
 
     fn limit(value: i64) -> Concurrency {
         Concurrency::new(value).unwrap()
+    }
+
+    #[test]
+    fn the_run_going_is_the_running_one_or_else_the_oldest_waiting() {
+        let mut queue = BackupQueue::new(limit(1));
+        assert_eq!(queue.going(&plan("home")), None);
+        let docs = queue.push(&plan("docs"));
+        let first = queue.push(&plan("home"));
+        queue.push(&plan("home"));
+        assert_eq!(queue.going(&plan("home")), Some(first), "the oldest waiting");
+        assert_eq!(queue.start(), vec![docs]);
+        let later = queue.push(&plan("docs"));
+        assert_eq!(queue.going(&plan("docs")), Some(docs), "the running one");
+        queue.leave(docs);
+        assert_eq!(queue.going(&plan("docs")), Some(later));
+        assert_eq!(queue.going(&plan("photos")), None);
     }
 
     #[test]

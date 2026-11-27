@@ -262,6 +262,8 @@ fn password() -> impl Strategy<Value = SecretRef> {
 fn agent() -> impl Strategy<Value = AgentSettings> {
     let hostname = plain(&[]).prop_filter_map("a host name", |text| Hostname::parse(&text).ok());
     let concurrency = prop_oneof![Just(1), Just(i64::from(Concurrency::MAX)), 1..=64_i64];
+    let maintenance_concurrency =
+        prop_oneof![Just(1), Just(i64::from(Concurrency::MAX)), 1..=64_i64];
     let nice = 0..=i64::from(Nice::MAX);
     let locale = "[a-zA-Z]{1,8}(-[a-zA-Z0-9]{1,8}){0,3}"
         .prop_filter_map("a locale", |text| Locale::parse(&text).ok());
@@ -276,6 +278,7 @@ fn agent() -> impl Strategy<Value = AgentSettings> {
     (
         weighted(0.5, hostname),
         concurrency,
+        maintenance_concurrency,
         weighted(0.5, nice),
         any::<bool>(),
         weighted(0.5, locale),
@@ -287,6 +290,7 @@ fn agent() -> impl Strategy<Value = AgentSettings> {
             |(
                 hostname,
                 concurrency,
+                maintenance_concurrency,
                 nice,
                 allow_hub_restore,
                 locale,
@@ -297,6 +301,8 @@ fn agent() -> impl Strategy<Value = AgentSettings> {
                 AgentSettings {
                     hostname,
                     concurrency: Concurrency::new(concurrency).expect("drawn in its range"),
+                    maintenance_concurrency: Concurrency::new(maintenance_concurrency)
+                        .expect("drawn in its range"),
                     nice: nice.map(|nice| Nice::new(nice).expect("drawn in its range")),
                     allow_hub_restore,
                     locale,

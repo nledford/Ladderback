@@ -217,6 +217,44 @@ impl Drop for Place {
     }
 }
 
+/// The agent's one queue of maintenance runs (decision 75, point 8): forget,
+/// prune, check and adoption, keyed by their repository, under the limit
+/// `maintenance-concurrency` sets.
+pub struct MaintenanceQueue;
+
+/// Why a run was refused a place: a run of its key is going, running or
+/// waiting for its turn. Names that run's operation, the running one first,
+/// when the queue knows it.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct Going(pub Option<domain::OperationId>);
+
+impl MaintenanceQueue {
+    pub fn new() -> Self {
+        Self
+    }
+
+    pub fn unless_going_as(
+        &self,
+        _repository: &domain::RepositoryAlias,
+        _operation: domain::OperationId,
+        _limit: Concurrency,
+    ) -> Result<Place, Going> {
+        todo!()
+    }
+
+    pub fn hold(&self) {
+        todo!()
+    }
+
+    pub fn release(&self) {
+        todo!()
+    }
+
+    pub fn running(&self) -> usize {
+        todo!()
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use domain::PlanId;
@@ -224,7 +262,51 @@ mod tests {
     use domain::planning::{Concurrency, Overlap};
     use futures::FutureExt;
 
-    use super::{Place, RunQueue};
+    use super::{Going, MaintenanceQueue, Place, RunQueue};
+
+    fn repository(name: &str) -> domain::RepositoryAlias {
+        domain::RepositoryAlias::parse(name).unwrap()
+    }
+
+    fn operation(n: u128) -> domain::OperationId {
+        domain::OperationId::from_uuid(domain::Uuid::from_u128(n))
+    }
+
+    #[test]
+    fn a_maintenance_run_of_a_repository_going_is_refused_naming_the_one_going() {
+        let queue = MaintenanceQueue::new();
+        let mut nas = queue
+            .unless_going_as(&repository("nas"), operation(1), limit(1))
+            .unwrap();
+        let mut laptop = queue
+            .unless_going_as(&repository("laptop"), operation(2), limit(1))
+            .unwrap();
+        assert!(has_turn(&mut nas));
+        assert!(!has_turn(&mut laptop), "the limit of one wasn't kept");
+        assert_eq!(
+            queue
+                .unless_going_as(&repository("nas"), operation(3), limit(1))
+                .err(),
+            Some(Going(Some(operation(1)))),
+            "a running run is named"
+        );
+        assert_eq!(
+            queue
+                .unless_going_as(&repository("laptop"), operation(4), limit(1))
+                .err(),
+            Some(Going(Some(operation(2)))),
+            "a waiting run is named"
+        );
+        assert_eq!(queue.running(), 1);
+        drop(nas);
+        assert!(has_turn(&mut laptop));
+        drop(laptop);
+        assert!(
+            queue
+                .unless_going_as(&repository("nas"), operation(5), limit(1))
+                .is_ok()
+        );
+    }
 
     fn plan(name: &str) -> PlanId {
         PlanId::parse(name).unwrap()

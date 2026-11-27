@@ -260,6 +260,7 @@ fn agent(reader: &Reader<'_, '_>, path: &Path, table: AgentTable) -> Read<AgentS
     Ok(AgentSettings {
         hostname,
         concurrency,
+        maintenance_concurrency: Concurrency::default(),
         nice,
         allow_hub_restore: table.allow_hub_restore.unwrap_or(false),
         locale,

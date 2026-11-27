@@ -238,6 +238,31 @@ impl MaintenanceAssessment {
     }
 }
 
+/// An assessed run with its place in the maintenance queue (decision 75,
+/// point 8): its turn came at once, or it waits for it, in the log as
+/// queued.
+pub enum Queued {
+    /// Its turn came at once: [`RunMaintenance::start_turn`] takes its
+    /// repository's slot, as [`RunMaintenance::start`] does.
+    Turn(TurnNow),
+    /// It waits for its turn, in the log as queued:
+    /// [`RunMaintenance::run_waiting`] runs it once its turn comes.
+    Waiting(WaitingMaintenance),
+}
+
+/// A run whose turn came as it took its place.
+pub struct TurnNow {
+    assessment: MaintenanceAssessment,
+    place: crate::queue::Place,
+}
+
+/// A run waiting for its turn, in the log as queued.
+pub struct WaitingMaintenance {
+    assessment: MaintenanceAssessment,
+    operation: Operation,
+    place: crate::queue::Place,
+}
+
 /// What a run would do, decided and not yet done (§7.3).
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum MaintenancePreview {
@@ -689,6 +714,34 @@ impl RunMaintenance {
             Ok(Start::Refused { running }) => Err(MaintenanceError::Busy { running }),
             Err(error) => Err(MaintenanceError::Store(error)),
         }
+    }
+
+    /// Takes the maintenance queue's limit and place from `queue` (decision
+    /// 75, point 8).
+    pub fn with_queue(self, _queue: Arc<crate::queue::MaintenanceQueue>) -> Self {
+        todo!()
+    }
+
+    /// Takes the assessed run's place in the maintenance queue.
+    pub async fn queue(
+        &self,
+        _assessment: MaintenanceAssessment,
+    ) -> Result<Queued, MaintenanceError> {
+        todo!()
+    }
+
+    /// Takes the repository's slot of a run whose turn came at once.
+    pub async fn start_turn(&self, _turn: TurnNow) -> Result<PreparedMaintenance, MaintenanceError> {
+        todo!()
+    }
+
+    /// Waits for the turn of a waiting run, or its cancel, and runs it.
+    pub async fn run_waiting(
+        &self,
+        _waiting: WaitingMaintenance,
+        _cancel: impl Future<Output = ()> + Send,
+    ) -> Finished {
+        todo!()
     }
 
     /// Refuses anything but a check on a machine whose data folder was

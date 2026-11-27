@@ -135,6 +135,7 @@ fn rich_agent_settings() -> Option<AgentSettings> {
     Some(AgentSettings {
         hostname: Some(Hostname::parse("demo-host").ok()?),
         concurrency: Concurrency::new(4).ok()?,
+        maintenance_concurrency: Concurrency::new(3).ok()?,
         nice: Some(Nice::new(10).ok()?),
         allow_hub_restore: true,
         locale: Some(Locale::parse("en-US").ok()?),

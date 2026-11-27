@@ -119,6 +119,9 @@ impl Drop for Maintaining {
 /// no more, and the maintenance runs going, of which it starts no new one.
 pub(crate) struct Work {
     pub(crate) queue: Arc<app::queue::RunQueue>,
+    /// The maintenance queue, whose running runs a restart waits for and
+    /// whose waiting ones it starts no more (decision 75, point 8).
+    pub(crate) maintenance: Arc<app::queue::MaintenanceQueue>,
     pub(crate) runs: Runs,
 }
 
@@ -249,6 +252,7 @@ mod tests {
         let runs = Runs::default();
         let work = super::Work {
             queue: Arc::new(app::queue::RunQueue::new()),
+            maintenance: Arc::new(app::queue::MaintenanceQueue::new()),
             runs: runs.clone(),
         };
         let limit = domain::planning::Concurrency::default();
@@ -273,6 +277,45 @@ mod tests {
         assert!(
             queued.turn().now_or_never().is_some(),
             "the queued backup didn't start"
+        );
+    }
+
+    /// A restart that waits counts a maintenance run past its turn, never
+    /// one waiting for it, and gives the waiting one no turn until it is
+    /// canceled (decision 75, point 8).
+    #[test]
+    fn a_held_restart_waits_for_the_running_maintenance_run_and_not_the_waiting_one() {
+        use futures::FutureExt;
+        use http_adapter::Work as _;
+
+        let work = super::Work {
+            queue: Arc::new(app::queue::RunQueue::new()),
+            maintenance: Arc::new(app::queue::MaintenanceQueue::new()),
+            runs: Runs::default(),
+        };
+        let limit = domain::planning::Concurrency::default();
+        let repository = |name| domain::RepositoryAlias::parse(name).unwrap();
+        let operation = |n| domain::OperationId::from_uuid(domain::Uuid::from_u128(n));
+        let prune = work
+            .maintenance
+            .unless_going_as(&repository("nas"), operation(1), limit)
+            .unwrap();
+        let mut check = work
+            .maintenance
+            .unless_going_as(&repository("laptop"), operation(2), limit)
+            .unwrap();
+        work.hold();
+        assert_eq!(work.running(), 1, "the waiting check was counted");
+        drop(prune);
+        assert_eq!(work.running(), 0, "the restart waits for nothing");
+        assert!(
+            check.turn().now_or_never().is_none(),
+            "the waiting check started"
+        );
+        work.release();
+        assert!(
+            check.turn().now_or_never().is_some(),
+            "the waiting check didn't start"
         );
     }
 }

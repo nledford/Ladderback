@@ -254,6 +254,7 @@ pub(crate) fn told(told: Told) -> Words {
             msg::UI_MAINTENANCE_STARTING,
             vec![("kind", text(kind.wire()))],
         ),
+        Told::Waiting(_kind) => todo!(),
         Told::Running(kind) => running(kind),
         Told::Ended(ended) => end(&ended),
         Told::Unwatched(kind) => words(
@@ -1179,33 +1180,38 @@ mod tests {
         let read = |kind| {
             (
                 written(&told(Told::Starting(kind))),
+                written(&told(Told::Waiting(kind))),
                 written(&told(Told::Running(kind))),
                 written(&told(Told::Unwatched(kind))),
             )
         };
         let on = "which goes on. The Operations page shows how it ends.";
-        for (kind, starting, running, watching) in [
+        for (kind, starting, waiting, running, watching) in [
             (
                 Kind::Forget,
                 "Starting the forget…",
+                "A forget is waiting for its turn.",
                 "A forget is running.",
                 "the forget",
             ),
             (
                 Kind::Prune,
                 "Starting the prune…",
+                "A prune is waiting for its turn.",
                 "A prune is running.",
                 "the prune",
             ),
             (
                 Kind::Check,
                 "Starting the check…",
+                "A check is waiting for its turn.",
                 "A check is running.",
                 "the check",
             ),
             (
                 Kind::Adopt,
                 "Starting the adoption…",
+                "An adoption is waiting for its turn.",
                 "An adoption is running.",
                 "the adoption",
             ),
@@ -1213,7 +1219,12 @@ mod tests {
             let unwatched = format!("This page stopped watching {watching}, {on}");
             assert_eq!(
                 read(kind),
-                (starting.to_owned(), running.to_owned(), unwatched),
+                (
+                    starting.to_owned(),
+                    waiting.to_owned(),
+                    running.to_owned(),
+                    unwatched
+                ),
                 "{kind:?}"
             );
         }

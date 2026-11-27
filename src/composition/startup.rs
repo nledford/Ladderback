@@ -518,6 +518,7 @@ pub(crate) async fn daemon(
         service_managed,
         Arc::new(runs::Work {
             queue: Arc::clone(&daemon.background.runner.queue),
+            maintenance: Arc::new(app::queue::MaintenanceQueue::new()),
             runs: daemon.background.runs(),
         }),
     );

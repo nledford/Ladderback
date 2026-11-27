@@ -52,6 +52,8 @@ pub fn expected() -> AgentConfig {
     let agent = AgentSettings {
         hostname: Some(Hostname::parse("demo-laptop").expect("a hostname")),
         concurrency: Concurrency::new(2).expect("a concurrency"),
+        // `golden/v1.toml` predates the key: one at a time.
+        maintenance_concurrency: Concurrency::default(),
         nice: Some(Nice::new(10).expect("a nice")),
         allow_hub_restore: true,
         locale: Some(Locale::parse("en-US").expect("a locale")),
