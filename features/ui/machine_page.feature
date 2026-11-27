@@ -126,6 +126,7 @@ Feature: A machine's page on the hub
     And the hub doesn't answer when asked which machine it is
     When I open the page of the machine "demo-laptop"
     Then the main heading reads "demo-laptop"
+    And no region of the page is busy
     When I open the address "/machines/018f0000-0000-7000-8000-00000000dead"
     Then the page says "The hub didn't say which machine it is, so this hub's own machine can't be shown. The page asks again in a few seconds."
     And the main heading reads "Machine"

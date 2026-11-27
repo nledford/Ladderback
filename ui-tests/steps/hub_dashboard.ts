@@ -113,8 +113,8 @@ Given("the hub fails its first two answers about its machines", function (this: 
 });
 
 /** Lets the hub answer, from now on, when the page asks which machine it
- *  is; set by the step that holds those reads, for the scenario running. */
-let answerIdentity: (() => void) | undefined;
+ *  is, per scenario: set by the step that holds those reads. */
+const answerIdentity = new WeakMap<BrowserWorld, () => void>();
 
 // The hub never answers the page's reads of which machine it is (`GET
 // /api/v1/machine`): each is held, never fulfilled, as from a daemon that
@@ -122,9 +122,9 @@ let answerIdentity: (() => void) | undefined;
 // reaches the hub (#1692).
 Given("the hub doesn't answer when asked which machine it is", function (this: BrowserWorld) {
   let answering = false;
-  answerIdentity = () => {
+  answerIdentity.set(this, () => {
     answering = true;
-  };
+  });
   this.contextRoutes.push(async (context) => {
     await context.route("**/api/v1/machine", async (route) => {
       if (route.request().method() !== "GET" || answering) {
@@ -135,8 +135,9 @@ Given("the hub doesn't answer when asked which machine it is", function (this: B
 });
 
 When("the hub answers when asked which machine it is", function (this: BrowserWorld) {
-  assert.ok(answerIdentity, "no Given held the hub's answers about which machine it is");
-  answerIdentity();
+  const answer = answerIdentity.get(this);
+  assert.ok(answer, "no Given held the hub's answers about which machine it is");
+  answer();
 });
 
 // The hub never answers the page's request to start a backup (`POST
@@ -154,7 +155,15 @@ Given("the hub doesn't answer a request to start a backup", function (this: Brow
 
 // A sentence the page showed is gone.
 Then("the page no longer says {string}", async function (this: BrowserWorld, text: string) {
-  await expect(this.page.getByText(namePattern(text))).toHaveCount(0);
+  await expect(this.page.getByRole("main").getByText(namePattern(text))).toHaveCount(0);
+});
+
+// A button the page made busy while its request was on its way is no
+// longer busy, so it can be pressed again (#1690).
+Then("the button {string} can be pressed again", async function (this: BrowserWorld, name: string) {
+  const button = this.page.getByRole("button", { name: namePattern(name) });
+  await expect(button).toHaveCount(1);
+  await expect(button).not.toHaveAttribute("aria-disabled");
 });
 
 // Each row by its result's badge and its error code, in the order the
