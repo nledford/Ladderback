@@ -7,8 +7,8 @@ use serde::{Deserialize, Serialize};
 use super::{UnreadableFrame, written};
 
 /// The payload of the agent's `PlansSnapshot`: its plans in its
-/// configuration's order, at most `domain::fleet::MAX_PLANS_REPORTED`, and
-/// how many more it has.
+/// configuration's order, at most `domain::fleet::MAX_PLANS_REPORTED` and
+/// as many as fit one frame, and how many more it has.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct PlansPayload {
     pub plans: Vec<PlanPayload>,

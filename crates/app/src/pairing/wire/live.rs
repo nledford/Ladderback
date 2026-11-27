@@ -5,13 +5,14 @@
 //! it, which says the prunes it holds (decisions 159 and 166). A field that
 //! doesn't hold what it must refuses the whole payload.
 
-use super::{WireRefused, uuid};
+use super::{WireRefused, encoded, uuid};
 use api::sync::{
-    HeartbeatAckPayload, HeartbeatPayload, LastRunPayload, PlanPayload, PlansAckPayload,
-    PlansPayload, ProgressPayload, RunningOpPayload,
+    AgentFrame, HeartbeatAckPayload, HeartbeatPayload, LastRunPayload, MAX_FRAME_BYTES,
+    PlanPayload, PlansAckPayload, PlansPayload, ProgressPayload, RunningOpPayload,
 };
 use domain::fleet::{
-    EpochSeconds, LastRun, LastRunOutcome, PlansReport, ReportedPlan, ReportedProgress, WireName,
+    EpochSeconds, LastRun, LastRunOutcome, MAX_PLANS_REPORTED, PlansReport, ReportedPlan,
+    ReportedProgress, SIGNATURE_BYTES, WireName, plans_kind,
 };
 use domain::maintenance::{MAX_RUNNING_BACKUPS, RunningBackup};
 use domain::{OperationId, PlanId, RepositoryId, Timestamp};
@@ -34,6 +35,39 @@ pub fn plans_payload(report: &PlansReport) -> Vec<u8> {
         left_out: report.left_out(),
     }
     .to_bytes()
+}
+
+/// `report` as one frame carries it: its plans in the configuration's
+/// order while the frame that signs them fits [`MAX_FRAME_BYTES`], and the
+/// rest counted with those it left out already (#1698).
+pub fn plans_in_one_frame(report: PlansReport) -> PlansReport {
+    plans_within(report, MAX_FRAME_BYTES)
+}
+
+/// `report`, its last plans left out until its frame, at its longest, is
+/// at most `limit` bytes. A report holds at most [`MAX_PLANS_REPORTED`]
+/// plans, so this measures it at most once more than that.
+fn plans_within(mut report: PlansReport, limit: usize) -> PlansReport {
+    for _ in 0..=MAX_PLANS_REPORTED {
+        if frame_bytes(&report) <= limit || !report.leave_out_last() {
+            break;
+        }
+    }
+    report
+}
+
+/// The bytes of the frame that carries `report` at its longest: with the
+/// largest sequence number, and a signature, whose encoding is as long
+/// whatever its bytes.
+fn frame_bytes(report: &PlansReport) -> usize {
+    AgentFrame::Signed {
+        kind: plans_kind().as_str().to_owned(),
+        seq: u64::MAX,
+        payload: encoded(&plans_payload(report)),
+        signature: encoded(&[0; SIGNATURE_BYTES]),
+    }
+    .to_text()
+    .len()
 }
 
 /// The snapshot a payload's bytes hold: more plans than a snapshot holds, a

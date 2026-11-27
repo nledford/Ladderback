@@ -158,7 +158,7 @@ impl AgentChannel {
     }
 
     /// Sends the snapshot of the agent's `plans`, signed with the next
-    /// sequence number.
+    /// sequence number: a report `ReadPlans` read, which fits one frame.
     pub async fn send_plans(&mut self, plans: &PlansReport) -> Result<(), ChannelError> {
         self.send(plans_kind(), plans_payload(plans)).await
     }

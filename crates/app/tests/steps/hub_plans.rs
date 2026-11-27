@@ -181,6 +181,24 @@ async fn has_plans(agent: &mut Agent, first: String, second: String) {
         .expect("the configuration is kept");
 }
 
+/// `more` plans after those the agent has, each backing up to "nas".
+#[given(expr = "the agent has {int} more plans")]
+async fn has_more_plans(agent: &mut Agent, more: usize) {
+    let side = side(agent);
+    let config = side.config.load().await.expect("the configuration");
+    let mut names: Vec<String> = config
+        .plans()
+        .iter()
+        .map(|plan| plan.id.as_str().to_owned())
+        .collect();
+    names.extend((1..=more).map(|n| format!("more-{n:02}")));
+    let plans: Vec<(&str, &str)> = names.iter().map(|name| (name.as_str(), "nas")).collect();
+    side.config
+        .save(&config_with_plans(&plans, repository_id))
+        .await
+        .expect("the configuration is kept");
+}
+
 #[given(expr = "the plan {string} last backed up successfully and runs next in an hour")]
 #[when(expr = "the plan {string} last backed up successfully and runs next in an hour")]
 async fn backed_up(agent: &mut Agent, plan: String) {
@@ -293,6 +311,23 @@ async fn shows_plans(agent: &mut Agent, first: String, second: String) {
     let names: Vec<_> = plans.plans().iter().map(|plan| plan.plan.clone()).collect();
     assert_eq!(names, [plan_id(&first), plan_id(&second)]);
     assert_eq!(plans.left_out(), 0);
+}
+
+#[then(
+    expr = "the hub shows the agent's first {int} plans, in its configuration's order, and that it left out {int}"
+)]
+async fn shows_first_plans(agent: &mut Agent, count: usize, left_out: u64) {
+    let config = side(agent).config.load().await.expect("the configuration");
+    let first: Vec<_> = config
+        .plans()
+        .iter()
+        .take(count)
+        .map(|plan| plan.id.clone())
+        .collect();
+    let plans = shown(agent).await.plans.expect("the hub shows plans");
+    let names: Vec<_> = plans.plans().iter().map(|plan| plan.plan.clone()).collect();
+    assert_eq!(names, first);
+    assert_eq!(plans.left_out(), left_out);
 }
 
 #[then(expr = "the hub shows the plan {string} last succeeded and runs next in an hour")]

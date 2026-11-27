@@ -11,10 +11,10 @@ use super::{EpochSeconds, WireName};
 use crate::execution::OperationStatus;
 use crate::{OperationId, PlanId, Timestamp};
 
-/// The most plans one `PlansSnapshot` holds: with every plan ID at its
-/// longest, every last run and next run told, the snapshot still fits one
-/// frame of the sync (`api::sync::MAX_FRAME_BYTES`). A machine with more
-/// says how many it left out.
+/// The most plans one `PlansSnapshot` holds; a hub refuses a snapshot with
+/// more. A machine with more says how many it left out, and one whose
+/// plans don't all fit one frame of the sync (`api::sync::MAX_FRAME_BYTES`)
+/// leaves out its last plans until they do, counted the same way (#1698).
 pub const MAX_PLANS_REPORTED: usize = 16;
 
 /// How a plan's last run stands, as the machine's operation log tells it.
@@ -106,7 +106,8 @@ pub struct ReportedPlan {
 }
 
 /// A machine's plans, in the order its configuration writes them: at most
-/// [`MAX_PLANS_REPORTED`], and how many more it has.
+/// [`MAX_PLANS_REPORTED`], and how many more it has, past that cap or left
+/// out to fit the message that carries the report.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct PlansReport {
     plans: Vec<ReportedPlan>,
@@ -138,6 +139,17 @@ impl PlansReport {
     /// How many of the machine's plans the report leaves out.
     pub const fn left_out(&self) -> u64 {
         self.left_out
+    }
+
+    /// Leaves out the last plan reported, counted with the rest, as when
+    /// the report doesn't fit the message that carries it: false, and the
+    /// report unchanged, when it reports no plan.
+    pub fn leave_out_last(&mut self) -> bool {
+        if self.plans.pop().is_none() {
+            return false;
+        }
+        self.left_out = self.left_out.saturating_add(1);
+        true
     }
 }
 
