@@ -151,8 +151,9 @@ components:
     # A line of text 1em tall, or a block in rem; never moves.
     backgroundColor: "{colors.pencil-gray}"
     rounded: "{rounded.sm}"
-  machine-card:
-    # The page's color through it, inside a 1 px Field Edge; no shadow.
+  card:
+    # Every card, the shared `Card`: the page's color through it, inside a
+    # 1 px Field Edge; no shadow.
     backgroundColor: "{colors.paper}"
     rounded: "{rounded.sm}"
     padding: "1rem"
@@ -273,11 +274,11 @@ Flat. No element has a shadow. Depth is said with a Ledger Gray surface, a 1 px 
 - A card is flat: the page's color inside a 1 px Field Edge, with the small corner and no shadow. It is never filled, striped or edged in a status color: its status is a badge's words.
 - It is not a control: never a link, a button or a Tab stop, and the controls inside it are named by the thing they act on.
 - It stands in a page that answers the at-a-glance question in words before any card (a sentence that counts the items and links those that need attention), in a stable order that never moves under the reader's eyes or focus, in a grid that wraps by its own width (The 320 Rule).
-- Every card is the shared card component; a new use of it is a decision.
+- Every card is the shared card component, `Card` (`crates/web/src/components/card.rs`); a new use of it is a decision.
 
 ## Shapes
 
-Square by default, as the browser draws controls. Two radii exist: a full pill (`9999px`) for status badges and progress bars, and a small 0.25rem corner (`--radius-small`) for buttons, toasts, alerts, the pause banner, tooltips, machine cards and a skeleton's bars. Table rows are separated by one Slate Note rule under each row; there are no cell borders or zebra stripes. Each cell keeps its own rule (borders separate, with no spacing), so a pinned row header carries it as the table scrolls.
+Square by default, as the browser draws controls. Two radii exist: a full pill (`9999px`) for status badges and progress bars, and a small 0.25rem corner (`--radius-small`) for buttons, toasts, alerts, the pause banner, tooltips, cards and a skeleton's bars. Table rows are separated by one Slate Note rule under each row; there are no cell borders or zebra stripes. Each cell keeps its own rule (borders separate, with no spacing), so a pinned row header carries it as the table scrolls.
 
 ## Components
 
@@ -453,13 +454,19 @@ The native `<dialog>`, as wide as its content up to 48rem. Review dialogs put Ca
 
 A flat list of rows indented by level (capped so deep folders fit 320 px), each row at least 1.5rem tall; the selected row is bold.
 
+### Cards
+
+- **Use:** a summary of one thing that stands on its own, under The Summary Card Rule: the shared `Card`, an article named by its title, then its body, then its actions, if any.
+- **Actions:** a row of controls at the card's foot and its inline end, wrapping onto more lines where the card is narrow.
+- **Style:** the page's color inside a 1 px Field Edge with the small corner, 1rem of padding inside its edge, no shadow; no tone and no size.
+- **Layout:** a grid of columns at least 18rem wide (`CARDS`): one column at 320 px with 200 % text, several side by side on a wide page. Each card fills its row's height.
+
 ### Machine Cards
 
-- **Use:** one machine at a glance on a hub's dashboard, under The Summary Card Rule (decision 175): its hostname as the heading, "This hub" under the hub's own in words, then whether it is online, its status badge, its progress while it runs, and its last backup, next run and plans as terms and values.
-- **Style:** 1rem of padding inside its edge.
+- **Use:** one machine at a glance on a hub's dashboard, under The Summary Card Rule (decision 175), drawn in the shared card: its hostname as the heading, "This hub" under the hub's own in words, then whether it is online, its status badge, its progress while it runs, and its last backup, next run and plans as terms and values.
 - **Needs attention:** the first line under the heading, a Flag Amber Warning icon, then "Needs attention:" in bold and why, in the text's color.
-- **Controls:** at the card's foot, a Back up menu "Back up ⁨hostname⁩" on the hub's own and a link "Open ⁨hostname⁩" on every card.
-- **Layout:** a grid of columns at least 18rem wide: one column at 320 px with 200 % text, several side by side on a wide page. Cards keep their order as their machines change.
+- **Controls:** the card's actions, at its foot and its inline end: a Back up menu "Back up ⁨hostname⁩" on the hub's own and a link "Open ⁨hostname⁩" on every card.
+- **Order:** cards keep their order as their machines change.
 
 ## Do's and Don'ts
 
