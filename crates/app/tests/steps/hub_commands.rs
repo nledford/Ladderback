@@ -67,8 +67,9 @@ struct Side {
     older: bool,
     /// Whether the hub holds the machine's connection as live.
     live: bool,
-    /// The machine's sync with its hub, run while a person on the hub asks.
-    sync: Option<SyncWithHub>,
+    /// The machine's sync with its hub, run while a person on the hub asks;
+    /// on the heap, as it is too large to keep in the world on the stack.
+    sync: Option<Box<SyncWithHub>>,
     /// What the hub told the person who asked last.
     heard: Option<Result<CommandAnswer, CommandAskRefused>>,
 }
@@ -429,7 +430,7 @@ async fn syncs(agent: &mut Agent) {
         machine.zone.clone(),
     )
     .with_commands(Arc::new(side.answering()));
-    side.sync = Some(sync);
+    side.sync = Some(Box::new(sync));
     agent.pairing.first = Some(machine);
 }
 
@@ -664,7 +665,8 @@ async fn person_asks(agent: &mut Agent, command: HubCommand) {
             }
             pairing.command_asked(ask).await
         };
-        let running = std::pin::pin!(sync.run());
+        // On the heap, as the sync is: its future is large.
+        let running = Box::pin(sync.run());
         let asked = std::pin::pin!(asked);
         let Either::Right((heard, _)) = select(running, asked).await else {
             panic!("the machine's sync with its hub ended");
