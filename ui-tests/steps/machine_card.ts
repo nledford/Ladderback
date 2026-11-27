@@ -122,20 +122,34 @@ Then(
 
 // Each fact is a term and its definition, read in that order (1.3.1). The
 // list is found from its terms; only how they pair with their definitions
-// is read from the page's structure.
+// is read from the page's structure. HTML lets a `div` group a term with
+// its definitions; then every child is such a group, and each group holds
+// its terms, then its definitions, at least one of each.
 Then("the article {string} tells its facts in a description list", async function (this: BrowserWorld, name: string) {
   const card = cardIn(demoSection(this.page, "Machine card"), name);
   const terms = card.getByRole("term");
   await expect(terms.first()).toBeVisible();
-  const pairs = await terms.first().evaluate((term) => {
+  const { lists, grouped, groups } = await terms.first().evaluate((term) => {
+    const tags = (element: Element) => [...element.children].map((child) => child.tagName.toLowerCase());
+    const lists = term.closest("article")?.querySelectorAll("dl").length ?? 0;
     const list = term.closest("dl");
-    return list ? [...list.children].map((child) => child.tagName.toLowerCase()) : [];
+    if (!list) return { lists, grouped: false, groups: [] };
+    const children = [...list.children];
+    return children.some((child) => child.tagName === "DIV")
+      ? {
+          lists,
+          grouped: true,
+          groups: children.map((child) => (child.tagName === "DIV" ? tags(child) : [child.tagName.toLowerCase()])),
+        }
+      : { lists, grouped: false, groups: [tags(list)] };
   });
-  assert.ok(pairs.length >= 2, "the list tells no fact");
-  for (const [place, tag] of pairs.entries()) {
-    // A `div` may group a term with its description, as HTML allows.
-    if (tag === "div") continue;
-    assert.equal(tag, place % 2 === 0 ? "dt" : "dd", `the list's child ${place + 1} is a ${tag}`);
+  assert.equal(lists, 1, "the card tells its facts in more than one list, or none");
+  assert.ok(groups.length >= 1, "the list tells no fact");
+  // A group's terms, then its definitions; a list of no groups, one such
+  // run after another.
+  const pairs = grouped ? /^dt( dt)* dd( dd)*$/ : /^dt( dt)* dd( dd)*( dt( dt)* dd( dd)*)*$/;
+  for (const [place, group] of groups.entries()) {
+    assert.match(group.join(" "), pairs, `the list's group ${place + 1} isn't terms then definitions: ${group.join(", ") || "empty"}`);
   }
 });
 
