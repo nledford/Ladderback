@@ -6,8 +6,10 @@ Feature: The hub's dashboard of its machines
   online now, while the hub holds its connection, or else when it last
   connected (§16, decision 159), its status in a badge, the progress of the
   operation it runs in the shared progress bar, which is never announced
-  (§16, decision 83), when its last backup ended, when it runs next and how
-  many plans it has. A card whose machine needs attention, offline past a
+  (§16, decision 83), when its last backup ended, when it runs next, how
+  many plans it has, and the version of Ladderback it runs, with a quiet
+  note when that is older or newer than the hub's own, which is never
+  attention (#1707). A card whose machine needs attention, offline past a
   planned run, the last run of a plan failed, or a planned run past due,
   starts with a mark and words that say why. A sentence above the cards
   counts the machines and names, as links, those that need attention. Each
