@@ -8,7 +8,8 @@ use crate::request_checks_steps::{Request, exchange};
 use crate::{Agent, blocking};
 
 /// A request to the serving hub as its page sends it, over plain HTTP on
-/// loopback with sign-in off: the status and body of its answer.
+/// loopback, with the session and CSRF token a sign-in kept, if any: the
+/// status and body of its answer.
 pub(super) async fn page_asks(
     agent: &Agent,
     method: &str,
@@ -16,13 +17,18 @@ pub(super) async fn page_asks(
     body: String,
 ) -> (u16, String) {
     let address = agent.pairing_terminal.address.expect("a serving hub");
+    let mut headers = vec![
+        "Origin: http://localhost:{port}".to_owned(),
+        "Content-Type: application/json".to_owned(),
+    ];
+    if let Some((cookie, csrf)) = &agent.pairing_terminal.session {
+        headers.push(format!("Cookie: {cookie}"));
+        headers.push(format!("X-CSRF-Token: {csrf}"));
+    }
     let request = Request {
         method: method.to_owned(),
         path: path.to_owned(),
-        headers: vec![
-            "Origin: http://localhost:{port}".to_owned(),
-            "Content-Type: application/json".to_owned(),
-        ],
+        headers,
         default_host: true,
         body,
     };

@@ -9,7 +9,7 @@
 
 use std::io::{BufRead, BufReader};
 use std::net::SocketAddr;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::process::{Command, ExitStatus, Stdio};
 use std::sync::{Arc, Mutex, PoisonError};
 use std::time::Duration;
@@ -593,6 +593,12 @@ pub(crate) async fn serve_with_plan(agent: &mut Agent, plan: &str) {
 /// every request, so calling this again changes what a running daemon does
 /// next.
 pub(crate) async fn save_daemon_config(agent: &Agent, keep_last: Option<i64>) {
+    save_daemon_config_in(agent, &Events::config_dir(agent), keep_last).await;
+}
+
+/// [`save_daemon_config`] into the config folder `dir`, for a daemon on
+/// folders of its own, as the machine a hub's scenario pairs.
+pub(crate) async fn save_daemon_config_in(agent: &Agent, dir: &Path, keep_last: Option<i64>) {
     let repository = agent.backup.repository.clone().expect("a repository");
     let source = agent.backup.source.clone().expect("a plan source");
     let plan = agent.backup.plan.clone().expect("a plan");
@@ -656,8 +662,7 @@ pub(crate) async fn save_daemon_config(agent: &Agent, keep_last: Option<i64>) {
         None => config,
     })
     .expect("a valid configuration");
-    let dir = Events::config_dir(agent);
-    std::fs::create_dir_all(&dir).expect("the config folder");
+    std::fs::create_dir_all(dir).expect("the config folder");
     app::ports::ConfigStore::save(
         &config_adapter::FileConfigStore::new(
             dir.join("config.toml"),
