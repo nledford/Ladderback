@@ -35,8 +35,8 @@ use leptos_router::components::Redirect;
 use crate::announcer::Politeness;
 use crate::backend::{OperationsState, Rereads};
 use crate::components::button::{Appearance, Content};
+use crate::components::card::CARDS;
 use crate::components::link::rules::{Destination, LinkPlacement, Matching};
-use crate::components::machine_card::CARDS;
 use crate::components::skeleton::rules::Awaited;
 use crate::components::status_badge::rules::BadgeState;
 use crate::components::{

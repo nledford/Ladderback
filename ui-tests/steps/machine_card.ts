@@ -15,6 +15,7 @@ import { expect } from "../support/expect.ts";
 import { demoSection, eachOf } from "../support/gallery.ts";
 import { ISOLATION, namePattern } from "../support/keyboard.ts";
 import type { BrowserWorld } from "../support/world.ts";
+import { drawnFlat } from "./card.ts";
 
 // Layout rounds to fractions of a pixel; anything within this is one place.
 const ROUNDING_PX = 1;
@@ -178,38 +179,14 @@ Then("the article {string} has no attention mark", async function (this: Browser
   await expect(attentionMark(card)).toHaveCount(0);
 });
 
-// The Flat Ledger Rule: no fill of the card's own, a 1px edge all round in
-// its token, and no shadow, in light and dark. The token is read through a
-// probe, as the page resolves it.
+// The Flat Ledger Rule, as every shared card is drawn (card.ts), in light
+// and dark: no fill or stripe of its own, a 1px edge all round in the
+// token, and no shadow.
 Then(
   "each card of the demo is drawn on the page's background inside a 1px edge in {string}, with no shadow",
   async function (this: BrowserWorld, token: string) {
     for (const card of await eachOf(demoCards(this), 3)) {
-      const drawn = await card.evaluate((article, edge) => {
-        const probe = document.createElement("span");
-        document.body.append(probe);
-        probe.style.color = `var(${edge}, rgb(1, 2, 3))`;
-        const expected = getComputedStyle(probe).color;
-        probe.remove();
-        const style = getComputedStyle(article);
-        return {
-          expected,
-          fill: style.backgroundColor,
-          edges: [style.borderTopWidth, style.borderRightWidth, style.borderBottomWidth, style.borderLeftWidth],
-          styles: [style.borderTopStyle, style.borderRightStyle, style.borderBottomStyle, style.borderLeftStyle],
-          colors: [style.borderTopColor, style.borderRightColor, style.borderBottomColor, style.borderLeftColor],
-          shadow: style.boxShadow,
-        };
-      }, token);
-      assert.equal(drawn.fill, "rgba(0, 0, 0, 0)", "a card has a fill of its own");
-      assert.deepEqual(drawn.edges, ["1px", "1px", "1px", "1px"], "a card's edge isn't 1px all round");
-      assert.deepEqual(drawn.styles, ["solid", "solid", "solid", "solid"], "a card's edge isn't solid");
-      assert.deepEqual(
-        drawn.colors,
-        [drawn.expected, drawn.expected, drawn.expected, drawn.expected],
-        `a card's edge isn't in ${token} all round`,
-      );
-      assert.equal(drawn.shadow, "none", "a card casts a shadow");
+      await drawnFlat(card, token);
     }
   },
 );

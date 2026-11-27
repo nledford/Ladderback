@@ -11,7 +11,7 @@ use lepticons_data::LucideGlyph;
 use leptos::prelude::*;
 
 use super::status_badge::rules::BadgeState;
-use super::{Icon, Progress, StatusBadge, TitleLevel};
+use super::{Card, Icon, Progress, StatusBadge, TitleLevel};
 use crate::backend;
 use crate::repositories::{Run, runs};
 use crate::routes::{text_with, time_view};
@@ -27,12 +27,7 @@ pub struct CardFact {
     pub time: Option<String>,
 }
 
-/// The card's frame: the page's own color showing through, a 1px edge in
-/// Field Edge with the small corner, and no shadow (the Flat Ledger Rule).
-const FRAME: &str = "flex flex-col gap-2 [min-inline-size:0] block-full m-0 p-4 border border-solid \
-     border-field-edge rounded-(--radius-small)";
-
-/// A machine card (§4.5, decision 175): an `<article>` named by its heading,
+/// A machine card (§4.5, decision 175): the shared [`Card`], named by its heading,
 /// the machine's `hostname`, which `this_hub` marks "This hub" in words
 /// under it. Then, in this order:
 ///
@@ -49,14 +44,14 @@ const FRAME: &str = "flex flex-col gap-2 [min-inline-size:0] block-full m-0 p-4 
 ///   is never announced (decision 83) and hands focus to the heading when
 ///   it goes.
 /// - **The facts**, a description list (`facts`).
-/// - **The controls**, `children`: the caller's links and menus.
+/// - **The controls**, `children`: the caller's links and menus, the
+///   card's actions.
 ///
 /// The card itself is never a stop for Tab, nor a control: its controls
 /// and its progress bar are. Its heading takes focus from a script
-/// (`tabindex="-1"`), at `level`. It is flat: the page's color inside a 1px
-/// Field Edge with the small corner, and no shadow. Cards stand in a list
-/// the caller lays out, as `CARDS` does: one column on a narrow page,
-/// several side by side on a wide one.
+/// (`tabindex="-1"`), at `level`. It is flat, as every [`Card`] is. Cards
+/// stand in a list the caller lays out with `CARDS`: one column on a
+/// narrow page, several side by side on a wide one.
 ///
 /// What the caller owes WCAG 2.2 AA: a `heading_id` unique on the page, the
 /// heading's level in the page's outline, and controls named by the
@@ -89,22 +84,7 @@ pub fn MachineCard(
         <bdi>{hostname}</bdi>
         {hub_mark}
     };
-    let labeled_by = heading_id.clone();
     let then_focus = heading_id.clone();
-    let heading = match level {
-        TitleLevel::Two => view! {
-            <h2 id=heading_id class="m-0" tabindex="-1">
-                {name}
-            </h2>
-        }
-        .into_any(),
-        TitleLevel::Three => view! {
-            <h3 id=heading_id class="m-0" tabindex="-1">
-                {name}
-            </h3>
-        }
-        .into_any(),
-    };
     let mark = move || {
         attention.get().map(|reason| {
             // The catalog's words around the reason, the placeable it
@@ -161,8 +141,7 @@ pub fn MachineCard(
             .collect::<Vec<_>>()
     };
     view! {
-        <article class=FRAME aria-labelledby=labeled_by>
-            {heading}
+        <Card heading_id=heading_id level=level heading=move || name actions=children>
             {mark}
             <p class="m-0">{connection}</p>
             <p class="m-0">
@@ -173,13 +152,6 @@ pub fn MachineCard(
             </p>
             {bar}
             <dl class="flex flex-col gap-1 m-0">{list}</dl>
-            <div class="flex flex-wrap items-center gap-x-4 gap-y-2 mbs-auto">{children()}</div>
-        </article>
+        </Card>
     }
 }
-
-/// The classes of the list the cards stand in: a grid of columns at least
-/// 18rem wide, or the page's whole width where it is narrower, which wraps
-/// by its own width (1.4.10).
-pub(crate) const CARDS: &str = "grid grid-cols-[repeat(auto-fill,minmax(min(100%,18rem),1fr))] \
-     gap-4 m-0 p-0 list-none";
