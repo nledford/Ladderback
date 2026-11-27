@@ -195,12 +195,19 @@ async fn kept_pause(cache: &InMemoryLeaseCache) {
     cache.save_pauses(&paused).await.unwrap();
 }
 
+/// The first read that sees no lease notes the pause at once, so a page
+/// says it from the moment maintenance is asked for, not from the next
+/// watch (#1671); the watch keeps its date.
 #[tokio::test]
 async fn a_paired_machine_notes_and_reads_its_pauses_now() {
     let machine = machine(paired().await);
-    assert_eq!(machine.leases.paused(Some(&repository('a'))).await, None);
+    assert_eq!(
+        machine.leases.paused(Some(&repository('a'))).await,
+        Some(start())
+    );
+    machine.clock.advance(SignedDuration::from_hours(1));
     assert_eq!(machine.leases.watch(&[repository('a')]).await, Ok(vec![]));
-    machine.clock.advance(SignedDuration::from_hours(24));
+    machine.clock.advance(SignedDuration::from_hours(23));
     assert_eq!(
         machine.leases.paused(Some(&repository('a'))).await,
         Some(start())
@@ -241,8 +248,10 @@ async fn a_machine_that_isnt_paired_is_never_paused_and_drops_what_it_noted() {
     assert_eq!(machine.cache.load().await.unwrap().pauses().count(), 0);
 }
 
+/// A watch whose pin can't be read notes nothing, and says why in the log
+/// rather than nothing at all (#1671).
 #[tokio::test]
-async fn a_pin_that_cant_be_read_notes_and_says_nothing() {
+async fn a_pin_that_cant_be_read_notes_nothing_and_says_so_in_the_log() {
     let machine = machine(Arc::new(InMemoryIdentity::unreadable(
         IdentityError::Damaged {
             file: KeyFile::HubPin,
@@ -251,8 +260,228 @@ async fn a_pin_that_cant_be_read_notes_and_says_nothing() {
     kept_pause(&machine.cache).await;
     assert_eq!(machine.leases.paused(Some(&repository('a'))).await, None);
     machine.clock.advance(SignedDuration::from_hours(30 * 24));
+    crate::test_log::capture_the_log();
     assert_eq!(machine.leases.watch(&[repository('a')]).await, Ok(vec![]));
     assert_eq!(machine.cache.load().await.unwrap().pauses().count(), 1);
+    assert_eq!(
+        logged(),
+        vec![(
+            log::Level::Warn,
+            "the maintenance watch noted no pause: this machine's hub pin can't be read \
+             (Damaged { file: HubPin })"
+                .to_owned()
+        )]
+    );
+}
+
+/// What `app::leases` logged since the capture began.
+fn logged() -> Vec<(log::Level, String)> {
+    crate::test_log::logged_by("app::leases")
+}
+
+/// A paired machine's watch says in one line what it found: how many of
+/// the repositories it asks to maintain are paused (#1671).
+#[tokio::test]
+async fn a_paired_machines_watch_says_what_it_found_in_one_line() {
+    let machine = machine(paired().await);
+    machine
+        .leases
+        .take(&grants(start()), 0, start())
+        .await
+        .unwrap();
+    crate::test_log::capture_the_log();
+    assert_eq!(
+        machine
+            .leases
+            .watch(&[repository('a'), repository('b')])
+            .await,
+        Ok(vec![])
+    );
+    assert_eq!(
+        logged(),
+        vec![(
+            log::Level::Info,
+            "the maintenance watch found 1 of the 2 repositories this machine asks to \
+             maintain paused, for want of a lease from its hub"
+                .to_owned()
+        )]
+    );
+}
+
+/// A cache whose pauses can't be written, as a read-only database.
+struct PausesUnwritable;
+
+#[async_trait::async_trait]
+impl LeaseCache for PausesUnwritable {
+    async fn load(&self) -> Result<HeldLeases, StoreError> {
+        Ok(HeldLeases::default())
+    }
+
+    async fn save(&self, _leases: &HeldLeases) -> Result<(), StoreError> {
+        Ok(())
+    }
+
+    async fn save_pauses(&self, _leases: &HeldLeases) -> Result<(), StoreError> {
+        Err(StoreError::Unavailable {
+            detail: "read-only".to_owned(),
+        })
+    }
+}
+
+/// A pause a read can't note is still said: the machine maintains nothing
+/// there either way.
+#[tokio::test]
+async fn a_pause_a_read_cant_note_is_said_all_the_same() {
+    let leases = MaintenanceLeases::new(
+        paired().await,
+        Arc::new(PausesUnwritable),
+        Arc::new(FakeClock::new(start())),
+    );
+    assert_eq!(leases.paused(Some(&repository('a'))).await, Some(start()));
+}
+
+/// A cache that can't be read at all, whose failure names a value nobody
+/// checked (I4).
+struct Unreadable;
+
+#[async_trait::async_trait]
+impl LeaseCache for Unreadable {
+    async fn load(&self) -> Result<HeldLeases, StoreError> {
+        Err(StoreError::Unavailable {
+            detail: "demo-canary-detail".to_owned(),
+        })
+    }
+
+    async fn save(&self, _leases: &HeldLeases) -> Result<(), StoreError> {
+        self.load().await.map(drop)
+    }
+
+    async fn save_pauses(&self, _leases: &HeldLeases) -> Result<(), StoreError> {
+        self.load().await.map(drop)
+    }
+}
+
+/// A configuration that can't be read.
+struct ConfigUnreadable;
+
+fn config_error() -> crate::ports::ConfigError {
+    crate::ports::ConfigError::Unavailable {
+        file: "config.toml".to_owned(),
+        detail: "demo-canary-detail".to_owned(),
+    }
+}
+
+#[async_trait::async_trait]
+impl ConfigStore for ConfigUnreadable {
+    async fn load(&self) -> Result<domain::planning::AgentConfig, crate::ports::ConfigError> {
+        Err(config_error())
+    }
+
+    async fn save(
+        &self,
+        _config: &domain::planning::AgentConfig,
+    ) -> Result<(), crate::ports::ConfigError> {
+        Err(config_error())
+    }
+
+    async fn record_id(
+        &self,
+        _alias: &RepositoryAlias,
+        _read: &domain::planning::RepositoryConfig,
+        _id: &RepositoryId,
+    ) -> Result<(), crate::ports::RecordError> {
+        Err(crate::ports::RecordError::Store(config_error()))
+    }
+}
+
+/// A configuration that asks to maintain `photos` (ID `a`) here.
+async fn maintaining_photos() -> Arc<dyn ConfigStore> {
+    use std::collections::BTreeMap;
+
+    use domain::planning::{
+        AgentConfig, AgentSettings, GroupBy, Hooks, Maintenance, RepositoryConfig,
+        RepositorySettings,
+    };
+    use domain::secrets::SecretRef;
+    let entry = RepositoryConfig {
+        locations: Default::default(),
+        id: Some(repository('a')),
+        settings: RepositorySettings {
+            repository: "/srv/photos".to_owned(),
+            repo_hot: None,
+            password: SecretRef::Env("DEMO_PASSWORD".to_owned()),
+            options: BTreeMap::new(),
+            options_hot: BTreeMap::new(),
+            options_cold: BTreeMap::new(),
+        },
+        maintenance: Maintenance::Local,
+        group_by: GroupBy::default(),
+        hooks: Hooks::default(),
+    };
+    let config = AgentConfig::new(
+        AgentSettings::default(),
+        Hooks::default(),
+        BTreeMap::from([(RepositoryAlias::parse("photos").unwrap(), entry)]),
+        vec![],
+    )
+    .unwrap();
+    let store = crate::fakes::InMemoryConfigStore::new();
+    store.save(&config).await.unwrap();
+    Arc::new(store)
+}
+
+/// The pause watch of a paired machine over `config` and `cache`.
+async fn watching(config: Arc<dyn ConfigStore>, cache: Arc<dyn LeaseCache>) -> WatchPauses {
+    let leases = Arc::new(MaintenanceLeases::new(
+        paired().await,
+        cache,
+        Arc::new(FakeClock::new(start())),
+    ));
+    let notify = Arc::new(Notify::new(
+        config.clone(),
+        Arc::new(crate::fakes::InMemoryOperationStore::new()),
+        Arc::new(crate::fakes::FakeSecrets::default()),
+        Arc::new(crate::fakes::RecordingNotifier::new()),
+    ));
+    WatchPauses::new(config, leases, notify)
+}
+
+/// A watch whose lease cache can't be read notes nothing, and says so in
+/// the log by the failure's code alone (#1671, I4).
+#[tokio::test]
+async fn a_watch_whose_cache_cant_be_read_says_so_in_the_log() {
+    let watch = watching(maintaining_photos().await, Arc::new(Unreadable)).await;
+    crate::test_log::capture_the_log();
+    assert_eq!(watch.watch().await, vec![]);
+    assert_eq!(
+        logged(),
+        vec![(
+            log::Level::Warn,
+            "the maintenance watch noted no pause: the lease cache can't be read or written \
+             (store-unavailable)"
+                .to_owned()
+        )]
+    );
+}
+
+/// A watch whose configuration can't be read notes nothing, and says so in
+/// the log (#1671).
+#[tokio::test]
+async fn a_watch_whose_configuration_cant_be_read_says_so_in_the_log() {
+    let watch = watching(
+        Arc::new(ConfigUnreadable),
+        Arc::new(InMemoryLeaseCache::default()),
+    )
+    .await;
+    crate::test_log::capture_the_log();
+    assert_eq!(watch.watch().await, vec![]);
+    assert_eq!(
+        logged(),
+        vec![(
+            log::Level::Warn,
+            "the maintenance watch noted no pause: the configuration can't be read".to_owned()
+        )]
+    );
 }
 
 #[tokio::test]

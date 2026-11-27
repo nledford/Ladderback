@@ -13,7 +13,7 @@ use app::fakes::{
 };
 use app::leases::{MaintenanceLeases, WatchPauses};
 use app::notifications::Notify;
-use app::ports::{ConfigStore, Identity, NotifyError};
+use app::ports::{ConfigStore, Identity, LeaseCache, NotifyError};
 use domain::fleet::{HubAddress, HubPin, PublicKey, TokenTls};
 use domain::fleet::{SIGNATURE_BYTES, Signature};
 use domain::maintenance::{Grant, LeaseEpoch, RepoGrants};
@@ -120,6 +120,7 @@ fn config() -> AgentConfig {
 struct Machine {
     watch: WatchPauses,
     leases: Arc<MaintenanceLeases>,
+    cache: Arc<InMemoryLeaseCache>,
     clock: Arc<FakeClock>,
     notifier: Arc<RecordingNotifier>,
 }
@@ -137,9 +138,10 @@ async fn machine() -> Machine {
     );
     identity.write_pin(&pin).await.expect("pinned");
     let clock = Arc::new(FakeClock::new(start()));
+    let cache = Arc::new(InMemoryLeaseCache::default());
     let leases = Arc::new(MaintenanceLeases::new(
         identity,
-        Arc::new(InMemoryLeaseCache::default()),
+        cache.clone(),
         clock.clone(),
     ));
     let grants = RepoGrants {
@@ -171,6 +173,7 @@ async fn machine() -> Machine {
     Machine {
         watch: WatchPauses::new(config, leases.clone(), notify),
         leases,
+        cache,
         clock,
         notifier,
     }
@@ -193,10 +196,20 @@ fn told(notifier: &RecordingNotifier) -> Vec<(Option<RepositoryAlias>, Timestamp
 async fn each_repository_maintained_here_is_paused_while_it_holds_no_lease() {
     let machine = machine().await;
     assert_eq!(machine.watch.watch().await, vec![]);
+    // The watch noted `music` alone: `photos` holds its lease, `films` is
+    // left to the hub, not this machine's to maintain, and `notes` has no
+    // ID a pause could be kept under.
+    let noted: Vec<RepositoryId> = machine
+        .cache
+        .load()
+        .await
+        .expect("the cache answers")
+        .pauses()
+        .map(|(repository, _)| repository.clone())
+        .collect();
+    assert_eq!(noted, vec![id('b')]);
     assert_eq!(machine.leases.paused(Some(&id('a'))).await, None);
     assert_eq!(machine.leases.paused(Some(&id('b'))).await, Some(start()));
-    // Left to the hub: not this machine's to maintain.
-    assert_eq!(machine.leases.paused(Some(&id('c'))).await, None);
     assert_eq!(machine.leases.paused(None).await, None);
     machine.clock.advance(days(9));
     assert_eq!(

@@ -152,8 +152,9 @@ async fn the_plans_list_carries_the_planned_run_of_each_scheduled_plan() {
 
 /// On a paired machine, the repositories list says since when the
 /// maintenance of each repository maintained here is paused for want of a
-/// lease, as RFC 3339, and nothing for a repository maintained elsewhere or
-/// one whose pause isn't noted yet (decision 158).
+/// lease, as RFC 3339: since the pause a watch noted, or, for one no watch
+/// noted yet, since this read, which notes it (#1671); nothing for a
+/// repository maintained elsewhere (decision 158).
 #[tokio::test]
 async fn the_repositories_list_says_since_when_maintenance_here_is_paused() {
     use domain::fleet::{HubAddress, HubPin, PublicKey, TokenTls};
@@ -243,7 +244,7 @@ async fn the_repositories_list_says_since_when_maintenance_here_is_paused() {
     assert_eq!(
         shown,
         vec![
-            ("docs", None),
+            ("docs", Some("2027-01-15T08:00:00Z")),
             ("music", None),
             ("photos", Some("2027-01-15T08:00:00Z")),
         ]

@@ -1410,6 +1410,14 @@ async fn paused_since(world: &mut Agent, repository: String, machine: String, da
     assert_eq!(paused(world, &machine, &repository).await, Some(since));
 }
 
+/// Paused since `machine`'s clock reads now: the read noted the pause the
+/// moment it saw no lease, with no watch since (#1671).
+#[then(expr = "maintenance of {string} on {string} is paused since now")]
+async fn paused_since_now(world: &mut Agent, repository: String, machine: String) {
+    let now = world.ownership.holder(&machine).await.clock.now();
+    assert_eq!(paused(world, &machine, &repository).await, Some(now));
+}
+
 #[then(expr = "maintenance of {string} on {string} isn't paused")]
 async fn not_paused(world: &mut Agent, repository: String, machine: String) {
     assert_eq!(paused(world, &machine, &repository).await, None);
