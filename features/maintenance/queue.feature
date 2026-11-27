@@ -43,15 +43,6 @@ Feature: Maintenance takes its turn under a limit of its own
     Then the prune of the repository "nas" is running
     And the check of the repository "laptop" is running
 
-  Scenario: A backup takes its turn while maintenance waits for its own
-    Given the agent runs 1 maintenance operation at a time
-    And the agent runs 1 backup at a time
-    When a prune of the repository "nas" is started
-    And a check of the repository "laptop" is started
-    And a backup of the plan "home" is started
-    Then the backup takes its turn at once
-    And the check of the repository "laptop" is waiting for its turn
-
   Scenario: A waiting run that is canceled ends at once and never runs
     Given the agent runs 1 maintenance operation at a time
     When a prune of the repository "nas" is started

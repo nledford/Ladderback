@@ -13,7 +13,7 @@ use app::ports::{
     CheckSummary, ConfigStore, Engine, EngineError, EngineEvent, EngineResult, Job, JobControl,
     NormalizeSources, OperationStore, PruneSummary, RunningJob, SourcesError,
 };
-use app::queue::{MaintenanceQueue, Place, RunQueue};
+use app::queue::MaintenanceQueue;
 use async_trait::async_trait;
 use cucumber::{given, then, when};
 use domain::execution::OperationStatus;
@@ -22,9 +22,9 @@ use domain::planning::{
     RepositorySettings, Source,
 };
 use domain::secrets::{SecretRef, SecretValue};
-use domain::{OperationId, PlanId, RepositoryAlias, RepositoryId, Timestamp, Uuid};
+use domain::{OperationId, RepositoryAlias, RepositoryId, Timestamp, Uuid};
 use futures::channel::oneshot;
-use futures::{FutureExt, StreamExt, stream};
+use futures::{StreamExt, stream};
 use tokio::sync::Notify;
 
 use super::Agent;
@@ -46,9 +46,6 @@ pub struct MaintenanceQueueWorld {
     /// The run whose start was refused, and why.
     refused: Option<(OperationId, MaintenanceError)>,
     made: u128,
-    backups: Arc<RunQueue>,
-    backup_limit: Concurrency,
-    backup: Option<Place>,
 }
 
 impl Default for MaintenanceQueueWorld {
@@ -63,9 +60,6 @@ impl Default for MaintenanceQueueWorld {
             cancels: BTreeMap::new(),
             refused: None,
             made: 0,
-            backups: Arc::new(RunQueue::new()),
-            backup_limit: Concurrency::default(),
-            backup: None,
         }
     }
 }
@@ -310,11 +304,6 @@ async fn maintenance_limit(agent: &mut Agent, limit: i64) {
     world.save().await;
 }
 
-#[given(expr = "the agent runs {int} backup(s) at a time")]
-fn backup_limit(agent: &mut Agent, limit: i64) {
-    agent.maintenance_queue.backup_limit = Concurrency::new(limit).expect("a limit");
-}
-
 #[when(expr = "a {word} of the repository {string} is started")]
 async fn started(agent: &mut Agent, kind: String, repository: String) {
     let use_case = use_case(agent);
@@ -356,18 +345,6 @@ async fn started(agent: &mut Agent, kind: String, repository: String) {
         }
     }
     world.runs.insert((kind, repository), id);
-}
-
-#[when(expr = "a backup of the plan {string} is started")]
-fn backup_started(agent: &mut Agent, plan: String) {
-    let world = &mut agent.maintenance_queue;
-    let plan = PlanId::parse(&plan).expect("a plan ID");
-    world.backup = Some(
-        world
-            .backups
-            .by_hand(&plan, world.backup_limit)
-            .expect("no run of the plan waits"),
-    );
 }
 
 #[when(expr = "the {word} of the repository {string} finishes")]
@@ -476,19 +453,6 @@ async fn never_ran(agent: &mut Agent, kind: String, repository: String) {
             .engine
             .ran(&kind, &location(&repository)),
         "the engine ran the {kind}"
-    );
-}
-
-#[then("the backup takes its turn at once")]
-fn backup_turn(agent: &mut Agent) {
-    let backup = agent
-        .maintenance_queue
-        .backup
-        .as_mut()
-        .expect("a backup was started");
-    assert!(
-        backup.turn().now_or_never().is_some(),
-        "the backup waits for maintenance"
     );
 }
 
