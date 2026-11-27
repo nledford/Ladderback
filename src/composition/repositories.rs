@@ -53,6 +53,10 @@ pub(super) struct RepositoryService {
     /// Where a typed password is kept when the person chose the system
     /// keyring (§10.2): the OS keyring the resolver reads.
     keyring: Arc<dyn Keyring>,
+    /// The leases a paired machine maintains under, whose pause of a
+    /// repository begins or ends when maintenance of it is turned on or off
+    /// (#1671).
+    leases: Option<Arc<app::leases::MaintenanceLeases>>,
 }
 
 impl RepositoryService {
@@ -74,7 +78,15 @@ impl RepositoryService {
             operations,
             writes,
             keyring: Arc::new(SystemSecrets::default()),
+            leases: None,
         }
+    }
+
+    /// The service noting, in `leases`, the pause of a repository whose
+    /// maintenance it turns on while this paired machine holds no lease on
+    /// it (#1671).
+    pub(super) fn with_leases(self, leases: Option<Arc<app::leases::MaintenanceLeases>>) -> Self {
+        Self { leases, ..self }
     }
 
     /// The service keeping typed passwords in `keyring` rather than in the
@@ -281,14 +293,16 @@ impl Repositories for RepositoryService {
         // The change runs under the configuration's write lock, which a
         // maintenance start holds too while it reads again whether this agent
         // maintains the repository and takes its slot (I1).
-        match ChangeMaintainer::new(
+        let change = ChangeMaintainer::new(
             Arc::clone(&self.config),
             Arc::clone(&self.operations),
             Arc::clone(&self.writes),
-        )
-        .change(&parsed, request.maintain_here)
-        .await
-        {
+        );
+        let change = match &self.leases {
+            Some(leases) => change.with_leases(Arc::clone(leases)),
+            None => change,
+        };
+        match change.change(&parsed, request.maintain_here).await {
             Ok(_) => Ok(()),
             Err(MaintainerError::Unknown(_)) => Err(RepositoriesError::Unknown { alias }),
             Err(MaintainerError::Busy { running }) => Err(RepositoriesError::MaintenanceBusy {

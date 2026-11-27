@@ -645,7 +645,7 @@ impl RunMaintenance {
                 held_to(held, || forget.selection())?;
                 (
                     // The forget's own listing tells the hosts.
-                    self.other_hosts_in(&config, alias, &partition),
+                    self.other_hosts_in(&config, alias, &partition).await,
                     Some(partition),
                     Job::Forget(ForgetJob {
                         repository: access,
@@ -669,7 +669,7 @@ impl RunMaintenance {
                     .collect();
                 let tags = PlanTags::new(adoption.into, self.agent);
                 (
-                    self.other_hosts_in(&config, alias, &partition),
+                    self.other_hosts_in(&config, alias, &partition).await,
                     Some(partition),
                     Job::Rewrite(RewriteJob {
                         repository: access,
@@ -975,7 +975,7 @@ impl RunMaintenance {
                 let (partition, forget) = self.forget_of(op, &config, alias, &access).await?;
                 Ok((
                     MaintenancePreview::Forget(forget),
-                    self.other_hosts_in(&config, alias, &partition),
+                    self.other_hosts_in(&config, alias, &partition).await,
                 ))
             }
             MaintenanceKind::Adopt(adoption) => {
@@ -989,7 +989,7 @@ impl RunMaintenance {
                         into: adoption.into.clone(),
                         snapshots,
                     }),
-                    self.other_hosts_in(&config, alias, &partition),
+                    self.other_hosts_in(&config, alias, &partition).await,
                 ))
             }
             MaintenanceKind::Prune => {
@@ -1146,7 +1146,7 @@ impl RunMaintenance {
                 .filter_map(|(_, result)| result.ok())
                 .collect()
         };
-        let other_hosts = self.other_hosts_in(&config, alias, &partition);
+        let other_hosts = self.other_hosts_in(&config, alias, &partition).await;
         // Which plan takes orphaned history is the person's choice, so every
         // plan of the repository is offered, to a group an adoption can name:
         // it names both tags, so a group missing one can't be adopted.
@@ -1543,14 +1543,29 @@ impl RunMaintenance {
         .await
     }
 
+    /// Whether this machine, paired with a hub, holds no live lease on the
+    /// repository `alias`, so it forgets and prunes nothing there and warns
+    /// of no other host (#1671): never for a machine that isn't paired.
+    async fn unleased(&self, config: &AgentConfig, alias: &RepositoryAlias) -> bool {
+        let id = config.repository(alias).and_then(|entry| entry.id.as_ref());
+        match &self.leases {
+            Some(leases) => leases.permits(id).await.is_err(),
+            None => false,
+        }
+    }
+
     /// The other hosts of the repository `alias` among the snapshots one
-    /// listing of it was partitioned from (§7.3).
-    fn other_hosts_in(
+    /// listing of it was partitioned from (§7.3); none on a paired machine
+    /// that holds no lease on it.
+    async fn other_hosts_in(
         &self,
         config: &AgentConfig,
         alias: &RepositoryAlias,
         partition: &Partition,
     ) -> OtherHosts {
+        if self.unleased(config, alias).await {
+            return OtherHosts::default();
+        }
         let snapshots = partition
             .managed
             .iter()
@@ -1574,7 +1589,8 @@ impl RunMaintenance {
 
     /// The other hosts of the repository `alias`, for a run that lists
     /// nothing of its own (a prune): a listing of it. Only a repository this
-    /// agent maintains gets this far.
+    /// agent maintains gets this far. A paired machine that holds no lease
+    /// on it lists nothing and warns of no other host.
     async fn listed_other_hosts(
         &self,
         op: OperationId,
@@ -1582,6 +1598,9 @@ impl RunMaintenance {
         alias: &RepositoryAlias,
         access: &RepositoryAccess,
     ) -> Result<OtherHosts, MaintenanceError> {
+        if self.unleased(config, alias).await {
+            return Ok(OtherHosts::default());
+        }
         let snapshots: Vec<Snapshot> = list(
             self.engine.as_ref(),
             self.clock.as_ref(),

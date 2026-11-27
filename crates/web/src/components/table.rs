@@ -350,8 +350,10 @@ pub struct Footer {
 /// It sits in a frame that scrolls sideways where its columns are wider than
 /// the page (a small screen, larger text): a region named as the table is,
 /// which a keyboard focuses and scrolls, each row's header pinned at its
-/// start. The columns are as wide as they say, in rem, never as their
-/// content, so a cell that changes moves no column (#194).
+/// start, and its caption's words wrapped within the frame's width, pinned
+/// there too, so the table's name reads whole (#1695). The columns are as
+/// wide as they say, in rem, never as their content, so a cell that changes
+/// moves no column (#194).
 ///
 /// `rows` are told apart by `key` and updated in place: a row is built once,
 /// when it first shows, and a change to it reaches only what its cells bind
@@ -610,7 +612,14 @@ where
                                         .map(|caption| {
                                             view! {
                                                 <caption id=caption_id.clone() class="text-muted">
-                                                    {caption}
+                                                    // The caption is as wide as the table, so
+                                                    // its words wrap in a box as wide as the
+                                                    // frame (`100cqi`), pinned at the frame's
+                                                    // start as it scrolls: the table's name
+                                                    // reads whole without scrolling (#1695).
+                                                    <span class="sticky inset-s-0 block max-inline-[100cqi]">
+                                                        {caption}
+                                                    </span>
                                                 </caption>
                                             }
                                         })}

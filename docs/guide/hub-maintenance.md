@@ -20,6 +20,8 @@ To tell, a machine lists each repository it asks to maintain at most once a day,
 
 A paired machine that holds no lease on a repository it asks to maintain forgets, prunes, checks and adopts nothing there; its backups run as usual. The **Repositories** page says **Maintained from this machine, but paused: it holds no lease on this repository from its hub.**, and the **Snapshots** page says since when. **Forget snapshots** and the other maintenance buttons are refused with the code `maintenance-no-lease`. Maintenance starts again once the hub grants a lease.
 
+The pause shows from the moment you turn maintenance on with **Turn on maintenance** for a repository the hub doesn't lease to this machine, for example one it leases to another machine, and the **Snapshots** page warns of it at once. Turning maintenance off ends the pause. A repository whose ID was never recorded shows no pause, though its maintenance is refused all the same.
+
 Once maintenance of a repository has been paused for 14 days, the machine sends the notification event `repo.maintenance_paused` once, to each rule that names it, so a machine that lost its hub doesn't go unnoticed.
 
 `maintenance = "hub"` in a repository's entry leaves it to the hub, and the Repositories page says **Left to the hub to maintain.** The hub doesn't maintain repositories itself yet, so nothing maintains such a repository.

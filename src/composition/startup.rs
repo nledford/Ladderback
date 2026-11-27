@@ -863,15 +863,18 @@ async fn state_over(
         Arc::new(SystemClock),
     ));
     let operations: Arc<dyn Operations> = Arc::<PlanRunner>::clone(&runner);
-    let repositories: Arc<dyn Repositories> = Arc::new(RepositoryService::new(
-        Arc::new(SystemClock),
-        Arc::clone(&engine),
-        Arc::<NameWatch>::clone(&conditions.link),
-        resolve.as_ref().clone(),
-        Arc::clone(&config),
-        Arc::clone(&store),
-        Arc::clone(&writes),
-    ));
+    let repositories: Arc<dyn Repositories> = Arc::new(
+        RepositoryService::new(
+            Arc::new(SystemClock),
+            Arc::clone(&engine),
+            Arc::<NameWatch>::clone(&conditions.link),
+            resolve.as_ref().clone(),
+            Arc::clone(&config),
+            Arc::clone(&store),
+            Arc::clone(&writes),
+        )
+        .with_leases(leases.clone()),
+    );
     let (changed, changes) = app::schedule::config_changes();
     // The turns to list a repository's snapshots: the snapshot list's
     // listings and the forget previews' reads take them alike (#710, #967).
