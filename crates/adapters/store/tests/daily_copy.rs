@@ -244,3 +244,26 @@ async fn an_operation_saved_while_a_copy_is_taken_is_saved() {
     assert_eq!(held_in(&daily(&scratch), &[1, 50]).await, vec![1, 50]);
     store.close().await;
 }
+
+#[tokio::test]
+async fn a_copy_that_fails_after_it_is_written_leaves_what_was_there_and_no_work_file() {
+    let scratch = Scratch::new();
+    let store = scratch.open().await;
+    save(&store, &queued_backup(1), None).await;
+    // A folder in the copy's place, with a file in it, which no rename
+    // replaces: the copy fails once `VACUUM INTO` has written it.
+    fs::create_dir(daily(&scratch)).expect("a folder in the copy's place");
+    let held = daily(&scratch).join("held");
+    fs::write(&held, "what was there").expect("a file in the folder");
+    let taken = store.take().await;
+    assert!(
+        matches!(taken, Err(DailyCopyError::Failed { .. })),
+        "the copy fails: {taken:?}"
+    );
+    assert_eq!(
+        fs::read_to_string(&held).expect("what was there is kept"),
+        "what was there"
+    );
+    assert!(!work(&scratch).exists(), "no work file is left");
+    store.close().await;
+}
