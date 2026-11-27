@@ -359,6 +359,14 @@ Then("the card {string} has the link {string} and no button", async function (th
   await expect(card.getByRole("button")).toHaveCount(0);
 });
 
+// A hub with no plan has nothing to back up: its card offers no menu.
+Then("the hub's own card has its Open link and no button", async function (this: BrowserWorld) {
+  const { hostname } = await hubItself(this);
+  const card = await hubsCard(this);
+  await expect(card.getByRole("link", { name: namePattern(`Open ${hostname}`) })).toHaveCount(1);
+  await expect(card.getByRole("button")).toHaveCount(0);
+});
+
 When("I press Tab until focus is on the hub's own Open link", async function (this: BrowserWorld) {
   const { hostname } = await hubItself(this);
   await pressUntilFocusIsOn(this, "Tab", "link", `Open ${hostname}`);

@@ -135,6 +135,26 @@ Feature: The hub's dashboard of its machines
     And the hub's own card tells its status "Succeeded"
     And the page has no accessibility violations
 
+  Scenario Outline: The hub's own Back up menu opens inside the window on a narrow page, at <size> percent text
+    Given a viewport of 320 by 640 pixels
+    And the reader sets the text size to <size> percent
+    And a hub with sign-in off and a demo plan "demo-home" with a tiny scratch repository
+    When I open the web UI
+    And I skip to the content
+    And I press Tab until focus is on the button "Back up"
+    And I press Enter
+    Then the menu of the button "Back up" lies inside the window
+
+    Examples:
+      | size |
+      | 100  |
+      | 200  |
+
+  Scenario: A hub with no plan has no Back up menu on its card
+    Given a hub with sign-in off
+    When I open the web UI
+    Then the hub's own card has its Open link and no button
+
   Scenario: A paired machine's card has no Back up menu
     Given a hub with sign-in off
     And a machine named "demo-laptop" is approved on the hub
