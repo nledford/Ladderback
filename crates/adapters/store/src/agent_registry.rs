@@ -6,10 +6,10 @@ use app::ports::{Added, AgentRegistry, StoreError};
 use async_trait::async_trait;
 use domain::fleet::{
     AgentRecord, AgentStatus, ApprovalRefused, BindingKind, Fingerprint, HostnameKey, KEY_BYTES,
-    MachineCheck, MachineFingerprint, MachineZone, PENDING_LIFE, PairRefusal, PairRequest, Pairing,
-    PairingView, ProofRefusal, ProofRequest, ProofView, Proved, PublicKey, RemovalRefused,
-    SecondMachine, TokenId, TokenRecord, TokenUse, Tombstone, admits_unused_token, decide_approval,
-    decide_pairing, decide_proof, decide_removal, voids_tokens_for_new_key,
+    MachineCheck, MachineFingerprint, MachineVersion, MachineZone, PENDING_LIFE, PairRefusal,
+    PairRequest, Pairing, PairingView, ProofRefusal, ProofRequest, ProofView, Proved, PublicKey,
+    RemovalRefused, SecondMachine, TokenId, TokenRecord, TokenUse, Tombstone, admits_unused_token,
+    decide_approval, decide_pairing, decide_proof, decide_removal, voids_tokens_for_new_key,
 };
 use domain::{AgentId, Timestamp};
 use sqlx::{Connection, SqliteConnection};
@@ -409,6 +409,15 @@ impl AgentRegistry for SqliteStore {
             .await
             .map_err(unavailable)?;
         Ok(())
+    }
+
+    async fn record_version(
+        &self,
+        agent_id: AgentId,
+        version: Option<&MachineVersion>,
+    ) -> Result<(), StoreError> {
+        let _ = (agent_id, version);
+        todo!()
     }
 
     async fn record_seen(&self, agent_id: AgentId, now: Timestamp) -> Result<(), StoreError> {

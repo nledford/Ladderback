@@ -228,7 +228,7 @@ fn follow_own(fleet: Fleet, localizer: &Arc<Localizer>, visit: &Visit) {
             return;
         };
         let own = status.with(|status| {
-            operations.with(|operations| own_machine(&identity, status.as_ref(), operations))
+            operations.with(|operations| own_machine(&identity, status.as_ref(), operations, None))
         });
         fleet.own.set(Own::Read(own.map(Box::new)));
     });

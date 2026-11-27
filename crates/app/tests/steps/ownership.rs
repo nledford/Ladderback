@@ -192,6 +192,7 @@ impl OwnershipWorld {
             counter: 1,
             last_seen: now,
             zone: None,
+            version: None,
         });
         self.machines.insert(name.to_owned(), agent_id);
     }

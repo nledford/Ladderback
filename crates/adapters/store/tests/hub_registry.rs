@@ -74,6 +74,7 @@ async fn the_rows_the_cases_start_from_are_good() {
             counter: u64::MAX,
             last_seen: at(20),
             zone: None,
+            version: None,
         }])
     );
     assert_eq!(

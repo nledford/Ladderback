@@ -934,6 +934,7 @@ fn held(n: u8, name: &str, pending: bool) -> AgentRecord {
         counter: 1,
         last_seen: at,
         zone: None,
+        version: None,
     }
 }
 

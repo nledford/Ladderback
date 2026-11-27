@@ -191,6 +191,7 @@ pub(crate) fn agent(row: &SqliteRow) -> Result<AgentRecord, StoreError> {
         counter,
         last_seen: reader.required_time("last_seen")?,
         zone,
+        version: None,
     })
 }
 
