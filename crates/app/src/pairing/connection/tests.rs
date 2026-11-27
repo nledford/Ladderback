@@ -3483,3 +3483,45 @@ async fn i1_a_floor_another_hubs_key_signed_is_logged_and_doesnt_count() {
         "{warned:?}"
     );
 }
+
+/// The hub keeps the commands a machine's `Hello` said it takes with its
+/// live connection (decision 176); a machine whose `Hello` says none, as a
+/// 0.6.0 one, takes none.
+#[tokio::test]
+async fn the_hub_keeps_the_commands_a_live_machine_takes() {
+    use crate::ports::OutboxEntry;
+    use domain::fleet::{Accepts, AgentReport, Happening, OutboxEpoch, ReportSeq};
+
+    let entry = |place| OutboxEntry {
+        epoch: OutboxEpoch::from_uuid(Uuid::from_u128(0xe1)),
+        seq: ReportSeq::new(place).unwrap(),
+        report: AgentReport {
+            op_id: domain::OperationId::from_uuid(Uuid::from_u128(0x0b)),
+            happening: Happening::Started,
+            at: EpochSeconds::from_seconds(1_800_000_000),
+        },
+    };
+    for (accepts, kept) in [
+        (Some(Accepts::all()), Accepts::all()),
+        (Some(Accepts::none()), Accepts::none()),
+        (None, Accepts::none()),
+    ] {
+        let inbox = Arc::new(FullInbox::default());
+        let hub = hub_with(1, |pairing| pairing.with_inbox(inbox.clone()));
+        let identity = paired(&hub, 1).await;
+        let waiting = hub.registry.agent(agent_id(1)).await.unwrap().unwrap();
+        hub.pairing.approve(&waiting).await.unwrap().unwrap();
+        let connecting = connecting(
+            identity,
+            Arc::new(LoopbackHubConnector::to(hub.pairing.clone())),
+        );
+        let (_, mut channel) = connecting
+            .connect_accepting(agent_id(1), hostname(1), None, None, accepts)
+            .await
+            .unwrap();
+        channel.send_report(&entry(1)).await.unwrap();
+        channel.receive_ack().await.unwrap();
+        assert!(hub.pairing.is_online(agent_id(1)));
+        assert_eq!(hub.pairing.accepts_of(agent_id(1)), kept);
+    }
+}
