@@ -25,4 +25,5 @@ CREATE INDEX hub_runs_at ON hub_runs (at);
 -- hub_session: the tag of the hub session that asked for an operation, 16
 -- lower-case hex digits and nothing secret (I4); set only on the hub's.
 ALTER TABLE operations ADD COLUMN hub_session TEXT
-  CHECK (hub_session IS NULL OR ("trigger" = 'hub' AND length(hub_session) = 16));
+  CHECK (hub_session IS NULL OR ("trigger" = 'hub' AND length(hub_session) = 16
+    AND hub_session NOT GLOB '*[^0-9a-f]*'));

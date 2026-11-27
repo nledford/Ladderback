@@ -14,7 +14,7 @@ CREATE TABLE operations (           -- also the job queue (status = 'queued')
   restored_to TEXT,               -- restore: '' in place, else the new folder it wrote into, the repository's secrets masked, at most 1 KiB (#813); NULL otherwise
   trigger TEXT NOT NULL,          -- schedule|manual|catch-up|retry|hub|mcp|api-token
   token_id TEXT, token_label TEXT, -- the API token an api-token trigger names (decision 93)
-  hub_session TEXT,               -- the tag of the hub session a hub trigger names, 16 hex digits (decision 176)
+  hub_session TEXT,               -- the tag of the hub session a hub trigger names, 16 lower-case hex digits (decision 176)
   status TEXT NOT NULL,           -- queued|running|succeeded|succeeded_with_warnings|failed|cancelled
   queued_at INTEGER, started_at INTEGER, finished_at INTEGER,
   index_read_at INTEGER, deadline INTEGER,     -- backups (§7.3)
