@@ -18,8 +18,10 @@ pub const RETRY_AFTER: SignedDuration = SignedDuration::from_hours(1);
 /// `now`: the clock has been set back since, and a copy that seems to come
 /// from the future would otherwise stand until the clock caught up with it.
 pub fn next_copy(taken: Option<Timestamp>, now: Timestamp) -> Timestamp {
-    let _ = (taken, now);
-    todo!()
+    match taken {
+        Some(taken) if taken <= now => taken.checked_add(COPY_EVERY).unwrap_or(Timestamp::MAX),
+        _ => now,
+    }
 }
 
 #[cfg(test)]
@@ -61,5 +63,11 @@ mod tests {
         let taken = at("2026-06-10T09:00:01Z");
         let now = at("2026-06-10T09:00:00Z");
         assert_eq!(next_copy(Some(taken), now), now);
+    }
+
+    #[test]
+    fn a_copy_taken_at_the_end_of_time_makes_the_next_due_at_the_end_of_time() {
+        let now = Timestamp::MAX;
+        assert_eq!(next_copy(Some(now), now), Timestamp::MAX);
     }
 }
