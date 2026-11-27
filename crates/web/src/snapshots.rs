@@ -424,7 +424,18 @@ impl Page {
         };
         let base = self.base.get_value();
         spawn_local(async move {
-            let how = ws::await_end(&base, &run.operation, run.kind, move || self.alive()).await;
+            let how = ws::await_end(
+                &base,
+                &run.operation,
+                run.kind,
+                move || self.alive(),
+                move |waiting| {
+                    if self.alive() {
+                        self.change(|panel| panel.seen(waiting));
+                    }
+                },
+            )
+            .await;
             if self.alive() {
                 self.change(|panel| panel.watched(how));
             }
@@ -816,7 +827,7 @@ fn Repository(
             {move || {
                 run.get()
                     .map(|run| {
-                        let shown = page.words(&wording::told(Told::Running(run.kind)));
+                        let shown = page.words(&wording::told(run.told()));
                         view! {
                             <p>{shown}</p>
                             <p>

@@ -254,7 +254,10 @@ pub(crate) fn told(told: Told) -> Words {
             msg::UI_MAINTENANCE_STARTING,
             vec![("kind", text(kind.wire()))],
         ),
-        Told::Waiting(_kind) => todo!(),
+        Told::Waiting(kind) => words(
+            msg::UI_MAINTENANCE_WAITING,
+            vec![("kind", text(kind.wire()))],
+        ),
         Told::Running(kind) => running(kind),
         Told::Ended(ended) => end(&ended),
         Told::Unwatched(kind) => words(

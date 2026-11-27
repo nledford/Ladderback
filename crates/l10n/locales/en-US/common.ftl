@@ -509,11 +509,12 @@ error-operation-unknown = There is no operation { $operation }. List the operati
 error-operation-not-running = Operation { $operation } has already ended, so there is nothing to cancel.
 
 
-# A maintenance operation is running on this machine, so the request was
-# refused and nothing was done. For a maintenance run it is this
-# repository's; for turning maintenance off it may be another repository's.
-# $operation (text): the running operation's ID.
-error-maintenance-busy = Maintenance operation { $operation } is running on this { -machine }, so nothing was done. Wait for it to end, then ask again.
+# A maintenance operation is running on this machine, or waiting for its
+# turn under maintenance-concurrency, so the request was refused and nothing
+# was done. For a maintenance run it is this repository's; for turning
+# maintenance off it may be another repository's.
+# $operation (text): the going operation's ID.
+error-maintenance-busy = Maintenance operation { $operation } is running on this { -machine } or waiting for its turn, so nothing was done. Wait for it to end, then ask again.
 
 # The confirmation a restore asks for first was not right: the admin
 # password with sign-in on, the snapshot's short ID with sign-in off.

@@ -366,6 +366,11 @@ pub(crate) fn ended(status: &str) -> bool {
     rank(status) >= TERMINAL
 }
 
+/// Whether `status` is that of an operation still waiting for its turn.
+pub(crate) fn queued(status: &str) -> bool {
+    rank(status) == QUEUED
+}
+
 /// Whether a POST's answer is a success: any 2xx. An operation is accepted
 /// with 202, a repository that was tested with 200 and one that was connected
 /// or created with 201; anything else is a refusal, with a typed body.
@@ -451,7 +456,7 @@ mod tests {
     use std::time::Duration;
 
     use super::{
-        OperationsState, Progress, Rereads, asks_for_a_reread, ended, events_url,
+        OperationsState, Progress, Rereads, asks_for_a_reread, ended, events_url, queued,
         reconnect_backoff, succeeded,
     };
     use api::{
@@ -1070,6 +1075,14 @@ mod tests {
             "failed",
         ] {
             assert!(ended(status), "{status} is an end");
+        }
+    }
+
+    #[test]
+    fn queued_names_only_the_status_of_an_operation_waiting_its_turn() {
+        assert!(queued("queued"));
+        for status in ["running", "succeeded", "failed", "cancelled"] {
+            assert!(!queued(status), "{status} isn't waiting");
         }
     }
 

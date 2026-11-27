@@ -705,9 +705,7 @@ impl Told {
             | Told::Starting(_)
             | Told::Waiting(_)
             | Told::Running(_)
-            | Told::Unwatched(_) => {
-                Politeness::Polite
-            }
+            | Told::Unwatched(_) => Politeness::Polite,
         }
     }
 }
@@ -728,6 +726,16 @@ pub(crate) struct Run {
     pub(crate) kind: Kind,
     pub(crate) operation: String,
     pub(crate) state: RunState,
+}
+
+impl Run {
+    /// What the page shows of it: that it waits for its turn, or runs.
+    pub(crate) fn told(&self) -> Told {
+        match self.state {
+            RunState::Waiting => Told::Waiting(self.kind),
+            RunState::Starting | RunState::Running => Told::Running(self.kind),
+        }
+    }
 }
 
 /// Where a run that goes on stands: not read yet since its start was
@@ -833,7 +841,8 @@ impl Panel {
         self.refusal = Some(refusal);
     }
 
-    /// The start was accepted: the run goes on, and is watched.
+    /// The start was accepted: the run goes on, and is watched. Whether it
+    /// runs or waits for its turn is told once it is read.
     pub(crate) fn started(&mut self, kind: Kind, operation: String) -> Vec<Effect> {
         self.step = None;
         self.ended = None;
@@ -844,17 +853,25 @@ impl Panel {
             operation,
             state: RunState::Starting,
         });
-        vec![
-            Effect::CloseReview,
-            Effect::Say(Told::Running(kind)),
-            Effect::Watch,
-        ]
+        vec![Effect::CloseReview, Effect::Watch]
     }
 
     /// The run that goes on was read as `waiting` for its turn, or as
     /// running: what changed is told.
-    pub(crate) fn seen(&mut self, _waiting: bool) -> Vec<Effect> {
-        todo!()
+    pub(crate) fn seen(&mut self, waiting: bool) -> Vec<Effect> {
+        let Some(run) = self.run.as_mut() else {
+            return Vec::new();
+        };
+        let state = if waiting {
+            RunState::Waiting
+        } else {
+            RunState::Running
+        };
+        if std::mem::replace(&mut run.state, state) == state {
+            Vec::new()
+        } else {
+            vec![Effect::Say(run.told())]
+        }
     }
 
     /// The wait for the run came to `how`. A run that ended is told, and the
@@ -2235,10 +2252,7 @@ mod tests {
             vec![Effect::Say(Told::Running(Kind::Prune))]
         );
         assert_eq!(panel.seen(false), Vec::new());
-        assert_eq!(
-            panel.run.map(|run| run.state),
-            Some(RunState::Running)
-        );
+        assert_eq!(panel.run.map(|run| run.state), Some(RunState::Running));
     }
 
     #[test]
@@ -2258,10 +2272,19 @@ mod tests {
             panel.seen(false),
             vec![Effect::Say(Told::Running(Kind::Check))]
         );
-        assert_eq!(
-            panel.run.map(|run| run.state),
-            Some(RunState::Running)
-        );
+        assert_eq!(panel.run.map(|run| run.state), Some(RunState::Running));
+    }
+
+    #[test]
+    fn a_run_shows_that_it_waits_until_it_is_read_running() {
+        let mut panel = Panel::default();
+        panel.started(Kind::Prune, operation());
+        let shown = |panel: &Panel| panel.run.as_ref().map(Run::told);
+        assert_eq!(shown(&panel), Some(Told::Running(Kind::Prune)));
+        panel.seen(true);
+        assert_eq!(shown(&panel), Some(Told::Waiting(Kind::Prune)));
+        panel.seen(false);
+        assert_eq!(shown(&panel), Some(Told::Running(Kind::Prune)));
     }
 
     #[test]
