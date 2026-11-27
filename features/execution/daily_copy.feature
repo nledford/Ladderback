@@ -28,6 +28,13 @@ Feature: The daily copy of the database
     When the daemon serves until its clock reads "2026-06-10 09:01+00:00"
     Then the daily copy was taken at "2026-06-10 09:00+00:00"
 
+  Scenario: A clock set back while the daemon serves is noticed within the hour
+    Given the database has no daily copy
+    When the daemon serves until its clock reads "2026-06-10 10:30+00:00"
+    And the daemon's clock is set back 2 days
+    And the daemon serves until its clock reads "2026-06-08 11:01+00:00"
+    Then the daily copy was taken at "2026-06-10 09:00+00:00" and "2026-06-08 11:00+00:00"
+
   Scenario: A copy that can't be taken is said in the log and tried again an hour later
     Given the daily copy was taken at "2026-06-09 09:00+00:00"
     And the database is unavailable

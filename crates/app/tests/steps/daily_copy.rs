@@ -139,6 +139,14 @@ fn serves_until(agent: &mut Agent, text: String) {
     agent.daily_copy.serve_until(time(&text));
 }
 
+#[when(expr = "the daemon's clock is set back {int} days")]
+fn clock_set_back(agent: &mut Agent, days: i64) {
+    agent
+        .daily_copy
+        .clock
+        .set_back(SignedDuration::from_hours(24 * days));
+}
+
 #[then(expr = "the daily copy was taken at {string}")]
 fn taken_once_at(agent: &mut Agent, at: String) {
     assert_eq!(agent.daily_copy.copies.taken(), vec![time(&at)]);
@@ -149,6 +157,14 @@ fn taken_three_times(agent: &mut Agent, first: String, second: String, third: St
     assert_eq!(
         agent.daily_copy.copies.taken(),
         vec![time(&first), time(&second), time(&third)]
+    );
+}
+
+#[then(expr = "the daily copy was taken at {string} and {string}")]
+fn taken_twice(agent: &mut Agent, first: String, second: String) {
+    assert_eq!(
+        agent.daily_copy.copies.taken(),
+        vec![time(&first), time(&second)]
     );
 }
 
