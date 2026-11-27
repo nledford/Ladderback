@@ -184,6 +184,17 @@ async fn machine_store_once_stopped(agent: &mut Agent) -> SqliteStore {
 )]
 async fn recorded_for_session(agent: &mut Agent) {
     let id = started_operation(agent);
+    // The cookie is `<name>=<token>`: the tag is of the token's digest.
+    let (cookie, _) = agent
+        .pairing_terminal
+        .session
+        .as_ref()
+        .expect("the person signed in on the hub");
+    let token = cookie
+        .split_once('=')
+        .and_then(|(_, token)| domain::access::Token::parse(token))
+        .unwrap_or_else(|| panic!("the session's cookie holds a token: {cookie}"));
+    let tag = domain::access::SessionTag::of(&token.digest());
     let store = machine_store_once_stopped(agent).await;
     let uuid = Uuid::parse_str(&id).unwrap_or_else(|error| panic!("{error}: {id}"));
     let detail = store.get(OperationId::from_uuid(uuid)).await;
@@ -193,8 +204,9 @@ async fn recorded_for_session(agent: &mut Agent) {
         .unwrap_or_else(|| panic!("the machine's store holds no {id}"))
         .record;
     assert_eq!(record.kind, OperationKind::Backup, "{record:?}");
-    assert!(
-        matches!(record.trigger, Trigger::Hub { asked_by: Some(_) }),
+    assert_eq!(
+        record.trigger,
+        Trigger::Hub { asked_by: Some(tag) },
         "{record:?}"
     );
 }
