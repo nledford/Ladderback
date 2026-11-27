@@ -271,27 +271,39 @@ where
             let next = tokio::time::timeout_at(deadline, self.socket.next())
                 .await
                 .map_err(|_| no_answer())?;
-            return match next {
-                Some(Ok(Message::Text(text))) => {
-                    HubFrame::from_text(text.as_str()).map_err(|_| LinkError::Unreadable)
-                }
-                Some(Ok(Message::Ping(_) | Message::Pong(_) | Message::Frame(_))) => continue,
-                Some(Ok(Message::Binary(_)) | Err(WsError::Capacity(_))) => {
-                    Err(LinkError::Unreadable)
-                }
-                Some(Ok(Message::Close(frame))) => Err(LinkError::Closed {
-                    reason: frame
-                        .map(|frame| frame.reason.as_str().to_owned())
-                        .filter(|reason| !reason.is_empty()),
-                }),
-                Some(Err(_)) | None => Err(LinkError::Closed { reason: None }),
-            };
+            if let Some(heard) = heard(next) {
+                return heard;
+            }
         }
     }
 
     async fn listen(&mut self) -> Result<HubFrame, LinkError> {
-        todo!()
+        // `next` is cancel-safe: a listen given up loses no frame. The
+        // codec's size caps bound each frame as they bound `receive`'s.
+        loop {
+            if let Some(heard) = heard(self.socket.next().await) {
+                return heard;
+            }
+        }
     }
+}
+
+/// The frame a WebSocket message carries, or `None` for a control message
+/// to pass over.
+fn heard(next: Option<Result<Message, WsError>>) -> Option<Result<HubFrame, LinkError>> {
+    Some(match next {
+        Some(Ok(Message::Text(text))) => {
+            HubFrame::from_text(text.as_str()).map_err(|_| LinkError::Unreadable)
+        }
+        Some(Ok(Message::Ping(_) | Message::Pong(_) | Message::Frame(_))) => return None,
+        Some(Ok(Message::Binary(_)) | Err(WsError::Capacity(_))) => Err(LinkError::Unreadable),
+        Some(Ok(Message::Close(frame))) => Err(LinkError::Closed {
+            reason: frame
+                .map(|frame| frame.reason.as_str().to_owned())
+                .filter(|reason| !reason.is_empty()),
+        }),
+        Some(Err(_)) | None => Err(LinkError::Closed { reason: None }),
+    })
 }
 
 fn no_answer() -> LinkError {
