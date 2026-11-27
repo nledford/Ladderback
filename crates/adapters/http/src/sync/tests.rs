@@ -895,11 +895,12 @@ async fn a_command_the_hub_sends_doesnt_keep_a_silent_connection() {
         .await
         .unwrap()
         .unwrap();
-    // 90 seconds after the heartbeat, 30 after the command.
+    // 80 seconds after the heartbeat, 20 after the command, then 90: the
+    // margin before 90 leaves room for the real time the steps above take.
     tokio::time::pause();
-    tokio::time::advance(Duration::from_secs(29)).await;
+    tokio::time::advance(Duration::from_secs(20)).await;
     assert!(shown_online(&pairing, agent, 100).await);
-    tokio::time::advance(Duration::from_secs(1) + Duration::from_millis(2)).await;
+    tokio::time::advance(Duration::from_secs(10) + Duration::from_millis(2)).await;
     assert!(!shown_online(&pairing, agent, 100).await);
     tokio::time::resume();
 }
