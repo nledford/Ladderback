@@ -149,6 +149,33 @@ async fn every_connection_the_store_opens_waits_for_each_commit_to_reach_the_dis
     }
 }
 
+/// On macOS, every connection the store opens flushes the drive's own
+/// cache at each checkpoint (`PRAGMA checkpoint_fullfsync` is 1), and
+/// elsewhere, where `F_FULLFSYNC` doesn't exist, none asks for it. A
+/// checkpoint moves the log's flushed commits into the database file and
+/// then reuses the log: without the flush, a power cut could take back a
+/// grant the hub flushed and sent, from the file's copy still in the
+/// drive's cache (I1; §7.3, decision 178). The setting is the
+/// connection's, so the test takes all of them at once.
+#[tokio::test]
+async fn every_connection_the_store_opens_flushes_the_drive_at_a_checkpoint_on_macos() {
+    let (_dir, store) = scratch_store().await;
+    let mut taken = Vec::new();
+    for _ in 0..MAX_CONNECTIONS {
+        let mut conn = store.pool.acquire().await.expect("a connection");
+        let fullfsync: i64 = sqlx::query_scalar("PRAGMA checkpoint_fullfsync")
+            .fetch_one(&mut *conn)
+            .await
+            .expect("the setting is readable");
+        assert_eq!(
+            fullfsync,
+            i64::from(cfg!(target_os = "macos")),
+            "the connection flushes the drive at a checkpoint on macOS only"
+        );
+        taken.push(conn);
+    }
+}
+
 /// The demo repository, which one maintenance operation at a time holds.
 fn demo_repository() -> RepositoryId {
     RepositoryId::parse(&"ab".repeat(32)).expect("a valid repository ID")
