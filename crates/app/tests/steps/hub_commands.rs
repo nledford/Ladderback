@@ -43,7 +43,9 @@ const ASKED_BY: &str = "0123456789abcdef";
 
 #[derive(Default)]
 pub(super) struct CommandsWorld {
-    side: Option<Side>,
+    /// On the heap, so the scenario's world stays small on the runner's
+    /// stack.
+    side: Option<Box<Side>>,
 }
 
 /// The machine's side: its configuration, its command ledger, its backups,
@@ -79,7 +81,7 @@ fn side(agent: &mut Agent) -> &mut Side {
     if world.commands.side.is_none() {
         let connector = world.connector_to(world.hub());
         let config = Arc::new(InMemoryConfigStore::new());
-        world.commands.side = Some(Side {
+        world.commands.side = Some(Box::new(Side {
             runs: Arc::new(Runs {
                 config: config.clone(),
                 state: Mutex::default(),
@@ -97,7 +99,7 @@ fn side(agent: &mut Agent) -> &mut Side {
             live: false,
             sync: None,
             heard: None,
-        });
+        }));
     }
     world.commands.side.as_mut().expect("the machine's side")
 }
