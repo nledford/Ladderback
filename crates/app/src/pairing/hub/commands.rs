@@ -128,8 +128,10 @@ impl HubPairing {
             }
             awaited.insert(id, Awaited { agent, answer });
         }
+        // Waited on until this ask ends, however it ends: an asker that
+        // stops waiting, as a page closed, leaves no command counted.
+        let _waiting = Waiting { pairing: self, id };
         if let Err(error) = line.try_send(OutgoingCommand { kind, payload }) {
-            self.forget_command(id);
             return Err(if error.is_full() {
                 self.busy()
             } else {
@@ -137,12 +139,10 @@ impl HubPairing {
             });
         }
         let within = std::pin::pin!(self.clock.sleep(COMMAND_ANSWER_WITHIN));
-        let heard = match select(answered, within).await {
+        match select(answered, within).await {
             Either::Left((Ok(answer), _)) => Ok(answer),
             Either::Left((Err(_), _)) | Either::Right(_) => Err(CommandAskRefused::NoAnswer),
-        };
-        self.forget_command(id);
-        heard
+        }
     }
 
     /// The refusal of `command` to the machine `agent`, offline: for a run
@@ -240,5 +240,18 @@ impl HubPairing {
             .lock()
             .unwrap_or_else(PoisonError::into_inner)
             .remove(&id);
+    }
+}
+
+/// The hub waiting for the answer to the command `id`: dropped, it stops,
+/// whether the answer came, the wait timed out or the asker went away.
+struct Waiting<'a> {
+    pairing: &'a HubPairing,
+    id: CommandId,
+}
+
+impl Drop for Waiting<'_> {
+    fn drop(&mut self) {
+        self.pairing.forget_command(self.id);
     }
 }
