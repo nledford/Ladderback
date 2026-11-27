@@ -434,8 +434,17 @@ impl HubLink for LoopLink {
         }
     }
 
+    /// The next frame the agent hasn't read, or a command the hub sends;
+    /// with neither, it waits on an open link for as long as it is polled,
+    /// as nothing more reaches a loopback link unasked.
     async fn listen(&mut self) -> Result<HubFrame, LinkError> {
-        todo!()
+        if self.inbox.is_empty() {
+            self.deliver_commands().await;
+        }
+        if self.inbox.is_empty() && !self.closed() {
+            return std::future::pending().await;
+        }
+        self.receive().await
     }
 }
 

@@ -1,18 +1,21 @@
+use std::collections::VecDeque;
 use std::sync::Arc;
 
+use api::sync::HubFrame;
 use domain::fleet::{
-    Ack, AgentEnvelope, Binding, CommandId, EpochSeconds, FIRST_SEQUENCE, HubEnvelope, Nonce,
-    PayloadDigest, PlansReport, PublicKey, ReportedProgress, SignedMessage, SigningSeed, WireName,
-    ack_kind, fresh_on_hub_time, grants_kind, heartbeat_ack_kind, heartbeat_kind, plans_ack_kind,
-    plans_kind, progress_kind, release_kind, released_kind, report_kind, repos_kind, withheld_kind,
+    Ack, AgentEnvelope, Binding, CommandId, EpochSeconds, FIRST_SEQUENCE, HubEnvelope,
+    MAX_COMMANDS_IN_FLIGHT, Nonce, PayloadDigest, PlansReport, PublicKey, ReportedProgress,
+    SignedMessage, SigningSeed, WireName, ack_kind, command_result_kind, fresh_on_hub_time,
+    grants_kind, heartbeat_ack_kind, heartbeat_kind, plans_ack_kind, plans_kind, progress_kind,
+    release_kind, released_kind, report_kind, repos_kind, withheld_kind,
 };
 use domain::maintenance::{LeaseEpoch, RepoGrants, RepositoryReports, RunningBackup};
 use domain::{AgentId, RepositoryId, SignedDuration};
 
 use super::wire::{
-    HubMessage, agent_envelope_frame, heartbeat_payload, hub_message, plans_payload,
-    progress_payload, read_ack, read_grants, read_heartbeat_ack, read_plans_ack, read_released,
-    read_withheld, release_payload, report_payload, repos_payload,
+    HubMessage, agent_envelope_frame, command_result_payload, heartbeat_payload, hub_message,
+    plans_payload, progress_payload, read_ack, read_command, read_grants, read_heartbeat_ack,
+    read_plans_ack, read_released, read_withheld, release_payload, report_payload, repos_payload,
 };
 use crate::hub_commands::{CommandAnswer, ReceivedCommand};
 use crate::ports::{Clock, HubLink, LinkError, OutboxEntry, Signing, SigningError};
@@ -34,6 +37,9 @@ pub enum ChannelError {
     OutOfTurn,
     /// The agent's count of its own messages ran out.
     SequenceSpent,
+    /// The hub sent more than [`MAX_COMMANDS_IN_FLIGHT`] commands the agent
+    /// hadn't answered: the agent closes the connection.
+    TooManyCommands,
     Signing(SigningError),
 }
 
@@ -68,6 +74,9 @@ pub struct AgentChannel {
     welcomed_at: EpochSeconds,
     /// When the agent sent `Hello`, on its monotonic clock.
     hello_sent: SignedDuration,
+    /// The hub's commands taken while the agent waited for another message,
+    /// which it hasn't answered, at most [`MAX_COMMANDS_IN_FLIGHT`].
+    commands: VecDeque<ReceivedCommand>,
 }
 
 /// What every signed message on one connection is bound to.
@@ -113,6 +122,7 @@ impl AgentChannel {
             next_received: next,
             welcomed_at,
             hello_sent,
+            commands: VecDeque::new(),
         }
     }
 
@@ -236,13 +246,20 @@ impl AgentChannel {
     /// command. A signed message of a kind this build doesn't take is
     /// counted and passed over.
     pub async fn listen_command(&mut self) -> Result<ReceivedCommand, ChannelError> {
-        todo!()
+        loop {
+            if let Some(command) = self.commands.pop_front() {
+                return Ok(command);
+            }
+            let frame = self.link.listen().await?;
+            // A message that isn't a command, unasked, is passed over.
+            let _ = self.take(&frame)?;
+        }
     }
 
     /// The next command the hub sent while the agent waited for another
     /// message, which it hasn't answered; none when there is none.
     pub fn buffered_command(&mut self) -> Option<ReceivedCommand> {
-        todo!()
+        self.commands.pop_front()
     }
 
     /// Sends `answer` to the hub's command `id` (`CommandResult`), signed
@@ -252,8 +269,8 @@ impl AgentChannel {
         id: CommandId,
         answer: &CommandAnswer,
     ) -> Result<(), ChannelError> {
-        let _ = (id, answer);
-        todo!()
+        self.send(command_result_kind(), command_result_payload(id, answer))
+            .await
     }
 
     /// Sends a message of `kind` holding `payload`, signed with the next
@@ -285,11 +302,23 @@ impl AgentChannel {
         Ok(())
     }
 
-    /// The hub's next signed message, once it holds.
+    /// The hub's next signed message other than a command, once it holds;
+    /// each command before it is kept to be answered.
     async fn receive(&mut self) -> Result<HubEnvelope, ChannelError> {
-        let frame = self.link.receive().await?;
+        loop {
+            let frame = self.link.receive().await?;
+            if let Some(envelope) = self.take(&frame)? {
+                return Ok(envelope);
+            }
+        }
+    }
+
+    /// The signed message `frame` holds, once it holds; none when it is a
+    /// command, which is kept to be answered, with the hub's time it came
+    /// at, unless the agent holds [`MAX_COMMANDS_IN_FLIGHT`] unanswered.
+    fn take(&mut self, frame: &HubFrame) -> Result<Option<HubEnvelope>, ChannelError> {
         let since = self.clock.monotonic().saturating_sub(self.hello_sent);
-        let Ok(HubMessage::Signed(envelope)) = hub_message(&frame) else {
+        let Ok(HubMessage::Signed(envelope)) = hub_message(frame) else {
             return Err(ChannelError::OutOfTurn);
         };
         let bound = self.bound;
@@ -315,6 +344,19 @@ impl AgentChannel {
         if !fresh_on_hub_time(self.welcomed_at, since, envelope.expires_at) {
             return Err(ChannelError::Expired);
         }
-        Ok(envelope)
+        let request =
+            read_command(&envelope.kind, &envelope.payload).map_err(|_| ChannelError::OutOfTurn)?;
+        let Some(request) = request else {
+            return Ok(Some(envelope));
+        };
+        if self.commands.len() >= MAX_COMMANDS_IN_FLIGHT {
+            return Err(ChannelError::TooManyCommands);
+        }
+        self.commands.push_back(ReceivedCommand {
+            request,
+            welcomed_at: self.welcomed_at,
+            since,
+        });
+        Ok(None)
     }
 }

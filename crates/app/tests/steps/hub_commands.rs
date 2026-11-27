@@ -262,7 +262,7 @@ impl Side {
             .filter_map(|text| payload_of(text))
             .filter(|(kind, _)| kind == "Hello")
             .map(|(_, payload)| payload)
-            .last()
+            .next_back()
             .expect("the machine said Hello");
         HelloPayload::from_bytes(&payload).expect("a Hello")
     }
@@ -454,7 +454,7 @@ async fn started_for_session(agent: &mut Agent, plan: String) {
     let side = side(agent);
     let started = &side.runs.state().started;
     assert_eq!(started.len(), 1, "one backup started");
-    let (on, asked_by, _) = &started[0];
+    let (on, asked_by, _) = started.first().expect("the backup");
     assert_eq!(*on, plan_id(&plan));
     assert_eq!(asked_by.as_ref().map(SessionTag::as_str), Some(ASKED_BY));
 }

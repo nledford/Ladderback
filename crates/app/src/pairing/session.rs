@@ -204,8 +204,16 @@ impl HubPairing {
         kind: WireName,
         payload: Vec<u8>,
     ) -> Option<HubFrame> {
-        let _ = (session, kind, payload);
-        todo!()
+        let Stage::Syncing(syncing) = &mut session.stage else {
+            return None;
+        };
+        match self.signed_for(&session.keys, syncing, kind, payload) {
+            Ok(envelope) => Some(hub_envelope_frame(&envelope)),
+            Err(error) => {
+                log::error!("the hub couldn't sign its command: {error:?}");
+                None
+            }
+        }
     }
 }
 

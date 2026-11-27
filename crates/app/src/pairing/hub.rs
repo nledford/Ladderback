@@ -917,9 +917,23 @@ impl HubPairing {
             Ok(None) => return Ok(Ok(None)),
             Err(refused) => return Ok(Err(refused)),
         };
+        Ok(Ok(Some(self.signed_for(keys, syncing, kind, payload)?)))
+    }
+
+    /// `kind` holding `payload`, the hub's next message to the agent
+    /// `syncing` holds, signed for its connection with the hub's next
+    /// sequence number, expiring [`MESSAGE_LIFE`] from now.
+    pub(super) fn signed_for(
+        &self,
+        keys: &HubKeys,
+        syncing: &mut Syncing,
+        kind: WireName,
+        payload: Vec<u8>,
+    ) -> Result<HubEnvelope, HubPairingError> {
+        let handshake = &syncing.handshake;
         let sequence = syncing.next_sent;
         let expires_at = EpochSeconds::from_seconds(
-            EpochSeconds::from_timestamp(now)
+            EpochSeconds::from_timestamp(self.clock.now())
                 .unwrap_or(EpochSeconds::from_seconds(0))
                 .seconds()
                 .saturating_add(MESSAGE_LIFE),
@@ -937,13 +951,13 @@ impl HubPairing {
         };
         let signature = self.signing.sign(&keys.seed, &answer.to_bytes())?;
         syncing.next_sent = sequence.saturating_add(1);
-        Ok(Ok(Some(HubEnvelope {
+        Ok(HubEnvelope {
             kind,
             seq: sequence,
             expires_at,
             payload,
             signature,
-        })))
+        })
     }
 
     /// Keeps `agent`'s report unless the hub took it before, and answers

@@ -2,11 +2,13 @@
 //! §16, decisions 120 and 176): run a plan's backup now, through the same
 //! use case as Back up now, or cancel a backup it runs. The machine acts
 //! on a command only while its configuration lets the hub command it, only
-//! when the hub asked it within [`COMMAND_LIFE`] of the hub's time, and
-//! only once: it remembers each command's ID in its [`CommandLedger`], so a
-//! command replayed, after a restart too, is refused. The hub starts at
-//! most one backup of a plan every [`HUB_RUN_SPACING`] and
-//! [`HUB_RUNS_PER_HOUR`] in an hour. Each command is answered with what the
+//! when the hub asked it within [`COMMAND_LIFE`](domain::fleet::COMMAND_LIFE)
+//! of the hub's time, and only once: it remembers each command's ID in its
+//! [`CommandLedger`], so a command replayed, after a restart too, is
+//! refused. The hub starts at most one backup of a plan every
+//! [`HUB_RUN_SPACING`](domain::fleet::HUB_RUN_SPACING) and
+//! [`HUB_RUNS_PER_HOUR`](domain::fleet::HUB_RUNS_PER_HOUR) in an hour. Each
+//! command is answered with what the
 //! machine did, or the code of why it did nothing.
 
 use std::sync::Arc;
@@ -15,12 +17,14 @@ use api::ErrorCode;
 use async_trait::async_trait;
 use domain::access::SessionTag;
 use domain::fleet::{
-    Accepts, COMMAND_LIFE, CommandRequest, EpochSeconds, HUB_RUN_SPACING, HUB_RUNS_PER_HOUR,
+    Accepts, COMMANDS_REMEMBERED_FOR, CommandRequest, EpochSeconds, HubCommand, HubRun,
+    command_fresh, hub_run_admitted,
 };
+use domain::planning::HubCommands;
 use domain::{OperationId, PlanId, SignedDuration, Timestamp};
 
 use crate::pairing::{AgentChannel, ChannelError};
-use crate::ports::{Clock, CommandLedger, ConfigStore};
+use crate::ports::{Clock, CommandLedger, ConfigStore, Remembered};
 
 /// What starts and cancels the backups the hub asks for: the composition
 /// root's plan runner, the same use case as Back up now. Not a port: it is
@@ -120,31 +124,146 @@ impl AnswerHubCommands {
     /// The commands the machine's `Hello` says it takes: every one, unless
     /// its configuration turns its hub's commands off or can't be read.
     pub async fn accepts(&self) -> Accepts {
-        let _ = (&self.config, Accepts::all());
-        todo!()
+        if self.allowed().await {
+            Accepts::all()
+        } else {
+            Accepts::none()
+        }
     }
 
     /// The answer to `command`; none when the machine can't tell whether it
     /// took it before, as when its database can't be read: the hub then
     /// says it had no answer, and nothing ran.
     pub async fn answer(&self, command: &ReceivedCommand) -> Option<CommandAnswer> {
-        let _ = (
-            command,
-            &self.ledger,
-            &self.runs,
-            &self.clock,
-            COMMAND_LIFE,
-            HUB_RUN_SPACING,
-            HUB_RUNS_PER_HOUR,
-        );
-        todo!()
+        if !self.allowed().await {
+            return Some(refused(ErrorCode::MachineCommandsOff));
+        }
+        let request = &command.request;
+        if !command_fresh(command.welcomed_at, command.since, request.requested_at) {
+            return Some(refused(ErrorCode::CommandExpired));
+        }
+        let now = self.clock.now();
+        let remembered = self
+            .ledger
+            .remember(request.id, now)
+            .await
+            .inspect_err(|error| log::error!("the hub's command couldn't be remembered: {error}"))
+            .ok()?;
+        match remembered {
+            Remembered::New => {}
+            Remembered::Seen => return Some(refused(ErrorCode::CommandReplayed)),
+            Remembered::Full { oldest } => {
+                return Some(rate_limited(
+                    oldest.checked_add(COMMANDS_REMEMBERED_FOR).ok(),
+                ));
+            }
+        }
+        match &request.command {
+            HubCommand::RunPlan { plan } => self.run(plan, request.asked_by.clone(), now).await,
+            HubCommand::CancelOp { op } => Some(match self.runs.cancel(op).await {
+                Ok(()) => CommandAnswer::Canceled(*op),
+                Err(HubCancelRefused::Unknown) => refused(ErrorCode::OperationUnknown),
+                Err(HubCancelRefused::NotRunning) => refused(ErrorCode::OperationNotRunning),
+                Err(HubCancelRefused::NotABackup) => refused(ErrorCode::CommandBackupsOnly),
+            }),
+        }
     }
 
     /// Answers each command `channel` holds, then waits for the hub's next
     /// and answers it.
     pub async fn answer_next(&self, channel: &mut AgentChannel) -> Result<(), ChannelError> {
-        let _ = channel;
-        todo!()
+        self.answer_held(channel).await?;
+        let command = channel.listen_command().await?;
+        self.reply(channel, &command).await
+    }
+
+    /// Answers each command `channel` took while the agent waited for
+    /// another message.
+    pub async fn answer_held(&self, channel: &mut AgentChannel) -> Result<(), ChannelError> {
+        while let Some(command) = channel.buffered_command() {
+            self.reply(channel, &command).await?;
+        }
+        Ok(())
+    }
+
+    /// Answers `command` on `channel`, when the machine has an answer.
+    pub async fn reply(
+        &self,
+        channel: &mut AgentChannel,
+        command: &ReceivedCommand,
+    ) -> Result<(), ChannelError> {
+        match self.answer(command).await {
+            Some(answer) => {
+                channel
+                    .send_command_result(command.request.id, &answer)
+                    .await
+            }
+            None => Ok(()),
+        }
+    }
+
+    /// Whether the machine's configuration lets the hub command it: not
+    /// when it turns the commands off, nor when it can't be read.
+    async fn allowed(&self) -> bool {
+        match self.config.load().await {
+            Ok(config) => config.agent().hub_commands == HubCommands::On,
+            Err(error) => {
+                log::warn!("the configuration couldn't be read for the hub's commands: {error}");
+                false
+            }
+        }
+    }
+
+    /// A backup of `plan` the hub's session `asked_by` asked for at `now`:
+    /// the plan's run already going, or a new one within the hub's limits.
+    async fn run(
+        &self,
+        plan: &PlanId,
+        asked_by: Option<SessionTag>,
+        now: Timestamp,
+    ) -> Option<CommandAnswer> {
+        if let Some(going) = self.runs.going(plan).await {
+            return Some(CommandAnswer::Started(going));
+        }
+        let runs = self
+            .ledger
+            .runs()
+            .await
+            .inspect_err(|error| log::error!("the hub's runs couldn't be read: {error}"))
+            .ok()?;
+        if let Err(again) = hub_run_admitted(&runs, plan, now) {
+            return Some(rate_limited(Some(again)));
+        }
+        Some(match self.runs.start(plan, asked_by).await {
+            Ok(operation) => {
+                let run = HubRun {
+                    plan: plan.clone(),
+                    at: now,
+                };
+                if let Err(error) = self.ledger.ran(&run).await {
+                    log::error!("the hub's run couldn't be kept: {error}");
+                }
+                CommandAnswer::Started(operation)
+            }
+            Err(HubRunRefused::UnknownPlan) => refused(ErrorCode::PlanUnknown),
+            Err(HubRunRefused::RunWaiting) => refused(ErrorCode::PlanRunWaiting),
+            Err(HubRunRefused::KeyFilesNotLeftOut) => refused(ErrorCode::KeyFilesNotLeftOut),
+            Err(HubRunRefused::Refused) => refused(ErrorCode::MachineRunRefused),
+        })
+    }
+}
+
+fn refused(code: ErrorCode) -> CommandAnswer {
+    CommandAnswer::Refused {
+        code,
+        retry_at: None,
+    }
+}
+
+fn rate_limited(retry_at: Option<Timestamp>) -> CommandAnswer {
+    CommandAnswer::Refused {
+        code: ErrorCode::CommandRateLimited,
+        retry_at,
     }
 }
 
