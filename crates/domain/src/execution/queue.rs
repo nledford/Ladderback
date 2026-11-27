@@ -185,7 +185,7 @@ impl<K: Ord + Clone> Queue<K> {
 
     /// Whether a restart holds the queue ([`Self::hold`]).
     pub fn is_held(&self) -> bool {
-        todo!()
+        self.held
     }
 
     /// Lets go of the hold of a restart that was canceled: the waiting runs

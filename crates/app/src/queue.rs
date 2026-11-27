@@ -242,6 +242,9 @@ impl Queue<RepositoryAlias> {
     ) -> Result<Place, NoPlace> {
         self.admit(|state| {
             state.queue.set_limit(limit);
+            if state.queue.is_held() {
+                return Err(NoPlace::Held);
+            }
             match state.queue.going(repository) {
                 Some(going) => Err(NoPlace::Going(state.operations.get(&going).copied())),
                 None => {
