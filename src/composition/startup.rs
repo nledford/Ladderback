@@ -272,6 +272,12 @@ impl Background {
         Arc::clone(&self.runner.running)
     }
 
+    /// What starts, finds and cancels the backups a paired machine's hub
+    /// asks for (§7.2).
+    pub(crate) fn hub_runs(&self) -> Arc<dyn app::hub_commands::HubRuns> {
+        Arc::clone(&self.runner) as Arc<dyn app::hub_commands::HubRuns>
+    }
+
     /// What a paired machine tells its hub of its plans (§7.2): their
     /// standing in the log this daemon keeps, and their planned runs.
     pub(crate) fn read_plans(&self) -> app::sync::ReadPlans {

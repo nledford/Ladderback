@@ -1028,6 +1028,8 @@ pub(crate) struct Maintained {
     /// hub holds other machines' prunes of their repositories (§7.3, layer
     /// 2; §16, decision 166).
     pub(crate) running: Arc<app::running::RunningBackups>,
+    /// What starts, finds and cancels the backups the hub asks for (§7.2).
+    pub(crate) runs: Arc<dyn app::hub_commands::HubRuns>,
 }
 
 /// This machine's reports to its hub (§7.2): once it paired, a recorder
@@ -1061,6 +1063,7 @@ pub(crate) async fn reporting(
         listings,
         leases,
         running,
+        runs,
     } = maintained;
     let identity = Arc::new(FileIdentity::in_data_dir(&data_dir));
     let mut early = Some(early);
@@ -1093,6 +1096,12 @@ pub(crate) async fn reporting(
             }
         }
     };
+    let answer = Arc::new(app::hub_commands::AnswerHubCommands::new(
+        Arc::clone(&config),
+        Arc::<SqliteStore>::clone(&store) as Arc<dyn app::ports::CommandLedger>,
+        runs,
+        Arc::new(SystemClock),
+    ));
     let mut syncing = SyncWithHub::new(
         connecting(identity, &data_dir),
         Arc::<SqliteStore>::clone(&store),
@@ -1107,7 +1116,8 @@ pub(crate) async fn reporting(
     .with_listings(listings)
     .with_standing(standing)
     .with_progress(Arc::clone(&progress))
-    .with_running(running);
+    .with_running(running)
+    .with_commands(answer);
     if let Some(plans) = plans {
         syncing = syncing.with_plans(plans);
     }
@@ -1544,6 +1554,31 @@ fn read_pasted() -> io::Result<String> {
 mod tests {
     use super::*;
 
+    /// Hub runs that never start or cancel anything.
+    struct NoRuns;
+
+    #[async_trait::async_trait]
+    impl app::hub_commands::HubRuns for NoRuns {
+        async fn going(&self, _plan: &domain::PlanId) -> Option<domain::OperationId> {
+            None
+        }
+
+        async fn start(
+            &self,
+            _plan: &domain::PlanId,
+            _asked_by: Option<domain::access::SessionTag>,
+        ) -> Result<domain::OperationId, app::hub_commands::HubRunRefused> {
+            Err(app::hub_commands::HubRunRefused::Refused)
+        }
+
+        async fn cancel(
+            &self,
+            _operation: &domain::OperationId,
+        ) -> Result<(), app::hub_commands::HubCancelRefused> {
+            Err(app::hub_commands::HubCancelRefused::Unknown)
+        }
+    }
+
     /// A paired machine's reporting keeps the start of an operation the
     /// scheduler began before the reporting task first ran, on the events
     /// it was subscribed to before the scheduler started (§7.2).
@@ -1601,6 +1636,7 @@ mod tests {
                     Arc::new(SystemClock),
                 )),
                 running: Arc::default(),
+                runs: Arc::new(NoRuns),
             },
             Arc::default(),
             None,

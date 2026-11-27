@@ -905,6 +905,8 @@ fn run_daemon(
         let leases = background.leases();
         // And the backups it runs, which each heartbeat names (decision 166).
         let running = background.running();
+        // And what starts and cancels the backups its hub asks for.
+        let hub_runs = background.hub_runs();
         // A hub watches its machines for offline alerts beside the
         // scheduler (§11, decision 168).
         let watching = watched.and_then(|pairing| background.watch_machines(pairing));
@@ -922,6 +924,7 @@ fn run_daemon(
                     listings,
                     leases,
                     running,
+                    runs: hub_runs,
                 },
                 standing,
                 Some(plans),
