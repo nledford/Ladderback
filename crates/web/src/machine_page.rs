@@ -23,7 +23,9 @@ use crate::components::skeleton::rules::Awaited;
 use crate::components::{
     Alert, Column, Name, Progress, Sentences, State, StatusBadge, Table, first_load, paced,
 };
-use crate::dashboard::{Fleet, connection_line, no_plans, outcome_badge, progress_reading};
+use crate::dashboard::{
+    Fleet, connection_line, no_plans, not_found, outcome_badge, progress_reading,
+};
 use crate::dashboard_page::{follow, pause_control, shown_instant};
 use crate::operations_page::badge_of;
 use crate::routes::{NotFound, PAGE_HEADING_ID, PageHeading, machine_title, text_with, time_view};
@@ -52,8 +54,9 @@ fn set_title(title: &str) {
 }
 
 /// The page of the machine the address names: its heading, its hostname
-/// once read, then its section; a page not found once the machines are read
-/// and it isn't among them.
+/// once read, then its section; a page not found once the machines and the
+/// hub's own are read and it is neither, and while the hub's own goes
+/// unread, a sentence saying so in its place (#1692).
 #[component]
 fn MachinePage(localizer: Arc<Localizer>) -> impl IntoView {
     let params = use_params_map();
@@ -78,7 +81,9 @@ fn MachinePage(localizer: Arc<Localizer>) -> impl IntoView {
                 .map(|machine| (machine.machine_id.clone(), machine.hostname.clone()))
         })
     });
-    let missing = Memo::new(move |_| state.get() == State::Ready && found.with(Option::is_none));
+    let own_unread = fleet.own_unread();
+    let missing =
+        Memo::new(move |_| not_found(state.get(), found.with(Option::is_some), own_unread.get()));
     let own = fleet.own_id();
     let is_own = Memo::new(move |_| {
         found.with(|found| {
@@ -101,6 +106,7 @@ fn MachinePage(localizer: Arc<Localizer>) -> impl IntoView {
     let this_hub = text(&localizer, msg::UI_MACHINE_PAGE_THIS_HUB);
     let loading = text(&localizer, msg::UI_DASHBOARD_LOADING);
     let unreachable = text(&localizer, msg::UI_DASHBOARD_UNREACHABLE);
+    let own_unanswered = text(&localizer, msg::UI_DASHBOARD_OWN_UNANSWERED);
     move || {
         if missing.get() {
             return view! { <NotFound localizer=Arc::clone(&localizer) /> }.into_any();
@@ -115,6 +121,7 @@ fn MachinePage(localizer: Arc<Localizer>) -> impl IntoView {
         };
         let this_hub = this_hub.clone();
         let (loading, unreachable) = (loading.clone(), unreachable.clone());
+        let own_unanswered = own_unanswered.clone();
         let pause = pause_control(&localizer, fleet);
         let localizer = Arc::clone(&localizer);
         let viewer = viewer.clone();
@@ -124,7 +131,8 @@ fn MachinePage(localizer: Arc<Localizer>) -> impl IntoView {
             (State::Ready, Some((agent_id, hostname))) => {
                 machine_section(&localizer, shown, agent_id, hostname, viewer.clone()).into_any()
             }
-            (State::Ready, None) => ().into_any(),
+            // Not missing, so the hub's own goes unread, and it may be this.
+            (State::Ready, None) => view! { <p>{own_unanswered.clone()}</p> }.into_any(),
         };
         view! {
             <PageHeading>

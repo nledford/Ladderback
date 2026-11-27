@@ -28,5 +28,7 @@ A tester of 0.6.0 found two faults in the hub's dashboard. It showed the machine
 
 - A paired machine's card has no Back up menu until #1464 lands.
 - A hub whose hostname a hub would refuse from a pairing machine, or whose `GET /api/v1/machine` names no machine ID, shows no card of its own: the sentence and the cards are then the approved machines', as before this decision.
+- While `GET /api/v1/machine` goes unanswered past its 5-second patience, or is refused, the page shows the approved machines without the hub's own card, as above, and a sentence saying the hub's own machine can't be shown; it asks again every few seconds and shows the card once the hub answers (#1692). A machine's page then can't tell an address that isn't approved from the hub's own, so it shows that sentence in place of a page not found.
+- The Back up menu gives the hub 5 seconds to answer its start; past that, or when the request fails, the alert where a refusal shows says the backup didn't start because the hub couldn't be reached (#1690). A start the hub queued but answered too late is said as not started; the card's status then shows it running.
 - Whether a run is past due is judged by the viewer's clock, read again every minute, against the machine's planned time; a clock more than 5 minutes off marks a machine too early or too late.
 - A card's last backup and its status come from the plans the machine last reported, so a machine that never reported its plans shows "None yet" and "Not run yet", whatever its operations say.

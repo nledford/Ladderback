@@ -67,6 +67,10 @@ const READ_PATIENCE: Duration = Duration::from_secs(5);
 /// How long the page waits before it asks again after a read that went
 /// unanswered while none had answered: the "few seconds" it says.
 const ASK_AGAIN: Duration = Duration::from_secs(3);
+/// How long the hub may take to answer a Back up menu's start before the
+/// page says the backup didn't start (#1690): a start only queues the
+/// backup, so its answer comes as quickly as a read's.
+const START_PATIENCE: Duration = READ_PATIENCE;
 /// How often the cards read the time again, so that a planned run falls
 /// due on them while nothing else changes (decision 175).
 const TICK: Duration = Duration::from_secs(60);
@@ -159,9 +163,10 @@ pub(crate) fn follow(fleet: Fleet, localizer: &Arc<Localizer>) {
 }
 
 /// Reads the hub's own machine into `fleet` (decision 175): who it is,
-/// once; its operations, as the operations page follows them; and its
-/// plans' status, read again each time an operation comes, goes or
-/// changes its status.
+/// once, asked again after each read unanswered past its patience, which
+/// `fleet` notes (#1692); its operations, as the operations page follows
+/// them; and its plans' status, read again each time an operation comes,
+/// goes or changes its status.
 fn follow_own(fleet: Fleet, localizer: &Arc<Localizer>, visit: &Visit) {
     let base = ws::origin();
     let identity = RwSignal::<Option<MachineDto>>::new(None);
@@ -190,6 +195,7 @@ fn follow_own(fleet: Fleet, localizer: &Arc<Localizer>, visit: &Visit) {
                         let _ = identity.try_set(Some(read));
                         break;
                     }
+                    fleet.own_unanswered();
                     gloo_timers::future::sleep(ASK_AGAIN).await;
                 }
             })
@@ -277,6 +283,8 @@ pub(crate) fn Dashboard(localizer: Arc<Localizer>) -> impl IntoView {
     let loading = text(&localizer, msg::UI_DASHBOARD_LOADING);
     let unreachable = text(&localizer, msg::UI_DASHBOARD_UNREACHABLE);
     let none = text(&localizer, msg::UI_DASHBOARD_NONE);
+    let own_unanswered = text(&localizer, msg::UI_DASHBOARD_OWN_UNANSWERED);
+    let own_unread = fleet.own_unread();
     let shown = fleet.shown();
     let now = fleet.shown_now();
     let own = fleet.own_id();
@@ -332,9 +340,11 @@ pub(crate) fn Dashboard(localizer: Arc<Localizer>) -> impl IntoView {
                 let card_localizer = Arc::clone(&localizer);
                 let card_viewer = viewer.clone();
                 let none = none.clone();
+                let own_unanswered = own_unanswered.clone();
                 let alert_localizer = Arc::clone(&localizer);
                 view! {
                     {summary_view(&localizer, counted, viewer.clone())}
+                    {move || own_unread.get().then(|| view! { <p>{own_unanswered.clone()}</p> })}
                     {move || {
                         refused.get().map(|sentence| refusal_alert(&alert_localizer, sentence))
                     }}
@@ -632,7 +642,8 @@ fn card(
 /// The hub's own Back up menu (decision 175), named by its `hostname`: a
 /// disclosure menu whose rows start a backup of each of its `plans`, as the
 /// operations page's buttons do, through the same request. The start is
-/// said politely; a refusal is said and shown in `refused`. A row's press
+/// said politely; a refusal is said and shown in `refused`, and so is a
+/// start the hub didn't answer within `START_PATIENCE` (#1690). A row's press
 /// closes the menu and returns focus to its button, as the disclosure menu
 /// does for any row's button.
 fn back_up_menu(
@@ -648,6 +659,7 @@ fn back_up_menu(
         &[("hostname", MsgArg::Text(hostname.to_owned()))],
     );
     let started = text(localizer, msg::UI_BACKUP_STARTED);
+    let unanswered = text(localizer, msg::UI_DASHBOARD_BACKUP_UNANSWERED);
     let localizer = Arc::clone(localizer);
     let rows = move || {
         plans
@@ -661,16 +673,18 @@ fn back_up_menu(
                 );
                 let starting = RwSignal::new(false);
                 let started = started.clone();
+                let unanswered = unanswered.clone();
                 let localizer = Arc::clone(&localizer);
                 let on_press = Callback::new(move |()| {
                     let request = StartBackup { plan: plan.clone() };
                     let url = format!("{}/api/v1/operations", ws::origin());
                     let started = started.clone();
+                    let unanswered = unanswered.clone();
                     let localizer = Arc::clone(&localizer);
                     refused.set(None);
                     starting.set(true);
                     spawn_local(async move {
-                        let answer = ws::post(&url, &request).await;
+                        let answer = ws::post_within(&url, &request, START_PATIENCE).await;
                         let _ = starting.try_set(false);
                         match answer {
                             Some(Posted::Done(_)) => reply(Politeness::Polite, &started),
@@ -682,7 +696,9 @@ fn back_up_menu(
                                     detail.as_deref(),
                                 )));
                             }
-                            None => {}
+                            None => {
+                                let _ = refused.try_set(Some(Sentence::new(&unanswered, None)));
+                            }
                         }
                     });
                 });
