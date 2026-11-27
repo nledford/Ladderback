@@ -267,6 +267,14 @@ Flat. No element has a shadow. Depth is said with a Ledger Gray surface, a 1 px 
 
 **The Flat Ledger Rule.** Surfaces never cast shadows. Separation is a fill, a rule or a heading.
 
+**The Summary Card Rule.** A card summarizes one thing that stands on its own (a machine), when the reader's question is "is each of these all right?" rather than "how do these compare?", and the thing's detail has a page of its own.
+
+- Facts a reader compares across items, row by row or column by column, go in a table.
+- A card is flat: the page's color inside a 1 px Field Edge, with the small corner and no shadow. It is never filled, striped or edged in a status color: its status is a badge's words.
+- It is not a control: never a link, a button or a Tab stop, and the controls inside it are named by the thing they act on.
+- It stands in a page that answers the at-a-glance question in words before any card (a sentence that counts the items and links those that need attention), in a stable order that never moves under the reader's eyes or focus, in a grid that wraps by its own width (The 320 Rule).
+- Every card is the shared card component; a new use of it is a decision.
+
 ## Shapes
 
 Square by default, as the browser draws controls. Two radii exist: a full pill (`9999px`) for status badges and progress bars, and a small 0.25rem corner (`--radius-small`) for buttons, toasts, alerts, the pause banner, tooltips, machine cards and a skeleton's bars. Table rows are separated by one Slate Note rule under each row; there are no cell borders or zebra stripes. Each cell keeps its own rule (borders separate, with no spacing), so a pinned row header carries it as the table scrolls.
@@ -447,11 +455,11 @@ A flat list of rows indented by level (capped so deep folders fit 320 px), each 
 
 ### Machine Cards
 
-- **Use:** one machine at a glance on a hub's dashboard, and the one kind of card the UI has (decision 175): its hostname as the heading, "This hub" under the hub's own in words, then whether it is online, its status badge, its progress while it runs, and its last backup, next run and plans as terms and values.
-- **Style:** flat on the page's background, inside a 1 px Field Edge with the small corner and 1rem of padding, no shadow and no fill (The Flat Ledger Rule). Never a colored edge, stripe or fill: its status is its badge's words.
+- **Use:** one machine at a glance on a hub's dashboard, under The Summary Card Rule (decision 175): its hostname as the heading, "This hub" under the hub's own in words, then whether it is online, its status badge, its progress while it runs, and its last backup, next run and plans as terms and values.
+- **Style:** 1rem of padding inside its edge.
 - **Needs attention:** the first line under the heading, a Flag Amber Warning icon, then "Needs attention:" in bold and why, in the text's color.
-- **Controls:** at the card's foot, a Back up menu on the hub's own and a link "Open ⁨hostname⁩" on every card. The card itself is never a link, a button or a Tab stop.
-- **Layout:** a grid of columns at least 18rem wide that wraps by its own width: one column at 320 px with 200 % text, several side by side on a wide page. Cards keep their order as their machines change.
+- **Controls:** at the card's foot, a Back up menu on the hub's own and a link "Open ⁨hostname⁩" on every card.
+- **Layout:** a grid of columns at least 18rem wide: one column at 320 px with 200 % text, several side by side on a wide page. Cards keep their order as their machines change.
 
 ## Do's and Don'ts
 
@@ -466,7 +474,7 @@ A flat list of rows indented by level (capped so deep folders fit 320 px), each 
 
 ### Don't:
 
-- **Don't** add dashboard chrome: decorative cards, gradients, glows, shadows or big hero numbers. The machine card is the one card allowed: flat, with no colored edge, its status told by its badge.
+- **Don't** add dashboard chrome: gradients, glows, shadows, colored stripes or big hero numbers, nor a card that breaks the Summary Card Rule.
 - **Don't** repeat a failure in red across the page. It is stated once, as an error badge or one alert or error message; no red banners, red rows or red headings.
 - **Don't** restyle a native control with custom fills, radii or borders outside its shared component: a button's look is `Button`'s.
 - **Don't** introduce a second accent color, a fourth status hue, or a color without a contrast-checked pair.
