@@ -442,7 +442,7 @@ async fn backup_ended(agent: &mut Agent) {
     op.running = false;
 }
 
-#[when(expr = "{int} minutes pass")]
+#[when(expr = "{int} minutes pass on the machine and its hub")]
 async fn minutes_pass(agent: &mut Agent, minutes: i64) {
     let passed = SignedDuration::from_mins(minutes);
     agent.pairing.hub().clock.advance(passed);

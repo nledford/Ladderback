@@ -65,7 +65,7 @@ Feature: A machine answers its hub's commands
     Given the machine is connected to its hub
     And the hub asked the machine to run the plan "photos"
     And that backup ended
-    When 2 minutes pass
+    When 2 minutes pass on the machine and its hub
     And the hub asks the machine to run the plan "photos"
     Then the machine started 1 backup
     And the machine refused the command with "command-rate-limited", to be asked again 3 minutes from now
