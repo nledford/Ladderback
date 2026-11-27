@@ -2,7 +2,7 @@
 
 **A table may offer a Columns button before it, a disclosure whose panel lists the columns after the row header's, in the table's order, each with a checkbox that shows or hides it, Move up and Move down buttons named for it, and a drag handle for a pointer, then Reset columns. This browser keeps the choice per table. Hiding the column a table is sorted by ends the sort, and a hidden cued column marks nothing. Operations, Repositories, the plans, the Log and API tokens offer it; a repository's snapshots don't** (recorded 2026-11-21, §4.5; the maintainer's decision).
 
-**Amended 2026-11-27 (#1625, the maintainer's suggestion in the issue):** a table may also give columns the reader can't hide (`Table`'s `always_shown`), for the one fact the page exists to let a reader check. They stand right after the row header, in the order given, and the panel doesn't list them. The Repositories table's Maintenance column is the one: who maintains a repository is what I1 asks a reader to check there, and with the note in the Password cell (#1615), hiding Password hid it too.
+**Amended 2026-11-27 (#1625, as the issue suggested):** a table may also give columns the reader can't hide (`Table`'s `always_shown`), for the one fact the page exists to let a reader check. They stand right after the row header, in the order given, and the panel doesn't list them: where this decision says "the columns after the row header's", it means those after these too. The Repositories table's Maintenance column is the one: who maintains a repository is what I1 asks a reader to check there, and with the note in the Password cell (#1615), hiding Password hid it too. The gallery's Table demo shows one, Kind.
 
 ## Why
 
