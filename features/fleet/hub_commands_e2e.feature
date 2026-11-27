@@ -26,7 +26,7 @@ Feature: A person on the hub's page runs a backup on a connected machine
     And the machine's backup soon succeeds
     And once the machine's daemon stops, its store says the hub started that backup for the person's session
 
-  Scenario: A page on another site can't run a plan in the person's name
+  Scenario: A page on another site can't have the hub run a plan in the person's name
     When a page on another site asks the hub to run "documents" on "e2e-laptop" with the person's session
     Then the hub refuses with the code "origin-not-allowed"
     And once the machine's daemon stops, its store holds no backup
