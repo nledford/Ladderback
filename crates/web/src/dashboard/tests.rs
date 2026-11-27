@@ -408,6 +408,34 @@ fn a_running_machine_reads_running_and_one_that_never_ran_reads_never() {
     );
 }
 
+/// A machine runs operations side by side, so one queued later can end
+/// while one before it still runs: newest first, the one that runs can come
+/// second as well as first, and either way the card reads Running, with its
+/// run past due as its next run rather than one that was due.
+#[test]
+fn a_machine_whose_newer_operation_ended_while_an_older_one_runs_reads_running() {
+    let busy = running(online(with_plans(
+        machine("demo-desktop", AT),
+        vec![plan("documents", Some(("succeeded", -60)), Some(-10))],
+        0,
+    )));
+    let ended = MachineOperationDto {
+        operation: "op-2".to_owned(),
+        started_at: Some(at(-2)),
+        ended_at: Some(at(-1)),
+        outcome: MachineOutcomeDto::Succeeded,
+        code: None,
+    };
+    for place in [0, 1] {
+        let mut both = busy.clone();
+        both.operations.insert(place, ended.clone());
+        let facts = card_facts(&both, AT_MS);
+        assert_eq!(facts.status, CardStatus::Running, "ended one at {place}");
+        assert_eq!(facts.next_run, NextRun::At(at(-10)), "ended one at {place}");
+        assert_eq!(facts.attention, None, "ended one at {place}");
+    }
+}
+
 /// An offline machine whose planned run is more than five minutes past
 /// needs attention for that first; a run five minutes past or less is
 /// still on its way, since a machine reads its plans every minute.
