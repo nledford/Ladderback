@@ -433,16 +433,15 @@ fn log_release_check(report: ReleaseCheckReport) {
     }
 }
 
-/// Says in the log why the daily copy of the database wasn't taken (§9).
-/// A copy that failed before its rename left the one before it; the
-/// detail says when only the folder's sync after the rename failed.
+/// Says in the log why the daily copy of the database wasn't taken, or
+/// that the one taken may not survive a power loss (§9).
 fn log_daily_copy(error: DailyCopyError) {
     match error {
         DailyCopyError::Unavailable { detail } => log::warn!(
             "the daily copy of the database was skipped: the database is unavailable ({detail}); the next try is in an hour"
         ),
         DailyCopyError::Failed { detail } => log::warn!(
-            "the daily copy of the database failed ({detail}); a copy that didn't take its place leaves the one before it, and the next try is due in an hour"
+            "the daily copy of the database failed ({detail}); the copy before it, if any, is kept as it was, and the next try is in an hour"
         ),
         DailyCopyError::Unsynced { detail } => log::warn!(
             "the daily copy of the database is in place, but it may not survive a power loss ({detail}); the next copy is due in a day"

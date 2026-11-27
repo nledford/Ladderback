@@ -38,7 +38,8 @@ impl KeepDailyCopy {
     /// Takes a copy when one is due now, and answers when to look again: a
     /// day after the copy there is, or an hour from now when the copy
     /// there is couldn't be read or a copy couldn't be taken, which is
-    /// told.
+    /// told. A copy in place whose folder couldn't be synced is told and
+    /// counts as taken.
     pub async fn keep(&self) -> Timestamp {
         let now = self.clock.now();
         let taken = match self.copies.taken_at().await {
@@ -51,6 +52,10 @@ impl KeepDailyCopy {
         }
         match self.copies.take().await {
             Ok(()) => later(now, COPY_EVERY),
+            Err(error @ DailyCopyError::Unsynced { .. }) => {
+                (self.reports)(error);
+                later(now, COPY_EVERY)
+            }
             Err(error) => self.not_taken(error, now),
         }
     }

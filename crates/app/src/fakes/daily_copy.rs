@@ -39,7 +39,7 @@ impl InMemoryDailyCopy {
     }
 
     /// Every copy from now on fails with `error`, and leaves the one there
-    /// is as it was.
+    /// is as it was; with [`DailyCopyError::Unsynced`], it is taken first.
     pub fn fail(&self, error: DailyCopyError) {
         self.lock().failing = Some(error);
     }
@@ -69,11 +69,12 @@ impl DailyCopy for InMemoryDailyCopy {
     async fn take(&self) -> Result<(), DailyCopyError> {
         let now = self.clock.now();
         let mut state = self.lock();
-        if let Some(error) = &state.failing {
-            return Err(error.clone());
+        let failing = state.failing.clone();
+        if !matches!(failing, None | Some(DailyCopyError::Unsynced { .. })) {
+            return failing.map_or(Ok(()), Err);
         }
         state.there = Some(now);
         state.taken.push(now);
-        Ok(())
+        failing.map_or(Ok(()), Err)
     }
 }

@@ -11,7 +11,7 @@ use async_trait::async_trait;
 use domain::Timestamp;
 
 use crate::SqliteStore;
-use crate::copy::{beside, copy_to};
+use crate::copy::{CopyFailed, beside, copy_to};
 use crate::report::cap;
 
 /// The suffix of the daily copy, after the database's name.
@@ -57,8 +57,9 @@ impl DailyCopy for SqliteStore {
             })?;
         copy_to(&mut conn, &self.path, &self.daily_copy())
             .await
-            .map_err(|failed| DailyCopyError::Failed {
-                detail: failed.detail,
+            .map_err(|failed| match failed {
+                CopyFailed::NotInPlace { detail } => DailyCopyError::Failed { detail },
+                CopyFailed::Unsynced { detail } => DailyCopyError::Unsynced { detail },
             })
     }
 }

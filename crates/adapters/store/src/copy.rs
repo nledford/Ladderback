@@ -23,13 +23,17 @@ const WORK: &str = "-new";
 
 /// Why a copy failed, in SQLite's or the operating system's words, capped.
 #[derive(Debug)]
-pub(crate) struct CopyFailed {
-    pub(crate) detail: String,
+pub(crate) enum CopyFailed {
+    /// The copy didn't take the destination's place, which is as it was.
+    NotInPlace { detail: String },
+    /// The copy took the destination's place, but its folder couldn't be
+    /// synced, so the rename may not survive a power loss.
+    Unsynced { detail: String },
 }
 
 impl CopyFailed {
     fn of(error: impl std::fmt::Display) -> Self {
-        Self {
+        Self::NotInPlace {
             detail: cap(error.to_string()),
         }
     }
@@ -73,10 +77,8 @@ fn put_in_place(work: &Path, destination: &Path) -> Result<(), CopyFailed> {
         .and_then(|file| file.sync_all())
         .map_err(CopyFailed::of)?;
     fs::rename(work, destination).map_err(CopyFailed::of)?;
-    sync_dir(folder(destination)).map_err(|error| {
-        CopyFailed::of(format!(
-            "the copy took its place, but its folder couldn't be synced: {error}"
-        ))
+    sync_dir(folder(destination)).map_err(|error| CopyFailed::Unsynced {
+        detail: cap(format!("its folder couldn't be synced: {error}")),
     })
 }
 
