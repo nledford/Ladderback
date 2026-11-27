@@ -58,6 +58,16 @@ fn a_session_tag_reads_back_and_refuses_anything_else() {
 }
 
 #[test]
+fn a_session_tag_read_from_json_is_checked_as_parse_checks_it() {
+    let tag = SessionTag::of(&token(4).digest());
+    let json = serde_json::to_string(&tag).unwrap();
+    assert_eq!(serde_json::from_str::<SessionTag>(&json).unwrap(), tag);
+    for text in ["\"zz\"", "\"0123456789ABCDEF\""] {
+        assert!(serde_json::from_str::<SessionTag>(text).is_err(), "{text}");
+    }
+}
+
+#[test]
 fn a_password_is_one_byte_to_the_most_bytes() {
     assert_eq!(
         Password::parse(String::new()).unwrap_err(),
