@@ -148,6 +148,9 @@ Feature: The hub's dashboard of its machines
     And I press Tab until focus is on the button "Start backup of demo-home"
     And I press Enter
     Then the page shows an error alert containing "The backup didn't start because the hub couldn't be reached."
+    And focus is on the hub's own Back up button
+    When I press Enter
+    Then the button "Start backup of demo-home" can be pressed again
     And the page has no accessibility violations
 
   Scenario Outline: The hub's own Back up menu opens inside the window on a narrow page, at <size> percent text

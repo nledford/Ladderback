@@ -986,6 +986,27 @@ fn a_paused_page_holds_whether_the_hubs_own_was_unread() {
     assert!(!fleet.own_unread().get_untracked());
 }
 
+/// The hub's own read going unanswered, or answering that it names no
+/// machine, changes no card, so a pause counts no change for it; its card
+/// coming counts one.
+#[test]
+fn a_pause_counts_the_hubs_own_by_its_card() {
+    let fleet = Fleet::new();
+    fleet.state.set(State::Ready);
+    fleet.pause();
+    fleet.own_unanswered();
+    assert_eq!(fleet.pending(), 0);
+    fleet.own.set(Own::Read(None));
+    assert_eq!(fleet.pending(), 0);
+    assert_eq!(fleet.resume(), resumed(0));
+
+    fleet.pause();
+    fleet
+        .own
+        .set(Own::Read(Some(Box::new(machine("demo-hub", AT)))));
+    assert_eq!(fleet.resume(), resumed(1));
+}
+
 /// A machine's page is a page not found only once the machines and the
 /// hub's own are read and it is neither: while the hub's own is unread, it
 /// may be the hub's (#1692).
