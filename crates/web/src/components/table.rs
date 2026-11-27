@@ -45,7 +45,7 @@ thread_local! {
 const KEPT_KEY: &str = "ladderback-columns-";
 
 /// A table's Columns panel, where the reader hides, shows and reorders the
-/// columns after the row header's (decision 140): `id` names the table's
+/// columns after the row header's and any it always shows (decision 140): `id` names the table's
 /// choice, which this browser keeps for every table of that id, and the
 /// panel's words are `localizer`'s. Lower-case letters, digits and hyphens.
 pub struct ColumnsChoice {
@@ -110,10 +110,11 @@ impl<R: Send + Sync + 'static> Column<R> {
     /// The column, as a table's row header, `room` wide however narrow its
     /// frame, so its words read whole, as a snapshot's short ID must; the
     /// frame scrolls instead. It is still at most its width, and at most
-    /// three fifths of the frame, so the cells beside it can be read. Only
-    /// for a header beside cells that hold no control: the room it covers can
-    /// be more than the share that keeps a focused control in view (2.4.11).
-    /// A column that isn't the row header's is its width already.
+    /// three fifths of the frame, so the cells beside it can be read. Beside
+    /// cells that hold a control, `room` is at most 4rem, so at 320 px with
+    /// 200 % text, where the frame is 8rem wide, they keep half of it to show
+    /// a focused control in (2.4.11). A column that isn't the row header's
+    /// is its width already.
     pub fn kept_whole(self, room: Rem) -> Self {
         Self {
             whole: Some(room),
@@ -315,7 +316,8 @@ pub struct Sentences {
 }
 
 /// A footer row (`<tfoot>`), such as the totals: its header's words, then a
-/// cell for each column after the row header's, in their order; columns
+/// cell for each column after the row header's, by the table's place (any
+/// always shown first), in their order; columns
 /// past the last cell given get empty ones.
 #[derive(Clone)]
 pub struct Footer {
@@ -326,9 +328,13 @@ pub struct Footer {
 /// A table (§4.5): a real `<table>`, named by its `name`, a caption or the
 /// page's heading, with `columns` after the `row_header` column, whose cell
 /// is each row's header (`<th scope="row">`), and an optional `footer`.
-/// `row_header_id`, where given, gives each row's header an `id` and lets a
-/// script focus it (`tabindex="-1"`, no stop for Tab), so a control that
-/// leaves the row can hand focus to the header that names it.
+/// `always_shown` columns, where given, stand right after the row header,
+/// in their order, and a [`ColumnsChoice`] panel doesn't list them, so the
+/// reader can't hide or move them (decision 140, #1625): only for the one
+/// fact the page exists to let a reader check. A footer's cells count them
+/// first. `row_header_id`, where given, gives each row's header an `id` and
+/// lets a script focus it (`tabindex="-1"`, no stop for Tab), so a control
+/// that leaves the row can hand focus to the header that names it.
 ///
 /// A column given a [`Cue`] ([`Column::cued`]) is what a live update can
 /// change in a row, such as its status. A row whose value there changes
@@ -386,6 +392,7 @@ pub fn Table<R, K, KF>(
     name: Name,
     row_header: Column<R>,
     columns: Vec<Column<R>>,
+    #[prop(optional)] always_shown: Vec<Column<R>>,
     #[prop(into)] rows: Signal<Vec<R>>,
     key: KF,
     #[prop(into)] state: Signal<State>,
@@ -409,12 +416,22 @@ where
     let frame_name = name.frame_labeled_by(&caption_id).to_owned();
     let pinned = row_header.width;
     let whole = row_header.whole;
-    let columns: Arc<Vec<Column<R>>> =
-        Arc::new(std::iter::once(row_header).chain(columns).collect());
-    // The columns after the row header's, by the caller's place: their ids,
-    // and the layout the reader chose of them (decision 140), kept where the
-    // table has a Columns panel.
-    let ids: Arc<[&'static str]> = columns.iter().skip(1).map(|column| column.id).collect();
+    // The columns the reader can't hide, right after the row header's.
+    let fixed = always_shown.len();
+    let columns: Arc<Vec<Column<R>>> = Arc::new(
+        std::iter::once(row_header)
+            .chain(always_shown)
+            .chain(columns)
+            .collect(),
+    );
+    // The columns after the row header's and the fixed ones, by the
+    // caller's place: their ids, and the layout the reader chose of them
+    // (decision 140), kept where the table has a Columns panel.
+    let ids: Arc<[&'static str]> = columns
+        .iter()
+        .skip(fixed + 1)
+        .map(|column| column.id)
+        .collect();
     let choice = columns_choice.map(|choice| (kept_columns(choice.id), choice));
     let layout = {
         let ids = Arc::clone(&ids);
@@ -427,15 +444,8 @@ where
     // The table's places (the row header's 0) of the columns it shows after
     // the row header's, in their order; placed once the focus a moving
     // column's cells may hold is noted (below).
-    let shown_columns = Memo::new(move |_| {
-        layout.with(|layout| {
-            layout
-                .shown()
-                .into_iter()
-                .map(|column| column + 1)
-                .collect::<Vec<_>>()
-        })
-    });
+    let shown_columns =
+        Memo::new(move |_| layout.with(|layout| rules::shown_places(fixed, layout)));
     let placed_columns = RwSignal::new(shown_columns.get_untracked());
     let widths: Arc<[Rem]> = columns.iter().map(|column| column.width).collect();
     let width = Signal::derive({
@@ -454,7 +464,7 @@ where
     let sorted = RwSignal::new(None::<Sorted>);
     // Hiding the column the rows are sorted by ends the sort.
     Effect::new(move |_| {
-        let kept = layout.with(|layout| rules::sort_kept(sorted.get_untracked(), layout));
+        let kept = layout.with(|layout| rules::sort_kept(sorted.get_untracked(), fixed, layout));
         if kept != sorted.get_untracked() {
             sorted.set(kept);
         }
@@ -525,9 +535,7 @@ where
     let cue_shown = {
         let watched = watch.as_ref().map(|(at, _, _)| *at);
         Memo::new(move |_| {
-            watched
-                .and_then(|at| at.checked_sub(1))
-                .is_none_or(|column| layout.with(|layout| layout.is_shown(column)))
+            watched.is_none_or(|at| layout.with(|layout| rules::is_place_shown(at, fixed, layout)))
         })
     };
     Effect::new(move |_| {
@@ -547,7 +555,7 @@ where
             ids,
             headers: columns
                 .iter()
-                .skip(1)
+                .skip(fixed + 1)
                 .map(|column| column.header.clone())
                 .collect(),
             layout,
@@ -1072,7 +1080,8 @@ fn keep_columns(id: &str, value: Option<&str>) {
 
 /// What a table's Columns panel draws from: the table's number, its
 /// [`ColumnsChoice`], the choice kept, the ids and headers of the columns
-/// after the row header's by the caller's place, their layout, and the
+/// after the row header's and those it always shows, by the caller's place,
+/// their layout, and the
 /// `id` of what names the table, which describes the panel's button.
 struct ColumnsPanel {
     table: u32,
@@ -1086,8 +1095,9 @@ struct ColumnsPanel {
 
 /// The Columns panel (decision 140): a disclosure button, "Columns",
 /// described by the table's name, and the panel it shows, a list named by
-/// the button with an item for each column after the row header's, in the
-/// table's order, then "Reset columns". Each item has a checkbox that shows
+/// the button with an item for each column after the row header's and
+/// those it always shows, in the table's order, then "Reset columns". Each
+/// item has a checkbox that shows
 /// or hides its column and Move buttons that move it a place, unavailable
 /// at the ends, focus staying on the button pressed until its column can't
 /// move that way, then going to the other; a pointer may drag the item by

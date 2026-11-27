@@ -55,10 +55,11 @@ const SNAPSHOTS: Record<string, string> = {
   - table "Demo folders":
     - caption: Demo folders
     - rowgroup:
-      - row "Name Sort by name Size Sort by size Changed Sort by changed Files Sort by files Actions":
+      - row "Name Sort by name Kind Size Sort by size Changed Sort by changed Files Sort by files Actions":
         - columnheader "Name Sort by name":
           - text: Name
           - button "Sort by name"
+        - columnheader "Kind"
         - columnheader "Size Sort by size":
           - text: Size
           - button "Sort by size"
@@ -70,29 +71,33 @@ const SNAPSHOTS: Record<string, string> = {
           - button "Sort by files"
         - columnheader "Actions"
     - rowgroup:
-      - row "photos 4.2 GiB Oct 4, 2026 1,204 Add a file to ⁨photos⁩":
+      - row "photos Folder 4.2 GiB Oct 4, 2026 1,204 Add a file to ⁨photos⁩":
         - rowheader "photos"
+        - cell "Folder"
         - cell "4.2 GiB"
         - cell "Oct 4, 2026"
         - cell "1,204"
         - cell "Add a file to ⁨photos⁩":
           - button "Add a file to ⁨photos⁩"
-      - row "music 12.6 GiB Aug 21, 2026 12 Add a file to ⁨music⁩":
+      - row "music Folder 12.6 GiB Aug 21, 2026 12 Add a file to ⁨music⁩":
         - rowheader "music"
+        - cell "Folder"
         - cell "12.6 GiB"
         - cell "Aug 21, 2026"
         - cell "12"
         - cell "Add a file to ⁨music⁩":
           - button "Add a file to ⁨music⁩"
-      - row "documents 820 MiB Nov 2, 2026 312 Add a file to ⁨documents⁩":
+      - row "documents Folder 820 MiB Nov 2, 2026 312 Add a file to ⁨documents⁩":
         - rowheader "documents"
+        - cell "Folder"
         - cell "820 MiB"
         - cell "Nov 2, 2026"
         - cell "312"
         - cell "Add a file to ⁨documents⁩":
           - button "Add a file to ⁨documents⁩"
-      - row "notes 1.5 MiB Nov 12, 2026 12 Add a file to ⁨notes⁩":
+      - row "notes Folder 1.5 MiB Nov 12, 2026 12 Add a file to ⁨notes⁩":
         - rowheader "notes"
+        - cell "Folder"
         - cell "1.5 MiB"
         - cell "Nov 12, 2026"
         - cell "12"
@@ -101,6 +106,7 @@ const SNAPSHOTS: Record<string, string> = {
     - rowgroup:
       - row "Total 17.6 GiB 1,540":
         - rowheader "Total"
+        - cell
         - cell "17.6 GiB"
         - cell
         - cell "1,540"
