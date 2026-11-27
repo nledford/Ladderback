@@ -97,6 +97,34 @@ async fn asking_whether_a_plan_ever_succeeded_reads_only_the_index_of_successes(
     );
 }
 
+/// Finding a plan's unfinished backup walks the plan's own rows through
+/// `ops_by_plan`, newest first, and stops at the first one: no scan of the
+/// whole log and no sort (#1464).
+#[tokio::test]
+async fn finding_a_plans_unfinished_backup_reads_the_plans_index() {
+    let (_dir, store) = scratch_store().await;
+
+    // The statement and a fixed prefix: nothing from outside the crate.
+    let explain = format!("EXPLAIN QUERY PLAN {}", super::sql::UNFINISHED_BACKUP);
+    let plan: Vec<String> = sqlx::query(sqlx::AssertSqlSafe(explain))
+        .bind("demo-home")
+        .fetch_all(&store.pool)
+        .await
+        .expect("the statement's plan")
+        .iter()
+        .map(|step| step.get::<String, _>("detail"))
+        .collect();
+
+    assert!(
+        plan.iter().any(|step| step.contains("USING INDEX ops_by_plan")),
+        "{plan:?}"
+    );
+    assert!(
+        !plan.iter().any(|step| step.contains("TEMP B-TREE")),
+        "{plan:?}"
+    );
+}
+
 #[tokio::test]
 async fn deleting_an_operation_deletes_its_warnings_and_only_its_own() {
     let (_dir, store) = scratch_store().await;

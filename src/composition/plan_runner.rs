@@ -1420,29 +1420,13 @@ fn log_keyring_wait(
 #[async_trait]
 impl app::hub_commands::HubRuns for PlanRunner {
     async fn going(&self, plan: &PlanId) -> Option<OperationId> {
-        let mut after = None;
-        loop {
-            let query = app::ports::HistoryQuery {
-                plan: Some(plan.clone()),
-                after,
-                limit: app::ports::PageSize::DEFAULT,
-            };
-            let page = match self.store.list(&query).await {
-                Ok(page) => page,
-                Err(error) => {
-                    log::error!("the operation log could not be read: {error}");
-                    return None;
-                }
-            };
-            let found = page.operations.iter().find(|record| {
-                record.kind == domain::execution::OperationKind::Backup
-                    && !record.status.is_finished()
-            });
-            if let Some(record) = found {
-                return Some(record.id);
-            }
-            after = Some(page.next?);
-        }
+        self.store
+            .unfinished_backup(plan)
+            .await
+            .unwrap_or_else(|error| {
+                log::error!("the operation log could not be read: {error}");
+                None
+            })
     }
 
     async fn start(

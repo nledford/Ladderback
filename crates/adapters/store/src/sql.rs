@@ -191,6 +191,14 @@ pub(crate) const EVER_SUCCEEDED: &str = concat!(
     "WHERE plan_id = ? AND status IN ('succeeded', 'succeeded_with_warnings'))"
 );
 
+/// The newest queued or running backup of a plan. Parameter: the plan.
+/// SQLite walks the plan's rows newest first through `ops_by_plan`, and the
+/// first unfinished backup ends the walk.
+pub(crate) const UNFINISHED_BACKUP: &str = concat!(
+    "SELECT id FROM operations WHERE plan_id = ? AND kind = 'backup' ",
+    "AND status IN ('queued', 'running') ORDER BY id DESC LIMIT 1"
+);
+
 /// The columns `row::api_token` reads.
 macro_rules! select_api_tokens {
     ($($clause:literal),+ $(,)?) => {

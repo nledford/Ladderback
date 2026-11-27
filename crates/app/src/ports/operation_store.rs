@@ -120,8 +120,25 @@ pub trait OperationStore: Send + Sync {
     /// plan's whole history when it can; this default pages
     /// [`list`](Self::list).
     async fn unfinished_backup(&self, plan: &PlanId) -> Result<Option<OperationId>, StoreError> {
-        let _ = plan;
-        todo!()
+        let mut after = None;
+        loop {
+            let query = HistoryQuery {
+                plan: Some(plan.clone()),
+                after,
+                limit: PageSize::DEFAULT,
+            };
+            let page = self.list(&query).await?;
+            let found = page.operations.iter().find(|record| {
+                record.kind == OperationKind::Backup && !record.status.is_finished()
+            });
+            if let Some(record) = found {
+                return Ok(Some(record.id));
+            }
+            let Some(next) = page.next else {
+                return Ok(None);
+            };
+            after = Some(next);
+        }
     }
 
     /// Ends every operation the log shows as running as

@@ -738,6 +738,16 @@ impl OperationStore for SqliteStore {
             .map_err(unavailable)
     }
 
+    async fn unfinished_backup(&self, plan: &PlanId) -> Result<Option<OperationId>, StoreError> {
+        let _call = self.call().await;
+        let found = sqlx::query(sql::UNFINISHED_BACKUP)
+            .bind(plan.as_str())
+            .fetch_optional(&self.pool)
+            .await
+            .map_err(unavailable)?;
+        found.as_ref().map(row::operation_id).transpose()
+    }
+
     async fn recover(&self, reason: &FailureReason) -> Result<Recovered, StoreError> {
         let _call = self.call().await;
         let mut conn = self.pool.acquire().await.map_err(unavailable)?;
