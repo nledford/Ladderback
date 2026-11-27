@@ -305,7 +305,8 @@ impl Align {
 /// header pinned wider would leave the cells scrolling past it too little
 /// room to show a focused control (2.4.11) on a small screen with larger
 /// text, where a frame is 8rem wide. Its words break inside it there, unless
-/// they must read whole (`whole` below), beside cells that hold no control.
+/// they must read whole (`whole` below), which beside cells that hold a
+/// control takes at most half that frame.
 const PINNED_SHARE: u8 = 40;
 
 /// The share of its frame a row header kept whole takes at most, in percent:

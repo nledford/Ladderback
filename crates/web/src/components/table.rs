@@ -110,10 +110,11 @@ impl<R: Send + Sync + 'static> Column<R> {
     /// The column, as a table's row header, `room` wide however narrow its
     /// frame, so its words read whole, as a snapshot's short ID must; the
     /// frame scrolls instead. It is still at most its width, and at most
-    /// three fifths of the frame, so the cells beside it can be read. Only
-    /// for a header beside cells that hold no control: the room it covers can
-    /// be more than the share that keeps a focused control in view (2.4.11).
-    /// A column that isn't the row header's is its width already.
+    /// three fifths of the frame, so the cells beside it can be read. Beside
+    /// cells that hold a control, `room` is at most 4rem, so at 320 px with
+    /// 200 % text, where the frame is 8rem wide, they keep half of it to show
+    /// a focused control in (2.4.11). A column that isn't the row header's
+    /// is its width already.
     pub fn kept_whole(self, room: Rem) -> Self {
         Self {
             whole: Some(room),

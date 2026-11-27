@@ -518,12 +518,18 @@ fn repositories_table(
 ) -> AnyView {
     // The five columns add up to the page's 58 rem at 1280 px, so a wide
     // screen never scrolls the frame (§4.5, the table).
+    // Its header reads whole at 320 px with 200 % text too: "Name" in
+    // DejaVu Sans Bold, Linux's default sans-serif, is 3.23em, wider than
+    // two fifths of the 8rem frame less the cells' padding (94.4 px of 32 px
+    // text), so it broke inside on CI. 4rem leaves it 120 px, room for the
+    // word 16 % wider, and the cells beside it half the frame (§4.5).
     let name = Column::new(
         "name",
         text(localizer, msg::UI_COLUMN_NAME),
         Rem::tenths(70),
         |row: Signal<RepositoryDto>| row.with_untracked(|row| row.alias.clone()).into_any(),
-    );
+    )
+    .kept_whole(Rem::tenths(40));
     let maintenance_localizer = Arc::clone(localizer);
     let maintenance = Column::new(
         "maintenance",
