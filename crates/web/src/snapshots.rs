@@ -112,7 +112,8 @@ struct Page {
     /// The daemon's refusal of the change, said inside the dialog.
     switch_refused: RwSignal<Option<Sentence>>,
     /// Tells the list of repositories who maintains the one shown now, so
-    /// that picking it again shows it so.
+    /// that picking it again shows it so, and has the list read again, so
+    /// the pause the change began or ended is shown at once (#1671).
     remember: Callback<(String, bool)>,
     unreachable: RwSignal<bool>,
     /// The history read last: `None` until a read is answered, and again when
@@ -538,7 +539,7 @@ pub(crate) fn Snapshots(localizer: Arc<Localizer>) -> impl IntoView {
     // it and since when that maintenance is paused for want of a lease, on a
     // paired machine; `None` while the read is on its way.
     let repositories = RwSignal::<Option<Vec<(String, bool, Option<String>)>>>::new(None);
-    let chosen = RwSignal::<Option<(String, bool, Option<String>)>>::new(None);
+    let chosen = RwSignal::<Option<(String, bool)>>::new(None);
     // The page of a repository is made anew when another is picked, not when
     // the one shown is picked again; that only asks for its history again.
     let shown_alias = Memo::new(move |_| chosen.get());
@@ -551,32 +552,44 @@ pub(crate) fn Snapshots(localizer: Arc<Localizer>) -> impl IntoView {
     let refused_localizer = Arc::clone(&localizer);
     let alert_localizer = Arc::clone(&localizer);
     let repositories_url = format!("{}/api/v1/repositories", ws::origin());
-    spawn_local(async move {
-        match ws::get::<RepositoriesDto>(&repositories_url).await {
-            Some(Got::Read(read)) => {
-                unreachable.set(unreachable_after(true));
-                repositories.set(Some(
-                    read.repositories
-                        .into_iter()
-                        .map(|row| (row.alias, row.maintained_here, row.maintenance_paused_since))
-                        .collect(),
-                ));
+    // Reads the list: on the page's first read, and again once maintenance
+    // of a repository is turned on or off, when only a list read is kept,
+    // so a later failure leaves the list shown as it was.
+    let read_list = Callback::new(move |first: bool| {
+        let url = repositories_url.clone();
+        let refused_localizer = Arc::clone(&refused_localizer);
+        spawn_local(async move {
+            match ws::get::<RepositoriesDto>(&url).await {
+                Some(Got::Read(read)) => {
+                    unreachable.set(unreachable_after(true));
+                    repositories.set(Some(
+                        read.repositories
+                            .into_iter()
+                            .map(|row| {
+                                (row.alias, row.maintained_here, row.maintenance_paused_since)
+                            })
+                            .collect(),
+                    ));
+                }
+                Some(Got::Refused(code, args, detail)) if first => {
+                    unreachable.set(unreachable_after(true));
+                    refused.set(Some(refused_sentence(
+                        &refused_localizer,
+                        code,
+                        &args,
+                        detail.as_deref(),
+                    )));
+                    repositories.set(Some(Vec::new()));
+                }
+                Some(Got::Refused(..)) => {}
+                None => unreachable.set(unreachable_after(false)),
             }
-            Some(Got::Refused(code, args, detail)) => {
-                unreachable.set(unreachable_after(true));
-                refused.set(Some(refused_sentence(
-                    &refused_localizer,
-                    code,
-                    &args,
-                    detail.as_deref(),
-                )));
-                repositories.set(Some(Vec::new()));
-            }
-            None => unreachable.set(unreachable_after(false)),
-        }
+        });
     });
+    read_list.run(true);
     // Who maintains a repository once its page turned that on or off, so
-    // that picking it again shows it so.
+    // that picking it again shows it so; the list is read again for the
+    // pause the change began or ended (#1671).
     let remember = Callback::new(move |(alias, maintained): (String, bool)| {
         repositories.update(|rows| {
             for row in rows.iter_mut().flatten() {
@@ -585,6 +598,7 @@ pub(crate) fn Snapshots(localizer: Arc<Localizer>) -> impl IntoView {
                 }
             }
         });
+        read_list.run(false);
     });
     let picker = Arc::clone(&localizer);
     // Whether the reading reached no daemon counts only until the list has
@@ -616,7 +630,7 @@ pub(crate) fn Snapshots(localizer: Arc<Localizer>) -> impl IntoView {
             (Some(aliases), _) => {
                 aliases
                     .into_iter()
-                    .map(|(alias, maintained, paused)| {
+                    .map(|(alias, maintained, _)| {
                         let label = text_with(
                             &picker,
                             msg::UI_SNAPSHOTS_OF,
@@ -628,7 +642,7 @@ pub(crate) fn Snapshots(localizer: Arc<Localizer>) -> impl IntoView {
                             <Button
                                 content=Content::Text(label.into())
                                 on_press=Callback::new(move |()| {
-                                    chosen.set(Some((alias.clone(), maintained, paused.clone())));
+                                    chosen.set(Some((alias.clone(), maintained)));
                                     picks.update(|picks| *picks = picks.wrapping_add(1));
                                 })
                             />
@@ -641,13 +655,13 @@ pub(crate) fn Snapshots(localizer: Arc<Localizer>) -> impl IntoView {
         {move || {
             shown_alias
                 .get()
-                .map(|(alias, maintained, paused)| {
+                .map(|(alias, maintained)| {
                     view! {
                         <Repository
                             localizer=Arc::clone(&localizer)
                             alias=alias
                             maintained=maintained
-                            paused=paused
+                            repositories=repositories
                             unreachable=unreachable
                             picks=picks
                             remember=remember
@@ -662,16 +676,16 @@ pub(crate) fn Snapshots(localizer: Arc<Localizer>) -> impl IntoView {
 /// whatever is asked. It is made anew for each repository picked, and reads
 /// its history again each time its repository is picked. A repository this
 /// agent does not maintain shows its history and says why it offers no
-/// maintenance; one it maintains whose maintenance is `paused` for want of
-/// a lease, since when the daemon wrote, warns of it above the buttons.
-/// Either way the page offers to turn maintenance from this agent on or
-/// off, after a dialog that says what that means.
+/// maintenance; one it maintains whose maintenance is paused for want of a
+/// lease, since when the daemon wrote in its row of `repositories`, warns
+/// of it above the buttons. Either way the page offers to turn maintenance
+/// from this agent on or off, after a dialog that says what that means.
 #[component]
 fn Repository(
     localizer: Arc<Localizer>,
     alias: String,
     maintained: bool,
-    paused: Option<String>,
+    repositories: RwSignal<Option<Vec<(String, bool, Option<String>)>>>,
     unreachable: RwSignal<bool>,
     picks: RwSignal<u32>,
     remember: Callback<(String, bool)>,
@@ -694,23 +708,25 @@ fn Repository(
         })
     };
     // Since when maintenance from this paired machine is paused (§7.3,
-    // decision 158), read in the viewer's zone.
-    let paused = page.viewer.with_value(|zone| {
-        paused
-            .as_deref()
-            .and_then(|since| wording::maintenance_paused(since, zone.as_ref()))
-    });
+    // decision 158), as the list read last says, read in the viewer's zone.
+    let paused = move || {
+        let since = repositories.with(|rows| {
+            rows.iter()
+                .flatten()
+                .find(|row| page.alias.with_value(|alias| row.0 == *alias))
+                .and_then(|row| row.2.clone())
+        })?;
+        page.viewer
+            .with_value(|zone| wording::maintenance_paused(&since, zone.as_ref()))
+    };
     let paused_alert = move || {
-        paused
-            .clone()
-            .filter(|_| page.maintained.get())
-            .map(|words| {
-                view! {
-                    <Alert localizer=page.localizer.get_value() tone=AlertTone::Warning>
-                        {page.words(&words)}
-                    </Alert>
-                }
-            })
+        paused().filter(|_| page.maintained.get()).map(|words| {
+            view! {
+                <Alert localizer=page.localizer.get_value() tone=AlertTone::Warning>
+                    {page.words(&words)}
+                </Alert>
+            }
+        })
     };
     let buttons = move || {
         page.maintained.get().then(|| {
