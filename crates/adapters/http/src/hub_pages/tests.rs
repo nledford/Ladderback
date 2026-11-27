@@ -1397,3 +1397,44 @@ async fn answered_within(
     .await
     .expect("the route answered within 5 seconds")
 }
+
+/// A run of a plan on a machine offline names the plan and its next run on
+/// its schedule, as the machine last reported them (decision 176).
+#[tokio::test]
+async fn a_run_on_a_machine_offline_names_the_plans_next_run() {
+    use domain::fleet::{PlansReport, ReportedPlan};
+
+    let daemon = Daemon::hub(false);
+    let machine = agent(1, "macbook", true, now());
+    daemon.registry.hold(machine.clone());
+    let next = now() + domain::SignedDuration::from_hours(1);
+    let plans = PlansReport::of(vec![ReportedPlan {
+        plan: domain::PlanId::parse("photos").unwrap(),
+        last: None,
+        next_run: EpochSeconds::from_timestamp(next),
+    }]);
+    daemon
+        .inbox
+        .keep_plans(machine.agent_id, &plans)
+        .await
+        .unwrap();
+    let response = daemon.send(run(LOOPBACK, &[], &machine, "photos")).await;
+    assert_eq!(response.status(), StatusCode::CONFLICT);
+    let refused: api::ErrorDto = serde_json::from_value(json(response).await).unwrap();
+    assert_eq!(refused.code, ErrorCode::MachineOfflineNextRun);
+    assert_eq!(
+        refused.args,
+        [
+            ("plan".to_owned(), api::MsgArg::Text("photos".to_owned())),
+            (
+                "next-run".to_owned(),
+                api::MsgArg::Timestamp {
+                    utc_ms: next.as_millisecond(),
+                    zone: None,
+                },
+            ),
+        ]
+        .into_iter()
+        .collect()
+    );
+}

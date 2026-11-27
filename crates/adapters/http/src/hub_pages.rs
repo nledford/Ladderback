@@ -609,6 +609,7 @@ fn command_refused(refused: CommandAskRefused) -> Response {
     match refused {
         CommandAskRefused::NeedsSignIn => crate::refused(StatusCode::FORBIDDEN, code),
         CommandAskRefused::MachineUnknown => crate::refused(StatusCode::NOT_FOUND, code),
+        CommandAskRefused::MachineOfflineNextRun { .. } => todo!(),
         CommandAskRefused::MachineOffline
         | CommandAskRefused::CommandsUnsupported
         | CommandAskRefused::CommandsOff => crate::refused(StatusCode::CONFLICT, code),

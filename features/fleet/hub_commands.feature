@@ -4,8 +4,10 @@ Feature: A machine answers its hub's commands
   when its hub signed it on this connection, asked it within 15 minutes of
   the hub's time and never sent it before, and the hub starts at most one
   backup of a plan every 5 minutes and 12 an hour. The machine answers each
-  command with what it did, or why it did nothing (technical design §7.2,
-  §10.3; §16, decisions 120 and 176).
+  command with what it did, or why it did nothing, and the hub tells the
+  person who asked; a machine that isn't connected, or doesn't take the
+  command, is sent nothing, and nothing waits to be sent later (technical
+  design §7.2, §10.3; §16, decisions 120 and 176).
 
   Background:
     Given an agent paired with a hub
@@ -83,3 +85,10 @@ Feature: A machine answers its hub's commands
     When the hub asks the machine to cancel that check
     Then the check runs on
     And the machine refused the command with "command-backups-only"
+
+  Scenario: A machine not connected is named with its plan's next run
+    Given the machine told its hub the plan "photos" runs next in an hour
+    And the machine's connection to its hub ended
+    When a person on the hub asks the machine to run the plan "photos"
+    Then the hub told the person "machine-offline-next-run", with the plan's next run in an hour
+    And the machine started no backup

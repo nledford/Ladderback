@@ -1,12 +1,13 @@
 //! Steps for `features/fleet/hub_commands.feature`: a machine connected to
-//! its hub answers the hub's commands to run a plan's backup or cancel one
-//! (technical design §7.2, §10.3; §16, decisions 120 and 176). The hub
-//! sends each command on the machine's connection through the loopback
-//! connector, signed as the hub signs its messages; the machine answers it
-//! through its use case, whose backups a double of the plan runner starts.
-//! The machine's clock and its command ledger are kept for the scenario, so
-//! a restart builds the use case and the connection again on the same
-//! database.
+//! its hub answers the hub's commands to run a plan's backup or cancel one,
+//! and the hub tells the person who asked what the machine answered, or why
+//! it sent nothing (technical design §7.2, §10.3; §16, decisions 120 and
+//! 176). The hub sends each command on the machine's connection through the
+//! loopback connector, signed as the hub signs its messages; the machine
+//! answers it through its use case, whose backups a double of the plan
+//! runner starts. The machine's clock and its command ledger are kept for
+//! the scenario, so a restart builds the use case and the connection again
+//! on the same database.
 
 use std::sync::{Arc, Mutex, PoisonError};
 
@@ -15,17 +16,23 @@ use app::fakes::{
     FakeClock, FakeSigning, InMemoryCommandLedger, InMemoryConfigStore, LoopbackHubConnector,
     SeededRandom,
 };
-use app::hub_commands::{AnswerHubCommands, HubCancelRefused, HubRunRefused, HubRuns};
-use app::pairing::{AgentChannel, ChannelError, ConnectToHub};
+use app::hub_commands::{
+    AnswerHubCommands, CommandAnswer, HubCancelRefused, HubRunRefused, HubRuns,
+};
+use app::pairing::{AgentChannel, ChannelError, CommandAsk, CommandAskRefused, ConnectToHub};
 use app::ports::{Clock, ConfigStore};
 use async_trait::async_trait;
 use base64::Engine;
 use base64::engine::general_purpose::URL_SAFE_NO_PAD;
 use cucumber::{given, then, when};
 use domain::access::SessionTag;
-use domain::fleet::{WireName, cancel_op_kind, run_plan_kind};
+use domain::fleet::{
+    COMMAND_ANSWER_WITHIN, EpochSeconds, HubCommand, PlansReport, ReportedPlan, WireName,
+    cancel_op_kind, run_plan_kind,
+};
 use domain::planning::{AgentConfig, AgentSettings, HubCommands};
 use domain::{OperationId, PlanId, RepositoryId, SignedDuration, Uuid};
+use futures::future::{Either, join, select};
 
 use super::Agent;
 use crate::scheduler_steps::config_with_plans;
@@ -54,6 +61,13 @@ struct Side {
     /// How the machine's last answer went.
     answered: Option<Result<(), ChannelError>>,
     commands: u128,
+    /// Whether the machine runs a release whose `Hello` doesn't say which
+    /// commands it takes.
+    older: bool,
+    /// Whether the hub holds the machine's connection as live.
+    live: bool,
+    /// What the hub told the person who asked last.
+    heard: Option<Result<CommandAnswer, CommandAskRefused>>,
 }
 
 fn side(agent: &mut Agent) -> &mut Side {
@@ -75,6 +89,9 @@ fn side(agent: &mut Agent) -> &mut Side {
             last: None,
             answered: None,
             commands: 0,
+            older: false,
+            live: false,
+            heard: None,
         });
     }
     world.commands.side.as_mut().expect("the machine's side")
@@ -218,18 +235,36 @@ impl Side {
             "0.6.0-agent".to_owned(),
             machine.identifier.clone(),
         );
+        let accepts = if self.older {
+            None
+        } else {
+            Some(answer.accepts().await)
+        };
         let (_, channel) = connect
             .connect_accepting(
                 machine.agent_id,
                 machine.hostname.clone(),
                 machine.zone.clone(),
                 None,
-                Some(answer.accepts().await),
+                accepts,
             )
             .await
             .expect("the machine connects to its hub");
         self.channel = Some(channel);
         self.answer = Some(answer);
+        self.live = false;
+    }
+
+    /// The machine tells its hub `plans`, its first message on this
+    /// connection, by which the hub holds the connection as live.
+    async fn tell_plans(&mut self, plans: &PlansReport) {
+        let channel = self.channel.as_mut().expect("a connection to the hub");
+        channel.send_plans(plans).await.expect("the plans are sent");
+        channel
+            .receive_plans_ack()
+            .await
+            .expect("the hub took the plans");
+        self.live = true;
     }
 
     /// The hub sends `kind` holding `payload`, and the machine answers it.
@@ -551,4 +586,176 @@ async fn check_runs_on(agent: &mut Agent) {
     let state = side.runs.state();
     let check = state.operations.last().expect("the check");
     assert!(check.running && !check.canceled);
+}
+
+/// The ask of a person on the hub, signed in as the session [`ASKED_BY`]
+/// tags, that the first machine take `command`.
+fn person_ask(agent: &Agent, command: HubCommand) -> CommandAsk {
+    CommandAsk {
+        agent: agent
+            .pairing
+            .first
+            .as_ref()
+            .expect("the first agent")
+            .agent_id,
+        command,
+        asked_by: Some(SessionTag::parse(ASKED_BY).expect("a session's tag")),
+        beyond_loopback: false,
+    }
+}
+
+/// The machine's connection, live on the hub once it told the hub its
+/// plans, none of them.
+async fn live_side(agent: &mut Agent) -> &mut Side {
+    let side = side(agent);
+    if side.channel.is_some() && !side.live {
+        side.tell_plans(&PlansReport::of(Vec::new())).await;
+    }
+    side
+}
+
+/// A person on the hub asks the machine to take `command`; the machine,
+/// while connected, answers what reaches it, and the hub tells the person
+/// what it heard.
+async fn person_asks(agent: &mut Agent, command: HubCommand) {
+    let ask = person_ask(agent, command);
+    let pairing = agent.pairing.hub().pairing.clone();
+    let side = live_side(agent).await;
+    let asked = std::pin::pin!(pairing.command_asked(ask));
+    let heard = match (side.channel.as_mut(), side.answer.as_ref()) {
+        (Some(channel), Some(answer)) => {
+            let answering = std::pin::pin!(answer.answer_next(channel));
+            match select(asked, answering).await {
+                Either::Left((heard, _)) => heard,
+                Either::Right((answered, asked)) => {
+                    side.answered = Some(answered);
+                    asked.await
+                }
+            }
+        }
+        _ => asked.await,
+    };
+    side.heard = Some(heard);
+}
+
+#[given("the machine isn't connected to its hub")]
+async fn not_connected(agent: &mut Agent) {
+    assert!(side(agent).channel.is_none());
+}
+
+#[given("the machine runs a release that takes no commands and is connected to its hub")]
+async fn older_connected(agent: &mut Agent) {
+    side(agent).older = true;
+    connected(agent).await;
+}
+
+#[given(expr = "the machine told its hub the plan {string} runs next in an hour")]
+async fn told_next_run(agent: &mut Agent, plan: String) {
+    connected(agent).await;
+    let side = side(agent);
+    let next = side.clock.now() + SignedDuration::from_hours(1);
+    let plans = PlansReport::of(vec![ReportedPlan {
+        plan: plan_id(&plan),
+        last: None,
+        next_run: EpochSeconds::from_timestamp(next),
+    }]);
+    side.tell_plans(&plans).await;
+}
+
+#[given("the machine's connection to its hub ended")]
+async fn connection_ended(agent: &mut Agent) {
+    let side = side(agent);
+    side.connector.drop_links().await;
+    side.channel = None;
+    side.answer = None;
+    side.live = false;
+}
+
+#[given(expr = "a person on the hub asked the machine to run the plan {string}")]
+#[when(expr = "a person on the hub asks the machine to run the plan {string}")]
+async fn person_asks_to_run(agent: &mut Agent, plan: String) {
+    person_asks(
+        agent,
+        HubCommand::RunPlan {
+            plan: plan_id(&plan),
+        },
+    )
+    .await;
+}
+
+#[when(
+    expr = "a person on the hub asks the machine to run the plan {string}, which the machine hears and doesn't answer for 20 seconds"
+)]
+async fn person_asks_unanswered(agent: &mut Agent, plan: String) {
+    let ask = person_ask(
+        agent,
+        HubCommand::RunPlan {
+            plan: plan_id(&plan),
+        },
+    );
+    let hub = agent.pairing.hub();
+    let (pairing, clock) = (hub.pairing.clone(), hub.clock.clone());
+    let side = live_side(agent).await;
+    let channel = side.channel.as_mut().expect("a connection to the hub");
+    let silent = async {
+        channel
+            .listen_command()
+            .await
+            .expect("the machine hears the command");
+        clock.advance(COMMAND_ANSWER_WITHIN);
+    };
+    let (heard, ()) = join(pairing.command_asked(ask), silent).await;
+    side.heard = Some(heard);
+}
+
+/// The code of what the hub told the person, by its name on the wire: its
+/// refusal, or the machine's.
+fn heard_code(side: &Side) -> Option<String> {
+    let code = match side.heard.as_ref().expect("the hub told the person") {
+        Err(refused) => refused.code(),
+        Ok(CommandAnswer::Refused { code, .. }) => *code,
+        Ok(_) => return None,
+    };
+    serde_json::to_value(code)
+        .ok()
+        .and_then(|name| name.as_str().map(str::to_owned))
+}
+
+#[then(expr = "the hub told the person {string}")]
+async fn person_told(agent: &mut Agent, code: String) {
+    let side = side(agent);
+    assert_eq!(heard_code(side), Some(code), "{:?}", side.heard);
+}
+
+#[then(expr = "the hub told the person {string}, with the plan's next run in an hour")]
+async fn person_told_next_run(agent: &mut Agent, code: String) {
+    let side = side(agent);
+    assert_eq!(heard_code(side), Some(code), "{:?}", side.heard);
+    let next = side.clock.now() + SignedDuration::from_hours(1);
+    assert_eq!(
+        side.heard,
+        Some(Err(CommandAskRefused::MachineOfflineNextRun {
+            next_run: next
+        }))
+    );
+}
+
+#[then(expr = "the hub told the person {string}, to be asked again {int} minutes from now")]
+async fn person_told_until(agent: &mut Agent, code: String, minutes: i64) {
+    let side = side(agent);
+    assert_eq!(heard_code(side), Some(code), "{:?}", side.heard);
+    let again = side.clock.now() + SignedDuration::from_mins(minutes);
+    let retry_at = match &side.heard {
+        Some(Ok(CommandAnswer::Refused { retry_at, .. })) => *retry_at,
+        Some(Err(CommandAskRefused::Busy { retry_at })) => Some(*retry_at),
+        _ => None,
+    };
+    assert_eq!(retry_at, Some(again));
+}
+
+#[then("the hub told the person the machine started that backup")]
+async fn person_told_started(agent: &mut Agent) {
+    let side = side(agent);
+    let started = side.runs.state().started.last().expect("a backup").2;
+    assert_eq!(side.heard, Some(Ok(CommandAnswer::Started(started))));
 }

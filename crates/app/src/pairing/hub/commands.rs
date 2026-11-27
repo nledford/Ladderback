@@ -44,6 +44,10 @@ pub enum CommandAskRefused {
     MachineUnknown,
     /// The machine isn't connected: nothing was sent.
     MachineOffline,
+    /// As [`Self::MachineOffline`], for a run of a plan whose next run on
+    /// its schedule, as the machine last reported it, is `next_run`, still
+    /// to come.
+    MachineOfflineNextRun { next_run: Timestamp },
     /// The machine runs a release that takes no commands, or not this one.
     CommandsUnsupported,
     /// The machine turned its hub's commands off.
@@ -64,6 +68,7 @@ impl CommandAskRefused {
             Self::NeedsSignIn => ErrorCode::PairingNeedsSignIn,
             Self::MachineUnknown => ErrorCode::MachineUnknown,
             Self::MachineOffline => ErrorCode::MachineOffline,
+            Self::MachineOfflineNextRun { .. } => ErrorCode::MachineOfflineNextRun,
             Self::CommandsUnsupported => ErrorCode::MachineCommandsUnsupported,
             Self::CommandsOff => ErrorCode::MachineCommandsOff,
             Self::Busy { .. } => ErrorCode::CommandRateLimited,

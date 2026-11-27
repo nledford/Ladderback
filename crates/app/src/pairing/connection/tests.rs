@@ -3620,6 +3620,63 @@ async fn the_hub_refuses_at_once_a_command_no_live_machine_takes() {
     assert_eq!(ask(agent_id(1)).await, Err(CommandAskRefused::CommandsOff));
 }
 
+/// A run of a plan on a machine offline names the plan's next run on its
+/// schedule, as the machine last reported it, when it is still to come; a
+/// cancel, a plan reported without one, or one already past, is only
+/// offline (decision 176).
+#[tokio::test]
+async fn a_run_on_a_machine_offline_names_its_next_run_still_to_come() {
+    use crate::pairing::CommandAskRefused;
+    use crate::ports::ReportInbox as _;
+    use domain::fleet::{HubCommand, PlansReport, ReportedPlan};
+
+    let inbox = Arc::new(crate::fakes::InMemoryReportInbox::default());
+    let hub = hub_with(1, |pairing| pairing.with_inbox(inbox.clone()));
+    let _identity = approved(&hub).await;
+    let ask = || hub.pairing.command_asked(photos_asked_of(agent_id(1)));
+    assert_eq!(ask().await, Err(CommandAskRefused::MachineOffline));
+    let now = hub.clock.now();
+    let next = now + SignedDuration::from_hours(1);
+    let plans = |plan: &str, next_run: Option<Timestamp>| {
+        PlansReport::of(vec![ReportedPlan {
+            plan: domain::PlanId::parse(plan).unwrap(),
+            last: None,
+            next_run: next_run.and_then(EpochSeconds::from_timestamp),
+        }])
+    };
+    inbox
+        .keep_plans(agent_id(1), &plans("photos", Some(next)))
+        .await
+        .unwrap();
+    assert_eq!(
+        ask().await,
+        Err(CommandAskRefused::MachineOfflineNextRun { next_run: next })
+    );
+    let cancel = crate::pairing::CommandAsk {
+        command: HubCommand::CancelOp {
+            op: domain::OperationId::from_uuid(Uuid::from_u128(0x0e)),
+        },
+        ..photos_asked_of(agent_id(1))
+    };
+    assert_eq!(
+        hub.pairing.command_asked(cancel).await,
+        Err(CommandAskRefused::MachineOffline)
+    );
+    for report in [
+        plans("music", Some(next)),
+        plans("photos", None),
+        plans("photos", Some(now)),
+        plans("photos", Some(now - SignedDuration::from_mins(1))),
+    ] {
+        inbox.keep_plans(agent_id(1), &report).await.unwrap();
+        assert_eq!(
+            ask().await,
+            Err(CommandAskRefused::MachineOffline),
+            "{report:?}"
+        );
+    }
+}
+
 /// The hub sends the command signed on the machine's live connection and
 /// waits 20 seconds for its answer, then says the machine didn't answer
 /// (decision 176).
