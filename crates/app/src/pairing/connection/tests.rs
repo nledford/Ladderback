@@ -1179,8 +1179,8 @@ async fn the_sync_loop_logs_a_streak_of_failures_once() {
     assert_eq!(warned.len(), 1, "{warned:?}");
     assert!(warned[0].starts_with("the agent's reports didn't reach its hub"));
 
-    // The loop reads its outbox once it holds a connection, so this one
-    // reaches a hub that approved it.
+    // An outbox it can't read ends each session before it connects, as its
+    // position can't be stated (decision 177): one streak, one warning.
     let hub = keeping_reports(2);
     let identity = approved(&hub).await;
     let sync = SyncWithHub::new(
@@ -1196,7 +1196,7 @@ async fn the_sync_loop_logs_a_streak_of_failures_once() {
     );
     let warned = warned_by_the_sync_loop(sync, &clock, 3).await;
     assert_eq!(warned.len(), 1, "{warned:?}");
-    assert!(warned[0].starts_with("the outbox couldn't be read"));
+    assert!(warned[0].starts_with("the agent's reports didn't reach its hub: Store"));
 
     // A configuration it can't read leaves the leases unasked at every look
     // of the one connection it holds to a hub that approved it.
