@@ -6,6 +6,7 @@ pub mod agent_registry;
 pub mod api_token_store;
 pub mod change_codec;
 pub mod clock;
+pub mod command_ledger;
 pub mod config_drafts;
 pub mod config_store;
 pub mod daily_copy;

@@ -390,3 +390,40 @@ async fn machine_rows(raw: &mut SqliteConnection, table: &str, machine: domain::
         .await
         .expect("a count")
 }
+
+/// The tag of the hub session that asked is 16 lower-case hex digits, as
+/// `SessionTag` writes it, and the schema refuses any other 16 characters
+/// (decision 176).
+#[tokio::test]
+async fn the_log_keeps_only_a_hub_sessions_tag_of_16_lower_case_hex_digits() {
+    let scratch = Scratch::new();
+    let _store = scratch.open().await;
+    let mut raw = scratch.raw().await;
+    let insert = async |raw: &mut SqliteConnection, n: u128, tag: &str| {
+        sqlx::query(
+            r#"INSERT INTO operations (id, kind, "trigger", status, queued_at, hub_session)
+               VALUES (?, 'backup', 'hub', 'queued', ?, ?)"#,
+        )
+        .bind(id_text(n))
+        .bind(ms(0))
+        .bind(tag)
+        .execute(raw)
+        .await
+        .map(|_| ())
+        .map_err(|error| error.to_string())
+    };
+    assert_eq!(insert(&mut raw, 1, "0123456789abcdef").await, Ok(()));
+    for (n, tag) in [
+        (2, "0123456789ABCDEF"),
+        (3, "0123456789abcdeg"),
+        (4, "0123456789abcde "),
+    ] {
+        let refused = insert(&mut raw, n, tag).await;
+        assert!(
+            refused
+                .as_ref()
+                .is_err_and(|error| error.contains("CHECK constraint failed")),
+            "{tag:?}: {refused:?}"
+        );
+    }
+}

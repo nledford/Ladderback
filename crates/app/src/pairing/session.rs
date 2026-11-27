@@ -1,12 +1,14 @@
 use api::sync::{AgentFrame, HubFrame};
 use domain::AgentId;
-use domain::fleet::{AgentRecord, KEY_BYTES};
+use domain::fleet::{Accepts, AgentRecord, KEY_BYTES, WireName};
 
 use super::hub::{
     HelloAnswer, HubHandshake, HubKeys, HubPairing, HubPairingError, MessageRefused, ProofAnswer,
     Syncing,
 };
-use super::wire::{AgentMessage, agent_message, answer_frame, challenge_frame, hub_envelope_frame};
+use super::wire::{
+    AgentMessage, agent_message, answer_frame, challenge_frame, hub_envelope_frame, read_hello,
+};
 use domain::fleet::PairAnswer;
 
 /// The close reason of a message out of turn or one that doesn't read: a
@@ -45,6 +47,16 @@ impl HubSession {
     pub fn syncing_agent(&self) -> Option<AgentId> {
         match &self.stage {
             Stage::Syncing(syncing) => Some(syncing.agent_id()),
+            _ => None,
+        }
+    }
+
+    /// The commands the agent welcomed on this connection takes from the
+    /// hub, as its `Hello` said: `None` before then, or when it didn't say
+    /// (decision 176).
+    pub fn accepts(&self) -> Option<Accepts> {
+        match &self.stage {
+            Stage::Syncing(syncing) => syncing.accepts().cloned(),
             _ => None,
         }
     }
@@ -144,13 +156,20 @@ impl HubPairing {
                     Ok(Ok(HelloAnswer::Welcome {
                         envelope,
                         outbox_stated,
-                    })) => match self.syncing(handshake, &agent, outbox_stated) {
-                        Some(syncing) => {
-                            session.stage = Stage::Syncing(Box::new(syncing));
-                            HubStep::Reply(hub_envelope_frame(&envelope))
+                    })) => {
+                        // Read again: the `Welcome` read it whole, so it
+                        // reads.
+                        let accepts = read_hello(&hello.payload)
+                            .ok()
+                            .and_then(|read| read.accepts);
+                        match self.syncing(handshake, &agent, outbox_stated, accepts) {
+                            Some(syncing) => {
+                                session.stage = Stage::Syncing(Box::new(syncing));
+                                HubStep::Reply(hub_envelope_frame(&envelope))
+                            }
+                            None => HubStep::Last(hub_envelope_frame(&envelope)),
                         }
-                        None => HubStep::Last(hub_envelope_frame(&envelope)),
-                    },
+                    }
                     Ok(Err(refused)) => HubStep::Close(close_reason(refused)),
                     Err(error) => HubStep::Fail(error),
                 }
@@ -171,6 +190,28 @@ impl HubPairing {
                 }
             }
             _ => HubStep::Close(PROTOCOL_ERROR),
+        }
+    }
+
+    /// The hub's command of `kind` holding `payload` to the agent it syncs
+    /// with on `session`, signed for this connection with the hub's next
+    /// sequence number (§16, decision 176); none before the agent's
+    /// `Welcome`, or when the hub can't sign.
+    pub async fn command_frame(
+        &self,
+        session: &mut HubSession,
+        kind: WireName,
+        payload: Vec<u8>,
+    ) -> Option<HubFrame> {
+        let Stage::Syncing(syncing) = &mut session.stage else {
+            return None;
+        };
+        match self.signed_for(&session.keys, syncing, kind, payload) {
+            Ok(envelope) => Some(hub_envelope_frame(&envelope)),
+            Err(error) => {
+                log::error!("the hub couldn't sign its command: {error:?}");
+                None
+            }
         }
     }
 }

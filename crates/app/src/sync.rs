@@ -25,6 +25,7 @@ use domain::maintenance::RepositoryReports;
 use domain::planning::Maintenance;
 use domain::{AgentId, OperationId, SignedDuration, Timestamp, Uuid};
 
+use crate::hub_commands::{AnswerHubCommands, ReceivedCommand};
 use crate::leases::MaintenanceLeases;
 use crate::machine::MachineStanding;
 use crate::others_snapshots::{ListingsDue, OthersSnapshots};
@@ -174,6 +175,8 @@ pub struct SyncWithHub {
     /// The backups the machine runs, which each heartbeat names; without
     /// them, a heartbeat says it can't tell.
     running: Option<Arc<RunningBackups>>,
+    /// What answers the hub's commands, when the machine takes them.
+    commands: Option<Arc<AnswerHubCommands>>,
 }
 
 /// What a session needs to ask for the machine's leases: the repositories
@@ -224,6 +227,7 @@ impl SyncWithHub {
             told: Mutex::new(Told::default()),
             listings: None,
             running: None,
+            commands: None,
         }
     }
 
@@ -282,6 +286,15 @@ impl SyncWithHub {
     #[must_use]
     pub fn with_running(mut self, running: Arc<RunningBackups>) -> Self {
         self.running = Some(running);
+        self
+    }
+
+    /// This sync taking its hub's commands: its `Hello` says which
+    /// `answer` takes, and `answer` answers each the hub sends, between
+    /// the machine's own messages (§16, decision 176).
+    #[must_use]
+    pub fn with_commands(mut self, answer: Arc<AnswerHubCommands>) -> Self {
+        self.commands = Some(answer);
         self
     }
 
@@ -431,13 +444,18 @@ impl SyncWithHub {
         // nothing sent, as a new epoch that can't be started does: stated as
         // none, its reports at places the hub took would be let go of.
         let stated = self.outbox.position().await.map_err(SyncFailure::Store)?;
+        let accepts = match &self.commands {
+            Some(answer) => Some(answer.accepts().await),
+            None => None,
+        };
         let connected = self
             .connect
-            .connect_channel(
+            .connect_accepting(
                 self.agent_id,
                 self.hostname.clone(),
                 self.zone.clone(),
                 stated,
+                accepts,
             )
             .await;
         if let Some(standing) = &self.standing {
@@ -490,8 +508,9 @@ impl SyncWithHub {
     /// places ahead of the hub's acknowledgements, and once the hub
     /// acknowledged the last of them, the agent's plans when they changed
     /// since the hub last acknowledged them, waiting for that
-    /// acknowledgement, and then the latest progress when one is due. It
-    /// returns how many reports it sent.
+    /// acknowledgement, and then the latest progress when one is due. The
+    /// hub's commands that came meanwhile are answered after each window
+    /// and at the end. It returns how many reports it sent.
     async fn tell(
         &self,
         connected: &Connected,
@@ -520,11 +539,13 @@ impl SyncWithHub {
                 .map_err(SyncFailure::Channel)?;
             self.told().progress = Some((progress, self.clock.monotonic()));
         }
+        self.answer_held(channel).await?;
         Ok(sent)
     }
 
     /// Sends every report not yet acknowledged, and returns how many once
-    /// the hub acknowledged the last of them.
+    /// the hub acknowledged the last of them; after each window, it answers
+    /// the hub's commands that came while it waited.
     async fn replay(&self, channel: &mut AgentChannel) -> Result<u64, SyncFailure> {
         let mut sent = 0;
         // Each window starts after the last place acknowledged, so a session
@@ -566,6 +587,7 @@ impl SyncWithHub {
                     break;
                 }
             }
+            self.answer_held(channel).await?;
         }
     }
 
@@ -698,13 +720,30 @@ impl SyncWithHub {
             {
                 return failure;
             }
+            if let Err(failure) = self.answer_held(&mut channel).await {
+                return failure;
+            }
             if self.clock.monotonic() >= beat_at
                 && let Err(failure) = self.beat(&mut channel, &mut beat_at).await
             {
                 return failure;
             }
             let left = beat_at.saturating_sub(self.clock.monotonic());
-            self.clock.sleep(POLL.min(left)).await;
+            // The hub's command, if one comes before the next poll, is
+            // answered at once.
+            let heard = {
+                let sleep = std::pin::pin!(self.clock.sleep(POLL.min(left)));
+                let listen = std::pin::pin!(self.listen(&mut channel));
+                match select(sleep, listen).await {
+                    Either::Left(((), _)) => None,
+                    Either::Right((heard, _)) => Some(heard),
+                }
+            };
+            if let Some(heard) = heard
+                && let Err(failure) = self.reply(&mut channel, heard).await
+            {
+                return failure;
+            }
         }
     }
 
@@ -767,7 +806,8 @@ impl SyncWithHub {
     }
 
     /// `work`, while a heartbeat goes out on `channel` whenever one is due
-    /// at `beat_at`, so the hub keeps a connection that waits on it.
+    /// at `beat_at`, so the hub keeps a connection that waits on it, and
+    /// each command the hub sends meanwhile is answered.
     async fn beating_while<T>(
         &self,
         channel: &mut AgentChannel,
@@ -777,10 +817,58 @@ impl SyncWithHub {
         let mut work = std::pin::pin!(work);
         loop {
             let left = beat_at.saturating_sub(self.clock.monotonic());
-            match select(work.as_mut(), self.clock.sleep(left)).await {
-                Either::Left((done, _)) => return Ok(done),
-                Either::Right(((), _)) => self.beat(channel, beat_at).await?,
+            let woke = {
+                let sleep = std::pin::pin!(self.clock.sleep(left));
+                let listen = std::pin::pin!(self.listen(channel));
+                match select(work.as_mut(), select(sleep, listen)).await {
+                    Either::Left((done, _)) => return Ok(done),
+                    Either::Right((Either::Left(((), _)), _)) => None,
+                    Either::Right((Either::Right((heard, _)), _)) => Some(heard),
+                }
+            };
+            match woke {
+                None => self.beat(channel, beat_at).await?,
+                Some(heard) => self.reply(channel, heard).await?,
             }
+        }
+    }
+
+    /// The hub's next command on `channel`, when the sync takes them;
+    /// otherwise it never comes, and a frame the hub sends unasked waits
+    /// for the next read.
+    async fn listen(&self, channel: &mut AgentChannel) -> Result<ReceivedCommand, ChannelError> {
+        if self.commands.is_none() {
+            return std::future::pending().await;
+        }
+        channel.listen_command().await
+    }
+
+    /// Answers `heard`, the hub's command, on `channel`, or ends the
+    /// connection with why the listen failed.
+    async fn reply(
+        &self,
+        channel: &mut AgentChannel,
+        heard: Result<ReceivedCommand, ChannelError>,
+    ) -> Result<(), SyncFailure> {
+        let command = heard.map_err(SyncFailure::Channel)?;
+        match &self.commands {
+            Some(answer) => answer
+                .reply(channel, &command)
+                .await
+                .map_err(SyncFailure::Channel),
+            None => Ok(()),
+        }
+    }
+
+    /// Answers each command the hub sent while the machine waited for
+    /// another message.
+    async fn answer_held(&self, channel: &mut AgentChannel) -> Result<(), SyncFailure> {
+        match &self.commands {
+            Some(answer) => answer
+                .answer_held(channel)
+                .await
+                .map_err(SyncFailure::Channel),
+            None => Ok(()),
         }
     }
 

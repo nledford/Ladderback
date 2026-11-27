@@ -64,6 +64,7 @@ table! {
         maintenance_concurrency: i64,
         nice: i64,
         allow_hub_restore: bool,
+        allow_hub_commands: bool,
         locale: String,
         check_for_updates: bool,
         restore_folder: String,

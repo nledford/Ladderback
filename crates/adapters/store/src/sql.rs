@@ -10,7 +10,7 @@ macro_rules! select_operations {
             "SELECT id, kind, plan_id, repo_uuid, \"trigger\", status, queued_at, started_at, ",
             "finished_at, snapshot_id, summary_json, error_code, error_args, error_detail, ",
             "warning_count, repo_alias, location_no, locations_json, token_id, token_label, ",
-            "entry, restored_to ",
+            "entry, restored_to, hub_session ",
             "FROM operations",
             $($clause),+
         )
@@ -44,13 +44,14 @@ pub(crate) const OLD_SET_FIRST_CHECKSUM: &str = concat!(
 /// `plan_id`, `repo_uuid`, `trigger`, `status`, `queued_at`, `started_at`,
 /// `finished_at`, `snapshot_id`, `summary_json`, `error_code`, `error_args`,
 /// `error_detail`, `warning_count`, `repo_alias`, `location_no`,
-/// `locations_json`, `token_id`, `token_label`, `entry`, `restored_to`.
+/// `locations_json`, `token_id`, `token_label`, `entry`, `restored_to`,
+/// `hub_session`.
 pub(crate) const UPSERT_OPERATION: &str = concat!(
     "INSERT INTO operations (id, kind, plan_id, repo_uuid, \"trigger\", status, ",
     "queued_at, started_at, finished_at, snapshot_id, summary_json, error_code, error_args, ",
     "error_detail, warning_count, repo_alias, location_no, locations_json, token_id, ",
-    "token_label, entry, restored_to) ",
-    "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) ",
+    "token_label, entry, restored_to, hub_session) ",
+    "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) ",
     "ON CONFLICT(id) DO UPDATE SET ",
     "kind = excluded.kind, plan_id = excluded.plan_id, ",
     "repo_uuid = excluded.repo_uuid, \"trigger\" = excluded.\"trigger\", ",
@@ -62,7 +63,7 @@ pub(crate) const UPSERT_OPERATION: &str = concat!(
     "repo_alias = excluded.repo_alias, location_no = excluded.location_no, ",
     "locations_json = excluded.locations_json, token_id = excluded.token_id, ",
     "token_label = excluded.token_label, entry = excluded.entry, ",
-    "restored_to = excluded.restored_to"
+    "restored_to = excluded.restored_to, hub_session = excluded.hub_session"
 );
 
 /// Parameter: the operation's ID.
@@ -188,6 +189,14 @@ pub(crate) const LIST_PLAN_AFTER: &str =
 pub(crate) const EVER_SUCCEEDED: &str = concat!(
     "SELECT EXISTS (SELECT 1 FROM operations ",
     "WHERE plan_id = ? AND status IN ('succeeded', 'succeeded_with_warnings'))"
+);
+
+/// The newest queued or running backup of a plan. Parameter: the plan.
+/// SQLite walks the plan's rows newest first through `ops_by_plan`, and the
+/// first unfinished backup ends the walk.
+pub(crate) const UNFINISHED_BACKUP: &str = concat!(
+    "SELECT id FROM operations WHERE plan_id = ? AND kind = 'backup' ",
+    "AND status IN ('queued', 'running') ORDER BY id DESC LIMIT 1"
 );
 
 /// The columns `row::api_token` reads.

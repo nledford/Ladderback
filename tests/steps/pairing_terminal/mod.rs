@@ -9,8 +9,9 @@
 //! page approves through, and a machine's `ladderback pair`,
 //! `ladderback hub-status` and `ladderback serve`, each a real process on
 //! folders of its own, and the scenarios of
-//! `features/fleet/hub_keys_at_start.feature` and
-//! `features/fleet/hub_mode.feature`.
+//! `features/fleet/hub_keys_at_start.feature`,
+//! `features/fleet/hub_mode.feature` and
+//! `features/fleet/hub_commands_e2e.feature`.
 
 use std::io::Write as _;
 use std::net::SocketAddr;
@@ -22,6 +23,7 @@ use testkit::children::Owned;
 use super::{Agent, LADDERBACK, blocking};
 
 mod hub;
+mod hub_commands;
 mod hub_mode;
 mod hub_page;
 mod hub_terminal;
@@ -61,6 +63,11 @@ pub struct PairingTerminal {
     /// The machine's daemon, ended when the scenario ends or a step stops
     /// it.
     machine: Option<Owned>,
+    /// The address the machine's daemon serves its own page on.
+    machine_address: Option<SocketAddr>,
+    /// The session cookie (`name=value`) and CSRF token a sign-in on the
+    /// hub's page kept, which the page's later requests carry.
+    session: Option<(String, String)>,
     /// What the hub's `config.toml` says in its `[serve]` table.
     serve_table: hub_mode::ServeTable,
     /// The key fingerprint of the hub the machine paired with before it

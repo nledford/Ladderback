@@ -6,7 +6,7 @@
 
 use std::time::{Duration, Instant};
 
-use cucumber::{then, when};
+use cucumber::{given, then, when};
 
 use super::hub_page::page_asks;
 use super::machine_root;
@@ -17,6 +17,7 @@ use crate::request_checks_steps::{Outcome, start};
 /// the second's backoff after it, and slack for a loaded runner.
 const SHOWN_WITHIN: Duration = Duration::from_secs(45);
 
+#[given("the machine's daemon starts")]
 #[when("the machine's daemon starts")]
 async fn machine_starts(agent: &mut Agent) {
     let (child, outcome, _log) = start(
@@ -26,10 +27,11 @@ async fn machine_starts(agent: &mut Agent) {
         None,
     )
     .await;
-    let Outcome::Listening(_) = outcome else {
+    let Outcome::Listening(address) = outcome else {
         panic!("the machine's daemon didn't start: {outcome:?}");
     };
     agent.pairing_terminal.machine = Some(child);
+    agent.pairing_terminal.machine_address = Some(address);
 }
 
 #[when("the machine's daemon stops")]
@@ -38,6 +40,7 @@ fn machine_stops(agent: &mut Agent) {
     agent.pairing_terminal.machine = None;
 }
 
+#[given(expr = "the hub soon shows {string} {word}")]
 #[then(expr = "the hub soon shows {string} {word}")]
 async fn hub_soon_shows(agent: &mut Agent, hostname: String, shown: String) {
     let online = match shown.as_str() {

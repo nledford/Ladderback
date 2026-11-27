@@ -26,6 +26,7 @@ pub mod execution;
 pub mod full_disk_access;
 pub mod globs;
 pub mod history;
+pub mod hub_commands;
 pub mod hub_tls;
 pub mod interop;
 pub mod keyring_check;

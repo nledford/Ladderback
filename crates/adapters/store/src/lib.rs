@@ -15,6 +15,7 @@ mod agent_registry;
 mod api_tokens;
 mod baseline_copy;
 mod codec;
+mod commands;
 mod copy;
 mod daily_copy;
 mod error_args;
@@ -467,6 +468,12 @@ async fn write(
                     RestoredTo::Folder(path) => path.as_str(),
                 }),
         )
+        .bind(match operation.trigger() {
+            Trigger::Hub {
+                asked_by: Some(tag),
+            } => Some(tag.as_str()),
+            _ => None,
+        })
         .execute(&mut *conn)
         .await
         .map_err(unavailable)?;
@@ -729,6 +736,16 @@ impl OperationStore for SqliteStore {
             .fetch_one(&self.pool)
             .await
             .map_err(unavailable)
+    }
+
+    async fn unfinished_backup(&self, plan: &PlanId) -> Result<Option<OperationId>, StoreError> {
+        let _call = self.call().await;
+        let found = sqlx::query(sql::UNFINISHED_BACKUP)
+            .bind(plan.as_str())
+            .fetch_optional(&self.pool)
+            .await
+            .map_err(unavailable)?;
+        found.as_ref().map(row::operation_id).transpose()
     }
 
     async fn recover(&self, reason: &FailureReason) -> Result<Recovered, StoreError> {

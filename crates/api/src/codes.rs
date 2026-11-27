@@ -716,6 +716,37 @@ pub enum ErrorCode {
     MachineApprovedAlready,
     /// The hub couldn't read or keep its key or its tokens.
     HubUnavailable,
+    /// The machine isn't connected to the hub, so the hub sent it nothing
+    /// and keeps nothing to send later (§16, decision 176).
+    MachineOffline,
+    /// As [`ErrorCode::MachineOffline`], for a run of plan `plan`, whose
+    /// next scheduled run on the machine is `next-run`.
+    MachineOfflineNextRun,
+    /// The machine runs a release that takes no commands from its hub.
+    MachineCommandsUnsupported,
+    /// The machine turned its hub's commands off (`allow-hub-commands`).
+    MachineCommandsOff,
+    /// The machine didn't answer the hub's command in time, or its
+    /// connection ended first: whether it acted is unknown.
+    MachineNoAnswer,
+    /// The command reached the machine more than 15 minutes from the time
+    /// it was asked, on the hub's clock: nothing ran.
+    CommandExpired,
+    /// The machine took a command with this ID before: nothing ran again.
+    CommandReplayed,
+    /// The hub asked the machine for more than it takes for now: one run
+    /// of a plan every 5 minutes, 12 runs an hour. `retry-at` is when it
+    /// may ask again.
+    CommandRateLimited,
+    /// The machine couldn't start the backup of plan `plan`; its own log
+    /// and page say why.
+    MachineRunRefused,
+    /// The hub may cancel only a machine's backups; `operation` is
+    /// another kind.
+    CommandBackupsOnly,
+    /// The machine couldn't cancel the backup `operation` for its hub, or
+    /// answered the cancel with something no cancel is answered with.
+    MachineCancelRefused,
     #[serde(other)]
     Unknown,
 }
@@ -1748,7 +1779,45 @@ impl ErrorCode {
             | Self::MachineUnknown
             | Self::MachineApprovedAlready
             | Self::HubUnavailable
+            | Self::MachineOffline
+            | Self::MachineCommandsUnsupported
+            | Self::MachineCommandsOff
+            | Self::MachineNoAnswer
+            | Self::CommandExpired
+            | Self::CommandReplayed
             | Self::Unknown => &[],
+            Self::MachineOfflineNextRun => &[
+                ArgSpec {
+                    name: "plan",
+                    kind: ArgKind::Text,
+                    optional: false,
+                },
+                ArgSpec {
+                    name: "next-run",
+                    kind: ArgKind::Timestamp,
+                    optional: false,
+                },
+            ],
+            Self::CommandRateLimited => &[ArgSpec {
+                name: "retry-at",
+                kind: ArgKind::Timestamp,
+                optional: false,
+            }],
+            Self::MachineRunRefused => &[ArgSpec {
+                name: "plan",
+                kind: ArgKind::Text,
+                optional: false,
+            }],
+            Self::CommandBackupsOnly => &[ArgSpec {
+                name: "operation",
+                kind: ArgKind::Text,
+                optional: false,
+            }],
+            Self::MachineCancelRefused => &[ArgSpec {
+                name: "operation",
+                kind: ArgKind::Text,
+                optional: false,
+            }],
         }
     }
 }

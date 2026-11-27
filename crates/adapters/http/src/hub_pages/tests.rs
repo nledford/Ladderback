@@ -8,7 +8,7 @@ use app::fakes::{
     SeededRandom,
 };
 use app::ownership::RepositoryOwners;
-use app::pairing::HubPairing;
+use app::pairing::{CommandQueue, HubPairing};
 use app::ports::{AgentRegistry as _, OutboxEntry, ReportInbox as _, Signing as _};
 use axum::body::Body;
 use axum::http::header::{HOST, SET_COOKIE};
@@ -16,7 +16,7 @@ use axum::http::{Method, StatusCode};
 use domain::access::api_token::{ApiTokenLabel, TokenPermissions};
 use domain::access::permissions::{Permission, Permissions};
 use domain::fleet::{
-    AgentRecord, AgentReport, AgentStatus, EpochSeconds, Fingerprint, Happening, Hostname,
+    Accepts, AgentRecord, AgentReport, AgentStatus, EpochSeconds, Fingerprint, Happening, Hostname,
     MachineFingerprint, OutboxEpoch, ReportSeq, SigningSeed, WireName,
 };
 use domain::{AgentId, OperationId, Timestamp, Uuid};
@@ -50,6 +50,8 @@ struct Daemon {
     inbox: Arc<InMemoryReportInbox>,
     /// The registry of maintenance owners the hub decides leases in.
     owners: Arc<InMemoryOwnershipRegistry>,
+    /// The hub's clock.
+    clock: Arc<FakeClock>,
 }
 
 impl Daemon {
@@ -64,12 +66,13 @@ impl Daemon {
             ))
         });
         let registry = Arc::new(InMemoryAgentRegistry::new());
+        let hub_clock = clock();
         let pairing = HubPairing::new(
             Arc::clone(&registry) as _,
             Arc::new(InMemoryIdentity::default()),
             Arc::new(FakeSigning),
             Arc::new(SeededRandom::new(5)),
-            clock(),
+            hub_clock.clone(),
             "0.5.0-hub".to_owned(),
         );
         let inbox = Arc::new(InMemoryReportInbox::default());
@@ -91,6 +94,7 @@ impl Daemon {
             certificate: None,
             inbox,
             owners,
+            clock: hub_clock,
         }
     }
 
@@ -110,6 +114,7 @@ impl Daemon {
             certificate: None,
             inbox: Arc::new(InMemoryReportInbox::default()),
             owners: Arc::new(InMemoryOwnershipRegistry::new()),
+            clock: clock(),
         }
     }
 
@@ -807,6 +812,7 @@ async fn the_page_shows_each_approved_machine_with_its_latest_operations() {
             ],
             plans: None,
             progress: None,
+            accepts: Vec::new(),
         }]
     );
 }
@@ -1217,4 +1223,342 @@ async fn with_sign_in_on_only_a_session_reads_or_ends_recovery_mode() {
     let read = daemon.send(read_recovery(REMOTE, &session)).await;
     let read: api::HubRecoveryDto = serde_json::from_value(json(read).await).unwrap();
     assert!(!read.recovering);
+}
+
+/// The approved machine 1, live on the hub taking `accepts`: the queue of
+/// the hub's commands to it.
+async fn live(daemon: &Daemon, accepts: Option<Accepts>) -> (AgentRecord, CommandQueue) {
+    let machine = agent(1, "macbook", true, now());
+    daemon.registry.hold(machine.clone());
+    let queue = daemon
+        .pairing
+        .as_ref()
+        .unwrap()
+        .went_live_taking(machine.agent_id, 1, Box::new(|| {}), accepts)
+        .await;
+    (machine, queue)
+}
+
+fn run(peer: IpAddr, headers: &[(&str, String)], machine: &AgentRecord, plan: &str) -> Request {
+    let path = api::machine_runs_path(&machine.agent_id.as_uuid().to_string());
+    let body = serde_json::json!({ "plan": plan }).to_string();
+    build(Method::POST, &path, peer, headers, &body)
+}
+
+fn cancel(peer: IpAddr, headers: &[(&str, String)], machine: &AgentRecord) -> Request {
+    let operation = Uuid::from_u128(0x0e).hyphenated().to_string();
+    let path = api::machine_cancel_path(&machine.agent_id.as_uuid().to_string(), &operation);
+    build(Method::POST, &path, peer, headers, "")
+}
+
+/// A run or a cancel no live machine takes is refused at once by its
+/// code, and a body or path that isn't one by its own (decision 176).
+#[tokio::test]
+async fn a_command_no_live_machine_takes_is_refused_by_its_code() {
+    let daemon = Daemon::hub(false);
+    let unknown = agent(2, "laptop", true, now());
+    assert_eq!(
+        refusal(daemon.send(run(LOOPBACK, &[], &unknown, "photos")).await).await,
+        (StatusCode::NOT_FOUND, "machine-unknown".to_owned())
+    );
+    let machine = agent(1, "macbook", true, now());
+    daemon.registry.hold(machine.clone());
+    for request in [
+        run(LOOPBACK, &[], &machine, "photos"),
+        cancel(LOOPBACK, &[], &machine),
+    ] {
+        assert_eq!(
+            refusal(daemon.send(request).await).await,
+            (StatusCode::CONFLICT, "machine-offline".to_owned())
+        );
+    }
+    let (machine, _older) = live(&daemon, None).await;
+    assert_eq!(
+        refusal(daemon.send(run(LOOPBACK, &[], &machine, "photos")).await).await,
+        (
+            StatusCode::CONFLICT,
+            "machine-commands-unsupported".to_owned()
+        )
+    );
+    let (machine, _newer) = live(&daemon, Some(Accepts::none())).await;
+    assert_eq!(
+        refusal(daemon.send(cancel(LOOPBACK, &[], &machine)).await).await,
+        (StatusCode::CONFLICT, "machine-commands-off".to_owned())
+    );
+    for body in [r#"{"plan":"no such plan!"}"#, r#"{"plan":"a","b":1}"#, ""] {
+        let path = api::machine_runs_path(&machine.agent_id.as_uuid().to_string());
+        let bad = build(Method::POST, &path, LOOPBACK, &[], body);
+        assert_eq!(
+            refusal(daemon.send(bad).await).await,
+            (StatusCode::BAD_REQUEST, "invalid-body".to_owned()),
+            "{body:?}"
+        );
+    }
+    let path = api::machine_cancel_path(&machine.agent_id.as_uuid().to_string(), "nightly");
+    assert_eq!(
+        refusal(
+            daemon
+                .send(build(Method::POST, &path, LOOPBACK, &[], ""))
+                .await
+        )
+        .await,
+        (StatusCode::NOT_FOUND, "operation-unknown".to_owned())
+    );
+}
+
+/// A run sent to a live machine that doesn't answer in 20 seconds is
+/// answered `machine-no-answer`: whether it ran is unknown (decision 176).
+#[tokio::test]
+async fn a_live_machine_that_doesnt_answer_in_20_seconds_is_no_answer() {
+    use futures::StreamExt as _;
+
+    let daemon = Daemon::hub(false);
+    let (machine, mut queue) = live(&daemon, Some(Accepts::all())).await;
+    let asked = daemon.send(run(LOOPBACK, &[], &machine, "photos"));
+    let waited = async {
+        let sent = queue.next().await.expect("the hub sent the command");
+        let payload = api::sync::RunPlanPayload::from_bytes(&sent.payload).unwrap();
+        assert_eq!(payload.plan_id, "photos");
+        assert_eq!(payload.session, None, "sign-in is off: no session asked");
+        daemon.clock.advance(domain::fleet::COMMAND_ANSWER_WITHIN);
+    };
+    let (response, ()) = answered_within(asked, waited).await;
+    assert_eq!(
+        refusal(response).await,
+        (StatusCode::GATEWAY_TIMEOUT, "machine-no-answer".to_owned())
+    );
+}
+
+/// Beyond loopback with sign-in off no command is sent; with sign-in on
+/// only a session sends one, with its CSRF token, and the machine hears
+/// which session asked, never a token (decision 176, I4).
+#[tokio::test]
+async fn only_a_session_sends_a_machine_a_command() {
+    use futures::StreamExt as _;
+
+    let off = Daemon::hub(false);
+    let (machine, mut queue) = live(&off, Some(Accepts::all())).await;
+    assert_eq!(
+        refusal(off.send(run(REMOTE, &[], &machine, "photos")).await).await,
+        (StatusCode::FORBIDDEN, "pairing-needs-sign-in".to_owned())
+    );
+    assert!(queue.try_recv().is_err(), "nothing was sent");
+    let on = Daemon::hub(true);
+    let (machine, mut queue) = live(&on, Some(Accepts::all())).await;
+    let unsigned = on.send(run(LOOPBACK, &[], &machine, "photos")).await;
+    assert_eq!(unsigned.status(), StatusCode::UNAUTHORIZED);
+    let created = on
+        .access
+        .as_ref()
+        .unwrap()
+        .create_api_token(
+            ApiTokenLabel::new("assistant".to_owned()).unwrap(),
+            TokenPermissions::new(Permission::ALL.iter().fold(Permissions::NONE, |held, row| {
+                held.with(*row, Some(row.level())).unwrap()
+            }))
+            .unwrap(),
+        )
+        .await
+        .unwrap();
+    let bearer = [("authorization", format!("Bearer {}", created.text.expose()))];
+    assert_eq!(
+        refusal(on.send(run(LOOPBACK, &bearer, &machine, "photos")).await).await,
+        (StatusCode::FORBIDDEN, "api-token-permission".to_owned())
+    );
+    let session = on.signed_in().await;
+    let cookie_only = [session[0].clone()];
+    assert_eq!(
+        refusal(on.send(cancel(REMOTE, &cookie_only, &machine)).await).await,
+        (StatusCode::FORBIDDEN, "csrf-token-invalid".to_owned())
+    );
+    assert!(queue.try_recv().is_err(), "nothing was sent");
+    let asked = on.send(run(REMOTE, &session, &machine, "photos"));
+    let waited = async {
+        let sent = queue.next().await.expect("the hub sent the command");
+        let payload = api::sync::RunPlanPayload::from_bytes(&sent.payload).unwrap();
+        let tag = payload.session.expect("the session that asked");
+        assert!(domain::access::SessionTag::parse(&tag).is_ok(), "{tag}");
+        assert!(!session[0].1.contains(&tag) && !session[1].1.contains(&tag));
+        on.clock.advance(domain::fleet::COMMAND_ANSWER_WITHIN);
+    };
+    let (response, ()) = answered_within(asked, waited).await;
+    assert_eq!(response.status(), StatusCode::GATEWAY_TIMEOUT);
+}
+
+/// `asked` and `waited` run together, for at most 5 seconds.
+async fn answered_within(
+    asked: impl Future<Output = Response>,
+    waited: impl Future<Output = ()>,
+) -> (Response, ()) {
+    tokio::time::timeout(
+        std::time::Duration::from_secs(5),
+        futures::future::join(asked, waited),
+    )
+    .await
+    .expect("the route answered within 5 seconds")
+}
+
+/// A run of a plan on a machine offline names the plan and its next run on
+/// its schedule, as the machine last reported them (decision 176).
+#[tokio::test]
+async fn a_run_on_a_machine_offline_names_the_plans_next_run() {
+    use domain::fleet::{PlansReport, ReportedPlan};
+
+    let daemon = Daemon::hub(false);
+    let machine = agent(1, "macbook", true, now());
+    daemon.registry.hold(machine.clone());
+    let next = now() + domain::SignedDuration::from_hours(1);
+    let plans = PlansReport::of(vec![ReportedPlan {
+        plan: domain::PlanId::parse("photos").unwrap(),
+        last: None,
+        next_run: EpochSeconds::from_timestamp(next),
+    }]);
+    daemon
+        .inbox
+        .keep_plans(machine.agent_id, &plans)
+        .await
+        .unwrap();
+    let response = daemon.send(run(LOOPBACK, &[], &machine, "photos")).await;
+    assert_eq!(response.status(), StatusCode::CONFLICT);
+    let refused: api::ErrorDto = serde_json::from_value(json(response).await).unwrap();
+    assert_eq!(refused.code, ErrorCode::MachineOfflineNextRun);
+    assert_eq!(
+        refused.args,
+        [
+            ("plan".to_owned(), api::MsgArg::Text("photos".to_owned())),
+            (
+                "next-run".to_owned(),
+                api::MsgArg::Timestamp {
+                    utc_ms: next.as_millisecond(),
+                    zone: None,
+                },
+            ),
+        ]
+        .into_iter()
+        .collect()
+    );
+}
+
+/// The backup the machine of [`answering_machine`] starts for any plan,
+/// and cancels.
+fn backup() -> OperationId {
+    OperationId::from_uuid(Uuid::from_u128(0x0e))
+}
+
+/// The plan runner of [`answering_machine`]: a backup of any plan starts
+/// as [`backup`], which it cancels.
+struct Runs;
+
+#[async_trait::async_trait]
+impl app::hub_commands::HubRuns for Runs {
+    async fn going(&self, _plan: &domain::PlanId) -> Option<OperationId> {
+        None
+    }
+
+    async fn queue(
+        &self,
+        _plan: &domain::PlanId,
+        _asked_by: Option<domain::access::SessionTag>,
+    ) -> Result<OperationId, app::hub_commands::HubRunRefused> {
+        Ok(backup())
+    }
+
+    async fn cancel(
+        &self,
+        operation: &OperationId,
+    ) -> Result<(), app::hub_commands::HubCancelRefused> {
+        if *operation == backup() {
+            Ok(())
+        } else {
+            Err(app::hub_commands::HubCancelRefused::Unknown)
+        }
+    }
+}
+
+/// A machine paired with `daemon`'s hub and approved there, live on its
+/// connection: its record, the connection, and its answers to the hub's
+/// commands.
+async fn answering_machine(
+    daemon: &Daemon,
+) -> (
+    AgentRecord,
+    app::pairing::AgentChannel,
+    app::hub_commands::AnswerHubCommands,
+) {
+    use app::pairing::{AgentPairing, ConnectToHub, PairWithHub};
+
+    let pairing = Arc::clone(daemon.pairing.as_ref().unwrap());
+    let keys = pairing.keys().await.unwrap();
+    let tls = domain::fleet::TokenTls::Pinned(Fingerprint::from_digest([7; 32]));
+    let address = domain::fleet::HubAddress::parse(ADDRESS).unwrap();
+    let token = pairing.make_token(&keys, address, tls, None).await.unwrap();
+    let connector = Arc::new(app::fakes::LoopbackHubConnector::to(Arc::clone(&pairing)));
+    let identity = Arc::new(InMemoryIdentity::default());
+    let agent = AgentId::from_uuid(Uuid::from_u128(1));
+    let hostname = Hostname::parse("laptop").unwrap();
+    let machine = AgentPairing::new(
+        identity.clone(),
+        Arc::new(FakeSigning),
+        Arc::new(SeededRandom::new(9)),
+        Arc::new(app::fakes::InMemoryLeaseCache::default()),
+    );
+    PairWithHub::new(machine, connector.clone())
+        .pair(token, agent, hostname.clone(), None)
+        .await
+        .unwrap();
+    let waiting = daemon.registry.agent(agent).await.unwrap().unwrap();
+    pairing.approve(&waiting).await.unwrap().unwrap();
+    let machine_clock = Arc::new(FakeClock::new(now()));
+    let (_, mut channel) = ConnectToHub::new(
+        identity,
+        Arc::new(FakeSigning),
+        Arc::new(SeededRandom::new(77)),
+        machine_clock.clone(),
+        connector,
+        "0.6.0-agent".to_owned(),
+        None,
+    )
+    .connect_accepting(agent, hostname, None, None, Some(Accepts::all()))
+    .await
+    .unwrap();
+    // Its first message makes its connection live on the hub.
+    channel
+        .send_plans(&domain::fleet::PlansReport::of(Vec::new()))
+        .await
+        .unwrap();
+    channel.receive_plans_ack().await.unwrap();
+    let answers = app::hub_commands::AnswerHubCommands::new(
+        Arc::new(app::fakes::InMemoryConfigStore::new()),
+        Arc::new(app::fakes::InMemoryCommandLedger::default()),
+        Arc::new(Runs),
+        machine_clock,
+    );
+    let record = daemon.registry.agent(agent).await.unwrap().unwrap();
+    (record, channel, answers)
+}
+
+/// A run on a live machine that starts its backup is `202 Accepted` with
+/// that backup, and a cancel of it that the machine makes is `200` with it
+/// (decision 176).
+#[tokio::test]
+async fn a_live_machine_starts_and_cancels_the_backup_the_page_asks_for() {
+    let daemon = Daemon::hub(false);
+    let (machine, mut channel, answers) = answering_machine(&daemon).await;
+    let operation = backup().as_uuid().hyphenated().to_string();
+    for (request, status) in [
+        (run(LOOPBACK, &[], &machine, "photos"), StatusCode::ACCEPTED),
+        (cancel(LOOPBACK, &[], &machine), StatusCode::OK),
+    ] {
+        let (response, answered) = tokio::time::timeout(
+            std::time::Duration::from_secs(5),
+            futures::future::join(daemon.send(request), answers.answer_next(&mut channel)),
+        )
+        .await
+        .expect("the route answered within 5 seconds");
+        answered.unwrap();
+        assert_eq!(response.status(), status);
+        let done: api::MachineCommandDoneDto =
+            serde_json::from_value(json(response).await).unwrap();
+        assert_eq!(done.operation, operation);
+    }
 }

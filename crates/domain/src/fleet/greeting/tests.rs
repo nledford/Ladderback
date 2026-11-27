@@ -15,6 +15,7 @@ fn hello(protocols: Protocols) -> Hello {
         zone: None,
         machine: None,
         outbox: None,
+        accepts: None,
     }
 }
 

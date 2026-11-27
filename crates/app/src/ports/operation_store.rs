@@ -114,6 +114,33 @@ pub trait OperationStore: Send + Sync {
     /// operation found no repository (decision 53).
     async fn ever_succeeded(&self, plan: &PlanId) -> Result<bool, StoreError>;
 
+    /// The newest backup of `plan` the log shows as queued or running, or
+    /// `None` when every backup of it finished. The hub asks it before it
+    /// starts a run (#1464), so a store answers it without walking the
+    /// plan's whole history when it can; this default pages
+    /// [`list`](Self::list).
+    async fn unfinished_backup(&self, plan: &PlanId) -> Result<Option<OperationId>, StoreError> {
+        let mut after = None;
+        loop {
+            let query = HistoryQuery {
+                plan: Some(plan.clone()),
+                after,
+                limit: PageSize::DEFAULT,
+            };
+            let page = self.list(&query).await?;
+            let found = page.operations.iter().find(|record| {
+                record.kind == OperationKind::Backup && !record.status.is_finished()
+            });
+            if let Some(record) = found {
+                return Ok(Some(record.id));
+            }
+            let Some(next) = page.next else {
+                return Ok(None);
+            };
+            after = Some(next);
+        }
+    }
+
     /// Ends every operation the log shows as running as
     /// [`Failed`](OperationStatus::Failed) with `reason`, and returns the IDs
     /// of those it ended and the operations the log shows as queued, each

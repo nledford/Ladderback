@@ -24,8 +24,16 @@ pub trait HubLink: Send {
 
     async fn send(&mut self, frame: &AgentFrame) -> Result<(), LinkError>;
 
-    /// The hub's next frame.
+    /// The hub's next frame, within the link's deadline for an answer.
     async fn receive(&mut self) -> Result<HubFrame, LinkError>;
+
+    /// The hub's next frame, whenever it comes, as a command the hub sends
+    /// unasked (§16, decision 176): no deadline, and cancel-safe, so a
+    /// listen given up loses no frame. A link with no deadline of its own
+    /// hears it as [`Self::receive`] does.
+    async fn listen(&mut self) -> Result<HubFrame, LinkError> {
+        self.receive().await
+    }
 }
 
 /// Why the connection couldn't be opened or went on no further. None

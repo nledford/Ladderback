@@ -2100,6 +2100,7 @@ async fn the_hub_welcomes_only_a_proved_agents_first_hello() {
             zone: None,
             machine: None,
             outbox: None,
+            accepts: None,
         });
         let signed = SignedMessage::AgentMessage {
             hub_key: *keys.key(),
@@ -3178,10 +3179,11 @@ async fn i1_a_session_reports_a_repository_never_listed_as_holding_another_agent
 }
 
 /// A sync of the machine `leasing` sets up that has listed nothing since it
-/// started, and lists through `engine` before each session.
+/// started, and lists through `engine` before each session, on `connector`.
 fn listing_first(
     leasing: &Leasing,
-    engine: &Arc<crate::fakes::ListingEngine>,
+    engine: Arc<dyn crate::ports::Engine>,
+    connector: Arc<LoopbackHubConnector>,
 ) -> crate::sync::SyncWithHub {
     use domain::fleet::OutboxEpoch;
 
@@ -3190,7 +3192,7 @@ fn listing_first(
     let seen = Arc::new(OthersSnapshots::default());
     let listing = crate::snapshots::ListSnapshots::new(
         Arc::new(NoteListings::new(
-            engine.clone(),
+            engine,
             seen.clone(),
             agent_id(1),
             leasing.machine_clock.clone(),
@@ -3209,10 +3211,7 @@ fn listing_first(
         leasing.machine_clock.clone(),
     ));
     crate::sync::SyncWithHub::new(
-        connecting(
-            leasing.identity.clone(),
-            Arc::new(LoopbackHubConnector::to(leasing.hub.pairing.clone())),
-        ),
+        connecting(leasing.identity.clone(), connector),
         Arc::new(crate::fakes::InMemoryOutbox::new(OutboxEpoch::from_uuid(
             Uuid::from_u128(0xe4),
         ))),
@@ -3240,7 +3239,11 @@ async fn i1_a_session_lists_an_unlisted_repository_first_and_is_granted_its_leas
 
     let leasing = leasing(Timestamp::from_second(1_800_000_000).unwrap()).await;
     let engine = Arc::new(crate::fakes::ListingEngine::default());
-    let sync = listing_first(&leasing, &engine);
+    let sync = listing_first(
+        &leasing,
+        engine.clone(),
+        Arc::new(LoopbackHubConnector::to(leasing.hub.pairing.clone())),
+    );
     sync.sync_once().await.unwrap();
     assert_eq!(engine.listings(&photos()), 1);
     let held = leasing.owners.ownership(&photos()).await.unwrap();
@@ -3269,7 +3272,11 @@ async fn i1_a_failed_listing_before_a_session_is_refused_and_tried_again_at_the_
     let leasing = leasing(Timestamp::from_second(1_800_000_000).unwrap()).await;
     let engine = Arc::new(crate::fakes::ListingEngine::default());
     engine.fails(photos(), true);
-    let sync = listing_first(&leasing, &engine);
+    let sync = listing_first(
+        &leasing,
+        engine.clone(),
+        Arc::new(LoopbackHubConnector::to(leasing.hub.pairing.clone())),
+    );
     sync.sync_once().await.unwrap();
     assert_eq!(engine.listings(&photos()), 1);
     let held = leasing.owners.ownership(&photos()).await.unwrap();
@@ -3481,4 +3488,1013 @@ async fn i1_a_floor_another_hubs_key_signed_is_logged_and_doesnt_count() {
         warned.iter().any(|line| line.starts_with(&unproven)),
         "{warned:?}"
     );
+}
+
+/// The hub keeps the commands a machine's `Hello` said it takes with its
+/// live connection (decision 176); a machine whose `Hello` doesn't say, as
+/// a 0.6.0 one, is kept apart from one that takes none.
+#[tokio::test]
+async fn the_hub_keeps_the_commands_a_live_machine_takes() {
+    use crate::ports::OutboxEntry;
+    use domain::fleet::{Accepts, AgentReport, Happening, OutboxEpoch, ReportSeq};
+
+    let entry = |place| OutboxEntry {
+        epoch: OutboxEpoch::from_uuid(Uuid::from_u128(0xe1)),
+        seq: ReportSeq::new(place).unwrap(),
+        report: AgentReport {
+            op_id: domain::OperationId::from_uuid(Uuid::from_u128(0x0b)),
+            happening: Happening::Started,
+            at: EpochSeconds::from_seconds(1_800_000_000),
+        },
+    };
+    for (accepts, kept) in [
+        (Some(Accepts::all()), Some(Accepts::all())),
+        (Some(Accepts::none()), Some(Accepts::none())),
+        (None, None),
+    ] {
+        let inbox = Arc::new(FullInbox::default());
+        let hub = hub_with(1, |pairing| pairing.with_inbox(inbox.clone()));
+        let identity = paired(&hub, 1).await;
+        let waiting = hub.registry.agent(agent_id(1)).await.unwrap().unwrap();
+        hub.pairing.approve(&waiting).await.unwrap().unwrap();
+        let connecting = connecting(
+            identity,
+            Arc::new(LoopbackHubConnector::to(hub.pairing.clone())),
+        );
+        let (_, mut channel) = connecting
+            .connect_accepting(agent_id(1), hostname(1), None, None, accepts)
+            .await
+            .unwrap();
+        channel.send_report(&entry(1)).await.unwrap();
+        channel.receive_ack().await.unwrap();
+        assert!(hub.pairing.is_online(agent_id(1)));
+        assert_eq!(hub.pairing.accepts_of(agent_id(1)), kept);
+    }
+}
+
+/// The hub's `run-plan` of `photos`.
+fn photos_plan() -> domain::fleet::HubCommand {
+    domain::fleet::HubCommand::RunPlan {
+        plan: domain::PlanId::parse("photos").unwrap(),
+    }
+}
+
+/// A person's ask on loopback that machine `agent` run `photos`.
+fn photos_asked_of(agent: AgentId) -> crate::pairing::CommandAsk {
+    crate::pairing::CommandAsk {
+        agent,
+        command: photos_plan(),
+        asked_by: None,
+        beyond_loopback: false,
+    }
+}
+
+/// The hub sends a live machine that takes commands the one a person asked
+/// for, and hears the machine's answer: the backup it started (decision
+/// 176).
+#[tokio::test]
+async fn the_hub_hears_the_backup_a_live_machine_started_for_it() {
+    let hub = keeping_reports(1);
+    let connector = Arc::new(LoopbackHubConnector::to(hub.pairing.clone()));
+    let clock = Arc::new(FakeClock::new(hub.clock.now()));
+    let sync = sync_taking_commands(&hub, connector, clock).await;
+    let asked = async {
+        for _ in 0..10_000 {
+            if hub.pairing.is_online(agent_id(1)) {
+                break;
+            }
+            tokio::task::yield_now().await;
+        }
+        hub.pairing
+            .command_asked(photos_asked_of(agent_id(1)))
+            .await
+    };
+    let running = std::pin::pin!(sync.run());
+    let asked = std::pin::pin!(asked);
+    let answered = tokio::time::timeout(
+        std::time::Duration::from_secs(5),
+        futures::future::select(running, asked),
+    )
+    .await;
+    let Ok(futures::future::Either::Right((answer, _))) = answered else {
+        panic!("the hub heard no answer");
+    };
+    assert_eq!(
+        answer,
+        Ok(crate::hub_commands::CommandAnswer::Started(
+            domain::OperationId::from_uuid(Uuid::from_u128(0x0e))
+        ))
+    );
+}
+
+/// A command no live machine takes is refused at once, and nothing is kept
+/// to send later (decision 176).
+#[tokio::test]
+async fn the_hub_refuses_at_once_a_command_no_live_machine_takes() {
+    use crate::pairing::CommandAskRefused;
+    use domain::fleet::Accepts;
+    use futures::FutureExt as _;
+
+    let hub = keeping_reports(1);
+    let _identity = approved(&hub).await;
+    let ask = |agent| hub.pairing.command_asked(photos_asked_of(agent));
+    assert_eq!(
+        ask(agent_id(2)).await,
+        Err(CommandAskRefused::MachineUnknown)
+    );
+    assert_eq!(
+        ask(agent_id(1)).await,
+        Err(CommandAskRefused::MachineOffline)
+    );
+    let _older = hub
+        .pairing
+        .went_live_taking(agent_id(1), 1, Box::new(|| {}), None)
+        .await;
+    // Refused at once: an ask the hub sent would wait for an answer.
+    assert_eq!(
+        ask(agent_id(1)).now_or_never(),
+        Some(Err(CommandAskRefused::CommandsUnsupported))
+    );
+    let _newer = hub
+        .pairing
+        .went_live_taking(agent_id(1), 2, Box::new(|| {}), Some(Accepts::none()))
+        .await;
+    assert_eq!(
+        ask(agent_id(1)).now_or_never(),
+        Some(Err(CommandAskRefused::CommandsOff))
+    );
+}
+
+/// A command to a machine the hub doesn't hold approved, as one waiting for
+/// approval or one removed, is refused as to a machine it doesn't know, and
+/// nothing is sent: even while the hub still holds a connection of it, as
+/// when the registry changed under a live connection (decision 176).
+#[tokio::test]
+async fn a_command_to_a_machine_not_approved_is_refused_and_nothing_is_sent() {
+    use crate::pairing::CommandAskRefused;
+    use domain::fleet::{Accepts, AgentRecord};
+    use futures::{FutureExt as _, StreamExt as _};
+
+    let hub = keeping_reports(1);
+    let _identity = paired(&hub, 1).await;
+    let ask = || hub.pairing.command_asked(photos_asked_of(agent_id(1)));
+    assert_eq!(ask().await, Err(CommandAskRefused::MachineUnknown));
+    let waiting = hub.registry.agent(agent_id(1)).await.unwrap().unwrap();
+    let approved = hub.pairing.approve(&waiting).await.unwrap().unwrap();
+    let mut queue = hub
+        .pairing
+        .went_live_taking(agent_id(1), 1, Box::new(|| {}), Some(Accepts::all()))
+        .await;
+    hub.registry
+        .remove(agent_id(1), approved.key, hub.clock.now())
+        .await
+        .unwrap()
+        .unwrap();
+    assert_eq!(
+        ask().now_or_never(),
+        Some(Err(CommandAskRefused::MachineUnknown)),
+        "removed"
+    );
+    hub.registry.hold(AgentRecord {
+        status: AgentStatus::Pending {
+            since: hub.clock.now(),
+        },
+        ..approved
+    });
+    assert_eq!(
+        ask().now_or_never(),
+        Some(Err(CommandAskRefused::MachineUnknown)),
+        "waiting for approval"
+    );
+    assert!(
+        queue.next().now_or_never().flatten().is_none(),
+        "the hub sent a command to a machine it doesn't hold approved"
+    );
+}
+
+/// A command the live machine doesn't take is refused at once and nothing
+/// is sent: one whose `Hello` didn't say, or that takes other commands, runs
+/// a release that doesn't take it; one that takes none turned its hub's
+/// commands off (decision 176).
+#[tokio::test]
+async fn a_command_the_live_machine_doesnt_take_is_refused_and_nothing_is_sent() {
+    use crate::pairing::CommandAskRefused;
+    use domain::fleet::Accepts;
+    use futures::{FutureExt as _, StreamExt as _};
+
+    let hub = keeping_reports(1);
+    let _identity = approved(&hub).await;
+    let only_cancel = Accepts::from_names(["cancel-op"]).unwrap();
+    for (connection, accepts, refused) in [
+        (1, None, CommandAskRefused::CommandsUnsupported),
+        (2, Some(only_cancel), CommandAskRefused::CommandsUnsupported),
+        (3, Some(Accepts::none()), CommandAskRefused::CommandsOff),
+    ] {
+        let mut queue = hub
+            .pairing
+            .went_live_taking(agent_id(1), connection, Box::new(|| {}), accepts.clone())
+            .await;
+        assert_eq!(
+            hub.pairing
+                .command_asked(photos_asked_of(agent_id(1)))
+                .now_or_never(),
+            Some(Err(refused)),
+            "{accepts:?}"
+        );
+        assert!(
+            queue.next().now_or_never().flatten().is_none(),
+            "the hub sent a command the machine doesn't take: {accepts:?}"
+        );
+    }
+}
+
+/// When a machine's connection ends, an asker waiting on it hears at once
+/// that the machine didn't answer, rather than once the hub's 20 seconds
+/// are up (decision 176).
+#[tokio::test]
+async fn an_asker_waiting_on_a_machine_whose_connection_ends_hears_at_once() {
+    use crate::pairing::CommandAskRefused;
+    use domain::fleet::Accepts;
+    use futures::{FutureExt as _, StreamExt as _};
+
+    let hub = keeping_reports(1);
+    let _identity = approved(&hub).await;
+    let mut queue = hub
+        .pairing
+        .went_live_taking(agent_id(1), 1, Box::new(|| {}), Some(Accepts::all()))
+        .await;
+    let mut asked = Box::pin(hub.pairing.command_asked(photos_asked_of(agent_id(1))));
+    assert!(futures::poll!(asked.as_mut()).is_pending());
+    assert!(queue.next().now_or_never().flatten().is_some());
+    hub.pairing.went_away(agent_id(1), 1).await;
+    assert_eq!(asked.now_or_never(), Some(Err(CommandAskRefused::NoAnswer)));
+}
+
+/// A run of a plan on a machine offline names the plan's next run on its
+/// schedule, as the machine last reported it, when it is still to come; a
+/// cancel, a plan reported without one, or one already past, is only
+/// offline (decision 176).
+#[tokio::test]
+async fn a_run_on_a_machine_offline_names_its_next_run_still_to_come() {
+    use crate::pairing::CommandAskRefused;
+    use crate::ports::ReportInbox as _;
+    use domain::fleet::{HubCommand, PlansReport, ReportedPlan};
+
+    let inbox = Arc::new(crate::fakes::InMemoryReportInbox::default());
+    let hub = hub_with(1, |pairing| pairing.with_inbox(inbox.clone()));
+    let _identity = approved(&hub).await;
+    let ask = || hub.pairing.command_asked(photos_asked_of(agent_id(1)));
+    assert_eq!(ask().await, Err(CommandAskRefused::MachineOffline));
+    let now = hub.clock.now();
+    let next = now + SignedDuration::from_hours(1);
+    let plans = |plan: &str, next_run: Option<Timestamp>| {
+        PlansReport::of(vec![ReportedPlan {
+            plan: domain::PlanId::parse(plan).unwrap(),
+            last: None,
+            next_run: next_run.and_then(EpochSeconds::from_timestamp),
+        }])
+    };
+    inbox
+        .keep_plans(agent_id(1), &plans("photos", Some(next)))
+        .await
+        .unwrap();
+    assert_eq!(
+        ask().await,
+        Err(CommandAskRefused::MachineOfflineNextRun { next_run: next })
+    );
+    let cancel = crate::pairing::CommandAsk {
+        command: HubCommand::CancelOp {
+            op: domain::OperationId::from_uuid(Uuid::from_u128(0x0e)),
+        },
+        ..photos_asked_of(agent_id(1))
+    };
+    assert_eq!(
+        hub.pairing.command_asked(cancel).await,
+        Err(CommandAskRefused::MachineOffline)
+    );
+    for report in [
+        plans("music", Some(next)),
+        plans("photos", None),
+        plans("photos", Some(now)),
+        plans("photos", Some(now - SignedDuration::from_mins(1))),
+    ] {
+        inbox.keep_plans(agent_id(1), &report).await.unwrap();
+        assert_eq!(
+            ask().await,
+            Err(CommandAskRefused::MachineOffline),
+            "{report:?}"
+        );
+    }
+}
+
+/// The hub sends the command signed on the machine's live connection and
+/// waits 20 seconds for its answer, then says the machine didn't answer
+/// (decision 176).
+#[tokio::test]
+async fn the_hub_waits_20_seconds_for_a_machines_answer() {
+    use crate::pairing::CommandAskRefused;
+    use domain::fleet::{Accepts, COMMAND_ANSWER_WITHIN};
+    use futures::StreamExt as _;
+
+    let hub = keeping_reports(1);
+    let _identity = approved(&hub).await;
+    let mut queue = hub
+        .pairing
+        .went_live_taking(agent_id(1), 1, Box::new(|| {}), Some(Accepts::all()))
+        .await;
+    let asked = hub.pairing.command_asked(photos_asked_of(agent_id(1)));
+    let waited = async {
+        let sent = queue.next().await.expect("the hub sent the command");
+        let request = crate::pairing::wire::read_command(&sent.kind, &sent.payload)
+            .unwrap()
+            .unwrap();
+        assert_eq!(request.command, photos_plan());
+        assert_eq!(
+            request.requested_at,
+            EpochSeconds::from_timestamp(hub.clock.now()).unwrap()
+        );
+        hub.clock
+            .advance(COMMAND_ANSWER_WITHIN.saturating_sub(SignedDuration::from_secs(1)));
+        tokio::task::yield_now().await;
+        hub.clock.advance(SignedDuration::from_secs(1));
+    };
+    let (answer, ()) = tokio::time::timeout(
+        std::time::Duration::from_secs(5),
+        futures::future::join(asked, waited),
+    )
+    .await
+    .expect("the hub waited past 20 seconds");
+    assert_eq!(answer, Err(CommandAskRefused::NoAnswer));
+}
+
+/// A command whose asker stopped waiting, as when the person closed the
+/// page, no longer waits for the machine's answer: the hub's limit on the
+/// commands waiting counts only those still waited on (decision 176).
+#[tokio::test]
+async fn a_command_no_one_waits_for_leaves_room_for_the_next() {
+    use domain::fleet::{Accepts, MAX_COMMANDS_IN_FLIGHT};
+    use futures::{FutureExt as _, StreamExt as _};
+
+    let hub = keeping_reports(1);
+    let _identity = approved(&hub).await;
+    let mut queue = hub
+        .pairing
+        .went_live_taking(agent_id(1), 1, Box::new(|| {}), Some(Accepts::all()))
+        .await;
+    for ask in 0..=MAX_COMMANDS_IN_FLIGHT {
+        let mut asked = Box::pin(hub.pairing.command_asked(photos_asked_of(agent_id(1))));
+        assert!(
+            futures::poll!(asked.as_mut()).is_pending(),
+            "the hub refused ask {ask}"
+        );
+        assert!(
+            queue.next().now_or_never().flatten().is_some(),
+            "the hub sent nothing for ask {ask}"
+        );
+        drop(asked);
+    }
+}
+
+/// The hub waits on at most its commands in flight to one machine: one
+/// more, while they all wait, is refused with when to ask again, once the
+/// wait for an answer is over, and nothing is sent (decision 176).
+#[tokio::test]
+async fn the_hub_refuses_a_command_past_those_in_flight() {
+    use crate::pairing::CommandAskRefused;
+    use domain::fleet::{Accepts, COMMAND_ANSWER_WITHIN, MAX_COMMANDS_IN_FLIGHT};
+    use futures::{FutureExt as _, StreamExt as _};
+
+    let hub = keeping_reports(1);
+    let _identity = approved(&hub).await;
+    let mut queue = hub
+        .pairing
+        .went_live_taking(agent_id(1), 1, Box::new(|| {}), Some(Accepts::all()))
+        .await;
+    let mut waiting = Vec::new();
+    for ask in 0..MAX_COMMANDS_IN_FLIGHT {
+        let mut asked = Box::pin(hub.pairing.command_asked(photos_asked_of(agent_id(1))));
+        assert!(
+            futures::poll!(asked.as_mut()).is_pending(),
+            "the hub refused ask {ask}"
+        );
+        assert!(
+            queue.next().now_or_never().flatten().is_some(),
+            "the hub sent nothing for ask {ask}"
+        );
+        waiting.push(asked);
+    }
+    let refused = futures::poll!(Box::pin(
+        hub.pairing.command_asked(photos_asked_of(agent_id(1)))
+    ));
+    assert_eq!(
+        refused,
+        std::task::Poll::Ready(Err(CommandAskRefused::Busy {
+            retry_at: hub.clock.now() + COMMAND_ANSWER_WITHIN
+        }))
+    );
+    assert!(
+        queue.next().now_or_never().flatten().is_none(),
+        "the hub sent the refused command"
+    );
+}
+
+/// The hub sends one machine at most its commands an hour, so its own asks
+/// never fill the machine's ledger of the commands it took; the next is
+/// refused with when to ask again, an hour after the oldest (decision 176).
+#[tokio::test]
+async fn the_hub_sends_a_machine_at_most_its_commands_an_hour() {
+    use crate::pairing::CommandAskRefused;
+    use domain::fleet::{Accepts, HUB_COMMANDS_PER_HOUR};
+    use futures::{FutureExt as _, StreamExt as _};
+
+    let hub = keeping_reports(1);
+    let _identity = approved(&hub).await;
+    let mut queue = hub
+        .pairing
+        .went_live_taking(agent_id(1), 1, Box::new(|| {}), Some(Accepts::all()))
+        .await;
+    let mut sent = async || {
+        let mut asked = Box::pin(hub.pairing.command_asked(photos_asked_of(agent_id(1))));
+        let pending = futures::poll!(asked.as_mut()).is_pending();
+        pending && queue.next().now_or_never().flatten().is_some()
+    };
+    let first = hub.clock.now();
+    for ask in 0..HUB_COMMANDS_PER_HOUR {
+        assert!(sent().await, "the hub refused ask {ask}");
+        hub.clock.advance(SignedDuration::from_secs(1));
+    }
+    let refused = futures::poll!(Box::pin(
+        hub.pairing.command_asked(photos_asked_of(agent_id(1)))
+    ));
+    assert_eq!(
+        refused,
+        std::task::Poll::Ready(Err(CommandAskRefused::Busy {
+            retry_at: first + SignedDuration::from_hours(1)
+        }))
+    );
+    hub.clock.advance(
+        SignedDuration::from_hours(1)
+            - SignedDuration::from_secs(i64::try_from(HUB_COMMANDS_PER_HOUR).unwrap()),
+    );
+    assert!(
+        sent().await,
+        "the hub refused the ask an hour after the first"
+    );
+}
+
+/// A command the hub couldn't hand to the machine's connection, as one
+/// whose connection is ending, isn't counted in the hour's commands: the
+/// machine's next connection takes as many as ever (decision 176).
+#[tokio::test]
+async fn a_command_the_hub_couldnt_send_isnt_counted() {
+    use crate::pairing::CommandAskRefused;
+    use domain::fleet::{Accepts, HUB_COMMANDS_PER_HOUR};
+    use futures::{FutureExt as _, StreamExt as _};
+
+    let hub = keeping_reports(1);
+    let _identity = approved(&hub).await;
+    let ending = hub
+        .pairing
+        .went_live_taking(agent_id(1), 1, Box::new(|| {}), Some(Accepts::all()))
+        .await;
+    drop(ending);
+    for ask in 0..HUB_COMMANDS_PER_HOUR {
+        assert_eq!(
+            hub.pairing
+                .command_asked(photos_asked_of(agent_id(1)))
+                .now_or_never(),
+            Some(Err(CommandAskRefused::MachineOffline)),
+            "ask {ask}"
+        );
+    }
+    let mut queue = hub
+        .pairing
+        .went_live_taking(agent_id(1), 2, Box::new(|| {}), Some(Accepts::all()))
+        .await;
+    let mut asked = Box::pin(hub.pairing.command_asked(photos_asked_of(agent_id(1))));
+    assert!(
+        futures::poll!(asked.as_mut()).is_pending(),
+        "the hub refused the first command it could send"
+    );
+    assert!(queue.next().now_or_never().flatten().is_some());
+}
+
+/// The hub's runs for a sync that takes its commands: no plan runs, and
+/// each start is the operation `0x0e`.
+struct StartsOne;
+
+#[async_trait]
+impl crate::hub_commands::HubRuns for StartsOne {
+    async fn going(&self, _plan: &domain::PlanId) -> Option<domain::OperationId> {
+        None
+    }
+
+    async fn queue(
+        &self,
+        _plan: &domain::PlanId,
+        _asked_by: Option<domain::access::SessionTag>,
+    ) -> Result<domain::OperationId, crate::hub_commands::HubRunRefused> {
+        Ok(domain::OperationId::from_uuid(Uuid::from_u128(0x0e)))
+    }
+
+    async fn cancel(
+        &self,
+        _operation: &domain::OperationId,
+    ) -> Result<(), crate::hub_commands::HubCancelRefused> {
+        Err(crate::hub_commands::HubCancelRefused::Unknown)
+    }
+}
+
+/// A sync of machine 1 with `hub` on `connector` and `clock`, taking the
+/// hub's commands.
+async fn sync_taking_commands(
+    hub: &Hub,
+    connector: Arc<LoopbackHubConnector>,
+    clock: Arc<FakeClock>,
+) -> crate::sync::SyncWithHub {
+    let identity = approved(hub).await;
+    crate::sync::SyncWithHub::new(
+        connecting(identity, connector),
+        Arc::new(crate::fakes::InMemoryOutbox::new(
+            domain::fleet::OutboxEpoch::from_uuid(Uuid::from_u128(0xe1)),
+        )),
+        clock.clone(),
+        agent_id(1),
+        hostname(1),
+        None,
+    )
+    .with_commands(answering(clock))
+}
+
+/// Answers to the hub's commands on `clock`, with the runs [`StartsOne`].
+fn answering(clock: Arc<FakeClock>) -> Arc<crate::hub_commands::AnswerHubCommands> {
+    Arc::new(crate::hub_commands::AnswerHubCommands::new(
+        Arc::new(crate::fakes::InMemoryConfigStore::new()),
+        Arc::new(crate::fakes::InMemoryCommandLedger::default()),
+        Arc::new(StartsOne),
+        clock,
+    ))
+}
+
+/// A listing engine whose listings wait to be let through, after saying
+/// one has begun.
+struct HeldListings {
+    engine: crate::fakes::ListingEngine,
+    begun: tokio::sync::Notify,
+    through: tokio::sync::Notify,
+}
+
+#[async_trait]
+impl crate::ports::Engine for HeldListings {
+    async fn run(
+        &self,
+        op: domain::OperationId,
+        job: crate::ports::Job,
+    ) -> Result<crate::ports::RunningJob, crate::ports::EngineError> {
+        self.begun.notify_one();
+        self.through.notified().await;
+        self.engine.run(op, job).await
+    }
+}
+
+/// The hub's `run-plan` of `photos`, the command `seq`, asked at `at`.
+fn run_photos(seq: u128, at: Timestamp) -> Vec<u8> {
+    api::sync::RunPlanPayload {
+        command_id: Uuid::from_u128((0x0191_u128 << 112) | seq)
+            .hyphenated()
+            .to_string(),
+        requested_at: u64::try_from(at.as_second()).unwrap(),
+        plan_id: "photos".to_owned(),
+        session: Some("0123456789abcdef".to_owned()),
+    }
+    .to_bytes()
+}
+
+/// A machine answers the hub's command while a listing holds its session,
+/// as it beats its heart then (decision 176).
+#[tokio::test]
+async fn a_session_answers_the_hubs_command_while_a_listing_holds_it() {
+    let leasing = leasing(Timestamp::from_second(1_800_000_000).unwrap()).await;
+    let held = Arc::new(HeldListings {
+        engine: crate::fakes::ListingEngine::default(),
+        begun: tokio::sync::Notify::new(),
+        through: tokio::sync::Notify::new(),
+    });
+    let connector = Arc::new(LoopbackHubConnector::to(leasing.hub.pairing.clone()));
+    let sync = listing_first(&leasing, held.clone(), connector.clone())
+        .with_commands(answering(leasing.machine_clock.clone()));
+    let result_kind = domain::fleet::command_result_kind();
+    let watched = async {
+        held.begun.notified().await;
+        connector.send_command(
+            domain::fleet::run_plan_kind(),
+            run_photos(1, leasing.hub.clock.now()),
+        );
+        // The listing holds the session until the command is answered.
+        for _ in 0..200 {
+            if !sent_of(&connector, &result_kind).is_empty() {
+                return true;
+            }
+            leasing
+                .machine_clock
+                .advance(domain::fleet::HEARTBEAT_EVERY);
+            tokio::task::yield_now().await;
+        }
+        false
+    };
+    let running = std::pin::pin!(sync.run());
+    let watched = std::pin::pin!(watched);
+    let answered = tokio::time::timeout(
+        std::time::Duration::from_secs(5),
+        futures::future::select(running, watched),
+    )
+    .await;
+    assert!(
+        matches!(answered, Ok(futures::future::Either::Right((true, _)))),
+        "the machine didn't answer while it listed"
+    );
+    assert_eq!(held.engine.listings(&photos()), 0, "the listing went on");
+    let results = sent_of(&connector, &result_kind);
+    let result = api::sync::CommandResultPayload::from_bytes(&results[0]).unwrap();
+    assert_eq!(result.result, "started", "{result:?}");
+}
+
+/// The signed messages of `kind` the agent sent on `connector`, as their
+/// payloads.
+fn sent_of(connector: &LoopbackHubConnector, kind: &WireName) -> Vec<Vec<u8>> {
+    connector
+        .sent()
+        .iter()
+        .filter_map(
+            |text| match agent_message(&AgentFrame::from_text(text).ok()?) {
+                Ok(AgentMessage::Signed(envelope)) if envelope.kind == *kind => {
+                    Some(envelope.payload)
+                }
+                _ => None,
+            },
+        )
+        .collect()
+}
+
+/// A sync that takes its hub's commands says in its `Hello` which it
+/// takes, so the hub sends them (decision 176).
+#[tokio::test]
+async fn a_sync_taking_commands_names_them_in_its_hello() {
+    let hub = hub(1);
+    let connector = Arc::new(LoopbackHubConnector::to(hub.pairing.clone()));
+    let clock = Arc::new(FakeClock::new(hub.clock.now()));
+    let sync = sync_taking_commands(&hub, connector.clone(), clock).await;
+    sync.sync_once().await.unwrap();
+    let hellos = sent_of(&connector, &hello_kind());
+    let hello = api::sync::HelloPayload::from_bytes(hellos.last().unwrap()).unwrap();
+    assert_eq!(
+        hello.accepts,
+        Some(vec!["run-plan".to_owned(), "cancel-op".to_owned()])
+    );
+}
+
+/// A connection the machine holds answers the hub's command between its
+/// own messages, while it waits for its next poll (decision 176).
+#[tokio::test]
+async fn a_held_connection_answers_the_hubs_command() {
+    let hub = keeping_reports(1);
+    let connector = Arc::new(LoopbackHubConnector::to(hub.pairing.clone()));
+    let clock = Arc::new(FakeClock::new(hub.clock.now()));
+    let sync = sync_taking_commands(&hub, connector.clone(), clock.clone()).await;
+    let result_kind = domain::fleet::command_result_kind();
+    let heartbeat = domain::fleet::heartbeat_kind();
+    let payload = api::sync::RunPlanPayload {
+        command_id: Uuid::from_u128((0x0191_u128 << 112) | 1)
+            .hyphenated()
+            .to_string(),
+        requested_at: u64::try_from(hub.clock.now().as_second()).unwrap(),
+        plan_id: "photos".to_owned(),
+        session: Some("0123456789abcdef".to_owned()),
+    }
+    .to_bytes();
+    let watched = async {
+        for _ in 0..10_000 {
+            if !sent_of(&connector, &heartbeat).is_empty() {
+                break;
+            }
+            tokio::task::yield_now().await;
+        }
+        connector.send_command(domain::fleet::run_plan_kind(), payload);
+        for _ in 0..200 {
+            if !sent_of(&connector, &result_kind).is_empty() {
+                return true;
+            }
+            clock.advance(crate::sync::POLL);
+            tokio::task::yield_now().await;
+        }
+        false
+    };
+    let running = std::pin::pin!(sync.run());
+    let watched = std::pin::pin!(watched);
+    let answered = tokio::time::timeout(
+        std::time::Duration::from_secs(5),
+        futures::future::select(running, watched),
+    )
+    .await;
+    assert!(
+        matches!(answered, Ok(futures::future::Either::Right((true, _)))),
+        "the machine didn't answer the hub's command"
+    );
+    let results = sent_of(&connector, &result_kind);
+    let result = api::sync::CommandResultPayload::from_bytes(&results[0]).unwrap();
+    assert_eq!(result.result, "started", "{result:?}");
+}
+
+/// How long [`SlowStart`]'s backups take to start: longer than the hub
+/// waits for an answer, and than three heartbeats.
+const SLOW_START: SignedDuration = SignedDuration::from_secs(95);
+
+/// The hub's runs for a sync whose backups take [`SLOW_START`] on `clock`
+/// to start, as reading a repository's secrets can (a command or a
+/// keyring that is slow to answer): each is admitted and queued as the
+/// operation `0x0e` at once, and starts that long after.
+struct SlowStart {
+    clock: Arc<FakeClock>,
+}
+
+#[async_trait]
+impl crate::hub_commands::HubRuns for SlowStart {
+    async fn going(&self, _plan: &domain::PlanId) -> Option<domain::OperationId> {
+        None
+    }
+
+    async fn queue(
+        &self,
+        _plan: &domain::PlanId,
+        _asked_by: Option<domain::access::SessionTag>,
+    ) -> Result<domain::OperationId, crate::hub_commands::HubRunRefused> {
+        let clock = self.clock.clone();
+        tokio::spawn(async move {
+            crate::ports::Clock::sleep(&*clock, SLOW_START).await;
+        });
+        Ok(domain::OperationId::from_uuid(Uuid::from_u128(0x0e)))
+    }
+
+    async fn cancel(
+        &self,
+        _operation: &domain::OperationId,
+    ) -> Result<(), crate::hub_commands::HubCancelRefused> {
+        Err(crate::hub_commands::HubCancelRefused::Unknown)
+    }
+}
+
+/// A held connection answers the hub's `run-plan` once the backup is
+/// admitted and queued, not once it has started: a start that takes 95
+/// seconds neither keeps the answer past the hub's 20 seconds nor stops
+/// the heartbeats every 30, so the hub keeps the machine online and never
+/// says it had no answer for a backup that runs (decision 176).
+#[tokio::test]
+async fn a_held_connection_answers_and_beats_while_the_hubs_backup_starts() {
+    use crate::ports::Clock as _;
+
+    let hub = keeping_reports(1);
+    let identity = approved(&hub).await;
+    let connector = Arc::new(LoopbackHubConnector::to(hub.pairing.clone()));
+    let clock = Arc::new(FakeClock::new(hub.clock.now()));
+    let sync = crate::sync::SyncWithHub::new(
+        connecting(identity, connector.clone()),
+        Arc::new(crate::fakes::InMemoryOutbox::new(
+            domain::fleet::OutboxEpoch::from_uuid(Uuid::from_u128(0xe1)),
+        )),
+        clock.clone(),
+        agent_id(1),
+        hostname(1),
+        None,
+    )
+    .with_commands(Arc::new(crate::hub_commands::AnswerHubCommands::new(
+        Arc::new(crate::fakes::InMemoryConfigStore::new()),
+        Arc::new(crate::fakes::InMemoryCommandLedger::default()),
+        Arc::new(SlowStart {
+            clock: clock.clone(),
+        }),
+        clock.clone(),
+    )));
+    let result_kind = domain::fleet::command_result_kind();
+    let heartbeat = domain::fleet::heartbeat_kind();
+    let watched = async {
+        for _ in 0..10_000 {
+            if !sent_of(&connector, &heartbeat).is_empty() {
+                break;
+            }
+            tokio::task::yield_now().await;
+        }
+        connector.send_command(
+            domain::fleet::run_plan_kind(),
+            run_photos(1, hub.clock.now()),
+        );
+        let asked = clock.monotonic();
+        let beats = sent_of(&connector, &heartbeat).len();
+        let mut answered_after = None;
+        // Two minutes of the machine's clock, a second at a time.
+        for _ in 0..120 {
+            for _ in 0..50 {
+                tokio::task::yield_now().await;
+            }
+            if answered_after.is_none() && !sent_of(&connector, &result_kind).is_empty() {
+                answered_after = Some(clock.monotonic().saturating_sub(asked));
+            }
+            clock.advance(SignedDuration::from_secs(1));
+        }
+        (
+            answered_after,
+            sent_of(&connector, &heartbeat).len() - beats,
+        )
+    };
+    let running = std::pin::pin!(sync.run());
+    let watched = std::pin::pin!(watched);
+    let Ok(futures::future::Either::Right(((answered_after, beats), _))) = tokio::time::timeout(
+        std::time::Duration::from_secs(10),
+        futures::future::select(running, watched),
+    )
+    .await
+    else {
+        panic!("the watch didn't end");
+    };
+    assert!(
+        answered_after.is_some_and(|after| after <= SignedDuration::from_secs(20)),
+        "the machine answered after {answered_after:?}"
+    );
+    assert!(beats >= 3, "{beats} heartbeats in two minutes");
+    let results = sent_of(&connector, &result_kind);
+    let result = api::sync::CommandResultPayload::from_bytes(&results[0]).unwrap();
+    assert_eq!(result.result, "started", "{result:?}");
+}
+
+/// The kinds of the signed messages the agent sent on `connector`, in
+/// order.
+fn kinds_sent(connector: &LoopbackHubConnector) -> Vec<WireName> {
+    connector
+        .sent()
+        .iter()
+        .filter_map(
+            |text| match agent_message(&AgentFrame::from_text(text).ok()?) {
+                Ok(AgentMessage::Signed(envelope)) => Some(envelope.kind),
+                _ => None,
+            },
+        )
+        .collect()
+}
+
+/// A machine answers the hub's commands that came while it replayed its
+/// outbox between its windows of reports, not after the whole replay, so
+/// none waits on a long backlog past the hub's 20 seconds (decision 176).
+#[tokio::test]
+async fn a_replay_answers_the_hubs_commands_between_its_windows() {
+    use crate::ports::Outbox as _;
+    use domain::fleet::{AgentReport, Happening, OutboxEpoch, SEND_WINDOW, report_kind};
+
+    let hub = keeping_reports(1);
+    let identity = approved(&hub).await;
+    let connector = Arc::new(LoopbackHubConnector::to(hub.pairing.clone()));
+    let clock = Arc::new(FakeClock::new(hub.clock.now()));
+    let outbox = Arc::new(crate::fakes::InMemoryOutbox::new(OutboxEpoch::from_uuid(
+        Uuid::from_u128(0xe1),
+    )));
+    for number in 0..=SEND_WINDOW {
+        outbox
+            .append(&AgentReport {
+                op_id: domain::OperationId::from_uuid(Uuid::from_u128(
+                    0x0b00 + u128::try_from(number).unwrap(),
+                )),
+                happening: Happening::Started,
+                at: EpochSeconds::from_seconds(1_800_000_000),
+            })
+            .await
+            .unwrap();
+    }
+    let sync = crate::sync::SyncWithHub::new(
+        connecting(identity, connector.clone()),
+        outbox,
+        clock.clone(),
+        agent_id(1),
+        hostname(1),
+        None,
+    )
+    .with_commands(answering(clock));
+    connector.send_command(
+        domain::fleet::run_plan_kind(),
+        run_photos(1, hub.clock.now()),
+    );
+    connector.send_commands_ahead();
+    sync.sync_once().await.unwrap();
+    let kinds = kinds_sent(&connector);
+    let answered = kinds
+        .iter()
+        .position(|kind| *kind == domain::fleet::command_result_kind());
+    let last_report = kinds.iter().rposition(|kind| *kind == report_kind());
+    assert!(
+        matches!((answered, last_report), (Some(answered), Some(last)) if answered < last),
+        "{kinds:?}"
+    );
+}
+
+/// A machine holding as many of the hub's commands unanswered as the hub
+/// waits on, as through a long replay, keeps its connection when the hub
+/// sends another: it drops the oldest, which the hub has stopped waiting
+/// for, answers it expired, and answers the rest (decision 176).
+#[tokio::test]
+async fn a_machine_holding_its_limit_of_commands_answers_the_oldest_expired() {
+    use domain::fleet::{Accepts, MAX_COMMANDS_IN_FLIGHT, command_result_kind, run_plan_kind};
+
+    let hub = keeping_reports(1);
+    let identity = approved(&hub).await;
+    let connector = Arc::new(LoopbackHubConnector::to(hub.pairing.clone()));
+    let (_, mut channel) = connecting(identity, connector.clone())
+        .connect_accepting(agent_id(1), hostname(1), None, None, Some(Accepts::all()))
+        .await
+        .unwrap();
+    channel.send_report(&one_report()).await.unwrap();
+    channel.receive_ack().await.unwrap();
+    let sent = u128::try_from(MAX_COMMANDS_IN_FLIGHT).unwrap() + 1;
+    for number in 1..=sent {
+        connector.send_command(run_plan_kind(), run_photos(number, hub.clock.now()));
+    }
+    connector.send_commands_ahead();
+    channel.send_heartbeat(None).await.unwrap();
+    channel
+        .receive_heartbeat_ack()
+        .await
+        .expect("the machine keeps its connection");
+    answering(Arc::new(FakeClock::new(hub.clock.now())))
+        .answer_held(&mut channel)
+        .await
+        .unwrap();
+    let results: Vec<(String, String, Option<String>)> =
+        sent_of(&connector, &command_result_kind())
+            .iter()
+            .map(|bytes| {
+                let result = api::sync::CommandResultPayload::from_bytes(bytes).unwrap();
+                (result.command_id, result.result, result.code)
+            })
+            .collect();
+    let id = |number: u128| {
+        Uuid::from_u128((0x0191_u128 << 112) | number)
+            .hyphenated()
+            .to_string()
+    };
+    assert_eq!(
+        results
+            .first()
+            .map(|(id, _, code)| (id.clone(), code.clone())),
+        Some((id(1), Some("command-expired".to_owned())))
+    );
+    let answered: Vec<String> = results.into_iter().map(|(id, ..)| id).collect();
+    assert_eq!(answered, (1..=sent).map(id).collect::<Vec<_>>());
+}
+
+/// A machine keeps at most as many of the hub's commands unanswered as the
+/// hub waits on, and as many of those it dropped to make room: past both,
+/// the oldest dropped is forgotten unanswered, the next dropped are each
+/// answered expired, and the newest are answered (decision 176).
+#[tokio::test]
+async fn a_machine_forgets_the_oldest_of_more_commands_dropped_than_it_holds() {
+    use domain::fleet::{Accepts, MAX_COMMANDS_IN_FLIGHT, command_result_kind, run_plan_kind};
+
+    let hub = keeping_reports(1);
+    let identity = approved(&hub).await;
+    let connector = Arc::new(LoopbackHubConnector::to(hub.pairing.clone()));
+    let (_, mut channel) = connecting(identity, connector.clone())
+        .connect_accepting(agent_id(1), hostname(1), None, None, Some(Accepts::all()))
+        .await
+        .unwrap();
+    channel.send_report(&one_report()).await.unwrap();
+    channel.receive_ack().await.unwrap();
+    let held = u128::try_from(MAX_COMMANDS_IN_FLIGHT).unwrap();
+    let sent = 2 * held + 1;
+    for number in 1..=sent {
+        connector.send_command(run_plan_kind(), run_photos(number, hub.clock.now()));
+    }
+    connector.send_commands_ahead();
+    channel.send_heartbeat(None).await.unwrap();
+    channel
+        .receive_heartbeat_ack()
+        .await
+        .expect("the machine keeps its connection");
+    answering(Arc::new(FakeClock::new(hub.clock.now())))
+        .answer_held(&mut channel)
+        .await
+        .unwrap();
+    let answered: Vec<(String, bool)> = sent_of(&connector, &command_result_kind())
+        .iter()
+        .map(|bytes| {
+            let result = api::sync::CommandResultPayload::from_bytes(bytes).unwrap();
+            let expired = result.code.as_deref() == Some("command-expired");
+            (result.command_id, expired)
+        })
+        .collect();
+    let id = |number: u128| {
+        Uuid::from_u128((0x0191_u128 << 112) | number)
+            .hyphenated()
+            .to_string()
+    };
+    let expected: Vec<(String, bool)> = (2..=held + 1)
+        .map(|number| (id(number), true))
+        .chain((held + 2..=sent).map(|number| (id(number), false)))
+        .collect();
+    assert_eq!(answered, expected);
 }

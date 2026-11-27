@@ -262,6 +262,70 @@ impl std::fmt::Debug for SessionDigest {
     }
 }
 
+/// How many bytes of its hash a [`SessionTag`] keeps.
+const SESSION_TAG_BYTES: usize = 8;
+
+/// Which of a hub's sessions asked a machine for something, as the hub
+/// tells the machine and the machine's operation log keeps it (§16,
+/// decision 176): the first 8 bytes of the SHA-256 of a label and the
+/// session's digest, as 16 lower-case hex digits. It tells one session
+/// from another and says nothing of the token or of its digest (I4).
+#[derive(Clone, Debug, PartialEq, Eq, Hash, serde::Serialize, serde::Deserialize)]
+#[serde(try_from = "String")]
+pub struct SessionTag(String);
+
+/// Text that isn't 16 lower-case hex digits.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct InvalidSessionTag;
+
+impl std::fmt::Display for InvalidSessionTag {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str("a session tag isn't 16 lower-case hex digits")
+    }
+}
+
+impl TryFrom<String> for SessionTag {
+    type Error = InvalidSessionTag;
+
+    fn try_from(text: String) -> Result<Self, Self::Error> {
+        Self::parse(&text)
+    }
+}
+
+impl SessionTag {
+    /// The tag of the session kept by `digest`.
+    pub fn of(digest: &SessionDigest) -> Self {
+        const LABEL: &[u8] = b"ladderback hub session tag v1\0";
+        let hash = Sha256::new()
+            .chain_update(LABEL)
+            .chain_update(digest.as_bytes())
+            .finalize();
+        Self(
+            hash.iter()
+                .take(SESSION_TAG_BYTES)
+                .map(|byte| format!("{byte:02x}"))
+                .collect(),
+        )
+    }
+
+    /// Exactly 16 lower-case hex digits, as [`Self::as_str`] writes them.
+    pub fn parse(text: &str) -> Result<Self, InvalidSessionTag> {
+        let hex = text.len() == SESSION_TAG_BYTES * 2
+            && text
+                .bytes()
+                .all(|byte| byte.is_ascii_digit() || (b'a'..=b'f').contains(&byte));
+        if hex {
+            Ok(Self(text.to_owned()))
+        } else {
+            Err(InvalidSessionTag)
+        }
+    }
+
+    pub fn as_str(&self) -> &str {
+        &self.0
+    }
+}
+
 fn hex_digit(digit: u8) -> Option<u8> {
     match digit {
         b'0'..=b'9' => Some(digit - b'0'),

@@ -56,6 +56,7 @@ mod download_sweep;
 mod engine_jobs;
 mod hook_output;
 mod hub_leases;
+mod hub_runs;
 mod key_files;
 mod keyring_passwords;
 mod log_lines;

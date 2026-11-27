@@ -4,10 +4,12 @@ use std::sync::{Arc, Mutex, PoisonError};
 
 use api::sync::{AgentFrame, HubFrame, MAX_FRAME_BYTES};
 use async_trait::async_trait;
-use domain::fleet::{HubRoute, KEY_BYTES, RouteSession, SILENCE_LIMIT};
+use domain::fleet::{HubRoute, KEY_BYTES, RouteSession, SILENCE_LIMIT, WireName};
 use domain::{AgentId, SignedDuration};
 
-use crate::pairing::{HubPairing, HubSession, HubStep};
+use futures::StreamExt as _;
+
+use crate::pairing::{CommandQueue, HubPairing, HubSession, HubStep, OutgoingCommand};
 use crate::ports::{Clock, HubConnector, HubLink, LinkError};
 
 /// The `tls-exporter` value both ends of a pinned link see.
@@ -45,6 +47,15 @@ struct Tap {
     /// The hub's clock, by which a link that sent nothing for
     /// [`SILENCE_LIMIT`] is closed, when the connector watches for it.
     clock: Mutex<Option<Arc<dyn Clock>>>,
+    /// The commands the hub sends next, each a kind and its payload, which
+    /// the link the agent reads next signs and delivers.
+    commands: Mutex<VecDeque<(WireName, Vec<u8>)>>,
+    /// Whether the next command reaches the agent with a signature the hub
+    /// didn't make, as one from anyone but the hub it paired with.
+    forging_command: AtomicBool,
+    /// Whether the hub's commands reach the agent ahead of the hub's next
+    /// answer on a live link.
+    commands_ahead: AtomicBool,
 }
 
 impl Tap {
@@ -161,6 +172,31 @@ impl LoopbackHubConnector {
         self.tap.forging.store(true, Ordering::SeqCst);
     }
 
+    /// The hub sends the agent, on the link it holds open, the command of
+    /// `kind` holding `payload`, signed for that link as the hub signs its
+    /// messages; the agent hears it at its next read.
+    pub fn send_command(&self, kind: WireName, payload: Vec<u8>) {
+        self.tap
+            .commands
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .push_back((kind, payload));
+    }
+
+    /// The next command reaches the agent with a signature the hub didn't
+    /// make, as one from anyone but the hub it paired with.
+    pub fn forge_next_command(&self) {
+        self.tap.forging_command.store(true, Ordering::SeqCst);
+    }
+
+    /// From now on, the commands the hub sends reach the agent ahead of
+    /// the hub's next answer on a live link, as commands the hub sent while
+    /// the agent's message was on its way: the agent takes them while it
+    /// waits for that answer.
+    pub fn send_commands_ahead(&self) {
+        self.tap.commands_ahead.store(true, Ordering::SeqCst);
+    }
+
     /// The connector closing each link that sent nothing for
     /// [`SILENCE_LIMIT`] by `clock`, the hub's, when asked to
     /// ([`Self::close_silent`]), as the hub's transport does.
@@ -263,6 +299,7 @@ impl HubConnector for LoopbackHubConnector {
             inbox: VecDeque::new(),
             held,
             reason: None,
+            queue: None,
         }))
     }
 }
@@ -278,6 +315,8 @@ struct LoopLink {
     /// The link as the hub holds it: its `closed` is the hub's side.
     held: Arc<Held>,
     reason: Option<String>,
+    /// The hub's commands to the agent once the link went live.
+    queue: Option<CommandQueue>,
 }
 
 impl LoopLink {
@@ -331,6 +370,15 @@ impl HubLink for LoopLink {
             .heard
             .lock()
             .unwrap_or_else(PoisonError::into_inner) = self.tap.heard_now();
+        let live = self
+            .held
+            .live
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .is_some();
+        if live && self.tap.commands_ahead.load(Ordering::SeqCst) {
+            self.deliver_commands().await;
+        }
         let Some(session) = self.session.as_mut() else {
             self.close(None).await;
             return Ok(());
@@ -345,6 +393,7 @@ impl HubLink for LoopLink {
         // A connection goes live at its first message after the `Welcome`
         // that the hub takes, as the hub's transport has it.
         let syncing = session.syncing_agent();
+        let accepts = session.accepts();
         let step = self.hub.step(session, &read).await;
         let taken = matches!(step, HubStep::Reply(_) | HubStep::Wait);
         let went_live = syncing.filter(|_| {
@@ -362,7 +411,11 @@ impl HubLink for LoopLink {
         if let Some(agent) = went_live {
             let held = self.held.clone();
             let close = Box::new(move || held.closed.store(true, Ordering::SeqCst));
-            self.hub.went_live(agent, self.held.connection, close).await;
+            self.queue = Some(
+                self.hub
+                    .went_live_taking(agent, self.held.connection, close, accepts)
+                    .await,
+            );
         }
         match step {
             HubStep::Reply(answer) => {
@@ -394,6 +447,9 @@ impl HubLink for LoopLink {
     }
 
     async fn receive(&mut self) -> Result<HubFrame, LinkError> {
+        if self.inbox.is_empty() {
+            self.deliver_commands().await;
+        }
         match self.inbox.pop_front() {
             Some(text) if text.len() <= MAX_FRAME_BYTES => {
                 HubFrame::from_text(&text).map_err(|_| LinkError::Unreadable)
@@ -402,6 +458,80 @@ impl HubLink for LoopLink {
             None => Err(LinkError::Closed {
                 reason: self.reason.clone(),
             }),
+        }
+    }
+
+    /// The next frame the agent hasn't read, or a command the hub sends;
+    /// with neither, it waits on an open link for as long as it is polled,
+    /// as nothing more reaches a loopback link unasked.
+    async fn listen(&mut self) -> Result<HubFrame, LinkError> {
+        if self.inbox.is_empty() {
+            self.deliver_commands().await;
+        }
+        while self.inbox.is_empty() && !self.closed() {
+            // The hub's next command, as its transport waits for it.
+            let Some(queue) = self.queue.as_mut() else {
+                return std::future::pending().await;
+            };
+            let Some(OutgoingCommand { kind, payload }) = queue.next().await else {
+                self.queue = None;
+                continue;
+            };
+            self.tap
+                .commands
+                .lock()
+                .unwrap_or_else(PoisonError::into_inner)
+                .push_back((kind, payload));
+            self.deliver_commands().await;
+        }
+        self.receive().await
+    }
+}
+
+impl LoopLink {
+    /// Puts each command the hub sends next in the agent's inbox, signed
+    /// for this link by the hub, or forged when the connector forges the
+    /// next; none while the link is closed or before the hub syncs on it.
+    async fn deliver_commands(&mut self) {
+        if self.closed() {
+            return;
+        }
+        let mut queued: Vec<_> = self
+            .tap
+            .commands
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .drain(..)
+            .collect();
+        if let Some(queue) = self.queue.as_mut() {
+            while let Ok(OutgoingCommand { kind, payload }) = queue.try_recv() {
+                queued.push((kind, payload));
+            }
+        }
+        let Some(session) = self.session.as_mut() else {
+            return;
+        };
+        for (kind, payload) in queued {
+            let Some(frame) = self.hub.command_frame(session, kind, payload).await else {
+                continue;
+            };
+            let frame = match frame {
+                HubFrame::Signed {
+                    kind,
+                    seq,
+                    expires_at,
+                    payload,
+                    ..
+                } if self.tap.forging_command.swap(false, Ordering::SeqCst) => HubFrame::Signed {
+                    kind,
+                    seq,
+                    expires_at,
+                    payload,
+                    signature: "A".repeat(86),
+                },
+                frame => frame,
+            };
+            self.inbox.push_back(frame.to_text());
         }
     }
 }
@@ -512,6 +642,7 @@ mod tests {
                 heard: Mutex::new(SignedDuration::ZERO),
             }),
             reason: None,
+            queue: None,
         };
         assert_eq!(link.receive().await, Err(LinkError::Unreadable));
     }

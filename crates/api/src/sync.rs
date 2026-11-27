@@ -11,7 +11,10 @@ use serde::{Deserialize, Serialize};
 
 use crate::ErrorCode;
 
+mod commands;
 mod live;
+
+pub use commands::{CancelOpPayload, CommandResultPayload, RunPlanPayload};
 
 pub use live::{
     HeartbeatAckPayload, HeartbeatPayload, LastRunPayload, PlanPayload, PlansAckPayload,
@@ -133,6 +136,11 @@ pub struct HelloPayload {
     /// from a build before decision 177.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub outbox: Option<OutboxPayload>,
+    /// The commands the machine takes from its hub by name (`run-plan`,
+    /// `cancel-op`; decision 176); absent from a build before them, which
+    /// the hub reads as taking none.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub accepts: Option<Vec<String>>,
 }
 
 /// Where an agent's outbox stands, in its `Hello`: `epoch` is the outbox's

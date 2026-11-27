@@ -245,6 +245,7 @@ fn hub_stopped(agent: &mut Agent) {
     agent.pairing_terminal.hub = None;
 }
 
+#[given("the hub serves again on the same address")]
 #[when("the hub serves again on the same address")]
 async fn hub_serves_again(agent: &mut Agent) {
     let address = agent.pairing_terminal.address.expect("the hub served");

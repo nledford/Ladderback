@@ -3,15 +3,15 @@ use std::fmt;
 use std::sync::{Arc, Mutex, PoisonError};
 
 use domain::fleet::{
-    Ack, AgentEnvelope, AgentRecord, Approval, ApprovalRefused, Binding, BindingKind, Challenge,
-    Connect, EpochSeconds, FIRST_SEQUENCE, HANDSHAKES, Holder, Hostname, HostnameKey, HubAddress,
-    HubEnvelope, Ingest, KEY_BYTES, KeyFile, ListedAgent, MESSAGE_LIFE, MachineCheck, MachineZone,
-    Nonce, Pair, PairAnswer, PairRefusal, PairRequest, Paired, PairingToken, PayloadDigest, Proof,
-    ProofRefusal, ProofRequest, PublicKey, Refused, RemovalRefused, SeedFile, SignedMessage,
-    SigningSeed, TokenId, TokenRecord, TokenTls, TokenUse, Tombstone, UNUSED_TOKEN_LIMIT, Welcome,
-    WireName, ack_kind, grants_kind, heartbeat_kind, hello_kind, list_agents, plans_kind,
-    progress_kind, release_kind, released_kind, report_kind, repos_kind, starts_new_epoch,
-    token_life, welcome_kind, withheld_kind,
+    Accepts, Ack, AgentEnvelope, AgentRecord, Approval, ApprovalRefused, Binding, BindingKind,
+    Challenge, Connect, EpochSeconds, FIRST_SEQUENCE, HANDSHAKES, Holder, Hostname, HostnameKey,
+    HubAddress, HubEnvelope, Ingest, KEY_BYTES, KeyFile, ListedAgent, MESSAGE_LIFE, MachineCheck,
+    MachineZone, Nonce, Pair, PairAnswer, PairRefusal, PairRequest, Paired, PairingToken,
+    PayloadDigest, Proof, ProofRefusal, ProofRequest, PublicKey, Refused, RemovalRefused, SeedFile,
+    SignedMessage, SigningSeed, TokenId, TokenRecord, TokenTls, TokenUse, Tombstone,
+    UNUSED_TOKEN_LIMIT, Welcome, WireName, ack_kind, grants_kind, heartbeat_kind, hello_kind,
+    list_agents, plans_kind, progress_kind, release_kind, released_kind, report_kind, repos_kind,
+    starts_new_epoch, token_life, welcome_kind, withheld_kind,
 };
 use domain::{AgentId, SignedDuration, TimeZoneDatabase, Timestamp};
 
@@ -26,6 +26,7 @@ use crate::ports::{
     ReportInbox, Signing, SigningError, StoreError,
 };
 
+mod commands;
 mod dialog;
 mod fleet;
 mod lease_proof;
@@ -36,6 +37,7 @@ mod presence;
 #[cfg(test)]
 mod tests;
 
+pub use commands::{CommandAsk, CommandAskRefused};
 pub use dialog::{
     AgentsListed, ApprovalAsk, MadeToken, RecoveryAsk, RemovalAsk, TokenAsk, TokenAskRefused,
 };
@@ -43,7 +45,7 @@ pub use fleet::Machine;
 pub use lease_proof::{proven_floors, signed_grants};
 pub use live::{progress_dto, time_of};
 pub use offline::{MACHINES_WATCHED_EVERY, WatchMachines};
-pub use presence::CloseConnection;
+pub use presence::{CloseConnection, CommandQueue, OutgoingCommand};
 
 /// The hub's side of pairing: its keys, its tokens, and its answers to an
 /// agent's `Connect` and `Pair`.
@@ -836,6 +838,7 @@ impl HubPairing {
         handshake: HubHandshake,
         agent: &AgentRecord,
         outbox_stated: bool,
+        accepts: Option<Accepts>,
     ) -> Option<Syncing> {
         let approved = Approval::of(agent.status) == Approval::Approved;
         (approved && self.inbox.is_some()).then(|| {
@@ -847,6 +850,7 @@ impl HubPairing {
                 outbox_stated,
                 next_received: next,
                 next_sent: next,
+                accepts,
             }
         })
     }
@@ -907,6 +911,8 @@ impl HubPairing {
                 .await?
         } else if message.kind == heartbeat_kind() {
             self.take_heartbeat(syncing.agent_id, &message.payload)
+        } else if message.kind == domain::fleet::command_result_kind() {
+            self.take_command_result(syncing.agent_id, &message.payload)
         } else {
             return Ok(Ok(None));
         };
@@ -915,9 +921,23 @@ impl HubPairing {
             Ok(None) => return Ok(Ok(None)),
             Err(refused) => return Ok(Err(refused)),
         };
+        Ok(Ok(Some(self.signed_for(keys, syncing, kind, payload)?)))
+    }
+
+    /// `kind` holding `payload`, the hub's next message to the agent
+    /// `syncing` holds, signed for its connection with the hub's next
+    /// sequence number, expiring [`MESSAGE_LIFE`] from now.
+    pub(super) fn signed_for(
+        &self,
+        keys: &HubKeys,
+        syncing: &mut Syncing,
+        kind: WireName,
+        payload: Vec<u8>,
+    ) -> Result<HubEnvelope, HubPairingError> {
+        let handshake = &syncing.handshake;
         let sequence = syncing.next_sent;
         let expires_at = EpochSeconds::from_seconds(
-            EpochSeconds::from_timestamp(now)
+            EpochSeconds::from_timestamp(self.clock.now())
                 .unwrap_or(EpochSeconds::from_seconds(0))
                 .seconds()
                 .saturating_add(MESSAGE_LIFE),
@@ -935,13 +955,13 @@ impl HubPairing {
         };
         let signature = self.signing.sign(&keys.seed, &answer.to_bytes())?;
         syncing.next_sent = sequence.saturating_add(1);
-        Ok(Ok(Some(HubEnvelope {
+        Ok(HubEnvelope {
             kind,
             seq: sequence,
             expires_at,
             payload,
             signature,
-        })))
+        })
     }
 
     /// Keeps `agent`'s report unless the hub took it before, and answers
@@ -1198,12 +1218,20 @@ pub(super) struct Syncing {
     next_received: u64,
     /// The sequence number of the hub's next message.
     next_sent: u64,
+    /// The commands the agent's `Hello` said it takes, `None` when it
+    /// didn't say (decision 176).
+    accepts: Option<Accepts>,
 }
 
 impl Syncing {
     /// The agent whose messages the connection carries.
     pub(super) fn agent_id(&self) -> AgentId {
         self.agent_id
+    }
+
+    /// The commands the agent takes on this connection.
+    pub(super) fn accepts(&self) -> Option<&Accepts> {
+        self.accepts.as_ref()
     }
 }
 

@@ -138,6 +138,7 @@ fn rich_agent_settings() -> Option<AgentSettings> {
         maintenance_concurrency: Concurrency::new(3).ok()?,
         nice: Some(Nice::new(10).ok()?),
         allow_hub_restore: true,
+        hub_commands: domain::planning::HubCommands::Off,
         locale: Some(Locale::parse("en-US").ok()?),
         update_check: domain::planning::UpdateCheck::Off,
         restore_folder: Some(domain::planning::RestoreFolder::parse("/srv/restores").ok()?),

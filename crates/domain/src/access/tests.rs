@@ -21,6 +21,65 @@ fn v4(last: u8) -> Client {
 }
 
 #[test]
+fn a_session_tag_is_sixteen_hex_digits_that_tell_sessions_apart() {
+    let one = SessionTag::of(&token(1).digest());
+    let other = SessionTag::of(&token(2).digest());
+    assert_eq!(one.as_str().len(), 16);
+    assert!(
+        one.as_str()
+            .bytes()
+            .all(|b| b.is_ascii_hexdigit() && !b.is_ascii_uppercase())
+    );
+    assert_ne!(one, other);
+    assert_eq!(SessionTag::of(&token(1).digest()), one);
+    // Neither the token's text nor its digest's leading bytes.
+    assert!(!token(1).to_text().starts_with(one.as_str()));
+    let digest = token(1).digest();
+    let leading: String = digest.as_bytes()[..8]
+        .iter()
+        .map(|byte| format!("{byte:02x}"))
+        .collect();
+    assert_ne!(one.as_str(), leading);
+}
+
+#[test]
+fn a_session_tag_reads_back_and_refuses_anything_else() {
+    let tag = SessionTag::of(&token(3).digest());
+    assert_eq!(SessionTag::parse(tag.as_str()), Ok(tag.clone()));
+    for text in [
+        "",
+        "0123456789abcde",
+        "0123456789abcdef0",
+        "0123456789ABCDEF",
+        "0123456789abcdeg",
+    ] {
+        assert_eq!(SessionTag::parse(text), Err(InvalidSessionTag), "{text:?}");
+    }
+}
+
+#[test]
+fn a_session_tag_read_from_json_is_checked_as_parse_checks_it() {
+    let tag = SessionTag::of(&token(4).digest());
+    let json = serde_json::to_string(&tag).unwrap();
+    assert_eq!(serde_json::from_str::<SessionTag>(&json).unwrap(), tag);
+    for text in ["\"zz\"", "\"0123456789ABCDEF\""] {
+        assert!(serde_json::from_str::<SessionTag>(text).is_err(), "{text}");
+    }
+}
+
+/// A tag refused as JSON is read says why.
+#[test]
+fn a_session_tag_refused_from_json_says_why() {
+    let refused = serde_json::from_str::<SessionTag>("\"zz\"").unwrap_err();
+    assert!(
+        refused
+            .to_string()
+            .contains("a session tag isn't 16 lower-case hex digits"),
+        "{refused}"
+    );
+}
+
+#[test]
 fn a_password_is_one_byte_to_the_most_bytes() {
     assert_eq!(
         Password::parse(String::new()).unwrap_err(),

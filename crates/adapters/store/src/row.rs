@@ -16,7 +16,7 @@ use domain::access::api_token::{
     ApiToken, ApiTokenDigest, ApiTokenId, ApiTokenLabel, TokenPermissions,
 };
 use domain::access::permissions::{Level, Permission, Permissions};
-use domain::access::{KeptSession, PasswordFingerprint, SessionDigest, SessionLength};
+use domain::access::{KeptSession, PasswordFingerprint, SessionDigest, SessionLength, SessionTag};
 use domain::execution::locations::LocationsRecord;
 use domain::execution::logged_entry::{LoggedEntry, RestoredTo};
 use domain::execution::retry::RetryScheduled;
@@ -81,13 +81,21 @@ impl Reader<'_> {
             .map_err(|error| self.corrupt(column, unreadable(&error)))
     }
 
-    /// What started the operation: a trigger word, and for an API token the
-    /// token's ID and label beside it, which no other trigger leaves set.
+    /// What started the operation: a trigger word, for an API token the
+    /// token's ID and label beside it, and for the hub the tag of the
+    /// session that asked, when it named one; no other trigger leaves them
+    /// set.
     fn trigger(&self) -> Result<Trigger, StoreError> {
         let word = self.required_text("trigger")?;
         let id = self.text("token_id")?;
         let label = self.text("token_label")?;
+        let session = self.text("hub_session")?;
         if word == codec::API_TOKEN {
+            if session.is_some() {
+                return Err(
+                    self.corrupt("hub_session", "is set on an operation the hub didn't start")
+                );
+            }
             let id = id.ok_or_else(|| self.corrupt("token_id", "is NULL"))?;
             let id = ApiTokenId::parse(&id).ok_or_else(|| {
                 self.corrupt("token_id", format!("{} is not an API token ID", shown(&id)))
@@ -104,7 +112,23 @@ impl Reader<'_> {
                 return Err(self.corrupt(column, "is set on an operation no API token started"));
             }
         }
-        Ok(trigger)
+        match (trigger, session) {
+            (Trigger::Hub { .. }, Some(session)) => {
+                let tag = SessionTag::parse(&session).map_err(|_| {
+                    self.corrupt(
+                        "hub_session",
+                        format!("{} is not a session tag", shown(&session)),
+                    )
+                })?;
+                Ok(Trigger::Hub {
+                    asked_by: Some(tag),
+                })
+            }
+            (_, Some(_)) => {
+                Err(self.corrupt("hub_session", "is set on an operation the hub didn't start"))
+            }
+            (trigger, None) => Ok(trigger),
+        }
     }
 
     fn time(&self, column: &str) -> Result<Option<Timestamp>, StoreError> {

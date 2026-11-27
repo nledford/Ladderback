@@ -50,7 +50,12 @@ fn rows() -> Vec<Row> {
     finished_with_warnings
         .succeed(at(70))
         .expect("a running operation succeeds");
-    let mut canceled = queued(0x14, OperationKind::Check, Trigger::Hub, repository_only());
+    let mut canceled = queued(
+        0x14,
+        OperationKind::Check,
+        Trigger::Hub { asked_by: None },
+        repository_only(),
+    );
     canceled.cancel(at(5)).expect("a queued operation cancels");
     vec![
         Row {

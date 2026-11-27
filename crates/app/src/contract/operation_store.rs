@@ -43,12 +43,19 @@ pub async fn run(store: &dyn OperationStore) {
     warnings_past_the_cap_are_counted_not_stored(store).await;
     history_names_each_operations_warnings_by_kind(store).await;
     times_are_kept_to_the_millisecond(store).await;
-    history_lists_the_newest_operation_first(store, &fx).await;
-    a_page_ends_at_its_limit_and_says_whether_more_remain(store, &fx).await;
-    a_page_continues_after_any_cursor(store, &fx).await;
-    history_can_be_limited_to_one_plan(store, &fx).await;
-    a_plan_ever_succeeded_only_if_one_of_its_own_operations_did(store).await;
+    history_cases(store, &fx).await;
     serialization::run(store, &fx).await;
+}
+
+/// The cases for reading the log back as history, page by page and plan by
+/// plan.
+async fn history_cases(store: &dyn OperationStore, fx: &Fixtures) {
+    history_lists_the_newest_operation_first(store, fx).await;
+    a_page_ends_at_its_limit_and_says_whether_more_remain(store, fx).await;
+    a_page_continues_after_any_cursor(store, fx).await;
+    history_can_be_limited_to_one_plan(store, fx).await;
+    a_plan_ever_succeeded_only_if_one_of_its_own_operations_did(store).await;
+    a_plans_unfinished_backup_is_found_however_far_back(store).await;
 }
 
 /// The cases for ending what a stopped daemon left behind: every queued or
@@ -535,7 +542,10 @@ async fn every_kind_and_trigger_reads_back(store: &dyn OperationStore, fx: &Fixt
         Trigger::Manual,
         Trigger::CatchUp,
         Trigger::Retry,
-        Trigger::Hub,
+        Trigger::Hub { asked_by: None },
+        Trigger::Hub {
+            asked_by: domain::access::SessionTag::parse("0123456789abcdef").ok(),
+        },
         Trigger::Mcp,
     ];
     if let Ok(label) = label {
@@ -1204,4 +1214,62 @@ async fn a_plan_ever_succeeded_only_if_one_of_its_own_operations_did(store: &dyn
         Some(true)
     );
     assert_eq!(ever_succeeded(store, &warned).await, Some(true));
+}
+
+/// The plan's unfinished backup, queued or running: the answer is `None`
+/// when the store failed.
+async fn unfinished_backup(
+    store: &dyn OperationStore,
+    plan: &PlanId,
+) -> Option<Option<OperationId>> {
+    let answer = store.unfinished_backup(plan).await;
+    assert!(answer.is_ok(), "asking about {plan:?} failed: {answer:?}");
+    answer.ok()
+}
+
+/// A plan's unfinished backup is found behind more finished ones than a
+/// page of history holds, and a plan whose backups all finished, or whose
+/// only unfinished operation is no backup, has none (#1464).
+async fn a_plans_unfinished_backup_is_found_however_far_back(store: &dyn OperationStore) {
+    let plans: Option<Vec<PlanId>> = ["demo-long-running", "demo-all-done", "demo-checking"]
+        .into_iter()
+        .map(|name| PlanId::parse(name).ok())
+        .collect();
+    assert!(plans.is_some(), "the case's own plan IDs are valid IDs");
+    let Some([long_running, all_done, checking]) =
+        plans.and_then(|plans| <[PlanId; 3]>::try_from(plans).ok())
+    else {
+        return;
+    };
+
+    save(store, &started(queued(0xA00, Some(&long_running))), None).await;
+    let past_a_page = u128::try_from(PageSize::DEFAULT.get()).unwrap_or(u128::MAX) + 10;
+    for n in 1..=past_a_page {
+        save(
+            store,
+            &succeeded(queued(0xA00 + n, Some(&long_running))),
+            None,
+        )
+        .await;
+        save(store, &succeeded(queued(0xB00 + n, Some(&all_done))), None).await;
+    }
+    let check = Operation::queue(
+        id(0xC00),
+        OperationKind::Check,
+        Trigger::Schedule,
+        Target {
+            plan: Some(checking.clone()),
+            repository: None,
+        },
+        at(0),
+    );
+    save(store, &check, None).await;
+    save(store, &queued(0xC01, None), None).await;
+
+    assert_eq!(
+        unfinished_backup(store, &long_running).await,
+        Some(Some(id(0xA00)))
+    );
+    assert_eq!(unfinished_backup(store, &all_done).await, Some(None));
+    assert_eq!(unfinished_backup(store, &checking).await, Some(None));
 }

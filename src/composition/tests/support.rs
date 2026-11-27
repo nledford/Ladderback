@@ -426,6 +426,66 @@ impl OperationStore for RefusingSaves {
     }
 }
 
+/// An operation log whose writes wait until the test opens it.
+pub(super) struct GatedSaves {
+    pub(super) inner: Arc<dyn OperationStore>,
+    pub(super) open: tokio::sync::watch::Receiver<bool>,
+}
+
+#[async_trait]
+impl OperationStore for GatedSaves {
+    async fn recover(
+        &self,
+        reason: &FailureReason,
+    ) -> Result<app::ports::Recovered, app::ports::StoreError> {
+        self.inner.recover(reason).await
+    }
+
+    async fn save(
+        &self,
+        operation: &domain::execution::Operation,
+        result: Option<&app::ports::EngineResult>,
+    ) -> Result<(), app::ports::StoreError> {
+        let mut open = self.open.clone();
+        while !*open.borrow_and_update() {
+            open.changed().await.expect("the gate stays open");
+        }
+        self.inner.save(operation, result).await
+    }
+
+    async fn try_start(
+        &self,
+        operation: &domain::execution::Operation,
+    ) -> Result<app::ports::Start, app::ports::StoreError> {
+        self.inner.try_start(operation).await
+    }
+
+    async fn get(
+        &self,
+        id: OperationId,
+    ) -> Result<Option<app::ports::OperationDetail>, app::ports::StoreError> {
+        self.inner.get(id).await
+    }
+
+    async fn list(
+        &self,
+        query: &app::ports::HistoryQuery,
+    ) -> Result<app::ports::HistoryPage, app::ports::StoreError> {
+        self.inner.list(query).await
+    }
+
+    async fn ever_succeeded(&self, plan: &domain::PlanId) -> Result<bool, app::ports::StoreError> {
+        self.inner.ever_succeeded(plan).await
+    }
+
+    async fn running_maintenance(
+        &self,
+        repository: Option<&domain::RepositoryId>,
+    ) -> Result<Option<OperationId>, app::ports::StoreError> {
+        self.inner.running_maintenance(repository).await
+    }
+}
+
 /// An engine that answers the identify a maintenance run begins with and
 /// parks the job itself, as a real check does while it works.
 pub(super) struct IdentifiesThenParks;

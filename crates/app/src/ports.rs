@@ -5,6 +5,7 @@ mod agent_registry;
 mod api_token_store;
 mod change_codec;
 mod clock;
+mod command_ledger;
 mod config_drafts;
 mod config_store;
 mod daily_copy;
@@ -43,6 +44,7 @@ pub use agent_registry::AgentRegistry;
 pub use api_token_store::{Added, ApiTokenStore, PermissionsSet};
 pub use change_codec::{ChangeCodec, CodecError};
 pub use clock::Clock;
+pub use command_ledger::{CommandLedger, Remembered};
 pub use config_drafts::{ConfigDraft, ConfigDrafts, SavedOver};
 pub use config_store::{
     CadenceProblem, ConfigError, ConfigStore, NotInPlace, PasswordProblem, Position, Problem,

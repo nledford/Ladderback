@@ -329,12 +329,33 @@ impl contract::daily_copy::DailyCopyHarness for SqliteFiles {
     }
 }
 
+#[async_trait]
+impl contract::command_ledger::CommandLedgerHarness for SqliteFiles {
+    async fn empty(&self) -> Arc<dyn app::ports::CommandLedger> {
+        Arc::new(self.new_store().await)
+    }
+
+    async fn reopened(&self) -> Arc<dyn app::ports::CommandLedger> {
+        Arc::new(self.last_store().await)
+    }
+}
+
 #[tokio::test]
 async fn sqlite_store_meets_the_daily_copy_contract() {
     within(
         120,
         "the daily copy contract suite",
         contract::daily_copy::run(&SqliteFiles::default()),
+    )
+    .await;
+}
+
+#[tokio::test]
+async fn sqlite_store_meets_the_command_ledger_contract() {
+    within(
+        120,
+        "the command ledger contract suite",
+        contract::command_ledger::run(&SqliteFiles::default()),
     )
     .await;
 }

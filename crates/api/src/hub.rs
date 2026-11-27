@@ -150,6 +150,42 @@ pub fn machine_removal_path(machine_id: &str) -> String {
     format!("{HUB_MACHINES_PATH}/{machine_id}/removal")
 }
 
+/// Where the hub's page runs a plan on the machine `machine_id` (§16,
+/// decision 176): `POST` a [`MachineRunDto`], answered `202 Accepted` with
+/// a [`MachineCommandDoneDto`] naming the run, new or already running.
+pub fn machine_runs_path(machine_id: &str) -> String {
+    format!("{HUB_MACHINES_PATH}/{machine_id}/runs")
+}
+
+/// Where the hub's page cancels the backup `operation` on the machine
+/// `machine_id`: `POST`, answered with a [`MachineCommandDoneDto`].
+pub fn machine_cancel_path(machine_id: &str, operation: &str) -> String {
+    format!("{HUB_MACHINES_PATH}/{machine_id}/operations/{operation}/cancel")
+}
+
+/// A run of the machine's plan `plan` asked for on the hub's page.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "kebab-case", deny_unknown_fields)]
+pub struct MachineRunDto {
+    pub plan: String,
+}
+
+/// What a command did on the machine: the operation that runs the plan, or
+/// that was canceled.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "kebab-case", deny_unknown_fields)]
+pub struct MachineCommandDoneDto {
+    pub operation: String,
+}
+
+/// A command a machine takes from its hub, by its wire name.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "kebab-case")]
+pub enum MachineCommandDto {
+    RunPlan,
+    CancelOp,
+}
+
 /// Whether a registered agent waits for a person's approval or has it.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "kebab-case")]
@@ -260,6 +296,10 @@ pub struct HubMachineDto {
     /// reports say it runs.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub progress: Option<MachineProgressDto>,
+    /// The commands the machine takes from the hub while it is online;
+    /// none while it is offline (§16, decision 176).
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub accepts: Vec<MachineCommandDto>,
 }
 
 /// The hub's approved machines, oldest first.

@@ -298,6 +298,69 @@ impl PlanRunner {
         operation
     }
 
+    /// Starts `operation`, a backup of `plan` the hub asked for, which the
+    /// log holds queued and `place` holds its turn for: reads its
+    /// repository's secrets as `config` names them, then runs it in its
+    /// turn (decision 176). A secret it can't read ends it failed with the
+    /// refusal, as an unattended run's (§5, #490). `cancel` is its cancel
+    /// switch, parked already: a cancel while the secrets are read ends it
+    /// canceled before anything ran.
+    async fn start_queued(
+        &self,
+        operation: domain::execution::Operation,
+        plan: &PlanId,
+        config: &domain::planning::AgentConfig,
+        trigger: &Trigger,
+        place: Place,
+        cancel: impl Future<Output = ()> + Send + 'static,
+    ) {
+        let mut cancel = Box::pin(cancel);
+        let built = tokio::select! {
+            biased;
+            () = &mut cancel => None,
+            built = self.backup_of(config, plan, trigger, None) => Some(built),
+        };
+        let built = match built {
+            Some(Ok(built)) => return self.spawn_resumed(operation, built, place, cancel),
+            Some(Err(unbuilt)) => unbuilt,
+            None => {
+                drop(place);
+                self.registry.finish(&operation.id());
+                self.end_canceled(operation).await;
+                return;
+            }
+        };
+        // A run that won't go gives its turn up before its end is written.
+        drop(place);
+        let Some(operation) = self.unless_canceled(operation).await else {
+            return;
+        };
+        // Its own words: it never ran, unlike a queued backup a start finds.
+        let failed = format!(
+            "{} of plan {} didn't start, and ends as failed operation {}",
+            run_named(trigger),
+            plan.as_str(),
+            operation.id().as_uuid().hyphenated()
+        );
+        match built {
+            Unbuilt::Secret(secret) => {
+                let SecretUnbuilt {
+                    refusal, failure, ..
+                } = *secret;
+                log::warn!(
+                    "{failed}: {}",
+                    start_refused(&StartError::SecretRefused(refusal))
+                );
+                self.end_refused(operation, failure).await;
+            }
+            Unbuilt::Refused(error) => {
+                let reason = never_ran(&error);
+                log::warn!("{failed} ({}): {}", reason.code(), start_refused(&error));
+                self.end_never_ran(operation, reason).await;
+            }
+        }
+    }
+
     /// The configuration a run of `plan` starts under, or `None`, with the
     /// refusal said in the daemon's log, when it can't be read.
     async fn config_for_a_run(
@@ -651,6 +714,12 @@ impl PlanRunner {
             operation.id().as_uuid().hyphenated(),
             reason.code()
         );
+        self.end_never_ran(operation, reason).await;
+    }
+
+    /// Ends `operation`, a queued backup that never ran, failed with
+    /// `reason`, its end left unannounced but in the daemon's log.
+    async fn end_never_ran(&self, operation: domain::execution::Operation, reason: FailureReason) {
         let ended = self.queued_ends().end_resumed(operation, reason).await;
         log_queued_end(&ended);
     }
@@ -670,6 +739,12 @@ impl PlanRunner {
             operation.id().as_uuid().hyphenated(),
             start_refused(&StartError::SecretRefused(refusal))
         );
+        self.end_refused(operation, failure).await;
+    }
+
+    /// Ends `operation`, refused for a secret, failed with `failure`, and
+    /// says how it ended once the log has the end.
+    async fn end_refused(&self, operation: domain::execution::Operation, failure: FailureReason) {
         let ended = self.queued_ends().end_resumed(operation, failure).await;
         log_queued_end(&ended);
         if ended.written {
@@ -834,7 +909,12 @@ pub(super) fn run_named(trigger: &Trigger) -> std::borrow::Cow<'static, str> {
         Trigger::Manual => "the manual run".into(),
         Trigger::CatchUp => "the catch-up run".into(),
         Trigger::Retry => "the retry".into(),
-        Trigger::Hub => "the hub's run".into(),
+        Trigger::Hub { asked_by: None } => "the hub's run".into(),
+        // The tag is a hash of the session's digest, never the session's
+        // secret (I4).
+        Trigger::Hub {
+            asked_by: Some(tag),
+        } => format!("the hub's run, asked for by session {}", tag.as_str()).into(),
         Trigger::Mcp => "the MCP client's run".into(),
         Trigger::ApiToken { id, label } => format!(
             "the run API token \"{}\" ({}) asked for",
@@ -1331,13 +1411,19 @@ pub(super) fn log_ended(finished: &Finished) {
 /// Says in the log each write of `finished` the operation log refused, as
 /// [`log_ended`] does.
 fn log_recording_errors(finished: &Finished) {
-    let operation = finished.operation.id().as_uuid().hyphenated();
     for refused in &finished.recording_errors {
-        log::warn!(
-            "operation {operation}: a write to the operation log failed ({}); its history may be incomplete",
-            refused.code()
-        );
+        log_refused_write(finished.operation.id(), refused);
     }
+}
+
+/// Says in the log that the operation log refused a write of `operation`,
+/// by the refusal's code, never its words (I4).
+fn log_refused_write(operation: OperationId, refused: &app::ports::StoreError) {
+    log::warn!(
+        "operation {}: a write to the operation log failed ({}); its history may be incomplete",
+        operation.as_uuid().hyphenated(),
+        refused.code()
+    );
 }
 
 /// Says in the log each write of a queued backup's end the operation log
@@ -1409,5 +1495,120 @@ fn log_keyring_wait(
             run_named(trigger),
             plan.as_str()
         ),
+    }
+}
+
+#[async_trait]
+impl app::hub_commands::HubRuns for PlanRunner {
+    async fn going(&self, plan: &PlanId) -> Option<OperationId> {
+        self.store
+            .unfinished_backup(plan)
+            .await
+            .unwrap_or_else(|error| {
+                log::error!("the operation log could not be read: {error}");
+                None
+            })
+    }
+
+    async fn queue(
+        &self,
+        plan: &PlanId,
+        asked_by: Option<domain::access::SessionTag>,
+    ) -> Result<OperationId, app::hub_commands::HubRunRefused> {
+        use app::hub_commands::HubRunRefused;
+        let trigger = Trigger::Hub { asked_by };
+        let refused = |error: StartError| match error {
+            StartError::UnknownPlan => HubRunRefused::UnknownPlan,
+            StartError::RunWaiting => HubRunRefused::RunWaiting,
+            StartError::KeyFilesNotLeftOut => HubRunRefused::KeyFilesNotLeftOut,
+            other => {
+                log_not_started(plan, &trigger, &other);
+                HubRunRefused::Refused
+            }
+        };
+        let config = self.config.load().await.map_err(|error| {
+            refused(config_unusable(error, |code, args, detail| {
+                StartError::Unavailable { code, args, detail }
+            }))
+        })?;
+        // What Back up now refuses before it reads a secret, the hub's
+        // backup is refused for in its answer; what it refuses once it
+        // reads them ends the queued run (decision 176).
+        let planned = config.plan(plan).ok_or(HubRunRefused::UnknownPlan)?;
+        let repository = config
+            .repository(&planned.repository)
+            .ok_or(HubRunRefused::UnknownPlan)?;
+        self.left_out
+            .for_backup(&planned.sources)
+            .map_err(&refused)?;
+        let target = Target {
+            plan: Some(plan.clone()),
+            repository: repository.id.clone(),
+        };
+        let place = self
+            .queue
+            .by_hand(plan, config.agent().concurrency)
+            .map_err(|RunWaiting| HubRunRefused::RunWaiting)?;
+        // A UUIDv7: the log orders by ID, so the newest run is the highest.
+        let id = OperationId::from_uuid(Uuid::now_v7());
+        let cancel = self.cancel_switch(id);
+        let runner = self.clone();
+        let plan = plan.clone();
+        // Recorded as queued before the answer is sent, so the hub's next
+        // ask finds the run going. The task does the recording and the
+        // start, as Back up now's does, so an asker dropped meanwhile (the
+        // hub's connection ended) strands neither. A write the log refuses
+        // doesn't stop the run (§9): its later writes are the whole
+        // operation again.
+        let (recorded, wait_for_log) = futures::channel::oneshot::channel::<()>();
+        tokio::spawn(async move {
+            let (operation, refused) = runner
+                .queued_ends()
+                .queue_backup(id, trigger.clone(), target)
+                .await;
+            if let Some(refused) = &refused {
+                log_refused_write(id, refused);
+            }
+            let _ = recorded.send(());
+            // Nothing waits on the start: the run reports through the
+            // event bus. One the daemon's stop freezes stays queued, for
+            // the next start to run (decision 73).
+            let runs = runner.runs.clone();
+            runs.until_frozen(async move {
+                runner
+                    .start_queued(operation, &plan, &config, &trigger, place, cancel)
+                    .await;
+            })
+            .await;
+        });
+        // A task that ended without recording has nothing to wait for.
+        let _ = wait_for_log.await;
+        Ok(id)
+    }
+
+    async fn cancel(
+        &self,
+        operation: &OperationId,
+    ) -> Result<(), app::hub_commands::HubCancelRefused> {
+        use app::hub_commands::HubCancelRefused;
+        let record = match GetOperation::new(Arc::clone(&self.store))
+            .get(*operation)
+            .await
+        {
+            Ok(Some(detail)) => detail.record,
+            Ok(None) => return Err(HubCancelRefused::Unknown),
+            Err(error) => {
+                log::error!("the operation log could not be read: {error}");
+                return Err(HubCancelRefused::Unknown);
+            }
+        };
+        if record.kind != domain::execution::OperationKind::Backup {
+            return Err(HubCancelRefused::NotABackup);
+        }
+        if !record.status.is_finished() && self.registry.cancel(operation) {
+            Ok(())
+        } else {
+            Err(HubCancelRefused::NotRunning)
+        }
     }
 }

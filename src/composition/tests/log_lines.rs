@@ -9,7 +9,15 @@ fn a_run_is_named_in_the_log_by_what_started_it_in_words() {
         (Trigger::Manual, "the manual run"),
         (Trigger::CatchUp, "the catch-up run"),
         (Trigger::Retry, "the retry"),
-        (Trigger::Hub, "the hub's run"),
+        (Trigger::Hub { asked_by: None }, "the hub's run"),
+        (
+            Trigger::Hub {
+                asked_by: Some(
+                    domain::access::SessionTag::parse("0123456789abcdef").expect("a tag"),
+                ),
+            },
+            "the hub's run, asked for by session 0123456789abcdef",
+        ),
         (Trigger::Mcp, "the MCP client's run"),
         (
             Trigger::ApiToken {
@@ -150,6 +158,52 @@ async fn a_write_the_log_refuses_during_maintenance_is_logged_once_with_its_code
         .await
         .expect("a check starts")
         .operation;
+    let lines = logged_about_the_run(&id, &refused).await;
+    assert_each_refusal_is_said(&lines, refused.load(std::sync::atomic::Ordering::SeqCst));
+}
+
+/// The same for a backup the hub asked for, whose queued write the log
+/// refuses too: the machine still answers that it started it, and the
+/// backup goes on, as Back up now's does (§9, decision 176).
+#[tokio::test]
+async fn a_write_the_log_refuses_as_the_hub_queues_a_backup_is_logged_once_and_the_backup_goes_on()
+{
+    captured_log::capture();
+    let (mut runner, mut entered, open_hooks, _scratch) = runner_at_a_gate().await;
+    open_hooks.send(true).expect("the gate opens");
+    let refused = Arc::new(std::sync::atomic::AtomicUsize::new(0));
+    runner.store = Arc::new(RefusingSaves {
+        inner: Arc::clone(&runner.store),
+        refused: Arc::clone(&refused),
+    });
+    let tag = domain::access::SessionTag::parse("0123456789abcdef").expect("a session tag");
+    let operation = app::hub_commands::HubRuns::queue(
+        &runner,
+        &PlanId::parse("home").expect("a plan ID"),
+        Some(tag),
+    )
+    .await
+    .expect("a backup starts without a log that takes its writes");
+    tokio::time::timeout(
+        std::time::Duration::from_secs(5),
+        entered.wait_for(|hooks| *hooks > 0),
+    )
+    .await
+    .expect("the backup reaches its hooks")
+    .expect("the hooks' count stays");
+    assert!(
+        runner.registry.cancel(&operation),
+        "the run has a switch to fire"
+    );
+    let ended = async {
+        while runner.registry.running().contains_key(&operation) {
+            tokio::time::sleep(std::time::Duration::from_millis(10)).await;
+        }
+    };
+    tokio::time::timeout(std::time::Duration::from_secs(5), ended)
+        .await
+        .expect("the canceled backup ends");
+    let id = operation.as_uuid().hyphenated().to_string();
     let lines = logged_about_the_run(&id, &refused).await;
     assert_each_refusal_is_said(&lines, refused.load(std::sync::atomic::Ordering::SeqCst));
 }

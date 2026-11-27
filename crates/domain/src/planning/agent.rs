@@ -80,6 +80,9 @@ pub struct AgentSettings {
     pub nice: Option<Nice>,
     /// Whether the hub may restore files onto this machine (§10.4).
     pub allow_hub_restore: bool,
+    /// Whether it takes its hub's commands to run a plan's backup or cancel
+    /// one (§16, decision 176).
+    pub hub_commands: HubCommands,
     /// The language of its notifications, when it isn't the system's (§8.4).
     pub locale: Option<Locale>,
     /// Whether it asks for Ladderback's newest release once a day.
@@ -97,6 +100,16 @@ pub struct AgentSettings {
 /// `[agent] check-for-updates = false` turns it off.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub enum UpdateCheck {
+    #[default]
+    On,
+    Off,
+}
+
+/// Whether the machine takes its hub's commands (§16, decision 176): on
+/// unless `[agent] allow-hub-commands = false` turns them off, when its
+/// `Hello` says it takes none and it refuses any it is sent.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum HubCommands {
     #[default]
     On,
     Off,
@@ -712,6 +725,7 @@ mod tests {
             maintenance_concurrency: Concurrency::new(3).unwrap(),
             nice: Some(Nice::new(10).unwrap()),
             allow_hub_restore: true,
+            hub_commands: HubCommands::Off,
             locale: Some(Locale::parse("en-US").unwrap()),
             update_check: UpdateCheck::Off,
             restore_folder: Some(RestoreFolder::parse("/srv/restores").unwrap()),

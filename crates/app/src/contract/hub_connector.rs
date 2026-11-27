@@ -32,6 +32,7 @@ pub async fn run(harness: &dyn HubConnectorHarness) {
     a_connect_is_answered_with_the_hubs_challenge(harness).await;
     a_frame_out_of_turn_ends_the_link_with_its_reason(harness).await;
     frames_the_agent_has_not_read_are_kept_in_order(harness).await;
+    a_listen_given_up_loses_no_frame(harness).await;
     only_a_pinned_route_has_an_exporter(harness).await;
     a_route_nothing_answers_on_is_unreachable(harness).await;
 }
@@ -154,5 +155,26 @@ async fn a_route_nothing_answers_on_is_unreachable(harness: &dyn HubConnectorHar
         matches!(link, Err(LinkError::Unreachable { .. })),
         "nothing answers on {route:?}: {:?}",
         link.err()
+    );
+}
+
+/// A listen given up before the hub sent anything loses nothing: the
+/// listen after it hears the hub's next frame, however long it waits for
+/// it, as the agent's sync waits for the hub's commands between its own
+/// messages.
+async fn a_listen_given_up_loses_no_frame(harness: &dyn HubConnectorHarness) {
+    use futures::FutureExt;
+
+    let Some((mut link, _)) = open(harness).await else {
+        return;
+    };
+    let given_up = link.listen().now_or_never();
+    assert!(given_up.is_none(), "nothing was sent yet: {given_up:?}");
+    let frame = connect(link.as_ref());
+    assert_eq!(link.send(&frame).await, Ok(()));
+    let heard = link.listen().await;
+    assert!(
+        matches!(heard, Ok(HubFrame::Challenge { .. })),
+        "the listen hears the Challenge: {heard:?}"
     );
 }

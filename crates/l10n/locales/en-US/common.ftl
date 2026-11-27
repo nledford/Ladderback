@@ -738,6 +738,51 @@ error-machine-approved-already = That { -machine } is approved already.
 # The hub couldn't read or keep its key or its tokens.
 error-hub-unavailable = The { -hub } couldn't read or keep its key or its pairing tokens. Its log says why.
 
+# The hub asked a machine to run a plan or cancel a backup, and the machine
+# isn't connected, so nothing was sent or kept to send later.
+error-machine-offline = That { -machine } isn't connected to the { -hub }, so nothing was sent. Nothing waits to be sent when it connects again.
+
+# As error-machine-offline, for a run of a plan with a next scheduled run.
+# $plan (text): the plan's ID, such as home.
+# $next-run (time): the plan's next scheduled run on that machine.
+error-machine-offline-next-run = That { -machine } isn't connected to the { -hub }, so nothing was sent. Plan { $plan } runs next on its schedule at { $next-run }.
+
+# The machine runs a release that takes no commands from its hub.
+error-machine-commands-unsupported = That { -machine } runs a release that takes no commands from the { -hub }. Update Ladderback on it first.
+
+# The machine said, when it last connected, that it takes no commands from
+# its hub, or refused this one as turned off. Its configuration may have
+# changed since: turning the commands back on takes effect when it connects
+# again.
+error-machine-commands-off = That { -machine } has turned off commands from the { -hub }. If it turned them back on, they work once it connects to the { -hub } again.
+
+# The machine didn't answer the hub's command in time, or its connection
+# ended first, so whether it acted isn't known.
+error-machine-no-answer = That { -machine } didn't answer in time, so whether it acted isn't known. Its page on the { -hub } shows what it runs once it reports.
+
+# The command reached the machine more than 15 minutes from when it was asked.
+error-command-expired = The request reached the { -machine } too late, more than 15 minutes after it was made, so nothing ran. Ask again.
+
+# The machine took a request with this ID before, so it did nothing again.
+error-command-replayed = The { -machine } already took this request, so it did nothing again.
+
+# The hub asked the machine for more runs than it takes for now: one run of a
+# plan every 5 minutes, and 12 runs an hour.
+# $retry-at (time): when the hub may run the plan on that machine again.
+error-command-rate-limited = The { -hub } started as many backups on that { -machine } as it may for now. You can run this plan from the { -hub } again at { $retry-at }.
+
+# The machine couldn't start the backup the hub asked for.
+# $plan (text): the plan's ID, such as home.
+error-machine-run-refused = The { -machine } couldn't start a backup of plan { $plan }. Its own page and its log say why.
+
+# The hub asked to cancel an operation that isn't a backup.
+# $operation (text): the operation's ID.
+error-command-backups-only = The { -hub } can cancel only a { -machine }'s backups, and operation { $operation } isn't one. Cancel it on the { -machine }'s own page.
+
+# The machine couldn't cancel the backup the hub asked it to cancel.
+# $operation (text): the operation's ID.
+error-machine-cancel-refused = The { -machine } couldn't cancel backup { $operation }. Its own page and its log say why.
+
 # This machine doesn't maintain the repository: its entry doesn't ask this
 # machine to maintain it, so a forget, a prune, a check or an adoption, or the
 # preview of one, was refused and nothing in the repository was changed. The
