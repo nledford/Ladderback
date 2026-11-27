@@ -73,7 +73,8 @@ async fn the_hub_cancels_no_maintenance_run() {
     let id = runner
         .start_maintenance("demo".into(), http_adapter::MaintenanceRequest::Check, None)
         .await
-        .expect("the check starts");
+        .expect("the check starts")
+        .operation;
     let operation = operation_of(&id).expect("the answer is an operation ID");
     assert_eq!(
         HubRuns::cancel(&runner, &operation).await,
