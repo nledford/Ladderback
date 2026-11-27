@@ -1,6 +1,7 @@
 //! Execution context: one operation's lifecycle (technical design §3.1).
 
 pub mod conditions;
+pub mod daily_copy;
 pub mod deadline;
 pub mod full_disk_access;
 pub mod locations;

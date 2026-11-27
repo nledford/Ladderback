@@ -49,6 +49,7 @@ use sqlx::migrate::{MigrateError, Migrator};
 use sqlx::sqlite::{SqliteConnectOptions, SqliteConnection, SqlitePool, SqlitePoolOptions};
 use sqlx::{AssertSqlSafe, ConnectOptions, Connection, Row};
 
+use crate::copy::{beside, clear, folder, make_empty_like, remove_if_there, sync_dir};
 use crate::report::cap;
 use crate::{BUSY_TIMEOUT, MIGRATOR, OpenError, sql};
 
@@ -282,13 +283,6 @@ fn of_the_old_set(recorded: &[Recorded]) -> bool {
         })
 }
 
-/// `log` with `suffix` after its name.
-fn beside(log: &Path, suffix: &str) -> PathBuf {
-    let mut name = log.as_os_str().to_owned();
-    name.push(suffix);
-    PathBuf::from(name)
-}
-
 /// The files of one copy, beside the log.
 struct Work {
     log: PathBuf,
@@ -313,9 +307,7 @@ impl Work {
     /// own journals.
     fn clear(&self) -> io::Result<()> {
         for file in [&self.kept_new, &self.source, &self.new] {
-            for suffix in ["", "-journal", "-wal", "-shm"] {
-                remove_if_there(&beside(file, suffix))?;
-            }
+            clear(file)?;
         }
         Ok(())
     }
@@ -343,18 +335,8 @@ impl Work {
     /// writes a snapshot into an empty file and takes it as a new
     /// database, and gives a database's journals its permissions.
     fn make_files(&self) -> io::Result<()> {
-        let permissions = fs::metadata(&self.log)?.permissions();
         for file in [&self.kept_new, &self.source, &self.new] {
-            let mut options = fs::OpenOptions::new();
-            options.write(true).create_new(true);
-            #[cfg(unix)]
-            {
-                use std::os::unix::fs::{OpenOptionsExt, PermissionsExt};
-                options.mode(permissions.mode() & 0o777);
-            }
-            options.open(file)?;
-            // The umask may have taken more away than the log's mode did.
-            fs::set_permissions(file, permissions.clone())?;
+            make_empty_like(file, &self.log)?;
         }
         Ok(())
     }
@@ -393,10 +375,7 @@ impl Work {
 
     /// The folder the log is in.
     fn folder(&self) -> &Path {
-        match self.log.parent() {
-            Some(folder) if !folder.as_os_str().is_empty() => folder,
-            _ => Path::new("."),
-        }
+        folder(&self.log)
     }
 
     /// Gives the copy from step 2 the first free name of
@@ -425,25 +404,6 @@ impl Work {
             }
         }
     }
-}
-
-fn remove_if_there(path: &Path) -> io::Result<()> {
-    match fs::remove_file(path) {
-        Ok(()) => Ok(()),
-        Err(error) if error.kind() == io::ErrorKind::NotFound => Ok(()),
-        Err(error) => Err(error),
-    }
-}
-
-/// Makes the renames durable.
-#[cfg(unix)]
-fn sync_dir(dir: &Path) -> io::Result<()> {
-    File::open(dir)?.sync_all()
-}
-
-#[cfg(not(unix))]
-fn sync_dir(_dir: &Path) -> io::Result<()> {
-    Ok(())
 }
 
 async fn copy_file(from: PathBuf, to: PathBuf) -> Result<(), CopyFailure> {

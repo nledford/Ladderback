@@ -281,6 +281,31 @@ async fn in_memory_stats_store_meets_the_stats_store_contract() {
     contract::stats_store::run(&InMemoryStats::default()).await;
 }
 
+/// The in-memory daily copy: a new one for each `empty`, and the same one
+/// again for `reopened`, as the real copy's file outlives its handle.
+#[derive(Default)]
+struct InMemoryDailyCopies(Mutex<Option<Arc<app::fakes::InMemoryDailyCopy>>>);
+
+#[async_trait]
+impl contract::daily_copy::DailyCopyHarness for InMemoryDailyCopies {
+    async fn empty(&self) -> Arc<dyn app::ports::DailyCopy> {
+        let copy = Arc::new(app::fakes::InMemoryDailyCopy::new(Arc::new(
+            FakeClock::new(epoch()),
+        )));
+        *self.0.lock().unwrap() = Some(Arc::clone(&copy));
+        copy
+    }
+
+    async fn reopened(&self) -> Arc<dyn app::ports::DailyCopy> {
+        self.0.lock().unwrap().clone().expect("a copy was opened")
+    }
+}
+
+#[tokio::test]
+async fn in_memory_daily_copy_meets_the_daily_copy_contract() {
+    contract::daily_copy::run(&InMemoryDailyCopies::default()).await;
+}
+
 #[test]
 fn seeded_randomness_meets_the_random_contract() {
     contract::random::run(&SeededRandom::new(0x5eed));

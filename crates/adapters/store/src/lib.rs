@@ -15,6 +15,8 @@ mod agent_registry;
 mod api_tokens;
 mod baseline_copy;
 mod codec;
+mod copy;
+mod daily_copy;
 mod error_args;
 mod leases;
 mod locations;
@@ -32,7 +34,7 @@ mod summary;
 mod pool_tests;
 
 use std::fmt::Display;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::time::Duration;
 
 use app::ports::{
@@ -139,6 +141,8 @@ impl std::error::Error for OpenError {}
 #[derive(Debug)]
 pub struct SqliteStore {
     pool: SqlitePool,
+    /// The database's file, which the daily copy is taken beside (§9).
+    path: PathBuf,
     /// Held shared by each call for as long as it uses the database, and
     /// alone by [`SqliteStore::close`], which so waits for the calls in flight.
     calls: RwLock<()>,
@@ -176,6 +180,7 @@ impl SqliteStore {
         }
         Ok(Self {
             pool,
+            path: path.to_owned(),
             calls: RwLock::new(()),
         })
     }

@@ -264,7 +264,7 @@ exclude_re = [
     # offset onto the wire, or `KeyringEntry`) says something a test can check,
     # so its mutants are judged. A new error type joins this list only when its
     # Display is there for `Error` alone.
-    "<impl std::fmt::Display for (ClientUnavailable|SessionFailed|ClientError|OpenError|InvalidZone|InvalidOffset|InvalidSnapshot|InvalidOperation|ConfigError|StoreError|ProfileError|ExportRefusal|SourcesError|ResolveError|LifecycleError|KeepDeleteTooShort|ReservedTag|InvalidId|InvalidValue|Violation|NoNextRun|CommandLineError|SecretError|NotAKeyringEntry|TemplateError)>",
+    "<impl std::fmt::Display for (ClientUnavailable|SessionFailed|ClientError|OpenError|InvalidZone|InvalidOffset|InvalidSnapshot|InvalidOperation|ConfigError|StoreError|ProfileError|ExportRefusal|SourcesError|ResolveError|LifecycleError|KeepDeleteTooShort|ReservedTag|InvalidId|InvalidValue|Violation|NoNextRun|CommandLineError|SecretError|NotAKeyringEntry|TemplateError|DailyCopyError)>",
     # `InvalidZoneName` is such an error too, written `fmt::Display`: the
     # store maps it to its own corrupt-row text and the wire to its refusal,
     # so its Display is there for `Error` alone.

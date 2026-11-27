@@ -890,3 +890,37 @@ fn a_log_that_cannot_be_recovered_is_refused_with_the_stores_own_words() {
         );
     }
 }
+
+#[tokio::test]
+async fn only_a_daemon_whose_background_runs_keeps_the_daily_copy() {
+    let scratch = tempfile::tempdir().expect("a scratch dir");
+    let (config, data) = own_folders(scratch.path());
+    let daily = data.join("ladderback.db.daily");
+    {
+        // A headless MCP session holds the background unstarted.
+        let daemon = daemon_at(Some(config.clone()), Some(data.clone()), None)
+            .await
+            .map_err(|refused| refused.message)
+            .expect("the daemon starts");
+        let _session = daemon.background.unstarted();
+    }
+    assert!(
+        !daily.exists(),
+        "a session that doesn't serve takes no copy"
+    );
+
+    let daemon = daemon_at(Some(config), Some(data), None)
+        .await
+        .map_err(|refused| refused.message)
+        .expect("the daemon starts again");
+    let serving = tokio::spawn(daemon.background.run(Arc::new(platform::random::OsRandom)));
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(10);
+    while !daily.exists() {
+        assert!(
+            std::time::Instant::now() < deadline,
+            "the daemon that serves takes its first copy at once"
+        );
+        tokio::time::sleep(std::time::Duration::from_millis(20)).await;
+    }
+    serving.abort();
+}
