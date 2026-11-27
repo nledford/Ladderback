@@ -43,6 +43,17 @@ pub(crate) enum Own {
     Unanswered,
 }
 
+impl Own {
+    /// The card the hub's own machine shows, if any: a pause counts a
+    /// change of it, not of a read that changes no card.
+    fn card(&self) -> Option<&HubMachineDto> {
+        match self {
+            Self::Read(Some(machine)) => Some(machine),
+            Self::Read(None) | Self::Waiting | Self::Unanswered => None,
+        }
+    }
+}
+
 /// The machines as the hub last listed them, whether a read has answered,
 /// and the copy the page shows while the reader has paused it.
 #[derive(Clone, Copy)]
@@ -72,12 +83,7 @@ impl Fleet {
     /// The machine ID of the hub's own card, as the page shows it.
     pub(crate) fn own_id(self) -> Signal<Option<String>> {
         let own = self.shown_own();
-        Signal::derive(move || {
-            own.with(|own| match own {
-                Own::Read(Some(machine)) => Some(machine.machine_id.clone()),
-                Own::Read(None) | Own::Waiting | Own::Unanswered => None,
-            })
-        })
+        Signal::derive(move || own.with(|own| own.card().map(|machine| machine.machine_id.clone())))
     }
 
     /// The time the cards the page shows are read at.
@@ -185,7 +191,9 @@ impl Fleet {
             held.as_ref().map_or(0, |held| {
                 self.machines
                     .with(|machines| changes_since(&held.machines, machines))
-                    + self.own.with(|own| usize::from(*own != held.own))
+                    + self
+                        .own
+                        .with(|own| usize::from(own.card() != held.own.card()))
             })
         })
     }
@@ -195,7 +203,9 @@ impl Fleet {
             held.as_ref().map_or(0, |held| {
                 self.machines
                     .with_untracked(|machines| changes_since(&held.machines, machines))
-                    + self.own.with_untracked(|own| usize::from(*own != held.own))
+                    + self
+                        .own
+                        .with_untracked(|own| usize::from(own.card() != held.own.card()))
             })
         })
     }
