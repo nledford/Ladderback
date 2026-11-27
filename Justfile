@@ -892,10 +892,12 @@ smoke-image image *args:
 # the next candidate or X.Y.Z. It sets the version, keeps CHANGELOG.md from
 # set-version and writes the entry with scripts/release-notes.ts, opens the
 # notes in $EDITOR, commits, pushes a new `release-plz-` branch and opens a
-# draft PR labeled `release`. If the push fails, the edited notes are saved and
-# their path printed. Needs `gh` (signed in, allowed to run workflows), `node`
-# and `release-plz`. Nothing tests it automatically: it acts on the real
-# repository; scripts/release-notes.test.ts tests the notes.
+# draft PR labeled `release`; with a release PR already open (one it made
+# before, say) it stops and asks for that PR to be closed. If the push fails,
+# the edited notes are saved and their path printed. Needs `gh` (signed in,
+# allowed to run workflows), `node` and `release-plz`. Nothing tests it
+# automatically: it acts on the real repository; scripts/release-notes.test.ts
+# tests the notes.
 [confirm('Run the Release workflow and push to the release PR branch?')]
 [doc('Open or update the release PR; optionally set its version and edit its notes.')]
 [group('release')]
@@ -950,29 +952,34 @@ release-pr version='':
         [ -n "$pr" ] && break
         sleep 5
     done
-    scratch=$(mktemp -d)
-    if [ -n "$pr" ]; then
-        branch=$(gh pr view "$pr" --json headRefName -q .headRefName)
-        git -C "$root" fetch --quiet origin "$branch"
-    else
-        # After a release candidate release-plz finds no release to make: in
-        # git-only mode it skips pre-release tags, so it compares with the last
-        # X.Y.Z, whose version and entry are already on main.
-        git -C "$root" fetch --quiet --tags origin
-        git -C "$root" fetch --quiet origin main
-        current=$(git -C "$root" show FETCH_HEAD:Cargo.toml |
-            awk '/^\[workspace\.package\]/ { s = 1; next } /^\[/ { s = 0 } s && $1 == "version" { gsub(/"/, "", $3); print $3; exit }')
-        if [[ $current != *-rc.* ]]; then
-            echo "No open release PR after the run: nothing since the last tag calls for a release (feat, fix, perf, revert or a breaking change)."
-            exit 0
+    # After a release candidate release-plz finds no release to make: in
+    # git-only mode it skips pre-release tags, so it compares with the last
+    # X.Y.Z, whose version and entry are already on main. So main's version
+    # decides who makes the PR.
+    git -C "$root" fetch --quiet origin main
+    head=$(git -C "$root" rev-parse FETCH_HEAD)
+    current=$(git -C "$root" show "$head:Cargo.toml" |
+        awk '/^\[workspace\.package\]/ { s = 1; next } /^\[/ { s = 0 } s && $1 == "version" { gsub(/"/, "", $3); print $3; exit }')
+    if [[ $current == *-rc.* ]]; then
+        if [ -n "$pr" ]; then
+            echo "error: release PR #$pr is open while main is at the release candidate $current; its set-version would rename $current's notes. Close it (gh pr close $pr --delete-branch) and run this again" >&2
+            exit 1
         fi
         if [ -z "$version" ]; then
             echo "error: main is at the release candidate $current and the Release workflow opens no PR after one; give the version: the next candidate or the release" >&2
             exit 2
         fi
+        git -C "$root" fetch --quiet --tags origin
         branch="release-plz-$(date -u +%Y-%m-%dT%H-%M-%SZ)-v$version"
+    elif [ -z "$pr" ]; then
+        echo "No open release PR after the run: nothing since the last tag calls for a release (feat, fix, perf, revert or a breaking change)."
+        exit 0
+    else
+        branch=$(gh pr view "$pr" --json headRefName -q .headRefName)
+        git -C "$root" fetch --quiet origin "$branch"
+        head=$(git -C "$root" rev-parse FETCH_HEAD)
     fi
-    head=$(git -C "$root" rev-parse FETCH_HEAD)
+    scratch=$(mktemp -d)
     keep="${TMPDIR:-/tmp}/ladderback-release-notes-${pr:-v$version}.md"
     notes_edited=0
     cleanup() {
