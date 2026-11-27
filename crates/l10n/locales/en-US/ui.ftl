@@ -350,6 +350,12 @@ ui-gallery-table-notes = notes
 # The table demo's column of folder names, each row's header.
 ui-gallery-table-name = Name
 
+# The table demo's column of what each folder is, which the table always shows: the reader can't hide it.
+ui-gallery-table-kind = Kind
+
+# What each demo folder is, in the table demo's Kind column.
+ui-gallery-table-folder = Folder
+
 # The table demo's column of folder sizes.
 ui-gallery-table-size-column = Size
 

@@ -45,7 +45,7 @@ thread_local! {
 const KEPT_KEY: &str = "ladderback-columns-";
 
 /// A table's Columns panel, where the reader hides, shows and reorders the
-/// columns after the row header's (decision 140): `id` names the table's
+/// columns after the row header's and any it always shows (decision 140): `id` names the table's
 /// choice, which this browser keeps for every table of that id, and the
 /// panel's words are `localizer`'s. Lower-case letters, digits and hyphens.
 pub struct ColumnsChoice {
@@ -315,7 +315,8 @@ pub struct Sentences {
 }
 
 /// A footer row (`<tfoot>`), such as the totals: its header's words, then a
-/// cell for each column after the row header's, in their order; columns
+/// cell for each column after the row header's, by the table's place (any
+/// always shown first), in their order; columns
 /// past the last cell given get empty ones.
 #[derive(Clone)]
 pub struct Footer {
@@ -1078,7 +1079,8 @@ fn keep_columns(id: &str, value: Option<&str>) {
 
 /// What a table's Columns panel draws from: the table's number, its
 /// [`ColumnsChoice`], the choice kept, the ids and headers of the columns
-/// after the row header's by the caller's place, their layout, and the
+/// after the row header's and those it always shows, by the caller's place,
+/// their layout, and the
 /// `id` of what names the table, which describes the panel's button.
 struct ColumnsPanel {
     table: u32,
@@ -1092,8 +1094,9 @@ struct ColumnsPanel {
 
 /// The Columns panel (decision 140): a disclosure button, "Columns",
 /// described by the table's name, and the panel it shows, a list named by
-/// the button with an item for each column after the row header's, in the
-/// table's order, then "Reset columns". Each item has a checkbox that shows
+/// the button with an item for each column after the row header's and
+/// those it always shows, in the table's order, then "Reset columns". Each
+/// item has a checkbox that shows
 /// or hides its column and Move buttons that move it a place, unavailable
 /// at the ends, focus staying on the button pressed until its column can't
 /// move that way, then going to the other; a pointer may drag the item by

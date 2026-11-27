@@ -105,7 +105,10 @@ fn demo_table(localizer: Arc<Localizer>) -> impl IntoView {
         let (sizes, counts) = (Arc::clone(localizer), Arc::clone(localizer));
         Footer {
             header: Signal::stored(text(localizer, msg::UI_GALLERY_TABLE_TOTAL)),
+            // A cell for each column by the table's place: Kind, always
+            // shown, first.
             cells: vec![
+                Signal::stored(String::new()),
                 Signal::derive(move || {
                     let size = data.with(|rows| rows.iter().map(|row| row.size).sum());
                     text_with(
@@ -127,6 +130,15 @@ fn demo_table(localizer: Arc<Localizer>) -> impl IntoView {
         }
     };
     let (row_header, columns) = folder_columns(&localizer, Some(data));
+    // What each folder is, a column the reader can't hide (decision 140,
+    // #1625): the panel doesn't list it.
+    let folder_word = t(msg::UI_GALLERY_TABLE_FOLDER);
+    let kind = Column::new(
+        "kind",
+        t(msg::UI_GALLERY_TABLE_KIND),
+        Rem::tenths(70),
+        move |_: Signal<DemoFolder>| folder_word.clone().into_any(),
+    );
     let (narrow_header, narrow_columns) = folder_columns(&localizer, None);
     let (rtl_header, rtl_columns) = folder_columns(&localizer, None);
     view! {
@@ -146,6 +158,7 @@ fn demo_table(localizer: Arc<Localizer>) -> impl IntoView {
             name=Name::Caption(t(msg::UI_GALLERY_TABLE_CAPTION))
             columns_choice=ColumnsChoice::new("gallery-folders", Arc::clone(&localizer))
             row_header=row_header
+            always_shown=vec![kind]
             columns=columns
             rows=rows
             key=|row: &DemoFolder| row.name.clone()
