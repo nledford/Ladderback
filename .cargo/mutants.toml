@@ -323,6 +323,14 @@ exclude_re = [
     # machine that turned its hub's commands off takes: the mutant that
     # returns `Default::default()` is the same code.
     'crates/domain/src/fleet/commands\.rs.*: replace Accepts::none -> Self with Default::default\(\)$',
+    # `hub_run_admitted` asks `hub_run_refused` again at each time it was
+    # given, while the answer is later. Every time `hub_run_refused` gives
+    # is a run's time plus a span (the plan's spacing, or an hour) of a run
+    # less than that span from the time asked about, so it always lies
+    # after that time: the guard never sees an equal pair, and `>=` keeps
+    # the same loop as `>`. `==` and `<`, which end it at once, are caught.
+    # Named by line, so a moved line brings the mutant back to judge.
+    'crates/domain/src/fleet/commands\.rs:225:86: replace > with >= in hub_run_admitted$',
     # A proposal's diff walks the table of longest common runs. The walk
     # takes this branch only where `old[i] != new[j]`, the same test the
     # table was filled by, so there `common[i][j]` is
