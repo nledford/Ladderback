@@ -32,6 +32,7 @@ use domain::notifications::{
     Auth, Channel, ChannelKind, ChannelName, EventKind, Notifications, Rule, RuleName, Template,
     Username,
 };
+use domain::planning::HubCommands;
 use domain::planning::{
     AgentConfig, AgentSettings, Alternative, Cadence, Concurrency, CronExpression, DryRunAllowlist,
     DryRunFolder, GlobFile, GroupBy, HookEntry, Hooks, Hostname, Interval, KeepCount, KeepWithin,
@@ -281,6 +282,7 @@ fn agent() -> impl Strategy<Value = AgentSettings> {
         maintenance_concurrency,
         weighted(0.5, nice),
         any::<bool>(),
+        prop_oneof![Just(HubCommands::On), Just(HubCommands::Off)],
         weighted(0.5, locale),
         prop_oneof![Just(UpdateCheck::On), Just(UpdateCheck::Off)],
         weighted(0.5, restore_folder),
@@ -293,6 +295,7 @@ fn agent() -> impl Strategy<Value = AgentSettings> {
                 maintenance_concurrency,
                 nice,
                 allow_hub_restore,
+                hub_commands,
                 locale,
                 update_check,
                 restore_folder,
@@ -305,6 +308,7 @@ fn agent() -> impl Strategy<Value = AgentSettings> {
                         .expect("drawn in its range"),
                     nice: nice.map(|nice| Nice::new(nice).expect("drawn in its range")),
                     allow_hub_restore,
+                    hub_commands,
                     locale,
                     update_check,
                     restore_folder,

@@ -288,6 +288,10 @@ where
             };
         }
     }
+
+    async fn listen(&mut self) -> Result<HubFrame, LinkError> {
+        todo!()
+    }
 }
 
 fn no_answer() -> LinkError {

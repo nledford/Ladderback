@@ -56,6 +56,7 @@ pub fn expected() -> AgentConfig {
         maintenance_concurrency: Concurrency::default(),
         nice: Some(Nice::new(10).expect("a nice")),
         allow_hub_restore: true,
+        hub_commands: domain::planning::HubCommands::On,
         locale: Some(Locale::parse("en-US").expect("a locale")),
         update_check: domain::planning::UpdateCheck::Off,
         restore_folder: Some(

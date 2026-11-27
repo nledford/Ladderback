@@ -1,10 +1,10 @@
 use std::sync::Arc;
 
 use domain::fleet::{
-    Ack, AgentEnvelope, Binding, EpochSeconds, FIRST_SEQUENCE, HubEnvelope, Nonce, PayloadDigest,
-    PlansReport, PublicKey, ReportedProgress, SignedMessage, SigningSeed, WireName, ack_kind,
-    fresh_on_hub_time, grants_kind, heartbeat_ack_kind, heartbeat_kind, plans_ack_kind, plans_kind,
-    progress_kind, release_kind, released_kind, report_kind, repos_kind, withheld_kind,
+    Ack, AgentEnvelope, Binding, CommandId, EpochSeconds, FIRST_SEQUENCE, HubEnvelope, Nonce,
+    PayloadDigest, PlansReport, PublicKey, ReportedProgress, SignedMessage, SigningSeed, WireName,
+    ack_kind, fresh_on_hub_time, grants_kind, heartbeat_ack_kind, heartbeat_kind, plans_ack_kind,
+    plans_kind, progress_kind, release_kind, released_kind, report_kind, repos_kind, withheld_kind,
 };
 use domain::maintenance::{LeaseEpoch, RepoGrants, RepositoryReports, RunningBackup};
 use domain::{AgentId, RepositoryId, SignedDuration};
@@ -14,6 +14,7 @@ use super::wire::{
     progress_payload, read_ack, read_grants, read_heartbeat_ack, read_plans_ack, read_released,
     read_withheld, release_payload, report_payload, repos_payload,
 };
+use crate::hub_commands::{CommandAnswer, ReceivedCommand};
 use crate::ports::{Clock, HubLink, LinkError, OutboxEntry, Signing, SigningError};
 
 /// Why a connection after the handshake went on no further. None carries a
@@ -227,6 +228,32 @@ impl AgentChannel {
                 return Ok(read_heartbeat_ack(&envelope.payload).unwrap_or(None));
             }
         }
+    }
+
+    /// The next command the hub sent that the agent hasn't answered: one
+    /// it took while it waited for another message, or else the hub's
+    /// next, whenever it comes. Cancel-safe: a listen given up loses no
+    /// command. A signed message of a kind this build doesn't take is
+    /// counted and passed over.
+    pub async fn listen_command(&mut self) -> Result<ReceivedCommand, ChannelError> {
+        todo!()
+    }
+
+    /// The next command the hub sent while the agent waited for another
+    /// message, which it hasn't answered; none when there is none.
+    pub fn buffered_command(&mut self) -> Option<ReceivedCommand> {
+        todo!()
+    }
+
+    /// Sends `answer` to the hub's command `id` (`CommandResult`), signed
+    /// with the next sequence number.
+    pub async fn send_command_result(
+        &mut self,
+        id: CommandId,
+        answer: &CommandAnswer,
+    ) -> Result<(), ChannelError> {
+        let _ = (id, answer);
+        todo!()
     }
 
     /// Sends a message of `kind` holding `payload`, signed with the next

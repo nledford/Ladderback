@@ -32,6 +32,8 @@ use super::Agent;
 mod dialog;
 #[path = "held_prunes.rs"]
 mod held_prunes;
+#[path = "hub_commands.rs"]
+mod hub_commands;
 #[path = "hub_plans.rs"]
 mod hub_plans;
 #[path = "leaving.rs"]
@@ -270,6 +272,9 @@ pub struct PairingWorld {
     /// The sync of the first agent's plans and progress
     /// (`fleet/plans_and_progress.feature`).
     live: hub_plans::LiveWorld,
+    /// The first agent's answers to its hub's commands
+    /// (`fleet/hub_commands.feature`).
+    commands: hub_commands::CommandsWorld,
     /// Two machines' prunes and backups through their syncs
     /// (`maintenance/prune_guard.feature`).
     held: held_prunes::HeldWorld,

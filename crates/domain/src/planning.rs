@@ -25,8 +25,8 @@ mod rule;
 mod schedule;
 
 pub use agent::{
-    AgentConfig, AgentSettings, ChangeRefused, Concurrency, DEFAULT_LISTEN, Nice, NotRecorded,
-    ServeSettings, UpdateCheck, Violation,
+    AgentConfig, AgentSettings, ChangeRefused, Concurrency, DEFAULT_LISTEN, HubCommands, Nice,
+    NotRecorded, ServeSettings, UpdateCheck, Violation,
 };
 pub use dry_run::{
     DRY_RUN_WINDOW, DryRunAllowlist, DryRunFolder, DryRunRecord, ExcludeSetting,

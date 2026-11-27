@@ -270,6 +270,7 @@ fn agent(reader: &Reader<'_, '_>, path: &Path, table: AgentTable) -> Read<AgentS
         maintenance_concurrency,
         nice,
         allow_hub_restore: table.allow_hub_restore.unwrap_or(false),
+        hub_commands: domain::planning::HubCommands::On,
         locale,
         update_check: match table.check_for_updates {
             Some(false) => UpdateCheck::Off,

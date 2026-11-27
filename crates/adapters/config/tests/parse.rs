@@ -68,7 +68,8 @@ fn a_file_with_a_repository_and_a_plan_gets_the_defaults_for_the_rest() {
 fn the_agent_table_is_read() {
     let text = "schema = 1\n\n[agent]\nhostname = \"demo-host\"\nconcurrency = 4\n\
                 maintenance-concurrency = 3\nnice = 10\n\
-                allow-hub-restore = true\nlocale = \"en-US\"\ncheck-for-updates = false\n\
+                allow-hub-restore = true\nallow-hub-commands = false\nlocale = \"en-US\"\n\
+                check-for-updates = false\n\
                 restore-folder = \"/srv/restores\"\ndry-run-allowlist = [\"/srv/demo\"]\n";
     assert_eq!(
         parsed(text).expect("valid").config.agent(),
@@ -78,6 +79,7 @@ fn the_agent_table_is_read() {
             maintenance_concurrency: Concurrency::new(3).expect("a concurrency"),
             nice: Some(Nice::new(10).expect("a nice")),
             allow_hub_restore: true,
+            hub_commands: domain::planning::HubCommands::Off,
             locale: Some(Locale::parse("en-US").expect("a locale")),
             update_check: domain::planning::UpdateCheck::Off,
             restore_folder: Some(

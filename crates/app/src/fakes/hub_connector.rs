@@ -4,7 +4,7 @@ use std::sync::{Arc, Mutex, PoisonError};
 
 use api::sync::{AgentFrame, HubFrame, MAX_FRAME_BYTES};
 use async_trait::async_trait;
-use domain::fleet::{HubRoute, KEY_BYTES, RouteSession, SILENCE_LIMIT};
+use domain::fleet::{HubRoute, KEY_BYTES, RouteSession, SILENCE_LIMIT, WireName};
 use domain::{AgentId, SignedDuration};
 
 use crate::pairing::{HubPairing, HubSession, HubStep};
@@ -45,6 +45,12 @@ struct Tap {
     /// The hub's clock, by which a link that sent nothing for
     /// [`SILENCE_LIMIT`] is closed, when the connector watches for it.
     clock: Mutex<Option<Arc<dyn Clock>>>,
+    /// The commands the hub sends next, each a kind and its payload, which
+    /// the link the agent reads next signs and delivers.
+    commands: Mutex<VecDeque<(WireName, Vec<u8>)>>,
+    /// Whether the next command reaches the agent with a signature the hub
+    /// didn't make.
+    forging_command: AtomicBool,
 }
 
 impl Tap {
@@ -159,6 +165,23 @@ impl LoopbackHubConnector {
     /// didn't make, as one from anyone but the hub it paired with.
     pub fn forge_refusals(&self) {
         self.tap.forging.store(true, Ordering::SeqCst);
+    }
+
+    /// The hub sends the agent, on the link it holds open, the command of
+    /// `kind` holding `payload`, signed for that link as the hub signs its
+    /// messages; the agent hears it at its next read.
+    pub fn send_command(&self, kind: WireName, payload: Vec<u8>) {
+        self.tap
+            .commands
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .push_back((kind, payload));
+    }
+
+    /// The next command reaches the agent with a signature the hub didn't
+    /// make, as one from anyone but the hub it paired with.
+    pub fn forge_next_command(&self) {
+        self.tap.forging_command.store(true, Ordering::SeqCst);
     }
 
     /// The connector closing each link that sent nothing for
@@ -397,6 +420,9 @@ impl HubLink for LoopLink {
     }
 
     async fn receive(&mut self) -> Result<HubFrame, LinkError> {
+        if self.inbox.is_empty() {
+            self.deliver_commands().await;
+        }
         match self.inbox.pop_front() {
             Some(text) if text.len() <= MAX_FRAME_BYTES => {
                 HubFrame::from_text(&text).map_err(|_| LinkError::Unreadable)
@@ -405,6 +431,53 @@ impl HubLink for LoopLink {
             None => Err(LinkError::Closed {
                 reason: self.reason.clone(),
             }),
+        }
+    }
+
+    async fn listen(&mut self) -> Result<HubFrame, LinkError> {
+        todo!()
+    }
+}
+
+impl LoopLink {
+    /// Puts each command the hub sends next in the agent's inbox, signed
+    /// for this link by the hub, or forged when the connector forges the
+    /// next; none while the link is closed or before the hub syncs on it.
+    async fn deliver_commands(&mut self) {
+        if self.closed() {
+            return;
+        }
+        let queued: Vec<_> = self
+            .tap
+            .commands
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .drain(..)
+            .collect();
+        let Some(session) = self.session.as_mut() else {
+            return;
+        };
+        for (kind, payload) in queued {
+            let Some(frame) = self.hub.command_frame(session, kind, payload).await else {
+                continue;
+            };
+            let frame = match frame {
+                HubFrame::Signed {
+                    kind,
+                    seq,
+                    expires_at,
+                    payload,
+                    ..
+                } if self.tap.forging_command.swap(false, Ordering::SeqCst) => HubFrame::Signed {
+                    kind,
+                    seq,
+                    expires_at,
+                    payload,
+                    signature: "A".repeat(86),
+                },
+                frame => frame,
+            };
+            self.inbox.push_back(frame.to_text());
         }
     }
 }

@@ -1509,3 +1509,26 @@ impl contract::lease_cache::LeaseCacheHarness for InMemoryLeases {
 async fn in_memory_lease_cache_meets_the_lease_cache_contract() {
     contract::lease_cache::run(&InMemoryLeases::default()).await;
 }
+
+/// A machine's command ledger in memory, kept for `reopened` as with the
+/// lease cache.
+#[derive(Default)]
+struct InMemoryCommands(Mutex<Option<Arc<app::fakes::InMemoryCommandLedger>>>);
+
+#[async_trait]
+impl contract::command_ledger::CommandLedgerHarness for InMemoryCommands {
+    async fn empty(&self) -> Arc<dyn app::ports::CommandLedger> {
+        let ledger = Arc::new(app::fakes::InMemoryCommandLedger::default());
+        *self.0.lock().unwrap() = Some(Arc::clone(&ledger));
+        ledger
+    }
+
+    async fn reopened(&self) -> Arc<dyn app::ports::CommandLedger> {
+        self.0.lock().unwrap().clone().expect("a ledger was opened")
+    }
+}
+
+#[tokio::test]
+async fn in_memory_command_ledger_meets_the_command_ledger_contract() {
+    contract::command_ledger::run(&InMemoryCommands::default()).await;
+}

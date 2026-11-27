@@ -1,6 +1,6 @@
 use api::sync::{AgentFrame, HubFrame};
 use domain::AgentId;
-use domain::fleet::{Accepts, AgentRecord, KEY_BYTES};
+use domain::fleet::{Accepts, AgentRecord, KEY_BYTES, WireName};
 
 use super::hub::{
     HelloAnswer, HubHandshake, HubKeys, HubPairing, HubPairingError, MessageRefused, ProofAnswer,
@@ -192,6 +192,20 @@ impl HubPairing {
             }
             _ => HubStep::Close(PROTOCOL_ERROR),
         }
+    }
+
+    /// The hub's command of `kind` holding `payload` to the agent it syncs
+    /// with on `session`, signed for this connection with the hub's next
+    /// sequence number (§16, decision 176); none before the agent's
+    /// `Welcome`, or when the hub can't sign.
+    pub async fn command_frame(
+        &self,
+        session: &mut HubSession,
+        kind: WireName,
+        payload: Vec<u8>,
+    ) -> Option<HubFrame> {
+        let _ = (session, kind, payload);
+        todo!()
     }
 }
 
