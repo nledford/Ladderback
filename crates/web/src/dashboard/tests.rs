@@ -439,7 +439,8 @@ fn a_machine_whose_newer_operation_ended_while_an_older_one_runs_reads_running()
 
 /// While each plan of a paired machine waits or runs again, its card still
 /// tells its last backup: a plan's last success, as succeeded, where its
-/// last run hasn't ended, the latest of every plan's (#1693).
+/// last run hasn't ended, the latest of every plan's (#1693). A plan whose
+/// last run ended tells that run, not its older last success.
 #[test]
 fn a_card_tells_the_last_success_while_each_plan_waits_or_runs_again() {
     let succeeded = |mut plan: MachinePlanDto, minutes: i64| {
@@ -469,6 +470,19 @@ fn a_card_tells_the_last_success_while_each_plan_waits_or_runs_again() {
     assert_eq!(
         (busy.status, busy.last_backup),
         (CardStatus::Running, Some(at(-30)))
+    );
+    let ended = online(with_plans(
+        machine("demo-laptop", AT),
+        vec![succeeded(
+            plan("music", Some(("cancelled", -40)), None),
+            -100,
+        )],
+        0,
+    ));
+    let facts = card_facts(&ended, AT_MS);
+    assert_eq!(
+        (facts.status, facts.last_backup),
+        (CardStatus::Last("cancelled".to_owned()), Some(at(-40)))
     );
 }
 
@@ -776,11 +790,11 @@ fn the_hubs_own_machine_reads_as_a_paired_one_does() {
     );
 }
 
-/// While a plan of the hub's own runs or waits in the queue, its card's
-/// last run is the plan's last success, which its status tells, so the
-/// card never says no backup has ended while one runs.
+/// A plan of the hub's own tells its last run as it is, queued or running
+/// too, and its last success beside it, as a paired machine's plan does,
+/// so its card and its page read it as they read a paired one's (#1693).
 #[test]
-fn the_hubs_own_plan_that_runs_again_reads_its_last_success() {
+fn the_hubs_own_plan_tells_its_last_run_and_its_last_success() {
     let standing = |status: &str, success: Option<i64>| api::PlanStatusDto {
         plan: api::PlanSummaryDto {
             id: "documents".to_owned(),
@@ -812,14 +826,22 @@ fn the_hubs_own_plan_that_runs_again_reads_its_last_success() {
         .and_then(|own| own.plans)
         .map(|plans| plans.plans)
     };
+    let documents = |last: (&str, i64), success: Option<i64>| MachinePlanDto {
+        last_success: success.map(at),
+        ..plan("documents", Some(last), None)
+    };
     assert_eq!(
         read(standing("running", Some(-1500))),
-        Some(vec![plan("documents", Some(("succeeded", -1500)), None)])
+        Some(vec![documents(("running", -2), Some(-1500))])
     );
     assert_eq!(
         read(standing("queued", None)),
-        Some(vec![plan("documents", None, None)]),
-        "never succeeded: no last run yet"
+        Some(vec![documents(("queued", -3), None)]),
+        "never succeeded: no last success yet"
+    );
+    assert_eq!(
+        read(standing("failed", Some(-1500))),
+        Some(vec![documents(("failed", -1), Some(-1500))])
     );
 }
 
