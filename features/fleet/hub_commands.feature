@@ -92,6 +92,12 @@ Feature: A machine answers its hub's commands
     Then the machine started a backup of "photos" for the hub's session
     And the hub told the person the machine started that backup
 
+  Scenario: A machine syncing with its hub runs the plan a person asks for
+    Given the machine syncs with its hub
+    When a person on the hub asks the machine to run the plan "photos"
+    Then the machine started a backup of "photos" for the hub's session
+    And the hub told the person the machine started that backup
+
   Scenario: A machine not connected is sent nothing, and nothing waits for it
     Given the machine isn't connected to its hub
     When a person on the hub asks the machine to run the plan "photos"

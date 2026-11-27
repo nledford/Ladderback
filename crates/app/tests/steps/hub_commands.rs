@@ -13,7 +13,8 @@ use std::sync::{Arc, Mutex, PoisonError};
 
 use api::sync::{AgentFrame, CancelOpPayload, CommandResultPayload, HelloPayload, RunPlanPayload};
 use app::fakes::{
-    FakeClock, FakeSigning, InMemoryCommandLedger, InMemoryConfigStore, LoopbackHubConnector,
+    FakeClock, FakeSigning, InMemoryCommandLedger, InMemoryConfigStore, InMemoryOutbox,
+    LoopbackHubConnector,
     SeededRandom,
 };
 use app::hub_commands::{
@@ -21,13 +22,15 @@ use app::hub_commands::{
 };
 use app::pairing::{AgentChannel, ChannelError, CommandAsk, CommandAskRefused, ConnectToHub};
 use app::ports::{Clock, ConfigStore};
+use app::sync::SyncWithHub;
 use async_trait::async_trait;
 use base64::Engine;
 use base64::engine::general_purpose::URL_SAFE_NO_PAD;
 use cucumber::{given, then, when};
 use domain::access::SessionTag;
 use domain::fleet::{
-    COMMAND_ANSWER_WITHIN, EpochSeconds, HubCommand, PlansReport, ReportedPlan, WireName,
+    COMMAND_ANSWER_WITHIN, EpochSeconds, HubCommand, OutboxEpoch, PlansReport, ReportedPlan,
+    WireName,
     cancel_op_kind, run_plan_kind,
 };
 use domain::planning::{AgentConfig, AgentSettings, HubCommands};
@@ -66,6 +69,8 @@ struct Side {
     older: bool,
     /// Whether the hub holds the machine's connection as live.
     live: bool,
+    /// The machine's sync with its hub, run while a person on the hub asks.
+    sync: Option<SyncWithHub>,
     /// What the hub told the person who asked last.
     heard: Option<Result<CommandAnswer, CommandAskRefused>>,
 }
@@ -91,6 +96,7 @@ fn side(agent: &mut Agent) -> &mut Side {
             commands: 0,
             older: false,
             live: false,
+            sync: None,
             heard: None,
         });
     }
@@ -216,17 +222,20 @@ fn payload_of(text: &str) -> Option<(String, Vec<u8>)> {
 }
 
 impl Side {
-    /// The machine connects to its hub, built as after a start: its use
-    /// case on the database it keeps, and a new connection whose `Hello`
-    /// says which commands it takes.
-    async fn connect(&mut self, machine: &super::Machine) {
-        let answer = AnswerHubCommands::new(
+    /// The use case that answers the hub's commands, on the database the
+    /// machine keeps.
+    fn answering(&self) -> AnswerHubCommands {
+        AnswerHubCommands::new(
             self.config.clone(),
             self.ledger.clone(),
             self.runs.clone(),
             self.clock.clone(),
-        );
-        let connect = ConnectToHub::new(
+        )
+    }
+
+    /// How the machine connects to its hub.
+    fn connecting(&self, machine: &super::Machine) -> ConnectToHub {
+        ConnectToHub::new(
             machine.identity.clone(),
             Arc::new(FakeSigning),
             Arc::new(SeededRandom::new(machine.seed + 1)),
@@ -234,7 +243,15 @@ impl Side {
             self.connector.clone(),
             "0.6.0-agent".to_owned(),
             machine.identifier.clone(),
-        );
+        )
+    }
+
+    /// The machine connects to its hub, built as after a start: its use
+    /// case on the database it keeps, and a new connection whose `Hello`
+    /// says which commands it takes.
+    async fn connect(&mut self, machine: &super::Machine) {
+        let answer = self.answering();
+        let connect = self.connecting(machine);
         let accepts = if self.older {
             None
         } else {
@@ -396,6 +413,25 @@ async fn commands_off(agent: &mut Agent) {
 async fn connected(agent: &mut Agent) {
     let machine = agent.pairing.first.take().expect("the first agent");
     side(agent).connect(&machine).await;
+    agent.pairing.first = Some(machine);
+}
+
+#[given("the machine syncs with its hub")]
+async fn syncs(agent: &mut Agent) {
+    let machine = agent.pairing.first.take().expect("the first agent");
+    let side = side(agent);
+    let sync = SyncWithHub::new(
+        side.connecting(&machine),
+        Arc::new(InMemoryOutbox::new(OutboxEpoch::from_uuid(Uuid::from_u128(
+            0xe1,
+        )))),
+        side.clock.clone(),
+        machine.agent_id,
+        machine.hostname.clone(),
+        machine.zone.clone(),
+    )
+    .with_commands(Arc::new(side.answering()));
+    side.sync = Some(sync);
     agent.pairing.first = Some(machine);
 }
 
@@ -622,6 +658,22 @@ async fn person_asks(agent: &mut Agent, command: HubCommand) {
     let ask = person_ask(agent, command);
     let pairing = agent.pairing.hub().pairing.clone();
     let side = live_side(agent).await;
+    if let Some(sync) = side.sync.as_ref() {
+        let agent_id = ask.agent;
+        let asked = async {
+            while !pairing.is_online(agent_id) {
+                tokio::task::yield_now().await;
+            }
+            pairing.command_asked(ask).await
+        };
+        let running = std::pin::pin!(sync.run());
+        let asked = std::pin::pin!(asked);
+        let Either::Right((heard, _)) = select(running, asked).await else {
+            panic!("the machine's sync with its hub ended");
+        };
+        side.heard = Some(heard);
+        return;
+    }
     let asked = std::pin::pin!(pairing.command_asked(ask));
     let heard = match (side.channel.as_mut(), side.answer.as_ref()) {
         (Some(channel), Some(answer)) => {
