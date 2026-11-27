@@ -139,6 +139,13 @@ impl PlansReport {
     pub const fn left_out(&self) -> u64 {
         self.left_out
     }
+
+    /// Leaves out the last plan reported, counted with the rest, as when
+    /// the report doesn't fit the message that carries it: false, and the
+    /// report unchanged, when it reports no plan.
+    pub fn leave_out_last(&mut self) -> bool {
+        todo!()
+    }
 }
 
 /// The latest progress of an operation a machine runs: the step it is in,

@@ -62,6 +62,29 @@ fn a_snapshot_with_more_plans_than_the_cap_is_refused() {
     assert_eq!(PlansReport::from_parts(over, 0), None);
 }
 
+/// A report too large for its message gives up its last plan first, so the
+/// plans kept are the first in the configuration's order, and the plan
+/// left out is counted (#1698).
+#[test]
+fn leaving_out_the_last_plan_counts_it_with_the_rest() {
+    let mut report = PlansReport::of((0..MAX_PLANS_REPORTED + 3).map(plan).collect());
+    assert!(report.leave_out_last());
+    assert_eq!(
+        report.plans(),
+        (0..MAX_PLANS_REPORTED - 1).map(plan).collect::<Vec<_>>()
+    );
+    assert_eq!(report.left_out(), 4);
+
+    let mut none = PlansReport::from_parts(Vec::new(), 2).unwrap();
+    assert!(!none.leave_out_last());
+    assert_eq!(none, PlansReport::from_parts(Vec::new(), 2).unwrap());
+
+    let mut most = PlansReport::from_parts(vec![plan(1), plan(2)], u64::MAX).unwrap();
+    assert!(most.leave_out_last());
+    assert_eq!(most.plans(), [plan(1)]);
+    assert_eq!(most.left_out(), u64::MAX);
+}
+
 #[test]
 fn each_outcome_reads_back_from_its_wire_name_and_no_other_name_reads() {
     for outcome in [

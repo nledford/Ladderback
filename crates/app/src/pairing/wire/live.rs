@@ -7,8 +7,8 @@
 
 use super::{WireRefused, uuid};
 use api::sync::{
-    HeartbeatAckPayload, HeartbeatPayload, LastRunPayload, PlanPayload, PlansAckPayload,
-    PlansPayload, ProgressPayload, RunningOpPayload,
+    HeartbeatAckPayload, HeartbeatPayload, LastRunPayload, MAX_FRAME_BYTES, PlanPayload,
+    PlansAckPayload, PlansPayload, ProgressPayload, RunningOpPayload,
 };
 use domain::fleet::{
     EpochSeconds, LastRun, LastRunOutcome, PlansReport, ReportedPlan, ReportedProgress, WireName,
@@ -34,6 +34,19 @@ pub fn plans_payload(report: &PlansReport) -> Vec<u8> {
         left_out: report.left_out(),
     }
     .to_bytes()
+}
+
+/// `report` as one frame carries it: its plans in the configuration's
+/// order while the frame that signs them fits [`MAX_FRAME_BYTES`], and the
+/// rest counted with those it left out already (#1698).
+pub fn plans_in_one_frame(report: PlansReport) -> PlansReport {
+    plans_within(report, MAX_FRAME_BYTES)
+}
+
+/// `report`, its last plans left out until its frame, at its longest, is
+/// at most `limit` bytes.
+fn plans_within(report: PlansReport, limit: usize) -> PlansReport {
+    todo!()
 }
 
 /// The snapshot a payload's bytes hold: more plans than a snapshot holds, a

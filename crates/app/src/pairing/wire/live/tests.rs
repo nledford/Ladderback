@@ -95,6 +95,71 @@ fn the_largest_snapshot_fits_one_frame() {
     ));
 }
 
+/// The bytes of the frame `report` goes in at its longest: the largest
+/// sequence number and a signature the frame writes at its longest.
+fn frame_bytes(report: &PlansReport) -> usize {
+    agent_envelope_frame(&AgentEnvelope {
+        kind: plans_kind(),
+        seq: u64::MAX,
+        payload: plans_payload(report),
+        signature: longest_signature(),
+    })
+    .to_text()
+    .len()
+}
+
+/// A full snapshot of the largest plans: every plan ID at its longest,
+/// every time at its latest, and 3 plans past the cap left out.
+fn largest_plans() -> PlansReport {
+    let longest = |n: usize| format!("{}{n:02}", "p".repeat(62));
+    let last = LastRun {
+        at: EpochSeconds::from_seconds(latest()),
+        outcome: LastRunOutcome::SucceededWithWarnings,
+    };
+    let plans = (0..MAX_PLANS_REPORTED)
+        .map(|n| plan(&longest(n), Some(last), Some(latest())))
+        .collect();
+    PlansReport::from_parts(plans, 3).unwrap()
+}
+
+/// `report`'s first `kept` plans, the others counted as left out.
+fn first(report: &PlansReport, kept: usize) -> PlansReport {
+    let others = u64::try_from(report.plans().len() - kept).unwrap();
+    PlansReport::from_parts(report.plans()[..kept].to_vec(), report.left_out() + others).unwrap()
+}
+
+/// A snapshot whose frame would pass the limit keeps its first plans, in
+/// the configuration's order, while the frame fits, and counts each plan
+/// it leaves out with those past the cap (#1698).
+#[test]
+fn plans_past_one_frame_are_left_out_from_the_last_and_counted() {
+    let largest = largest_plans();
+    for kept in [MAX_PLANS_REPORTED, 10, 1, 0] {
+        let fits = first(&largest, kept);
+        let limit = frame_bytes(&fits);
+        let sent = plans_within(largest.clone(), limit);
+        assert_eq!(sent, fits, "a limit of {limit} bytes");
+        assert!(frame_bytes(&sent) <= limit);
+    }
+    for kept in [MAX_PLANS_REPORTED, 10, 1] {
+        let limit = frame_bytes(&first(&largest, kept)) - 1;
+        assert_eq!(
+            plans_within(largest.clone(), limit),
+            first(&largest, kept - 1),
+            "a limit of {limit} bytes"
+        );
+    }
+    assert_eq!(plans_within(largest.clone(), 0), first(&largest, 0));
+}
+
+/// In the frame the sync sends, the largest snapshot goes whole, and so
+/// does a small one.
+#[test]
+fn the_largest_snapshot_goes_whole_in_the_frame_the_sync_sends() {
+    assert_eq!(plans_in_one_frame(largest_plans()), largest_plans());
+    assert_eq!(plans_in_one_frame(report()), report());
+}
+
 #[test]
 fn a_snapshot_with_too_many_plans_or_a_field_that_isnt_one_is_refused() {
     let names: Vec<String> = (0..=MAX_PLANS_REPORTED).map(|n| format!("p{n}")).collect();
