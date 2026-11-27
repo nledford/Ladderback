@@ -741,6 +741,24 @@ Given("the daemon answers each maintenance start as waiting for its turn", funct
   });
 });
 
+// Each read of a maintenance run says it runs, 4 seconds late: with the step
+// above, the page shows the run waiting, then its turn come, while the real
+// run of a tiny scratch repository has long ended.
+Given("each read of a maintenance run says it is running", function (this: BrowserWorld) {
+  this.contextRoutes.push(async (context) => {
+    await context.route(
+      (url) => /^\/api\/v1\/operations\/[^/]+$/.test(url.pathname),
+      async (route) => {
+        await sleep(4_000);
+        const response = await route.fetch();
+        if (response.status() !== 200) return route.fulfill({ response });
+        const body = (await response.json()) as { operation: { status: string } };
+        await route.fulfill({ response, json: { ...body, operation: { ...body.operation, status: "running" } } });
+      },
+    );
+  });
+});
+
 // Nothing on the page says it as a live alert now: an alert drawn with the
 // page is there at once. A shared Error alert, no live region, may show it.
 Then("no live alert on the page contains {string}", async function (this: BrowserWorld, needle: string) {
