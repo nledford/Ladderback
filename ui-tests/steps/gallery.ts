@@ -643,33 +643,32 @@ const SNAPSHOTS: Record<string, string> = {
       - paragraph: Succeeded
       - term: Last backup
       - definition:
-        - time: ⁨11/9/26, 9:00:00 AM⁩
+        - time: 11/9/26, 9:00:00 AM
       - term: Next run
       - definition:
-        - time: ⁨11/10/26, 9:00:00 AM⁩
+        - time: 11/10/26, 9:00:00 AM
       - term: Plans
-      - definition: ⁨2⁩
+      - definition: "2"
       - button "Back up"
-      - link "Open ⁨demo-hub⁩"
+      - link "Open ⁨demo-hub⁩":
+        - /url: /machines/demo-hub
   - listitem:
     - article "demo-laptop":
       - heading "demo-laptop" [level=3]
       - paragraph:
         - strong: "Needs attention:"
         - text: ⁨The last run of ⁨photos⁩ failed.⁩
-      - paragraph:
-        - text: Last connected
-        - time: ⁨11/8/26, 6:30:00 PM⁩
-        - text: .
+      - paragraph: Last connected ⁨11/8/26, 6:30:00 PM⁩.
       - paragraph: Failed
       - term: Last backup
       - definition:
-        - time: ⁨11/8/26, 6:00:00 PM⁩
+        - time: 11/8/26, 6:00:00 PM
       - term: Next run
       - definition: None planned
       - term: Plans
-      - definition: ⁨3⁩
-      - link "Open ⁨demo-laptop⁩"
+      - definition: "3"
+      - link "Open ⁨demo-laptop⁩":
+        - /url: /machines/demo-laptop
   - listitem:
     - article "demo-desktop":
       - heading "demo-desktop" [level=3]
@@ -682,7 +681,8 @@ const SNAPSHOTS: Record<string, string> = {
       - definition: None planned
       - term: Plans
       - definition: Not reported yet
-      - link "Open ⁨demo-desktop⁩"`,
+      - link "Open ⁨demo-desktop⁩":
+        - /url: /machines/demo-desktop`,
   // Closed, a disclosure menu is its button alone: its panel is hidden, from
   // a screen reader too, until the button shows it.
   "Disclosure menu": `- heading "Disclosure menu" [level=2]
