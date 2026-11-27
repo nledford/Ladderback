@@ -22,8 +22,9 @@ use api::MsgArg;
 use domain::execution::refusal::SettingRefusal;
 use domain::execution::{
     FailureReason, HookEnd, HookLevel, HookPlace, OperationKind, OperationStatus, RepositoryHalf,
-    Transition, Trigger, WarningKind,
+    Transition, Trigger, TurnRefusal, WarningKind,
 };
+use domain::{OperationId, RepositoryAlias};
 
 use crate::error_args;
 use crate::report::shown;
@@ -248,6 +249,7 @@ pub(crate) fn encode_failure(
         FailureReason::PasswordNotAccepted => ("password-not-accepted", Vec::new(), None),
         FailureReason::LeaseLapsed => ("maintenance-lease-lapsed", Vec::new(), None),
         FailureReason::DeletionUnanswered => ("maintenance-deletion-unanswered", Vec::new(), None),
+        FailureReason::TurnRefused(refusal) => (refusal.code(), turn_refusal_args(refusal), None),
         FailureReason::SecretRefused { field, refusal } => (
             refusal.code(),
             std::iter::once(("field", MsgArg::Text(field.clone())))
@@ -377,6 +379,21 @@ pub(crate) fn decode_failure(
         "password-not-accepted" => Ok(FailureReason::PasswordNotAccepted),
         "maintenance-lease-lapsed" => Ok(FailureReason::LeaseLapsed),
         "maintenance-deletion-unanswered" => Ok(FailureReason::DeletionUnanswered),
+        "repository-unknown" => Ok(FailureReason::TurnRefused(TurnRefusal::RepositoryUnknown {
+            alias: alias(&args)?,
+        })),
+        "maintenance-not-owner" => Ok(FailureReason::TurnRefused(TurnRefusal::NotOwner {
+            alias: alias(&args)?,
+        })),
+        "maintenance-no-lease" => Ok(FailureReason::TurnRefused(TurnRefusal::NoLease {
+            alias: alias(&args)?,
+        })),
+        "maintenance-prune-held" => Ok(FailureReason::TurnRefused(TurnRefusal::PruneHeld {
+            alias: alias(&args)?,
+        })),
+        "maintenance-busy" => Ok(FailureReason::TurnRefused(TurnRefusal::Busy {
+            running: operation(&args)?,
+        })),
         "hook-failed" => Ok(FailureReason::HookFailed {
             hook: hook_place(&args)?,
             ended: hook_end(&args)?,
@@ -564,6 +581,47 @@ fn text(args: &[(String, MsgArg)], name: &str) -> Result<String, BadColumn> {
         Some(MsgArg::Text(text)) => Ok(text.clone()),
         Some(_) => Err(bad("error_args", format!("{name} is not text"))),
     }
+}
+
+/// What a refused turn keeps: the repository's alias it was asked under, or
+/// the operation that held the repository, as the start's refusal names it.
+fn turn_refusal_args(refusal: &TurnRefusal) -> Vec<(&'static str, MsgArg)> {
+    match refusal {
+        TurnRefusal::RepositoryUnknown { alias }
+        | TurnRefusal::NotOwner { alias }
+        | TurnRefusal::NoLease { alias }
+        | TurnRefusal::PruneHeld { alias } => {
+            vec![("alias", MsgArg::Text(alias.as_str().to_owned()))]
+        }
+        TurnRefusal::Busy { running } => vec![(
+            "operation",
+            MsgArg::Text(running.as_uuid().hyphenated().to_string()),
+        )],
+    }
+}
+
+/// The repository alias `alias`, which the failure must have.
+fn alias(args: &[(String, MsgArg)]) -> Result<RepositoryAlias, BadColumn> {
+    let text = text(args, "alias")?;
+    RepositoryAlias::parse(&text).map_err(|_| {
+        bad(
+            "error_args",
+            format!("alias {} is not a repository alias", shown(&text)),
+        )
+    })
+}
+
+/// The operation `operation`, which the failure must have.
+fn operation(args: &[(String, MsgArg)]) -> Result<OperationId, BadColumn> {
+    let text = text(args, "operation")?;
+    domain::Uuid::parse_str(&text)
+        .map(OperationId::from_uuid)
+        .map_err(|_| {
+            bad(
+                "error_args",
+                format!("operation {} is not an operation ID", shown(&text)),
+            )
+        })
 }
 
 /// The number of bytes `name`, which the failure must have.
@@ -861,6 +919,70 @@ mod tests {
         match decode_failure(Some(columns.code), Some(&columns.args), columns.detail) {
             Ok(reason) => reason,
             Err(bad) => panic!("the written columns decode: {} {}", bad.column, bad.why),
+        }
+    }
+
+    /// A waiting maintenance run whose turn was refused reads back with the
+    /// refusal and what it names: the repository's alias, or the operation
+    /// that held the repository (decision 75, point 8).
+    #[test]
+    fn a_refused_maintenance_turn_round_trips() {
+        let alias = || RepositoryAlias::parse("nas").expect("an alias");
+        let running =
+            OperationId::from_uuid(domain::Uuid::from_u128(0x018f_0000_0000_7000_8000_0000_0000_0003));
+        for (refusal, code, args) in [
+            (
+                TurnRefusal::RepositoryUnknown { alias: alias() },
+                "repository-unknown",
+                r#"[["alias",{"type":"text","value":"nas"}]]"#,
+            ),
+            (
+                TurnRefusal::NotOwner { alias: alias() },
+                "maintenance-not-owner",
+                r#"[["alias",{"type":"text","value":"nas"}]]"#,
+            ),
+            (
+                TurnRefusal::NoLease { alias: alias() },
+                "maintenance-no-lease",
+                r#"[["alias",{"type":"text","value":"nas"}]]"#,
+            ),
+            (
+                TurnRefusal::PruneHeld { alias: alias() },
+                "maintenance-prune-held",
+                r#"[["alias",{"type":"text","value":"nas"}]]"#,
+            ),
+            (
+                TurnRefusal::Busy { running },
+                "maintenance-busy",
+                r#"[["operation",{"type":"text","value":"018f0000-0000-7000-8000-000000000003"}]]"#,
+            ),
+        ] {
+            let reason = FailureReason::TurnRefused(refusal);
+            let columns = encode_failure(&reason).expect("the failure encodes");
+            assert_eq!((columns.code, columns.args.as_str()), (code, args));
+            assert_eq!(columns.detail, None);
+            assert_eq!(round_trip(&reason), reason);
+        }
+    }
+
+    /// A refused turn whose alias or operation can't be read is a bad
+    /// column, never another refusal.
+    #[test]
+    fn a_refused_maintenance_turn_with_an_unreadable_argument_is_reported() {
+        for (code, args) in [
+            ("maintenance-not-owner", "[]"),
+            (
+                "maintenance-not-owner",
+                r#"[["alias",{"type":"text","value":""}]]"#,
+            ),
+            (
+                "maintenance-busy",
+                r#"[["operation",{"type":"text","value":"not-an-id"}]]"#,
+            ),
+        ] {
+            let bad = decode_failure(Some(code), Some(args), None)
+                .expect_err("an unreadable argument is refused");
+            assert_eq!(bad.column, "error_args", "{code} {args}");
         }
     }
 

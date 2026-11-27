@@ -113,7 +113,8 @@ impl OperationStatus {
                 | Why::KeyFilesNotLeftOut
                 | Why::RestoreTargetUnwritable
                 | Why::LeaseLapsed
-                | Why::DeletionUnanswered => None,
+                | Why::DeletionUnanswered
+                | Why::TurnRefused(_) => None,
             },
             Self::Queued | Self::Running | Self::Canceled => None,
         }
@@ -263,6 +264,41 @@ pub enum FailureReason {
     /// still maintain the repository, and had no answer in time (§16,
     /// decision 161). Nothing was deleted.
     DeletionUnanswered,
+    /// A maintenance run waited for its turn (decision 75, point 8), and
+    /// when its turn came, a start was refused for it as a run started then
+    /// would have been: why is the refusal's own code. Nothing ran.
+    TurnRefused(TurnRefusal),
+}
+
+/// Why a maintenance run that waited for its turn couldn't go ahead once it
+/// came (decision 75, point 8): the refusals a start makes when it takes the
+/// repository's slot, each with what its code names.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub enum TurnRefusal {
+    /// The configuration holds the repository `alias` no more.
+    RepositoryUnknown { alias: RepositoryAlias },
+    /// This agent maintains the repository `alias` no more (I1).
+    NotOwner { alias: RepositoryAlias },
+    /// This paired machine holds no live lease on the repository `alias`
+    /// from its hub (I1, §7.3).
+    NoLease { alias: RepositoryAlias },
+    /// The hub holds the prune of the repository `alias` (§7.3, layer 2).
+    PruneHeld { alias: RepositoryAlias },
+    /// Another maintenance operation, `running`, holds the repository (I7).
+    Busy { running: OperationId },
+}
+
+impl TurnRefusal {
+    /// The refusal's code: the one a start refused for it answers with.
+    pub fn code(&self) -> &'static str {
+        match self {
+            Self::RepositoryUnknown { .. } => "repository-unknown",
+            Self::NotOwner { .. } => "maintenance-not-owner",
+            Self::NoLease { .. } => "maintenance-no-lease",
+            Self::PruneHeld { .. } => "maintenance-prune-held",
+            Self::Busy { .. } => "maintenance-busy",
+        }
+    }
 }
 
 impl FailureReason {
@@ -299,6 +335,7 @@ impl FailureReason {
             Self::SecretRefused { refusal, .. } => refusal.code(),
             Self::LeaseLapsed => "maintenance-lease-lapsed",
             Self::DeletionUnanswered => "maintenance-deletion-unanswered",
+            Self::TurnRefused(refusal) => refusal.code(),
         }
     }
 }

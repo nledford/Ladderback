@@ -848,6 +848,36 @@ fn a_prune_that_heard_no_answer_codes_as_maintenance_deletion_unanswered() {
     );
 }
 
+/// A waiting maintenance run whose turn was refused codes as the refusal a
+/// start made then would have answered with (decision 75, point 8).
+#[test]
+fn a_maintenance_turn_refused_codes_as_the_start_refusal() {
+    let alias = || RepositoryAlias::parse("nas").unwrap();
+    for (refusal, code) in [
+        (
+            TurnRefusal::RepositoryUnknown { alias: alias() },
+            "repository-unknown",
+        ),
+        (
+            TurnRefusal::NotOwner { alias: alias() },
+            "maintenance-not-owner",
+        ),
+        (TurnRefusal::NoLease { alias: alias() }, "maintenance-no-lease"),
+        (
+            TurnRefusal::PruneHeld { alias: alias() },
+            "maintenance-prune-held",
+        ),
+        (
+            TurnRefusal::Busy {
+                running: OperationId::from_uuid(Uuid::from_u128(7)),
+            },
+            "maintenance-busy",
+        ),
+    ] {
+        assert_eq!(FailureReason::TurnRefused(refusal).code(), code);
+    }
+}
+
 #[test]
 fn a_refusal_of_the_credentials_codes_as_credentials_refused() {
     for half in [None, Some(RepositoryHalf::Cold), Some(RepositoryHalf::Hot)] {

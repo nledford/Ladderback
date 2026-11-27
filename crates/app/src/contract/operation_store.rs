@@ -5,8 +5,8 @@ use domain::execution::logged_entry::{LoggedEntry, RestoredTo};
 use domain::execution::refusal::SettingRefusal;
 use domain::execution::{
     FailureReason, HookEnd, HookLevel, HookPlace, LifecycleError, MAX_STORED_WARNINGS, Operation,
-    OperationKind, OperationStatus, RepositoryHalf, Target, Transition, Trigger, Warning,
-    WarningKind,
+    OperationKind, OperationStatus, RepositoryHalf, Target, Transition, Trigger, TurnRefusal,
+    Warning, WarningKind,
 };
 use domain::{OperationId, PlanId, RepositoryAlias, RepositoryId, SnapshotId, Timestamp, Uuid};
 
@@ -98,6 +98,34 @@ impl Fixtures {
 
 fn id(n: u128) -> OperationId {
     OperationId::from_uuid(Uuid::from_u128(n))
+}
+
+/// A waiting maintenance run's refused turn, for each refusal, naming the
+/// repository's alias or the operation that held it (decision 75, point 8).
+fn turn_refusals() -> Vec<FailureReason> {
+    let busy = TurnRefusal::Busy { running: id(0x3f) };
+    let named = RepositoryAlias::parse("nas").map_or_else(
+        |_| Vec::new(),
+        |alias| {
+            vec![
+                TurnRefusal::RepositoryUnknown {
+                    alias: alias.clone(),
+                },
+                TurnRefusal::NotOwner {
+                    alias: alias.clone(),
+                },
+                TurnRefusal::NoLease {
+                    alias: alias.clone(),
+                },
+                TurnRefusal::PruneHeld { alias },
+            ]
+        },
+    );
+    named
+        .into_iter()
+        .chain([busy])
+        .map(FailureReason::TurnRefused)
+        .collect()
 }
 
 /// `seconds` after a fixed instant, on a whole second.
@@ -471,7 +499,7 @@ async fn every_status_and_failure_reason_reads_back(store: &dyn OperationStore) 
     let mut never_started = queued(0x36, None);
     applied(never_started.fail(reasons[0].clone(), at(1)));
     ops.push(never_started);
-    for (n, reason) in (0x40..).zip(reasons) {
+    for (n, reason) in (0x40..).zip(reasons.into_iter().chain(turn_refusals())) {
         ops.push(failed(queued(n, None), reason));
     }
 

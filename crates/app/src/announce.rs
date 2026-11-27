@@ -9,7 +9,9 @@
 
 use api::{ErrorCode, ErrorDto, MsgArg, UiEvent, WarningCode};
 use domain::execution::refusal::SettingRefusal;
-use domain::execution::{FailureReason, HookEnd, HookPlace, Operation, OperationStatus};
+use domain::execution::{
+    FailureReason, HookEnd, HookPlace, Operation, OperationStatus, TurnRefusal,
+};
 use domain::{OperationId, RepositoryId, Timestamp};
 
 use crate::ports::{EventBus, HookPhase};
@@ -194,6 +196,32 @@ pub fn failure(reason: &FailureReason) -> ErrorDto {
         }
         F::LeaseLapsed => ErrorDto::new(ErrorCode::MaintenanceLeaseLapsed, [], None),
         F::DeletionUnanswered => ErrorDto::new(ErrorCode::MaintenanceDeletionUnanswered, [], None),
+        F::TurnRefused(refusal) => {
+            let (code, args) = turn_refused(refusal);
+            ErrorDto::new(code, args, None)
+        }
+    }
+}
+
+/// A waiting maintenance run's refused turn as a start refused for the same
+/// reason is told (decision 75, point 8): the refusal's code, with the
+/// repository's alias or the operation that held it.
+pub fn turn_refused(refusal: &TurnRefusal) -> (ErrorCode, Vec<(&'static str, MsgArg)>) {
+    let alias = |code, alias: &domain::RepositoryAlias| {
+        (code, vec![("alias", MsgArg::Text(alias.as_str().to_owned()))])
+    };
+    match refusal {
+        TurnRefusal::RepositoryUnknown { alias: name } => alias(ErrorCode::RepositoryUnknown, name),
+        TurnRefusal::NotOwner { alias: name } => alias(ErrorCode::MaintenanceNotOwner, name),
+        TurnRefusal::NoLease { alias: name } => alias(ErrorCode::MaintenanceNoLease, name),
+        TurnRefusal::PruneHeld { alias: name } => alias(ErrorCode::MaintenancePruneHeld, name),
+        TurnRefusal::Busy { running } => (
+            ErrorCode::MaintenanceBusy,
+            vec![(
+                "operation",
+                MsgArg::Text(running.as_uuid().hyphenated().to_string()),
+            )],
+        ),
     }
 }
 
@@ -609,6 +637,20 @@ mod tests {
             (F::ConfigUnusable, C::ConfigUnusable, vec![]),
             (F::KeyFilesNotLeftOut, C::KeyFilesNotLeftOut, vec![]),
             (
+                F::TurnRefused(TurnRefusal::NotOwner {
+                    alias: domain::RepositoryAlias::parse("nas").unwrap(),
+                }),
+                C::MaintenanceNotOwner,
+                vec![text("nas")],
+            ),
+            (
+                F::TurnRefused(TurnRefusal::Busy {
+                    running: OperationId::from_uuid(domain::Uuid::from_u128(3)),
+                }),
+                C::MaintenanceBusy,
+                vec![text("00000000-0000-0000-0000-000000000003")],
+            ),
+            (
                 F::SecretsTooLargeToMask {
                     field: Some("HTTPS_PROXY".to_owned()),
                     limit: 262_144,
@@ -819,6 +861,40 @@ mod tests {
             (
                 F::DeletionUnanswered,
                 ErrorDto::new(C::MaintenanceDeletionUnanswered, [], None),
+            ),
+            (
+                F::TurnRefused(TurnRefusal::RepositoryUnknown {
+                    alias: domain::RepositoryAlias::parse("nas").unwrap(),
+                }),
+                ErrorDto::new(C::RepositoryUnknown, [("alias", text("nas"))], None),
+            ),
+            (
+                F::TurnRefused(TurnRefusal::NotOwner {
+                    alias: domain::RepositoryAlias::parse("nas").unwrap(),
+                }),
+                ErrorDto::new(C::MaintenanceNotOwner, [("alias", text("nas"))], None),
+            ),
+            (
+                F::TurnRefused(TurnRefusal::NoLease {
+                    alias: domain::RepositoryAlias::parse("nas").unwrap(),
+                }),
+                ErrorDto::new(C::MaintenanceNoLease, [("alias", text("nas"))], None),
+            ),
+            (
+                F::TurnRefused(TurnRefusal::PruneHeld {
+                    alias: domain::RepositoryAlias::parse("nas").unwrap(),
+                }),
+                ErrorDto::new(C::MaintenancePruneHeld, [("alias", text("nas"))], None),
+            ),
+            (
+                F::TurnRefused(TurnRefusal::Busy {
+                    running: OperationId::from_uuid(domain::Uuid::from_u128(3)),
+                }),
+                ErrorDto::new(
+                    C::MaintenanceBusy,
+                    [("operation", text("00000000-0000-0000-0000-000000000003"))],
+                    None,
+                ),
             ),
             (
                 F::SecretsTooLargeToMask {
