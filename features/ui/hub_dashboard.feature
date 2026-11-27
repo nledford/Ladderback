@@ -13,7 +13,10 @@ Feature: The hub's dashboard of its machines
   counts the machines and names, as links, those that need attention. Each
   card links to its machine's page, where its latest operations and plans
   are (features/ui/machine_page.feature), and the hub's own card has a Back
-  up menu that starts a backup of one of its plans. The scenarios here show
+  up menu that starts a backup of one of its plans, and says when the hub
+  didn't answer that the backup didn't start. While the hub doesn't say
+  which machine it is, the approved machines show without its own card,
+  with a sentence saying so, until it answers (#1692). The scenarios here show
   machines that paired from their terminals and hold no connection; the hub
   showing a connected machine online is in
   `features/fleet/staying_connected.feature`. The page follows the hub's
@@ -135,6 +138,18 @@ Feature: The hub's dashboard of its machines
     And the hub's own card tells its status "Succeeded"
     And the page has no accessibility violations
 
+  Scenario: The hub's own Back up menu says the backup didn't start when the hub doesn't answer
+    Given a hub with sign-in off and a demo plan "demo-home" with a tiny scratch repository
+    And the hub doesn't answer a request to start a backup
+    When I open the web UI
+    And I skip to the content
+    And I press Tab until focus is on the hub's own Back up button
+    And I press Enter
+    And I press Tab until focus is on the button "Start backup of demo-home"
+    And I press Enter
+    Then the page shows an error alert containing "The backup didn't start because the hub couldn't be reached."
+    And the page has no accessibility violations
+
   Scenario Outline: The hub's own Back up menu opens inside the window on a narrow page, at <size> percent text
     Given a viewport of 320 by 640 pixels
     And the reader sets the text size to <size> percent
@@ -168,6 +183,18 @@ Feature: The hub's dashboard of its machines
     When I open the web UI
     Then the page says "The hub didn't answer, so its machines can't be shown. The page asks again in a few seconds."
     And the page shows the machine "demo-laptop"
+
+  Scenario: A dashboard shows the approved machines while the hub doesn't say which machine it is, and its own card once it does
+    Given a hub with sign-in off
+    And a machine named "demo-laptop" is approved on the hub
+    And the hub doesn't answer when asked which machine it is
+    When I open the web UI
+    Then the page says "The hub didn't say which machine it is, so this hub's own machine can't be shown. The page asks again in a few seconds."
+    And the page shows the machine "demo-laptop"
+    And the page has no accessibility violations
+    When the hub answers when asked which machine it is
+    Then the first card is the hub's own, marked "This hub"
+    And the page no longer says "The hub didn't say which machine it is, so this hub's own machine can't be shown. The page asks again in a few seconds."
 
   Scenario: A machine approved while the dashboard is open shows at once, and a pause holds the page until it resumes
     Given a hub with sign-in off
