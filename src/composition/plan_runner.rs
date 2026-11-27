@@ -335,11 +335,28 @@ impl PlanRunner {
         let Some(operation) = self.unless_canceled(operation).await else {
             return;
         };
+        // Its own words: it never ran, unlike a queued backup a start finds.
+        let failed = format!(
+            "{} of plan {} didn't start, and ends as failed operation {}",
+            run_named(trigger),
+            plan.as_str(),
+            operation.id().as_uuid().hyphenated()
+        );
         match built {
-            Unbuilt::Secret(secret) => self.refuse_resumed(operation, *secret).await,
+            Unbuilt::Secret(secret) => {
+                let SecretUnbuilt {
+                    refusal, failure, ..
+                } = *secret;
+                log::warn!(
+                    "{failed}: {}",
+                    start_refused(&StartError::SecretRefused(refusal))
+                );
+                self.end_refused(operation, failure).await;
+            }
             Unbuilt::Refused(error) => {
-                self.end_unrunnable(operation, never_ran(&error), &start_refused(&error))
-                    .await;
+                let reason = never_ran(&error);
+                log::warn!("{failed} ({}): {}", reason.code(), start_refused(&error));
+                self.end_never_ran(operation, reason).await;
             }
         }
     }
@@ -697,6 +714,12 @@ impl PlanRunner {
             operation.id().as_uuid().hyphenated(),
             reason.code()
         );
+        self.end_never_ran(operation, reason).await;
+    }
+
+    /// Ends `operation`, a queued backup that never ran, failed with
+    /// `reason`, its end left unannounced but in the daemon's log.
+    async fn end_never_ran(&self, operation: domain::execution::Operation, reason: FailureReason) {
         let ended = self.queued_ends().end_resumed(operation, reason).await;
         log_queued_end(&ended);
     }
@@ -716,6 +739,12 @@ impl PlanRunner {
             operation.id().as_uuid().hyphenated(),
             start_refused(&StartError::SecretRefused(refusal))
         );
+        self.end_refused(operation, failure).await;
+    }
+
+    /// Ends `operation`, refused for a secret, failed with `failure`, and
+    /// says how it ended once the log has the end.
+    async fn end_refused(&self, operation: domain::execution::Operation, failure: FailureReason) {
         let ended = self.queued_ends().end_resumed(operation, failure).await;
         log_queued_end(&ended);
         if ended.written {
