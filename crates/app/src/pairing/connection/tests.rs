@@ -3745,6 +3745,49 @@ async fn a_command_no_one_waits_for_leaves_room_for_the_next() {
     }
 }
 
+/// The hub waits on at most its commands in flight to one machine: one
+/// more, while they all wait, is refused with when to ask again, once the
+/// wait for an answer is over, and nothing is sent (decision 176).
+#[tokio::test]
+async fn the_hub_refuses_a_command_past_those_in_flight() {
+    use crate::pairing::CommandAskRefused;
+    use domain::fleet::{Accepts, COMMAND_ANSWER_WITHIN, MAX_COMMANDS_IN_FLIGHT};
+    use futures::{FutureExt as _, StreamExt as _};
+
+    let hub = keeping_reports(1);
+    let _identity = approved(&hub).await;
+    let mut queue = hub
+        .pairing
+        .went_live_taking(agent_id(1), 1, Box::new(|| {}), Some(Accepts::all()))
+        .await;
+    let mut waiting = Vec::new();
+    for ask in 0..MAX_COMMANDS_IN_FLIGHT {
+        let mut asked = Box::pin(hub.pairing.command_asked(photos_asked_of(agent_id(1))));
+        assert!(
+            futures::poll!(asked.as_mut()).is_pending(),
+            "the hub refused ask {ask}"
+        );
+        assert!(
+            queue.next().now_or_never().flatten().is_some(),
+            "the hub sent nothing for ask {ask}"
+        );
+        waiting.push(asked);
+    }
+    let refused = futures::poll!(Box::pin(
+        hub.pairing.command_asked(photos_asked_of(agent_id(1)))
+    ));
+    assert_eq!(
+        refused,
+        std::task::Poll::Ready(Err(CommandAskRefused::Busy {
+            retry_at: hub.clock.now() + COMMAND_ANSWER_WITHIN
+        }))
+    );
+    assert!(
+        queue.next().now_or_never().flatten().is_none(),
+        "the hub sent the refused command"
+    );
+}
+
 /// The hub sends one machine at most its commands an hour, so its own asks
 /// never fill the machine's ledger of the commands it took; the next is
 /// refused with when to ask again, an hour after the oldest (decision 176).
