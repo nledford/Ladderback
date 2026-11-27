@@ -247,6 +247,7 @@ impl ReportInbox for SqliteStore {
             return Ok(Ingested {
                 ingest: verdict,
                 dropped: None,
+                diverged: false,
             });
         }
         sqlx::query(RAISE)
@@ -284,6 +285,7 @@ impl ReportInbox for SqliteStore {
             return Ok(Ingested {
                 ingest: Ingest::Duplicate,
                 dropped: None,
+                diverged: false,
             });
         }
         let held: i64 = sqlx::query(TALLY)
@@ -317,6 +319,7 @@ impl ReportInbox for SqliteStore {
         Ok(Ingested {
             ingest: Ingest::New,
             dropped,
+            diverged: false,
         })
     }
 
@@ -380,6 +383,11 @@ impl ReportInbox for SqliteStore {
             .map_err(unavailable)?
             .map(|row| seq_of(&row, "seq"))
             .transpose()
+    }
+
+    async fn diverged(&self, agent: AgentId, epoch: OutboxEpoch) -> Result<bool, StoreError> {
+        let _ = (agent, epoch);
+        todo!("the diverged mark")
     }
 
     async fn keep_plans(&self, agent: AgentId, plans: &PlansReport) -> Result<(), StoreError> {

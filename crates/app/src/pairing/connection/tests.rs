@@ -494,6 +494,14 @@ impl crate::ports::ReportInbox for FullInbox {
     ) -> Result<Option<domain::fleet::ReportSeq>, crate::ports::StoreError> {
         self.inner.taken_through(agent, epoch).await
     }
+
+    async fn diverged(
+        &self,
+        agent: domain::AgentId,
+        epoch: domain::fleet::OutboxEpoch,
+    ) -> Result<bool, crate::ports::StoreError> {
+        self.inner.diverged(agent, epoch).await
+    }
 }
 
 /// The hub warns that it let go of an agent's reports in the step that let

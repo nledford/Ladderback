@@ -62,6 +62,8 @@ pub async fn run_inbox(harness: &dyn ReportInboxHarness) {
     the_latest_reports_are_read_with_the_count_let_go_of(harness).await;
     an_operations_report_is_held_once_across_machines(harness).await;
     the_last_place_taken_is_read_for_each_agent_and_epoch(harness).await;
+    a_report_unlike_the_one_taken_at_its_place_diverges(harness).await;
+    a_diverged_mark_is_forgotten_with_its_epoch(harness).await;
     live::the_latest_plans_are_kept_in_place_of_the_last(harness).await;
     live::the_latest_progress_is_kept_in_place_of_the_last(harness).await;
 }
@@ -778,4 +780,128 @@ async fn the_last_place_taken_is_read_for_each_agent_and_epoch(harness: &dyn Rep
     drop(inbox);
     let inbox = harness.reopened().await;
     assert_eq!(through(inbox, AGENT, EPOCH).await, Some(seq(5)));
+}
+
+/// What the hub did with `entry`, and whether it diverged from the report
+/// taken at its place.
+async fn checked(
+    inbox: &dyn ReportInbox,
+    agent: AgentId,
+    entry: &OutboxEntry,
+) -> Option<(Ingest, bool)> {
+    ok(inbox.ingest(agent, entry, now()).await, "taking a report")
+        .map(|taken| (taken.ingest, taken.diverged))
+}
+
+/// Whether the hub marked `agent`'s `epoch` diverged.
+async fn diverged(inbox: &dyn ReportInbox, agent: AgentId, epoch: OutboxEpoch) -> Option<bool> {
+    ok(inbox.diverged(agent, epoch).await, "the diverged mark")
+}
+
+/// Another operation's report at `place` of `epoch` than [`entry`]'s.
+fn other_at(epoch: OutboxEpoch, place: u64) -> OutboxEntry {
+    let taken = entry(epoch, place);
+    OutboxEntry {
+        report: AgentReport {
+            op_id: op(0x1387_0000 + u128::from(place)),
+            ..taken.report.clone()
+        },
+        ..taken
+    }
+}
+
+/// A report at a place the hub took is checked against the report taken
+/// there (#1387, decision 177): the same one sent again is a duplicate, or
+/// behind, as before. Another diverges, near or far behind the last taken:
+/// it is kept nowhere, and its epoch is marked diverged, for that agent and
+/// epoch only, across restarts. With no report at the place, one the hub
+/// holds under another machine ID is sent again (#1513), and one it holds
+/// nowhere diverges.
+async fn a_report_unlike_the_one_taken_at_its_place_diverges(harness: &dyn ReportInboxHarness) {
+    let inbox = harness.empty().await;
+    let window = u64::try_from(SEND_WINDOW).unwrap_or(u64::MAX);
+    for place in [1, 2, window + 1] {
+        taken(inbox.as_ref(), AGENT, &entry(EPOCH, place)).await;
+    }
+    assert_eq!(
+        checked(inbox.as_ref(), AGENT, &entry(EPOCH, 2)).await,
+        Some((Ingest::Duplicate, false)),
+        "the report taken, sent again"
+    );
+    assert_eq!(
+        checked(inbox.as_ref(), AGENT, &entry(EPOCH, 1)).await,
+        Some((Ingest::Behind, false)),
+        "the report taken, far behind"
+    );
+    assert_eq!(diverged(inbox.as_ref(), AGENT, EPOCH).await, Some(false));
+    assert_eq!(
+        checked(inbox.as_ref(), AGENT, &other_at(EPOCH, 2)).await,
+        Some((Ingest::Duplicate, true)),
+        "another report at a place taken"
+    );
+    assert_eq!(
+        checked(inbox.as_ref(), AGENT, &other_at(EPOCH, 1)).await,
+        Some((Ingest::Behind, true)),
+        "another report far behind"
+    );
+    assert_eq!(
+        checked(inbox.as_ref(), AGENT, &other_at(EPOCH, 3)).await,
+        Some((Ingest::Duplicate, true)),
+        "a report held nowhere, at a place taken with none"
+    );
+    assert_eq!(
+        reports(inbox.as_ref(), AGENT).await,
+        [entry(EPOCH, 1), entry(EPOCH, 2), entry(EPOCH, window + 1)]
+    );
+    assert_eq!(diverged(inbox.as_ref(), AGENT, EPOCH).await, Some(true));
+    assert_eq!(
+        diverged(inbox.as_ref(), OTHER_AGENT, EPOCH).await,
+        Some(false)
+    );
+    let held = entry(OTHER_EPOCH, 1);
+    taken(inbox.as_ref(), OTHER_AGENT, &held).await;
+    let again = OutboxEntry {
+        seq: seq(5),
+        ..held
+    };
+    for _ in 0..2 {
+        assert_eq!(
+            checked(inbox.as_ref(), AGENT, &again).await,
+            Some((Ingest::Duplicate, false)),
+            "a report held under another machine ID"
+        );
+    }
+    assert_eq!(
+        diverged(inbox.as_ref(), AGENT, OTHER_EPOCH).await,
+        Some(false)
+    );
+    drop(inbox);
+    let inbox = harness.reopened().await;
+    assert_eq!(diverged(inbox.as_ref(), AGENT, EPOCH).await, Some(true));
+}
+
+/// The diverged mark lives with its epoch's last place taken: once the hub
+/// forgets the epoch among the agent's oldest, the mark goes with it, so it
+/// never outlasts the epoch it names (decision 177).
+async fn a_diverged_mark_is_forgotten_with_its_epoch(harness: &dyn ReportInboxHarness) {
+    let inbox = harness.empty().await;
+    let inbox = inbox.as_ref();
+    taken(inbox, AGENT, &entry(EPOCH, 1)).await;
+    checked(inbox, AGENT, &other_at(EPOCH, 1)).await;
+    assert_eq!(diverged(inbox, AGENT, EPOCH).await, Some(true));
+    let later = Timestamp::constant(1_800_000_200, 0);
+    for n in 1..=MAX_EPOCHS_HELD {
+        let newer = OutboxEpoch::from_uuid(Uuid::from_u128(0x200 + u128::from(n)));
+        taken_at(inbox, AGENT, &entry(newer, 1), later).await;
+    }
+    assert_eq!(
+        ok(
+            inbox.taken_through(AGENT, EPOCH).await,
+            "the last place taken"
+        )
+        .flatten(),
+        None,
+        "the epoch is forgotten"
+    );
+    assert_eq!(diverged(inbox, AGENT, EPOCH).await, Some(false));
 }

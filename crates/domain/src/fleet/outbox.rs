@@ -282,5 +282,20 @@ pub fn ingest(held: Option<ReportSeq>, seq: ReportSeq) -> Ingest {
     }
 }
 
+/// Whether `sent`, a report at a place of its epoch the hub took already,
+/// isn't the report the hub took there, `at_place`, none when the hub
+/// holds no report at that place (#1387, decision 177). The hub holds an
+/// operation's happening once, so a report of the same operation and
+/// happening is the one taken, sent again. With no report at the place,
+/// because the hub held the report already under another epoch or machine
+/// ID (#1513) or let go of it past the cap, a report the hub holds
+/// anywhere, `held_anywhere`, is one sent again, and one it holds nowhere
+/// is new to it: the agent's outbox gave the place again to another report,
+/// as one restored from an older database does.
+pub fn diverges(sent: &AgentReport, at_place: Option<&AgentReport>, held_anywhere: bool) -> bool {
+    let _ = (sent, at_place, held_anywhere);
+    todo!("the content check")
+}
+
 #[cfg(test)]
 mod tests;

@@ -24,6 +24,39 @@ fn failure() -> AgentReport {
 
 const EPOCH: OutboxEpoch = OutboxEpoch::from_uuid(Uuid::from_u128(7));
 
+fn of(op: u128, happening: Happening) -> AgentReport {
+    AgentReport {
+        op_id: OperationId::from_uuid(Uuid::from_u128(op)),
+        ..report(happening)
+    }
+}
+
+/// A report at a place the hub took is the one taken, sent again, when the
+/// hub holds that operation's happening there, however its time or a
+/// failure's code reads; or, holding no report at the place, when it holds
+/// that report anywhere (#1513). Another report at the place, or one the
+/// hub holds nowhere, diverges: the outbox gave the place again (#1387,
+/// decision 177).
+#[test]
+fn a_report_at_a_taken_place_diverges_unless_it_is_the_one_taken() {
+    let sent = of(1, Happening::Succeeded);
+    assert!(!diverges(&sent, Some(&sent), false));
+    let later = AgentReport {
+        at: EpochSeconds::from_seconds(1_900_000_000),
+        ..sent.clone()
+    };
+    assert!(!diverges(&sent, Some(&later), false));
+    let other_code = report(Happening::Failed {
+        code: WireName::parse("hook-failed").unwrap(),
+    });
+    assert!(!diverges(&failure(), Some(&other_code), false));
+    assert!(diverges(&sent, Some(&of(2, Happening::Succeeded)), true));
+    assert!(diverges(&sent, Some(&of(1, Happening::Started)), true));
+    assert!(diverges(&sent, Some(&of(1, Happening::Canceled)), false));
+    assert!(!diverges(&sent, None, true));
+    assert!(diverges(&sent, None, false));
+}
+
 #[test]
 fn places_count_up_from_one_and_stop_at_the_last_number() {
     assert_eq!(ReportSeq::FIRST.get(), 1);

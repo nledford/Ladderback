@@ -187,6 +187,7 @@ impl ReportInbox for InMemoryReportInbox {
             return Ok(Ingested {
                 ingest: verdict,
                 dropped: None,
+                diverged: false,
             });
         }
         match place.and_then(|place| held.epochs.get_mut(place)) {
@@ -205,6 +206,7 @@ impl ReportInbox for InMemoryReportInbox {
             return Ok(Ingested {
                 ingest: Ingest::Duplicate,
                 dropped: None,
+                diverged: false,
             });
         }
         held.reports.push(entry.clone());
@@ -220,6 +222,7 @@ impl ReportInbox for InMemoryReportInbox {
         Ok(Ingested {
             ingest: Ingest::New,
             dropped,
+            diverged: false,
         })
     }
 
@@ -262,6 +265,11 @@ impl ReportInbox for InMemoryReportInbox {
                 .find(|(held, _, _)| *held == epoch)
                 .map(|(_, seq, _)| *seq)
         }))
+    }
+
+    async fn diverged(&self, agent: AgentId, epoch: OutboxEpoch) -> Result<bool, StoreError> {
+        let _ = (agent, epoch);
+        todo!("the diverged mark")
     }
 
     async fn keep_plans(&self, agent: AgentId, plans: &PlansReport) -> Result<(), StoreError> {

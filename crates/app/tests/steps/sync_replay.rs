@@ -556,6 +556,17 @@ async fn hub_holds_first_only(agent: &mut Agent, count: usize) {
     assert_eq!(Some(reports.as_slice()), recorded.get(..count));
 }
 
+#[then(regex = r"^the hub ended the connection, holding the agent's first (\d+) reports only$")]
+async fn hub_ended_holding_first(agent: &mut Agent, count: usize) {
+    let outcome = first(agent).synced.last();
+    assert!(
+        matches!(outcome, Some(Err(SyncFailure::Channel(_)))),
+        "{outcome:?}"
+    );
+    let reports = held(agent).await;
+    assert_eq!(Some(reports.as_slice()), first(agent).recorded.get(..count));
+}
+
 #[then(regex = r"^the agent's last Hello said its outbox gives place (\d+) next$")]
 async fn hello_said(agent: &mut Agent, next: u64) {
     let side = first(agent);

@@ -58,7 +58,8 @@ Feature: An agent's reports reach its hub once, in order
 
   Rule: A machine restored from an older copy of its database starts a new epoch (decision 177)
     Its `Hello` says where its outbox stands. When the hub already took the
-    place the outbox gives next, the machine numbers its reports again from
+    place the outbox gives next, or finds at a place it took a report other
+    than the one it took there, the machine numbers its reports again from
     an older place, so it starts a new epoch and sends its waiting reports
     under it; the hub keeps both epochs, and each report once.
 
@@ -75,6 +76,23 @@ Feature: An agent's reports reach its hub once, in order
       And the agent syncs with its hub
       Then the agent's outbox has started a new epoch
       And the hub holds each of the agent's 8 reports once, in the order it took them
+      And the agent's outbox holds no report the hub hasn't acknowledged
+
+    Scenario: A restored machine that gives more places than the hub took after the copy has every later report kept, and none twice
+      Given the hub can't be reached
+      And the agent ran 1 backup
+      And a copy of the agent's database was kept
+      And the hub can be reached again
+      And the agent synced with its hub
+      And the agent ran 2 backups
+      And the agent synced with its hub
+      When the agent's database is restored from the copy
+      And the agent runs 2 backups
+      And the agent tries to sync with its hub
+      Then the hub ended the connection, holding the agent's first 6 reports only
+      When the agent syncs with its hub
+      Then the agent's outbox has started a new epoch
+      And the hub holds each of the agent's 10 reports once, in the order it took them
       And the agent's outbox holds no report the hub hasn't acknowledged
 
     Scenario: A restored machine whose connection drops under its new epoch sends each report once
