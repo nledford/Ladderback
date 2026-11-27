@@ -1,6 +1,6 @@
 # API tokens and AI agents
 
-An API token lets a program other than a browser use Ladderback while sign-in is on: an AI agent through `ladderback mcp`, a scheduler, a monitoring script. Each token has its own permissions, and it can do only what they allow. Give a program only what its job needs, and a token of its own, so you can revoke one without stopping the others.
+An API token lets a program other than a browser use Ladderback while sign-in is on: an AI agent through `ladderback mcp` ([AI agents and the MCP server](ai-agents.md)), a scheduler, a monitoring script. Each token has its own permissions, and it can do only what they allow. Give a program only what its job needs, and a token of its own, so you can revoke one without stopping the others.
 
 ## Making a token
 

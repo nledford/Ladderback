@@ -18,5 +18,6 @@
 - [Moving a repository's password out of config.toml](secrets.md)
 - [Sign-in and remote access](remote-access.md)
 - [API tokens and AI agents](api-tokens.md)
+- [AI agents and the MCP server](ai-agents.md)
 - [The hub](hub.md)
   - [Maintenance with a hub](hub-maintenance.md)
