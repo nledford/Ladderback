@@ -55,8 +55,10 @@ impl MachineRoute {
     /// The route, telling who this machine is.
     #[must_use]
     pub fn with_identity(self, identity: MachineIdentity) -> Self {
-        let _ = identity;
-        todo!()
+        Self {
+            identity: Some(Arc::new(identity)),
+            ..self
+        }
     }
 
     fn standing(&self) -> Standing {
@@ -66,8 +68,9 @@ impl MachineRoute {
     }
 }
 
-fn answer(standing: Standing) -> Response {
-    let standing = match standing {
+/// Where the machine of `route` stands, and who it is, as the routes answer.
+fn answer(route: &MachineRoute) -> Response {
+    let standing = match route.standing() {
         Standing::Same => MachineStandingDto::Same,
         Standing::Copied => MachineStandingDto::Copied,
         Standing::NewIdTaken => MachineStandingDto::NewIdTaken,
@@ -75,18 +78,19 @@ fn answer(standing: Standing) -> Response {
         Standing::RemovedByHub => MachineStandingDto::RemovedByHub,
         Standing::Unread => MachineStandingDto::Unread,
     };
+    let identity = route.identity.as_deref();
     let dto = MachineDto {
         standing,
-        machine_id: None,
-        hostname: None,
-        zone: None,
+        machine_id: identity.map(|identity| identity.machine_id.clone()),
+        hostname: identity.and_then(|identity| identity.hostname.clone()),
+        zone: identity.and_then(|identity| identity.zone.clone()),
     };
     (StatusCode::OK, Json(dto)).into_response()
 }
 
-/// `GET /api/v1/machine`: where this machine stands.
+/// `GET /api/v1/machine`: where this machine stands, and who it is.
 pub(crate) async fn read(State(state): State<AppState>) -> Response {
-    answer(state.machine.standing())
+    answer(&state.machine)
 }
 
 /// `POST /api/v1/machine/new-id`: takes a new machine ID for a copied data
@@ -103,7 +107,7 @@ pub(crate) async fn take_new_id(State(state): State<AppState>) -> Response {
                 "took the new machine ID {} for this computer, as its data folder was copied from another computer or its hub refused it as a second computer or removed it, and turned off its maintenance of every repository: restart Ladderback to start using it",
                 id.as_uuid()
             );
-            answer(take.standing())
+            answer(&state.machine)
         }
         Err(NewIdError::NotCopied) => refused(StatusCode::CONFLICT, ErrorCode::MachineNotCopied),
         // The configuration's refusal, `503` with its `config-*` code, as

@@ -108,6 +108,9 @@ mod dashboard;
 // The hub's dashboard, its start page, and its old address `/dashboard`:
 // the DOM glue of `dashboard.rs`.
 mod dashboard_page;
+// A machine's page on a hub, `/machines/<machine-id>` (decision 175): the
+// DOM glue of `dashboard.rs`, as the dashboard's.
+mod machine_page;
 // What the hub's pairing dialog decides, on the host; `settings/agents.rs`
 // is its glue.
 mod pairing;
@@ -221,6 +224,11 @@ fn dashboard_page(localizer: Arc<Localizer>) -> AnyView {
     view! { <dashboard_page::DashboardRoute localizer=localizer /> }.into_any()
 }
 
+/// The page of `/machines/:id`: a machine's page on a hub (decision 175).
+fn machine_page(localizer: Arc<Localizer>) -> AnyView {
+    view! { <machine_page::MachineRoute localizer=localizer /> }.into_any()
+}
+
 /// Watches the router: each path the page shows is titled (`page::retitle`),
 /// again once the page knows whether the daemon is a hub, whose start page
 /// is titled as its dashboard (§16, decision 173). `page::declare` titled
@@ -244,6 +252,7 @@ fn Pages(localizer: Arc<Localizer>) -> impl IntoView {
     let start = Arc::clone(&localizer);
     let gallery = Arc::clone(&localizer);
     let operations = Arc::clone(&localizer);
+    let machine = Arc::clone(&localizer);
     let plans = Arc::clone(&localizer);
     let proposals = Arc::clone(&localizer);
     let snapshots = Arc::clone(&localizer);
@@ -293,6 +302,7 @@ fn Pages(localizer: Arc<Localizer>) -> impl IntoView {
                 view=move || view! { <Settings localizer=Arc::clone(&settings) /> }
             />
             <Route path=path!("/dashboard") view=move || dashboard_page(Arc::clone(&dashboard)) />
+            <Route path=path!("/machines/:id") view=move || machine_page(Arc::clone(&machine)) />
         </Routes>
     }
 }

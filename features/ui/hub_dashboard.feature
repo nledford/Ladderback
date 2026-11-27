@@ -178,7 +178,7 @@ Feature: The hub's dashboard of its machines
     And the page doesn't show "There are no plans yet"
     And the page has no accessibility violations
 
-  Scenario: The product name in the banner leads a hub's reader to its approved machines, by keyboard
+  Scenario: The product name in the banner leads a hub's reader to its machines, by keyboard
     Given a hub with sign-in off
     And a machine named "demo-laptop" is approved on the hub
     When I open the address "/operations"
@@ -205,12 +205,12 @@ Feature: The hub's dashboard of its machines
     And the page is titled "Page not found – Ladderback"
     And the page has no accessibility violations
 
-  Scenario: The Machines tab leads to the hub's start page, where the approved machines are
+  Scenario: The Machines tab leads to the hub's start page, where the machines are
     Given a hub with sign-in off
     And a machine named "demo-laptop" is approved on the hub
     When I open the address "/settings#machines"
     And I skip to the content
-    And I press Tab until focus is on the link "See the approved machines' latest operations"
+    And I press Tab until focus is on the link "See the machines on the dashboard"
     And I press Enter
     Then focus is on the main heading "Dashboard"
     And the page's address is "/"

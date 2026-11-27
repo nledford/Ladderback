@@ -3871,7 +3871,7 @@ ui-machines-resumed-unlisted = Live updates are on again.
 ui-machines-started-waiting = { $hostname } is waiting for approval.
 
 # A link on the Machines tab to the dashboard of the approved machines, which is the hub's start page (decision 173).
-ui-machines-dashboard-link = See the approved { -machine(form: "other") }' latest operations
+ui-machines-dashboard-link = See the { -machine(form: "other") } on the dashboard
 
 # The heading of the notice that leads the Machines tab while the hub is in recovery mode (decision 137).
 ui-machines-recovery-heading = Recovery mode
@@ -3910,7 +3910,7 @@ ui-dashboard-heading = Dashboard
 ui-dashboard-title = Dashboard – { -brand-name }
 
 # What the dashboard shows, under its heading.
-ui-dashboard-intro = Each approved { -machine }'s latest operations, as it reported them to this { -hub }. A { -machine } stays connected to the { -hub } while it runs, so this page shows that it is online now, or when it last connected.
+ui-dashboard-intro = Each { -machine } at a glance: this { -hub } first, then each approved { -machine }, as it reported to this { -hub }. A { -machine } stays connected to the { -hub } while it runs, so its card shows that it is online now, or when it last connected.
 
 # Shown while the dashboard's first read of the machines is on its way.
 ui-dashboard-loading = Loading the { -machine(form: "other") }…
@@ -4042,8 +4042,9 @@ ui-dashboard-attention-due = { $plan } on { $hostname } was due { $due } and has
 # Under the name on the hub's own card, and under the heading of its page.
 ui-machine-card-this-hub = This { -hub }
 
-# The start of a card's attention mark, before the sentence that says why.
-ui-machine-card-attention = Needs attention:
+# A card's attention mark: that its machine needs attention, then why. The words around the reason show in bold.
+# $reason (string): the sentence that says why, one of the ui-machine-card-* reasons below.
+ui-machine-card-attention = Needs attention: { $reason }
 
 # Why a card needs attention: its machine is offline though a planned run of it fell due.
 # $when (string): when it last connected, as ui-instant or ui-dashboard-time-elsewhere writes it.
@@ -4086,6 +4087,9 @@ ui-machine-card-open = Open { $hostname }
 ui-machine-card-back-up = Back up
 
 ## A machine's page on the hub (decision 175).
+
+# The heading of a machine's page before the page has read the machine's name.
+ui-machine-page-heading = Machine
 
 # A machine's page's title before the page has read the machine's name.
 ui-machine-page-title = Machine – { -brand-name }

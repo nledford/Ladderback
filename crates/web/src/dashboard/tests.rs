@@ -321,7 +321,11 @@ fn plan(name: &str, last: Option<(&str, i64)>, next: Option<i64>) -> MachinePlan
 }
 
 /// `machine` with these plans, and `left_out` more it didn't report.
-fn with_plans(mut machine: HubMachineDto, plans: Vec<MachinePlanDto>, left_out: u64) -> HubMachineDto {
+fn with_plans(
+    mut machine: HubMachineDto,
+    plans: Vec<MachinePlanDto>,
+    left_out: u64,
+) -> HubMachineDto {
     machine.plans = Some(MachinePlansDto { plans, left_out });
     machine
 }
@@ -441,7 +445,11 @@ fn an_offline_machine_past_a_planned_run_needs_attention() {
         vec![plan("documents", Some(("succeeded", -60)), Some(30))],
         0,
     );
-    assert_eq!(card_facts(&asleep, AT_MS).attention, None, "offline before its schedule is no matter");
+    assert_eq!(
+        card_facts(&asleep, AT_MS).attention,
+        None,
+        "offline before its schedule is no matter"
+    );
 }
 
 /// An online machine needs attention for a failed last run, then for a
@@ -571,7 +579,8 @@ fn summary_of(id: &str, plan: &str, status: &str, minutes: i64) -> api::Operatio
         status: status.to_owned(),
         queued_at: at(minutes - 1),
         started_at: (status != "queued").then(|| at(minutes)),
-        finished_at: matches!(status, "succeeded" | "failed" | "cancelled").then(|| at(minutes + 1)),
+        finished_at: matches!(status, "succeeded" | "failed" | "cancelled")
+            .then(|| at(minutes + 1)),
         warning_codes: Vec::new(),
         failure_code: (status == "failed").then_some(api::ErrorCode::DaemonUnreachable),
         failure: None,
@@ -670,7 +679,9 @@ fn the_hubs_own_machine_reads_as_a_paired_one_does() {
         })
     );
     assert_eq!(
-        own.progress.as_ref().map(|progress| (progress.operation.as_str(), progress.current)),
+        own.progress
+            .as_ref()
+            .map(|progress| (progress.operation.as_str(), progress.current)),
         Some(("op-r", 512))
     );
     // Before its status is read, the hub hasn't told its plans; without a
@@ -679,7 +690,10 @@ fn the_hubs_own_machine_reads_as_a_paired_one_does() {
         own_machine(&identity(Some("agent-hub")), None, &operations).and_then(|own| own.plans),
         None
     );
-    assert_eq!(own_machine(&identity(None), Some(&status), &operations), None);
+    assert_eq!(
+        own_machine(&identity(None), Some(&status), &operations),
+        None
+    );
 }
 
 /// The hub's own card comes first, then each approved machine in the order
@@ -687,7 +701,9 @@ fn the_hubs_own_machine_reads_as_a_paired_one_does() {
 #[test]
 fn the_hubs_own_card_comes_first_and_the_page_waits_for_it() {
     let fleet = Fleet::new();
-    fleet.machines.set(vec![machine("demo-a", AT), machine("demo-b", AT)]);
+    fleet
+        .machines
+        .set(vec![machine("demo-a", AT), machine("demo-b", AT)]);
     fleet.state.set(State::Ready);
     assert_eq!(fleet.shown_state().get_untracked(), State::Loading);
     fleet.own.set(Own::Read(Some(machine("demo-hub", AT))));
@@ -699,7 +715,10 @@ fn the_hubs_own_card_comes_first_and_the_page_waits_for_it() {
         .map(|machine| machine.hostname)
         .collect();
     assert_eq!(names, ["demo-hub", "demo-a", "demo-b"]);
-    assert_eq!(fleet.own_id().get_untracked().as_deref(), Some("agent-demo-hub"));
+    assert_eq!(
+        fleet.own_id().get_untracked().as_deref(),
+        Some("agent-demo-hub")
+    );
     fleet.own.set(Own::Read(None));
     assert_eq!(fleet.shown().get_untracked().len(), 2);
     assert_eq!(fleet.own_id().get_untracked(), None);
@@ -714,7 +733,9 @@ fn a_pause_holds_the_hubs_own_card_and_the_time() {
     fleet.own.set(Own::Read(Some(machine("demo-hub", AT))));
     fleet.now.set(AT_MS);
     fleet.pause();
-    fleet.own.set(Own::Read(Some(online(machine("demo-hub", AT)))));
+    fleet
+        .own
+        .set(Own::Read(Some(online(machine("demo-hub", AT)))));
     fleet.now.set(AT_MS + MINUTE_MS);
     assert_eq!(fleet.shown_now().get_untracked(), AT_MS);
     assert_eq!(

@@ -9,11 +9,9 @@
 //! while it is paused and shows the copy; resuming drops it.
 
 use api::{
-    HubMachineDto, IanaZone, MachineDto, MachineOutcomeDto, MachinePlansDto, MachineProgressDto,
-    MsgArg, StatusDto, UiEvent,
+    HubMachineDto, IanaZone, MachineDto, MachineOperationDto, MachineOutcomeDto, MachinePlanDto,
+    MachinePlanRunDto, MachinePlansDto, MachineProgressDto, MsgArg, StatusDto, UiEvent,
 };
-#[cfg(test)]
-use api::{MachinePlanDto, MachinePlanRunDto};
 use l10n::{MessageId, msg};
 use leptos::prelude::*;
 
@@ -22,11 +20,14 @@ use crate::components::State;
 use crate::components::status_badge::rules::BadgeState;
 use crate::wording::Words;
 
-/// The machines as they were when the reader paused them.
+/// The machines as they were when the reader paused them, the hub's own
+/// and the time the cards were read at with them.
 #[derive(Clone)]
 struct Held {
     machines: Vec<HubMachineDto>,
     state: State,
+    own: Own,
+    now: i64,
 }
 
 /// What the page has read of the hub's own machine: nothing yet, or its
@@ -66,12 +67,31 @@ impl Fleet {
 
     /// The machine ID of the hub's own card, as the page shows it.
     pub(crate) fn own_id(self) -> Signal<Option<String>> {
-        todo!()
+        let own = self.shown_own();
+        Signal::derive(move || {
+            own.with(|own| match own {
+                Own::Read(Some(machine)) => Some(machine.machine_id.clone()),
+                Own::Read(None) | Own::Waiting => None,
+            })
+        })
     }
 
     /// The time the cards the page shows are read at.
     pub(crate) fn shown_now(self) -> Signal<i64> {
-        todo!()
+        Signal::derive(move || {
+            self.held
+                .with(|held| held.as_ref().map(|held| held.now))
+                .unwrap_or_else(|| self.now.get())
+        })
+    }
+
+    /// The hub's own machine, as the page shows it.
+    fn shown_own(self) -> Signal<Own> {
+        Signal::derive(move || {
+            self.held
+                .with(|held| held.as_ref().map(|held| held.own.clone()))
+                .unwrap_or_else(|| self.own.get())
+        })
     }
 
     /// Holds the machines as they are now; a page already paused keeps the
@@ -83,6 +103,8 @@ impl Fleet {
         self.held.set(Some(Held {
             machines: self.machines.get_untracked(),
             state: self.state.get_untracked(),
+            own: self.own.get_untracked(),
+            now: self.now.get_untracked(),
         }));
     }
 
@@ -99,31 +121,51 @@ impl Fleet {
         self.held.with(Option::is_some)
     }
 
-    /// Whether a read has answered, as the page shows it.
+    /// Whether a read has answered, as the page shows it: the page waits
+    /// for the hub's own machine too.
     pub(crate) fn shown_state(self) -> Signal<State> {
         Signal::derive(move || {
-            self.held
-                .with(|held| held.as_ref().map(|held| held.state))
-                .unwrap_or_else(|| self.state.get())
+            let (state, own_read) = self
+                .held
+                .with(|held| {
+                    held.as_ref()
+                        .map(|held| (held.state, held.own != Own::Waiting))
+                })
+                .unwrap_or_else(|| (self.state.get(), self.own.with(|own| *own != Own::Waiting)));
+            if state == State::Ready && !own_read {
+                State::Loading
+            } else {
+                state
+            }
         })
     }
 
-    /// The machines the page shows, oldest first.
+    /// The machines the page shows: the hub's own first, then each
+    /// approved one, oldest first.
     pub(crate) fn shown(self) -> Signal<Vec<HubMachineDto>> {
+        let own = self.shown_own();
         Signal::derive(move || {
-            self.held.with(|held| match held {
+            let mut machines = self.held.with(|held| match held {
                 Some(held) => held.machines.clone(),
                 None => self.machines.get(),
-            })
+            });
+            if let Own::Read(Some(own)) = own.get() {
+                // Never twice, should the hub list itself among its machines.
+                machines.retain(|machine| machine.machine_id != own.machine_id);
+                machines.insert(0, own);
+            }
+            machines
         })
     }
 
-    /// How many changes wait for the resume; none when not paused.
+    /// How many changes wait for the resume, the hub's own machine's among
+    /// them; none when not paused.
     pub(crate) fn pending(self) -> usize {
         self.held.with(|held| {
             held.as_ref().map_or(0, |held| {
                 self.machines
                     .with(|machines| changes_since(&held.machines, machines))
+                    + self.own.with(|own| usize::from(*own != held.own))
             })
         })
     }
@@ -133,6 +175,7 @@ impl Fleet {
             held.as_ref().map_or(0, |held| {
                 self.machines
                     .with_untracked(|machines| changes_since(&held.machines, machines))
+                    + self.own.with_untracked(|own| usize::from(*own != held.own))
             })
         })
     }
@@ -314,23 +357,124 @@ pub(crate) struct CardFacts {
     pub(crate) attention: Option<Attention>,
 }
 
-/// What the card of `machine` tells at `now_ms`.
+/// The instant `at` (RFC 3339) in ms since the Unix epoch; none when it
+/// can't be read.
+fn millis(at: &str) -> Option<i64> {
+    Some(at.parse::<jiff::Timestamp>().ok()?.as_millisecond())
+}
+
+/// Whether a run in `status` has ended: one queued or running hasn't.
+fn ended(status: &str) -> bool {
+    !matches!(status, "queued" | "running")
+}
+
+/// What the card of `machine` tells at `now_ms`: its status, when its
+/// latest run that ended did, its earliest next run, how many plans it has,
+/// and why it needs attention, the first reason that holds (decision 175):
+/// offline past a planned run, a plan's last run failed, or a planned run
+/// past due while nothing runs. A run counts as due once it is more than
+/// [`DUE_AFTER_MS`] past.
 pub(crate) fn card_facts(machine: &HubMachineDto, now_ms: i64) -> CardFacts {
-    let _ = (machine, now_ms);
-    todo!()
+    let listed: &[MachinePlanDto] = machine
+        .plans
+        .as_ref()
+        .map_or(&[], |plans| plans.plans.as_slice());
+    let running = machine.progress.is_some()
+        || machine
+            .operations
+            .first()
+            .is_some_and(|operation| operation.outcome == MachineOutcomeDto::Running);
+    let last = listed
+        .iter()
+        .filter_map(|plan| plan.last_run.as_ref())
+        .filter(|run| ended(&run.status))
+        .max_by_key(|run| millis(&run.at));
+    let next = listed
+        .iter()
+        .filter_map(|plan| {
+            let at = plan.next_run.as_deref()?;
+            Some((plan.plan.as_str(), at, millis(at)?))
+        })
+        .min_by_key(|(_, _, ms)| *ms);
+    let due = next.filter(|(_, _, ms)| ms.saturating_add(DUE_AFTER_MS) < now_ms);
+    let status = if running {
+        CardStatus::Running
+    } else {
+        last.map_or(CardStatus::Never, |run| {
+            CardStatus::Last(run.status.clone())
+        })
+    };
+    let next_run = match (next, due) {
+        (None, _) => NextRun::NotPlanned,
+        (Some((_, at, _)), Some(_)) if !running => NextRun::WasDue(at.to_owned()),
+        (Some((_, at, _)), _) => NextRun::At(at.to_owned()),
+    };
+    let failed = listed.iter().find(|plan| {
+        plan.last_run
+            .as_ref()
+            .is_some_and(|run| run.status == "failed")
+    });
+    let attention = match (due, failed) {
+        (Some((_, at, _)), _) if !machine.online => Some(Attention::Offline {
+            last_seen: machine.last_seen.clone(),
+            due: at.to_owned(),
+        }),
+        (_, Some(plan)) => Some(Attention::Failed {
+            plan: plan.plan.clone(),
+        }),
+        (Some((plan, at, _)), None) if !running => Some(Attention::Due {
+            plan: plan.to_owned(),
+            due: at.to_owned(),
+        }),
+        _ => None,
+    };
+    CardFacts {
+        status,
+        last_backup: last.map(|run| run.at.clone()),
+        next_run,
+        plans: machine.plans.as_ref().map(|plans| {
+            u64::try_from(plans.plans.len())
+                .unwrap_or(u64::MAX)
+                .saturating_add(plans.left_out)
+        }),
+        attention,
+    }
+}
+
+/// A count as a message's number.
+fn count(n: usize) -> MsgArg {
+    MsgArg::Count(u64::try_from(n).unwrap_or(u64::MAX))
 }
 
 /// What the sentence above the cards says of `count` machines, `attention`
 /// of which need it.
-pub(crate) fn summary(count: usize, attention: usize) -> Words {
-    let _ = (count, attention);
-    todo!()
+pub(crate) fn summary(machines: usize, attention: usize) -> Words {
+    Words {
+        id: msg::UI_DASHBOARD_SUMMARY,
+        args: vec![("count", count(machines)), ("attention", count(attention))],
+    }
 }
 
 /// Why a card needs attention, in words, its times as `shown` writes them.
 pub(crate) fn attention_words(attention: &Attention, shown: impl Fn(&str) -> String) -> Words {
-    let _ = (attention, shown);
-    todo!()
+    let text = |value: &str| MsgArg::Text(value.to_owned());
+    match attention {
+        Attention::Offline { last_seen, due } => Words {
+            id: msg::UI_MACHINE_CARD_OFFLINE,
+            args: vec![
+                ("when", MsgArg::Text(shown(last_seen))),
+                ("due", MsgArg::Text(shown(due))),
+            ],
+        },
+        Attention::Failed { plan } => Words {
+            id: msg::UI_MACHINE_CARD_FAILED,
+            args: vec![("plan", text(plan))],
+        },
+        Attention::Due { plan, due } => Words {
+            id: msg::UI_MACHINE_CARD_DUE,
+            args: vec![("plan", text(plan)), ("due", MsgArg::Text(shown(due)))],
+        },
+    }
 }
 
 /// The words of the link after the sentence to the page of `hostname`,
@@ -340,20 +484,125 @@ pub(crate) fn attention_link(
     attention: &Attention,
     shown: impl Fn(&str) -> String,
 ) -> Words {
-    let _ = (hostname, attention, shown);
-    todo!()
+    let name = ("hostname", MsgArg::Text(hostname.to_owned()));
+    let text = |value: &str| MsgArg::Text(value.to_owned());
+    match attention {
+        Attention::Offline { last_seen, due } => Words {
+            id: msg::UI_DASHBOARD_ATTENTION_OFFLINE,
+            args: vec![
+                name,
+                ("when", MsgArg::Text(shown(last_seen))),
+                ("due", MsgArg::Text(shown(due))),
+            ],
+        },
+        Attention::Failed { plan } => Words {
+            id: msg::UI_DASHBOARD_ATTENTION_FAILED,
+            args: vec![name, ("plan", text(plan))],
+        },
+        Attention::Due { plan, due } => Words {
+            id: msg::UI_DASHBOARD_ATTENTION_DUE,
+            args: vec![
+                name,
+                ("plan", text(plan)),
+                ("due", MsgArg::Text(shown(due))),
+            ],
+        },
+    }
 }
 
-/// The hub's own machine as a card shows one: who `identity` says it is,
-/// its plans from its `status` once read, and its `operations`; none
-/// without a machine ID.
+/// How many of the hub's own operations its card's machine lists, as a
+/// paired machine's report holds at most.
+const OWN_OPERATIONS: usize = 10;
+
+/// A status of the hub's own history as a machine's outcome; none for one
+/// that hasn't started, or that this build doesn't know.
+fn own_outcome(status: &str) -> Option<MachineOutcomeDto> {
+    match status {
+        "running" => Some(MachineOutcomeDto::Running),
+        "succeeded" | "succeeded-with-warnings" => Some(MachineOutcomeDto::Succeeded),
+        "failed" => Some(MachineOutcomeDto::Failed),
+        "cancelled" => Some(MachineOutcomeDto::Canceled),
+        _ => None,
+    }
+}
+
+/// The hub's own machine as a card shows one (decision 175): who
+/// `identity` says it is, online, since the page reads it from the hub
+/// itself; its plans from its `status` once read, each one's last run when
+/// it ended, or else started or was queued; its latest `operations` that
+/// started, newest first, and the progress of the one that runs. None
+/// without a machine ID or a hostname.
 pub(crate) fn own_machine(
     identity: &MachineDto,
     status: Option<&StatusDto>,
     operations: &OperationsState,
 ) -> Option<HubMachineDto> {
-    let _ = (identity, status, operations);
-    todo!()
+    let machine_id = identity.machine_id.clone()?;
+    let hostname = identity.hostname.clone()?;
+    let plans = status.map(|status| MachinePlansDto {
+        plans: status
+            .plans
+            .iter()
+            .map(|plan| MachinePlanDto {
+                plan: plan.plan.id.clone(),
+                last_run: plan.last.as_ref().map(|last| MachinePlanRunDto {
+                    at: last
+                        .finished_at
+                        .as_ref()
+                        .or(last.started_at.as_ref())
+                        .unwrap_or(&last.queued_at)
+                        .clone(),
+                    status: last.status.clone(),
+                }),
+                next_run: plan.plan.next_run.clone(),
+            })
+            .collect(),
+        left_out: 0,
+    });
+    let listed = operations
+        .rows
+        .iter()
+        .filter_map(|row| {
+            let summary = &row.summary;
+            Some(MachineOperationDto {
+                operation: summary.id.clone(),
+                started_at: summary.started_at.clone(),
+                ended_at: summary.finished_at.clone(),
+                outcome: own_outcome(&summary.status)?,
+                code: summary
+                    .failure_code
+                    .and_then(|code| serde_json::to_value(code).ok())
+                    .and_then(|code| code.as_str().map(str::to_owned)),
+            })
+        })
+        .take(OWN_OPERATIONS)
+        .collect();
+    let progress = operations.rows.iter().find_map(|row| {
+        let progress = row.progress?;
+        Some(MachineProgressDto {
+            operation: row.summary.id.clone(),
+            step: progress.step,
+            unit: progress.unit,
+            current: progress.current,
+            total: progress.total,
+            at: progress
+                .reported_at
+                .or(progress.since)
+                .map(|at| at.to_string())
+                .unwrap_or_default(),
+        })
+    });
+    Some(HubMachineDto {
+        machine_id,
+        hostname,
+        last_seen: String::new(),
+        online: true,
+        zone: identity.zone.clone(),
+        reports_dropped: 0,
+        operations: listed,
+        plans,
+        progress,
+    })
 }
 
 #[cfg(test)]
