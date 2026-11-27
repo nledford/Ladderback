@@ -152,7 +152,7 @@ async fn reopening_does_not_apply_the_migrations_again() {
     let versions: Vec<i64> = first.iter().map(|row| row.0).collect();
     assert_eq!(
         versions,
-        [1, 2],
+        [1, 2, 3],
         "the baseline, then each after it: {first:?}"
     );
     assert!(
@@ -228,7 +228,7 @@ async fn a_second_handle_on_the_same_file_sees_what_the_first_wrote_and_the_othe
 }
 
 /// A 0.6.0 log, the baseline and nothing after it, that holds operations
-/// takes migration 0002 with each row kept as it was: a hub run of that
+/// takes migration 0003 with each row kept as it was: a hub run of that
 /// release names no session (decision 176).
 #[tokio::test]
 async fn a_0_6_0_log_holding_operations_takes_the_hub_commands_migration() {
@@ -280,7 +280,7 @@ async fn a_0_6_0_log_holding_operations_takes_the_hub_commands_migration() {
         .into_iter()
         .map(|(version, ..)| version)
         .collect();
-    assert_eq!(versions, [1, 2]);
+    assert_eq!(versions, [1, 2, 3]);
     let trigger = async |n| {
         store
             .get(id(n))

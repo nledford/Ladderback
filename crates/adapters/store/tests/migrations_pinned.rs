@@ -28,7 +28,7 @@ const PINNED: &[(i64, &str, &str)] = &[
         "11ae64b79438522f0d89befccbd5fa12cf451e2d58c58e60103800c6ab104df0be92a9b23e17e9fe0df31823df6ff5fb",
     ),
     (
-        2,
+        3,
         "hub commands",
         "4f63e2e4ee9a81060c21e601d03ac0cc69ed5ee0e71cae64c9c65aa3aad6825fa82a097674cf2d167f101afd5228763a",
     ),
