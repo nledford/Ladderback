@@ -244,7 +244,12 @@ fn use_case(agent: &mut Agent) -> Arc<RunMaintenance> {
 
 /// Lets the runs go on until `done` holds of the run `id` as the log has
 /// it, or fails the step.
-async fn until(agent: &Agent, id: OperationId, what: &str, done: impl Fn(&OperationStatus) -> bool) {
+async fn until(
+    agent: &Agent,
+    id: OperationId,
+    what: &str,
+    done: impl Fn(&OperationStatus) -> bool,
+) {
     for _ in 0..PATIENCE {
         let status = agent
             .store
@@ -258,7 +263,10 @@ async fn until(agent: &Agent, id: OperationId, what: &str, done: impl Fn(&Operat
         tokio::task::yield_now().await;
     }
     let status = agent.store.get(id).await.expect("the log answers");
-    panic!("the run is not {what}: {:?}", status.map(|detail| detail.record.status));
+    panic!(
+        "the run is not {what}: {:?}",
+        status.map(|detail| detail.record.status)
+    );
 }
 
 /// Lets the runs go on for a while, for a step that checks that something
@@ -312,7 +320,9 @@ async fn started(agent: &mut Agent, kind: String, repository: String) {
     let use_case = use_case(agent);
     let world = &mut agent.maintenance_queue;
     world.made += 1;
-    let id = OperationId::from_uuid(Uuid::from_u128(0x0190_0000_0000_7000_8000_0000_0000_0000 + world.made));
+    let id = OperationId::from_uuid(Uuid::from_u128(
+        0x0190_0000_0000_7000_8000_0000_0000_0000 + world.made,
+    ));
     let assessment = use_case
         .assess(id, &alias(&repository), kind_of(&kind))
         .await
@@ -380,7 +390,10 @@ async fn canceled(agent: &mut Agent, kind: String, repository: String) {
         .remove(&id)
         .expect("the run waits for its turn");
     let _ = cancel.send(());
-    until(agent, id, "canceled", |status| *status == OperationStatus::Canceled).await;
+    until(agent, id, "canceled", |status| {
+        *status == OperationStatus::Canceled
+    })
+    .await;
 }
 
 #[when(expr = "this agent stops maintaining the repository {string}")]
@@ -402,7 +415,10 @@ fn restart_holds(agent: &mut Agent) {
 #[then(expr = "the {word} of the repository {string} is running")]
 async fn is_running(agent: &mut Agent, kind: String, repository: String) {
     let id = agent.maintenance_queue.run(&kind, &repository);
-    until(agent, id, "running", |status| *status == OperationStatus::Running).await;
+    until(agent, id, "running", |status| {
+        *status == OperationStatus::Running
+    })
+    .await;
 }
 
 #[then(expr = "the {word} of the repository {string} is waiting for its turn")]
@@ -442,9 +458,12 @@ async fn history_shows(agent: &mut Agent, kind: String, repository: String, stat
 )]
 async fn history_shows_failed(agent: &mut Agent, kind: String, repository: String, code: String) {
     let id = agent.maintenance_queue.run(&kind, &repository);
-    until(agent, id, "failed", |status| {
-        matches!(status, OperationStatus::Failed { reason } if reason.code() == code)
-    })
+    until(
+        agent,
+        id,
+        "failed",
+        |status| matches!(status, OperationStatus::Failed { reason } if reason.code() == code),
+    )
     .await;
 }
 
@@ -493,7 +512,12 @@ async fn refused_unlisted(agent: &mut Agent) {
         .expect("a start was refused");
     let id = *id;
     assert!(
-        agent.store.get(id).await.expect("the log answers").is_none(),
+        agent
+            .store
+            .get(id)
+            .await
+            .expect("the log answers")
+            .is_none(),
         "the refused run is in the log"
     );
 }

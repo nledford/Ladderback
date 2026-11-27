@@ -208,7 +208,10 @@ pub fn failure(reason: &FailureReason) -> ErrorDto {
 /// repository's alias or the operation that held it.
 pub fn turn_refused(refusal: &TurnRefusal) -> (ErrorCode, Vec<(&'static str, MsgArg)>) {
     let alias = |code, alias: &domain::RepositoryAlias| {
-        (code, vec![("alias", MsgArg::Text(alias.as_str().to_owned()))])
+        (
+            code,
+            vec![("alias", MsgArg::Text(alias.as_str().to_owned()))],
+        )
     };
     match refusal {
         TurnRefusal::RepositoryUnknown { alias: name } => alias(ErrorCode::RepositoryUnknown, name),

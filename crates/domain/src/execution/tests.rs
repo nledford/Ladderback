@@ -862,7 +862,10 @@ fn a_maintenance_turn_refused_codes_as_the_start_refusal() {
             TurnRefusal::NotOwner { alias: alias() },
             "maintenance-not-owner",
         ),
-        (TurnRefusal::NoLease { alias: alias() }, "maintenance-no-lease"),
+        (
+            TurnRefusal::NoLease { alias: alias() },
+            "maintenance-no-lease",
+        ),
         (
             TurnRefusal::PruneHeld { alias: alias() },
             "maintenance-prune-held",

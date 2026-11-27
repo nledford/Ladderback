@@ -928,8 +928,9 @@ mod tests {
     #[test]
     fn a_refused_maintenance_turn_round_trips() {
         let alias = || RepositoryAlias::parse("nas").expect("an alias");
-        let running =
-            OperationId::from_uuid(domain::Uuid::from_u128(0x018f_0000_0000_7000_8000_0000_0000_0003));
+        let running = OperationId::from_uuid(domain::Uuid::from_u128(
+            0x018f_0000_0000_7000_8000_0000_0000_0003,
+        ));
         for (refusal, code, args) in [
             (
                 TurnRefusal::RepositoryUnknown { alias: alias() },

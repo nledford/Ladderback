@@ -229,7 +229,11 @@ mod tests {
         let docs = queue.push(&plan("docs"));
         let first = queue.push(&plan("home"));
         queue.push(&plan("home"));
-        assert_eq!(queue.going(&plan("home")), Some(first), "the oldest waiting");
+        assert_eq!(
+            queue.going(&plan("home")),
+            Some(first),
+            "the oldest waiting"
+        );
         assert_eq!(queue.start(), vec![docs]);
         let later = queue.push(&plan("docs"));
         assert_eq!(queue.going(&plan("docs")), Some(docs), "the running one");

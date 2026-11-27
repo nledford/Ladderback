@@ -29,10 +29,10 @@ mod daily_copy_steps;
 #[path = "steps/locations.rs"]
 mod locations_steps;
 
-#[path = "steps/maintenance.rs"]
-mod maintenance_steps;
 #[path = "steps/maintenance_queue.rs"]
 mod maintenance_queue_steps;
+#[path = "steps/maintenance.rs"]
+mod maintenance_steps;
 
 #[path = "steps/machine.rs"]
 mod machine_steps;

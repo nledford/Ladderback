@@ -2728,7 +2728,10 @@ mod place_tests {
         let one = Concurrency::default();
         let place = queue.unless_going_as(&alias("nas"), id(1), one).unwrap();
         let mut next = queue.unless_going_as(&alias("laptop"), id(2), one).unwrap();
-        assert!(next.turn().now_or_never().is_none(), "the limit of one holds");
+        assert!(
+            next.turn().now_or_never().is_none(),
+            "the limit of one holds"
+        );
         let mut operation = Operation::queue(
             id(1),
             OperationKind::Check,
@@ -2780,10 +2783,7 @@ mod place_tests {
         let finished = use_case(Arc::new(Refuses))
             .execute(prepared, futures::future::pending())
             .await;
-        assert_matches!(
-            finished.operation.status(),
-            OperationStatus::Failed { .. }
-        );
+        assert_matches!(finished.operation.status(), OperationStatus::Failed { .. });
         released(&queue, next);
     }
 

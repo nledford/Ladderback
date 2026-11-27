@@ -118,10 +118,7 @@ impl<K: Ord + Clone + Send + 'static> Queue<K> {
     /// Asks `take` for a ticket, and starts whatever may start now: the new
     /// run, or, under a limit `take` raised, runs that waited, whether or
     /// not `take` gave a ticket.
-    fn admit<E>(
-        &self,
-        take: impl FnOnce(&mut State<K>) -> Result<Ticket, E>,
-    ) -> Result<Place, E> {
+    fn admit<E>(&self, take: impl FnOnce(&mut State<K>) -> Result<Ticket, E>) -> Result<Place, E> {
         let mut state = self.state.lock().unwrap_or_else(PoisonError::into_inner);
         let place = take(&mut state).map(|ticket| {
             let (sender, turn) = oneshot::channel();
