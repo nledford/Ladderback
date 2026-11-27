@@ -1,7 +1,7 @@
 use std::sync::Arc;
 
 use domain::fleet::{
-    AgentEnvelope, Approval, Binding, BindingKind, Challenge, Connect, EpochSeconds,
+    Accepts, AgentEnvelope, Approval, Binding, BindingKind, Challenge, Connect, EpochSeconds,
     FIRST_SEQUENCE, Hello, Hostname, HubAddress, HubEnvelope, HubPin, HubRoute, MachineFingerprint,
     MachineIdentifier, MachineZone, Nonce, OutboxPosition, PROTOCOLS, PairAnswer, PayloadDigest,
     Proof, PublicKey, Refused, RouteRefused, SeedFile, SignedMessage, SigningSeed, WelcomeRefused,
@@ -128,6 +128,9 @@ struct Introduction {
     hostname: Hostname,
     zone: Option<MachineZone>,
     outbox: Option<OutboxPosition>,
+    /// The commands it takes from its hub; none said when the caller takes
+    /// none (decision 176).
+    accepts: Option<Accepts>,
 }
 
 impl ConnectToHub {
@@ -181,6 +184,20 @@ impl ConnectToHub {
         zone: Option<MachineZone>,
         outbox: Option<OutboxPosition>,
     ) -> Result<(Connected, AgentChannel), ConnectFailure> {
+        self.connect_accepting(agent_id, hostname, zone, outbox, None)
+            .await
+    }
+
+    /// [`Self::connect_channel`], its `Hello` saying the machine takes
+    /// `accepts` from its hub (decision 176).
+    pub async fn connect_accepting(
+        &self,
+        agent_id: AgentId,
+        hostname: Hostname,
+        zone: Option<MachineZone>,
+        outbox: Option<OutboxPosition>,
+        accepts: Option<Accepts>,
+    ) -> Result<(Connected, AgentChannel), ConnectFailure> {
         let (pin, seed) = self.paired().await?;
         let addresses: Vec<HubAddress> = pin.addresses().cloned().collect();
         let mut first = None;
@@ -197,6 +214,7 @@ impl ConnectToHub {
                                 hostname,
                                 zone,
                                 outbox,
+                                accepts,
                             },
                             false,
                         )
@@ -236,6 +254,7 @@ impl ConnectToHub {
                 hostname,
                 zone,
                 outbox: None,
+                accepts: None,
             },
             changed,
         )
@@ -340,6 +359,7 @@ impl ConnectToHub {
                 .as_ref()
                 .map(|identifier| MachineFingerprint::of(agent_id, identifier)),
             outbox: introduction.outbox,
+            accepts: introduction.accepts,
         };
         let payload = hello_payload(&hello);
         let kind = hello_kind();

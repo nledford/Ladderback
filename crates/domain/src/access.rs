@@ -262,6 +262,39 @@ impl std::fmt::Debug for SessionDigest {
     }
 }
 
+/// How many bytes of its hash a [`SessionTag`] keeps.
+const SESSION_TAG_BYTES: usize = 8;
+
+/// Which of a hub's sessions asked a machine for something, as the hub
+/// tells the machine and the machine's operation log keeps it (§16,
+/// decision 176): the first 8 bytes of the SHA-256 of a label and the
+/// session's digest, as 16 lower-case hex digits. It tells one session
+/// from another and says nothing of the token or of its digest (I4).
+#[derive(Clone, Debug, PartialEq, Eq, Hash, serde::Serialize, serde::Deserialize)]
+pub struct SessionTag(String);
+
+/// Text that isn't 16 lower-case hex digits.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct InvalidSessionTag;
+
+impl SessionTag {
+    /// The tag of the session kept by `digest`.
+    pub fn of(digest: &SessionDigest) -> Self {
+        let _ = digest;
+        todo!("a session's tag")
+    }
+
+    /// Exactly 16 lower-case hex digits, as [`Self::as_str`] writes them.
+    pub fn parse(text: &str) -> Result<Self, InvalidSessionTag> {
+        let _ = text;
+        todo!("read a session's tag")
+    }
+
+    pub fn as_str(&self) -> &str {
+        &self.0
+    }
+}
+
 fn hex_digit(digit: u8) -> Option<u8> {
     match digit {
         b'0'..=b'9' => Some(digit - b'0'),

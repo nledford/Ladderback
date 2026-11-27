@@ -356,6 +356,7 @@ fn hello() -> Hello {
         zone: None,
         machine: None,
         outbox: None,
+        accepts: None,
     }
 }
 

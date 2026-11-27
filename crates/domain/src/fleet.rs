@@ -5,6 +5,7 @@
 //! token. Rules only: the signing itself is the `Signing` port's, and every
 //! seed and nonce comes from the `Random` port.
 
+mod commands;
 mod fingerprint;
 mod greeting;
 mod handshake;
@@ -24,6 +25,12 @@ mod signed;
 mod token;
 mod zone;
 
+pub use commands::{
+    Accepts, COMMAND_ANSWER_WITHIN, COMMAND_LIFE, COMMANDS_REMEMBERED_FOR, CommandId, CommandKind,
+    CommandRequest, HUB_RUN_SPACING, HUB_RUNS_PER_HOUR, HubCommand, HubRun, MAX_ACCEPTS,
+    MAX_COMMANDS_IN_FLIGHT, MAX_COMMANDS_REMEMBERED, TooManyAccepted, cancel_op_kind,
+    command_fresh, command_result_kind, hub_run_admitted, run_plan_kind,
+};
 pub use fingerprint::{Fingerprint, TokenId};
 pub use greeting::{
     AgentEnvelope, Approval, FIRST_SEQUENCE, GENERATION, Hello, HubEnvelope, MAX_EXPIRY_AHEAD,

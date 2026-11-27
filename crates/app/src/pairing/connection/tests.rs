@@ -2100,6 +2100,7 @@ async fn the_hub_welcomes_only_a_proved_agents_first_hello() {
             zone: None,
             machine: None,
             outbox: None,
+            accepts: None,
         });
         let signed = SignedMessage::AgentMessage {
             hub_key: *keys.key(),

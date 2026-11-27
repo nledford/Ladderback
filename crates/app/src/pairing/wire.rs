@@ -12,7 +12,8 @@ use api::sync::{
 use base64::Engine as _;
 use base64::engine::general_purpose::URL_SAFE_NO_PAD;
 use domain::fleet::{
-    Ack, AgentEnvelope, AgentReport, Approval, BindingKind, Challenge, Connect, EpochSeconds,
+    Accepts, Ack, AgentEnvelope, AgentReport, Approval, BindingKind, Challenge, Connect,
+    EpochSeconds,
     Handshakes, Happening, Hello, Holder, Hostname, HubEnvelope, KEY_BYTES, MachineFingerprint,
     MachineZone, Nonce, OutboxEpoch, OutboxPosition, Pair, PairAnswer, Paired, Proof, Protocols,
     PublicKey, Refused, ReportSeq, SIGNATURE_BYTES, Signature, Welcome, WireName,
@@ -142,6 +143,12 @@ pub fn hello_payload(hello: &Hello) -> Vec<u8> {
         zone: hello.zone.as_ref().map(|zone| zone.as_str().to_owned()),
         machine: hello.machine.as_ref().map(MachineFingerprint::to_hex),
         outbox: hello.outbox.map(outbox_payload),
+        accepts: hello.accepts.as_ref().map(|accepts| {
+            accepts
+                .kinds()
+                .map(|kind| kind.wire_name().to_owned())
+                .collect()
+        }),
     }
     .to_bytes()
 }
@@ -181,6 +188,12 @@ pub fn read_hello(bytes: &[u8]) -> Result<Hello, WireRefused> {
             .map(|text| MachineFingerprint::from_hex(text).map_err(|_| WireRefused))
             .transpose()?,
         outbox: payload.outbox.map(outbox_position).transpose()?,
+        accepts: payload
+            .accepts
+            .as_ref()
+            .map(|names| Accepts::from_names(names.iter().map(String::as_str)))
+            .transpose()
+            .map_err(|_| WireRefused)?,
     })
 }
 

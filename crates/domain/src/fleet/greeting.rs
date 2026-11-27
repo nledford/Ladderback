@@ -5,6 +5,7 @@
 
 use jiff::SignedDuration;
 
+use super::commands::Accepts;
 use super::handshake::HANDSHAKES;
 use super::hostname::Hostname;
 use super::keys::Signature;
@@ -138,6 +139,9 @@ pub struct Hello {
     /// Where the agent's outbox stands; none before its first report, and
     /// from a build before it was said (§16, decision 177).
     pub outbox: Option<OutboxPosition>,
+    /// The commands the machine takes from its hub (decision 176); none
+    /// from a build before them, which takes none.
+    pub accepts: Option<Accepts>,
 }
 
 /// The hub's answer to `Hello`.
