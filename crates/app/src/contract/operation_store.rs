@@ -43,13 +43,19 @@ pub async fn run(store: &dyn OperationStore) {
     warnings_past_the_cap_are_counted_not_stored(store).await;
     history_names_each_operations_warnings_by_kind(store).await;
     times_are_kept_to_the_millisecond(store).await;
-    history_lists_the_newest_operation_first(store, &fx).await;
-    a_page_ends_at_its_limit_and_says_whether_more_remain(store, &fx).await;
-    a_page_continues_after_any_cursor(store, &fx).await;
-    history_can_be_limited_to_one_plan(store, &fx).await;
+    history_cases(store, &fx).await;
+    serialization::run(store, &fx).await;
+}
+
+/// The cases for reading the log back as history, page by page and plan by
+/// plan.
+async fn history_cases(store: &dyn OperationStore, fx: &Fixtures) {
+    history_lists_the_newest_operation_first(store, fx).await;
+    a_page_ends_at_its_limit_and_says_whether_more_remain(store, fx).await;
+    a_page_continues_after_any_cursor(store, fx).await;
+    history_can_be_limited_to_one_plan(store, fx).await;
     a_plan_ever_succeeded_only_if_one_of_its_own_operations_did(store).await;
     a_plans_unfinished_backup_is_found_however_far_back(store).await;
-    serialization::run(store, &fx).await;
 }
 
 /// The cases for ending what a stopped daemon left behind: every queued or
