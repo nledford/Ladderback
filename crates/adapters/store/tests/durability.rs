@@ -226,3 +226,68 @@ async fn a_second_handle_on_the_same_file_sees_what_the_first_wrote_and_the_othe
         Some(OperationRecord::of(&later, None))
     );
 }
+
+/// A 0.6.0 log, the baseline and nothing after it, that holds operations
+/// takes migration 0002 with each row kept as it was: a hub run of that
+/// release names no session (decision 176).
+#[tokio::test]
+async fn a_0_6_0_log_holding_operations_takes_the_hub_commands_migration() {
+    use std::borrow::Cow;
+
+    use sqlx::migrate::Migrator;
+    use sqlx::sqlite::SqliteConnectOptions;
+    use sqlx::{ConnectOptions as _, Connection as _};
+
+    static MIGRATOR: Migrator = sqlx::migrate!("../../../migrations");
+    let scratch = Scratch::new();
+    let baseline = Migrator {
+        migrations: Cow::Owned(
+            MIGRATOR
+                .iter()
+                .filter(|migration| migration.version == 1)
+                .cloned()
+                .collect(),
+        ),
+        ..Migrator::DEFAULT
+    };
+    let mut raw = SqliteConnectOptions::new()
+        .filename(scratch.path())
+        .create_if_missing(true)
+        .connect()
+        .await
+        .expect("the 0.6.0 database is created");
+    baseline
+        .run(&mut raw)
+        .await
+        .expect("the baseline is applied");
+    for (n, trigger) in [(0x60, "manual"), (0x61, "hub")] {
+        sqlx::query(
+            r#"INSERT INTO operations (id, kind, "trigger", status, queued_at)
+               VALUES (?, 'backup', ?, 'queued', ?)"#,
+        )
+        .bind(id_text(n))
+        .bind(trigger)
+        .bind(ms(0))
+        .execute(&mut raw)
+        .await
+        .expect("a 0.6.0 row is written");
+    }
+    raw.close().await.expect("the 0.6.0 connection closes");
+
+    let store = scratch.open().await;
+    let versions: Vec<i64> = migration_rows(&scratch)
+        .await
+        .into_iter()
+        .map(|(version, ..)| version)
+        .collect();
+    assert_eq!(versions, [1, 2]);
+    let trigger = async |n| {
+        store
+            .get(id(n))
+            .await
+            .expect("the log is read")
+            .map(|detail| detail.record.trigger)
+    };
+    assert_eq!(trigger(0x60).await, Some(Trigger::Manual));
+    assert_eq!(trigger(0x61).await, Some(Trigger::Hub { asked_by: None }));
+}
