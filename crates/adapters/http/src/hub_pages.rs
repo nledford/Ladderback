@@ -17,21 +17,23 @@ use std::net::IpAddr;
 use std::sync::Arc;
 
 use api::ErrorCode;
+use app::hub_commands::CommandAnswer;
 use app::pairing::{
-    ApprovalAsk, HubPairing, HubPairingError, Machine, MadeToken, RecoveryAsk, RemovalAsk,
-    TokenAsk, TokenAskRefused, progress_dto, time_of,
+    ApprovalAsk, CommandAsk, CommandAskRefused, HubPairing, HubPairingError, Machine, MadeToken,
+    RecoveryAsk, RemovalAsk, TokenAsk, TokenAskRefused, progress_dto, time_of,
 };
 use axum::Router;
 use axum::extract::{ConnectInfo, Path, Request, State};
 use axum::http::{HeaderMap, StatusCode};
 use axum::response::{IntoResponse, Response};
+use domain::access::SessionTag;
 use domain::access::step_up::StepUpConfirmation;
 use domain::fleet::{
-    AgentRecord, AgentStatus, ApprovalRefused, Fingerprint, HubAddress, HubRoute, HubScheme,
-    ListedAgent, PlansReport, PublicKey, RemovalRefused, ReportedOutcome, RouteRefused, TokenId,
-    TokenTls,
+    AgentRecord, AgentStatus, ApprovalRefused, Fingerprint, HubAddress, HubCommand, HubRoute,
+    HubScheme, ListedAgent, PlansReport, PublicKey, RemovalRefused, ReportedOutcome, RouteRefused,
+    TokenId, TokenTls,
 };
-use domain::{AgentId, SignedDuration, Timestamp, Uuid};
+use domain::{AgentId, OperationId, PlanId, SignedDuration, Timestamp, Uuid};
 
 use crate::AppState;
 
@@ -462,8 +464,44 @@ async fn run_plan(
     session: Option<axum::Extension<crate::sign_in::SessionOf>>,
     request: Request,
 ) -> Response {
-    let _ = (state, id, session, request);
-    todo!()
+    let Some(pairing) = pairing_of(&state) else {
+        return not_a_hub();
+    };
+    let peer = match peer_of(&request) {
+        Ok(peer) => peer,
+        Err(refused) => return *refused,
+    };
+    let beyond = beyond_loopback(request.headers(), peer);
+    let Ok(agent) = Uuid::parse_str(&id).map(AgentId::from_uuid) else {
+        return crate::refused(StatusCode::NOT_FOUND, ErrorCode::MachineUnknown);
+    };
+    // Bounded by the API's body limit, as an approval's is.
+    let Ok(body) = axum::body::to_bytes(request.into_body(), usize::MAX).await else {
+        return crate::refused(StatusCode::BAD_REQUEST, ErrorCode::InvalidBody);
+    };
+    let Ok(api::MachineRunDto { plan }) = serde_json::from_slice(&body) else {
+        return crate::refused(StatusCode::BAD_REQUEST, ErrorCode::InvalidBody);
+    };
+    let Ok(plan) = PlanId::parse(&plan) else {
+        return crate::refused(StatusCode::BAD_REQUEST, ErrorCode::InvalidBody);
+    };
+    let ask = CommandAsk {
+        agent,
+        command: HubCommand::RunPlan { plan: plan.clone() },
+        asked_by: asked_by(session.as_ref()),
+        beyond_loopback: beyond,
+    };
+    let subject = Subject {
+        plan: Some(plan.as_str()),
+        operation: None,
+    };
+    match pairing.command_asked(ask).await {
+        Ok(CommandAnswer::Started(operation)) => {
+            (StatusCode::ACCEPTED, command_done(operation)).into_response()
+        }
+        Ok(answer) => machine_answer_refused(&answer, &subject),
+        Err(refused) => command_refused(refused),
+    }
 }
 
 /// The cancel of the backup the path names on the machine it names
@@ -475,8 +513,121 @@ async fn cancel_operation(
     session: Option<axum::Extension<crate::sign_in::SessionOf>>,
     request: Request,
 ) -> Response {
-    let _ = (state, id, operation, session, request);
-    todo!()
+    let Some(pairing) = pairing_of(&state) else {
+        return not_a_hub();
+    };
+    let peer = match peer_of(&request) {
+        Ok(peer) => peer,
+        Err(refused) => return *refused,
+    };
+    let beyond = beyond_loopback(request.headers(), peer);
+    let Ok(agent) = Uuid::parse_str(&id).map(AgentId::from_uuid) else {
+        return crate::refused(StatusCode::NOT_FOUND, ErrorCode::MachineUnknown);
+    };
+    // No operation ID was ever made from a path that isn't one; the
+    // path's text is bounded by the request line's.
+    let Ok(op) = Uuid::parse_str(&operation).map(OperationId::from_uuid) else {
+        return crate::refused_with(
+            StatusCode::NOT_FOUND,
+            ErrorCode::OperationUnknown,
+            vec![("operation", api::MsgArg::Text(operation))],
+        );
+    };
+    let ask = CommandAsk {
+        agent,
+        command: HubCommand::CancelOp { op },
+        asked_by: asked_by(session.as_ref()),
+        beyond_loopback: beyond,
+    };
+    let subject = Subject {
+        plan: None,
+        operation: Some(&operation),
+    };
+    match pairing.command_asked(ask).await {
+        Ok(CommandAnswer::Canceled(operation)) => {
+            (StatusCode::OK, command_done(operation)).into_response()
+        }
+        Ok(answer) => machine_answer_refused(&answer, &subject),
+        Err(refused) => command_refused(refused),
+    }
+}
+
+/// The session that asked, as the machine hears of it: its tag, never its
+/// token (I4). None with sign-in off.
+fn asked_by(session: Option<&axum::Extension<crate::sign_in::SessionOf>>) -> Option<SessionTag> {
+    session.map(|session| SessionTag::of(&session.token.digest()))
+}
+
+/// The backup `operation` a command ran or canceled, as the page reads it.
+fn command_done(operation: OperationId) -> axum::Json<api::MachineCommandDoneDto> {
+    axum::Json(api::MachineCommandDoneDto {
+        operation: operation.as_uuid().hyphenated().to_string(),
+    })
+}
+
+/// What a command was about, for the arguments of its refusal.
+struct Subject<'a> {
+    plan: Option<&'a str>,
+    operation: Option<&'a str>,
+}
+
+/// The machine's `answer` that didn't do what was asked: its refusal, by
+/// the code it gave, or `machine-run-refused` for an answer to another
+/// command.
+fn machine_answer_refused(answer: &CommandAnswer, subject: &Subject<'_>) -> Response {
+    let (code, retry_at) = match answer {
+        CommandAnswer::Refused { code, retry_at } => (*code, *retry_at),
+        CommandAnswer::Started(_) | CommandAnswer::Canceled(_) => {
+            log::warn!("a machine answered the hub's command with another's result");
+            (ErrorCode::MachineRunRefused, None)
+        }
+    };
+    let status = match code {
+        ErrorCode::PlanUnknown | ErrorCode::OperationUnknown => StatusCode::NOT_FOUND,
+        ErrorCode::CommandRateLimited => StatusCode::TOO_MANY_REQUESTS,
+        _ => StatusCode::CONFLICT,
+    };
+    let args = code
+        .args()
+        .iter()
+        .filter_map(|spec| {
+            let arg = match spec.name {
+                "plan" => api::MsgArg::Text(subject.plan?.to_owned()),
+                "operation" => api::MsgArg::Text(subject.operation?.to_owned()),
+                "retry-at" => time_arg(retry_at?),
+                _ => return None,
+            };
+            Some((spec.name, arg))
+        })
+        .collect();
+    crate::refused_with(status, code, args)
+}
+
+/// The hub's refusal of a command, by its kind.
+fn command_refused(refused: CommandAskRefused) -> Response {
+    let code = refused.code();
+    match refused {
+        CommandAskRefused::NeedsSignIn => crate::refused(StatusCode::FORBIDDEN, code),
+        CommandAskRefused::MachineUnknown => crate::refused(StatusCode::NOT_FOUND, code),
+        CommandAskRefused::MachineOffline
+        | CommandAskRefused::CommandsUnsupported
+        | CommandAskRefused::CommandsOff => crate::refused(StatusCode::CONFLICT, code),
+        CommandAskRefused::Busy { retry_at } => crate::refused_with(
+            StatusCode::TOO_MANY_REQUESTS,
+            code,
+            vec![("retry-at", time_arg(retry_at))],
+        ),
+        CommandAskRefused::NoAnswer => crate::refused(StatusCode::GATEWAY_TIMEOUT, code),
+        CommandAskRefused::Unavailable => crate::unavailable(code, Vec::new(), None),
+    }
+}
+
+/// `at` as a refusal's time argument.
+fn time_arg(at: Timestamp) -> api::MsgArg {
+    api::MsgArg::Timestamp {
+        utc_ms: at.as_millisecond(),
+        zone: None,
+    }
 }
 
 /// When the agent's status began: approved just now, for one the hub
