@@ -10,9 +10,9 @@ use api::ErrorCode;
 use domain::access::SessionTag;
 use domain::fleet::{
     AgentStatus, COMMAND_ANSWER_WITHIN, CommandId, CommandRequest, EpochSeconds, HubCommand,
-    MAX_COMMANDS_IN_FLIGHT, needs_sign_in,
+    MAX_COMMANDS_IN_FLIGHT, hub_command_admitted, needs_sign_in,
 };
-use domain::{AgentId, Timestamp};
+use domain::{AgentId, SignedDuration, Timestamp};
 use futures::channel::oneshot;
 use futures::future::{Either, select};
 
@@ -126,6 +126,7 @@ impl HubPairing {
             if waiting >= MAX_COMMANDS_IN_FLIGHT {
                 return Err(self.busy());
             }
+            self.count_sent(agent)?;
             awaited.insert(id, Awaited { agent, answer });
         }
         // Waited on until this ask ends, however it ends: an asker that
@@ -176,6 +177,39 @@ impl HubPairing {
         let now = self.clock.now();
         CommandAskRefused::Busy {
             retry_at: now.checked_add(COMMAND_ANSWER_WITHIN).unwrap_or(now),
+        }
+    }
+
+    /// Counts a command the hub sends `agent` now, unless it sent it
+    /// [`HUB_COMMANDS_PER_HOUR`](domain::fleet::HUB_COMMANDS_PER_HOUR) in
+    /// the last hour: then the refusal says
+    /// when it may send one again.
+    fn count_sent(&self, agent: AgentId) -> Result<(), CommandAskRefused> {
+        let now = self.clock.monotonic();
+        let hour = SignedDuration::from_hours(1);
+        let mut sent = self
+            .presence
+            .sent
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner);
+        let times = sent.entry(agent).or_default();
+        while times
+            .front()
+            .is_some_and(|at| now.saturating_sub(*at) >= hour)
+        {
+            times.pop_front();
+        }
+        match hub_command_admitted(times.make_contiguous(), now) {
+            Ok(()) => {
+                times.push_back(now);
+                Ok(())
+            }
+            Err(again) => {
+                let wall = self.clock.now();
+                Err(CommandAskRefused::Busy {
+                    retry_at: wall.checked_add(again.saturating_sub(now)).unwrap_or(wall),
+                })
+            }
         }
     }
 

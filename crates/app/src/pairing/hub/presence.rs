@@ -9,11 +9,11 @@
 //! learn here when a machine went offline or came back, and live in memory
 //! too.
 
-use std::collections::HashMap;
+use std::collections::{HashMap, VecDeque};
 use std::sync::{Mutex, MutexGuard, PoisonError};
 
 use api::UiEvent;
-use domain::AgentId;
+use domain::{AgentId, SignedDuration};
 use domain::fleet::{
     Accepts, AgentStatus, CommandId, MAX_COMMANDS_IN_FLIGHT, OfflineAlerts, WireName,
 };
@@ -77,6 +77,11 @@ pub(super) struct Presence {
     /// The commands sent and not answered yet, at most
     /// [`MAX_COMMANDS_IN_FLIGHT`] for each machine.
     pub(super) awaited: Mutex<HashMap<CommandId, Awaited>>,
+    /// When on the hub's monotonic clock it sent each machine its commands
+    /// in the last hour, oldest first, at most
+    /// [`HUB_COMMANDS_PER_HOUR`](domain::fleet::HUB_COMMANDS_PER_HOUR) for
+    /// each; kept while the hub runs, across the machine's connections.
+    pub(super) sent: Mutex<HashMap<AgentId, VecDeque<SignedDuration>>>,
 }
 
 impl Presence {
@@ -264,6 +269,11 @@ impl HubPairing {
             .remove(&agent);
         self.forget_running(agent);
         self.forget_commands(agent);
+        self.presence
+            .sent
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .remove(&agent);
         // Closed outside the lock: what closes it may take its own.
         if let Some(held) = held {
             (held.close)();

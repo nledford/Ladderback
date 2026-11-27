@@ -249,7 +249,22 @@ pub fn hub_command_admitted(
     sent: &[SignedDuration],
     now: SignedDuration,
 ) -> Result<(), SignedDuration> {
-    todo!("{sent:?} {now:?}")
+    let hour = SignedDuration::from_hours(1);
+    let mut within: Vec<SignedDuration> = sent
+        .iter()
+        .copied()
+        .filter(|at| now.saturating_sub(*at) < hour)
+        .collect();
+    within.sort_unstable();
+    // Past the limit, the hour must let go of one more than the excess.
+    match within
+        .len()
+        .checked_sub(HUB_COMMANDS_PER_HOUR)
+        .and_then(|past| within.get(past))
+    {
+        Some(oldest) => Err(oldest.saturating_add(hour)),
+        None => Ok(()),
+    }
 }
 
 #[cfg(test)]
