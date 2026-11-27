@@ -6,6 +6,7 @@ fn plan(n: usize) -> ReportedPlan {
     ReportedPlan {
         plan: PlanId::parse(&format!("plan-{n}")).unwrap(),
         last: None,
+        last_success: None,
         next_run: Some(EpochSeconds::from_seconds(1_800_000_000)),
     }
 }

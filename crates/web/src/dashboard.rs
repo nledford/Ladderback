@@ -349,7 +349,8 @@ pub(crate) enum NextRun {
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub(crate) struct CardFacts {
     pub(crate) status: CardStatus,
-    /// When the latest run that ended, ended.
+    /// When the latest run that ended, ended, or a plan's last success
+    /// while its last run waits or runs.
     pub(crate) last_backup: Option<String>,
     pub(crate) next_run: NextRun,
     /// How many plans it has, those it left out among them; none before it
@@ -370,11 +371,12 @@ fn ended(status: &str) -> bool {
 }
 
 /// What the card of `machine` tells at `now_ms`: its status, when its
-/// latest run that ended did, its earliest next run, how many plans it has,
-/// and why it needs attention, the first reason that holds (decision 175):
-/// offline past a planned run, a plan's last run failed, or a planned run
-/// past due while nothing runs. A run counts as due once it is more than
-/// [`DUE_AFTER_MS`] past.
+/// latest run that ended did, a plan's last success standing in for its
+/// last run while that waits or runs (#1693), its earliest next run, how
+/// many plans it has, and why it needs attention, the first reason that
+/// holds (decision 175): offline past a planned run, a plan's last run
+/// failed, or a planned run past due while nothing runs. A run counts as
+/// due once it is more than [`DUE_AFTER_MS`] past.
 pub(crate) fn card_facts(machine: &HubMachineDto, now_ms: i64) -> CardFacts {
     let listed: &[MachinePlanDto] = machine
         .plans
@@ -387,9 +389,11 @@ pub(crate) fn card_facts(machine: &HubMachineDto, now_ms: i64) -> CardFacts {
             .any(|operation| operation.outcome == MachineOutcomeDto::Running);
     let last = listed
         .iter()
-        .filter_map(|plan| plan.last_run.as_ref())
-        .filter(|run| ended(&run.status))
-        .max_by_key(|run| millis(&run.at));
+        .filter_map(|plan| match plan.last_run.as_ref() {
+            Some(run) if ended(&run.status) => Some((run.at.as_str(), run.status.as_str())),
+            _ => plan.last_success.as_deref().map(|at| (at, "succeeded")),
+        })
+        .max_by_key(|(at, _)| millis(at));
     let next = listed
         .iter()
         .filter_map(|plan| {
@@ -401,8 +405,8 @@ pub(crate) fn card_facts(machine: &HubMachineDto, now_ms: i64) -> CardFacts {
     let status = if running {
         CardStatus::Running
     } else {
-        last.map_or(CardStatus::Never, |run| {
-            CardStatus::Last(run.status.clone())
+        last.map_or(CardStatus::Never, |(_, status)| {
+            CardStatus::Last(status.to_owned())
         })
     };
     let next_run = match (next, due) {
@@ -431,7 +435,7 @@ pub(crate) fn card_facts(machine: &HubMachineDto, now_ms: i64) -> CardFacts {
     };
     CardFacts {
         status,
-        last_backup: last.map(|run| run.at.clone()),
+        last_backup: last.map(|(at, _)| at.to_owned()),
         next_run,
         plans: machine.plans.as_ref().map(|plans| {
             u64::try_from(plans.plans.len())
@@ -530,9 +534,10 @@ fn own_outcome(status: &str) -> Option<MachineOutcomeDto> {
 /// The hub's own machine as a card shows one (decision 175): who
 /// `identity` says it is, online, since the page reads it from the hub
 /// itself; its plans from its `status` once read, each one's last run when
-/// it ended, or else, while it waits or runs again, its last success; its
-/// latest `operations` that started, newest first, and the progress of the
-/// one that runs. None without a machine ID or a hostname.
+/// it ended, or else started or was queued, and its last success, as a
+/// paired machine reports them; its latest `operations` that started,
+/// newest first, and the progress of the one that runs. None without a
+/// machine ID or a hostname.
 pub(crate) fn own_machine(
     identity: &MachineDto,
     status: Option<&StatusDto>,
@@ -546,21 +551,19 @@ pub(crate) fn own_machine(
             .iter()
             .map(|plan| MachinePlanDto {
                 plan: plan.plan.id.clone(),
-                last_run: match plan.last.as_ref() {
-                    Some(last) if ended(&last.status) => Some(MachinePlanRunDto {
-                        at: last
-                            .finished_at
-                            .as_ref()
-                            .or(last.started_at.as_ref())
-                            .unwrap_or(&last.queued_at)
-                            .clone(),
-                        status: last.status.clone(),
-                    }),
-                    _ => plan.last_success.as_ref().map(|success| MachinePlanRunDto {
-                        at: success.finished_at.clone(),
-                        status: "succeeded".to_owned(),
-                    }),
-                },
+                last_run: plan.last.as_ref().map(|last| MachinePlanRunDto {
+                    at: last
+                        .finished_at
+                        .as_ref()
+                        .or(last.started_at.as_ref())
+                        .unwrap_or(&last.queued_at)
+                        .clone(),
+                    status: last.status.clone(),
+                }),
+                last_success: plan
+                    .last_success
+                    .as_ref()
+                    .map(|success| success.finished_at.clone()),
                 next_run: plan.plan.next_run.clone(),
             })
             .collect(),

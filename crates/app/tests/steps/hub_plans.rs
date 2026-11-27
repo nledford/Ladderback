@@ -216,6 +216,28 @@ async fn backed_up(agent: &mut Agent, plan: String) {
         .expect("the run is planned");
 }
 
+#[when(expr = "the plan {string} runs again")]
+async fn runs_again(agent: &mut Agent, plan: String) {
+    let side = side(agent);
+    let now = side.clock.now();
+    let id = side.next_id();
+    let mut backup = Operation::queue(
+        id,
+        OperationKind::Backup,
+        Trigger::Schedule,
+        Target {
+            plan: Some(plan_id(&plan)),
+            repository: None,
+        },
+        now,
+    );
+    backup.start(now).expect("a queued backup starts");
+    side.operations
+        .save(&backup, None)
+        .await
+        .expect("the log keeps the backup");
+}
+
 #[given("the agent's sync with its hub ran")]
 #[when("the agent's sync with its hub runs")]
 async fn sync_runs(agent: &mut Agent) {
@@ -311,7 +333,27 @@ async fn shows_succeeded(agent: &mut Agent, plan: String) {
 #[then(expr = "the hub shows the plan {string} never ran and has no next run")]
 async fn shows_never_ran(agent: &mut Agent, plan: String) {
     let shown = shown_plan(agent, &plan).await;
-    assert_eq!((shown.last, shown.next_run), (None, None));
+    assert_eq!(
+        (shown.last, shown.last_success, shown.next_run),
+        (None, None, None)
+    );
+}
+
+#[then(expr = "the hub shows the plan {string} running")]
+async fn shows_running(agent: &mut Agent, plan: String) {
+    let now = side(agent).clock.now();
+    let last = shown_plan(agent, &plan).await.last.expect("a last run");
+    assert_eq!(last.outcome, LastRunOutcome::Running);
+    assert_eq!(last.at, EpochSeconds::from_timestamp(now).unwrap());
+}
+
+#[then(expr = "the hub shows the plan {string} last backed up successfully a minute ago")]
+async fn shows_last_success(agent: &mut Agent, plan: String) {
+    let now = side(agent).clock.now();
+    assert_eq!(
+        shown_plan(agent, &plan).await.last_success,
+        EpochSeconds::from_timestamp(now - SignedDuration::from_mins(1))
+    );
 }
 
 #[then(regex = r"^the hub was sent the agent's plans (once|twice)$")]

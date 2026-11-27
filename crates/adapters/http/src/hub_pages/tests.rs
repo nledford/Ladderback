@@ -16,8 +16,9 @@ use axum::http::{Method, StatusCode};
 use domain::access::api_token::{ApiTokenLabel, TokenPermissions};
 use domain::access::permissions::{Permission, Permissions};
 use domain::fleet::{
-    AgentRecord, AgentReport, AgentStatus, EpochSeconds, Fingerprint, Happening, Hostname,
-    MachineFingerprint, OutboxEpoch, ReportSeq, SigningSeed, WireName,
+    AgentRecord, AgentReport, AgentStatus, EpochSeconds, Fingerprint, Happening, Hostname, LastRun,
+    LastRunOutcome, MachineFingerprint, OutboxEpoch, PlansReport, ReportSeq, ReportedPlan,
+    SigningSeed, WireName,
 };
 use domain::{AgentId, OperationId, Timestamp, Uuid};
 use http_body_util::BodyExt;
@@ -808,6 +809,60 @@ async fn the_page_shows_each_approved_machine_with_its_latest_operations() {
             plans: None,
             progress: None,
         }]
+    );
+}
+
+/// A machine's plans as the dashboard reads them: each with its last run,
+/// when its last successful backup ended, which the card falls back to
+/// while a later run waits or runs (#1693), and its next run.
+#[test]
+fn a_plan_reads_with_its_last_run_its_last_success_and_its_next_run() {
+    let seconds = EpochSeconds::from_seconds;
+    let plan = |name: &str| domain::PlanId::parse(name).unwrap();
+    let report = PlansReport::from_parts(
+        vec![
+            ReportedPlan {
+                plan: plan("home"),
+                last: Some(LastRun {
+                    at: seconds(1_800_000_000),
+                    outcome: LastRunOutcome::Running,
+                }),
+                last_success: Some(seconds(1_799_990_000)),
+                next_run: Some(seconds(1_800_003_600)),
+            },
+            ReportedPlan {
+                plan: plan("photos"),
+                last: None,
+                last_success: None,
+                next_run: None,
+            },
+        ],
+        2,
+    )
+    .unwrap();
+    let time = |second| Timestamp::from_second(second).unwrap().to_string();
+    assert_eq!(
+        plans_dto(&report),
+        api::MachinePlansDto {
+            plans: vec![
+                api::MachinePlanDto {
+                    plan: "home".to_owned(),
+                    last_run: Some(api::MachinePlanRunDto {
+                        at: time(1_800_000_000),
+                        status: "running".to_owned(),
+                    }),
+                    last_success: Some(time(1_799_990_000)),
+                    next_run: Some(time(1_800_003_600)),
+                },
+                api::MachinePlanDto {
+                    plan: "photos".to_owned(),
+                    last_run: None,
+                    last_success: None,
+                    next_run: None,
+                },
+            ],
+            left_out: 2,
+        }
     );
 }
 

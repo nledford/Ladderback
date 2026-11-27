@@ -20,6 +20,8 @@ fn plans(names: &[&str], left_out: u64) -> Option<PlansReport> {
                     at: EpochSeconds::from_seconds(1_800_000_000 + n as u64),
                     outcome: LastRunOutcome::SucceededWithWarnings,
                 }),
+                last_success: (n % 3 != 2)
+                    .then_some(EpochSeconds::from_seconds(1_799_990_000 + n as u64)),
                 next_run: (n % 3 != 1).then_some(EpochSeconds::from_seconds(1_800_003_600)),
             })
         })

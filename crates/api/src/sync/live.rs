@@ -15,13 +15,18 @@ pub struct PlansPayload {
     pub left_out: u64,
 }
 
-/// One plan of a `PlansSnapshot`: its ID, its last run and its next run, in
-/// seconds since the Unix epoch, each left out when it has none.
+/// One plan of a `PlansSnapshot`: its ID, its last run, when its last
+/// successful backup ended (`ok`, #1693) and its next run, in seconds since
+/// the Unix epoch, each left out when it has none. `ok` is short so a full
+/// snapshot still fits one frame. A field a later release adds is read
+/// past, as a 0.6.0 hub reads past `ok`, which a 0.6.0 machine leaves out.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct PlanPayload {
     pub plan: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub last: Option<LastRunPayload>,
+    #[serde(rename = "ok", default, skip_serializing_if = "Option::is_none")]
+    pub last_success: Option<u64>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub next: Option<u64>,
 }

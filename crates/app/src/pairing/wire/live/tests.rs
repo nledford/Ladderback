@@ -21,6 +21,7 @@ fn plan(name: &str, last: Option<LastRun>, next: Option<u64>) -> ReportedPlan {
     ReportedPlan {
         plan: PlanId::parse(name).unwrap(),
         last,
+        last_success: None,
         next_run: next.map(EpochSeconds::from_seconds),
     }
 }
@@ -28,14 +29,17 @@ fn plan(name: &str, last: Option<LastRun>, next: Option<u64>) -> ReportedPlan {
 fn report() -> PlansReport {
     PlansReport::from_parts(
         vec![
-            plan(
-                "home",
-                Some(LastRun {
-                    at: EpochSeconds::from_seconds(1_800_000_000),
-                    outcome: LastRunOutcome::SucceededWithWarnings,
-                }),
-                Some(1_800_003_600),
-            ),
+            ReportedPlan {
+                last_success: Some(EpochSeconds::from_seconds(1_799_990_000)),
+                ..plan(
+                    "home",
+                    Some(LastRun {
+                        at: EpochSeconds::from_seconds(1_800_000_000),
+                        outcome: LastRunOutcome::Running,
+                    }),
+                    Some(1_800_003_600),
+                )
+            },
             plan("photos", None, None),
         ],
         3,
@@ -49,11 +53,36 @@ fn a_snapshot_of_plans_reads_back_as_it_was_written() {
     assert_eq!(
         String::from_utf8(bytes.clone()).unwrap(),
         concat!(
-            r#"{"plans":[{"plan":"home","last":{"at":1800000000,"outcome":"succeeded-with-warnings"},"#,
-            r#""next":1800003600},{"plan":"photos"}],"left_out":3}"#
+            r#"{"plans":[{"plan":"home","last":{"at":1800000000,"outcome":"running"},"#,
+            r#""ok":1799990000,"next":1800003600},{"plan":"photos"}],"left_out":3}"#
         )
     );
     assert_eq!(read_plans(&bytes), Ok(report()));
+}
+
+/// A 0.6.0 machine's snapshot, which tells no last success, reads with
+/// none; a field a later release adds is read past, as a 0.6.0 hub reads
+/// past `ok`, its last success (#1693).
+#[test]
+fn a_snapshot_without_a_last_success_or_with_a_field_this_build_doesnt_know_reads() {
+    let from_0_6_0 = concat!(
+        r#"{"plans":[{"plan":"home","last":{"at":1800000000,"outcome":"running"},"#,
+        r#""next":1800003600}],"left_out":0}"#
+    );
+    let read = read_plans(from_0_6_0.as_bytes()).unwrap();
+    assert_eq!(
+        read.plans().first().map(|plan| plan.last_success),
+        Some(None)
+    );
+    let later = concat!(
+        r#"{"plans":[{"plan":"home","ok":1799990000,"later":{"at":1}}],"#,
+        r#""left_out":0,"later":[]}"#
+    );
+    let read = read_plans(later.as_bytes()).unwrap();
+    assert_eq!(
+        read.plans().first().map(|plan| plan.last_success),
+        Some(Some(EpochSeconds::from_seconds(1_799_990_000)))
+    );
 }
 
 /// The last second a timestamp holds, the latest time a machine can send.
@@ -73,7 +102,10 @@ fn the_largest_snapshot_fits_one_frame() {
         outcome: LastRunOutcome::SucceededWithWarnings,
     };
     let plans = (0..MAX_PLANS_REPORTED)
-        .map(|n| plan(&longest(n), Some(last), Some(latest())))
+        .map(|n| ReportedPlan {
+            last_success: Some(EpochSeconds::from_seconds(latest())),
+            ..plan(&longest(n), Some(last), Some(latest()))
+        })
         .collect();
     let report = PlansReport::from_parts(plans, largest).unwrap();
     assert_eq!(read_plans(&plans_payload(&report)), Ok(report.clone()));
@@ -111,10 +143,14 @@ fn a_snapshot_with_too_many_plans_or_a_field_that_isnt_one_is_refused() {
         r#"{"plans":[]}"#.to_owned(),
         r#"{"plans":[],"left_out":9223372036854775808}"#.to_owned(),
         r#"{"plans":[{"plan":"home","next":9223372036854775808}],"left_out":0}"#.to_owned(),
+        r#"{"plans":[{"plan":"home","ok":9223372036854775808}],"left_out":0}"#
+            .to_owned(),
+        r#"{"plans":[{"plan":"home","ok":-1}],"left_out":0}"#.to_owned(),
         r#"{"plans":[{"plan":"home","last":{"at":9223372036854775808,"outcome":"failed"}}],"left_out":0}"#
             .to_owned(),
         // Past the last second a timestamp holds, in year 9999.
         r#"{"plans":[{"plan":"home","next":253402300800}],"left_out":0}"#.to_owned(),
+        r#"{"plans":[{"plan":"home","ok":253402300800}],"left_out":0}"#.to_owned(),
         r#"{"plans":[{"plan":"home","last":{"at":253402300800,"outcome":"failed"}}],"left_out":0}"#
             .to_owned(),
     ];

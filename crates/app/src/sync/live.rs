@@ -50,6 +50,12 @@ impl ReadPlans {
                         last.finished_at,
                     )
                 }),
+                last_success: standing.last_success.as_ref().and_then(|success| {
+                    let run = &success.operation;
+                    EpochSeconds::from_timestamp(
+                        run.finished_at.or(run.started_at).unwrap_or(run.queued_at),
+                    )
+                }),
                 next_run: planned
                     .iter()
                     .find(|run| run.plan == standing.plan)
