@@ -25,6 +25,7 @@ use domain::maintenance::RepositoryReports;
 use domain::planning::Maintenance;
 use domain::{AgentId, OperationId, SignedDuration, Timestamp, Uuid};
 
+use crate::hub_commands::AnswerHubCommands;
 use crate::leases::MaintenanceLeases;
 use crate::machine::MachineStanding;
 use crate::others_snapshots::{ListingsDue, OthersSnapshots};
@@ -174,6 +175,8 @@ pub struct SyncWithHub {
     /// The backups the machine runs, which each heartbeat names; without
     /// them, a heartbeat says it can't tell.
     running: Option<Arc<RunningBackups>>,
+    /// What answers the hub's commands, when the machine takes them.
+    commands: Option<Arc<AnswerHubCommands>>,
 }
 
 /// What a session needs to ask for the machine's leases: the repositories
@@ -224,6 +227,7 @@ impl SyncWithHub {
             told: Mutex::new(Told::default()),
             listings: None,
             running: None,
+            commands: None,
         }
     }
 
@@ -282,6 +286,15 @@ impl SyncWithHub {
     #[must_use]
     pub fn with_running(mut self, running: Arc<RunningBackups>) -> Self {
         self.running = Some(running);
+        self
+    }
+
+    /// This sync taking its hub's commands: its `Hello` says which
+    /// `answer` takes, and `answer` answers each the hub sends, between
+    /// the machine's own messages (§16, decision 176).
+    #[must_use]
+    pub fn with_commands(mut self, answer: Arc<AnswerHubCommands>) -> Self {
+        self.commands = Some(answer);
         self
     }
 
