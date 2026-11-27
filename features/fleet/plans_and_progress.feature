@@ -1,8 +1,9 @@
 Feature: A machine's plans and its running operation's progress reach its hub
   An approved machine tells its hub its plans, each with its last run and its
-  next planned run, whenever they change, and the progress of an operation it
-  runs, at most every 5 seconds. The hub keeps the latest of each, and shows
-  a progress only while the machine's reports say its operation runs
+  next planned run, each time it connects and whenever they change, and the
+  progress of an operation it runs, at most every 5 seconds. The hub keeps
+  the latest of each, and shows a progress only while the machine's reports
+  say its operation runs
   (technical design §7.2).
 
   Background:
@@ -16,6 +17,12 @@ Feature: A machine's plans and its running operation's progress reach its hub
     Then the hub shows the agent's plans "photos" and "documents", in that order
     And the hub shows the plan "photos" last succeeded and runs next in an hour
     And the hub shows the plan "documents" never ran and has no next run
+
+  Scenario: A machine that reconnects to its hub tells it its plans again, unchanged as they are
+    Given the agent's sync with its hub ran
+    When the agent reconnects to its hub
+    Then the hub was sent the agent's plans twice
+    And the hub shows the agent's plans "photos" and "documents", in that order
 
   Scenario: Plans that didn't change aren't sent again, and a change is
     Given the agent's sync with its hub ran

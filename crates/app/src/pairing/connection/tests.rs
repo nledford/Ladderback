@@ -1318,6 +1318,142 @@ async fn the_sync_loop_tells_the_hub_a_report_waiting_in_its_outbox() {
     assert_eq!(told, vec![entry.report]);
 }
 
+/// Each session tells the hub the agent's plans, unchanged as they are,
+/// so a hub that lost a snapshot holds it again once the agent reconnects
+/// (§7.2, #1699).
+#[tokio::test]
+async fn each_session_tells_the_hub_the_plans_again_unchanged() {
+    use crate::sync::Synced;
+
+    let hub = keeping_reports(1);
+    let (sync, connector, _) = syncing_plans(&hub).await;
+    for session in 1..=2 {
+        assert_eq!(sync.sync_once().await, Ok(Synced::Replayed { sent: 0 }));
+        assert_eq!(plans_snapshots(&connector), session, "session {session}");
+    }
+}
+
+/// The sync loop tells the hub the agent's plans at each connection's
+/// first look, without waiting out [`crate::sync::PLANS_CHECK`] since the
+/// connection before read them, and never again within a connection while
+/// they don't change (§7.2, #1699).
+#[tokio::test]
+async fn the_sync_loop_tells_unchanged_plans_once_a_connection() {
+    use crate::ports::Clock as _;
+    use crate::sync::PLANS_CHECK;
+
+    /// How long until the sync loop's next wait ends, once it waits.
+    async fn next_wait(clock: &FakeClock) -> SignedDuration {
+        for _ in 0..1_000 {
+            if let Some(next) = clock.until_next_sleeper() {
+                return next;
+            }
+            tokio::time::sleep(std::time::Duration::from_millis(1)).await;
+        }
+        panic!("the sync loop stopped waiting");
+    }
+
+    /// The loop's next wait passed, once it waits again.
+    async fn step(clock: &FakeClock) {
+        let wait = next_wait(clock).await;
+        clock.advance(wait);
+        next_wait(clock).await;
+    }
+
+    let hub = keeping_reports(1);
+    let (sync, connector, clock) = syncing_plans(&hub).await;
+    let (stop, stopped) = tokio::sync::oneshot::channel::<()>();
+    let running = std::thread::spawn(move || {
+        let runtime = tokio::runtime::Builder::new_current_thread()
+            .build()
+            .unwrap();
+        runtime.block_on(async {
+            tokio::select! {
+                () = sync.run() => unreachable!("the sync loop runs until it is stopped"),
+                _ = stopped => {}
+            }
+        });
+    });
+    next_wait(&clock).await;
+    assert_eq!(plans_snapshots(&connector), 1, "the first look");
+    let held = clock.monotonic();
+    while clock.monotonic() - held <= PLANS_CHECK {
+        step(&clock).await;
+    }
+    assert_eq!(
+        plans_snapshots(&connector),
+        1,
+        "unchanged on one connection"
+    );
+    connector.drop_links().await;
+    // Each step ends once the loop waits again, so the next connection's
+    // first look is done once it holds.
+    while connector.open_links() == 0 {
+        step(&clock).await;
+    }
+    assert_eq!(
+        plans_snapshots(&connector),
+        2,
+        "the next connection's first look"
+    );
+    stop.send(()).unwrap();
+    running.join().unwrap();
+}
+
+/// Agent 1, approved on `hub`, syncing with it, its plans read from fakes,
+/// on the loopback connector returned and the agent's clock.
+async fn syncing_plans(
+    hub: &Hub,
+) -> (
+    crate::sync::SyncWithHub,
+    Arc<LoopbackHubConnector>,
+    Arc<FakeClock>,
+) {
+    use crate::sync::{ReadPlans, SyncWithHub};
+    use domain::fleet::OutboxEpoch;
+
+    let identity = approved(hub).await;
+    let connector = Arc::new(LoopbackHubConnector::to(hub.pairing.clone()));
+    let clock = Arc::new(FakeClock::new(
+        Timestamp::from_second(1_800_000_030).unwrap(),
+    ));
+    let status = crate::status::ReadStatus::new(
+        Arc::new(crate::fakes::InMemoryConfigStore::new()),
+        Arc::new(crate::fakes::InMemoryOperationStore::new()),
+        clock.clone(),
+        domain::TimeZone::UTC,
+    );
+    let sync = SyncWithHub::new(
+        connecting(identity, connector.clone()),
+        Arc::new(crate::fakes::InMemoryOutbox::new(OutboxEpoch::from_uuid(
+            Uuid::from_u128(0xe1),
+        ))),
+        clock.clone(),
+        agent_id(1),
+        hostname(1),
+        None,
+    )
+    .with_plans(ReadPlans::new(
+        status,
+        Arc::new(crate::fakes::InMemoryScheduleStore::new()),
+    ));
+    (sync, connector, clock)
+}
+
+/// How many snapshots of its plans the agent sent through `connector`.
+fn plans_snapshots(connector: &LoopbackHubConnector) -> usize {
+    connector
+        .sent()
+        .iter()
+        .filter(|text| {
+            matches!(
+                AgentFrame::from_text(text),
+                Ok(AgentFrame::Signed { kind, .. }) if kind == "PlansSnapshot"
+            )
+        })
+        .count()
+}
+
 /// A channel shows its sequence numbers in a log and leaves out its keys.
 #[tokio::test]
 async fn a_channel_shows_its_sequence_numbers_and_no_key() {
