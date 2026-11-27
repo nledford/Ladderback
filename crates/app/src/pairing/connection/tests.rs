@@ -3559,7 +3559,7 @@ async fn sync_taking_commands(
     connector: Arc<LoopbackHubConnector>,
     clock: Arc<FakeClock>,
 ) -> crate::sync::SyncWithHub {
-    let identity = paired(hub, 1).await;
+    let identity = approved(hub).await;
     let answer = crate::hub_commands::AnswerHubCommands::new(
         Arc::new(crate::fakes::InMemoryConfigStore::new()),
         Arc::new(crate::fakes::InMemoryCommandLedger::default()),
@@ -3617,7 +3617,7 @@ async fn a_sync_taking_commands_names_them_in_its_hello() {
 /// own messages, while it waits for its next poll (decision 176).
 #[tokio::test]
 async fn a_held_connection_answers_the_hubs_command() {
-    let hub = hub(1);
+    let hub = keeping_reports(1);
     let connector = Arc::new(LoopbackHubConnector::to(hub.pairing.clone()));
     let clock = Arc::new(FakeClock::new(hub.clock.now()));
     let sync = sync_taking_commands(&hub, connector.clone(), clock.clone()).await;
@@ -3633,7 +3633,10 @@ async fn a_held_connection_answers_the_hubs_command() {
     }
     .to_bytes();
     let watched = async {
-        while sent_of(&connector, &heartbeat).is_empty() {
+        for _ in 0..10_000 {
+            if !sent_of(&connector, &heartbeat).is_empty() {
+                break;
+            }
             tokio::task::yield_now().await;
         }
         connector.send_command(domain::fleet::run_plan_kind(), payload);
@@ -3649,7 +3652,7 @@ async fn a_held_connection_answers_the_hubs_command() {
     let running = std::pin::pin!(sync.run());
     let watched = std::pin::pin!(watched);
     let answered = tokio::time::timeout(
-        std::time::Duration::from_secs(10),
+        std::time::Duration::from_secs(5),
         futures::future::select(running, watched),
     )
     .await;
