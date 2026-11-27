@@ -3832,6 +3832,43 @@ async fn the_hub_sends_a_machine_at_most_its_commands_an_hour() {
     );
 }
 
+/// A command the hub couldn't hand to the machine's connection, as one
+/// whose connection is ending, isn't counted in the hour's commands: the
+/// machine's next connection takes as many as ever (decision 176).
+#[tokio::test]
+async fn a_command_the_hub_couldnt_send_isnt_counted() {
+    use crate::pairing::CommandAskRefused;
+    use domain::fleet::{Accepts, HUB_COMMANDS_PER_HOUR};
+    use futures::{FutureExt as _, StreamExt as _};
+
+    let hub = keeping_reports(1);
+    let _identity = approved(&hub).await;
+    let ending = hub
+        .pairing
+        .went_live_taking(agent_id(1), 1, Box::new(|| {}), Some(Accepts::all()))
+        .await;
+    drop(ending);
+    for ask in 0..HUB_COMMANDS_PER_HOUR {
+        assert_eq!(
+            hub.pairing
+                .command_asked(photos_asked_of(agent_id(1)))
+                .now_or_never(),
+            Some(Err(CommandAskRefused::MachineOffline)),
+            "ask {ask}"
+        );
+    }
+    let mut queue = hub
+        .pairing
+        .went_live_taking(agent_id(1), 2, Box::new(|| {}), Some(Accepts::all()))
+        .await;
+    let mut asked = Box::pin(hub.pairing.command_asked(photos_asked_of(agent_id(1))));
+    assert!(
+        futures::poll!(asked.as_mut()).is_pending(),
+        "the hub refused the first command it could send"
+    );
+    assert!(queue.next().now_or_never().flatten().is_some());
+}
+
 /// The hub's runs for a sync that takes its commands: no plan runs, and
 /// each start is the operation `0x0e`.
 struct StartsOne;
