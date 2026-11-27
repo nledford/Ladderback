@@ -44,8 +44,8 @@ use crate::components::{
     first_load, paced, refusal_alert, say_refusals,
 };
 use crate::dashboard::{
-    CardFacts, CardStatus, Fleet, NextRun, Own, attention_link, attention_words, card_facts,
-    connection_line, instant, own_machine, progress_reading, reads_again, summary,
+    CardFacts, CardStatus, Fleet, NextRun, Own, OwnStory, attention_link, attention_words,
+    card_facts, connection_line, instant, own_machine, progress_reading, reads_again, summary,
 };
 use crate::live::reply;
 use crate::operations_page::{StartBackup, badge_of};
@@ -195,21 +195,20 @@ fn follow_own(fleet: Fleet, localizer: &Arc<Localizer>, visit: &Visit) {
             })
             .await;
     });
-    // Each operation and its status: a change reads the plans' status again.
-    let story = Memo::new(move |_| {
-        operations.with(|operations| {
-            operations
-                .rows
-                .iter()
-                .map(|row| (row.summary.id.clone(), row.summary.status.clone()))
-                .collect::<Vec<_>>()
-        })
-    });
+    // Each operation and its status: the first, and each change of either,
+    // reads the plans' status again. The effect reads `operations` itself,
+    // so each change wakes it: a memo tracked and never read is never
+    // computed, so it never hears a change.
+    let story = StoredValue::new(OwnStory::default());
     let rereads = StoredValue::new(Rereads::default());
     let status_url = format!("{base}/api/v1/status");
     let reading = visit.clone();
     Effect::new(move |_| {
-        story.track();
+        let moved = operations
+            .with(|operations| story.try_update_value(|story| story.moves_on(operations)));
+        if moved != Some(true) {
+            return;
+        }
         ws::reread_hub(
             status_url.clone(),
             rereads,
@@ -336,7 +335,9 @@ pub(crate) fn Dashboard(localizer: Arc<Localizer>) -> impl IntoView {
                 let alert_localizer = Arc::clone(&localizer);
                 view! {
                     {summary_view(&localizer, counted, viewer.clone())}
-                    {move || refused.get().map(|sentence| refusal_alert(&alert_localizer, sentence))}
+                    {move || {
+                        refused.get().map(|sentence| refusal_alert(&alert_localizer, sentence))
+                    }}
                     <ul class=CARDS role="list">
                         <For
                             each=move || shown.get()
@@ -344,7 +345,13 @@ pub(crate) fn Dashboard(localizer: Arc<Localizer>) -> impl IntoView {
                             children=move |machine: HubMachineDto| {
                                 view! {
                                     <li class="m-0">
-                                        {card(&card_localizer, fleet, machine, card_viewer.clone(), refused)}
+                                        {card(
+                                            &card_localizer,
+                                            fleet,
+                                            machine,
+                                            card_viewer.clone(),
+                                            refused,
+                                        )}
                                     </li>
                                 }
                             }
@@ -380,7 +387,11 @@ fn summary_view(
                     let words = text_with(&localizer, words.id, &words.args);
                     Some(view! {
                         <li>
-                            <Link to=to localizer=Arc::clone(&localizer) placement=LinkPlacement::InText>
+                            <Link
+                                to=to
+                                localizer=Arc::clone(&localizer)
+                                placement=LinkPlacement::InText
+                            >
                                 {words}
                             </Link>
                         </li>

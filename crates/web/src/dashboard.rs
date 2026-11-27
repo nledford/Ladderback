@@ -618,7 +618,26 @@ impl OwnStory {
     /// was last read for, always so before the first read, which it then
     /// becomes: whether to read the status again.
     pub(crate) fn moves_on(&mut self, operations: &OperationsState) -> bool {
-        todo!("{self:?} {operations:?}")
+        let same = self.0.as_ref().is_some_and(|read| {
+            read.len() == operations.rows.len()
+                && read
+                    .iter()
+                    .zip(&operations.rows)
+                    .all(|((id, status), row)| {
+                        *id == row.summary.id && *status == row.summary.status
+                    })
+        });
+        if same {
+            return false;
+        }
+        self.0 = Some(
+            operations
+                .rows
+                .iter()
+                .map(|row| (row.summary.id.clone(), row.summary.status.clone()))
+                .collect(),
+        );
+        true
     }
 }
 
