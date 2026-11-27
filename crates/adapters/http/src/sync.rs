@@ -470,6 +470,9 @@ mod served {
             // The hub's commands to the machine, once its connection is live
             // (decision 176).
             let mut queue: Option<CommandQueue> = None;
+            // Moved only by a frame the machine sends: a command the hub
+            // sends it doesn't keep a silent machine's connection.
+            let mut idle_by = tokio::time::Instant::now() + self.bounds.idle_within;
             loop {
                 let woke = async {
                     match queue.as_mut() {
@@ -483,12 +486,13 @@ mod served {
                         None => Woke::Read(next(socket).await),
                     }
                 };
-                let woke = match tokio::time::timeout(self.bounds.idle_within, woke).await {
+                let woke = match tokio::time::timeout_at(idle_by, woke).await {
                     Ok(woke) => woke,
                     Err(_) => return End::Dropped,
                 };
                 match woke {
                     Woke::Read(read) => {
+                        idle_by = tokio::time::Instant::now() + self.bounds.idle_within;
                         // Answering is within the idle bound too, so an agent
                         // that stops reading is let go of.
                         let taken = self.take(socket, session, read);
