@@ -64,6 +64,66 @@ async fn the_hub_is_refused_an_unknown_plan_and_operation() {
     );
 }
 
+/// The hub's backup is queued before its repository's password is read:
+/// the log holds it when the machine answers, and a password that can't
+/// be read ends that run failed for it, before any hook runs, as an
+/// unattended run's does (decision 176).
+#[tokio::test]
+async fn the_hubs_backup_is_queued_and_a_password_it_cant_read_fails_it() {
+    let (mut runner, entered, _gate, _scratch) = runner_at_a_gate().await;
+    let config = app::ports::ConfigStore::load(&*runner.config)
+        .await
+        .expect("the config loads");
+    let repositories = config
+        .repositories()
+        .iter()
+        .map(|(alias, repository)| {
+            let mut repository = repository.clone();
+            repository.settings.password =
+                domain::secrets::SecretRef::Env("LADDERBACK_TEST_PASSWORD_NEVER_SET".to_owned());
+            (alias.clone(), repository)
+        })
+        .collect();
+    let unreadable = domain::planning::AgentConfig::new(
+        config.agent().clone(),
+        config.hooks().clone(),
+        repositories,
+        config.plans().to_vec(),
+    )
+    .expect("a valid configuration");
+    app::ports::ConfigStore::save(&*runner.config, &unreadable)
+        .await
+        .expect("the config saves");
+    runner.resolve = Arc::new(ResolveRepository::new(Arc::new(
+        app::fakes::FakeSecrets::new(),
+    )));
+    let operation = HubRuns::queue(&runner, &plan("home"), Some(tag()))
+        .await
+        .expect("the plan is queued");
+    let logged = GetOperation::new(Arc::clone(&runner.store))
+        .get(operation)
+        .await
+        .expect("the log reads")
+        .expect("the operation is logged");
+    assert_eq!(
+        logged.record.trigger,
+        Trigger::Hub {
+            asked_by: Some(tag())
+        }
+    );
+    let status = ended(&runner, operation).await;
+    assert!(
+        matches!(
+            status,
+            OperationStatus::Failed {
+                reason: domain::execution::FailureReason::SecretRefused { .. }
+            }
+        ),
+        "{status:?}"
+    );
+    assert_eq!(*entered.borrow(), 0, "a hook ran");
+}
+
 /// The hub cancels backups only: a running check goes on until a session
 /// cancels it.
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]

@@ -42,6 +42,20 @@ pub trait HubRuns: Send + Sync {
         asked_by: Option<SessionTag>,
     ) -> Result<OperationId, HubRunRefused>;
 
+    /// Admits a backup of `plan` the hub's session `asked_by` asked for,
+    /// as a new operation, and returns once the operation log has it
+    /// queued: on a task of its own, the backup then reads its
+    /// repository's secrets and runs, or ends failed with why it can't
+    /// (decision 176).
+    async fn queue(
+        &self,
+        plan: &PlanId,
+        asked_by: Option<SessionTag>,
+    ) -> Result<OperationId, HubRunRefused> {
+        let _ = (plan, asked_by);
+        todo!()
+    }
+
     /// Cancels the backup `operation`.
     async fn cancel(&self, operation: &OperationId) -> Result<(), HubCancelRefused>;
 }

@@ -4058,6 +4058,135 @@ async fn a_held_connection_answers_the_hubs_command() {
     assert_eq!(result.result, "started", "{result:?}");
 }
 
+/// How long [`SlowStart`]'s backups take to start: longer than the hub
+/// waits for an answer, and than three heartbeats.
+const SLOW_START: SignedDuration = SignedDuration::from_secs(95);
+
+/// The hub's runs for a sync whose backups take [`SLOW_START`] on `clock`
+/// to start, as reading a repository's secrets can (a command or a
+/// keyring that is slow to answer): each is admitted and queued as the
+/// operation `0x0e` at once, and starts that long after.
+struct SlowStart {
+    clock: Arc<FakeClock>,
+}
+
+#[async_trait]
+impl crate::hub_commands::HubRuns for SlowStart {
+    async fn going(&self, _plan: &domain::PlanId) -> Option<domain::OperationId> {
+        None
+    }
+
+    async fn start(
+        &self,
+        _plan: &domain::PlanId,
+        _asked_by: Option<domain::access::SessionTag>,
+    ) -> Result<domain::OperationId, crate::hub_commands::HubRunRefused> {
+        crate::ports::Clock::sleep(&*self.clock, SLOW_START).await;
+        Ok(domain::OperationId::from_uuid(Uuid::from_u128(0x0e)))
+    }
+
+    async fn queue(
+        &self,
+        _plan: &domain::PlanId,
+        _asked_by: Option<domain::access::SessionTag>,
+    ) -> Result<domain::OperationId, crate::hub_commands::HubRunRefused> {
+        let clock = self.clock.clone();
+        tokio::spawn(async move {
+            crate::ports::Clock::sleep(&*clock, SLOW_START).await;
+        });
+        Ok(domain::OperationId::from_uuid(Uuid::from_u128(0x0e)))
+    }
+
+    async fn cancel(
+        &self,
+        _operation: &domain::OperationId,
+    ) -> Result<(), crate::hub_commands::HubCancelRefused> {
+        Err(crate::hub_commands::HubCancelRefused::Unknown)
+    }
+}
+
+/// A held connection answers the hub's `run-plan` once the backup is
+/// admitted and queued, not once it has started: a start that takes 95
+/// seconds neither keeps the answer past the hub's 20 seconds nor stops
+/// the heartbeats every 30, so the hub keeps the machine online and never
+/// says it had no answer for a backup that runs (decision 176).
+#[tokio::test]
+async fn a_held_connection_answers_and_beats_while_the_hubs_backup_starts() {
+    use crate::ports::Clock as _;
+
+    let hub = keeping_reports(1);
+    let identity = approved(&hub).await;
+    let connector = Arc::new(LoopbackHubConnector::to(hub.pairing.clone()));
+    let clock = Arc::new(FakeClock::new(hub.clock.now()));
+    let sync = crate::sync::SyncWithHub::new(
+        connecting(identity, connector.clone()),
+        Arc::new(crate::fakes::InMemoryOutbox::new(
+            domain::fleet::OutboxEpoch::from_uuid(Uuid::from_u128(0xe1)),
+        )),
+        clock.clone(),
+        agent_id(1),
+        hostname(1),
+        None,
+    )
+    .with_commands(Arc::new(crate::hub_commands::AnswerHubCommands::new(
+        Arc::new(crate::fakes::InMemoryConfigStore::new()),
+        Arc::new(crate::fakes::InMemoryCommandLedger::default()),
+        Arc::new(SlowStart {
+            clock: clock.clone(),
+        }),
+        clock.clone(),
+    )));
+    let result_kind = domain::fleet::command_result_kind();
+    let heartbeat = domain::fleet::heartbeat_kind();
+    let watched = async {
+        for _ in 0..10_000 {
+            if !sent_of(&connector, &heartbeat).is_empty() {
+                break;
+            }
+            tokio::task::yield_now().await;
+        }
+        connector.send_command(
+            domain::fleet::run_plan_kind(),
+            run_photos(1, hub.clock.now()),
+        );
+        let asked = clock.monotonic();
+        let beats = sent_of(&connector, &heartbeat).len();
+        let mut answered_after = None;
+        // Two minutes of the machine's clock, a second at a time.
+        for _ in 0..120 {
+            for _ in 0..50 {
+                tokio::task::yield_now().await;
+            }
+            if answered_after.is_none() && !sent_of(&connector, &result_kind).is_empty() {
+                answered_after = Some(clock.monotonic().saturating_sub(asked));
+            }
+            clock.advance(SignedDuration::from_secs(1));
+        }
+        (
+            answered_after,
+            sent_of(&connector, &heartbeat).len() - beats,
+        )
+    };
+    let running = std::pin::pin!(sync.run());
+    let watched = std::pin::pin!(watched);
+    let Ok(futures::future::Either::Right(((answered_after, beats), _))) = tokio::time::timeout(
+        std::time::Duration::from_secs(10),
+        futures::future::select(running, watched),
+    )
+    .await
+    else {
+        panic!("the watch didn't end");
+    };
+    assert!(
+        answered_after.is_some_and(|after| after <= SignedDuration::from_secs(20)),
+        "the machine answered after {answered_after:?}"
+    );
+    assert!(beats >= 3, "{beats} heartbeats in two minutes");
+    let results = sent_of(&connector, &result_kind);
+    let result = api::sync::CommandResultPayload::from_bytes(&results[0]).unwrap();
+    assert_eq!(result.result, "started", "{result:?}");
+}
+
 /// The kinds of the signed messages the agent sent on `connector`, in
 /// order.
 fn kinds_sent(connector: &LoopbackHubConnector) -> Vec<WireName> {
