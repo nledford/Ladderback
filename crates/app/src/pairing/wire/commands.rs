@@ -4,7 +4,7 @@
 //! the Unix epoch, and the hub's session as its tag.
 
 use api::ErrorCode;
-use api::sync::{CancelOpPayload, CommandResultPayload, RunPlanPayload, code_name, refusal_code};
+use api::sync::{CancelOpPayload, CommandResultPayload, RunPlanPayload, code_name};
 use domain::access::SessionTag;
 use domain::fleet::{
     CommandId, CommandRequest, EpochSeconds, HubCommand, WireName, cancel_op_kind, run_plan_kind,
@@ -118,10 +118,11 @@ pub fn read_command_result(bytes: &[u8]) -> Result<(CommandId, CommandAnswer), W
         "started" => CommandAnswer::Started(operation()?),
         "canceled" => CommandAnswer::Canceled(operation()?),
         "refused" => {
+            // Read by its name alone: `refusal_code` keeps only the
+            // handshake's refusals, and the list below keeps the machine's.
             let code = payload
                 .code
-                .as_deref()
-                .map(refusal_code)
+                .and_then(|name| serde_json::from_value(serde_json::Value::String(name)).ok())
                 .filter(|code| MACHINE_REFUSALS.contains(code))
                 .unwrap_or(ErrorCode::MachineRunRefused);
             let retry_at = payload
