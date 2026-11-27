@@ -859,3 +859,60 @@ fn a_cancel_report_keeps_its_wire_spelling() {
     let payload = String::from_utf8(report_payload(&report_entry(Happening::Canceled))).unwrap();
     assert!(payload.contains(r#""cancelled""#), "{payload}");
 }
+
+/// The hub reads each refusal a machine answers its command with by its
+/// own code, and when to ask again only of a rate limit; a code no machine
+/// refuses with is `machine-run-refused`, so a machine can't have the hub
+/// say what it doesn't mean (decision 176).
+#[test]
+fn the_hub_reads_a_machines_refusal_by_its_code() {
+    use crate::hub_commands::CommandAnswer;
+    use api::ErrorCode;
+    use domain::Timestamp;
+    use domain::fleet::CommandId;
+
+    let id = CommandId::from_uuid(Uuid::from_u128(0x0191));
+    let at = Timestamp::from_second(1_800_000_300).unwrap();
+    let read = |code, retry_at| {
+        let sent = CommandAnswer::Refused { code, retry_at };
+        let (read_id, answer) = read_command_result(&command_result_payload(id, &sent)).unwrap();
+        assert_eq!(read_id, id);
+        answer
+    };
+    for code in [
+        ErrorCode::PlanUnknown,
+        ErrorCode::OperationUnknown,
+        ErrorCode::OperationNotRunning,
+        ErrorCode::KeyFilesNotLeftOut,
+        ErrorCode::PlanRunWaiting,
+        ErrorCode::MachineCommandsOff,
+        ErrorCode::CommandExpired,
+        ErrorCode::CommandReplayed,
+        ErrorCode::MachineRunRefused,
+        ErrorCode::CommandBackupsOnly,
+    ] {
+        assert_eq!(
+            read(code, Some(at)),
+            CommandAnswer::Refused {
+                code,
+                retry_at: None
+            }
+        );
+    }
+    assert_eq!(
+        read(ErrorCode::CommandRateLimited, Some(at)),
+        CommandAnswer::Refused {
+            code: ErrorCode::CommandRateLimited,
+            retry_at: Some(at)
+        }
+    );
+    for code in [ErrorCode::TokenUsed, ErrorCode::HubUnavailable] {
+        assert_eq!(
+            read(code, None),
+            CommandAnswer::Refused {
+                code: ErrorCode::MachineRunRefused,
+                retry_at: None
+            }
+        );
+    }
+}

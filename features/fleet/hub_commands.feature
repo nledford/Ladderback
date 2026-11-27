@@ -86,9 +86,52 @@ Feature: A machine answers its hub's commands
     Then the check runs on
     And the machine refused the command with "command-backups-only"
 
+  Scenario: A person on the hub runs a plan on the machine
+    Given the machine is connected to its hub
+    When a person on the hub asks the machine to run the plan "photos"
+    Then the machine started a backup of "photos" for the hub's session
+    And the hub told the person the machine started that backup
+
+  Scenario: A machine not connected is sent nothing, and nothing waits for it
+    Given the machine isn't connected to its hub
+    When a person on the hub asks the machine to run the plan "photos"
+    Then the hub told the person "machine-offline"
+    When the machine connects to its hub
+    Then the machine heard no command
+    And the machine started no backup
+
   Scenario: A machine not connected is named with its plan's next run
     Given the machine told its hub the plan "photos" runs next in an hour
     And the machine's connection to its hub ended
     When a person on the hub asks the machine to run the plan "photos"
     Then the hub told the person "machine-offline-next-run", with the plan's next run in an hour
     And the machine started no backup
+
+  Scenario: A machine of a release that takes no commands is told apart from one that turned them off
+    Given the machine runs a release that takes no commands and is connected to its hub
+    When a person on the hub asks the machine to run the plan "photos"
+    Then the hub told the person "machine-commands-unsupported"
+    And the machine started no backup
+
+  Scenario: The hub sends nothing to a machine that turned its commands off
+    Given the machine's configuration turns its hub's commands off
+    And the machine is connected to its hub
+    When a person on the hub asks the machine to run the plan "photos"
+    Then the hub told the person "machine-commands-off"
+    And the machine heard no command
+    And the machine started no backup
+
+  Scenario: The hub waits 20 seconds for the machine's answer
+    Given the machine is connected to its hub
+    When a person on the hub asks the machine to run the plan "photos", which the machine hears and doesn't answer for 20 seconds
+    Then the hub told the person "machine-no-answer"
+    And the machine started no backup
+
+  Scenario: The hub tells the person when the machine may be asked again
+    Given the machine is connected to its hub
+    And a person on the hub asked the machine to run the plan "photos"
+    And that backup ended
+    When 2 minutes pass on the machine and its hub
+    And a person on the hub asks the machine to run the plan "photos"
+    Then the machine started 1 backup
+    And the hub told the person "command-rate-limited", to be asked again 3 minutes from now

@@ -1438,3 +1438,127 @@ async fn a_run_on_a_machine_offline_names_the_plans_next_run() {
         .collect()
     );
 }
+
+/// The backup the machine of [`answering_machine`] starts for any plan,
+/// and cancels.
+fn backup() -> OperationId {
+    OperationId::from_uuid(Uuid::from_u128(0x0e))
+}
+
+/// The plan runner of [`answering_machine`]: a backup of any plan starts
+/// as [`backup`], which it cancels.
+struct Runs;
+
+#[async_trait::async_trait]
+impl app::hub_commands::HubRuns for Runs {
+    async fn going(&self, _plan: &domain::PlanId) -> Option<OperationId> {
+        None
+    }
+
+    async fn start(
+        &self,
+        _plan: &domain::PlanId,
+        _asked_by: Option<domain::access::SessionTag>,
+    ) -> Result<OperationId, app::hub_commands::HubRunRefused> {
+        Ok(backup())
+    }
+
+    async fn cancel(
+        &self,
+        operation: &OperationId,
+    ) -> Result<(), app::hub_commands::HubCancelRefused> {
+        if *operation == backup() {
+            Ok(())
+        } else {
+            Err(app::hub_commands::HubCancelRefused::Unknown)
+        }
+    }
+}
+
+/// A machine paired with `daemon`'s hub and approved there, live on its
+/// connection: its record, the connection, and its answers to the hub's
+/// commands.
+async fn answering_machine(
+    daemon: &Daemon,
+) -> (
+    AgentRecord,
+    app::pairing::AgentChannel,
+    app::hub_commands::AnswerHubCommands,
+) {
+    use app::pairing::{AgentPairing, ConnectToHub, PairWithHub};
+
+    let pairing = Arc::clone(daemon.pairing.as_ref().unwrap());
+    let keys = pairing.keys().await.unwrap();
+    let tls = domain::fleet::TokenTls::Pinned(Fingerprint::from_digest([7; 32]));
+    let address = domain::fleet::HubAddress::parse(ADDRESS).unwrap();
+    let token = pairing.make_token(&keys, address, tls, None).await.unwrap();
+    let connector = Arc::new(app::fakes::LoopbackHubConnector::to(Arc::clone(&pairing)));
+    let identity = Arc::new(InMemoryIdentity::default());
+    let agent = AgentId::from_uuid(Uuid::from_u128(1));
+    let hostname = Hostname::parse("laptop").unwrap();
+    let machine = AgentPairing::new(
+        identity.clone(),
+        Arc::new(FakeSigning),
+        Arc::new(SeededRandom::new(9)),
+        Arc::new(app::fakes::InMemoryLeaseCache::default()),
+    );
+    PairWithHub::new(machine, connector.clone())
+        .pair(token, agent, hostname.clone(), None)
+        .await
+        .unwrap();
+    let waiting = daemon.registry.agent(agent).await.unwrap().unwrap();
+    pairing.approve(&waiting).await.unwrap().unwrap();
+    let machine_clock = Arc::new(FakeClock::new(now()));
+    let (_, mut channel) = ConnectToHub::new(
+        identity,
+        Arc::new(FakeSigning),
+        Arc::new(SeededRandom::new(77)),
+        machine_clock.clone(),
+        connector,
+        "0.6.0-agent".to_owned(),
+        None,
+    )
+    .connect_accepting(agent, hostname, None, None, Some(Accepts::all()))
+    .await
+    .unwrap();
+    // Its first message makes its connection live on the hub.
+    channel
+        .send_plans(&domain::fleet::PlansReport::of(Vec::new()))
+        .await
+        .unwrap();
+    channel.receive_plans_ack().await.unwrap();
+    let answers = app::hub_commands::AnswerHubCommands::new(
+        Arc::new(app::fakes::InMemoryConfigStore::new()),
+        Arc::new(app::fakes::InMemoryCommandLedger::default()),
+        Arc::new(Runs),
+        machine_clock,
+    );
+    let record = daemon.registry.agent(agent).await.unwrap().unwrap();
+    (record, channel, answers)
+}
+
+/// A run on a live machine that starts its backup is `202 Accepted` with
+/// that backup, and a cancel of it that the machine makes is `200` with it
+/// (decision 176).
+#[tokio::test]
+async fn a_live_machine_starts_and_cancels_the_backup_the_page_asks_for() {
+    let daemon = Daemon::hub(false);
+    let (machine, mut channel, answers) = answering_machine(&daemon).await;
+    let operation = backup().as_uuid().hyphenated().to_string();
+    for (request, status) in [
+        (run(LOOPBACK, &[], &machine, "photos"), StatusCode::ACCEPTED),
+        (cancel(LOOPBACK, &[], &machine), StatusCode::OK),
+    ] {
+        let (response, answered) = tokio::time::timeout(
+            std::time::Duration::from_secs(5),
+            futures::future::join(daemon.send(request), answers.answer_next(&mut channel)),
+        )
+        .await
+        .expect("the route answered within 5 seconds");
+        answered.unwrap();
+        assert_eq!(response.status(), status);
+        let done: api::MachineCommandDoneDto =
+            serde_json::from_value(json(response).await).unwrap();
+        assert_eq!(done.operation, operation);
+    }
+}

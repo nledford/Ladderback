@@ -392,6 +392,7 @@ async fn commands_off(agent: &mut Agent) {
 }
 
 #[given("the machine is connected to its hub")]
+#[when("the machine connects to its hub")]
 async fn connected(agent: &mut Agent) {
     let machine = agent.pairing.first.take().expect("the first agent");
     side(agent).connect(&machine).await;
@@ -636,6 +637,14 @@ async fn person_asks(agent: &mut Agent, command: HubCommand) {
         _ => asked.await,
     };
     side.heard = Some(heard);
+}
+
+#[then("the machine heard no command")]
+async fn heard_no_command(agent: &mut Agent) {
+    let side = live_side(agent).await;
+    let channel = side.channel.as_mut().expect("a connection to the hub");
+    assert!(channel.buffered_command().is_none(), "a command waited");
+    assert!(side.results().is_empty(), "{:?}", side.results());
 }
 
 #[given("the machine isn't connected to its hub")]
