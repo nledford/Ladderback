@@ -310,14 +310,16 @@ pub enum Queued {
 /// A run whose turn came as it took its place.
 pub struct TurnNow {
     assessment: MaintenanceAssessment,
-    place: crate::queue::Place,
+    place: Place,
 }
 
 /// A run waiting for its turn, in the log as queued.
 pub struct WaitingMaintenance {
     assessment: MaintenanceAssessment,
-    operation: Operation,
-    place: crate::queue::Place,
+    /// Boxed, as a waiting run is otherwise much larger than one whose turn
+    /// came at once.
+    operation: Box<Operation>,
+    place: Place,
 }
 
 /// What a run would do, decided and not yet done (§7.3).
@@ -769,7 +771,7 @@ impl RunMaintenance {
             .map_err(MaintenanceError::Store)?;
         Ok(Queued::Waiting(WaitingMaintenance {
             assessment,
-            operation,
+            operation: Box::new(operation),
             place,
         }))
     }
@@ -796,9 +798,10 @@ impl RunMaintenance {
     ) -> Finished {
         let WaitingMaintenance {
             assessment,
-            mut operation,
+            operation,
             mut place,
         } = waiting;
+        let mut operation = *operation;
         let mut cancel = pin!(cancel.fuse());
         let turn = {
             let mut turn = pin!(place.turn().fuse());

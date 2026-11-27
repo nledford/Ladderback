@@ -12,18 +12,20 @@ use tokio::sync::watch;
 /// daemon that is going, and the stop's operation log step records its end
 /// (`daemon-shut-down`). A frozen run is dropped where it stands, so a hook
 /// it was running is killed at once, as the runtime's end once killed it.
-/// Clones share one switch, and one count of the maintenance runs going,
-/// which a restart that waits for the running operations counts with the
-/// queue's running backups and holds, so none starts meanwhile (decision 94).
+/// Clones share one switch, and one count of the runs a restart waits for
+/// outside the queues: a restore while it runs, and a maintenance run until
+/// it has its place in the maintenance queue. A restart that waits for the
+/// running operations counts it with the queues' running runs and holds
+/// them, so none starts meanwhile (decisions 94 and 75, point 8).
 #[derive(Clone)]
 pub(crate) struct Runs {
     frozen: Arc<watch::Sender<bool>>,
     maintenance: Arc<Mutex<Maintenance>>,
 }
 
-/// The maintenance runs going, and whether a restart holds new ones back.
-/// One lock for both, so a run either counts before the hold or is refused
-/// after it.
+/// The runs counted outside the queues ([`Runs::maintaining`]), and whether
+/// a restart holds new ones back. One lock for both, so a run either counts
+/// before the hold or is refused after it.
 #[derive(Default)]
 struct Maintenance {
     running: usize,
@@ -63,9 +65,10 @@ impl Runs {
         self.frozen.send_replace(true);
     }
 
-    /// Counts a maintenance run as running until what this returns is
-    /// dropped, however the run ends; `None`, and nothing counted, while a
-    /// restart holds new runs back.
+    /// Counts a run as running until what this returns is dropped: a
+    /// restore until it ends, and a maintenance run until it has its place
+    /// in the maintenance queue, which counts it from then on while it runs;
+    /// `None`, and nothing counted, while a restart holds new runs back.
     pub(crate) fn maintaining(&self) -> Option<Maintaining> {
         let mut maintenance = self.lock();
         if maintenance.held {
@@ -75,7 +78,7 @@ impl Runs {
         Some(Maintaining(Arc::clone(&self.maintenance)))
     }
 
-    /// How many maintenance runs are running.
+    /// How many runs are counted outside the queues.
     pub(crate) fn maintenance_running(&self) -> usize {
         self.lock().running
     }
@@ -116,7 +119,9 @@ impl Drop for Maintaining {
 
 /// What a restart that waits for the running operations counts and holds
 /// (decision 94): the queue's running backups, whose waiting ones it starts
-/// no more, and the maintenance runs going, of which it starts no new one.
+/// no more; the maintenance queue's running runs, whose waiting ones it
+/// starts no more either (decision 75, point 8); and the maintenance runs
+/// asked for and not yet in the queue, of which it starts no new one.
 pub(crate) struct Work {
     pub(crate) queue: Arc<app::queue::RunQueue>,
     /// The maintenance queue, whose running runs a restart waits for and
@@ -128,17 +133,20 @@ pub(crate) struct Work {
 impl http_adapter::Work for Work {
     fn hold(&self) {
         self.queue.hold();
+        self.maintenance.hold();
         self.runs.hold();
     }
 
     fn release(&self) {
         self.runs.release();
+        self.maintenance.release();
         self.queue.release();
     }
 
     fn running(&self) -> usize {
         self.queue
             .running()
+            .saturating_add(self.maintenance.running())
             .saturating_add(self.runs.maintenance_running())
     }
 }

@@ -8,7 +8,7 @@ use std::sync::Arc;
 
 use api::{ErrorCode, MsgArg};
 use app::maintenance::{
-    Adoption, AdoptionSource, MaintenanceError, MaintenanceKind, MaintenancePreview,
+    Adoption, AdoptionSource, MaintenanceError, MaintenanceKind, MaintenancePreview, Queued,
     RepositoryGroups, RunMaintenance,
 };
 use app::ports::{ConfigStore, EngineError, StoreError};
@@ -45,7 +45,8 @@ impl PlanRunner {
         )
         .with_events(Arc::clone(&self.events))
         .with_stats(Arc::new(self.stats_reader()))
-        .with_machine(Arc::clone(&self.machine));
+        .with_machine(Arc::clone(&self.machine))
+        .with_queue(Arc::clone(&self.maintenance_queue));
         let maintenance = match &self.leases {
             Some(leases) => maintenance.with_leases(Arc::clone(leases)),
             None => maintenance,
@@ -107,24 +108,30 @@ fn held_of(selection: &str) -> Result<SelectionToken, MaintenanceRefusal> {
 }
 
 /// Starts the run `request` asks for on `repository`, held to `selection` when
-/// there is one, and answers with the operation's ID. The run happens on a
+/// there is one, and answers with the operation's ID. The run takes its turn
+/// in the maintenance queue, under `maintenance-concurrency` (decision 75,
+/// point 8): one whose turn comes at once starts, and one that waits is in
+/// the log as queued and starts when its turn comes. Either happens on a
 /// task of its own and reports through the event bus (§4.2).
 ///
 /// The reads come first, on the request's own future, the check of the held
 /// selection among them: they store nothing and take no slot, so a client
-/// that hangs up meanwhile has left nothing behind. The start writes the log,
-/// and a write dropped after SQLite committed it leaves a running row that
-/// holds the repository (I7) and that nothing in this process ends, so the
-/// start happens on a task of its own, which the client's hanging up can't
-/// drop, and the route waits for that task's answer.
+/// that hangs up meanwhile has left nothing behind. The place in the queue
+/// and the start write the log, and a write dropped after SQLite committed it
+/// leaves a row that nothing in this process ends, a running one holding the
+/// repository (I7), so they happen on a task of their own, which the
+/// client's hanging up can't drop, and the route waits for that task's
+/// answer.
 pub(super) async fn start(
     runner: &PlanRunner,
     repository: String,
     request: MaintenanceRequest,
     selection: Option<String>,
 ) -> Result<String, MaintenanceRefusal> {
-    // Counted from the request on, so a restart asked for from now on waits
-    // for it; a restart that already waits starts no new run (decision 94).
+    // Counted from the request on, until the run has its place in the queue,
+    // which counts it from then on while it runs and never while it waits,
+    // so a restart asked for from now on waits only for the running ones; a
+    // restart that already waits starts no new run (decision 94).
     let Some(maintaining) = runner.runs.maintaining() else {
         return Err(unavailable(ErrorCode::RestartPending, Vec::new(), None));
     };
@@ -148,11 +155,20 @@ pub(super) async fn start(
     let config = Arc::clone(&runner.config);
     // A start the daemon's stop freezes answers nothing, so the route says
     // the operation failed; a run it freezes is ended by the stop (decision
-    // 92).
+    // 92), and one it freezes while it waits for its turn stays queued for
+    // the next start to end (decision 73).
     tokio::spawn(runner.runs.until_frozen(async move {
-        let _maintaining = maintaining;
-        let prepared = match use_case.start(assessment).await {
-            Ok(prepared) => prepared,
+        let queued = use_case.queue(assessment).await;
+        drop(maintaining);
+        let run = match queued {
+            Ok(Queued::Turn(turn)) => match use_case.start_turn(turn).await {
+                Ok(prepared) => Run::Now(Box::new(prepared)),
+                Err(refused) => {
+                    let _ = started.send(Err(refusal(config.as_ref(), &alias, refused).await));
+                    return;
+                }
+            },
+            Ok(Queued::Waiting(waiting)) => Run::Waiting(Box::new(waiting)),
             Err(refused) => {
                 let _ = started.send(Err(refusal(config.as_ref(), &alias, refused).await));
                 return;
@@ -160,13 +176,16 @@ pub(super) async fn start(
         };
         // The cancel switch is parked before the route answers, not lazily
         // when the run first polls it, so a cancel that arrives the instant
-        // the route answers finds it (§4.2).
+        // the route answers finds it (§4.2), a run waiting for its turn too.
         let cancel = registry.register(operation);
         let cancel = async move {
             let _ = cancel.await;
         };
         let _ = started.send(Ok(()));
-        let finished = use_case.execute(prepared, cancel).await;
+        let finished = match run {
+            Run::Now(prepared) => use_case.execute(*prepared, cancel).await,
+            Run::Waiting(waiting) => use_case.run_waiting(*waiting, cancel).await,
+        };
         registry.finish(&operation);
         super::plan_runner::log_ended(&finished);
     }));
@@ -176,6 +195,13 @@ pub(super) async fn start(
         Ok(answer) => answer.map(|()| operation.as_uuid().hyphenated().to_string()),
         Err(_) => Err(unavailable(ErrorCode::OperationFailed, Vec::new(), None)),
     }
+}
+
+/// A started run as it goes on: running now, or waiting for its turn. Both
+/// boxed, as the two differ much in size.
+enum Run {
+    Now(Box<app::maintenance::PreparedMaintenance>),
+    Waiting(Box<app::maintenance::WaitingMaintenance>),
 }
 
 /// What `request` would do to `repository`, told as the page reads it. A read:

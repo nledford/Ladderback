@@ -188,6 +188,7 @@ pub(super) async fn runner_at_a_gate() -> (
         hooks: Arc::new(hooks),
         events: Arc::new(BroadcastEventBus::new()),
         queue: Arc::new(RunQueue::new()),
+        maintenance_queue: Arc::new(app::queue::MaintenanceQueue::new()),
         ends: app::retry::run_ends().0,
         runs: crate::composition::runs::Runs::default(),
         readings: Arc::new(app::fakes::InMemoryStatsStore::new()),

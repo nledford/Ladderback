@@ -15,7 +15,7 @@ use app::ports::{
     NormalizeSources, OperationRecord, OperationStore, PowerSupply, RELEASE_TIMEOUT, Random,
     ReleaseFeed, ReleaseFeedError, ScheduleStore,
 };
-use app::queue::RunQueue;
+use app::queue::{MaintenanceQueue, RunQueue};
 use app::reads::ReadTurns;
 use app::recovery::RecoverOperations;
 use app::repositories::{ConfigWrites, RecordOpened, Recording};
@@ -518,7 +518,7 @@ pub(crate) async fn daemon(
         service_managed,
         Arc::new(runs::Work {
             queue: Arc::clone(&daemon.background.runner.queue),
-            maintenance: Arc::new(app::queue::MaintenanceQueue::new()),
+            maintenance: Arc::clone(&daemon.background.runner.maintenance_queue),
             runs: daemon.background.runs(),
         }),
     );
@@ -825,6 +825,7 @@ async fn state_over(
         hooks: Arc::new(ProcessHookRunner::new()),
         events: Arc::clone(&bus),
         queue: Arc::new(RunQueue::new()),
+        maintenance_queue: Arc::new(MaintenanceQueue::new()),
         ends: run_ends,
         runs: runs::Runs::default(),
         // A repository's stats, read on request and after each check, are
