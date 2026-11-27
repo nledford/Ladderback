@@ -1,12 +1,12 @@
-use std::collections::{BTreeMap, HashMap};
+use std::collections::{BTreeMap, HashMap, HashSet};
 use std::sync::{Mutex, PoisonError};
 
 use async_trait::async_trait;
 use domain::fleet::{
     AgentReport, Ingest, MAX_EPOCHS_HELD, MAX_REPORTS_HELD, OutboxAdmission, OutboxEpoch,
-    PlansReport, ReportSeq, ReportedProgress, admit, ingest,
+    OutboxPosition, PlansReport, ReportSeq, ReportedProgress, admit, diverges, ingest,
 };
-use domain::{AgentId, Timestamp};
+use domain::{AgentId, Timestamp, Uuid};
 
 use crate::ports::{
     Appended, Ingested, LatestReports, Outbox, OutboxEntry, ReportInbox, StoreError,
@@ -17,12 +17,12 @@ use crate::ports::{
 /// across a rebuilt use case has what a restart keeps.
 #[derive(Debug)]
 pub struct InMemoryOutbox {
-    epoch: OutboxEpoch,
     kept: Mutex<Held>,
 }
 
-#[derive(Debug, Default)]
+#[derive(Clone, Debug)]
 struct Held {
+    epoch: OutboxEpoch,
     /// The last place given, none before the first report.
     last: Option<ReportSeq>,
     reports: BTreeMap<ReportSeq, AgentReport>,
@@ -32,13 +32,25 @@ impl InMemoryOutbox {
     /// An empty outbox of `epoch`.
     pub fn new(epoch: OutboxEpoch) -> Self {
         Self {
-            epoch,
-            kept: Mutex::default(),
+            kept: Mutex::new(Held {
+                epoch,
+                last: None,
+                reports: BTreeMap::new(),
+            }),
         }
     }
 
-    pub const fn epoch(&self) -> OutboxEpoch {
-        self.epoch
+    /// A copy of this outbox as it stands, as a copy of its database taken
+    /// now holds it, to restore later in its place.
+    pub fn copied(&self) -> Self {
+        Self {
+            kept: Mutex::new(
+                self.kept
+                    .lock()
+                    .unwrap_or_else(PoisonError::into_inner)
+                    .clone(),
+            ),
+        }
     }
 }
 
@@ -84,7 +96,7 @@ impl Outbox for InMemoryOutbox {
             .filter(|(seq, _)| after.is_none_or(|after| **seq > after))
             .take(limit)
             .map(|(seq, report)| OutboxEntry {
-                epoch: self.epoch,
+                epoch: held.epoch,
                 seq: *seq,
                 report: report.clone(),
             })
@@ -92,11 +104,34 @@ impl Outbox for InMemoryOutbox {
     }
 
     async fn acknowledge(&self, epoch: OutboxEpoch, through: ReportSeq) -> Result<(), StoreError> {
-        if epoch == self.epoch {
-            let mut held = self.kept.lock().unwrap_or_else(PoisonError::into_inner);
+        let mut held = self.kept.lock().unwrap_or_else(PoisonError::into_inner);
+        if epoch == held.epoch {
             held.reports.retain(|seq, _| *seq > through);
         }
         Ok(())
+    }
+
+    async fn position(&self) -> Result<Option<OutboxPosition>, StoreError> {
+        let held = self.kept.lock().unwrap_or_else(PoisonError::into_inner);
+        Ok(held
+            .last
+            .and_then(ReportSeq::next)
+            .map(|next| OutboxPosition {
+                epoch: held.epoch,
+                next,
+            }))
+    }
+
+    /// The new epoch is the old one's UUID moved on by 2⁶⁴, so a test can
+    /// tell it from the old and name it.
+    async fn start_epoch(&self, from: OutboxEpoch) -> Result<Option<OutboxEpoch>, StoreError> {
+        let mut held = self.kept.lock().unwrap_or_else(PoisonError::into_inner);
+        if held.epoch != from || held.last.is_none() {
+            return Ok(None);
+        }
+        let current = held.epoch.as_uuid().as_u128();
+        held.epoch = OutboxEpoch::from_uuid(Uuid::from_u128(current.wrapping_add(1 << 64)));
+        Ok(Some(held.epoch))
     }
 }
 
@@ -111,6 +146,9 @@ pub struct InMemoryReportInbox {
 struct Agent {
     /// Each epoch's last place taken and when, in no order.
     epochs: Vec<(OutboxEpoch, ReportSeq, Timestamp)>,
+    /// The epochs whose report diverged from the one taken at its place,
+    /// each among `epochs`: the store keeps the mark on the epoch's row.
+    diverged: HashSet<OutboxEpoch>,
     /// The reports taken, oldest first.
     reports: Vec<OutboxEntry>,
     /// How many reports were let go of past the cap.
@@ -149,9 +187,20 @@ impl ReportInbox for InMemoryReportInbox {
             .map(|(_, seq, _)| *seq);
         let verdict = ingest(through, entry.seq);
         if verdict != Ingest::New {
+            let at_place = held
+                .reports
+                .iter()
+                .rev()
+                .find(|kept| kept.epoch == entry.epoch && kept.seq == entry.seq)
+                .map(|kept| &kept.report);
+            let diverged = diverges(&entry.report, at_place, held_already);
+            if diverged {
+                held.diverged.insert(entry.epoch);
+            }
             return Ok(Ingested {
                 ingest: verdict,
                 dropped: None,
+                diverged,
             });
         }
         match place.and_then(|place| held.epochs.get_mut(place)) {
@@ -166,10 +215,14 @@ impl ReportInbox for InMemoryReportInbox {
         held.epochs
             .sort_by_key(|(epoch, _, at)| (*epoch != entry.epoch, std::cmp::Reverse(*at)));
         held.epochs.truncate(epochs);
+        let kept = &held.epochs;
+        held.diverged
+            .retain(|marked| kept.iter().any(|(epoch, _, _)| epoch == marked));
         if held_already {
             return Ok(Ingested {
                 ingest: Ingest::Duplicate,
                 dropped: None,
+                diverged: false,
             });
         }
         held.reports.push(entry.clone());
@@ -185,6 +238,7 @@ impl ReportInbox for InMemoryReportInbox {
         Ok(Ingested {
             ingest: Ingest::New,
             dropped,
+            diverged: false,
         })
     }
 
@@ -213,6 +267,27 @@ impl ReportInbox for InMemoryReportInbox {
                 dropped: held.dropped,
             },
         ))
+    }
+
+    async fn taken_through(
+        &self,
+        agent: AgentId,
+        epoch: OutboxEpoch,
+    ) -> Result<Option<ReportSeq>, StoreError> {
+        let agents = self.agents.lock().unwrap_or_else(PoisonError::into_inner);
+        Ok(agents.get(&agent).and_then(|held| {
+            held.epochs
+                .iter()
+                .find(|(held, _, _)| *held == epoch)
+                .map(|(_, seq, _)| *seq)
+        }))
+    }
+
+    async fn diverged(&self, agent: AgentId, epoch: OutboxEpoch) -> Result<bool, StoreError> {
+        let agents = self.agents.lock().unwrap_or_else(PoisonError::into_inner);
+        Ok(agents
+            .get(&agent)
+            .is_some_and(|held| held.diverged.contains(&epoch)))
     }
 
     async fn keep_plans(&self, agent: AgentId, plans: &PlansReport) -> Result<(), StoreError> {

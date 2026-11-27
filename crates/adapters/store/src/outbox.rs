@@ -6,8 +6,8 @@ use app::ports::{Appended, Ingested, LatestReports, Outbox, OutboxEntry, ReportI
 use async_trait::async_trait;
 use domain::fleet::{
     AgentReport, EpochSeconds, Happening, Ingest, MAX_EPOCHS_HELD, MAX_REPORTS_HELD,
-    OutboxAdmission, OutboxEpoch, PlansReport, ReportSeq, ReportedProgress, WireName, admit,
-    ingest,
+    OutboxAdmission, OutboxEpoch, OutboxPosition, PlansReport, ReportSeq, ReportedProgress,
+    WireName, admit, diverges, ingest,
 };
 use domain::{AgentId, OperationId, Timestamp, Uuid};
 use sqlx::sqlite::SqliteRow;
@@ -17,13 +17,29 @@ use crate::row::agent_id_text;
 use crate::{SqliteStore, unavailable};
 
 const META: &str = "SELECT epoch, last_seq FROM sync_outbox_meta WHERE id = 1";
-/// A new outbox's epoch: a random UUID (version 4), which only has to differ
-/// from the epoch of any outbox the machine had before.
-const NEW_META: &str = "INSERT INTO sync_outbox_meta (id, epoch, last_seq) VALUES (1, \
-     lower(hex(randomblob(4))) || '-' || lower(hex(randomblob(2))) || '-4' || \
-     substr(lower(hex(randomblob(2))), 2) || '-' || \
-     substr('89ab', 1 + abs(random() % 4), 1) || substr(lower(hex(randomblob(2))), 2) || '-' || \
-     lower(hex(randomblob(6))), 0)";
+/// A random UUID (version 4) in SQL, as a new epoch's, which only has to
+/// differ from the epoch of any outbox the machine had before.
+macro_rules! random_uuid {
+    () => {
+        "lower(hex(randomblob(4))) || '-' || lower(hex(randomblob(2))) || '-4' || \
+         substr(lower(hex(randomblob(2))), 2) || '-' || \
+         substr('89ab', 1 + abs(random() % 4), 1) || substr(lower(hex(randomblob(2))), 2) || \
+         '-' || lower(hex(randomblob(6)))"
+    };
+}
+/// A new outbox, of a random epoch.
+const NEW_META: &str = concat!(
+    "INSERT INTO sync_outbox_meta (id, epoch, last_seq) VALUES (1, ",
+    random_uuid!(),
+    ", 0)"
+);
+/// A new epoch in place of the one named, keeping the places given and the
+/// reports waiting (decision 177).
+const NEW_EPOCH: &str = concat!(
+    "UPDATE sync_outbox_meta SET epoch = ",
+    random_uuid!(),
+    " WHERE id = 1 AND epoch = ? RETURNING epoch"
+);
 const HELD: &str = "SELECT (SELECT COUNT(*) FROM sync_outbox), \
      (SELECT MIN(seq) FROM sync_outbox WHERE kept = 0)";
 const EVICT: &str = "DELETE FROM sync_outbox WHERE seq = ?";
@@ -34,6 +50,16 @@ const WAITING: &str = "SELECT seq, op_id, happening, code, at FROM sync_outbox \
      WHERE seq > ? ORDER BY seq LIMIT ?";
 const ACKNOWLEDGE: &str = "DELETE FROM sync_outbox WHERE seq <= ?";
 const WATERMARK: &str = "SELECT seq FROM sync_watermarks WHERE machine_id = ? AND epoch = ?";
+/// The report the hub took at a place of an agent's epoch, the last taken
+/// there should the epoch have been forgotten and taken again.
+const AT_PLACE: &str = "SELECT op_id, happening, code, at FROM sync_reports \
+     WHERE machine_id = ? AND epoch = ? AND seq = ? ORDER BY id DESC LIMIT 1";
+/// Whether the hub holds an operation's happening, from whichever machine
+/// ID (`sync_reports_once`).
+const HELD_ANYWHERE: &str = "SELECT 1 FROM sync_reports WHERE op_id = ? AND happening = ?";
+const MARK_DIVERGED: &str =
+    "UPDATE sync_watermarks SET diverged = 1 WHERE machine_id = ? AND epoch = ?";
+const DIVERGED: &str = "SELECT diverged FROM sync_watermarks WHERE machine_id = ? AND epoch = ?";
 const RAISE: &str = "INSERT INTO sync_watermarks (machine_id, epoch, seq, ingested_at) \
      VALUES (?, ?, ?, ?) ON CONFLICT (machine_id, epoch) \
      DO UPDATE SET seq = excluded.seq, ingested_at = excluded.ingested_at";
@@ -173,6 +199,31 @@ impl Outbox for SqliteStore {
         }
         tx.commit().await.map_err(unavailable)
     }
+
+    async fn position(&self) -> Result<Option<OutboxPosition>, StoreError> {
+        let _call = self.call().await;
+        let mut conn = self.pool.acquire().await.map_err(unavailable)?;
+        Ok(meta(&mut conn).await?.and_then(|(epoch, last)| {
+            ReportSeq::new(last)
+                .and_then(ReportSeq::next)
+                .filter(|next| i64::try_from(next.get()).is_ok())
+                .map(|next| OutboxPosition { epoch, next })
+        }))
+    }
+
+    /// One statement, so a crash leaves the old epoch or the new, never
+    /// half of either.
+    async fn start_epoch(&self, from: OutboxEpoch) -> Result<Option<OutboxEpoch>, StoreError> {
+        let _call = self.call().await;
+        let mut conn = self.pool.acquire().await.map_err(unavailable)?;
+        sqlx::query(NEW_EPOCH)
+            .bind(from.as_uuid().to_string())
+            .fetch_optional(&mut *conn)
+            .await
+            .map_err(unavailable)?
+            .map(|row| epoch_of(&row, "epoch"))
+            .transpose()
+    }
 }
 
 #[async_trait]
@@ -203,9 +254,20 @@ impl ReportInbox for SqliteStore {
             .transpose()?;
         let verdict = ingest(held, entry.seq);
         if verdict != Ingest::New {
+            let diverged = check_content(&mut tx, &agent, &epoch, entry).await?;
+            if diverged {
+                sqlx::query(MARK_DIVERGED)
+                    .bind(&agent)
+                    .bind(&epoch)
+                    .execute(&mut *tx)
+                    .await
+                    .map_err(unavailable)?;
+                tx.commit().await.map_err(unavailable)?;
+            }
             return Ok(Ingested {
                 ingest: verdict,
                 dropped: None,
+                diverged,
             });
         }
         sqlx::query(RAISE)
@@ -243,6 +305,7 @@ impl ReportInbox for SqliteStore {
             return Ok(Ingested {
                 ingest: Ingest::Duplicate,
                 dropped: None,
+                diverged: false,
             });
         }
         let held: i64 = sqlx::query(TALLY)
@@ -276,6 +339,7 @@ impl ReportInbox for SqliteStore {
         Ok(Ingested {
             ingest: Ingest::New,
             dropped,
+            diverged: false,
         })
     }
 
@@ -324,6 +388,35 @@ impl ReportInbox for SqliteStore {
         })
     }
 
+    async fn taken_through(
+        &self,
+        agent: AgentId,
+        epoch: OutboxEpoch,
+    ) -> Result<Option<ReportSeq>, StoreError> {
+        let _call = self.call().await;
+        let mut conn = self.pool.acquire().await.map_err(unavailable)?;
+        sqlx::query(WATERMARK)
+            .bind(agent_id_text(agent))
+            .bind(epoch.as_uuid().to_string())
+            .fetch_optional(&mut *conn)
+            .await
+            .map_err(unavailable)?
+            .map(|row| seq_of(&row, "seq"))
+            .transpose()
+    }
+
+    async fn diverged(&self, agent: AgentId, epoch: OutboxEpoch) -> Result<bool, StoreError> {
+        let _call = self.call().await;
+        let mut conn = self.pool.acquire().await.map_err(unavailable)?;
+        let marked: Option<i64> = sqlx::query_scalar(DIVERGED)
+            .bind(agent_id_text(agent))
+            .bind(epoch.as_uuid().to_string())
+            .fetch_optional(&mut *conn)
+            .await
+            .map_err(unavailable)?;
+        Ok(marked.is_some_and(|marked| marked != 0))
+    }
+
     async fn keep_plans(&self, agent: AgentId, plans: &PlansReport) -> Result<(), StoreError> {
         live::keep_plans(self, agent, plans).await
     }
@@ -360,6 +453,40 @@ async fn meta(conn: &mut SqliteConnection) -> Result<Option<(OutboxEpoch, u64)>,
     let last: i64 = row.try_get("last_seq").map_err(unavailable)?;
     let last = u64::try_from(last).map_err(|_| corrupt("last_seq"))?;
     Ok(Some((epoch_of(&row, "epoch")?, last)))
+}
+
+/// Whether `entry`, at a place of `agent`'s `epoch` the hub took, diverges
+/// from the report taken there (`domain::fleet::diverges`), read in the
+/// ingest's transaction.
+async fn check_content(
+    conn: &mut SqliteConnection,
+    agent: &str,
+    epoch: &str,
+    entry: &OutboxEntry,
+) -> Result<bool, StoreError> {
+    let at_place = sqlx::query(AT_PLACE)
+        .bind(agent)
+        .bind(epoch)
+        .bind(place(entry.seq))
+        .fetch_optional(&mut *conn)
+        .await
+        .map_err(unavailable)?
+        .map(|row| report_of(&row))
+        .transpose()?;
+    let held_anywhere = match at_place {
+        Some(_) => true,
+        None => {
+            let (happening, _) = happening_text(&entry.report.happening);
+            sqlx::query(HELD_ANYWHERE)
+                .bind(entry.report.op_id.as_uuid().to_string())
+                .bind(happening)
+                .fetch_optional(&mut *conn)
+                .await
+                .map_err(unavailable)?
+                .is_some()
+        }
+    };
+    Ok(diverges(&entry.report, at_place.as_ref(), held_anywhere))
 }
 
 /// A place as the store keeps it: every place the outbox gives fits, and

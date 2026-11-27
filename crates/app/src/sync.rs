@@ -421,12 +421,24 @@ impl SyncWithHub {
         Ok(Synced::Replayed { sent })
     }
 
-    /// Connects, telling `standing` what the hub made of the machine; none
-    /// when the hub holds the machine pending.
+    /// Connects, its `Hello` saying where the outbox stands, and telling
+    /// `standing` what the hub made of the machine; none when the hub holds
+    /// the machine pending. When the hub took the place the outbox gives
+    /// next, as after a restore from an older database, the outbox starts a
+    /// new epoch before anything is sent (§16, decision 177).
     async fn open(&self) -> Result<Option<(Connected, AgentChannel)>, SyncFailure> {
+        // An outbox whose position can't be read ends the session with
+        // nothing sent, as a new epoch that can't be started does: stated as
+        // none, its reports at places the hub took would be let go of.
+        let stated = self.outbox.position().await.map_err(SyncFailure::Store)?;
         let connected = self
             .connect
-            .connect_channel(self.agent_id, self.hostname.clone(), self.zone.clone())
+            .connect_channel(
+                self.agent_id,
+                self.hostname.clone(),
+                self.zone.clone(),
+                stated,
+            )
             .await;
         if let Some(standing) = &self.standing {
             match &connected {
@@ -450,6 +462,25 @@ impl SyncWithHub {
             }
         }
         let (connected, channel) = connected.map_err(SyncFailure::Connect)?;
+        if let Some(stated) = stated.filter(|_| connected.new_epoch) {
+            let started = self
+                .outbox
+                .start_epoch(stated.epoch)
+                .await
+                .map_err(SyncFailure::Store)?;
+            match started {
+                Some(epoch) => log::warn!(
+                    "the hub told this machine to start a new outbox epoch, as after a restore \
+                     from an older database: its reports wait under epoch {} so the hub keeps \
+                     them",
+                    epoch.as_uuid()
+                ),
+                None => log::info!(
+                    "the hub told this machine to start a new outbox epoch, and the outbox has \
+                     started one already"
+                ),
+            }
+        }
         Ok((connected.approval != Approval::Pending).then_some((connected, channel)))
     }
 

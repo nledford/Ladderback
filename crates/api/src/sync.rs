@@ -129,6 +129,18 @@ pub struct HelloPayload {
     /// when the computer's identifier can't be read.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub machine: Option<String>,
+    /// Where the agent's outbox stands; absent before its first report and
+    /// from a build before decision 177.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub outbox: Option<OutboxPayload>,
+}
+
+/// Where an agent's outbox stands, in its `Hello`: `epoch` is the outbox's
+/// UUID, `next` the place it gives its next report.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct OutboxPayload {
+    pub epoch: String,
+    pub next: u64,
 }
 
 /// The payload of the hub's `Welcome`.
@@ -144,6 +156,11 @@ pub struct WelcomePayload {
     pub hub_version: String,
     pub signed_at: u64,
     pub status: AgentApproval,
+    /// The hub took the place the agent's outbox gives next: the agent
+    /// starts a new epoch. Absent when false, and from a build before
+    /// decision 177.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub new_epoch: bool,
 }
 
 /// The payload of the agent's `OpEvent`: one report from its outbox (§7.2).

@@ -177,6 +177,7 @@ async fn a_paired_agent_is_welcomed_pending_and_its_counter_kept() {
             approval: Approval::Pending,
             pin: identity.pin().await.unwrap().unwrap(),
             agent_key: agent_key(&seed),
+            new_epoch: false,
         }
     );
     let after = hub.registry.agent(agent_id(1)).await.unwrap().unwrap();
@@ -485,6 +486,22 @@ impl crate::ports::ReportInbox for FullInbox {
     ) -> Result<Option<domain::fleet::ReportedProgress>, crate::ports::StoreError> {
         self.inner.progress(agent).await
     }
+
+    async fn taken_through(
+        &self,
+        agent: domain::AgentId,
+        epoch: domain::fleet::OutboxEpoch,
+    ) -> Result<Option<domain::fleet::ReportSeq>, crate::ports::StoreError> {
+        self.inner.taken_through(agent, epoch).await
+    }
+
+    async fn diverged(
+        &self,
+        agent: domain::AgentId,
+        epoch: domain::fleet::OutboxEpoch,
+    ) -> Result<bool, crate::ports::StoreError> {
+        self.inner.diverged(agent, epoch).await
+    }
 }
 
 /// The hub warns that it let go of an agent's reports in the step that let
@@ -517,7 +534,7 @@ async fn a_step_cut_short_after_letting_go_of_a_report_loses_no_warning() {
     };
     crate::test_log::capture_the_log();
     let (_, mut cut) = connecting
-        .connect_channel(agent_id(1), hostname(1), None)
+        .connect_channel(agent_id(1), hostname(1), None, None)
         .await
         .unwrap();
     // Cut short at the step's first wait after the ingest, if it has one.
@@ -527,7 +544,7 @@ async fn a_step_cut_short_after_letting_go_of_a_report_loses_no_warning() {
     )
     .await;
     let (_, mut next) = connecting
-        .connect_channel(agent_id(1), hostname(1), None)
+        .connect_channel(agent_id(1), hostname(1), None, None)
         .await
         .unwrap();
     next.send_report(&entry(2)).await.unwrap();
@@ -547,10 +564,11 @@ async fn a_step_cut_short_after_letting_go_of_a_report_loses_no_warning() {
     );
 }
 
-/// An agent restored from an older database numbers its new reports again
-/// from places of its epoch the hub took before, further behind than a
-/// resend: the hub acknowledges them as taken, keeps none, and warns once
-/// for that agent while it runs, naming nothing a report says (I4; #1387).
+/// A 0.6.0 agent restored from an older database, whose `Hello` says
+/// nothing of its outbox, numbers its new reports again from places of its
+/// epoch the hub took before, further behind than a resend: the hub
+/// acknowledges them as taken, keeps none, and warns once for that agent
+/// while it runs, naming nothing a report says (I4; #1387, decision 177).
 #[tokio::test]
 async fn reports_far_behind_the_last_taken_are_warned_of_once() {
     use crate::ports::{Outbox as _, OutboxEntry, ReportInbox as _};
@@ -582,12 +600,13 @@ async fn reports_far_behind_the_last_taken_are_warned_of_once() {
             .await
             .unwrap();
     }
-    // The restored outbox: the same epoch, numbering from its first place.
+    // The restored outbox: the same epoch, numbering from its first place,
+    // stating no position, as 0.6.0's `Hello`.
     let outbox = Arc::new(crate::fakes::InMemoryOutbox::new(epoch));
     let connector = Arc::new(LoopbackHubConnector::to(hub.pairing.clone()));
     let sync = SyncWithHub::new(
         connecting(identity, connector),
-        outbox.clone(),
+        Arc::new(UnstatedOutbox(outbox.clone())),
         Arc::new(FakeClock::new(
             Timestamp::from_second(1_800_000_030).unwrap(),
         )),
@@ -627,6 +646,49 @@ async fn reports_far_behind_the_last_taken_are_warned_of_once() {
     }
 }
 
+/// An outbox that states no position, as a 0.6.0 agent's `Hello` doesn't,
+/// and otherwise is the in-memory outbox it wraps.
+struct UnstatedOutbox(Arc<crate::fakes::InMemoryOutbox>);
+
+#[async_trait]
+impl crate::ports::Outbox for UnstatedOutbox {
+    async fn append(
+        &self,
+        report: &domain::fleet::AgentReport,
+    ) -> Result<crate::ports::Appended, crate::ports::StoreError> {
+        self.0.append(report).await
+    }
+
+    async fn unacknowledged(
+        &self,
+        after: Option<domain::fleet::ReportSeq>,
+        limit: usize,
+    ) -> Result<Vec<crate::ports::OutboxEntry>, crate::ports::StoreError> {
+        self.0.unacknowledged(after, limit).await
+    }
+
+    async fn acknowledge(
+        &self,
+        epoch: domain::fleet::OutboxEpoch,
+        through: domain::fleet::ReportSeq,
+    ) -> Result<(), crate::ports::StoreError> {
+        self.0.acknowledge(epoch, through).await
+    }
+
+    async fn position(
+        &self,
+    ) -> Result<Option<domain::fleet::OutboxPosition>, crate::ports::StoreError> {
+        Ok(None)
+    }
+
+    async fn start_epoch(
+        &self,
+        from: domain::fleet::OutboxEpoch,
+    ) -> Result<Option<domain::fleet::OutboxEpoch>, crate::ports::StoreError> {
+        self.0.start_epoch(from).await
+    }
+}
+
 /// An outbox the agent's database can't read.
 struct UnreadableOutbox;
 
@@ -652,6 +714,19 @@ impl crate::ports::Outbox for UnreadableOutbox {
         _: domain::fleet::OutboxEpoch,
         _: domain::fleet::ReportSeq,
     ) -> Result<(), crate::ports::StoreError> {
+        Err(unreadable())
+    }
+
+    async fn position(
+        &self,
+    ) -> Result<Option<domain::fleet::OutboxPosition>, crate::ports::StoreError> {
+        Err(unreadable())
+    }
+
+    async fn start_epoch(
+        &self,
+        _: domain::fleet::OutboxEpoch,
+    ) -> Result<Option<domain::fleet::OutboxEpoch>, crate::ports::StoreError> {
         Err(unreadable())
     }
 }
@@ -763,6 +838,21 @@ impl crate::ports::Outbox for GappedOutbox {
         }
         Ok(())
     }
+
+    /// It says nothing of where it stands, so the hub never tells it to
+    /// start a new epoch.
+    async fn position(
+        &self,
+    ) -> Result<Option<domain::fleet::OutboxPosition>, crate::ports::StoreError> {
+        Ok(None)
+    }
+
+    async fn start_epoch(
+        &self,
+        _: domain::fleet::OutboxEpoch,
+    ) -> Result<Option<domain::fleet::OutboxEpoch>, crate::ports::StoreError> {
+        Ok(None)
+    }
 }
 
 /// A send window spans at most [`SEND_WINDOW`] places, however far apart
@@ -816,6 +906,190 @@ async fn a_window_sent_again_across_the_outboxs_gaps_is_taken_as_resent() {
         .map(|(_, line)| line)
         .collect();
     assert_eq!(warned, Vec::<String>::new());
+}
+
+/// An outbox that gives its position and reports as `InMemoryOutbox` does
+/// but can't start a new epoch, as on a full or read-only disk.
+struct StuckEpochOutbox(crate::fakes::InMemoryOutbox);
+
+#[async_trait]
+impl crate::ports::Outbox for StuckEpochOutbox {
+    async fn append(
+        &self,
+        report: &domain::fleet::AgentReport,
+    ) -> Result<crate::ports::Appended, crate::ports::StoreError> {
+        self.0.append(report).await
+    }
+
+    async fn unacknowledged(
+        &self,
+        after: Option<domain::fleet::ReportSeq>,
+        limit: usize,
+    ) -> Result<Vec<crate::ports::OutboxEntry>, crate::ports::StoreError> {
+        self.0.unacknowledged(after, limit).await
+    }
+
+    async fn acknowledge(
+        &self,
+        epoch: domain::fleet::OutboxEpoch,
+        through: domain::fleet::ReportSeq,
+    ) -> Result<(), crate::ports::StoreError> {
+        self.0.acknowledge(epoch, through).await
+    }
+
+    async fn position(
+        &self,
+    ) -> Result<Option<domain::fleet::OutboxPosition>, crate::ports::StoreError> {
+        self.0.position().await
+    }
+
+    async fn start_epoch(
+        &self,
+        _: domain::fleet::OutboxEpoch,
+    ) -> Result<Option<domain::fleet::OutboxEpoch>, crate::ports::StoreError> {
+        Err(unreadable())
+    }
+}
+
+/// An outbox whose reports can be read but whose position can't, as after
+/// one busy moment of the store.
+struct UnreadablePositionOutbox(crate::fakes::InMemoryOutbox);
+
+#[async_trait]
+impl crate::ports::Outbox for UnreadablePositionOutbox {
+    async fn append(
+        &self,
+        report: &domain::fleet::AgentReport,
+    ) -> Result<crate::ports::Appended, crate::ports::StoreError> {
+        self.0.append(report).await
+    }
+
+    async fn unacknowledged(
+        &self,
+        after: Option<domain::fleet::ReportSeq>,
+        limit: usize,
+    ) -> Result<Vec<crate::ports::OutboxEntry>, crate::ports::StoreError> {
+        self.0.unacknowledged(after, limit).await
+    }
+
+    async fn acknowledge(
+        &self,
+        epoch: domain::fleet::OutboxEpoch,
+        through: domain::fleet::ReportSeq,
+    ) -> Result<(), crate::ports::StoreError> {
+        self.0.acknowledge(epoch, through).await
+    }
+
+    async fn position(
+        &self,
+    ) -> Result<Option<domain::fleet::OutboxPosition>, crate::ports::StoreError> {
+        Err(unreadable())
+    }
+
+    async fn start_epoch(
+        &self,
+        from: domain::fleet::OutboxEpoch,
+    ) -> Result<Option<domain::fleet::OutboxEpoch>, crate::ports::StoreError> {
+        self.0.start_epoch(from).await
+    }
+}
+
+/// A restored machine whose outbox position can't be read ends the session
+/// as a store failure with nothing sent, rather than connecting as a 0.6.0
+/// machine whose reports at places the hub took are acknowledged and let
+/// go of (decision 177).
+#[tokio::test]
+async fn an_outbox_position_that_cant_be_read_sends_nothing() {
+    use crate::ports::{Outbox as _, ReportInbox as _};
+    use crate::sync::{SyncFailure, SyncWithHub};
+
+    let inbox = Arc::new(crate::fakes::InMemoryReportInbox::default());
+    let hub = hub_with(1, |pairing| pairing.with_inbox(inbox.clone()));
+    let identity = approved(&hub).await;
+    let taken = one_report();
+    let now = Timestamp::from_second(1_800_000_030).unwrap();
+    inbox.ingest(agent_id(1), &taken, now).await.unwrap();
+    let restored = Arc::new(UnreadablePositionOutbox(crate::fakes::InMemoryOutbox::new(
+        taken.epoch,
+    )));
+    restored
+        .append(&domain::fleet::AgentReport {
+            op_id: domain::OperationId::from_uuid(Uuid::from_u128(0x10)),
+            happening: domain::fleet::Happening::Succeeded,
+            at: EpochSeconds::from_seconds(1_800_000_000),
+        })
+        .await
+        .unwrap();
+    let sync = SyncWithHub::new(
+        connecting(
+            identity,
+            Arc::new(LoopbackHubConnector::to(hub.pairing.clone())),
+        ),
+        restored.clone(),
+        Arc::new(FakeClock::new(now)),
+        agent_id(1),
+        hostname(1),
+        None,
+    );
+    assert!(matches!(sync.sync_once().await, Err(SyncFailure::Store(_))));
+    assert_eq!(
+        restored.unacknowledged(None, 10).await.unwrap().len(),
+        1,
+        "the restored report is kept to send under a new epoch"
+    );
+}
+
+/// A machine told to start a new epoch whose outbox can't start one ends
+/// the session as a store failure and sends nothing under the old epoch,
+/// so the hub drops none of its reports as taken (decision 177).
+#[tokio::test]
+async fn a_new_epoch_that_cant_be_started_sends_nothing() {
+    use crate::ports::{Outbox as _, ReportInbox as _};
+    use crate::sync::{SyncFailure, SyncWithHub};
+
+    let inbox = Arc::new(crate::fakes::InMemoryReportInbox::default());
+    let hub = hub_with(1, |pairing| pairing.with_inbox(inbox.clone()));
+    let identity = paired(&hub, 1).await;
+    let waiting = hub.registry.agent(agent_id(1)).await.unwrap().unwrap();
+    hub.pairing.approve(&waiting).await.unwrap().unwrap();
+    let epoch = domain::fleet::OutboxEpoch::from_uuid(Uuid::from_u128(0xe1));
+    let report = |n: u128| domain::fleet::AgentReport {
+        op_id: domain::OperationId::from_uuid(Uuid::from_u128(n)),
+        happening: domain::fleet::Happening::Succeeded,
+        at: domain::fleet::EpochSeconds::from_seconds(1_800_000_000),
+    };
+    let now = Timestamp::from_second(1_800_000_030).unwrap();
+    for n in 1..=3 {
+        let entry = crate::ports::OutboxEntry {
+            epoch,
+            seq: domain::fleet::ReportSeq::new(n).unwrap(),
+            report: report(u128::from(n)),
+        };
+        inbox.ingest(agent_id(1), &entry, now).await.unwrap();
+    }
+    let restored = crate::fakes::InMemoryOutbox::new(epoch);
+    restored.append(&report(0x10)).await.unwrap();
+    let sync = SyncWithHub::new(
+        connecting(
+            identity,
+            Arc::new(LoopbackHubConnector::to(hub.pairing.clone())),
+        ),
+        Arc::new(StuckEpochOutbox(restored)),
+        Arc::new(FakeClock::new(now)),
+        agent_id(1),
+        hostname(1),
+        None,
+    );
+    assert!(
+        matches!(sync.sync_once().await, Err(SyncFailure::Store(_))),
+        "the new epoch isn't started"
+    );
+    assert_eq!(inbox.reports(agent_id(1)).await.unwrap().len(), 3);
+    assert_eq!(
+        inbox.taken_through(agent_id(1), epoch).await.unwrap(),
+        domain::fleet::ReportSeq::new(3),
+        "nothing was sent under the old epoch"
+    );
 }
 
 /// Runs the agent's sync loop through `waits` of its waits on `clock`, and
@@ -905,8 +1179,8 @@ async fn the_sync_loop_logs_a_streak_of_failures_once() {
     assert_eq!(warned.len(), 1, "{warned:?}");
     assert!(warned[0].starts_with("the agent's reports didn't reach its hub"));
 
-    // The loop reads its outbox once it holds a connection, so this one
-    // reaches a hub that approved it.
+    // An outbox it can't read ends each session before it connects, as its
+    // position can't be stated (decision 177): one streak, one warning.
     let hub = keeping_reports(2);
     let identity = approved(&hub).await;
     let sync = SyncWithHub::new(
@@ -922,7 +1196,7 @@ async fn the_sync_loop_logs_a_streak_of_failures_once() {
     );
     let warned = warned_by_the_sync_loop(sync, &clock, 3).await;
     assert_eq!(warned.len(), 1, "{warned:?}");
-    assert!(warned[0].starts_with("the outbox couldn't be read"));
+    assert!(warned[0].starts_with("the agent's reports didn't reach its hub: Store"));
 
     // A configuration it can't read leaves the leases unasked at every look
     // of the one connection it holds to a hub that approved it.
@@ -1051,7 +1325,7 @@ async fn a_channel_shows_its_sequence_numbers_and_no_key() {
     let identity = paired(&hub, 1).await;
     let connector = Arc::new(LoopbackHubConnector::to(hub.pairing.clone()));
     let (_, channel) = connecting(identity, connector)
-        .connect_channel(agent_id(1), hostname(1), None)
+        .connect_channel(agent_id(1), hostname(1), None, None)
         .await
         .unwrap();
     let next = domain::fleet::FIRST_SEQUENCE + 1;
@@ -1073,7 +1347,7 @@ async fn a_link_dropped_before_an_acknowledgement_fails_the_wait_for_it() {
     for kind in ["plans", "heartbeat"] {
         let connector = Arc::new(LoopbackHubConnector::to(hub.pairing.clone()));
         let (_, mut channel) = connecting(identity.clone(), connector.clone())
-            .connect_channel(agent_id(1), hostname(1), None)
+            .connect_channel(agent_id(1), hostname(1), None, None)
             .await
             .unwrap();
         connector.drop_links().await;
@@ -1825,6 +2099,7 @@ async fn the_hub_welcomes_only_a_proved_agents_first_hello() {
             clock: EpochSeconds::from_seconds(1_800_000_000),
             zone: None,
             machine: None,
+            outbox: None,
         });
         let signed = SignedMessage::AgentMessage {
             hub_key: *keys.key(),
@@ -1866,7 +2141,9 @@ async fn the_hub_welcomes_only_a_proved_agents_first_hello() {
             Err(refusal)
         );
     }
-    let Ok(HelloAnswer::Welcome(welcome)) = hub
+    let Ok(HelloAnswer::Welcome {
+        envelope: welcome, ..
+    }) = hub
         .pairing
         .welcome(
             &keys,
@@ -2162,7 +2439,7 @@ async fn an_ack_out_of_sequence_or_not_signed_for_it_is_not_acted_on() {
             rewrite,
         };
         let (_, mut channel) = connecting(identity.clone(), Arc::new(connector))
-            .connect_channel(agent_id(1), hostname(1), None)
+            .connect_channel(agent_id(1), hostname(1), None, None)
             .await
             .unwrap();
         channel.send_report(&entry).await.unwrap();
@@ -2282,13 +2559,47 @@ async fn a_report_sent_again_on_its_connection_closes_it_as_a_sequence_error() {
         ..Watching::default()
     });
     let (_, mut channel) = connecting(identity, connector.clone())
-        .connect_channel(agent_id(1), hostname(1), None)
+        .connect_channel(agent_id(1), hostname(1), None, None)
         .await
         .unwrap();
     channel.send_report(&one_report()).await.unwrap();
     assert_eq!(
         *connector.closes.lock().unwrap(),
         [crate::pairing::SEQUENCE_ERROR]
+    );
+}
+
+/// A report unlike the one the hub took at its place closes the connection
+/// as `outbox-diverged` (decision 177, §7.2).
+#[tokio::test]
+async fn a_report_unlike_the_one_taken_at_its_place_closes_as_outbox_diverged() {
+    let hub = keeping_reports(1);
+    let identity = approved(&hub).await;
+    let connector = Arc::new(Watching {
+        hub: Some(hub.pairing.clone()),
+        ..Watching::default()
+    });
+    let taken = one_report();
+    let (_, mut channel) = connecting(identity, connector.clone())
+        .connect_channel(
+            agent_id(1),
+            hostname(1),
+            None,
+            Some(domain::fleet::OutboxPosition {
+                epoch: taken.epoch,
+                next: domain::fleet::ReportSeq::new(2).unwrap(),
+            }),
+        )
+        .await
+        .unwrap();
+    channel.send_report(&taken).await.unwrap();
+    channel.receive_ack().await.unwrap();
+    let mut unlike = taken;
+    unlike.report.happening = domain::fleet::Happening::Succeeded;
+    let _ = channel.send_report(&unlike).await;
+    assert_eq!(
+        *connector.closes.lock().unwrap(),
+        [crate::pairing::OUTBOX_DIVERGED]
     );
 }
 

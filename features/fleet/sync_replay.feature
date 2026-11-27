@@ -55,3 +55,81 @@ Feature: An agent's reports reach its hub once, in order
     Then the other agent is told it waits for approval
     And the hub holds no report of the other agent
     And the other agent's outbox holds 2 reports the hub hasn't acknowledged
+
+  Rule: A machine restored from an older copy of its database starts a new epoch (decision 177)
+    Its `Hello` says where its outbox stands. When the hub already took the
+    place the outbox gives next, or finds at a place it took a report other
+    than the one it took there, the machine numbers its reports again from
+    an older place, so it starts a new epoch and sends its waiting reports
+    under it; the hub keeps both epochs, and each report once.
+
+    Scenario: A machine restored from an older copy of its database has every later report kept by the hub, and none twice
+      Given the hub can't be reached
+      And the agent ran 1 backup
+      And a copy of the agent's database was kept
+      And the hub can be reached again
+      And the agent synced with its hub
+      And the agent ran 2 backups
+      And the agent synced with its hub
+      When the agent's database is restored from the copy
+      And the agent runs 1 backup
+      And the agent syncs with its hub
+      Then the agent's outbox has started a new epoch
+      And the hub holds each of the agent's 8 reports once, in the order it took them
+      And the agent's outbox holds no report the hub hasn't acknowledged
+
+    Scenario: A restored machine that gives more places than the hub took after the copy has every later report kept, and none twice
+      Given the hub can't be reached
+      And the agent ran 1 backup
+      And a copy of the agent's database was kept
+      And the hub can be reached again
+      And the agent synced with its hub
+      And the agent ran 2 backups
+      And the agent synced with its hub
+      When the agent's database is restored from the copy
+      And the agent runs 2 backups
+      And the agent tries to sync with its hub
+      Then the hub ended the connection, holding the agent's first 6 reports only
+      When the agent syncs with its hub
+      Then the agent's outbox has started a new epoch
+      And the hub holds each of the agent's 10 reports once, in the order it took them
+      And the agent's outbox holds no report the hub hasn't acknowledged
+
+    Scenario: A restored machine whose connection drops under its new epoch sends each report once
+      Given the agent ran 1 backup
+      And a copy of the agent's database was kept
+      And the agent synced with its hub
+      And the agent ran 2 backups
+      And the agent synced with its hub
+      When the agent's database is restored from the copy
+      And the agent runs 1 backup
+      And the hub's next acknowledgement is lost with its connection
+      And the agent tries to sync with its hub
+      And the agent restarts
+      And the agent syncs with its hub
+      Then the agent's outbox has started a new epoch
+      And the hub holds each of the agent's 8 reports once, in the order it took them
+      And the agent's outbox holds no report the hub hasn't acknowledged
+
+    Scenario: A machine that wasn't restored keeps its epoch
+      Given the agent ran 1 backup
+      And the agent synced with its hub
+      And the agent ran 1 backup
+      When the agent restarts
+      And the agent syncs with its hub
+      Then the agent's last Hello said its outbox gives place 5 next
+      And the agent's outbox keeps its epoch
+      And the hub holds the agent's 4 reports, each once, in the order they happened
+
+    Scenario: A restored machine whose Hello says nothing of its outbox, as 0.6.0's doesn't, is taken as before
+      Given the agent's Hello says nothing of its outbox, as a machine on 0.6.0 does
+      And the agent ran 1 backup
+      And a copy of the agent's database was kept
+      And the agent synced with its hub
+      And the agent ran 2 backups
+      And the agent synced with its hub
+      When the agent's database is restored from the copy
+      And the agent runs 1 backup
+      And the agent syncs with its hub
+      Then the agent's outbox keeps its epoch
+      And the hub holds the agent's first 6 reports only, as it did before decision 177

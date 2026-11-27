@@ -21,6 +21,11 @@ pub const BINDING_UNAVAILABLE: &str = "binding-unavailable";
 /// sequence number isn't the next (decision 120, "Signed messages after
 /// the handshake").
 pub const SEQUENCE_ERROR: &str = "sequence-error";
+/// The close reason of a report at a place the hub took that isn't the
+/// report it took there, from an agent whose `Hello` stated its outbox: the
+/// agent reconnects, and its next `Hello` is told to start a new epoch
+/// (decision 177).
+pub const OUTBOX_DIVERGED: &str = "outbox-diverged";
 
 /// One connection on the hub's `/sync/v1`, from the agent's `Connect` to
 /// the hub's answer to its `Pair`, or to its `Welcome` once the agent
@@ -136,15 +141,16 @@ impl HubPairing {
                     Ok(Ok(HelloAnswer::Refused(refused))) => {
                         HubStep::Last(answer_frame(&PairAnswer::Refused(refused)))
                     }
-                    Ok(Ok(HelloAnswer::Welcome(welcome))) => {
-                        match self.syncing(handshake, &agent) {
-                            Some(syncing) => {
-                                session.stage = Stage::Syncing(Box::new(syncing));
-                                HubStep::Reply(hub_envelope_frame(&welcome))
-                            }
-                            None => HubStep::Last(hub_envelope_frame(&welcome)),
+                    Ok(Ok(HelloAnswer::Welcome {
+                        envelope,
+                        outbox_stated,
+                    })) => match self.syncing(handshake, &agent, outbox_stated) {
+                        Some(syncing) => {
+                            session.stage = Stage::Syncing(Box::new(syncing));
+                            HubStep::Reply(hub_envelope_frame(&envelope))
                         }
-                    }
+                        None => HubStep::Last(hub_envelope_frame(&envelope)),
+                    },
                     Ok(Err(refused)) => HubStep::Close(close_reason(refused)),
                     Err(error) => HubStep::Fail(error),
                 }
@@ -174,6 +180,7 @@ const fn close_reason(refused: MessageRefused) -> &'static str {
     match refused {
         MessageRefused::Unexpected => PROTOCOL_ERROR,
         MessageRefused::Unsigned | MessageRefused::OutOfSequence => SEQUENCE_ERROR,
+        MessageRefused::Diverged => OUTBOX_DIVERGED,
     }
 }
 

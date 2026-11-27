@@ -24,6 +24,39 @@ fn failure() -> AgentReport {
 
 const EPOCH: OutboxEpoch = OutboxEpoch::from_uuid(Uuid::from_u128(7));
 
+fn of(op: u128, happening: Happening) -> AgentReport {
+    AgentReport {
+        op_id: OperationId::from_uuid(Uuid::from_u128(op)),
+        ..report(happening)
+    }
+}
+
+/// A report at a place the hub took is the one taken, sent again, when the
+/// hub holds that operation's happening there, however its time or a
+/// failure's code reads; or, holding no report at the place, when it holds
+/// that report anywhere (#1513). Another report at the place, or one the
+/// hub holds nowhere, diverges: the outbox gave the place again (#1387,
+/// decision 177).
+#[test]
+fn a_report_at_a_taken_place_diverges_unless_it_is_the_one_taken() {
+    let sent = of(1, Happening::Succeeded);
+    assert!(!diverges(&sent, Some(&sent), false));
+    let later = AgentReport {
+        at: EpochSeconds::from_seconds(1_900_000_000),
+        ..sent.clone()
+    };
+    assert!(!diverges(&sent, Some(&later), false));
+    let other_code = report(Happening::Failed {
+        code: WireName::parse("hook-failed").unwrap(),
+    });
+    assert!(!diverges(&failure(), Some(&other_code), false));
+    assert!(diverges(&sent, Some(&of(2, Happening::Succeeded)), true));
+    assert!(diverges(&sent, Some(&of(1, Happening::Started)), true));
+    assert!(diverges(&sent, Some(&of(1, Happening::Canceled)), false));
+    assert!(!diverges(&sent, None, true));
+    assert!(diverges(&sent, None, false));
+}
+
 #[test]
 fn places_count_up_from_one_and_stop_at_the_last_number() {
     assert_eq!(ReportSeq::FIRST.get(), 1);
@@ -132,6 +165,25 @@ fn a_report_a_send_window_behind_the_last_taken_is_behind() {
     let last = seq(window + 1);
     assert_eq!(ingest(Some(last), seq(2)), Ingest::Duplicate);
     assert_eq!(ingest(Some(last), seq(1)), Ingest::Behind);
+}
+
+/// An agent starts a new epoch when the hub took the place its outbox
+/// gives next, however near or far behind the last taken: the hub took
+/// every place up to that one already, and a resend never makes the
+/// outbox give a place again (decision 177). Past the last place taken, or
+/// of an epoch the hub took nothing of, it goes on.
+#[test]
+fn an_agent_starts_a_new_epoch_when_the_hub_took_the_place_it_gives_next() {
+    assert!(!starts_new_epoch(None, seq(1)));
+    assert!(!starts_new_epoch(None, seq(40)));
+    assert!(!starts_new_epoch(Some(seq(6)), seq(7)));
+    assert!(!starts_new_epoch(Some(seq(6)), seq(90)));
+    assert!(starts_new_epoch(Some(seq(6)), seq(6)));
+    assert!(starts_new_epoch(Some(seq(6)), seq(5)));
+    assert!(starts_new_epoch(Some(seq(6)), seq(1)));
+    let last = ReportSeq::new(u64::MAX).unwrap();
+    assert!(starts_new_epoch(Some(last), seq(1)));
+    assert!(!starts_new_epoch(Some(seq(1)), last));
 }
 
 #[test]

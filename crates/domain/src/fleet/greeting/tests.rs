@@ -14,6 +14,7 @@ fn hello(protocols: Protocols) -> Hello {
         clock: EpochSeconds::from_seconds(1_800_000_000),
         zone: None,
         machine: None,
+        outbox: None,
     }
 }
 
@@ -64,6 +65,7 @@ fn a_welcome_answers_the_hello_it_follows() {
             hub_version: "0.5.0+def5678".to_owned(),
             signed_at: EpochSeconds::from_seconds(1_800_000_000),
             approval: Approval::Approved,
+            new_epoch: false,
         }
     );
     assert_eq!(

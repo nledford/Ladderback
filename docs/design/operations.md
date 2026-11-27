@@ -132,7 +132,7 @@ Ladderback follows [Semantic Versioning 2.0.0](https://semver.org/spec/v2.0.0.ht
 | Database and data directory (§9) | A migration with no automatic path | Automatic migrations |
 | MCP tools (§4.6): names, input schemas, result fields | Removing or renaming a tool, a new required argument, a result field whose meaning changes | New tools, optional arguments and result fields |
 
-Not part of the contract: UI layout and wording, log text, the CLI's sentences (a script reads `--json`; the daemon's `listening on` line stays as §8.4 says), the worker protocol (both ends ship in one binary), and Rust APIs. Downgrades are unsupported; the config history and the daily database copy are the way back.
+Not part of the contract: UI layout and wording, log text, the CLI's sentences (a script reads `--json`; the daemon's `listening on` line stays as §8.4 says), the worker protocol (both ends ship in one binary), and Rust APIs. Downgrades are unsupported; the config history and the daily database copy are the way back, except across a migration: the daily copy is taken after it, so until the copy before a migration (#1474) ships, going back past one needs a copy made before upgrading (decision 177).
 
 **The hub in the contract.** From the MVP's first release candidate (`0.6.0-rc.1`, #1044), the first release with the hub (§16, decision 122 as amended), the table covers the hub as it does the rest:
 

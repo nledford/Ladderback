@@ -134,9 +134,9 @@ fn entry(seq: u64, n: u128, happening: Happening, at: u64) -> OutboxEntry {
     }
 }
 
-/// Machine `n` connects to `hub` and sends `entries` on one connection.
-async fn reports(hub: &Hub, identity: Arc<InMemoryIdentity>, n: u128, entries: &[OutboxEntry]) {
-    let connecting = ConnectToHub::new(
+/// Machine `n`'s connector to `hub`, with the key files `identity` holds.
+fn connecting(hub: &Hub, identity: Arc<InMemoryIdentity>) -> ConnectToHub {
+    ConnectToHub::new(
         identity,
         Arc::new(FakeSigning),
         Arc::new(SeededRandom::new(77)),
@@ -144,14 +144,177 @@ async fn reports(hub: &Hub, identity: Arc<InMemoryIdentity>, n: u128, entries: &
         Arc::new(LoopbackHubConnector::to(hub.pairing.clone())),
         "0.5.0-agent".to_owned(),
         None,
-    );
-    let (_, mut channel) = connecting
-        .connect_channel(agent_id(n), hostname(n), None)
+    )
+}
+
+/// Machine `n` connects to `hub` and sends `entries` on one connection.
+async fn reports(hub: &Hub, identity: Arc<InMemoryIdentity>, n: u128, entries: &[OutboxEntry]) {
+    let (_, mut channel) = connecting(hub, identity)
+        .connect_channel(agent_id(n), hostname(n), None, None)
         .await
         .unwrap();
     for entry in entries {
         channel.send_report(entry).await.unwrap();
     }
+}
+
+/// The hub's `Welcome` tells a machine to start a new epoch when the hub
+/// took the place the machine's `Hello` says its outbox gives next, of
+/// that epoch: the machine numbers its reports again from an older place,
+/// as one restored from an older copy of its database does. A `Hello`
+/// that says nothing of its outbox, as 0.6.0's, a place past the last the
+/// hub took, or an epoch the hub took nothing of, is welcomed as before
+/// (decision 177).
+#[tokio::test]
+async fn a_machine_whose_next_place_the_hub_took_is_told_to_start_a_new_epoch() {
+    let hub = hub();
+    crate::test_log::capture_the_log();
+    let identity = paired(&hub, 1).await;
+    approve(&hub, 1).await;
+    let taken: Vec<_> = (1..=3)
+        .map(|seq| entry(seq, u128::from(seq), Happening::Succeeded, 1_800_000_000))
+        .collect();
+    reports(&hub, identity.clone(), 1, &taken).await;
+    let epoch = OutboxEpoch::from_uuid(Uuid::from_u128(0xe1));
+    let other = OutboxEpoch::from_uuid(Uuid::from_u128(0xe2));
+    let at = |epoch, next| {
+        Some(domain::fleet::OutboxPosition {
+            epoch,
+            next: ReportSeq::new(next).unwrap(),
+        })
+    };
+    for (outbox, told) in [
+        (None, false),
+        (at(epoch, 4), false),
+        (at(epoch, 9), false),
+        (at(other, 1), false),
+        (at(epoch, 3), true),
+        (at(epoch, 1), true),
+    ] {
+        let (connected, _) = connecting(&hub, identity.clone())
+            .connect_channel(agent_id(1), hostname(1), None, outbox)
+            .await
+            .unwrap();
+        assert_eq!(connected.new_epoch, told, "{outbox:?}");
+    }
+    assert_eq!(
+        hub.inbox.taken_through(agent_id(1), epoch).await.unwrap(),
+        ReportSeq::new(3),
+        "telling it changes nothing the hub took"
+    );
+    let told: Vec<String> = crate::test_log::logged_by("app::pairing::hub")
+        .into_iter()
+        .filter(|(_, line)| line.contains("new epoch"))
+        .map(|(level, line)| {
+            assert_eq!(level, log::Level::Warn, "{line}");
+            line
+        })
+        .collect();
+    assert_eq!(told.len(), 2, "{told:?}");
+    assert!(
+        told.iter()
+            .all(|line| line.contains(&agent_id(1).as_uuid().to_string())),
+        "{told:?}"
+    );
+}
+
+/// The hub's reports of machine 1's epoch `0xe1` at places 1 to 3, each
+/// of its own operation.
+async fn three_taken(hub: &Hub, identity: Arc<InMemoryIdentity>) -> Vec<OutboxEntry> {
+    let taken: Vec<_> = (1..=3)
+        .map(|seq| entry(seq, u128::from(seq), Happening::Succeeded, 1_800_000_000))
+        .collect();
+    reports(hub, identity, 1, &taken).await;
+    taken
+}
+
+/// Where an outbox of epoch `0xe1` stands past [`three_taken`]'s places.
+fn past_the_three() -> Option<domain::fleet::OutboxPosition> {
+    Some(domain::fleet::OutboxPosition {
+        epoch: OutboxEpoch::from_uuid(Uuid::from_u128(0xe1)),
+        next: ReportSeq::new(9).unwrap(),
+    })
+}
+
+/// A machine whose `Hello` states its outbox, past the last place the hub
+/// took, and which sends at a taken place a report other than the one the
+/// hub took there, as one restored from an older copy of its database
+/// that gave more places since than the hub took after the copy: the hub
+/// keeps nothing, acknowledges nothing, ends the connection, and tells the
+/// machine at its next `Hello` to start a new epoch. The report taken,
+/// sent again, is acknowledged as before (#1387, decision 177).
+#[tokio::test]
+async fn a_report_unlike_the_one_taken_at_its_place_ends_the_connection_and_starts_a_new_epoch() {
+    let hub = hub();
+    let identity = paired(&hub, 1).await;
+    approve(&hub, 1).await;
+    let taken = three_taken(&hub, identity.clone()).await;
+    let (connected, mut channel) = connecting(&hub, identity.clone())
+        .connect_channel(agent_id(1), hostname(1), None, past_the_three())
+        .await
+        .unwrap();
+    assert!(!connected.new_epoch);
+    channel.send_report(&taken[0]).await.unwrap();
+    assert_eq!(
+        channel.receive_ack().await.unwrap().seq,
+        ReportSeq::FIRST,
+        "the report taken, sent again"
+    );
+    let restored = entry(2, 0x1387, Happening::Succeeded, 1_800_000_000);
+    let _ = channel.send_report(&restored).await;
+    assert!(
+        channel.receive_ack().await.is_err(),
+        "a report the hub didn't take is never acknowledged"
+    );
+    assert_eq!(hub.inbox.reports(agent_id(1)).await.unwrap(), taken);
+    let epoch = OutboxEpoch::from_uuid(Uuid::from_u128(0xe1));
+    assert!(hub.inbox.diverged(agent_id(1), epoch).await.unwrap());
+    let (connected, _) = connecting(&hub, identity)
+        .connect_channel(agent_id(1), hostname(1), None, past_the_three())
+        .await
+        .unwrap();
+    assert!(connected.new_epoch, "the next Hello starts a new epoch");
+}
+
+/// A machine whose `Hello` states nothing of its outbox, as 0.6.0's, can't
+/// start a new epoch: a report of its other than the one the hub took at
+/// its place is acknowledged as taken and kept nowhere, as before, and the
+/// hub warns once while it runs, naming the agent and the place only (I4;
+/// #1387, decision 177).
+#[tokio::test]
+async fn a_machine_that_states_no_outbox_has_a_report_unlike_the_one_taken_acknowledged() {
+    let hub = hub();
+    let identity = paired(&hub, 1).await;
+    approve(&hub, 1).await;
+    let taken = three_taken(&hub, identity.clone()).await;
+    crate::test_log::capture_the_log();
+    let (_, mut channel) = connecting(&hub, identity.clone())
+        .connect_channel(agent_id(1), hostname(1), None, None)
+        .await
+        .unwrap();
+    for (seq, n) in [(2, 0x1387), (3, 0x1388)] {
+        let restored = entry(seq, n, Happening::Succeeded, 1_800_000_000);
+        channel.send_report(&restored).await.unwrap();
+        assert_eq!(channel.receive_ack().await.unwrap().seq, restored.seq);
+    }
+    assert_eq!(hub.inbox.reports(agent_id(1)).await.unwrap(), taken);
+    let warned: Vec<(log::Level, String)> = crate::test_log::logged_by("app::pairing::hub")
+        .into_iter()
+        .filter(|(level, _)| *level == log::Level::Warn)
+        .collect();
+    assert_eq!(
+        warned,
+        [(
+            log::Level::Warn,
+            format!(
+                "agent {} sent a report at place 2 of its outbox other than the one the hub \
+                 took there: its database may have been restored from an older copy, and its \
+                 version can't start a new epoch; the hub takes such reports as held already, \
+                 keeps none of them, and doesn't log the next ones",
+                agent_id(1).as_uuid()
+            )
+        )]
+    );
 }
 
 /// A machine that pairs is told to the browsers as waiting, once: the same

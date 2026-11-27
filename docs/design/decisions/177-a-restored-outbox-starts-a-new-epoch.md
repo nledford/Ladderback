@@ -1,0 +1,36 @@
+# Decision 177: A machine whose database was restored from an older copy starts a new outbox epoch
+
+**A machine's `Hello` says where its outbox stands: its epoch and the place it gives its next report (`outbox: { epoch, next }`), absent before its first report. When the hub already took that place of that epoch, the machine numbers its reports again from an older place, as a restored one does, and the hub's signed `Welcome` says `new_epoch`. The machine then gives its outbox a new random epoch, keeping its reports and their places, and sends them under it; the hub keeps both epochs. A machine that gave as many places after the copy as the hub took, or more, gets past that check, so the hub also compares a report at a place it took with the one it took there: another one ends the connection, and the next `Welcome` says `new_epoch`. The sync protocol stays 1** (recorded 2026-11-27; §7.2, #1387).
+
+## Why
+
+Each report of a machine's outbox has a place in its epoch, and the hub takes each place of an epoch once ([decision 145](145-the-agents-outbox-and-the-hubs-reports.md)). A database restored from an older copy, as the daily copy ([decision 174](174-the-daily-copy-of-the-database.md)) now makes a normal recovery step, keeps its epoch and its older count, so it gives again places the hub took, and the hub dropped each new report as one it took before. Only reports 32 or more places behind were even told apart, in the hub's log.
+
+## Decided
+
+1. **The handshake says it.** `Hello` carries the outbox's epoch and its next place, `last_seq + 1`. The hub compares it with the last place it took of that epoch: at or below it, the hub took places this outbox gives again, and `Welcome` carries `new_epoch: true`. Past it, of an epoch the hub doesn't hold, or with no position at all, `Welcome` says nothing new. The rule is `domain::fleet::starts_new_epoch`; nothing else, the hostname or the clock, decides it.
+2. **One step on the machine.** Before it sends anything on that connection, the machine replaces the epoch it stated with a new random one in `sync_outbox_meta`, in one `UPDATE`, and only if the outbox still holds that epoch. Its places, the reports still waiting and its count stay as they are, so no migration is needed. A machine that stops before the step states the old epoch again at its next connection and is told again; one that stops after it states the new epoch, which the hub doesn't hold, and goes on. Both sides log a warning; a failed step ends the session with nothing sent.
+3. **What "sends them again" means.** The reports the hub acknowledged left the outbox, under either epoch, and are never sent again. The ones still waiting are sent under the new epoch, the ones the hub took after the copy among them: the hub holds each operation's start and end once, whichever epoch or machine ID brings it (`sync_reports_once`, #1513), so it acknowledges those as duplicates and keeps the rest. The new epoch's places start where the outbox's count stood, which the hub takes as a gap.
+4. **The content check.** The `Hello` check misses a machine that gave, before its first connection after the restore, as many places as the hub took after the copy, or more: its next place lies past the hub's, and its reports at the places the hub took would be dropped as duplicates. So the hub compares a report at a place it took with the report it took there, by operation and happening, never its time or failure code (`domain::fleet::diverges`). The same one is a resend, acknowledged as before. Another one, or one the hub holds nowhere when it kept no report at that place, diverges: the hub keeps nothing and marks the epoch diverged in the same transaction.
+5. **What a divergence does.** To a machine whose `Hello` stated its outbox, the hub sends no acknowledgement and closes with `outbox-diverged`. The machine keeps the report, reconnects after 1 s as after any dropped connection, and its `Hello` states the marked epoch, so the `Welcome` says `new_epoch`. The mark names one machine and one epoch, which the machine leaves at that `Hello`; it goes with the epoch's row when the hub forgets the epoch among the machine's 8 newest. A 0.6.0 machine can't start an epoch: its report is acknowledged as before, and the hub logs the first such report once per machine while it runs.
+6. **What the hub keeps.** The last place of each of a machine's 8 newest epochs and whether it diverged (`sync_watermarks.diverged`, migration `0002_diverged_epochs.sql`), and its reports, with an index on `sync_reports (machine_id, epoch, seq)` that the check reads. Each restore adds one epoch.
+7. **No new protocol.** §7.3 asks for one when a field's meaning changes. None does here: `outbox` and `new_epoch` are optional fields an older peer ignores, as `zone` and `machine` were, and a signature covers a payload's bytes, so an older reader verifies them. The new close goes only to a machine that stated `outbox`, which says it can start an epoch.
+
+## Compatibility with 0.6.0
+
+| Machine | Hub | What happens |
+|---|---|---|
+| This release | This release | A restored machine starts a new epoch, at its `Hello` or after its first report unlike the one the hub took at its place, and the hub keeps every report it sends after |
+| This release | 0.6.0 | The hub ignores `outbox` and says nothing of an epoch: as today, the hub drops the restored machine's reports at places it took, and logs those 32 or more behind |
+| 0.6.0 | This release | Its `Hello` has no `outbox`: its reports are acknowledged as today, and the hub logs the first unlike the one it took at its place |
+| 0.6.0 | 0.6.0 | As today |
+
+A `Hello` whose `outbox` is out of shape (an epoch that isn't a UUID, a place of 0) is refused, as one with a fingerprint out of shape is. `new_epoch` is a boolean, absent when false. An outbox whose position can't be read ends the session with nothing sent, as a new epoch that can't be started does; stated as none, its reports at places the hub took would be let go of.
+
+**Going back to 0.6.0.** Every machine's database, a hub's, an agent's or a standalone one's, gets migration 0002 at its first start on this release, and 0.6.0 opens no newer schema, so every 0.6.0 build refuses it. This release takes no copy before the migration (#1474), and its daily copy is taken after it, so neither is a way back: going back needs a copy of the database the person made before upgrading.
+
+## Consequences
+
+- Two computers under one machine ID, a copied data folder the hub can't tell apart (no fingerprint; decisions 144 and 150), share one epoch. The first report of one at a place the other gave diverges, and the computer that sent it starts an epoch of its own; the other, still on the marked epoch, starts one at its next connection. After that the hub keeps both computers' reports. Decision 150 refuses the second computer whenever the hub can tell.
+- A resend whose report the hub let go of past its 10,000 per machine finds no report at its place, and is taken as held when the hub holds it under another machine ID; otherwise it diverges, and the machine's next epoch sends it once more, which the hub keeps once.
+- A restore whose copy is newer than what the hub took changes nothing: the machine's next place is past the hub's.

@@ -724,7 +724,7 @@ async fn a_syncing_connection_outlives_the_handshake_bound_until_it_is_idle() {
     };
     let (connecting, agent, hostname, _) = approved_agent(bounds).await;
     let (connected, mut channel) = connecting
-        .connect_channel(agent, hostname, None)
+        .connect_channel(agent, hostname, None, None)
         .await
         .unwrap();
     assert_eq!(connected.approval, Approval::Approved);
@@ -759,13 +759,13 @@ async fn a_new_session_of_an_agent_closes_its_older_one() {
 
     let (connecting, agent, hostname, _) = approved_agent(Bounds::DECIDED).await;
     let (_, mut older) = connecting
-        .connect_channel(agent, hostname.clone(), None)
+        .connect_channel(agent, hostname.clone(), None, None)
         .await
         .unwrap();
     older.send_heartbeat(Some(&[])).await.unwrap();
     older.receive_heartbeat_ack().await.unwrap();
     let (_, mut newer) = connecting
-        .connect_channel(agent, hostname.clone(), None)
+        .connect_channel(agent, hostname.clone(), None, None)
         .await
         .unwrap();
     older.send_heartbeat(Some(&[])).await.unwrap();
@@ -790,7 +790,7 @@ async fn a_new_session_of_an_agent_closes_its_older_one() {
         }
     );
     let (_, mut newest) = connecting
-        .connect_channel(agent, hostname, None)
+        .connect_channel(agent, hostname, None, None)
         .await
         .unwrap();
     newest.send_heartbeat(Some(&[])).await.unwrap();
@@ -821,7 +821,7 @@ async fn shown_online(pairing: &HubPairing, agent: domain::AgentId, turns: usize
 async fn a_connection_silent_for_90_seconds_is_closed_and_its_machine_shown_offline() {
     let (connecting, agent, hostname, pairing) = approved_agent(Bounds::DECIDED).await;
     let (_, mut channel) = connecting
-        .connect_channel(agent, hostname, None)
+        .connect_channel(agent, hostname, None, None)
         .await
         .unwrap();
     assert!(

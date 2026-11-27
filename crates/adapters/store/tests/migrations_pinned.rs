@@ -16,11 +16,18 @@ static MIGRATOR: Migrator = sqlx::migrate!("../../../migrations");
 /// Each released migration: version, description and the hex SHA-384 checksum
 /// sqlx records. Append-only: adding a migration means adding one line here,
 /// in the same PR.
-const PINNED: &[(i64, &str, &str)] = &[(
-    1,
-    "baseline",
-    "b54dd9c2138812d3e5be0d0d4e122e55873392287d384113e3e1613d1d83eb2e10f718f4344cb4d64ea23cdbedb9585c",
-)];
+const PINNED: &[(i64, &str, &str)] = &[
+    (
+        1,
+        "baseline",
+        "b54dd9c2138812d3e5be0d0d4e122e55873392287d384113e3e1613d1d83eb2e10f718f4344cb4d64ea23cdbedb9585c",
+    ),
+    (
+        2,
+        "diverged epochs",
+        "11ae64b79438522f0d89befccbd5fa12cf451e2d58c58e60103800c6ab104df0be92a9b23e17e9fe0df31823df6ff5fb",
+    ),
+];
 
 /// The migration's file name, as `sqlx::migrate!` reads it: sqlx turns the
 /// name's underscores into the description's spaces.

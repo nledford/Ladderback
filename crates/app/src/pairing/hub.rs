@@ -7,10 +7,10 @@ use domain::fleet::{
     Connect, EpochSeconds, FIRST_SEQUENCE, HANDSHAKES, Holder, Hostname, HostnameKey, HubAddress,
     HubEnvelope, Ingest, KEY_BYTES, KeyFile, ListedAgent, MESSAGE_LIFE, MachineCheck, MachineZone,
     Nonce, Pair, PairAnswer, PairRefusal, PairRequest, Paired, PairingToken, PayloadDigest, Proof,
-    ProofRefusal, ProofRequest, PublicKey, Refused, RemovalRefused, ReportSeq, SeedFile,
-    SignedMessage, SigningSeed, TokenId, TokenRecord, TokenTls, TokenUse, Tombstone,
-    UNUSED_TOKEN_LIMIT, Welcome, WireName, ack_kind, grants_kind, heartbeat_kind, hello_kind,
-    list_agents, plans_kind, progress_kind, release_kind, released_kind, report_kind, repos_kind,
+    ProofRefusal, ProofRequest, PublicKey, Refused, RemovalRefused, SeedFile, SignedMessage,
+    SigningSeed, TokenId, TokenRecord, TokenTls, TokenUse, Tombstone, UNUSED_TOKEN_LIMIT, Welcome,
+    WireName, ack_kind, grants_kind, heartbeat_kind, hello_kind, list_agents, plans_kind,
+    progress_kind, release_kind, released_kind, report_kind, repos_kind, starts_new_epoch,
     token_life, welcome_kind, withheld_kind,
 };
 use domain::{AgentId, SignedDuration, TimeZoneDatabase, Timestamp};
@@ -89,8 +89,14 @@ pub struct HubPairing {
 /// The hub's answer to a proved agent's `Hello`.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum HelloAnswer {
-    /// The signed `Welcome`.
-    Welcome(HubEnvelope),
+    /// The signed `Welcome`, and whether the `Hello` stated where the
+    /// agent's outbox stands: an agent that did can start a new epoch, so
+    /// the hub refuses its report at a place taken that isn't the one taken
+    /// there (decision 177).
+    Welcome {
+        envelope: HubEnvelope,
+        outbox_stated: bool,
+    },
     /// A signed refusal: another computer holds the agent's ID (decision
     /// 150).
     Refused(Refused),
@@ -116,6 +122,11 @@ pub enum MessageRefused {
     /// A kind the hub doesn't take here, or a payload that isn't the
     /// kind's.
     Unexpected,
+    /// A report at a place the hub took that isn't the report it took
+    /// there, from an agent whose `Hello` stated its outbox: the hub
+    /// acknowledges nothing, so the agent keeps the report, and the agent's
+    /// next `Hello` is told to start a new epoch (decision 177).
+    Diverged,
 }
 
 /// The hub key, with its seed, and the recovery key's public half, read
@@ -762,14 +773,32 @@ impl HubPairing {
                 .record_zone(agent.agent_id, zone.as_ref())
                 .await?;
         }
+        // The outbox numbers its reports again from an older place when the
+        // hub took its next place, or found at a place it took a report
+        // other than the one it took there (decision 177).
+        let new_epoch = match (&self.inbox, read.outbox) {
+            (Some(inbox), Some(position)) => {
+                starts_new_epoch(
+                    inbox.taken_through(agent.agent_id, position.epoch).await?,
+                    position.next,
+                ) || inbox.diverged(agent.agent_id, position.epoch).await?
+            }
+            _ => false,
+        };
+        if new_epoch {
+            log::warn!("{}", logged::new_epoch(agent.agent_id));
+        }
         let signed_at =
             EpochSeconds::from_timestamp(self.clock.now()).unwrap_or(EpochSeconds::from_seconds(0));
-        let welcome = Welcome::answering(
-            &read,
-            Approval::of(agent.status),
-            self.version.clone(),
-            signed_at,
-        );
+        let welcome = Welcome {
+            new_epoch,
+            ..Welcome::answering(
+                &read,
+                Approval::of(agent.status),
+                self.version.clone(),
+                signed_at,
+            )
+        };
         let payload = welcome_payload(&welcome);
         let kind = welcome_kind();
         let expires_at = welcome.expires_at();
@@ -785,20 +814,29 @@ impl HubPairing {
             payload: PayloadDigest::of(&payload),
         };
         let signature = self.signing.sign(&keys.seed, &answer.to_bytes())?;
-        Ok(Ok(HelloAnswer::Welcome(HubEnvelope {
-            kind,
-            seq: FIRST_SEQUENCE,
-            expires_at,
-            payload,
-            signature,
-        })))
+        Ok(Ok(HelloAnswer::Welcome {
+            envelope: HubEnvelope {
+                kind,
+                seq: FIRST_SEQUENCE,
+                expires_at,
+                payload,
+                signature,
+            },
+            outbox_stated: read.outbox.is_some(),
+        }))
     }
 
     /// The connection's state after the `Welcome` to `agent`, when the hub
     /// takes its reports: none for a pending agent, whose reports wait in
     /// its outbox, nor on a hub that keeps no reports, which closes after
-    /// the `Welcome` (§7.2).
-    pub(super) fn syncing(&self, handshake: HubHandshake, agent: &AgentRecord) -> Option<Syncing> {
+    /// the `Welcome` (§7.2). `outbox_stated` says the agent's `Hello`
+    /// stated where its outbox stands, so it can start a new epoch.
+    pub(super) fn syncing(
+        &self,
+        handshake: HubHandshake,
+        agent: &AgentRecord,
+        outbox_stated: bool,
+    ) -> Option<Syncing> {
         let approved = Approval::of(agent.status) == Approval::Approved;
         (approved && self.inbox.is_some()).then(|| {
             let next = FIRST_SEQUENCE.saturating_add(1);
@@ -806,6 +844,7 @@ impl HubPairing {
                 handshake,
                 agent_id: agent.agent_id,
                 agent_key: agent.key,
+                outbox_stated,
                 next_received: next,
                 next_sent: next,
             }
@@ -849,8 +888,13 @@ impl HubPairing {
         syncing.next_received = syncing.next_received.saturating_add(1);
         let now = self.clock.now();
         let answered = if message.kind == report_kind() {
-            self.take_report(syncing.agent_id, &message.payload, now)
-                .await?
+            self.take_report(
+                syncing.agent_id,
+                syncing.outbox_stated,
+                &message.payload,
+                now,
+            )
+            .await?
         } else if message.kind == repos_kind() {
             self.grant(keys, syncing.agent_id, &message.payload).await?
         } else if message.kind == release_kind() {
@@ -901,10 +945,16 @@ impl HubPairing {
     }
 
     /// Keeps `agent`'s report unless the hub took it before, and answers
-    /// with its acknowledgement either way.
+    /// with its acknowledgement either way, but for a report that diverged
+    /// from the one taken at its place from an agent whose `Hello` stated
+    /// its outbox (`outbox_stated`): that one is refused, unacknowledged,
+    /// and the agent starts a new epoch at its next `Hello` (decision 177).
+    /// An agent that stated nothing, as 0.6.0's, can't: its report is
+    /// acknowledged as taken, and the hub warns once.
     async fn take_report(
         &self,
         agent: AgentId,
+        outbox_stated: bool,
         payload: &[u8],
         now: Timestamp,
     ) -> Result<Answered, HubPairingError> {
@@ -912,6 +962,9 @@ impl HubPairing {
             return Ok(Err(MessageRefused::Unexpected));
         };
         let taken = inbox.ingest(agent, &entry, now).await?;
+        if taken.diverged && outbox_stated {
+            return Ok(Err(MessageRefused::Diverged));
+        }
         if let Some(dropped) = taken.dropped {
             self.warn_full(agent, dropped);
         }
@@ -919,7 +972,9 @@ impl HubPairing {
             self.tell(fleet::reported(agent, &entry.report)).await;
         }
         if taken.ingest == Ingest::Behind {
-            self.warn_behind(agent, entry.seq);
+            self.warn_behind(agent, || logged::reports_behind(agent, entry.seq));
+        } else if taken.diverged {
+            self.warn_behind(agent, || logged::reports_diverged(agent, entry.seq));
         }
         let payload = ack_payload(Ack {
             epoch: entry.epoch,
@@ -1049,17 +1104,19 @@ impl HubPairing {
         }
     }
 
-    /// Warns, once per agent while the hub runs, that `agent` sent a report
-    /// at `seq` far behind the last the hub took of its epoch; the ones
-    /// after are acknowledged as held and not logged (#1387).
-    fn warn_behind(&self, agent: AgentId, seq: ReportSeq) {
+    /// Warns with `line`, once per agent while the hub runs, that `agent`
+    /// sent a report its outbox numbered again from an older place: far
+    /// behind the last the hub took of its epoch, or other than the one
+    /// taken at its place from an agent that can't start a new epoch; the
+    /// ones after are acknowledged as held and not logged (#1387).
+    fn warn_behind(&self, agent: AgentId, line: impl FnOnce() -> String) {
         let first = self
             .warned_behind
             .lock()
             .unwrap_or_else(PoisonError::into_inner)
             .insert(agent);
         if first {
-            log::warn!("{}", logged::reports_behind(agent, seq));
+            log::warn!("{}", line());
         }
     }
 
@@ -1134,6 +1191,9 @@ pub(super) struct Syncing {
     handshake: HubHandshake,
     agent_id: AgentId,
     agent_key: PublicKey,
+    /// Whether the agent's `Hello` stated where its outbox stands, so it can
+    /// start a new epoch (decision 177).
+    outbox_stated: bool,
     /// The sequence number the agent's next message must carry.
     next_received: u64,
     /// The sequence number of the hub's next message.
