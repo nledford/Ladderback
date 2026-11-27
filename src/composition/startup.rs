@@ -4,15 +4,16 @@
 
 use api::{MsgArg, WarningCode};
 use app::conditions::NameWatch;
+use app::daily_copy::KeepDailyCopy;
 use app::event_bus::BroadcastEventBus;
 use app::full_disk_access::{FullDiskAccessCheck, StartNote};
 use app::locations::{ChooseLocation, LocationReport};
 use app::notifications::{Notify, Report};
 use app::ports::DELIVERY_TIMEOUT;
 use app::ports::{
-    Clock, ConfigError, ConfigStore, Engine, EventBus, Network, NormalizeSources, OperationRecord,
-    OperationStore, PowerSupply, RELEASE_TIMEOUT, Random, ReleaseFeed, ReleaseFeedError,
-    ScheduleStore,
+    Clock, ConfigError, ConfigStore, DailyCopy, DailyCopyError, Engine, EventBus, Network,
+    NormalizeSources, OperationRecord, OperationStore, PowerSupply, RELEASE_TIMEOUT, Random,
+    ReleaseFeed, ReleaseFeedError, ScheduleStore,
 };
 use app::queue::RunQueue;
 use app::reads::ReadTurns;
@@ -165,6 +166,8 @@ pub(crate) struct Background {
     config: Arc<dyn ConfigStore>,
     schedules: Arc<dyn ScheduleStore>,
     store: Arc<dyn OperationStore>,
+    /// Where the daily copy of the database is kept (§9).
+    copies: Arc<dyn DailyCopy>,
     conditions: RunConditions,
     /// How each backup ended, which the scheduler reads to retry a failed
     /// one (§5).
@@ -303,8 +306,8 @@ impl Background {
 
     /// Runs the queue's leftovers, oldest first, then the scheduler, with
     /// `random` spreading its runs over their jitter, and beside them the
-    /// release check, with `random` spreading its checks too, until the
-    /// future is dropped.
+    /// release check, with `random` spreading its checks too, and the daily
+    /// copy of the database, until the future is dropped.
     pub(crate) async fn run(self, random: Arc<dyn Random>) {
         let check = self.releases.map(|releases| CheckForUpdates {
             clock: Arc::new(SystemClock),
@@ -320,6 +323,11 @@ impl Background {
             if let Some(check) = &check {
                 check.run().await;
             }
+        };
+        let copying = KeepDailyCopy {
+            clock: Arc::new(SystemClock),
+            copies: self.copies,
+            reports: Arc::new(log_daily_copy),
         };
         let queue = Arc::clone(&self.runner.queue);
         let events = Arc::clone(&self.runner.events);
@@ -355,7 +363,7 @@ impl Background {
             .run()
             .await;
         };
-        tokio::join!(scheduling, checking);
+        tokio::join!(scheduling, checking, copying.run());
     }
 }
 
@@ -422,6 +430,19 @@ fn log_release_check(report: ReleaseCheckReport) {
         ReleaseCheckReport::Config(error) => {
             log::debug!("the release check didn't ask: the configuration can't be read: {error}")
         }
+    }
+}
+
+/// Says in the log why the daily copy of the database wasn't taken (§9):
+/// the copy before it, if any, is kept as it was.
+fn log_daily_copy(error: DailyCopyError) {
+    match error {
+        DailyCopyError::Unavailable { detail } => log::warn!(
+            "the daily copy of the database was skipped: the database is unavailable ({detail}); the next try is in an hour"
+        ),
+        DailyCopyError::Failed { detail } => log::warn!(
+            "the daily copy of the database wasn't taken ({detail}); the copy before it, if any, is kept as it was, and the next try is in an hour"
+        ),
     }
 }
 
@@ -964,6 +985,7 @@ async fn state_over(
         config,
         schedules,
         store,
+        copies: Arc::<SqliteStore>::clone(&log.store),
         conditions,
         ends,
         changes,
