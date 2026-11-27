@@ -890,6 +890,7 @@ fn the_hub_reads_a_machines_refusal_by_its_code() {
         ErrorCode::CommandReplayed,
         ErrorCode::MachineRunRefused,
         ErrorCode::CommandBackupsOnly,
+        ErrorCode::MachineCancelRefused,
     ] {
         assert_eq!(
             read(code, Some(at)),
@@ -914,5 +915,81 @@ fn the_hub_reads_a_machines_refusal_by_its_code() {
                 retry_at: None
             }
         );
+    }
+}
+
+/// The hub passes on a machine's answer only as one to the kind of command
+/// it sent: a result of the other kind, a refusal no machine gives that
+/// kind, or one missing an argument its code needs, is the kind's own
+/// refusal, which names what was asked (#1464).
+#[test]
+fn the_hub_passes_on_only_an_answer_to_the_command_it_sent() {
+    use crate::hub_commands::CommandAnswer;
+    use api::ErrorCode;
+    use domain::fleet::CommandKind;
+    use domain::{OperationId, Timestamp};
+
+    let operation = OperationId::from_uuid(Uuid::from_u128(0x0e));
+    let at = Timestamp::from_second(1_800_000_300).unwrap();
+    let refused = |code, retry_at| CommandAnswer::Refused { code, retry_at };
+    let run = |answer| answer_to(CommandKind::RunPlan, answer);
+    let cancel = |answer| answer_to(CommandKind::CancelOp, answer);
+
+    assert_eq!(
+        run(CommandAnswer::Started(operation)),
+        CommandAnswer::Started(operation)
+    );
+    assert_eq!(
+        cancel(CommandAnswer::Canceled(operation)),
+        CommandAnswer::Canceled(operation)
+    );
+    for code in [
+        ErrorCode::PlanUnknown,
+        ErrorCode::KeyFilesNotLeftOut,
+        ErrorCode::PlanRunWaiting,
+        ErrorCode::MachineCommandsOff,
+        ErrorCode::CommandExpired,
+        ErrorCode::CommandReplayed,
+        ErrorCode::MachineRunRefused,
+    ] {
+        assert_eq!(run(refused(code, None)), refused(code, None), "{code:?}");
+    }
+    for code in [
+        ErrorCode::OperationUnknown,
+        ErrorCode::OperationNotRunning,
+        ErrorCode::CommandBackupsOnly,
+        ErrorCode::MachineCommandsOff,
+        ErrorCode::CommandExpired,
+        ErrorCode::CommandReplayed,
+        ErrorCode::MachineCancelRefused,
+    ] {
+        assert_eq!(cancel(refused(code, None)), refused(code, None), "{code:?}");
+    }
+    for kind in [CommandKind::RunPlan, CommandKind::CancelOp] {
+        let limited = refused(ErrorCode::CommandRateLimited, Some(at));
+        assert_eq!(answer_to(kind, limited.clone()), limited);
+    }
+
+    let run_refused = refused(ErrorCode::MachineRunRefused, None);
+    for answer in [
+        CommandAnswer::Canceled(operation),
+        refused(ErrorCode::OperationUnknown, None),
+        refused(ErrorCode::OperationNotRunning, None),
+        refused(ErrorCode::CommandBackupsOnly, None),
+        refused(ErrorCode::MachineCancelRefused, None),
+        refused(ErrorCode::CommandRateLimited, None),
+    ] {
+        assert_eq!(run(answer.clone()), run_refused, "{answer:?}");
+    }
+    let cancel_refused = refused(ErrorCode::MachineCancelRefused, None);
+    for answer in [
+        CommandAnswer::Started(operation),
+        refused(ErrorCode::PlanUnknown, None),
+        refused(ErrorCode::KeyFilesNotLeftOut, None),
+        refused(ErrorCode::PlanRunWaiting, None),
+        refused(ErrorCode::MachineRunRefused, None),
+        refused(ErrorCode::CommandRateLimited, None),
+    ] {
+        assert_eq!(cancel(answer.clone()), cancel_refused, "{answer:?}");
     }
 }

@@ -776,6 +776,10 @@ error-machine-run-refused = The { -machine } couldn't start a backup of plan { $
 # $operation (text): the operation's ID.
 error-command-backups-only = The { -hub } can cancel only a { -machine }'s backups, and operation { $operation } isn't one. Cancel it on the { -machine }'s own page.
 
+# The machine couldn't cancel the backup the hub asked it to cancel.
+# $operation (text): the operation's ID.
+error-machine-cancel-refused = The { -machine } couldn't cancel backup { $operation }. Its own page and its log say why.
+
 # This machine doesn't maintain the repository: its entry doesn't ask this
 # machine to maintain it, so a forget, a prune, a check or an adoption, or the
 # preview of one, was refused and nothing in the repository was changed. The

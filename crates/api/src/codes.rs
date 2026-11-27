@@ -744,6 +744,9 @@ pub enum ErrorCode {
     /// The hub may cancel only a machine's backups; `operation` is
     /// another kind.
     CommandBackupsOnly,
+    /// The machine couldn't cancel the backup `operation` for its hub, or
+    /// answered the cancel with something no cancel is answered with.
+    MachineCancelRefused,
     #[serde(other)]
     Unknown,
 }
@@ -1806,6 +1809,11 @@ impl ErrorCode {
                 optional: false,
             }],
             Self::CommandBackupsOnly => &[ArgSpec {
+                name: "operation",
+                kind: ArgKind::Text,
+                optional: false,
+            }],
+            Self::MachineCancelRefused => &[ArgSpec {
                 name: "operation",
                 kind: ArgKind::Text,
                 optional: false,

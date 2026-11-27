@@ -203,6 +203,7 @@ code_messages!(ERRORS, error_message, ErrorCode {
     CommandRateLimited => msg::ERROR_COMMAND_RATE_LIMITED,
     MachineRunRefused => msg::ERROR_MACHINE_RUN_REFUSED,
     CommandBackupsOnly => msg::ERROR_COMMAND_BACKUPS_ONLY,
+    MachineCancelRefused => msg::ERROR_MACHINE_CANCEL_REFUSED,
     MaintenanceNotOwner => msg::ERROR_MAINTENANCE_NOT_OWNER,
     MaintenanceNoLease => msg::ERROR_MAINTENANCE_NO_LEASE,
     MaintenancePruneHeld => msg::ERROR_MAINTENANCE_PRUNE_HELD,

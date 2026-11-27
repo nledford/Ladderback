@@ -7,7 +7,8 @@ use api::ErrorCode;
 use api::sync::{CancelOpPayload, CommandResultPayload, RunPlanPayload, code_name};
 use domain::access::SessionTag;
 use domain::fleet::{
-    CommandId, CommandRequest, EpochSeconds, HubCommand, WireName, cancel_op_kind, run_plan_kind,
+    CommandId, CommandKind, CommandRequest, EpochSeconds, HubCommand, WireName, cancel_op_kind,
+    run_plan_kind,
 };
 use domain::{OperationId, PlanId, Timestamp};
 
@@ -154,4 +155,14 @@ const MACHINE_REFUSALS: [ErrorCode; 11] = [
 
 fn seconds(time: Timestamp) -> Option<u64> {
     EpochSeconds::from_timestamp(time).map(EpochSeconds::seconds)
+}
+
+/// The machine's `answer` to a command of `kind`, as the hub passes it on:
+/// one that answers another kind of command, refuses with a code no
+/// machine refuses that kind with, or leaves out an argument its code
+/// needs, is the kind's own refusal, `machine-run-refused` or
+/// `machine-cancel-refused`.
+pub fn answer_to(kind: CommandKind, answer: CommandAnswer) -> CommandAnswer {
+    let _ = (kind, answer);
+    todo!()
 }

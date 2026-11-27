@@ -485,6 +485,7 @@ pub(super) fn translate(event: WorkerEvent, redactor: &Redactor) -> Option<Engin
                 | ErrorCode::CommandRateLimited
                 | ErrorCode::MachineRunRefused
                 | ErrorCode::CommandBackupsOnly
+                | ErrorCode::MachineCancelRefused
                 | ErrorCode::Unknown => FailureReason::EngineFailed { detail },
             })
         }

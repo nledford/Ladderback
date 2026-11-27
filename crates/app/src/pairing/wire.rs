@@ -28,7 +28,9 @@ use crate::ports::OutboxEntry;
 mod commands;
 mod live;
 
-pub use commands::{command_payload, command_result_payload, read_command, read_command_result};
+pub use commands::{
+    answer_to, command_payload, command_result_payload, read_command, read_command_result,
+};
 
 pub use live::{
     heartbeat_ack_payload, heartbeat_payload, plans_ack_payload, plans_payload, progress_payload,
