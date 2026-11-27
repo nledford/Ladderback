@@ -764,9 +764,7 @@ impl HubPairing {
         }
         let new_epoch = match (&self.inbox, read.outbox) {
             (Some(inbox), Some(position)) => starts_new_epoch(
-                inbox
-                    .taken_through(agent.agent_id, position.epoch)
-                    .await?,
+                inbox.taken_through(agent.agent_id, position.epoch).await?,
                 position.next,
             ),
             _ => false,
