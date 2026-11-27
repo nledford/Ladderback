@@ -1,6 +1,7 @@
 use std::collections::VecDeque;
 use std::sync::Arc;
 
+use api::ErrorCode;
 use api::sync::HubFrame;
 use domain::fleet::{
     Ack, AgentEnvelope, Binding, CommandId, EpochSeconds, FIRST_SEQUENCE, HubEnvelope,
@@ -37,9 +38,6 @@ pub enum ChannelError {
     OutOfTurn,
     /// The agent's count of its own messages ran out.
     SequenceSpent,
-    /// The hub sent more than [`MAX_COMMANDS_IN_FLIGHT`] commands the agent
-    /// hadn't answered: the agent closes the connection.
-    TooManyCommands,
     Signing(SigningError),
 }
 
@@ -77,6 +75,9 @@ pub struct AgentChannel {
     /// The hub's commands taken while the agent waited for another message,
     /// which it hasn't answered, at most [`MAX_COMMANDS_IN_FLIGHT`].
     commands: VecDeque<ReceivedCommand>,
+    /// The commands dropped unacted to make room for a newer one, which
+    /// the agent answers expired, at most [`MAX_COMMANDS_IN_FLIGHT`].
+    dropped: VecDeque<CommandId>,
 }
 
 /// What every signed message on one connection is bound to.
@@ -123,6 +124,7 @@ impl AgentChannel {
             welcomed_at,
             hello_sent,
             commands: VecDeque::new(),
+            dropped: VecDeque::new(),
         }
     }
 
@@ -262,6 +264,20 @@ impl AgentChannel {
         self.commands.pop_front()
     }
 
+    /// Answers each command the agent dropped unacted to make room for a
+    /// newer one: it came too long before the agent could act on it, so
+    /// its answer is [`ErrorCode::CommandExpired`].
+    pub async fn answer_dropped(&mut self) -> Result<(), ChannelError> {
+        while let Some(id) = self.dropped.pop_front() {
+            let expired = CommandAnswer::Refused {
+                code: ErrorCode::CommandExpired,
+                retry_at: None,
+            };
+            self.send_command_result(id, &expired).await?;
+        }
+        Ok(())
+    }
+
     /// Sends `answer` to the hub's command `id` (`CommandResult`), signed
     /// with the next sequence number.
     pub async fn send_command_result(
@@ -315,7 +331,9 @@ impl AgentChannel {
 
     /// The signed message `frame` holds, once it holds; none when it is a
     /// command, which is kept to be answered, with the hub's time it came
-    /// at, unless the agent holds [`MAX_COMMANDS_IN_FLIGHT`] unanswered.
+    /// at. One that finds [`MAX_COMMANDS_IN_FLIGHT`] held unanswered makes
+    /// room by dropping the oldest, which the hub has stopped waiting for:
+    /// it waits on no more at once.
     fn take(&mut self, frame: &HubFrame) -> Result<Option<HubEnvelope>, ChannelError> {
         let since = self.clock.monotonic().saturating_sub(self.hello_sent);
         let Ok(HubMessage::Signed(envelope)) = hub_message(frame) else {
@@ -349,8 +367,14 @@ impl AgentChannel {
         let Some(request) = request else {
             return Ok(Some(envelope));
         };
-        if self.commands.len() >= MAX_COMMANDS_IN_FLIGHT {
-            return Err(ChannelError::TooManyCommands);
+        if self.commands.len() >= MAX_COMMANDS_IN_FLIGHT
+            && let Some(oldest) = self.commands.pop_front()
+        {
+            if self.dropped.len() >= MAX_COMMANDS_IN_FLIGHT {
+                // Older still: no one waits for its answer.
+                self.dropped.pop_front();
+            }
+            self.dropped.push_back(oldest.request.id);
         }
         self.commands.push_back(ReceivedCommand {
             request,

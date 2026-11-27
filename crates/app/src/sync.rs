@@ -508,8 +508,9 @@ impl SyncWithHub {
     /// places ahead of the hub's acknowledgements, and once the hub
     /// acknowledged the last of them, the agent's plans when they changed
     /// since the hub last acknowledged them, waiting for that
-    /// acknowledgement, and then the latest progress when one is due. It
-    /// returns how many reports it sent.
+    /// acknowledgement, and then the latest progress when one is due. The
+    /// hub's commands that came meanwhile are answered after each window
+    /// and at the end. It returns how many reports it sent.
     async fn tell(
         &self,
         connected: &Connected,
@@ -538,11 +539,13 @@ impl SyncWithHub {
                 .map_err(SyncFailure::Channel)?;
             self.told().progress = Some((progress, self.clock.monotonic()));
         }
+        self.answer_held(channel).await?;
         Ok(sent)
     }
 
     /// Sends every report not yet acknowledged, and returns how many once
-    /// the hub acknowledged the last of them.
+    /// the hub acknowledged the last of them; after each window, it answers
+    /// the hub's commands that came while it waited.
     async fn replay(&self, channel: &mut AgentChannel) -> Result<u64, SyncFailure> {
         let mut sent = 0;
         // Each window starts after the last place acknowledged, so a session
@@ -584,6 +587,7 @@ impl SyncWithHub {
                     break;
                 }
             }
+            self.answer_held(channel).await?;
         }
     }
 

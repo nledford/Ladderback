@@ -27,8 +27,9 @@ pub const COMMANDS_REMEMBERED_FOR: SignedDuration = SignedDuration::from_hours(2
 /// acted on, so a hostile hub can't fill the machine's database.
 pub const MAX_COMMANDS_REMEMBERED: usize = 1_000;
 
-/// The most commands a hub waits on the answer of from one machine at once;
-/// the machine closes a connection that sends it more before it answered.
+/// The most commands a hub waits on the answer of from one machine at once,
+/// and the most a machine holds unanswered: one more makes it drop the
+/// oldest, which the hub has stopped waiting for, answering it expired.
 pub const MAX_COMMANDS_IN_FLIGHT: usize = 8;
 
 /// How long a hub waits for a machine's answer to a command.

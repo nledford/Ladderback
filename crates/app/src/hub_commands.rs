@@ -142,7 +142,12 @@ impl AnswerHubCommands {
             return Some(refused(ErrorCode::MachineCommandsOff));
         }
         let request = &command.request;
-        if !command_fresh(command.welcomed_at, command.since, request.requested_at) {
+        // Fresh when it came, and still when the machine acts on it, after
+        // however long it was held.
+        let acting = self.clock.monotonic().saturating_sub(command.hello_sent);
+        if !command_fresh(command.welcomed_at, command.since, request.requested_at)
+            || !command_fresh(command.welcomed_at, acting, request.requested_at)
+        {
             return Some(refused(ErrorCode::CommandExpired));
         }
         let now = self.clock.now();
@@ -181,20 +186,23 @@ impl AnswerHubCommands {
     }
 
     /// Answers each command `channel` took while the agent waited for
-    /// another message.
+    /// another message, and each it dropped to make room.
     pub async fn answer_held(&self, channel: &mut AgentChannel) -> Result<(), ChannelError> {
+        channel.answer_dropped().await?;
         while let Some(command) = channel.buffered_command() {
             self.reply(channel, &command).await?;
         }
         Ok(())
     }
 
-    /// Answers `command` on `channel`, when the machine has an answer.
+    /// Answers `command` on `channel`, when the machine has an answer,
+    /// after each command the channel dropped to make room for it.
     pub async fn reply(
         &self,
         channel: &mut AgentChannel,
         command: &ReceivedCommand,
     ) -> Result<(), ChannelError> {
+        channel.answer_dropped().await?;
         match self.answer(command).await {
             Some(answer) => {
                 channel
