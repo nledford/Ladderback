@@ -21,6 +21,7 @@
 - A hub restored behind a machine's epoch floor enters recovery mode when that floor is proved, and grants no leases until a person confirms the old hub is stopped or gone. Ending recovery raises each affected repository's counter above its floor.
 - The start window and recovery mode are separate: the window still protects every repository's first owner change after a start, while recovery mode protects repositories whose floors show that this hub was rewound.
 - A hub clock that steps forward after the window has ended is still decision 147's limit.
+- [Decision 178](178-the-start-window-waits-on-every-approved-machine.md) widens the window: it also waits on every machine approved before the start, since a grant the hub lost takes with it the report that named the repository.
 
 ## Rejected
 
