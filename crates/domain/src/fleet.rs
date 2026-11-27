@@ -22,6 +22,7 @@ mod reported;
 mod route;
 mod signed;
 mod token;
+mod version;
 mod zone;
 
 pub use fingerprint::{Fingerprint, TokenId};
@@ -83,4 +84,5 @@ pub use token::{
     HubAddress, HubScheme, InvalidHubAddress, MAX_ADDRESS_BYTES, PairingToken, TOKEN_PREFIX,
     TOKEN_VERSION, TokenRefused, TokenTls,
 };
+pub use version::{InvalidVersion, MAX_VERSION_BYTES, MachineVersion};
 pub use zone::{InvalidZoneName, MAX_ZONE_BYTES, MachineZone};

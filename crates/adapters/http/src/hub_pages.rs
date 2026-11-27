@@ -243,6 +243,7 @@ fn machine_dto(machine: &Machine) -> api::HubMachineDto {
         last_seen: record.last_seen.to_string(),
         online: machine.online,
         zone: record.zone.as_ref().map(|zone| zone.as_str().to_owned()),
+        version: None,
         reports_dropped: machine.reports_dropped,
         operations: machine
             .operations

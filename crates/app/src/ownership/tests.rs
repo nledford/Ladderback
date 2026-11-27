@@ -74,6 +74,7 @@ fn machine(agents: &InMemoryAgentRegistry, n: u8, now: Timestamp) -> AgentId {
         counter: 1,
         last_seen: now,
         zone: None,
+        version: None,
     });
     agent_id
 }

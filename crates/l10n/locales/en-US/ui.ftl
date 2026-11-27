@@ -4079,6 +4079,24 @@ ui-machine-card-plan-count = { $count }
 # A card's plans before its machine reported them.
 ui-machine-card-plans-unreported = Not reported yet
 
+# The term of a card's version of Ladderback: the version its machine runs, as its latest Hello gave it (#1707).
+ui-machine-card-version = Version
+
+# A card's version when it is the hub's own release, or doesn't read as a release number.
+# $version (string): the version as the machine wrote it, such as 0.6.0, or 0.6.0+3f937cf between releases.
+ui-machine-card-version-shown = { $version }
+
+# A card's version when it is older than the hub's own. The words after the version are a quiet note.
+# $version (string): the version as the machine wrote it, such as 0.6.0.
+ui-machine-card-version-older = { $version } Older than the { -hub }.
+
+# A card's version when it is newer than the hub's own, so the hub is the one to upgrade. The words after the version are a quiet note.
+# $version (string): the version as the machine wrote it, such as 0.8.0.
+ui-machine-card-version-newer = { $version } Newer than the { -hub }.
+
+# A card's version before its machine gave one.
+ui-machine-card-version-unreported = Not reported yet
+
 # The link on a card to its machine's page.
 # $hostname (string): the machine's name.
 ui-machine-card-open = Open { $hostname }

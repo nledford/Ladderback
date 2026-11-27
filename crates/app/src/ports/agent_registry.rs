@@ -1,7 +1,7 @@
 use async_trait::async_trait;
 use domain::fleet::{
-    AgentRecord, ApprovalRefused, Fingerprint, MachineCheck, MachineFingerprint, MachineZone,
-    PairRefusal, PairRequest, Pairing, ProofRefusal, ProofRequest, Proved, PublicKey,
+    AgentRecord, ApprovalRefused, Fingerprint, MachineCheck, MachineFingerprint, MachineVersion,
+    MachineZone, PairRefusal, PairRequest, Pairing, ProofRefusal, ProofRequest, Proved, PublicKey,
     RemovalRefused, SecondMachine, TokenId, TokenRecord, Tombstone,
 };
 use domain::{AgentId, Timestamp};
@@ -85,6 +85,16 @@ pub trait AgentRegistry: Send + Sync {
         &self,
         agent_id: AgentId,
         zone: Option<&MachineZone>,
+    ) -> Result<(), StoreError>;
+
+    /// Keeps `version` as the version of Ladderback of the agent
+    /// registered under `agent_id`, none included, over the one it held:
+    /// the agent's latest `Hello` wins (#1707). An ID it doesn't hold
+    /// changes nothing.
+    async fn record_version(
+        &self,
+        agent_id: AgentId,
+        version: Option<&MachineVersion>,
     ) -> Result<(), StoreError>;
 
     /// Keeps `now` as when the hub last heard from the agent registered

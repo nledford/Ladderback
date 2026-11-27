@@ -9,8 +9,9 @@
 //! while it is paused and shows the copy; resuming drops it.
 
 use api::{
-    HubMachineDto, IanaZone, MachineDto, MachineOperationDto, MachineOutcomeDto, MachinePlanDto,
-    MachinePlanRunDto, MachinePlansDto, MachineProgressDto, MsgArg, StatusDto, UiEvent,
+    AgainstHubDto, HubMachineDto, IanaZone, MachineDto, MachineOperationDto, MachineOutcomeDto,
+    MachinePlanDto, MachinePlanRunDto, MachinePlansDto, MachineProgressDto, MachineVersionDto,
+    MsgArg, StatusDto, UiEvent,
 };
 use l10n::{MessageId, msg};
 use leptos::prelude::*;
@@ -442,6 +443,14 @@ pub(crate) fn card_facts(machine: &HubMachineDto, now_ms: i64) -> CardFacts {
     }
 }
 
+/// What a card says of its machine's version (#1707): as the machine
+/// wrote it, with a quiet note after it when it is older or newer than the
+/// hub's own; that it hasn't given one yet.
+pub(crate) fn version_words(version: Option<&MachineVersionDto>) -> Words {
+    let _ = version;
+    todo!()
+}
+
 /// A count as a message's number.
 fn count(n: usize) -> MsgArg {
     MsgArg::Count(u64::try_from(n).unwrap_or(u64::MAX))
@@ -529,14 +538,17 @@ fn own_outcome(status: &str) -> Option<MachineOutcomeDto> {
 
 /// The hub's own machine as a card shows one (decision 175): who
 /// `identity` says it is, online, since the page reads it from the hub
-/// itself; its plans from its `status` once read, each one's last run when
-/// it ended, or else, while it waits or runs again, its last success; its
-/// latest `operations` that started, newest first, and the progress of the
-/// one that runs. None without a machine ID or a hostname.
+/// itself; its `version`, the hub's own build as the footer shows it, with
+/// no note, since it is the hub's; its plans from its `status` once read,
+/// each one's last run when it ended, or else, while it waits or runs
+/// again, its last success; its latest `operations` that started, newest
+/// first, and the progress of the one that runs. None without a machine
+/// ID or a hostname.
 pub(crate) fn own_machine(
     identity: &MachineDto,
     status: Option<&StatusDto>,
     operations: &OperationsState,
+    version: Option<&str>,
 ) -> Option<HubMachineDto> {
     let machine_id = identity.machine_id.clone()?;
     let hostname = identity.hostname.clone()?;
@@ -605,6 +617,7 @@ pub(crate) fn own_machine(
         last_seen: String::new(),
         online: true,
         zone: identity.zone.clone(),
+        version: None,
         reports_dropped: 0,
         operations: listed,
         plans,

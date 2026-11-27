@@ -13,6 +13,7 @@ use super::handshake::BindingKind;
 use super::hostname::Hostname;
 use super::keys::PublicKey;
 use super::signed::WireName;
+use super::version::MachineVersion;
 use super::zone::MachineZone;
 use crate::AgentId;
 
@@ -176,6 +177,10 @@ pub struct AgentRecord {
     /// The machine zone the agent last reported, as the hub's database
     /// knows it; none while it is unknown.
     pub zone: Option<MachineZone>,
+    /// The version of Ladderback the agent's latest `Hello` gave; none
+    /// before its first `Hello`, or when what it gave isn't shaped like a
+    /// version (#1707).
+    pub version: Option<MachineVersion>,
 }
 
 impl AgentRecord {
@@ -537,6 +542,7 @@ pub fn decide_pairing(
         counter: request.counter,
         last_seen: now,
         zone: request.zone.clone(),
+        version: None,
     }))
 }
 

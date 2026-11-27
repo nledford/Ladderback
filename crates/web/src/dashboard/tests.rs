@@ -9,6 +9,7 @@ fn machine(hostname: &str, last_seen: &str) -> HubMachineDto {
         last_seen: last_seen.to_owned(),
         online: false,
         zone: None,
+        version: None,
         reports_dropped: 0,
         operations: Vec::new(),
         plans: None,
@@ -686,13 +687,26 @@ fn the_hubs_own_machine_reads_as_a_paired_one_does() {
     if let Some(row) = operations.rows.get_mut(1) {
         row.progress = Some(reading);
     }
-    let Some(own) = own_machine(&identity(Some("agent-hub")), Some(&status), &operations) else {
+    let Some(own) = own_machine(
+        &identity(Some("agent-hub")),
+        Some(&status),
+        &operations,
+        Some("0.6.0+3f937cf"),
+    ) else {
         panic!("the hub's own machine isn't shown");
     };
     assert_eq!(own.machine_id, "agent-hub");
     assert_eq!(own.hostname, "demo-hub");
     assert!(own.online);
     assert_eq!(own.zone.as_deref(), Some("Europe/Berlin"));
+    assert_eq!(
+        own.version,
+        Some(MachineVersionDto {
+            version: "0.6.0+3f937cf".to_owned(),
+            against_hub: None,
+        }),
+        "the hub's own build, with no note"
+    );
     assert_eq!(own.reports_dropped, 0);
     assert_eq!(
         own.plans,
@@ -731,11 +745,12 @@ fn the_hubs_own_machine_reads_as_a_paired_one_does() {
     // Before its status is read, the hub hasn't told its plans; without a
     // machine ID, it has no card.
     assert_eq!(
-        own_machine(&identity(Some("agent-hub")), None, &operations).and_then(|own| own.plans),
+        own_machine(&identity(Some("agent-hub")), None, &operations, None)
+            .and_then(|own| own.plans),
         None
     );
     assert_eq!(
-        own_machine(&identity(None), Some(&status), &operations),
+        own_machine(&identity(None), Some(&status), &operations, None),
         None
     );
 }
@@ -772,6 +787,7 @@ fn the_hubs_own_plan_that_runs_again_reads_its_last_success() {
             &identity(Some("agent-hub")),
             Some(&status),
             &OperationsState::default(),
+            None,
         )
         .and_then(|own| own.plans)
         .map(|plans| plans.plans)
@@ -795,7 +811,7 @@ fn the_hubs_own_canceled_operation_reads_canceled() {
         vec![summary_of("op-1", "documents", "cancelled", -10)],
         None,
     );
-    let own = own_machine(&identity(Some("agent-hub")), None, &operations);
+    let own = own_machine(&identity(Some("agent-hub")), None, &operations, None);
     assert_eq!(
         own.map(|own| own.operations),
         Some(vec![MachineOperationDto {
@@ -921,5 +937,45 @@ fn a_paused_page_stays_ready_once_the_hubs_own_was_read() {
         waiting.shown_state().get_untracked(),
         State::Loading,
         "the pause holds the page as it was: waiting"
+    );
+}
+
+/// A card's version reads as its machine wrote it, with the note "Older
+/// than the hub." or "Newer than the hub." after it when it is, none when
+/// it is the hub's release or doesn't read as one, and "Not reported yet"
+/// before the machine gave one (#1707).
+#[test]
+fn a_cards_version_reads_as_written_with_a_note_when_older_or_newer() {
+    let version = |against_hub| MachineVersionDto {
+        version: "0.6.0+3f937cf".to_owned(),
+        against_hub,
+    };
+    let written = || vec![("version", MsgArg::Text("0.6.0+3f937cf".to_owned()))];
+    for (told, id) in [
+        (None, msg::UI_MACHINE_CARD_VERSION_SHOWN),
+        (
+            Some(AgainstHubDto::Older),
+            msg::UI_MACHINE_CARD_VERSION_OLDER,
+        ),
+        (
+            Some(AgainstHubDto::Newer),
+            msg::UI_MACHINE_CARD_VERSION_NEWER,
+        ),
+    ] {
+        assert_eq!(
+            version_words(Some(&version(told))),
+            Words {
+                id,
+                args: written()
+            },
+            "{told:?}"
+        );
+    }
+    assert_eq!(
+        version_words(None),
+        Words {
+            id: msg::UI_MACHINE_CARD_VERSION_UNREPORTED,
+            args: Vec::new()
+        }
     );
 }

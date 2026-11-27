@@ -227,6 +227,7 @@ async fn hub_with(other: Option<Other>, clock: Arc<FakeClock>) -> Arc<HubPairing
             counter: 1,
             last_seen: now,
             zone: None,
+            version: None,
         });
     }
     let hub = Arc::new(HubPairing::new(

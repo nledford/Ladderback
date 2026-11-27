@@ -63,6 +63,32 @@ Feature: The hub's dashboard of its machines
     And the page has no live region but the announcer's
     And the page has no accessibility violations
 
+  Scenario: Each card tells its machine's version, noting quietly one older or newer than the hub's
+    Given a hub with sign-in off
+    And a machine named "demo-desktop" is approved on the hub
+    And a machine named "demo-tablet" is approved on the hub
+    And a machine named "demo-laptop" is approved on the hub
+    And a machine named "demo-phone" is approved on the hub
+    And the machine "demo-laptop" last said it runs Ladderback "0.0.1"
+    And the machine "demo-desktop" last said it runs Ladderback "999.0.0+3f937cf"
+    And the machine "demo-tablet" last said it runs Ladderback "nightly"
+    When I open the web UI
+    Then the page says "5 machines, none of which needs attention."
+    And the hub's own card tells "Version": the running version
+    And the card "demo-laptop" tells "Version": "0.0.1 Older than the hub."
+    And the card "demo-desktop" tells "Version": "999.0.0+3f937cf Newer than the hub."
+    And the card "demo-tablet" tells "Version": "nightly"
+    And the card "demo-phone" tells "Version": "Not reported yet"
+    And the card "demo-laptop" has no attention mark
+    And the card "demo-desktop" has no attention mark
+    And the cards after it are, in order:
+      | machine      |
+      | demo-desktop |
+      | demo-tablet  |
+      | demo-laptop  |
+      | demo-phone   |
+    And the page has no accessibility violations
+
   Scenario: The sentence names an offline machine past its schedule, whose card is marked with words
     Given a hub with sign-in off
     And a machine named "demo-laptop" is approved on the hub

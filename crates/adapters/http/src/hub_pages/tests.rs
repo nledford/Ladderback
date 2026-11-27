@@ -17,7 +17,7 @@ use domain::access::api_token::{ApiTokenLabel, TokenPermissions};
 use domain::access::permissions::{Permission, Permissions};
 use domain::fleet::{
     AgentRecord, AgentReport, AgentStatus, EpochSeconds, Fingerprint, Happening, Hostname,
-    MachineFingerprint, OutboxEpoch, ReportSeq, SigningSeed, WireName,
+    MachineFingerprint, MachineVersion, OutboxEpoch, ReportSeq, SigningSeed, WireName,
 };
 use domain::{AgentId, OperationId, Timestamp, Uuid};
 use http_body_util::BodyExt;
@@ -650,6 +650,7 @@ fn agent(n: u8, hostname: &str, approved: bool, at: Timestamp) -> AgentRecord {
         counter: 1,
         last_seen: at,
         zone: None,
+        version: None,
     }
 }
 
@@ -781,6 +782,7 @@ async fn the_page_shows_each_approved_machine_with_its_latest_operations() {
             last_seen: approved.last_seen.to_string(),
             online: false,
             zone: None,
+            version: None,
             reports_dropped: 0,
             operations: vec![
                 api::MachineOperationDto {
@@ -808,6 +810,61 @@ async fn the_page_shows_each_approved_machine_with_its_latest_operations() {
             plans: None,
             progress: None,
         }]
+    );
+}
+
+/// The dashboard's route tells each machine's version as it wrote it, and
+/// whether it is older or newer than the hub's own (`0.5.0-hub` here): no
+/// note for the hub's release, whatever its build, nor for a version that
+/// doesn't read as SemVer, and no version before the machine gave one
+/// (#1707).
+#[tokio::test]
+async fn the_page_shows_each_machines_version_and_how_it_stands_against_the_hubs() {
+    let daemon = Daemon::hub(false);
+    let earlier = Timestamp::from_second(1_799_999_400).unwrap();
+    let versions = [
+        Some("0.4.9"),
+        Some("0.5.0-hub+3f937cf"),
+        Some("0.6.0"),
+        Some("nightly"),
+        None,
+    ];
+    for (n, version) in (1..).zip(versions) {
+        daemon.registry.hold(AgentRecord {
+            version: version.map(|text| MachineVersion::parse(text).unwrap()),
+            ..agent(n, &format!("laptop-{n}"), true, earlier)
+        });
+    }
+    let response = daemon
+        .send(build(
+            Method::GET,
+            api::HUB_DASHBOARD_PATH,
+            LOOPBACK,
+            &[],
+            "",
+        ))
+        .await;
+    assert_eq!(response.status(), StatusCode::OK);
+    let shown: api::HubMachinesDto = serde_json::from_value(json(response).await).unwrap();
+    let told = |version: &str, against_hub| {
+        Some(api::MachineVersionDto {
+            version: version.to_owned(),
+            against_hub,
+        })
+    };
+    assert_eq!(
+        shown
+            .machines
+            .into_iter()
+            .map(|machine| machine.version)
+            .collect::<Vec<_>>(),
+        [
+            told("0.4.9", Some(api::AgainstHubDto::Older)),
+            told("0.5.0-hub+3f937cf", None),
+            told("0.6.0", Some(api::AgainstHubDto::Newer)),
+            told("nightly", None),
+            None,
+        ]
     );
 }
 

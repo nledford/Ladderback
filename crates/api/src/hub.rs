@@ -237,10 +237,11 @@ pub struct MachineOperationDto {
 
 /// One approved machine on the hub's dashboard: when the hub last heard
 /// from it (RFC 3339), whether it is online, its IANA time zone when it
-/// gave one, how many of its reports the hub let go of past the cap, and
-/// its latest operations, newest first. Online means the hub holds the
-/// machine's sync connection, which it closes once the machine sent
-/// nothing for 90 seconds (§16, decision 159).
+/// gave one, its version of Ladderback once it gave one, how many of its
+/// reports the hub let go of past the cap, and its latest operations,
+/// newest first. Online means the hub holds the machine's sync connection,
+/// which it closes once the machine sent nothing for 90 seconds (§16,
+/// decision 159).
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "kebab-case", deny_unknown_fields)]
 pub struct HubMachineDto {
@@ -251,6 +252,10 @@ pub struct HubMachineDto {
     pub online: bool,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub zone: Option<String>,
+    /// Its version of Ladderback, as its latest `Hello` gave it; none
+    /// before it gave one (#1707).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub version: Option<MachineVersionDto>,
     pub reports_dropped: u64,
     pub operations: Vec<MachineOperationDto>,
     /// Its plans as it last reported them; none before it reported any.
@@ -260,6 +265,26 @@ pub struct HubMachineDto {
     /// reports say it runs.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub progress: Option<MachineProgressDto>,
+}
+
+/// A machine's version of Ladderback, as it wrote it (`0.6.0`,
+/// `0.6.0+3f937cf`), and whether it is older or newer than the hub's own
+/// by SemVer precedence, build metadata ignored: none when it is the
+/// hub's release, or when either doesn't read as SemVer (#1707).
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "kebab-case", deny_unknown_fields)]
+pub struct MachineVersionDto {
+    pub version: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub against_hub: Option<AgainstHubDto>,
+}
+
+/// How a machine's version stands against the hub's own.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "kebab-case")]
+pub enum AgainstHubDto {
+    Older,
+    Newer,
 }
 
 /// The hub's approved machines, oldest first.
