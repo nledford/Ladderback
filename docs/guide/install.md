@@ -30,6 +30,8 @@ Apart from the program itself, Ladderback keeps everything in your home folder:
 
 On Linux, the settings folder appears once you first save a setting. On macOS the service logs to `~/Library/Logs/ladderback.log`.
 
+The data folder also holds `ladderback.db.daily`, a copy of the operation history that Ladderback takes once a day while it runs. If the history is ever damaged, stop Ladderback, delete `ladderback.db-wal` and `ladderback.db-shm` if they are there, and copy `ladderback.db.daily` over `ladderback.db`. The history since that copy is lost; your backups aren't.
+
 ## What removing leaves behind
 
 Each system's page says how to remove Ladderback: stop its service with `ladderback remove-service`, then remove the program. That leaves your files in place, so that installing Ladderback again picks up where you left off, and so that removing a program never costs you a backup:
