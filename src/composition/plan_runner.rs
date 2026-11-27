@@ -1411,13 +1411,19 @@ pub(super) fn log_ended(finished: &Finished) {
 /// Says in the log each write of `finished` the operation log refused, as
 /// [`log_ended`] does.
 fn log_recording_errors(finished: &Finished) {
-    let operation = finished.operation.id().as_uuid().hyphenated();
     for refused in &finished.recording_errors {
-        log::warn!(
-            "operation {operation}: a write to the operation log failed ({}); its history may be incomplete",
-            refused.code()
-        );
+        log_refused_write(finished.operation.id(), refused);
     }
+}
+
+/// Says in the log that the operation log refused a write of `operation`,
+/// by the refusal's code, never its words (I4).
+fn log_refused_write(operation: OperationId, refused: &app::ports::StoreError) {
+    log::warn!(
+        "operation {}: a write to the operation log failed ({}); its history may be incomplete",
+        operation.as_uuid().hyphenated(),
+        refused.code()
+    );
 }
 
 /// Says in the log each write of a queued backup's end the operation log
@@ -1546,32 +1552,37 @@ impl app::hub_commands::HubRuns for PlanRunner {
         // A UUIDv7: the log orders by ID, so the newest run is the highest.
         let id = OperationId::from_uuid(Uuid::now_v7());
         let cancel = self.cancel_switch(id);
-        let operation = match self
-            .queued_ends()
-            .queue_backup(id, trigger.clone(), target)
-            .await
-        {
-            Ok(operation) => operation,
-            Err(error) => {
-                self.registry.finish(&id);
-                log::error!(
-                    "{} of plan {} didn't start: the operation log refused it: {error}",
-                    run_named(&trigger),
-                    plan.as_str()
-                );
-                return Err(HubRunRefused::Refused);
-            }
-        };
         let runner = self.clone();
         let plan = plan.clone();
-        // Nothing waits on the start: the run reports through the event
-        // bus. One the daemon's stop freezes stays queued, for the next
-        // start to run (decision 73).
-        tokio::spawn(self.runs.until_frozen(async move {
-            runner
-                .start_queued(operation, &plan, &config, &trigger, place, cancel)
+        // Recorded as queued before the answer is sent, so the hub's next
+        // ask finds the run going. The task does the recording and the
+        // start, as Back up now's does, so an asker dropped meanwhile (the
+        // hub's connection ended) strands neither. A write the log refuses
+        // doesn't stop the run (§9): its later writes are the whole
+        // operation again.
+        let (recorded, wait_for_log) = futures::channel::oneshot::channel::<()>();
+        tokio::spawn(async move {
+            let (operation, refused) = runner
+                .queued_ends()
+                .queue_backup(id, trigger.clone(), target)
                 .await;
-        }));
+            if let Some(refused) = &refused {
+                log_refused_write(id, refused);
+            }
+            let _ = recorded.send(());
+            // Nothing waits on the start: the run reports through the
+            // event bus. One the daemon's stop freezes stays queued, for
+            // the next start to run (decision 73).
+            let runs = runner.runs.clone();
+            runs.until_frozen(async move {
+                runner
+                    .start_queued(operation, &plan, &config, &trigger, place, cancel)
+                    .await;
+            })
+            .await;
+        });
+        // A task that ended without recording has nothing to wait for.
+        let _ = wait_for_log.await;
         Ok(id)
     }
 
