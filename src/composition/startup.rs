@@ -444,6 +444,9 @@ fn log_daily_copy(error: DailyCopyError) {
         DailyCopyError::Failed { detail } => log::warn!(
             "the daily copy of the database failed ({detail}); a copy that didn't take its place leaves the one before it, and the next try is due in an hour"
         ),
+        DailyCopyError::Unsynced { detail } => log::warn!(
+            "the daily copy of the database is in place, but it may not survive a power loss ({detail}); the next copy is due in a day"
+        ),
     }
 }
 

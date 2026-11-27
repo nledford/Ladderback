@@ -122,6 +122,14 @@ fn unavailable(agent: &mut Agent) {
     });
 }
 
+#[given("the database's folder can't be synced")]
+fn unsynced(agent: &mut Agent) {
+    agent.daily_copy.copies.fail(DailyCopyError::Unsynced {
+        detail: "the copy took its place, but its folder couldn't be synced: Input/output error"
+            .to_owned(),
+    });
+}
+
 #[when("the database becomes available again")]
 fn available_again(agent: &mut Agent) {
     agent.daily_copy.copies.recover();
@@ -172,6 +180,15 @@ fn taken_twice(agent: &mut Agent, first: String, second: String) {
 fn none_taken(agent: &mut Agent) {
     let taken = agent.daily_copy.copies.taken();
     assert!(taken.is_empty(), "taken at {taken:?}");
+}
+
+#[then("the daemon's log said once that the daily copy may not survive a power loss")]
+fn said_unsynced_once(agent: &mut Agent) {
+    let said = agent.daily_copy.said();
+    assert!(
+        matches!(said.as_slice(), [DailyCopyError::Unsynced { .. }]),
+        "said {said:?}"
+    );
 }
 
 #[then("the daemon's log said once that the daily copy was skipped")]

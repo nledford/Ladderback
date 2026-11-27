@@ -35,6 +35,13 @@ Feature: The daily copy of the database
     And the daemon serves until its clock reads "2026-06-08 11:01+00:00"
     Then the daily copy was taken at "2026-06-10 09:00+00:00" and "2026-06-08 11:00+00:00"
 
+  Scenario: A copy whose folder can't be synced counts as taken and is said in the log
+    Given the daily copy was taken at "2026-06-09 09:00+00:00"
+    And the database's folder can't be synced
+    When the daemon serves until its clock reads "2026-06-10 12:00+00:00"
+    Then the daily copy was taken at "2026-06-10 09:00+00:00"
+    And the daemon's log said once that the daily copy may not survive a power loss
+
   Scenario: A copy that can't be taken is said in the log and tried again an hour later
     Given the daily copy was taken at "2026-06-09 09:00+00:00"
     And the database is unavailable

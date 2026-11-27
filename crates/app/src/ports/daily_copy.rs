@@ -18,6 +18,10 @@ pub enum DailyCopyError {
     /// The copy couldn't be written, synced or put in place, or the one
     /// there is couldn't be read. The one before, if any, stays as it was.
     Failed { detail: String },
+    /// The copy took the place of the one before, but its folder couldn't
+    /// be synced, so the rename may not survive a power loss. It counts as
+    /// taken: the next is due a day later.
+    Unsynced { detail: String },
 }
 
 impl std::fmt::Display for DailyCopyError {
