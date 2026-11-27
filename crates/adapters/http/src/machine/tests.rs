@@ -115,11 +115,11 @@ async fn a_machine_that_never_checked_stands_as_usual_and_keeps_its_id() {
 #[tokio::test]
 async fn the_machine_route_tells_who_this_machine_is() {
     let (route, _) = started("other-computer");
-    let route = route.with_identity(MachineIdentity {
-        machine_id: "018f0000-0000-7000-8000-0000000000aa".to_owned(),
-        hostname: Some("demo-hub".to_owned()),
-        zone: Some("Europe/Berlin".to_owned()),
-    });
+    let route = route.with_identity(MachineIdentity::new(
+        "018f0000-0000-7000-8000-0000000000aa".to_owned(),
+        "demo-hub",
+        Some("Europe/Berlin".to_owned()),
+    ));
     let (status, body) = send(&route, request(Method::GET, MACHINE_PATH)).await;
     assert_eq!(status, StatusCode::OK);
     assert_eq!(
@@ -136,6 +136,39 @@ async fn the_machine_route_tells_who_this_machine_is() {
     assert_eq!(body["standing"], "new-id-taken");
     assert_eq!(body["machine-id"], "018f0000-0000-7000-8000-0000000000aa");
     assert_eq!(body["hostname"], "demo-hub");
+}
+
+/// The hub's own hostname passes the rule a pairing hostname does, or the
+/// route leaves it out, as a hub never shows a hostname it would refuse
+/// from a machine (decision 120, "Hostnames"; decision 175).
+#[tokio::test]
+async fn the_machine_route_leaves_out_a_hostname_a_hub_would_refuse() {
+    for refused in ["", " demo-hub", "demo\u{202e}buh", "demo\u{200b}hub"] {
+        let identity = MachineIdentity::new(
+            "018f0000-0000-7000-8000-0000000000aa".to_owned(),
+            refused,
+            None,
+        );
+        let route = MachineRoute::default().with_identity(identity);
+        let (status, body) = send(&route, request(Method::GET, MACHINE_PATH)).await;
+        assert_eq!(status, StatusCode::OK);
+        assert_eq!(
+            body,
+            serde_json::json!({
+                "standing": "same",
+                "machine-id": "018f0000-0000-7000-8000-0000000000aa",
+            }),
+            "{refused:?}"
+        );
+    }
+    let identity = MachineIdentity::new(
+        "018f0000-0000-7000-8000-0000000000aa".to_owned(),
+        "Nick's MacBook Pro",
+        None,
+    );
+    let route = MachineRoute::default().with_identity(identity);
+    let (_, body) = send(&route, request(Method::GET, MACHINE_PATH)).await;
+    assert_eq!(body["hostname"], "Nick's MacBook Pro");
 }
 
 #[tokio::test]

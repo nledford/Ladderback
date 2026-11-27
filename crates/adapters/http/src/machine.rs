@@ -15,6 +15,7 @@ use axum::Json;
 use axum::extract::State;
 use axum::http::StatusCode;
 use axum::response::{IntoResponse, Response};
+use domain::fleet::Hostname;
 
 use crate::{AppState, refused, refused_detailed, refused_with};
 
@@ -40,8 +41,21 @@ pub struct MachineRoute {
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub struct MachineIdentity {
     pub machine_id: String,
-    pub hostname: Option<String>,
+    pub hostname: Option<Hostname>,
     pub zone: Option<String>,
+}
+
+impl MachineIdentity {
+    /// Who this machine is, from its machine ID, the `hostname` its
+    /// operating system tells, kept only when it passes the rule a pairing
+    /// hostname does (decision 120, "Hostnames"), and its IANA zone.
+    pub fn new(machine_id: String, hostname: &str, zone: Option<String>) -> Self {
+        Self {
+            machine_id,
+            hostname: Hostname::parse(hostname).ok(),
+            zone,
+        }
+    }
 }
 
 impl MachineRoute {
@@ -82,7 +96,9 @@ fn answer(route: &MachineRoute) -> Response {
     let dto = MachineDto {
         standing,
         machine_id: identity.map(|identity| identity.machine_id.clone()),
-        hostname: identity.and_then(|identity| identity.hostname.clone()),
+        hostname: identity
+            .and_then(|identity| identity.hostname.as_ref())
+            .map(|hostname| hostname.as_str().to_owned()),
         zone: identity.and_then(|identity| identity.zone.clone()),
     };
     (StatusCode::OK, Json(dto)).into_response()
