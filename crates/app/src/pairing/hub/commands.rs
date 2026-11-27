@@ -19,7 +19,7 @@ use futures::future::{Either, select};
 use super::presence::{Awaited, OutgoingCommand};
 use super::{Answered, HubPairing, MessageRefused};
 use crate::hub_commands::CommandAnswer;
-use crate::pairing::wire::{command_payload, read_command_result};
+use crate::pairing::wire::{answer_to, command_payload, read_command_result};
 
 /// How many random bytes a command's ID holds.
 const ID_RANDOM_BYTES: usize = 10;
@@ -112,6 +112,7 @@ impl HubPairing {
             }
             _ => return Err(CommandAskRefused::CommandsUnsupported),
         }
+        let asked = command.kind();
         let request = self.request(command, asked_by)?;
         let id = request.id;
         let (kind, payload) = command_payload(&request);
@@ -141,7 +142,7 @@ impl HubPairing {
         }
         let within = std::pin::pin!(self.clock.sleep(COMMAND_ANSWER_WITHIN));
         match select(answered, within).await {
-            Either::Left((Ok(answer), _)) => Ok(answer),
+            Either::Left((Ok(answer), _)) => Ok(answer_to(asked, answer)),
             Either::Left((Err(_), _)) | Either::Right(_) => Err(CommandAskRefused::NoAnswer),
         }
     }

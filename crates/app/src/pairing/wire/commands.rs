@@ -124,7 +124,7 @@ pub fn read_command_result(bytes: &[u8]) -> Result<(CommandId, CommandAnswer), W
             let code = payload
                 .code
                 .and_then(|name| serde_json::from_value(serde_json::Value::String(name)).ok())
-                .filter(|code| MACHINE_REFUSALS.contains(code))
+                .filter(|code| RUN_REFUSALS.contains(code) || CANCEL_REFUSALS.contains(code))
                 .unwrap_or(ErrorCode::MachineRunRefused);
             let retry_at = payload
                 .retry_at
@@ -138,11 +138,9 @@ pub fn read_command_result(bytes: &[u8]) -> Result<(CommandId, CommandAnswer), W
     Ok((id, answer))
 }
 
-/// The codes a machine refuses the hub's command with.
-const MACHINE_REFUSALS: [ErrorCode; 11] = [
+/// The codes a machine refuses the hub's run of a plan with.
+const RUN_REFUSALS: [ErrorCode; 8] = [
     ErrorCode::PlanUnknown,
-    ErrorCode::OperationUnknown,
-    ErrorCode::OperationNotRunning,
     ErrorCode::KeyFilesNotLeftOut,
     ErrorCode::PlanRunWaiting,
     ErrorCode::MachineCommandsOff,
@@ -150,7 +148,18 @@ const MACHINE_REFUSALS: [ErrorCode; 11] = [
     ErrorCode::CommandReplayed,
     ErrorCode::CommandRateLimited,
     ErrorCode::MachineRunRefused,
+];
+
+/// The codes a machine refuses the hub's cancel of a backup with.
+const CANCEL_REFUSALS: [ErrorCode; 8] = [
+    ErrorCode::OperationUnknown,
+    ErrorCode::OperationNotRunning,
     ErrorCode::CommandBackupsOnly,
+    ErrorCode::MachineCommandsOff,
+    ErrorCode::CommandExpired,
+    ErrorCode::CommandReplayed,
+    ErrorCode::CommandRateLimited,
+    ErrorCode::MachineCancelRefused,
 ];
 
 fn seconds(time: Timestamp) -> Option<u64> {
@@ -161,8 +170,28 @@ fn seconds(time: Timestamp) -> Option<u64> {
 /// one that answers another kind of command, refuses with a code no
 /// machine refuses that kind with, or leaves out an argument its code
 /// needs, is the kind's own refusal, `machine-run-refused` or
-/// `machine-cancel-refused`.
+/// `machine-cancel-refused`. The plan or the operation a code names is
+/// the command's own, so the one argument a machine can leave out is a
+/// rate limit's `retry-at`.
 pub fn answer_to(kind: CommandKind, answer: CommandAnswer) -> CommandAnswer {
-    let _ = (kind, answer);
-    todo!()
+    let (refusals, generic) = match kind {
+        CommandKind::RunPlan => (&RUN_REFUSALS, ErrorCode::MachineRunRefused),
+        CommandKind::CancelOp => (&CANCEL_REFUSALS, ErrorCode::MachineCancelRefused),
+    };
+    match answer {
+        CommandAnswer::Started(_) if kind == CommandKind::RunPlan => answer,
+        CommandAnswer::Canceled(_) if kind == CommandKind::CancelOp => answer,
+        CommandAnswer::Refused { code, retry_at }
+            if refusals.contains(&code)
+                && (code != ErrorCode::CommandRateLimited || retry_at.is_some()) =>
+        {
+            CommandAnswer::Refused { code, retry_at }
+        }
+        CommandAnswer::Started(_) | CommandAnswer::Canceled(_) | CommandAnswer::Refused { .. } => {
+            CommandAnswer::Refused {
+                code: generic,
+                retry_at: None,
+            }
+        }
+    }
 }
