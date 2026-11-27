@@ -47,6 +47,7 @@ Feature: The component gallery
       | Fingerprint       |
       | Footer            |
       | Machine card      |
+      | Card              |
       | Disclosure menu   |
       | Navigation bar    |
       | Table             |
@@ -97,6 +98,7 @@ Feature: The component gallery
       | Fingerprint |
       | Footer      |
       | Machine card |
+      | Card         |
       | Disclosure menu |
       | Navigation bar  |
 
@@ -137,6 +139,7 @@ Feature: The component gallery
       | Fingerprint |
       | Footer      |
       | Machine card |
+      | Card         |
       | Disclosure menu |
       | Navigation bar  |
 
