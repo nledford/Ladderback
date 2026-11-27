@@ -179,6 +179,51 @@ test("the final release with no commits since the last candidate still gets its 
   assert.ok(out.indexOf("## [0.6.0](") < out.indexOf("## [0.6.0-rc.2]("));
 });
 
+test("a later candidate's upgrade notes from the last release replace an earlier one's, and text above the sections stays", () => {
+  const rc2Restating = `## [0.6.0-rc.2](${repo}/compare/v0.6.0-rc.1...v0.6.0-rc.2) - 2026-11-26
+
+The hub's first candidate to try.
+
+### Upgrading from 0.5.0
+
+Stop 0.5.0, retag the snapshots, then install 0.6.0.
+`;
+  const out = releaseNotes({
+    changelog: `${header}\n${rc2Restating}\n${rc1}\n${older}`,
+    version: "0.6.0",
+    tags: ["v0.5.0", "v0.6.0-rc.1", "v0.6.0-rc.2"],
+    commits: [],
+    date: "2026-12-01",
+  });
+  const entry = out.slice(out.indexOf("## [0.6.0]("), out.indexOf("## [0.6.0-rc.2]("));
+  assert.match(
+    entry,
+    /^## \[0\.6\.0\]\(.*\) - 2026-12-01\n\nThe hub's first candidate to try\.\n\n### Upgrading from 0\.5\.0\n\nStop 0\.5\.0, retag the snapshots, then install 0\.6\.0\.\n\n### Breaking\n/,
+  );
+  assert.doesNotMatch(entry, /Stop 0\.5\.0 first/);
+});
+
+test("a breaking change's footer runs to the next footer, as in a squashed commit", () => {
+  const message = `fix!: tools refuse a bad argument (#751)
+
+* test: MCP tool arguments
+
+Closes #725
+
+BREAKING CHANGE: a bad argument is now a tool result
+marked as an error.
+
+* fix!: the tools take \`operation\`
+
+Closes #724
+
+BREAKING CHANGE: \`id\` is refused.`;
+  assert.deepEqual(commitLine({ message }, repo), {
+    group: "Breaking",
+    line: `- Tools refuse a bad argument ([#751](${repo}/pull/751)): a bad argument is now a tool result\nmarked as an error.\n\n* fix!: the tools take \`operation\``,
+  });
+});
+
 test("the version must follow the last candidate: its next candidate or its release", () => {
   const tags = ["v0.5.0", "v0.6.0-rc.1", "v0.6.0-rc.2"];
   assert.deepEqual(nextRelease("0.6.0-rc.3", tags), { from: "v0.6.0-rc.2", since: "v0.6.0-rc.2", candidates: [] });
