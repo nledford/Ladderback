@@ -316,10 +316,9 @@ async fn shows_never_ran(agent: &mut Agent, plan: String) {
     assert_eq!((shown.last, shown.next_run), (None, None));
 }
 
-#[then(regex = r"^the hub was sent the agent's plans (once|twice)$")]
-async fn plans_sent(agent: &mut Agent, times: String) {
-    let expected = if times == "once" { 1 } else { 2 };
-    assert_eq!(side(agent).plans_sent(), expected);
+#[then("the hub was sent the agent's plans twice")]
+async fn plans_sent(agent: &mut Agent) {
+    assert_eq!(side(agent).plans_sent(), 2);
 }
 
 #[then(regex = r"^the hub shows the agent's backup at (\d+) of (\d+) bytes$")]

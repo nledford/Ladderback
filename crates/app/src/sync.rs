@@ -190,7 +190,8 @@ struct Leasing {
 /// What the agent told its hub besides its reports, on its monotonic clock.
 #[derive(Default)]
 struct Told {
-    /// The plans the hub last acknowledged; none since the agent started.
+    /// The plans the hub last acknowledged in this session; none since the
+    /// agent started or last connected.
     plans: Option<PlansReport>,
     /// When the agent last read its plans.
     plans_read: Option<SignedDuration>,
@@ -227,7 +228,8 @@ impl SyncWithHub {
         }
     }
 
-    /// Tells the hub the plans `plans` reads, whenever they changed.
+    /// Tells the hub the plans `plans` reads, in each session and whenever
+    /// they changed.
     #[must_use]
     pub fn with_plans(mut self, plans: ReadPlans) -> Self {
         self.plans = Some(plans);
@@ -425,7 +427,10 @@ impl SyncWithHub {
     /// `standing` what the hub made of the machine; none when the hub holds
     /// the machine pending. When the hub took the place the outbox gives
     /// next, as after a restore from an older database, the outbox starts a
-    /// new epoch before anything is sent (§16, decision 177).
+    /// new epoch before anything is sent (§16, decision 177). Each session
+    /// forgets the plans it told, so its first look tells them whatever
+    /// they hold, as a hub may have dropped or lost what it was told
+    /// (§7.2, #1699).
     async fn open(&self) -> Result<Option<(Connected, AgentChannel)>, SyncFailure> {
         // An outbox whose position can't be read ends the session with
         // nothing sent, as a new epoch that can't be started does: stated as
@@ -462,6 +467,12 @@ impl SyncWithHub {
             }
         }
         let (connected, channel) = connected.map_err(SyncFailure::Connect)?;
+        // Read and told at the session's first look, unchanged or not.
+        {
+            let mut told = self.told();
+            told.plans = None;
+            told.plans_read = None;
+        }
         if let Some(stated) = stated.filter(|_| connected.new_epoch) {
             let started = self
                 .outbox
@@ -488,8 +499,8 @@ impl SyncWithHub {
     /// `leases` and the sync asks for them; then every report not yet
     /// acknowledged, in order, in windows of at most [`SEND_WINDOW`]
     /// places ahead of the hub's acknowledgements, and once the hub
-    /// acknowledged the last of them, the agent's plans when they changed
-    /// since the hub last acknowledged them, waiting for that
+    /// acknowledged the last of them, the agent's plans when the hub hasn't
+    /// acknowledged them as they stand in this session, waiting for that
     /// acknowledgement, and then the latest progress when one is due. It
     /// returns how many reports it sent.
     async fn tell(
@@ -574,8 +585,8 @@ impl SyncWithHub {
     }
 
     /// The agent's plans as they stand now, when they differ from those the
-    /// hub last acknowledged; none when they don't, or don't read. A streak
-    /// of failed reads is logged once.
+    /// hub last acknowledged in this session; none when they don't, or
+    /// don't read. A streak of failed reads is logged once.
     async fn plans_to_tell(&self) -> Option<PlansReport> {
         let read = self.plans.as_ref()?.read().await;
         let mut told = self.told();
@@ -627,7 +638,8 @@ impl SyncWithHub {
     /// once and every [`HEARTBEAT_EVERY`] after, and every [`POLL`] tells
     /// the hub what `tell` does whenever its outbox holds a report
     /// the hub hasn't acknowledged, a progress is due, or its plans changed
-    /// when it read them, every [`PLANS_CHECK`]. A sync that asks for the
+    /// when it read them, at each connection's first look and every
+    /// [`PLANS_CHECK`] after. A sync that asks for the
     /// machine's leases lists what is due and asks at each connection's
     /// first look and once [`GRANTS_EVERY`] has passed since the last that
     /// held, on the machine's clock. Heartbeats go on through the listings,

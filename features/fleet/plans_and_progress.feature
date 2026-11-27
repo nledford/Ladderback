@@ -24,14 +24,11 @@ Feature: A machine's plans and its running operation's progress reach its hub
     Then the hub was sent the agent's plans twice
     And the hub shows the agent's plans "photos" and "documents", in that order
 
-  Scenario: Plans that didn't change aren't sent again, and a change is
+  Scenario: A change to the plans reaches the hub
     Given the agent's sync with its hub ran
-    When the agent's sync with its hub runs
-    Then the hub was sent the agent's plans once
     When the plan "documents" last backed up successfully and runs next in an hour
     And the agent's sync with its hub runs
-    Then the hub was sent the agent's plans twice
-    And the hub shows the plan "documents" last succeeded and runs next in an hour
+    Then the hub shows the plan "documents" last succeeded and runs next in an hour
 
   Scenario: The hub shows a running backup's progress, and none once it ends
     Given the agent started a backup
