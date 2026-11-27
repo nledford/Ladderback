@@ -447,8 +447,20 @@ pub(crate) fn card_facts(machine: &HubMachineDto, now_ms: i64) -> CardFacts {
 /// wrote it, with a quiet note after it when it is older or newer than the
 /// hub's own; that it hasn't given one yet.
 pub(crate) fn version_words(version: Option<&MachineVersionDto>) -> Words {
-    let _ = version;
-    todo!()
+    let Some(version) = version else {
+        return Words {
+            id: msg::UI_MACHINE_CARD_VERSION_UNREPORTED,
+            args: Vec::new(),
+        };
+    };
+    Words {
+        id: match version.against_hub {
+            None => msg::UI_MACHINE_CARD_VERSION_SHOWN,
+            Some(AgainstHubDto::Older) => msg::UI_MACHINE_CARD_VERSION_OLDER,
+            Some(AgainstHubDto::Newer) => msg::UI_MACHINE_CARD_VERSION_NEWER,
+        },
+        args: vec![("version", MsgArg::Text(version.version.clone()))],
+    }
 }
 
 /// A count as a message's number.
@@ -617,7 +629,10 @@ pub(crate) fn own_machine(
         last_seen: String::new(),
         online: true,
         zone: identity.zone.clone(),
-        version: None,
+        version: version.map(|version| MachineVersionDto {
+            version: version.to_owned(),
+            against_hub: None,
+        }),
         reports_dropped: 0,
         operations: listed,
         plans,

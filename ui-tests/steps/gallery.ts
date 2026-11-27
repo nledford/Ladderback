@@ -633,7 +633,9 @@ const SNAPSHOTS: Record<string, string> = {
 - paragraph: Version ⁨0.4.0⁩
 - paragraph: Version ⁨0.4.0+4444444.dirty⁩`,
   // Three cards in a list: the hub's own, its Back up menu closed; one that
-  // needs attention, which says why first; and one that runs an operation.
+  // needs attention, which says why first, and whose version is noted as
+  // older than the hub's; and one that runs an operation, with no version
+  // yet. The note is words, not a role: it reads with its version.
   "Machine card": `- heading "Machine card" [level=2]
 - list:
   - listitem:
@@ -649,6 +651,8 @@ const SNAPSHOTS: Record<string, string> = {
         - time: 11/10/26, 9:00:00 AM
       - term: Plans
       - definition: "2"
+      - term: Version
+      - definition: 0.6.0
       - button "Back up ⁨demo-hub⁩"
       - link "Open ⁨demo-hub⁩":
         - /url: /machines/demo-hub
@@ -667,6 +671,8 @@ const SNAPSHOTS: Record<string, string> = {
       - definition: None planned
       - term: Plans
       - definition: "3"
+      - term: Version
+      - definition: ⁨0.5.2⁩ Older than the hub.
       - link "Open ⁨demo-laptop⁩":
         - /url: /machines/demo-laptop
   - listitem:
@@ -680,6 +686,8 @@ const SNAPSHOTS: Record<string, string> = {
       - term: Next run
       - definition: None planned
       - term: Plans
+      - definition: Not reported yet
+      - term: Version
       - definition: Not reported yet
       - link "Open ⁨demo-desktop⁩":
         - /url: /machines/demo-desktop`,

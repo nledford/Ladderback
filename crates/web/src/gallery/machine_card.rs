@@ -25,8 +25,9 @@ const LAPTOP_BACKUP: &str = "2026-11-08T18:00:00Z";
 
 /// The machine card's demo (`#machine-card-demo`): three cards in the list
 /// the dashboard lays them out in. The hub's own, marked "This hub", with
-/// its Back up menu; one whose last run failed, which needs attention; and
-/// one that runs an operation, its progress bar at 25 percent.
+/// its Back up menu; one whose last run failed, which needs attention, and
+/// whose version is older than the hub's, noted quietly; and one that runs
+/// an operation, its progress bar at 25 percent, before it gave a version.
 #[component]
 pub(super) fn MachineCardDemo(localizer: Arc<Localizer>) -> impl IntoView {
     let t = |id| text(&localizer, id);
@@ -35,6 +36,19 @@ pub(super) fn MachineCardDemo(localizer: Arc<Localizer>) -> impl IntoView {
         term: t(term),
         words,
         time: time.map(str::to_owned),
+        written: false,
+    };
+    // A version as its machine wrote it, with the catalog's note when
+    // `against` names one (#1707).
+    let version = |against, version: &str| CardFact {
+        term: t(msg::UI_MACHINE_CARD_VERSION),
+        words: text_with(
+            &localizer,
+            against,
+            &[("version", MsgArg::Text(version.to_owned()))],
+        ),
+        time: None,
+        written: true,
     };
     let count = |count: u64| {
         text_with(
@@ -84,6 +98,7 @@ pub(super) fn MachineCardDemo(localizer: Arc<Localizer>) -> impl IntoView {
         ),
         fact(msg::UI_MACHINE_CARD_NEXT_RUN, at(HUB_NEXT), Some(HUB_NEXT)),
         fact(msg::UI_MACHINE_CARD_PLANS, count(2), None),
+        version(msg::UI_MACHINE_CARD_VERSION_SHOWN, "0.6.0"),
     ];
     let laptop_facts = vec![
         fact(
@@ -97,6 +112,7 @@ pub(super) fn MachineCardDemo(localizer: Arc<Localizer>) -> impl IntoView {
             None,
         ),
         fact(msg::UI_MACHINE_CARD_PLANS, count(3), None),
+        version(msg::UI_MACHINE_CARD_VERSION_OLDER, "0.5.2"),
     ];
     let desktop_facts = vec![
         fact(
@@ -112,6 +128,11 @@ pub(super) fn MachineCardDemo(localizer: Arc<Localizer>) -> impl IntoView {
         fact(
             msg::UI_MACHINE_CARD_PLANS,
             t(msg::UI_MACHINE_CARD_PLANS_UNREPORTED),
+            None,
+        ),
+        fact(
+            msg::UI_MACHINE_CARD_VERSION,
+            t(msg::UI_MACHINE_CARD_VERSION_UNREPORTED),
             None,
         ),
     ];

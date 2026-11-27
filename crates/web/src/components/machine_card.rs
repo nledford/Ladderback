@@ -20,11 +20,36 @@ use crate::variants::{Size, Tone};
 
 /// One fact a card tells: its term, and its words, with the instant
 /// (RFC 3339) they write when they are a time, which a `<time>` carries.
+/// Words `written` hold a value as its machine wrote it, such as a version:
+/// the value the catalog isolated stands in a `<bdi>`, and any words the
+/// catalog puts around it are a quiet note, muted (#1707). Words that are
+/// the value alone stand in the `<bdi>` whole.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct CardFact {
     pub term: String,
     pub words: String,
     pub time: Option<String>,
+    pub written: bool,
+}
+
+/// The words of a fact `written` (#1707): each value the catalog isolated
+/// in a `<bdi>`, the words around it a note in Muted; the words whole in a
+/// `<bdi>` when the catalog isolated nothing, being the value alone.
+fn written_view(words: String) -> AnyView {
+    let found = runs(&words);
+    if !found.iter().any(|run| matches!(run, Run::Placeable(_))) {
+        return view! { <bdi>{words}</bdi> }.into_any();
+    }
+    found
+        .into_iter()
+        .map(|run| match run {
+            Run::Placeable(value) => view! { <bdi>{value.to_owned()}</bdi> }.into_any(),
+            Run::Words(note) => {
+                view! { <span class="text-muted">{note.to_owned()}</span> }.into_any()
+            }
+        })
+        .collect_view()
+        .into_any()
 }
 
 /// The card's frame: the page's own color showing through, a 1px edge in
@@ -48,7 +73,8 @@ const FRAME: &str = "flex flex-col gap-2 [min-inline-size:0] block-full m-0 p-4 
 ///   holds one, in the shared progress bar named `progress_label`, which
 ///   is never announced (decision 83) and hands focus to the heading when
 ///   it goes.
-/// - **The facts**, a description list (`facts`).
+/// - **The facts**, a description list (`facts`), a value as its machine
+///   wrote it in a `<bdi>` and a note beside it in Muted.
 /// - **The controls**, `children`: the caller's links and menus.
 ///
 /// The card itself is never a stop for Tab, nor a control: its controls
@@ -153,7 +179,11 @@ pub fn MachineCard(
                     <div class="flex flex-wrap gap-x-2">
                         <dt class="text-muted">{fact.term}</dt>
                         <dd class="m-0 [min-inline-size:0] wrap-anywhere">
-                            {time_view(fact.words, fact.time)}
+                            {if fact.written {
+                                written_view(fact.words)
+                            } else {
+                                time_view(fact.words, fact.time).into_any()
+                            }}
                         </dd>
                     </div>
                 }
