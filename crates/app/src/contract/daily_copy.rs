@@ -43,10 +43,11 @@ async fn the_next_copy_is_dated_no_earlier(harness: &dyn DailyCopyHarness) {
     let first = copy.taken_at().await;
     assert_eq!(copy.take().await, Ok(()));
     let second = copy.taken_at().await;
-    match (&first, &second) {
-        (Ok(Some(first)), Ok(Some(second))) => assert!(second >= first, "{first} then {second}"),
-        _ => panic!("both copies are dated: {first:?}, {second:?}"),
-    }
+    let dated = matches!((&first, &second), (Ok(Some(first)), Ok(Some(second))) if second >= first);
+    assert!(
+        dated,
+        "both copies are dated, the second no earlier: {first:?}, {second:?}"
+    );
 }
 
 async fn the_copy_outlives_the_daemon(harness: &dyn DailyCopyHarness) {
