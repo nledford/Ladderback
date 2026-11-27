@@ -1,8 +1,9 @@
 //! The lines the hub logs when a machine pairs (#1307), when a person
 //! approves or removes one, when a waiting one lapses (decision 154), when
 //! an approved one first connects (#1342), when it first lets go of an
-//! agent's reports past the cap (§7.2), and when an agent first sends a
-//! report far behind the last it took (#1387).
+//! agent's reports past the cap (§7.2), when it tells an agent to start a
+//! new epoch (decision 177), and when an agent first sends a report far
+//! behind the last it took (#1387).
 
 use domain::fleet::{
     AgentRecord, AgentStatus, Fingerprint, MAX_REPORTS_HELD, PairRequest, Pairing, ReportSeq,
@@ -10,12 +11,27 @@ use domain::fleet::{
 };
 use domain::{AgentId, RepositoryId};
 
+/// The line for each time the hub tells `agent` to start a new epoch: the
+/// hub took the place its outbox gives next already, as when its database
+/// was restored from an older copy (decision 177). It names the agent
+/// only, nothing a report says (I4).
+pub(super) fn new_epoch(agent: AgentId) -> String {
+    format!(
+        "agent {} numbers its reports from a place the hub took already: its database may \
+         have been restored from an older copy; the hub told it to start a new epoch, so the \
+         hub keeps its reports from now on",
+        agent.as_uuid(),
+    )
+}
+
 /// The line for the first time `agent` sends a report the hub took before,
 /// at `seq` of its outbox, further behind the last the hub took of its
 /// epoch than a report sent again lies: its outbox numbers its reports
 /// again from an older place, as one restored from an older database does,
-/// and the hub keeps none of them (#1387). It names the agent and the
-/// place only, nothing a report says (I4).
+/// and the hub keeps none of them (#1387). Since decision 177 the hub tells
+/// such an agent to start a new epoch when it connects, so only a 0.6.0
+/// agent, whose `Hello` doesn't say where its outbox stands, still sends
+/// them. It names the agent and the place only, nothing a report says (I4).
 pub(super) fn reports_behind(agent: AgentId, seq: ReportSeq) -> String {
     format!(
         "agent {} sent a report at place {} of its outbox, far behind the last the hub took \

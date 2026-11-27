@@ -11,7 +11,7 @@ use domain::fleet::{
     SignedMessage, SigningSeed, TokenId, TokenRecord, TokenTls, TokenUse, Tombstone,
     UNUSED_TOKEN_LIMIT, Welcome, WireName, ack_kind, grants_kind, heartbeat_kind, hello_kind,
     list_agents, plans_kind, progress_kind, release_kind, released_kind, report_kind, repos_kind,
-    token_life, welcome_kind, withheld_kind,
+    starts_new_epoch, token_life, welcome_kind, withheld_kind,
 };
 use domain::{AgentId, SignedDuration, TimeZoneDatabase, Timestamp};
 
@@ -762,14 +762,29 @@ impl HubPairing {
                 .record_zone(agent.agent_id, zone.as_ref())
                 .await?;
         }
+        let new_epoch = match (&self.inbox, read.outbox) {
+            (Some(inbox), Some(position)) => starts_new_epoch(
+                inbox
+                    .taken_through(agent.agent_id, position.epoch)
+                    .await?,
+                position.next,
+            ),
+            _ => false,
+        };
+        if new_epoch {
+            log::warn!("{}", logged::new_epoch(agent.agent_id));
+        }
         let signed_at =
             EpochSeconds::from_timestamp(self.clock.now()).unwrap_or(EpochSeconds::from_seconds(0));
-        let welcome = Welcome::answering(
-            &read,
-            Approval::of(agent.status),
-            self.version.clone(),
-            signed_at,
-        );
+        let welcome = Welcome {
+            new_epoch,
+            ..Welcome::answering(
+                &read,
+                Approval::of(agent.status),
+                self.version.clone(),
+                signed_at,
+            )
+        };
         let payload = welcome_payload(&welcome);
         let kind = welcome_kind();
         let expires_at = welcome.expires_at();
