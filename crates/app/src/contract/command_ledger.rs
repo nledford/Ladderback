@@ -27,6 +27,7 @@ pub trait CommandLedgerHarness: Send + Sync {
 pub async fn run(harness: &dyn CommandLedgerHarness) {
     a_command_is_new_once_and_seen_after_a_restart(harness).await;
     a_command_is_forgotten_once_remembered_for_its_time(harness).await;
+    a_clock_set_back_forgets_what_it_puts_a_whole_time_ahead(harness).await;
     a_full_ledger_remembers_no_more_and_says_since_when(harness).await;
     the_hubs_runs_outlive_a_restart_and_go_after_an_hour(harness).await;
 }
@@ -77,6 +78,32 @@ async fn a_command_is_forgotten_once_remembered_for_its_time(harness: &dyn Comma
     );
     let at_its_time = ledger.remember(command(1), at(life)).await;
     assert_eq!(ok(at_its_time, "at its time"), Some(Remembered::New));
+}
+
+/// An ID taken while the machine's clock ran ahead counts by how far it
+/// lies either way: once the clock is set back, one it puts
+/// [`COMMANDS_REMEMBERED_FOR`] or more ahead is forgotten, rather than
+/// kept until the clock catches up, and a nearer one is still remembered.
+async fn a_clock_set_back_forgets_what_it_puts_a_whole_time_ahead(
+    harness: &dyn CommandLedgerHarness,
+) {
+    let ledger = harness.empty().await;
+    let life = COMMANDS_REMEMBERED_FOR.as_secs();
+    let _ = ok(ledger.remember(command(1), at(life)).await, "a take ahead");
+    let _ = ok(
+        ledger.remember(command(2), at(life - 1)).await,
+        "a take a second nearer",
+    );
+    let ahead = ledger.remember(command(1), at(0)).await;
+    assert_eq!(
+        ok(ahead, "the take ahead, after the clock was set back"),
+        Some(Remembered::New)
+    );
+    let nearer = ledger.remember(command(2), at(0)).await;
+    assert_eq!(
+        ok(nearer, "the nearer take, after the clock was set back"),
+        Some(Remembered::Seen)
+    );
 }
 
 async fn a_full_ledger_remembers_no_more_and_says_since_when(harness: &dyn CommandLedgerHarness) {
