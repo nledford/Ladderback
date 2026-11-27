@@ -468,6 +468,12 @@ async fn write(
                     RestoredTo::Folder(path) => path.as_str(),
                 }),
         )
+        .bind(match operation.trigger() {
+            Trigger::Hub {
+                asked_by: Some(tag),
+            } => Some(tag.as_str()),
+            _ => None,
+        })
         .execute(&mut *conn)
         .await
         .map_err(unavailable)?;

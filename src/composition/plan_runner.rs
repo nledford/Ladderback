@@ -834,7 +834,12 @@ pub(super) fn run_named(trigger: &Trigger) -> std::borrow::Cow<'static, str> {
         Trigger::Manual => "the manual run".into(),
         Trigger::CatchUp => "the catch-up run".into(),
         Trigger::Retry => "the retry".into(),
-        Trigger::Hub { .. } => "the hub's run".into(),
+        Trigger::Hub { asked_by: None } => "the hub's run".into(),
+        // The tag is a hash of the session's digest, never the session's
+        // secret (I4).
+        Trigger::Hub {
+            asked_by: Some(tag),
+        } => format!("the hub's run, asked for by session {}", tag.as_str()).into(),
         Trigger::Mcp => "the MCP client's run".into(),
         Trigger::ApiToken { id, label } => format!(
             "the run API token \"{}\" ({}) asked for",
