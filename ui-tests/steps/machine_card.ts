@@ -2,7 +2,9 @@
 // decision 175), and what the dashboard's steps share of it: a card is an
 // article named by its heading, its facts a description list, its attention
 // mark the paragraph that starts with "Needs attention:". Elements are found
-// by role and accessible name; only boxes and computed styles are read.
+// by role and accessible name, and the status badge, which has no role, by
+// its words. Only boxes, computed styles, and the order a card's structure
+// sets (its terms with their definitions, its first paragraph) are read.
 
 import assert from "node:assert/strict";
 
@@ -30,15 +32,24 @@ export function cardIn(within: Locator, name: string): Locator {
   return within.getByRole("article", { name: namePattern(name) });
 }
 
-/** The fact a card tells under `term`: the description after its term. */
-export function factOf(card: Locator, term: string): Locator {
-  return card.locator("dt", { hasText: namePattern(term) }).locator("xpath=following-sibling::dd[1]");
+/** The fact a card tells under `term`: the definition after its term. A
+ *  card pairs each term with one definition, in one order (the description
+ *  list's step checks the pairs), so the term's place among the terms is
+ *  its definition's among the definitions. */
+export async function factOf(card: Locator, term: string): Promise<Locator> {
+  const terms = card.getByRole("term");
+  const definitions = card.getByRole("definition");
+  await expect(terms.filter({ hasText: namePattern(term) })).toHaveCount(1);
+  await expect(definitions).toHaveCount(await terms.count());
+  const place = (await terms.allTextContents()).findIndex((words) => namePattern(term).test(words.trim()));
+  assert.ok(place >= 0, `the card has no term "${term}"`);
+  return definitions.nth(place);
 }
 
-/** A card's status: the one status badge it shows, after its connection's
- *  line, as the badge's steps find one (badge.ts). */
-export function statusOf(card: Locator): Locator {
-  return card.locator(".badge");
+/** A card's status badge reading `status`: the paragraph that holds only
+ *  its words. The badge has no role (badge.rs), so it is found by them. */
+export function statusOf(card: Locator, status: string): Locator {
+  return card.getByRole("paragraph").filter({ hasText: namePattern(status) });
 }
 
 /** A card's attention mark: its paragraph that starts with the mark's words. */
@@ -109,12 +120,17 @@ Then(
   },
 );
 
-// Each fact is a term and its description, read in that order (1.3.1).
+// Each fact is a term and its definition, read in that order (1.3.1). The
+// list is found from its terms; only how they pair with their definitions
+// is read from the page's structure.
 Then("the article {string} tells its facts in a description list", async function (this: BrowserWorld, name: string) {
   const card = cardIn(demoSection(this.page, "Machine card"), name);
-  const list = card.locator("dl");
-  await expect(list).toHaveCount(1);
-  const pairs = await list.evaluate((dl) => [...dl.children].map((child) => child.tagName.toLowerCase()));
+  const terms = card.getByRole("term");
+  await expect(terms.first()).toBeVisible();
+  const pairs = await terms.first().evaluate((term) => {
+    const list = term.closest("dl");
+    return list ? [...list.children].map((child) => child.tagName.toLowerCase()) : [];
+  });
   assert.ok(pairs.length >= 2, "the list tells no fact");
   for (const [place, tag] of pairs.entries()) {
     // A `div` may group a term with its description, as HTML allows.

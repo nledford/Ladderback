@@ -285,11 +285,11 @@ Then("the cards after it are, in order:", async function (this: BrowserWorld, ex
 });
 
 Then("the card {string} tells its status {string}", async function (this: BrowserWorld, hostname: string, status: string) {
-  await expect(statusOf(machineCard(this, hostname))).toHaveText(namePattern(status));
+  await expect(statusOf(machineCard(this, hostname), status)).toBeVisible();
 });
 
 Then("the hub's own card tells its status {string}", async function (this: BrowserWorld, status: string) {
-  await expect(statusOf(await hubsCard(this))).toHaveText(namePattern(status));
+  await expect(statusOf(await hubsCard(this), status)).toBeVisible();
 });
 
 // A machine's page is titled by its hostname once its read answers (WCAG
@@ -299,7 +299,7 @@ Then("the page is titled after the machine: {string}", async function (this: Bro
 });
 
 Then("the card {string} tells {string}: {string}", async function (this: BrowserWorld, hostname: string, term: string, value: string) {
-  await expect(factOf(machineCard(this, hostname), term)).toHaveText(namePattern(value));
+  await expect(await factOf(machineCard(this, hostname), term)).toHaveText(namePattern(value));
 });
 
 // Each a time element whose `datetime` a machine can read (#115).
@@ -307,7 +307,9 @@ Then(
   "the card {string} tells its {string} and {string} as times",
   async function (this: BrowserWorld, hostname: string, first: string, second: string) {
     for (const term of [first, second]) {
-      await expect(factOf(machineCard(this, hostname), term).locator("time[datetime]")).toHaveCount(1);
+      const time = (await factOf(machineCard(this, hostname), term)).getByRole("time");
+      await expect(time).toHaveCount(1);
+      await expect(time).toHaveAttribute("datetime", /\S/);
     }
   },
 );
