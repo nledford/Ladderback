@@ -127,19 +127,21 @@ impl HubPairing {
             if waiting >= MAX_COMMANDS_IN_FLIGHT {
                 return Err(self.busy());
             }
-            self.count_sent(agent)?;
+            self.send_counted(agent, || {
+                line.try_send(OutgoingCommand { kind, payload })
+                    .map_err(|error| {
+                        if error.is_full() {
+                            self.busy()
+                        } else {
+                            CommandAskRefused::MachineOffline
+                        }
+                    })
+            })?;
             awaited.insert(id, Awaited { agent, answer });
         }
         // Waited on until this ask ends, however it ends: an asker that
         // stops waiting, as a page closed, leaves no command counted.
         let _waiting = Waiting { pairing: self, id };
-        if let Err(error) = line.try_send(OutgoingCommand { kind, payload }) {
-            return Err(if error.is_full() {
-                self.busy()
-            } else {
-                CommandAskRefused::MachineOffline
-            });
-        }
         let within = std::pin::pin!(self.clock.sleep(COMMAND_ANSWER_WITHIN));
         match select(answered, within).await {
             Either::Left((Ok(answer), _)) => Ok(answer_to(asked, answer)),
@@ -181,11 +183,16 @@ impl HubPairing {
         }
     }
 
-    /// Counts a command the hub sends `agent` now, unless it sent it
+    /// Sends `agent` a command through `send` and counts it, unless the
+    /// hub sent it
     /// [`HUB_COMMANDS_PER_HOUR`](domain::fleet::HUB_COMMANDS_PER_HOUR) in
-    /// the last hour: then the refusal says
-    /// when it may send one again.
-    fn count_sent(&self, agent: AgentId) -> Result<(), CommandAskRefused> {
+    /// the last hour: then the refusal says when it may send one again. A
+    /// command `send` couldn't hand over isn't counted.
+    fn send_counted(
+        &self,
+        agent: AgentId,
+        send: impl FnOnce() -> Result<(), CommandAskRefused>,
+    ) -> Result<(), CommandAskRefused> {
         let now = self.clock.monotonic();
         let hour = SignedDuration::from_hours(1);
         let mut sent = self
@@ -202,6 +209,7 @@ impl HubPairing {
         }
         match hub_command_admitted(times.make_contiguous(), now) {
             Ok(()) => {
+                send()?;
                 times.push_back(now);
                 Ok(())
             }
