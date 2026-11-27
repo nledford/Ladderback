@@ -28,6 +28,7 @@ pub use session::{
     BINDING_UNAVAILABLE, HubSession, HubStep, OUTBOX_DIVERGED, PROTOCOL_ERROR, SEQUENCE_ERROR,
 };
 pub use state::PairingState;
+pub(crate) use wire::plans_in_one_frame;
 
 #[cfg(test)]
 mod tests;

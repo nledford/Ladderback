@@ -9,6 +9,7 @@ use api::UiEvent;
 use domain::fleet::{EpochSeconds, LastRun, PlansReport, ReportedPlan, ReportedProgress, WireName};
 use domain::{OperationId, SignedDuration, Timestamp, Uuid};
 
+use crate::pairing::plans_in_one_frame;
 use crate::ports::ScheduleStore;
 use crate::status::{ReadStatus, StatusError};
 
@@ -30,7 +31,8 @@ impl ReadPlans {
         Self { status, schedules }
     }
 
-    /// The agent's plans as they stand now, in its configuration's order.
+    /// The agent's plans as they stand now, in its configuration's order:
+    /// as many as one report holds and its frame fits, the rest left out.
     pub async fn read(&self) -> Result<PlansReport, StatusError> {
         let status = self.status.read().await?;
         let planned = self
@@ -57,7 +59,7 @@ impl ReadPlans {
                 plan: standing.plan,
             })
             .collect();
-        Ok(PlansReport::of(plans))
+        Ok(plans_in_one_frame(PlansReport::of(plans)))
     }
 }
 
