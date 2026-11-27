@@ -68,9 +68,11 @@ const READ_PATIENCE: Duration = Duration::from_secs(5);
 /// unanswered while none had answered: the "few seconds" it says.
 const ASK_AGAIN: Duration = Duration::from_secs(3);
 /// How long the hub may take to answer a Back up menu's start before the
-/// page says the backup didn't start (#1690): a start only queues the
-/// backup, so its answer comes as quickly as a read's.
-const START_PATIENCE: Duration = READ_PATIENCE;
+/// page says the backup didn't start (#1690). The hub answers once the
+/// operation log holds the backup queued, a write that may wait up to the
+/// store's 5-second busy timeout behind another, so it has longer than a
+/// read.
+const START_PATIENCE: Duration = Duration::from_secs(15);
 /// How often the cards read the time again, so that a planned run falls
 /// due on them while nothing else changes (decision 175).
 const TICK: Duration = Duration::from_secs(60);
