@@ -1,6 +1,7 @@
 //! Steps for `features/fleet/plans_and_progress.feature`: an approved
-//! agent tells its hub its plans when they change and the progress of the
-//! operation it runs, at most every 5 seconds, and the hub's dashboard
+//! agent tells its hub its plans each time it connects and when they
+//! change, and the progress of the operation it runs, at most every 5
+//! seconds, and the hub's dashboard
 //! reads them (technical design §7.2). One sync, kept for the scenario,
 //! remembers what it told the hub, as the daemon's does; the agent's clock
 //! is a fake the steps move.
@@ -218,6 +219,7 @@ async fn backed_up(agent: &mut Agent, plan: String) {
 
 #[given("the agent's sync with its hub ran")]
 #[when("the agent's sync with its hub runs")]
+#[when("the agent reconnects to its hub")]
 async fn sync_runs(agent: &mut Agent) {
     let machine = agent.pairing.first.take().expect("the first agent");
     side(agent).sync(&machine).await;
@@ -314,10 +316,9 @@ async fn shows_never_ran(agent: &mut Agent, plan: String) {
     assert_eq!((shown.last, shown.next_run), (None, None));
 }
 
-#[then(regex = r"^the hub was sent the agent's plans (once|twice)$")]
-async fn plans_sent(agent: &mut Agent, times: String) {
-    let expected = if times == "once" { 1 } else { 2 };
-    assert_eq!(side(agent).plans_sent(), expected);
+#[then("the hub was sent the agent's plans twice")]
+async fn plans_sent(agent: &mut Agent) {
+    assert_eq!(side(agent).plans_sent(), 2);
 }
 
 #[then(regex = r"^the hub shows the agent's backup at (\d+) of (\d+) bytes$")]
