@@ -50,6 +50,7 @@ impl ReadPlans {
                         last.finished_at,
                     )
                 }),
+                last_success: None,
                 next_run: planned
                     .iter()
                     .find(|run| run.plan == standing.plan)

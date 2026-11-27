@@ -244,6 +244,7 @@ async fn removing_a_machine_forgets_its_current_state_and_keeps_its_history_and_
             vec![ReportedPlan {
                 plan: plan("demo-home"),
                 last: None,
+                last_success: None,
                 next_run: None,
             }],
             0,

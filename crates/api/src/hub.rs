@@ -341,14 +341,17 @@ pub struct MachinePlansDto {
     pub left_out: u64,
 }
 
-/// One of a machine's plans: its ID, its last run, and its next planned
-/// run by the machine's clock (RFC 3339), each none when it has none.
+/// One of a machine's plans: its ID, its last run, when its last successful
+/// backup ended, and its next planned run, by the machine's clock (RFC
+/// 3339), each none when it has none.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "kebab-case", deny_unknown_fields)]
 pub struct MachinePlanDto {
     pub plan: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub last_run: Option<MachinePlanRunDto>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub last_success: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub next_run: Option<String>,
 }

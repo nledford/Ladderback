@@ -183,6 +183,7 @@ fn plan_of(row: &SqliteRow) -> Result<ReportedPlan, StoreError> {
     Ok(ReportedPlan {
         plan: PlanId::parse(&plan).map_err(|_| corrupt("plan_id"))?,
         last,
+        last_success: None,
         next_run: held_if_any(row, "next_run")?.map(EpochSeconds::from_seconds),
     })
 }

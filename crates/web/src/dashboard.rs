@@ -561,6 +561,7 @@ pub(crate) fn own_machine(
                         status: "succeeded".to_owned(),
                     }),
                 },
+                last_success: None,
                 next_run: plan.plan.next_run.clone(),
             })
             .collect(),

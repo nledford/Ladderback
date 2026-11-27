@@ -95,13 +95,16 @@ impl LastRun {
     }
 }
 
-/// One plan as its machine reports it: its ID, its last run, none when it
-/// never ran, and its next planned run, none when it has no schedule or the
-/// scheduler planned none.
+/// One plan as its machine reports it: its ID; its last run, none when it
+/// never ran; when its last successful backup, with or without warnings,
+/// ended, however far back, none when it has had none (#1693), so the hub
+/// still tells it while a later run waits or runs; and its next planned
+/// run, none when it has no schedule or the scheduler planned none.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct ReportedPlan {
     pub plan: PlanId,
     pub last: Option<LastRun>,
+    pub last_success: Option<EpochSeconds>,
     pub next_run: Option<EpochSeconds>,
 }
 

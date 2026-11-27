@@ -28,6 +28,7 @@ pub fn plans_payload(report: &PlansReport) -> Vec<u8> {
                     at: last.at.seconds(),
                     outcome: last.outcome.wire_name().to_owned(),
                 }),
+                last_success: None,
                 next: plan.next_run.map(EpochSeconds::seconds),
             })
             .collect(),
@@ -58,6 +59,7 @@ pub fn read_plans(bytes: &[u8]) -> Result<PlansReport, WireRefused> {
                         })
                     })
                     .transpose()?,
+                last_success: None,
                 next_run: plan.next.map(time).transpose()?,
             })
         })

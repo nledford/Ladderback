@@ -160,6 +160,7 @@ fn plans_report(count: usize, left_out: u64) -> domain::fleet::PlansReport {
         .map(|n| domain::fleet::ReportedPlan {
             plan: domain::PlanId::parse(&format!("plan-{n}")).expect("a plan's ID"),
             last: None,
+            last_success: None,
             next_run: None,
         })
         .collect();

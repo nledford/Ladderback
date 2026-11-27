@@ -316,6 +316,7 @@ fn plan(name: &str, last: Option<(&str, i64)>, next: Option<i64>) -> MachinePlan
             at: at(minutes),
             status: status.to_owned(),
         }),
+        last_success: None,
         next_run: next.map(at),
     }
 }
@@ -434,6 +435,41 @@ fn a_machine_whose_newer_operation_ended_while_an_older_one_runs_reads_running()
         assert_eq!(facts.next_run, NextRun::At(at(-10)), "ended one at {place}");
         assert_eq!(facts.attention, None, "ended one at {place}");
     }
+}
+
+/// While each plan of a paired machine waits or runs again, its card still
+/// tells its last backup: a plan's last success, as succeeded, where its
+/// last run hasn't ended, the latest of every plan's (#1693).
+#[test]
+fn a_card_tells_the_last_success_while_each_plan_waits_or_runs_again() {
+    let succeeded = |mut plan: MachinePlanDto, minutes: i64| {
+        plan.last_success = Some(at(minutes));
+        plan
+    };
+    let waiting = online(with_plans(
+        machine("demo-laptop", AT),
+        vec![
+            succeeded(plan("documents", Some(("queued", -2)), Some(60)), -90),
+            succeeded(plan("photos", Some(("running", -1)), None), -30),
+            succeeded(plan("music", Some(("cancelled", -40)), None), -100),
+        ],
+        0,
+    ));
+    assert_eq!(
+        card_facts(&waiting, AT_MS),
+        CardFacts {
+            status: CardStatus::Last("succeeded".to_owned()),
+            last_backup: Some(at(-30)),
+            next_run: NextRun::At(at(60)),
+            plans: Some(3),
+            attention: None,
+        }
+    );
+    let busy = card_facts(&running(waiting), AT_MS);
+    assert_eq!(
+        (busy.status, busy.last_backup),
+        (CardStatus::Running, Some(at(-30)))
+    );
 }
 
 /// An offline machine whose planned run is more than five minutes past
