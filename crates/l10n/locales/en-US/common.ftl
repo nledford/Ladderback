@@ -750,8 +750,11 @@ error-machine-offline-next-run = That { -machine } isn't connected to the { -hub
 # The machine runs a release that takes no commands from its hub.
 error-machine-commands-unsupported = That { -machine } runs a release that takes no commands from the { -hub }. Update Ladderback on it first.
 
-# The machine turned its hub's commands off in its configuration file.
-error-machine-commands-off = That { -machine } takes no commands from the { -hub }: its configuration file sets { "allow-hub-commands = false" }.
+# The machine said, when it last connected, that it takes no commands from
+# its hub, or refused this one as turned off. Its configuration may have
+# changed since: turning the commands back on takes effect when it connects
+# again.
+error-machine-commands-off = That { -machine } has turned off commands from the { -hub }. If it turned them back on, they work once it connects to the { -hub } again.
 
 # The machine didn't answer the hub's command in time, or its connection
 # ended first, so whether it acted isn't known.
