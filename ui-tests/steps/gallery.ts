@@ -683,6 +683,21 @@ const SNAPSHOTS: Record<string, string> = {
       - definition: Not reported yet
       - link "Open ⁨demo-desktop⁩":
         - /url: /machines/demo-desktop`,
+  // Two cards in a list: one of words alone, and one whose controls follow
+  // its words. Each is an article named by its heading.
+  Card: `- heading "Card" [level=2]
+- list:
+  - listitem:
+    - article "Demo summary":
+      - heading "Demo summary" [level=3]
+      - paragraph: Its words say how one thing stands, at a glance.
+  - listitem:
+    - article "Demo summary with controls":
+      - heading "Demo summary with controls" [level=3]
+      - paragraph: Its controls follow its words, each named by what it acts on.
+      - button "Act on the demo summary with controls"
+      - link "Open the demo summary with controls":
+        - /url: /`,
   // Closed, a disclosure menu is its button alone: its panel is hidden, from
   // a screen reader too, until the button shows it.
   "Disclosure menu": `- heading "Disclosure menu" [level=2]
