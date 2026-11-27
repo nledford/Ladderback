@@ -3970,3 +3970,123 @@ async fn a_held_connection_answers_the_hubs_command() {
     let result = api::sync::CommandResultPayload::from_bytes(&results[0]).unwrap();
     assert_eq!(result.result, "started", "{result:?}");
 }
+
+/// The kinds of the signed messages the agent sent on `connector`, in
+/// order.
+fn kinds_sent(connector: &LoopbackHubConnector) -> Vec<WireName> {
+    connector
+        .sent()
+        .iter()
+        .filter_map(
+            |text| match agent_message(&AgentFrame::from_text(text).ok()?) {
+                Ok(AgentMessage::Signed(envelope)) => Some(envelope.kind),
+                _ => None,
+            },
+        )
+        .collect()
+}
+
+/// A machine answers the hub's commands that came while it replayed its
+/// outbox between its windows of reports, not after the whole replay, so
+/// none waits on a long backlog past the hub's 20 seconds (decision 176).
+#[tokio::test]
+async fn a_replay_answers_the_hubs_commands_between_its_windows() {
+    use crate::ports::Outbox as _;
+    use domain::fleet::{AgentReport, Happening, OutboxEpoch, SEND_WINDOW, report_kind};
+
+    let hub = keeping_reports(1);
+    let identity = approved(&hub).await;
+    let connector = Arc::new(LoopbackHubConnector::to(hub.pairing.clone()));
+    let clock = Arc::new(FakeClock::new(hub.clock.now()));
+    let outbox = Arc::new(crate::fakes::InMemoryOutbox::new(OutboxEpoch::from_uuid(
+        Uuid::from_u128(0xe1),
+    )));
+    for number in 0..=SEND_WINDOW {
+        outbox
+            .append(&AgentReport {
+                op_id: domain::OperationId::from_uuid(Uuid::from_u128(
+                    0x0b00 + u128::try_from(number).unwrap(),
+                )),
+                happening: Happening::Started,
+                at: EpochSeconds::from_seconds(1_800_000_000),
+            })
+            .await
+            .unwrap();
+    }
+    let sync = crate::sync::SyncWithHub::new(
+        connecting(identity, connector.clone()),
+        outbox,
+        clock.clone(),
+        agent_id(1),
+        hostname(1),
+        None,
+    )
+    .with_commands(answering(clock));
+    connector.send_command(
+        domain::fleet::run_plan_kind(),
+        run_photos(1, hub.clock.now()),
+    );
+    connector.send_commands_ahead();
+    sync.sync_once().await.unwrap();
+    let kinds = kinds_sent(&connector);
+    let answered = kinds
+        .iter()
+        .position(|kind| *kind == domain::fleet::command_result_kind());
+    let last_report = kinds.iter().rposition(|kind| *kind == report_kind());
+    assert!(
+        matches!((answered, last_report), (Some(answered), Some(last)) if answered < last),
+        "{kinds:?}"
+    );
+}
+
+/// A machine holding as many of the hub's commands unanswered as the hub
+/// waits on, as through a long replay, keeps its connection when the hub
+/// sends another: it drops the oldest, which the hub has stopped waiting
+/// for, answers it expired, and answers the rest (decision 176).
+#[tokio::test]
+async fn a_machine_holding_its_limit_of_commands_answers_the_oldest_expired() {
+    use domain::fleet::{Accepts, MAX_COMMANDS_IN_FLIGHT, command_result_kind, run_plan_kind};
+
+    let hub = keeping_reports(1);
+    let identity = approved(&hub).await;
+    let connector = Arc::new(LoopbackHubConnector::to(hub.pairing.clone()));
+    let (_, mut channel) = connecting(identity, connector.clone())
+        .connect_accepting(agent_id(1), hostname(1), None, None, Some(Accepts::all()))
+        .await
+        .unwrap();
+    channel.send_report(&one_report()).await.unwrap();
+    channel.receive_ack().await.unwrap();
+    let sent = u128::try_from(MAX_COMMANDS_IN_FLIGHT).unwrap() + 1;
+    for number in 1..=sent {
+        connector.send_command(run_plan_kind(), run_photos(number, hub.clock.now()));
+    }
+    connector.send_commands_ahead();
+    channel.send_heartbeat(None).await.unwrap();
+    channel
+        .receive_heartbeat_ack()
+        .await
+        .expect("the machine keeps its connection");
+    answering(Arc::new(FakeClock::new(hub.clock.now())))
+        .answer_held(&mut channel)
+        .await
+        .unwrap();
+    let results: Vec<(String, String, Option<String>)> =
+        sent_of(&connector, &command_result_kind())
+            .iter()
+            .map(|bytes| {
+                let result = api::sync::CommandResultPayload::from_bytes(bytes).unwrap();
+                (result.command_id, result.result, result.code)
+            })
+            .collect();
+    let id = |number: u128| {
+        Uuid::from_u128((0x0191_u128 << 112) | number)
+            .hyphenated()
+            .to_string()
+    };
+    assert_eq!(
+        results.first().map(|(id, _, code)| (id.clone(), code.clone())),
+        Some((id(1), Some("command-expired".to_owned())))
+    );
+    let answered: Vec<String> = results.into_iter().map(|(id, ..)| id).collect();
+    assert_eq!(answered, (1..=sent).map(id).collect::<Vec<_>>());
+}

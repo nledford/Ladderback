@@ -356,6 +356,7 @@ impl AgentChannel {
             request,
             welcomed_at: self.welcomed_at,
             since,
+            hello_sent: self.hello_sent,
         });
         Ok(None)
     }

@@ -51,8 +51,11 @@ struct Tap {
     /// the link the agent reads next signs and delivers.
     commands: Mutex<VecDeque<(WireName, Vec<u8>)>>,
     /// Whether the next command reaches the agent with a signature the hub
-    /// didn't make.
+    /// didn't make, as one from anyone but the hub it paired with.
     forging_command: AtomicBool,
+    /// Whether the hub's commands reach the agent ahead of the hub's next
+    /// answer on a live link.
+    commands_ahead: AtomicBool,
 }
 
 impl Tap {
@@ -184,6 +187,14 @@ impl LoopbackHubConnector {
     /// make, as one from anyone but the hub it paired with.
     pub fn forge_next_command(&self) {
         self.tap.forging_command.store(true, Ordering::SeqCst);
+    }
+
+    /// From now on, the commands the hub sends reach the agent ahead of
+    /// the hub's next answer on a live link, as commands the hub sent while
+    /// the agent's message was on its way: the agent takes them while it
+    /// waits for that answer.
+    pub fn send_commands_ahead(&self) {
+        self.tap.commands_ahead.store(true, Ordering::SeqCst);
     }
 
     /// The connector closing each link that sent nothing for
@@ -359,6 +370,15 @@ impl HubLink for LoopLink {
             .heard
             .lock()
             .unwrap_or_else(PoisonError::into_inner) = self.tap.heard_now();
+        let live = self
+            .held
+            .live
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .is_some();
+        if live && self.tap.commands_ahead.load(Ordering::SeqCst) {
+            self.deliver_commands().await;
+        }
         let Some(session) = self.session.as_mut() else {
             self.close(None).await;
             return Ok(());

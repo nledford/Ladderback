@@ -75,26 +75,25 @@ impl CommandLedger for Unreadable {
 struct Machine {
     config: Arc<InMemoryConfigStore>,
     runs: Arc<Started>,
+    clock: Arc<FakeClock>,
     answer: AnswerHubCommands,
 }
 
 fn machine(ledger: Arc<dyn CommandLedger>) -> Machine {
     let config = Arc::new(InMemoryConfigStore::new());
     let runs = Arc::new(Started::default());
-    let answer = AnswerHubCommands::new(
-        config.clone(),
-        ledger,
-        runs.clone(),
-        Arc::new(FakeClock::new(start())),
-    );
+    let clock = Arc::new(FakeClock::new(start()));
+    let answer = AnswerHubCommands::new(config.clone(), ledger, runs.clone(), clock.clone());
     Machine {
         config,
         runs,
+        clock,
         answer,
     }
 }
 
-/// A command asked now on the hub's time, on a connection welcomed now.
+/// A command asked now on the hub's time, on a connection welcomed now,
+/// whose `Hello` went at the start of the machine's monotonic clock.
 fn run_of(name: &str, number: u128) -> ReceivedCommand {
     let now = EpochSeconds::from_timestamp(start()).unwrap();
     ReceivedCommand {
@@ -106,7 +105,27 @@ fn run_of(name: &str, number: u128) -> ReceivedCommand {
         },
         welcomed_at: now,
         since: SignedDuration::ZERO,
+        hello_sent: SignedDuration::ZERO,
     }
+}
+
+/// A command fresh when it arrived, but acted on more than
+/// [`COMMAND_LIFE`] after on the hub's time, as one held through a long
+/// replay, is refused expired: no backup starts that late.
+#[tokio::test]
+async fn a_command_held_past_its_life_is_refused_expired() {
+    let machine = machine(Arc::new(InMemoryCommandLedger::default()));
+    machine
+        .clock
+        .advance(COMMAND_LIFE + SignedDuration::from_secs(1));
+    assert_eq!(
+        machine.answer.answer(&run_of("photos", 1)).await,
+        Some(CommandAnswer::Refused {
+            code: ErrorCode::CommandExpired,
+            retry_at: None,
+        })
+    );
+    assert!(machine.runs.0.lock().unwrap().is_empty());
 }
 
 #[tokio::test]

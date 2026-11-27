@@ -72,13 +72,16 @@ pub enum HubCancelRefused {
 }
 
 /// A command the machine took from its hub on a connection whose `Welcome`
-/// the hub signed at `welcomed_at`, `since` before it took it on the
-/// machine's monotonic clock: what the hub's time was then.
+/// the hub signed at `welcomed_at`, `since` after it sent its `Hello` on
+/// the machine's monotonic clock: what the hub's time was then. It sent
+/// its `Hello` at `hello_sent` on that clock, by which it judges the hub's
+/// time again when it acts on the command.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct ReceivedCommand {
     pub request: CommandRequest,
     pub welcomed_at: EpochSeconds,
     pub since: SignedDuration,
+    pub hello_sent: SignedDuration,
 }
 
 /// The machine's answer to a command.
