@@ -4084,7 +4084,8 @@ ui-machine-card-plans-unreported = Not reported yet
 ui-machine-card-open = Open { $hostname }
 
 # The button of the menu on the hub's own card that starts a backup of one of its plans.
-ui-machine-card-back-up = Back up
+# $hostname (string): the hub's own machine's name.
+ui-machine-card-back-up = Back up { $hostname }
 
 ## A machine's page on the hub (decision 175).
 

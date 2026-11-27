@@ -597,9 +597,14 @@ fn card(
         });
         let any = Memo::new(move |_| plans.with(|plans: &Vec<String>| !plans.is_empty()));
         let localizer = Arc::clone(localizer);
+        let hostname = hostname.clone();
         move || {
             any.get().then(|| {
-                view! { <div class="ms-auto">{back_up_menu(&localizer, menu_id.clone(), plans, refused)}</div> }
+                view! {
+                    <div class="ms-auto">
+                        {back_up_menu(&localizer, &hostname, menu_id.clone(), plans, refused)}
+                    </div>
+                }
             })
         }
     });
@@ -624,18 +629,24 @@ fn card(
     }
 }
 
-/// The hub's own Back up menu (decision 175): a disclosure menu whose rows
-/// start a backup of each of its `plans`, as the operations page's buttons
-/// do, through the same request. The start is said politely; a refusal is
-/// said and shown in `refused`. A row's press closes the menu and returns
-/// focus to its button, as the disclosure menu does for any row's button.
+/// The hub's own Back up menu (decision 175), named by its `hostname`: a
+/// disclosure menu whose rows start a backup of each of its `plans`, as the
+/// operations page's buttons do, through the same request. The start is
+/// said politely; a refusal is said and shown in `refused`. A row's press
+/// closes the menu and returns focus to its button, as the disclosure menu
+/// does for any row's button.
 fn back_up_menu(
     localizer: &Arc<Localizer>,
+    hostname: &str,
     panel_id: String,
     plans: Memo<Vec<String>>,
     refused: RwSignal<Option<Sentence>>,
 ) -> impl IntoView + use<> {
-    let label = text(localizer, msg::UI_MACHINE_CARD_BACK_UP);
+    let label = text_with(
+        localizer,
+        msg::UI_MACHINE_CARD_BACK_UP,
+        &[("hostname", MsgArg::Text(hostname.to_owned()))],
+    );
     let started = text(localizer, msg::UI_BACKUP_STARTED);
     let localizer = Arc::clone(localizer);
     let rows = move || {

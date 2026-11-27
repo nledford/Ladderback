@@ -458,7 +458,7 @@ A flat list of rows indented by level (capped so deep folders fit 320 px), each 
 - **Use:** one machine at a glance on a hub's dashboard, under The Summary Card Rule (decision 175): its hostname as the heading, "This hub" under the hub's own in words, then whether it is online, its status badge, its progress while it runs, and its last backup, next run and plans as terms and values.
 - **Style:** 1rem of padding inside its edge.
 - **Needs attention:** the first line under the heading, a Flag Amber Warning icon, then "Needs attention:" in bold and why, in the text's color.
-- **Controls:** at the card's foot, a Back up menu on the hub's own and a link "Open ⁨hostname⁩" on every card.
+- **Controls:** at the card's foot, a Back up menu "Back up ⁨hostname⁩" on the hub's own and a link "Open ⁨hostname⁩" on every card.
 - **Layout:** a grid of columns at least 18rem wide: one column at 320 px with 200 % text, several side by side on a wide page. Cards keep their order as their machines change.
 
 ## Do's and Don'ts

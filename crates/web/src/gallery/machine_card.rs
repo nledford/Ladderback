@@ -65,7 +65,7 @@ pub(super) fn MachineCardDemo(localizer: Arc<Localizer>) -> impl IntoView {
         (open("demo-hub"), open("demo-laptop"), open("demo-desktop"));
     let (heading, back_up) = (
         t(msg::UI_GALLERY_MACHINE_CARD_HEADING),
-        t(msg::UI_MACHINE_CARD_BACK_UP),
+        named(msg::UI_MACHINE_CARD_BACK_UP, "demo-hub"),
     );
     let (succeeded, failed_badge, running_badge) = (
         t(msg::UI_STATUS_SUCCEEDED),

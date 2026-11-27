@@ -92,7 +92,7 @@ The hub's **Dashboard** is its start page: **Ladderback** at the top of every pa
 - How its latest run came out, or **Running** and the progress of the operation it runs.
 - **Last backup**, **Next run**, and how many **Plans** it has.
 
-**Back up** on the hub's own card starts a backup of the plan you choose. **Open** and the machine's name leads to the machine's page, which shows:
+**Back up** and the hub's name, on the hub's own card, starts a backup of the plan you choose. **Open** and the machine's name leads to the machine's page, which shows:
 
 - **Plans of** the machine, as it last reported them: how and when each last ran, and when it runs next.
 - **Latest operations of** the machine, newest first: when each started and ended, its result, and a failure's error code. A machine keeps its reports while it can't reach the hub and sends them in order once it can. When the hub let go of a machine's oldest reports to stay within its limit, the page says so.
