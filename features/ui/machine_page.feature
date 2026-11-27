@@ -97,7 +97,7 @@ Feature: A machine's page on the hub
     And I press Tab until focus is on the button "Start backup of demo-home"
     And I press Enter
     Then the hub's own card tells its status "Succeeded"
-    When I press Tab until focus is on the hub's own Open link
+    When I press Shift+Tab until focus is on the hub's own Open link
     And I press Enter
     Then focus is on the hub's own main heading
     And the hub's own table of plans lists "demo-home" with its last run "Succeeded"

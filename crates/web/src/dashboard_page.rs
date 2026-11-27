@@ -581,6 +581,10 @@ fn card(
             </Link>
         }
     });
+    // Only while the hub has a plan to back up; last in the row and pushed
+    // to its end, since the menu's panel ends at its button's end and grows
+    // toward the start, which a button at the card's start would push past
+    // a narrow window's edge (1.4.10).
     let menu = this_hub.then(|| {
         let plans = Memo::new(move |_| {
             machine.with(|machine| {
@@ -591,7 +595,13 @@ fn card(
                     .unwrap_or_default()
             })
         });
-        back_up_menu(localizer, menu_id, plans, refused)
+        let any = Memo::new(move |_| plans.with(|plans: &Vec<String>| !plans.is_empty()));
+        let localizer = Arc::clone(localizer);
+        move || {
+            any.get().then(|| {
+                view! { <div class="ms-auto">{back_up_menu(&localizer, menu_id.clone(), plans, refused)}</div> }
+            })
+        }
     });
     view! {
         <MachineCard
@@ -608,8 +618,8 @@ fn card(
             progress=progress
             zone=viewer
         >
-            {menu}
             {open}
+            {menu}
         </MachineCard>
     }
 }

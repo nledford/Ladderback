@@ -367,9 +367,10 @@ Then("the hub's own card has its Open link and no button", async function (this:
   await expect(card.getByRole("button")).toHaveCount(0);
 });
 
-When("I press Tab until focus is on the hub's own Open link", async function (this: BrowserWorld) {
+// The Open link stands before the Back up menu, which is last on the card.
+When("I press Shift+Tab until focus is on the hub's own Open link", async function (this: BrowserWorld) {
   const { hostname } = await hubItself(this);
-  await pressUntilFocusIsOn(this, "Tab", "link", `Open ${hostname}`);
+  await pressUntilFocusIsOn(this, "Shift+Tab", "link", `Open ${hostname}`);
 });
 
 Then("focus is on the hub's own main heading", async function (this: BrowserWorld) {
