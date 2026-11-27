@@ -12,7 +12,8 @@
 //   the candidates, folding in every candidate's entry and the commits since
 //   the last one. A section a candidate's notes share is merged, in release
 //   order; a candidate's "Upgrading" notes are left out, except "Upgrading
-//   from <the last release>". The candidates' own entries stay below it.
+//   from <the last release>", and of those only the newest candidate's, which
+//   restates the others. The candidates' own entries stay below it.
 //
 // Run in a checkout after `release-plz set-version <version>` with
 // CHANGELOG.md as it was: `node scripts/release-notes.ts <version>
@@ -55,11 +56,16 @@ const groups: [RegExp, string][] = [
   [/^fix$/, "Fixed"],
 ];
 
+/** A footer's first line (`Token: value` or `Token #value`), which ends the footer before it. */
+const footerToken = /^(BREAKING[ -]CHANGE|[A-Za-z][\w-]*)(: | #)/;
+
 /**
  * The CHANGELOG.md line release-plz writes for a commit, and its section:
  * `Breaking` for a breaking change of any type (`!` or a `BREAKING CHANGE:`
  * footer, kept by `protect_breaking_commits`), else Added, Changed or Fixed;
  * `undefined` for a skipped type or a message that isn't a Conventional Commit.
+ * A footer's description runs to the next footer, as in a squashed commit
+ * whose `Closes #N` follows it.
  */
 export function commitLine(commit: Commit, repo: string): { group: string; line: string } | undefined {
   // release-plz's default preprocessor links each `(#N)` to its pull request.
@@ -68,10 +74,18 @@ export function commitLine(commit: Commit, repo: string): { group: string; line:
   const m = /^([a-z]+)(?:\([^)]*\))?(!)?: (.+)$/.exec(subject.trim());
   if (!m) return undefined;
   const [, type = "", bang, description = ""] = m;
-  const footer = /^BREAKING[ -]CHANGE: ?([\s\S]*)$/m.exec(rest.join("\n"));
+  const start = rest.findIndex((line) => /^BREAKING[ -]CHANGE: /.test(line));
   const text = description.charAt(0).toUpperCase() + description.slice(1);
-  if (bang || footer) {
-    const why = footer?.[1]?.trim();
+  if (bang || start >= 0) {
+    let why = "";
+    if (start >= 0) {
+      const end = rest.findIndex((line, i) => i > start && footerToken.test(line));
+      why = rest
+        .slice(start, end < 0 ? undefined : end)
+        .join("\n")
+        .replace(/^BREAKING[ -]CHANGE: /, "")
+        .trim();
+    }
     return { group: "Breaking", line: `- ${text}${why && why !== description ? `: ${why}` : ""}` };
   }
   const group = groups.find(([pattern]) => pattern.test(type))?.[1];
@@ -111,9 +125,12 @@ export function nextRelease(version: string, tags: string[]): { from: string; si
 
 type Section = { title: string; body: string[] };
 
-/** The `###` sections of an entry's text, a fenced code block's lines kept whole. */
+/**
+ * The `###` sections of an entry's text, a fenced code block's lines kept
+ * whole; any text above the first, under the title `""`. Empty ones are left out.
+ */
 function sections(entry: string): Section[] {
-  const out: Section[] = [];
+  const out: Section[] = [{ title: "", body: [] }];
   let fenced = false;
   for (const line of entry.split("\n").slice(1)) {
     if (line.trimStart().startsWith("```")) fenced = !fenced;
@@ -125,7 +142,7 @@ function sections(entry: string): Section[] {
     while (s.body[0] === "") s.body.shift();
     while (s.body.at(-1) === "") s.body.pop();
   }
-  return out;
+  return out.filter((s) => s.title !== "" || s.body.length > 0);
 }
 
 /** Each release entry's text by version, as `## [version]` starts it, up to the next entry. */
@@ -155,8 +172,9 @@ function commitSections(commits: Commit[], repo: string): Section[] {
   return out;
 }
 
-/** Upgrading notes first, then Breaking, then release-plz's groups, then any other section. */
+/** Text above the sections, then Upgrading notes, Breaking, release-plz's groups and any other section. */
 function rank(title: string): number {
+  if (title === "") return -1;
   if (title.startsWith("Upgrading")) return 0;
   const order = ["Breaking", "Added", "Changed", "Fixed"].indexOf(title);
   return order < 0 ? 5 : order + 1;
@@ -187,13 +205,17 @@ export function releaseNotes(input: { changelog: string; version: string; tags: 
   if (known.has(version)) throw new Error(`CHANGELOG.md already has an entry for ${version}`);
   const { from, candidates } = nextRelease(version, tags);
   const last = from.slice(1);
+  const upgrading = `Upgrading from ${last}`;
   const folded = candidates.map((candidate) => {
     const entry = known.get(candidate);
     if (entry === undefined) throw new Error(`CHANGELOG.md has no entry for ${candidate} to fold into ${version}`);
-    return sections(entry).filter((s) => !s.title.startsWith("Upgrading") || s.title === `Upgrading from ${last}`);
+    return sections(entry).filter((s) => !s.title.startsWith("Upgrading") || s.title === upgrading);
   });
-  const body = merge([...folded, commitSections(commits, repo)])
-    .map((s) => `\n### ${s.title}\n\n${s.body.join("\n")}\n`)
+  // A later candidate's "Upgrading from <the last release>" replaces an earlier one's: it restates them.
+  const newest = folded.findLastIndex((list) => list.some((s) => s.title === upgrading));
+  const kept = folded.map((list, i) => list.filter((s) => s.title !== upgrading || i === newest));
+  const body = merge([...kept, commitSections(commits, repo)])
+    .map((s) => (s.title === "" ? `\n${s.body.join("\n")}\n` : `\n### ${s.title}\n\n${s.body.join("\n")}\n`))
     .join("");
   const entry = `## [${version}](${repo}/compare/${from}...v${version}) - ${date}\n${body}`;
   const unreleased = /^## \[Unreleased\]\n\n?/m.exec(changelog);
