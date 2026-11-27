@@ -24,7 +24,9 @@ pub use hub::{
     ProofAnswer, RecoveryAsk, RemovalAsk, TokenAsk, TokenAskRefused, WatchMachines, progress_dto,
     proven_floors, signed_grants, time_of,
 };
-pub use session::{BINDING_UNAVAILABLE, HubSession, HubStep, PROTOCOL_ERROR, SEQUENCE_ERROR};
+pub use session::{
+    BINDING_UNAVAILABLE, HubSession, HubStep, OUTBOX_DIVERGED, PROTOCOL_ERROR, SEQUENCE_ERROR,
+};
 pub use state::PairingState;
 
 #[cfg(test)]
