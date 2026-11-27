@@ -3179,10 +3179,11 @@ async fn i1_a_session_reports_a_repository_never_listed_as_holding_another_agent
 }
 
 /// A sync of the machine `leasing` sets up that has listed nothing since it
-/// started, and lists through `engine` before each session.
+/// started, and lists through `engine` before each session, on `connector`.
 fn listing_first(
     leasing: &Leasing,
-    engine: &Arc<crate::fakes::ListingEngine>,
+    engine: Arc<dyn crate::ports::Engine>,
+    connector: Arc<LoopbackHubConnector>,
 ) -> crate::sync::SyncWithHub {
     use domain::fleet::OutboxEpoch;
 
@@ -3191,7 +3192,7 @@ fn listing_first(
     let seen = Arc::new(OthersSnapshots::default());
     let listing = crate::snapshots::ListSnapshots::new(
         Arc::new(NoteListings::new(
-            engine.clone(),
+            engine,
             seen.clone(),
             agent_id(1),
             leasing.machine_clock.clone(),
@@ -3210,10 +3211,7 @@ fn listing_first(
         leasing.machine_clock.clone(),
     ));
     crate::sync::SyncWithHub::new(
-        connecting(
-            leasing.identity.clone(),
-            Arc::new(LoopbackHubConnector::to(leasing.hub.pairing.clone())),
-        ),
+        connecting(leasing.identity.clone(), connector),
         Arc::new(crate::fakes::InMemoryOutbox::new(OutboxEpoch::from_uuid(
             Uuid::from_u128(0xe4),
         ))),
@@ -3241,7 +3239,11 @@ async fn i1_a_session_lists_an_unlisted_repository_first_and_is_granted_its_leas
 
     let leasing = leasing(Timestamp::from_second(1_800_000_000).unwrap()).await;
     let engine = Arc::new(crate::fakes::ListingEngine::default());
-    let sync = listing_first(&leasing, &engine);
+    let sync = listing_first(
+        &leasing,
+        engine.clone(),
+        Arc::new(LoopbackHubConnector::to(leasing.hub.pairing.clone())),
+    );
     sync.sync_once().await.unwrap();
     assert_eq!(engine.listings(&photos()), 1);
     let held = leasing.owners.ownership(&photos()).await.unwrap();
@@ -3270,7 +3272,11 @@ async fn i1_a_failed_listing_before_a_session_is_refused_and_tried_again_at_the_
     let leasing = leasing(Timestamp::from_second(1_800_000_000).unwrap()).await;
     let engine = Arc::new(crate::fakes::ListingEngine::default());
     engine.fails(photos(), true);
-    let sync = listing_first(&leasing, &engine);
+    let sync = listing_first(
+        &leasing,
+        engine.clone(),
+        Arc::new(LoopbackHubConnector::to(leasing.hub.pairing.clone())),
+    );
     sync.sync_once().await.unwrap();
     assert_eq!(engine.listings(&photos()), 1);
     let held = leasing.owners.ownership(&photos()).await.unwrap();
@@ -3560,23 +3566,110 @@ async fn sync_taking_commands(
     clock: Arc<FakeClock>,
 ) -> crate::sync::SyncWithHub {
     let identity = approved(hub).await;
-    let answer = crate::hub_commands::AnswerHubCommands::new(
-        Arc::new(crate::fakes::InMemoryConfigStore::new()),
-        Arc::new(crate::fakes::InMemoryCommandLedger::default()),
-        Arc::new(StartsOne),
-        clock.clone(),
-    );
     crate::sync::SyncWithHub::new(
         connecting(identity, connector),
         Arc::new(crate::fakes::InMemoryOutbox::new(
             domain::fleet::OutboxEpoch::from_uuid(Uuid::from_u128(0xe1)),
         )),
-        clock,
+        clock.clone(),
         agent_id(1),
         hostname(1),
         None,
     )
-    .with_commands(Arc::new(answer))
+    .with_commands(answering(clock))
+}
+
+/// Answers to the hub's commands on `clock`, with the runs [`StartsOne`].
+fn answering(clock: Arc<FakeClock>) -> Arc<crate::hub_commands::AnswerHubCommands> {
+    Arc::new(crate::hub_commands::AnswerHubCommands::new(
+        Arc::new(crate::fakes::InMemoryConfigStore::new()),
+        Arc::new(crate::fakes::InMemoryCommandLedger::default()),
+        Arc::new(StartsOne),
+        clock,
+    ))
+}
+
+/// A listing engine whose listings wait to be let through, after saying
+/// one has begun.
+struct HeldListings {
+    engine: crate::fakes::ListingEngine,
+    begun: tokio::sync::Notify,
+    through: tokio::sync::Notify,
+}
+
+#[async_trait]
+impl crate::ports::Engine for HeldListings {
+    async fn run(
+        &self,
+        op: domain::OperationId,
+        job: crate::ports::Job,
+    ) -> Result<crate::ports::RunningJob, crate::ports::EngineError> {
+        self.begun.notify_one();
+        self.through.notified().await;
+        self.engine.run(op, job).await
+    }
+}
+
+/// The hub's `run-plan` of `photos`, the command `seq`, asked at `at`.
+fn run_photos(seq: u128, at: Timestamp) -> Vec<u8> {
+    api::sync::RunPlanPayload {
+        command_id: Uuid::from_u128((0x0191_u128 << 112) | seq)
+            .hyphenated()
+            .to_string(),
+        requested_at: u64::try_from(at.as_second()).unwrap(),
+        plan_id: "photos".to_owned(),
+        session: Some("0123456789abcdef".to_owned()),
+    }
+    .to_bytes()
+}
+
+/// A machine answers the hub's command while a listing holds its session,
+/// as it beats its heart then (decision 176).
+#[tokio::test]
+async fn a_session_answers_the_hubs_command_while_a_listing_holds_it() {
+    let leasing = leasing(Timestamp::from_second(1_800_000_000).unwrap()).await;
+    let held = Arc::new(HeldListings {
+        engine: crate::fakes::ListingEngine::default(),
+        begun: tokio::sync::Notify::new(),
+        through: tokio::sync::Notify::new(),
+    });
+    let connector = Arc::new(LoopbackHubConnector::to(leasing.hub.pairing.clone()));
+    let sync = listing_first(&leasing, held.clone(), connector.clone())
+        .with_commands(answering(leasing.machine_clock.clone()));
+    let result_kind = domain::fleet::command_result_kind();
+    let watched = async {
+        held.begun.notified().await;
+        connector.send_command(
+            domain::fleet::run_plan_kind(),
+            run_photos(1, leasing.hub.clock.now()),
+        );
+        // The listing holds the session until the command is answered.
+        for _ in 0..200 {
+            if !sent_of(&connector, &result_kind).is_empty() {
+                return true;
+            }
+            leasing
+                .machine_clock
+                .advance(domain::fleet::HEARTBEAT_EVERY);
+            tokio::task::yield_now().await;
+        }
+        false
+    };
+    let running = std::pin::pin!(sync.run());
+    let watched = std::pin::pin!(watched);
+    let answered = tokio::time::timeout(
+        std::time::Duration::from_secs(5),
+        futures::future::select(running, watched),
+    )
+    .await;
+    assert!(
+        matches!(answered, Ok(futures::future::Either::Right((true, _)))),
+        "the machine didn't answer while it listed"
+    );
+    assert_eq!(held.engine.listings(&photos()), 0, "the listing went on");
+    let results = sent_of(&connector, &result_kind);
+    let result = api::sync::CommandResultPayload::from_bytes(&results[0]).unwrap();
+    assert_eq!(result.result, "started", "{result:?}");
 }
 
 /// The signed messages of `kind` the agent sent on `connector`, as their
