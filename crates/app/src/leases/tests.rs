@@ -503,6 +503,15 @@ impl ConfigStore for ConfigUnreadable {
 async fn photos(
     maintenance: domain::planning::Maintenance,
 ) -> Arc<crate::fakes::InMemoryConfigStore> {
+    photos_with(maintenance, Some(repository('a'))).await
+}
+
+/// A configuration that keeps `photos`, of the ID `id` when it records
+/// one, asking `maintenance` of it.
+async fn photos_with(
+    maintenance: domain::planning::Maintenance,
+    id: Option<RepositoryId>,
+) -> Arc<crate::fakes::InMemoryConfigStore> {
     use std::collections::BTreeMap;
 
     use domain::planning::{
@@ -511,7 +520,7 @@ async fn photos(
     use domain::secrets::SecretRef;
     let entry = RepositoryConfig {
         locations: Default::default(),
-        id: Some(repository('a')),
+        id,
         settings: RepositorySettings {
             repository: "/srv/photos".to_owned(),
             repo_hot: None,
@@ -571,6 +580,36 @@ async fn a_watch_whose_cache_cant_be_read_says_so_in_the_log() {
              (store-unavailable)"
                 .to_owned()
         )]
+    );
+}
+
+/// A watch that finds repositories maintained here that record no ID,
+/// whose pause it can't note, says so in the log (#1671).
+#[tokio::test]
+async fn a_watch_says_in_the_log_what_it_maintains_with_no_id() {
+    let watch = watching(
+        photos_with(domain::planning::Maintenance::Local, None).await,
+        Arc::new(InMemoryLeaseCache::default()),
+    )
+    .await;
+    crate::test_log::capture_the_log();
+    assert_eq!(watch.watch().await, vec![]);
+    assert_eq!(
+        logged(),
+        vec![
+            (
+                log::Level::Warn,
+                "the maintenance watch can't note a pause for 1 of the repositories maintained \
+                 here: their entries record no repository ID"
+                    .to_owned()
+            ),
+            (
+                log::Level::Info,
+                "the maintenance watch found 0 of the 0 repositories this machine asks to \
+                 maintain paused, for want of a lease from its hub"
+                    .to_owned()
+            ),
+        ]
     );
 }
 

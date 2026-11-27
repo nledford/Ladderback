@@ -450,15 +450,16 @@ fn turning_maintenance_on_without_a_lease_notes_a_pause_since_then() {
     );
 }
 
+/// Maintenance that wasn't asked for wasn't paused: a lease that ran out
+/// while maintenance was off dates the pause from the toggle, not from its
+/// end, so the next watch doesn't tell a pause that only just began.
 #[test]
-fn turning_maintenance_on_after_a_lease_ran_out_notes_a_pause_since_it_ran_out() {
+fn turning_maintenance_on_after_a_lease_ran_out_notes_a_pause_since_then() {
     let mut held = granted();
-    held.turned(&repository('a'), true, hub(9 * DAY));
-    assert_eq!(held.pauses().count(), 1);
-    assert_eq!(
-        held.paused_since(&repository('a'), hub(9 * DAY)),
-        Some(hub(7 * DAY))
-    );
+    let now = hub(30 * DAY);
+    held.turned(&repository('a'), true, now);
+    assert_eq!(held.paused_since(&repository('a'), now), Some(now));
+    assert_eq!(held.watch([&repository('a')], now), vec![]);
 }
 
 #[test]

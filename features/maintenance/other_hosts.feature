@@ -67,6 +67,19 @@ Feature: A repository maintained here warns of snapshots from other hosts
     When the owner lists the repository's groups
     Then the groups warn of no other host
 
+  Scenario Outline: The review of a <run> on a paired machine that holds no lease warns of no other host
+    Given a plan "home" keeping the last 1 snapshot
+    And the repository is maintained by this agent
+    And this agent is paired with a hub that grants it no lease
+    And the repository holds 2 snapshots plain rustic made on the host "demo-desktop"
+    When the owner previews <previewing> the repository
+    Then the preview warns of no other host
+
+    Examples:
+      | run    | previewing |
+      | forget | forgetting |
+      | prune  | pruning    |
+
   Scenario: A recent snapshot another agent made under this host's name comes from another machine
     Given this agent's hostname is "demo-pi"
     And a plan "home" keeping the last 1 snapshot
