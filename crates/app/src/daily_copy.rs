@@ -71,3 +71,6 @@ impl KeepDailyCopy {
 fn later(moment: Timestamp, duration: SignedDuration) -> Timestamp {
     moment.checked_add(duration).unwrap_or(Timestamp::MAX)
 }
+
+#[cfg(test)]
+mod tests;
