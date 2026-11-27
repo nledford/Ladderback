@@ -136,7 +136,8 @@ async fn write_agent(
         .bind(status_at.as_millisecond())
         .bind(row::counter_text(agent.counter))
         .bind(agent.last_seen.as_millisecond())
-        .bind(agent.zone.as_ref().map(MachineZone::as_str));
+        .bind(agent.zone.as_ref().map(MachineZone::as_str))
+        .bind(agent.version.as_ref().map(MachineVersion::as_str));
     let query = if new { query } else { query.bind(id.as_str()) };
     query.execute(&mut *tx).await.map_err(unavailable)?;
     Ok(())
@@ -416,8 +417,15 @@ impl AgentRegistry for SqliteStore {
         agent_id: AgentId,
         version: Option<&MachineVersion>,
     ) -> Result<(), StoreError> {
-        let _ = (agent_id, version);
-        todo!()
+        let _call = self.call().await;
+        let mut conn = self.pool.acquire().await.map_err(unavailable)?;
+        sqlx::query(sql::RECORD_VERSION)
+            .bind(version.map(MachineVersion::as_str))
+            .bind(row::agent_id_text(agent_id))
+            .execute(&mut *conn)
+            .await
+            .map_err(unavailable)?;
+        Ok(())
     }
 
     async fn record_seen(&self, agent_id: AgentId, now: Timestamp) -> Result<(), StoreError> {

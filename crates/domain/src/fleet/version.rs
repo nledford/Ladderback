@@ -4,11 +4,9 @@
 //! the hub's own (#1707).
 
 use std::cmp::Ordering;
-use std::fmt;
 
-/// The longest machine version, in bytes. A build's version is a SemVer
-/// version with a short commit after it, a few dozen bytes at most.
-pub const MAX_VERSION_BYTES: usize = 64;
+pub use crate::updates::MAX_VERSION_BYTES;
+use crate::updates::Version;
 
 /// The version of Ladderback a machine runs, as its `Hello` wrote it:
 /// `0.6.0`, or `0.6.0+3f937cf` between releases. Up to
@@ -23,32 +21,31 @@ pub struct MachineVersion(String);
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct InvalidVersion;
 
-impl fmt::Display for InvalidVersion {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        f.write_str("not shaped like a version")
-    }
-}
-
-impl std::error::Error for InvalidVersion {}
-
 impl MachineVersion {
     /// `text`, if it is shaped like a version.
     pub fn parse(text: &str) -> Result<Self, InvalidVersion> {
-        let _ = text;
-        todo!()
+        let shaped = !text.is_empty()
+            && text.len() <= MAX_VERSION_BYTES
+            && text.bytes().all(|byte| byte.is_ascii_graphic());
+        if shaped {
+            Ok(Self(text.to_owned()))
+        } else {
+            Err(InvalidVersion)
+        }
     }
 
     pub fn as_str(&self) -> &str {
         &self.0
     }
 
-    /// How this version stands against `other` by SemVer precedence: the
-    /// release, then its pre-release, with build metadata ignored, so two
-    /// builds of one release are equal. None when either doesn't read as
-    /// SemVer.
+    /// How this version stands against `other` by SemVer precedence, as
+    /// the update notice orders releases: the release, then its
+    /// pre-release, with build metadata ignored, so two builds of one
+    /// release are equal. None when either doesn't read as SemVer.
     pub fn against(&self, other: &Self) -> Option<Ordering> {
-        let _ = other;
-        todo!()
+        let mine = Version::parse(&self.0).ok()?;
+        let theirs = Version::parse(&other.0).ok()?;
+        Some(mine.cmp(&theirs))
     }
 }
 
