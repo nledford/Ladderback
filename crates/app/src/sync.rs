@@ -421,16 +421,26 @@ impl SyncWithHub {
         Ok(Synced::Replayed { sent })
     }
 
-    /// Connects, telling `standing` what the hub made of the machine; none
-    /// when the hub holds the machine pending.
+    /// Connects, its `Hello` saying where the outbox stands, and telling
+    /// `standing` what the hub made of the machine; none when the hub holds
+    /// the machine pending. When the hub took the place the outbox gives
+    /// next, as after a restore from an older database, the outbox starts a
+    /// new epoch before anything is sent (§16, decision 177).
     async fn open(&self) -> Result<Option<(Connected, AgentChannel)>, SyncFailure> {
+        let stated = match self.outbox.position().await {
+            Ok(position) => position,
+            Err(error) => {
+                log::warn!("the outbox's position couldn't be read: {error:?}");
+                None
+            }
+        };
         let connected = self
             .connect
             .connect_channel(
                 self.agent_id,
                 self.hostname.clone(),
                 self.zone.clone(),
-                None,
+                stated,
             )
             .await;
         if let Some(standing) = &self.standing {
@@ -455,6 +465,18 @@ impl SyncWithHub {
             }
         }
         let (connected, channel) = connected.map_err(SyncFailure::Connect)?;
+        if let Some(stated) = stated.filter(|_| connected.new_epoch) {
+            let started = self
+                .outbox
+                .start_epoch(stated.epoch)
+                .await
+                .map_err(SyncFailure::Store)?;
+            log::warn!(
+                "the hub took the place the outbox gives next already, as after a restore from \
+                 an older database: the outbox starts a new epoch ({started:?}) so the hub keeps \
+                 its reports"
+            );
+        }
         Ok((connected.approval != Approval::Pending).then_some((connected, channel)))
     }
 
