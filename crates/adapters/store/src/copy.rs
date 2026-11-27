@@ -81,7 +81,7 @@ fn put_in_place(work: &Path, destination: &Path) -> Result<(), CopyFailed> {
 }
 
 /// Removes `file` and the journals SQLite may have left beside it.
-fn clear(file: &Path) -> io::Result<()> {
+pub(crate) fn clear(file: &Path) -> io::Result<()> {
     for suffix in ["", "-journal", "-wal", "-shm"] {
         remove_if_there(&beside(file, suffix))?;
     }
