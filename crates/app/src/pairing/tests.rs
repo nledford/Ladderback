@@ -374,6 +374,39 @@ async fn a_start_that_cant_read_a_key_file_fails() {
     );
 }
 
+/// A registry of machines the hub can't read fails its start with the
+/// error that says so: its start window can't know which machines to wait
+/// for (§16, decision 178).
+#[tokio::test]
+async fn a_start_that_cant_read_the_registry_fails() {
+    let unreadable = StoreError::Unavailable {
+        detail: "database is locked".to_owned(),
+    };
+    let registry = Arc::new(InMemoryAgentRegistry::new());
+    registry.fails_to_list(unreadable.clone());
+    let clock = Arc::new(FakeClock::new(
+        Timestamp::from_second(1_800_000_000).unwrap(),
+    ));
+    let pairing = HubPairing::new(
+        registry.clone(),
+        Arc::new(InMemoryIdentity::default()),
+        Arc::new(FakeSigning),
+        Arc::new(SeededRandom::new(1)),
+        clock.clone(),
+        "0.0.0-test".to_owned(),
+    )
+    .with_owners(Arc::new(crate::ownership::RepositoryOwners::new(
+        registry,
+        Arc::new(crate::fakes::InMemoryOwnershipRegistry::new()),
+        clock,
+        Arc::new(crate::fakes::InMemoryDriveFlush::default()),
+    )));
+    assert_eq!(
+        pairing.start().await.unwrap_err(),
+        HubPairingError::Registry(unreadable)
+    );
+}
+
 /// A hub whose key files are gone while agents are registered makes no new
 /// key, which would lock every agent out, and voids no token.
 #[tokio::test]

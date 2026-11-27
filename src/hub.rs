@@ -1920,6 +1920,26 @@ mod tests {
         assert_eq!(id, msg::CLI_HUB_KEYS_FAILED);
     }
 
+    /// A registry the hub can't read stops its start with the message that
+    /// names the registry, not the keys, and the database's text escaped.
+    #[test]
+    fn a_registry_that_stops_the_start_is_said_as_the_registry() {
+        use app::ports::StoreError;
+        let (id, args) = start_refusal(&HubPairingError::Registry(StoreError::Unavailable {
+            detail: "locked\u{1b}[31m".to_owned(),
+        }));
+        assert_eq!(id, msg::CLI_HUB_REGISTRY_FAILED);
+        assert_eq!(
+            args,
+            vec![("detail", MsgArg::Text("locked\\u{1b}[31m".to_owned()))]
+        );
+        let (id, args) = start_refusal(&HubPairingError::Registry(StoreError::Corrupt {
+            detail: "a row".to_owned(),
+        }));
+        assert_eq!(id, msg::CLI_HUB_REGISTRY_FAILED);
+        assert_eq!(args, vec![("detail", MsgArg::Text("a row".to_owned()))]);
+    }
+
     #[test]
     fn a_peer_closing_before_its_proof_names_only_what_it_cannot_serve() {
         let closed = |reason: &str| {

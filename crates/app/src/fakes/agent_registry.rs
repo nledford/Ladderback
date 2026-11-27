@@ -22,6 +22,9 @@ pub struct InMemoryAgentRegistry {
     kept: Mutex<Kept>,
     keeping: Mutex<Option<Keeping>>,
     approving: Mutex<Option<Timestamp>>,
+    /// The error listing the agents fails with, as a database that can't
+    /// be read does.
+    unlisted: Mutex<Option<StoreError>>,
 }
 
 /// How long keeping a token takes: `clock` moves on by `by` as one is kept,
@@ -77,6 +80,11 @@ impl InMemoryAgentRegistry {
             .approving
             .lock()
             .unwrap_or_else(PoisonError::into_inner) = Some(at);
+    }
+
+    /// Listing the agents fails with `error` from now on.
+    pub fn fails_to_list(&self, error: StoreError) {
+        *self.unlisted.lock().unwrap_or_else(PoisonError::into_inner) = Some(error);
     }
 }
 
@@ -233,6 +241,9 @@ impl AgentRegistry for InMemoryAgentRegistry {
     }
 
     async fn agents(&self) -> Result<Vec<AgentRecord>, StoreError> {
+        if let Some(error) = &*self.unlisted.lock().unwrap_or_else(PoisonError::into_inner) {
+            return Err(error.clone());
+        }
         Ok(self.kept().agents.clone())
     }
 

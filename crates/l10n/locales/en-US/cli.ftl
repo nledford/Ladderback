@@ -726,6 +726,10 @@ cli-hub-key-file-unavailable = the { -hub } didn't start: its key file { $file }
 # $detail (text): the reason, as the program names it. It is shown as it came.
 cli-hub-keys-failed = the { -hub } didn't start: its keys couldn't be made or read ({ $detail }). Start it again, and report this if it is said again.
 
+# The { -hub } didn't start because its database couldn't read or write its records of the machines paired with it, which it needs to know which machines to wait for before it gives any a new lease (technical design §16, decision 178).
+# $detail (text): the database's message. It is shown as it came.
+cli-hub-registry-failed = the { -hub } didn't start: its records of the { -machine(form: "other") } paired with it couldn't be read or written ({ $detail }). Start it again, and report this if it is said again.
+
 # `ladderback pair` asks for the token at a terminal; what is pasted is not shown. Printed without the program's name, and the paste follows on the same line.
 cli-pair-prompt = Paste the pairing token:
 

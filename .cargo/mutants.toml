@@ -335,7 +335,7 @@ exclude_re = [
     # test, contract or scenario prints a fake's internals, and what it
     # writes changes nothing the registry does. Named by line, so a moved
     # line brings the mutant back to judge.
-    'crates/app/src/fakes/agent_registry\.rs:36:9: replace <impl fmt::Debug for Keeping>::fmt -> fmt::Result with Ok\(Default::default\(\)\)$',
+    'crates/app/src/fakes/agent_registry\.rs:39:9: replace <impl fmt::Debug for Keeping>::fmt -> fmt::Result with Ok\(Default::default\(\)\)$',
     # `decoded`'s scratch buffer is `SIGNATURE_BYTES + 3` bytes; the mutant's
     # `SIGNATURE_BYTES * 3` is only larger. The text's length is checked
     # before it is decoded, so every decode fits either buffer and gives the
