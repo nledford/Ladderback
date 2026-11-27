@@ -66,7 +66,8 @@ fn a_file_with_a_repository_and_a_plan_gets_the_defaults_for_the_rest() {
 
 #[test]
 fn the_agent_table_is_read() {
-    let text = "schema = 1\n\n[agent]\nhostname = \"demo-host\"\nconcurrency = 4\nnice = 10\n\
+    let text = "schema = 1\n\n[agent]\nhostname = \"demo-host\"\nconcurrency = 4\n\
+                maintenance-concurrency = 3\nnice = 10\n\
                 allow-hub-restore = true\nlocale = \"en-US\"\ncheck-for-updates = false\n\
                 restore-folder = \"/srv/restores\"\ndry-run-allowlist = [\"/srv/demo\"]\n";
     assert_eq!(
@@ -74,6 +75,7 @@ fn the_agent_table_is_read() {
         &AgentSettings {
             hostname: Some(Hostname::parse("demo-host").expect("a hostname")),
             concurrency: Concurrency::new(4).expect("a concurrency"),
+            maintenance_concurrency: Concurrency::new(3).expect("a concurrency"),
             nice: Some(Nice::new(10).expect("a nice")),
             allow_hub_restore: true,
             locale: Some(Locale::parse("en-US").expect("a locale")),
@@ -602,6 +604,18 @@ fn a_value_the_model_refuses_is_reported_with_its_key_and_its_place() {
             "agent.concurrency",
             ValueKind::Concurrency,
             "0",
+        ),
+        refused(
+            agent("maintenance-concurrency = 0\n"),
+            "agent.maintenance-concurrency",
+            ValueKind::Concurrency,
+            "0",
+        ),
+        refused(
+            agent("maintenance-concurrency = 65\n"),
+            "agent.maintenance-concurrency",
+            ValueKind::Concurrency,
+            "65",
         ),
         refused(agent("nice = 20\n"), "agent.nice", ValueKind::Nice, "20"),
         refused(

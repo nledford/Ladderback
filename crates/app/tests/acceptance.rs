@@ -29,6 +29,8 @@ mod daily_copy_steps;
 #[path = "steps/locations.rs"]
 mod locations_steps;
 
+#[path = "steps/maintenance_queue.rs"]
+mod maintenance_queue_steps;
 #[path = "steps/maintenance.rs"]
 mod maintenance_steps;
 
@@ -112,6 +114,7 @@ struct Agent {
     config: config_steps::ConfigWorld,
     conditions: conditions_steps::ConditionsWorld,
     maintenance: maintenance_steps::MaintenanceWorld,
+    maintenance_queue: maintenance_queue_steps::MaintenanceQueueWorld,
     repositories: repositories_steps::RepositoriesWorld,
     forget: forget_steps::ForgetWorld,
     interop: interop_steps::InteropWorld,
@@ -174,6 +177,7 @@ impl Agent {
             sign_in: Default::default(),
             api_tokens: Default::default(),
             maintenance: Default::default(),
+            maintenance_queue: Default::default(),
             hooks: hooks_steps::HooksWorld::new(),
             hub_tls_key: Default::default(),
             pairing: Default::default(),

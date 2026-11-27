@@ -15,7 +15,7 @@ use app::ports::{
     NormalizeSources, OperationRecord, OperationStore, PowerSupply, RELEASE_TIMEOUT, Random,
     ReleaseFeed, ReleaseFeedError, ScheduleStore,
 };
-use app::queue::RunQueue;
+use app::queue::{MaintenanceQueue, RunQueue};
 use app::reads::ReadTurns;
 use app::recovery::RecoverOperations;
 use app::repositories::{ConfigWrites, RecordOpened, Recording};
@@ -330,6 +330,7 @@ impl Background {
             reports: Arc::new(log_daily_copy),
         };
         let queue = Arc::clone(&self.runner.queue);
+        let maintenance = Arc::clone(&self.runner.maintenance_queue);
         let events = Arc::clone(&self.runner.events);
         let runs: Arc<dyn PlanRuns> = self.runner;
         let scheduling = async {
@@ -355,6 +356,7 @@ impl Background {
                 link: self.conditions.link,
                 runs,
                 queue,
+                maintenance,
                 zone: domain::TimeZone::system(),
                 ends: self.ends,
                 events,
@@ -518,6 +520,7 @@ pub(crate) async fn daemon(
         service_managed,
         Arc::new(runs::Work {
             queue: Arc::clone(&daemon.background.runner.queue),
+            maintenance: Arc::clone(&daemon.background.runner.maintenance_queue),
             runs: daemon.background.runs(),
         }),
     );
@@ -824,6 +827,7 @@ async fn state_over(
         hooks: Arc::new(ProcessHookRunner::new()),
         events: Arc::clone(&bus),
         queue: Arc::new(RunQueue::new()),
+        maintenance_queue: Arc::new(MaintenanceQueue::new()),
         ends: run_ends,
         runs: runs::Runs::default(),
         // A repository's stats, read on request and after each check, are

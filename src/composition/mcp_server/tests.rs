@@ -483,7 +483,7 @@ impl http_adapter::Operations for NamingAFile {
         repository: String,
         request: http_adapter::MaintenanceRequest,
         selection: Option<String>,
-    ) -> Result<String, http_adapter::MaintenanceRefusal> {
+    ) -> Result<http_adapter::MaintenanceStarted, http_adapter::MaintenanceRefusal> {
         self.operations
             .start_maintenance(repository, request, selection)
             .await

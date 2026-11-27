@@ -14,7 +14,7 @@ use app::ports::Retention;
 use app::ports::{
     BackupJob, ConfigStore, Engine, EventBus, HookRunner, HookSetup, Job, OperationStore,
 };
-use app::queue::{Place, RunQueue};
+use app::queue::{MaintenanceQueue, Place, RunQueue};
 use app::repositories::ConfigWrites;
 use app::schedule::{PlanRuns, ScheduleReport};
 use app::secrets::{KeyringWaitsFor, ResolveRepository, UnlockWait};
@@ -67,6 +67,10 @@ pub(super) struct PlanRunner {
     /// The agent's one queue of backups, which the scheduler shares: every
     /// backup takes its turn in it (§5, the concurrency limit).
     pub(super) queue: Arc<RunQueue>,
+    /// The agent's one queue of maintenance runs, which every forget,
+    /// prune, check and adoption takes its turn in, under
+    /// `maintenance-concurrency` (decision 75, point 8).
+    pub(super) maintenance_queue: Arc<MaintenanceQueue>,
     /// Where each backup's run says how it ended, so the scheduler can
     /// retry a failed one (§5).
     pub(super) ends: app::retry::RunEndSender,
@@ -1152,7 +1156,7 @@ impl Operations for PlanRunner {
         repository: String,
         request: http_adapter::MaintenanceRequest,
         selection: Option<String>,
-    ) -> Result<String, MaintenanceRefusal> {
+    ) -> Result<http_adapter::MaintenanceStarted, MaintenanceRefusal> {
         maintenance::start(self, repository, request, selection).await
     }
 

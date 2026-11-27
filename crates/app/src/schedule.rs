@@ -44,7 +44,7 @@ use crate::ports::{
     Clock, ConfigError, ConfigStore, EventBus, Network, NetworkLink, PendingRetry, PlannedRun,
     PlatformError, PowerSupply, Random, ScheduleStore, StoreError,
 };
-use crate::queue::{Place, RunQueue};
+use crate::queue::{MaintenanceQueue, Place, RunQueue};
 use crate::recovery::QueuedEnd;
 use crate::retry::{RunEnd, RunEnds, RunOutcome};
 use crate::secrets::UnlockWait;
@@ -201,6 +201,10 @@ pub struct Scheduler {
     pub runs: Arc<dyn PlanRuns>,
     /// The agent's one queue of backups, which the routes share.
     pub queue: Arc<RunQueue>,
+    /// The agent's one queue of maintenance runs, which the routes share:
+    /// it takes `maintenance-concurrency` from each configuration read, as
+    /// the backup queue takes `concurrency` (decision 75, points 2 and 8).
+    pub maintenance: Arc<MaintenanceQueue>,
     /// The machine's time zone, which a cron schedule that names none is
     /// read in.
     pub zone: TimeZone,
@@ -352,9 +356,10 @@ impl Scheduler {
     /// now, and a plan no longer scheduled is forgotten. A plan that no
     /// longer retries a failed backup drops its pending retry and stops one
     /// already going, and one whose attempts went down drops a pending retry
-    /// past them: its series ran out. The queue runs as many backups at once
-    /// as it says from then on, the runs already waiting included. A
-    /// configuration that can't be read changes nothing.
+    /// past them: its series ran out. The backup queue runs as many backups
+    /// at once as it says from then on, and the maintenance queue as many
+    /// maintenance runs, the runs already waiting included. A configuration
+    /// that can't be read changes nothing.
     async fn refresh(&self, plans: &mut Plans) {
         let config = match self.config.load().await {
             Ok(config) => config,
@@ -365,6 +370,8 @@ impl Scheduler {
         };
         let now = self.clock.now();
         self.queue.set_limit(config.agent().concurrency);
+        self.maintenance
+            .set_limit(config.agent().maintenance_concurrency);
         let scheduled = scheduled(&config);
         let mut kept = plans.kept.take().unwrap_or_default();
         for (plan, (schedule, overlap, rules)) in &scheduled {
@@ -862,7 +869,7 @@ mod tests {
         FakeClock, FakeNetwork, FakePower, InMemoryConfigStore, InMemoryScheduleStore, SeededRandom,
     };
     use crate::ports::{PendingRetry, PlatformError};
-    use crate::queue::{Place, RunQueue};
+    use crate::queue::{MaintenanceQueue, Place, RunQueue};
     use crate::retry::{RunEnd, RunOutcome};
 
     /// The runs the scheduler starts, in order, each holding its place as a
@@ -949,6 +956,7 @@ mod tests {
             link: Arc::new(crate::fakes::FakeNetworkLink::new()),
             runs,
             queue: Arc::new(RunQueue::new()),
+            maintenance: Arc::new(MaintenanceQueue::new()),
             zone: TimeZone::UTC,
             ends: crate::retry::run_ends().1,
             events: Arc::new(crate::fakes::InMemoryEventBus::new()),
@@ -1187,6 +1195,45 @@ mod tests {
         assert!(third.turn().now_or_never().is_none(), "a lowered limit");
         drop(waiting);
         assert!(third.turn().now_or_never().is_some());
+    }
+
+    /// `maintenance-concurrency`, read by the scheduler, applies to the
+    /// maintenance runs already waiting, as `concurrency` does to backups:
+    /// a raised limit gives a waiting run its turn without another start
+    /// asking for a place (decision 75, points 2 and 8).
+    #[tokio::test]
+    async fn a_raised_maintenance_limit_read_from_the_configuration_starts_a_waiting_run() {
+        let scheduler = scheduler("2026-06-10T03:00:00Z", Arc::new(Started::default()));
+        let operation = |n| OperationId::from_uuid(domain::Uuid::from_u128(n));
+        let _running = scheduler
+            .maintenance
+            .unless_going_as(&RepositoryAlias::parse("nas").unwrap(), operation(1), one())
+            .unwrap();
+        let mut waiting = scheduler
+            .maintenance
+            .unless_going_as(
+                &RepositoryAlias::parse("laptop").unwrap(),
+                operation(2),
+                one(),
+            )
+            .unwrap();
+        assert!(waiting.turn().now_or_never().is_none(), "the limit is 1");
+        let config = AgentConfig::new(
+            AgentSettings {
+                maintenance_concurrency: Concurrency::new(2).unwrap(),
+                ..AgentSettings::default()
+            },
+            Hooks::default(),
+            BTreeMap::new(),
+            Vec::new(),
+        )
+        .unwrap();
+        scheduler.config.save(&config).await.unwrap();
+        scheduler.refresh(&mut Plans::default()).await;
+        assert!(
+            waiting.turn().now_or_never().is_some(),
+            "a raised maintenance limit"
+        );
     }
 
     #[test]

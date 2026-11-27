@@ -65,7 +65,7 @@ pub use full_disk_access::{FullDiskAccessRoute, SettingsOpener, SettingsUnopened
 pub use handed::{BuiltInTls, Handed, HandedIo, HandedListener, HandedPeer, handed};
 pub use listener::{GatedListener, PeerAddr};
 pub use machine::MachineRoute;
-pub use maintenance::{MaintenanceRefusal, MaintenanceRequest};
+pub use maintenance::{MaintenanceRefusal, MaintenanceRequest, MaintenanceStarted};
 pub use plans::{Plans, PlansError};
 pub use profiles::{Profiles, ProfilesError};
 pub use proposals::{Approval, Proposals, ProposalsError};
@@ -208,7 +208,8 @@ pub trait Operations: Send + Sync {
     /// ID.
     async fn start_backup(&self, plan: String, trigger: Trigger) -> Result<String, StartError>;
     /// Starts maintenance (forget, prune, check or adopt) on the repository
-    /// named in the request, returning the operation's ID. A forget or an
+    /// named in the request, returning the operation's ID and whether it
+    /// waits for its turn in the maintenance queue. A forget or an
     /// adoption that carries the `selection` its preview named runs only if
     /// it would act on that selection still. Refusals are typed: an unknown
     /// repository or kind, a busy repository (I7), a policy that would keep
@@ -218,7 +219,7 @@ pub trait Operations: Send + Sync {
         repository: String,
         request: MaintenanceRequest,
         selection: Option<String>,
-    ) -> Result<String, MaintenanceRefusal>;
+    ) -> Result<MaintenanceStarted, MaintenanceRefusal>;
 
     /// What `request` would do to the repository, told before it starts: a
     /// read of the repository that takes no maintenance slot and writes

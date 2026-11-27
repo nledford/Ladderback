@@ -13,7 +13,7 @@ use axum::http::StatusCode;
 use axum::response::{IntoResponse, Response};
 
 use crate::repositories::SecretRefusal;
-use crate::{AppState, StartedOperation, refused_detailed};
+use crate::{AppState, refused_detailed};
 
 /// What a maintenance request asks for, parsed: the trait's own type, so
 /// adapters never see the wire's strings.
@@ -27,6 +27,15 @@ pub enum MaintenanceRequest {
         into: String,
         from: api::AdoptionFromDto,
     },
+}
+
+/// A maintenance run the daemon accepted: its operation's ID, and whether it
+/// waits for its turn in the maintenance queue or runs now (decision 75,
+/// point 8), so the page can say which at once.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct MaintenanceStarted {
+    pub operation: String,
+    pub waiting: bool,
 }
 
 /// Why maintenance couldn't be started, previewed or listed. One refusal is
@@ -211,11 +220,20 @@ pub(crate) async fn preview(
     }
 }
 
+/// What a maintenance start answers: the operation's ID and its status as
+/// the history says it, `queued` while it waits for its turn and `running`
+/// otherwise, unenveloped.
+#[derive(serde::Serialize)]
+struct StartedMaintenance {
+    operation: String,
+    status: &'static str,
+}
+
 /// Starts maintenance on the repository the path names, of the kind the body
-/// names: forget, prune, check or adopt. The answer is the operation's ID,
-/// and the refusals are typed: an unknown repository or kind, a busy
-/// repository (I7), a retention policy that would keep nothing, or a
-/// selection the repository no longer matches.
+/// names: forget, prune, check or adopt. The answer is the operation's ID
+/// and whether it runs or waits for its turn, and the refusals are typed: an
+/// unknown repository or kind, a busy repository (I7), a retention policy
+/// that would keep nothing, or a selection the repository no longer matches.
 pub(crate) async fn start(
     State(state): State<AppState>,
     Path(alias): Path<String>,
@@ -230,9 +248,14 @@ pub(crate) async fn start(
         .start_maintenance(alias.clone(), request, selection)
         .await
     {
-        Ok(operation) => {
-            (StatusCode::ACCEPTED, Json(StartedOperation { operation })).into_response()
-        }
+        Ok(started) => (
+            StatusCode::ACCEPTED,
+            Json(StartedMaintenance {
+                operation: started.operation,
+                status: if started.waiting { "queued" } else { "running" },
+            }),
+        )
+            .into_response(),
         Err(error) => refusal(&alias, error),
     }
 }

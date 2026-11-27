@@ -394,10 +394,10 @@ impl Page {
                 return;
             }
             match answer {
-                Some(Posted::Done(body)) => match ws::started_operation(&body) {
-                    Some(operation) => {
+                Some(Posted::Done(body)) => match maintenance::started_run(&body) {
+                    Some((operation, waiting)) => {
                         self.answered(true);
-                        self.change(|panel| panel.started(kind, operation));
+                        self.change(|panel| panel.started(kind, operation, waiting));
                     }
                     None => {
                         self.answered(false);
@@ -424,7 +424,18 @@ impl Page {
         };
         let base = self.base.get_value();
         spawn_local(async move {
-            let how = ws::await_end(&base, &run.operation, run.kind, move || self.alive()).await;
+            let how = ws::await_end(
+                &base,
+                &run.operation,
+                run.kind,
+                move || self.alive(),
+                move |waiting| {
+                    if self.alive() {
+                        self.change(|panel| panel.seen(waiting));
+                    }
+                },
+            )
+            .await;
             if self.alive() {
                 self.change(|panel| panel.watched(how));
             }
@@ -758,9 +769,22 @@ fn Repository(
     let empty = page.plain(msg::UI_NO_SNAPSHOTS);
     // Each part of the panel has a memo of its own, so that a change of one
     // does not draw the others again, and a refusal read again in the same
-    // words is not said again (`say_refusals`).
+    // words is not said again (`say_refusals`). The run that goes on has
+    // two: what is said of it, which changes as its turn comes, and which run
+    // it is, which its Cancel button follows, so focus stays on the button.
     let step = Memo::new(move |_| page.panel.with(|panel| panel.step));
-    let run = Memo::new(move |_| page.panel.with(|panel| panel.run.clone()));
+    let told = Memo::new(move |_| {
+        page.panel
+            .with(|panel| panel.run.as_ref().map(maintenance::Run::told))
+    });
+    let going = Memo::new(move |_| {
+        page.panel.with(|panel| {
+            panel
+                .run
+                .as_ref()
+                .map(|run| (run.kind, run.operation.clone()))
+        })
+    });
     let ended = Memo::new(move |_| page.panel.with(|panel| panel.ended));
     let findings = Memo::new(move |_| page.panel.with(|panel| panel.findings.clone()));
     let refused = Memo::new(move |_| page.panel.with(|panel| panel.refusal.clone()));
@@ -813,12 +837,12 @@ fn Repository(
                         refusal_alert(&page.localizer.get_value(), page.refused_sentence(&refused))
                     })
             }}
+            {move || { told.get().map(|told| view! { <p>{page.words(&wording::told(told))}</p> }) }}
             {move || {
-                run.get()
-                    .map(|run| {
-                        let shown = page.words(&wording::told(Told::Running(run.kind)));
+                going
+                    .get()
+                    .map(|_| {
                         view! {
-                            <p>{shown}</p>
                             <p>
                                 <Button
                                     content=Content::Text(cancel.clone().into())

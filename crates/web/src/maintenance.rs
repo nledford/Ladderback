@@ -15,7 +15,7 @@ use api::{
 };
 
 use crate::announcer::Politeness;
-use crate::backend::{ended, reconnect_backoff};
+use crate::backend::{ended, queued, reconnect_backoff};
 
 /// What a maintenance run does.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -83,6 +83,22 @@ pub(crate) fn preview_path(alias: &str) -> String {
 /// The route that starts a maintenance run.
 pub(crate) fn start_path(alias: &str) -> String {
     format!("/api/v1/repositories/{alias}/maintenance")
+}
+
+/// What a maintenance start answers: the operation's ID and its status,
+/// `queued` while it waits for its turn.
+#[derive(serde::Deserialize)]
+struct Started {
+    operation: String,
+    status: String,
+}
+
+/// The operation a maintenance start's answer names, and whether it waits
+/// for its turn; `None` for an answer that isn't one.
+pub(crate) fn started_run(answer: &str) -> Option<(String, bool)> {
+    let started = serde_json::from_str::<Started>(answer).ok()?;
+    let waiting = queued(&started.status);
+    Some((started.operation, waiting))
 }
 
 /// The route that turns maintenance of a repository from this agent on or
@@ -675,6 +691,9 @@ pub(crate) enum Told {
     Preparing,
     /// A run of this kind is being started.
     Starting(Kind),
+    /// A run of this kind waits for its turn: the agent runs only so many
+    /// maintenance runs at once (decision 75, point 8).
+    Waiting(Kind),
     /// A run of this kind goes on.
     Running(Kind),
     /// A run ended.
@@ -698,9 +717,11 @@ impl Told {
     pub(crate) fn politeness(self) -> Politeness {
         match self {
             Told::Ended(end) => end.politeness,
-            Told::Preparing | Told::Starting(_) | Told::Running(_) | Told::Unwatched(_) => {
-                Politeness::Polite
-            }
+            Told::Preparing
+            | Told::Starting(_)
+            | Told::Waiting(_)
+            | Told::Running(_)
+            | Told::Unwatched(_) => Politeness::Polite,
         }
     }
 }
@@ -714,11 +735,41 @@ pub(crate) struct Refusal {
     pub(crate) detail: Option<String>,
 }
 
-/// The run that goes on: what it is, and the operation to stop it by.
+/// The run that goes on: what it is, the operation to stop it by, and where
+/// it stands as last read.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub(crate) struct Run {
     pub(crate) kind: Kind,
     pub(crate) operation: String,
+    pub(crate) state: RunState,
+}
+
+impl Run {
+    /// What the page shows of it: that it waits for its turn, or runs.
+    pub(crate) fn told(&self) -> Told {
+        match self.state {
+            RunState::Waiting => Told::Waiting(self.kind),
+            RunState::Running => Told::Running(self.kind),
+        }
+    }
+}
+
+/// Where a run that goes on stands, as its start's answer or the last read
+/// said: waiting for its turn, or running.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum RunState {
+    Waiting,
+    Running,
+}
+
+impl RunState {
+    fn of(waiting: bool) -> Self {
+        if waiting {
+            Self::Waiting
+        } else {
+            Self::Running
+        }
+    }
 }
 
 /// What the page does next, as the panel decides.
@@ -815,18 +866,36 @@ impl Panel {
         self.refusal = Some(refusal);
     }
 
-    /// The start was accepted: the run goes on, and is watched.
-    pub(crate) fn started(&mut self, kind: Kind, operation: String) -> Vec<Effect> {
+    /// The start was accepted: the run goes on, and is watched. Whether it
+    /// runs or waits for its turn, as the start's answer says, is told at
+    /// once.
+    pub(crate) fn started(&mut self, kind: Kind, operation: String, waiting: bool) -> Vec<Effect> {
         self.step = None;
         self.ended = None;
         self.findings = Findings::default();
         self.refusal = None;
-        self.run = Some(Run { kind, operation });
-        vec![
-            Effect::CloseReview,
-            Effect::Say(Told::Running(kind)),
-            Effect::Watch,
-        ]
+        let run = Run {
+            kind,
+            operation,
+            state: RunState::of(waiting),
+        };
+        let told = run.told();
+        self.run = Some(run);
+        vec![Effect::CloseReview, Effect::Say(told), Effect::Watch]
+    }
+
+    /// The run that goes on was read as `waiting` for its turn, or as
+    /// running: what changed is told.
+    pub(crate) fn seen(&mut self, waiting: bool) -> Vec<Effect> {
+        let Some(run) = self.run.as_mut() else {
+            return Vec::new();
+        };
+        let state = RunState::of(waiting);
+        if std::mem::replace(&mut run.state, state) == state {
+            Vec::new()
+        } else {
+            vec![Effect::Say(run.told())]
+        }
     }
 
     /// The wait for the run came to `how`. A run that ended is told, and the
@@ -1992,6 +2061,19 @@ mod tests {
     }
 
     #[test]
+    fn a_starts_answer_names_its_run_and_whether_it_waits_for_its_turn() {
+        assert_eq!(
+            started_run(r#"{"operation":"0a1b","status":"queued"}"#),
+            Some(("0a1b".to_owned(), true))
+        );
+        assert_eq!(
+            started_run(r#"{"operation":"0a1b","status":"running"}"#),
+            Some(("0a1b".to_owned(), false))
+        );
+        assert_eq!(started_run(r#"{"operation":"0a1b"}"#), None);
+    }
+
+    #[test]
     fn a_refusal_that_says_the_page_is_out_of_date_rereads_the_history() {
         assert!(rereads(ErrorCode::MaintenanceBusy));
         assert!(rereads(ErrorCode::MaintenanceSelectionChanged));
@@ -2112,7 +2194,7 @@ mod tests {
         panel.previewed();
         panel.asks(Step::Starting(Kind::Prune));
         assert!(panel.starting());
-        panel.started(Kind::Prune, operation());
+        panel.started(Kind::Prune, operation(), false);
         assert!(!panel.starting());
     }
 
@@ -2180,31 +2262,72 @@ mod tests {
     }
 
     #[test]
-    fn a_run_that_started_closes_its_review_announces_itself_and_is_watched() {
+    fn a_run_that_started_closes_its_review_is_told_as_its_start_answered_and_is_watched() {
+        for (waiting, told, state) in [
+            (false, Told::Running(Kind::Forget), RunState::Running),
+            (true, Told::Waiting(Kind::Forget), RunState::Waiting),
+        ] {
+            let mut panel = Panel::default();
+            panel.asks(Step::Starting(Kind::Forget));
+            assert_eq!(
+                panel.started(Kind::Forget, operation(), waiting),
+                vec![Effect::CloseReview, Effect::Say(told), Effect::Watch],
+                "waiting: {waiting}"
+            );
+            assert_eq!(panel.step, None);
+            assert_eq!(
+                panel.run,
+                Some(Run {
+                    kind: Kind::Forget,
+                    operation: operation(),
+                    state,
+                })
+            );
+        }
+    }
+
+    #[test]
+    fn a_run_read_as_its_start_answered_is_not_told_again() {
         let mut panel = Panel::default();
-        panel.asks(Step::Starting(Kind::Forget));
+        panel.started(Kind::Prune, operation(), false);
+        assert_eq!(panel.seen(false), Vec::new());
+        assert_eq!(panel.run.map(|run| run.state), Some(RunState::Running));
+    }
+
+    #[test]
+    fn a_run_that_waited_is_told_running_once_when_its_turn_comes() {
+        let mut panel = Panel::default();
+        panel.started(Kind::Check, operation(), true);
+        assert_eq!(panel.seen(true), Vec::new(), "the wait is told again");
         assert_eq!(
-            panel.started(Kind::Forget, operation()),
-            vec![
-                Effect::CloseReview,
-                Effect::Say(Told::Running(Kind::Forget)),
-                Effect::Watch
-            ]
+            panel.seen(false),
+            vec![Effect::Say(Told::Running(Kind::Check))]
         );
-        assert_eq!(panel.step, None);
-        assert_eq!(
-            panel.run,
-            Some(Run {
-                kind: Kind::Forget,
-                operation: operation()
-            })
-        );
+        assert_eq!(panel.seen(false), Vec::new());
+        assert_eq!(panel.run.map(|run| run.state), Some(RunState::Running));
+    }
+
+    #[test]
+    fn a_run_shows_that_it_waits_until_it_is_read_running() {
+        let mut panel = Panel::default();
+        panel.started(Kind::Prune, operation(), true);
+        let shown = |panel: &Panel| panel.run.as_ref().map(Run::told);
+        assert_eq!(shown(&panel), Some(Told::Waiting(Kind::Prune)));
+        panel.seen(false);
+        assert_eq!(shown(&panel), Some(Told::Running(Kind::Prune)));
+    }
+
+    #[test]
+    fn a_read_with_no_run_going_says_nothing() {
+        let mut panel = Panel::default();
+        assert_eq!(panel.seen(true), Vec::new());
+        assert_eq!(panel, Panel::default());
     }
 
     #[test]
     fn a_run_that_ended_is_told_and_the_history_it_changed_is_read_again() {
         let mut panel = Panel::default();
-        panel.started(Kind::Check, operation());
+        panel.started(Kind::Check, operation(), false);
         let end = End::of(Kind::Check, "failed");
         assert_eq!(
             panel.watched(Watched::Ended(end, Findings::default())),
@@ -2232,7 +2355,7 @@ mod tests {
     #[test]
     fn a_check_that_ended_keeps_what_it_found_to_show() {
         let mut panel = Panel::default();
-        panel.started(Kind::Check, operation());
+        panel.started(Kind::Check, operation(), false);
         let end = End::of(Kind::Check, "succeeded-with-warnings");
         panel.watched(Watched::Ended(end, some_findings()));
         assert_eq!(panel.findings, some_findings());
@@ -2254,14 +2377,14 @@ mod tests {
         refused.refused(refusal(ErrorCode::MaintenanceBusy));
         assert_eq!(refused.findings, Findings::default());
         let mut started = shown();
-        started.started(Kind::Check, operation());
+        started.started(Kind::Check, operation(), false);
         assert_eq!(started.findings, Findings::default());
     }
 
     #[test]
     fn a_run_the_page_stopped_watching_is_told_to_go_on_without_it() {
         let mut panel = Panel::default();
-        panel.started(Kind::Prune, operation());
+        panel.started(Kind::Prune, operation(), false);
         assert_eq!(
             panel.watched(Watched::GaveUp),
             vec![
@@ -2276,7 +2399,7 @@ mod tests {
     #[test]
     fn a_page_that_is_gone_changes_nothing() {
         let mut panel = Panel::default();
-        panel.started(Kind::Check, operation());
+        panel.started(Kind::Check, operation(), false);
         let before = panel.clone();
         assert_eq!(panel.watched(Watched::Gone), Vec::new());
         assert_eq!(panel, before);
@@ -2301,6 +2424,7 @@ mod tests {
         for told in [
             Told::Preparing,
             Told::Starting(Kind::Forget),
+            Told::Waiting(Kind::Forget),
             Told::Running(Kind::Forget),
             Told::Unwatched(Kind::Forget),
             Told::Ended(End::of(Kind::Forget, "succeeded")),

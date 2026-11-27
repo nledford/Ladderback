@@ -12,7 +12,7 @@ use std::rc::Rc;
 use std::time::Duration;
 
 use crate::backend::{
-    OperationsState, REREAD_PATIENCE, Rereads, asks_for_a_reread, ended, events_url,
+    OperationsState, REREAD_PATIENCE, Rereads, asks_for_a_reread, ended, events_url, queued,
     reconnect_backoff, succeeded,
 };
 use crate::maintenance::{self, Awaited, Beat, Kind, Pace, Watched};
@@ -903,31 +903,43 @@ pub(crate) async fn settle(base: &str, state: RwSignal<OperationsState>, operati
 }
 
 /// Reads the operation of a maintenance run of `kind` until it has ended, as
-/// [`await_operation`] does.
+/// [`await_operation`] does, telling `seen` after each read before the end
+/// whether the run still waits for its turn.
 pub(crate) async fn await_end(
     base: &str,
     operation: &str,
     kind: Kind,
     alive: impl Fn() -> bool,
+    seen: impl Fn(bool),
 ) -> Watched {
-    Watched::of(kind, await_operation(base, operation, alive).await)
+    let awaited = await_operation(base, operation, alive, |detail| {
+        seen(queued(&detail.operation.status));
+    })
+    .await;
+    Watched::of(kind, awaited)
 }
 
 /// Reads `operation` until it has ended, as the page's own reads. The pace
 /// of the reads and the patience with a silent daemon are
 /// `maintenance::Pace`'s; `alive` says whether the page that waits is still
-/// there.
+/// there, and `seen` is given each read that finds it still going.
 pub(crate) async fn await_operation(
     base: &str,
     operation: &str,
     alive: impl Fn() -> bool,
+    seen: impl Fn(&OperationDetailDto),
 ) -> Awaited {
     let url = format!("{base}{}", maintenance::operation_path(operation));
     let mut pace = Pace::default();
     while alive() {
         let answer = read_as::<OperationDetailDto>(&url, Asked::OnItsOwn, None).await;
         match pace.after(answer.as_ref()) {
-            Beat::Again(delay) => sleep(delay).await,
+            Beat::Again(delay) => {
+                if let Some(detail) = answer.as_ref() {
+                    seen(detail);
+                }
+                sleep(delay).await;
+            }
             Beat::Ended(_) => {
                 if let Some(detail) = answer {
                     return Awaited::Ended(Box::new(detail));

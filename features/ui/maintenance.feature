@@ -382,6 +382,49 @@ Feature: Maintenance of a repository on the Snapshots page
     Then the dialog "Forget snapshots of demo" is closed
     And the polite region comes to contain "A forget is running."
 
+  # The page says at once that the run waits, from the start's answer, before
+  # it reads the run.
+  Scenario: The start of a forget that waits for its turn is announced as waiting
+    Given a demo plan "home" with a tiny scratch repository
+    And the plan "home" keeps the last 1 snapshots
+    And the plan "home" has been backed up 3 times
+    And the daemon answers each maintenance start as waiting for its turn
+    When I open the address "/snapshots"
+    And I skip to the content
+    And I press Tab until focus is on the button "Snapshots of demo"
+    And I press Enter
+    And I press Tab until focus is on the button "Forget snapshots"
+    And I press Enter
+    Then the dialog "Forget snapshots of demo" opens with focus inside it
+    When I press Tab until focus is on the button "Forget 2 snapshots"
+    And I press Enter
+    Then the dialog "Forget snapshots of demo" is closed
+    And the polite region comes to contain "A forget is waiting for its turn."
+    And the main content shows the line "A forget is waiting for its turn."
+
+  # The button that cancels the run is drawn once for it, so focus stays on it
+  # when the run's turn comes and the line says it runs (A1).
+  Scenario: Focus stays on the run's Cancel button when its turn comes
+    Given a demo plan "home" with a tiny scratch repository
+    And the plan "home" keeps the last 1 snapshots
+    And the plan "home" has been backed up 3 times
+    And the daemon answers each maintenance start as waiting for its turn
+    And each read of a maintenance run says it is running
+    When I open the address "/snapshots"
+    And I skip to the content
+    And I press Tab until focus is on the button "Snapshots of demo"
+    And I press Enter
+    And I press Tab until focus is on the button "Forget snapshots"
+    And I press Enter
+    Then the dialog "Forget snapshots of demo" opens with focus inside it
+    When I press Tab until focus is on the button "Forget 2 snapshots"
+    And I press Enter
+    Then the dialog "Forget snapshots of demo" is closed
+    And the main content shows the line "A forget is waiting for its turn."
+    When I press Tab until focus is on the button "Cancel the run"
+    Then the main content shows the line "A forget is running."
+    And focus stays on the button "Cancel the run"
+
   # What the engine says is English whatever the language of the page, and the
   # page marks it so.
   Scenario: The engine's words in a refusal are an error alert, said assertively and marked as English

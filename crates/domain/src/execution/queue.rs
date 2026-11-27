@@ -1,12 +1,14 @@
-//! Which backups run and which wait (technical design §5): the agent's
+//! Which runs go and which wait (technical design §5): the agent's
 //! concurrency limit across its plans, a plan's one backup at a time, and a
-//! plan's overlap policy for a run its schedule starts. Nothing here runs
-//! anything or waits: `app::queue` hands each run its turn as this decides.
+//! plan's overlap policy for a run its schedule starts; and the same for
+//! maintenance runs, under their own limit and keyed by their repository
+//! (decision 75, point 8). Nothing here runs anything or waits: `app::queue`
+//! hands each run its turn as this decides.
 
 use std::collections::{BTreeMap, BTreeSet};
 
-use crate::PlanId;
 use crate::planning::{Concurrency, Overlap};
+use crate::{PlanId, RepositoryAlias};
 
 /// A run's place in the queue. Tickets are issued in the order the runs
 /// asked for a place, so the lowest waiting one is the oldest.
@@ -31,28 +33,35 @@ pub enum Overlapping {
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct RunWaiting;
 
-/// The backups that hold a slot and the ones waiting for one: the domain
-/// side of the persistent queue (§5, the concurrency limit). At most
-/// `limit` run at once, across plans; a plan has at most one running, and
-/// neither a run its schedule starts nor one started by hand joins a run of
-/// its plan already waiting.
+/// The runs that hold a slot and the ones waiting for one, each under its
+/// key: the domain side of the persistent queue (§5, the concurrency
+/// limit). At most `limit` run at once, across keys; a key has at most one
+/// running, and neither a run its schedule starts nor one started by hand
+/// joins a run of its key already waiting.
 #[derive(Clone, Debug)]
-pub struct BackupQueue {
+pub struct Queue<K> {
     limit: Concurrency,
     /// The next ticket to issue.
     issued: u64,
-    running: BTreeMap<Ticket, PlanId>,
+    running: BTreeMap<Ticket, K>,
     /// By ticket, so oldest first.
-    waiting: BTreeMap<Ticket, PlanId>,
+    waiting: BTreeMap<Ticket, K>,
     /// Held for a restart: no waiting run starts again (decision 94).
     held: bool,
-    /// The plans whose runs from before the start are still to be handed
+    /// The keys whose runs from before the start are still to be handed
     /// back to the queue (decision 73).
-    resuming: BTreeSet<PlanId>,
+    resuming: BTreeSet<K>,
 }
 
-impl BackupQueue {
-    /// An empty queue that runs at most `limit` backups at once.
+/// The backups, keyed by their plan.
+pub type BackupQueue = Queue<PlanId>;
+
+/// The maintenance runs (forget, prune, check, adoption), keyed by their
+/// repository, under `maintenance-concurrency` (decision 75, point 8).
+pub type MaintenanceQueue = Queue<RepositoryAlias>;
+
+impl<K: Ord + Clone> Queue<K> {
+    /// An empty queue that runs at most `limit` runs at once.
     pub fn new(limit: Concurrency) -> Self {
         Self {
             limit,
@@ -64,7 +73,7 @@ impl BackupQueue {
         }
     }
 
-    /// Runs at most `limit` backups at once from now on. Lowering it stops
+    /// Runs at most `limit` runs at once from now on. Lowering it stops
     /// nothing that runs: no run starts until fewer than `limit` do.
     pub fn set_limit(&mut self, limit: Concurrency) {
         self.limit = limit;
@@ -74,7 +83,7 @@ impl BackupQueue {
     /// unless `overlap` says it is skipped. Under either policy a plan that
     /// has a run waiting already skips it ([`Overlapping::Waiting`]); under
     /// `skip`, so does a plan whose last run is running.
-    pub fn due(&mut self, plan: &PlanId, overlap: Overlap) -> Result<Ticket, Overlapping> {
+    pub fn due(&mut self, plan: &K, overlap: Overlap) -> Result<Ticket, Overlapping> {
         if self.has_waiting(plan) {
             return Err(Overlapping::Waiting);
         }
@@ -89,7 +98,7 @@ impl BackupQueue {
     /// ([`RunWaiting`]), whichever way that one came: a schedule, a person,
     /// or the queue held from before the start, handed back or still to be
     /// ([`Self::resuming`]).
-    pub fn by_hand(&mut self, plan: &PlanId) -> Result<Ticket, RunWaiting> {
+    pub fn by_hand(&mut self, plan: &K) -> Result<Ticket, RunWaiting> {
         if self.has_waiting(plan) || self.resuming.contains(plan) {
             return Err(RunWaiting);
         }
@@ -97,14 +106,14 @@ impl BackupQueue {
     }
 
     /// Whether a run of `plan` waits for its turn.
-    fn has_waiting(&self, plan: &PlanId) -> bool {
+    fn has_waiting(&self, plan: &K) -> bool {
         self.waiting.values().any(|waiting| waiting == plan)
     }
 
     /// A run of `plan` the queue held from before the daemon started: it
     /// waits for its turn whatever else of the plan is running or waiting,
     /// since the log has it queued already. The plan is handed back.
-    pub fn push(&mut self, plan: &PlanId) -> Ticket {
+    pub fn push(&mut self, plan: &K) -> Ticket {
         let ticket = Ticket(self.issued);
         // A daemon would have to queue a run every nanosecond for 584 years
         // to wrap it.
@@ -145,24 +154,38 @@ impl BackupQueue {
     }
 
     /// Whether a run of `plan` is going: running, or waiting for its turn.
-    pub fn is_going(&self, plan: &PlanId) -> bool {
-        self.running
-            .values()
-            .chain(self.waiting.values())
-            .any(|going| going == plan)
+    pub fn is_going(&self, plan: &K) -> bool {
+        self.going(plan).is_some()
     }
 
-    /// Whether any backup holds a place: running, or waiting for its turn.
+    /// The run of `key` that is going: the one running, or else the oldest
+    /// waiting for its turn; `None` when none is.
+    pub fn going(&self, key: &K) -> Option<Ticket> {
+        let of_key = |(ticket, going): (&Ticket, &K)| (going == key).then_some(*ticket);
+        self.running
+            .iter()
+            .find_map(of_key)
+            .or_else(|| self.waiting.iter().find_map(of_key))
+    }
+
+    /// Whether any run holds a place: running, or waiting for its turn.
     pub fn is_busy(&self) -> bool {
         !self.running.is_empty() || !self.waiting.is_empty()
     }
 
-    /// Holds the queue for a restart that waits for the running backups to
-    /// end: from now on no waiting run starts, and a run that asks for a
-    /// place waits, for the daemon that starts next to run (decision 94).
-    /// The restart ends the hold, or [`Self::release`] when it is canceled.
+    /// Holds the queue for a restart that waits for the running runs to
+    /// end: from now on no waiting run starts. A backup that asks for a
+    /// place waits, for the daemon that starts next to run (decision 94); a
+    /// maintenance run is refused one, and one still waiting ends at the next
+    /// start (decision 75, point 8). The restart ends the hold, or
+    /// [`Self::release`] when it is canceled.
     pub fn hold(&mut self) {
         self.held = true;
+    }
+
+    /// Whether a restart holds the queue ([`Self::hold`]).
+    pub fn is_held(&self) -> bool {
+        self.held
     }
 
     /// Lets go of the hold of a restart that was canceled: the waiting runs
@@ -176,7 +199,7 @@ impl BackupQueue {
     /// plan's run takes its place again ([`Self::push`]), or the daemon has
     /// handed back every one ([`Self::resumed`]), a run of the plan started
     /// by hand is refused as if that run waited already ([`RunWaiting`]).
-    pub fn resuming(&mut self, plans: impl IntoIterator<Item = PlanId>) {
+    pub fn resuming(&mut self, plans: impl IntoIterator<Item = K>) {
         self.resuming.extend(plans);
     }
 
@@ -186,7 +209,7 @@ impl BackupQueue {
         self.resuming.clear();
     }
 
-    /// How many backups hold a slot: running, past their turn.
+    /// How many runs hold a slot: running, past their turn.
     pub fn running(&self) -> usize {
         self.running.len()
     }
@@ -207,6 +230,26 @@ mod tests {
     }
 
     #[test]
+    fn the_run_going_is_the_running_one_or_else_the_oldest_waiting() {
+        let mut queue = BackupQueue::new(limit(1));
+        assert_eq!(queue.going(&plan("home")), None);
+        let docs = queue.push(&plan("docs"));
+        let first = queue.push(&plan("home"));
+        queue.push(&plan("home"));
+        assert_eq!(
+            queue.going(&plan("home")),
+            Some(first),
+            "the oldest waiting"
+        );
+        assert_eq!(queue.start(), vec![docs]);
+        let later = queue.push(&plan("docs"));
+        assert_eq!(queue.going(&plan("docs")), Some(docs), "the running one");
+        queue.leave(docs);
+        assert_eq!(queue.going(&plan("docs")), Some(later));
+        assert_eq!(queue.going(&plan("photos")), None);
+    }
+
+    #[test]
     fn a_queue_is_busy_while_a_run_is_waiting_or_running() {
         let mut queue = BackupQueue::new(limit(1));
         assert!(!queue.is_busy());
@@ -216,6 +259,16 @@ mod tests {
         assert!(queue.is_busy(), "running");
         queue.leave(home);
         assert!(!queue.is_busy());
+    }
+
+    #[test]
+    fn a_queue_is_held_from_a_restarts_hold_until_its_release() {
+        let mut queue = BackupQueue::new(limit(1));
+        assert!(!queue.is_held());
+        queue.hold();
+        assert!(queue.is_held());
+        queue.release();
+        assert!(!queue.is_held());
     }
 
     #[test]

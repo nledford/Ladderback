@@ -52,12 +52,15 @@ use crate::ports::{
     PruneJob, RepositoryAccess, Retention, RetentionError, RewriteJob, RunningJob, SnapshotSummary,
     SourcesError, Start, StoreError,
 };
+use crate::queue::{MaintenanceQueue, NoPlace, Place};
 use crate::reads::ReadTurns;
 use crate::repositories::ConfigWrites;
 use crate::secrets::{ResolveError, ResolveRepository, ResolvedRepository};
 use domain::execution::deadline::KeepDelete;
 use domain::execution::plan_tags::PlanTags;
-use domain::execution::{FailureReason, Operation, OperationKind, Trigger, Warning, WarningKind};
+use domain::execution::{
+    FailureReason, Operation, OperationKind, Trigger, TurnRefusal, Warning, WarningKind,
+};
 use domain::secrets::SecretWarning;
 
 /// The `keep-delete` a manual prune uses when nothing else says: six days,
@@ -186,6 +189,59 @@ pub enum MaintenanceError {
     /// previews one, lest it take another computer's snapshots for its own
     /// (I1, I6). Refused before the repository is opened.
     DataFolderCopied,
+    /// A restart that waits for the running operations holds the
+    /// maintenance queue, and starts no new run until the daemon is back
+    /// (decision 94; decision 75, point 8). Nothing was stored.
+    RestartPending,
+}
+
+/// Why a run couldn't take its repository's slot (I7), when it started or
+/// when its turn came: a start's own refusals, each told as the
+/// [`MaintenanceError`] of its name.
+#[derive(Debug)]
+enum SlotRefused {
+    UnknownRepository,
+    NotOwner,
+    NoLease(NoLease),
+    PruneHeld,
+    Unavailable(Box<ConfigError>),
+    Busy { running: OperationId },
+    Store(StoreError),
+}
+
+impl From<SlotRefused> for MaintenanceError {
+    fn from(refused: SlotRefused) -> Self {
+        match refused {
+            SlotRefused::UnknownRepository => Self::UnknownRepository,
+            SlotRefused::NotOwner => Self::NotOwner,
+            SlotRefused::NoLease(why) => Self::NoLease(why),
+            SlotRefused::PruneHeld => Self::PruneHeld,
+            SlotRefused::Unavailable(error) => Self::Unavailable(error),
+            SlotRefused::Busy { running } => Self::Busy { running },
+            SlotRefused::Store(error) => Self::Store(error),
+        }
+    }
+}
+
+impl SlotRefused {
+    /// How a run that waited for its turn ends when this refused it the
+    /// slot (decision 75, point 8): failed with the refusal, as a start then
+    /// would have been refused, or with a configuration that can't be used.
+    /// A start the log itself refused is its error instead: the run stays
+    /// queued, and the next start ends it (decision 73).
+    fn failure(self, alias: &RepositoryAlias) -> Result<FailureReason, StoreError> {
+        let alias = alias.clone();
+        let refusal = match self {
+            Self::UnknownRepository => TurnRefusal::RepositoryUnknown { alias },
+            Self::NotOwner => TurnRefusal::NotOwner { alias },
+            Self::NoLease(_) => TurnRefusal::NoLease { alias },
+            Self::PruneHeld => TurnRefusal::PruneHeld { alias },
+            Self::Busy { running } => TurnRefusal::Busy { running },
+            Self::Unavailable(_) => return Ok(FailureReason::ConfigUnusable),
+            Self::Store(error) => return Err(error),
+        };
+        Ok(FailureReason::TurnRefused(refusal))
+    }
 }
 
 /// A maintenance run with every decision made and its I7 slot held: the
@@ -200,6 +256,11 @@ pub struct PreparedMaintenance {
     /// that isn't paired. A prune deletes only under the same (§16,
     /// decision 161).
     lease: Option<LeaseEpoch>,
+    /// The run's place in the maintenance queue, kept until `execute` ends,
+    /// however it ends, so the next run waits for this one (decision 75,
+    /// point 8); `None` for a run [`RunMaintenance::start`] started outside
+    /// the queue.
+    place: Option<Place>,
 }
 
 impl PreparedMaintenance {
@@ -236,6 +297,33 @@ impl MaintenanceAssessment {
     pub fn other_hosts(&self) -> &OtherHosts {
         &self.other_hosts
     }
+}
+
+/// An assessed run with its place in the maintenance queue (decision 75,
+/// point 8): its turn came at once, or it waits for it, in the log as
+/// queued.
+pub enum Queued {
+    /// Its turn came at once: [`RunMaintenance::start_turn`] takes its
+    /// repository's slot, as [`RunMaintenance::start`] does.
+    Turn(TurnNow),
+    /// It waits for its turn, in the log as queued:
+    /// [`RunMaintenance::run_waiting`] runs it once its turn comes.
+    Waiting(WaitingMaintenance),
+}
+
+/// A run whose turn came as it took its place.
+pub struct TurnNow {
+    assessment: MaintenanceAssessment,
+    place: Place,
+}
+
+/// A run waiting for its turn, in the log as queued.
+pub struct WaitingMaintenance {
+    assessment: MaintenanceAssessment,
+    /// Boxed, as a waiting run is otherwise much larger than one whose turn
+    /// came at once.
+    operation: Box<Operation>,
+    place: Place,
 }
 
 /// What a run would do, decided and not yet done (§7.3).
@@ -388,6 +476,9 @@ pub struct RunMaintenance {
     /// The leases from this machine's hub, when it may be paired with one:
     /// a paired machine runs maintenance only while it holds one (I1).
     leases: Option<Arc<crate::leases::MaintenanceLeases>>,
+    /// The maintenance queue every run takes its turn in, under the limit
+    /// `maintenance-concurrency` sets (decision 75, point 8).
+    queue: Arc<MaintenanceQueue>,
 }
 
 impl RunMaintenance {
@@ -423,6 +514,7 @@ impl RunMaintenance {
             stats: None,
             machine: Arc::default(),
             leases: None,
+            queue: Arc::default(),
         }
     }
 
@@ -633,8 +725,148 @@ impl RunMaintenance {
         &self,
         assessment: MaintenanceAssessment,
     ) -> Result<PreparedMaintenance, MaintenanceError> {
+        let operation = self.queued(&assessment);
+        Ok(self.take_slot(assessment, operation, None).await?)
+    }
+
+    /// Takes the maintenance queue's limit and places from `queue`, the
+    /// agent's one, so the limit holds across every run (decision 75, point
+    /// 8).
+    pub fn with_queue(self, queue: Arc<MaintenanceQueue>) -> Self {
+        Self { queue, ..self }
+    }
+
+    /// Takes the assessed run's place in the maintenance queue, under
+    /// `maintenance-concurrency` as the configuration says now (decision
+    /// 75, point 8). A run of a repository that has one going, running or
+    /// waiting for its turn, is refused with [`MaintenanceError::Busy`],
+    /// naming that one, with nothing stored (I7); while a restart holds the
+    /// queue, every run is refused with [`MaintenanceError::RestartPending`],
+    /// with nothing stored. A run whose turn comes at once is
+    /// [`Queued::Turn`], stored nowhere yet; one that waits is stored as
+    /// queued first, [`Queued::Waiting`].
+    ///
+    /// A call dropped once the queued row is stored leaves it queued until
+    /// the next start ends it, so a caller that can be dropped awaits this,
+    /// and what follows, on a task of its own, as it does [`Self::start`].
+    pub async fn queue(
+        &self,
+        assessment: MaintenanceAssessment,
+    ) -> Result<Queued, MaintenanceError> {
+        let limit = self.load().await?.agent().maintenance_concurrency;
+        let mut place = self
+            .queue
+            .unless_going_as(&assessment.alias, assessment.operation, limit)
+            .map_err(|refused| match refused {
+                NoPlace::Held => MaintenanceError::RestartPending,
+                NoPlace::Going(Some(running)) => MaintenanceError::Busy { running },
+                // Every run takes its place in the maintenance queue with its
+                // operation, so the queue names one; were it ever to name
+                // none, the run is refused all the same (I7).
+                NoPlace::Going(None) => MaintenanceError::Store(StoreError::Unavailable {
+                    detail: "the maintenance queue holds a run of the repository it can't name"
+                        .to_owned(),
+                }),
+            })?;
+        if place.turn().now_or_never().is_some() {
+            return Ok(Queued::Turn(TurnNow { assessment, place }));
+        }
+        let operation = self.queued(&assessment);
+        self.store
+            .save(&operation, None)
+            .await
+            .map_err(MaintenanceError::Store)?;
+        Ok(Queued::Waiting(WaitingMaintenance {
+            assessment,
+            operation: Box::new(operation),
+            place,
+        }))
+    }
+
+    /// Takes the repository's slot of a run whose turn came at once, as
+    /// [`Self::start`] does, holding its place in the queue until `execute`
+    /// ends; a refusal gives the place up at once.
+    pub async fn start_turn(&self, turn: TurnNow) -> Result<PreparedMaintenance, MaintenanceError> {
+        let TurnNow { assessment, place } = turn;
+        let operation = self.queued(&assessment);
+        Ok(self.take_slot(assessment, operation, Some(place)).await?)
+    }
+
+    /// Waits for the turn of a run that waits for it, or for `cancel`, and
+    /// runs it once it comes. A cancel first ends it as canceled, having run
+    /// nothing. A turn that finds the run can no longer go ahead, as a start
+    /// then would have been refused, ends it as failed with why
+    /// ([`FailureReason::TurnRefused`]), having run nothing. Either end is
+    /// recorded and announced, and the place is given up at once.
+    pub async fn run_waiting(
+        &self,
+        waiting: WaitingMaintenance,
+        cancel: impl Future<Output = ()> + Send,
+    ) -> Finished {
+        let WaitingMaintenance {
+            assessment,
+            operation,
+            mut place,
+        } = waiting;
+        let mut operation = *operation;
+        let mut cancel = pin!(cancel.fuse());
+        let turn = {
+            let mut turn = pin!(place.turn().fuse());
+            select_biased! {
+                () = cancel.as_mut() => false,
+                () = turn => true,
+            }
+        };
+        if !turn {
+            drop(place);
+            let _ = operation.cancel(self.clock.now());
+            return self.ended(operation).await;
+        }
+        let alias = assessment.alias.clone();
+        match self
+            .take_slot(assessment, operation.clone(), Some(place))
+            .await
+        {
+            Ok(prepared) => self.execute(prepared, cancel).await,
+            Err(refused) => match refused.failure(&alias) {
+                Ok(reason) => {
+                    let _ = operation.fail(reason, self.clock.now());
+                    self.ended(operation).await
+                }
+                Err(error) => Finished {
+                    operation,
+                    result: None,
+                    recording_errors: vec![error],
+                    stats_failed: None,
+                },
+            },
+        }
+    }
+
+    /// The assessed run as an operation queued now, under the alias it was
+    /// asked under.
+    fn queued(&self, assessment: &MaintenanceAssessment) -> Operation {
+        Operation::queue(
+            assessment.operation,
+            assessment.job.kind(),
+            Trigger::Manual,
+            assessment.job.target(),
+            self.clock.now(),
+        )
+        .with_repository_alias(assessment.alias.clone())
+    }
+
+    /// Takes the repository's slot (I7) for `operation`, the assessed run
+    /// as it was queued, and starts it, holding `place` until `execute`
+    /// ends.
+    async fn take_slot(
+        &self,
+        assessment: MaintenanceAssessment,
+        mut operation: Operation,
+        place: Option<Place>,
+    ) -> Result<PreparedMaintenance, SlotRefused> {
         let MaintenanceAssessment {
-            operation: id,
+            operation: _,
             alias,
             job,
             partition,
@@ -654,17 +886,9 @@ impl RunMaintenance {
         if matches!(job, Job::Prune(_)) {
             self.unheld(&alias, opened).await?;
         }
-        let mut operation = Operation::queue(
-            id,
-            job.kind(),
-            Trigger::Manual,
-            job.target(),
-            self.clock.now(),
-        )
-        .with_repository_alias(alias);
         #[expect(
             clippy::expect_used,
-            reason = "the operation was queued a moment above and nothing else runs"
+            reason = "the operation is queued, as the run's own and nothing else's, until here"
         )]
         operation
             .start(self.clock.now())
@@ -685,9 +909,24 @@ impl RunMaintenance {
                 job,
                 partition,
                 lease,
+                place,
             }),
-            Ok(Start::Refused { running }) => Err(MaintenanceError::Busy { running }),
-            Err(error) => Err(MaintenanceError::Store(error)),
+            Ok(Start::Refused { running }) => Err(SlotRefused::Busy { running }),
+            Err(error) => Err(SlotRefused::Store(error)),
+        }
+    }
+
+    /// Records `operation` as it ended before it ran, announces its end, and
+    /// says so.
+    async fn ended(&self, operation: Operation) -> Finished {
+        let mut recording_errors = Vec::new();
+        self.record(&operation, &None, &mut recording_errors).await;
+        announce_end(self.events.as_deref(), &operation).await;
+        Finished {
+            operation,
+            result: None,
+            recording_errors,
+            stats_failed: None,
         }
     }
 
@@ -723,7 +962,7 @@ impl RunMaintenance {
                 // does, only that this agent maintains it. It only reads, so
                 // it lists nothing and warns of nothing.
                 self.maintained(alias).await?;
-                Ok((
+                Ok::<_, MaintenanceError>((
                     MaintenancePreview::Check(CheckPreview {
                         read_data: Self::CHECK_READS_DATA,
                     }),
@@ -964,13 +1203,17 @@ impl RunMaintenance {
     /// repository `alias` (I1, §7.3): refused with
     /// [`MaintenanceError::NotOwner`] otherwise, before anything else is
     /// asked of the repository.
-    async fn maintained(&self, alias: &RepositoryAlias) -> Result<AgentConfig, MaintenanceError> {
-        let config = self.load().await?;
+    async fn maintained(&self, alias: &RepositoryAlias) -> Result<AgentConfig, SlotRefused> {
+        let config = self
+            .config
+            .load()
+            .await
+            .map_err(|error| SlotRefused::Unavailable(Box::new(error)))?;
         let repository = config
             .repository(alias)
-            .ok_or(MaintenanceError::UnknownRepository)?;
+            .ok_or(SlotRefused::UnknownRepository)?;
         if !Ownership::owned_here(repository.maintenance) {
-            return Err(MaintenanceError::NotOwner);
+            return Err(SlotRefused::NotOwner);
         }
         Ok(config)
     }
@@ -1040,7 +1283,7 @@ impl RunMaintenance {
         &self,
         alias: &RepositoryAlias,
         repository: Option<&RepositoryId>,
-    ) -> Result<Option<LeaseEpoch>, MaintenanceError> {
+    ) -> Result<Option<LeaseEpoch>, SlotRefused> {
         let Some(leases) = &self.leases else {
             return Ok(None);
         };
@@ -1051,7 +1294,7 @@ impl RunMaintenance {
                 alias.as_str(),
                 no_lease_because(&why)
             );
-            MaintenanceError::NoLease(why)
+            SlotRefused::NoLease(why)
         })
     }
 
@@ -1064,7 +1307,7 @@ impl RunMaintenance {
         &self,
         alias: &RepositoryAlias,
         repository: Option<&RepositoryId>,
-    ) -> Result<(), MaintenanceError> {
+    ) -> Result<(), SlotRefused> {
         let Some(leases) = &self.leases else {
             return Ok(());
         };
@@ -1074,7 +1317,7 @@ impl RunMaintenance {
                  hub, and another machine may be backing up to the repository",
                 alias.as_str()
             );
-            return Err(MaintenanceError::PruneHeld);
+            return Err(SlotRefused::PruneHeld);
         }
         Ok(())
     }
@@ -1380,6 +1623,9 @@ impl RunMaintenance {
             job,
             partition: _,
             lease,
+            // Held until the run ends, however it ends, the future dropped
+            // with it: the queue's next run waits for this one's end.
+            place: _place,
         } = prepared;
         // The log has had the operation running since `start` stored it, so
         // the news can go out now, once however many jobs the run takes (#305).
@@ -2405,6 +2651,174 @@ mod record_tests {
 
 #[cfg(test)]
 #[cfg(feature = "fakes")]
+mod place_tests {
+    //! A run keeps its place in the maintenance queue until `execute` ends,
+    //! however it ends, and gives it up then (decision 75, point 8).
+
+    use std::assert_matches;
+    use std::collections::BTreeMap;
+    use std::sync::Arc;
+    use std::time::Duration;
+
+    use async_trait::async_trait;
+    use domain::execution::{OperationStatus, Target};
+    use domain::planning::Concurrency;
+    use domain::secrets::SecretValue;
+    use domain::{AgentId, Timestamp, Uuid};
+    use futures::stream;
+
+    use super::*;
+    use crate::fakes::{
+        FakeClock, FakeRetention, FakeSecrets, FakeSources, InMemoryConfigStore,
+        InMemoryOperationStore,
+    };
+    use crate::ports::JobControl;
+
+    struct Nothing;
+
+    #[async_trait]
+    impl JobControl for Nothing {
+        async fn stop(&mut self) {}
+    }
+
+    /// An engine whose every job starts and then says nothing.
+    struct Silent;
+
+    #[async_trait]
+    impl Engine for Silent {
+        async fn run(&self, _op: OperationId, _job: Job) -> Result<RunningJob, EngineError> {
+            Ok(RunningJob {
+                events: stream::pending().boxed(),
+                control: Box::new(Nothing),
+            })
+        }
+    }
+
+    /// An engine that can't be started.
+    struct Refuses;
+
+    #[async_trait]
+    impl Engine for Refuses {
+        async fn run(&self, _op: OperationId, _job: Job) -> Result<RunningJob, EngineError> {
+            Err(EngineError::Unavailable {
+                detail: "no such file or directory".to_owned(),
+            })
+        }
+    }
+
+    fn use_case(engine: Arc<dyn Engine>) -> RunMaintenance {
+        RunMaintenance::new(
+            engine,
+            Arc::new(FakeClock::auto_advancing(Timestamp::UNIX_EPOCH)),
+            Arc::new(InMemoryOperationStore::new()),
+            ResolveRepository::new(Arc::new(FakeSecrets::default())),
+            Arc::new(FakeRetention),
+            Arc::new(InMemoryConfigStore::new()),
+            Arc::default(),
+            AgentId::from_uuid(Uuid::from_u128(1)),
+            "demo-host".to_owned(),
+            Arc::new(FakeSources),
+        )
+    }
+
+    fn alias(name: &str) -> RepositoryAlias {
+        RepositoryAlias::parse(name).unwrap()
+    }
+
+    fn id(n: u128) -> OperationId {
+        OperationId::from_uuid(Uuid::from_u128(n))
+    }
+
+    /// A running check of "nas" holding the queue's one turn, and the place
+    /// of a check of "laptop" waiting for it.
+    fn prepared(queue: &MaintenanceQueue) -> (PreparedMaintenance, Place) {
+        let one = Concurrency::default();
+        let place = queue.unless_going_as(&alias("nas"), id(1), one).unwrap();
+        let mut next = queue.unless_going_as(&alias("laptop"), id(2), one).unwrap();
+        assert!(
+            next.turn().now_or_never().is_none(),
+            "the limit of one holds"
+        );
+        let mut operation = Operation::queue(
+            id(1),
+            OperationKind::Check,
+            Trigger::Manual,
+            Target {
+                plan: None,
+                repository: None,
+            },
+            Timestamp::UNIX_EPOCH,
+        );
+        operation.start(Timestamp::UNIX_EPOCH).unwrap();
+        let job = Job::Check(CheckJob {
+            repository: RepositoryAccess {
+                repository: "/srv/nas/repo".to_owned(),
+                repo_hot: None,
+                password: SecretValue::new("demo-password"),
+                options: BTreeMap::new(),
+                options_hot: BTreeMap::new(),
+                options_cold: BTreeMap::new(),
+                secrets: Vec::new(),
+                id: None,
+                entry: None,
+            },
+            read_data: false,
+        });
+        let prepared = PreparedMaintenance {
+            operation,
+            job,
+            partition: None,
+            lease: None,
+            place: Some(place),
+        };
+        (prepared, next)
+    }
+
+    /// The next run got the turn the ended one gave up.
+    fn released(queue: &MaintenanceQueue, mut next: Place) {
+        assert!(
+            next.turn().now_or_never().is_some(),
+            "the next run didn't get its turn"
+        );
+        assert_eq!(queue.running(), 1, "the ended run still counts");
+    }
+
+    #[tokio::test]
+    async fn a_run_that_fails_gives_up_its_place_as_it_ends() {
+        let queue = MaintenanceQueue::new();
+        let (prepared, next) = prepared(&queue);
+        let finished = use_case(Arc::new(Refuses))
+            .execute(prepared, futures::future::pending())
+            .await;
+        assert_matches!(finished.operation.status(), OperationStatus::Failed { .. });
+        released(&queue, next);
+    }
+
+    #[tokio::test]
+    async fn a_canceled_run_gives_up_its_place_as_it_ends() {
+        let queue = MaintenanceQueue::new();
+        let (prepared, next) = prepared(&queue);
+        let finished = use_case(Arc::new(Silent))
+            .execute(prepared, futures::future::ready(()))
+            .await;
+        assert_eq!(*finished.operation.status(), OperationStatus::Canceled);
+        released(&queue, next);
+    }
+
+    #[tokio::test]
+    async fn a_run_dropped_while_it_runs_gives_up_its_place() {
+        let queue = MaintenanceQueue::new();
+        let (prepared, next) = prepared(&queue);
+        let use_case = use_case(Arc::new(Silent));
+        let run = use_case.execute(prepared, futures::future::pending());
+        let dropped = tokio::time::timeout(Duration::from_millis(50), run).await;
+        assert!(dropped.is_err(), "the silent run ended");
+        released(&queue, next);
+    }
+}
+
+#[cfg(test)]
+#[cfg(feature = "fakes")]
 mod config_tests {
     use std::sync::Arc;
 
@@ -2595,6 +3009,7 @@ mod cancel_tests {
             }),
             partition: None,
             lease: None,
+            place: None,
         }
     }
 

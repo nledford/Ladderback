@@ -176,6 +176,7 @@ async fn what_hooks_printing_secrets_left(
         hooks: kept.clone(),
         events: Arc::new(BroadcastEventBus::new()),
         queue: Arc::new(RunQueue::new()),
+        maintenance_queue: Arc::new(app::queue::MaintenanceQueue::new()),
         ends,
         runs: crate::composition::runs::Runs::default(),
         readings: Arc::new(app::fakes::InMemoryStatsStore::new()),

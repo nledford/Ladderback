@@ -73,6 +73,10 @@ pub struct AgentSettings {
     /// The host name its snapshots carry, when it isn't the system's.
     pub hostname: Option<Hostname>,
     pub concurrency: Concurrency,
+    /// How many maintenance runs (forget, prune, check, adoption) it runs
+    /// at once across its repositories, apart from its backups (decision
+    /// 75, point 8): one unless `maintenance-concurrency` says more.
+    pub maintenance_concurrency: Concurrency,
     pub nice: Option<Nice>,
     /// Whether the hub may restore files onto this machine (§10.4).
     pub allow_hub_restore: bool,
@@ -705,6 +709,7 @@ mod tests {
         let settings = AgentSettings {
             hostname: Some(Hostname::parse("demo-host").unwrap()),
             concurrency: Concurrency::new(2).unwrap(),
+            maintenance_concurrency: Concurrency::new(3).unwrap(),
             nice: Some(Nice::new(10).unwrap()),
             allow_hub_restore: true,
             locale: Some(Locale::parse("en-US").unwrap()),

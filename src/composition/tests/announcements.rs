@@ -142,7 +142,8 @@ async fn a_check_is_announced_to_the_pages_once_and_once_the_log_has_its_end() {
     let id = runner
         .start_maintenance("demo".into(), http_adapter::MaintenanceRequest::Check, None)
         .await
-        .expect("the check starts");
+        .expect("the check starts")
+        .operation;
 
     log.arrived().await;
     assert_eq!(
@@ -227,7 +228,8 @@ async fn a_check_is_announced_to_the_pages_as_started_once() {
     let id = runner
         .start_maintenance("demo".into(), http_adapter::MaintenanceRequest::Check, None)
         .await
-        .expect("the check starts");
+        .expect("the check starts")
+        .operation;
 
     let mut news = Vec::new();
     let end = async {

@@ -432,7 +432,8 @@ fn restore_dialog(
                             value.set(String::new());
                             open.set(false);
                             started.show(RESTORE_BUTTON, words(&restore::running(&name)));
-                            let awaited = ws::await_operation(&base, &operation, || true).await;
+                            let awaited =
+                                ws::await_operation(&base, &operation, || true, |_| {}).await;
                             if let Some((said, politeness)) =
                                 restore::ended(&name, folder.as_deref(), &awaited)
                             {

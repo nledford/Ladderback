@@ -1,31 +1,59 @@
 //! The turns of the persistent queue (technical design §5): each backup the
-//! agent starts takes a [`Place`] here, and runs once the place's turn comes.
-//! What may start when is the domain's [`BackupQueue`]: the concurrency
-//! limit across plans, a plan's one backup at a time, and a plan's overlap
-//! policy for a run its schedule starts. This module only hands each run its
-//! turn, and frees a run's slot when its place is dropped, however the run
-//! ended.
+//! agent starts takes a [`Place`] in the [`RunQueue`], and each maintenance
+//! run one in the [`MaintenanceQueue`] (decision 75, point 8), and runs once
+//! the place's turn comes. What may start when is the domain's
+//! [`Queue`](domain::execution::queue::Queue): the concurrency limit across
+//! keys, a key's one run at a time, and a plan's overlap policy for a run its
+//! schedule starts. This module only hands each run its turn, and frees a
+//! run's slot when its place is dropped, however the run ended.
 
 use std::collections::BTreeMap;
 use std::convert::Infallible;
 use std::sync::{Arc, Mutex, PoisonError};
 
-use domain::PlanId;
-use domain::execution::queue::{BackupQueue, Overlapping, RunWaiting, Ticket};
+use domain::execution::queue::{self, Overlapping, RunWaiting, Ticket};
 use domain::planning::{Concurrency, Overlap};
+use domain::{OperationId, PlanId, RepositoryAlias};
 use futures::channel::oneshot;
 
-/// The agent's one queue of backups. Every backup takes its place here, so
-/// the limit holds across the scheduler, the routes and the runs the queue
-/// held from before the start.
-pub struct RunQueue {
-    state: Arc<Mutex<State>>,
+/// A queue of runs keyed by `K`, whose places hand each run its turn.
+pub struct Queue<K> {
+    state: Arc<Mutex<State<K>>>,
 }
 
-struct State {
-    queue: BackupQueue,
+/// The agent's one queue of backups, keyed by their plan. Every backup
+/// takes its place here, so the limit holds across the scheduler, the
+/// routes and the runs the queue held from before the start.
+pub type RunQueue = Queue<PlanId>;
+
+/// The agent's one queue of maintenance runs (decision 75, point 8): forget,
+/// prune, check and adoption, keyed by their repository, under the limit
+/// `maintenance-concurrency` sets, apart from the backups' own.
+pub type MaintenanceQueue = Queue<RepositoryAlias>;
+
+struct State<K> {
+    queue: queue::Queue<K>,
     /// The waiting runs' turns, sent as each starts.
     turns: BTreeMap<Ticket, oneshot::Sender<()>>,
+    /// The operation of each run that took its place with one, to name it
+    /// when another is refused for it ([`NoPlace::Going`]).
+    operations: BTreeMap<Ticket, OperationId>,
+}
+
+/// What a dropped [`Place`] does to the queue it held a place in, whatever
+/// that queue's key.
+trait Leave: Send + Sync {
+    fn leave(&self, ticket: Ticket);
+}
+
+impl<K: Ord + Clone + Send> Leave for Mutex<State<K>> {
+    fn leave(&self, ticket: Ticket) {
+        let mut state = self.lock().unwrap_or_else(PoisonError::into_inner);
+        state.queue.leave(ticket);
+        state.turns.remove(&ticket);
+        state.operations.remove(&ticket);
+        state.start();
+    }
 }
 
 /// A run's place in the queue: it waits for its [`turn`](Self::turn), then
@@ -34,57 +62,111 @@ struct State {
 #[must_use = "a place dropped at once leaves the queue"]
 pub struct Place {
     ticket: Ticket,
-    state: Arc<Mutex<State>>,
+    state: Arc<dyn Leave>,
     turn: oneshot::Receiver<()>,
 }
 
-impl RunQueue {
-    /// An empty queue that runs one backup at a time until it is told the
-    /// configuration's limit ([`Self::set_limit`], [`Self::push`]).
+/// Why a maintenance run was refused a place in the queue.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum NoPlace {
+    /// A run of its repository is going, running or waiting for its turn.
+    /// Names that run's operation, the running one first, when the queue
+    /// knows it.
+    Going(Option<OperationId>),
+    /// A restart that waits for the running runs holds the queue.
+    Held,
+}
+
+impl<K: Ord + Clone + Send + 'static> Queue<K> {
+    /// An empty queue that runs one run at a time until it is told the
+    /// configuration's limit.
     pub fn new() -> Self {
         Self {
             state: Arc::new(Mutex::new(State {
-                queue: BackupQueue::new(Concurrency::default()),
+                queue: queue::Queue::new(Concurrency::default()),
                 turns: BTreeMap::new(),
+                operations: BTreeMap::new(),
             })),
         }
     }
 
-    /// Runs at most `limit` backups at once from now on, as the
-    /// configuration says: a raised limit starts the waiting runs it makes
-    /// room for at once, and a lowered one starts nothing until fewer run.
+    /// Runs at most `limit` runs at once from now on, as the configuration
+    /// says: a raised limit starts the waiting runs it makes room for at
+    /// once, and a lowered one starts nothing until fewer run.
     pub fn set_limit(&self, limit: Concurrency) {
         let mut state = self.state.lock().unwrap_or_else(PoisonError::into_inner);
         state.queue.set_limit(limit);
         state.start();
     }
 
+    /// Holds the queue for a restart that waits for the running runs to
+    /// end: no waiting run gets its turn from now on (`Queue::hold`).
+    pub fn hold(&self) {
+        let mut state = self.state.lock().unwrap_or_else(PoisonError::into_inner);
+        state.queue.hold();
+    }
+
+    /// Lets go of the hold of a restart that was canceled, and starts the
+    /// waiting runs that may start now (`Queue::release`).
+    pub fn release(&self) {
+        let mut state = self.state.lock().unwrap_or_else(PoisonError::into_inner);
+        state.queue.release();
+        state.start();
+    }
+
+    /// How many runs are running: past their turn, their place kept.
+    pub fn running(&self) -> usize {
+        let state = self.state.lock().unwrap_or_else(PoisonError::into_inner);
+        state.queue.running()
+    }
+
+    /// Asks `take` for a ticket, and starts whatever may start now: the new
+    /// run, or, under a limit `take` raised, runs that waited, whether or
+    /// not `take` gave a ticket.
+    fn admit<E>(&self, take: impl FnOnce(&mut State<K>) -> Result<Ticket, E>) -> Result<Place, E> {
+        let mut state = self.state.lock().unwrap_or_else(PoisonError::into_inner);
+        let place = take(&mut state).map(|ticket| {
+            let (sender, turn) = oneshot::channel();
+            state.turns.insert(ticket, sender);
+            let leave: Arc<dyn Leave> = Arc::clone(&self.state) as Arc<Mutex<State<K>>>;
+            Place {
+                ticket,
+                state: leave,
+                turn,
+            }
+        });
+        state.start();
+        place
+    }
+}
+
+impl Queue<PlanId> {
     /// A place for a run of `plan` its schedule starts, which came due now,
-    /// or why it is skipped (`BackupQueue::due`), under the limit the
-    /// scheduler last set.
+    /// or why it is skipped (`Queue::due`), under the limit the scheduler
+    /// last set.
     pub fn due(&self, plan: &PlanId, overlap: Overlap) -> Result<Place, Overlapping> {
-        self.admit(|queue| queue.due(plan, overlap))
+        self.admit(|state| state.queue.due(plan, overlap))
     }
 
     /// A place for a run of `plan` started by hand, by a person, an API
     /// token, an AI tool or the hub, or why it is refused: a run of the plan
-    /// is waiting already (`BackupQueue::by_hand`). `limit` is the agent's
+    /// is waiting already (`Queue::by_hand`). `limit` is the agent's
     /// concurrency, as the configuration says now, and applies from then
     /// on, refused or not.
     pub fn by_hand(&self, plan: &PlanId, limit: Concurrency) -> Result<Place, RunWaiting> {
-        self.admit(|queue| {
-            queue.set_limit(limit);
-            queue.by_hand(plan)
+        self.admit(|state| {
+            state.queue.set_limit(limit);
+            state.queue.by_hand(plan)
         })
     }
 
     /// A place for a run of `plan` the queue held from before the start
-    /// (`BackupQueue::push`). `limit` is the agent's concurrency, as the
+    /// (`Queue::push`). `limit` is the agent's concurrency, as the
     /// configuration says now, and applies from then on.
     pub fn push(&self, plan: &PlanId, limit: Concurrency) -> Place {
-        let taken = self.admit(|queue| {
-            queue.set_limit(limit);
-            Ok::<_, Infallible>(queue.push(plan))
+        let taken = self.admit(|state| {
+            state.queue.set_limit(limit);
+            Ok::<_, Infallible>(state.queue.push(plan))
         });
         match taken {
             Ok(place) => place,
@@ -98,12 +180,12 @@ impl RunQueue {
     /// queue's lock, so two runs of a plan whose waits end at once can't
     /// both take one. `limit` applies from then on, refused or not.
     pub fn unless_going(&self, plan: &PlanId, limit: Concurrency) -> Result<Place, RunWaiting> {
-        self.admit(|queue| {
-            queue.set_limit(limit);
-            if queue.is_going(plan) {
+        self.admit(|state| {
+            state.queue.set_limit(limit);
+            if state.queue.is_going(plan) {
                 Err(RunWaiting)
             } else {
-                Ok(queue.push(plan))
+                Ok(state.queue.push(plan))
             }
         })
     }
@@ -122,66 +204,60 @@ impl RunQueue {
         state.queue.is_busy()
     }
 
-    /// Holds the queue for a restart that waits for the running backups to
-    /// end: no waiting run gets its turn from now on (`BackupQueue::hold`).
-    pub fn hold(&self) {
-        let mut state = self.state.lock().unwrap_or_else(PoisonError::into_inner);
-        state.queue.hold();
-    }
-
-    /// Lets go of the hold of a restart that was canceled, and starts the
-    /// waiting runs that may start now (`BackupQueue::release`).
-    pub fn release(&self) {
-        let mut state = self.state.lock().unwrap_or_else(PoisonError::into_inner);
-        state.queue.release();
-        state.start();
-    }
-
     /// The plans of the runs the queue held from before the start, which the
     /// daemon is still handing back to it: until a plan's run takes its
     /// place again, or every one is handed back ([`Self::resumed`]), a run
-    /// of the plan started by hand is refused (`BackupQueue::resuming`).
+    /// of the plan started by hand is refused (`Queue::resuming`).
     pub fn resuming(&self, plans: impl IntoIterator<Item = PlanId>) {
         let mut state = self.state.lock().unwrap_or_else(PoisonError::into_inner);
         state.queue.resuming(plans);
     }
 
     /// Every run the queue held from before the start is handed back to it,
-    /// or ended (`BackupQueue::resumed`).
+    /// or ended (`Queue::resumed`).
     pub fn resumed(&self) {
         let mut state = self.state.lock().unwrap_or_else(PoisonError::into_inner);
         state.queue.resumed();
     }
+}
 
-    /// How many backups are running: past their turn, their place kept.
-    pub fn running(&self) -> usize {
-        let state = self.state.lock().unwrap_or_else(PoisonError::into_inner);
-        state.queue.running()
-    }
-
-    /// Asks `take` for a ticket, and starts whatever may start now: the new
-    /// run, or, under a limit `take` raised, runs that waited, whether or
-    /// not `take` gave a ticket.
-    fn admit<E>(
+impl Queue<RepositoryAlias> {
+    /// A place for the maintenance run `operation` of `repository`, under
+    /// `limit`, or why it gets none: [`NoPlace::Held`] while a restart holds
+    /// the queue, which starts no new run (decision 94) and would leave this
+    /// one waiting only for the next start to end it (decision 75, point 8);
+    /// [`NoPlace::Going`] while a run of the repository is going, running or
+    /// waiting for its turn, naming it: a repository has one maintenance run
+    /// going at a time, and a second is refused, not queued behind it (I7).
+    /// One step under the queue's lock, so two runs of a repository asked
+    /// for at once can't both take one, and a hold either comes before the
+    /// place, refusing it, or after, counting it if it runs. `limit` is
+    /// `maintenance-concurrency` as the configuration says now, and applies
+    /// from then on, refused or not.
+    pub fn unless_going_as(
         &self,
-        take: impl FnOnce(&mut BackupQueue) -> Result<Ticket, E>,
-    ) -> Result<Place, E> {
-        let mut state = self.state.lock().unwrap_or_else(PoisonError::into_inner);
-        let place = take(&mut state.queue).map(|ticket| {
-            let (sender, turn) = oneshot::channel();
-            state.turns.insert(ticket, sender);
-            Place {
-                ticket,
-                state: Arc::clone(&self.state),
-                turn,
+        repository: &RepositoryAlias,
+        operation: OperationId,
+        limit: Concurrency,
+    ) -> Result<Place, NoPlace> {
+        self.admit(|state| {
+            state.queue.set_limit(limit);
+            if state.queue.is_held() {
+                return Err(NoPlace::Held);
             }
-        });
-        state.start();
-        place
+            match state.queue.going(repository) {
+                Some(going) => Err(NoPlace::Going(state.operations.get(&going).copied())),
+                None => {
+                    let ticket = state.queue.push(repository);
+                    state.operations.insert(ticket, operation);
+                    Ok(ticket)
+                }
+            }
+        })
     }
 }
 
-impl State {
+impl<K: Ord + Clone> State<K> {
     /// Hands their turn to the runs that may start now.
     fn start(&mut self) {
         for ticket in self.queue.start() {
@@ -193,7 +269,7 @@ impl State {
     }
 }
 
-impl Default for RunQueue {
+impl<K: Ord + Clone + Send + 'static> Default for Queue<K> {
     fn default() -> Self {
         Self::new()
     }
@@ -210,10 +286,7 @@ impl Place {
 
 impl Drop for Place {
     fn drop(&mut self) {
-        let mut state = self.state.lock().unwrap_or_else(PoisonError::into_inner);
-        state.queue.leave(self.ticket);
-        state.turns.remove(&self.ticket);
-        state.start();
+        self.state.leave(self.ticket);
     }
 }
 
@@ -224,7 +297,75 @@ mod tests {
     use domain::planning::{Concurrency, Overlap};
     use futures::FutureExt;
 
-    use super::{Place, RunQueue};
+    use super::{MaintenanceQueue, NoPlace, Place, RunQueue};
+
+    fn repository(name: &str) -> domain::RepositoryAlias {
+        domain::RepositoryAlias::parse(name).unwrap()
+    }
+
+    fn operation(n: u128) -> domain::OperationId {
+        domain::OperationId::from_uuid(domain::Uuid::from_u128(n))
+    }
+
+    #[test]
+    fn a_maintenance_run_of_a_repository_going_is_refused_naming_the_one_going() {
+        let queue = MaintenanceQueue::new();
+        let mut nas = queue
+            .unless_going_as(&repository("nas"), operation(1), limit(1))
+            .unwrap();
+        let mut laptop = queue
+            .unless_going_as(&repository("laptop"), operation(2), limit(1))
+            .unwrap();
+        assert!(has_turn(&mut nas));
+        assert!(!has_turn(&mut laptop), "the limit of one wasn't kept");
+        assert_eq!(
+            queue
+                .unless_going_as(&repository("nas"), operation(3), limit(1))
+                .err(),
+            Some(NoPlace::Going(Some(operation(1)))),
+            "a running run is named"
+        );
+        assert_eq!(
+            queue
+                .unless_going_as(&repository("laptop"), operation(4), limit(1))
+                .err(),
+            Some(NoPlace::Going(Some(operation(2)))),
+            "a waiting run is named"
+        );
+        assert_eq!(queue.running(), 1);
+        drop(nas);
+        assert!(has_turn(&mut laptop));
+        drop(laptop);
+        assert!(
+            queue
+                .unless_going_as(&repository("nas"), operation(5), limit(1))
+                .is_ok()
+        );
+    }
+
+    #[test]
+    fn a_held_maintenance_queue_gives_no_new_run_a_place_until_it_is_released() {
+        let queue = MaintenanceQueue::new();
+        let mut nas = queue
+            .unless_going_as(&repository("nas"), operation(1), limit(2))
+            .unwrap();
+        assert!(has_turn(&mut nas));
+        queue.hold();
+        assert_eq!(
+            queue
+                .unless_going_as(&repository("laptop"), operation(2), limit(2))
+                .err(),
+            Some(NoPlace::Held),
+            "a run asked for under the hold would only wait to be ended"
+        );
+        assert_eq!(queue.running(), 1, "the running run is still counted");
+        queue.release();
+        assert!(
+            queue
+                .unless_going_as(&repository("laptop"), operation(3), limit(2))
+                .is_ok()
+        );
+    }
 
     fn plan(name: &str) -> PlanId {
         PlanId::parse(name).unwrap()

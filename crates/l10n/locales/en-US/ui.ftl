@@ -1987,6 +1987,15 @@ ui-maintenance-running =
        *[adopt] An adoption is running.
     }
 
+# What the maintenance section says, and what is said politely once, while a run waits for its turn: this machine runs only so many maintenance runs at once, as [agent] maintenance-concurrency says. $kind is the wire text of what waits: forget, prune, check or adopt.
+ui-maintenance-waiting =
+    { $kind ->
+        [forget] A forget is waiting for its turn.
+        [prune] A prune is waiting for its turn.
+        [check] A check is waiting for its turn.
+       *[adopt] An adoption is waiting for its turn.
+    }
+
 # The button that asks the run that goes on to stop.
 ui-maintenance-cancel = Cancel the run
 
@@ -3165,8 +3174,8 @@ ui-restart-running = { $running ->
        *[other] { $running } operations are running. Restart once they finish, and { -brand-name } starts no new operation meanwhile. Or restart now: that stops them, as any stop of { -brand-name } does, and their history says the shutdown interrupted them.
     }
 
-# What that dialog says after the running operations: what becomes of queued ones.
-ui-restart-queued = Queued operations wait, and run once { -brand-name } is back.
+# What that dialog says after the running operations: what becomes of queued ones. A queued backup waits and runs after the restart; a maintenance run still waiting for its turn ends, and its history says Ladderback stopped before it ended.
+ui-restart-queued = Queued backups wait, and run once { -brand-name } is back. A maintenance run still waiting for its turn ends, and its history says { -brand-name } stopped before it ended.
 
 # The button of that dialog that restarts Ladderback.
 ui-restart-confirm = Restart

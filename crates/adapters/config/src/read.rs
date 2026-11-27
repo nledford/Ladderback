@@ -233,6 +233,13 @@ fn agent(reader: &Reader<'_, '_>, path: &Path, table: AgentTable) -> Read<AgentS
         Some(count) => reader.value(&path.key("concurrency"), Concurrency::new(count))?,
         None => Concurrency::default(),
     };
+    let maintenance_concurrency = match table.maintenance_concurrency {
+        Some(count) => reader.value(
+            &path.key("maintenance-concurrency"),
+            Concurrency::new(count),
+        )?,
+        None => Concurrency::default(),
+    };
     let nice = table
         .nice
         .map(|nice| reader.value(&path.key("nice"), Nice::new(nice)))
@@ -260,6 +267,7 @@ fn agent(reader: &Reader<'_, '_>, path: &Path, table: AgentTable) -> Read<AgentS
     Ok(AgentSettings {
         hostname,
         concurrency,
+        maintenance_concurrency,
         nice,
         allow_hub_restore: table.allow_hub_restore.unwrap_or(false),
         locale,

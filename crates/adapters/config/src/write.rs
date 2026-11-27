@@ -332,6 +332,9 @@ fn agent(settings: &AgentSettings) -> Option<AgentTable> {
             .map(|name| name.as_str().to_owned()),
         concurrency: (settings.concurrency != AgentSettings::default().concurrency)
             .then(|| i64::from(settings.concurrency.get())),
+        maintenance_concurrency: (settings.maintenance_concurrency
+            != AgentSettings::default().maintenance_concurrency)
+            .then(|| i64::from(settings.maintenance_concurrency.get())),
         nice: settings.nice.map(|nice| i64::from(nice.get())),
         allow_hub_restore: settings.allow_hub_restore.then_some(true),
         locale: settings
