@@ -170,10 +170,7 @@ fn a_hub_at_its_limit_sends_again_an_hour_after_its_oldest() {
         hub_command_admitted(&sent, now),
         Err(SignedDuration::from_hours(1))
     );
-    assert_eq!(
-        hub_command_admitted(sent.get(1..).unwrap(), now),
-        Ok(())
-    );
+    assert_eq!(hub_command_admitted(sent.get(1..).unwrap(), now), Ok(()));
     assert_eq!(
         hub_command_admitted(&sent, SignedDuration::from_hours(1)),
         Ok(())

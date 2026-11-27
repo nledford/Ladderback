@@ -206,7 +206,9 @@ async fn recorded_for_session(agent: &mut Agent) {
     assert_eq!(record.kind, OperationKind::Backup, "{record:?}");
     assert_eq!(
         record.trigger,
-        Trigger::Hub { asked_by: Some(tag) },
+        Trigger::Hub {
+            asked_by: Some(tag)
+        },
         "{record:?}"
     );
 }

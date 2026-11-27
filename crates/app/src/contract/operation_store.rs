@@ -1212,7 +1212,10 @@ async fn a_plan_ever_succeeded_only_if_one_of_its_own_operations_did(store: &dyn
 
 /// The plan's unfinished backup, queued or running: the answer is `None`
 /// when the store failed.
-async fn unfinished_backup(store: &dyn OperationStore, plan: &PlanId) -> Option<Option<OperationId>> {
+async fn unfinished_backup(
+    store: &dyn OperationStore,
+    plan: &PlanId,
+) -> Option<Option<OperationId>> {
     let answer = store.unfinished_backup(plan).await;
     assert!(answer.is_ok(), "asking about {plan:?} failed: {answer:?}");
     answer.ok()
@@ -1236,7 +1239,12 @@ async fn a_plans_unfinished_backup_is_found_however_far_back(store: &dyn Operati
     save(store, &started(queued(0xA00, Some(&long_running))), None).await;
     let past_a_page = u128::try_from(PageSize::DEFAULT.get()).unwrap_or(u128::MAX) + 10;
     for n in 1..=past_a_page {
-        save(store, &succeeded(queued(0xA00 + n, Some(&long_running))), None).await;
+        save(
+            store,
+            &succeeded(queued(0xA00 + n, Some(&long_running))),
+            None,
+        )
+        .await;
         save(store, &succeeded(queued(0xB00 + n, Some(&all_done))), None).await;
     }
     let check = Operation::queue(

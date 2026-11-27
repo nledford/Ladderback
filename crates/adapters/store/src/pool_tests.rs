@@ -116,7 +116,8 @@ async fn finding_a_plans_unfinished_backup_reads_the_plans_index() {
         .collect();
 
     assert!(
-        plan.iter().any(|step| step.contains("USING INDEX ops_by_plan")),
+        plan.iter()
+            .any(|step| step.contains("USING INDEX ops_by_plan")),
         "{plan:?}"
     );
     assert!(

@@ -3826,7 +3826,10 @@ async fn the_hub_sends_a_machine_at_most_its_commands_an_hour() {
         SignedDuration::from_hours(1)
             - SignedDuration::from_secs(i64::try_from(HUB_COMMANDS_PER_HOUR).unwrap()),
     );
-    assert!(sent().await, "the hub refused the ask an hour after the first");
+    assert!(
+        sent().await,
+        "the hub refused the ask an hour after the first"
+    );
 }
 
 /// The hub's runs for a sync that takes its commands: no plan runs, and
@@ -4168,7 +4171,9 @@ async fn a_machine_holding_its_limit_of_commands_answers_the_oldest_expired() {
             .to_string()
     };
     assert_eq!(
-        results.first().map(|(id, _, code)| (id.clone(), code.clone())),
+        results
+            .first()
+            .map(|(id, _, code)| (id.clone(), code.clone())),
         Some((id(1), Some("command-expired".to_owned())))
     );
     let answered: Vec<String> = results.into_iter().map(|(id, ..)| id).collect();

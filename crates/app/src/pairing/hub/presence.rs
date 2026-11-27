@@ -13,11 +13,11 @@ use std::collections::{HashMap, VecDeque};
 use std::sync::{Mutex, MutexGuard, PoisonError};
 
 use api::UiEvent;
-use domain::{AgentId, SignedDuration};
 use domain::fleet::{
     Accepts, AgentStatus, CommandId, MAX_COMMANDS_IN_FLIGHT, OfflineAlerts, WireName,
 };
 use domain::maintenance::RunningBackup;
+use domain::{AgentId, SignedDuration};
 use futures::channel::{mpsc, oneshot};
 
 use super::HubPairing;

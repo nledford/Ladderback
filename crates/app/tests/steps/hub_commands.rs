@@ -14,8 +14,7 @@ use std::sync::{Arc, Mutex, PoisonError};
 use api::sync::{AgentFrame, CancelOpPayload, CommandResultPayload, HelloPayload, RunPlanPayload};
 use app::fakes::{
     FakeClock, FakeSigning, InMemoryCommandLedger, InMemoryConfigStore, InMemoryOutbox,
-    LoopbackHubConnector,
-    SeededRandom,
+    LoopbackHubConnector, SeededRandom,
 };
 use app::hub_commands::{
     AnswerHubCommands, CommandAnswer, HubCancelRefused, HubRunRefused, HubRuns,
@@ -30,8 +29,7 @@ use cucumber::{given, then, when};
 use domain::access::SessionTag;
 use domain::fleet::{
     COMMAND_ANSWER_WITHIN, EpochSeconds, HubCommand, OutboxEpoch, PlansReport, ReportedPlan,
-    WireName,
-    cancel_op_kind, run_plan_kind,
+    WireName, cancel_op_kind, run_plan_kind,
 };
 use domain::planning::{AgentConfig, AgentSettings, HubCommands};
 use domain::{OperationId, PlanId, RepositoryId, SignedDuration, Uuid};
@@ -422,9 +420,9 @@ async fn syncs(agent: &mut Agent) {
     let side = side(agent);
     let sync = SyncWithHub::new(
         side.connecting(&machine),
-        Arc::new(InMemoryOutbox::new(OutboxEpoch::from_uuid(Uuid::from_u128(
-            0xe1,
-        )))),
+        Arc::new(InMemoryOutbox::new(OutboxEpoch::from_uuid(
+            Uuid::from_u128(0xe1),
+        ))),
         side.clock.clone(),
         machine.agent_id,
         machine.hostname.clone(),
