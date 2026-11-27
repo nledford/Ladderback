@@ -175,8 +175,9 @@ jobs:
   # failure here leaves the outputs empty, and the jobs below run: they skip
   # only when this job says "true" (`docs-only`) or "false" (`service`, `ui`).
   # The user guide (docs/guide/) is docs, but its config.toml and keyring
-  # examples are tested (crates/adapters/config/tests/guide.rs): a docs-only
-  # pull request that touches it says "true" in `guide` too, and `check`'s
+  # examples and its table of MCP tools are tested (the `guide` test targets,
+  # crates/adapters/config/tests/guide.rs and crates/adapters/mcp/tests/guide.rs):
+  # a docs-only pull request that touches it says "true" in `guide` too, and `check`'s
   # Linux leg runs those tests beside the docs checks; every other job skips
   # as for any docs-only pull request (decision 171). It also reads the pull
   # request's labels, from the API when it runs, not from the event, so a
@@ -322,10 +323,11 @@ jobs:
         run: node scripts/decision-index.ts
       - if: needs.changes.outputs.docs-only == 'true' && runner.os == 'Linux'
         run: node scripts/component-index.ts
-      # The guide's examples (crates/adapters/config/tests/guide.rs), for a
-      # docs-only pull request that touches the guide: that test target alone,
-      # with `--workspace` for the features every other build uses. Any other
-      # pull request runs it in `just test`.
+      # The guide's examples and table of MCP tools (the `guide` test targets,
+      # crates/adapters/config/tests/guide.rs and crates/adapters/mcp/tests/guide.rs),
+      # for a docs-only pull request that touches the guide: those test targets
+      # alone, with `--workspace` for the features every other build uses. Any
+      # other pull request runs them in `just test`.
       - if: needs.changes.outputs.docs-only == 'true' && needs.changes.outputs.guide == 'true' && runner.os == 'Linux'
         run: cargo nextest run --workspace --test guide
         env:

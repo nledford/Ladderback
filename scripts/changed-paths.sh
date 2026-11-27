@@ -20,8 +20,9 @@
 # unless this says "true" (`docs-only`) or "false" (`service`, `mutants`).
 # The `ui` lane is the other way round: false unless a path names the UI,
 # because Chromium's required job covers the rest. The user guide is docs,
-# but its config.toml and keyring examples are tested
-# (crates/adapters/config/tests/guide.rs): a docs-only change that touches it
+# but its config.toml and keyring examples, and its table of MCP tools, are
+# tested (the `guide` test targets, crates/adapters/config/tests/guide.rs and
+# crates/adapters/mcp/tests/guide.rs): a docs-only change that touches it
 # runs those tests, and a change to code runs them with the rest. A guide page
 # the web UI links to counts as code, since a UI journey checks the heading
 # the link leads to (features/ui/pairing_dialog.feature), and so do the
