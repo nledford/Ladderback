@@ -427,3 +427,53 @@ fn a_floors_proof_is_found_by_its_repository() {
     assert_eq!(held.proof(&repository('a')), Some(kept));
     assert_eq!(held.proof(&repository('b')), None);
 }
+
+#[test]
+fn turning_maintenance_on_without_a_lease_notes_a_pause_since_then() {
+    let mut held = HeldLeases::default();
+    held.turned(&repository('a'), true, hub(DAY));
+    assert_eq!(
+        held.paused_since(&repository('a'), hub(2 * DAY)),
+        Some(hub(DAY))
+    );
+    // Turning it on again keeps the date first noted.
+    held.turned(&repository('a'), true, hub(2 * DAY));
+    assert_eq!(
+        held.paused_since(&repository('a'), hub(2 * DAY)),
+        Some(hub(DAY))
+    );
+    // A watch keeps that date too, and tells it once it has lasted 14 days.
+    let due = hub(DAY).checked_add(PAUSE_ALERT_AFTER).unwrap();
+    assert_eq!(
+        held.watch([&repository('a')], due),
+        vec![(repository('a'), hub(DAY))]
+    );
+}
+
+#[test]
+fn turning_maintenance_on_after_a_lease_ran_out_notes_a_pause_since_it_ran_out() {
+    let mut held = granted();
+    held.turned(&repository('a'), true, hub(9 * DAY));
+    assert_eq!(held.pauses().count(), 1);
+    assert_eq!(
+        held.paused_since(&repository('a'), hub(9 * DAY)),
+        Some(hub(7 * DAY))
+    );
+}
+
+#[test]
+fn turning_maintenance_on_while_the_lease_holds_notes_no_pause() {
+    let mut held = granted();
+    held.turned(&repository('a'), true, hub(DAY));
+    assert_eq!(held.pauses().count(), 0);
+}
+
+#[test]
+fn turning_maintenance_off_drops_the_pause() {
+    let mut held = HeldLeases::default();
+    held.turned(&repository('a'), true, hub(DAY));
+    held.turned(&repository('b'), true, hub(DAY));
+    held.turned(&repository('a'), false, hub(2 * DAY));
+    let left: Vec<&RepositoryId> = held.pauses().map(|(repository, _)| repository).collect();
+    assert_eq!(left, vec![&repository('b')]);
+}

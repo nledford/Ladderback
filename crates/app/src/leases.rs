@@ -227,6 +227,29 @@ impl MaintenanceLeases {
         }
         Ok(())
     }
+
+    /// Notes, now, that maintenance of `repository` was just turned on
+    /// (`maintained`) or off here, so a paired machine that holds no live
+    /// lease on it says it is paused from that moment, not from the next
+    /// watch, and one turned off leaves no pause behind (#1671). A machine
+    /// that isn't paired, or whose pin can't be read, notes nothing. Only
+    /// the pauses are saved (I1).
+    pub async fn turned(
+        &self,
+        repository: &RepositoryId,
+        maintained: bool,
+    ) -> Result<(), StoreError> {
+        let Ok(Some(_)) = self.identity.pin().await else {
+            return Ok(());
+        };
+        let mut held = self.cache.load().await?;
+        let before = held.clone();
+        held.turned(repository, maintained, self.now());
+        if held != before {
+            self.cache.save_pauses(&held).await?;
+        }
+        Ok(())
+    }
 }
 
 /// Tells the notification rules, once, of each repository whose

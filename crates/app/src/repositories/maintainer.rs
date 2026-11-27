@@ -11,6 +11,7 @@ use domain::maintenance::{Ownership, OwnershipChange};
 use domain::planning::Maintenance;
 use domain::{OperationId, RepositoryAlias};
 
+use crate::leases::MaintenanceLeases;
 use crate::ports::{ConfigError, ConfigStore, OperationStore, Problem, StoreError};
 use crate::repositories::ConfigWrites;
 
@@ -23,6 +24,9 @@ pub struct ChangeMaintainer {
     config: Arc<dyn ConfigStore>,
     operations: Arc<dyn OperationStore>,
     writes: Arc<ConfigWrites>,
+    /// The leases of a machine that may be paired with a hub, whose pause
+    /// of a repository begins or ends with the change (#1671).
+    leases: Option<Arc<MaintenanceLeases>>,
 }
 
 /// Why the maintenance of a saved repository wasn't changed. A typed code,
@@ -55,18 +59,25 @@ impl ChangeMaintainer {
             config,
             operations,
             writes,
+            leases: None,
         }
     }
 
-    /// Notes the pause of a repository this paired machine turns
-    /// maintenance on for while it holds no lease on it (#1671).
-    pub fn with_leases(self, _leases: Arc<crate::leases::MaintenanceLeases>) -> Self {
-        todo!()
+    /// Notes the pause of a repository this machine, once paired, turns
+    /// maintenance on for while it holds no lease on it, and drops it when
+    /// maintenance is turned off (#1671, decision 158).
+    pub fn with_leases(mut self, leases: Arc<MaintenanceLeases>) -> Self {
+        self.leases = Some(leases);
+        self
     }
 
     /// Asks this agent to maintain the repository saved under `alias`
     /// (`maintain_here`), or nobody, and answers what its entry asks for
-    /// now. An entry that already asks for it is not written again.
+    /// now. An entry that already asks for it is not written again. A
+    /// change of an entry with a recorded ID notes its pause for want of a
+    /// lease with [`with_leases`](Self::with_leases); a pause that can't be
+    /// noted is logged and leaves the change made, for the next watch notes
+    /// it.
     pub async fn change(
         &self,
         alias: &RepositoryAlias,
@@ -115,6 +126,14 @@ impl ChangeMaintainer {
             .save(&changed)
             .await
             .map_err(MaintainerError::Config)?;
+        if let (Some(leases), Some(id)) = (&self.leases, &entry.id)
+            && let Err(error) = leases.turned(id, Ownership::owned_here(request)).await
+        {
+            log::warn!(
+                "maintenance was turned on or off, but its pause couldn't be noted ({}); the next maintenance watch notes it",
+                error.code()
+            );
+        }
         Ok(request)
     }
 }
