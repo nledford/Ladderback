@@ -306,6 +306,30 @@ async fn in_memory_daily_copy_meets_the_daily_copy_contract() {
     contract::daily_copy::run(&InMemoryDailyCopies::default()).await;
 }
 
+/// The drive of a database in memory: one told nothing, or one told to
+/// fail as a closed database's does.
+struct InMemoryDrives;
+
+#[async_trait]
+impl contract::drive_flush::DriveFlushHarness for InMemoryDrives {
+    async fn open(&self) -> Arc<dyn app::ports::DriveFlush> {
+        Arc::new(app::fakes::InMemoryDriveFlush::default())
+    }
+
+    async fn closed(&self) -> Arc<dyn app::ports::DriveFlush> {
+        let drive = app::fakes::InMemoryDriveFlush::default();
+        drive.fail(app::ports::StoreError::Unavailable {
+            detail: "the database is closed".to_owned(),
+        });
+        Arc::new(drive)
+    }
+}
+
+#[tokio::test]
+async fn in_memory_drive_flush_meets_the_drive_flush_contract() {
+    contract::drive_flush::run(&InMemoryDrives).await;
+}
+
 #[test]
 fn seeded_randomness_meets_the_random_contract() {
     contract::random::run(&SeededRandom::new(0x5eed));
