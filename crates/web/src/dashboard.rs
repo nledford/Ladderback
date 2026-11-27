@@ -383,8 +383,8 @@ pub(crate) fn card_facts(machine: &HubMachineDto, now_ms: i64) -> CardFacts {
     let running = machine.progress.is_some()
         || machine
             .operations
-            .first()
-            .is_some_and(|operation| operation.outcome == MachineOutcomeDto::Running);
+            .iter()
+            .any(|operation| operation.outcome == MachineOutcomeDto::Running);
     let last = listed
         .iter()
         .filter_map(|plan| plan.last_run.as_ref())
