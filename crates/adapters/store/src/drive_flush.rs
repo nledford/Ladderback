@@ -53,3 +53,62 @@ async fn full_flush(path: &std::path::Path) -> Result<(), StoreError> {
         Err(error) => Err(failed(error.to_string())),
     }
 }
+
+#[cfg(test)]
+#[cfg(target_os = "macos")]
+mod tests {
+    use std::os::unix::fs::PermissionsExt as _;
+
+    use app::ports::{DriveFlush as _, StoreError};
+
+    use crate::SqliteStore;
+
+    /// An open store in a scratch folder, and its write-ahead log.
+    async fn scratch() -> (tempfile::TempDir, SqliteStore, std::path::PathBuf) {
+        let dir = tempfile::tempdir().expect("a scratch directory");
+        let path = dir.path().join("ladderback.db");
+        let store = SqliteStore::open(&path)
+            .await
+            .expect("the scratch database opens");
+        let log = crate::copy::beside(&path, "-wal");
+        assert!(log.exists(), "an open store keeps its log");
+        (dir, store, log)
+    }
+
+    /// The log an open store writes its commits to is always there, so one
+    /// gone means the commits may be off the drive: nothing that depends on
+    /// them goes out (I1; §16, decision 178).
+    #[tokio::test]
+    async fn a_store_whose_log_is_gone_doesnt_flush() {
+        let (_dir, store, log) = scratch().await;
+        std::fs::remove_file(&log).expect("the log is removed");
+        let flushed = store.flush().await;
+        assert!(
+            matches!(flushed, Err(StoreError::Unavailable { .. })),
+            "{flushed:?}"
+        );
+    }
+
+    /// A log the flush can't open isn't flushed, and the flush says so.
+    #[tokio::test]
+    async fn a_store_whose_log_cant_be_opened_doesnt_flush() {
+        let (_dir, store, log) = scratch().await;
+        std::fs::set_permissions(&log, std::fs::Permissions::from_mode(0o000))
+            .expect("the log's permissions change");
+        let opens_anyway = std::fs::OpenOptions::new()
+            .read(true)
+            .write(true)
+            .open(&log)
+            .is_ok();
+        let flushed = store.flush().await;
+        std::fs::set_permissions(&log, std::fs::Permissions::from_mode(0o644))
+            .expect("the log's permissions change back");
+        if opens_anyway {
+            testkit::skip!("running as root: permissions don't stop opening a file");
+        }
+        assert!(
+            matches!(flushed, Err(StoreError::Unavailable { .. })),
+            "{flushed:?}"
+        );
+    }
+}
