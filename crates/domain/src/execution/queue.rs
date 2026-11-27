@@ -61,7 +61,7 @@ pub type BackupQueue = Queue<PlanId>;
 pub type MaintenanceQueue = Queue<RepositoryAlias>;
 
 impl<K: Ord + Clone> Queue<K> {
-    /// An empty queue that runs at most `limit` backups at once.
+    /// An empty queue that runs at most `limit` runs at once.
     pub fn new(limit: Concurrency) -> Self {
         Self {
             limit,
@@ -173,12 +173,19 @@ impl<K: Ord + Clone> Queue<K> {
         !self.running.is_empty() || !self.waiting.is_empty()
     }
 
-    /// Holds the queue for a restart that waits for the running backups to
-    /// end: from now on no waiting run starts, and a run that asks for a
-    /// place waits, for the daemon that starts next to run (decision 94).
-    /// The restart ends the hold, or [`Self::release`] when it is canceled.
+    /// Holds the queue for a restart that waits for the running runs to
+    /// end: from now on no waiting run starts. A backup that asks for a
+    /// place waits, for the daemon that starts next to run (decision 94); a
+    /// maintenance run is refused one, and one still waiting ends at the next
+    /// start (decision 75, point 8). The restart ends the hold, or
+    /// [`Self::release`] when it is canceled.
     pub fn hold(&mut self) {
         self.held = true;
+    }
+
+    /// Whether a restart holds the queue ([`Self::hold`]).
+    pub fn is_held(&self) -> bool {
+        todo!()
     }
 
     /// Lets go of the hold of a restart that was canceled: the waiting runs
@@ -202,7 +209,7 @@ impl<K: Ord + Clone> Queue<K> {
         self.resuming.clear();
     }
 
-    /// How many backups hold a slot: running, past their turn.
+    /// How many runs hold a slot: running, past their turn.
     pub fn running(&self) -> usize {
         self.running.len()
     }
@@ -252,6 +259,16 @@ mod tests {
         assert!(queue.is_busy(), "running");
         queue.leave(home);
         assert!(!queue.is_busy());
+    }
+
+    #[test]
+    fn a_queue_is_held_from_a_restarts_hold_until_its_release() {
+        let mut queue = BackupQueue::new(limit(1));
+        assert!(!queue.is_held());
+        queue.hold();
+        assert!(queue.is_held());
+        queue.release();
+        assert!(!queue.is_held());
     }
 
     #[test]

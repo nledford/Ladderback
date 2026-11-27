@@ -36,7 +36,7 @@ struct State<K> {
     /// The waiting runs' turns, sent as each starts.
     turns: BTreeMap<Ticket, oneshot::Sender<()>>,
     /// The operation of each run that took its place with one, to name it
-    /// when another is refused for it ([`Going`]).
+    /// when another is refused for it ([`NoPlace::Going`]).
     operations: BTreeMap<Ticket, OperationId>,
 }
 
@@ -66,11 +66,16 @@ pub struct Place {
     turn: oneshot::Receiver<()>,
 }
 
-/// Why a maintenance run was refused a place: a run of its repository is
-/// going, running or waiting for its turn. Names that run's operation, the
-/// running one first, when the queue knows it.
+/// Why a maintenance run was refused a place in the queue.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub struct Going(pub Option<OperationId>);
+pub enum NoPlace {
+    /// A run of its repository is going, running or waiting for its turn.
+    /// Names that run's operation, the running one first, when the queue
+    /// knows it.
+    Going(Option<OperationId>),
+    /// A restart that waits for the running runs holds the queue.
+    Held,
+}
 
 impl<K: Ord + Clone + Send + 'static> Queue<K> {
     /// An empty queue that runs one run at a time until it is told the
@@ -218,23 +223,27 @@ impl Queue<PlanId> {
 
 impl Queue<RepositoryAlias> {
     /// A place for the maintenance run `operation` of `repository`, under
-    /// `limit`, or [`Going`] while a run of the repository is going, running
-    /// or waiting for its turn, naming it: a repository has one maintenance
-    /// run going at a time, and a second is refused, not queued behind it
-    /// (I7, decision 75, point 8). One step under the queue's lock, so two
-    /// runs of a repository asked for at once can't both take one. `limit`
-    /// is `maintenance-concurrency` as the configuration says now, and
-    /// applies from then on, refused or not.
+    /// `limit`, or why it gets none: [`NoPlace::Held`] while a restart holds
+    /// the queue, which starts no new run (decision 94) and would leave this
+    /// one waiting only for the next start to end it (decision 75, point 8);
+    /// [`NoPlace::Going`] while a run of the repository is going, running or
+    /// waiting for its turn, naming it: a repository has one maintenance run
+    /// going at a time, and a second is refused, not queued behind it (I7).
+    /// One step under the queue's lock, so two runs of a repository asked
+    /// for at once can't both take one, and a hold either comes before the
+    /// place, refusing it, or after, counting it if it runs. `limit` is
+    /// `maintenance-concurrency` as the configuration says now, and applies
+    /// from then on, refused or not.
     pub fn unless_going_as(
         &self,
         repository: &RepositoryAlias,
         operation: OperationId,
         limit: Concurrency,
-    ) -> Result<Place, Going> {
+    ) -> Result<Place, NoPlace> {
         self.admit(|state| {
             state.queue.set_limit(limit);
             match state.queue.going(repository) {
-                Some(going) => Err(Going(state.operations.get(&going).copied())),
+                Some(going) => Err(NoPlace::Going(state.operations.get(&going).copied())),
                 None => {
                     let ticket = state.queue.push(repository);
                     state.operations.insert(ticket, operation);
@@ -285,7 +294,7 @@ mod tests {
     use domain::planning::{Concurrency, Overlap};
     use futures::FutureExt;
 
-    use super::{Going, MaintenanceQueue, Place, RunQueue};
+    use super::{MaintenanceQueue, NoPlace, Place, RunQueue};
 
     fn repository(name: &str) -> domain::RepositoryAlias {
         domain::RepositoryAlias::parse(name).unwrap()
@@ -310,14 +319,14 @@ mod tests {
             queue
                 .unless_going_as(&repository("nas"), operation(3), limit(1))
                 .err(),
-            Some(Going(Some(operation(1)))),
+            Some(NoPlace::Going(Some(operation(1)))),
             "a running run is named"
         );
         assert_eq!(
             queue
                 .unless_going_as(&repository("laptop"), operation(4), limit(1))
                 .err(),
-            Some(Going(Some(operation(2)))),
+            Some(NoPlace::Going(Some(operation(2)))),
             "a waiting run is named"
         );
         assert_eq!(queue.running(), 1);
@@ -327,6 +336,30 @@ mod tests {
         assert!(
             queue
                 .unless_going_as(&repository("nas"), operation(5), limit(1))
+                .is_ok()
+        );
+    }
+
+    #[test]
+    fn a_held_maintenance_queue_gives_no_new_run_a_place_until_it_is_released() {
+        let queue = MaintenanceQueue::new();
+        let mut nas = queue
+            .unless_going_as(&repository("nas"), operation(1), limit(2))
+            .unwrap();
+        assert!(has_turn(&mut nas));
+        queue.hold();
+        assert_eq!(
+            queue
+                .unless_going_as(&repository("laptop"), operation(2), limit(2))
+                .err(),
+            Some(NoPlace::Held),
+            "a run asked for under the hold would only wait to be ended"
+        );
+        assert_eq!(queue.running(), 1, "the running run is still counted");
+        queue.release();
+        assert!(
+            queue
+                .unless_going_as(&repository("laptop"), operation(3), limit(2))
                 .is_ok()
         );
     }

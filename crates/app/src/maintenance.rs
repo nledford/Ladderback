@@ -52,7 +52,7 @@ use crate::ports::{
     PruneJob, RepositoryAccess, Retention, RetentionError, RewriteJob, RunningJob, SnapshotSummary,
     SourcesError, Start, StoreError,
 };
-use crate::queue::{Going, MaintenanceQueue, Place};
+use crate::queue::{MaintenanceQueue, NoPlace, Place};
 use crate::reads::ReadTurns;
 use crate::repositories::ConfigWrites;
 use crate::secrets::{ResolveError, ResolveRepository, ResolvedRepository};
@@ -189,6 +189,10 @@ pub enum MaintenanceError {
     /// previews one, lest it take another computer's snapshots for its own
     /// (I1, I6). Refused before the repository is opened.
     DataFolderCopied,
+    /// A restart that waits for the running operations holds the
+    /// maintenance queue, and starts no new run until the daemon is back
+    /// (decision 94; decision 75, point 8). Nothing was stored.
+    RestartPending,
 }
 
 /// Why a run couldn't take its repository's slot (I7), when it started or
@@ -736,9 +740,11 @@ impl RunMaintenance {
     /// `maintenance-concurrency` as the configuration says now (decision
     /// 75, point 8). A run of a repository that has one going, running or
     /// waiting for its turn, is refused with [`MaintenanceError::Busy`],
-    /// naming that one, with nothing stored (I7). A run whose turn comes at
-    /// once is [`Queued::Turn`], stored nowhere yet; one that waits is stored
-    /// as queued first, [`Queued::Waiting`].
+    /// naming that one, with nothing stored (I7); while a restart holds the
+    /// queue, every run is refused with [`MaintenanceError::RestartPending`],
+    /// with nothing stored. A run whose turn comes at once is
+    /// [`Queued::Turn`], stored nowhere yet; one that waits is stored as
+    /// queued first, [`Queued::Waiting`].
     ///
     /// A call dropped once the queued row is stored leaves it queued until
     /// the next start ends it, so a caller that can be dropped awaits this,
@@ -751,12 +757,13 @@ impl RunMaintenance {
         let mut place = self
             .queue
             .unless_going_as(&assessment.alias, assessment.operation, limit)
-            .map_err(|Going(going)| match going {
-                Some(running) => MaintenanceError::Busy { running },
+            .map_err(|refused| match refused {
+                NoPlace::Held => MaintenanceError::RestartPending,
+                NoPlace::Going(Some(running)) => MaintenanceError::Busy { running },
                 // Every run takes its place in the maintenance queue with its
                 // operation, so the queue names one; were it ever to name
                 // none, the run is refused all the same (I7).
-                None => MaintenanceError::Store(StoreError::Unavailable {
+                NoPlace::Going(None) => MaintenanceError::Store(StoreError::Unavailable {
                     detail: "the maintenance queue holds a run of the repository it can't name"
                         .to_owned(),
                 }),

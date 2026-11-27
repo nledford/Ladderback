@@ -587,6 +587,9 @@ pub(super) async fn refusal(
             unavailable(ErrorCode::OperationFailed, Vec::new(), None)
         }
         MaintenanceError::DataFolderCopied => MaintenanceRefusal::DataFolderCopied,
+        MaintenanceError::RestartPending => {
+            unavailable(ErrorCode::RestartPending, Vec::new(), None)
+        }
     }
 }
 
@@ -1172,6 +1175,10 @@ mod tests {
             (
                 MaintenanceError::InvalidRetention { plan: plan("home") },
                 unavailable_with(ErrorCode::OperationFailed, Vec::new(), None),
+            ),
+            (
+                MaintenanceError::RestartPending,
+                unavailable_with(ErrorCode::RestartPending, Vec::new(), None),
             ),
         ];
         let config = InMemoryConfigStore::new();
