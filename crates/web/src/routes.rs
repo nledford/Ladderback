@@ -306,6 +306,20 @@ fn is_snapshot_page(path: &str) -> bool {
     })
 }
 
+/// Whether `path` is a machine's page on a hub: `/machines/{machine-id}`,
+/// the ID not empty (§16, decision 175).
+pub(crate) fn is_machine_page(path: &str) -> bool {
+    let _ = path;
+    false
+}
+
+/// A machine's page's title: its hostname once the page has read it, and
+/// the generic one until then (WCAG 2.4.2).
+pub(crate) fn machine_title(localizer: &Localizer, hostname: Option<&str>) -> String {
+    let _ = (localizer, hostname);
+    todo!()
+}
+
 /// [`title`] for a build that has the gallery or not, so that both are tested
 /// whichever one the tests are built as.
 fn title_in(localizer: &Localizer, path: &str, gallery: bool, hub: bool) -> String {
@@ -361,6 +375,23 @@ mod tests {
     #[test]
     fn a_hubs_start_page_is_titled_as_its_dashboard() {
         assert_eq!(title_on_a_hub("/"), "Dashboard – Ladderback");
+    }
+
+    /// A machine's page on a hub is titled as a machine's until the page has
+    /// read its name, and by its name after; anywhere else, and with no
+    /// machine ID, it is a page not found.
+    #[test]
+    fn a_hubs_machine_page_is_titled_by_the_machines_name() {
+        assert_eq!(title_on_a_hub("/machines/agent-1"), "Machine – Ladderback");
+        assert_eq!(title_on_a_hub("/machines/"), "Page not found – Ladderback");
+        assert_eq!(title_on_a_hub("/machines/agent-1/more"), "Page not found – Ladderback");
+        assert_eq!(title_of("/machines/agent-1"), "Page not found – Ladderback");
+        let localizer = Localizer::new(&[]);
+        assert_eq!(machine_title(&localizer, None), "Machine – Ladderback");
+        assert_eq!(
+            machine_title(&localizer, Some("demo-laptop")).replace(['\u{2068}', '\u{2069}'], ""),
+            "demo-laptop – Ladderback"
+        );
     }
 
     #[test]

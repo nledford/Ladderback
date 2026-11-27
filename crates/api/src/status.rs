@@ -30,12 +30,21 @@ pub enum FullDiskAccessStateDto {
 }
 
 /// What `GET /api/v1/machine` answers, and `POST /api/v1/machine/new-id`
-/// once the new ID is taken (§7.1, §16 decision 144): where this machine
-/// stands, as the check at start found it.
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+/// once the new ID is taken (§7.1, §16 decisions 144 and 175): where this
+/// machine stands, as the check at start found it, and who it is, which a
+/// hub's dashboard shows on its own card: the machine ID it runs under, its
+/// hostname when it is one a hub takes, and its IANA time zone when it has
+/// one. A daemon that never checked, as a test's, tells none of them.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "kebab-case")]
 pub struct MachineDto {
     pub standing: MachineStandingDto,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub machine_id: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub hostname: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub zone: Option<String>,
 }
 
 /// Where this machine stands: `copied` when its data folder came from

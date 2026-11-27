@@ -632,6 +632,57 @@ const SNAPSHOTS: Record<string, string> = {
   Footer: `- heading "Footer" [level=2]
 - paragraph: Version ⁨0.4.0⁩
 - paragraph: Version ⁨0.4.0+4444444.dirty⁩`,
+  // Three cards in a list: the hub's own, its Back up menu closed; one that
+  // needs attention, which says why first; and one that runs an operation.
+  "Machine card": `- heading "Machine card" [level=2]
+- list:
+  - listitem:
+    - article "demo-hub This hub":
+      - heading "demo-hub This hub" [level=3]
+      - paragraph: Online now.
+      - paragraph: Succeeded
+      - term: Last backup
+      - definition:
+        - time: ⁨11/9/26, 9:00:00 AM⁩
+      - term: Next run
+      - definition:
+        - time: ⁨11/10/26, 9:00:00 AM⁩
+      - term: Plans
+      - definition: ⁨2⁩
+      - button "Back up"
+      - link "Open ⁨demo-hub⁩"
+  - listitem:
+    - article "demo-laptop":
+      - heading "demo-laptop" [level=3]
+      - paragraph:
+        - strong: "Needs attention:"
+        - text: ⁨The last run of ⁨photos⁩ failed.⁩
+      - paragraph:
+        - text: Last connected
+        - time: ⁨11/8/26, 6:30:00 PM⁩
+        - text: .
+      - paragraph: Failed
+      - term: Last backup
+      - definition:
+        - time: ⁨11/8/26, 6:00:00 PM⁩
+      - term: Next run
+      - definition: None planned
+      - term: Plans
+      - definition: ⁨3⁩
+      - link "Open ⁨demo-laptop⁩"
+  - listitem:
+    - article "demo-desktop":
+      - heading "demo-desktop" [level=3]
+      - paragraph: Online now.
+      - paragraph: Running
+      - progressbar "Progress of the operation running on ⁨demo-desktop⁩": Backing up… 25%
+      - term: Last backup
+      - definition: None yet
+      - term: Next run
+      - definition: None planned
+      - term: Plans
+      - definition: Not reported yet
+      - link "Open ⁨demo-desktop⁩"`,
   // Closed, a disclosure menu is its button alone: its panel is hidden, from
   // a screen reader too, until the button shows it.
   "Disclosure menu": `- heading "Disclosure menu" [level=2]

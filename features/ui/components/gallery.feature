@@ -46,6 +46,7 @@ Feature: The component gallery
       | Live table        |
       | Fingerprint       |
       | Footer            |
+      | Machine card      |
       | Disclosure menu   |
       | Navigation bar    |
       | Table             |
@@ -95,6 +96,7 @@ Feature: The component gallery
       | Steps       |
       | Fingerprint |
       | Footer      |
+      | Machine card |
       | Disclosure menu |
       | Navigation bar  |
 
@@ -134,6 +136,7 @@ Feature: The component gallery
       | Steps       |
       | Fingerprint |
       | Footer      |
+      | Machine card |
       | Disclosure menu |
       | Navigation bar  |
 

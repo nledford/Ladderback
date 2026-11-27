@@ -9,13 +9,15 @@
 //! while it is paused and shows the copy; resuming drops it.
 
 use api::{
-    HubMachineDto, IanaZone, MachineOutcomeDto, MachinePlansDto, MachineProgressDto, MsgArg,
-    UiEvent,
+    HubMachineDto, IanaZone, MachineDto, MachineOutcomeDto, MachinePlansDto, MachineProgressDto,
+    MsgArg, StatusDto, UiEvent,
 };
+#[cfg(test)]
+use api::{MachinePlanDto, MachinePlanRunDto};
 use l10n::{MessageId, msg};
 use leptos::prelude::*;
 
-use crate::backend::Progress;
+use crate::backend::{OperationsState, Progress};
 use crate::components::State;
 use crate::components::status_badge::rules::BadgeState;
 use crate::wording::Words;
@@ -27,6 +29,15 @@ struct Held {
     state: State,
 }
 
+/// What the page has read of the hub's own machine: nothing yet, or its
+/// card's machine, none when the hub didn't say who it is (decision 175).
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub(crate) enum Own {
+    #[default]
+    Waiting,
+    Read(Option<HubMachineDto>),
+}
+
 /// The machines as the hub last listed them, whether a read has answered,
 /// and the copy the page shows while the reader has paused it.
 #[derive(Clone, Copy)]
@@ -35,6 +46,10 @@ pub(crate) struct Fleet {
     pub(crate) machines: RwSignal<Vec<HubMachineDto>>,
     /// Whether a read has answered.
     pub(crate) state: RwSignal<State>,
+    /// The hub's own machine, as the page reads it.
+    pub(crate) own: RwSignal<Own>,
+    /// The time the cards are read at (ms since the Unix epoch).
+    pub(crate) now: RwSignal<i64>,
     held: RwSignal<Option<Held>>,
 }
 
@@ -43,8 +58,20 @@ impl Fleet {
         Self {
             machines: RwSignal::new(Vec::new()),
             state: RwSignal::new(State::Loading),
+            own: RwSignal::new(Own::Waiting),
+            now: RwSignal::new(0),
             held: RwSignal::new(None),
         }
+    }
+
+    /// The machine ID of the hub's own card, as the page shows it.
+    pub(crate) fn own_id(self) -> Signal<Option<String>> {
+        todo!()
+    }
+
+    /// The time the cards the page shows are read at.
+    pub(crate) fn shown_now(self) -> Signal<i64> {
+        todo!()
     }
 
     /// Holds the machines as they are now; a page already paused keeps the
@@ -235,6 +262,98 @@ pub(crate) fn instant(at: &str, viewer: Option<&IanaZone>, zone: Option<&str>) -
             }
         }
     })
+}
+
+/// How long past its time a planned run may stand before it counts as due:
+/// a machine reads its plans every 60 seconds and sends them when they
+/// change (§7.2), and its clock and the viewer's may be a few minutes apart.
+pub(crate) const DUE_AFTER_MS: i64 = 5 * 60 * 1000;
+
+/// Why a machine needs attention (decision 175): the first of these that
+/// holds.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub(crate) enum Attention {
+    /// Offline, though a planned run fell due: when it last connected, and
+    /// when the earliest run was planned for.
+    Offline { last_seen: String, due: String },
+    /// The plan's last run failed.
+    Failed { plan: String },
+    /// The plan's planned run fell due while nothing ran.
+    Due { plan: String, due: String },
+}
+
+/// What a card's status badge says: an operation runs, how the latest run
+/// that ended came out (its status as the history names it), or that none
+/// has run.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub(crate) enum CardStatus {
+    Running,
+    Last(String),
+    Never,
+}
+
+/// When a card's machine runs next: not at all, at the earliest of its
+/// plans' next runs, or that run fell due and hasn't run.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub(crate) enum NextRun {
+    NotPlanned,
+    At(String),
+    WasDue(String),
+}
+
+/// What a machine's card tells (decision 175), each time in RFC 3339.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub(crate) struct CardFacts {
+    pub(crate) status: CardStatus,
+    /// When the latest run that ended, ended.
+    pub(crate) last_backup: Option<String>,
+    pub(crate) next_run: NextRun,
+    /// How many plans it has, those it left out among them; none before it
+    /// reported them.
+    pub(crate) plans: Option<u64>,
+    pub(crate) attention: Option<Attention>,
+}
+
+/// What the card of `machine` tells at `now_ms`.
+pub(crate) fn card_facts(machine: &HubMachineDto, now_ms: i64) -> CardFacts {
+    let _ = (machine, now_ms);
+    todo!()
+}
+
+/// What the sentence above the cards says of `count` machines, `attention`
+/// of which need it.
+pub(crate) fn summary(count: usize, attention: usize) -> Words {
+    let _ = (count, attention);
+    todo!()
+}
+
+/// Why a card needs attention, in words, its times as `shown` writes them.
+pub(crate) fn attention_words(attention: &Attention, shown: impl Fn(&str) -> String) -> Words {
+    let _ = (attention, shown);
+    todo!()
+}
+
+/// The words of the link after the sentence to the page of `hostname`,
+/// which needs `attention`, its times as `shown` writes them.
+pub(crate) fn attention_link(
+    hostname: &str,
+    attention: &Attention,
+    shown: impl Fn(&str) -> String,
+) -> Words {
+    let _ = (hostname, attention, shown);
+    todo!()
+}
+
+/// The hub's own machine as a card shows one: who `identity` says it is,
+/// its plans from its `status` once read, and its `operations`; none
+/// without a machine ID.
+pub(crate) fn own_machine(
+    identity: &MachineDto,
+    status: Option<&StatusDto>,
+    operations: &OperationsState,
+) -> Option<HubMachineDto> {
+    let _ = (identity, status, operations);
+    todo!()
 }
 
 #[cfg(test)]

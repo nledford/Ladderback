@@ -8,12 +8,15 @@ import assert from "node:assert/strict";
 import path from "node:path";
 import { DatabaseSync } from "node:sqlite";
 
-import { type DataTable, Given, Then } from "@cucumber/cucumber";
+import { type DataTable, Given, Then, When } from "@cucumber/cucumber";
+import type { Locator } from "playwright";
 
 import { expect } from "../support/expect.ts";
-import { ISOLATION, namePattern } from "../support/keyboard.ts";
+import { ISOLATION, journey, namePattern } from "../support/keyboard.ts";
 import type { BrowserWorld } from "../support/world.ts";
-import { listedMachine } from "./approving_machines.ts";
+import { pressUntilFocusIsOn } from "./accessibility.ts";
+import { askHub, listedMachine } from "./approving_machines.ts";
+import { attentionMark, cardIn, factOf, markedWith, standInOneColumn, standSideBySide, statusOf } from "./machine_card.ts";
 
 /** The outbox epoch every report of a scenario's machine is under. */
 const EPOCH = "018f0000-0000-7000-8000-0000000000e1";
@@ -131,29 +134,31 @@ Then("the page shows the machine {string}", async function (this: BrowserWorld, 
   await expect(this.page.getByRole("heading", { level: 2, name: namePattern(hostname) })).toBeVisible();
 });
 
-// Which of two regions, each named by its heading, a reader meets first in
-// the page's order, as a screen reader and the keyboard walk it: the start
-// page's notices before a hub's machines (§16, decision 173).
-Then("the region {string} comes before the region {string}", async function (this: BrowserWorld, first: string, second: string) {
-  const earlier = this.page.getByRole("region", { name: namePattern(first) });
-  const later = this.page.getByRole("region", { name: namePattern(second) });
-  await expect(earlier).toHaveCount(1);
-  await expect(later).toHaveCount(1);
-  const before = await earlier.evaluate(
-    (region, other) => other !== null && (region.compareDocumentPosition(other) & Node.DOCUMENT_POSITION_FOLLOWING) !== 0,
-    await later.elementHandle(),
+// The start page's notices come before a hub's cards in the page's order,
+// as a screen reader and the keyboard walk it (§16, decision 173).
+Then("the region {string} comes before the cards", async function (this: BrowserWorld, name: string) {
+  const region = this.page.getByRole("region", { name: namePattern(name) });
+  await expect(region).toHaveCount(1);
+  const first = cards(this).first();
+  await expect(first).toBeVisible();
+  const before = await region.evaluate(
+    (earlier, card) => card !== null && (earlier.compareDocumentPosition(card) & Node.DOCUMENT_POSITION_FOLLOWING) !== 0,
+    await first.elementHandle(),
   );
-  assert.ok(before, `the region "${first}" doesn't come before the region "${second}"`);
+  assert.ok(before, `the region "${name}" doesn't come before the cards`);
 });
 
-// The viewer's time, then the machine's in parentheses with its zone named,
-// the zone isolated as fetched text is (§4.5).
+// On the machine's page, named by its hostname: the viewer's time, then the
+// machine's in parentheses with its zone named, the zone isolated as
+// fetched text is (§4.5).
 Then(
   "the time {string} last connected reads in the zone {string} too",
   async function (this: BrowserWorld, hostname: string, zone: string) {
-    const section = this.page.getByRole("region", { name: namePattern(hostname) });
+    await expect(this.page.getByRole("heading", { level: 1, name: namePattern(hostname) })).toBeVisible();
     const named = zone.replace(/[.*+?^${}()|[\]\\/]/g, "\\$&");
-    await expect(section.getByText(/^Last connected /)).toContainText(new RegExp(`\\(.+ ${ISOLATION}${named}${ISOLATION}\\)`));
+    await expect(this.page.getByRole("main").getByText(/^Last connected /)).toContainText(
+      new RegExp(`\\(.+ ${ISOLATION}${named}${ISOLATION}\\)`),
+    );
   },
 );
 
@@ -233,4 +238,154 @@ Then("the table {string} lists, in order:", async function (this: BrowserWorld, 
     const next = row["next run"] ?? "";
     if (next !== "") await expect(shown).toContainText(next);
   }
+});
+
+/** The machines' cards on the page, in its order. */
+function cards(world: BrowserWorld): Locator {
+  return world.page.getByRole("main").getByRole("article");
+}
+
+/** Who the hub's own machine is, as the hub tells its page. */
+async function hubItself(world: BrowserWorld): Promise<{ hostname: string; machineId: string }> {
+  const answer = await askHub(world, "/api/v1/machine");
+  assert.equal(answer.status, 200, `the hub didn't say who it is: ${answer.text}`);
+  const { hostname, "machine-id": machineId } = JSON.parse(answer.text) as { hostname?: string; "machine-id"?: string };
+  assert.ok(hostname && machineId, `the hub names no hostname or machine ID: ${answer.text}`);
+  return { hostname, machineId };
+}
+
+/** The hub's own card, named by its hostname and the words "This hub". */
+async function hubsCard(world: BrowserWorld): Promise<Locator> {
+  const { hostname } = await hubItself(world);
+  return cardIn(world.page.getByRole("main"), `${hostname} This hub`);
+}
+
+/** The card of the approved machine named `hostname`. */
+function machineCard(world: BrowserWorld, hostname: string): Locator {
+  return cardIn(world.page.getByRole("main"), hostname);
+}
+
+When("I open the page of the machine {string}", async function (this: BrowserWorld, hostname: string) {
+  const { "machine-id": id } = await listedMachine(this, hostname);
+  await this.open(`/machines/${id}`);
+});
+
+Then("the first card is the hub's own, marked {string}", async function (this: BrowserWorld, mark: string) {
+  const { hostname } = await hubItself(this);
+  await expect(cards(this).first()).toHaveAccessibleName(namePattern(`${hostname} ${mark}`));
+});
+
+Then("the cards after it are, in order:", async function (this: BrowserWorld, expected: DataTable) {
+  const wanted = expected.hashes().map((row) => row.machine ?? "");
+  await expect(cards(this)).toHaveCount(wanted.length + 1);
+  for (const [place, hostname] of wanted.entries()) {
+    await expect(cards(this).nth(place + 1)).toHaveAccessibleName(namePattern(hostname));
+  }
+});
+
+Then("the card {string} tells its status {string}", async function (this: BrowserWorld, hostname: string, status: string) {
+  await expect(statusOf(machineCard(this, hostname))).toHaveText(namePattern(status));
+});
+
+Then("the hub's own card tells its status {string}", async function (this: BrowserWorld, status: string) {
+  await expect(statusOf(await hubsCard(this))).toHaveText(namePattern(status));
+});
+
+// A machine's page is titled by its hostname once its read answers (WCAG
+// 2.4.2), the name isolated as fetched text is (§4.5).
+Then("the page is titled after the machine: {string}", async function (this: BrowserWorld, title: string) {
+  await expect(this.page).toHaveTitle(namePattern(title));
+});
+
+Then("the card {string} tells {string}: {string}", async function (this: BrowserWorld, hostname: string, term: string, value: string) {
+  await expect(factOf(machineCard(this, hostname), term)).toHaveText(namePattern(value));
+});
+
+// Each a time element whose `datetime` a machine can read (#115).
+Then(
+  "the card {string} tells its {string} and {string} as times",
+  async function (this: BrowserWorld, hostname: string, first: string, second: string) {
+    for (const term of [first, second]) {
+      await expect(factOf(machineCard(this, hostname), term).locator("time[datetime]")).toHaveCount(1);
+    }
+  },
+);
+
+Then("the card {string} has no attention mark", async function (this: BrowserWorld, hostname: string) {
+  const card = machineCard(this, hostname);
+  await expect(card).toHaveCount(1);
+  await expect(attentionMark(card)).toHaveCount(0);
+});
+
+Then(
+  "the card {string} is marked as needing attention, its words starting {string}",
+  async function (this: BrowserWorld, hostname: string, words: string) {
+    await markedWith(machineCard(this, hostname), words);
+  },
+);
+
+// The sentence's link to a machine that needs attention: words that start
+// with its hostname, leading to its page.
+Then(
+  "the page links to the page of the machine {string} with words starting {string}",
+  async function (this: BrowserWorld, hostname: string, words: string) {
+    const { "machine-id": id } = await listedMachine(this, hostname);
+    const start = [...words].map((ch) => ch.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")).join(ISOLATION);
+    const link = this.page.getByRole("main").getByRole("link", { name: new RegExp(`^${ISOLATION}${start}`) });
+    await expect(link).toHaveCount(1);
+    await expect(link).toHaveAttribute("href", `/machines/${id}`);
+  },
+);
+
+Then("the page's address is the page of the machine {string}", async function (this: BrowserWorld, hostname: string) {
+  const { "machine-id": id } = await listedMachine(this, hostname);
+  await expect(this.page).toHaveURL((url) => url.pathname === `/machines/${id}`);
+});
+
+Then("the cards stand in one column, each inside the page", async function (this: BrowserWorld) {
+  await standInOneColumn(cards(this));
+});
+
+Then("the card {string} stands beside the hub's own", async function (this: BrowserWorld, hostname: string) {
+  await standSideBySide(await hubsCard(this), machineCard(this, hostname));
+});
+
+// Until the hub can ask a paired machine to back up (#1464), its card holds
+// no Back up menu, not even one shown unavailable.
+Then("the card {string} has the link {string} and no button", async function (this: BrowserWorld, hostname: string, link: string) {
+  const card = machineCard(this, hostname);
+  await expect(card.getByRole("link")).toHaveCount(1);
+  await expect(card.getByRole("link", { name: namePattern(link) })).toHaveCount(1);
+  await expect(card.getByRole("button")).toHaveCount(0);
+});
+
+When("I press Tab until focus is on the hub's own Open link", async function (this: BrowserWorld) {
+  const { hostname } = await hubItself(this);
+  await pressUntilFocusIsOn(this, "Tab", "link", `Open ${hostname}`);
+});
+
+Then("focus is on the hub's own main heading", async function (this: BrowserWorld) {
+  const { hostname, machineId } = await hubItself(this);
+  const keys = journey(this.page);
+  await keys.assertFocused(keys.byRole("heading", { level: 1, name: namePattern(hostname) }), `the main heading "${hostname}"`);
+  await expect(this.page).toHaveURL((url) => url.pathname === `/machines/${machineId}`);
+});
+
+Then(
+  "the hub's own table of plans lists {string} with its last run {string}",
+  async function (this: BrowserWorld, plan: string, lastRun: string) {
+    const { hostname } = await hubItself(this);
+    const table = this.page.getByRole("table", { name: namePattern(`Plans of ${hostname}`) });
+    const row = table.getByRole("row").filter({ has: this.page.getByRole("rowheader", { name: namePattern(plan) }) });
+    await expect(row).toHaveCount(1);
+    await expect(row).toContainText(lastRun);
+  },
+);
+
+Then("the hub's own table of latest operations lists one, {string}", async function (this: BrowserWorld, outcome: string) {
+  const { hostname } = await hubItself(this);
+  const rows = this.page.getByRole("table", { name: namePattern(`Latest operations of ${hostname}`) }).getByRole("row");
+  // The header's row, then the one operation.
+  await expect(rows).toHaveCount(2);
+  await expect(rows.nth(1)).toContainText(outcome);
 });

@@ -109,6 +109,35 @@ async fn a_machine_that_never_checked_stands_as_usual_and_keeps_its_id() {
     assert_eq!(body["code"], "machine-not-copied");
 }
 
+/// The route tells who this machine is beside where it stands, and keeps
+/// telling it after a new ID is taken, which is used from the next start
+/// (§16, decision 175).
+#[tokio::test]
+async fn the_machine_route_tells_who_this_machine_is() {
+    let (route, _) = started("other-computer");
+    let route = route.with_identity(MachineIdentity {
+        machine_id: "018f0000-0000-7000-8000-0000000000aa".to_owned(),
+        hostname: Some("demo-hub".to_owned()),
+        zone: Some("Europe/Berlin".to_owned()),
+    });
+    let (status, body) = send(&route, request(Method::GET, MACHINE_PATH)).await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(
+        body,
+        serde_json::json!({
+            "standing": "copied",
+            "machine-id": "018f0000-0000-7000-8000-0000000000aa",
+            "hostname": "demo-hub",
+            "zone": "Europe/Berlin",
+        })
+    );
+    let (status, body) = send(&route, request(Method::POST, NEW_ID_PATH)).await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(body["standing"], "new-id-taken");
+    assert_eq!(body["machine-id"], "018f0000-0000-7000-8000-0000000000aa");
+    assert_eq!(body["hostname"], "demo-hub");
+}
+
 #[tokio::test]
 async fn an_unchanged_machine_reads_same_and_can_t_take_a_new_id() {
     let (route, machine) = started("this-computer");

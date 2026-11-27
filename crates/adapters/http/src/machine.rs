@@ -25,15 +25,38 @@ pub(crate) const NEW_ID_PATH: &str = "/api/v1/machine/new-id";
 /// Where this machine stands, and what takes a new machine ID for a copied
 /// data folder or a machine its hub refused or removed. Without one, as in
 /// a test's daemon that never checked, the machine stands as usual and no
-/// new ID can be taken.
+/// new ID can be taken. Who the machine is, which the route tells beside
+/// its standing, is none until the composition gives it.
 #[derive(Clone, Default)]
 pub struct MachineRoute {
     take: Option<Arc<TakeNewId>>,
+    identity: Option<Arc<MachineIdentity>>,
+}
+
+/// Who this machine is, as the route tells it (§16, decision 175): the
+/// machine ID it runs under, its hostname when it is one a hub takes, and
+/// its IANA time zone when it has one. A hub's dashboard shows them on its
+/// own card.
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct MachineIdentity {
+    pub machine_id: String,
+    pub hostname: Option<String>,
+    pub zone: Option<String>,
 }
 
 impl MachineRoute {
     pub fn new(take: Arc<TakeNewId>) -> Self {
-        Self { take: Some(take) }
+        Self {
+            take: Some(take),
+            identity: None,
+        }
+    }
+
+    /// The route, telling who this machine is.
+    #[must_use]
+    pub fn with_identity(self, identity: MachineIdentity) -> Self {
+        let _ = identity;
+        todo!()
     }
 
     fn standing(&self) -> Standing {
@@ -52,7 +75,13 @@ fn answer(standing: Standing) -> Response {
         Standing::RemovedByHub => MachineStandingDto::RemovedByHub,
         Standing::Unread => MachineStandingDto::Unread,
     };
-    (StatusCode::OK, Json(MachineDto { standing })).into_response()
+    let dto = MachineDto {
+        standing,
+        machine_id: None,
+        hostname: None,
+        zone: None,
+    };
+    (StatusCode::OK, Json(dto)).into_response()
 }
 
 /// `GET /api/v1/machine`: where this machine stands.

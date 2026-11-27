@@ -889,6 +889,10 @@ ui-gallery-fingerprint-name = Demo { -hub } key fingerprint
 # the foot of every page.
 ui-gallery-footer-heading = Footer
 
+# The heading of the gallery's machine card demo (§4.5): a machine at a
+# glance, as the hub's dashboard shows one.
+ui-gallery-machine-card-heading = Machine card
+
 # The heading of the gallery's disclosure menu demo (§4.5): buttons that
 # show and hide a panel of links under them, as the header's Settings menu.
 ui-gallery-disclosure-menu-heading = Disclosure menu
@@ -3894,7 +3898,8 @@ ui-machines-recovery-ended = Recovery mode ended. This { -hub } grants leases ag
 ui-machines-recovery-step-up-failed = That isn't right, so recovery mode didn't end. Try again.
 
 ## The hub's dashboard (#569), which is the hub's start page (decision 173):
-## each approved machine, whether it is online now or when it last
+## a card for each machine, the hub's own first (decision 175), and a
+## machine's page, which shows whether it is online now or when it last
 ## connected, the reports the hub let go of, and its latest operations, as
 ## its reports told them.
 
@@ -3995,6 +4000,102 @@ ui-dashboard-resumed =
         [one] Live updates are on again. One { -machine } changed while they were paused.
        *[other] Live updates are on again. { $count } { -machine(form: "other") } changed while they were paused.
     }
+
+# The sentence above the machines' cards, under the dashboard's heading: how many machines the page shows, and how many of them need attention, which the links after it name (decision 175).
+# $count (number): how many machines the page shows, this hub among them.
+# $attention (number): how many of them need attention.
+ui-dashboard-summary =
+    { $attention ->
+        [0]
+            { $count ->
+                [one] One { -machine }, which needs no attention.
+               *[other] { $count } { -machine(form: "other") }, none of which needs attention.
+            }
+        [one]
+            { $count ->
+                [one] One { -machine }, which needs attention:
+               *[other] { $count } { -machine(form: "other") }. One needs attention:
+            }
+       *[other] { $count } { -machine(form: "other") }. { $attention } need attention:
+    }
+
+# A link after ui-dashboard-summary to the page of a machine that is offline though a planned run of it fell due.
+# $hostname (string): the machine's name.
+# $when (string): when it last connected, as ui-instant or ui-dashboard-time-elsewhere writes it.
+# $due (string): when the run was planned for, written the same way.
+ui-dashboard-attention-offline = { $hostname } last connected { $when }, before a run planned for { $due }.
+
+# A link after ui-dashboard-summary to the page of a machine whose plan's last run failed.
+# $hostname (string): the machine's name.
+# $plan (string): the plan's ID.
+ui-dashboard-attention-failed = The last run of { $plan } on { $hostname } failed.
+
+# A link after ui-dashboard-summary to the page of a machine whose planned run fell due while nothing ran.
+# $hostname (string): the machine's name.
+# $plan (string): the plan's ID.
+# $due (string): when the run was planned for, as ui-instant or ui-dashboard-time-elsewhere writes it.
+ui-dashboard-attention-due = { $plan } on { $hostname } was due { $due } and hasn't run.
+
+## A machine's card on the hub's dashboard (decision 175): its name, why it
+## needs attention, its connection, its status, its facts and its controls.
+
+# Under the name on the hub's own card, and under the heading of its page.
+ui-machine-card-this-hub = This { -hub }
+
+# The start of a card's attention mark, before the sentence that says why.
+ui-machine-card-attention = Needs attention:
+
+# Why a card needs attention: its machine is offline though a planned run of it fell due.
+# $when (string): when it last connected, as ui-instant or ui-dashboard-time-elsewhere writes it.
+# $due (string): when the run was planned for, written the same way.
+ui-machine-card-offline = It last connected { $when }, before a run planned for { $due }.
+
+# Why a card needs attention: a plan's last run failed.
+# $plan (string): the plan's ID.
+ui-machine-card-failed = The last run of { $plan } failed.
+
+# Why a card needs attention: a planned run fell due while nothing ran.
+# $plan (string): the plan's ID.
+# $due (string): when the run was planned for, as ui-instant or ui-dashboard-time-elsewhere writes it.
+ui-machine-card-due = { $plan } was due { $due } and hasn't run.
+
+# The terms of a card's facts: when its last backup ended, when it runs next, and how many plans it has.
+ui-machine-card-last-backup = Last backup
+ui-machine-card-next-run = Next run
+ui-machine-card-plans = Plans
+
+# A card's last backup when none of its plans has run.
+ui-machine-card-no-backup = None yet
+
+# A card's next run when the earliest of its plans' fell due and hasn't run.
+# $when (string): when it was due, as ui-instant or ui-dashboard-time-elsewhere writes it.
+ui-machine-card-was-due = Was due { $when }
+
+# How many plans a card's machine has, those it left out of its report among them.
+# $count (number): how many.
+ui-machine-card-plan-count = { $count }
+
+# A card's plans before its machine reported them.
+ui-machine-card-plans-unreported = Not reported yet
+
+# The link on a card to its machine's page.
+# $hostname (string): the machine's name.
+ui-machine-card-open = Open { $hostname }
+
+# The button of the menu on the hub's own card that starts a backup of one of its plans.
+ui-machine-card-back-up = Back up
+
+## A machine's page on the hub (decision 175).
+
+# A machine's page's title before the page has read the machine's name.
+ui-machine-page-title = Machine – { -brand-name }
+
+# A machine's page's title, as the browser's tab and history show it.
+# $hostname (string): the machine's name.
+ui-machine-page-named-title = { $hostname } – { -brand-name }
+
+# Under the heading of the hub's own page.
+ui-machine-page-this-hub = This is the { -hub } itself: its own plans and operations.
 
 ## Settings' "Dry-run allowlist" tab (decision 89): the folders a plan dry
 ## run an AI agent asks for may read, which only a person sets.
