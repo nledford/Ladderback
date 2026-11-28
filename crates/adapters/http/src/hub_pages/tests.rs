@@ -79,6 +79,7 @@ impl Daemon {
             Arc::clone(&registry) as _,
             Arc::clone(&owners) as _,
             clock(),
+            Arc::new(app::fakes::InMemoryDriveFlush::default()),
         )));
         let pairing = match &access {
             Some(access) => pairing.with_access(Arc::clone(access)),
@@ -1090,7 +1091,7 @@ async fn into_recovery(daemon: &Daemon) {
             &RepositoryReports::new([]),
             &[floor],
             now(),
-            &StartWindow::new([]),
+            &StartWindow::new([], []),
         )
         .await
         .unwrap();

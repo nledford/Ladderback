@@ -481,7 +481,7 @@ async fn the_start_window_grants_no_new_owner(harness: &dyn OwnershipRegistryHar
     let (Some(a), Some(b)) = (repository('a'), repository('b')) else {
         return;
     };
-    let window = StartWindow::new([(agent(9), a), (agent(9), b)]);
+    let window = StartWindow::new([(agent(9), a), (agent(9), b)], []);
     let claim_in = |agent, digit, now| {
         let registry = registry.clone();
         let window = window.clone();

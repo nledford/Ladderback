@@ -8,6 +8,7 @@ mod clock;
 mod config_drafts;
 mod config_store;
 mod daily_copy;
+mod drive_flush;
 mod engine;
 mod event_bus;
 mod full_disk_access;
@@ -49,6 +50,7 @@ pub use config_store::{
     RecordError, config_unusable,
 };
 pub use daily_copy::{DailyCopy, DailyCopyError};
+pub use drive_flush::DriveFlush;
 pub use engine::{
     BackupJob, BackupSummary, BrowseJob, CheckJob, CheckSummary, Deletion, DeletionAnswer,
     DeletionAsk, DumpAnswer, DumpHeader, DumpJob, Engine, EngineError, EngineEvent, EngineResult,

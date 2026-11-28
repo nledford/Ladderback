@@ -7,12 +7,16 @@ use domain::planning::Maintenance;
 use domain::{Timestamp, Uuid};
 
 use super::*;
-use crate::fakes::{FakeClock, InMemoryAgentRegistry, InMemoryOwnershipRegistry};
+use crate::fakes::{
+    FakeClock, InMemoryAgentRegistry, InMemoryDriveFlush, InMemoryOwnershipRegistry,
+};
 
-/// The in-memory registry, whose next report fails once told to.
+/// The in-memory registry, whose next report, or next read of the
+/// recovery state, fails once told to.
 struct FailingReport {
     registry: InMemoryOwnershipRegistry,
     fail: AtomicBool,
+    fail_recovery: AtomicBool,
 }
 
 #[async_trait]
@@ -36,6 +40,11 @@ impl OwnershipRegistry for FailingReport {
     }
 
     async fn recovery(&self) -> Result<domain::maintenance::HubRecovery, StoreError> {
+        if self.fail_recovery.swap(false, Ordering::SeqCst) {
+            return Err(StoreError::Unavailable {
+                detail: "the database is locked".to_owned(),
+            });
+        }
         self.registry.recovery().await
     }
 
@@ -115,8 +124,14 @@ async fn a_report_that_wasnt_stored_doesnt_end_the_start_window() {
     let registry = Arc::new(FailingReport {
         registry,
         fail: AtomicBool::new(true),
+        fail_recovery: AtomicBool::new(false),
     });
-    let hub = RepositoryOwners::new(agents, registry, clock);
+    let hub = RepositoryOwners::new(
+        agents,
+        registry,
+        clock,
+        Arc::new(InMemoryDriveFlush::default()),
+    );
 
     assert!(
         hub.report(laptop, &reports(Maintenance::None), &[])
@@ -134,5 +149,208 @@ async fn a_report_that_wasnt_stored_doesnt_end_the_start_window() {
             repository: photos(),
             outcome: ClaimOutcome::Refused(ClaimRefused::Starting),
         }])
+    );
+}
+
+fn clock() -> Arc<FakeClock> {
+    Arc::new(FakeClock::new(
+        Timestamp::from_second(1_800_000_000).unwrap(),
+    ))
+}
+
+/// How many leases the hub gives to be signed.
+fn given(granting: Granting) -> usize {
+    match granting {
+        Granting::Leases { leases, .. } => leases.len(),
+        Granting::Withheld | Granting::NotApproved => 0,
+    }
+}
+
+/// The hub opens its start window when it starts: it waits for every
+/// machine approved before then, which may hold a lease the hub lost with
+/// its last commits, and for none approved since, which can't (§16,
+/// decision 178).
+#[tokio::test]
+async fn the_start_window_waits_for_every_machine_approved_before_the_start_and_none_since() {
+    let clock = clock();
+    let agents = Arc::new(InMemoryAgentRegistry::new());
+    let laptop = machine(&agents, 1, clock.now());
+    let nas = machine(&agents, 2, clock.now());
+    let hub = RepositoryOwners::new(
+        agents.clone(),
+        Arc::new(InMemoryOwnershipRegistry::new()),
+        clock.clone(),
+        Arc::new(InMemoryDriveFlush::default()),
+    );
+    hub.open().await.unwrap();
+    let _tablet = machine(&agents, 3, clock.now());
+
+    let refused = hub
+        .report(laptop, &reports(Maintenance::Local), &[])
+        .await
+        .unwrap();
+    assert_eq!(
+        refused,
+        Reported::Decided(vec![ClaimDecision {
+            repository: photos(),
+            outcome: ClaimOutcome::Refused(ClaimRefused::Starting),
+        }]),
+        "the NAS hasn't reported since the start"
+    );
+    hub.report(nas, &RepositoryReports::new([]), &[])
+        .await
+        .unwrap();
+    let granted = hub
+        .report(laptop, &reports(Maintenance::Local), &[])
+        .await
+        .unwrap();
+    assert!(
+        matches!(
+            &granted,
+            Reported::Decided(decided)
+                if matches!(decided.as_slice(), [ClaimDecision { outcome: ClaimOutcome::Granted(_), .. }])
+        ),
+        "the tablet, approved since the start, isn't waited for: {granted:?}"
+    );
+}
+
+/// A new grant is on the drive's permanent storage before the hub gives
+/// it to be signed and sent, so a power cut can't take back a grant a
+/// machine holds; a renewal isn't flushed, and a grant whose flush fails
+/// isn't given (§16, decision 178).
+#[tokio::test]
+async fn a_new_grant_is_flushed_before_it_is_given_to_be_signed_and_a_renewal_isnt() {
+    let clock = clock();
+    let agents = Arc::new(InMemoryAgentRegistry::new());
+    let drive = Arc::new(InMemoryDriveFlush::default());
+    let hub = RepositoryOwners::new(
+        agents.clone(),
+        Arc::new(InMemoryOwnershipRegistry::new()),
+        clock.clone(),
+        drive.clone(),
+    );
+    hub.open().await.unwrap();
+    let laptop = machine(&agents, 1, clock.now());
+
+    drive.fail(StoreError::Unavailable {
+        detail: "the drive".to_owned(),
+    });
+    assert!(
+        hub.grant(laptop, &reports(Maintenance::Local), &[])
+            .await
+            .is_err(),
+        "a grant whose flush failed isn't given to be signed"
+    );
+    drive.recover();
+    let renewed = hub
+        .grant(laptop, &reports(Maintenance::Local), &[])
+        .await
+        .unwrap();
+    assert_eq!(given(renewed), 1);
+    assert_eq!(
+        drive.flushed(),
+        1,
+        "a grant whose flush failed is flushed before it goes out as a renewal"
+    );
+    hub.grant(laptop, &reports(Maintenance::Local), &[])
+        .await
+        .unwrap();
+    assert_eq!(drive.flushed(), 1, "a renewal");
+
+    let tablet = machine(&agents, 2, clock.now());
+    let other = RepositoryReports::new([RepositoryReport {
+        repository: RepositoryId::parse(&"b".repeat(64)).unwrap(),
+        request: Maintenance::Local,
+        holds_other_agents_snapshots: false,
+        floor: None,
+    }]);
+    let granted = hub.grant(tablet, &other, &[]).await.unwrap();
+    assert_eq!(given(granted), 1);
+    assert_eq!(drive.flushed(), 2, "a new grant");
+}
+
+/// A hub that stopped after a grant whose flush failed may have sent it, and
+/// sends it again as a renewal after its start: the first lease it gives
+/// after any start is flushed first, a renewal included (§16, decision
+/// 178).
+#[tokio::test]
+async fn the_first_lease_given_after_the_start_is_flushed_a_renewal_included() {
+    let clock = clock();
+    let agents = Arc::new(InMemoryAgentRegistry::new());
+    let registry = Arc::new(InMemoryOwnershipRegistry::new());
+    let laptop = machine(&agents, 1, clock.now());
+    let before = Arc::new(InMemoryDriveFlush::default());
+    let stopped = RepositoryOwners::new(
+        agents.clone(),
+        registry.clone(),
+        clock.clone(),
+        before.clone(),
+    );
+    stopped.open().await.unwrap();
+    before.fail(StoreError::Unavailable {
+        detail: "the drive".to_owned(),
+    });
+    assert!(
+        stopped
+            .grant(laptop, &reports(Maintenance::Local), &[])
+            .await
+            .is_err()
+    );
+
+    let drive = Arc::new(InMemoryDriveFlush::default());
+    let hub = RepositoryOwners::new(agents, registry, clock, drive.clone());
+    hub.open().await.unwrap();
+    let renewed = hub
+        .grant(laptop, &reports(Maintenance::Local), &[])
+        .await
+        .unwrap();
+    assert_eq!(given(renewed), 1);
+    assert_eq!(drive.flushed(), 1, "the first lease after the start");
+    hub.grant(laptop, &reports(Maintenance::Local), &[])
+        .await
+        .unwrap();
+    assert_eq!(drive.flushed(), 1, "a renewal after that");
+}
+
+/// A grant stored but not given, because the hub's answer failed after its
+/// commit, is flushed before it goes out as a renewal (§16, decision 178).
+#[tokio::test]
+async fn a_grant_whose_answer_failed_after_its_commit_is_flushed_before_it_goes_out() {
+    let clock = clock();
+    let agents = Arc::new(InMemoryAgentRegistry::new());
+    let registry = Arc::new(FailingReport {
+        registry: InMemoryOwnershipRegistry::new(),
+        fail: AtomicBool::new(false),
+        fail_recovery: AtomicBool::new(false),
+    });
+    let drive = Arc::new(InMemoryDriveFlush::default());
+    let hub = RepositoryOwners::new(
+        agents.clone(),
+        registry.clone(),
+        clock.clone(),
+        drive.clone(),
+    );
+    hub.open().await.unwrap();
+    let laptop = machine(&agents, 1, clock.now());
+    hub.grant(laptop, &reports(Maintenance::Local), &[])
+        .await
+        .unwrap();
+    assert_eq!(drive.flushed(), 1, "a new grant");
+
+    registry.fail_recovery.store(true, Ordering::SeqCst);
+    let tablet = machine(&agents, 2, clock.now());
+    let other = RepositoryReports::new([RepositoryReport {
+        repository: RepositoryId::parse(&"b".repeat(64)).unwrap(),
+        request: Maintenance::Local,
+        holds_other_agents_snapshots: false,
+        floor: None,
+    }]);
+    assert!(hub.grant(tablet, &other, &[]).await.is_err());
+    let renewed = hub.grant(tablet, &other, &[]).await.unwrap();
+    assert_eq!(given(renewed), 1);
+    assert_eq!(
+        drive.flushed(),
+        2,
+        "the grant stored before the failure is flushed before it goes out"
     );
 }

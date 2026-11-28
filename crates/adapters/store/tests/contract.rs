@@ -338,3 +338,26 @@ async fn sqlite_store_meets_the_daily_copy_contract() {
     )
     .await;
 }
+
+#[async_trait]
+impl contract::drive_flush::DriveFlushHarness for SqliteFiles {
+    async fn open(&self) -> Arc<dyn app::ports::DriveFlush> {
+        Arc::new(self.new_store().await)
+    }
+
+    async fn closed(&self) -> Arc<dyn app::ports::DriveFlush> {
+        let store = self.new_store().await;
+        store.close().await;
+        Arc::new(store)
+    }
+}
+
+#[tokio::test]
+async fn sqlite_store_meets_the_drive_flush_contract() {
+    within(
+        120,
+        "the drive flush contract suite",
+        contract::drive_flush::run(&SqliteFiles::default()),
+    )
+    .await;
+}

@@ -16,7 +16,7 @@ use app::pairing::{
 };
 use app::ports::{
     AgentRegistry as _, EventBus, Identity as _, IdentityError, LinkError, Signing as _,
-    ThisMachine as _,
+    StoreError, ThisMachine as _,
 };
 use app::sync::{LiveProgress, ReadPlans, RecordReports, SyncWithHub};
 use domain::fleet::{
@@ -85,8 +85,9 @@ pub(crate) fn hub_pairing(data_dir: &Path, store: Arc<SqliteStore>) -> HubPairin
     .with_inbox(Arc::<SqliteStore>::clone(&store))
     .with_owners(Arc::new(RepositoryOwners::new(
         Arc::<SqliteStore>::clone(&store),
-        store,
+        Arc::<SqliteStore>::clone(&store),
         Arc::new(SystemClock),
+        store,
     )))
 }
 
@@ -226,6 +227,12 @@ fn start_refusal(error: &HubPairingError) -> (MessageId, Vec<(&'static str, MsgA
         HubPairingError::Identity(IdentityError::Unavailable { file, detail }) => (
             msg::CLI_HUB_KEY_FILE_UNAVAILABLE,
             vec![("file", text(file)), ("detail", text(escaped(detail)))],
+        ),
+        HubPairingError::Registry(
+            StoreError::Unavailable { detail } | StoreError::Corrupt { detail },
+        ) => (
+            msg::CLI_HUB_REGISTRY_FAILED,
+            vec![("detail", text(escaped(detail)))],
         ),
         other => (
             msg::CLI_HUB_KEYS_FAILED,
@@ -1102,8 +1109,15 @@ pub(crate) async fn reporting(
         machine_zone(),
     )
     // A maintenance running here keeps its repository's lease from a
-    // release, as its operation log says.
-    .with_leases(config, leases, store, Arc::clone(listings.seen()))
+    // release, as its operation log says; a release goes out only once
+    // the database's drive holds it (decision 178).
+    .with_leases(
+        config,
+        leases,
+        Arc::<SqliteStore>::clone(&store),
+        Arc::clone(listings.seen()),
+        store,
+    )
     .with_listings(listings)
     .with_standing(standing)
     .with_progress(Arc::clone(&progress))
@@ -1910,6 +1924,25 @@ mod tests {
         );
         let (id, _) = start_refusal(&HubPairingError::TokenLife);
         assert_eq!(id, msg::CLI_HUB_KEYS_FAILED);
+    }
+
+    /// A registry the hub can't read stops its start with the message that
+    /// names the registry, not the keys, and the database's text escaped.
+    #[test]
+    fn a_registry_that_stops_the_start_is_said_as_the_registry() {
+        let (id, args) = start_refusal(&HubPairingError::Registry(StoreError::Unavailable {
+            detail: "locked\u{1b}[31m".to_owned(),
+        }));
+        assert_eq!(id, msg::CLI_HUB_REGISTRY_FAILED);
+        assert_eq!(
+            args,
+            vec![("detail", MsgArg::Text("locked\\u{1b}[31m".to_owned()))]
+        );
+        let (id, args) = start_refusal(&HubPairingError::Registry(StoreError::Corrupt {
+            detail: "a row".to_owned(),
+        }));
+        assert_eq!(id, msg::CLI_HUB_REGISTRY_FAILED);
+        assert_eq!(args, vec![("detail", MsgArg::Text("a row".to_owned()))]);
     }
 
     #[test]

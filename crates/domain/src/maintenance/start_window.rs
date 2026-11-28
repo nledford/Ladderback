@@ -1,9 +1,10 @@
 //! The hub's start window (technical design §7.3, "A rewound hub"; §16,
-//! decisions 137 and 157): after any start of the hub, a restore from a
-//! backup or an ordinary restart, no repository changes owner until every
-//! agent that used it at the start has reported since, or [`START_WINDOW`]
-//! has passed on the hub's monotonic clock. A hub restored from a backup
-//! can't see that a lease was granted after the backup until the holder
+//! decisions 137, 157 and 178): after any start of the hub, a restore from
+//! a backup or an ordinary restart, no repository changes owner until every
+//! agent that used it at the start, and every agent approved at the start,
+//! has reported since, or [`START_WINDOW`] has passed on the hub's
+//! monotonic clock. A hub restored from a backup, or one whose last commits
+//! a power cut took back, can't see a lease it granted until the holder
 //! reports, and a lease renewed just before the start can run that long.
 //! Rules only: what the hub took and when are passed in.
 
@@ -23,7 +24,10 @@ pub const START_WINDOW: SignedDuration = LEASE_LIFE.saturating_add(LEASE_GRACE);
 /// haven't reported since. A repository no agent's last report named is
 /// held until every agent whose last report named any has reported: a hub
 /// restored from a backup can't tell which of them began using it after
-/// the backup. The window holds nothing once [`START_WINDOW`] has passed.
+/// the backup. Every repository is held while an agent approved at the
+/// start hasn't reported since: the grant it holds, and the report that won
+/// it, may be what the hub lost (decision 178). The window holds nothing
+/// once [`START_WINDOW`] has passed.
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub struct StartWindow {
     awaited: BTreeMap<RepositoryId, BTreeSet<AgentId>>,
@@ -32,13 +36,22 @@ pub struct StartWindow {
     /// Every agent whose last report before the start named a repository,
     /// that hasn't reported since.
     unheard: BTreeSet<AgentId>,
+    /// Every agent approved at the start that hasn't reported since.
+    approved: BTreeSet<AgentId>,
 }
 
 impl StartWindow {
     /// The window of a hub that has just started, from every repository
-    /// each agent's last report named.
-    pub fn new(uses: impl IntoIterator<Item = (AgentId, RepositoryId)>) -> Self {
-        let mut window = Self::default();
+    /// each agent's last report named, and every agent `approved` at the
+    /// start.
+    pub fn new(
+        uses: impl IntoIterator<Item = (AgentId, RepositoryId)>,
+        approved: impl IntoIterator<Item = AgentId>,
+    ) -> Self {
+        let mut window = Self {
+            approved: approved.into_iter().collect(),
+            ..Self::default()
+        };
         for (agent, repository) in uses {
             window.listed.insert(repository.clone());
             window.unheard.insert(agent);
@@ -50,6 +63,7 @@ impl StartWindow {
     /// `agent` reported since the start: the window waits for it no more.
     pub fn heard(&mut self, agent: AgentId) {
         self.unheard.remove(&agent);
+        self.approved.remove(&agent);
         self.awaited.retain(|_, agents| {
             agents.remove(&agent);
             !agents.is_empty()
@@ -62,14 +76,17 @@ impl StartWindow {
         if since_start >= START_WINDOW {
             self.awaited.clear();
             self.unheard.clear();
+            self.approved.clear();
         }
     }
 
-    /// Whether the window still holds `repository`: an agent that used it
-    /// at the start hasn't reported since, or no agent's last report named
-    /// it and one that named any hasn't reported since.
+    /// Whether the window still holds `repository`: an agent approved at
+    /// the start, or one that used it then, hasn't reported since, or no
+    /// agent's last report named it and one that named any hasn't reported
+    /// since.
     pub fn holds(&self, repository: &RepositoryId) -> bool {
-        self.awaited.contains_key(repository)
+        !self.approved.is_empty()
+            || self.awaited.contains_key(repository)
             || (!self.unheard.is_empty() && !self.listed.contains(repository))
     }
 }

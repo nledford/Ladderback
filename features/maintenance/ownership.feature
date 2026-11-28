@@ -29,8 +29,11 @@ Feature: The hub gives each repository at most one maintenance owner
   the hub moves no repository to a new owner until every machine that used
   it has reported since the start, or 7 days and an hour have passed since
   the start, counted on a clock that a change of the hub's own time doesn't
-  move (§16, decisions 137 and 157). The holder's lease is renewed all the
-  while.
+  move (§16, decisions 137 and 157). Nor does it grant any repository to a
+  first owner while a machine it had approved before the start hasn't
+  reported since: that machine may hold a lease the hub granted after its
+  last backup, or just before a power cut took the grant back (decision
+  178). The holder's lease is renewed all the while.
 
   A hub restored from a backup can't see a lease it granted after the
   backup until its holder reports it. Each machine reports, with each
@@ -303,6 +306,19 @@ Feature: The hub gives each repository at most one maintenance owner
     And "laptop" stops using "photos" and the hub acknowledges its release
     And "nas" claims the repository "photos"
     Then "nas" holds the lease on "photos" at epoch 2, for 7 days from now
+
+  Scenario: A hub restored from before a grant waits for every machine it approved, and the holder's report puts it in recovery mode
+    Given the hub's database is backed up
+    And "nas" claims the repository "photos" and hears the hub's grants
+    When the hub is restored from that backup and starts
+    And "laptop" claims the repository "photos"
+    Then the claim of "laptop" was refused because the hub has just started
+    And nobody holds the lease on "photos"
+    When "nas" claims the repository "photos"
+    Then the hub is in recovery mode
+    And "nas" may maintain "photos"
+    When "laptop" claims the repository "photos"
+    Then the claim of "laptop" was refused because the hub is in recovery mode
 
   Scenario: An epoch without the hub key's signature doesn't put the hub in recovery mode
     Given "laptop" heard a grant of "photos" at epoch 3 signed by another hub's key

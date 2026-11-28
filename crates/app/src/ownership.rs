@@ -4,10 +4,13 @@
 //! refusing each lease, and its holder's release ends one early. A pending
 //! agent's report changes nothing, so it holds no lease and refuses no other
 //! agent's claim (decision 120, "What pending means"). From its start, the
-//! hub moves no repository to a new owner until every agent that used it
-//! has reported, or the start window has passed on its monotonic clock
-//! (decisions 137 and 157).
+//! hub moves no repository to a new owner until every agent that used it,
+//! and every agent approved at the start, has reported, or the start window
+//! has passed on its monotonic clock (decisions 137, 157 and 178). A new
+//! grant is on the drive's permanent storage before it is given to be
+//! signed (decision 178).
 
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex, MutexGuard, PoisonError};
 
 use domain::fleet::GENERATION;
@@ -16,7 +19,9 @@ use domain::maintenance::{
 };
 use domain::{AgentId, RepositoryId, SignedDuration, Timestamp};
 
-use crate::ports::{AgentRegistry, ClaimDecision, Clock, OwnershipRegistry, StoreError};
+use crate::ports::{
+    AgentRegistry, ClaimDecision, Clock, DriveFlush, OwnershipRegistry, StoreError,
+};
 
 /// What became of an agent's report.
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -51,9 +56,16 @@ pub struct RepositoryOwners {
     agents: Arc<dyn AgentRegistry>,
     owners: Arc<dyn OwnershipRegistry>,
     clock: Arc<dyn Clock>,
+    /// The drive the registry is on, flushed before a new grant goes out.
+    drive: Arc<dyn DriveFlush>,
+    /// Whether a grant may be off the drive's permanent storage: set from
+    /// the start, since a run before it may have stopped before its flush,
+    /// and while a grant's call hasn't flushed it.
+    unflushed: AtomicBool,
     /// The hub's monotonic time at its start.
     started: SignedDuration,
-    /// The start window, once the first report since the start read it.
+    /// The start window, once [`open`](Self::open) or the first report
+    /// since the start read it.
     window: Mutex<Option<StartWindow>>,
 }
 
@@ -62,19 +74,33 @@ impl RepositoryOwners {
         agents: Arc<dyn AgentRegistry>,
         owners: Arc<dyn OwnershipRegistry>,
         clock: Arc<dyn Clock>,
+        drive: Arc<dyn DriveFlush>,
     ) -> Self {
         Self {
             started: clock.monotonic(),
             agents,
             owners,
             clock,
+            drive,
+            unflushed: AtomicBool::new(true),
             window: Mutex::new(None),
         }
     }
 
+    /// Reads the start window now, at the hub's start, so it waits for
+    /// every agent approved before the start and none approved since.
+    /// Until it is called, the first report since the start reads it.
+    pub async fn open(&self) -> Result<(), StoreError> {
+        let read = self.read_window().await?;
+        self.kept_window().get_or_insert(read);
+        Ok(())
+    }
+
     /// Takes `reports` as every repository `agent` uses, with `proven`, the
     /// floors among them whose proof the hub checked, and decides each at
-    /// the hub's now when the agent is approved.
+    /// the hub's now when the agent is approved. It flushes nothing, so a
+    /// grant it decides mustn't be sent: [`grant`](Self::grant) gives what
+    /// is sent.
     pub async fn report(
         &self,
         agent: AgentId,
@@ -101,25 +127,43 @@ impl RepositoryOwners {
         proven: &[ProvenFloor],
     ) -> Result<Granting, StoreError> {
         let now = self.clock.now();
+        // Marked before the decision commits a grant: one stored but not
+        // given, because what follows failed or the call was dropped,
+        // stays marked, and the next lease given is flushed first. Grants
+        // are given one at a time (`HubPairing`), so no other call clears
+        // the mark meanwhile.
+        let outstanding = self.unflushed.swap(true, Ordering::SeqCst);
         let Some(decided) = self.decide(agent, reports, proven, now).await? else {
             return Ok(Granting::NotApproved);
         };
         if self.recovering().await? {
             return Ok(Granting::Withheld);
         }
-        let leases = decided
+        let given: Vec<_> = decided
             .into_iter()
             .filter_map(|decision| match decision.outcome {
-                ClaimOutcome::Granted(lease)
-                | ClaimOutcome::Renewed(lease)
-                | ClaimOutcome::Unrenewed(lease) => Some((decision.repository, lease)),
+                ClaimOutcome::Granted(lease) => Some((decision.repository, lease, true)),
+                ClaimOutcome::Renewed(lease) | ClaimOutcome::Unrenewed(lease) => {
+                    Some((decision.repository, lease, false))
+                }
                 ClaimOutcome::Refused(_) | ClaimOutcome::NoClaim => None,
             })
             .collect();
+        // A new grant goes out only once the drive holds it, so a power
+        // cut can't take back a grant a machine holds; so does any lease
+        // while a grant may be off the drive, since it may go out now as a
+        // renewal.
+        if outstanding || given.iter().any(|(_, _, new)| *new) {
+            self.drive.flush().await?;
+        }
+        self.unflushed.store(false, Ordering::SeqCst);
         Ok(Granting::Leases {
             generation: GENERATION,
             signed_at: now,
-            leases,
+            leases: given
+                .into_iter()
+                .map(|(repository, lease, _)| (repository, lease))
+                .collect(),
         })
     }
 
@@ -158,14 +202,15 @@ impl RepositoryOwners {
         }
     }
 
-    /// The start window as `agent`'s report finds it: read from the
-    /// registry at the first report since the start, holding nothing once
-    /// its time has passed, and waiting for `agent` no more in this copy
-    /// only. The kept window stops waiting for it once its report is
-    /// stored, so a report that fails, or is dropped, opens nothing.
+    /// The start window as `agent`'s report finds it: the one
+    /// [`open`](Self::open) read, or read from the registry at the first
+    /// report since the start, holding nothing once its time has passed,
+    /// and waiting for `agent` no more in this copy only. The kept window
+    /// stops waiting for it once its report is stored, so a report that
+    /// fails, or is dropped, opens nothing.
     async fn window(&self, agent: AgentId) -> Result<StartWindow, StoreError> {
         let read = if self.kept_window().is_none() {
-            Some(StartWindow::new(self.owners.reported_uses().await?))
+            Some(self.read_window().await?)
         } else {
             None
         };
@@ -178,6 +223,22 @@ impl RepositoryOwners {
         };
         window.heard(agent);
         Ok(window)
+    }
+
+    /// The start window as the registries hold it now: every repository
+    /// each agent's last report named, and every approved agent.
+    async fn read_window(&self) -> Result<StartWindow, StoreError> {
+        let approved = self
+            .agents
+            .agents()
+            .await?
+            .into_iter()
+            .filter(|record| !record.is_pending())
+            .map(|record| record.agent_id);
+        Ok(StartWindow::new(
+            self.owners.reported_uses().await?,
+            approved,
+        ))
     }
 
     /// `agent`'s report is stored: the kept window waits for it no more.

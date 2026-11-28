@@ -17,6 +17,7 @@ mod baseline_copy;
 mod codec;
 mod copy;
 mod daily_copy;
+mod drive_flush;
 mod error_args;
 mod leases;
 mod locations;
@@ -309,11 +310,17 @@ async fn connect(path: &Path) -> Result<SqlitePool, OpenError> {
         .journal_mode(SqliteJournalMode::Wal)
         // NORMAL would let a power cut take back a commit the hub has
         // already sent as a lease. On macOS this still leaves a commit
-        // in the drive's own cache: `fullfsync` would flush it, at a
-        // cost decision 164 weighs.
+        // in the drive's own cache: `fullfsync` on every commit would
+        // flush it, at a cost decision 164 weighs, so only a new grant
+        // and a release are flushed (`DriveFlush`, decision 178).
         .synchronous(SqliteSynchronous::Full)
         .busy_timeout(BUSY_TIMEOUT)
         .foreign_keys(true);
+    // On macOS a checkpoint flushes the drive's cache too, so it can't
+    // reuse the log's flushed frames while the database file's copy of
+    // them is still in that cache (decision 178).
+    #[cfg(target_os = "macos")]
+    let options = options.pragma("checkpoint_fullfsync", "ON");
     SqlitePoolOptions::new()
         .max_connections(MAX_CONNECTIONS)
         .acquire_timeout(ACQUIRE_TIMEOUT)

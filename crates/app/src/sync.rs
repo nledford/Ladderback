@@ -29,7 +29,9 @@ use crate::leases::MaintenanceLeases;
 use crate::machine::MachineStanding;
 use crate::others_snapshots::{ListingsDue, OthersSnapshots};
 use crate::pairing::{AgentChannel, ChannelError, ConnectFailure, ConnectToHub, Connected};
-use crate::ports::{Appended, Clock, ConfigError, ConfigStore, OperationStore, Outbox, StoreError};
+use crate::ports::{
+    Appended, Clock, ConfigError, ConfigStore, DriveFlush, OperationStore, Outbox, StoreError,
+};
 use crate::running::RunningBackups;
 
 mod live;
@@ -178,13 +180,15 @@ pub struct SyncWithHub {
 
 /// What a session needs to ask for the machine's leases: the repositories
 /// it uses, from its configuration, where it keeps what it is granted, the
-/// maintenance running here, which keeps its lease from a release, and
-/// what its listings showed of other agents' snapshots in each repository.
+/// maintenance running here, which keeps its lease from a release, what
+/// its listings showed of other agents' snapshots in each repository, and
+/// the drive its leases are kept on.
 struct Leasing {
     config: Arc<dyn ConfigStore>,
     leases: Arc<MaintenanceLeases>,
     operations: Arc<dyn OperationStore>,
     others: Arc<OthersSnapshots>,
+    drive: Arc<dyn DriveFlush>,
 }
 
 /// What the agent told its hub besides its reports, on its monotonic clock.
@@ -248,7 +252,8 @@ impl SyncWithHub {
     /// repositories `config` asks to maintain here, and keeping them in
     /// `leases`: a lease the configuration no longer asks for is released
     /// first, unless `operations` has a maintenance of its repository
-    /// running, then every repository whose ID is known is reported, with
+    /// running, and only once `drive` has its letting go on its permanent
+    /// storage; then every repository whose ID is known is reported, with
     /// whether `others` saw another agent's recent snapshots in it, and
     /// the hub's grants taken (§7.2, §7.3, I1).
     #[must_use]
@@ -258,12 +263,14 @@ impl SyncWithHub {
         leases: Arc<MaintenanceLeases>,
         operations: Arc<dyn OperationStore>,
         others: Arc<OthersSnapshots>,
+        drive: Arc<dyn DriveFlush>,
     ) -> Self {
         self.leases = Some(Leasing {
             config,
             leases,
             operations,
             others,
+            drive,
         });
         self
     }
@@ -334,12 +341,16 @@ impl SyncWithHub {
                 continue;
             }
             // Let go first: a release the hub takes but whose answer is
-            // lost must leave nothing here to maintain under.
+            // lost must leave nothing here to maintain under. The letting
+            // go is on the drive's permanent storage before the release
+            // leaves, so a power cut can't bring back a lease the hub may
+            // have granted elsewhere (decision 178).
             leasing
                 .leases
                 .released(&repository, epoch)
                 .await
                 .map_err(SyncFailure::Store)?;
+            leasing.drive.flush().await.map_err(SyncFailure::Store)?;
             channel
                 .send_release(&repository, epoch)
                 .await

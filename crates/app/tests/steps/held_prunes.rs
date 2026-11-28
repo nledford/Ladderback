@@ -170,6 +170,45 @@ async fn both_syncing(agent: &mut Agent) {
     }
 
     let start = Timestamp::from_second(1_800_000_000).unwrap();
+    // The other machine reports first, as every paired machine does,
+    // naming no repository: until it has, the hub's start window holds
+    // every repository from this machine (decision 178).
+    let clock = Arc::new(FakeClock::new(start));
+    let connector = world.connector_to(world.hub());
+    let sync = SyncWithHub::new(
+        other.connecting(connector.clone()),
+        Arc::new(InMemoryOutbox::new(OutboxEpoch::from_uuid(
+            Uuid::from_u128(0xf2),
+        ))),
+        clock.clone(),
+        other.agent_id,
+        other.hostname.clone(),
+        other.zone.clone(),
+    )
+    .with_leases(
+        Arc::new(InMemoryConfigStore::new()),
+        Arc::new(MaintenanceLeases::new(
+            other.identity.clone(),
+            Arc::new(InMemoryLeaseCache::default()),
+            clock.clone(),
+        )),
+        Arc::new(InMemoryOperationStore::default()),
+        Arc::new(OthersSnapshots::default()),
+        Arc::new(app::fakes::InMemoryDriveFlush::default()),
+    )
+    .with_running(Arc::clone(&world.held.running));
+    world.held.other = Some(Syncing {
+        machine: other,
+        connector,
+        running: Running {
+            clock,
+            task: tokio::spawn(async move { sync.run().await }),
+        },
+    });
+    if let Some(other) = &world.held.other {
+        other.running.settle().await;
+    }
+
     let clock = Arc::new(FakeClock::new(start));
     let configs = Arc::new(InMemoryConfigStore::new());
     configs
@@ -203,6 +242,7 @@ async fn both_syncing(agent: &mut Agent) {
         leases.clone(),
         Arc::new(InMemoryOperationStore::default()),
         others,
+        Arc::new(app::fakes::InMemoryDriveFlush::default()),
     )
     .with_running(Arc::new(RunningBackups::new()));
     world.held.this = Some(Syncing {
@@ -215,28 +255,6 @@ async fn both_syncing(agent: &mut Agent) {
     });
     world.held.leases = Some(leases);
     world.held.config = Some(configs);
-
-    let clock = Arc::new(FakeClock::new(start));
-    let connector = world.connector_to(world.hub());
-    let sync = SyncWithHub::new(
-        other.connecting(connector.clone()),
-        Arc::new(InMemoryOutbox::new(OutboxEpoch::from_uuid(
-            Uuid::from_u128(0xf2),
-        ))),
-        clock.clone(),
-        other.agent_id,
-        other.hostname.clone(),
-        other.zone.clone(),
-    )
-    .with_running(Arc::clone(&world.held.running));
-    world.held.other = Some(Syncing {
-        machine: other,
-        connector,
-        running: Running {
-            clock,
-            task: tokio::spawn(async move { sync.run().await }),
-        },
-    });
 }
 
 #[given("this machine's sync took the hub's leases on the repository and on another repository")]

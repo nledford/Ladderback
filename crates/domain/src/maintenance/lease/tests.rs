@@ -338,7 +338,7 @@ fn a_release_by_another_agent_or_of_another_epoch_changes_nothing() {
 /// A start window that holds repository `a`, used by agent 9, who hasn't
 /// reported since the start.
 fn holding_a() -> StartWindow {
-    StartWindow::new([(agent(9), repository('a'))])
+    StartWindow::new([(agent(9), repository('a'))], [])
 }
 
 #[test]
@@ -397,7 +397,10 @@ fn the_start_window_renews_the_holders_lease_and_refuses_another() {
 
 #[test]
 fn a_repository_the_start_window_doesnt_hold_is_decided_as_ever() {
-    let mut window = StartWindow::new([(agent(9), repository('a')), (agent(8), repository('b'))]);
+    let mut window = StartWindow::new(
+        [(agent(9), repository('a')), (agent(8), repository('b'))],
+        [],
+    );
     window.heard(agent(8));
     assert!(window.holds(&repository('a')));
     let mut ownership = RepositoryOwnership::new(repository('b'));
