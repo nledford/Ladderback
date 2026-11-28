@@ -42,7 +42,7 @@ Ladderback turns rustic into a managed service on each machine, with one place t
 4. **No lock-in.** Import existing rustic profiles, and export any plan back to one, so the `rustic` CLI always remains an option.
 5. **One self-contained program.** It runs headless on servers and as a user service on desktops and laptops, with the web UI built in.
 6. **Help from an AI agent, confirmed by a person.** People can ask an AI agent to help them work out what to back up, where and for how long. The AI agent proposes the setup; Ladderback shows in its own words what would change, what it could delete and every command it would add, and with sign-in on, nothing changes until a person has reviewed every change and confirmed it in the web UI. With sign-in off, anyone who can reach Ladderback, an AI agent included, can confirm, and Ladderback says so.
-7. **The web UI and the terminal, both.** Every routine task works from either. Installing takes one command; after that, nothing a casual user needs (setting the admin password, restarting, updating, reading why a backup failed) requires the terminal. The commands stay, for advanced users and for scripts.
+7. **The web UI and the terminal, both.** Every routine task works from either. Installing takes one command; after that, nothing a casual user needs (setting the admin password, restarting, reading why a backup failed) requires the terminal. Updating is the exception for now: it takes the install command again, since updating from the web UI (#1080, after `1.0.0`) waits for signed release checksums. The commands stay, for advanced users and for scripts.
 
 Success means: every machine's last good backup is visible at a glance, and a missed or failed backup is reported, not discovered during a restore.
 
@@ -89,7 +89,7 @@ Free and open source under MIT OR Apache-2.0.
 
 ## Evidence on Hand
 
-Released (0.1.0–0.3.1) and running on the author's own machines. There are no outside users, testimonials, benchmarks or published screenshots, and none may be invented.
+Released (0.1.0–0.6.0) and running on the author's own machines. There are no outside users, testimonials or benchmarks, and none may be invented; the screenshots in the README and the user guide show demo data.
 
 ## Stack
 
