@@ -376,14 +376,14 @@ async fn a_start_that_cant_read_a_key_file_fails() {
 
 /// A registry of machines the hub can't read fails its start with the
 /// error that says so: its start window can't know which machines to wait
-/// for (§16, decision 178).
+/// for (§16, decision 178). The keys are made first, while the registry
+/// still lists, so the failure can only come from the start window's read.
 #[tokio::test]
 async fn a_start_that_cant_read_the_registry_fails() {
     let unreadable = StoreError::Unavailable {
         detail: "database is locked".to_owned(),
     };
     let registry = Arc::new(InMemoryAgentRegistry::new());
-    registry.fails_to_list(unreadable.clone());
     let clock = Arc::new(FakeClock::new(
         Timestamp::from_second(1_800_000_000).unwrap(),
     ));
@@ -396,11 +396,13 @@ async fn a_start_that_cant_read_the_registry_fails() {
         "0.0.0-test".to_owned(),
     )
     .with_owners(Arc::new(crate::ownership::RepositoryOwners::new(
-        registry,
+        registry.clone(),
         Arc::new(crate::fakes::InMemoryOwnershipRegistry::new()),
         clock,
         Arc::new(crate::fakes::InMemoryDriveFlush::default()),
     )));
+    pairing.keys().await.unwrap();
+    registry.fails_to_list(unreadable.clone());
     assert_eq!(
         pairing.start().await.unwrap_err(),
         HubPairingError::Registry(unreadable)
