@@ -1,8 +1,14 @@
-blank_issues_enabled: true
+blank_issues_enabled: false
 contact_links:
+  - name: Ask a question
+    url: https://github.com/nledford/Ladderback/discussions/categories/q-a
+    about: Installing, setting up and using Ladderback. Questions go in Discussions, not issues.
+  - name: Talk through an idea
+    url: https://github.com/nledford/Ladderback/discussions/categories/ideas
+    about: An idea to discuss before it becomes a feature request.
   - name: Report a security vulnerability
     url: https://github.com/nledford/Ladderback/security/advisories/new
-    about: Privately, never in a public issue. See SECURITY.md.
+    about: Privately, never in a public issue or discussion. See SECURITY.md.
   - name: The user guide
     url: https://nledford.github.io/Ladderback/
     about: Installing, a first backup, and the advanced setups.

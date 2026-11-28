@@ -1,0 +1,65 @@
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Questions about installing, setting up and using Ladderback. It's built for its author's own machines first and published without support promises, so an answer may take a while. Something broken that you can reproduce is a [bug report](https://github.com/nledford/Ladderback/issues/new/choose); a security problem goes through [the security policy](https://github.com/nledford/Ladderback/security/policy), never a discussion.
+  - type: input
+    id: version
+    attributes:
+      label: Version
+      description: The web UI's footer, or `ladderback --version`.
+      placeholder: 0.6.0+1a2b3c4
+    validations:
+      required: true
+  - type: input
+    id: system
+    attributes:
+      label: System
+      description: The operating system and its version, and the processor if it isn't x86_64.
+      placeholder: Fedora 43, aarch64
+    validations:
+      required: true
+  - type: dropdown
+    id: install
+    attributes:
+      label: How Ladderback was installed
+      options:
+        - The release's .deb or .rpm package
+        - The install script
+        - cargo-binstall, or the release's archive by hand
+        - Built from source (cargo install)
+        - The Docker image (not supported yet)
+        - Something else (say below)
+    validations:
+      required: true
+  - type: dropdown
+    id: setup
+    attributes:
+      label: Setup
+      options:
+        - One machine on its own
+        - The hub
+        - A machine paired with a hub
+        - Several of these
+    validations:
+      required: true
+  - type: textarea
+    id: question
+    attributes:
+      label: Question
+      description: What you are trying to do, what you tried, and what happened.
+    validations:
+      required: true
+  - type: textarea
+    id: log
+    attributes:
+      label: Log lines
+      description: The daemon's log around it, if it says anything. Check it for paths or names you'd rather not share.
+      render: text
+  - type: checkboxes
+    id: secrets
+    attributes:
+      label: Before posting
+      options:
+        - label: I left out every password, key, API token and repository URL that holds credentials.
+          required: true

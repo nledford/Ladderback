@@ -1,0 +1,24 @@
+body:
+  - type: markdown
+    attributes:
+      value: |
+        An idea to talk through before it becomes an issue. [PRODUCT.md](https://github.com/nledford/Ladderback/blob/main/PRODUCT.md) says what Ladderback is for and what it leaves to rustic, and [the roadmap](https://github.com/nledford/Ladderback/blob/main/docs/design/roadmap.md) says what is planned. An idea the maintainer agrees on becomes an issue.
+  - type: textarea
+    id: problem
+    attributes:
+      label: The problem
+      description: What you are trying to do, and what gets in the way today. The problem first, rather than only the change you have in mind.
+    validations:
+      required: true
+  - type: textarea
+    id: who
+    attributes:
+      label: Who has it
+      description: "Your setup, and who else you think meets it: someone who never opens a terminal, or someone at home with the rustic CLI."
+  - type: textarea
+    id: idea
+    attributes:
+      label: The idea
+      description: What could change. Say if it touches one of PRODUCT.md's boundaries, such as Windows, several users or restic.
+    validations:
+      required: true
