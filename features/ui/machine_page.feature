@@ -15,7 +15,10 @@ Feature: A machine's page on the hub
   shows its own plans and operations. The page follows the hub's events, and
   "Pause live updates" holds it still, as the dashboard does (A3; §16,
   decision 65). It is a page not found for a machine the hub hasn't
-  approved, and on a machine that isn't a hub.
+  approved, and on a machine that isn't a hub. While the hub doesn't say
+  which machine it is, an approved machine's page shows, and any other
+  says so in place of a page not found, since it may be the hub's own
+  (#1692).
 
   Scenario: A machine's page shows its latest operations, a failure's code and the reports let go of
     Given a hub with sign-in off
@@ -115,6 +118,18 @@ Feature: A machine's page on the hub
     And the page is titled "Page not found – Ladderback"
     When I open the address "/machines/018f0000-0000-7000-8000-00000000dead"
     Then the main heading reads "Page not found"
+    And the page has no accessibility violations
+
+  Scenario: A machine's page shows while the hub doesn't say which machine it is, and another says so
+    Given a hub with sign-in off
+    And a machine named "demo-laptop" is approved on the hub
+    And the hub doesn't answer when asked which machine it is
+    When I open the page of the machine "demo-laptop"
+    Then the main heading reads "demo-laptop"
+    And no region of the page is busy
+    When I open the address "/machines/018f0000-0000-7000-8000-00000000dead"
+    Then the page says "The hub didn't say which machine it is, so this hub's own machine can't be shown. The page asks again in a few seconds."
+    And the main heading reads "Machine"
     And the page has no accessibility violations
 
   Scenario: A machine's page is a page not found on a machine that isn't a hub

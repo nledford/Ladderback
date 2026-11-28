@@ -112,6 +112,60 @@ Given("the hub fails its first two answers about its machines", function (this: 
   }
 });
 
+/** Lets the hub answer, from now on, when the page asks which machine it
+ *  is, per scenario: set by the step that holds those reads. */
+const answerIdentity = new WeakMap<BrowserWorld, () => void>();
+
+// The hub never answers the page's reads of which machine it is (`GET
+// /api/v1/machine`): each is held, never fulfilled, as from a daemon that
+// hangs, until a later step lets the hub answer; each read after that
+// reaches the hub (#1692).
+Given("the hub doesn't answer when asked which machine it is", function (this: BrowserWorld) {
+  let answering = false;
+  answerIdentity.set(this, () => {
+    answering = true;
+  });
+  this.contextRoutes.push(async (context) => {
+    await context.route("**/api/v1/machine", async (route) => {
+      if (route.request().method() !== "GET" || answering) {
+        await route.fallback();
+      }
+    });
+  });
+});
+
+When("the hub answers when asked which machine it is", function (this: BrowserWorld) {
+  const answer = answerIdentity.get(this);
+  assert.ok(answer, "no Given held the hub's answers about which machine it is");
+  answer();
+});
+
+// The hub never answers the page's request to start a backup (`POST
+// /api/v1/operations`): it is held, never fulfilled, as from a daemon that
+// hangs (#1690).
+Given("the hub doesn't answer a request to start a backup", function (this: BrowserWorld) {
+  this.contextRoutes.push(async (context) => {
+    await context.route("**/api/v1/operations", async (route) => {
+      if (route.request().method() !== "POST") {
+        await route.fallback();
+      }
+    });
+  });
+});
+
+// A sentence the page showed is gone.
+Then("the page no longer says {string}", async function (this: BrowserWorld, text: string) {
+  await expect(this.page.getByRole("main").getByText(namePattern(text))).toHaveCount(0);
+});
+
+// A button the page made busy while its request was on its way is no
+// longer busy, so it can be pressed again (#1690).
+Then("the button {string} can be pressed again", async function (this: BrowserWorld, name: string) {
+  const button = this.page.getByRole("button", { name: namePattern(name) });
+  await expect(button).toHaveCount(1);
+  await expect(button).not.toHaveAttribute("aria-disabled");
+});
+
 // Each row by its result's badge and its error code, in the order the
 // table shows them.
 Then("the table {string} lists, newest first:", async function (this: BrowserWorld, name: string, expected: DataTable) {

@@ -83,7 +83,7 @@ The gallery's "Shared vocabulary" demo shows every value named in words, each st
 **Live updates (A3).** `UiEvent`s update the page visually, but only the **announcer** talks to screen readers.
 
 - **Two regions:** a polite `role="status"` and an assertive `role="alert"`. Both sit in the static `index.html`, outside the Leptos mount point, empty and never `display: none`, so they exist before anything is written to them.
-- **Polite:** an operation finished, an agent came back. **Assertive:** only a failure that needs the user now, such as a failed restore.
+- **Polite:** an operation finished, an agent came back, and a status sentence a page shows by itself in place of what the daemon didn't answer, such as the dashboard's "The hub didn't answer…" (4.1.3), said once each time it appears and never again as the page asks again (`components::say_when_shown`). **Assertive:** only a failure that needs the user now, such as a failed restore.
 - **Writing:** each message clears the region and sets the text on the next tick, so a repeated message is announced again.
 - **Bursts are merged:** the same message within 2 s is said once, and ten agents changing at once become one summary ("3 backups finished, 1 failed").
 - **Modal dialogs** make the rest of the page inert, including the regions. While one is open, announcements queue and are spoken when it closes.

@@ -30,14 +30,28 @@ struct Held {
     now: i64,
 }
 
-/// What the page has read of the hub's own machine: nothing yet, or its
-/// card's machine, none when the hub didn't say who it is (decision 175).
-/// Boxed so that a `Waiting` doesn't take a whole machine's room.
+/// What the page has read of the hub's own machine: nothing yet, its
+/// card's machine, none when the hub didn't say who it is (decision 175),
+/// or nothing, its read gone unanswered past its patience while the page
+/// asks again (#1692). Boxed so that a `Waiting` doesn't take a whole
+/// machine's room.
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub(crate) enum Own {
     #[default]
     Waiting,
     Read(Option<Box<HubMachineDto>>),
+    Unanswered,
+}
+
+impl Own {
+    /// The card the hub's own machine shows, if any: a pause counts a
+    /// change of it, not of a read that changes no card.
+    fn card(&self) -> Option<&HubMachineDto> {
+        match self {
+            Self::Read(Some(machine)) => Some(machine),
+            Self::Read(None) | Self::Waiting | Self::Unanswered => None,
+        }
+    }
 }
 
 /// The machines as the hub last listed them, whether a read has answered,
@@ -69,12 +83,7 @@ impl Fleet {
     /// The machine ID of the hub's own card, as the page shows it.
     pub(crate) fn own_id(self) -> Signal<Option<String>> {
         let own = self.shown_own();
-        Signal::derive(move || {
-            own.with(|own| match own {
-                Own::Read(Some(machine)) => Some(machine.machine_id.clone()),
-                Own::Read(None) | Own::Waiting => None,
-            })
-        })
+        Signal::derive(move || own.with(|own| own.card().map(|machine| machine.machine_id.clone())))
     }
 
     /// The time the cards the page shows are read at.
@@ -93,6 +102,22 @@ impl Fleet {
                 .with(|held| held.as_ref().map(|held| held.own.clone()))
                 .unwrap_or_else(|| self.own.get())
         })
+    }
+
+    /// Notes that the read of the hub's own machine went unanswered past its
+    /// patience: a page still waiting for it shows the approved machines
+    /// without it, and one that has read it keeps it. A page gone already
+    /// takes no note.
+    pub(crate) fn own_unanswered(self) {
+        if self.own.try_with_untracked(|own| *own == Own::Waiting) == Some(true) {
+            let _ = self.own.try_set(Own::Unanswered);
+        }
+    }
+
+    /// Whether the page shows that the hub's own machine couldn't be read.
+    pub(crate) fn own_unread(self) -> Signal<bool> {
+        let own = self.shown_own();
+        Signal::derive(move || own.with(|own| *own == Own::Unanswered))
     }
 
     /// Holds the machines as they are now; a page already paused keeps the
@@ -166,7 +191,9 @@ impl Fleet {
             held.as_ref().map_or(0, |held| {
                 self.machines
                     .with(|machines| changes_since(&held.machines, machines))
-                    + self.own.with(|own| usize::from(*own != held.own))
+                    + self
+                        .own
+                        .with(|own| usize::from(own.card() != held.own.card()))
             })
         })
     }
@@ -176,10 +203,19 @@ impl Fleet {
             held.as_ref().map_or(0, |held| {
                 self.machines
                     .with_untracked(|machines| changes_since(&held.machines, machines))
-                    + self.own.with_untracked(|own| usize::from(*own != held.own))
+                    + self
+                        .own
+                        .with_untracked(|own| usize::from(own.card() != held.own.card()))
             })
         })
     }
+}
+
+/// Whether a machine's page is a page not found: the machines are read,
+/// the machine its address names isn't among them, and the hub's own
+/// machine, which it may be, was read too, not left unanswered (#1692).
+pub(crate) fn not_found(state: State, found: bool, own_unread: bool) -> bool {
+    state == State::Ready && !found && !own_unread
 }
 
 /// Whether `event` asks the dashboard to read its machines again: a
