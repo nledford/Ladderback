@@ -501,10 +501,11 @@ struct RowCreates {
 }
 
 /// The repositories table (§4.5), named by the page's heading: each
-/// repository's name as its row's header, where it is (the hot half on a line
-/// of its own), or, for a repository reached at several locations, the list
-/// of them in order with its Test (decision 80), where its password comes
-/// from and who maintains it, and its Create, when the row offers it
+/// repository's name as its row's header, then who maintains it, in a
+/// column the reader can't hide (I1, decision 140, #1625), where it is (the
+/// hot half on a line of its own), or, for a repository reached at several
+/// locations, the list of them in order with its Test (decision 80), where
+/// its password comes from, and its Create, when the row offers it
 /// (decision 53). Never the password itself (I4). A row follows a read of
 /// the list in place; its buttons are built again only when what the row
 /// offers changes, as a created repository's Create goes.
@@ -515,20 +516,40 @@ fn repositories_table(
     rows: RwSignal<Option<Vec<RepositoryDto>>>,
     tested: RwSignal<HashMap<String, Vec<LocationTriedDto>>>,
 ) -> AnyView {
+    // The five columns add up to the page's 58 rem at 1280 px, so a wide
+    // screen never scrolls the frame (§4.5, the table).
+    // Its header reads whole at 320 px with 200 % text too: "Name" in
+    // DejaVu Sans Bold, Linux's default sans-serif, is 3.23em, wider than
+    // two fifths of the 8rem frame less the cells' padding (94.4 px of 32 px
+    // text), so it broke inside on CI. 4rem leaves it 120 px, room for the
+    // word 16 % wider, and the cells beside it half the frame (§4.5).
     let name = Column::new(
         "name",
         text(localizer, msg::UI_COLUMN_NAME),
         Rem::tenths(70),
         |row: Signal<RepositoryDto>| row.with_untracked(|row| row.alias.clone()).into_any(),
+    )
+    .kept_whole(Rem::tenths(40));
+    let maintenance_localizer = Arc::clone(localizer);
+    let maintenance = Column::new(
+        "maintenance",
+        text(localizer, msg::UI_COLUMN_MAINTENANCE),
+        // Its header on one line in DejaVu Sans Bold, Linux's default
+        // sans-serif, the widest common one, with room to spare.
+        Rem::tenths(90),
+        move |row: Signal<RepositoryDto>| {
+            let localizer = Arc::clone(&maintenance_localizer);
+            (move || row.with(|row| maintainer_view(&localizer, row))).into_any()
+        },
     );
     let place_localizer = Arc::clone(localizer);
     let location = Column::new(
         "location",
         text(localizer, msg::UI_COLUMN_LOCATION),
-        // An address such as `sftp:me@nas.home.lan:/srv/data/repo/pc/main`
-        // on one line in DejaVu Sans, Linux's default sans-serif, the widest
-        // common one. The four columns add up to the page's 58 rem.
-        Rem::tenths(265),
+        // The room the others leave: an address such as
+        // `sftp:me@nas.home.lan:/srv/data/repo/pc/main` takes two lines,
+        // broken only between its parts (`address_view`).
+        Rem::tenths(175),
         move |row: Signal<RepositoryDto>| {
             let localizer = Arc::clone(&place_localizer);
             (move || row.with(|row| place_view(&localizer, row, tested))).into_any()
@@ -538,6 +559,8 @@ fn repositories_table(
     let password = Column::new(
         "password",
         text(localizer, msg::UI_COLUMN_PASSWORD),
+        // A quarter of the table, so where a password comes from, and a
+        // warning about it, read as sentences (#482).
         Rem::tenths(150),
         move |row: Signal<RepositoryDto>| {
             let localizer = Arc::clone(&password_localizer);
@@ -585,6 +608,7 @@ fn repositories_table(
             name=TableName::Heading(PAGE_HEADING_ID.to_owned())
             columns_choice=ColumnsChoice::new("repositories", Arc::clone(localizer))
             row_header=name
+            always_shown=vec![maintenance]
             columns=vec![location, password, actions]
             rows=Memo::new(move |_| rows.get().unwrap_or_default())
             key=|row: &RepositoryDto| row.alias.clone()
@@ -619,20 +643,24 @@ fn place_view(
     .into_any()
 }
 
-/// Where a repository's password comes from, who maintains it (§7.3), and
-/// what the page notes of it. Who maintains it is a muted note in words,
-/// never a color alone (#1548).
+/// Who maintains a repository (§7.3), in words, never a color alone
+/// (#1548).
+fn maintainer_view(localizer: &Localizer, row: &RepositoryDto) -> AnyView {
+    text(
+        localizer,
+        maintainer_note(row.maintenance, row.maintenance_paused_since.is_some()),
+    )
+    .into_any()
+}
+
+/// Where a repository's password comes from, and what the page notes of
+/// it.
 fn password_view(localizer: &Localizer, row: &RepositoryDto) -> AnyView {
     let (id, args) = password_source(&row.password);
     let password = text_with(localizer, id, &args);
-    let maintainer = text(
-        localizer,
-        maintainer_note(row.maintenance, row.maintenance_paused_since.is_some()),
-    );
     let notes = repository_notes(localizer, &row.warnings);
     view! {
         <div>{runs_view(&password)}</div>
-        <div class="text-muted">{maintainer}</div>
         {notes
             .into_iter()
             .map(|note| view! { <div class="text-muted">{runs_view(&note)}</div> })

@@ -350,6 +350,12 @@ ui-gallery-table-notes = notes
 # The table demo's column of folder names, each row's header.
 ui-gallery-table-name = Name
 
+# The table demo's column of what each folder is, which the table always shows: the reader can't hide it.
+ui-gallery-table-kind = Kind
+
+# What each demo folder is, in the table demo's Kind column.
+ui-gallery-table-folder = Folder
+
 # The table demo's column of folder sizes.
 ui-gallery-table-size-column = Size
 
@@ -2775,6 +2781,9 @@ ui-column-location = Location
 # The repositories table's column of where each password comes from.
 ui-column-password = Password
 
+# The repositories table's column of who maintains each repository, right after its name. The reader can't hide it.
+ui-column-maintenance = Maintenance
+
 # What the repositories page says when none is configured.
 ui-no-repositories = No repositories yet.
 
@@ -2803,16 +2812,16 @@ ui-password-env = Read from the environment variable { $name }
 # $program (text): the program's name. It is shown as it came.
 ui-password-command = Read from the output of { $program }
 
-# A muted note on a repository's row, under where its password comes from: its entry asks this machine to maintain it, that is to forget, prune and check it and adopt history into it (`maintenance = "local"`).
+# What a repository's row says in its Maintenance column when its entry asks this machine to maintain it, that is to forget, prune and check it and adopt history into it (`maintenance = "local"`).
 ui-repository-maintained-here = Maintained from this { -machine }.
 
-# A muted note on a repository's row: its entry asks this machine to maintain it, but this paired machine holds no lease on it from its hub, so its maintenance is paused (the Snapshots page says since when).
+# What a repository's row says in its Maintenance column when its entry asks this machine to maintain it, but this paired machine holds no lease on it from its hub, so its maintenance is paused (the Snapshots page says since when).
 ui-repository-maintained-here-paused = Maintained from this { -machine }, but paused: it holds no lease on this repository from its { -hub }.
 
-# A muted note on a repository's row: its entry leaves it to the hub to maintain (`maintenance = "hub"`), so this machine doesn't. It says what the entry asks, not that the hub maintains it: the hub may not have taken it on.
+# What a repository's row says in its Maintenance column when its entry leaves it to the hub to maintain (`maintenance = "hub"`), so this machine doesn't. It says what the entry asks, not that the hub maintains it: the hub may not have taken it on.
 ui-repository-maintained-by-hub = Left to the { -hub } to maintain.
 
-# A muted note on a repository's row: its entry asks nobody to maintain it (`maintenance = "none"`, or no setting), so neither this machine nor the hub forgets, prunes or checks it. Another machine or a program outside Ladderback may still do it.
+# What a repository's row says in its Maintenance column when its entry asks nobody to maintain it (`maintenance = "none"`, or no setting), so neither this machine nor the hub forgets, prunes or checks it. Another machine or a program outside Ladderback may still do it.
 ui-repository-maintained-by-nobody = No one maintains it from here.
 
 # The heading of the form that tests, connects or creates a repository.
