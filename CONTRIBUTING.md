@@ -1,8 +1,12 @@
 # Contributing to Ladderback
 
-Ladderback is built for its author's own machines first and published for other rustic users, without support promises. Issues, design discussion and test reports are welcome; pull requests are welcome once an issue has agreed on the change.
+Ladderback is built for its author's own machines first and published for other rustic users, without support promises. Questions, ideas, issues, design discussion and test reports are welcome; pull requests are welcome once an issue has agreed on the change.
 
 Everyone taking part follows the [code of conduct](CODE_OF_CONDUCT.md).
+
+## Asking a question
+
+Ask in the [Q&A category of Discussions](https://github.com/nledford/Ladderback/discussions/categories/q-a), not in an issue. Its form asks for the same version, system and installation as a bug report, and an answer marked there helps the next person who searches. An answer may take a while.
 
 ## Reporting a bug
 
@@ -14,7 +18,7 @@ A security problem goes through the [security policy](SECURITY.md), never a publ
 
 ## Asking for a feature
 
-Open an issue with the **Feature request** form, and say what you are trying to do rather than only the change you have in mind. [PRODUCT.md](PRODUCT.md) says what Ladderback is for and what it leaves to rustic; [the roadmap](docs/design/roadmap.md) says what is planned.
+Open an issue with the **Feature request** form, and say what you are trying to do rather than only the change you have in mind. An idea you'd like to talk through first goes in the [Ideas category of Discussions](https://github.com/nledford/Ladderback/discussions/categories/ideas); one the maintainer agrees on becomes an issue. [PRODUCT.md](PRODUCT.md) says what Ladderback is for and what it leaves to rustic; [the roadmap](docs/design/roadmap.md) says what is planned.
 
 ## Testing on a real machine
 
