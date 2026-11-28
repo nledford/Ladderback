@@ -350,6 +350,12 @@ ui-gallery-table-notes = notes
 # The table demo's column of folder names, each row's header.
 ui-gallery-table-name = Name
 
+# The table demo's column of what each folder is, which the table always shows: the reader can't hide it.
+ui-gallery-table-kind = Kind
+
+# What each demo folder is, in the table demo's Kind column.
+ui-gallery-table-folder = Folder
+
 # The table demo's column of folder sizes.
 ui-gallery-table-size-column = Size
 
@@ -888,6 +894,10 @@ ui-gallery-fingerprint-name = Demo { -hub } key fingerprint
 # The heading of the gallery's footer demo (§4.5): the running version at
 # the foot of every page.
 ui-gallery-footer-heading = Footer
+
+# The heading of the gallery's machine card demo (§4.5): a machine at a
+# glance, as the hub's dashboard shows one.
+ui-gallery-machine-card-heading = Machine card
 
 # The heading of the gallery's disclosure menu demo (§4.5): buttons that
 # show and hide a panel of links under them, as the header's Settings menu.
@@ -2771,6 +2781,9 @@ ui-column-location = Location
 # The repositories table's column of where each password comes from.
 ui-column-password = Password
 
+# The repositories table's column of who maintains each repository, right after its name. The reader can't hide it.
+ui-column-maintenance = Maintenance
+
 # What the repositories page says when none is configured.
 ui-no-repositories = No repositories yet.
 
@@ -2799,16 +2812,16 @@ ui-password-env = Read from the environment variable { $name }
 # $program (text): the program's name. It is shown as it came.
 ui-password-command = Read from the output of { $program }
 
-# A muted note on a repository's row, under where its password comes from: its entry asks this machine to maintain it, that is to forget, prune and check it and adopt history into it (`maintenance = "local"`).
+# What a repository's row says in its Maintenance column when its entry asks this machine to maintain it, that is to forget, prune and check it and adopt history into it (`maintenance = "local"`).
 ui-repository-maintained-here = Maintained from this { -machine }.
 
-# A muted note on a repository's row: its entry asks this machine to maintain it, but this paired machine holds no lease on it from its hub, so its maintenance is paused (the Snapshots page says since when).
+# What a repository's row says in its Maintenance column when its entry asks this machine to maintain it, but this paired machine holds no lease on it from its hub, so its maintenance is paused (the Snapshots page says since when).
 ui-repository-maintained-here-paused = Maintained from this { -machine }, but paused: it holds no lease on this repository from its { -hub }.
 
-# A muted note on a repository's row: its entry leaves it to the hub to maintain (`maintenance = "hub"`), so this machine doesn't. It says what the entry asks, not that the hub maintains it: the hub may not have taken it on.
+# What a repository's row says in its Maintenance column when its entry leaves it to the hub to maintain (`maintenance = "hub"`), so this machine doesn't. It says what the entry asks, not that the hub maintains it: the hub may not have taken it on.
 ui-repository-maintained-by-hub = Left to the { -hub } to maintain.
 
-# A muted note on a repository's row: its entry asks nobody to maintain it (`maintenance = "none"`, or no setting), so neither this machine nor the hub forgets, prunes or checks it. Another machine or a program outside Ladderback may still do it.
+# What a repository's row says in its Maintenance column when its entry asks nobody to maintain it (`maintenance = "none"`, or no setting), so neither this machine nor the hub forgets, prunes or checks it. Another machine or a program outside Ladderback may still do it.
 ui-repository-maintained-by-nobody = No one maintains it from here.
 
 # The heading of the form that tests, connects or creates a repository.
@@ -3867,7 +3880,7 @@ ui-machines-resumed-unlisted = Live updates are on again.
 ui-machines-started-waiting = { $hostname } is waiting for approval.
 
 # A link on the Machines tab to the dashboard of the approved machines, which is the hub's start page (decision 173).
-ui-machines-dashboard-link = See the approved { -machine(form: "other") }' latest operations
+ui-machines-dashboard-link = See the { -machine(form: "other") } on the dashboard
 
 # The heading of the notice that leads the Machines tab while the hub is in recovery mode (decision 137).
 ui-machines-recovery-heading = Recovery mode
@@ -3894,7 +3907,8 @@ ui-machines-recovery-ended = Recovery mode ended. This { -hub } grants leases ag
 ui-machines-recovery-step-up-failed = That isn't right, so recovery mode didn't end. Try again.
 
 ## The hub's dashboard (#569), which is the hub's start page (decision 173):
-## each approved machine, whether it is online now or when it last
+## a card for each machine, the hub's own first (decision 175), and a
+## machine's page, which shows whether it is online now or when it last
 ## connected, the reports the hub let go of, and its latest operations, as
 ## its reports told them.
 
@@ -3905,7 +3919,7 @@ ui-dashboard-heading = Dashboard
 ui-dashboard-title = Dashboard – { -brand-name }
 
 # What the dashboard shows, under its heading.
-ui-dashboard-intro = Each approved { -machine }'s latest operations, as it reported them to this { -hub }. A { -machine } stays connected to the { -hub } while it runs, so this page shows that it is online now, or when it last connected.
+ui-dashboard-intro = Each { -machine } at a glance: this { -hub } first, then each approved { -machine }, as it reported to this { -hub }. A { -machine } stays connected to the { -hub } while it runs, so its card shows that it is online now, or when it last connected.
 
 # Shown while the dashboard's first read of the machines is on its way.
 ui-dashboard-loading = Loading the { -machine(form: "other") }…
@@ -3995,6 +4009,107 @@ ui-dashboard-resumed =
         [one] Live updates are on again. One { -machine } changed while they were paused.
        *[other] Live updates are on again. { $count } { -machine(form: "other") } changed while they were paused.
     }
+
+# The sentence above the machines' cards, under the dashboard's heading: how many machines the page shows, and how many of them need attention, which the links after it name (decision 175).
+# $count (number): how many machines the page shows, this hub among them.
+# $attention (number): how many of them need attention.
+ui-dashboard-summary =
+    { $attention ->
+        [0]
+            { $count ->
+                [one] One { -machine }, which needs no attention.
+               *[other] { $count } { -machine(form: "other") }, none of which needs attention.
+            }
+        [one]
+            { $count ->
+                [one] One { -machine }, which needs attention:
+               *[other] { $count } { -machine(form: "other") }. One needs attention:
+            }
+       *[other] { $count } { -machine(form: "other") }. { $attention } need attention:
+    }
+
+# A link after ui-dashboard-summary to the page of a machine that is offline though a planned run of it fell due.
+# $hostname (string): the machine's name.
+# $when (string): when it last connected, as ui-instant or ui-dashboard-time-elsewhere writes it.
+# $due (string): when the run was planned for, written the same way.
+ui-dashboard-attention-offline = { $hostname } last connected { $when } and is offline, past a run planned for { $due }.
+
+# A link after ui-dashboard-summary to the page of a machine whose plan's last run failed.
+# $hostname (string): the machine's name.
+# $plan (string): the plan's ID.
+ui-dashboard-attention-failed = The last run of { $plan } on { $hostname } failed.
+
+# A link after ui-dashboard-summary to the page of a machine whose planned run fell due while nothing ran.
+# $hostname (string): the machine's name.
+# $plan (string): the plan's ID.
+# $due (string): when the run was planned for, as ui-instant or ui-dashboard-time-elsewhere writes it.
+ui-dashboard-attention-due = { $plan } on { $hostname } was due { $due } and hasn't run.
+
+## A machine's card on the hub's dashboard (decision 175): its name, why it
+## needs attention, its connection, its status, its facts and its controls.
+
+# Under the name on the hub's own card, and under the heading of its page.
+ui-machine-card-this-hub = This { -hub }
+
+# A card's attention mark: that its machine needs attention, then why. The words around the reason show in bold.
+# $reason (string): the sentence that says why, one of the ui-machine-card-* reasons below.
+ui-machine-card-attention = Needs attention: { $reason }
+
+# Why a card needs attention: its machine is offline though a planned run of it fell due.
+# $when (string): when it last connected, as ui-instant or ui-dashboard-time-elsewhere writes it.
+# $due (string): when the run was planned for, written the same way.
+ui-machine-card-offline = It last connected { $when } and is offline, past a run planned for { $due }.
+
+# Why a card needs attention: a plan's last run failed.
+# $plan (string): the plan's ID.
+ui-machine-card-failed = The last run of { $plan } failed.
+
+# Why a card needs attention: a planned run fell due while nothing ran.
+# $plan (string): the plan's ID.
+# $due (string): when the run was planned for, as ui-instant or ui-dashboard-time-elsewhere writes it.
+ui-machine-card-due = { $plan } was due { $due } and hasn't run.
+
+# The terms of a card's facts: when its last backup ended, when it runs next, and how many plans it has.
+ui-machine-card-last-backup = Last backup
+ui-machine-card-next-run = Next run
+ui-machine-card-plans = Plans
+
+# A card's last backup when none of its plans has run.
+ui-machine-card-no-backup = None yet
+
+# A card's next run when the earliest of its plans' fell due and hasn't run.
+# $when (string): when it was due, as ui-instant or ui-dashboard-time-elsewhere writes it.
+ui-machine-card-was-due = Was due { $when }
+
+# How many plans a card's machine has, those it left out of its report among them.
+# $count (number): how many.
+ui-machine-card-plan-count = { $count }
+
+# A card's plans before its machine reported them.
+ui-machine-card-plans-unreported = Not reported yet
+
+# The link on a card to its machine's page.
+# $hostname (string): the machine's name.
+ui-machine-card-open = Open { $hostname }
+
+# The button of the menu on the hub's own card that starts a backup of one of its plans.
+# $hostname (string): the hub's own machine's name.
+ui-machine-card-back-up = Back up { $hostname }
+
+## A machine's page on the hub (decision 175).
+
+# The heading of a machine's page before the page has read the machine's name.
+ui-machine-page-heading = Machine
+
+# A machine's page's title before the page has read the machine's name.
+ui-machine-page-title = Machine – { -brand-name }
+
+# A machine's page's title, as the browser's tab and history show it.
+# $hostname (string): the machine's name.
+ui-machine-page-named-title = { $hostname } – { -brand-name }
+
+# Under the heading of the hub's own page.
+ui-machine-page-this-hub = This is the { -hub } itself: its own plans and operations.
 
 ## Settings' "Dry-run allowlist" tab (decision 89): the folders a plan dry
 ## run an AI agent asks for may read, which only a person sets.

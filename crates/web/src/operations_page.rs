@@ -39,10 +39,11 @@ use crate::variants::{Rem, Size, Tone};
 use crate::visit::Visit;
 use crate::ws::{self, Got, Phase, Posted};
 
-/// The body a start request carries: the plan to back up.
+/// The body a start request carries: the plan to back up. The hub's own
+/// Back up menu on the dashboard sends it too (decision 175).
 #[derive(Serialize)]
-struct StartBackup {
-    plan: String,
+pub(crate) struct StartBackup {
+    pub(crate) plan: String,
 }
 
 /// The page's connection to the daemon, as a row's Cancel uses it: the

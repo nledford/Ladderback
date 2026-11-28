@@ -15,6 +15,7 @@ use axum::Json;
 use axum::extract::State;
 use axum::http::StatusCode;
 use axum::response::{IntoResponse, Response};
+use domain::fleet::Hostname;
 
 use crate::{AppState, refused, refused_detailed, refused_with};
 
@@ -25,15 +26,53 @@ pub(crate) const NEW_ID_PATH: &str = "/api/v1/machine/new-id";
 /// Where this machine stands, and what takes a new machine ID for a copied
 /// data folder or a machine its hub refused or removed. Without one, as in
 /// a test's daemon that never checked, the machine stands as usual and no
-/// new ID can be taken.
+/// new ID can be taken. Who the machine is, which the route tells beside
+/// its standing, is none until the composition gives it.
 #[derive(Clone, Default)]
 pub struct MachineRoute {
     take: Option<Arc<TakeNewId>>,
+    identity: Option<Arc<MachineIdentity>>,
+}
+
+/// Who this machine is, as the route tells it (§16, decision 175): the
+/// machine ID it runs under, its hostname when it is one a hub takes, and
+/// its IANA time zone when it has one. A hub's dashboard shows them on its
+/// own card.
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct MachineIdentity {
+    pub machine_id: String,
+    pub hostname: Option<Hostname>,
+    pub zone: Option<String>,
+}
+
+impl MachineIdentity {
+    /// Who this machine is, from its machine ID, the `hostname` its
+    /// operating system tells, kept only when it passes the rule a pairing
+    /// hostname does (decision 120, "Hostnames"), and its IANA zone.
+    pub fn new(machine_id: String, hostname: &str, zone: Option<String>) -> Self {
+        Self {
+            machine_id,
+            hostname: Hostname::parse(hostname).ok(),
+            zone,
+        }
+    }
 }
 
 impl MachineRoute {
     pub fn new(take: Arc<TakeNewId>) -> Self {
-        Self { take: Some(take) }
+        Self {
+            take: Some(take),
+            identity: None,
+        }
+    }
+
+    /// The route, telling who this machine is.
+    #[must_use]
+    pub fn with_identity(self, identity: MachineIdentity) -> Self {
+        Self {
+            identity: Some(Arc::new(identity)),
+            ..self
+        }
     }
 
     fn standing(&self) -> Standing {
@@ -43,8 +82,9 @@ impl MachineRoute {
     }
 }
 
-fn answer(standing: Standing) -> Response {
-    let standing = match standing {
+/// Where the machine of `route` stands, and who it is, as the routes answer.
+fn answer(route: &MachineRoute) -> Response {
+    let standing = match route.standing() {
         Standing::Same => MachineStandingDto::Same,
         Standing::Copied => MachineStandingDto::Copied,
         Standing::NewIdTaken => MachineStandingDto::NewIdTaken,
@@ -52,12 +92,21 @@ fn answer(standing: Standing) -> Response {
         Standing::RemovedByHub => MachineStandingDto::RemovedByHub,
         Standing::Unread => MachineStandingDto::Unread,
     };
-    (StatusCode::OK, Json(MachineDto { standing })).into_response()
+    let identity = route.identity.as_deref();
+    let dto = MachineDto {
+        standing,
+        machine_id: identity.map(|identity| identity.machine_id.clone()),
+        hostname: identity
+            .and_then(|identity| identity.hostname.as_ref())
+            .map(|hostname| hostname.as_str().to_owned()),
+        zone: identity.and_then(|identity| identity.zone.clone()),
+    };
+    (StatusCode::OK, Json(dto)).into_response()
 }
 
-/// `GET /api/v1/machine`: where this machine stands.
+/// `GET /api/v1/machine`: where this machine stands, and who it is.
 pub(crate) async fn read(State(state): State<AppState>) -> Response {
-    answer(state.machine.standing())
+    answer(&state.machine)
 }
 
 /// `POST /api/v1/machine/new-id`: takes a new machine ID for a copied data
@@ -74,7 +123,7 @@ pub(crate) async fn take_new_id(State(state): State<AppState>) -> Response {
                 "took the new machine ID {} for this computer, as its data folder was copied from another computer or its hub refused it as a second computer or removed it, and turned off its maintenance of every repository: restart Ladderback to start using it",
                 id.as_uuid()
             );
-            answer(take.standing())
+            answer(&state.machine)
         }
         Err(NewIdError::NotCopied) => refused(StatusCode::CONFLICT, ErrorCode::MachineNotCopied),
         // The configuration's refusal, `503` with its `config-*` code, as

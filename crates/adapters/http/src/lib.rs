@@ -64,7 +64,7 @@ pub use dry_runs::{DryRuns, DryRunsError};
 pub use full_disk_access::{FullDiskAccessRoute, SettingsOpener, SettingsUnopened};
 pub use handed::{BuiltInTls, Handed, HandedIo, HandedListener, HandedPeer, handed};
 pub use listener::{GatedListener, PeerAddr};
-pub use machine::MachineRoute;
+pub use machine::{MachineIdentity, MachineRoute};
 pub use maintenance::{MaintenanceRefusal, MaintenanceRequest, MaintenanceStarted};
 pub use plans::{Plans, PlansError};
 pub use profiles::{Profiles, ProfilesError};

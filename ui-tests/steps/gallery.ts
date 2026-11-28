@@ -55,10 +55,11 @@ const SNAPSHOTS: Record<string, string> = {
   - table "Demo folders":
     - caption: Demo folders
     - rowgroup:
-      - row "Name Sort by name Size Sort by size Changed Sort by changed Files Sort by files Actions":
+      - row "Name Sort by name Kind Size Sort by size Changed Sort by changed Files Sort by files Actions":
         - columnheader "Name Sort by name":
           - text: Name
           - button "Sort by name"
+        - columnheader "Kind"
         - columnheader "Size Sort by size":
           - text: Size
           - button "Sort by size"
@@ -70,29 +71,33 @@ const SNAPSHOTS: Record<string, string> = {
           - button "Sort by files"
         - columnheader "Actions"
     - rowgroup:
-      - row "photos 4.2 GiB Oct 4, 2026 1,204 Add a file to ⁨photos⁩":
+      - row "photos Folder 4.2 GiB Oct 4, 2026 1,204 Add a file to ⁨photos⁩":
         - rowheader "photos"
+        - cell "Folder"
         - cell "4.2 GiB"
         - cell "Oct 4, 2026"
         - cell "1,204"
         - cell "Add a file to ⁨photos⁩":
           - button "Add a file to ⁨photos⁩"
-      - row "music 12.6 GiB Aug 21, 2026 12 Add a file to ⁨music⁩":
+      - row "music Folder 12.6 GiB Aug 21, 2026 12 Add a file to ⁨music⁩":
         - rowheader "music"
+        - cell "Folder"
         - cell "12.6 GiB"
         - cell "Aug 21, 2026"
         - cell "12"
         - cell "Add a file to ⁨music⁩":
           - button "Add a file to ⁨music⁩"
-      - row "documents 820 MiB Nov 2, 2026 312 Add a file to ⁨documents⁩":
+      - row "documents Folder 820 MiB Nov 2, 2026 312 Add a file to ⁨documents⁩":
         - rowheader "documents"
+        - cell "Folder"
         - cell "820 MiB"
         - cell "Nov 2, 2026"
         - cell "312"
         - cell "Add a file to ⁨documents⁩":
           - button "Add a file to ⁨documents⁩"
-      - row "notes 1.5 MiB Nov 12, 2026 12 Add a file to ⁨notes⁩":
+      - row "notes Folder 1.5 MiB Nov 12, 2026 12 Add a file to ⁨notes⁩":
         - rowheader "notes"
+        - cell "Folder"
         - cell "1.5 MiB"
         - cell "Nov 12, 2026"
         - cell "12"
@@ -101,6 +106,7 @@ const SNAPSHOTS: Record<string, string> = {
     - rowgroup:
       - row "Total 17.6 GiB 1,540":
         - rowheader "Total"
+        - cell
         - cell "17.6 GiB"
         - cell
         - cell "1,540"
@@ -632,6 +638,57 @@ const SNAPSHOTS: Record<string, string> = {
   Footer: `- heading "Footer" [level=2]
 - paragraph: Version ⁨0.4.0⁩
 - paragraph: Version ⁨0.4.0+4444444.dirty⁩`,
+  // Three cards in a list: the hub's own, its Back up menu closed; one that
+  // needs attention, which says why first; and one that runs an operation.
+  "Machine card": `- heading "Machine card" [level=2]
+- list:
+  - listitem:
+    - article "demo-hub This hub":
+      - heading "demo-hub This hub" [level=3]
+      - paragraph: Online now.
+      - paragraph: Succeeded
+      - term: Last backup
+      - definition:
+        - time: 11/9/26, 9:00:00 AM
+      - term: Next run
+      - definition:
+        - time: 11/10/26, 9:00:00 AM
+      - term: Plans
+      - definition: "2"
+      - button "Back up ⁨demo-hub⁩"
+      - link "Open ⁨demo-hub⁩":
+        - /url: /machines/demo-hub
+  - listitem:
+    - article "demo-laptop":
+      - heading "demo-laptop" [level=3]
+      - paragraph:
+        - strong: "Needs attention:"
+        - text: ⁨The last run of ⁨photos⁩ failed.⁩
+      - paragraph: Last connected ⁨11/8/26, 6:30:00 PM⁩.
+      - paragraph: Failed
+      - term: Last backup
+      - definition:
+        - time: 11/8/26, 6:00:00 PM
+      - term: Next run
+      - definition: None planned
+      - term: Plans
+      - definition: "3"
+      - link "Open ⁨demo-laptop⁩":
+        - /url: /machines/demo-laptop
+  - listitem:
+    - article "demo-desktop":
+      - heading "demo-desktop" [level=3]
+      - paragraph: Online now.
+      - paragraph: Running
+      - progressbar "Progress of the operation running on ⁨demo-desktop⁩": Backing up… 25%
+      - term: Last backup
+      - definition: None yet
+      - term: Next run
+      - definition: None planned
+      - term: Plans
+      - definition: Not reported yet
+      - link "Open ⁨demo-desktop⁩":
+        - /url: /machines/demo-desktop`,
   // Closed, a disclosure menu is its button alone: its panel is hidden, from
   // a screen reader too, until the button shows it.
   "Disclosure menu": `- heading "Disclosure menu" [level=2]

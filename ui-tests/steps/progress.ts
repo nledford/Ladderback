@@ -18,8 +18,8 @@ import { eachOf } from "../support/gallery.ts";
 
 // The gallery's progress bars (`gallery/progress.rs`): the one the reader advances,
 // one of unknown size and one of a step, then one at each size and one in
-// each tone.
-const BARS = 13;
+// each tone; and the Machine card demo's, of the machine that runs.
+const BARS = 14;
 
 // Half a pixel of rounding in a laid-out length.
 const ROUNDING_PX = 0.5;

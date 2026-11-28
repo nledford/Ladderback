@@ -6,9 +6,10 @@ Feature: The disclosure menu
   with no arrow keys of their own. Its button says whether the panel shows
   and names it, opens it on a press and never under the pointer, and is
   marked while the page the reader is on is one of the panel's. Escape
-  closes the panel and returns focus to the button; so does nothing else,
-  but the panel closes as well when a row is chosen, when focus moves out of
-  it and when the pointer presses outside it. Focus is never kept in it.
+  closes the panel and returns focus to the button, and so does a row's
+  button pressed, as a menu button's item does; the panel closes as well
+  when a row's link is chosen, when focus moves out of it and when the
+  pointer presses outside it. Focus is never kept in it.
 
   Scenario: Enter on the button shows the panel's rows, Tab reaches each in order, and Escape hides them and returns focus to the button
     When I open the "Disclosure menu" demo
@@ -59,6 +60,15 @@ Feature: The disclosure menu
     And I press Tab until focus is on the button "Demo pages"
     And I press Enter
     And I press Tab until focus is on the link "Demo menu link to this page"
+    And I press Enter
+    Then the button "Demo pages" is collapsed
+    And focus is on the button "Demo pages"
+
+  Scenario: Pressing a row's button hides the panel and returns focus to the button
+    When I open the "Disclosure menu" demo
+    And I press Tab until focus is on the button "Demo pages"
+    And I press Enter
+    And I press Tab until focus is on the button "Demo menu action"
     And I press Enter
     Then the button "Demo pages" is collapsed
     And focus is on the button "Demo pages"

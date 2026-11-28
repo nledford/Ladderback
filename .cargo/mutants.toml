@@ -203,13 +203,21 @@
 #
 # `crates/web/src/dashboard_page.rs` is the DOM glue of the hub's dashboard
 # (§4.3, #569): it reads the machines when the page opens, when the events
-# stream opens and when an event asks, and draws each machine's section and
-# table. Which events read again, what a pause holds and counts, what the
-# resume says, how an outcome reads and how a time reads beside the viewer's
-# are `crates/web/src/dashboard.rs`'s, tested on the host and gated; the
+# stream opens and when an event asks, and draws each machine's card.
+# Which events read again, what a pause holds and counts, what the
+# resume says, what a card tells and why it needs attention, how an outcome
+# reads and how a time reads beside the viewer's are
+# `crates/web/src/dashboard.rs`'s, tested on the host and gated; the
 # machines and their operations are the hub's (`crates/app/src/pairing/hub/`,
 # `crates/adapters/http/src/hub_pages/tests.rs`). The `@ui` scenarios of
 # `features/ui/hub_dashboard.feature` run the glue in Chromium and WebKit.
+#
+# `crates/web/src/machine_page.rs` is the DOM glue of a machine's page on a
+# hub (§4.4, decision 175): it reads and follows the machine as the
+# dashboard does, sets the page's title and draws its section and its
+# tables. What it shows is `crates/web/src/dashboard.rs`'s, tested on the
+# host and gated. The `@ui` scenarios of `features/ui/machine_page.feature`
+# run the glue in Chromium, Firefox and WebKit.
 #
 # The wasm32-only test modules of `web` (`formatting.rs`, `time_zones.rs`) are
 # not listed: they are declared `#[cfg(test)]`, which cargo-mutants skips (see
@@ -254,6 +262,7 @@ exclude_globs = [
     "crates/web/src/settings/dry_run_allowlist.rs",
     "crates/web/src/settings/machines.rs",
     "crates/web/src/dashboard_page.rs",
+    "crates/web/src/machine_page.rs",
     "crates/web/src/settings/agents.rs",
 ]
 # Mutants that no test can tell from the real code, or that no host can run:
@@ -374,7 +383,7 @@ exclude_re = [
     # Machines tab, which every `@ui` scenario of
     # `features/ui/approving_machines.feature` opens in Chromium. Named by
     # line, so a moved line brings the mutant back to judge.
-    'crates/web/src/main\.rs:448:46: replace == with != in App$',
+    'crates/web/src/main\.rs:458:46: replace == with != in App$',
     # Each page's `paced` takes which shown value is its first load: DOM
     # glue. A test of `!=` hides the page's "Loading…" while it waits, which
     # the `@ui` scenarios check: the operations page's "A page still waiting
@@ -384,7 +393,7 @@ exclude_re = [
     # answer" (`features/ui/repositories.feature`), and the start page's and
     # the AI agents tab's in `features/ui/first_load.feature`. Named by line,
     # so a moved line brings the mutant back to judge.
-    'crates/web/src/operations_page\.rs:210:75: replace == with != in Operations$',
+    'crates/web/src/operations_page\.rs:211:75: replace == with != in Operations$',
     'crates/web/src/repositories_page\.rs:323:68: replace == with != in Repositories$',
     'crates/web/src/start_page\.rs:130:67: replace == with != in Start$',
     'crates/web/src/settings/ai_agents\.rs:162:67: replace == with != in AiAgentsSection$',

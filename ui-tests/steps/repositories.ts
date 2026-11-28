@@ -88,6 +88,23 @@ Given("a daemon with these repositories:", async function (this: BrowserWorld, t
   this.baseUrl = url;
 });
 
+// What a browser kept of the Repositories table's Columns panel before the
+// table had a Maintenance column (decision 140, `components/table.rs`): the
+// listed columns' ids in order, Password hidden (`!`). Kept once, before
+// the scenario's first page loads, as in page_width.ts.
+Given(
+  "this browser kept a choice of the Repositories columns from before they had a Maintenance column, Password hidden",
+  function (this: BrowserWorld) {
+    this.contextRoutes.push(async (context) => {
+      await context.addInitScript(() => {
+        if (sessionStorage.getItem("columns-seeded") !== null) return;
+        sessionStorage.setItem("columns-seeded", "yes");
+        localStorage.setItem("ladderback-columns-repositories", "location,!password,actions");
+      });
+    });
+  },
+);
+
 // Someone edits the running daemon's config.toml by hand and leaves a key
 // nobody knows, `color`, in the repository `demo`, on line `line`: a note of
 // their own fills the lines before it. The daemon reads the file on every
