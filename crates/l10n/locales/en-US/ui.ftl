@@ -899,6 +899,30 @@ ui-gallery-footer-heading = Footer
 # glance, as the hub's dashboard shows one.
 ui-gallery-machine-card-heading = Machine card
 
+# The heading of the gallery's card demo (§4.5): the shared frame of a
+# summary of one thing, under The Summary Card Rule.
+ui-gallery-card-heading = Card
+
+# The heading of the demo's first card, which holds words alone.
+ui-gallery-card-plain = Demo summary
+
+# The words of the demo's first card.
+ui-gallery-card-plain-words = Its words say how one thing stands, at a glance.
+
+# The heading of the demo's second card, whose controls follow its words.
+ui-gallery-card-controls = Demo summary with controls
+
+# The words of the demo's second card.
+ui-gallery-card-controls-words = Its controls follow its words, each named by what it acts on.
+
+# The words of the second card's button, which does nothing, named by the
+# card it acts on.
+ui-gallery-card-action = Act on the demo summary with controls
+
+# The words of the second card's link, to the start page, named by the
+# card it acts on.
+ui-gallery-card-open = Open the demo summary with controls
+
 # The heading of the gallery's disclosure menu demo (§4.5): buttons that
 # show and hide a panel of links under them, as the header's Settings menu.
 ui-gallery-disclosure-menu-heading = Disclosure menu

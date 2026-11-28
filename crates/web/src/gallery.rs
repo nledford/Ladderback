@@ -21,6 +21,7 @@ mod announcer;
 mod badge;
 mod banner;
 mod button;
+mod card;
 mod checkbox;
 mod disclosure_menu;
 mod fingerprint;
@@ -113,6 +114,9 @@ pub(crate) fn Gallery(localizer: Arc<Localizer>) -> impl IntoView {
         // those walks; its scenarios start at its anchor.
         <machine_card::MachineCardDemo localizer=Arc::clone(&localizer) />
         // After the machine card's, for the same reason: its scenarios
+        // start at its anchor.
+        <card::CardDemo localizer=Arc::clone(&localizer) />
+        // After the card's, for the same reason: its scenarios
         // start at its anchor.
         <disclosure_menu::DisclosureMenuDemo localizer=Arc::clone(&localizer) />
         // After the disclosure menu's, for the same reason: its scenarios
