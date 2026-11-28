@@ -18,7 +18,7 @@ use leptos::wasm_bindgen::{JsCast, JsValue};
 
 use crate::announcer::Politeness;
 use crate::focus::{FocusWrap, focus_wrap};
-use crate::live::reply;
+use crate::live::{reply, say};
 use crate::repositories::{Run, Sentence, address_parts, runs};
 use alert::rules::AlertTone;
 use skeleton::rules::{Awaited, Load, NOT_YET, Reveal, Timer};
@@ -390,6 +390,22 @@ pub(crate) fn say_refusals(refused: impl Into<Signal<Option<Sentence>>>) {
     Effect::new(move |_| {
         if let Some(sentence) = shown.get() {
             reply(Politeness::Assertive, &sentence.plain());
+        }
+    });
+}
+
+/// Says `words` through the announcer's polite region each time `shown`
+/// turns true: a status sentence a page shows by itself, with no change of
+/// focus (4.1.3), which is no live region. Said once each time it appears:
+/// a page that reads again and still shows it says nothing new. It waits
+/// while live updates are paused, as what happened by itself does. Called
+/// once, where the page makes the signal; it stops with the page.
+pub(crate) fn say_when_shown(shown: impl Into<Signal<bool>>, words: String) {
+    let shown = shown.into();
+    let shown = Memo::new(move |_| shown.get());
+    Effect::new(move |_| {
+        if shown.get() {
+            say(Politeness::Polite, &words);
         }
     });
 }
