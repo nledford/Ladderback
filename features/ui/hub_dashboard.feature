@@ -16,7 +16,9 @@ Feature: The hub's dashboard of its machines
   up menu that starts a backup of one of its plans, and says when the hub
   didn't answer that the backup didn't start. While the hub doesn't say
   which machine it is, the approved machines show without its own card,
-  with a sentence saying so, until it answers (#1692). The scenarios here show
+  with a sentence saying so, until it answers (#1692). Both that sentence and
+  the one that says the hub didn't answer are said politely through the
+  announcer once each time they appear (WCAG 4.1.3). The scenarios here show
   machines that paired from their terminals and hold no connection; the hub
   showing a connected machine online is in
   `features/fleet/staying_connected.feature`. The page follows the hub's
@@ -179,20 +181,24 @@ Feature: The hub's dashboard of its machines
     When I open the web UI
     Then the card "demo-laptop" has the link "Open demo-laptop" and no button
 
-  Scenario: A dashboard the hub didn't answer says so, and asks again until it does
+  Scenario: A dashboard the hub didn't answer says so politely, and asks again until it does
     Given a hub with sign-in off
     And a machine named "demo-laptop" is approved on the hub
     And the hub fails its first two answers about its machines
     When I open the web UI
     Then the page says "The hub didn't answer, so its machines can't be shown. The page asks again in a few seconds."
+    And the polite region reads "The hub didn't answer, so its machines can't be shown. The page asks again in a few seconds."
+    And the polite region keeps reading "The hub didn't answer, so its machines can't be shown. The page asks again in a few seconds."
     And the page shows the machine "demo-laptop"
 
-  Scenario: A dashboard shows the approved machines while the hub doesn't say which machine it is, and its own card once it does
+  Scenario: A dashboard shows the approved machines while the hub doesn't say which machine it is, says so politely, and shows its own card once it does
     Given a hub with sign-in off
     And a machine named "demo-laptop" is approved on the hub
     And the hub doesn't answer when asked which machine it is
     When I open the web UI
     Then the page says "The hub didn't say which machine it is, so this hub's own machine can't be shown. The page asks again in a few seconds."
+    And the polite region reads "The hub didn't say which machine it is, so this hub's own machine can't be shown. The page asks again in a few seconds."
+    And the polite region keeps reading "The hub didn't say which machine it is, so this hub's own machine can't be shown. The page asks again in a few seconds."
     And the page shows the machine "demo-laptop"
     And the page has no accessibility violations
     When the hub answers when asked which machine it is
