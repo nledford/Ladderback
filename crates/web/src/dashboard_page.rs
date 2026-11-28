@@ -41,7 +41,7 @@ use crate::components::skeleton::rules::Awaited;
 use crate::components::status_badge::rules::BadgeState;
 use crate::components::{
     Button, CardFact, DisclosureMenu, Link, MachineCard, PauseUpdates, State, TitleLevel,
-    first_load, paced, refusal_alert, say_refusals,
+    first_load, paced, refusal_alert, say_refusals, say_when_shown,
 };
 use crate::dashboard::{
     CardFacts, CardStatus, Fleet, NextRun, Own, OwnStory, attention_link, attention_words,
@@ -325,6 +325,16 @@ pub(crate) fn Dashboard(localizer: Arc<Localizer>) -> impl IntoView {
     let (state, pace) = paced(
         move || fleet.shown_state().get(),
         |state| *state == State::Loading,
+    );
+    // The two sentences that stand in for what the hub didn't answer show
+    // with no change of focus, so each is said once as it appears (4.1.3).
+    say_when_shown(
+        Signal::derive(move || state.get() == State::Unreachable),
+        unreachable.clone(),
+    );
+    say_when_shown(
+        Signal::derive(move || state.get() == State::Ready && own_unread.get()),
+        own_unanswered.clone(),
     );
     let heading = text(&localizer, msg::UI_DASHBOARD_HEADING);
     let intro = text(&localizer, msg::UI_DASHBOARD_INTRO);
