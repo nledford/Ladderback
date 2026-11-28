@@ -62,10 +62,11 @@ Then(
   },
 );
 
-// Every edge of the panel within the window's width: nothing of it is past
-// an edge a reader would have to scroll sideways to (1.4.10).
-Then("the menu of the button {string} lies inside the window", async function (this: BrowserWorld, name: string) {
-  const panel = await menuOf(this.page, name);
+/** Checks every edge of the panel of the button `name` is within the
+ * window's width: nothing of it is past an edge a reader would have to
+ * scroll sideways to (1.4.10). */
+export async function menuLiesInsideWindow(page: Page, name: string): Promise<void> {
+  const panel = await menuOf(page, name);
   await expect(panel).toBeVisible();
   const drawn = await panel.evaluate((el) => {
     const box = el.getBoundingClientRect();
@@ -77,6 +78,10 @@ Then("the menu of the button {string} lies inside the window", async function (t
     `the menu ends ${Math.round(drawn.right - drawn.width)}px past the window's end`,
   );
   assert.ok(drawn.top >= -ROUNDING_PX, "the menu starts above the window");
+}
+
+Then("the menu of the button {string} lies inside the window", async function (this: BrowserWorld, name: string) {
+  await menuLiesInsideWindow(this.page, name);
 });
 
 // Its edge is what tells the panel from the page under it (1.4.11).

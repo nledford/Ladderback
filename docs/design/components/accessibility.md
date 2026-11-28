@@ -139,6 +139,7 @@ The gallery's "Shared vocabulary" demo shows every value named in words, each st
 | [The footer](accessibility/footer.md) | `components/footer.rs` |
 | [The icon](accessibility/icon.md) | `components/icon.rs` |
 | [The link](accessibility/link.md) | `components/link.rs` |
+| [The machine card](accessibility/machine_card.md) | `components/machine_card.rs` |
 | [The modal dialog](accessibility/modal_dialog.md) | `components/modal_dialog.rs` |
 | [The navigation bar](accessibility/navigation_bar.md) | `components/navigation_bar.rs` |
 | [The progress bar](accessibility/progress.md) | `components/progress.rs` |

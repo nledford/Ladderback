@@ -27,6 +27,7 @@ mod fingerprint;
 mod footer;
 mod icon;
 mod link;
+mod machine_card;
 mod modal_dialog;
 mod navigation_bar;
 mod pause_updates;
@@ -110,6 +111,9 @@ pub(crate) fn Gallery(localizer: Arc<Localizer>) -> impl IntoView {
         // the page's top, and before the table's, which journeys reach by
         // Shift+Tab from the page's start, so its stops lengthen none of
         // those walks; its scenarios start at its anchor.
+        <machine_card::MachineCardDemo localizer=Arc::clone(&localizer) />
+        // After the machine card's, for the same reason: its scenarios
+        // start at its anchor.
         <disclosure_menu::DisclosureMenuDemo localizer=Arc::clone(&localizer) />
         // After the disclosure menu's, for the same reason: its scenarios
         // start at its anchor.

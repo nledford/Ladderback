@@ -70,8 +70,9 @@ export function table(world: BrowserWorld, name: string): Locator {
  *  that daemon. `env` is added to the daemon's environment, as `TZ` for the
  *  zone its clock runs in, which its workers inherit. A plan `schedules`
  *  names runs on that schedule, a cron expression or an interval (`every`),
- *  a plan in `iglobs` has those globs, and `after` is written at the end,
- *  after the plans. */
+ *  a plan in `iglobs` has those globs, `after` is written at the end,
+ *  after the plans, and `serve` is what `ladderback serve` is told, as
+ *  `--hub` for a hub. */
 export async function serveDemoPlans(
   world: BrowserWorld,
   plans: readonly string[],
@@ -80,6 +81,7 @@ export async function serveDemoPlans(
   schedules: Readonly<Record<string, { cron: string } | { every: string }>> = {},
   iglobs: Readonly<Record<string, readonly string[]>> = {},
   after: readonly string[] = [],
+  serve?: string[],
 ): Promise<void> {
   const scratch = await mkdtemp(path.join(tmpdir(), "ladderback-ui-plan-"));
   await cp(fixtureRepo, path.join(scratch, "repo"), { recursive: true });
@@ -112,12 +114,16 @@ export async function serveDemoPlans(
   const configDir = path.join(scratch, "config");
   await mkdir(configDir);
   await writeFile(path.join(configDir, "config.toml"), config);
-  const { child, url } = await startServer(scratch, {
-    LADDERBACK_CONFIG_DIR: configDir,
-    LADDERBACK_DATA_DIR: path.join(scratch, "data"),
-    LADDERBACK_CACHE_DIR: path.join(scratch, "cache"),
-    ...env,
-  });
+  const { child, url } = await startServer(
+    scratch,
+    {
+      LADDERBACK_CONFIG_DIR: configDir,
+      LADDERBACK_DATA_DIR: path.join(scratch, "data"),
+      LADDERBACK_CACHE_DIR: path.join(scratch, "cache"),
+      ...env,
+    },
+    serve,
+  );
   world.ownServer = { child, scratch };
   world.baseUrl = url;
 }
@@ -158,6 +164,15 @@ Given(
   "two demo plans {string} and {string} with a scratch repository",
   async function (this: BrowserWorld, first: string, second: string) {
     await serveDemoPlans(this, [first, second], "small");
+  },
+);
+
+// A hub whose own machine has a plan, over the tiny source, as the hub's
+// own card backs it up (§16, decision 175).
+Given(
+  "a hub with sign-in off and a demo plan {string} with a tiny scratch repository",
+  async function (this: BrowserWorld, plan: string) {
+    await serveDemoPlans(this, [plan], "tiny", {}, {}, {}, [], ["--hub", "--listen", "127.0.0.1:0"]);
   },
 );
 

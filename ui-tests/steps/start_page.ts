@@ -76,9 +76,13 @@ Then("the main heading reads {string}", async function (this: BrowserWorld, name
   await keys.byRole("heading", { level: 1, name }).waitFor({ timeout: patienceMs() });
 });
 
+// The link's name, read past the isolation marks around a name the page
+// fetched, such as a machine's hostname in "Open demo-hub"; as a name given
+// as text is, the words may be part of it, in any case.
 Then("focus is on the link {string}", async function (this: BrowserWorld, name: string) {
   const keys = journey(this.page);
-  await keys.assertFocused(keys.byRole("link", { name }), `the link "${name}"`);
+  const words = new RegExp(namePattern(name).source.slice(1, -1), "i");
+  await keys.assertFocused(keys.byRole("link", { name: words }), `the link "${name}"`);
 });
 
 // The product name in the header is the start page's link, marked as the

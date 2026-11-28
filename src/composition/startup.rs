@@ -770,7 +770,17 @@ async fn state_over(
         Arc::new(platform::identity::FileIdentity::in_data_dir(data_dir)),
         Arc::new(OsRandom),
     );
-    let machine_route = http_adapter::MachineRoute::new(Arc::new(take_new_id));
+    // Who this machine is, which a hub's dashboard shows on its own card
+    // (decision 175); a hostname a hub would refuse from a machine is left
+    // out.
+    let machine_route = http_adapter::MachineRoute::new(Arc::new(take_new_id)).with_identity(
+        http_adapter::MachineIdentity::new(
+            agent_id.as_uuid().hyphenated().to_string(),
+            &platform::hostname(),
+            domain::fleet::MachineZone::of(&domain::TimeZone::system())
+                .map(|zone| zone.as_str().to_owned()),
+        ),
+    );
     // What AI agents may do without a token: the configuration's
     // `[without-token]` table, changed under the same lock (§10.5).
     let without_token = Arc::new(app::without_token::WithoutToken::new(

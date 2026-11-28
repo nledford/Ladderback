@@ -85,14 +85,20 @@ The machine moves to **Approved machines**, and shows on the Dashboard at once. 
 
 ## The Dashboard
 
-The hub's **Dashboard** is its start page: **Ladderback** at the top of every page leads there, and so does the link **See the approved machines' latest operations** on its **Machines** tab. Notices, such as sign-in being off, come first, then each approved machine.
+The hub's **Dashboard** is its start page: **Ladderback** at the top of every page leads there, and so does the link **See the machines on the dashboard** on its **Machines** tab. Notices, such as sign-in being off, come first. Then a sentence says how many machines there are and links each one that needs attention, and a card shows each machine: the hub's own first, marked **This hub**, then each approved machine in the order you approved them. A card shows:
 
+- **Needs attention** and why, first, when the machine is offline more than 5 minutes past a planned run, a plan's last run failed, or a planned run is more than 5 minutes past and hasn't run.
 - **Online now**, or **Last connected** and when. A running machine holds one connection to its hub and sends something on it at least every 30 seconds. The hub closes a connection that sent nothing for 90 seconds, so a machine that sleeps, shuts down or loses the network shows when it last connected within 90 seconds. After the hub restarts, each machine shows when it last connected until it connects again.
+- How its latest run came out, or **Running** and the progress of the operation it runs.
+- **Last backup**, **Next run**, and how many **Plans** it has.
+
+**Back up** and the hub's name, on the hub's own card, starts a backup of the plan you choose. **Open** and the machine's name leads to the machine's page, which shows:
+
 - **Plans of** the machine, as it last reported them: how and when each last ran, and when it runs next.
 - **Latest operations of** the machine, newest first: when each started and ended, its result, and a failure's error code. A machine keeps its reports while it can't reach the hub and sends them in order once it can. When the hub let go of a machine's oldest reports to stay within its limit, the page says so.
 - The progress of the operation the machine runs.
 
-Times read in your browser's time zone, with the machine's own beside them when the two differ. **Pause live updates** holds the page still until you press it again. The hub's own plans and operations are on its **Plans** and **Operations** pages, as on any machine. A bookmark of the hub's `/dashboard` from 0.6.0-rc.1 leads to the start page.
+Times read in your browser's time zone, with the machine's own beside them when the two differ. **Pause live updates** holds the Dashboard, or a machine's page, still until you press it again. The hub's own page shows its own plans and operations, which its **Plans** and **Operations** pages show too, as on any machine. A bookmark of the hub's `/dashboard` from 0.6.0-rc.1 leads to the start page.
 
 ## Removing a machine
 

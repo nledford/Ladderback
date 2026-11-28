@@ -7,7 +7,7 @@ use leptos::prelude::*;
 use leptos::wasm_bindgen::JsCast;
 
 use super::Icon;
-use rules::FocusMoved;
+use rules::{Choice, FocusMoved};
 
 // When the menu opens and closes and what its button tells, decided on the
 // host; `DisclosureMenu` is its glue.
@@ -34,10 +34,12 @@ pub(crate) mod rules;
 ///   under it, so it closes whenever focus moves out of the menu (2.4.11);
 ///   focus is never kept in it.
 /// - **It closes** on Escape, which returns focus to the button; on a row's
-///   link chosen; on focus moving to an element outside it; and on a press
-///   of the pointer outside it. Escape does nothing while the button isn't
-///   drawn: a page may show the panel's rows in a menu of its own and hide
-///   the button, as the header's hamburger panel does below 54rem
+///   link chosen; on a row's button pressed, which returns focus to the
+///   button, as a menu button's item does; on focus moving to an element
+///   outside it; and on a press of the pointer outside it. Escape does
+///   nothing while the button isn't drawn: a page may show the panel's
+///   rows in a menu of its own and hide the button, as the header's
+///   hamburger panel does below 54rem
 ///   (`style.css`), and that menu's Escape is then its own.
 ///
 /// What the caller owes WCAG 2.2 AA, since the menu does none of it:
@@ -111,15 +113,25 @@ pub fn DisclosureMenu(
     on_cleanup(move || pressed.remove());
     // A row's link chosen closes the panel, the current page's too, which
     // changes no route: focus then goes back to the button, since no page's
-    // heading takes it and the link it was on is no longer drawn.
+    // heading takes it and the link it was on is no longer drawn. A row's
+    // button pressed closes it too, and focus goes back to the button: its
+    // action stays on the page, and the row it was on is no longer drawn.
     let on_panel_click = move |event: web_sys::MouseEvent| {
-        let link = event
+        let row = event
             .target()
             .and_then(|target| target.dyn_into::<web_sys::Element>().ok())
-            .and_then(|target| target.closest("a").ok().flatten());
-        if let Some(link) = link {
+            .and_then(|target| target.closest("a, button").ok().flatten());
+        if let Some(row) = row {
+            let current = row.get_attribute("aria-current");
+            let choice = if row.tag_name().eq_ignore_ascii_case("a") {
+                Choice::Link {
+                    current: current.as_deref(),
+                }
+            } else {
+                Choice::Button
+            };
             open.set(false);
-            if rules::focus_returns_on_choice(link.get_attribute("aria-current").as_deref())
+            if rules::focus_returns_on_choice(choice)
                 && let Some(button) = button.get_untracked()
             {
                 // A failed focus leaves focus where it was.

@@ -361,9 +361,10 @@ fn every_message_is_transformed_in_every_branch_without_a_problem() {
                 // catalog's to transform (§8.4). `the_helpers_that_write_...`
                 // has them. `ui-snapshot-time-offset` holds only its two
                 // values and "UTC", a string literal a pseudolocale leaves
-                // as it is, `ui-stats-count` and the table demo's
-                // `ui-gallery-table-files` only their number, written in the
-                // locale's digits, and `ui-stats-size` and the demo's
+                // as it is, `ui-stats-count`, the table demo's
+                // `ui-gallery-table-files` and a machine card's
+                // `ui-machine-card-plan-count` only their number, written in
+                // the locale's digits, and `ui-stats-size` and the demo's
                 // `ui-gallery-table-size` only their size, which
                 // the size helper writes: there is no text of the catalog's
                 // to transform. The gallery's names of languages
@@ -376,6 +377,7 @@ fn every_message_is_transformed_in_every_branch_without_a_problem() {
                     || id == msg::UI_GALLERY_TABLE_CHANGED_ON
                     || id == msg::UI_SNAPSHOT_TIME_OFFSET
                     || id == msg::UI_STATS_COUNT
+                    || id == msg::UI_MACHINE_CARD_PLAN_COUNT
                     || id == msg::UI_GALLERY_TABLE_FILES
                     || id == msg::UI_STATS_SIZE
                     || id == msg::UI_GALLERY_TABLE_SIZE
