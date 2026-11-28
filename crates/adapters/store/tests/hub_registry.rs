@@ -74,6 +74,7 @@ async fn the_rows_the_cases_start_from_are_good() {
             counter: u64::MAX,
             last_seen: at(20),
             zone: None,
+            version: None,
         }])
     );
     assert_eq!(
@@ -162,6 +163,11 @@ fn agent_cases() -> Vec<(&'static str, &'static str, String)> {
             "a zone not shaped like a zone name",
             "zone",
             "UPDATE machines SET zone = '../etc/localtime'".to_owned(),
+        ),
+        (
+            "a version not shaped like a version",
+            "version",
+            "UPDATE machines SET version = '0.6.0 beta'".to_owned(),
         ),
     ]
 }

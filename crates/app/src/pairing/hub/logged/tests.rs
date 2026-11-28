@@ -32,6 +32,7 @@ fn record(request: &PairRequest, status: AgentStatus) -> AgentRecord {
         counter: request.counter,
         last_seen: Timestamp::from_second(1_800_000_000).expect("a time"),
         zone: None,
+        version: None,
     }
 }
 

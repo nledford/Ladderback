@@ -52,6 +52,7 @@ fn record(agent: u128, agent_key: PublicKey, hostname: &str) -> AgentRecord {
         counter: 9,
         last_seen: at(-50),
         zone: None,
+        version: None,
     }
 }
 
@@ -236,6 +237,7 @@ fn a_new_agent_is_kept_pending() {
             counter: 5,
             last_seen: at(10),
             zone: None,
+            version: None,
         }))
     );
 }

@@ -256,6 +256,7 @@ mod tests {
             counter: 0,
             last_seen: since,
             zone: None,
+            version: None,
         }
     }
 

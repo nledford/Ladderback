@@ -6,8 +6,10 @@ Feature: The hub's dashboard of its machines
   online now, while the hub holds its connection, or else when it last
   connected (§16, decision 159), its status in a badge, the progress of the
   operation it runs in the shared progress bar, which is never announced
-  (§16, decision 83), when its last backup ended, when it runs next and how
-  many plans it has. A card whose machine needs attention, offline past a
+  (§16, decision 83), when its last backup ended, when it runs next, how
+  many plans it has, and the version of Ladderback it runs, with a quiet
+  note when that is older or newer than the hub's own, which is never
+  attention (#1707). A card whose machine needs attention, offline past a
   planned run, the last run of a plan failed, or a planned run past due,
   starts with a mark and words that say why. A sentence above the cards
   counts the machines and names, as links, those that need attention. Each
@@ -61,6 +63,32 @@ Feature: The hub's dashboard of its machines
     And the card "demo-tablet" tells its status "Not run yet"
     And the card "demo-tablet" tells "Plans": "Not reported yet"
     And the page has no live region but the announcer's
+    And the page has no accessibility violations
+
+  Scenario: Each card tells its machine's version, noting quietly one older or newer than the hub's
+    Given a hub with sign-in off
+    And a machine named "demo-desktop" is approved on the hub
+    And a machine named "demo-tablet" is approved on the hub
+    And a machine named "demo-laptop" is approved on the hub
+    And a machine named "demo-phone" is approved on the hub
+    And the machine "demo-laptop" last said it runs Ladderback "0.0.1"
+    And the machine "demo-desktop" last said it runs Ladderback "999.0.0+3f937cf"
+    And the machine "demo-tablet" last said it runs Ladderback "nightly"
+    When I open the web UI
+    Then the page says "5 machines, none of which needs attention."
+    And the hub's own card tells "Version": the running version
+    And the card "demo-laptop" tells "Version": "0.0.1 Older than the hub."
+    And the card "demo-desktop" tells "Version": "999.0.0+3f937cf Newer than the hub."
+    And the card "demo-tablet" tells "Version": "nightly"
+    And the card "demo-phone" tells "Version": "Not reported yet"
+    And the card "demo-laptop" has no attention mark
+    And the card "demo-desktop" has no attention mark
+    And the cards after it are, in order:
+      | machine      |
+      | demo-desktop |
+      | demo-tablet  |
+      | demo-laptop  |
+      | demo-phone   |
     And the page has no accessibility violations
 
   Scenario: The sentence names an offline machine past its schedule, whose card is marked with words

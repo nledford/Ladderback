@@ -574,6 +574,7 @@ fn lapsed(n: u128) -> domain::fleet::AgentRecord {
         counter: 1,
         last_seen: since,
         zone: None,
+        version: None,
     }
 }
 

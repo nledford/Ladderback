@@ -75,6 +75,15 @@ impl Hub {
     /// given. It decides which machine maintains each repository its
     /// machines report, as a real hub does.
     async fn with_access(seed: u64, access: Option<Arc<app::access::Access>>) -> Self {
+        Self::built(seed, access, "0.5.0-hub").await
+    }
+
+    /// A hub running Ladderback `version` (`fleet/machine_version.feature`).
+    async fn running(seed: u64, version: &str) -> Self {
+        Self::built(seed, None, version).await
+    }
+
+    async fn built(seed: u64, access: Option<Arc<app::access::Access>>, version: &str) -> Self {
         let registry = Arc::new(InMemoryAgentRegistry::new());
         let identity = Arc::new(InMemoryIdentity::default());
         let inbox = Arc::new(InMemoryReportInbox::default());
@@ -87,7 +96,7 @@ impl Hub {
             Arc::new(FakeSigning),
             Arc::new(SeededRandom::new(seed)),
             clock.clone(),
-            "0.5.0-hub".to_owned(),
+            version.to_owned(),
         )
         .with_inbox(inbox.clone())
         .with_owners(Arc::new(RepositoryOwners::new(
@@ -170,14 +179,15 @@ impl Hub {
 }
 
 /// One machine: its key files, its agent ID, its hostname, the machine
-/// zone it reports, the identifier of the computer it runs on, and the
-/// leases and epoch floors it keeps.
+/// zone it reports, the version of Ladderback it runs, the identifier of
+/// the computer it runs on, and the leases and epoch floors it keeps.
 #[derive(Clone)]
 struct Machine {
     identity: Arc<InMemoryIdentity>,
     agent_id: AgentId,
     hostname: Hostname,
     zone: Option<MachineZone>,
+    version: String,
     seed: u64,
     identifier: Option<MachineIdentifier>,
     leases: Arc<app::fakes::InMemoryLeaseCache>,
@@ -190,6 +200,7 @@ impl Machine {
             agent_id: AgentId::from_uuid(Uuid::from_u128(u128::from(n))),
             hostname: Hostname::parse(hostname).unwrap(),
             zone: None,
+            version: "0.5.0-agent".to_owned(),
             seed: n * 1_000_000,
             identifier: MachineIdentifier::parse(&format!("{n:032x}")).ok(),
             leases: Arc::default(),
@@ -215,7 +226,7 @@ impl Machine {
                 Timestamp::from_second(1_800_000_000).unwrap(),
             )),
             connector,
-            "0.5.0-agent".to_owned(),
+            self.version.clone(),
             self.identifier.clone(),
         )
     }
@@ -636,6 +647,77 @@ async fn hub_holds_zone(agent: &mut Agent, zone: String) {
 #[then("the hub holds the machine's time zone as unknown")]
 async fn hub_holds_unknown_zone(agent: &mut Agent) {
     assert_eq!(agent.pairing.held_zone().await, None);
+}
+
+#[given(expr = "a hub running Ladderback {string}")]
+async fn hub_running(agent: &mut Agent, version: String) {
+    agent.pairing.hub = Some(Hub::running(1, &version).await);
+}
+
+/// The first agent, now running Ladderback `version`, connects to its hub.
+async fn connect_running(agent: &mut Agent, version: String) {
+    let world = &mut agent.pairing;
+    let machine = Machine {
+        version,
+        ..world.first().clone()
+    };
+    world.connect(&machine, None).await;
+    world.connected();
+    world.first = Some(machine);
+}
+
+#[when(expr = "the agent, running Ladderback {string}, connects to its hub")]
+async fn connects_running(agent: &mut Agent, version: String) {
+    connect_running(agent, version).await;
+}
+
+/// The first agent's version as the hub's dashboard shows it, and how it
+/// stands against the hub's own.
+async fn shown_version(agent: &Agent) -> (Option<String>, Option<std::cmp::Ordering>) {
+    let first = agent.pairing.first().agent_id;
+    let machine = agent
+        .pairing
+        .hub()
+        .pairing
+        .machines()
+        .await
+        .expect("the hub's machines")
+        .into_iter()
+        .find(|machine| machine.record.agent_id == first)
+        .expect("the hub shows the agent");
+    (
+        machine
+            .record
+            .version
+            .as_ref()
+            .map(|version| version.as_str().to_owned()),
+        machine.against_hub,
+    )
+}
+
+#[then(expr = "the hub shows the agent's version {string}, older than the hub's")]
+async fn shows_older(agent: &mut Agent, version: String) {
+    let shown = shown_version(agent).await;
+    assert_eq!(shown, (Some(version), Some(std::cmp::Ordering::Less)));
+}
+
+#[then(expr = "the hub shows the agent's version {string}, newer than the hub's")]
+async fn shows_newer(agent: &mut Agent, version: String) {
+    let shown = shown_version(agent).await;
+    assert_eq!(shown, (Some(version), Some(std::cmp::Ordering::Greater)));
+}
+
+#[then(expr = "the hub shows the agent's version {string} with no note")]
+async fn shows_no_note(agent: &mut Agent, version: String) {
+    let (shown, against_hub) = shown_version(agent).await;
+    assert_eq!(shown, Some(version));
+    assert_ne!(against_hub, Some(std::cmp::Ordering::Less), "older");
+    assert_ne!(against_hub, Some(std::cmp::Ordering::Greater), "newer");
+}
+
+#[then("the hub shows no version of the agent yet")]
+async fn shows_no_version(agent: &mut Agent) {
+    assert_eq!(shown_version(agent).await, (None, None));
 }
 
 #[given(regex = r"^(?:a hub with )?a pairing token$")]

@@ -9,9 +9,9 @@ use std::sync::Arc;
 use async_trait::async_trait;
 use domain::fleet::{
     AgentRecord, AgentStatus, ApprovalRefused, BindingKind, Fingerprint, Hostname, KEY_BYTES,
-    MachineCheck, MachineFingerprint, MachineZone, PENDING_LIFE, PENDING_LIMIT, PairRefusal,
-    PairRequest, Pairing, ProofRefusal, ProofRequest, PublicKey, RemovalRefused, SecondMachine,
-    TokenRecord, TokenUse, Tombstone,
+    MachineCheck, MachineFingerprint, MachineVersion, MachineZone, PENDING_LIFE, PENDING_LIMIT,
+    PairRefusal, PairRequest, Pairing, ProofRefusal, ProofRequest, PublicKey, RemovalRefused,
+    SecondMachine, TokenRecord, TokenUse, Tombstone,
 };
 use domain::{AgentId, Timestamp, Uuid};
 
@@ -71,6 +71,7 @@ async fn proofs_approvals_and_machines(harness: &dyn AgentRegistryHarness) {
     racing_approvals_approve_once(harness).await;
     the_tls_key_is_recorded_once_and_outlives_the_hub(harness).await;
     the_machine_zone_an_agent_reported_last_is_kept(harness).await;
+    the_version_an_agent_gave_last_is_kept(harness).await;
     when_the_hub_last_heard_from_an_agent_is_kept(harness).await;
     the_first_machine_is_kept_and_a_second_is_refused_and_listed(harness).await;
     a_refused_second_machine_leaves_the_first_taken(harness).await;
@@ -104,6 +105,10 @@ fn hostname(text: &str) -> Option<Hostname> {
 
 fn zone(name: &str) -> Option<MachineZone> {
     ok(MachineZone::parse(name), "a test zone")
+}
+
+fn version(text: &str) -> Option<MachineVersion> {
+    ok(MachineVersion::parse(text), "a test version")
 }
 
 /// The token whose pairing key is `key(byte)`, made at `made` and lapsing
@@ -301,6 +306,7 @@ async fn a_pairing_keeps_a_pending_agent_and_spends_the_token(harness: &dyn Agen
         counter: first.counter,
         last_seen: at(10),
         zone: None,
+        version: None,
     };
     assert_eq!(
         pair(registry.as_ref(), &first, at(10)).await,
@@ -731,6 +737,66 @@ async fn the_machine_zone_an_agent_reported_last_is_kept(harness: &dyn AgentRegi
         "recording no zone",
     );
     assert_eq!(zone_of(reopened.as_ref()).await, Some(None));
+}
+
+/// The version of Ladderback an agent's latest `Hello` gave is the one
+/// kept, none included: none from its pairing, then each one a `Hello`
+/// gives, across a restart, through its proofs and its approval (#1707). A
+/// version for an ID it doesn't hold changes nothing.
+async fn the_version_an_agent_gave_last_is_kept(harness: &dyn AgentRegistryHarness) {
+    let (Some(token), Some(request), Some(proving), Some(older), Some(newer)) = (
+        token(1, 0),
+        request(1, 1, "laptop"),
+        proof(1, 5),
+        version("0.6.0"),
+        version("0.7.0+3f937cf"),
+    ) else {
+        return;
+    };
+    let registry = harness.empty().await;
+    add(registry.as_ref(), &token).await;
+    let paired = pair(registry.as_ref(), &request, at(10)).await;
+    assert!(matches!(paired, Some(Ok(Pairing::New(_)))), "{paired:?}");
+    let version_of = async |registry: &dyn AgentRegistry| {
+        let found = ok(registry.agent(request.agent_id).await, "reading the agent");
+        found.flatten().map(|agent| agent.version)
+    };
+    assert_eq!(
+        version_of(registry.as_ref()).await,
+        Some(None),
+        "a pairing gives no version"
+    );
+    ok(
+        registry
+            .record_version(request.agent_id, Some(&older))
+            .await,
+        "recording a version",
+    );
+    prove_and_approve(registry.as_ref(), &proving, &request).await;
+    assert_eq!(
+        version_of(registry.as_ref()).await,
+        Some(Some(older)),
+        "a proof and an approval keep the version"
+    );
+    ok(
+        registry
+            .record_version(request.agent_id, Some(&newer))
+            .await,
+        "recording a newer version",
+    );
+    let reopened = harness.reopened().await;
+    assert_eq!(version_of(reopened.as_ref()).await, Some(Some(newer)));
+    let before = agents(reopened.as_ref()).await;
+    ok(
+        reopened.record_version(agent_id(9), None).await,
+        "recording the version of no agent",
+    );
+    assert_eq!(agents(reopened.as_ref()).await, before);
+    ok(
+        reopened.record_version(request.agent_id, None).await,
+        "recording no version",
+    );
+    assert_eq!(version_of(reopened.as_ref()).await, Some(None));
 }
 
 fn machine(byte: u8) -> Option<MachineFingerprint> {

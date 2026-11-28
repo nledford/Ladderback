@@ -4,10 +4,13 @@
 //! operation, and each approved machine with its latest operations, its
 //! plans and the progress of the operation it runs.
 
+use std::cmp::Ordering;
+
 use api::{MachineOutcomeDto, UiEvent};
 use domain::fleet::{
-    AgentRecord, AgentReport, Happening, OPERATIONS_SHOWN, Pairing, PlansReport, REPORTS_READ,
-    ReportedOperation, ReportedProgress, Tombstone, latest_operations, progress_shown,
+    AgentRecord, AgentReport, Happening, MachineVersion, OPERATIONS_SHOWN, Pairing, PlansReport,
+    REPORTS_READ, ReportedOperation, ReportedProgress, Tombstone, latest_operations,
+    progress_shown,
 };
 use domain::{AgentId, Timestamp};
 
@@ -18,8 +21,9 @@ use super::{HubPairing, HubPairingError};
 /// One approved machine as the hub's dashboard shows it: its record,
 /// whether it is online (the hub holds its sync connection; decision 159),
 /// how many of its reports the hub let go of past the cap, its latest
-/// operations, newest first, its plans as it last reported them, and the
-/// progress of the operation it runs, while its reports say it runs.
+/// operations, newest first, its plans as it last reported them, the
+/// progress of the operation it runs, while its reports say it runs, and
+/// how its version stands against the hub's own (#1707).
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Machine {
     pub record: AgentRecord,
@@ -28,6 +32,9 @@ pub struct Machine {
     pub operations: Vec<ReportedOperation>,
     pub plans: Option<PlansReport>,
     pub progress: Option<ReportedProgress>,
+    /// The machine's version against the hub's, by SemVer precedence:
+    /// none before it gave one, or when either doesn't read as SemVer.
+    pub against_hub: Option<Ordering>,
 }
 
 impl HubPairing {
@@ -41,6 +48,7 @@ impl HubPairing {
     /// Every approved machine, oldest first, with its latest operations:
     /// none of a hub that takes no reports.
     pub async fn machines(&self) -> Result<Vec<Machine>, HubPairingError> {
+        let hub_version = MachineVersion::parse(&self.version).ok();
         let mut machines = Vec::new();
         for record in self.registry.agents().await? {
             if record.is_pending() {
@@ -62,6 +70,11 @@ impl HubPairing {
                 ),
             };
             let operations = latest_operations(&latest.reports, OPERATIONS_SHOWN);
+            let against_hub = record
+                .version
+                .as_ref()
+                .zip(hub_version.as_ref())
+                .and_then(|(version, hub)| version.against(hub));
             machines.push(Machine {
                 online: self.is_online(record.agent_id),
                 record,
@@ -69,6 +82,7 @@ impl HubPairing {
                 progress: progress_shown(&operations, progress),
                 operations,
                 plans,
+                against_hub,
             });
         }
         Ok(machines)

@@ -28,6 +28,7 @@ fn machine(n: u8, status: AgentStatus) -> AgentRecord {
         counter: 1,
         last_seen: at,
         zone: None,
+        version: None,
     }
 }
 

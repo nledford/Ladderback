@@ -18,6 +18,7 @@ import { pressUntilFocusIsOn } from "./accessibility.ts";
 import { askHub, listedMachine } from "./approving_machines.ts";
 import { menuLiesInsideWindow } from "./disclosure_menu.ts";
 import { attentionMark, cardIn, factOf, markedWith, standInOneColumn, standSideBySide, statusOf } from "./machine_card.ts";
+import { runningBuild } from "./start_page.ts";
 
 /** The outbox epoch every report of a scenario's machine is under. */
 const EPOCH = "018f0000-0000-7000-8000-0000000000e1";
@@ -91,6 +92,23 @@ Given("the machine {string} runs in the time zone {string}", async function (thi
     database.close();
   }
 });
+
+// The version a machine's latest `Hello` gave, written where the hub's sync
+// session keeps it, since a scenario's machines paired from their terminals
+// and never connected (#1707).
+Given(
+  "the machine {string} last said it runs Ladderback {string}",
+  async function (this: BrowserWorld, hostname: string, version: string) {
+    const agent = (await listedMachine(this, hostname))["machine-id"];
+    const database = hubDatabase(this);
+    try {
+      const changed = database.prepare("UPDATE machines SET version = ? WHERE id = ?").run(version, agent);
+      assert.equal(changed.changes, 1, `the hub has no machine ${agent}`);
+    } finally {
+      database.close();
+    }
+  },
+);
 
 // The page's first two reads of the hub's machines, the dashboard's and the
 // Machines tab's each, fail as a hub that can't read them (503
@@ -300,6 +318,11 @@ Then("the page is titled after the machine: {string}", async function (this: Bro
 
 Then("the card {string} tells {string}: {string}", async function (this: BrowserWorld, hostname: string, term: string, value: string) {
   await expect(await factOf(machineCard(this, hostname), term)).toHaveText(namePattern(value));
+});
+
+// The hub's own card tells the build the daemon runs, as the footer does.
+Then("the hub's own card tells {string}: the running version", async function (this: BrowserWorld, term: string) {
+  await expect(await factOf(await hubsCard(this), term)).toHaveText(namePattern(await runningBuild()));
 });
 
 // Each a time element whose `datetime` a machine can read (#115).

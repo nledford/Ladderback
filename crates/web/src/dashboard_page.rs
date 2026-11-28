@@ -23,7 +23,8 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use api::{
-    HUB_DASHBOARD_PATH, HubMachineDto, HubMachinesDto, IanaZone, MachineDto, MsgArg, StatusDto,
+    HUB_DASHBOARD_PATH, HubMachineDto, HubMachinesDto, IanaZone, MachineDto, MachineVersionDto,
+    MsgArg, StatusDto,
 };
 use l10n::{Localizer, msg};
 use lepticons_data::LucideGlyph;
@@ -46,12 +47,14 @@ use crate::components::{
 use crate::dashboard::{
     CardFacts, CardStatus, Fleet, NextRun, Own, OwnStory, attention_link, attention_words,
     card_facts, connection_line, instant, own_machine, progress_reading, reads_again, summary,
+    version_words,
 };
 use crate::live::reply;
 use crate::operations_page::{StartBackup, badge_of};
 use crate::pause;
 use crate::repositories::Sentence;
 use crate::routes::{NotFound, PageHeading, refused_sentence, text_with};
+use crate::session::Told;
 use crate::settings::agents::hub_known;
 use crate::start_page::notices;
 use crate::text;
@@ -223,12 +226,20 @@ fn follow_own(fleet: Fleet, localizer: &Arc<Localizer>, visit: &Visit) {
             },
         );
     });
+    // The hub's own build, as the footer shows it, once the session told it
+    // (decision 90; #1707).
+    let told = use_context::<RwSignal<Option<Told>>>();
     Effect::new(move |_| {
         let Some(identity) = identity.get() else {
             return;
         };
+        let build = told
+            .and_then(|told| told.get())
+            .map(|told| told.build.display());
         let own = status.with(|status| {
-            operations.with(|operations| own_machine(&identity, status.as_ref(), operations))
+            operations.with(|operations| {
+                own_machine(&identity, status.as_ref(), operations, build.as_deref())
+            })
         });
         fleet.own.set(Own::Read(own.map(Box::new)));
     });
@@ -418,10 +429,12 @@ fn status_badge(localizer: &Localizer, status: &CardStatus) -> (BadgeState, Stri
     }
 }
 
-/// A card's facts, in words, each time as `shown` writes it.
+/// A card's facts, in words, each time as `shown` writes it, and its
+/// machine's `version` (#1707).
 fn card_fact_list(
     localizer: &Localizer,
     facts: &CardFacts,
+    version: Option<&MachineVersionDto>,
     shown: impl Fn(&str) -> String,
 ) -> Vec<CardFact> {
     let t = |id| text(localizer, id);
@@ -452,21 +465,31 @@ fn card_fact_list(
             )
         },
     );
+    let version_said = version_words(version);
     vec![
         CardFact {
             term: t(msg::UI_MACHINE_CARD_LAST_BACKUP),
             words: backup,
             time: backup_at,
+            written: false,
         },
         CardFact {
             term: t(msg::UI_MACHINE_CARD_NEXT_RUN),
             words: next,
             time: next_at,
+            written: false,
         },
         CardFact {
             term: t(msg::UI_MACHINE_CARD_PLANS),
             words: plans,
             time: None,
+            written: false,
+        },
+        CardFact {
+            term: t(msg::UI_MACHINE_CARD_VERSION),
+            words: text_with(localizer, version_said.id, &version_said.args),
+            time: None,
+            written: version.is_some(),
         },
     ]
 }
@@ -553,10 +576,11 @@ fn card(
     let fact_list = {
         let localizer = Arc::clone(localizer);
         Signal::derive(move || {
+            let version = machine.with(|machine| machine.as_ref()?.version.clone());
             facts.with(|facts| {
                 facts
                     .as_ref()
-                    .map(|facts| card_fact_list(&localizer, facts, &shown_at))
+                    .map(|facts| card_fact_list(&localizer, facts, version.as_ref(), &shown_at))
                     .unwrap_or_default()
             })
         })

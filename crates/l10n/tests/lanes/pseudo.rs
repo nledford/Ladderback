@@ -364,10 +364,11 @@ fn every_message_is_transformed_in_every_branch_without_a_problem() {
                 // as it is, `ui-stats-count`, the table demo's
                 // `ui-gallery-table-files` and a machine card's
                 // `ui-machine-card-plan-count` only their number, written in
-                // the locale's digits, and `ui-stats-size` and the demo's
-                // `ui-gallery-table-size` only their size, which
-                // the size helper writes: there is no text of the catalog's
-                // to transform. The gallery's names of languages
+                // the locale's digits, a card's `ui-machine-card-version-shown`
+                // only the version as its machine wrote it (#1707), and
+                // `ui-stats-size` and the demo's `ui-gallery-table-size` only
+                // their size, which the size helper writes: there is no text
+                // of the catalog's to transform. The gallery's names of languages
                 // (`ui-gallery-demo-english`, `-japanese`, `-arabic`) are
                 // string literals too, each written in its own language,
                 // which the radio group marks with its `lang`.
@@ -378,6 +379,7 @@ fn every_message_is_transformed_in_every_branch_without_a_problem() {
                     || id == msg::UI_SNAPSHOT_TIME_OFFSET
                     || id == msg::UI_STATS_COUNT
                     || id == msg::UI_MACHINE_CARD_PLAN_COUNT
+                    || id == msg::UI_MACHINE_CARD_VERSION_SHOWN
                     || id == msg::UI_GALLERY_TABLE_FILES
                     || id == msg::UI_STATS_SIZE
                     || id == msg::UI_GALLERY_TABLE_SIZE
